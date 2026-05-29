@@ -42,10 +42,14 @@ function get<T>(url: string): Promise<T> {
 }
 
 function jsonBody(method: string, body?: unknown): RequestInit {
+  // Only declare a JSON content-type when we actually send a body. Fastify
+  // rejects an empty body that claims `application/json` with a 400, which would
+  // break bodyless calls (DELETE repo, POST sync, dismiss).
+  if (body === undefined) return { method };
   return {
     method,
     headers: { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: JSON.stringify(body),
   };
 }
 

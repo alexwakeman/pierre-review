@@ -29,27 +29,52 @@ function Chip({
   children,
   color,
   title,
+  onRemove,
+  removeTitle,
+  removeDisabled,
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
   color?: string;
   title?: string;
+  onRemove?: () => void;
+  removeTitle?: string;
+  removeDisabled?: boolean;
 }): JSX.Element {
+  const pill = `whitespace-nowrap rounded-full border text-xs transition ${
+    active
+      ? 'border-transparent bg-blue-600 text-white'
+      : 'border-gray-300 text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500'
+  }`;
+  const style = active && color ? { backgroundColor: color } : undefined;
+
+  // Without a remove affordance the chip is a single button. With one, render
+  // the toggle and the ✕ as *sibling* buttons inside a shared pill — never a
+  // button nested in a button (which can swallow the inner click).
+  if (!onRemove) {
+    return (
+      <button type="button" onClick={onClick} title={title} className={`${pill} px-2.5 py-0.5`} style={style}>
+        {children}
+      </button>
+    );
+  }
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={`whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs transition ${
-        active
-          ? 'border-transparent bg-blue-600 text-white'
-          : 'border-gray-300 text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500'
-      }`}
-      style={active && color ? { backgroundColor: color } : undefined}
-    >
-      {children}
-    </button>
+    <span className={`inline-flex items-center ${pill}`} style={style}>
+      <button type="button" onClick={onClick} title={title} className="py-0.5 pl-2.5 pr-1">
+        {children}
+      </button>
+      <button
+        type="button"
+        onClick={onRemove}
+        disabled={removeDisabled}
+        title={removeTitle}
+        aria-label={removeTitle}
+        className="py-0.5 pl-0.5 pr-2 opacity-50 hover:opacity-100 disabled:opacity-30"
+      >
+        ✕
+      </button>
+    </span>
   );
 }
 
@@ -132,7 +157,12 @@ export function FilterBar(): JSX.Element {
   const qc = useQueryClient();
   const removeRepo = useMutation({
     mutationFn: (id: number) => api.deleteRepo(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      // Drop the deleted repo from the active filter so its now-gone entries
+      // don't linger as a selected-but-missing id (empty → null = "all").
+      const cur = useFilters.getState();
+      const next = cur.repoIds?.filter((r) => r !== id);
+      cur.setRepoIds(next && next.length ? next : null);
       for (const key of ['repos', 'timeline', 'open-prs', 'users', 'my-turn', 'me']) {
         void qc.invalidateQueries({ queryKey: [key] });
       }
@@ -157,28 +187,31 @@ export function FilterBar(): JSX.Element {
             active={f.repoIds == null ? false : f.repoIds.includes(r.id)}
             onClick={() => f.toggleRepo(r.id)}
             title={r.fullName}
+            removeTitle={`Remove ${r.fullName}`}
+            removeDisabled={removeRepo.isPending}
+            onRemove={() => {
+              if (
+                window.confirm(
+                  `Stop watching ${r.fullName}? This deletes all of its locally-synced data.`,
+                )
+              ) {
+                removeRepo.mutate(r.id);
+              }
+            }}
           >
             {r.name}
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (
-                  window.confirm(
-                    `Stop watching ${r.fullName}? This deletes all of its locally-synced data.`,
-                  )
-                ) {
-                  removeRepo.mutate(r.id);
-                }
-              }}
-              className="ml-1 cursor-pointer opacity-50 hover:opacity-100"
-              title={`Remove ${r.fullName}`}
-            >
-              ✕
-            </span>
           </Chip>
         ))}
+        {removeRepo.error && (
+          <span
+            className="max-w-[14rem] truncate text-xs text-red-500"
+            title={String(removeRepo.error)}
+          >
+            {removeRepo.error instanceof ApiError
+              ? removeRepo.error.message
+              : 'Failed to remove repo'}
+          </span>
+        )}
         {f.repoIds && f.repoIds.length > 0 && (
           <button
             type="button"

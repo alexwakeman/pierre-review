@@ -19,6 +19,12 @@ const consoleLogger: Logger = {
   error: (m, ...a) => console.error(m, ...a),
 };
 
+export interface SyncProgressUpdate {
+  percent: number;
+  prsProcessed: number;
+  pages: number;
+}
+
 export interface SyncRepoOptions {
   owner: string;
   name: string;
@@ -26,6 +32,12 @@ export interface SyncRepoOptions {
   // Stop paginating once a PR's updatedAt falls before this instant.
   since: Date | null;
   log?: Logger;
+  // Called as pages/PRs are processed so callers can surface live progress.
+  onProgress?: (p: SyncProgressUpdate) => void;
+}
+
+function clamp01(n: number): number {
+  return n < 0 ? 0 : n > 1 ? 1 : n;
 }
 
 export interface SyncRepoResult {
@@ -37,7 +49,7 @@ export interface SyncRepoResult {
 }
 
 export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
-  const { owner, name, mode, since } = opts;
+  const { owner, name, mode, since, onProgress } = opts;
   const log = opts.log ?? consoleLogger;
   const client = getGraphqlClient();
   const resolver = createUserResolver();
@@ -48,6 +60,19 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
   let pages = 0;
   let totalCost = 0;
   let lastRemaining = 0;
+  // Time-walked progress: PRs arrive newest-first and we stop at `since`, so the
+  // span [since .. newest] is the work and the current PR's updatedAt marks how
+  // far through it we are.
+  let newestMs: number | null = null;
+  const sinceMs = since?.getTime() ?? null;
+  const reportProgress = (currentMs: number | null): void => {
+    if (!onProgress) return;
+    let percent = 0;
+    if (newestMs != null && sinceMs != null && newestMs > sinceMs && currentMs != null) {
+      percent = clamp01((newestMs - currentMs) / (newestMs - sinceMs));
+    }
+    onProgress({ percent, prsProcessed: prCount, pages });
+  };
 
   try {
     let stop = false;
@@ -71,10 +96,12 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
 
       const { nodes, pageInfo } = resp.repository.pullRequests;
       for (const pr of nodes) {
-        if (since && new Date(pr.updatedAt) < since) {
+        const updatedMs = new Date(pr.updatedAt).getTime();
+        if (since && updatedMs < since.getTime()) {
           stop = true;
           break;
         }
+        newestMs ??= updatedMs;
 
         // Only fetch changed-files for commits that could plausibly have
         // addressed an open thread (after its last comment).
@@ -96,11 +123,15 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
 
         persistPr(pr, repoId, resolver, commitFilesBySha);
         prCount += 1;
+        reportProgress(updatedMs);
       }
 
       cursor = pageInfo.endCursor;
       if (stop || !pageInfo.hasNextPage) break;
     } while (cursor);
+
+    // Reached the cutoff / last page — the walk is complete.
+    reportProgress(sinceMs);
 
     if (repoId === null) {
       throw new Error(`Repository ${owner}/${name} returned no data`);

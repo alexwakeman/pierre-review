@@ -5,6 +5,7 @@ import { REPO_ID_QUERY, type RepoIdResponse } from '../../github/queries.js';
 import { upsertRepo } from '../../sync/upsert.js';
 import {
   getSyncStatus,
+  isSyncRunning,
   runSyncForRepo,
 } from '../../sync/sync-manager.js';
 import { deleteRepo, getRepo, listRepos } from '../../db/queries.js';
@@ -76,6 +77,16 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete('/api/repos/:id', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
+    // A sync in flight would re-create the repo (and its rows) right after we
+    // delete them, since the sync's upserts are still running. Refuse until it
+    // settles — the cron tick / initial backfill is short.
+    if (isSyncRunning(id)) {
+      reply.status(409);
+      return {
+        error: 'Conflict',
+        message: 'A sync is running for this repo — try removing it again in a moment.',
+      };
+    }
     const ok = deleteRepo(id);
     if (!ok) {
       reply.status(404);

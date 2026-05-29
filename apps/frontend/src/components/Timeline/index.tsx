@@ -26,7 +26,11 @@ const VIS_OPTIONS: TimelineOptions = {
   zoomMax: 1000 * 60 * 60 * 24 * 365 * 2,
   margin: { item: 4, axis: 8 },
   tooltip: { followMouse: true, overflowMethod: 'flip' },
+  // Plain wheel scrolls rows vertically; trackpad/side-scroll (deltaX) pans the
+  // time axis. Zoom requires a modifier key (zoomKey, set per-platform at
+  // construction) so the wheel no longer zooms by accident.
   verticalScroll: true,
+  horizontalScroll: true,
   selectable: true,
   multiselect: false,
   maxHeight: '100%',
@@ -38,6 +42,17 @@ const VIS_OPTIONS: TimelineOptions = {
 
 function unique<T>(arr: T[]): T[] {
   return [...new Set(arr)];
+}
+
+// vis-timeline's zoomKey takes a single modifier; mac users zoom with Cmd
+// (metaKey), everyone else with Ctrl — matching the platform-native gesture and
+// avoiding the OS Ctrl+wheel page-zoom on mac.
+function zoomModifierKey(): 'metaKey' | 'ctrlKey' {
+  const ua =
+    typeof navigator !== 'undefined'
+      ? navigator.platform || navigator.userAgent
+      : '';
+  return /Mac|iP(hone|ad|od)/.test(ua) ? 'metaKey' : 'ctrlKey';
 }
 
 function groupOf(ev: TimelineEvent): string {
@@ -153,7 +168,7 @@ export function Timeline(): JSX.Element {
       containerRef.current,
       itemsRef.current,
       groupsRef.current,
-      { ...VIS_OPTIONS, start: from, end: to },
+      { ...VIS_OPTIONS, start: from, end: to, zoomKey: zoomModifierKey() },
     );
 
     timeline.on('click', (props: {

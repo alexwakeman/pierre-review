@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import type { SyncRunStatus, SyncStatus } from '@gh-team-monitor/shared';
+import type { SyncProgress, SyncRunStatus, SyncStatus } from '@gh-team-monitor/shared';
 import { db, schema } from '../db/client.js';
 import { config } from '../config.js';
 import { syncRepo, type Logger } from './sync-repo.js';
@@ -9,6 +9,18 @@ const { repos, syncState } = schema;
 // In-memory record of which repos are mid-sync (status isn't persisted as
 // "running" — it lives only for the lifetime of the process).
 const running = new Set<number>();
+
+// Live progress for in-flight syncs, surfaced via getSyncStatus so the UI can
+// show a determinate bar. Lives only for the duration of the run.
+const progressByRepo = new Map<number, SyncProgress>();
+
+function setSyncProgress(repoId: number, p: SyncProgress): void {
+  progressByRepo.set(repoId, p);
+}
+
+function clearSyncProgress(repoId: number): void {
+  progressByRepo.delete(repoId);
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -31,6 +43,7 @@ export function getSyncStatus(repoId: number): SyncStatus | null {
   return {
     repoId,
     status,
+    progress: status === 'running' ? progressByRepo.get(repoId) ?? null : null,
     lastFullSyncAt: state?.lastFullSyncAt?.toISOString() ?? null,
     lastIncrementalSyncAt: state?.lastIncrementalSyncAt?.toISOString() ?? null,
     lastSyncError: state?.lastSyncError ?? null,
@@ -88,7 +101,14 @@ export function runSyncForRepo(
     : planSync(repoId);
 
   running.add(repoId);
-  const task = syncRepo({ owner: repo.owner, name: repo.name, ...plan, log })
+  setSyncProgress(repoId, { percent: 0, prsProcessed: 0, pages: 0, mode: plan.mode });
+  const task = syncRepo({
+    owner: repo.owner,
+    name: repo.name,
+    ...plan,
+    log,
+    onProgress: (p) => setSyncProgress(repoId, { ...p, mode: plan.mode }),
+  })
     .catch((err) => {
       log.error(
         `background sync ${repo.owner}/${repo.name} failed: ${err instanceof Error ? err.message : err}`,
@@ -96,6 +116,7 @@ export function runSyncForRepo(
     })
     .finally(() => {
       running.delete(repoId);
+      clearSyncProgress(repoId);
     });
 
   if (!opts.background) return Boolean(task);
@@ -111,13 +132,21 @@ export async function syncAllRepos(log: Logger): Promise<void> {
     try {
       const repo = getRepoRow(r.id)!;
       const plan = planSync(r.id);
-      await syncRepo({ owner: repo.owner, name: repo.name, ...plan, log });
+      setSyncProgress(r.id, { percent: 0, prsProcessed: 0, pages: 0, mode: plan.mode });
+      await syncRepo({
+        owner: repo.owner,
+        name: repo.name,
+        ...plan,
+        log,
+        onProgress: (p) => setSyncProgress(r.id, { ...p, mode: plan.mode }),
+      });
     } catch (err) {
       log.error(
         `scheduled sync of repo ${r.id} failed: ${err instanceof Error ? err.message : err}`,
       );
     } finally {
       running.delete(r.id);
+      clearSyncProgress(r.id);
     }
   }
 }

@@ -1,10 +1,15 @@
 import { buildApp } from './app.js';
 import { config } from './config.js';
+import { cleanupRedundantReviewEvents } from './db/cleanup.js';
 import { runMigrations } from './db/run-migrations.js';
 
 async function main(): Promise<void> {
   // Apply any pending migrations before serving.
   runMigrations();
+
+  // Drop redundant empty-review-wrapper timeline events left by older syncs.
+  const removed = cleanupRedundantReviewEvents();
+  if (removed > 0) console.log(`cleanup: removed ${removed} redundant review_submitted events`);
 
   // Cache the locally-authenticated GitHub user up front so triage ("my turn")
   // knows who "you" are. Non-fatal if gh isn't available.

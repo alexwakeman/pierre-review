@@ -88,9 +88,21 @@ export interface Repo {
 
 export type SyncRunStatus = 'idle' | 'running' | 'ok' | 'error';
 
+// Live progress of an in-flight sync. Present only while status === 'running'.
+// `percent` is a 0..1 estimate based on how far back in time the sync has walked
+// toward its cutoff (PRs are paginated newest-first); it is monotonic and reaches
+// 1 when the cutoff is hit. `prsProcessed` is the honest running count.
+export interface SyncProgress {
+  percent: number;
+  prsProcessed: number;
+  pages: number;
+  mode: 'full' | 'incremental';
+}
+
 export interface SyncStatus {
   repoId: number;
   status: SyncRunStatus;
+  progress: SyncProgress | null;
   lastFullSyncAt: string | null;
   lastIncrementalSyncAt: string | null;
   lastSyncError: string | null;

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Repo, SyncStatus as SyncStatusT } from '@gh-team-monitor/shared';
 import { api } from '../api/client.js';
 import { relativeTime } from '../lib/ui.js';
+import { SyncProgressModal } from './SyncProgressModal.js';
 
 function mostRecentSync(repos: Repo[]): string | null {
   let latest: string | null = null;
@@ -16,6 +17,9 @@ function mostRecentSync(repos: Repo[]): string | null {
 export function SyncStatus(): JSX.Element | null {
   const qc = useQueryClient();
   const [syncing, setSyncing] = useState(false);
+  // The progress overlay is tracked separately from `syncing` so it stays up
+  // showing the "✓ done" state after the sync finishes — the user dismisses it.
+  const [modalOpen, setModalOpen] = useState(false);
 
   // Dedicated observer on the shared ['repos'] cache that polls for fresh
   // sync timestamps.
@@ -70,6 +74,7 @@ export function SyncStatus(): JSX.Element | null {
 
   const syncNow = async (full = false): Promise<void> => {
     setSyncing(true);
+    setModalOpen(true);
     await Promise.allSettled(repos.map((r) => api.syncRepo(r.id, full)));
     void qc.invalidateQueries({ queryKey: ['repos'] });
     void qc.invalidateQueries({ queryKey: ['sync-status'] });
@@ -81,7 +86,18 @@ export function SyncStatus(): JSX.Element | null {
       : 'syncing…';
 
   return (
-    <div className="flex items-center gap-2 text-xs text-gray-500">
+    <>
+      {modalOpen && (
+        <SyncProgressModal
+          repos={repos}
+          statuses={statuses}
+          onClose={() => {
+            setModalOpen(false);
+            setSyncing(false);
+          }}
+        />
+      )}
+      <div className="flex items-center gap-2 text-xs text-gray-500">
       {erroredRepo ? (
         <span className="text-red-500" title={erroredRepo.lastSyncError ?? ''}>
           sync error: {erroredRepo.fullName}
@@ -121,6 +137,7 @@ export function SyncStatus(): JSX.Element | null {
       >
         deep
       </button>
-    </div>
+      </div>
+    </>
   );
 }

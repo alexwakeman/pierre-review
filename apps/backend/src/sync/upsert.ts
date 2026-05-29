@@ -233,16 +233,28 @@ const REVIEW_STATES = new Set([
   'pending',
 ]);
 
-function reviewState(
-  s: string,
-): 'approved' | 'changes_requested' | 'commented' | 'dismissed' | 'pending' {
+export type MappedReviewState =
+  | 'approved'
+  | 'changes_requested'
+  | 'commented'
+  | 'dismissed'
+  | 'pending';
+
+function reviewState(s: string): MappedReviewState {
   const lower = s.toLowerCase();
-  return (REVIEW_STATES.has(lower) ? lower : 'commented') as
-    | 'approved'
-    | 'changes_requested'
-    | 'commented'
-    | 'dismissed'
-    | 'pending';
+  return (REVIEW_STATES.has(lower) ? lower : 'commented') as MappedReviewState;
+}
+
+// A review warrants its own timeline marker only when it's substantive: a
+// decision (approved/changes_requested/dismissed) or one carrying a summary
+// body. An empty "commented" review is just GitHub's wrapper around inline
+// comments — those already show as review_comment markers, so the wrapper would
+// duplicate them. See db/cleanup.ts for backfilling existing rows.
+export function isSubstantiveReview(
+  state: MappedReviewState,
+  body: string | null | undefined,
+): boolean {
+  return state !== 'commented' || !!body?.trim();
 }
 
 function upsertEvent(row: {
@@ -434,16 +446,18 @@ export function persistPr(
         })
         .returning({ id: reviews.id })
         .get();
-      upsertEvent({
-        repoId,
-        actorId: reviewerId,
-        prId,
-        type: 'review_submitted',
-        occurredAt: submittedAt,
-        refTable: 'reviews',
-        refId: reviewRow.id,
-        dedupeKey: `review_submitted:${r.id}`,
-      });
+      if (isSubstantiveReview(reviewState(r.state), r.body)) {
+        upsertEvent({
+          repoId,
+          actorId: reviewerId,
+          prId,
+          type: 'review_submitted',
+          occurredAt: submittedAt,
+          refTable: 'reviews',
+          refId: reviewRow.id,
+          dedupeKey: `review_submitted:${r.id}`,
+        });
+      }
     }
 
     // ---- review threads + comments ----
