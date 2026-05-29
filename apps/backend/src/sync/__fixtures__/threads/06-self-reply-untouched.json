@@ -1,0 +1,14 @@
+{
+  "name": "reviewer follows up on their own comment (no other author) -> untouched",
+  "expected": "untouched",
+  "thread": {
+    "isResolved": false,
+    "path": "README.md",
+    "comments": [
+      { "author": { "login": "reviewer-anna" }, "createdAt": "2026-01-10T10:00:00Z" },
+      { "author": { "login": "reviewer-anna" }, "createdAt": "2026-01-10T10:05:00Z" }
+    ]
+  },
+  "commits": [],
+  "commitFiles": {}
+}

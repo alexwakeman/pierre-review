@@ -1,0 +1,36 @@
+{
+  "name": "@gh-team-monitor/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:studio": "drizzle-kit studio",
+    "sync:once": "tsx scripts/sync-once.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@gh-team-monitor/shared": "workspace:*",
+    "@octokit/graphql": "^8.1.2",
+    "better-sqlite3": "^11.8.0",
+    "drizzle-orm": "^0.38.3",
+    "fastify": "^5.2.1",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "@types/node-cron": "^3.0.11",
+    "drizzle-kit": "^0.30.2",
+    "pino-pretty": "^13.0.0",
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,68 @@
+import type { ThreadDetail, User } from '@gh-team-monitor/shared';
+import { StateBadge } from '../StateBadge.js';
+import { CommentBlock } from './CommentBlock.js';
+import { CodeAnchor } from './CodeAnchor.js';
+import { isNewComment } from './NewCommentHighlight.js';
+
+// A single review thread rendered conversation-first: the code it's anchored to
+// sits inside the opening comment, replies follow as plain conversation.
+export function ThreadCard({
+  thread,
+  usersById,
+  prUrl,
+  selected,
+  viewedSince,
+}: {
+  thread: ThreadDetail;
+  usersById: Map<number, User>;
+  prUrl: string;
+  selected?: boolean;
+  viewedSince?: string | null;
+}): JSX.Element {
+  const anchorHunk = thread.comments[0]?.diffHunk ?? null;
+
+  return (
+    <div
+      className={`rounded-md border px-2.5 py-2 ${
+        selected
+          ? 'border-amber-400 bg-amber-400/5'
+          : 'border-gray-200 dark:border-gray-800'
+      }`}
+    >
+      <div className="mb-2 flex items-center gap-2 text-[11px] text-gray-400">
+        {thread.line != null ? <span>line {thread.line}</span> : <span>file-level</span>}
+        {thread.isOutdated && <span>· outdated</span>}
+        <span className="ml-auto">
+          <StateBadge state={thread.derivedState} />
+        </span>
+      </div>
+
+      <div className="space-y-3">
+        {thread.comments.map((c, i) => (
+          <CommentBlock
+            key={c.id}
+            comment={c}
+            usersById={usersById}
+            isNew={isNewComment(c.createdAt, viewedSince)}
+            anchor={
+              i === 0 ? (
+                <CodeAnchor diffHunk={anchorHunk} threadId={thread.id} />
+              ) : undefined
+            }
+          />
+        ))}
+      </div>
+
+      <div className="mt-2 pl-2 text-[11px]">
+        <a
+          href={`${prUrl}/files`}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="text-blue-500 hover:underline"
+        >
+          ↗ Reply on GitHub
+        </a>
+      </div>
+    </div>
+  );
+}

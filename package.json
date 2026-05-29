@@ -1,0 +1,25 @@
+{
+  "name": "gh-team-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,magenta \"pnpm dev:backend\" \"pnpm dev:frontend\"",
+    "dev:backend": "pnpm --filter @gh-team-monitor/backend dev",
+    "dev:frontend": "pnpm --filter @gh-team-monitor/frontend dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:generate": "pnpm --filter @gh-team-monitor/backend db:generate",
+    "db:migrate": "pnpm --filter @gh-team-monitor/backend db:migrate",
+    "db:studio": "pnpm --filter @gh-team-monitor/backend db:studio",
+    "sync:once": "pnpm --filter @gh-team-monitor/backend sync:once"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.0"
+  }
+}

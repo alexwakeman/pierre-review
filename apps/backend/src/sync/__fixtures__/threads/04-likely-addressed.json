@@ -1,0 +1,15 @@
+{
+  "name": "a later commit touched the thread's file -> likely_addressed",
+  "expected": "likely_addressed",
+  "thread": {
+    "isResolved": false,
+    "path": "src/github/client.ts",
+    "comments": [
+      { "author": { "login": "reviewer-anna" }, "createdAt": "2026-01-10T10:00:00Z" }
+    ]
+  },
+  "commits": [
+    { "oid": "c1", "committedDate": "2026-01-10T13:30:00Z" }
+  ],
+  "commitFiles": { "c1": ["src/github/client.ts", "src/github/auth.ts"] }
+}

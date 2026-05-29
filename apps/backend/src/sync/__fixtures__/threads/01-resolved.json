@@ -1,0 +1,14 @@
+{
+  "name": "GitHub marked the thread resolved -> resolved regardless of activity",
+  "expected": "resolved",
+  "thread": {
+    "isResolved": true,
+    "path": "src/api/routes/timeline.ts",
+    "comments": [
+      { "author": { "login": "reviewer-anna" }, "createdAt": "2026-01-10T10:00:00Z" },
+      { "author": { "login": "author-bob" }, "createdAt": "2026-01-10T12:00:00Z" }
+    ]
+  },
+  "commits": [],
+  "commitFiles": {}
+}

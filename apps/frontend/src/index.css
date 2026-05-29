@@ -1,0 +1,359 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  @apply bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ---- markdown comment bodies ---- */
+.md-body {
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.md-body > *:first-child {
+  margin-top: 0;
+}
+.md-body > *:last-child {
+  margin-bottom: 0;
+}
+.md-body p {
+  margin: 0.5em 0;
+}
+.md-body h1,
+.md-body h2,
+.md-body h3 {
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+}
+.md-body ul,
+.md-body ol {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+.md-body ul {
+  list-style: disc;
+}
+.md-body ol {
+  list-style: decimal;
+}
+.md-body li {
+  margin: 0.15em 0;
+}
+.md-body a {
+  color: #3b82f6;
+  text-decoration: underline;
+}
+.md-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: rgba(127, 127, 127, 0.18);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+}
+.md-body pre {
+  margin: 0.5em 0;
+  padding: 0.7em;
+  border-radius: 6px;
+  overflow-x: auto;
+  background: #0d1117;
+}
+.md-body pre code {
+  background: transparent;
+  padding: 0;
+}
+.md-body blockquote {
+  border-left: 3px solid rgba(127, 127, 127, 0.4);
+  padding-left: 0.8em;
+  margin: 0.5em 0;
+  color: #9ca3af;
+}
+.md-body table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+.md-body th,
+.md-body td {
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  padding: 0.3em 0.6em;
+}
+.md-body img {
+  max-width: 100%;
+}
+.md-body input[type='checkbox'] {
+  margin-right: 0.4em;
+}
+
+/* ---- vis-timeline: dark-mode + custom item styling ---- */
+.dark .vis-timeline {
+  border-color: #1f2937;
+}
+.dark .vis-panel .vis-content,
+.dark .vis-panel .vis-background,
+.dark .vis-labelset .vis-label,
+.dark .vis-foreground .vis-group {
+  border-color: #1f2937;
+  color: #e5e7eb;
+}
+.dark .vis-time-axis .vis-text {
+  color: #9ca3af;
+}
+.dark .vis-time-axis .vis-grid.vis-minor {
+  border-color: #1f2937;
+}
+.dark .vis-time-axis .vis-grid.vis-major {
+  border-color: #374151;
+}
+.dark .vis-labelset .vis-label {
+  color: #d1d5db;
+}
+.dark .vis-current-time {
+  background-color: #ef4444;
+}
+
+/* nested member sub-lanes sit slightly indented + dimmer */
+.vis-labelset .vis-label.vis-nested-group {
+  padding-left: 1rem;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+/* PR range bars */
+.vis-item.pr-bar {
+  border-radius: 6px;
+  border-width: 1px;
+  color: #fff;
+  font-size: 11px;
+}
+/* Open PRs read as "live": full saturation, taller. */
+.vis-item.pr-emph {
+  font-size: 11px;
+}
+/* Closed / merged recede into historical context. */
+.vis-item.pr-muted {
+  opacity: 0.5;
+  font-size: 10px;
+}
+.vis-item.pr-muted .pr-title {
+  max-width: 16ch;
+}
+/* status line under the title on open bars */
+.pr-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 4px 2px;
+  font-size: 9px;
+  line-height: 1.2;
+}
+.pr-ci {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.pr-warn {
+  color: #fdba74;
+  font-weight: 700;
+}
+.pr-new {
+  color: #e0f2fe;
+  font-weight: 700;
+}
+.vis-item.pr-open {
+  background-color: #1d4ed8;
+  border-color: #3b82f6;
+}
+.vis-item.pr-merged {
+  background-color: #6d28d9;
+  border-color: #8957e5;
+}
+.vis-item.pr-closed {
+  background-color: #4b5563;
+  border-color: #6b7280;
+}
+.vis-item.pr-draft {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.12),
+    rgba(255, 255, 255, 0.12) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+.vis-item.pr-stalled {
+  box-shadow: 0 0 0 2px #ef4444;
+}
+.vis-item.vis-selected.pr-bar {
+  box-shadow: 0 0 0 2px #fbbf24;
+}
+.pr-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 2px;
+}
+.pr-num {
+  font-weight: 700;
+  opacity: 0.85;
+}
+.pr-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22ch;
+}
+.pr-draft-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.pr-stall {
+  color: #fca5a5;
+}
+.pr-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 2px;
+}
+.pr-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.pr-dot-n {
+  font-size: 9px;
+  font-weight: 700;
+  margin-right: 3px;
+}
+
+/* ---- custom SVG event markers + clusters ---- */
+.vis-item.ev-marker,
+.vis-item.ev-cluster {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+.vis-item.ev-marker .vis-dot,
+.vis-item.ev-cluster .vis-dot {
+  display: none;
+}
+.vis-item.ev-marker .vis-item-content,
+.vis-item.ev-cluster .vis-item-content {
+  transform: translateX(-50%);
+  padding: 0;
+}
+.ev-marker-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.ev-marker-inner svg {
+  display: block;
+}
+.ev-cluster-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #475569;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+.vis-item.ev-cluster.vis-selected,
+.vis-item.ev-marker.vis-selected {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* legacy default-dot styling (kept for any non-custom points) */
+.vis-item.vis-point .vis-dot {
+  border-width: 5px;
+}
+.ev-pr_opened .vis-dot {
+  border-color: #3b82f6;
+}
+.ev-pr_merged .vis-dot {
+  border-color: #8957e5;
+}
+.ev-pr_closed .vis-dot {
+  border-color: #9ca3af;
+}
+.ev-review_submitted .vis-dot {
+  border-color: #22c55e;
+}
+.ev-review_comment .vis-dot {
+  border-color: #f59e0b;
+}
+.ev-pr_comment .vis-dot {
+  border-color: #a78bfa;
+}
+.ev-commit_pushed .vis-dot {
+  border-color: #6b7280;
+  border-width: 4px;
+}
+.ev-diamond .vis-dot {
+  border-radius: 0;
+  transform: rotate(45deg);
+}
+.ev-square .vis-dot {
+  border-radius: 2px;
+}
+
+/* comments newer than the user's last view get a left-edge highlight */
+.comment-new {
+  border-left: 3px solid #38bdf8;
+  margin-left: -2px;
+  border-radius: 1px;
+  background: rgba(56, 189, 248, 0.05);
+}
+
+/* ---- "my turn" pulsing ring (cards + timeline bars) ---- */
+@keyframes myturn-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.9);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
+  }
+}
+.my-turn-ring {
+  animation: myturn-pulse 2s ease-in-out infinite;
+}
+.vis-item.pr-myturn {
+  animation: myturn-pulse 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .my-turn-ring,
+  .vis-item.pr-myturn {
+    animation: none;
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.9);
+  }
+}

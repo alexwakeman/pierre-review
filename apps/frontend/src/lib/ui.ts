@@ -1,0 +1,136 @@
+import type {
+  CiStatus,
+  DerivedState,
+  EventType,
+  Mergeable,
+  MergeStateStatus,
+  PrState,
+  ReasonTag,
+  User,
+} from '@gh-team-monitor/shared';
+
+export interface StateMeta {
+  label: string;
+  color: string;
+  description: string;
+}
+
+export const DERIVED_STATE_META: Record<DerivedState, StateMeta> = {
+  untouched: {
+    label: 'Untouched',
+    color: '#ef4444',
+    description: 'No reply, and no follow-up commit touched the file.',
+  },
+  replied_unresolved: {
+    label: 'Replied',
+    color: '#f59e0b',
+    description:
+      'Someone replied, but the thread is unresolved and no later commit touched the file.',
+  },
+  likely_addressed: {
+    label: 'Likely addressed',
+    color: '#3b82f6',
+    description:
+      'A commit touched this file after the last comment. Heuristic — it may be a false positive.',
+  },
+  resolved: {
+    label: 'Resolved',
+    color: '#22c55e',
+    description: 'Marked resolved on GitHub.',
+  },
+};
+
+export const PR_STATE_META: Record<PrState, { label: string; color: string }> = {
+  open: { label: 'Open', color: '#3b82f6' },
+  merged: { label: 'Merged', color: '#22c55e' },
+  closed: { label: 'Closed', color: '#9ca3af' },
+};
+
+export const EVENT_META: Record<
+  EventType,
+  { label: string; color: string; shape: 'dot' | 'diamond' | 'triangle' | 'square' }
+> = {
+  pr_opened: { label: 'PR opened', color: '#3b82f6', shape: 'dot' },
+  pr_merged: { label: 'PR merged', color: '#8957e5', shape: 'dot' },
+  pr_closed: { label: 'PR closed', color: '#9ca3af', shape: 'dot' },
+  pr_reopened: { label: 'PR reopened', color: '#3b82f6', shape: 'dot' },
+  pr_ready_for_review: { label: 'Ready for review', color: '#3b82f6', shape: 'dot' },
+  review_submitted: { label: 'Review', color: '#22c55e', shape: 'triangle' },
+  review_comment: { label: 'Review comment', color: '#f59e0b', shape: 'dot' },
+  pr_comment: { label: 'PR comment', color: '#a78bfa', shape: 'square' },
+  commit_pushed: { label: 'Commit', color: '#6b7280', shape: 'diamond' },
+};
+
+// Reason tags: short label + colour + whether it's a "you" reason (gets the
+// pulsing ring + my-turn grouping).
+export const REASON_META: Record<
+  ReasonTag,
+  { label: string; color: string; myTurn: boolean }
+> = {
+  awaiting_your_review: { label: 'Awaiting your review', color: '#3b82f6', myTurn: true },
+  your_pr_new_comments: { label: 'Your PR · new comments', color: '#22c55e', myTurn: true },
+  ci_failing: { label: 'CI failing', color: '#ef4444', myTurn: false },
+  merge_conflicts: { label: 'Merge conflicts', color: '#f97316', myTurn: false },
+  approved_ready: { label: 'Approved · ready to merge', color: '#22c55e', myTurn: false },
+  stalled: { label: 'Stalled', color: '#eab308', myTurn: false },
+  untouched_threads: { label: 'Untouched threads', color: '#f59e0b', myTurn: false },
+  in_progress: { label: 'In progress', color: '#9ca3af', myTurn: false },
+};
+
+// CI rollup → dot colour + label. `null` when there are no checks at all.
+export const CI_META: Record<
+  CiStatus,
+  { label: string; color: string } | null
+> = {
+  success: { label: 'CI passing', color: '#22c55e' },
+  failure: { label: 'CI failing', color: '#ef4444' },
+  error: { label: 'CI error', color: '#ef4444' },
+  pending: { label: 'CI running', color: '#eab308' },
+  expected: { label: 'CI expected', color: '#9ca3af' },
+  unknown: null,
+};
+
+// Only surface mergeability when it's a problem.
+export function mergeWarning(
+  mergeable: Mergeable,
+  mss: MergeStateStatus,
+): string | null {
+  if (mergeable === 'conflicting' || mss === 'dirty') return 'conflicts';
+  if (mss === 'behind') return 'behind';
+  if (mss === 'unstable') return 'unstable';
+  return null;
+}
+
+export function userLabel(user: User | undefined, fallbackId: number | null): string {
+  if (user) return user.displayName || user.githubLogin;
+  return fallbackId == null ? 'unknown' : `user ${fallbackId}`;
+}
+
+export function indexUsers(users: User[] | undefined): Map<number, User> {
+  const map = new Map<number, User>();
+  for (const u of users ?? []) map.set(u.id, u);
+  return map;
+}
+
+export function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  const diff = Date.now() - then;
+  const abs = Math.abs(diff);
+  const min = 60_000;
+  const hr = 60 * min;
+  const day = 24 * hr;
+  const fmt = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'} ago`;
+  if (abs < min) return 'just now';
+  if (abs < hr) return fmt(Math.round(diff / min), 'min');
+  if (abs < day) return fmt(Math.round(diff / hr), 'hour');
+  if (abs < 30 * day) return fmt(Math.round(diff / day), 'day');
+  return new Date(iso).toLocaleDateString();
+}
+
+export function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
