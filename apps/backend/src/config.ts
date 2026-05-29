@@ -31,7 +31,7 @@ export const config = {
   dbPath: rawDbUrl.startsWith('/') ? rawDbUrl : resolve(backendRoot, rawDbUrl),
   backfillDays: intFromEnv('BACKFILL_DAYS', 90),
   syncCron: process.env.SYNC_CRON ?? '*/5 * * * *',
-  syncOverlapMinutes: intFromEnv('SYNC_OVERLAP_MINUTES', 60),
+  syncOverlapMinutes: intFromEnv('SYNC_OVERLAP_MINUTES', 20),
   stallThresholdDays: intFromEnv('STALL_THRESHOLD_DAYS', 3),
   // Disable the periodic scheduler (used by scripts/tests).
   disableScheduler: process.env.DISABLE_SCHEDULER === 'true',

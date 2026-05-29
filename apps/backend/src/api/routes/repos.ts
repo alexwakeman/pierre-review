@@ -29,6 +29,15 @@ const idParamSchema = {
   },
 };
 
+const syncSchema = {
+  ...idParamSchema,
+  querystring: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { full: { type: 'boolean', default: false } },
+  },
+};
+
 export async function repoRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/repos', async () => listRepos());
 
@@ -78,14 +87,20 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
 
   app.post(
     '/api/repos/:id/sync',
-    { schema: idParamSchema },
+    { schema: syncSchema },
     async (req, reply) => {
       const { id } = req.params as { id: number };
       if (!getRepo(id)) {
         reply.status(404);
         return { error: 'NotFound', message: `Repo ${id} not found` };
       }
-      const started = runSyncForRepo(id, app.log, { background: true });
+      // ?full=true forces a full backfill (catches CI/thread-resolve changes
+      // that don't bump PR.updatedAt and so lag the incremental path).
+      const { full } = req.query as { full?: boolean };
+      const started = runSyncForRepo(id, app.log, {
+        background: true,
+        forceFull: full === true,
+      });
       if (!started) {
         reply.status(409);
         return { error: 'Conflict', message: 'A sync is already running for this repo' };

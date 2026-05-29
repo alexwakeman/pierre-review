@@ -83,7 +83,7 @@ export function OpenPrsStrip(): JSX.Element | null {
       </div>
 
       {!collapsed && (
-        <div className="flex gap-2 overflow-x-auto px-4 pb-2 pt-0.5" style={{ height: 140 }}>
+        <div className="flex items-stretch gap-2 overflow-x-auto px-4 pb-2 pt-0.5">
           {shown.length === 0 ? (
             <div className="flex items-center text-xs text-gray-500">
               {filter === 'my_turn'

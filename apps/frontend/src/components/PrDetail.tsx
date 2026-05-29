@@ -6,6 +6,7 @@ import { api } from '../api/client.js';
 import { indexUsers, PR_STATE_META, relativeTime, userLabel } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
 import { ThreadList } from './ThreadList/index.js';
+import { ChecksTab } from './ChecksTab.js';
 import { Markdown } from './Markdown.js';
 
 function newSummary(n: PrDetailT['newSinceLastViewed']): string | null {
@@ -17,7 +18,7 @@ function newSummary(n: PrDetailT['newSinceLastViewed']): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
-type Tab = 'threads' | 'activity';
+type Tab = 'checks' | 'threads' | 'activity';
 
 interface ActivityRow {
   key: string;
@@ -141,7 +142,7 @@ export function PrDetail({
   selectedThreadId: number | null;
 }): JSX.Element {
   const { data: pr, isLoading, error } = usePr(prId);
-  const [tab, setTab] = useState<Tab>('threads');
+  const [tab, setTab] = useState<Tab>('checks');
   const [activitySince, setActivitySince] = useState<string | null>(null);
   const qc = useQueryClient();
 
@@ -249,27 +250,39 @@ export function PrDetail({
       </div>
 
       <div className="flex gap-1 border-b border-gray-200 px-3 dark:border-gray-800">
-        {(['threads', 'activity'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className={`-mb-px border-b-2 px-3 py-1.5 text-xs capitalize ${
-              tab === t
-                ? 'border-blue-500 text-blue-500'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {t}
-            {t === 'threads' && pr.threads.length > 0 && (
-              <span className="ml-1 opacity-60">{pr.threads.length}</span>
-            )}
-          </button>
-        ))}
+        {(['checks', 'threads', 'activity'] as Tab[]).map((t) => {
+          const failing = pr.checkRuns.filter(
+            (c) => c.state === 'failure' || c.state === 'error',
+          ).length;
+          return (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={`-mb-px border-b-2 px-3 py-1.5 text-xs capitalize ${
+                tab === t
+                  ? 'border-blue-500 text-blue-500'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {t}
+              {t === 'checks' && failing > 0 && (
+                <span className="ml-1 text-red-500" title={`${failing} failing`}>
+                  ●
+                </span>
+              )}
+              {t === 'threads' && pr.threads.length > 0 && (
+                <span className="ml-1 opacity-60">{pr.threads.length}</span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {tab === 'threads' ? (
+        {tab === 'checks' ? (
+          <ChecksTab pr={pr} usersById={usersById} />
+        ) : tab === 'threads' ? (
           <ThreadList
             threads={pr.threads}
             usersById={usersById}

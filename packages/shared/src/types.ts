@@ -129,6 +129,30 @@ export interface Label {
   color: string;
 }
 
+// A single CI check (CheckRun or legacy StatusContext) on the head commit,
+// normalised to one display state.
+export type CheckRunState =
+  | 'success'
+  | 'failure'
+  | 'pending'
+  | 'neutral'
+  | 'skipped'
+  | 'error'
+  | 'unknown';
+
+export interface CheckRun {
+  name: string;
+  state: CheckRunState;
+  url: string | null;
+}
+
+// An outstanding review request on a PR (user resolved via the users array;
+// team requests carry only a name).
+export interface RequestedReviewer {
+  userId: number | null;
+  teamName: string | null;
+}
+
 // The single most useful reason a PR matters right now, in priority order.
 export type ReasonTag =
   | 'awaiting_your_review'
@@ -301,6 +325,14 @@ export interface PrDetail {
   closedAt: string | null;
   updatedAt: string;
   githubUrl: string;
+  // v1.2 Checks/Overview tab: CI + mergeability + labels + per-job checks +
+  // outstanding reviewers (head-commit derived).
+  ciStatus: CiStatus;
+  mergeable: Mergeable;
+  mergeStateStatus: MergeStateStatus;
+  labels: Label[];
+  checkRuns: CheckRun[];
+  requestedReviewers: RequestedReviewer[];
   threads: ThreadDetail[];
   reviews: ReviewDetail[];
   comments: PrCommentDetail[];
@@ -371,6 +403,17 @@ export interface CreateRepoBody {
 
 export interface MarkViewedBody {
   sha?: string;
+}
+
+// Dismissing a "my turn" entry. Auto-resurfaces when newer activity arrives:
+// a review_request reappears when its PR is updated again; a thread reappears
+// on a newer reply.
+export type MyTurnDismissKind = 'review_request' | 'thread';
+
+export interface MyTurnDismissBody {
+  kind: MyTurnDismissKind;
+  // PR id for review_request, thread id for thread.
+  refId: number;
 }
 
 export interface UpdateUserBody {

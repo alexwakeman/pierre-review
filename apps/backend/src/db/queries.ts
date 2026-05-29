@@ -13,12 +13,15 @@ import {
 } from 'drizzle-orm';
 import {
   REASON_PRIORITY,
+  type CheckRun,
   type CiStatus,
   type CommitDetail,
   type EventType,
   type Label,
+  type RequestedReviewer,
   type Mergeable,
   type MergeStateStatus,
+  type MyTurnDismissKind,
   type MyTurnResponse,
   type NewSinceLastViewed,
   type PrCommentDetail,
@@ -52,6 +55,7 @@ const {
   events,
   syncState,
   prViews,
+  myTurnDismissals,
 } = schema;
 
 function iso(d: Date | null): string | null {
@@ -390,6 +394,17 @@ export function markPrViewed(prId: number, sha?: string): boolean {
 
 // ---- my turn ----
 
+export function dismissMyTurn(kind: MyTurnDismissKind, refId: number): void {
+  const now = new Date();
+  db.insert(myTurnDismissals)
+    .values({ kind, refId, dismissedAt: now })
+    .onConflictDoUpdate({
+      target: [myTurnDismissals.kind, myTurnDismissals.refId],
+      set: { dismissedAt: now },
+    })
+    .run();
+}
+
 function truncate(s: string, n: number): string {
   const oneLine = s.replace(/\s+/g, ' ').trim();
   return oneLine.length > n ? `${oneLine.slice(0, n - 1)}…` : oneLine;
@@ -428,6 +443,15 @@ export function getMyTurn(): MyTurnResponse {
   const repoNameById = new Map<number, string>();
   for (const r of listRepos()) repoNameById.set(r.id, r.fullName);
 
+  // Manual dismissals, honoured only until newer activity supersedes them.
+  const dismissals = db.select().from(myTurnDismissals).all();
+  const reviewDismissedAt = new Map<number, Date>();
+  const threadDismissedAt = new Map<number, Date>();
+  for (const d of dismissals) {
+    if (d.kind === 'review_request') reviewDismissedAt.set(d.refId, d.dismissedAt);
+    else if (d.kind === 'thread') threadDismissedAt.set(d.refId, d.dismissedAt);
+  }
+
   const meta = (prId: number) =>
     openRows.find((p) => p.id === prId)!;
 
@@ -448,9 +472,14 @@ export function getMyTurn(): MyTurnResponse {
     };
   };
 
-  // 1. Awaiting your review.
+  // 1. Awaiting your review. A dismissal sticks until the PR is updated again
+  //    (e.g. new commits → re-review warranted).
   const awaitingReview = open
     .filter((t) => t.reviewRequestedFromMe)
+    .filter((t) => {
+      const d = reviewDismissedAt.get(t.id);
+      return !d || meta(t.id).updatedAt.getTime() > d.getTime();
+    })
     .map((t) => {
       // otherReviewersRequested is recomputed via triage map; re-derive count.
       const others = countOtherReviewers(t.id, localUserId);
@@ -474,8 +503,13 @@ export function getMyTurn(): MyTurnResponse {
     }));
 
   // 3. Threads awaiting your response: you opened the thread, someone replied
-  //    after you, and it isn't resolved.
-  const threadsAwaiting = getThreadsAwaiting(localUserId, repoNameById);
+  //    after you, and it isn't resolved. A dismissal sticks until a newer reply.
+  const threadsAwaiting = getThreadsAwaiting(localUserId, repoNameById).filter(
+    (ta) => {
+      const d = threadDismissedAt.get(ta.threadId);
+      return !d || Date.parse(ta.lastReplyAt) > d.getTime();
+    },
+  );
   for (const ta of threadsAwaiting) {
     if (ta.lastReplyAuthorId != null) referencedUsers.add(ta.lastReplyAuthorId);
   }
@@ -657,6 +691,17 @@ export function getPrDetail(id: number): PrDetail | null {
     committedAt: c.committedAt.toISOString(),
   }));
 
+  // Outstanding review requests (for the Checks/Overview tab).
+  const reviewerRows = db
+    .select()
+    .from(schema.reviewRequests)
+    .where(eq(schema.reviewRequests.prId, id))
+    .all();
+  const requestedReviewers: RequestedReviewer[] = reviewerRows.map((r) => ({
+    userId: r.userId,
+    teamName: r.teamName,
+  }));
+
   // Gather referenced users for client-side lookup.
   const userIds = new Set<number>();
   if (pr.authorId) userIds.add(pr.authorId);
@@ -668,6 +713,7 @@ export function getPrDetail(id: number): PrDetail | null {
     if (c.authorId) userIds.add(c.authorId);
     if (c.committerId) userIds.add(c.committerId);
   }
+  for (const r of reviewerRows) if (r.userId) userIds.add(r.userId);
   const userList =
     userIds.size > 0
       ? db.select().from(users).where(inArray(users.id, [...userIds])).all().map(mapUser)
@@ -713,6 +759,12 @@ export function getPrDetail(id: number): PrDetail | null {
     closedAt: iso(pr.closedAt),
     updatedAt: pr.updatedAt.toISOString(),
     githubUrl: `https://github.com/${repo.owner}/${repo.name}/pull/${pr.number}`,
+    ciStatus: (pr.ciStatus ?? 'unknown') as CiStatus,
+    mergeable: (pr.mergeable ?? 'unknown') as Mergeable,
+    mergeStateStatus: (pr.mergeStateStatus ?? 'unknown') as MergeStateStatus,
+    labels: (pr.labels ?? []) as Label[],
+    checkRuns: (pr.checkRuns ?? []) as CheckRun[],
+    requestedReviewers,
     threads,
     reviews: reviewsOut,
     comments: commentsOut,

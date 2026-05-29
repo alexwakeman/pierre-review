@@ -1,6 +1,7 @@
 import type {
   CreateRepoBody,
   MeResponse,
+  MyTurnDismissKind,
   MyTurnResponse,
   OpenPrsResponse,
   PrDetail,
@@ -56,9 +57,9 @@ export const api = {
     fetch('/api/repos', jsonBody('POST', body)).then((r) => handle<Repo>(r)),
   deleteRepo: (id: number) =>
     fetch(`/api/repos/${id}`, jsonBody('DELETE')).then((r) => handle<void>(r)),
-  syncRepo: (id: number) =>
-    fetch(`/api/repos/${id}/sync`, jsonBody('POST')).then((r) =>
-      handle<{ status: string }>(r),
+  syncRepo: (id: number, full = false) =>
+    fetch(`/api/repos/${id}/sync${full ? '?full=true' : ''}`, jsonBody('POST')).then(
+      (r) => handle<{ status: string }>(r),
     ),
   syncStatus: (id: number) => get<SyncStatus>(`/api/repos/${id}/sync-status`),
 
@@ -77,6 +78,10 @@ export const api = {
 
   me: () => get<MeResponse>('/api/me'),
   myTurn: () => get<MyTurnResponse>('/api/my-turn'),
+  dismissMyTurn: (kind: MyTurnDismissKind, refId: number) =>
+    fetch('/api/my-turn/dismiss', jsonBody('POST', { kind, refId })).then((r) =>
+      handle<{ status: string }>(r),
+    ),
   markPrViewed: (id: number, sha?: string) =>
     fetch(`/api/prs/${id}/mark-viewed`, jsonBody('POST', sha ? { sha } : {})).then(
       (r) => handle<{ status: string }>(r),

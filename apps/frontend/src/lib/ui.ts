@@ -1,4 +1,5 @@
 import type {
+  CheckRunState,
   CiStatus,
   DerivedState,
   EventType,
@@ -88,6 +89,20 @@ export const CI_META: Record<
   pending: { label: 'CI running', color: '#eab308' },
   expected: { label: 'CI expected', color: '#9ca3af' },
   unknown: null,
+};
+
+// Per-check display: icon glyph + colour + short label.
+export const CHECK_STATE_META: Record<
+  CheckRunState,
+  { label: string; color: string; icon: string }
+> = {
+  success: { label: 'passed', color: '#22c55e', icon: '✓' },
+  failure: { label: 'failed', color: '#ef4444', icon: '✕' },
+  pending: { label: 'running', color: '#eab308', icon: '•' },
+  neutral: { label: 'neutral', color: '#9ca3af', icon: '–' },
+  skipped: { label: 'skipped', color: '#9ca3af', icon: '⤼' },
+  error: { label: 'error', color: '#ef4444', icon: '!' },
+  unknown: { label: 'unknown', color: '#9ca3af', icon: '?' },
 };
 
 // Only surface mergeability when it's a problem.

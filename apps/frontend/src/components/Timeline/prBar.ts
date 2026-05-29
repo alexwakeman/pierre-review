@@ -48,13 +48,27 @@ function statusLine(pr: TimelinePr): string {
   return `<div class="pr-status">${bits.join('')}</div>`;
 }
 
+export interface PrBarAuthor {
+  label: string;
+  avatarUrl: string | null;
+}
+
+function authorHtml(author: PrBarAuthor | undefined): string {
+  if (!author) return '';
+  const avatar = author.avatarUrl
+    ? `<img class="pr-avatar" src="${escapeHtml(author.avatarUrl)}" width="14" height="14" loading="lazy" alt="" />`
+    : '';
+  return `${avatar}<span class="pr-author">${escapeHtml(author.label)}</span>`;
+}
+
 // HTML content for a vis-timeline PR range item.
-export function renderPrBar(pr: TimelinePr): string {
+export function renderPrBar(pr: TimelinePr, author?: PrBarAuthor): string {
   const draft = pr.isDraft ? '<span class="pr-draft-tag">draft</span>' : '';
   const stalled = pr.isStalled ? '<span class="pr-stall" title="Stalled">●</span>' : '';
   const title =
     `<div class="pr-bar-inner">` +
     `<span class="pr-num">#${pr.number}</span>` +
+    authorHtml(author) +
     `${draft}` +
     `<span class="pr-title">${escapeHtml(pr.title)}</span>` +
     `${stalled}` +

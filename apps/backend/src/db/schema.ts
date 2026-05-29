@@ -6,7 +6,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
-import type { Label } from '@gh-team-monitor/shared';
+import type { CheckRun, Label } from '@gh-team-monitor/shared';
 
 export const repos = sqliteTable(
   'repos',
@@ -76,6 +76,8 @@ export const pullRequests = sqliteTable(
       ],
     }),
     labels: text('labels', { mode: 'json' }).$type<Label[]>(),
+    // Per-job CI checks on the head commit (CheckRuns + StatusContexts).
+    checkRuns: text('check_runs', { mode: 'json' }).$type<CheckRun[]>(),
   },
   (t) => ({
     repoIdx: index('pr_repo_idx').on(t.repoId),
@@ -110,6 +112,21 @@ export const prViews = sqliteTable('pr_views', {
   lastViewedSha: text('last_viewed_sha'),
   lastViewedAt: integer('last_viewed_at', { mode: 'timestamp' }).notNull(),
 });
+
+// Manual dismissals of "my turn" entries. `refId` is a PR id (review_request)
+// or a review-thread id (thread). The dismissal is honoured only while no newer
+// activity has happened — getMyTurn compares dismissedAt against the PR's
+// updatedAt / the thread's last reply, so it auto-resurfaces.
+export const myTurnDismissals = sqliteTable(
+  'my_turn_dismissals',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    kind: text('kind', { enum: ['review_request', 'thread'] }).notNull(),
+    refId: integer('ref_id').notNull(),
+    dismissedAt: integer('dismissed_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({ kindRefUx: uniqueIndex('mtd_kind_ref_ux').on(t.kind, t.refId) }),
+);
 
 // Singleton (id always 1): the locally-authenticated GitHub user, cached from
 // `gh api user` so triage ("my turn") knows who "you" are.

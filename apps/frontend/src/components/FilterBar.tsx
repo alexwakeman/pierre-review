@@ -129,6 +129,15 @@ export function FilterBar(): JSX.Element {
   const { data: timeline } = useTimeline();
 
   const f = useFilters();
+  const qc = useQueryClient();
+  const removeRepo = useMutation({
+    mutationFn: (id: number) => api.deleteRepo(id),
+    onSuccess: () => {
+      for (const key of ['repos', 'timeline', 'open-prs', 'users', 'my-turn', 'me']) {
+        void qc.invalidateQueries({ queryKey: [key] });
+      }
+    },
+  });
 
   // Members that are actually active in the current window (keeps the list
   // short). Falls back to all non-bot users if the timeline is empty.
@@ -150,6 +159,24 @@ export function FilterBar(): JSX.Element {
             title={r.fullName}
           >
             {r.name}
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (
+                  window.confirm(
+                    `Stop watching ${r.fullName}? This deletes all of its locally-synced data.`,
+                  )
+                ) {
+                  removeRepo.mutate(r.id);
+                }
+              }}
+              className="ml-1 cursor-pointer opacity-50 hover:opacity-100"
+              title={`Remove ${r.fullName}`}
+            >
+              ✕
+            </span>
           </Chip>
         ))}
         {f.repoIds && f.repoIds.length > 0 && (

@@ -70,6 +70,35 @@ export function markerHtml(ev: TimelineEvent): string {
   return `<div class="ev-marker-inner">${markerVisual(ev).svg}</div>`;
 }
 
-export function clusterHtml(count: number): string {
-  return `<div class="ev-cluster-inner" title="${count} events">+${count}</div>`;
+// Clusters are homogeneous by kind so a burst of commits never mixes with a
+// burst of comments. Each kind gets its own colour + glyph on the +N badge.
+export type ClusterKind = 'commit' | 'comment' | 'review';
+
+function clusterGlyph(inner: string): string {
+  return `<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">${inner}</svg>`;
+}
+
+const KIND_VISUAL: Record<ClusterKind, { color: string; glyph: string; label: string }> = {
+  commit: {
+    color: C.commit,
+    glyph: clusterGlyph(`<rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="#fff"/>`),
+    label: 'commits',
+  },
+  comment: {
+    color: C.reviewComment,
+    glyph: clusterGlyph(`<circle cx="8" cy="8" r="5" fill="#fff"/>`),
+    label: 'comments',
+  },
+  review: {
+    color: C.approved,
+    glyph: clusterGlyph(
+      `<path d="M4.5 8.3 L7 10.8 L11.5 5.5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
+    ),
+    label: 'reviews',
+  },
+};
+
+export function clusterHtml(count: number, kind: ClusterKind): string {
+  const v = KIND_VISUAL[kind];
+  return `<div class="ev-cluster-inner" style="background:${v.color}" title="${count} ${v.label}">${v.glyph}+${count}</div>`;
 }

@@ -30,8 +30,13 @@ export async function ensureCommitFiles(
     .all();
   for (const row of cached) result.set(row.sha, row.paths);
 
+  // Fetch cache misses with bounded concurrency. These REST calls dominate
+  // sync latency on a PR that just got several commits addressing threads;
+  // running them serially blocks the whole page loop. SHAs are immutable and
+  // the cache is idempotent, so parallelism is safe.
   const missing = unique.filter((sha) => !result.has(sha));
-  for (const sha of missing) {
+  const CONCURRENCY = 5;
+  const fetchOne = async (sha: string): Promise<void> => {
     try {
       const commit = await ghRestGet<RestCommit>(
         `/repos/${owner}/${name}/commits/${sha}`,
@@ -47,6 +52,9 @@ export async function ensureCommitFiles(
       // "no known files" (derivation falls back to other signals).
       result.set(sha, []);
     }
+  };
+  for (let i = 0; i < missing.length; i += CONCURRENCY) {
+    await Promise.all(missing.slice(i, i + CONCURRENCY).map(fetchOne));
   }
 
   return result;

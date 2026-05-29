@@ -1,4 +1,6 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ThreadAwaitingItem, User } from '@gh-team-monitor/shared';
+import { api } from '../../api/client.js';
 import { useFilters } from '../../store/filters.js';
 import { relativeTime } from '../../lib/ui.js';
 
@@ -9,6 +11,14 @@ export function ThreadsAwaitingSection({
   usersById: Map<number, User>;
 }): JSX.Element | null {
   const openPrFocused = useFilters((s) => s.openPrFocused);
+  const qc = useQueryClient();
+  const dismiss = useMutation({
+    mutationFn: (threadId: number) => api.dismissMyTurn('thread', threadId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['my-turn'] });
+      void qc.invalidateQueries({ queryKey: ['me'] });
+    },
+  });
   if (items.length === 0) return null;
 
   return (
@@ -22,11 +32,11 @@ export function ThreadsAwaitingSection({
         {items.map((it) => {
           const file = it.path.split('/').at(-1);
           return (
-            <li key={it.threadId}>
+            <li key={it.threadId} className="group flex items-stretch">
               <button
                 type="button"
                 onClick={() => openPrFocused(it.prId, it.threadId)}
-                className="w-full rounded px-2 py-1 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
+                className="min-w-0 flex-1 rounded px-2 py-1 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
               >
                 <div className="flex items-baseline gap-2 text-sm">
                   <span className="shrink-0 text-xs text-gray-400">
@@ -43,6 +53,15 @@ export function ThreadsAwaitingSection({
                 <div className="truncate pl-1 text-[11px] italic text-gray-500" title={it.lastReplyExcerpt}>
                   “{it.lastReplyExcerpt}”
                 </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => dismiss.mutate(it.threadId)}
+                disabled={dismiss.isPending}
+                className="shrink-0 self-start rounded px-1.5 py-1 text-[11px] text-gray-300 opacity-0 hover:text-gray-600 group-hover:opacity-100 dark:text-gray-600 dark:hover:text-gray-300"
+                title="Dismiss — reappears on a newer reply"
+              >
+                ✓ done
               </button>
             </li>
           );

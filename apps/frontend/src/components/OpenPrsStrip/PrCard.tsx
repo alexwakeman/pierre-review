@@ -43,7 +43,7 @@ export function PrCard({
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') openPrFocused(pr.id);
       }}
-      className={`relative flex h-full w-64 shrink-0 cursor-pointer flex-col gap-1.5 rounded-lg border p-2.5 text-left transition ${
+      className={`relative flex w-64 shrink-0 cursor-pointer flex-col gap-1.5 rounded-lg border p-2.5 text-left transition ${
         selected
           ? 'border-blue-500 ring-1 ring-blue-500'
           : 'border-gray-200 hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500'
@@ -67,6 +67,16 @@ export function PrCard({
         <span className="truncate">{repoFullName}</span>
         <span>·</span>
         <span className="shrink-0">#{pr.number}</span>
+        <a
+          href={`https://github.com/${repoFullName}/pull/${pr.number}`}
+          target="_blank"
+          rel="noreferrer noopener"
+          onClick={(e) => e.stopPropagation()}
+          className="shrink-0 text-gray-400 hover:text-blue-500"
+          title="Open on GitHub"
+        >
+          ↗
+        </a>
         {pr.isDraft && (
           <span className="ml-1 rounded bg-gray-500/20 px-1 text-[9px] uppercase">draft</span>
         )}

@@ -1,6 +1,6 @@
 import type { DataItem } from 'vis-timeline/standalone';
 import type { TimelineEvent, User } from '@gh-team-monitor/shared';
-import { markerHtml, clusterHtml } from './markerTemplate.js';
+import { markerHtml, clusterHtml, type ClusterKind } from './markerTemplate.js';
 import { eventTooltip } from './eventMarker.js';
 
 // Event types that get their own markers. PR lifecycle events are implicit in
@@ -14,6 +14,13 @@ const MARKER_TYPES = new Set([
 
 export function isMarkerEvent(ev: TimelineEvent): boolean {
   return MARKER_TYPES.has(ev.type);
+}
+
+// Which cluster bucket an event belongs to (commits / comments / reviews).
+function clusterKindOf(ev: TimelineEvent): ClusterKind {
+  if (ev.type === 'commit_pushed') return 'commit';
+  if (ev.type === 'review_submitted') return 'review';
+  return 'comment'; // review_comment + pr_comment
 }
 
 export interface ClusterResult {
@@ -42,17 +49,23 @@ export function buildMarkerItems(
   const items: DataItem[] = [];
   const clusterMembers = new Map<string, number[]>();
 
-  // bucket events by lane
-  const byGroup = new Map<string, TimelineEvent[]>();
+  // bucket events by (lane, kind) so a cluster never mixes commits with
+  // comments or reviews
+  const byBucket = new Map<
+    string,
+    { group: string; kind: ClusterKind; events: TimelineEvent[] }
+  >();
   for (const ev of events) {
     if (!isMarkerEvent(ev)) continue;
-    const g = groupOf(ev);
-    const arr = byGroup.get(g) ?? [];
-    arr.push(ev);
-    byGroup.set(g, arr);
+    const group = groupOf(ev);
+    const kind = clusterKindOf(ev);
+    const bk = `${group}::${kind}`;
+    const b = byBucket.get(bk);
+    if (b) b.events.push(ev);
+    else byBucket.set(bk, { group, kind, events: [ev] });
   }
 
-  for (const [group, groupEvents] of byGroup) {
+  for (const { group, kind, events: groupEvents } of byBucket.values()) {
     const sorted = [...groupEvents].sort(
       (a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt),
     );
@@ -76,7 +89,7 @@ export function buildMarkerItems(
       } else {
         const meanMs =
           bucket.reduce((s, e) => s + Date.parse(e.occurredAt), 0) / bucket.length;
-        const id = `cl:${group}:${bucket[0]!.id}`;
+        const id = `cl:${group}:${kind}:${bucket[0]!.id}`;
         clusterMembers.set(
           id,
           bucket.map((e) => e.id),
@@ -86,9 +99,9 @@ export function buildMarkerItems(
           group,
           type: 'point',
           start: new Date(meanMs).toISOString(),
-          content: clusterHtml(bucket.length),
+          content: clusterHtml(bucket.length, kind),
           className: 'ev-cluster',
-          title: `${bucket.length} events`,
+          title: `${bucket.length} ${kind}s`,
         } as DataItem);
       }
       bucket = [];

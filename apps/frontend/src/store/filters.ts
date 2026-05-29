@@ -52,6 +52,9 @@ export interface FilterState {
 
   // transient: request the timeline to scroll/focus a PR (cleared after use)
   timelineFocusPr: number | null;
+  // optional instant to recenter on (e.g. a clicked event's time) so focusing a
+  // long-running PR doesn't jump to its far-off midpoint
+  timelineFocusAt: string | null;
 
   setRepoIds: (ids: number[] | null) => void;
   toggleRepo: (id: number) => void;
@@ -65,9 +68,9 @@ export interface FilterState {
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
   clearSelection: () => void;
-  // Open a PR from the strip / my-turn: select it AND ask the timeline to
-  // scroll to it.
-  openPrFocused: (id: number, threadId?: number | null) => void;
+  // Open a PR from the strip / my-turn / a timeline event: select it AND ask
+  // the timeline to scroll to it (optionally recentering on `focusAt`).
+  openPrFocused: (id: number, threadId?: number | null, focusAt?: string | null) => void;
   consumeTimelineFocus: () => void;
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
@@ -97,6 +100,7 @@ export const useFilters = create<FilterState>((set) => ({
   collapsedFileGroups: [],
   expandedDiffHunks: [],
   timelineFocusPr: null,
+  timelineFocusAt: null,
 
   setRepoIds: (ids) => set({ repoIds: ids }),
   toggleRepo: (id) =>
@@ -117,13 +121,14 @@ export const useFilters = create<FilterState>((set) => ({
       selectedThreadId: threadId,
     })),
   clearSelection: () => set({ selectedPrId: null, selectedThreadId: null }),
-  openPrFocused: (id, threadId = null) =>
+  openPrFocused: (id, threadId = null, focusAt = null) =>
     set({
       selectedPrId: id,
       selectedThreadId: threadId,
       timelineFocusPr: id,
+      timelineFocusAt: focusAt,
     }),
-  consumeTimelineFocus: () => set({ timelineFocusPr: null }),
+  consumeTimelineFocus: () => set({ timelineFocusPr: null, timelineFocusAt: null }),
   setStripCollapsed: (v) => set({ stripCollapsed: v }),
   setStripFilter: (f) => set({ stripFilter: f }),
   toggleFileGroup: (path, defaultExpanded) =>

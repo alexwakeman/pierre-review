@@ -16,11 +16,13 @@ import { renderPrBar, prClassName } from './prBar.js';
 import { buildMarkerItems } from './clustering.js';
 import { MarkerPopover, type PopoverState } from './MarkerPopover.js';
 
+const ZOOM_MIN_MS = 1000 * 60 * 60;
+
 const VIS_OPTIONS: TimelineOptions = {
   stack: true,
   stackSubgroups: true,
   orientation: { axis: 'top', item: 'top' },
-  zoomMin: 1000 * 60 * 60,
+  zoomMin: ZOOM_MIN_MS,
   zoomMax: 1000 * 60 * 60 * 24 * 365 * 2,
   margin: { item: 4, axis: 8 },
   tooltip: { followMouse: true, overflowMethod: 'flip' },
@@ -62,6 +64,7 @@ export function Timeline(): JSX.Element {
   const { data: users } = useUsers();
   const derivedStates = useFilters((s) => s.derivedStates);
   const selectPr = useFilters((s) => s.selectPr);
+  const selectedPrId = useFilters((s) => s.selectedPrId);
 
   const preset = useFilters((s) => s.preset);
   const customFrom = useFilters((s) => s.customFrom);
@@ -135,10 +138,43 @@ export function Timeline(): JSX.Element {
         selectPr(Number.parseInt(key.slice(3), 10));
         setPopover(null);
       } else if (key.startsWith('ev:')) {
-        setPopover({ x, y, eventIds: [Number.parseInt(key.slice(3), 10)] });
+        // Clicking an event reveals the related PR (highlights its bar +
+        // recenters on the event's time) and opens the detail pane; if the
+        // event carries a thread the Threads tab is selected. Events with no
+        // PR fall back to the quick-preview popover.
+        const evId = Number.parseInt(key.slice(3), 10);
+        const ev = eventsByIdRef.current.get(evId);
+        if (ev && ev.prId != null) {
+          useFilters
+            .getState()
+            .openPrFocused(ev.prId, ev.threadId, ev.occurredAt);
+          setPopover(null);
+        } else {
+          setPopover({ x, y, eventIds: [evId] });
+        }
       } else if (key.startsWith('cl:')) {
+        // Zoom into the cluster's time-span so it unpacks into individual
+        // markers (the rangechanged handler re-clusters at the finer zoom).
+        // When members are too tight to separate even at max zoom, fall back to
+        // the list popover.
         const members = clusterMembersRef.current.get(key) ?? [];
-        setPopover({ x, y, eventIds: members });
+        const times = members
+          .map((mid) => eventsByIdRef.current.get(mid)?.occurredAt)
+          .filter((t): t is string => t != null)
+          .map((t) => Date.parse(t));
+        if (times.length > 0) {
+          const min = Math.min(...times);
+          const max = Math.max(...times);
+          const pad = Math.max((max - min) * 0.15, 60_000);
+          if (max - min + 2 * pad >= ZOOM_MIN_MS) {
+            timeline.setWindow(min - pad, max + pad, { animation: true });
+            setPopover(null);
+          } else {
+            setPopover({ x, y, eventIds: members });
+          }
+        } else {
+          setPopover({ x, y, eventIds: members });
+        }
       } else {
         setPopover(null);
       }
@@ -167,6 +203,9 @@ export function Timeline(): JSX.Element {
 
     const prs: TimelinePr[] = data.prs.filter(
       (pr) =>
+        // Always render the selected PR's bar so event→PR navigation has a
+        // target even when the derived-state filter would otherwise hide it.
+        pr.id === selectedPrId ||
         derivedStates.length === 0 ||
         derivedStates.some((s) => pr.threadCounts[s] > 0),
     );
@@ -203,16 +242,22 @@ export function Timeline(): JSX.Element {
       }
     }
 
-    const prItems: DataItem[] = prs.map((pr) => ({
-      id: `pr:${pr.id}`,
-      group: `repo:${pr.repoId}`,
-      type: 'range',
-      start: pr.openedAt,
-      end: pr.mergedAt ?? pr.closedAt ?? new Date().toISOString(),
-      content: renderPrBar(pr),
-      className: prClassName(pr),
-      title: `#${pr.number} ${pr.title}`,
-    }) as DataItem);
+    const prItems: DataItem[] = prs.map((pr) => {
+      const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
+      return {
+        id: `pr:${pr.id}`,
+        group: `repo:${pr.repoId}`,
+        type: 'range',
+        start: pr.openedAt,
+        end: pr.mergedAt ?? pr.closedAt ?? new Date().toISOString(),
+        content: renderPrBar(pr, {
+          label: userLabel(author, pr.authorId),
+          avatarUrl: author?.avatarUrl ?? null,
+        }),
+        className: prClassName(pr),
+        title: `#${pr.number} ${pr.title}`,
+      } as DataItem;
+    });
 
     groupsRef.current.clear();
     groupsRef.current.add(groups);
@@ -224,7 +269,13 @@ export function Timeline(): JSX.Element {
     itemsRef.current.remove(stalePr);
     itemsRef.current.add(prItems);
     rebuildMarkers();
-  }, [data, derivedStates, reposById, usersById, rebuildMarkers]);
+
+    // Re-adding the bars clears vis's selection, so restore the highlight for
+    // the currently-selected PR (also keeps it highlighted across refetches).
+    if (selectedPrId != null) {
+      timelineRef.current?.setSelection([`pr:${selectedPrId}`]);
+    }
+  }, [data, derivedStates, reposById, usersById, selectedPrId, rebuildMarkers]);
 
   // Move the visible window when the range preset changes.
   useEffect(() => {
@@ -234,8 +285,9 @@ export function Timeline(): JSX.Element {
     tl.setWindow(from, to, { animation: false });
   }, [preset, customFrom, customTo]);
 
-  // Scroll the timeline to a PR opened from the strip / my-turn.
+  // Scroll the timeline to a PR opened from the strip / my-turn / an event.
   const timelineFocusPr = useFilters((s) => s.timelineFocusPr);
+  const timelineFocusAt = useFilters((s) => s.timelineFocusAt);
   useEffect(() => {
     if (timelineFocusPr == null) return;
     const tl = timelineRef.current;
@@ -243,13 +295,21 @@ export function Timeline(): JSX.Element {
 
     const inWindow = data?.prs.find((p) => p.id === timelineFocusPr);
     if (inWindow) {
-      const startMs = new Date(inWindow.openedAt).getTime();
-      const endMs = new Date(
-        inWindow.mergedAt ?? inWindow.closedAt ?? new Date().toISOString(),
-      ).getTime();
-      const center = (startMs + endMs) / 2;
       const win = tl.getWindow();
       const width = win.end.valueOf() - win.start.valueOf();
+      // Recenter on the clicked event's instant when provided, otherwise on the
+      // PR bar's midpoint. The former avoids a big jump when a long-running PR's
+      // midpoint is far from the event the user clicked.
+      let center: number;
+      if (timelineFocusAt) {
+        center = Date.parse(timelineFocusAt);
+      } else {
+        const startMs = new Date(inWindow.openedAt).getTime();
+        const endMs = new Date(
+          inWindow.mergedAt ?? inWindow.closedAt ?? new Date().toISOString(),
+        ).getTime();
+        center = (startMs + endMs) / 2;
+      }
       tl.setWindow(center - width / 2, center + width / 2, { animation: true });
       tl.setSelection([`pr:${timelineFocusPr}`]);
       useFilters.getState().consumeTimelineFocus();
@@ -270,7 +330,7 @@ export function Timeline(): JSX.Element {
       }
     }
     useFilters.getState().consumeTimelineFocus();
-  }, [timelineFocusPr, data, openPrsData]);
+  }, [timelineFocusPr, timelineFocusAt, data, openPrsData]);
 
   return (
     <div className="relative h-full w-full">

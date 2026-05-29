@@ -7,8 +7,11 @@ import {
 } from './derive-thread-state.js';
 import type {
   GqlActor,
+  GqlCheckContext,
+  GqlHeadCommit,
   GqlPullRequest,
 } from '../github/queries.js';
+import type { CheckRun, CheckRunState } from '@gh-team-monitor/shared';
 
 const {
   repos,
@@ -176,6 +179,52 @@ function mergeStateStatusFrom(
     | 'unknown';
 }
 
+function checkContextState(c: GqlCheckContext): CheckRunState {
+  if (c.__typename === 'StatusContext') {
+    switch ((c.state ?? '').toUpperCase()) {
+      case 'SUCCESS':
+        return 'success';
+      case 'FAILURE':
+        return 'failure';
+      case 'ERROR':
+        return 'error';
+      case 'PENDING':
+      case 'EXPECTED':
+        return 'pending';
+      default:
+        return 'unknown';
+    }
+  }
+  // CheckRun: outcome is meaningful only once completed.
+  if ((c.status ?? '').toUpperCase() !== 'COMPLETED') return 'pending';
+  switch ((c.conclusion ?? '').toUpperCase()) {
+    case 'SUCCESS':
+      return 'success';
+    case 'FAILURE':
+    case 'TIMED_OUT':
+    case 'STARTUP_FAILURE':
+    case 'ACTION_REQUIRED':
+      return 'failure';
+    case 'CANCELLED':
+    case 'STALE':
+    case 'NEUTRAL':
+      return 'neutral';
+    case 'SKIPPED':
+      return 'skipped';
+    default:
+      return 'unknown';
+  }
+}
+
+function checkRunsFrom(head: GqlHeadCommit['commit'] | null | undefined): CheckRun[] {
+  const nodes = head?.statusCheckRollup?.contexts?.nodes ?? [];
+  return nodes.map((c) => ({
+    name: c.__typename === 'CheckRun' ? c.name : c.context,
+    state: checkContextState(c),
+    url: c.__typename === 'CheckRun' ? c.detailsUrl : c.targetUrl,
+  }));
+}
+
 const REVIEW_STATES = new Set([
   'approved',
   'changes_requested',
@@ -254,6 +303,7 @@ export function persistPr(
       name: l.name,
       color: l.color,
     }));
+    const checkRuns = checkRunsFrom(head);
 
     const prRow = db
       .insert(pullRequests)
@@ -277,6 +327,7 @@ export function persistPr(
         mergeable,
         mergeStateStatus,
         labels,
+        checkRuns,
       })
       .onConflictDoUpdate({
         target: pullRequests.githubNodeId,
@@ -296,6 +347,7 @@ export function persistPr(
           mergeable,
           mergeStateStatus,
           labels,
+          checkRuns,
         },
       })
       .returning({ id: pullRequests.id })

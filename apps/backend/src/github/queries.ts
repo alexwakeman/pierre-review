@@ -63,6 +63,22 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
                 oid
                 statusCheckRollup {
                   state
+                  contexts(first: 100) {
+                    nodes {
+                      __typename
+                      ... on CheckRun {
+                        name
+                        status
+                        conclusion
+                        detailsUrl
+                      }
+                      ... on StatusContext {
+                        context
+                        state
+                        targetUrl
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -234,10 +250,28 @@ export interface GqlReviewRequest {
     | null;
 }
 
+export type GqlCheckContext =
+  | {
+      __typename: 'CheckRun';
+      name: string;
+      status: string | null;
+      conclusion: string | null;
+      detailsUrl: string | null;
+    }
+  | {
+      __typename: 'StatusContext';
+      context: string;
+      state: string | null;
+      targetUrl: string | null;
+    };
+
 export interface GqlHeadCommit {
   commit: {
     oid: string;
-    statusCheckRollup: { state: string } | null;
+    statusCheckRollup: {
+      state: string;
+      contexts?: { nodes: GqlCheckContext[] };
+    } | null;
   };
 }
 
