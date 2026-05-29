@@ -132,6 +132,26 @@ body {
   opacity: 0.85;
 }
 
+/* Cross-user row focus: when a marker links two users we collapse every other
+   user row so the two relevant rows sit together (no vertical jump). Rows are
+   normal-flow (position: relative) so animating max-height reflows the rows
+   below smoothly. focusRows() sets max-height (from the measured row height down
+   to 0) + opacity inline; this rule just supplies the transition. `tl-user-row`
+   is the group className set when rows are built — vis copies it onto both the
+   label and the foreground row, so the two sides collapse in step. */
+.vis-labelset .vis-label.tl-user-row,
+.vis-foreground .vis-group.tl-user-row {
+  transition:
+    max-height 0.22s ease,
+    opacity 0.22s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vis-labelset .vis-label.tl-user-row,
+  .vis-foreground .vis-group.tl-user-row {
+    transition: none;
+  }
+}
+
 /* PR range bars */
 .vis-item.pr-bar {
   border-radius: 6px;

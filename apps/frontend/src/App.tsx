@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FilterBar } from './components/FilterBar.js';
 import { OpenPrsStrip } from './components/OpenPrsStrip/index.js';
 import { Timeline } from './components/Timeline/index.js';
 import { DetailPane } from './components/DetailPane.js';
 import { SyncStatus } from './components/SyncStatus.js';
 import { useUrlState } from './hooks/useUrlState.js';
+import { useLocalStorage } from './hooks/useLocalStorage.js';
 import { useKeyboard } from './hooks/useKeyboard.js';
 
 function useDarkMode(): [boolean, () => void] {
@@ -22,6 +23,36 @@ export default function App(): JSX.Element {
   useUrlState();
   useKeyboard();
   const [dark, toggleDark] = useDarkMode();
+
+  // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
+  // the dragged height is remembered across reloads. During a drag we set the
+  // height on the DOM node directly (no per-frame React render) and only commit
+  // to state — and localStorage — on release.
+  const [paneH, setPaneH] = useLocalStorage<number>('ghtm:detailPaneHeight', 384);
+  const paneRef = useRef<HTMLElement>(null);
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+
+  const onResizeDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+    dragRef.current = {
+      startY: e.clientY,
+      startH: paneRef.current?.offsetHeight ?? paneH,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onResizeMove = (e: React.PointerEvent<HTMLDivElement>): void => {
+    const d = dragRef.current;
+    if (!d || !paneRef.current) return;
+    const max = window.innerHeight * 0.7;
+    const next = Math.min(Math.max(d.startH + (d.startY - e.clientY), 160), max);
+    paneRef.current.style.height = `${next}px`;
+    window.dispatchEvent(new Event('resize')); // keep vis filling the rest live
+  };
+  const onResizeUp = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!dragRef.current || !paneRef.current) return;
+    dragRef.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    setPaneH(paneRef.current.offsetHeight); // commit + persist
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -50,7 +81,21 @@ export default function App(): JSX.Element {
         <section className="min-h-0 flex-1 overflow-hidden">
           <Timeline />
         </section>
-        <section className="h-80 shrink-0 overflow-auto border-t border-gray-200 dark:border-gray-800">
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize detail pane"
+          onPointerDown={onResizeDown}
+          onPointerMove={onResizeMove}
+          onPointerUp={onResizeUp}
+          title="Drag to resize"
+          className="h-1 shrink-0 cursor-row-resize bg-gray-200 transition-colors hover:bg-blue-400 dark:bg-gray-800 dark:hover:bg-blue-500"
+        />
+        <section
+          ref={paneRef}
+          style={{ height: paneH }}
+          className="shrink-0 overflow-auto"
+        >
           <DetailPane />
         </section>
       </main>

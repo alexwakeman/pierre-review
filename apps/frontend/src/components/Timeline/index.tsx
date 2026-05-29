@@ -61,6 +61,16 @@ function groupOf(ev: TimelineEvent): string {
     : `repo:${ev.repoId}`;
 }
 
+const USER_GROUP_RE = /^repo:\d+:user:\d+$/;
+
+// A DOM-safe class token for a group id (`repo:2:user:5` → `tlg-repo-2-user-5`),
+// set as part of the group's className so focusRows can find the rendered label
+// + foreground rows for that group to animate them. vis copies a group's
+// className onto both its label and its foreground row.
+function groupClassToken(id: string): string {
+  return `tlg-${id.replace(/:/g, '-')}`;
+}
+
 export function Timeline(): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<VisTimeline | null>(null);
@@ -73,6 +83,13 @@ export function Timeline(): JSX.Element {
   // The PR bar currently glowing as the "linked" partner of an open marker
   // modal, so we can clear it when the modal closes or moves to another PR.
   const highlightedPrRef = useRef<number | null>(null);
+  // Cross-user row focus (Fix 1): the user-group ids kept visible while a
+  // cross-user marker modal is open (null = no focus), the set of rows that are
+  // currently collapsed/hidden, and any in-flight collapse/expand timers so we
+  // can cancel them when focus changes mid-animation.
+  const focusedGroupIdsRef = useRef<string[] | null>(null);
+  const collapsedRowsRef = useRef<Set<string>>(new Set());
+  const focusTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const [popover, setPopover] = useState<PopoverState | null>(null);
 
@@ -129,6 +146,139 @@ export function Timeline(): JSX.Element {
       }
     }
     highlightedPrRef.current = prId;
+  }, []);
+
+  // Cross-user row focus (Fix 1): collapse every user row except `keepIds` so
+  // the two linked rows (actor + PR author) sit together — no vertical jump.
+  // `keepIds === null` (or empty) restores all rows. Rows animate via inline
+  // max-height measured from the live row height (a true accordion, no clipping
+  // and no snap); neighbours reflow because vis rows are normal-flow.
+  // `animate: false` force-re-asserts visibility instantly (no animation) — used
+  // after a background-sync rebuild, which can re-show a collapsed row and add
+  // brand-new rows that must be hidden again seamlessly (Fix 3).
+  const focusRows = useCallback((keepIds: string[] | null, animate = true) => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Cancel in-flight timers so rapid switching never leaves a row half-
+    // collapsed or fires a deferred visible:false after we re-show it.
+    for (const t of focusTimersRef.current) clearTimeout(t);
+    focusTimersRef.current = [];
+
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const rowEls = (id: string): HTMLElement[] => {
+      const token = groupClassToken(id);
+      const out: HTMLElement[] = [];
+      const fg = container.querySelector<HTMLElement>(
+        `.vis-foreground .vis-group.${token}`,
+      );
+      const lbl = container.querySelector<HTMLElement>(
+        `.vis-labelset .vis-label.${token}`,
+      );
+      if (fg) out.push(fg);
+      if (lbl) out.push(lbl);
+      return out;
+    };
+
+    const clearInline = (id: string): void => {
+      for (const el of rowEls(id)) {
+        el.style.maxHeight = '';
+        el.style.opacity = '';
+        el.style.overflow = '';
+        el.style.transition = '';
+      }
+    };
+
+    const collapse = (id: string): void => {
+      const els = rowEls(id);
+      if (els.length === 0 || reduceMotion) {
+        groupsRef.current.update({ id, visible: false });
+        return;
+      }
+      for (const el of els) {
+        el.style.overflow = 'hidden';
+        el.style.maxHeight = `${el.offsetHeight}px`;
+      }
+      void els[0]!.offsetHeight; // commit the start height before transitioning
+      requestAnimationFrame(() => {
+        for (const el of rowEls(id)) {
+          el.style.maxHeight = '0px';
+          el.style.opacity = '0';
+        }
+      });
+      focusTimersRef.current.push(
+        setTimeout(() => groupsRef.current.update({ id, visible: false }), 240),
+      );
+    };
+
+    const expand = (id: string): void => {
+      const g = groupsRef.current.get(id);
+      if (g && g.visible === false) groupsRef.current.update({ id, visible: true });
+      if (reduceMotion) {
+        clearInline(id);
+        return;
+      }
+      // Wait for vis to (re)create + lay out the row, then play 0 → natural.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          for (const el of rowEls(id)) {
+            el.style.maxHeight = ''; // measure natural height
+            const h = el.offsetHeight;
+            el.style.transition = 'none';
+            el.style.overflow = 'hidden';
+            el.style.maxHeight = '0px';
+            el.style.opacity = '0';
+            void el.offsetHeight; // commit the collapsed start
+            el.style.transition = ''; // hand back to the CSS transition
+            el.style.maxHeight = `${h}px`;
+            el.style.opacity = '1';
+          }
+          focusTimersRef.current.push(setTimeout(() => clearInline(id), 260));
+        }),
+      );
+    };
+
+    // Instant, forced hide/show — no animation. Used by the rebuild re-apply.
+    const setHidden = (id: string, hide: boolean): void => {
+      if (hide) {
+        collapsedRowsRef.current.add(id);
+        groupsRef.current.update({ id, visible: false });
+      } else {
+        collapsedRowsRef.current.delete(id);
+        groupsRef.current.update({ id, visible: true });
+        clearInline(id);
+      }
+    };
+
+    const allUserIds = groupsRef.current
+      .getIds()
+      .map(String)
+      .filter((id) => USER_GROUP_RE.test(id));
+    const keep = keepIds && keepIds.length ? new Set(keepIds) : null; // null = all
+
+    for (const id of allUserIds) {
+      const shouldHide = keep != null && !keep.has(id);
+      if (!animate) {
+        // Force the desired visibility regardless of the tracked state — a
+        // background rebuild may have reset it (and added new rows).
+        setHidden(id, shouldHide);
+        continue;
+      }
+      const isCollapsed = collapsedRowsRef.current.has(id);
+      if (shouldHide && !isCollapsed) {
+        collapsedRowsRef.current.add(id);
+        collapse(id);
+      } else if (!shouldHide && isCollapsed) {
+        collapsedRowsRef.current.delete(id);
+        expand(id);
+      }
+    }
+
+    focusedGroupIdsRef.current = keep ? (keepIds as string[]) : null;
   }, []);
 
   // (Re)build only the marker/cluster items from current data + current zoom.
@@ -286,10 +436,14 @@ export function Timeline(): JSX.Element {
         treeLevel: 1,
       } as DataGroup);
       for (const uid of memberIds) {
+        const gid = `repo:${rid}:user:${uid}`;
         groups.push({
-          id: `repo:${rid}:user:${uid}`,
+          id: gid,
           content: userLabel(usersById.get(uid), uid),
           treeLevel: 2,
+          // `tl-user-row` scopes the collapse transition; the per-group token
+          // lets focusRows find this row's label + bar to animate (Fix 1).
+          className: `tl-user-row ${groupClassToken(gid)}`,
         } as DataGroup);
       }
     }
@@ -317,23 +471,63 @@ export function Timeline(): JSX.Element {
       } as DataItem;
     });
 
-    groupsRef.current.clear();
-    groupsRef.current.add(groups);
+    // Diff the DataSets in place rather than clear()+add(). update() merges by
+    // id and only ever adds/updates — vis keeps the existing DOM rows, so the
+    // vertical scroll, the visible window, and the selection all survive a
+    // background-sync refetch (Fix 3). Only genuinely-gone ids are removed.
+    const tl = timelineRef.current;
+    const win = tl?.getWindow();
 
-    // Replace PR bars, then (re)build markers for the new event set.
-    const stalePr = itemsRef.current
+    const nextGroupIds = new Set(groups.map((g) => String(g.id)));
+    groupsRef.current.update(groups);
+    const goneGroups = groupsRef.current
       .getIds()
-      .filter((id) => String(id).startsWith('pr:'));
-    itemsRef.current.remove(stalePr);
-    itemsRef.current.add(prItems);
+      .map(String)
+      .filter((id) => !nextGroupIds.has(id));
+    if (goneGroups.length) groupsRef.current.remove(goneGroups);
+
+    const nextPrIds = new Set(prItems.map((i) => String(i.id)));
+    const gonePr = itemsRef.current
+      .getIds()
+      .map(String)
+      .filter((id) => id.startsWith('pr:') && !nextPrIds.has(id));
+    itemsRef.current.update(prItems);
+    if (gonePr.length) itemsRef.current.remove(gonePr);
+
     rebuildMarkers();
 
-    // Re-adding the bars clears vis's selection, so restore the highlight for
-    // the currently-selected PR (also keeps it highlighted across refetches).
-    if (selectedPrId != null) {
-      timelineRef.current?.setSelection([`pr:${selectedPrId}`]);
+    // Pin the window across the rebuild (belt-and-suspenders; the diff alone
+    // shouldn't move it).
+    if (tl && win) tl.setWindow(win.start, win.end, { animation: false });
+
+    // Re-assert overlay state so an open marker modal survives a background
+    // sync untouched: selection, the cross-link glow, and the row focus.
+    if (
+      selectedPrId != null &&
+      tl &&
+      itemsRef.current.get(`pr:${selectedPrId}`) &&
+      !tl.getSelection().map(String).includes(`pr:${selectedPrId}`)
+    ) {
+      tl.setSelection([`pr:${selectedPrId}`]);
     }
-  }, [data, derivedStates, reposById, usersById, selectedPrId, rebuildMarkers]);
+    if (highlightedPrRef.current != null) {
+      const hp = highlightedPrRef.current;
+      highlightedPrRef.current = null; // reset so highlightPr re-adds the class
+      highlightPr(hp);
+    }
+    if (focusedGroupIdsRef.current) {
+      focusRows(focusedGroupIdsRef.current, false); // instant re-assert, no animation
+    }
+  }, [
+    data,
+    derivedStates,
+    reposById,
+    usersById,
+    selectedPrId,
+    rebuildMarkers,
+    highlightPr,
+    focusRows,
+  ]);
 
   // Move the visible window when the range preset changes.
   useEffect(() => {
@@ -415,6 +609,7 @@ export function Timeline(): JSX.Element {
           usersById={usersById}
           prsById={prsById}
           onHighlightPr={highlightPr}
+          onFocusRows={focusRows}
           onClose={() => setPopover(null)}
         />
       )}

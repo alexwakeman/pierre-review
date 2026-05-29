@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   autoUpdate,
   flip,
@@ -10,6 +10,7 @@ import {
 } from '@floating-ui/react';
 import type { TimelineEvent, TimelinePr, User } from '@gh-team-monitor/shared';
 import { usePr, useThread } from '../../hooks/usePr.js';
+import { useLocalStorage } from '../../hooks/useLocalStorage.js';
 import { useFilters } from '../../store/filters.js';
 import { relativeTime, userLabel } from '../../lib/ui.js';
 import { markerVisual } from './markerTemplate.js';
@@ -238,6 +239,7 @@ export function MarkerPopover({
   usersById,
   prsById,
   onHighlightPr,
+  onFocusRows,
   onClose,
 }: {
   state: PopoverState;
@@ -245,6 +247,7 @@ export function MarkerPopover({
   usersById: Map<number, User>;
   prsById: Map<number, TimelinePr>;
   onHighlightPr: (prId: number | null) => void;
+  onFocusRows: (groupIds: string[] | null) => void;
   onClose: () => void;
 }): JSX.Element {
   // When a cluster is opened we start in list mode; picking an item drills in.
@@ -252,8 +255,12 @@ export function MarkerPopover({
     state.eventIds.length === 1 ? state.eventIds[0]! : null,
   );
 
-  const popoverSize = useFilters((s) => s.popoverSize);
-  const setPopoverSize = useFilters((s) => s.setPopoverSize);
+  // Persisted across reloads so the user's chosen size becomes the default for
+  // every marker modal going forward (Fix 2).
+  const [popoverSize, setPopoverSize] = useLocalStorage<{
+    width: number;
+    height: number;
+  } | null>('ghtm:popoverSize', null);
 
   const { refs, floatingStyles, context } = useFloating({
     open: true,
@@ -301,6 +308,26 @@ export function MarkerPopover({
     return () => onHighlightPr(null);
   }, [pickedPrId, onHighlightPr]);
 
+  // Cross-user focus: when the displayed event is one person acting on another
+  // person's PR, collapse every other user row so the actor's row and the PR
+  // author's row sit together (no vertical jump). Same-user events, unknown
+  // actor/author, and the cluster-list view leave all rows shown.
+  const focusGroupIds = useMemo(() => {
+    if (!pickedEvent || pickedEvent.prId == null) return null;
+    const pr = prsById.get(pickedEvent.prId);
+    const actorId = pickedEvent.actorId;
+    const authorId = pr?.authorId ?? null;
+    if (actorId == null || authorId == null || actorId === authorId) return null;
+    return [
+      `repo:${pickedEvent.repoId}:user:${actorId}`,
+      `repo:${pr!.repoId}:user:${authorId}`,
+    ];
+  }, [pickedEvent, prsById]);
+  useEffect(() => {
+    onFocusRows(focusGroupIds);
+    return () => onFocusRows(null);
+  }, [focusGroupIds, onFocusRows]);
+
   const persistSize = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     setPopoverSize({ width: el.offsetWidth, height: el.offsetHeight });
@@ -311,8 +338,8 @@ export function MarkerPopover({
       ref={refs.setFloating}
       style={{
         ...floatingStyles,
-        width: popoverSize?.width ?? 288,
-        height: popoverSize?.height,
+        width: popoverSize?.width ?? 420,
+        height: popoverSize?.height ?? 340,
         minWidth: 240,
         minHeight: 120,
         maxWidth: '92vw',

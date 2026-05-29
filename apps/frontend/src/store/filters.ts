@@ -50,9 +50,6 @@ export interface FilterState {
   collapsedFileGroups: string[]; // paths explicitly collapsed by the user
   expandedDiffHunks: number[]; // thread ids with the full hunk shown
 
-  // Last size the user dragged a marker modal to, reused on the next open.
-  popoverSize: { width: number; height: number } | null;
-
   // transient: request the timeline to scroll/focus a PR (cleared after use)
   timelineFocusPr: number | null;
   // optional instant to recenter on (e.g. a clicked event's time) so focusing a
@@ -79,7 +76,6 @@ export interface FilterState {
   setStripFilter: (f: StripFilter) => void;
   toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
-  setPopoverSize: (size: { width: number; height: number }) => void;
   hydrate: (partial: Partial<FilterState>) => void;
 }
 
@@ -103,7 +99,6 @@ export const useFilters = create<FilterState>((set) => ({
   expandedFileGroups: [],
   collapsedFileGroups: [],
   expandedDiffHunks: [],
-  popoverSize: null,
   timelineFocusPr: null,
   timelineFocusAt: null,
 
@@ -157,7 +152,6 @@ export const useFilters = create<FilterState>((set) => ({
     }),
   toggleDiffHunk: (threadId) =>
     set((s) => ({ expandedDiffHunks: toggle(s.expandedDiffHunks, threadId) })),
-  setPopoverSize: (size) => set({ popoverSize: size }),
   hydrate: (partial) => set(partial),
 }));
 
