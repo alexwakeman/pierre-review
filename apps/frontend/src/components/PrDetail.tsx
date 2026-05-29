@@ -55,7 +55,7 @@ function buildActivity(pr: PrDetailT): ActivityRow[] {
       label: `reviewed (${r.state.replace('_', ' ')})`,
       actorId: r.authorId,
       detail: r.body ?? undefined,
-      href: pr.githubUrl,
+      href: r.url ?? pr.githubUrl,
     });
   }
   for (const c of pr.comments) {
@@ -65,7 +65,7 @@ function buildActivity(pr: PrDetailT): ActivityRow[] {
       label: 'commented',
       actorId: c.authorId,
       detail: c.body,
-      href: pr.githubUrl,
+      href: c.url ?? pr.githubUrl,
     });
   }
   if (pr.mergedAt) {
@@ -116,9 +116,10 @@ function ActivityList({
                   href={r.href}
                   target="_blank"
                   rel="noreferrer noopener"
+                  title="Open on GitHub"
                   className="ml-auto shrink-0 text-xs text-gray-400 hover:text-blue-500"
                 >
-                  {relativeTime(r.time)}
+                  {relativeTime(r.time)} ↗
                 </a>
               </div>
               {r.detail && (

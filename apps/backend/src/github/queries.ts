@@ -107,6 +107,7 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
           reviews(first: 50) {
             nodes {
               id
+              fullDatabaseId
               state
               body
               submittedAt
@@ -131,6 +132,7 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
               comments(first: 50) {
                 nodes {
                   id
+                  fullDatabaseId
                   body
                   createdAt
                   diffHunk
@@ -149,6 +151,7 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
           comments(first: 50) {
             nodes {
               id
+              fullDatabaseId
               body
               createdAt
               author {
@@ -207,6 +210,7 @@ export interface GqlCommitNode {
 
 export interface GqlReview {
   id: string;
+  fullDatabaseId: string | null;
   state: string;
   body: string | null;
   submittedAt: string | null;
@@ -215,6 +219,7 @@ export interface GqlReview {
 
 export interface GqlReviewComment {
   id: string;
+  fullDatabaseId: string | null;
   body: string;
   createdAt: string;
   diffHunk: string | null;
@@ -233,6 +238,7 @@ export interface GqlReviewThread {
 
 export interface GqlPrComment {
   id: string;
+  fullDatabaseId: string | null;
   body: string;
   createdAt: string;
   author: GqlActor | null;

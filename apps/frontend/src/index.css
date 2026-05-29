@@ -215,6 +215,11 @@ body {
     animation: none;
   }
 }
+/* The PR band an open marker modal points at — a sky glow, distinct from the
+   amber selection ring, so cross-contributor links read at a glance. */
+.vis-item.pr-bar.pr-cross-linked {
+  box-shadow: 0 0 0 2px #38bdf8;
+}
 .pr-bar-inner {
   display: flex;
   align-items: center;

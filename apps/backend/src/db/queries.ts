@@ -334,6 +334,7 @@ export function getTimeline(filters: TimelineFilters): TimelineResponse {
       e.type === 'review_comment' && e.refTable === 'review_threads'
         ? e.refId
         : null,
+    refId: e.refId,
     reviewState:
       e.type === 'review_submitted' && e.refTable === 'reviews' && e.refId != null
         ? (reviewStateById.get(e.refId) ?? null)
@@ -610,6 +611,8 @@ export function getPrDetail(id: number): PrDetail | null {
   if (!row) return null;
   const pr = row.pull_requests;
   const repo = row.repos;
+  // Base for activity deep links; per-item anchors are appended below.
+  const prUrl = `https://github.com/${repo.owner}/${repo.name}/pull/${pr.number}`;
 
   const threadRows = db
     .select()
@@ -648,24 +651,32 @@ export function getPrDetail(id: number): PrDetail | null {
     commentsByThread.set(c.threadId, arr);
   }
 
-  const threads: ThreadDetail[] = threadRows.map((t) => ({
-    id: t.id,
-    prId: t.prId,
-    path: t.path,
-    line: t.line,
-    isResolved: t.isResolved,
-    isOutdated: t.isOutdated,
-    derivedState: t.derivedState,
-    originalCommenterId: t.originalCommenterId,
-    createdAt: t.createdAt.toISOString(),
-    comments: (commentsByThread.get(t.id) ?? []).map((c) => ({
-      id: c.id,
-      authorId: c.authorId,
-      body: c.body,
-      diffHunk: c.diffHunk,
-      createdAt: c.createdAt.toISOString(),
-    })),
-  }));
+  const threads: ThreadDetail[] = threadRows.map((t) => {
+    const tComments = commentsByThread.get(t.id) ?? [];
+    return {
+      id: t.id,
+      prId: t.prId,
+      path: t.path,
+      line: t.line,
+      isResolved: t.isResolved,
+      isOutdated: t.isOutdated,
+      derivedState: t.derivedState,
+      originalCommenterId: t.originalCommenterId,
+      createdAt: t.createdAt.toISOString(),
+      comments: tComments.map((c) => ({
+        id: c.id,
+        authorId: c.authorId,
+        body: c.body,
+        diffHunk: c.diffHunk,
+        createdAt: c.createdAt.toISOString(),
+        url: c.databaseId ? `${prUrl}#discussion_r${c.databaseId}` : null,
+      })),
+      // Thread anchor = its first comment's #discussion_r.
+      url: tComments[0]?.databaseId
+        ? `${prUrl}#discussion_r${tComments[0].databaseId}`
+        : null,
+    };
+  });
 
   const reviewsOut: ReviewDetail[] = reviewRows.map((r) => ({
     id: r.id,
@@ -673,6 +684,7 @@ export function getPrDetail(id: number): PrDetail | null {
     state: r.state as ReviewState,
     body: r.body,
     submittedAt: r.submittedAt.toISOString(),
+    url: r.databaseId ? `${prUrl}#pullrequestreview-${r.databaseId}` : null,
   }));
 
   const commentsOut: PrCommentDetail[] = prCommentRows.map((c) => ({
@@ -680,6 +692,7 @@ export function getPrDetail(id: number): PrDetail | null {
     authorId: c.authorId,
     body: c.body,
     createdAt: c.createdAt.toISOString(),
+    url: c.databaseId ? `${prUrl}#issuecomment-${c.databaseId}` : null,
   }));
 
   const commitsOut: CommitDetail[] = commitRows.map((c) => ({
@@ -758,7 +771,7 @@ export function getPrDetail(id: number): PrDetail | null {
     mergedAt: iso(pr.mergedAt),
     closedAt: iso(pr.closedAt),
     updatedAt: pr.updatedAt.toISOString(),
-    githubUrl: `https://github.com/${repo.owner}/${repo.name}/pull/${pr.number}`,
+    githubUrl: prUrl,
     ciStatus: (pr.ciStatus ?? 'unknown') as CiStatus,
     mergeable: (pr.mergeable ?? 'unknown') as Mergeable,
     mergeStateStatus: (pr.mergeStateStatus ?? 'unknown') as MergeStateStatus,
@@ -776,12 +789,16 @@ export function getPrDetail(id: number): PrDetail | null {
 }
 
 export function getThreadDetail(id: number): ThreadDetail | null {
-  const t = db
+  const row = db
     .select()
     .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
     .where(eq(reviewThreads.id, id))
     .get();
-  if (!t) return null;
+  if (!row) return null;
+  const t = row.review_threads;
+  const prUrl = `https://github.com/${row.repos.owner}/${row.repos.name}/pull/${row.pull_requests.number}`;
   const comments = db
     .select()
     .from(reviewComments)
@@ -804,7 +821,11 @@ export function getThreadDetail(id: number): ThreadDetail | null {
       body: c.body,
       diffHunk: c.diffHunk,
       createdAt: c.createdAt.toISOString(),
+      url: c.databaseId ? `${prUrl}#discussion_r${c.databaseId}` : null,
     })),
+    url: comments[0]?.databaseId
+      ? `${prUrl}#discussion_r${comments[0].databaseId}`
+      : null,
   };
 }
 

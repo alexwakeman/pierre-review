@@ -55,6 +55,9 @@ export function Timeline(): JSX.Element {
   const clusterMembersRef = useRef(new Map<string, number[]>());
   const dataRef = useRef<TimelineResponse | null>(null);
   const usersByIdRef = useRef(new Map<number, User>());
+  // The PR bar currently glowing as the "linked" partner of an open marker
+  // modal, so we can clear it when the modal closes or moves to another PR.
+  const highlightedPrRef = useRef<number | null>(null);
 
   const [popover, setPopover] = useState<PopoverState | null>(null);
 
@@ -77,6 +80,41 @@ export function Timeline(): JSX.Element {
   }, [repos]);
   const usersById = useMemo(() => indexUsers(users), [users]);
   usersByIdRef.current = usersById;
+
+  // PR lookup for the marker modal: attribution ("A acted on B's #123") and the
+  // commit deep link, without an extra fetch — the timeline already has these.
+  const prsById = useMemo(() => {
+    const m = new Map<number, TimelinePr>();
+    for (const p of data?.prs ?? []) m.set(p.id, p);
+    return m;
+  }, [data]);
+
+  // Glow the PR band a marker concerns while its modal is open. The class lives
+  // on the DataSet item, so the highlight survives pan/zoom/restack natively.
+  const highlightPr = useCallback((prId: number | null) => {
+    const items = itemsRef.current;
+    const prev = highlightedPrRef.current;
+    if (prev != null && prev !== prId) {
+      const item = items.get(`pr:${prev}`) as DataItem | null;
+      if (item && typeof item.className === 'string') {
+        items.update({
+          id: `pr:${prev}`,
+          className: item.className.replace(/\s*pr-cross-linked/g, ''),
+        });
+      }
+    }
+    if (prId != null) {
+      const item = items.get(`pr:${prId}`) as DataItem | null;
+      if (
+        item &&
+        typeof item.className === 'string' &&
+        !item.className.includes('pr-cross-linked')
+      ) {
+        items.update({ id: `pr:${prId}`, className: `${item.className} pr-cross-linked` });
+      }
+    }
+    highlightedPrRef.current = prId;
+  }, []);
 
   // (Re)build only the marker/cluster items from current data + current zoom.
   const rebuildMarkers = useCallback(() => {
@@ -138,20 +176,12 @@ export function Timeline(): JSX.Element {
         selectPr(Number.parseInt(key.slice(3), 10));
         setPopover(null);
       } else if (key.startsWith('ev:')) {
-        // Clicking an event reveals the related PR (highlights its bar +
-        // recenters on the event's time) and opens the detail pane; if the
-        // event carries a thread the Threads tab is selected. Events with no
-        // PR fall back to the quick-preview popover.
+        // Every single marker (commit, comment, review) opens the closely-
+        // positioned modal; the modal shows detail + attribution and offers
+        // "Open in detail pane" / "Open on GitHub" to drill in. While it's open
+        // the related PR band glows (see highlightPr, wired via MarkerPopover).
         const evId = Number.parseInt(key.slice(3), 10);
-        const ev = eventsByIdRef.current.get(evId);
-        if (ev && ev.prId != null) {
-          useFilters
-            .getState()
-            .openPrFocused(ev.prId, ev.threadId, ev.occurredAt);
-          setPopover(null);
-        } else {
-          setPopover({ x, y, eventIds: [evId] });
-        }
+        setPopover({ x, y, eventIds: [evId] });
       } else if (key.startsWith('cl:')) {
         // Zoom into the cluster's time-span so it unpacks into individual
         // markers (the rangechanged handler re-clusters at the finer zoom).
@@ -221,11 +251,18 @@ export function Timeline(): JSX.Element {
 
     const groups: DataGroup[] = [];
     for (const rid of repoIds) {
-      const memberIds = unique(
-        data.events
+      // A member sub-row exists for anyone who either acted in this repo or
+      // authored a PR shown here. The latter keeps a row for PR authors with no
+      // events (so their bar has a home); the former keeps a row for pure
+      // reviewers (markers, no bar) — every contributor stays visible.
+      const memberIds = unique([
+        ...data.events
           .filter((e) => e.repoId === rid && e.actorId != null)
           .map((e) => e.actorId as number),
-      );
+        ...prs
+          .filter((p) => p.repoId === rid && p.authorId != null)
+          .map((p) => p.authorId as number),
+      ]);
       const nested = memberIds.map((uid) => `repo:${rid}:user:${uid}`);
       groups.push({
         id: `repo:${rid}`,
@@ -244,9 +281,15 @@ export function Timeline(): JSX.Element {
 
     const prItems: DataItem[] = prs.map((pr) => {
       const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
+      // The PR creator owns the band in their own row; fall back to the repo
+      // row only when the author is unknown.
+      const group =
+        pr.authorId != null
+          ? `repo:${pr.repoId}:user:${pr.authorId}`
+          : `repo:${pr.repoId}`;
       return {
         id: `pr:${pr.id}`,
-        group: `repo:${pr.repoId}`,
+        group,
         type: 'range',
         start: pr.openedAt,
         end: pr.mergedAt ?? pr.closedAt ?? new Date().toISOString(),
@@ -355,6 +398,8 @@ export function Timeline(): JSX.Element {
           state={popover}
           eventsById={eventsByIdRef.current}
           usersById={usersById}
+          prsById={prsById}
+          onHighlightPr={highlightPr}
           onClose={() => setPopover(null)}
         />
       )}

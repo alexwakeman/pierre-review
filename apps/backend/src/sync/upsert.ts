@@ -420,11 +420,17 @@ export function persistPr(
           authorId: reviewerId,
           state: reviewState(r.state),
           body: r.body ?? null,
+          databaseId: r.fullDatabaseId ?? null,
           submittedAt,
         })
         .onConflictDoUpdate({
           target: reviews.githubNodeId,
-          set: { state: reviewState(r.state), body: r.body ?? null, submittedAt },
+          set: {
+            state: reviewState(r.state),
+            body: r.body ?? null,
+            databaseId: r.fullDatabaseId ?? null,
+            submittedAt,
+          },
         })
         .returning({ id: reviews.id })
         .get();
@@ -501,11 +507,16 @@ export function persistPr(
             authorId: commenterId,
             body: c.body,
             diffHunk: c.diffHunk ?? null,
+            databaseId: c.fullDatabaseId ?? null,
             createdAt,
           })
           .onConflictDoUpdate({
             target: reviewComments.githubNodeId,
-            set: { body: c.body, diffHunk: c.diffHunk ?? null },
+            set: {
+              body: c.body,
+              diffHunk: c.diffHunk ?? null,
+              databaseId: c.fullDatabaseId ?? null,
+            },
           })
           .run();
         upsertEvent({
@@ -533,11 +544,12 @@ export function persistPr(
           prId,
           authorId: commenterId,
           body: c.body,
+          databaseId: c.fullDatabaseId ?? null,
           createdAt,
         })
         .onConflictDoUpdate({
           target: prComments.githubNodeId,
-          set: { body: c.body },
+          set: { body: c.body, databaseId: c.fullDatabaseId ?? null },
         })
         .returning({ id: prComments.id })
         .get();
@@ -567,7 +579,10 @@ export function persistPr(
           : null,
       );
       const committedAt = new Date(c.committedDate);
-      db.insert(commits)
+      // Upsert (not DoNothing) so we always get the row id back to point the
+      // timeline event at — the marker modal resolves the commit via ref_id.
+      const commitRow = db
+        .insert(commits)
         .values({
           sha: c.oid,
           prId,
@@ -576,8 +591,12 @@ export function persistPr(
           message: c.message,
           committedAt,
         })
-        .onConflictDoNothing({ target: [commits.sha, commits.prId] })
-        .run();
+        .onConflictDoUpdate({
+          target: [commits.sha, commits.prId],
+          set: { message: c.message, committedAt },
+        })
+        .returning({ id: commits.id })
+        .get();
       upsertEvent({
         repoId,
         actorId: commitAuthorId ?? committerId,
@@ -585,7 +604,7 @@ export function persistPr(
         type: 'commit_pushed',
         occurredAt: committedAt,
         refTable: 'commits',
-        refId: null,
+        refId: commitRow.id,
         dedupeKey: `commit_pushed:${pr.id}:${c.oid}`,
       });
     }

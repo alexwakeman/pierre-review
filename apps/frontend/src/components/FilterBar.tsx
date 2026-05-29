@@ -20,7 +20,7 @@ const CATEGORY_LABELS: Record<EventCategory, string> = {
   reviews: 'Reviews',
   review_comments: 'Review comments',
   pr_comments: 'PR comments',
-  pushes: 'Pushes',
+  commits: 'Commits',
 };
 
 function Chip({

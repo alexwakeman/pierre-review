@@ -52,7 +52,7 @@ export type EventCategory =
   | 'reviews'
   | 'review_comments'
   | 'pr_comments'
-  | 'pushes';
+  | 'commits';
 
 export const EVENT_CATEGORY_BY_TYPE: Record<EventType, EventCategory> = {
   pr_opened: 'lifecycle',
@@ -63,7 +63,7 @@ export const EVENT_CATEGORY_BY_TYPE: Record<EventType, EventCategory> = {
   review_submitted: 'reviews',
   review_comment: 'review_comments',
   pr_comment: 'pr_comments',
-  commit_pushed: 'pushes',
+  commit_pushed: 'commits',
 };
 
 export interface User {
@@ -253,6 +253,10 @@ export interface TimelineEvent {
   occurredAt: string;
   // For navigation: the thread this event points at, when applicable.
   threadId: number | null;
+  // The underlying entity row id (events.ref_id). For commit_pushed this is the
+  // commit row id, letting the marker modal resolve the commit via /api/prs/:id
+  // without bloating the timeline payload.
+  refId: number | null;
   // For review_submitted markers: the review outcome (drives icon/colour).
   reviewState: ReviewState | null;
 }
@@ -268,6 +272,8 @@ export interface CommentDetail {
   body: string;
   diffHunk: string | null;
   createdAt: string;
+  // Deep link to this comment on GitHub (#discussion_r<id>); null until synced.
+  url: string | null;
 }
 
 export interface ThreadDetail {
@@ -281,6 +287,9 @@ export interface ThreadDetail {
   originalCommenterId: number | null;
   createdAt: string;
   comments: CommentDetail[];
+  // Deep link to the thread on GitHub (its first comment's #discussion_r anchor);
+  // null until synced.
+  url: string | null;
 }
 
 export interface ReviewDetail {
@@ -289,6 +298,8 @@ export interface ReviewDetail {
   state: ReviewState;
   body: string | null;
   submittedAt: string;
+  // Deep link to the review on GitHub (#pullrequestreview-<id>); null until synced.
+  url: string | null;
 }
 
 export interface PrCommentDetail {
@@ -296,6 +307,8 @@ export interface PrCommentDetail {
   authorId: number | null;
   body: string;
   createdAt: string;
+  // Deep link to the comment on GitHub (#issuecomment-<id>); null until synced.
+  url: string | null;
 }
 
 export interface CommitDetail {

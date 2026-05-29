@@ -177,6 +177,8 @@ export const reviewComments = sqliteTable(
     authorId: integer('author_id').references(() => users.id),
     body: text('body').notNull(),
     diffHunk: text('diff_hunk'),
+    // GitHub numeric id (fullDatabaseId) for the #discussion_r<id> deep link.
+    databaseId: text('database_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   },
   (t) => ({ threadIdx: index('rc_thread_idx').on(t.threadId) }),
@@ -192,6 +194,8 @@ export const prComments = sqliteTable(
       .references(() => pullRequests.id),
     authorId: integer('author_id').references(() => users.id),
     body: text('body').notNull(),
+    // GitHub numeric id (fullDatabaseId) for the #issuecomment-<id> deep link.
+    databaseId: text('database_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   },
   (t) => ({ prIdx: index('prc_pr_idx').on(t.prId) }),
@@ -210,6 +214,8 @@ export const reviews = sqliteTable(
       enum: ['approved', 'changes_requested', 'commented', 'dismissed', 'pending'],
     }).notNull(),
     body: text('body'),
+    // GitHub numeric id (fullDatabaseId) for the #pullrequestreview-<id> deep link.
+    databaseId: text('database_id'),
     submittedAt: integer('submitted_at', { mode: 'timestamp' }).notNull(),
   },
   (t) => ({ prIdx: index('rv_pr_idx').on(t.prId) }),

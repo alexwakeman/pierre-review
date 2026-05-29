@@ -55,12 +55,12 @@ export function ThreadCard({
 
       <div className="mt-2 pl-2 text-[11px]">
         <a
-          href={`${prUrl}/files`}
+          href={thread.url ?? `${prUrl}/files`}
           target="_blank"
           rel="noreferrer noopener"
           className="text-blue-500 hover:underline"
         >
-          ↗ Reply on GitHub
+          ↗ {thread.url ? 'View thread on GitHub' : 'Reply on GitHub'}
         </a>
       </div>
     </div>

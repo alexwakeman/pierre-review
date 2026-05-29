@@ -8,8 +8,8 @@ import {
   useFloating,
   useInteractions,
 } from '@floating-ui/react';
-import type { TimelineEvent, User } from '@gh-team-monitor/shared';
-import { useThread } from '../../hooks/usePr.js';
+import type { TimelineEvent, TimelinePr, User } from '@gh-team-monitor/shared';
+import { usePr, useThread } from '../../hooks/usePr.js';
 import { useFilters } from '../../store/filters.js';
 import { relativeTime, userLabel } from '../../lib/ui.js';
 import { markerVisual } from './markerTemplate.js';
@@ -29,13 +29,53 @@ function firstHunkLine(hunk: string | null): string | null {
   return lines.at(-1) ?? null;
 }
 
+// "on <owner>'s #<number> <title>" — the PR an activity concerns. When the actor
+// is the PR's own author we drop the possessive ("on #123") since it's their row.
+function PrContext({
+  ev,
+  pr,
+  usersById,
+  onOpen,
+}: {
+  ev: TimelineEvent;
+  pr: TimelinePr;
+  usersById: Map<number, User>;
+  onOpen: () => void;
+}): JSX.Element {
+  const owner = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
+  const isForeign =
+    ev.actorId != null && pr.authorId != null && ev.actorId !== pr.authorId;
+  return (
+    <div className="flex items-baseline gap-1 text-[11px] text-gray-500">
+      <span>on</span>
+      {isForeign && (
+        <span className="font-medium text-gray-600 dark:text-gray-300">
+          {userLabel(owner, pr.authorId)}&rsquo;s
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={onOpen}
+        className="font-medium text-blue-500 hover:underline"
+      >
+        #{pr.number}
+      </button>
+      <span className="truncate text-gray-400" title={pr.title}>
+        {pr.title}
+      </span>
+    </div>
+  );
+}
+
 function SingleEvent({
   ev,
   usersById,
+  prsById,
   onNavigate,
 }: {
   ev: TimelineEvent;
   usersById: Map<number, User>;
+  prsById: Map<number, TimelinePr>;
   onNavigate: () => void;
 }): JSX.Element {
   const selectThread = useFilters((s) => s.selectThread);
@@ -47,6 +87,15 @@ function SingleEvent({
   const isReviewComment = ev.type === 'review_comment' && ev.threadId != null;
   const { data: thread } = useThread(isReviewComment ? ev.threadId : null);
   const anchor = thread ? firstHunkLine(thread.comments[0]?.diffHunk ?? null) : null;
+
+  // Commit markers resolve their detail (sha / message / GitHub link) from the
+  // PR detail, joined by the event's ref id — keeps the timeline payload lean.
+  const isCommit = ev.type === 'commit_pushed';
+  const { data: prDetail } = usePr(isCommit && ev.prId != null ? ev.prId : null);
+  const commit =
+    isCommit && prDetail ? prDetail.commits.find((c) => c.id === ev.refId) : undefined;
+
+  const pr = ev.prId != null ? prsById.get(ev.prId) : undefined;
 
   const openInDetail = () => {
     if (ev.threadId != null) selectThread(ev.prId, ev.threadId);
@@ -65,6 +114,29 @@ function SingleEvent({
         <span className="text-gray-500">· {vis.label}</span>
         <span className="ml-auto text-gray-400">{relativeTime(ev.occurredAt)}</span>
       </div>
+
+      {pr && (
+        <PrContext ev={ev} pr={pr} usersById={usersById} onOpen={openInDetail} />
+      )}
+
+      {isCommit && (
+        <div className="text-[11px]">
+          {commit ? (
+            <div className="flex items-center gap-1.5">
+              <code className="rounded bg-gray-100 px-1 font-mono text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                {commit.sha.slice(0, 7)}
+              </code>
+              {commit.message && (
+                <span className="truncate text-gray-600 dark:text-gray-300">
+                  {commit.message.split('\n')[0]}
+                </span>
+              )}
+            </div>
+          ) : (
+            <span className="text-gray-400">loading commit…</span>
+          )}
+        </div>
+      )}
 
       {thread && (
         <div className="flex items-center gap-1.5 text-[11px]">
@@ -85,7 +157,7 @@ function SingleEvent({
       )}
 
       {thread?.comments[0] && (
-        <div className="max-h-32 overflow-y-auto text-xs">
+        <div className="text-xs">
           <Markdown>{thread.comments[0].body}</Markdown>
           {thread.comments.length > 1 && (
             <div className="mt-1 text-[11px] text-gray-400">
@@ -103,6 +175,16 @@ function SingleEvent({
         >
           Open in detail pane
         </button>
+        {isCommit && commit && prDetail && (
+          <a
+            href={`${prDetail.githubUrl}/commits/${commit.sha}`}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-blue-500 hover:underline"
+          >
+            Open commit on GitHub ↗
+          </a>
+        )}
       </div>
     </div>
   );
@@ -118,7 +200,7 @@ function EventList({
   onPick: (id: number) => void;
 }): JSX.Element {
   return (
-    <div className="max-h-64 space-y-0.5 overflow-y-auto">
+    <div className="space-y-0.5">
       <div className="px-1 pb-1 text-[11px] font-semibold text-gray-400">
         {events.length} events
       </div>
@@ -154,17 +236,24 @@ export function MarkerPopover({
   state,
   eventsById,
   usersById,
+  prsById,
+  onHighlightPr,
   onClose,
 }: {
   state: PopoverState;
   eventsById: Map<number, TimelineEvent>;
   usersById: Map<number, User>;
+  prsById: Map<number, TimelinePr>;
+  onHighlightPr: (prId: number | null) => void;
   onClose: () => void;
 }): JSX.Element {
   // When a cluster is opened we start in list mode; picking an item drills in.
   const [picked, setPicked] = useState<number | null>(
     state.eventIds.length === 1 ? state.eventIds[0]! : null,
   );
+
+  const popoverSize = useFilters((s) => s.popoverSize);
+  const setPopoverSize = useFilters((s) => s.setPopoverSize);
 
   const { refs, floatingStyles, context } = useFloating({
     open: true,
@@ -205,29 +294,59 @@ export function MarkerPopover({
     setPicked(state.eventIds.length === 1 ? state.eventIds[0]! : null);
   }, [state.eventIds]);
 
+  // Glow the PR band the displayed event concerns; clear on close / list view.
+  const pickedPrId = pickedEvent?.prId ?? null;
+  useEffect(() => {
+    onHighlightPr(pickedPrId);
+    return () => onHighlightPr(null);
+  }, [pickedPrId, onHighlightPr]);
+
+  const persistSize = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    setPopoverSize({ width: el.offsetWidth, height: el.offsetHeight });
+  };
+
   return (
     <div
       ref={refs.setFloating}
-      style={floatingStyles}
+      style={{
+        ...floatingStyles,
+        width: popoverSize?.width ?? 288,
+        height: popoverSize?.height,
+        minWidth: 240,
+        minHeight: 120,
+        maxWidth: '92vw',
+        maxHeight: '80vh',
+        resize: 'both',
+        overflow: 'hidden',
+      }}
       {...getFloatingProps()}
-      className="z-50 w-72 rounded-lg border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-900"
+      onPointerUp={persistSize}
+      className="z-50 flex flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
     >
-      {pickedEvent ? (
-        <div className="space-y-1.5">
-          {events.length > 1 && (
-            <button
-              type="button"
-              onClick={() => setPicked(null)}
-              className="text-[11px] text-gray-400 hover:text-gray-600"
-            >
-              ‹ back to {events.length} events
-            </button>
-          )}
-          <SingleEvent ev={pickedEvent} usersById={usersById} onNavigate={onClose} />
-        </div>
-      ) : (
-        <EventList events={events} usersById={usersById} onPick={setPicked} />
-      )}
+      <div className="min-h-0 flex-1 overflow-auto p-2">
+        {pickedEvent ? (
+          <div className="space-y-1.5">
+            {events.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setPicked(null)}
+                className="text-[11px] text-gray-400 hover:text-gray-600"
+              >
+                ‹ back to {events.length} events
+              </button>
+            )}
+            <SingleEvent
+              ev={pickedEvent}
+              usersById={usersById}
+              prsById={prsById}
+              onNavigate={onClose}
+            />
+          </div>
+        ) : (
+          <EventList events={events} usersById={usersById} onPick={setPicked} />
+        )}
+      </div>
     </div>
   );
 }
