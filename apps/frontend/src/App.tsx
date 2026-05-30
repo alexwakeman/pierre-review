@@ -4,6 +4,7 @@ import { OpenPrsStrip } from './components/OpenPrsStrip/index.js';
 import { Timeline } from './components/Timeline/index.js';
 import { DetailPane } from './components/DetailPane.js';
 import { SyncStatus } from './components/SyncStatus.js';
+import { TimelineSearch } from './components/TimelineSearch.js';
 import { useUrlState } from './hooks/useUrlState.js';
 import { useLocalStorage } from './hooks/useLocalStorage.js';
 import { useKeyboard } from './hooks/useKeyboard.js';
@@ -62,6 +63,7 @@ export default function App(): JSX.Element {
           <kbd>/</kbd> filter · <kbd>j</kbd>/<kbd>k</kbd> cycle PRs · <kbd>esc</kbd> clear
         </span>
         <div className="ml-auto flex items-center gap-3">
+          <TimelineSearch />
           <SyncStatus />
           <button
             type="button"

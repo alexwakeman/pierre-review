@@ -23,6 +23,7 @@ import {
 } from './MarkerPopover.js';
 
 const ZOOM_MIN_MS = 1000 * 60 * 60;
+const FOCUS_GLOW_MS = 2000; // matches the pr-focus-glow keyframe in index.css
 
 const VIS_OPTIONS: TimelineOptions = {
   // stack:false + stackSubgroups:true is the "subgroups as ordered single-line
@@ -150,6 +151,13 @@ export function Timeline(): JSX.Element {
   const exitGlowEventRef = useRef<number | null>(null);
   const exitGlowItemRef = useRef<string | null>(null);
   const exitGlowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The strip / search "locate the bar" cue: a finite sky glow (no marching ants)
+  // on a focused PR bar, plus a timer that strips it once the ~2s fade completes.
+  const prFocusGlowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // An open PR opened *within* the window but absent from the lean /api/timeline
+  // payload (it had no in-window activity). The focus path stages it here so the
+  // next rebuild materializes its bar; cleared once the rebuild consumes it.
+  const forceShowOpenPrRef = useRef<TimelinePr | null>(null);
   // True while a sticky "Show on timeline" overlay (from the activity panel) is
   // applied — a glowing marker plus, for a cross-user action, the collapsed
   // two-person row focus. Unlike the marker popover it has nothing to dismiss
@@ -319,6 +327,35 @@ export function Timeline(): JSX.Element {
     },
     [applyExitGlow],
   );
+
+  // Flash a finite sky glow on a PR bar for FOCUS_GLOW_MS, then strip it. Used by
+  // the strip / search focus path — "locate the bar" feedback without the infinite
+  // marching-ants ring cross-user focus mode uses (pr-cross-linked). Operates on
+  // the `pr:<id>` DataSet item directly (like highlightPr) so it survives a
+  // restack; re-resolves the item on the strip-off timeout because a background
+  // rebuild may have replaced it in the meantime.
+  const flashPrFocusGlow = useCallback((prId: number) => {
+    const items = itemsRef.current;
+    if (prFocusGlowTimerRef.current) clearTimeout(prFocusGlowTimerRef.current);
+    // Clear the class off any bar that still carries it (rapid re-clicks).
+    for (const it of items.get() as DataItem[]) {
+      if (typeof it.className === 'string' && it.className.includes('pr-focus-glow')) {
+        items.update({ id: it.id, className: it.className.replace(/\s*pr-focus-glow/g, '') });
+      }
+    }
+    const item = items.get(`pr:${prId}`) as DataItem | null;
+    if (!item || typeof item.className !== 'string') return;
+    if (!item.className.includes('pr-focus-glow')) {
+      items.update({ id: `pr:${prId}`, className: `${item.className} pr-focus-glow` });
+    }
+    prFocusGlowTimerRef.current = setTimeout(() => {
+      const it = items.get(`pr:${prId}`) as DataItem | null;
+      if (it && typeof it.className === 'string') {
+        items.update({ id: `pr:${prId}`, className: it.className.replace(/\s*pr-focus-glow/g, '') });
+      }
+      prFocusGlowTimerRef.current = null;
+    }, FOCUS_GLOW_MS);
+  }, []);
 
   // Reconcile the cross-band divider items with the current collapsed set: a
   // divider only belongs in a row that's actually showing. vis paints
@@ -664,12 +701,23 @@ export function Timeline(): JSX.Element {
   // height (~1s+ after the click), so a single pass isn't enough. The ~1.5s frame
   // cap is a backstop; the stable-streak ends it promptly once the layout settles.
   const centerShowTarget = useCallback(
-    (groupToken: string, hasMarker: boolean, markerSel = '.ev-cross-linked') => {
+    (
+      groupToken: string,
+      hasMarker: boolean,
+      markerSel = '.ev-cross-linked',
+      lifecycleSel = '.pr-cross-linked',
+    ) => {
       const container = containerRef.current;
       const vs = verticalScrollEl();
       const center = container?.querySelector<HTMLElement>('.vis-panel.vis-center');
       if (!container || !vs || !center) return;
       const labelSel = `.vis-labelset .vis-label.${groupToken}`;
+      // Lifecycle target lock: once we've resolved the glow bar, keep centring on
+      // that element even if its glow class is later stripped (the 2s fade ending
+      // mid-settle on slow hardware where the frame loop outlives the fade) —
+      // re-resolving by selector would otherwise fall back to the row label and
+      // shift the final centre.
+      let lockedTarget: HTMLElement | undefined;
 
       const deltaTo = (el: HTMLElement): number => {
         const cRect = center.getBoundingClientRect();
@@ -704,10 +752,20 @@ export function Timeline(): JSX.Element {
           }
           return null;
         }
-        // Lifecycle (no marker): centre the PR bar, else just scroll the row in.
-        const target =
-          biggest('.pr-cross-linked') ?? container.querySelector<HTMLElement>(labelSel);
-        return target ? { delta: deltaTo(target), settleable: true } : null;
+        // Lifecycle (no marker): centre the PR bar (the strip/search path passes
+        // its own glow selector), else just scroll the row in. Reuse the locked
+        // bar while it's still on-screen so a mid-settle class strip can't swap us
+        // onto the row label.
+        if (lockedTarget && lockedTarget.isConnected && lockedTarget.offsetHeight > 0) {
+          return { delta: deltaTo(lockedTarget), settleable: true };
+        }
+        const found = biggest(lifecycleSel);
+        if (found) {
+          lockedTarget = found;
+          return { delta: deltaTo(found), settleable: true };
+        }
+        const lbl = container.querySelector<HTMLElement>(labelSel);
+        return lbl ? { delta: deltaTo(lbl), settleable: true } : null;
       };
 
       const label = container.querySelector<HTMLElement>(labelSel);
@@ -911,10 +969,11 @@ export function Timeline(): JSX.Element {
     }
   }, [repoIds, focusActive, exitFocus]);
 
-  // Don't let the exit-glow fade timer fire after unmount.
+  // Don't let the glow fade timers fire after unmount.
   useEffect(
     () => () => {
       if (exitGlowTimerRef.current) clearTimeout(exitGlowTimerRef.current);
+      if (prFocusGlowTimerRef.current) clearTimeout(prFocusGlowTimerRef.current);
     },
     [],
   );
@@ -985,7 +1044,17 @@ export function Timeline(): JSX.Element {
     if (!data) return;
     dataRef.current = data;
 
-    const prs: TimelinePr[] = data.prs.filter(
+    // An open PR being focused may be absent from the lean /api/timeline payload
+    // (no in-window activity). The focus effect stages it here so its bar can be
+    // materialized and then scrolled-to + glowed. Seed it into the rendered PR
+    // set; cleared once consumed below so it doesn't linger past this rebuild.
+    const extra = forceShowOpenPrRef.current;
+    const basePrs: TimelinePr[] =
+      extra && !data.prs.some((p) => p.id === extra.id)
+        ? [...data.prs, extra]
+        : data.prs;
+
+    const prs: TimelinePr[] = basePrs.filter(
       (pr) =>
         // Always render the selected PR's bar so event→PR navigation has a
         // target even when the derived-state filter would otherwise hide it.
@@ -1004,12 +1073,12 @@ export function Timeline(): JSX.Element {
     // lane as filters toggle and own-work markers can resolve their lane even
     // when the bar itself is filtered out. Mirrored into a ref for
     // rebuildMarkers (own-work event bands) + focusSubgroups (kept lane band).
-    const prLanes = assignPrLanes(data.prs);
+    const prLanes = assignPrLanes(basePrs);
     prLanesRef.current = prLanes;
 
     // Per-user interaction tallies for the row labels — from the full timeframe
     // (all events + all PRs), so they don't shift with the thread-state filter.
-    const userStats = computeUserStats(data.events, data.prs);
+    const userStats = computeUserStats(data.events, basePrs);
 
     const repoIds = unique([
       ...prs.map((p) => p.repoId),
@@ -1129,6 +1198,10 @@ export function Timeline(): JSX.Element {
     if (focusedGroupIdsRef.current) {
       focusRows(focusedGroupIdsRef.current, false); // instant re-assert, no animation
     }
+
+    // Consumed: the staged open-PR bar has been materialized into this rebuild.
+    // Clear it so a later background-sync rebuild doesn't keep re-injecting it.
+    forceShowOpenPrRef.current = null;
   }, [
     data,
     derivedStates,
@@ -1248,12 +1321,16 @@ export function Timeline(): JSX.Element {
         return;
       }
 
-      // openPrFocused (strip / my-turn): drop any sticky "Show" overlay first —
-      // this is a fresh navigation, so expand back to all users. Then recenter
-      // horizontally on the clicked event's instant when provided, else the PR
-      // bar's midpoint — avoids a big jump when a long-running PR's midpoint is
-      // far from the clicked event.
-      if (showFocusActiveRef.current) {
+      // openPrFocused (strip / my-turn / search): drop ANY active overlay first —
+      // a sticky "Show" OR a marker-popover cross-user focus (tracked by
+      // focusedGroupIdsRef, which showFocusActiveRef alone misses). This is a
+      // fresh navigation, so expand back to all rows and clear the cross-link glow
+      // before scrolling+glowing the target — otherwise the rows stay collapsed
+      // and the focus glow paints on a hidden bar (and pr-cross-linked can stack
+      // under pr-focus-glow). Then recenter horizontally on the clicked event's
+      // instant when provided, else the PR bar's midpoint — avoids a big jump when
+      // a long-running PR's midpoint is far from the clicked event.
+      if (showFocusActiveRef.current || focusedGroupIdsRef.current) {
         showFocusActiveRef.current = false;
         applyContext(null);
       }
@@ -1271,15 +1348,38 @@ export function Timeline(): JSX.Element {
       }
       tl.setWindow(center - width / 2, center + width / 2, { animation: true });
       tl.setSelection([`pr:${timelineFocusPr}`]);
+      // Vertical scroll: the contributor row may be virtualized off-screen, so
+      // vis.focus() can't reach it — drive vis's own vertical scroll via the same
+      // settle loop the activity-"Show" path uses (centerShowTarget). hasMarker is
+      // false (lifecycle branch); the lifecycle target is the glow selector below,
+      // so it centres precisely on the focused PR bar (not the row label). The
+      // glow class is applied first so centerShowTarget can find `.pr-focus-glow`.
+      const token = groupClassToken(prGroupId(inWindow));
+      const focusId = timelineFocusPr;
+      // Defer the glow alongside the scroll: when a thread-state filter hides this
+      // PR, openPrFocused's selection effect schedules a force-show rebuild to
+      // materialize the bar; applying the glow synchronously here would no-op (the
+      // `pr:<id>` item isn't in the DataSet yet) and never retry. Running both
+      // after the rebuild paints guarantees flashPrFocusGlow finds the bar.
+      window.setTimeout(() => {
+        flashPrFocusGlow(focusId);
+        centerShowTarget(token, false, '.ev-cross-linked', '.pr-focus-glow');
+      }, 120);
       useFilters.getState().consumeTimelineFocus();
       return;
     }
 
+    // The PR isn't in the lean /api/timeline payload. It can still be focused if
+    // it's a currently-open PR (those come from a separate endpoint and may be
+    // outside the window or have no in-window activity).
     const candidate = openPrsData?.prs.find((p) => p.id === timelineFocusPr);
     if (candidate) {
       const { from } = resolveRange(useFilters.getState());
       const openedMs = new Date(candidate.openedAt).getTime();
       if (openedMs < from.getTime()) {
+        // Opened before the window — widen the range so it enters data.prs, then
+        // the effect re-runs into the openPrFocused sub-path above (which
+        // scrolls + glows). Keep the focus pending (don't consume).
         const day = new Date(openedMs - 24 * 60 * 60 * 1000)
           .toISOString()
           .slice(0, 10);
@@ -1287,9 +1387,52 @@ export function Timeline(): JSX.Element {
         useFilters.getState().setCustomRange(day, today);
         return;
       }
+      // Open + within the window but absent from data.prs (no in-window activity,
+      // so it never entered the lean payload). Stage it for the next rebuild —
+      // forceShowOpenPrRef is seeded into the rebuild's PR set so the bar
+      // materializes — then bump the nonce to trigger that rebuild. The bar can't
+      // be focused until it paints, so we center + glow on a short delay using the
+      // open-PR record directly (best-effort; never crashes). Consume the focus.
+      if (data && !data.prs.some((p) => p.id === candidate.id)) {
+        // Same fresh-navigation teardown as the in-window path above: clear any
+        // active "Show" / popover focus so the deferred scroll+glow doesn't land
+        // under collapsed rows.
+        if (showFocusActiveRef.current || focusedGroupIdsRef.current) {
+          showFocusActiveRef.current = false;
+          applyContext(null);
+        }
+        forceShowOpenPrRef.current = candidate;
+        setForceShowNonce((n) => n + 1);
+        const winC = tl.getWindow();
+        const w = winC.end.valueOf() - winC.start.valueOf();
+        const sMs = new Date(candidate.openedAt).getTime();
+        const eMs = new Date(
+          candidate.mergedAt ?? candidate.closedAt ?? new Date().toISOString(),
+        ).getTime();
+        const c = (sMs + eMs) / 2;
+        tl.setWindow(c - w / 2, c + w / 2, { animation: true });
+        const token = groupClassToken(prGroupId(candidate));
+        window.setTimeout(() => {
+          // 360ms: after the force-show rebuild paints the bar.
+          tl.setSelection([`pr:${candidate.id}`]);
+          flashPrFocusGlow(candidate.id);
+          centerShowTarget(token, false, '.ev-cross-linked', '.pr-focus-glow');
+        }, 360);
+        useFilters.getState().consumeTimelineFocus();
+        return;
+      }
     }
+    // Genuinely unreachable (in neither dataset) — fail gracefully.
     useFilters.getState().consumeTimelineFocus();
-  }, [timelineFocusPr, timelineFocusAt, data, openPrsData, applyContext, centerShowTarget]);
+  }, [
+    timelineFocusPr,
+    timelineFocusAt,
+    data,
+    openPrsData,
+    applyContext,
+    centerShowTarget,
+    flashPrFocusGlow,
+  ]);
 
   return (
     <div className="relative h-full w-full">

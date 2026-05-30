@@ -52,6 +52,12 @@ export interface FilterState {
   stripCollapsed: boolean;
   stripFilter: StripFilter;
 
+  // PR-title search box (App.tsx). Sticky: persists across input blur and PR
+  // selection so re-focusing re-shows the same results. Store-only (NOT URL-synced
+  // — transient per-session intent; keeps shared URLs clean). Client-side filter
+  // over loaded timeline/open-PR data, so it never feeds buildTimelineSearch.
+  searchQuery: string;
+
   // file groups + diff hunks (PR detail thread view)
   expandedFileGroups: string[]; // paths explicitly toggled by the user
   collapsedFileGroups: string[]; // paths explicitly collapsed by the user
@@ -69,7 +75,6 @@ export interface FilterState {
   setRepoIds: (ids: number[] | null) => void;
   toggleRepo: (id: number) => void;
   setUserIds: (ids: number[] | null) => void;
-  toggleUser: (id: number) => void;
   setExcludeBots: (v: boolean) => void;
   setPreset: (p: RangePreset) => void;
   setCustomRange: (from: string | null, to: string | null) => void;
@@ -91,6 +96,7 @@ export interface FilterState {
   consumeTimelineFocus: () => void;
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
+  setSearchQuery: (q: string) => void;
   toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
   hydrate: (partial: Partial<FilterState>) => void;
@@ -111,8 +117,9 @@ export const useFilters = create<FilterState>((set) => ({
   derivedStates: [],
   selectedPrId: null,
   selectedThreadId: null,
-  stripCollapsed: false,
+  stripCollapsed: true, // was false — strip starts collapsed for more timeline room
   stripFilter: 'all',
+  searchQuery: '',
   expandedFileGroups: [],
   collapsedFileGroups: [],
   expandedDiffHunks: [],
@@ -124,7 +131,6 @@ export const useFilters = create<FilterState>((set) => ({
   toggleRepo: (id) =>
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),
   setUserIds: (ids) => set({ userIds: ids }),
-  toggleUser: (id) => set((s) => ({ userIds: toggle(s.userIds ?? [], id) })),
   setExcludeBots: (v) => set({ excludeBots: v }),
   setPreset: (p) => set({ preset: p }),
   setCustomRange: (from, to) =>
@@ -158,6 +164,7 @@ export const useFilters = create<FilterState>((set) => ({
     set({ timelineFocusPr: null, timelineFocusAt: null, timelineFocusEvent: null }),
   setStripCollapsed: (v) => set({ stripCollapsed: v }),
   setStripFilter: (f) => set({ stripFilter: f }),
+  setSearchQuery: (q) => set({ searchQuery: q }),
   toggleFileGroup: (path, defaultExpanded) =>
     set((s) => {
       // Track explicit user intent against the default so re-renders are stable.

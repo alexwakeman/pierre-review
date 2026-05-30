@@ -64,6 +64,10 @@ function readFromUrl(): Partial<FilterState> {
     out.stripFilter = strip as StripFilter;
   }
 
+  // `open=1` means the user expanded the Open-PRs strip (non-default; default is
+  // collapsed). Absent → keep the collapsed default.
+  if (p.get('open') === '1') out.stripCollapsed = false;
+
   return out;
 }
 
@@ -84,6 +88,7 @@ function writeToUrl(s: FilterState): void {
   if (s.selectedPrId) p.set('pr', String(s.selectedPrId));
   if (s.selectedThreadId) p.set('thread', String(s.selectedThreadId));
   if (s.stripFilter !== 'all') p.set('strip', s.stripFilter);
+  if (!s.stripCollapsed) p.set('open', '1');
 
   const qs = p.toString();
   const next = `${window.location.pathname}${qs ? `?${qs}` : ''}`;

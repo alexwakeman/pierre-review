@@ -13,6 +13,7 @@ import {
   type RangePreset,
 } from '../store/filters.js';
 import { DERIVED_STATE_META } from '../lib/ui.js';
+import { UserSelectPanel } from './UserSelectPanel.js';
 
 const PRESETS: Exclude<RangePreset, 'custom'>[] = ['7d', '14d', '30d', '90d'];
 const CATEGORY_LABELS: Record<EventCategory, string> = {
@@ -169,14 +170,23 @@ export function FilterBar(): JSX.Element {
     },
   });
 
-  // Members that are actually active in the current window (keeps the list
-  // short). Falls back to all non-bot users if the timeline is empty.
+  // The member picker must offer the FULL non-bot roster so you can add or switch
+  // members after applying a selection. Scoping the options to who's active in the
+  // window would collapse the list once a filter is applied — the timeline is
+  // itself filtered by the selection, so its actors shrink to just the selected
+  // user(s), leaving you unable to pick anyone else. We still surface in-window
+  // actors first (then alphabetical) so the common picks stay at the top.
   const activeMemberIds = new Set(
     (timeline?.events ?? []).map((e) => e.actorId).filter((x): x is number => x != null),
   );
   const memberUsers = (users ?? [])
-    .filter((u) => !u.isBot && (activeMemberIds.size === 0 || activeMemberIds.has(u.id)))
-    .sort((a, b) => (a.displayName || a.githubLogin).localeCompare(b.displayName || b.githubLogin));
+    .filter((u) => !u.isBot)
+    .sort((a, b) => {
+      const aActive = activeMemberIds.has(a.id) ? 0 : 1;
+      const bActive = activeMemberIds.has(b.id) ? 0 : 1;
+      if (aActive !== bActive) return aActive - bActive;
+      return (a.displayName || a.githubLogin).localeCompare(b.displayName || b.githubLogin);
+    });
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-800 dark:bg-gray-900">
@@ -225,27 +235,11 @@ export function FilterBar(): JSX.Element {
       </Section>
 
       <Section label="Members">
-        <div className="flex max-h-14 max-w-[28rem] flex-wrap items-center gap-1 overflow-y-auto">
-          {memberUsers.map((u) => (
-            <Chip
-              key={u.id}
-              active={f.userIds == null ? false : f.userIds.includes(u.id)}
-              onClick={() => f.toggleUser(u.id)}
-              title={u.githubLogin}
-            >
-              {u.displayName || u.githubLogin}
-            </Chip>
-          ))}
-          {f.userIds && f.userIds.length > 0 && (
-            <button
-              type="button"
-              onClick={() => f.setUserIds(null)}
-              className="text-[11px] text-gray-400 hover:text-gray-600"
-            >
-              all
-            </button>
-          )}
-        </div>
+        <UserSelectPanel
+          members={memberUsers}
+          userIds={f.userIds}
+          onApply={(ids) => f.setUserIds(ids)}
+        />
         <label className="flex items-center gap-1 text-xs text-gray-500">
           <input
             type="checkbox"

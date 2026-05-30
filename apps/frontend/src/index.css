@@ -523,6 +523,38 @@ body {
   }
 }
 
+/* Strip / search PR focus cue: a single soft sky glow on the PR bar that fades
+   to nothing over ~2s — enough to locate the bar after a scroll-to, deliberately
+   WITHOUT the marching-ants ring (that ring is reserved for cross-user focus
+   mode). The class is stripped by a timer once the fade completes (see
+   flashPrFocusGlow in Timeline/index.tsx). */
+@keyframes pr-focus-glow {
+  0% {
+    box-shadow:
+      0 0 0 4px rgba(56, 189, 248, 0.95),
+      0 0 20px 6px rgba(56, 189, 248, 0.65);
+  }
+  100% {
+    box-shadow:
+      0 0 0 0 rgba(56, 189, 248, 0),
+      0 0 0 0 rgba(56, 189, 248, 0);
+  }
+}
+.vis-item.pr-bar.pr-focus-glow {
+  overflow: visible;
+  min-width: 22px; /* keep a sliver-width bar spottable while glowing */
+  z-index: 5;
+  animation: pr-focus-glow 2s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vis-item.pr-bar.pr-focus-glow {
+    animation: none;
+    box-shadow:
+      0 0 0 3px rgba(56, 189, 248, 0.8),
+      0 0 12px 3px rgba(56, 189, 248, 0.5);
+  }
+}
+
 /* Focus-exit cue: leaving focus mode re-centres on the marker that opened it and
    gives that marker a single soft sky glow that fades to nothing over 3s — just
    enough to relocate it, deliberately WITHOUT the marching-ants ring. The class
