@@ -15,7 +15,7 @@ export function StatusRow({ pr }: { pr: TimelinePr }): JSX.Element {
   const tc = pr.threadCounts;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px]">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
       {ci && (
         <span className="inline-flex items-center gap-1" title={ci.label}>
           <span

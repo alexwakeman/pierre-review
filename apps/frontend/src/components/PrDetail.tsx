@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { PrDetail as PrDetailT, User } from '@gh-team-monitor/shared';
+import type { EventType, PrDetail as PrDetailT, User } from '@gh-team-monitor/shared';
 import { usePr } from '../hooks/usePr.js';
 import { api } from '../api/client.js';
-import { indexUsers, PR_STATE_META, relativeTime, userLabel } from '../lib/ui.js';
+import { useFilters } from '../store/filters.js';
+import { dateTime, indexUsers, PR_STATE_META, relativeTime, userLabel } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
@@ -27,6 +28,10 @@ interface ActivityRow {
   actorId: number | null;
   detail?: string;
   href?: string;
+  // The timeline event this entry maps to, so "Show" can recenter on and glow
+  // it. refId matches the event's ref_id (null for lifecycle, which has no
+  // marker — "Show" just recenters on the PR bar then).
+  event: { type: EventType; refId: number | null };
 }
 
 function buildActivity(pr: PrDetailT): ActivityRow[] {
@@ -37,6 +42,7 @@ function buildActivity(pr: PrDetailT): ActivityRow[] {
     label: 'opened this PR',
     actorId: pr.authorId,
     href: pr.githubUrl,
+    event: { type: 'pr_opened', refId: null },
   });
   for (const c of pr.commits) {
     rows.push({
@@ -46,6 +52,7 @@ function buildActivity(pr: PrDetailT): ActivityRow[] {
       actorId: c.authorId ?? c.committerId,
       detail: c.message?.split('\n')[0],
       href: `${pr.githubUrl}/commits/${c.sha}`,
+      event: { type: 'commit_pushed', refId: c.id },
     });
   }
   for (const r of pr.reviews) {
@@ -56,6 +63,7 @@ function buildActivity(pr: PrDetailT): ActivityRow[] {
       actorId: r.authorId,
       detail: r.body ?? undefined,
       href: r.url ?? pr.githubUrl,
+      event: { type: 'review_submitted', refId: r.id },
     });
   }
   for (const c of pr.comments) {
@@ -66,12 +74,27 @@ function buildActivity(pr: PrDetailT): ActivityRow[] {
       actorId: c.authorId,
       detail: c.body,
       href: c.url ?? pr.githubUrl,
+      event: { type: 'pr_comment', refId: c.id },
     });
   }
   if (pr.mergedAt) {
-    rows.push({ key: 'merged', time: pr.mergedAt, label: 'merged this PR', actorId: pr.authorId, href: pr.githubUrl });
+    rows.push({
+      key: 'merged',
+      time: pr.mergedAt,
+      label: 'merged this PR',
+      actorId: pr.authorId,
+      href: pr.githubUrl,
+      event: { type: 'pr_merged', refId: null },
+    });
   } else if (pr.closedAt) {
-    rows.push({ key: 'closed', time: pr.closedAt, label: 'closed this PR', actorId: pr.authorId, href: pr.githubUrl });
+    rows.push({
+      key: 'closed',
+      time: pr.closedAt,
+      label: 'closed this PR',
+      actorId: pr.authorId,
+      href: pr.githubUrl,
+      event: { type: 'pr_closed', refId: null },
+    });
   }
   return rows.sort((a, b) => a.time.localeCompare(b.time));
 }
@@ -89,6 +112,7 @@ function ActivityList({
 }): JSX.Element {
   const all = useMemo(() => buildActivity(pr), [pr]);
   const rows = since ? all.filter((r) => r.time > since) : all;
+  const showEventOnTimeline = useFilters((s) => s.showEventOnTimeline);
   return (
     <ul className="divide-y divide-gray-100 dark:divide-gray-800">
       {since && (
@@ -109,24 +133,38 @@ function ActivityList({
           <li key={r.key} className="flex items-start gap-2 px-3 py-2 text-sm">
             <Avatar user={user} size={20} />
             <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                 <span className="font-medium">{userLabel(user, r.actorId)}</span>
                 <span className="text-gray-500">{r.label}</span>
-                <a
-                  href={r.href}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  title="Open on GitHub"
-                  className="ml-auto shrink-0 text-xs text-gray-400 hover:text-blue-500"
-                >
-                  {relativeTime(r.time)} ↗
-                </a>
+                <span className="text-xs text-gray-400" title={dateTime(r.time)}>
+                  · {dateTime(r.time)}
+                </span>
               </div>
               {r.detail && (
                 <div className="mt-0.5 truncate text-xs text-gray-500" title={r.detail}>
                   {r.detail.split('\n')[0]}
                 </div>
               )}
+              <div className="mt-1 flex items-center gap-3 text-xs">
+                <button
+                  type="button"
+                  onClick={() => showEventOnTimeline(pr.id, r.time, r.event)}
+                  className="text-blue-500 hover:underline"
+                  title="Show this event on the timeline"
+                >
+                  Show
+                </button>
+                {r.href && (
+                  <a
+                    href={r.href}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="text-gray-400 hover:text-blue-500"
+                  >
+                    Open on GitHub ↗
+                  </a>
+                )}
+              </div>
             </div>
           </li>
         );

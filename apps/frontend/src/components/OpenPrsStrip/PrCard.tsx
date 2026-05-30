@@ -43,7 +43,7 @@ export function PrCard({
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') openPrFocused(pr.id);
       }}
-      className={`relative flex w-64 shrink-0 cursor-pointer flex-col gap-1.5 rounded-lg border p-2.5 text-left transition ${
+      className={`relative flex w-52 shrink-0 cursor-pointer flex-col gap-1 rounded-lg border p-2 text-left transition ${
         selected
           ? 'border-blue-500 ring-1 ring-blue-500'
           : 'border-gray-200 hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500'

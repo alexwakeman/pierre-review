@@ -309,8 +309,18 @@ export function MarkerPopover({
     onOpenChange: (o) => {
       if (!o) onDismiss();
     },
-    placement: 'bottom',
-    middleware: [offset(10), flip(), shift({ padding: 8 })],
+    // Open to the SIDE of the click, not on top of it: `right-start` puts the
+    // modal's top-left just past the cursor so the clicked marker stays visible,
+    // and being top-aligned it extends downward — never up over an own-work PR
+    // bar (which sits on the line directly above the marker). flip() swings it
+    // left when there's no room on the right; `bottom` is the last resort on a
+    // narrow viewport. shift() keeps it on-screen vertically.
+    placement: 'right-start',
+    middleware: [
+      offset(14),
+      flip({ fallbackPlacements: ['left-start', 'bottom'] }),
+      shift({ padding: 8 }),
+    ],
     whileElementsMounted: autoUpdate,
   });
   const dismiss = useDismiss(context);

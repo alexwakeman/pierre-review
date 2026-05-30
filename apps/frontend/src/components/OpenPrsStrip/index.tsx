@@ -34,10 +34,14 @@ export function OpenPrsStrip(): JSX.Element | null {
   const stalledCount = all.filter((p) => p.reasonTag === 'stalled').length;
 
   const shown = useMemo(() => {
-    if (filter === 'my_turn') return all.filter((p) => isMyTurnReason(p.reasonTag));
-    if (filter === 'needs_attention')
-      return all.filter((p) => p.reasonTag !== 'in_progress');
-    return all;
+    const base =
+      filter === 'my_turn'
+        ? all.filter((p) => isMyTurnReason(p.reasonTag))
+        : filter === 'needs_attention'
+          ? all.filter((p) => p.reasonTag !== 'in_progress')
+          : all;
+    // Most recently opened first.
+    return [...base].sort((a, b) => Date.parse(b.openedAt) - Date.parse(a.openedAt));
   }, [all, filter]);
 
   if (!isLoading && all.length === 0) return null;
@@ -83,7 +87,7 @@ export function OpenPrsStrip(): JSX.Element | null {
       </div>
 
       {!collapsed && (
-        <div className="flex items-stretch gap-2 overflow-x-auto px-4 pb-2 pt-0.5">
+        <div className="flex items-stretch gap-1.5 overflow-x-auto px-3 pb-1.5 pt-0.5">
           {shown.length === 0 ? (
             <div className="flex items-center text-xs text-gray-500">
               {filter === 'my_turn'

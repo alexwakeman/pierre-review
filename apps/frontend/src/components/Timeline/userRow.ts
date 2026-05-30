@@ -63,6 +63,30 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
+// Dot colours mirror the timeline PR bars: open (blue), merged (green),
+// closed (grey).
+const PR_STATE_COLORS = {
+  open: '#3b82f6',
+  merged: '#22c55e',
+  closed: '#9ca3af',
+} as const;
+
+// Precise authored-PR breakdown — a coloured count per state instead of the old
+// open/closed lump, so the row shows exactly how many are open vs merged vs
+// closed. Zero states are dropped so the numbers stay exact without padding the
+// label; the tooltip always spells out all three.
+function prBreakdown(s: UserStats): string {
+  const cell = (n: number, color: string): string =>
+    `<span class="tl-pr"><span class="tl-pr-dot" style="background:${color}"></span>${n}</span>`;
+  const cells: string[] = [];
+  if (s.prsOpen) cells.push(cell(s.prsOpen, PR_STATE_COLORS.open));
+  if (s.prsMerged) cells.push(cell(s.prsMerged, PR_STATE_COLORS.merged));
+  if (s.prsClosed) cells.push(cell(s.prsClosed, PR_STATE_COLORS.closed));
+  if (cells.length === 0) return '';
+  const title = `PRs authored: ${s.prsOpen} open · ${s.prsMerged} merged · ${s.prsClosed} closed`;
+  return `<span class="tl-stat tl-prs" title="${escapeHtml(title)}">${GLYPH.pr}${cells.join('')}</span>`;
+}
+
 // HTML for a vis-timeline user-row group label: avatar + name + a compact
 // interaction summary. Zero-valued stats are omitted to keep the row readable.
 export function renderUserLabel(
@@ -76,19 +100,11 @@ export function renderUserLabel(
     : `<span class="tl-user-avatar tl-user-avatar-fallback">${escapeHtml((name[0] ?? '?').toUpperCase())}</span>`;
 
   const s = stats ?? emptyStats();
-  const prClosedTotal = s.prsMerged + s.prsClosed;
   const parts: string[] = [];
   if (s.comments) parts.push(stat('comment', s.comments, plural(s.comments, 'comment')));
   if (s.reviews) parts.push(stat('review', s.reviews, `${plural(s.reviews, 'review')} given`));
-  if (s.prsOpen || prClosedTotal) {
-    parts.push(
-      stat(
-        'pr',
-        `${s.prsOpen}/${prClosedTotal}`,
-        `PRs authored: ${s.prsOpen} open · ${s.prsMerged} merged · ${s.prsClosed} closed`,
-      ),
-    );
-  }
+  const prs = prBreakdown(s);
+  if (prs) parts.push(prs);
   const statsHtml = parts.length
     ? `<span class="tl-user-stats">${parts.join('')}</span>`
     : '';

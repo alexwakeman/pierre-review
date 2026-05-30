@@ -142,6 +142,18 @@ export function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+// Absolute date *with* time of day, e.g. "30 May 2026, 09:04" — used where the
+// exact moment matters (the activity feed) rather than a fuzzy "4 days ago".
+export function dateTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')

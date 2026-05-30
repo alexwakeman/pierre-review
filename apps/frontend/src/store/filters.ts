@@ -55,6 +55,9 @@ export interface FilterState {
   // optional instant to recenter on (e.g. a clicked event's time) so focusing a
   // long-running PR doesn't jump to its far-off midpoint
   timelineFocusAt: string | null;
+  // optional specific event marker to glow once the timeline recenters, resolved
+  // against the loaded timeline events by (type, refId). null = recenter only.
+  timelineFocusEvent: { type: EventType; refId: number | null } | null;
 
   setRepoIds: (ids: number[] | null) => void;
   toggleRepo: (id: number) => void;
@@ -71,6 +74,13 @@ export interface FilterState {
   // Open a PR from the strip / my-turn / a timeline event: select it AND ask
   // the timeline to scroll to it (optionally recentering on `focusAt`).
   openPrFocused: (id: number, threadId?: number | null, focusAt?: string | null) => void;
+  // Show a specific activity entry on the timeline: keep its PR selected, recenter
+  // on the event's instant, and glow the matching marker.
+  showEventOnTimeline: (
+    prId: number,
+    focusAt: string,
+    event: { type: EventType; refId: number | null },
+  ) => void;
   consumeTimelineFocus: () => void;
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
@@ -101,6 +111,7 @@ export const useFilters = create<FilterState>((set) => ({
   expandedDiffHunks: [],
   timelineFocusPr: null,
   timelineFocusAt: null,
+  timelineFocusEvent: null,
 
   setRepoIds: (ids) => set({ repoIds: ids }),
   toggleRepo: (id) =>
@@ -127,8 +138,17 @@ export const useFilters = create<FilterState>((set) => ({
       selectedThreadId: threadId,
       timelineFocusPr: id,
       timelineFocusAt: focusAt,
+      timelineFocusEvent: null,
     }),
-  consumeTimelineFocus: () => set({ timelineFocusPr: null, timelineFocusAt: null }),
+  showEventOnTimeline: (prId, focusAt, event) =>
+    set({
+      selectedPrId: prId,
+      timelineFocusPr: prId,
+      timelineFocusAt: focusAt,
+      timelineFocusEvent: event,
+    }),
+  consumeTimelineFocus: () =>
+    set({ timelineFocusPr: null, timelineFocusAt: null, timelineFocusEvent: null }),
   setStripCollapsed: (v) => set({ stripCollapsed: v }),
   setStripFilter: (f) => set({ stripFilter: f }),
   toggleFileGroup: (path, defaultExpanded) =>

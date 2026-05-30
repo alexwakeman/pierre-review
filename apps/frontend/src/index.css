@@ -147,8 +147,8 @@ body {
 }
 .tl-user-avatar {
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 9999px;
   object-fit: cover;
   background: #e5e7eb;
@@ -160,13 +160,13 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: #6b7280;
 }
 .tl-user-name {
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 600;
   max-width: 150px;
   white-space: nowrap;
   overflow: hidden;
@@ -175,10 +175,10 @@ body {
 .tl-user-stats {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   margin-left: auto;
   padding-left: 8px;
-  font-size: 10px;
+  font-size: 11.5px;
   color: #6b7280;
 }
 .dark .tl-user-stats {
@@ -192,6 +192,21 @@ body {
 }
 .tl-stat svg {
   display: block;
+}
+/* Authored-PR breakdown: a coloured dot + count per state (open/merged/closed). */
+.tl-prs {
+  gap: 5px;
+}
+.tl-pr {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.tl-pr-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
 }
 
 /* Marker modal: a slim header bar that doubles as the drag handle. */
@@ -255,9 +270,10 @@ body {
 .vis-item.pr-emph {
   font-size: 11px;
 }
-/* Closed / merged recede into historical context. */
+/* Closed / merged recede into historical context — but stay legible: the dim is
+   gentle (0.5 washed the white label out) and state is carried by colour. */
 .vis-item.pr-muted {
-  opacity: 0.5;
+  opacity: 0.85;
   font-size: 10px;
 }
 .vis-item.pr-muted .pr-title {
@@ -290,13 +306,14 @@ body {
   background-color: #1d4ed8;
   border-color: #3b82f6;
 }
+/* Merged → green, closed → grey; both keep white text for legibility. */
 .vis-item.pr-merged {
-  background-color: #6d28d9;
-  border-color: #8957e5;
+  background-color: #15803d;
+  border-color: #22c55e;
 }
 .vis-item.pr-closed {
   background-color: #4b5563;
-  border-color: #6b7280;
+  border-color: #9ca3af;
 }
 .vis-item.pr-draft {
   background-image: repeating-linear-gradient(
@@ -489,6 +506,7 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  position: relative; /* anchor the own-work chevron + cross-link ring */
 }
 .ev-marker-inner svg {
   display: block;
@@ -509,11 +527,40 @@ body {
   line-height: 1;
   cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.25);
+  position: relative; /* anchor the own-work chevron + cross-link ring */
 }
 .vis-item.ev-cluster.vis-selected,
 .vis-item.ev-marker.vis-selected {
   background: transparent;
   box-shadow: none;
+}
+
+/* Divider above the cross-user band: a full-width background item confined to
+   the `cross` subgroup. A subtle top line (+ faint tint) marks where a user's
+   own-work bands end and their actions on others' PRs begin. Decorative only —
+   never intercept clicks meant for the markers drawn over it. */
+.vis-item.vis-background.cross-sep {
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.05);
+  pointer-events: none;
+}
+
+/* Own-work chevron: an up-caret above the marker/cluster, pointing at the PR
+   bar it sits directly beneath (markers share their PR's subgroup band). Only
+   own-work events get it (.ev-own = actor is the PR author); cross-user markers,
+   whose PR bar lives in another row, deliberately omit it. */
+.vis-item.ev-own .ev-marker-inner::before,
+.vis-item.ev-own .ev-cluster-inner::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  border-top: 2px solid #cbd5e1;
+  border-left: 2px solid #cbd5e1;
+  transform: translateX(-50%) rotate(45deg);
+  pointer-events: none;
 }
 
 /* legacy default-dot styling (kept for any non-custom points) */
