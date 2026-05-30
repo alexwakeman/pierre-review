@@ -57,6 +57,17 @@ function unique<T>(arr: T[]): T[] {
   return [...new Set(arr)];
 }
 
+// Order-independent equality for the repo filter (null = "all repos"). Used to
+// detect a *genuine* repo-selection change so focus mode can be dropped only
+// then — not on every unrelated re-render.
+function sameRepoSelection(a: number[] | null, b: number[] | null): boolean {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((x) => set.has(x));
+}
+
 // vis-timeline's zoomKey takes a single modifier; mac users zoom with Cmd
 // (metaKey), everyone else with Ctrl — matching the platform-native gesture and
 // avoiding the OS Ctrl+wheel page-zoom on mac.
@@ -132,6 +143,13 @@ export function Timeline(): JSX.Element {
   // right one even after a re-cluster moves the event between items.
   const highlightedEventRef = useRef<number | null>(null);
   const highlightedItemRef = useRef<string | null>(null);
+  // The marker that opened the current focus, re-shown with a one-shot fade glow
+  // (no marching ants) when the user leaves focus so they can relocate where they
+  // were. Mirrors highlightedEvent/Item but for the transient `ev-exit-glow`
+  // class, plus a timer that strips it once the 3s fade completes.
+  const exitGlowEventRef = useRef<number | null>(null);
+  const exitGlowItemRef = useRef<string | null>(null);
+  const exitGlowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // True while a sticky "Show on timeline" overlay (from the activity panel) is
   // applied — a glowing marker plus, for a cross-user action, the collapsed
   // two-person row focus. Unlike the marker popover it has nothing to dismiss
@@ -253,6 +271,54 @@ export function Timeline(): JSX.Element {
       highlightedItemRef.current = targetId;
     }
   }, []);
+
+  // Add / move / clear the transient `ev-exit-glow` class on whichever item
+  // currently holds `eventId` (a lone `ev:` marker or the `cl:` cluster it folded
+  // into). Mirrors highlightEvent, but the class drives a finite 3s fade with no
+  // marching-ants ring — the "you exited focus here" cue.
+  const applyExitGlow = useCallback((eventId: number | null) => {
+    const items = itemsRef.current;
+    const prevId = exitGlowItemRef.current;
+    if (prevId != null) {
+      const item = items.get(prevId) as DataItem | null;
+      if (item && typeof item.className === 'string' && item.className.includes('ev-exit-glow')) {
+        items.update({
+          id: prevId,
+          className: item.className.replace(/\s*ev-exit-glow/g, ''),
+        });
+      }
+      exitGlowItemRef.current = null;
+    }
+    exitGlowEventRef.current = eventId;
+    if (eventId == null) return;
+    const targetId = items.get(`ev:${eventId}`)
+      ? `ev:${eventId}`
+      : (eventToClusterRef.current.get(eventId) ?? null);
+    if (targetId == null) return; // event not currently rendered
+    const item = items.get(targetId) as DataItem | null;
+    if (
+      item &&
+      typeof item.className === 'string' &&
+      !item.className.includes('ev-exit-glow')
+    ) {
+      items.update({ id: targetId, className: `${item.className} ev-exit-glow` });
+      exitGlowItemRef.current = targetId;
+    }
+  }, []);
+
+  // Flash the exit glow on `eventId` for 3s, then strip it. A re-cluster within
+  // that window re-applies it (see rebuildMarkers), so it survives a zoom/refetch.
+  const flashExitGlow = useCallback(
+    (eventId: number) => {
+      if (exitGlowTimerRef.current) clearTimeout(exitGlowTimerRef.current);
+      applyExitGlow(eventId);
+      exitGlowTimerRef.current = setTimeout(() => {
+        applyExitGlow(null);
+        exitGlowTimerRef.current = null;
+      }, 3000);
+    },
+    [applyExitGlow],
+  );
 
   // Reconcile the cross-band divider items with the current collapsed set: a
   // divider only belongs in a row that's actually showing. vis paints
@@ -465,7 +531,14 @@ export function Timeline(): JSX.Element {
       highlightedEventRef.current = null; // force highlightEvent to re-add the class
       highlightEvent(ev);
     }
-  }, [highlightEvent, applyCrossSeps]);
+    // Same for a still-fading exit glow (its 3s timer can outlive a recluster).
+    if (exitGlowEventRef.current != null) {
+      const ev = exitGlowEventRef.current;
+      exitGlowItemRef.current = null;
+      exitGlowEventRef.current = null;
+      applyExitGlow(ev);
+    }
+  }, [highlightEvent, applyExitGlow, applyCrossSeps]);
 
   // Within a focused cross-user context, trim each kept row to just the bands
   // that belong to the interaction "actor commented on author's PR":
@@ -528,6 +601,14 @@ export function Timeline(): JSX.Element {
   // on dismiss / back.
   const applyContext = useCallback(
     (ctx: ContextFocus | null) => {
+      // A fresh context (or a clear) supersedes any still-fading exit-glow cue —
+      // drop it first, else re-opening the just-exited marker would stack the
+      // exit glow under the cross-link pulse for the rest of the 3s window.
+      if (exitGlowTimerRef.current) {
+        clearTimeout(exitGlowTimerRef.current);
+        exitGlowTimerRef.current = null;
+      }
+      applyExitGlow(null);
       focusSubgroups(ctx?.groupIds ?? null, ctx?.prId ?? null);
       focusRows(ctx?.groupIds ?? null);
       highlightPr(ctx?.prId ?? null);
@@ -538,7 +619,7 @@ export function Timeline(): JSX.Element {
       setFocusActive(active);
       if (!active) showFocusActiveRef.current = false;
     },
-    [focusSubgroups, focusRows, highlightPr, highlightEvent],
+    [focusSubgroups, focusRows, highlightPr, highlightEvent, applyExitGlow],
   );
 
   // --- Activity "Show" vertical scrolling ----------------------------------
@@ -583,7 +664,7 @@ export function Timeline(): JSX.Element {
   // height (~1s+ after the click), so a single pass isn't enough. The ~1.5s frame
   // cap is a backstop; the stable-streak ends it promptly once the layout settles.
   const centerShowTarget = useCallback(
-    (groupToken: string, hasMarker: boolean) => {
+    (groupToken: string, hasMarker: boolean, markerSel = '.ev-cross-linked') => {
       const container = containerRef.current;
       const vs = verticalScrollEl();
       const center = container?.querySelector<HTMLElement>('.vis-panel.vis-center');
@@ -605,7 +686,7 @@ export function Timeline(): JSX.Element {
             .filter((el) => el.offsetHeight > 0)
             .sort((a, b) => b.offsetHeight - a.offsetHeight)[0];
         if (hasMarker) {
-          const marker = biggest('.ev-cross-linked');
+          const marker = biggest(markerSel);
           if (marker) return { delta: deltaTo(marker), settleable: true };
           // Marker exists but isn't rendered yet — it's on a band below the
           // viewport (a cross-user marker lives on the row's bottom band). Aim at
@@ -651,6 +732,22 @@ export function Timeline(): JSX.Element {
       requestAnimationFrame(() => requestAnimationFrame(step));
     },
     [verticalScrollEl, setVisScrollTop],
+  );
+
+  // Leaving focus: instead of letting the row-expand rebuild snap the timeline
+  // to the top, re-show the marker that opened the focus with a 3s fade glow and
+  // re-centre the viewport on it — "you were here". The glow is set immediately
+  // (and survives any recluster); the centring waits for the expand animation to
+  // start so the kept row's layout is settling before we drive the scroll.
+  const restoreAnchorView = useCallback(
+    (eventId: number) => {
+      flashExitGlow(eventId);
+      const ev = eventsByIdRef.current.get(eventId);
+      if (!ev) return;
+      const token = groupClassToken(groupOf(ev));
+      window.setTimeout(() => centerShowTarget(token, true, '.ev-exit-glow'), 320);
+    },
+    [flashExitGlow, centerShowTarget],
   );
 
   // Restore the window captured when the drill-down began (idempotent across the
@@ -734,19 +831,27 @@ export function Timeline(): JSX.Element {
 
   // Full exit (bottom-left button / browser-back): revert the row collapse +
   // glow, restore the window to where the user was when they opened the focus,
-  // and close the modal too.
-  const exitFocus = useCallback(() => {
-    const depth = drillDepthRef.current;
-    applyContext(null);
-    setPopover(null);
-    restoreWindow();
-    if (depth > 0) {
-      suppressPopstateRef.current += 1;
-      history.go(-depth);
-    }
-    drillDepthRef.current = 0;
-    savedWindowRef.current = null;
-  }, [applyContext, restoreWindow]);
+  // and close the modal too. `restoreAnchor` (default) re-centres on + glows the
+  // marker that opened the focus; callers where that context is gone (e.g. a repo
+  // switch) pass false to just clear the overlay.
+  const exitFocus = useCallback(
+    (restoreAnchor = true) => {
+      // Capture the anchor before applyContext(null) clears highlightedEventRef.
+      const anchorEvent = restoreAnchor ? highlightedEventRef.current : null;
+      const depth = drillDepthRef.current;
+      applyContext(null);
+      setPopover(null);
+      restoreWindow();
+      if (depth > 0) {
+        suppressPopstateRef.current += 1;
+        history.go(-depth);
+      }
+      drillDepthRef.current = 0;
+      savedWindowRef.current = null;
+      if (anchorEvent != null) restoreAnchorView(anchorEvent);
+    },
+    [applyContext, restoreWindow, restoreAnchorView],
+  );
 
   // Open-in-detail: close the popover but KEEP the overlay + one history entry,
   // so a later back press clears the overlay and restores the window (the detail
@@ -775,17 +880,44 @@ export function Timeline(): JSX.Element {
         applyContext(null);
         restoreWindow();
       } else if (depth === 1) {
-        // Out of the drill-down entirely.
+        // Out of the drill-down entirely — same treatment as the Exit focus
+        // button: re-centre on + glow the marker that opened a two-person focus.
+        const anchorEvent = highlightedEventRef.current;
         drillDepthRef.current = 0;
         applyContext(null);
         setPopover(null);
         restoreWindow();
         savedWindowRef.current = null;
+        if (anchorEvent != null) restoreAnchorView(anchorEvent);
       }
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [applyContext, restoreWindow]);
+  }, [applyContext, restoreWindow, restoreAnchorView]);
+
+  // Toggling the repo filter changes which contributors are on the timeline, so a
+  // two-person focus built from another repo no longer makes sense — drop it just
+  // like the "Exit focus" button. We skip the anchor re-centre/glow because the
+  // clicked marker may not exist in the new repo set. Only a *genuine* repo change
+  // triggers this (not unrelated re-renders, and not member/range/category edits).
+  const repoIds = useFilters((s) => s.repoIds);
+  const prevRepoIdsRef = useRef(repoIds);
+  useEffect(() => {
+    const prev = prevRepoIdsRef.current;
+    prevRepoIdsRef.current = repoIds;
+    if (sameRepoSelection(prev, repoIds)) return;
+    if (focusActive || focusedGroupIdsRef.current || showFocusActiveRef.current) {
+      exitFocus(false);
+    }
+  }, [repoIds, focusActive, exitFocus]);
+
+  // Don't let the exit-glow fade timer fire after unmount.
+  useEffect(
+    () => () => {
+      if (exitGlowTimerRef.current) clearTimeout(exitGlowTimerRef.current);
+    },
+    [],
+  );
 
   // Create the timeline once.
   useEffect(() => {
@@ -1180,7 +1312,7 @@ export function Timeline(): JSX.Element {
       {focusActive && (
         <button
           type="button"
-          onClick={exitFocus}
+          onClick={() => exitFocus()}
           className="tl-exit-focus"
           title="Show all rows again and return to where you were"
         >

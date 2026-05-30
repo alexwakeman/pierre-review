@@ -1,5 +1,5 @@
 import type { TimelineEvent, TimelinePr, User } from '@gh-team-monitor/shared';
-import { escapeHtml, userLabel } from '../../lib/ui.js';
+import { escapeHtml, profileUrl, userLabel } from '../../lib/ui.js';
 
 // A user's level of interaction within the loaded timeframe, shown on their row
 // label. Comments = PR + review-thread comments; reviews = submitted reviews;
@@ -109,10 +109,18 @@ export function renderUserLabel(
     ? `<span class="tl-user-stats">${parts.join('')}</span>`
     : '';
 
+  // Link the name to the contributor's GitHub profile when we know their login.
+  // `stopPropagation` keeps the click from also hitting vis's row handler, and
+  // the link opens in a new tab. vis's sanitizer is disabled (see VIS_OPTIONS),
+  // so the <a> survives; the login + name are still escaped for safety.
+  const nameHtml = user?.githubLogin
+    ? `<a class="tl-user-name tl-user-name-link" href="${escapeHtml(profileUrl(user.githubLogin))}" target="_blank" rel="noreferrer noopener" title="${escapeHtml(`@${user.githubLogin} on GitHub`)}" onclick="event.stopPropagation()">${escapeHtml(name)}</a>`
+    : `<span class="tl-user-name">${escapeHtml(name)}</span>`;
+
   return (
     `<div class="tl-user">` +
     avatar +
-    `<span class="tl-user-name">${escapeHtml(name)}</span>` +
+    nameHtml +
     statsHtml +
     `</div>`
   );

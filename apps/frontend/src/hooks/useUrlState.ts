@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import {
   ALL_CATEGORIES,
+  DEFAULT_CATEGORIES,
   useFilters,
   type FilterState,
   type RangePreset,
@@ -13,6 +14,12 @@ import {
 } from '@gh-team-monitor/shared';
 
 const PRESETS: RangePreset[] = ['7d', '14d', '30d', '90d', 'custom'];
+
+function sameSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((x) => set.has(x));
+}
 
 function parseIds(raw: string | null): number[] | null {
   if (!raw) return null;
@@ -68,7 +75,11 @@ function writeToUrl(s: FilterState): void {
   if (!s.excludeBots) p.set('bots', '0');
   if (s.preset === 'custom' && s.customFrom) p.set('from', s.customFrom);
   if (s.preset === 'custom' && s.customTo) p.set('to', s.customTo);
-  if (s.categories.length < ALL_CATEGORIES.length) p.set('cats', s.categories.join(','));
+  // Serialize the category selection whenever it differs from the fresh-load
+  // default (commits hidden). This keeps the URL clean for the common case yet
+  // lets a non-default choice — including "all categories incl. commits" —
+  // survive a reload, which a plain `length < ALL` check could not encode.
+  if (!sameSet(s.categories, DEFAULT_CATEGORIES)) p.set('cats', s.categories.join(','));
   if (s.derivedStates.length) p.set('states', s.derivedStates.join(','));
   if (s.selectedPrId) p.set('pr', String(s.selectedPrId));
   if (s.selectedThreadId) p.set('thread', String(s.selectedThreadId));

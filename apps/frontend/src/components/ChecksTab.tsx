@@ -1,11 +1,12 @@
-import type { PrDetail as PrDetailT, User } from '@gh-team-monitor/shared';
+import type { PrDetail as PrDetailT, ReviewState, User } from '@gh-team-monitor/shared';
 import {
   CHECK_STATE_META,
   CI_META,
   mergeWarning,
   relativeTime,
-  userLabel,
 } from '../lib/ui.js';
+import { Avatar } from './CommentCard.js';
+import { UserName } from './UserName.js';
 
 function Row({
   label,
@@ -38,6 +39,25 @@ export function ChecksTab({
     acc[c.state] = (acc[c.state] ?? 0) + 1;
     return acc;
   }, {});
+
+  // A reviewer's standing decision is their LATEST decisive review: an approval
+  // is superseded once they later request changes or it gets dismissed.
+  // 'commented'/'pending' reviews don't change a standing decision, so we skip
+  // them. pr.reviews is chronological (submittedAt asc), so a later decisive
+  // review overwrites — approvers are authors whose latest decision is 'approved'.
+  const latestDecision = new Map<number, ReviewState>();
+  for (const r of pr.reviews) {
+    if (
+      r.authorId == null ||
+      (r.state !== 'approved' && r.state !== 'changes_requested' && r.state !== 'dismissed')
+    ) {
+      continue;
+    }
+    latestDecision.set(r.authorId, r.state);
+  }
+  const approverIds = [...latestDecision]
+    .filter(([, state]) => state === 'approved')
+    .map(([id]) => id);
 
   return (
     <div className="divide-y divide-gray-100 py-1 dark:divide-gray-800">
@@ -140,17 +160,40 @@ export function ChecksTab({
         </Row>
       )}
 
+      {approverIds.length > 0 && (
+        <Row label="Approvers">
+          <div className="flex flex-wrap gap-2 text-xs">
+            {approverIds.map((uid) => {
+              const u = usersById.get(uid);
+              return (
+                <span
+                  key={uid}
+                  className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-green-700 dark:text-green-400"
+                  title="Approved this PR"
+                >
+                  <span className="text-green-600 dark:text-green-500">✓</span>
+                  <Avatar user={u} size={14} />
+                  <UserName user={u} fallbackId={uid} />
+                </span>
+              );
+            })}
+          </div>
+        </Row>
+      )}
+
       {pr.requestedReviewers.length > 0 && (
         <Row label="Reviewers">
           <div className="flex flex-wrap gap-2 text-xs">
             {pr.requestedReviewers.map((r, i) => (
               <span key={i} className="rounded bg-gray-500/10 px-1.5 py-0.5">
-                {r.teamName
-                  ? `@${r.teamName}`
-                  : userLabel(
-                      r.userId != null ? usersById.get(r.userId) : undefined,
-                      r.userId,
-                    )}
+                {r.teamName ? (
+                  `@${r.teamName}`
+                ) : (
+                  <UserName
+                    user={r.userId != null ? usersById.get(r.userId) : undefined}
+                    fallbackId={r.userId}
+                  />
+                )}
               </span>
             ))}
           </div>

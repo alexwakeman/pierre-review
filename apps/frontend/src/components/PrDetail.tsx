@@ -4,8 +4,9 @@ import type { EventType, PrDetail as PrDetailT, User } from '@gh-team-monitor/sh
 import { usePr } from '../hooks/usePr.js';
 import { api } from '../api/client.js';
 import { useFilters } from '../store/filters.js';
-import { dateTime, indexUsers, PR_STATE_META, relativeTime, userLabel } from '../lib/ui.js';
+import { dateTime, indexUsers, PR_STATE_META, relativeTime } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
+import { UserName } from './UserName.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
 import { Markdown } from './Markdown.js';
@@ -19,7 +20,7 @@ function newSummary(n: PrDetailT['newSinceLastViewed']): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
-type Tab = 'checks' | 'threads' | 'activity';
+type Tab = 'overview' | 'activity';
 
 interface ActivityRow {
   key: string;
@@ -134,7 +135,7 @@ function ActivityList({
             <Avatar user={user} size={20} />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                <span className="font-medium">{userLabel(user, r.actorId)}</span>
+                <UserName user={user} fallbackId={r.actorId} className="font-medium" />
                 <span className="text-gray-500">{r.label}</span>
                 <span className="text-xs text-gray-400" title={dateTime(r.time)}>
                   · {dateTime(r.time)}
@@ -181,13 +182,14 @@ export function PrDetail({
   selectedThreadId: number | null;
 }): JSX.Element {
   const { data: pr, isLoading, error } = usePr(prId);
-  const [tab, setTab] = useState<Tab>('checks');
+  const [tab, setTab] = useState<Tab>('overview');
   const [activitySince, setActivitySince] = useState<string | null>(null);
   const qc = useQueryClient();
 
-  // Selecting a thread (e.g. via a timeline marker) forces the Threads tab.
+  // Selecting a thread (e.g. via a timeline marker) forces the Overview tab,
+  // where the thread list lives and auto-scrolls to the selected thread.
   useEffect(() => {
-    if (selectedThreadId != null) setTab('threads');
+    if (selectedThreadId != null) setTab('overview');
   }, [selectedThreadId]);
 
   // Capture the last-viewed instant before marking (so new comments highlight
@@ -280,7 +282,7 @@ export function PrDetail({
         </div>
         <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
           <Avatar user={author} size={16} />
-          <span>{userLabel(author, pr.authorId)}</span>
+          <UserName user={author} fallbackId={pr.authorId} />
           <span>·</span>
           <span>{pr.repoFullName}</span>
           <span>·</span>
@@ -289,7 +291,7 @@ export function PrDetail({
       </div>
 
       <div className="flex gap-1 border-b border-gray-200 px-3 dark:border-gray-800">
-        {(['checks', 'threads', 'activity'] as Tab[]).map((t) => {
+        {(['overview', 'activity'] as Tab[]).map((t) => {
           const failing = pr.checkRuns.filter(
             (c) => c.state === 'failure' || c.state === 'error',
           ).length;
@@ -305,13 +307,15 @@ export function PrDetail({
               }`}
             >
               {t}
-              {t === 'checks' && failing > 0 && (
+              {t === 'overview' && failing > 0 && (
                 <span className="ml-1 text-red-500" title={`${failing} failing`}>
                   ●
                 </span>
               )}
-              {t === 'threads' && pr.threads.length > 0 && (
-                <span className="ml-1 opacity-60">{pr.threads.length}</span>
+              {t === 'overview' && pr.threads.length > 0 && (
+                <span className="ml-1 opacity-60" title={`${pr.threads.length} threads`}>
+                  {pr.threads.length}
+                </span>
               )}
             </button>
           );
@@ -319,16 +323,25 @@ export function PrDetail({
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {tab === 'checks' ? (
-          <ChecksTab pr={pr} usersById={usersById} />
-        ) : tab === 'threads' ? (
-          <ThreadList
-            threads={pr.threads}
-            usersById={usersById}
-            prUrl={pr.githubUrl}
-            selectedThreadId={selectedThreadId}
-            viewedSince={pr.lastViewedAt}
-          />
+        {tab === 'overview' ? (
+          <div>
+            <ChecksTab pr={pr} usersById={usersById} />
+            <div className="border-t border-gray-200 dark:border-gray-800">
+              <div className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                Threads
+                {pr.threads.length > 0 && (
+                  <span className="ml-1 font-normal opacity-70">· {pr.threads.length}</span>
+                )}
+              </div>
+              <ThreadList
+                threads={pr.threads}
+                usersById={usersById}
+                prUrl={pr.githubUrl}
+                selectedThreadId={selectedThreadId}
+                viewedSince={pr.lastViewedAt}
+              />
+            </div>
+          </div>
         ) : (
           <ActivityList
             pr={pr}

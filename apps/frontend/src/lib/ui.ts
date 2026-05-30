@@ -121,6 +121,11 @@ export function userLabel(user: User | undefined, fallbackId: number | null): st
   return fallbackId == null ? 'unknown' : `user ${fallbackId}`;
 }
 
+/** GitHub profile URL for a login (e.g. `octocat` → https://github.com/octocat). */
+export function profileUrl(login: string): string {
+  return `https://github.com/${encodeURIComponent(login)}`;
+}
+
 export function indexUsers(users: User[] | undefined): Map<number, User> {
   const map = new Map<number, User>();
   for (const u of users ?? []) map.set(u.id, u);

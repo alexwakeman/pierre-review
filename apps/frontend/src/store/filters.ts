@@ -18,6 +18,13 @@ export const ALL_CATEGORIES: EventCategory[] = [
   'commits',
 ];
 
+// Categories shown on a fresh load. Commits are noisy, so they start hidden —
+// the user can toggle them on, and that choice round-trips through the URL (see
+// useUrlState). This is the baseline the URL serializer diffs against.
+export const DEFAULT_CATEGORIES: EventCategory[] = ALL_CATEGORIES.filter(
+  (c) => c !== 'commits',
+);
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = {
   '7d': 7,
@@ -100,7 +107,7 @@ export const useFilters = create<FilterState>((set) => ({
   preset: '14d',
   customFrom: null,
   customTo: null,
-  categories: [...ALL_CATEGORIES],
+  categories: [...DEFAULT_CATEGORIES],
   derivedStates: [],
   selectedPrId: null,
   selectedThreadId: null,

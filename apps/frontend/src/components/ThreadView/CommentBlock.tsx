@@ -1,7 +1,8 @@
 import type { CommentDetail, User } from '@gh-team-monitor/shared';
 import { Avatar } from '../CommentCard.js';
+import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
-import { relativeTime, userLabel } from '../../lib/ui.js';
+import { relativeTime } from '../../lib/ui.js';
 import { NewTag } from './NewCommentHighlight.js';
 
 // One comment in a thread conversation. The first block carries the code
@@ -22,7 +23,7 @@ export function CommentBlock({
     <div className={`pl-2 ${isNew ? 'comment-new' : ''}`}>
       <div className="flex items-center gap-2 text-xs">
         <Avatar user={user} size={18} />
-        <span className="font-semibold">{userLabel(user, comment.authorId)}</span>
+        <UserName user={user} fallbackId={comment.authorId} className="font-semibold" />
         <span className="text-gray-400">{relativeTime(comment.createdAt)}</span>
         {isNew && <NewTag />}
       </div>
