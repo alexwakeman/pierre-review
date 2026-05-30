@@ -317,6 +317,32 @@ body {
   }
 }
 
+/* Zebra striping: every other contributor row gets a subtle band so adjacent
+   rows are easy to tell apart. Applied to BOTH the label (left) and the
+   foreground row (right) so the stripe spans the full width; repo header rows
+   (no .tl-user-row) stay un-striped and keep separating the sections. Kept
+   low-alpha so the grid lines, cross-band divider, and bars/markers all read
+   through. nth-child parity is stable + aligned across the two panels because
+   vis keeps every group row in the DOM in the same order (only their contents
+   virtualise), and the repo header is the first child of each panel.
+
+   We set BOTH parities explicitly: vis applies its own per-nesting-level shade
+   to the left labels (but not the right rows), so the odd rule resets that to
+   match the transparent foreground, and the even rule paints the band on both.
+   The nth-child specificity (beats vis's level shade) keeps both sides in sync. */
+.vis-labelset .vis-label.tl-user-row:nth-child(odd),
+.vis-foreground .vis-group.tl-user-row:nth-child(odd) {
+  background-color: transparent;
+}
+.vis-labelset .vis-label.tl-user-row:nth-child(even),
+.vis-foreground .vis-group.tl-user-row:nth-child(even) {
+  background-color: rgba(15, 23, 42, 0.045);
+}
+.dark .vis-labelset .vis-label.tl-user-row:nth-child(even),
+.dark .vis-foreground .vis-group.tl-user-row:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
 /* PR range bars */
 .vis-item.pr-bar {
   border-radius: 6px;
