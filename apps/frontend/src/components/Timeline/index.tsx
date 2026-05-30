@@ -150,6 +150,11 @@ export function Timeline(): JSX.Element {
   // Latest popover state, readable from stable callbacks without re-binding.
   const popoverRef = useRef<PopoverState | null>(null);
   popoverRef.current = popover;
+  // True whenever a row-collapse focus overlay is active (a cross-user marker or
+  // an activity "Show"). Drives the bottom-left "Exit focus" button. Clicking the
+  // timeline no longer reverts focus — this button (or browser-back) is the way
+  // out, so it must be visible the whole time the timeline is collapsed.
+  const [focusActive, setFocusActive] = useState(false);
 
   const { data, isLoading, error } = useTimeline();
   const { data: openPrsData } = useOpenPrs();
@@ -462,17 +467,16 @@ export function Timeline(): JSX.Element {
     }
   }, [highlightEvent, applyCrossSeps]);
 
-  // Within a focused cross-user context, trim each kept row down to just the
-  // bands that belong to the interaction: the discussed PR's lane bar band
-  // (`bar:<lane>`) and that lane's own-work events (`ev:<lane>`), plus the shared
-  // `cross` band that holds the clicked marker. Every other lane band in those
-  // rows (the actor's / author's unrelated work) is hidden, so the focus is the
-  // clean two-row view it's meant to be instead of a wall of stacked bars. (Other
-  // PRs packed into the kept lane stay visible — they're temporally elsewhere, so
-  // they don't clutter the interaction's moment.) A no-op unless we have both the
-  // kept rows and the PR (i.e. the cross-user case). Always restores the
-  // previously-hidden bands first so switching focus / clearing never strands a
-  // hidden band.
+  // Within a focused cross-user context, trim each kept row to just the bands
+  // that belong to the interaction "actor commented on author's PR":
+  //   • the PR AUTHOR's row keeps the discussed PR's lane (`bar:<lane>` +
+  //     `ev:<lane>`) plus `cross` — so their PR bar is what you see.
+  //   • the COMMENTER's (actor's) row keeps ONLY `cross` — every one of their own
+  //     PR bars is hidden, so the row shows nothing but the comment marker itself.
+  // Without the author/actor split both rows showed whatever PR happened to sit in
+  // the kept lane index, surfacing the commenter's unrelated work. A no-op unless
+  // we have both the kept rows and the PR. Always restores the previously-hidden
+  // bands first so switching focus / clearing never strands a hidden band.
   const focusSubgroups = useCallback(
     (groupIds: string[] | null, prId: number | null) => {
       const groups = groupsRef.current;
@@ -489,13 +493,17 @@ export function Timeline(): JSX.Element {
       if (!groupIds || groupIds.length === 0 || prId == null) return;
 
       const lane = prLanesRef.current.get(prId);
-      const keep = new Set(['cross']);
-      if (lane != null) {
-        keep.add(`bar:${lane}`);
-        keep.add(`ev:${lane}`);
-      }
+      const pr = prsByIdRef.current.get(prId);
+      const authorGroup = pr ? prGroupId(pr) : null;
       const items = itemsRef.current.get() as DataItem[];
       for (const gid of groupIds) {
+        // Author's row keeps the discussed PR's lane; the commenter's row keeps
+        // only the shared cross band (no PR bars of their own).
+        const keep = new Set(['cross']);
+        if (gid === authorGroup && lane != null) {
+          keep.add(`bar:${lane}`);
+          keep.add(`ev:${lane}`);
+        }
         const present = new Set<string>();
         for (const it of items) {
           if (it.group === gid && typeof it.subgroup === 'string') {
@@ -524,6 +532,11 @@ export function Timeline(): JSX.Element {
       focusRows(ctx?.groupIds ?? null);
       highlightPr(ctx?.prId ?? null);
       highlightEvent(ctx?.eventId ?? null);
+      // Track whether rows are collapsed so the "Exit focus" button shows. A null
+      // context (or one with no kept rows) means we're back to the full view.
+      const active = !!(ctx?.groupIds && ctx.groupIds.length > 0);
+      setFocusActive(active);
+      if (!active) showFocusActiveRef.current = false;
     },
     [focusSubgroups, focusRows, highlightPr, highlightEvent],
   );
@@ -700,9 +713,29 @@ export function Timeline(): JSX.Element {
     history.back();
   }, []);
 
-  // Ordinary dismiss (X / outside-click / Escape): tear down immediately for an
-  // instant feel, then pop our history entries (one popstate per go(), swallowed).
-  const dismissPopover = useCallback(() => {
+  // Close the popover modal ONLY (its X button / Escape): the cross-user focus
+  // overlay stays put so the user can keep examining the two-row view; the
+  // bottom-left "Exit focus" button is what reverts that. We still pop the
+  // modal's own history entries so the back button isn't left out of step, but we
+  // keep savedWindowRef so a later exitFocus can still restore the window.
+  const closeModal = useCallback(() => {
+    const depth = drillDepthRef.current;
+    setPopover(null);
+    if (depth > 0) {
+      suppressPopstateRef.current += 1;
+      history.go(-depth);
+    }
+    drillDepthRef.current = 0;
+    // When there's no collapsed-row focus to keep examining (e.g. a same-user
+    // marker that only glowed its PR), also clear that glow — there'd be no
+    // affordance left to clear it, since clicks no longer dismiss.
+    if (!focusedGroupIdsRef.current) applyContext(null);
+  }, [applyContext]);
+
+  // Full exit (bottom-left button / browser-back): revert the row collapse +
+  // glow, restore the window to where the user was when they opened the focus,
+  // and close the modal too.
+  const exitFocus = useCallback(() => {
     const depth = drillDepthRef.current;
     applyContext(null);
     setPopover(null);
@@ -772,17 +805,11 @@ export function Timeline(): JSX.Element {
       pageY?: number;
     }) => {
       const id = props.item;
-      // Any click on the timeline ends a sticky activity-panel "Show" overlay:
-      // collapsed rows expand back to all users and the marker glow clears. A
-      // marker/cluster click then sets up its own two-person context below.
-      if (showFocusActiveRef.current) {
-        showFocusActiveRef.current = false;
-        applyContext(null);
-      }
-      if (id == null) {
-        setPopover(null);
-        return;
-      }
+      // Clicking the timeline no longer dismisses the popover or reverts a focus
+      // overlay — that's now the explicit "Exit focus" button / the modal's X.
+      // So an empty-space click is a no-op, and selecting a PR / opening a marker
+      // leaves any open modal + focus alone (opening a new marker re-focuses).
+      if (id == null) return;
       const key = String(id);
       const native = props.event?.srcEvent ?? props.event;
       const x = native?.clientX ?? props.pageX ?? 0;
@@ -790,7 +817,6 @@ export function Timeline(): JSX.Element {
 
       if (key.startsWith('pr:')) {
         selectPr(Number.parseInt(key.slice(3), 10));
-        setPopover(null);
       } else if (key.startsWith('ev:')) {
         // Every single marker (commit, comment, review) opens the closely-
         // positioned modal; the modal shows detail + attribution and offers
@@ -803,8 +829,6 @@ export function Timeline(): JSX.Element {
         // timeline is stable now, so we no longer zoom into the cluster span.
         const members = clusterMembersRef.current.get(key) ?? [];
         openPopover(x, y, members);
-      } else {
-        setPopover(null);
       }
     });
 
@@ -1153,6 +1177,16 @@ export function Timeline(): JSX.Element {
         </div>
       )}
       <div ref={containerRef} className="h-full w-full" />
+      {focusActive && (
+        <button
+          type="button"
+          onClick={exitFocus}
+          className="tl-exit-focus"
+          title="Show all rows again and return to where you were"
+        >
+          <span aria-hidden="true">✕</span> Exit focus
+        </button>
+      )}
       {popover && (
         <MarkerPopover
           state={popover}
@@ -1160,7 +1194,7 @@ export function Timeline(): JSX.Element {
           usersById={usersById}
           prsById={prsById}
           onContextFocus={applyContext}
-          onDismiss={dismissPopover}
+          onDismiss={closeModal}
           onNavigate={navigatePopover}
           onPick={onPick}
           onBack={onBack}

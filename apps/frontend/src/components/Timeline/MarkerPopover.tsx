@@ -323,7 +323,9 @@ export function MarkerPopover({
     ],
     whileElementsMounted: autoUpdate,
   });
-  const dismiss = useDismiss(context);
+  // Outside-press is disabled: clicking the timeline must NOT close the modal
+  // (the user explores while it stays open). Escape + the header X still close it.
+  const dismiss = useDismiss(context, { outsidePress: false });
   const { getFloatingProps } = useInteractions([dismiss]);
 
   // Anchor to the click coordinates via a virtual reference element.
@@ -445,6 +447,17 @@ export function MarkerPopover({
         <span className="tl-modal-title">
           {events.length > 1 ? `${events.length} events` : 'Activity'}
         </span>
+        <button
+          type="button"
+          className="tl-modal-close"
+          // Stop the pointerdown so it doesn't start a header drag; the click closes.
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={onDismiss}
+          aria-label="Close"
+          title="Close"
+        >
+          ✕
+        </button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-2">
         {pickedEvent ? (
