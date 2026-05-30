@@ -13,8 +13,13 @@ import { useOpenPrs } from '../../hooks/useTriage.js';
 import { resolveRange, useFilters } from '../../store/filters.js';
 import { indexUsers, userLabel } from '../../lib/ui.js';
 import { renderPrBar, prClassName } from './prBar.js';
+import { computeUserStats, renderUserLabel } from './userRow.js';
 import { buildMarkerItems } from './clustering.js';
-import { MarkerPopover, type PopoverState } from './MarkerPopover.js';
+import {
+  MarkerPopover,
+  type ContextFocus,
+  type PopoverState,
+} from './MarkerPopover.js';
 
 const ZOOM_MIN_MS = 1000 * 60 * 60;
 
@@ -78,6 +83,9 @@ export function Timeline(): JSX.Element {
   const groupsRef = useRef(new DataSet<DataGroup>());
   const eventsByIdRef = useRef(new Map<number, TimelineEvent>());
   const clusterMembersRef = useRef(new Map<string, number[]>());
+  // Reverse of clusterMembers — event id → the cluster item id it currently sits
+  // in — so a highlighted event that's been clustered glows on its cluster pill.
+  const eventToClusterRef = useRef(new Map<number, string>());
   const dataRef = useRef<TimelineResponse | null>(null);
   const usersByIdRef = useRef(new Map<number, User>());
   // The PR bar currently glowing as the "linked" partner of an open marker
@@ -90,8 +98,24 @@ export function Timeline(): JSX.Element {
   const focusedGroupIdsRef = useRef<string[] | null>(null);
   const collapsedRowsRef = useRef<Set<string>>(new Set());
   const focusTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // The event currently glowing as the clicked partner of a two-person context
+  // (semantic id), plus the actual item carrying the class — an `ev:` marker or,
+  // when that event is clustered, the `cl:` cluster pill — so we can clear the
+  // right one even after a re-cluster moves the event between items.
+  const highlightedEventRef = useRef<number | null>(null);
+  const highlightedItemRef = useRef<string | null>(null);
+  // Marker drill-down depth mirrored onto the History API (0 closed / 1 popover
+  // / 2 a comment picked from a cluster list); the window captured when the
+  // drill-down began (restored on back-out); and a counter of popstate events to
+  // swallow when we unwind history ourselves.
+  const drillDepthRef = useRef(0);
+  const savedWindowRef = useRef<{ start: Date; end: Date } | null>(null);
+  const suppressPopstateRef = useRef(0);
 
   const [popover, setPopover] = useState<PopoverState | null>(null);
+  // Latest popover state, readable from stable callbacks without re-binding.
+  const popoverRef = useRef<PopoverState | null>(null);
+  popoverRef.current = popover;
 
   const { data, isLoading, error } = useTimeline();
   const { data: openPrsData } = useOpenPrs();
@@ -146,6 +170,41 @@ export function Timeline(): JSX.Element {
       }
     }
     highlightedPrRef.current = prId;
+  }, []);
+
+  // Glow the clicked event the same way as its linked PR while a two-person
+  // context is shown. The event may be rendered as a lone `ev:` marker or folded
+  // into a `cl:` cluster pill — highlight whichever item currently holds it, and
+  // remember that exact item so we clear the right one (clusters re-form on zoom).
+  const highlightEvent = useCallback((eventId: number | null) => {
+    const items = itemsRef.current;
+    const prevId = highlightedItemRef.current;
+    if (prevId != null) {
+      const item = items.get(prevId) as DataItem | null;
+      if (item && typeof item.className === 'string' && item.className.includes('ev-cross-linked')) {
+        items.update({
+          id: prevId,
+          className: item.className.replace(/\s*ev-cross-linked/g, ''),
+        });
+      }
+      highlightedItemRef.current = null;
+    }
+    highlightedEventRef.current = eventId;
+    if (eventId == null) return;
+    // Resolve to the lone marker, else the cluster pill it's folded into.
+    const targetId = items.get(`ev:${eventId}`)
+      ? `ev:${eventId}`
+      : (eventToClusterRef.current.get(eventId) ?? null);
+    if (targetId == null) return; // event not currently rendered
+    const item = items.get(targetId) as DataItem | null;
+    if (
+      item &&
+      typeof item.className === 'string' &&
+      !item.className.includes('ev-cross-linked')
+    ) {
+      items.update({ id: targetId, className: `${item.className} ev-cross-linked` });
+      highlightedItemRef.current = targetId;
+    }
   }, []);
 
   // Cross-user row focus (Fix 1): collapse every user row except `keepIds` so
@@ -299,6 +358,11 @@ export function Timeline(): JSX.Element {
       msPerPx,
     );
     clusterMembersRef.current = clusterMembers;
+    const evToCl = new Map<number, string>();
+    for (const [clId, members] of clusterMembers) {
+      for (const mid of members) evToCl.set(mid, clId);
+    }
+    eventToClusterRef.current = evToCl;
 
     const stale = itemsRef.current
       .getIds()
@@ -308,7 +372,145 @@ export function Timeline(): JSX.Element {
       });
     itemsRef.current.remove(stale);
     itemsRef.current.add(items);
+
+    // The glow lived on an `ev:`/`cl:` item just removed + re-added: re-assert it
+    // so the cross-link survives a re-cluster on manual zoom / a background sync.
+    // highlightEvent re-resolves to whichever item now holds the event (marker or
+    // cluster pill).
+    if (highlightedEventRef.current != null) {
+      const ev = highlightedEventRef.current;
+      highlightedItemRef.current = null; // the old DOM item is gone
+      highlightedEventRef.current = null; // force highlightEvent to re-add the class
+      highlightEvent(ev);
+    }
+  }, [highlightEvent]);
+
+  // Apply (or clear, with null) the whole combined-context overlay at once: the
+  // two focused rows, the linked-PR glow, and the clicked-marker glow. Timeline
+  // owns this now (not the popover's unmount) so it persists past "Open in
+  // detail pane" and is cleared explicitly on dismiss / back.
+  const applyContext = useCallback(
+    (ctx: ContextFocus | null) => {
+      focusRows(ctx?.groupIds ?? null);
+      highlightPr(ctx?.prId ?? null);
+      highlightEvent(ctx?.eventId ?? null);
+    },
+    [focusRows, highlightPr, highlightEvent],
+  );
+
+  // Restore the window captured when the drill-down began (idempotent across the
+  // two back steps). Honors reduced-motion like focusRows does.
+  const restoreWindow = useCallback(() => {
+    const tl = timelineRef.current;
+    const win = savedWindowRef.current;
+    if (!tl || !win) return;
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    tl.setWindow(win.start, win.end, { animation: !reduceMotion });
   }, []);
+
+  // --- Marker drill-down + browser/mouse-back navigation -------------------
+  // The popover journey is mirrored onto the History API so the mouse/browser
+  // back button (and the in-popover "‹ back" button, routed through
+  // history.back) steps out one level at a time: depth 2 (a comment picked from
+  // a cluster) → depth 1 (the cluster list) → depth 0 (closed). Backing out
+  // restores the pre-drill window. drillDepthRef is the source of truth;
+  // suppressPopstateRef swallows the popstate(s) our own history.go/back emit.
+
+  const openPopover = useCallback(
+    (x: number, y: number, eventIds: number[]) => {
+      if (eventIds.length === 0) return;
+      applyContext(null); // drop any lingering (e.g. post-navigate) overlay
+      if (drillDepthRef.current === 0) {
+        history.pushState({ ghtmDrill: 1 }, '');
+      } else if (drillDepthRef.current === 2) {
+        // Collapse the extra entry so we sit on a single drill slot.
+        suppressPopstateRef.current += 1;
+        history.go(-1);
+      }
+      drillDepthRef.current = 1;
+      // Capture before any selection/scroll side effect can move the window.
+      savedWindowRef.current = timelineRef.current?.getWindow() ?? null;
+      setPopover({
+        x,
+        y,
+        eventIds,
+        picked: eventIds.length === 1 ? eventIds[0]! : null,
+      });
+    },
+    [applyContext],
+  );
+
+  // Drill from the cluster list into a single comment (deepens to depth 2).
+  const onPick = useCallback((id: number) => {
+    const p = popoverRef.current;
+    if (!p || p.picked != null || p.eventIds.length <= 1) return;
+    drillDepthRef.current = 2;
+    history.pushState({ ghtmDrill: 2 }, '');
+    setPopover({ ...p, picked: id });
+  }, []);
+
+  // In-popover back button → route through history so all three back paths
+  // (mouse, browser, button) converge on the popstate handler.
+  const onBack = useCallback(() => {
+    history.back();
+  }, []);
+
+  // Ordinary dismiss (X / outside-click / Escape): tear down immediately for an
+  // instant feel, then pop our history entries (one popstate per go(), swallowed).
+  const dismissPopover = useCallback(() => {
+    const depth = drillDepthRef.current;
+    applyContext(null);
+    setPopover(null);
+    restoreWindow();
+    if (depth > 0) {
+      suppressPopstateRef.current += 1;
+      history.go(-depth);
+    }
+    drillDepthRef.current = 0;
+    savedWindowRef.current = null;
+  }, [applyContext, restoreWindow]);
+
+  // Open-in-detail: close the popover but KEEP the overlay + one history entry,
+  // so a later back press clears the overlay and restores the window (the detail
+  // pane itself stays open).
+  const navigatePopover = useCallback(() => {
+    if (drillDepthRef.current === 2) {
+      suppressPopstateRef.current += 1;
+      drillDepthRef.current = 1;
+      history.go(-1);
+    }
+    setPopover(null);
+  }, []);
+
+  // The single back-handler for the mouse/browser back button.
+  useEffect(() => {
+    const onPopState = (): void => {
+      if (suppressPopstateRef.current > 0) {
+        suppressPopstateRef.current -= 1;
+        return;
+      }
+      const depth = drillDepthRef.current;
+      if (depth >= 2) {
+        // Back to the cluster list: clear the overlay, restore the window.
+        drillDepthRef.current = 1;
+        setPopover((p) => (p ? { ...p, picked: null } : p));
+        applyContext(null);
+        restoreWindow();
+      } else if (depth === 1) {
+        // Out of the drill-down entirely.
+        drillDepthRef.current = 0;
+        applyContext(null);
+        setPopover(null);
+        restoreWindow();
+        savedWindowRef.current = null;
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [applyContext, restoreWindow]);
 
   // Create the timeline once.
   useEffect(() => {
@@ -346,30 +548,12 @@ export function Timeline(): JSX.Element {
         // "Open in detail pane" / "Open on GitHub" to drill in. While it's open
         // the related PR band glows (see highlightPr, wired via MarkerPopover).
         const evId = Number.parseInt(key.slice(3), 10);
-        setPopover({ x, y, eventIds: [evId] });
+        openPopover(x, y, [evId]);
       } else if (key.startsWith('cl:')) {
-        // Zoom into the cluster's time-span so it unpacks into individual
-        // markers (the rangechanged handler re-clusters at the finer zoom).
-        // When members are too tight to separate even at max zoom, fall back to
-        // the list popover.
+        // A cluster opens the list popover (pick a comment to drill in). The
+        // timeline is stable now, so we no longer zoom into the cluster span.
         const members = clusterMembersRef.current.get(key) ?? [];
-        const times = members
-          .map((mid) => eventsByIdRef.current.get(mid)?.occurredAt)
-          .filter((t): t is string => t != null)
-          .map((t) => Date.parse(t));
-        if (times.length > 0) {
-          const min = Math.min(...times);
-          const max = Math.max(...times);
-          const pad = Math.max((max - min) * 0.15, 60_000);
-          if (max - min + 2 * pad >= ZOOM_MIN_MS) {
-            timeline.setWindow(min - pad, max + pad, { animation: true });
-            setPopover(null);
-          } else {
-            setPopover({ x, y, eventIds: members });
-          }
-        } else {
-          setPopover({ x, y, eventIds: members });
-        }
+        openPopover(x, y, members);
       } else {
         setPopover(null);
       }
@@ -389,7 +573,7 @@ export function Timeline(): JSX.Element {
       timeline.destroy();
       timelineRef.current = null;
     };
-  }, [selectPr, rebuildMarkers]);
+  }, [selectPr, rebuildMarkers, openPopover]);
 
   // Rebuild groups + PR bars when data or the derived-state filter changes.
   useEffect(() => {
@@ -408,6 +592,10 @@ export function Timeline(): JSX.Element {
     const evMap = new Map<number, TimelineEvent>();
     for (const ev of data.events) evMap.set(ev.id, ev);
     eventsByIdRef.current = evMap;
+
+    // Per-user interaction tallies for the row labels — from the full timeframe
+    // (all events + all PRs), so they don't shift with the thread-state filter.
+    const userStats = computeUserStats(data.events, data.prs);
 
     const repoIds = unique([
       ...prs.map((p) => p.repoId),
@@ -439,7 +627,7 @@ export function Timeline(): JSX.Element {
         const gid = `repo:${rid}:user:${uid}`;
         groups.push({
           id: gid,
-          content: userLabel(usersById.get(uid), uid),
+          content: renderUserLabel(usersById.get(uid), uid, userStats.get(uid)),
           treeLevel: 2,
           // `tl-user-row` scopes the collapse transition; the per-group token
           // lets focusRows find this row's label + bar to animate (Fix 1).
@@ -608,9 +796,11 @@ export function Timeline(): JSX.Element {
           eventsById={eventsByIdRef.current}
           usersById={usersById}
           prsById={prsById}
-          onHighlightPr={highlightPr}
-          onFocusRows={focusRows}
-          onClose={() => setPopover(null)}
+          onContextFocus={applyContext}
+          onDismiss={dismissPopover}
+          onNavigate={navigatePopover}
+          onPick={onPick}
+          onBack={onBack}
         />
       )}
     </div>

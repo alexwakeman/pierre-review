@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   autoUpdate,
   flip,
@@ -21,6 +21,17 @@ export interface PopoverState {
   x: number;
   y: number;
   eventIds: number[];
+  // Which event is drilled into (null = cluster list). Owned by Timeline so the
+  // back button / history navigation is the single source of truth.
+  picked: number | null;
+}
+
+// The combined-context overlay the popover asks Timeline to apply: the two
+// focused rows, the linked-PR glow, and the clicked-marker glow.
+export interface ContextFocus {
+  groupIds: string[] | null;
+  prId: number | null;
+  eventId: number | null;
 }
 
 function firstHunkLine(hunk: string | null): string | null {
@@ -238,22 +249,25 @@ export function MarkerPopover({
   eventsById,
   usersById,
   prsById,
-  onHighlightPr,
-  onFocusRows,
-  onClose,
+  onContextFocus,
+  onDismiss,
+  onNavigate,
+  onPick,
+  onBack,
 }: {
   state: PopoverState;
   eventsById: Map<number, TimelineEvent>;
   usersById: Map<number, User>;
   prsById: Map<number, TimelinePr>;
-  onHighlightPr: (prId: number | null) => void;
-  onFocusRows: (groupIds: string[] | null) => void;
-  onClose: () => void;
+  onContextFocus: (ctx: ContextFocus) => void;
+  onDismiss: () => void;
+  onNavigate: () => void;
+  onPick: (id: number) => void;
+  onBack: () => void;
 }): JSX.Element {
-  // When a cluster is opened we start in list mode; picking an item drills in.
-  const [picked, setPicked] = useState<number | null>(
-    state.eventIds.length === 1 ? state.eventIds[0]! : null,
-  );
+  // The drilled-into event (null = cluster list) is owned by Timeline (history
+  // is the source of truth) and arrives via state.picked.
+  const picked = state.picked;
 
   // Persisted across reloads so the user's chosen size becomes the default for
   // every marker modal going forward (Fix 2).
@@ -265,7 +279,7 @@ export function MarkerPopover({
   const { refs, floatingStyles, context } = useFloating({
     open: true,
     onOpenChange: (o) => {
-      if (!o) onClose();
+      if (!o) onDismiss();
     },
     placement: 'bottom',
     middleware: [offset(10), flip(), shift({ padding: 8 })],
@@ -296,17 +310,7 @@ export function MarkerPopover({
     .filter((e): e is TimelineEvent => e != null);
   const pickedEvent = picked != null ? eventsById.get(picked) : undefined;
 
-  // Reset to the cluster list when a different marker/cluster is opened.
-  useEffect(() => {
-    setPicked(state.eventIds.length === 1 ? state.eventIds[0]! : null);
-  }, [state.eventIds]);
-
-  // Glow the PR band the displayed event concerns; clear on close / list view.
   const pickedPrId = pickedEvent?.prId ?? null;
-  useEffect(() => {
-    onHighlightPr(pickedPrId);
-    return () => onHighlightPr(null);
-  }, [pickedPrId, onHighlightPr]);
 
   // Cross-user focus: when the displayed event is one person acting on another
   // person's PR, collapse every other user row so the actor's row and the PR
@@ -323,21 +327,59 @@ export function MarkerPopover({
       `repo:${pr!.repoId}:user:${authorId}`,
     ];
   }, [pickedEvent, prsById]);
+
+  // Report the overlay to Timeline, which owns it — so it persists past
+  // "Open in detail pane" and is cleared explicitly on dismiss / back, not on
+  // unmount. The PR always glows when a single event is shown; the clicked
+  // marker only glows in the two-person (cross-user) case.
   useEffect(() => {
-    onFocusRows(focusGroupIds);
-    return () => onFocusRows(null);
-  }, [focusGroupIds, onFocusRows]);
+    onContextFocus({
+      groupIds: focusGroupIds,
+      prId: pickedPrId,
+      eventId: focusGroupIds != null ? picked : null,
+    });
+  }, [focusGroupIds, pickedPrId, picked, onContextFocus]);
 
   const persistSize = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     setPopoverSize({ width: el.offsetWidth, height: el.offsetHeight });
   };
 
+  // Drag-to-move: an offset added on top of floating-ui's computed position.
+  // Listeners are mounted once and gated by dragRef, so they're cleaned up on
+  // unmount and never leak even if a drag ends off-screen.
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  useEffect(() => {
+    const move = (ev: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      setDragOffset({ x: d.ox + (ev.clientX - d.sx), y: d.oy + (ev.clientY - d.sy) });
+    };
+    const up = () => {
+      dragRef.current = null;
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+  }, []);
+  const onDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragRef.current = { sx: e.clientX, sy: e.clientY, ox: dragOffset.x, oy: dragOffset.y };
+  };
+
+  const composedTransform = `${floatingStyles.transform ?? ''} translate(${dragOffset.x}px, ${dragOffset.y}px)`.trim();
+
   return (
     <div
       ref={refs.setFloating}
       style={{
         ...floatingStyles,
+        transform: composedTransform,
         width: popoverSize?.width ?? 420,
         height: popoverSize?.height ?? 340,
         minWidth: 240,
@@ -351,13 +393,28 @@ export function MarkerPopover({
       onPointerUp={persistSize}
       className="z-50 flex flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
     >
+      <div className="tl-modal-header" onPointerDown={onDragStart}>
+        <svg className="tl-grip" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+          <g fill="currentColor">
+            <circle cx="2" cy="2" r="1" />
+            <circle cx="8" cy="2" r="1" />
+            <circle cx="2" cy="5" r="1" />
+            <circle cx="8" cy="5" r="1" />
+            <circle cx="2" cy="8" r="1" />
+            <circle cx="8" cy="8" r="1" />
+          </g>
+        </svg>
+        <span className="tl-modal-title">
+          {events.length > 1 ? `${events.length} events` : 'Activity'}
+        </span>
+      </div>
       <div className="min-h-0 flex-1 overflow-auto p-2">
         {pickedEvent ? (
           <div className="space-y-1.5">
             {events.length > 1 && (
               <button
                 type="button"
-                onClick={() => setPicked(null)}
+                onClick={onBack}
                 className="text-[11px] text-gray-400 hover:text-gray-600"
               >
                 ‹ back to {events.length} events
@@ -367,11 +424,11 @@ export function MarkerPopover({
               ev={pickedEvent}
               usersById={usersById}
               prsById={prsById}
-              onNavigate={onClose}
+              onNavigate={onNavigate}
             />
           </div>
         ) : (
-          <EventList events={events} usersById={usersById} onPick={setPicked} />
+          <EventList events={events} usersById={usersById} onPick={onPick} />
         )}
       </div>
     </div>
