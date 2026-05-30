@@ -100,12 +100,20 @@ function SingleEvent({
   const { data: thread } = useThread(isReviewComment ? ev.threadId : null);
   const anchor = thread ? firstHunkLine(thread.comments[0]?.diffHunk ?? null) : null;
 
-  // Commit markers resolve their detail (sha / message / GitHub link) from the
-  // PR detail, joined by the event's ref id — keeps the timeline payload lean.
+  // Commit + PR-comment markers resolve their detail (sha / message / body /
+  // GitHub link) from the PR detail, joined by the event's ref id — keeps the
+  // timeline payload lean (no bodies on /api/timeline).
   const isCommit = ev.type === 'commit_pushed';
-  const { data: prDetail } = usePr(isCommit && ev.prId != null ? ev.prId : null);
+  const isPrComment = ev.type === 'pr_comment';
+  const { data: prDetail } = usePr(
+    (isCommit || isPrComment) && ev.prId != null ? ev.prId : null,
+  );
   const commit =
     isCommit && prDetail ? prDetail.commits.find((c) => c.id === ev.refId) : undefined;
+  const prComment =
+    isPrComment && prDetail
+      ? prDetail.comments.find((c) => c.id === ev.refId)
+      : undefined;
 
   const pr = ev.prId != null ? prsById.get(ev.prId) : undefined;
 
@@ -179,6 +187,16 @@ function SingleEvent({
         </div>
       )}
 
+      {isPrComment && (
+        <div className="text-xs">
+          {prComment ? (
+            <Markdown>{prComment.body}</Markdown>
+          ) : (
+            <span className="text-gray-400">loading comment…</span>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center gap-3 pt-0.5 text-[11px]">
         <button
           type="button"
@@ -195,6 +213,16 @@ function SingleEvent({
             className="text-blue-500 hover:underline"
           >
             Open commit on GitHub ↗
+          </a>
+        )}
+        {isPrComment && prComment && prDetail && (
+          <a
+            href={prComment.url ?? prDetail.githubUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-blue-500 hover:underline"
+          >
+            Open on GitHub ↗
           </a>
         )}
       </div>

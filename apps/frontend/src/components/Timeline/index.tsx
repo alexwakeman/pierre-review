@@ -124,6 +124,13 @@ export function Timeline(): JSX.Element {
   const derivedStates = useFilters((s) => s.derivedStates);
   const selectPr = useFilters((s) => s.selectPr);
   const selectedPrId = useFilters((s) => s.selectedPrId);
+  // selectedPrId mirrored into a ref so the rebuild effect can keep force-showing
+  // the selected PR's bar without taking selectedPrId as a dependency — a plain
+  // selection must NOT trigger a rebuild (see the selection effect below).
+  const selectedPrIdRef = useRef(selectedPrId);
+  // Bumped only when a selection lands on a PR the current filter hides, to ask
+  // the rebuild to materialize that one bar.
+  const [forceShowNonce, setForceShowNonce] = useState(0);
 
   const preset = useFilters((s) => s.preset);
   const customFrom = useFilters((s) => s.customFrom);
@@ -584,7 +591,7 @@ export function Timeline(): JSX.Element {
       (pr) =>
         // Always render the selected PR's bar so event→PR navigation has a
         // target even when the derived-state filter would otherwise hide it.
-        pr.id === selectedPrId ||
+        pr.id === selectedPrIdRef.current ||
         derivedStates.length === 0 ||
         derivedStates.some((s) => pr.threadCounts[s] > 0),
     );
@@ -690,13 +697,14 @@ export function Timeline(): JSX.Element {
 
     // Re-assert overlay state so an open marker modal survives a background
     // sync untouched: selection, the cross-link glow, and the row focus.
+    const selPr = selectedPrIdRef.current;
     if (
-      selectedPrId != null &&
+      selPr != null &&
       tl &&
-      itemsRef.current.get(`pr:${selectedPrId}`) &&
-      !tl.getSelection().map(String).includes(`pr:${selectedPrId}`)
+      itemsRef.current.get(`pr:${selPr}`) &&
+      !tl.getSelection().map(String).includes(`pr:${selPr}`)
     ) {
-      tl.setSelection([`pr:${selectedPrId}`]);
+      tl.setSelection([`pr:${selPr}`]);
     }
     if (highlightedPrRef.current != null) {
       const hp = highlightedPrRef.current;
@@ -711,11 +719,36 @@ export function Timeline(): JSX.Element {
     derivedStates,
     reposById,
     usersById,
-    selectedPrId,
+    forceShowNonce,
     rebuildMarkers,
     highlightPr,
     focusRows,
   ]);
+
+  // Reflect the active PR selection without disturbing the view. Selecting a PR
+  // — clicking its bar, j/k cycling, a marker's "open in detail" — is a purely
+  // visual change: vis's setSelection only toggles a class, it never scrolls.
+  // We deliberately keep it OUT of the rebuild effect above (which re-filters
+  // PRs, rebuilds every row, and re-clusters every marker); running that on a
+  // plain click was what made the timeline jump around. Intentional scroll-to-PR
+  // navigation goes through the separate timelineFocusPr effect below.
+  useEffect(() => {
+    selectedPrIdRef.current = selectedPrId;
+    const tl = timelineRef.current;
+    if (!tl) return;
+    // The selected PR's bar can be hidden by the derived-state filter (j/k
+    // cycles the full PR list; a marker may belong to a filtered-out PR). Force
+    // one rebuild to materialize the bar — its tail re-asserts the selection.
+    if (selectedPrId != null && !itemsRef.current.get(`pr:${selectedPrId}`)) {
+      setForceShowNonce((n) => n + 1);
+      return;
+    }
+    const want = selectedPrId != null ? [`pr:${selectedPrId}`] : [];
+    const cur = tl.getSelection().map(String);
+    const same =
+      cur.length === want.length && want.every((id) => cur.includes(id));
+    if (!same) tl.setSelection(want);
+  }, [selectedPrId]);
 
   // Move the visible window when the range preset changes.
   useEffect(() => {
