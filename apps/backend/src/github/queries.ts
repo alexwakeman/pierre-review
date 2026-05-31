@@ -5,6 +5,9 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
     repository(owner: $owner, name: $name) {
       id
       nameWithOwner
+      defaultBranchRef {
+        name
+      }
       pullRequests(
         first: 25
         after: $cursor
@@ -26,6 +29,7 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
           closedAt
           updatedAt
           url
+          baseRefName
           mergeable
           mergeStateStatus
           author {
@@ -301,6 +305,7 @@ export interface GqlPullRequest {
   closedAt: string | null;
   updatedAt: string;
   url: string;
+  baseRefName: string;
   mergeable: string | null;
   mergeStateStatus: string | null;
   author: GqlActor | null;
@@ -318,6 +323,7 @@ export interface RepoActivityResponse {
   repository: {
     id: string;
     nameWithOwner: string;
+    defaultBranchRef: { name: string } | null;
     pullRequests: {
       pageInfo: { hasNextPage: boolean; endCursor: string | null };
       nodes: GqlPullRequest[];

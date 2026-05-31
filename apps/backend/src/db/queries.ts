@@ -8,6 +8,7 @@ import {
   gte,
   inArray,
   isNotNull,
+  isNull,
   lte,
   or,
   sql,
@@ -414,16 +415,34 @@ export function getOpenPrs(filters: OpenPrsFilters): TimelinePr[] {
 
 // ---- merge-rights inference ----
 
-// Distinct users who have actually merged a PR per repo (across ALL synced
-// history, not the timeline window). We treat "has ever merged a PR here" as a
-// good-enough proxy for "has merge rights / is a maintainer" of that repo.
-// mergedById is only populated by syncs that ran after it was added, so this is
-// empty for repos not yet (deep-)re-synced.
+// Distinct users who have merged a PR INTO THE DEFAULT BRANCH per repo (across
+// ALL synced history, not the timeline window). We treat "has merged into the
+// repo's default branch" as a good-enough proxy for "is a maintainer" — merges
+// into feature/integration branches don't count, since write access to a side
+// branch isn't the same signal as landing changes on main.
+//
+// Backward-compat: mergedById / baseRefName / defaultBranch are only populated by
+// syncs that ran after they were added, so older rows have nulls. We count a
+// merge UNLESS we positively know it targeted a non-default branch (i.e. both the
+// repo's default branch and the PR's base branch are known and differ). This
+// keeps already-synced repos populated and tightens to default-only as they
+// re-sync. Repos never (deep-)re-synced for mergedById stay empty regardless.
 export function getMergers(): RepoMergers[] {
   const rows = db
     .selectDistinct({ repoId: pullRequests.repoId, userId: pullRequests.mergedById })
     .from(pullRequests)
-    .where(and(eq(pullRequests.state, 'merged'), isNotNull(pullRequests.mergedById)))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(
+      and(
+        eq(pullRequests.state, 'merged'),
+        isNotNull(pullRequests.mergedById),
+        or(
+          isNull(repos.defaultBranch),
+          isNull(pullRequests.baseRefName),
+          eq(pullRequests.baseRefName, repos.defaultBranch),
+        ),
+      ),
+    )
     .all();
   const byRepo = new Map<number, number[]>();
   for (const r of rows) {

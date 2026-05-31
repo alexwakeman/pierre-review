@@ -92,7 +92,12 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
         throw err;
       }
 
-      repoId ??= upsertRepo(owner, name, resp.repository.id);
+      repoId ??= upsertRepo(
+        owner,
+        name,
+        resp.repository.id,
+        resp.repository.defaultBranchRef?.name ?? null,
+      );
 
       const { nodes, pageInfo } = resp.repository.pullRequests;
       for (const pr of nodes) {

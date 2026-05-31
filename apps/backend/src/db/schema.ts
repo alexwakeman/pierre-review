@@ -15,6 +15,10 @@ export const repos = sqliteTable(
     owner: text('owner').notNull(),
     name: text('name').notNull(),
     githubNodeId: text('github_node_id').notNull().unique(),
+    // The repo's default branch (GraphQL defaultBranchRef.name), captured each
+    // activity sync. Used to scope the "maintainer" inference to PRs merged into
+    // the default branch. Null until a sync populates it.
+    defaultBranch: text('default_branch'),
     backfillUntil: integer('backfill_until', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
@@ -52,6 +56,11 @@ export const pullRequests = sqliteTable(
     // Drives the "has merge rights / maintainer" inference. Null for non-merged
     // PRs and until a (deep) sync backfills it on already-synced merged PRs.
     mergedById: integer('merged_by_id').references(() => users.id),
+    // The branch this PR targets (GraphQL `baseRefName`). The maintainer
+    // inference only counts merges into the repo's default branch, so a merge
+    // into a feature/integration branch doesn't elevate the merger. Null until a
+    // (deep) sync backfills it on already-synced PRs.
+    baseRefName: text('base_ref_name'),
     state: text('state', { enum: ['open', 'merged', 'closed'] }).notNull(),
     isDraft: integer('is_draft', { mode: 'boolean' }).notNull().default(false),
     openedAt: integer('opened_at', { mode: 'timestamp' }).notNull(),

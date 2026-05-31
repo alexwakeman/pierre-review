@@ -91,13 +91,19 @@ export function upsertRepo(
   owner: string,
   name: string,
   githubNodeId: string,
+  defaultBranch?: string | null,
 ): number {
+  // Only overwrite default_branch when we actually know it (the add-repo path
+  // calls without it via the lightweight REPO_ID_QUERY) so we never null out a
+  // value a prior sync populated.
+  const set: { owner: string; name: string; defaultBranch?: string } = { owner, name };
+  if (defaultBranch != null) set.defaultBranch = defaultBranch;
   const row = db
     .insert(repos)
-    .values({ owner, name, githubNodeId })
+    .values({ owner, name, githubNodeId, defaultBranch: defaultBranch ?? null })
     .onConflictDoUpdate({
       target: repos.githubNodeId,
-      set: { owner, name },
+      set,
     })
     .returning({ id: repos.id })
     .get();
@@ -329,6 +335,7 @@ export function persistPr(
         body: pr.body ?? null,
         authorId,
         mergedById,
+        baseRefName: pr.baseRefName ?? null,
         state: prState(pr.state),
         isDraft: pr.isDraft,
         openedAt,
@@ -351,6 +358,7 @@ export function persistPr(
           body: pr.body ?? null,
           authorId,
           mergedById,
+          baseRefName: pr.baseRefName ?? null,
           state: prState(pr.state),
           isDraft: pr.isDraft,
           firstReviewAt,
