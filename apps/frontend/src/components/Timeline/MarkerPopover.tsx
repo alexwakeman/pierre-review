@@ -372,7 +372,15 @@ export function MarkerPopover({
   // "Open in detail pane" and is cleared explicitly on dismiss / back, not on
   // unmount. The PR always glows when a single event is shown; the clicked
   // marker only glows in the two-person (cross-user) case.
+  //
+  // Only a *picked* single event defines a focus context — the cluster-LIST view
+  // (picked == null) must NOT drive it. Otherwise opening a cluster while a focus
+  // is active would clear that focus (re-expanding every row, snapping to the
+  // top). The two paths that legitimately clear focus from a list — backing out
+  // and dismissing — do so explicitly in Timeline, so leaving it untouched here
+  // is safe.
   useEffect(() => {
+    if (picked == null) return;
     onContextFocus({
       groupIds: focusGroupIds,
       prId: pickedPrId,

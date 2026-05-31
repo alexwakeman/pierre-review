@@ -941,7 +941,14 @@ export function Timeline(): JSX.Element {
   const openPopover = useCallback(
     (x: number, y: number, eventIds: number[]) => {
       if (eventIds.length === 0) return;
-      applyContext(null); // drop any lingering (e.g. post-navigate) overlay
+      // Preserve an active row-focus when opening another marker/cluster.
+      // Clearing it here re-expands every row and snaps the timeline to the top,
+      // losing the cluster the user just clicked. Instead: a picked single event
+      // re-targets the focus via the popover's own onContextFocus, and a cluster
+      // list keeps the current focus (its members live on the focused row). Only
+      // a lingering glow with NO row-focus (e.g. a same-user marker left over
+      // post-navigate) still needs an explicit clear.
+      if (!focusedGroupIdsRef.current) applyContext(null);
       if (drillDepthRef.current === 0) {
         history.pushState({ ghtmDrill: 1 }, '');
       } else if (drillDepthRef.current === 2) {
