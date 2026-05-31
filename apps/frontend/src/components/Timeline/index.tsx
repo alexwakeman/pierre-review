@@ -678,8 +678,11 @@ export function Timeline(): JSX.Element {
       highlightEvent(ctx?.eventId ?? null);
       // Track whether rows are collapsed so the "Exit focus" button shows. A null
       // context (or one with no kept rows) means we're back to the full view.
+      // Mirror it into the store too so the keyboard hook (Escape) can tell
+      // focus is up and route to exitFocus instead of clearing the selection.
       const active = !!(ctx?.groupIds && ctx.groupIds.length > 0);
       setFocusActive(active);
+      useFilters.getState().setFocusActive(active);
       if (!active) showFocusActiveRef.current = false;
     },
     [focusSubgroups, focusRows, highlightPr, highlightEvent, applyExitGlow],
@@ -995,6 +998,22 @@ export function Timeline(): JSX.Element {
     }
   }, [repoIds, focusActive, exitFocus]);
 
+  // Leave focus on the store's edge-triggered exit request (Escape via the
+  // keyboard hook, and "Clear all" via resetAllFilters both bump
+  // exitFocusSignal). Each bump is a fresh request: run the exact same teardown
+  // as the on-canvas "Exit focus" button — restore the rows, re-centre on the
+  // marker that opened the focus, and fade-glow it. exitFocus() no-ops cleanly
+  // when nothing is focused (anchor null, depth 0), so a stray bump is harmless.
+  const exitFocusSignal = useFilters((s) => s.exitFocusSignal);
+  const prevExitSignalRef = useRef(exitFocusSignal);
+  useEffect(() => {
+    if (exitFocusSignal === prevExitSignalRef.current) return;
+    prevExitSignalRef.current = exitFocusSignal;
+    if (focusActive || focusedGroupIdsRef.current || showFocusActiveRef.current) {
+      exitFocus();
+    }
+  }, [exitFocusSignal, focusActive, exitFocus]);
+
   // Don't let the glow fade timers fire after unmount.
   useEffect(
     () => () => {
@@ -1105,6 +1124,19 @@ export function Timeline(): JSX.Element {
     for (const ev of data.events) evMap.set(ev.id, ev);
     eventsByIdRef.current = evMap;
 
+    // PRs with at least one comment (review-thread or issue-level), derived
+    // straight from the lean timeline events — no extra fetch, keeps the
+    // endpoint lean. Drives the small comment glyph on each PR bar.
+    const prsWithComments = new Set<number>();
+    for (const ev of data.events) {
+      if (
+        ev.prId != null &&
+        (ev.type === 'review_comment' || ev.type === 'pr_comment')
+      ) {
+        prsWithComments.add(ev.prId);
+      }
+    }
+
     // Pack each row's PRs into lanes so non-overlapping PRs share one line — a
     // prolific author's row is a few lanes tall instead of one line per PR.
     // Computed over the full PR set (not the filtered `prs`) so a PR keeps its
@@ -1194,8 +1226,11 @@ export function Timeline(): JSX.Element {
         start: pr.openedAt,
         end: pr.mergedAt ?? pr.closedAt ?? new Date().toISOString(),
         content: renderPrBar(pr, {
-          label: userLabel(author, pr.authorId),
-          avatarUrl: author?.avatarUrl ?? null,
+          author: {
+            label: userLabel(author, pr.authorId),
+            avatarUrl: author?.avatarUrl ?? null,
+          },
+          hasComments: prsWithComments.has(pr.id),
         }),
         className: prClassName(pr),
         title: `#${pr.number} ${pr.title}`,

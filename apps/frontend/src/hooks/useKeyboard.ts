@@ -14,11 +14,21 @@ export function useKeyboard(): void {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const { selectedPrId, selectPr, clearSelection } = useFilters.getState();
+      const { selectedPrId, selectPr, clearSelection, focusActive, exitFocus } =
+        useFilters.getState();
 
       if (e.key === 'Escape') {
-        if (isTypingTarget(e.target)) (e.target as HTMLElement).blur();
-        else clearSelection();
+        if (isTypingTarget(e.target)) {
+          (e.target as HTMLElement).blur();
+        } else if (focusActive) {
+          // In focus mode, Escape exits focus exactly like the on-canvas "Exit
+          // focus" button: the Timeline reacts to the bumped exitFocusSignal to
+          // restore the rows, re-centre on the opening marker, and fade-glow it.
+          // Selection is left intact (the detail pane stays put).
+          exitFocus();
+        } else {
+          clearSelection();
+        }
         return;
       }
       if (isTypingTarget(e.target)) return;

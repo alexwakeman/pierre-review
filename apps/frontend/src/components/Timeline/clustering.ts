@@ -57,6 +57,27 @@ export interface ClusterResult {
  * @param prLanes   prId -> lane index, from assignPrLanes (own-work band placement)
  * @param msPerPx   current zoom: how many ms one horizontal pixel spans
  */
+// Spacing model for the anti-overlap pass (deconflictBands). Every marker/cluster
+// is rendered centred on its timestamp (translateX(-50%)), so two neighbours
+// visually collide unless their centres are at least (halfWidthA + halfWidthB)
+// apart. A plain marker is a 16px SVG (half ≈ 8px); a cluster "+N" pill is much
+// wider and grows with its digit count — a single fixed gap can't cover both, so
+// the pass spaces each pair by its actual glyph half-widths plus a little
+// padding. Items that fall closer than that at the current zoom are nudged apart
+// in time: they no longer sit exactly on their timestamp, but every glyph stays
+// separately visible + clickable.
+const MARKER_HALF_PX = 9; // 8px svg half + 1px breathing room
+const GLYPH_PAD_PX = 3; // minimum clear gap between two adjacent glyph edges
+
+// Approximate rendered half-width (px) of a cluster pill: padding (4+4) + border
+// (1+1) + the 11px kind glyph + a 2px gap + the "+N" text (~6.5px per char at the
+// pill's 10px bold font). Deliberately a touch generous so glyphs never quite
+// touch even when the count grows to several digits.
+function clusterHalfPx(count: number): number {
+  const chars = 1 + String(count).length; // '+' followed by the digits
+  return (23 + chars * 6.5) / 2;
+}
+
 export function buildMarkerItems(
   events: TimelineEvent[],
   groupOf: (ev: TimelineEvent) => string,
@@ -69,6 +90,9 @@ export function buildMarkerItems(
   const thresholdMs = Math.max(1, thresholdPx * msPerPx);
   const items: DataItem[] = [];
   const clusterMembers = new Map<string, number[]>();
+  // Per-point glyph half-width (px), consumed by the anti-overlap pass so wide
+  // cluster pills get spaced apart from their narrower marker neighbours.
+  const halfPx = new Map<string, number>();
   // Rows that have any cross-user marker — get a divider above their cross band.
   const crossGroups = new Set<string>();
 
@@ -136,8 +160,9 @@ export function buildMarkerItems(
       if (bucket.length === 0) return;
       if (bucket.length === 1) {
         const ev = bucket[0]!;
+        const id = `ev:${ev.id}`;
         items.push({
-          id: `ev:${ev.id}`,
+          id,
           group,
           subgroup,
           sortKey,
@@ -147,6 +172,7 @@ export function buildMarkerItems(
           className: cls('ev-marker'),
           title: eventTooltip(ev, usersById),
         } as DataItem);
+        halfPx.set(id, MARKER_HALF_PX);
       } else {
         const meanMs =
           bucket.reduce((s, e) => s + Date.parse(e.occurredAt), 0) / bucket.length;
@@ -166,6 +192,7 @@ export function buildMarkerItems(
           className: cls('ev-cluster'),
           title: `${bucket.length} ${kind}s`,
         } as DataItem);
+        halfPx.set(id, clusterHalfPx(bucket.length));
       }
       bucket = [];
     };
@@ -178,6 +205,19 @@ export function buildMarkerItems(
     }
     flush();
   }
+
+  // Anti-overlap pass. Clustering only merges events of the SAME kind within one
+  // bucket, so a band can still hold differently-shaped neighbours (e.g. a
+  // commit square abutting a comment circle on the same `ev:<lane>` line, or a
+  // wide "+N" cluster pill sitting on top of a single marker on the shared
+  // `cross` line) whose glyphs collide on the time axis. Within each rendered
+  // band (group + subgroup) we walk the items in time order and push any that
+  // sit closer than the two glyphs' combined half-widths to their left neighbour
+  // out to exactly that distance — a small, zoom-scaled time nudge that keeps
+  // every marker/cluster distinct and clickable (vis routes clicks by item id,
+  // and the nudge only shifts the `start` timestamp, so handlers/focus/clustering
+  // are unaffected). Background dividers carry no glyph and are skipped.
+  deconflictBands(items, msPerPx, halfPx);
 
   // Divider line above each row's cross-user band (a background item confined to
   // the `cross` subgroup; styled via .cross-sep).
@@ -196,4 +236,55 @@ export function buildMarkerItems(
   }
 
   return { items, clusterMembers };
+}
+
+// Spread point items within each rendered band (group + subgroup) so adjacent
+// glyphs never overlap on the time axis. Items are bucketed by their band,
+// sorted by start time, and each one that crowds its left neighbour is pushed
+// right until the two centres are `prevHalf + half + GLYPH_PAD_PX` pixels apart
+// (converted to ms via `msPerPx`). Because the gap is derived from each item's
+// own half-width (`halfPx`, defaulting to a plain marker), a wide "+N" cluster
+// pill reserves enough room that its narrower marker neighbours no longer sit
+// underneath it. The nudge is forward-only, so the time order stays stable and
+// the visual drift is one-sided + minimal. Only `point` items (markers +
+// clusters) are spread; ranges/backgrounds are left untouched. The item objects
+// are mutated in place — they're freshly built above.
+function deconflictBands(
+  items: DataItem[],
+  msPerPx: number,
+  halfPx: Map<string, number>,
+): void {
+  if (msPerPx <= 0) return;
+  const bands = new Map<string, DataItem[]>();
+  for (const it of items) {
+    if (it.type !== 'point') continue;
+    const key = `${String(it.group)} ${String(it.subgroup ?? '')}`;
+    const list = bands.get(key);
+    if (list) list.push(it);
+    else bands.set(key, [it]);
+  }
+  for (const list of bands.values()) {
+    if (list.length < 2) continue;
+    list.sort((a, b) => startMs(a) - startMs(b));
+    let prevMs = -Infinity;
+    let prevHalf = 0;
+    for (const it of list) {
+      const half = halfPx.get(String(it.id)) ?? MARKER_HALF_PX;
+      let ms = startMs(it);
+      const minGapMs = (prevHalf + half + GLYPH_PAD_PX) * msPerPx;
+      if (ms - prevMs < minGapMs) {
+        ms = prevMs + minGapMs;
+        it.start = new Date(ms).toISOString();
+      }
+      prevMs = ms;
+      prevHalf = half;
+    }
+  }
+}
+
+function startMs(it: DataItem): number {
+  const s = it.start;
+  if (s instanceof Date) return s.valueOf();
+  if (typeof s === 'number') return s;
+  return Date.parse(String(s));
 }

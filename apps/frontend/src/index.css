@@ -276,14 +276,17 @@ body {
   color: #e5e7eb;
 }
 
-/* "Exit focus" button — bottom-left of the timeline, shown only while a
-   cross-user / activity focus has collapsed the rows. Reverts to all rows and
-   the prior window, and closes the modal. */
+/* "Exit focus" button — pinned to the bottom-left of the timeline's VISIBLE
+   viewport (absolute to the timeline wrapper, so it never scrolls with the rows
+   or the time axis), shown only while a cross-user / activity focus has
+   collapsed the rows. Reverts to all rows and the prior window, and closes the
+   modal. The z-index sits well above every vis layer (items top out at 5) so it
+   always floats over the timeline content. */
 .tl-exit-focus {
   position: absolute;
   bottom: 12px;
   left: 12px;
-  z-index: 20;
+  z-index: 1000;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -392,6 +395,22 @@ body {
   color: #e0f2fe;
   font-weight: 700;
 }
+/* "Has comments" mark — a small speech bubble, kept low-key (the thread-state
+   dots carry the detail). Sits among the status-line bits on open bars and
+   inline at the end of muted (closed/merged) bars. */
+.pr-comment-mark {
+  display: inline-flex;
+  align-items: center;
+  color: #e0f2fe;
+  opacity: 0.85;
+}
+.pr-comment-mark svg {
+  display: block;
+}
+.vis-item.pr-muted .pr-comment-mark {
+  margin-left: 2px;
+  opacity: 0.75;
+}
 .vis-item.pr-open {
   background-color: #1d4ed8;
   border-color: #3b82f6;
@@ -467,6 +486,13 @@ body {
     background-position: 12px 0, -12px 100%, 0 -12px, 100% 12px;
   }
 }
+/* Circular variant for round event markers: the ring is a conic ring of dashes,
+   so it marches by rotating exactly one dash period (30°) per loop → seamless. */
+@keyframes cross-link-march-round {
+  to {
+    transform: rotate(30deg);
+  }
+}
 .vis-item.pr-bar.pr-cross-linked,
 .vis-item.ev-cross-linked .ev-marker-inner,
 .vis-item.ev-cross-linked .ev-cluster-inner {
@@ -507,8 +533,29 @@ body {
   border-radius: 6px; /* match the PR bar */
 }
 .vis-item.ev-cross-linked .ev-marker-inner::after {
-  border-radius: 9999px; /* a halo around the tiny marker */
+  /* Round marching-ants ring to match the circular marker. The shared rule above
+     builds a rectangular 4-edge ring (right for the PR bar + rounded-rect cluster
+     pill); here we override it with a repeating conic gradient of sky dashes,
+     masked into a thin ring and rotated one dash period per loop so the ants
+     march around the circle instead of tracing a square. */
   inset: -4px;
+  border-radius: 9999px; /* a circular halo around the tiny marker */
+  background: repeating-conic-gradient(
+    from 0deg,
+    #bae6fd 0deg 15deg,
+    transparent 15deg 30deg
+  );
+  -webkit-mask: radial-gradient(
+    circle closest-side,
+    transparent calc(100% - 3.5px),
+    #000 calc(100% - 3.5px)
+  );
+  mask: radial-gradient(
+    circle closest-side,
+    transparent calc(100% - 3.5px),
+    #000 calc(100% - 3.5px)
+  );
+  animation-name: cross-link-march-round; /* keep the shared 0.8s linear infinite */
 }
 .vis-item.ev-cross-linked .ev-cluster-inner::after {
   border-radius: 11px; /* match the cluster pill + inset */

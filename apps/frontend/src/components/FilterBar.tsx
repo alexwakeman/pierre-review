@@ -389,6 +389,18 @@ export function FilterBar(): JSX.Element {
           </Chip>
         ))}
       </Section>
+
+      {/* Reset everything to fresh-load defaults (clears repos/members/range/
+          categories/statuses/threads/search + any selection). Pushed to the far
+          right so it reads as a distinct, global action. */}
+      <button
+        type="button"
+        onClick={() => f.resetAllFilters()}
+        title="Reset all filters to their defaults"
+        className="ml-auto whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 hover:border-gray-400 hover:text-gray-800 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:text-gray-100"
+      >
+        Clear all
+      </button>
     </div>
   );
 }

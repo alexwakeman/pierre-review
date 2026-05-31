@@ -10,6 +10,7 @@ import { UserName } from './UserName.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
 import { Markdown } from './Markdown.js';
+import { isNewComment, NewTag } from './ThreadView/index.js';
 
 function newSummary(n: PrDetailT['newSinceLastViewed']): string | null {
   if (!n) return null;
@@ -20,7 +21,7 @@ function newSummary(n: PrDetailT['newSinceLastViewed']): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
-type Tab = 'overview' | 'activity';
+type Tab = 'overview' | 'threads' | 'activity';
 
 interface ActivityRow {
   key: string;
@@ -174,6 +175,84 @@ function ActivityList({
   );
 }
 
+// Issue-level PR comments (distinct from inline review threads). Each maps to a
+// `pr_comment` timeline event whose refId is the comment row id, so "Show on
+// timeline" reuses the same (type, refId) + recenter mechanism as the Activity
+// tab.
+function PrCommentsList({
+  pr,
+  usersById,
+  viewedSince,
+}: {
+  pr: PrDetailT;
+  usersById: Map<number, User>;
+  viewedSince: string | null;
+}): JSX.Element {
+  const showEventOnTimeline = useFilters((s) => s.showEventOnTimeline);
+
+  if (pr.comments.length === 0) {
+    return (
+      <div className="px-3 py-6 text-center text-sm text-gray-500">
+        No PR comments on this PR.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 px-3 pb-3">
+      {pr.comments.map((c) => {
+        const user = c.authorId != null ? usersById.get(c.authorId) : undefined;
+        const isNew = isNewComment(c.createdAt, viewedSince);
+        return (
+          <div
+            key={c.id}
+            className={`rounded-md border border-gray-200 px-2.5 py-2 dark:border-gray-800 ${
+              isNew ? 'comment-new' : ''
+            }`}
+          >
+            <div className="flex items-center gap-2 text-xs">
+              <Avatar user={user} size={18} />
+              <UserName user={user} fallbackId={c.authorId} className="font-semibold" />
+              <span className="text-gray-400" title={dateTime(c.createdAt)}>
+                {relativeTime(c.createdAt)}
+              </span>
+              {isNew && <NewTag />}
+              <button
+                type="button"
+                onClick={() =>
+                  showEventOnTimeline(pr.id, c.createdAt, {
+                    type: 'pr_comment',
+                    refId: c.id,
+                  })
+                }
+                className="ml-auto text-blue-500 hover:underline"
+                title="Show this comment on the timeline"
+              >
+                Show
+              </button>
+            </div>
+            <div className="mt-1 text-sm">
+              <Markdown>{c.body}</Markdown>
+            </div>
+            {c.url && (
+              <div className="mt-2 pl-2 text-[11px]">
+                <a
+                  href={c.url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="text-blue-500 hover:underline"
+                >
+                  ↗ View comment on GitHub
+                </a>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function PrDetail({
   prId,
   selectedThreadId,
@@ -186,10 +265,10 @@ export function PrDetail({
   const [activitySince, setActivitySince] = useState<string | null>(null);
   const qc = useQueryClient();
 
-  // Selecting a thread (e.g. via a timeline marker) forces the Overview tab,
+  // Selecting a thread (e.g. via a timeline marker) forces the Threads tab,
   // where the thread list lives and auto-scrolls to the selected thread.
   useEffect(() => {
-    if (selectedThreadId != null) setTab('overview');
+    if (selectedThreadId != null) setTab('threads');
   }, [selectedThreadId]);
 
   // Capture the last-viewed instant before marking (so new comments highlight
@@ -291,7 +370,7 @@ export function PrDetail({
       </div>
 
       <div className="flex gap-1 border-b border-gray-200 px-3 dark:border-gray-800">
-        {(['overview', 'activity'] as Tab[]).map((t) => {
+        {(['overview', 'threads', 'activity'] as Tab[]).map((t) => {
           const failing = pr.checkRuns.filter(
             (c) => c.state === 'failure' || c.state === 'error',
           ).length;
@@ -312,7 +391,7 @@ export function PrDetail({
                   ●
                 </span>
               )}
-              {t === 'overview' && pr.threads.length > 0 && (
+              {t === 'threads' && pr.threads.length > 0 && (
                 <span className="ml-1 opacity-60" title={`${pr.threads.length} threads`}>
                   {pr.threads.length}
                 </span>
@@ -328,20 +407,22 @@ export function PrDetail({
             <ChecksTab pr={pr} usersById={usersById} />
             <div className="border-t border-gray-200 dark:border-gray-800">
               <div className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Threads
-                {pr.threads.length > 0 && (
-                  <span className="ml-1 font-normal opacity-70">· {pr.threads.length}</span>
+                PR comments
+                {pr.comments.length > 0 && (
+                  <span className="ml-1 font-normal opacity-70">· {pr.comments.length}</span>
                 )}
               </div>
-              <ThreadList
-                threads={pr.threads}
-                usersById={usersById}
-                prUrl={pr.githubUrl}
-                selectedThreadId={selectedThreadId}
-                viewedSince={pr.lastViewedAt}
-              />
+              <PrCommentsList pr={pr} usersById={usersById} viewedSince={pr.lastViewedAt} />
             </div>
           </div>
+        ) : tab === 'threads' ? (
+          <ThreadList
+            threads={pr.threads}
+            usersById={usersById}
+            prUrl={pr.githubUrl}
+            selectedThreadId={selectedThreadId}
+            viewedSince={pr.lastViewedAt}
+          />
         ) : (
           <ActivityList
             pr={pr}

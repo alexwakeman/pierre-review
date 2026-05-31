@@ -83,6 +83,22 @@ export interface FilterState {
   // against the loaded timeline events by (type, refId). null = recenter only.
   timelineFocusEvent: { type: EventType; refId: number | null } | null;
 
+  // Timeline focus-mode overlay (clicking a cross-user marker collapses every row
+  // except the two involved contributors). The overlay itself — row collapse,
+  // glows, viewport save/restore, re-center — is owned by the Timeline component;
+  // these fields are the shared signal so BOTH the on-canvas "Exit focus" button
+  // and the global keyboard hook (Escape) can drive it consistently.
+  //
+  // `focusActive`: the Timeline sets this true while a focus overlay is showing
+  // and false when it tears one down. Other code reads it (e.g. Escape should
+  // exit focus before clearing selection).
+  focusActive: boolean;
+  // `exitFocusSignal`: a monotonic counter the Timeline watches. Bumping it (via
+  // exitFocus()) is an explicit, edge-triggered request to leave focus mode and
+  // restore the previous view — a counter (not a boolean) so repeated requests
+  // each fire, even if focusActive hasn't yet been observed as flipped.
+  exitFocusSignal: number;
+
   setRepoIds: (ids: number[] | null) => void;
   toggleRepo: (id: number) => void;
   setUserIds: (ids: number[] | null) => void;
@@ -106,11 +122,25 @@ export interface FilterState {
     event: { type: EventType; refId: number | null },
   ) => void;
   consumeTimelineFocus: () => void;
+  // Focus-mode signalling (the Timeline owns the actual overlay; see fields above).
+  // setFocusActive: the Timeline reports whether a focus overlay is currently up.
+  setFocusActive: (v: boolean) => void;
+  // exitFocus: request the Timeline to leave focus mode and restore the previous
+  // view. Bumps exitFocusSignal (edge-triggered) and clears focusActive. The
+  // Timeline reacts by tearing down the overlay and re-centering / fade-glowing
+  // the marker that opened it (that behaviour is NOT implemented here).
+  exitFocus: () => void;
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
   setSearchQuery: (q: string) => void;
   toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
+  // Reset every filter (repos, members, range, categories, PR statuses, derived
+  // states, search, excludeBots) back to its fresh-load default, and clear any
+  // selection / timeline-focus hint so the detail pane and overlay don't orphan.
+  // Values mirror freshDefaults() exactly so useUrlState's diff-against-defaults
+  // produces a clean (empty) query string.
+  resetAllFilters: () => void;
   hydrate: (partial: Partial<FilterState>) => void;
 }
 
@@ -118,27 +148,49 @@ function toggle<T>(arr: T[], value: T): T[] {
   return arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value];
 }
 
+// Every non-action piece of state. resetAllFilters() restores exactly these keys.
+type FilterData = Omit<
+  FilterState,
+  {
+    [K in keyof FilterState]: FilterState[K] extends (...args: never[]) => unknown
+      ? K
+      : never;
+  }[keyof FilterState]
+>;
+
+// The fresh-load defaults for every (non-action) piece of state. Single source of
+// truth used both for the initial store and resetAllFilters(); array defaults are
+// rebuilt per call (freshDefaults) so callers never share a mutable reference.
+// These values are what useUrlState diffs against, so a reset yields a clean URL.
+function freshDefaults(): FilterData {
+  return {
+    repoIds: null,
+    userIds: null,
+    excludeBots: true,
+    preset: '14d',
+    customFrom: null,
+    customTo: null,
+    categories: [...DEFAULT_CATEGORIES],
+    prStatuses: [...DEFAULT_PR_STATUSES],
+    derivedStates: [],
+    selectedPrId: null,
+    selectedThreadId: null,
+    stripCollapsed: true, // strip starts collapsed for more timeline room
+    stripFilter: 'all',
+    searchQuery: '',
+    expandedFileGroups: [],
+    collapsedFileGroups: [],
+    expandedDiffHunks: [],
+    timelineFocusPr: null,
+    timelineFocusAt: null,
+    timelineFocusEvent: null,
+    focusActive: false,
+    exitFocusSignal: 0,
+  };
+}
+
 export const useFilters = create<FilterState>((set) => ({
-  repoIds: null,
-  userIds: null,
-  excludeBots: true,
-  preset: '14d',
-  customFrom: null,
-  customTo: null,
-  categories: [...DEFAULT_CATEGORIES],
-  prStatuses: [...DEFAULT_PR_STATUSES],
-  derivedStates: [],
-  selectedPrId: null,
-  selectedThreadId: null,
-  stripCollapsed: true, // was false — strip starts collapsed for more timeline room
-  stripFilter: 'all',
-  searchQuery: '',
-  expandedFileGroups: [],
-  collapsedFileGroups: [],
-  expandedDiffHunks: [],
-  timelineFocusPr: null,
-  timelineFocusAt: null,
-  timelineFocusEvent: null,
+  ...freshDefaults(),
 
   setRepoIds: (ids) => set({ repoIds: ids }),
   toggleRepo: (id) =>
@@ -176,6 +228,9 @@ export const useFilters = create<FilterState>((set) => ({
     }),
   consumeTimelineFocus: () =>
     set({ timelineFocusPr: null, timelineFocusAt: null, timelineFocusEvent: null }),
+  setFocusActive: (v) => set({ focusActive: v }),
+  exitFocus: () =>
+    set((s) => ({ focusActive: false, exitFocusSignal: s.exitFocusSignal + 1 })),
   setStripCollapsed: (v) => set({ stripCollapsed: v }),
   setStripFilter: (f) => set({ stripFilter: f }),
   setSearchQuery: (q) => set({ searchQuery: q }),
@@ -200,6 +255,10 @@ export const useFilters = create<FilterState>((set) => ({
     }),
   toggleDiffHunk: (threadId) =>
     set((s) => ({ expandedDiffHunks: toggle(s.expandedDiffHunks, threadId) })),
+  resetAllFilters: () =>
+    // Also drop any active focus overlay so a "clear all" truly returns to the
+    // baseline view (the Timeline reacts to the bumped exitFocusSignal).
+    set((s) => ({ ...freshDefaults(), exitFocusSignal: s.exitFocusSignal + 1 })),
   hydrate: (partial) => set(partial),
 }));
 
