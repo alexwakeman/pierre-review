@@ -462,41 +462,15 @@ body {
     animation: none;
   }
 }
-/* The PR band — and the marker or cluster — an open marker modal points at: a
-   bright marching-ants dashed ring plus a strong sky glow, so a cross-contributor
-   link is unmistakable at a glance. The ring lives on a ::after pseudo-element so
-   it reads even on faded (muted) bars, and covers clusters as well as lone
-   markers. */
-@keyframes cross-link-glow {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 3px rgba(56, 189, 248, 1),
-      0 0 16px 5px rgba(56, 189, 248, 0.9);
-  }
-  50% {
-    box-shadow:
-      0 0 0 5px rgba(186, 230, 253, 1),
-      0 0 26px 9px rgba(56, 189, 248, 0.65);
-  }
-}
-@keyframes cross-link-march {
-  to {
-    /* one full 12px dash+gap cycle per loop → seamless; edges travel clockwise */
-    background-position: 12px 0, -12px 100%, 0 -12px, 100% 12px;
-  }
-}
-/* Circular variant for round event markers: the ring is a conic ring of dashes,
-   so it marches by rotating exactly one dash period (30°) per loop → seamless. */
-@keyframes cross-link-march-round {
-  to {
-    transform: rotate(30deg);
-  }
-}
+/* The PR band — and the marker or cluster — an open marker modal points at, or the
+   two-person rows held in cross-user focus: the SAME soft sky pulse used for a
+   same-person selected event (see ev-select-pulse below). This previously carried a
+   bright marching-ants dashed ring, which read as excessive in focus mode; now it
+   just breathes the gentle glow so cross-user and same-person cues match. */
 .vis-item.pr-bar.pr-cross-linked,
 .vis-item.ev-cross-linked .ev-marker-inner,
 .vis-item.ev-cross-linked .ev-cluster-inner {
-  animation: cross-link-glow 1.8s ease-in-out infinite;
+  animation: ev-select-pulse 1.8s ease-in-out infinite;
 }
 .vis-item.pr-bar.pr-cross-linked {
   overflow: visible; /* let the ring escape the bar bounds */
@@ -507,58 +481,11 @@ body {
 }
 .vis-item.ev-cross-linked .ev-marker-inner,
 .vis-item.ev-cross-linked .ev-cluster-inner {
-  position: relative; /* anchor the ring on the centered marker/cluster */
+  position: relative; /* ride above neighbours so the glow isn't clipped */
+  z-index: 5;
 }
-.vis-item.pr-bar.pr-cross-linked::after,
-.vis-item.ev-cross-linked .ev-marker-inner::after,
-.vis-item.ev-cross-linked .ev-cluster-inner::after {
-  content: '';
-  position: absolute;
-  inset: -4px;
-  pointer-events: none;
-  /* four edge strips (top/bottom/left/right) form the dashed border. Bright sky
-     dashes with a strong drop-shadow so the ants themselves glow. */
-  background-image:
-    repeating-linear-gradient(90deg, #bae6fd 0 6px, transparent 6px 12px),
-    repeating-linear-gradient(90deg, #bae6fd 0 6px, transparent 6px 12px),
-    repeating-linear-gradient(0deg, #bae6fd 0 6px, transparent 6px 12px),
-    repeating-linear-gradient(0deg, #bae6fd 0 6px, transparent 6px 12px);
-  background-size: 100% 3.5px, 100% 3.5px, 3.5px 100%, 3.5px 100%;
-  background-position: 0 0, 0 100%, 0 0, 100% 0;
-  background-repeat: no-repeat;
-  filter: drop-shadow(0 0 3px #38bdf8) drop-shadow(0 0 1px #38bdf8);
-  animation: cross-link-march 0.8s linear infinite;
-}
-.vis-item.pr-bar.pr-cross-linked::after {
-  border-radius: 6px; /* match the PR bar */
-}
-.vis-item.ev-cross-linked .ev-marker-inner::after {
-  /* Round marching-ants ring to match the circular marker. The shared rule above
-     builds a rectangular 4-edge ring (right for the PR bar + rounded-rect cluster
-     pill); here we override it with a repeating conic gradient of sky dashes,
-     masked into a thin ring and rotated one dash period per loop so the ants
-     march around the circle instead of tracing a square. */
-  inset: -4px;
-  border-radius: 9999px; /* a circular halo around the tiny marker */
-  background: repeating-conic-gradient(
-    from 0deg,
-    #bae6fd 0deg 15deg,
-    transparent 15deg 30deg
-  );
-  -webkit-mask: radial-gradient(
-    circle closest-side,
-    transparent calc(100% - 3.5px),
-    #000 calc(100% - 3.5px)
-  );
-  mask: radial-gradient(
-    circle closest-side,
-    transparent calc(100% - 3.5px),
-    #000 calc(100% - 3.5px)
-  );
-  animation-name: cross-link-march-round; /* keep the shared 0.8s linear infinite */
-}
-.vis-item.ev-cross-linked .ev-cluster-inner::after {
-  border-radius: 11px; /* match the cluster pill + inset */
+.vis-item.ev-cross-linked .ev-marker-inner {
+  border-radius: 9999px; /* circular halo around the tiny marker */
 }
 @media (prefers-reduced-motion: reduce) {
   .vis-item.pr-bar.pr-cross-linked,
@@ -566,13 +493,8 @@ body {
   .vis-item.ev-cross-linked .ev-cluster-inner {
     animation: none;
     box-shadow:
-      0 0 0 3px #bae6fd,
-      0 0 14px 3px #38bdf8;
-  }
-  .vis-item.pr-bar.pr-cross-linked::after,
-  .vis-item.ev-cross-linked .ev-marker-inner::after,
-  .vis-item.ev-cross-linked .ev-cluster-inner::after {
-    animation: none;
+      0 0 0 3px rgba(56, 189, 248, 0.85),
+      0 0 12px 3px rgba(56, 189, 248, 0.5);
   }
 }
 
@@ -609,25 +531,15 @@ body {
 }
 
 /* Focus-exit cue: leaving focus mode re-centres on the marker that opened it and
-   gives that marker a single soft sky glow that fades to nothing over 3s — just
-   enough to relocate it, deliberately WITHOUT the marching-ants ring. The class
-   is stripped by a timer once the fade completes (see flashExitGlow). */
-@keyframes ev-exit-glow {
-  0% {
-    box-shadow:
-      0 0 0 4px rgba(56, 189, 248, 0.9),
-      0 0 18px 6px rgba(56, 189, 248, 0.6);
-  }
-  100% {
-    box-shadow:
-      0 0 0 0 rgba(56, 189, 248, 0),
-      0 0 0 0 rgba(56, 189, 248, 0);
-  }
-}
+   keeps a soft sky pulse on it — the SAME persistent breathing glow as a selected
+   event (ev-select-pulse), rather than a flash that fades away, so it anchors the
+   user in a large repo until their next marker / focus interaction clears it
+   (applyContext → applyExitGlow(null)). */
 .vis-item.ev-exit-glow .ev-marker-inner,
 .vis-item.ev-exit-glow .ev-cluster-inner {
   position: relative;
-  animation: ev-exit-glow 3s ease-out forwards;
+  z-index: 5;
+  animation: ev-select-pulse 1.8s ease-in-out infinite;
 }
 .vis-item.ev-exit-glow .ev-marker-inner {
   border-radius: 9999px; /* circular halo around the tiny marker */
