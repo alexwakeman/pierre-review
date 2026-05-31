@@ -10,6 +10,18 @@ const { repos, syncState } = schema;
 // "running" — it lives only for the lifetime of the process).
 const running = new Set<number>();
 
+// Repos currently undergoing a user-initiated FULL ("deep") sync. The deep button
+// fires a forced full sync on every repo at once; they finish at different times.
+// While ANY deep sync is still in flight we skip the scheduled incremental run
+// entirely — otherwise the cron starts a fresh incremental on each repo the moment
+// its deep sync finishes, resetting that repo's progress bar to 0% mid-session.
+const deepSyncing = new Set<number>();
+
+// True while a deep (forced-full) sync is in progress on any repo.
+export function isDeepSyncActive(): boolean {
+  return deepSyncing.size > 0;
+}
+
 // Live progress for in-flight syncs, surfaced via getSyncStatus so the UI can
 // show a determinate bar. Lives only for the duration of the run.
 const progressByRepo = new Map<number, SyncProgress>();
@@ -101,6 +113,10 @@ export function runSyncForRepo(
     : planSync(repoId);
 
   running.add(repoId);
+  // Track forced-full runs so the scheduler stands down for the whole deep-sync
+  // session (added synchronously here, before any await, so a cron tick that
+  // fires right after this call already sees the deep sync as active).
+  if (opts.forceFull) deepSyncing.add(repoId);
   setSyncProgress(repoId, { percent: 0, prsProcessed: 0, pages: 0, mode: plan.mode });
   const task = syncRepo({
     owner: repo.owner,
@@ -116,6 +132,7 @@ export function runSyncForRepo(
     })
     .finally(() => {
       running.delete(repoId);
+      deepSyncing.delete(repoId);
       clearSyncProgress(repoId);
     });
 
@@ -125,6 +142,16 @@ export function runSyncForRepo(
 
 /** Incrementally sync every configured repo (used by the scheduler). */
 export async function syncAllRepos(log: Logger): Promise<void> {
+  // Stand down entirely while a deep (forced-full) sync is in progress. Resuming
+  // a repo incrementally the instant its deep sync finishes would reset its
+  // progress bar mid-session; idempotent upserts + the overlap window mean the
+  // next scheduled tick loses nothing by waiting.
+  if (deepSyncing.size > 0) {
+    log.info(
+      `scheduled sync skipped: deep sync in progress (${deepSyncing.size} repo(s))`,
+    );
+    return;
+  }
   const all = db.select({ id: repos.id }).from(repos).all();
   for (const r of all) {
     if (running.has(r.id)) continue;
