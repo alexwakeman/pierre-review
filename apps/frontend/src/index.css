@@ -707,6 +707,13 @@ body {
   background: transparent;
   border: none;
   box-shadow: none;
+  /* vis sizes/anchors the point box at the timestamp and extends it to the RIGHT,
+     but the glyph is centred on the timestamp (translateX(-50%) below). That
+     transparent right overhang otherwise sits over the NEXT glyph and steals its
+     clicks — so only part of each glyph was clickable. Make the box click-through;
+     the visible inner (re-enabled below) is the hit target, and a click still
+     resolves to this item via vis's DOM walk-up from the event target. */
+  pointer-events: none;
 }
 .vis-item.ev-marker .vis-dot,
 .vis-item.ev-cluster .vis-dot {
@@ -723,6 +730,7 @@ body {
   justify-content: center;
   cursor: pointer;
   position: relative; /* anchor the own-work chevron + cross-link ring */
+  pointer-events: auto; /* the visible glyph is the hit target (box is none above) */
 }
 .ev-marker-inner svg {
   display: block;
@@ -744,6 +752,7 @@ body {
   cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.25);
   position: relative; /* anchor the own-work chevron + cross-link ring */
+  pointer-events: auto; /* the visible pill is the hit target (box is none above) */
 }
 .vis-item.ev-cluster.vis-selected,
 .vis-item.ev-marker.vis-selected {

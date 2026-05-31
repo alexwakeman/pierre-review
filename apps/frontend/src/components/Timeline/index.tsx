@@ -176,6 +176,13 @@ export function Timeline(): JSX.Element {
   // swallow when we unwind history ourselves.
   const drillDepthRef = useRef(0);
   const savedWindowRef = useRef<{ start: Date; end: Date } | null>(null);
+  // Vertical scroll captured alongside savedWindowRef when the cluster popover
+  // opens, so backing out of a picked comment returns to where the cluster sat
+  // (the row-expand on back otherwise leaves the scroll at the top).
+  const savedScrollTopRef = useRef<number | null>(null);
+  // Event whose cluster should get the "you returned here" glow once the popover
+  // is back in list mode (applied in an effect, see below).
+  const pendingClusterGlowRef = useRef<number | null>(null);
   const suppressPopstateRef = useRef(0);
 
   const [popover, setPopover] = useState<PopoverState | null>(null);
@@ -312,17 +319,17 @@ export function Timeline(): JSX.Element {
   // marching-ants ring — the "you exited focus here" cue.
   const applyExitGlow = useCallback((eventId: number | null) => {
     const items = itemsRef.current;
-    const prevId = exitGlowItemRef.current;
-    if (prevId != null) {
-      const item = items.get(prevId) as DataItem | null;
-      if (item && typeof item.className === 'string' && item.className.includes('ev-exit-glow')) {
-        items.update({
-          id: prevId,
-          className: item.className.replace(/\s*ev-exit-glow/g, ''),
-        });
+    // Strip the glow from EVERY item that currently holds it before re-applying.
+    // A recluster within the glow's lifetime (e.g. the restore-window rebuild on
+    // back-out) can re-key the cluster and strand the class on a now-detached
+    // copy, so tracking a single item ref isn't enough to guarantee one glow.
+    for (const id of items.getIds()) {
+      const it = items.get(id) as DataItem | null;
+      if (it && typeof it.className === 'string' && it.className.includes('ev-exit-glow')) {
+        items.update({ id, className: it.className.replace(/\s*ev-exit-glow/g, '') });
       }
-      exitGlowItemRef.current = null;
     }
+    exitGlowItemRef.current = null;
     exitGlowEventRef.current = eventId;
     if (eventId == null) return;
     const targetId = items.get(`ev:${eventId}`)
@@ -850,6 +857,28 @@ export function Timeline(): JSX.Element {
     tl.setWindow(win.start, win.end, { animation: !reduceMotion });
   }, []);
 
+  // Restore the vertical scroll captured when the cluster popover opened. Backing
+  // out of a picked comment runs applyContext(null), whose row-expand grows the
+  // layout back from the collapsed focus height and leaves the scroll pinned at
+  // the top. Re-apply the saved scrollTop across frames — the expanding rows (and
+  // the animated window restore) only reach full height over a few hundred ms, so
+  // a single set would clamp to the still-short layout — until it sticks, landing
+  // back on the cluster instead of the top.
+  const restoreScrollTop = useCallback(() => {
+    const top = savedScrollTopRef.current;
+    if (top == null) return;
+    let frames = 0;
+    let stable = 0;
+    const step = (): void => {
+      setVisScrollTop(top);
+      const vs = verticalScrollEl();
+      const atTarget = vs != null && Math.abs(vs.scrollTop - top) <= 2;
+      stable = atTarget ? stable + 1 : 0;
+      if (stable < 3 && frames++ < 60) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(step));
+  }, [setVisScrollTop, verticalScrollEl]);
+
   // --- Marker drill-down + browser/mouse-back navigation -------------------
   // The popover journey is mirrored onto the History API so the mouse/browser
   // back button (and the in-popover "‹ back" button, routed through
@@ -870,8 +899,11 @@ export function Timeline(): JSX.Element {
         history.go(-1);
       }
       drillDepthRef.current = 1;
-      // Capture before any selection/scroll side effect can move the window.
+      // Capture before any selection/scroll side effect can move the window — both
+      // the horizontal window and the vertical scroll, so a later back-out can
+      // return to exactly where the cluster sat.
       savedWindowRef.current = timelineRef.current?.getWindow() ?? null;
+      savedScrollTopRef.current = verticalScrollEl()?.scrollTop ?? null;
       setPopover({
         x,
         y,
@@ -879,7 +911,7 @@ export function Timeline(): JSX.Element {
         picked: eventIds.length === 1 ? eventIds[0]! : null,
       });
     },
-    [applyContext],
+    [applyContext, verticalScrollEl],
   );
 
   // Drill from the cluster list into a single comment (deepens to depth 2).
@@ -935,6 +967,7 @@ export function Timeline(): JSX.Element {
       }
       drillDepthRef.current = 0;
       savedWindowRef.current = null;
+      savedScrollTopRef.current = null;
       if (anchorEvent != null) restoreAnchorView(anchorEvent);
     },
     [applyContext, restoreWindow, restoreAnchorView],
@@ -961,11 +994,21 @@ export function Timeline(): JSX.Element {
       }
       const depth = drillDepthRef.current;
       if (depth >= 2) {
-        // Back to the cluster list: clear the overlay, restore the window.
+        // Back to the cluster list: clear the focus overlay, then restore BOTH the
+        // window and the vertical scroll so the view returns to the cluster that
+        // was clicked rather than snapping to the top when the rows expand.
+        const members = popoverRef.current?.eventIds ?? [];
         drillDepthRef.current = 1;
         setPopover((p) => (p ? { ...p, picked: null } : p));
         applyContext(null);
         restoreWindow();
+        restoreScrollTop();
+        // Queue a brief glow on the cluster we returned to, so the context the
+        // user drilled out of is obvious. Applied in an effect (see below) AFTER
+        // the popover's own onContextFocus(null) effect — which clears the overlay
+        // and any exit glow — so it isn't immediately wiped. (Child effects run
+        // before parent effects, so the Timeline effect wins the ordering.)
+        pendingClusterGlowRef.current = members[0] ?? null;
       } else if (depth === 1) {
         // Out of the drill-down entirely — same treatment as the Exit focus
         // button: re-centre on + glow the marker that opened a two-person focus.
@@ -975,12 +1018,24 @@ export function Timeline(): JSX.Element {
         setPopover(null);
         restoreWindow();
         savedWindowRef.current = null;
+        savedScrollTopRef.current = null;
         if (anchorEvent != null) restoreAnchorView(anchorEvent);
       }
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [applyContext, restoreWindow, restoreAnchorView]);
+  }, [applyContext, restoreWindow, restoreScrollTop, restoreAnchorView]);
+
+  // Apply the queued "returned to this cluster" glow once the popover is back in
+  // list mode (picked === null). This Timeline (parent) effect runs AFTER the
+  // MarkerPopover (child) effect that fires onContextFocus(null) on the same
+  // commit, so the glow lands after the focus-clear instead of being wiped by it.
+  useEffect(() => {
+    const ev = pendingClusterGlowRef.current;
+    if (ev == null || !popover || popover.picked != null) return;
+    pendingClusterGlowRef.current = null;
+    flashExitGlow(ev);
+  }, [popover, flashExitGlow]);
 
   // Toggling the repo filter changes which contributors are on the timeline, so a
   // two-person focus built from another repo no longer makes sense — drop it just
