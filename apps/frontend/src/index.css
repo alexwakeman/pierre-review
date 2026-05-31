@@ -354,6 +354,7 @@ body {
   border-width: 1px;
   color: #fff;
   font-size: 11px;
+  cursor: pointer;
 }
 /* Open PRs read as "live": full saturation, taller. */
 .vis-item.pr-emph {
