@@ -75,6 +75,21 @@ function sameRepoSelection(a: number[] | null, b: number[] | null): boolean {
   return b.every((x) => set.has(x));
 }
 
+// Parse a row-label HTML string into a live DOM element ONCE, so it can be
+// handed to vis as the group `content`. vis's Group.setData re-applies a group's
+// content on every `groupsData.update()` — including a bare `{ visible }` toggle.
+// With a string it re-parses the whole label (`innerHTML = …`) each time; with an
+// Element it just re-appends the cached node. The focus feature toggles `visible`
+// on every off-screen row (dozens–hundreds), so a string label turns each
+// enter/exit-focus into hundreds of synchronous innerHTML re-parses (~1.8s on a
+// large board). The element is built in the main document so vis can append it
+// without cross-document adoption.
+function labelElement(html: string): HTMLElement {
+  const host = document.createElement('div');
+  host.innerHTML = html;
+  return (host.firstElementChild as HTMLElement | null) ?? host;
+}
+
 // vis-timeline's zoomKey takes a single modifier; mac users zoom with Cmd
 // (metaKey), everyone else with Ctrl — matching the platform-native gesture and
 // avoiding the OS Ctrl+wheel page-zoom on mac.
@@ -458,12 +473,21 @@ export function Timeline(): JSX.Element {
       }
     };
 
-    const collapse = (id: string): void => {
+    // The animation primitives below touch ONLY inline styles. The vis `visible`
+    // data toggles are collected and applied in a SINGLE batched
+    // `groupsData.update([...])` per direction (see the dispatch below). vis
+    // re-runs Group.setData and schedules a redraw on every groupsData.update,
+    // so toggling rows one-by-one turned a focus enter/exit on a large board into
+    // hundreds of redraw passes (~hundreds of ms). Batching collapses them to one
+    // redraw per direction.
+
+    // Begin the collapse animation for an on-screen row (returns false when the
+    // row has no rendered DOM — an off-screen/virtualized row — so the caller
+    // hides it immediately instead). The matching `visible:false` is applied by
+    // the deferred batch once the 240ms transition has played.
+    const animateCollapseStart = (id: string): boolean => {
       const els = rowEls(id);
-      if (els.length === 0 || reduceMotion) {
-        groupsRef.current.update({ id, visible: false });
-        return;
-      }
+      if (els.length === 0) return false;
       for (const el of els) {
         el.style.overflow = 'hidden';
         el.style.maxHeight = `${el.offsetHeight}px`;
@@ -475,19 +499,12 @@ export function Timeline(): JSX.Element {
           el.style.opacity = '0';
         }
       });
-      focusTimersRef.current.push(
-        setTimeout(() => groupsRef.current.update({ id, visible: false }), 240),
-      );
+      return true;
     };
 
-    const expand = (id: string): void => {
-      const g = groupsRef.current.get(id);
-      if (g && g.visible === false) groupsRef.current.update({ id, visible: true });
-      if (reduceMotion) {
-        clearInline(id);
-        return;
-      }
-      // Wait for vis to (re)create + lay out the row, then play 0 → natural.
+    // Play 0 → natural for a row whose `visible:true` has already been applied by
+    // the batched update above. Wait for vis to (re)create + lay out the row.
+    const animateExpand = (id: string): void => {
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
           for (const el of rowEls(id)) {
@@ -507,39 +524,63 @@ export function Timeline(): JSX.Element {
       );
     };
 
-    // Instant, forced hide/show — no animation. Used by the rebuild re-apply.
-    const setHidden = (id: string, hide: boolean): void => {
-      if (hide) {
-        collapsedRowsRef.current.add(id);
-        groupsRef.current.update({ id, visible: false });
-      } else {
-        collapsedRowsRef.current.delete(id);
-        groupsRef.current.update({ id, visible: true });
-        clearInline(id);
-      }
-    };
-
     const allUserIds = groupsRef.current
       .getIds()
       .map(String)
       .filter((id) => USER_GROUP_RE.test(id));
     const keep = keepIds && keepIds.length ? new Set(keepIds) : null; // null = all
 
-    for (const id of allUserIds) {
-      const shouldHide = keep != null && !keep.has(id);
-      if (!animate) {
-        // Force the desired visibility regardless of the tracked state — a
-        // background rebuild may have reset it (and added new rows).
-        setHidden(id, shouldHide);
-        continue;
+    if (!animate) {
+      // Instant, forced hide/show — used by the rebuild re-apply. Force the
+      // desired visibility for EVERY row (a background rebuild may have reset it
+      // and added new rows), in one batched update.
+      const batch: { id: string; visible: boolean }[] = [];
+      for (const id of allUserIds) {
+        const shouldHide = keep != null && !keep.has(id);
+        if (shouldHide) collapsedRowsRef.current.add(id);
+        else collapsedRowsRef.current.delete(id);
+        batch.push({ id, visible: !shouldHide });
       }
-      const isCollapsed = collapsedRowsRef.current.has(id);
-      if (shouldHide && !isCollapsed) {
-        collapsedRowsRef.current.add(id);
-        collapse(id);
-      } else if (!shouldHide && isCollapsed) {
-        collapsedRowsRef.current.delete(id);
-        expand(id);
+      if (batch.length) groupsRef.current.update(batch);
+      for (const id of allUserIds) {
+        if (!(keep != null && !keep.has(id))) clearInline(id);
+      }
+    } else {
+      const showNow: { id: string; visible: boolean }[] = []; // expands (any)
+      const expandAnimate: string[] = []; // on-screen expands to animate
+      const hideNow: { id: string; visible: boolean }[] = []; // off-screen collapses
+      const hideDeferred: string[] = []; // on-screen collapses (hidden post-anim)
+      for (const id of allUserIds) {
+        const shouldHide = keep != null && !keep.has(id);
+        const isCollapsed = collapsedRowsRef.current.has(id);
+        if (shouldHide && !isCollapsed) {
+          collapsedRowsRef.current.add(id);
+          if (!reduceMotion && animateCollapseStart(id)) hideDeferred.push(id);
+          else hideNow.push({ id, visible: false });
+        } else if (!shouldHide && isCollapsed) {
+          collapsedRowsRef.current.delete(id);
+          showNow.push({ id, visible: true });
+          if (!reduceMotion) expandAnimate.push(id);
+        }
+      }
+      // Reveal every expanding row in one update so vis lays them out in a single
+      // redraw, THEN animate each (the rows now exist in the DOM to measure).
+      if (showNow.length) groupsRef.current.update(showNow);
+      if (reduceMotion) for (const { id } of showNow) clearInline(id);
+      else for (const id of expandAnimate) animateExpand(id);
+      // Off-screen collapses hide immediately; on-screen ones hide after their
+      // 240ms transition — each direction a single batched update.
+      if (hideNow.length) groupsRef.current.update(hideNow);
+      if (hideDeferred.length) {
+        focusTimersRef.current.push(
+          setTimeout(
+            () =>
+              groupsRef.current.update(
+                hideDeferred.map((id) => ({ id, visible: false })),
+              ),
+            240,
+          ),
+        );
       }
     }
 
@@ -850,6 +891,16 @@ export function Timeline(): JSX.Element {
     const tl = timelineRef.current;
     const win = savedWindowRef.current;
     if (!tl || !win) return;
+    // Opening/drilling a marker no longer zooms, so the horizontal window is
+    // usually unchanged from when it was captured. Skip the setWindow then: an
+    // animated setWindow to the same range still fires `rangechanged`, which
+    // schedules a full marker recluster (rebuildMarkers) — wasted work on the
+    // back path. Only restore when the window genuinely moved.
+    const cur = tl.getWindow();
+    const unchanged =
+      Math.abs(cur.start.valueOf() - win.start.valueOf()) < 1000 &&
+      Math.abs(cur.end.valueOf() - win.end.valueOf()) < 1000;
+    if (unchanged) return;
     const reduceMotion =
       typeof window !== 'undefined' &&
       typeof window.matchMedia === 'function' &&
@@ -1249,7 +1300,9 @@ export function Timeline(): JSX.Element {
         const isMaintainer = mergerSet?.has(uid) ?? false;
         groups.push({
           id: gid,
-          content: renderUserLabel(usersById.get(uid), uid, userStats.get(uid), isMaintainer),
+          content: labelElement(
+            renderUserLabel(usersById.get(uid), uid, userStats.get(uid), isMaintainer),
+          ),
           treeLevel: 2,
           // Maintainers first (rank 0), then contributors — `i` preserves the
           // existing relative order within each band.
