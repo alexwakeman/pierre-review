@@ -1,5 +1,6 @@
 import type { ThreadDetail, User } from '@gh-team-monitor/shared';
 import { StateBadge } from '../StateBadge.js';
+import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';
 import { CodeAnchor } from './CodeAnchor.js';
 import { isNewComment } from './NewCommentHighlight.js';
@@ -30,6 +31,13 @@ export function ThreadCard({
       }`}
     >
       <div className="mb-2 flex items-center gap-2 text-[11px] text-gray-400">
+        <ShowOnTimeline
+          prId={thread.prId}
+          at={thread.createdAt}
+          event={{ type: 'review_comment', refId: thread.id }}
+          title="Show this thread on the timeline"
+        />
+        <span className="text-gray-300 dark:text-gray-600">·</span>
         {thread.line != null ? <span>line {thread.line}</span> : <span>file-level</span>}
         {thread.isOutdated && <span>· outdated</span>}
         <span className="ml-auto">

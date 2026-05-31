@@ -7,6 +7,7 @@ import { useFilters } from '../store/filters.js';
 import { dateTime, indexUsers, PR_STATE_META, relativeTime } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
+import { ShowOnTimeline } from './ShowOnTimeline.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
 import { Markdown } from './Markdown.js';
@@ -188,8 +189,6 @@ function PrCommentsList({
   usersById: Map<number, User>;
   viewedSince: string | null;
 }): JSX.Element {
-  const showEventOnTimeline = useFilters((s) => s.showEventOnTimeline);
-
   if (pr.comments.length === 0) {
     return (
       <div className="px-3 py-6 text-center text-sm text-gray-500">
@@ -211,25 +210,19 @@ function PrCommentsList({
             }`}
           >
             <div className="flex items-center gap-2 text-xs">
+              <ShowOnTimeline
+                prId={pr.id}
+                at={c.createdAt}
+                event={{ type: 'pr_comment', refId: c.id }}
+                title="Show this comment on the timeline"
+              />
+              <span className="text-gray-300 dark:text-gray-600">·</span>
               <Avatar user={user} size={18} />
               <UserName user={user} fallbackId={c.authorId} className="font-semibold" />
               <span className="text-gray-400" title={dateTime(c.createdAt)}>
                 {relativeTime(c.createdAt)}
               </span>
               {isNew && <NewTag />}
-              <button
-                type="button"
-                onClick={() =>
-                  showEventOnTimeline(pr.id, c.createdAt, {
-                    type: 'pr_comment',
-                    refId: c.id,
-                  })
-                }
-                className="ml-auto text-blue-500 hover:underline"
-                title="Show this comment on the timeline"
-              >
-                Show
-              </button>
             </div>
             <div className="mt-1 text-sm">
               <Markdown>{c.body}</Markdown>

@@ -317,7 +317,11 @@ export function MarkerPopover({
     // narrow viewport. shift() keeps it on-screen vertically.
     placement: 'right-start',
     middleware: [
-      offset(14),
+      // Sit clear of the clicked marker — the virtual reference is a zero-size
+      // point at the click coords, so this gap is the only thing keeping the modal
+      // edge off the marker. Kept generous enough that the marker stays fully
+      // visible beside the popover.
+      offset(24),
       flip({ fallbackPlacements: ['left-start', 'bottom'] }),
       shift({ padding: 8 }),
     ],

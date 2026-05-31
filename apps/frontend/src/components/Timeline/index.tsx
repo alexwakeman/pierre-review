@@ -776,6 +776,16 @@ export function Timeline(): JSX.Element {
       setFocusActive(active);
       useFilters.getState().setFocusActive(active);
       if (!active) showFocusActiveRef.current = false;
+      // On focus ENTRY, load the focused PR into the Overview/detail pane so the
+      // two-person context the user is inspecting shows there by default. Guard on
+      // a real change so this stays idempotent — it must NOT clobber an existing
+      // thread selection on the activity/thread "Show" path (which already has the
+      // PR selected). Exit never clears selectedPrId, so the PR persists in the
+      // Overview after the user leaves focus.
+      if (active && ctx?.prId != null) {
+        const store = useFilters.getState();
+        if (store.selectedPrId !== ctx.prId) store.selectPr(ctx.prId);
+      }
     },
     [focusSubgroups, focusRows, highlightPr, highlightEvent, applyExitGlow],
   );
@@ -1191,24 +1201,66 @@ export function Timeline(): JSX.Element {
       pageY?: number;
     }) => {
       const id = props.item;
-      // Clicking the timeline no longer dismisses the popover or reverts a focus
-      // overlay — that's now the explicit "Exit focus" button / the modal's X.
-      // So an empty-space click is a no-op, and selecting a PR / opening a marker
-      // leaves any open modal + focus alone (opening a new marker re-focuses).
-      if (id == null) return;
-      const key = String(id);
       const native = props.event?.srcEvent ?? props.event;
       const x = native?.clientX ?? props.pageX ?? 0;
       const y = native?.clientY ?? props.pageY ?? 0;
 
+      // Empty-canvas click. Inside a row-collapse focus this stays a no-op — the
+      // only way out of focus is the bottom-right "Exit focus" button / browser-
+      // back, so a stray click can't accidentally tear the overlay down. Outside
+      // focus it dismisses ONE level of the current selection: an open marker/
+      // cluster popover closes first (via closeModal, so the drill history stays in
+      // step — same as the popover's X / Escape); otherwise a selected PR bar is
+      // deselected. A popover-and-bar combo therefore clears the popover without
+      // also yanking the PR out of the detail pane.
+      if (id == null) {
+        if (!focusedGroupIdsRef.current) {
+          if (popoverRef.current) closeModal();
+          else if (selectedPrIdRef.current != null) useFilters.getState().clearSelection();
+        }
+        return;
+      }
+      const key = String(id);
+
       if (key.startsWith('pr:')) {
         selectPr(Number.parseInt(key.slice(3), 10));
       } else if (key.startsWith('ev:')) {
-        // Every single marker (commit, comment, review) opens the closely-
-        // positioned modal; the modal shows detail + attribution and offers
-        // "Open in detail pane" / "Open on GitHub" to drill in. While it's open
-        // the related PR band glows (see highlightPr, wired via MarkerPopover).
         const evId = Number.parseInt(key.slice(3), 10);
+        // In a cross-user focus, clicking a marker on a user's OWN-work line (the
+        // actor IS the PR's author) hands off cleanly to a normal single-event
+        // selection rather than silently re-expanding the rows and losing the
+        // marker. Cross-user determination mirrors MarkerPopover.focusGroupIds:
+        // it's cross-user iff actor and author are both known and differ —
+        // anything else (incl. unknown actor/author) is own-work.
+        if (focusedGroupIdsRef.current) {
+          const ev = eventsByIdRef.current.get(evId);
+          const pr = ev?.prId != null ? prsByIdRef.current.get(ev.prId) : undefined;
+          const crossUser =
+            ev != null &&
+            ev.actorId != null &&
+            pr?.authorId != null &&
+            ev.actorId !== pr.authorId;
+          if (!crossUser) {
+            // Leave focus WITHOUT the old-anchor recenter (we want the newly
+            // clicked marker centred, not the one that opened the focus), reopen
+            // the popover for this click, then recentre on it once the row-expand
+            // settles. The soft `ev-selected` pulse is applied automatically by the
+            // popover glow effect the moment focusActive flips false.
+            exitFocus(false);
+            openPopover(x, y, [evId]);
+            if (ev) {
+              const token = groupClassToken(groupOf(ev));
+              window.setTimeout(
+                () => centerShowTarget(token, true, '.ev-selected'),
+                320,
+              );
+            }
+            return;
+          }
+        }
+        // Default: open the marker modal (the related PR band glows via
+        // highlightPr, wired through MarkerPopover; a cross-user marker re-targets
+        // the focus through the popover's own onContextFocus).
         openPopover(x, y, [evId]);
       } else if (key.startsWith('cl:')) {
         // A cluster opens the list popover (pick a comment to drill in). The
@@ -1232,7 +1284,15 @@ export function Timeline(): JSX.Element {
       timeline.destroy();
       timelineRef.current = null;
     };
-  }, [selectPr, rebuildMarkers, openPopover, applyContext]);
+  }, [
+    selectPr,
+    rebuildMarkers,
+    openPopover,
+    applyContext,
+    closeModal,
+    exitFocus,
+    centerShowTarget,
+  ]);
 
   // Rebuild groups + PR bars when data or the derived-state filter changes.
   useEffect(() => {
