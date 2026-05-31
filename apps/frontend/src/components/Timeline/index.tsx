@@ -195,9 +195,13 @@ export function Timeline(): JSX.Element {
   // opens, so backing out of a picked comment returns to where the cluster sat
   // (the row-expand on back otherwise leaves the scroll at the top).
   const savedScrollTopRef = useRef<number | null>(null);
-  // Event whose cluster should get the "you returned here" glow once the popover
-  // is back in list mode (applied in an effect, see below).
-  const pendingClusterGlowRef = useRef<number | null>(null);
+  // The selected marker's persistent "you're looking at this" pulse (the soft sky
+  // halo, no marching ants), tracked like the other glows so a re-cluster can
+  // re-apply it to whichever item now holds the event — a lone `ev:` marker or
+  // the `cl:` cluster pill it folds into. Driven by the open popover whenever
+  // we're NOT in cross-user focus (focus uses the cross-link ring instead).
+  const selectedGlowEventRef = useRef<number | null>(null);
+  const selectedGlowItemRef = useRef<string | null>(null);
   const suppressPopstateRef = useRef(0);
 
   const [popover, setPopover] = useState<PopoverState | null>(null);
@@ -205,7 +209,7 @@ export function Timeline(): JSX.Element {
   const popoverRef = useRef<PopoverState | null>(null);
   popoverRef.current = popover;
   // True whenever a row-collapse focus overlay is active (a cross-user marker or
-  // an activity "Show"). Drives the bottom-left "Exit focus" button. Clicking the
+  // an activity "Show"). Drives the bottom-right "Exit focus" button. Clicking the
   // timeline no longer reverts focus — this button (or browser-back) is the way
   // out, so it must be visible the whole time the timeline is collapsed.
   const [focusActive, setFocusActive] = useState(false);
@@ -375,6 +379,38 @@ export function Timeline(): JSX.Element {
     },
     [applyExitGlow],
   );
+
+  // Persistent "this marker is selected" pulse — the soft sky halo (no marching
+  // ants), kept on whichever item currently shows `eventId` for as long as the
+  // popover is open and we're not in cross-user focus. Mirrors applyExitGlow's
+  // strip-all-then-reapply (so a re-cluster can't strand the class on a detached
+  // copy), but loops forever with no strip timer; re-applied across reclusters in
+  // rebuildMarkers.
+  const applySelectGlow = useCallback((eventId: number | null) => {
+    const items = itemsRef.current;
+    for (const id of items.getIds()) {
+      const it = items.get(id) as DataItem | null;
+      if (it && typeof it.className === 'string' && it.className.includes('ev-selected')) {
+        items.update({ id, className: it.className.replace(/\s*ev-selected/g, '') });
+      }
+    }
+    selectedGlowItemRef.current = null;
+    selectedGlowEventRef.current = eventId;
+    if (eventId == null) return;
+    const targetId = items.get(`ev:${eventId}`)
+      ? `ev:${eventId}`
+      : (eventToClusterRef.current.get(eventId) ?? null);
+    if (targetId == null) return; // event not currently rendered
+    const item = items.get(targetId) as DataItem | null;
+    if (
+      item &&
+      typeof item.className === 'string' &&
+      !item.className.includes('ev-selected')
+    ) {
+      items.update({ id: targetId, className: `${item.className} ev-selected` });
+      selectedGlowItemRef.current = targetId;
+    }
+  }, []);
 
   // Flash a finite sky glow on a PR bar for FOCUS_GLOW_MS, then strip it. Used by
   // the strip / search focus path — "locate the bar" feedback without the infinite
@@ -649,7 +685,15 @@ export function Timeline(): JSX.Element {
       exitGlowEventRef.current = null;
       applyExitGlow(ev);
     }
-  }, [highlightEvent, applyExitGlow, applyCrossSeps]);
+    // And the persistent selection pulse — it outlives a recluster for as long as
+    // the popover stays open, so re-resolve it onto the new marker/cluster item.
+    if (selectedGlowEventRef.current != null) {
+      const ev = selectedGlowEventRef.current;
+      selectedGlowItemRef.current = null;
+      selectedGlowEventRef.current = null;
+      applySelectGlow(ev);
+    }
+  }, [highlightEvent, applyExitGlow, applySelectGlow, applyCrossSeps]);
 
   // Within a focused cross-user context, trim each kept row to just the bands
   // that belong to the interaction "actor commented on author's PR":
@@ -989,7 +1033,7 @@ export function Timeline(): JSX.Element {
 
   // Close the popover modal ONLY (its X button / Escape): the cross-user focus
   // overlay stays put so the user can keep examining the two-row view; the
-  // bottom-left "Exit focus" button is what reverts that. We still pop the
+  // bottom-right "Exit focus" button is what reverts that. We still pop the
   // modal's own history entries so the back button isn't left out of step, but we
   // keep savedWindowRef so a later exitFocus can still restore the window.
   const closeModal = useCallback(() => {
@@ -1006,7 +1050,7 @@ export function Timeline(): JSX.Element {
     if (!focusedGroupIdsRef.current) applyContext(null);
   }, [applyContext]);
 
-  // Full exit (bottom-left button / browser-back): revert the row collapse +
+  // Full exit (bottom-right button / browser-back): revert the row collapse +
   // glow, restore the window to where the user was when they opened the focus,
   // and close the modal too. `restoreAnchor` (default) re-centres on + glows the
   // marker that opened the focus; callers where that context is gone (e.g. a repo
@@ -1054,19 +1098,14 @@ export function Timeline(): JSX.Element {
       if (depth >= 2) {
         // Back to the cluster list: clear the focus overlay, then restore BOTH the
         // window and the vertical scroll so the view returns to the cluster that
-        // was clicked rather than snapping to the top when the rows expand.
-        const members = popoverRef.current?.eventIds ?? [];
+        // was clicked rather than snapping to the top when the rows expand. The
+        // cluster is re-marked automatically by the persistent selection pulse
+        // (it's still the open popover's target, and focus is now cleared).
         drillDepthRef.current = 1;
         setPopover((p) => (p ? { ...p, picked: null } : p));
         applyContext(null);
         restoreWindow();
         restoreScrollTop();
-        // Queue a brief glow on the cluster we returned to, so the context the
-        // user drilled out of is obvious. Applied in an effect (see below) AFTER
-        // the popover's own onContextFocus(null) effect — which clears the overlay
-        // and any exit glow — so it isn't immediately wiped. (Child effects run
-        // before parent effects, so the Timeline effect wins the ordering.)
-        pendingClusterGlowRef.current = members[0] ?? null;
       } else if (depth === 1) {
         // Out of the drill-down entirely — same treatment as the Exit focus
         // button: re-centre on + glow the marker that opened a two-person focus.
@@ -1084,16 +1123,14 @@ export function Timeline(): JSX.Element {
     return () => window.removeEventListener('popstate', onPopState);
   }, [applyContext, restoreWindow, restoreScrollTop, restoreAnchorView]);
 
-  // Apply the queued "returned to this cluster" glow once the popover is back in
-  // list mode (picked === null). This Timeline (parent) effect runs AFTER the
-  // MarkerPopover (child) effect that fires onContextFocus(null) on the same
-  // commit, so the glow lands after the focus-clear instead of being wiped by it.
+  // Persistently pulse the marker/cluster the open popover refers to, so the user
+  // can always see which one they're looking at — but only when we're NOT in
+  // cross-user focus (focus marks that marker with the marching-ants cross-link
+  // ring instead, and the CSS keeps the two from stacking). The popover's first
+  // event resolves to whichever item renders it (a lone marker or a cluster pill).
   useEffect(() => {
-    const ev = pendingClusterGlowRef.current;
-    if (ev == null || !popover || popover.picked != null) return;
-    pendingClusterGlowRef.current = null;
-    flashExitGlow(ev);
-  }, [popover, flashExitGlow]);
+    applySelectGlow(popover && !focusActive ? (popover.eventIds[0] ?? null) : null);
+  }, [popover, focusActive, applySelectGlow]);
 
   // Toggling the repo filter changes which contributors are on the timeline, so a
   // two-person focus built from another repo no longer makes sense — drop it just

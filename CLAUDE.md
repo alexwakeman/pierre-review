@@ -249,10 +249,11 @@ render as type-shaped SVG markers that **cluster** at coarse zoom (`clustering.t
 Key behaviors to know about:
 - **Focus mode** — clicking a *cross-user* marker (one person acting on another's
   PR) opens a popover and collapses every row except the two involved
-  contributors, with the linked PR bar and clicked marker glowing. The bottom-left
+  contributors, with the linked PR bar and clicked marker glowing. The bottom-right
   **Exit focus** button (or browser-back) restores all rows, re-centers on the
   marker that opened the focus, and gives it a brief fade glow. Toggling the repo
-  filter also drops focus.
+  filter also drops focus. Outside focus, the marker/cluster an open popover refers
+  to gets a persistent soft "selected" pulse (`ev-selected`) so it stays locatable.
 - **Commits are hidden by default** (`DEFAULT_CATEGORIES` excludes `commits`);
   enabling them round-trips through the URL.
 - **Contributor names are GitHub profile links** (the `UserName` component / the
