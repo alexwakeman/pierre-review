@@ -1,25 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { TimelinePr } from '@gh-team-monitor/shared';
-import { useTimeline, useRepos } from '../hooks/useTimeline.js';
-import { useOpenPrs } from '../hooks/useTriage.js';
+import { useSearchTimeline, useRepos, useUsers } from '../hooks/useTimeline.js';
+import { useSearchOpenPrs } from '../hooks/useTriage.js';
 import { useFilters } from '../store/filters.js';
+import { indexUsers, userLabel } from '../lib/ui.js';
+import { Avatar } from './CommentCard.js';
 
 // Sticky PR-title search. The query lives in the store (searchQuery /
 // setSearchQuery), so it survives this component's re-renders, input blur, and
 // PR selection — re-focusing the input re-shows the same results. The panel's
 // open/closed state is local: results show only while the input is focused AND
 // the query is non-empty; Escape / outside-click hides the panel but keeps the
-// query. The filter is purely client-side over already-loaded data (it never
-// feeds buildTimelineSearch), and picking a result (click or Enter) reuses
-// openPrFocused — the same focus+glow path the timeline delivers.
+// query. The filter is purely client-side over already-loaded data, and picking
+// a result (click or Enter) reuses openPrFocused — the same focus+glow path the
+// timeline delivers. The index is GLOBAL: it reads the member-agnostic
+// useSearchTimeline / useSearchOpenPrs sets, so a PR is findable even when the
+// member filter would hide its author's row (picking it force-shows the bar).
 export function TimelineSearch(): JSX.Element {
   const query = useFilters((s) => s.searchQuery);
   const setQuery = useFilters((s) => s.setSearchQuery);
   const openPrFocused = useFilters((s) => s.openPrFocused);
 
-  const { data: timeline } = useTimeline();
-  const { data: openPrs } = useOpenPrs();
+  const { data: timeline } = useSearchTimeline();
+  const { data: openPrs } = useSearchOpenPrs();
   const { data: repos } = useRepos();
+  const { data: users } = useUsers();
 
   const [open, setOpen] = useState(false);
   // Keyboard-highlighted result (-1 = none); driven by Arrow keys, committed by
@@ -33,6 +38,8 @@ export function TimelineSearch(): JSX.Element {
     for (const r of repos ?? []) m.set(r.id, r.fullName);
     return m;
   }, [repos]);
+  // Resolve each result's authorId → user so the row can show who opened the PR.
+  const usersById = useMemo(() => indexUsers(users), [users]);
 
   // De-dupe timeline + open PRs by id (open PRs may be hidden by the collapsed
   // strip or outside the window, so include them so they're still findable).
@@ -127,27 +134,37 @@ export function TimelineSearch(): JSX.Element {
           {results.length === 0 ? (
             <div className="px-3 py-2 text-xs text-gray-500">No matching PRs.</div>
           ) : (
-            results.map((p, idx) => (
-              <button
-                key={p.id}
-                id={`pr-result-${p.id}`}
-                type="button"
-                role="option"
-                aria-selected={idx === active}
-                onMouseEnter={() => setActive(idx)}
-                onClick={() => pick(p)}
-                className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left ${
-                  idx === active ? 'bg-gray-100 dark:bg-gray-800' : ''
-                } hover:bg-gray-100 dark:hover:bg-gray-800`}
-              >
-                <span className="text-[10px] text-gray-400">
-                  {reposById.get(p.repoId) ?? `repo ${p.repoId}`} · #{p.number}
-                </span>
-                <span className="truncate text-xs" title={p.title}>
-                  {p.title}
-                </span>
-              </button>
-            ))
+            results.map((p, idx) => {
+              const author = p.authorId != null ? usersById.get(p.authorId) : undefined;
+              return (
+                <button
+                  key={p.id}
+                  id={`pr-result-${p.id}`}
+                  type="button"
+                  role="option"
+                  aria-selected={idx === active}
+                  onMouseEnter={() => setActive(idx)}
+                  onClick={() => pick(p)}
+                  className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left ${
+                    idx === active ? 'bg-gray-100 dark:bg-gray-800' : ''
+                  } hover:bg-gray-100 dark:hover:bg-gray-800`}
+                >
+                  <span className="flex items-center gap-1 text-[10px] text-gray-400">
+                    <Avatar user={author} size={12} />
+                    <span className="truncate" title={userLabel(author, p.authorId)}>
+                      {userLabel(author, p.authorId)}
+                    </span>
+                    <span aria-hidden>·</span>
+                    <span className="shrink-0">
+                      {reposById.get(p.repoId) ?? `repo ${p.repoId}`} · #{p.number}
+                    </span>
+                  </span>
+                  <span className="truncate text-xs" title={p.title}>
+                    {p.title}
+                  </span>
+                </button>
+              );
+            })
           )}
         </div>
       )}

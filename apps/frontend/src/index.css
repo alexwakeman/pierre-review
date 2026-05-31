@@ -182,6 +182,11 @@ body {
 .tl-user-name-link:hover {
   text-decoration: underline;
 }
+.tl-merger {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
 .tl-user-stats {
   display: inline-flex;
   align-items: center;

@@ -48,6 +48,10 @@ export const pullRequests = sqliteTable(
     title: text('title').notNull(),
     body: text('body'),
     authorId: integer('author_id').references(() => users.id),
+    // Who actually merged the PR (GraphQL `mergedBy`), distinct from the author.
+    // Drives the "has merge rights / maintainer" inference. Null for non-merged
+    // PRs and until a (deep) sync backfills it on already-synced merged PRs.
+    mergedById: integer('merged_by_id').references(() => users.id),
     state: text('state', { enum: ['open', 'merged', 'closed'] }).notNull(),
     isDraft: integer('is_draft', { mode: 'boolean' }).notNull().default(false),
     openedAt: integer('opened_at', { mode: 'timestamp' }).notNull(),

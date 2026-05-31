@@ -16,6 +16,12 @@ export const DERIVED_STATES: DerivedState[] = [
 
 export type PrState = 'open' | 'merged' | 'closed';
 
+// PR status as exposed by the top-level filter. Derived from (state, isDraft):
+// draft = open & isDraft, open = open & ready, merged, closed.
+export type PrStatus = 'draft' | 'open' | 'merged' | 'closed';
+
+export const PR_STATUSES: PrStatus[] = ['draft', 'open', 'merged', 'closed'];
+
 export type ReviewState =
   | 'approved'
   | 'changes_requested'
@@ -255,6 +261,16 @@ export interface OpenPrsResponse {
   prs: TimelinePr[];
 }
 
+// Per-repo "merge rights" inference: the distinct users who have actually merged
+// a PR in that repo (GraphQL mergedBy). Used to badge maintainers on the
+// timeline. Reference data — not bounded by the timeline window or filters.
+export interface RepoMergers {
+  repoId: number;
+  userIds: number[];
+}
+
+export type MergersResponse = RepoMergers[];
+
 // Lean event shape for the timeline. No bodies.
 export interface TimelineEvent {
   id: number;
@@ -451,5 +467,8 @@ export interface TimelineQuery {
   repoIds?: string; // comma-separated
   userIds?: string; // comma-separated
   types?: string; // comma-separated EventType
+  // comma-separated PrStatus. Absent = no status filter (all). Present (even
+  // empty) = explicit set; an empty value shows nothing.
+  statuses?: string;
   excludeBots?: string; // "true" | "false"
 }

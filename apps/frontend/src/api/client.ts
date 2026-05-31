@@ -1,6 +1,7 @@
 import type {
   CreateRepoBody,
   MeResponse,
+  MergersResponse,
   MyTurnDismissKind,
   MyTurnResponse,
   OpenPrsResponse,
@@ -68,6 +69,7 @@ export const api = {
   syncStatus: (id: number) => get<SyncStatus>(`/api/repos/${id}/sync-status`),
 
   listUsers: () => get<User[]>('/api/users'),
+  mergers: () => get<MergersResponse>('/api/mergers'),
   setUserBot: (id: number, isBot: boolean) =>
     fetch(`/api/users/${id}`, jsonBody('PATCH', { isBot })).then((r) =>
       handle<User>(r),

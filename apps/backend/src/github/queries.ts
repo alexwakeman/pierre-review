@@ -36,6 +36,14 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
               avatarUrl
             }
           }
+          mergedBy {
+            login
+            ... on User {
+              id
+              name
+              avatarUrl
+            }
+          }
           labels(first: 20) {
             nodes {
               name
@@ -296,6 +304,7 @@ export interface GqlPullRequest {
   mergeable: string | null;
   mergeStateStatus: string | null;
   author: GqlActor | null;
+  mergedBy: GqlActor | null;
   labels: { nodes: GqlLabel[] };
   reviewRequests: { nodes: GqlReviewRequest[] };
   headCommit: { nodes: GqlHeadCommit[] };

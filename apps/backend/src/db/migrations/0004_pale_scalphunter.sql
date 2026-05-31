@@ -1,0 +1,1 @@
+ALTER TABLE `pull_requests` ADD `merged_by_id` integer REFERENCES users(id);

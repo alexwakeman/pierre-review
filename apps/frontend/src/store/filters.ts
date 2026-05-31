@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import {
   EVENT_CATEGORY_BY_TYPE,
+  PR_STATUSES,
   type DerivedState,
   type EventCategory,
   type EventType,
+  type PrStatus,
 } from '@gh-team-monitor/shared';
 
 export type RangePreset = '7d' | '14d' | '30d' | '90d' | 'custom';
@@ -25,6 +27,14 @@ export const DEFAULT_CATEGORIES: EventCategory[] = ALL_CATEGORIES.filter(
   (c) => c !== 'commits',
 );
 
+export const ALL_PR_STATUSES: PrStatus[] = PR_STATUSES;
+
+// PR statuses shown on a fresh load. Closed PRs are noise for most situational-
+// awareness views, so they start hidden; the choice round-trips through the URL.
+export const DEFAULT_PR_STATUSES: PrStatus[] = ALL_PR_STATUSES.filter(
+  (s) => s !== 'closed',
+);
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = {
   '7d': 7,
@@ -42,6 +52,7 @@ export interface FilterState {
   customFrom: string | null; // ISO date (yyyy-mm-dd)
   customTo: string | null;
   categories: EventCategory[];
+  prStatuses: PrStatus[]; // which PR statuses are shown (empty = none)
   derivedStates: DerivedState[]; // empty = no derived-state filtering
 
   // selection
@@ -79,6 +90,7 @@ export interface FilterState {
   setPreset: (p: RangePreset) => void;
   setCustomRange: (from: string | null, to: string | null) => void;
   toggleCategory: (c: EventCategory) => void;
+  togglePrStatus: (s: PrStatus) => void;
   toggleDerivedState: (s: DerivedState) => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
@@ -114,6 +126,7 @@ export const useFilters = create<FilterState>((set) => ({
   customFrom: null,
   customTo: null,
   categories: [...DEFAULT_CATEGORIES],
+  prStatuses: [...DEFAULT_PR_STATUSES],
   derivedStates: [],
   selectedPrId: null,
   selectedThreadId: null,
@@ -136,6 +149,7 @@ export const useFilters = create<FilterState>((set) => ({
   setCustomRange: (from, to) =>
     set({ preset: 'custom', customFrom: from, customTo: to }),
   toggleCategory: (c) => set((s) => ({ categories: toggle(s.categories, c) })),
+  togglePrStatus: (st) => set((s) => ({ prStatuses: toggle(s.prStatuses, st) })),
   toggleDerivedState: (st) =>
     set((s) => ({ derivedStates: toggle(s.derivedStates, st) })),
   selectPr: (id) => set({ selectedPrId: id, selectedThreadId: null }),
@@ -221,23 +235,39 @@ function floorMinute(d: Date): Date {
  * Build the /api/open-prs query string. Respects repo + member filters but
  * ignores the date range — open PRs are always open.
  */
-export function buildOpenPrsSearch(s: FilterState): string {
+export function buildOpenPrsSearch(s: FilterState, includeMembers = true): string {
   const params = new URLSearchParams();
   if (s.repoIds && s.repoIds.length > 0) params.set('repoIds', s.repoIds.join(','));
-  if (s.userIds && s.userIds.length > 0) params.set('userIds', s.userIds.join(','));
+  if (includeMembers && s.userIds && s.userIds.length > 0)
+    params.set('userIds', s.userIds.join(','));
   return params.toString();
 }
 
-/** Build the /api/timeline query string from current filters. */
-export function buildTimelineSearch(s: FilterState): string {
+/**
+ * Build the /api/timeline query string from current filters. `includeMembers` /
+ * `includeStatuses` default true; pass false for the PR-title search index,
+ * which is a global "jump to any PR" tool and so must ignore the member AND PR-
+ * status filters (you can still search a closed/draft PR that's hidden on the
+ * timeline). When all statuses are selected the `statuses` param is omitted (=
+ * no filter); a non-full selection — including empty (= show none) — is sent.
+ */
+export function buildTimelineSearch(
+  s: FilterState,
+  includeMembers = true,
+  includeStatuses = true,
+): string {
   const { from, to } = resolveRange(s);
   const params = new URLSearchParams();
   params.set('from', floorMinute(from).toISOString());
   params.set('to', floorMinute(to).toISOString());
   if (s.repoIds && s.repoIds.length > 0) params.set('repoIds', s.repoIds.join(','));
-  if (s.userIds && s.userIds.length > 0) params.set('userIds', s.userIds.join(','));
+  if (includeMembers && s.userIds && s.userIds.length > 0)
+    params.set('userIds', s.userIds.join(','));
   if (s.categories.length < ALL_CATEGORIES.length) {
     params.set('types', categoriesToTypes(s.categories).join(','));
+  }
+  if (includeStatuses && s.prStatuses.length < ALL_PR_STATUSES.length) {
+    params.set('statuses', s.prStatuses.join(','));
   }
   params.set('excludeBots', String(s.excludeBots));
   return params.toString();

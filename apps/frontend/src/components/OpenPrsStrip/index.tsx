@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { isMyTurnReason } from '@gh-team-monitor/shared';
 import { useOpenPrs } from '../../hooks/useTriage.js';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
@@ -21,6 +21,18 @@ export function OpenPrsStrip(): JSX.Element | null {
   const setCollapsed = useFilters((s) => s.setStripCollapsed);
   const filter = useFilters((s) => s.stripFilter);
   const setFilter = useFilters((s) => s.setStripFilter);
+
+  // The card panel stays mounted (so its height can animate via the grid-rows
+  // 0fr↔1fr trick) — but while collapsed it's clipped to 0 height, so its cards
+  // (links/buttons) must leave the tab order + a11y tree. `inert` does both; set
+  // it imperatively since this @types/react version doesn't type the attribute.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    if (collapsed) el.setAttribute('inert', '');
+    else el.removeAttribute('inert');
+  }, [collapsed]);
 
   const reposById = useMemo(() => {
     const m = new Map<number, string>();
@@ -49,9 +61,15 @@ export function OpenPrsStrip(): JSX.Element | null {
   return (
     <div className="shrink-0 border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/50">
       <div className="flex items-center gap-2 px-4 py-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+        <button
+          type="button"
+          onClick={() => setCollapsed(!collapsed)}
+          aria-expanded={!collapsed}
+          title={collapsed ? 'Expand' : 'Collapse'}
+          className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+        >
           Open PRs
-        </span>
+        </button>
         {!collapsed && (
           <div className="flex items-center gap-1">
             {(Object.keys(FILTER_LABELS) as StripFilter[]).map((f) => (
@@ -86,26 +104,36 @@ export function OpenPrsStrip(): JSX.Element | null {
         </button>
       </div>
 
-      {!collapsed && (
-        <div className="flex items-stretch gap-1.5 overflow-x-auto px-3 pb-1.5 pt-0.5">
-          {shown.length === 0 ? (
-            <div className="flex items-center text-xs text-gray-500">
-              {filter === 'my_turn'
-                ? 'Nothing needs you right now.'
-                : 'No PRs match this filter.'}
-            </div>
-          ) : (
-            shown.map((pr) => (
-              <PrCard
-                key={pr.id}
-                pr={pr}
-                repoFullName={reposById.get(pr.repoId) ?? `repo ${pr.repoId}`}
-                usersById={usersById}
-              />
-            ))
-          )}
+      {/* Animate open/close by transitioning the grid track 0fr↔1fr — collapses
+          to the content's natural height with no JS measurement. The single grid
+          child is clipped (overflow-hidden + min-h-0) so it shrinks cleanly. */}
+      <div
+        ref={panelRef}
+        className={`grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none ${
+          collapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="flex items-stretch gap-1.5 overflow-x-auto px-3 pb-1.5 pt-0.5">
+            {shown.length === 0 ? (
+              <div className="flex items-center text-xs text-gray-500">
+                {filter === 'my_turn'
+                  ? 'Nothing needs you right now.'
+                  : 'No PRs match this filter.'}
+              </div>
+            ) : (
+              shown.map((pr) => (
+                <PrCard
+                  key={pr.id}
+                  pr={pr}
+                  repoFullName={reposById.get(pr.repoId) ?? `repo ${pr.repoId}`}
+                  usersById={usersById}
+                />
+              ))
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

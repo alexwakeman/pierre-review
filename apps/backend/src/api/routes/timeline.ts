@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import {
   EVENT_TYPES,
+  PR_STATUSES,
   type EventType,
+  type PrStatus,
   type TimelineQuery,
 } from '@gh-team-monitor/shared';
 import { getTimeline, type TimelineFilters } from '../../db/queries.js';
@@ -27,6 +29,18 @@ function parseTypes(raw: string | undefined): EventType[] | null {
   return types.length > 0 ? types : null;
 }
 
+// Absent (undefined) → null = no status filter (show all). Present, even empty
+// ("") → an explicit (possibly empty) set, so deselecting every status shows
+// nothing rather than falling back to "all".
+function parseStatuses(raw: string | undefined): PrStatus[] | null {
+  if (raw === undefined) return null;
+  const allowed = new Set<string>(PR_STATUSES);
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => allowed.has(s)) as PrStatus[];
+}
+
 function parseDate(raw: string | undefined, fallback: Date): Date {
   if (!raw) return fallback;
   const d = new Date(raw);
@@ -43,6 +57,7 @@ export async function timelineRoutes(app: FastifyInstance): Promise<void> {
       repoIds: parseIntList(q.repoIds),
       userIds: parseIntList(q.userIds),
       types: parseTypes(q.types),
+      statuses: parseStatuses(q.statuses),
       excludeBots: q.excludeBots !== 'false',
     };
     return getTimeline(filters);

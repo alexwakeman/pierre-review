@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
 import {
   ALL_CATEGORIES,
+  ALL_PR_STATUSES,
   DEFAULT_CATEGORIES,
+  DEFAULT_PR_STATUSES,
   useFilters,
   type FilterState,
   type RangePreset,
@@ -11,6 +13,7 @@ import {
   DERIVED_STATES,
   type DerivedState,
   type EventCategory,
+  type PrStatus,
 } from '@gh-team-monitor/shared';
 
 const PRESETS: RangePreset[] = ['7d', '14d', '30d', '90d', 'custom'];
@@ -49,6 +52,13 @@ function readFromUrl(): Partial<FilterState> {
     const valid = new Set<string>(ALL_CATEGORIES);
     out.categories = cats.split(',').filter((c) => valid.has(c)) as EventCategory[];
   }
+  // `status` present (even empty) is an explicit selection — '' means "none
+  // selected", which must survive a reload rather than reverting to the default.
+  const status = p.get('status');
+  if (status !== null) {
+    const valid = new Set<string>(ALL_PR_STATUSES);
+    out.prStatuses = status.split(',').filter((s) => valid.has(s)) as PrStatus[];
+  }
   const states = p.get('states');
   if (states) {
     const valid = new Set<string>(DERIVED_STATES);
@@ -84,6 +94,9 @@ function writeToUrl(s: FilterState): void {
   // lets a non-default choice — including "all categories incl. commits" —
   // survive a reload, which a plain `length < ALL` check could not encode.
   if (!sameSet(s.categories, DEFAULT_CATEGORIES)) p.set('cats', s.categories.join(','));
+  // Same default-diff approach as categories: encode any non-default status
+  // selection (incl. empty = none, and "all incl. closed") so it survives reload.
+  if (!sameSet(s.prStatuses, DEFAULT_PR_STATUSES)) p.set('status', s.prStatuses.join(','));
   if (s.derivedStates.length) p.set('states', s.derivedStates.join(','));
   if (s.selectedPrId) p.set('pr', String(s.selectedPrId));
   if (s.selectedThreadId) p.set('thread', String(s.selectedThreadId));

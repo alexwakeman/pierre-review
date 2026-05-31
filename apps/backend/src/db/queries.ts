@@ -7,9 +7,11 @@ import {
   gt,
   gte,
   inArray,
+  isNotNull,
   lte,
   or,
   sql,
+  type SQL,
 } from 'drizzle-orm';
 import {
   REASON_PRIORITY,
@@ -27,7 +29,9 @@ import {
   type PrCommentDetail,
   type PrDetail,
   type PrState,
+  type PrStatus,
   type Repo,
+  type RepoMergers,
   type ReviewDetail,
   type ReviewState,
   type ThreadAwaitingItem,
@@ -126,7 +130,28 @@ export interface TimelineFilters {
   repoIds: number[] | null;
   userIds: number[] | null;
   types: EventType[] | null;
+  // null = no status filter (all); otherwise the selected PR statuses (an empty
+  // array shows nothing). A status maps to (state, isDraft) on pullRequests.
+  statuses: PrStatus[] | null;
   excludeBots: boolean;
+}
+
+// SQL predicate (on the pullRequests table) for "the PR is one of these
+// statuses". Reused directly on the PR query and inside an EXISTS on the events
+// query, so events whose PR is filtered out drop too — letting a contributor's
+// row disappear when their only PR is excluded. Empty selection → matches none.
+function prStatusWhere(statuses: PrStatus[]): SQL {
+  if (statuses.length === 0) return sql`1 = 0`;
+  const parts = statuses.map((st) =>
+    st === 'draft'
+      ? and(eq(pullRequests.state, 'open'), eq(pullRequests.isDraft, true))
+      : st === 'open'
+        ? and(eq(pullRequests.state, 'open'), eq(pullRequests.isDraft, false))
+        : st === 'merged'
+          ? eq(pullRequests.state, 'merged')
+          : eq(pullRequests.state, 'closed'),
+  );
+  return or(...parts)!;
 }
 
 function botUserIds(): number[] {
@@ -228,7 +253,7 @@ function mapTimelinePr(
 }
 
 export function getTimeline(filters: TimelineFilters): TimelineResponse {
-  const { from, to, repoIds, userIds, types, excludeBots } = filters;
+  const { from, to, repoIds, userIds, types, statuses, excludeBots } = filters;
 
   // ---- PRs that overlap the window ----
   const prConds = [
@@ -242,6 +267,9 @@ export function getTimeline(filters: TimelineFilters): TimelineResponse {
     ),
   ];
   if (repoIds) prConds.push(inArray(pullRequests.repoId, repoIds));
+
+  // PR-status filter: keep only PRs whose (state, isDraft) is a selected status.
+  if (statuses) prConds.push(prStatusWhere(statuses));
 
   // Member filter: PRs the user authored OR acted on within the window.
   if (userIds && userIds.length > 0) {
@@ -288,6 +316,18 @@ export function getTimeline(filters: TimelineFilters): TimelineResponse {
   if (types) evConds.push(inArray(events.type, types));
   if (userIds && userIds.length > 0) {
     evConds.push(inArray(events.actorId, userIds));
+  }
+  // Drop events whose PR is filtered out by status — so a contributor with only
+  // a (e.g.) closed PR keeps neither a bar nor any markers, and loses their row.
+  if (statuses) {
+    evConds.push(
+      exists(
+        db
+          .select({ x: sql`1` })
+          .from(pullRequests)
+          .where(and(eq(pullRequests.id, events.prId), prStatusWhere(statuses))),
+      ),
+    );
   }
   if (excludeBots) {
     const bots = botUserIds();
@@ -370,6 +410,29 @@ export function getOpenPrs(filters: OpenPrsFilters): TimelinePr[] {
     if (r !== 0) return r;
     return a.openedAt.localeCompare(b.openedAt); // oldest first
   });
+}
+
+// ---- merge-rights inference ----
+
+// Distinct users who have actually merged a PR per repo (across ALL synced
+// history, not the timeline window). We treat "has ever merged a PR here" as a
+// good-enough proxy for "has merge rights / is a maintainer" of that repo.
+// mergedById is only populated by syncs that ran after it was added, so this is
+// empty for repos not yet (deep-)re-synced.
+export function getMergers(): RepoMergers[] {
+  const rows = db
+    .selectDistinct({ repoId: pullRequests.repoId, userId: pullRequests.mergedById })
+    .from(pullRequests)
+    .where(and(eq(pullRequests.state, 'merged'), isNotNull(pullRequests.mergedById)))
+    .all();
+  const byRepo = new Map<number, number[]>();
+  for (const r of rows) {
+    if (r.userId == null) continue;
+    const arr = byRepo.get(r.repoId);
+    if (arr) arr.push(r.userId);
+    else byRepo.set(r.repoId, [r.userId]);
+  }
+  return [...byRepo.entries()].map(([repoId, userIds]) => ({ repoId, userIds }));
 }
 
 // ---- incremental review: pr_views ----

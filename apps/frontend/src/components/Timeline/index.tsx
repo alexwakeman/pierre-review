@@ -8,8 +8,14 @@ import {
 } from 'vis-timeline/standalone';
 import 'vis-timeline/styles/vis-timeline-graph2d.css';
 import type { TimelineEvent, TimelinePr, TimelineResponse, User } from '@gh-team-monitor/shared';
-import { useTimeline, useRepos, useUsers } from '../../hooks/useTimeline.js';
-import { useOpenPrs } from '../../hooks/useTriage.js';
+import {
+  useMergers,
+  useSearchTimeline,
+  useTimeline,
+  useRepos,
+  useUsers,
+} from '../../hooks/useTimeline.js';
+import { useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
 import { resolveRange, useFilters } from '../../store/filters.js';
 import { indexUsers, userLabel } from '../../lib/ui.js';
 import { renderPrBar, prClassName } from './prBar.js';
@@ -184,9 +190,22 @@ export function Timeline(): JSX.Element {
 
   const { data, isLoading, error } = useTimeline();
   const { data: openPrsData } = useOpenPrs();
+  // Member-agnostic PR sets (shared cache with the PR-title search). They let a
+  // global search pick focus a PR the member filter hides: if it overlaps the
+  // window it's here, so we force-show its bar in place; an old open PR found
+  // only here widens the range like the strip does. Dedupes with the filtered
+  // queries when no member filter is active (identical key → no extra fetch).
+  const { data: searchData } = useSearchTimeline();
+  const { data: searchOpenPrsData } = useSearchOpenPrs();
   const { data: repos } = useRepos();
   const { data: users } = useUsers();
+  const { data: mergers } = useMergers();
   const derivedStates = useFilters((s) => s.derivedStates);
+  // Member filter: when set, the timeline collapses to just these contributors'
+  // rows (see the PR filter in the rebuild effect). Events are already actor-
+  // filtered server-side, so restricting which PR bars render is enough to drop
+  // every non-selected author's row.
+  const userIds = useFilters((s) => s.userIds);
   const selectPr = useFilters((s) => s.selectPr);
   const selectedPrId = useFilters((s) => s.selectedPrId);
   // selectedPrId mirrored into a ref so the rebuild effect can keep force-showing
@@ -206,6 +225,13 @@ export function Timeline(): JSX.Element {
     for (const r of repos ?? []) m.set(r.id, r.fullName);
     return m;
   }, [repos]);
+  // repoId → set of userIds with merge rights there (have merged a PR). Drives
+  // the maintainer shield on each contributor row label.
+  const mergersByRepo = useMemo(() => {
+    const m = new Map<number, Set<number>>();
+    for (const e of mergers ?? []) m.set(e.repoId, new Set(e.userIds));
+    return m;
+  }, [mergers]);
   const usersById = useMemo(() => indexUsers(users), [users]);
   usersByIdRef.current = usersById;
 
@@ -1054,13 +1080,25 @@ export function Timeline(): JSX.Element {
         ? [...data.prs, extra]
         : data.prs;
 
+    // Member filter: when set, only render bars for PRs the selected members
+    // authored, so the timeline collapses to just those contributors' rows
+    // (events are already actor-filtered server-side, and the per-repo memberIds
+    // below derive their author rows from this `prs` set). The backend also
+    // returns PRs the selected members merely *acted on* — those stay in the
+    // payload (so marker attribution can name them) but their bars are dropped.
+    const memberFilter = userIds && userIds.length > 0 ? new Set(userIds) : null;
+    const authoredByMember = (pr: TimelinePr): boolean =>
+      !memberFilter || (pr.authorId != null && memberFilter.has(pr.authorId));
+
     const prs: TimelinePr[] = basePrs.filter(
       (pr) =>
-        // Always render the selected PR's bar so event→PR navigation has a
-        // target even when the derived-state filter would otherwise hide it.
+        // Always render the selected PR's bar so event→PR navigation (and the
+        // global PR-title search) has a target even when the member or
+        // derived-state filter would otherwise hide it.
         pr.id === selectedPrIdRef.current ||
-        derivedStates.length === 0 ||
-        derivedStates.some((s) => pr.threadCounts[s] > 0),
+        (authoredByMember(pr) &&
+          (derivedStates.length === 0 ||
+            derivedStates.some((s) => pr.threadCounts[s] > 0))),
     );
 
     const evMap = new Map<number, TimelineEvent>();
@@ -1086,7 +1124,15 @@ export function Timeline(): JSX.Element {
     ]);
 
     const groups: DataGroup[] = [];
-    for (const rid of repoIds) {
+    // vis sorts groups (and nested groups within each parent) by the `order`
+    // field — default groupOrder='order' — re-evaluated on every redraw, so it
+    // survives the in-place DataSet diffing below. We set it explicitly:
+    // repos keep their data order; within a repo, maintainers (those with merge
+    // rights — see mergersByRepo) float to the top, everyone else keeps their
+    // existing relative order beneath them.
+    const MAINTAINER_RANK = 0;
+    const CONTRIBUTOR_RANK = 1_000_000; // > any per-repo member count
+    repoIds.forEach((rid, ridx) => {
       // A member sub-row exists for anyone who either acted in this repo or
       // authored a PR shown here. The latter keeps a row for PR authors with no
       // events (so their bar has a home); the former keeps a row for pure
@@ -1099,29 +1145,35 @@ export function Timeline(): JSX.Element {
           .filter((p) => p.repoId === rid && p.authorId != null)
           .map((p) => p.authorId as number),
       ]);
+      const mergerSet = mergersByRepo.get(rid);
       const nested = memberIds.map((uid) => `repo:${rid}:user:${uid}`);
       groups.push({
         id: `repo:${rid}`,
         content: reposById.get(rid) ?? `repo ${rid}`,
         nestedGroups: nested.length ? nested : undefined,
         treeLevel: 1,
+        order: ridx,
         // Order this row's subgroup bands by each item's `sortKey` (bar above its
         // own events; cross-user events last). See VIS_OPTIONS / buildMarkerItems.
         subgroupOrder: 'sortKey',
       } as DataGroup);
-      for (const uid of memberIds) {
+      memberIds.forEach((uid, i) => {
         const gid = `repo:${rid}:user:${uid}`;
+        const isMaintainer = mergerSet?.has(uid) ?? false;
         groups.push({
           id: gid,
-          content: renderUserLabel(usersById.get(uid), uid, userStats.get(uid)),
+          content: renderUserLabel(usersById.get(uid), uid, userStats.get(uid), isMaintainer),
           treeLevel: 2,
+          // Maintainers first (rank 0), then contributors — `i` preserves the
+          // existing relative order within each band.
+          order: (isMaintainer ? MAINTAINER_RANK : CONTRIBUTOR_RANK) + i,
           subgroupOrder: 'sortKey',
           // `tl-user-row` scopes the collapse transition; the per-group token
           // lets focusRows find this row's label + bar to animate (Fix 1).
           className: `tl-user-row ${groupClassToken(gid)}`,
         } as DataGroup);
-      }
-    }
+      });
+    });
 
     const prItems: DataItem[] = prs.map((pr) => {
       const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
@@ -1205,8 +1257,10 @@ export function Timeline(): JSX.Element {
   }, [
     data,
     derivedStates,
+    userIds,
     reposById,
     usersById,
+    mergersByRepo,
     forceShowNonce,
     rebuildMarkers,
     highlightPr,
@@ -1369,10 +1423,43 @@ export function Timeline(): JSX.Element {
       return;
     }
 
+    // Not in the member-filtered lean payload, but the global PR-title search can
+    // target a PR the member filter hides. If it overlaps the current window it's
+    // present in the member-agnostic search payload — force-show its bar in place
+    // (the rebuild force-adds its author's row), with no range change since an
+    // open/overlapping bar already spans the window. Reuses the same
+    // forceShowOpenPrRef path as a PR absent from the lean payload for lack of
+    // in-window activity; centerShowTarget then scrolls it vertically into view.
+    const hiddenByMember =
+      data && !data.prs.some((p) => p.id === timelineFocusPr)
+        ? searchData?.prs.find((p) => p.id === timelineFocusPr)
+        : undefined;
+    if (hiddenByMember) {
+      if (showFocusActiveRef.current || focusedGroupIdsRef.current) {
+        showFocusActiveRef.current = false;
+        applyContext(null);
+      }
+      forceShowOpenPrRef.current = hiddenByMember;
+      setForceShowNonce((n) => n + 1);
+      const token = groupClassToken(prGroupId(hiddenByMember));
+      const focusId = hiddenByMember.id;
+      window.setTimeout(() => {
+        // 360ms: after the force-show rebuild paints the bar + its author's row.
+        tl.setSelection([`pr:${focusId}`]);
+        flashPrFocusGlow(focusId);
+        centerShowTarget(token, false, '.ev-cross-linked', '.pr-focus-glow');
+      }, 360);
+      useFilters.getState().consumeTimelineFocus();
+      return;
+    }
+
     // The PR isn't in the lean /api/timeline payload. It can still be focused if
     // it's a currently-open PR (those come from a separate endpoint and may be
-    // outside the window or have no in-window activity).
-    const candidate = openPrsData?.prs.find((p) => p.id === timelineFocusPr);
+    // outside the window or have no in-window activity) — including an out-of-
+    // filter open PR surfaced by the global search but with no in-window activity.
+    const candidate =
+      openPrsData?.prs.find((p) => p.id === timelineFocusPr) ??
+      searchOpenPrsData?.prs.find((p) => p.id === timelineFocusPr);
     if (candidate) {
       const { from } = resolveRange(useFilters.getState());
       const openedMs = new Date(candidate.openedAt).getTime();
@@ -1429,6 +1516,8 @@ export function Timeline(): JSX.Element {
     timelineFocusAt,
     data,
     openPrsData,
+    searchData,
+    searchOpenPrsData,
     applyContext,
     centerShowTarget,
     flashPrFocusGlow,

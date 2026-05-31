@@ -3,13 +3,35 @@ import type { User } from '@gh-team-monitor/shared';
 import { Avatar } from './CommentCard.js';
 import { userLabel } from '../lib/ui.js';
 
+// Maintainer shield — mirrors the timeline row-label badge (same purple
+// shield-check). Marks a member with merge rights in the relevant repo(s).
+function MaintainerShield(): JSX.Element {
+  return (
+    <span className="flex-none" title="Maintainer — has merged a PR in the selected repo(s)">
+      <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+        <path fill="#8957e5" d="M8 .8 2.2 2.9v4.2c0 3.3 2.5 6.4 5.8 7.3 3.3-.9 5.8-4 5.8-7.3V2.9L8 .8Z" />
+        <path
+          d="M5.2 8 7.1 9.9 10.9 6"
+          fill="none"
+          stroke="#fff"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
+  );
+}
+
 export function UserSelectPanel({
   members,
   userIds,
+  maintainerIds,
   onApply,
 }: {
   members: User[];
   userIds: number[] | null; // committed selection (null = all)
+  maintainerIds: Set<number>; // members with merge rights in the relevant repo(s)
   onApply: (ids: number[] | null) => void; // empty => null (show all)
 }): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -80,16 +102,36 @@ export function UserSelectPanel({
 
   return (
     <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        onClick={() => (open ? setOpen(false) : openPanel())}
-        aria-haspopup="true"
-        aria-expanded={open}
-        className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-gray-300 px-2.5 py-0.5 text-xs text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
-      >
-        Members{activeCount > 0 ? ` (${activeCount})` : ''}
-        <span aria-hidden className="text-[9px]">▾</span>
-      </button>
+      {/* Trigger + (when a selection is active) a clear-✕. Sibling buttons inside
+          one pill — never a button nested in a button (that can swallow clicks). */}
+      <span className="inline-flex items-center whitespace-nowrap rounded-full border border-gray-300 text-xs text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500">
+        <button
+          type="button"
+          onClick={() => (open ? setOpen(false) : openPanel())}
+          aria-haspopup="true"
+          aria-expanded={open}
+          className={`inline-flex items-center gap-1 py-0.5 pl-2.5 ${
+            activeCount > 0 ? 'pr-1' : 'pr-2.5'
+          }`}
+        >
+          Members{activeCount > 0 ? ` (${activeCount})` : ''}
+          <span aria-hidden className="text-[9px]">▾</span>
+        </button>
+        {activeCount > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              onApply(null); // null => clear the member filter (show all rows)
+              setOpen(false);
+            }}
+            title="Clear members filter"
+            aria-label="Clear members filter"
+            className="py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
+          >
+            ✕
+          </button>
+        )}
+      </span>
 
       {open && (
         <div
@@ -123,9 +165,10 @@ export function UserSelectPanel({
                     onChange={() => toggle(u.id)}
                   />
                   <Avatar user={u} size={16} />
-                  <span className="truncate" title={u.githubLogin}>
+                  <span className="min-w-0 truncate" title={u.githubLogin}>
                     {userLabel(u, u.id)}
                   </span>
+                  {maintainerIds.has(u.id) && <MaintainerShield />}
                 </label>
               ))
             )}

@@ -2,11 +2,14 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DERIVED_STATES,
+  PR_STATUSES,
   type DerivedState,
   type EventCategory,
+  type PrStatus,
 } from '@gh-team-monitor/shared';
 import { api, ApiError } from '../api/client.js';
-import { useRepos, useTimeline, useUsers } from '../hooks/useTimeline.js';
+import { useMergers, useRepos, useSearchTimeline, useUsers } from '../hooks/useTimeline.js';
+import { useSearchOpenPrs } from '../hooks/useTriage.js';
 import {
   ALL_CATEGORIES,
   useFilters,
@@ -22,6 +25,12 @@ const CATEGORY_LABELS: Record<EventCategory, string> = {
   review_comments: 'Review comments',
   pr_comments: 'PR comments',
   commits: 'Commits',
+};
+const STATUS_LABELS: Record<PrStatus, string> = {
+  draft: 'Draft',
+  open: 'Open',
+  merged: 'Merged',
+  closed: 'Closed',
 };
 
 function Chip({
@@ -152,7 +161,12 @@ function Section({
 export function FilterBar(): JSX.Element {
   const { data: repos } = useRepos();
   const { data: users } = useUsers();
-  const { data: timeline } = useTimeline();
+  // Member-AGNOSTIC, repo-scoped activity (ignores the member filter, so the
+  // option list never collapses to just the already-selected members). When a
+  // repo filter is active these payloads already contain only the selected repos.
+  const { data: searchTimeline } = useSearchTimeline();
+  const { data: searchOpenPrs } = useSearchOpenPrs();
+  const { data: mergers } = useMergers();
 
   const f = useFilters();
   const qc = useQueryClient();
@@ -170,17 +184,33 @@ export function FilterBar(): JSX.Element {
     },
   });
 
-  // The member picker must offer the FULL non-bot roster so you can add or switch
-  // members after applying a selection. Scoping the options to who's active in the
-  // window would collapse the list once a filter is applied — the timeline is
-  // itself filtered by the selection, so its actors shrink to just the selected
-  // user(s), leaving you unable to pick anyone else. We still surface in-window
-  // actors first (then alphabetical) so the common picks stay at the top.
+  // Member picker options. With NO repo filter we offer the full non-bot roster
+  // (so you can pick anyone), surfacing in-window actors first then alphabetical.
+  // With a repo filter active we LIMIT the list to members active in the selected
+  // repo(s) — derived from the member-agnostic search payloads above, which
+  // already contain only those repos, so the list mirrors who's actually on the
+  // timeline for them. Currently-selected members are always kept so they stay
+  // visible/un-checkable even if they have no activity in the selected repos.
+  const repoScoped = f.repoIds != null && f.repoIds.length > 0;
+  const selectedIds = new Set(f.userIds ?? []);
   const activeMemberIds = new Set(
-    (timeline?.events ?? []).map((e) => e.actorId).filter((x): x is number => x != null),
+    [
+      ...(searchTimeline?.events ?? []).map((e) => e.actorId),
+      ...(searchTimeline?.prs ?? []).map((p) => p.authorId),
+      ...(searchOpenPrs?.prs ?? []).map((p) => p.authorId),
+    ].filter((x): x is number => x != null),
   );
+  // Members with merge rights in the relevant repo(s) — the selected repos when a
+  // repo filter is active, else any repo — so the picker shows the same shield
+  // as the timeline rows.
+  const maintainerIds = new Set<number>();
+  for (const m of mergers ?? []) {
+    if (repoScoped && !(f.repoIds ?? []).includes(m.repoId)) continue;
+    for (const uid of m.userIds) maintainerIds.add(uid);
+  }
   const memberUsers = (users ?? [])
     .filter((u) => !u.isBot)
+    .filter((u) => !repoScoped || activeMemberIds.has(u.id) || selectedIds.has(u.id))
     .sort((a, b) => {
       const aActive = activeMemberIds.has(a.id) ? 0 : 1;
       const bActive = activeMemberIds.has(b.id) ? 0 : 1;
@@ -238,6 +268,7 @@ export function FilterBar(): JSX.Element {
         <UserSelectPanel
           members={memberUsers}
           userIds={f.userIds}
+          maintainerIds={maintainerIds}
           onApply={(ids) => f.setUserIds(ids)}
         />
         <label className="flex items-center gap-1 text-xs text-gray-500">
@@ -254,6 +285,18 @@ export function FilterBar(): JSX.Element {
         {PRESETS.map((p) => (
           <Chip key={p} active={f.preset === p} onClick={() => f.setPreset(p)}>
             {p}
+          </Chip>
+        ))}
+      </Section>
+
+      <Section label="Status">
+        {PR_STATUSES.map((s: PrStatus) => (
+          <Chip
+            key={s}
+            active={f.prStatuses.includes(s)}
+            onClick={() => f.togglePrStatus(s)}
+          >
+            {STATUS_LABELS[s]}
           </Chip>
         ))}
       </Section>

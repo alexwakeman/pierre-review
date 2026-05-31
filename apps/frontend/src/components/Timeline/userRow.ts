@@ -59,6 +59,10 @@ function stat(kind: keyof typeof GLYPH, value: string | number, title: string): 
   return `<span class="tl-stat" title="${escapeHtml(title)}">${GLYPH[kind]}<span>${value}</span></span>`;
 }
 
+// Maintainer shield — shown next to a contributor who has merged a PR in this
+// repo (our proxy for "has merge rights"). Purple to echo the pr_merged marker.
+const SHIELD_GLYPH = `<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path fill="#8957e5" d="M8 .8 2.2 2.9v4.2c0 3.3 2.5 6.4 5.8 7.3 3.3-.9 5.8-4 5.8-7.3V2.9L8 .8Z"/><path d="M5.2 8 7.1 9.9 10.9 6" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
@@ -93,6 +97,7 @@ export function renderUserLabel(
   user: User | undefined,
   uid: number,
   stats: UserStats | undefined,
+  isMerger = false,
 ): string {
   const name = userLabel(user, uid);
   const avatar = user?.avatarUrl
@@ -117,10 +122,15 @@ export function renderUserLabel(
     ? `<a class="tl-user-name tl-user-name-link" href="${escapeHtml(profileUrl(user.githubLogin))}" target="_blank" rel="noreferrer noopener" title="${escapeHtml(`@${user.githubLogin} on GitHub`)}" onclick="event.stopPropagation()">${escapeHtml(name)}</a>`
     : `<span class="tl-user-name">${escapeHtml(name)}</span>`;
 
+  const mergerBadge = isMerger
+    ? `<span class="tl-merger" title="Has merge rights — has merged a PR in this repo">${SHIELD_GLYPH}</span>`
+    : '';
+
   return (
     `<div class="tl-user">` +
     avatar +
     nameHtml +
+    mergerBadge +
     statsHtml +
     `</div>`
   );

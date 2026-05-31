@@ -9,6 +9,7 @@ import { prRoutes } from './api/routes/prs.js';
 import { threadRoutes } from './api/routes/threads.js';
 import { meRoutes } from './api/routes/me.js';
 import { openPrsRoutes } from './api/routes/open-prs.js';
+import { mergersRoutes } from './api/routes/mergers.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -33,6 +34,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(threadRoutes);
   await app.register(meRoutes);
   await app.register(openPrsRoutes);
+  await app.register(mergersRoutes);
 
   return app;
 }

@@ -294,6 +294,8 @@ export function persistPr(
 ): void {
   db.transaction(() => {
     const authorId = resolver.resolve(pr.author);
+    // The actual merger (null for non-merged PRs / when GitHub omits the actor).
+    const mergedById = resolver.resolve(pr.mergedBy);
     const openedAt = new Date(pr.createdAt);
     const mergedAt = toDate(pr.mergedAt);
     const closedAt = toDate(pr.closedAt);
@@ -326,6 +328,7 @@ export function persistPr(
         title: pr.title,
         body: pr.body ?? null,
         authorId,
+        mergedById,
         state: prState(pr.state),
         isDraft: pr.isDraft,
         openedAt,
@@ -347,6 +350,7 @@ export function persistPr(
           title: pr.title,
           body: pr.body ?? null,
           authorId,
+          mergedById,
           state: prState(pr.state),
           isDraft: pr.isDraft,
           firstReviewAt,

@@ -16,6 +16,18 @@ export function useOpenPrs() {
   });
 }
 
+// Open PRs for the PR-title search index — ignores the member filter so search
+// is global (see useSearchTimeline). Dedupes with useOpenPrs when no member
+// filter is active (identical query string → shared cache entry).
+export function useSearchOpenPrs() {
+  const search = useFilters((s) => buildOpenPrsSearch(s, false));
+  return useQuery<OpenPrsResponse>({
+    queryKey: ['open-prs', search],
+    queryFn: () => api.openPrs(search),
+    placeholderData: (prev) => prev,
+  });
+}
+
 export function useMe() {
   return useQuery<MeResponse>({ queryKey: ['me'], queryFn: api.me });
 }
