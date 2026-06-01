@@ -384,6 +384,10 @@ body {
   color: #fff;
   font-size: 11px;
   cursor: pointer;
+  /* A just-opened or quickly-merged PR spans almost no time, so its bar would be a
+     near-invisible sliver. Guarantee a spottable minimum width for EVERY bar (only
+     affects bars whose natural width is smaller) — no longer only on selection. */
+  min-width: 22px;
 }
 /* Open PRs read as "live": full saturation, taller. */
 .vis-item.pr-emph {
@@ -468,7 +472,6 @@ body {
    panel's Show / Focus links. */
 .vis-item.vis-selected.pr-bar {
   overflow: visible; /* let the glow escape the bar bounds */
-  min-width: 22px; /* keep a sliver-width selected bar spottable */
   z-index: 5;
   animation: ev-select-pulse 1.8s ease-in-out infinite;
 }
@@ -497,9 +500,6 @@ body {
 }
 .vis-item.pr-bar.pr-cross-linked {
   overflow: visible; /* let the ring escape the bar bounds */
-  /* A short-lived PR is a sliver a couple of px wide — even glowing it's easy to
-     miss. Force a spottable minimum width while it's the highlighted bar. */
-  min-width: 22px;
   z-index: 5; /* ride above neighbours so the glow isn't clipped by them */
 }
 .vis-item.ev-cross-linked .ev-marker-inner,
@@ -540,7 +540,6 @@ body {
 }
 .vis-item.pr-bar.pr-focus-glow {
   overflow: visible;
-  min-width: 22px; /* keep a sliver-width bar spottable while glowing */
   z-index: 5;
   animation: pr-focus-glow 2s ease-out forwards;
 }
