@@ -716,7 +716,9 @@ export function Timeline(): JSX.Element {
     // Updating per-item in the loop fires a DataSet event + schedules a redraw for
     // each PR bar — on a large repo (hundreds of PRs) that was ~270ms on its own,
     // and ~1.5s when the changes forced layout against the in-flight collapse
-    // animation. A single batched update is one event → one redraw (~10-15ms).
+    // animation. A single batched update is one event → one redraw. (Scanning all
+    // items rather than prsById is deliberate: it also catches force-shown bars —
+    // open PRs surfaced via search/strip that aren't in the lean timeline payload.)
     const updates: DataItem[] = [];
     for (const id of items.getIds()) {
       const sid = String(id);
@@ -1012,15 +1014,18 @@ export function Timeline(): JSX.Element {
   // pulse and re-centre the viewport on it — "you were here". The glow stays
   // (anchoring the user in a large repo) until their next marker / focus action
   // clears it via applyContext, and survives reclusters (rebuildMarkers re-asserts
-  // exitGlowEventRef); the centring waits for the expand animation to start so the
-  // kept row's layout is settling before we drive the scroll.
+  // exitGlowEventRef). The collapse is instant now (no animation to wait out), so we
+  // drive the scroll on the next frame — the board snaps to the anchor as it paints
+  // rather than appearing, pausing, then visibly scrolling.
   const restoreAnchorView = useCallback(
     (eventId: number) => {
       applyExitGlow(eventId);
       const ev = eventsByIdRef.current.get(eventId);
       if (!ev) return;
       const token = groupClassToken(groupOf(ev));
-      window.setTimeout(() => centerShowTarget(token, true, '.ev-exit-glow'), 320);
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => centerShowTarget(token, true, '.ev-exit-glow')),
+      );
     },
     [applyExitGlow, centerShowTarget],
   );
@@ -1214,8 +1219,10 @@ export function Timeline(): JSX.Element {
           if (centerMs != null) {
             const win = tl.getWindow();
             const width = win.end.valueOf() - win.start.valueOf();
+            // Instant re-center (no pan): the board should snap back to its final
+            // position once, not appear and then animate horizontally into place.
             tl.setWindow(centerMs - width / 2, centerMs + width / 2, {
-              animation: true,
+              animation: false,
             });
           }
           if (prId != null) tl.setSelection([`pr:${prId}`]);
@@ -1224,10 +1231,10 @@ export function Timeline(): JSX.Element {
           restoreAnchorView(anchorEvent);
         } else if (pr) {
           const token = groupClassToken(prGroupId(pr));
-          window.setTimeout(
-            () =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() =>
               centerShowTarget(token, false, '.ev-cross-linked', '.pr-bar.vis-selected'),
-            140,
+            ),
           );
         }
         return;
