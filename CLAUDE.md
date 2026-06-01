@@ -61,14 +61,14 @@ gh-team-monitor/
 │  │  │  ├─ db/
 │  │  │  │  ├─ schema.ts        ← Drizzle table definitions (source of truth for the data model)
 │  │  │  │  ├─ client.ts        better-sqlite3 + drizzle, sets WAL + foreign_keys pragmas
-│  │  │  │  ├─ queries.ts       read layer: buildTimelinePrs(), getPrDetail(), getMyTurn()
+│  │  │  │  ├─ queries.ts       read layer: getTimeline(), getPrDetail(), getOpenPrs(), getMyTurn(), getMergers()
 │  │  │  │  ├─ triage.ts        computeTriage(): reasonTag, "my turn", new-since-viewed, approvals
 │  │  │  │  └─ migrations/      drizzle-kit SQL migrations (commit alongside schema changes)
 │  │  │  ├─ github/             auth.ts (gh token), client.ts (graphql/REST), queries.ts (the big query)
 │  │  │  ├─ sync/               scheduler, sync-manager, sync-repo, upsert, derive-thread-state, commit-files
 │  │  │  │  └─ __fixtures__/threads/   JSON fixtures for the thread-state heuristic tests
 │  │  │  └─ api/
-│  │  │     ├─ routes/          one file per resource (timeline, prs, open-prs, repos, users, me, threads, health)
+│  │  │     ├─ routes/          one file per resource (timeline, prs, open-prs, repos, users, mergers, me, threads, health)
 │  │  │     └─ plugins/         error-handler, etc.
 │  │  └─ data/gh-team-monitor.sqlite   the local DB (gitignored)
 │  └─ frontend/                @gh-team-monitor/frontend
@@ -195,7 +195,7 @@ Wire format is JSON with ISO-8601 timestamps; payload types live in
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/timeline?from&to&repoIds&userIds&types&excludeBots` | **lean** feed: `{ prs[], events[] }`, no bodies/diffs. Defaults: last 14d, `excludeBots=true` |
+| `GET /api/timeline?from&to&repoIds&userIds&types&statuses&excludeBots` | **lean** feed: `{ prs[], events[] }`, no bodies/diffs. Defaults: last 14d, `excludeBots=true` |
 | `GET /api/prs/:id` | full PR detail (threads, reviews, comments, commits, checks, labels) |
 | `POST /api/prs/:id/mark-viewed` (alias `/dismiss`) | record a view (`sha?` defaults to head) → clears new-since badges |
 | `GET /api/open-prs?repoIds&userIds` | currently-open PRs (ignores date range) |
@@ -203,6 +203,7 @@ Wire format is JSON with ISO-8601 timestamps; payload types live in
 | `GET /api/repos`, `POST /api/repos`, `DELETE /api/repos/:id` | manage watched repos (delete → 409 if syncing, else 204) |
 | `POST /api/repos/:id/sync?full=true` | trigger sync → `202 {status:'started'}`, or `409` if already running |
 | `GET /api/users` (+ isBot updates) | user list / bot flagging |
+| `GET /api/mergers` | per-repo merge-rights map (who's merged a PR there) → maintainer shield on row labels |
 | `GET /api/me`, `GET /api/my-turn`, `POST /api/my-turn/dismiss` | local identity + triage queue + dismissals |
 | `GET /api/health` | health check |
 
@@ -220,8 +221,10 @@ Three layers, deliberately separated:
    a PR is selected.
 2. **Filter & selection state** → the Zustand store in `store/filters.ts`
    (`useFilters`): repos/members/date-range, event-category toggles,
-   derived-state filters, the selected PR/thread, and transient timeline hints
-   (`timelineFocusPr`, `timelineFocusAt`, `timelineFocusEvent`).
+   derived-state filters, the selected PR/thread, transient timeline hints
+   (`timelineFocusPr`, `timelineFocusAt`, `timelineFocusEvent`, `timelineIsolate`),
+   and focus-mode signals (`focusActive`, `exitFocusSignal`) shared with the
+   keyboard hook so Escape can drive focus.
 3. **URL** → `hooks/useUrlState.ts` mirrors the store to the query string both
    ways, so views are shareable/reloadable. The serializer diffs against the
    **defaults**, so the common case stays a clean URL.
@@ -247,13 +250,34 @@ shared cross-user marker band. PR bars get packed into lanes (`lanes.ts`); event
 render as type-shaped SVG markers that **cluster** at coarse zoom (`clustering.ts`).
 
 Key behaviors to know about:
-- **Focus mode** — clicking a *cross-user* marker (one person acting on another's
-  PR) opens a popover and collapses every row except the two involved
-  contributors, with the linked PR bar and clicked marker glowing. The bottom-right
-  **Exit focus** button (or browser-back) restores all rows, re-centers on the
-  marker that opened the focus, and gives it a brief fade glow. Toggling the repo
-  filter also drops focus. Outside focus, the marker/cluster an open popover refers
-  to gets a persistent soft "selected" pulse (`ev-selected`) so it stays locatable.
+- **Selection & highlight.** Clicking any event marker (or picking one from a
+  cluster) loads its PR into the detail pane and opens a popover; clicking a PR bar
+  selects it. Every highlight — the selected PR bar, the open popover's marker
+  (`ev-selected`), the focus glows (`pr-cross-linked` / `ev-cross-linked`) — is the
+  **same soft sky pulse** (`ev-select-pulse`), *not* a yellow border or marching-ants
+  ring (both removed). Outside focus, clicking empty canvas dismisses one level
+  (open popover first, else the selected PR bar).
+- **Two focus overlays** (both collapse rows; both leave *only* via the bottom-right
+  **Exit focus** button, **Esc**, or browser-back — which expand the rows, re-centre
+  on whichever element was selected, and leave a **persistent** pulse on it so you
+  can relocate it. Toggling the repo filter also drops focus):
+  - **Cross-user marker focus** — clicking a marker whose actor ≠ the PR author
+    collapses to just those two contributor rows. Clicking an *own-work* marker while
+    focused hands off cleanly *out* of focus into a normal single-event selection.
+  - **PR-isolation "Focus"** (the PR-detail header's **Focus** link → store
+    `focusPrOnTimeline` → `timelineIsolate`) — collapses to the rows of **every**
+    contributor to the PR, shows **only that PR** (sibling bars sharing its packed
+    lane are hidden via `isolatePrBars`; markers are filtered to the PR in
+    `rebuildMarkers`, since the shared `cross` band can't be trimmed per-PR), and
+    **fits the window** to the PR's activity span. It's **sticky**: clicks only
+    explore (open popovers, move the highlight) and never leave focus.
+- **Show vs Focus (PR detail).** **Show** (`openPrFocused`) just centres + glow-pulses
+  the PR in the regular view — no focus. **Focus** enters the PR-isolation overlay
+  above. Both, plus the per-thread / per-comment / activity "Show" links
+  (`ShowOnTimeline` → `showEventOnTimeline`, which recentres on a specific event +
+  glows its marker), funnel through the one `timelineFocusPr` consumer effect in
+  `Timeline/index.tsx` — its three branches (isolate / show-event / centre-only) are
+  the place to start for any timeline-navigation change.
 - **Commits are hidden by default** (`DEFAULT_CATEGORIES` excludes `commits`);
   enabling them round-trips through the URL.
 - **Contributor names are GitHub profile links** (the `UserName` component / the
@@ -265,18 +289,24 @@ Key behaviors to know about:
 
 ### PR detail (`PrDetail.tsx`)
 
-Two tabs:
-- **Overview** — PR metadata + CI/checks + **Approvers** (each reviewer whose
-  latest decisive review is `approved`) + requested reviewers + labels
-  (`ChecksTab.tsx`), followed by the review **Threads** (`ThreadList`/`ThreadView`,
-  grouped by file, with code anchors and new-comment highlights).
+Header carries left-aligned **Show** + **Focus** links (drive the timeline, see
+above). Three tabs:
+- **Overview** — `ChecksTab.tsx` (CI/checks + **Approvers** — each reviewer whose
+  latest decisive review is `approved` — + requested reviewers + labels + meta), then
+  the PR **Summary** (the PR body as markdown, clamped to the first 3 lines with a
+  Show more/less toggle), then **PR comments** (issue-level), each with a left "Show"
+  link.
+- **Threads** — `ThreadList`/`ThreadView`: review threads grouped by file with code
+  anchors and new-comment highlights; each thread has a left "Show" link.
 - **Activity** — a chronological feed of opens / commits / reviews / comments /
   merge-close, each with a "Show on timeline" action.
 
-> Note: Overview is the *merged* former "Checks" + "Threads" tabs. There is no
-> longer a standalone Checks or Threads tab.
+> Note: **Checks** was merged into Overview (`ChecksTab`); **Threads** is its own tab
+> again. The per-thread / per-comment / activity "Show" links all use the shared
+> `ShowOnTimeline` component.
 
-Keyboard: `/` focuses the filter, `j`/`k` cycle PRs, `esc` clears selection
+Keyboard: `/` focuses the filter, `j`/`k` cycle PRs, `esc` exits focus mode if
+active (leaving the selection intact) else clears the selection
 (`hooks/useKeyboard.ts`).
 
 ---
