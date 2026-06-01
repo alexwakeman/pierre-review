@@ -5,6 +5,7 @@ import { Timeline } from './components/Timeline/index.js';
 import { DetailPane } from './components/DetailPane.js';
 import { SyncStatus } from './components/SyncStatus.js';
 import { TimelineSearch } from './components/TimelineSearch.js';
+import { HelpModal } from './components/HelpModal.js';
 import { useUrlState } from './hooks/useUrlState.js';
 import { useLocalStorage } from './hooks/useLocalStorage.js';
 import { useKeyboard } from './hooks/useKeyboard.js';
@@ -24,6 +25,7 @@ export default function App(): JSX.Element {
   useUrlState();
   useKeyboard();
   const [dark, toggleDark] = useDarkMode();
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
   // the dragged height is remembered across reloads. During a drag we set the
@@ -61,12 +63,18 @@ export default function App(): JSX.Element {
         <h1 className="brand-title" title="Pierre — a play on “PR”">
           Pierre
         </h1>
-        <span className="hidden text-xs text-gray-400 sm:inline">
-          <kbd>/</kbd> filter · <kbd>j</kbd>/<kbd>k</kbd> cycle PRs · <kbd>esc</kbd> clear
-        </span>
         <div className="ml-auto flex items-center gap-3">
           <TimelineSearch />
           <SyncStatus />
+          <button
+            type="button"
+            onClick={() => setHelpOpen(true)}
+            className="rounded border border-gray-300 px-2 py-0.5 text-xs font-semibold hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+            title="Help — what is Pierre and how to use it"
+            aria-label="Help"
+          >
+            ?
+          </button>
           <button
             type="button"
             onClick={toggleDark}
@@ -77,6 +85,8 @@ export default function App(): JSX.Element {
           </button>
         </div>
       </header>
+
+      {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
 
       <FilterBar />
       <OpenPrsStrip />
