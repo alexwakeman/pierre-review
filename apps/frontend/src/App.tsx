@@ -58,7 +58,9 @@ export default function App(): JSX.Element {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-3 border-b border-gray-200 px-4 py-2 dark:border-gray-800">
-        <h1 className="text-sm font-semibold">gh-team-monitor</h1>
+        <h1 className="brand-title" title="Pierre — a play on “PR”">
+          Pierre
+        </h1>
         <span className="hidden text-xs text-gray-400 sm:inline">
           <kbd>/</kbd> filter · <kbd>j</kbd>/<kbd>k</kbd> cycle PRs · <kbd>esc</kbd> clear
         </span>

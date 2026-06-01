@@ -19,6 +19,22 @@ body {
     ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* ---- brand wordmark ("Pierre") ---- */
+/* Ornate cursive title in the top-left header. Great Vibes is a single 400 weight,
+   so we never bolden it (faux-bold mangles the script). line-height:1 keeps the
+   header compact despite the tall glyphs; the slight size bump gives the flourish
+   room to read. Swap the family here + the <link> in index.html for another script
+   (e.g. 'Pinyon Script', 'Parisienne', 'Tangerine'). */
+.brand-title {
+  font-family: 'Great Vibes', ui-serif, cursive;
+  font-weight: 400;
+  font-size: 1.75rem;
+  line-height: 1;
+  letter-spacing: 0.3px;
+  /* Nudge the baseline so the script sits optically centred next to the meta text. */
+  padding-bottom: 2px;
+}
+
 /* ---- markdown comment bodies ---- */
 .md-body {
   font-size: 13px;
