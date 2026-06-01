@@ -206,13 +206,19 @@ function SingleEvent({
       )}
 
       <div className="flex items-center gap-3 pt-0.5 text-[11px]">
-        <button
-          type="button"
-          onClick={openInDetail}
-          className="text-blue-500 hover:underline"
-        >
-          Open in detail pane
-        </button>
+        {/* Commits (and lifecycle events, which never render a marker) drop the
+            "Open in detail pane" link — clicking the marker already opens the PR
+            in the detail pane, and commits get "View in Activity" instead. Other
+            types keep it: a review comment opens its specific thread, etc. */}
+        {!isCommit && (
+          <button
+            type="button"
+            onClick={openInDetail}
+            className="text-blue-500 hover:underline"
+          >
+            Open in detail pane
+          </button>
+        )}
         {isCommit && ev.prId != null && (
           <button
             type="button"
