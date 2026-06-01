@@ -64,6 +64,18 @@ function unique<T>(arr: T[]): T[] {
   return [...new Set(arr)];
 }
 
+// Pad the VISIBLE window around a resolved {from, to} range so the "current time"
+// line (at `to` for a preset, since to === now) isn't flush against the right edge,
+// with a little breathing room at the start too. A fraction of the span, with a
+// few-hour floor so even a 1-day custom range gets a visible margin. The data query
+// stays unpadded (buildTimelineSearch) — these margins are just empty viewport.
+function paddedViewport(from: Date, to: Date): { start: Date; end: Date } {
+  const span = to.getTime() - from.getTime();
+  const right = Math.max(span * 0.06, 4 * 60 * 60 * 1000);
+  const left = Math.max(span * 0.03, 2 * 60 * 60 * 1000);
+  return { start: new Date(from.getTime() - left), end: new Date(to.getTime() + right) };
+}
+
 // Order-independent equality for the repo filter (null = "all repos"). Used to
 // detect a *genuine* repo-selection change so focus mode can be dropped only
 // then — not on every unrelated re-render.
@@ -1412,11 +1424,12 @@ export function Timeline(): JSX.Element {
   useEffect(() => {
     if (!containerRef.current) return;
     const { from, to } = resolveRange(useFilters.getState());
+    const { start, end } = paddedViewport(from, to);
     const timeline = new VisTimeline(
       containerRef.current,
       itemsRef.current,
       groupsRef.current,
-      { ...VIS_OPTIONS, start: from, end: to, zoomKey: zoomModifierKey() },
+      { ...VIS_OPTIONS, start, end, zoomKey: zoomModifierKey() },
     );
 
     timeline.on('click', (props: {
@@ -1884,7 +1897,8 @@ export function Timeline(): JSX.Element {
     const tl = timelineRef.current;
     if (!tl) return;
     const { from, to } = resolveRange(useFilters.getState());
-    tl.setWindow(from, to, { animation: false });
+    const { start, end } = paddedViewport(from, to);
+    tl.setWindow(start, end, { animation: false });
   }, [preset, customFrom, customTo, rangeResetSignal]);
 
   // "Now" button: recenter the window on the current instant, keeping the
