@@ -180,7 +180,6 @@ export function Timeline(): JSX.Element {
       /* ignore malformed persisted state */
     }
   }
-  const focusTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   // While a cross-user context is focused, each kept row still carries a band per
   // PR its user ever touched — for a prolific contributor that's dozens of bars
   // stacked into an unreadable wall. We hide every band in the focused rows that
@@ -540,166 +539,34 @@ export function Timeline(): JSX.Element {
     [persistCollapsedRows, applyCrossSeps],
   );
 
-  // Cross-user row focus (Fix 1): collapse every user row except `keepIds` so
-  // the two linked rows (actor + PR author) sit together — no vertical jump.
-  // `keepIds === null` (or empty) restores all rows. Rows animate via inline
-  // max-height measured from the live row height (a true accordion, no clipping
-  // and no snap); neighbours reflow because vis rows are normal-flow.
-  // `animate: false` force-re-asserts visibility instantly (no animation) — used
-  // after a background-sync rebuild, which can re-show a collapsed row and add
-  // brand-new rows that must be hidden again seamlessly (Fix 3).
-  const focusRows = useCallback((keepIds: string[] | null, animate = true) => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    // Cancel in-flight timers so rapid switching never leaves a row half-
-    // collapsed or fires a deferred visible:false after we re-show it.
-    for (const t of focusTimersRef.current) clearTimeout(t);
-    focusTimersRef.current = [];
-
-    const reduceMotion =
-      typeof window !== 'undefined' &&
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    const rowEls = (id: string): HTMLElement[] => {
-      const token = groupClassToken(id);
-      const out: HTMLElement[] = [];
-      const fg = container.querySelector<HTMLElement>(
-        `.vis-foreground .vis-group.${token}`,
-      );
-      const lbl = container.querySelector<HTMLElement>(
-        `.vis-labelset .vis-label.${token}`,
-      );
-      if (fg) out.push(fg);
-      if (lbl) out.push(lbl);
-      return out;
-    };
-
-    const clearInline = (id: string): void => {
-      for (const el of rowEls(id)) {
-        el.style.maxHeight = '';
-        el.style.opacity = '';
-        el.style.overflow = '';
-        el.style.transition = '';
-      }
-    };
-
-    // The animation primitives below touch ONLY inline styles. The vis `visible`
-    // data toggles are collected and applied in a SINGLE batched
-    // `groupsData.update([...])` per direction (see the dispatch below). vis
-    // re-runs Group.setData and schedules a redraw on every groupsData.update,
-    // so toggling rows one-by-one turned a focus enter/exit on a large board into
-    // hundreds of redraw passes (~hundreds of ms). Batching collapses them to one
-    // redraw per direction.
-
-    // Begin the collapse animation for an on-screen row (returns false when the
-    // row has no rendered DOM — an off-screen/virtualized row — so the caller
-    // hides it immediately instead). The matching `visible:false` is applied by
-    // the deferred batch once the 240ms transition has played.
-    const animateCollapseStart = (id: string): boolean => {
-      const els = rowEls(id);
-      if (els.length === 0) return false;
-      for (const el of els) {
-        el.style.overflow = 'hidden';
-        el.style.maxHeight = `${el.offsetHeight}px`;
-      }
-      void els[0]!.offsetHeight; // commit the start height before transitioning
-      requestAnimationFrame(() => {
-        for (const el of rowEls(id)) {
-          el.style.maxHeight = '0px';
-          el.style.opacity = '0';
-        }
-      });
-      return true;
-    };
-
-    // Play 0 → natural for a row whose `visible:true` has already been applied by
-    // the batched update above. Wait for vis to (re)create + lay out the row.
-    const animateExpand = (id: string): void => {
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          for (const el of rowEls(id)) {
-            el.style.maxHeight = ''; // measure natural height
-            const h = el.offsetHeight;
-            el.style.transition = 'none';
-            el.style.overflow = 'hidden';
-            el.style.maxHeight = '0px';
-            el.style.opacity = '0';
-            void el.offsetHeight; // commit the collapsed start
-            el.style.transition = ''; // hand back to the CSS transition
-            el.style.maxHeight = `${h}px`;
-            el.style.opacity = '1';
-          }
-          focusTimersRef.current.push(setTimeout(() => clearInline(id), 260));
-        }),
-      );
-    };
-
+  // Cross-user / PR-isolation row focus: collapse every user row except `keepIds`
+  // (and re-show the rest) so only the focused PR's contributors remain.
+  // `keepIds === null` (or empty) restores all rows. Every visibility toggle is
+  // collected and applied in ONE batched groupsData.update — vis re-stacks the
+  // group tree once (~14ms even on a large board); toggling rows one-by-one
+  // scheduled hundreds of redraws. Collapse is INSTANT: the earlier accordion
+  // animation read offsetHeight in a loop (a forced-reflow storm) and forced layout
+  // against isolatePrBars's updates, costing ~1.3s on a three.js-scale board for no
+  // real benefit, so it was dropped.
+  const focusRows = useCallback((keepIds: string[] | null) => {
     const allUserIds = groupsRef.current
       .getIds()
       .map(String)
       .filter((id) => USER_GROUP_RE.test(id));
     const keep = keepIds && keepIds.length ? new Set(keepIds) : null; // null = all
-
-    if (!animate) {
-      // Instant, forced hide/show — used by the rebuild re-apply. Force the
-      // desired visibility for EVERY row (a background rebuild may have reset it
-      // and added new rows), in one batched update.
-      const batch: { id: string; visible: boolean }[] = [];
-      for (const id of allUserIds) {
-        const shouldHide = keep != null && !keep.has(id);
-        if (shouldHide) collapsedRowsRef.current.add(id);
-        else collapsedRowsRef.current.delete(id);
-        batch.push({ id, visible: !shouldHide });
-      }
-      if (batch.length) groupsRef.current.update(batch);
-      for (const id of allUserIds) {
-        if (!(keep != null && !keep.has(id))) clearInline(id);
-      }
-    } else {
-      const showNow: { id: string; visible: boolean }[] = []; // expands (any)
-      const expandAnimate: string[] = []; // on-screen expands to animate
-      const hideNow: { id: string; visible: boolean }[] = []; // off-screen collapses
-      const hideDeferred: string[] = []; // on-screen collapses (hidden post-anim)
-      for (const id of allUserIds) {
-        const shouldHide = keep != null && !keep.has(id);
-        const isCollapsed = collapsedRowsRef.current.has(id);
-        if (shouldHide && !isCollapsed) {
-          collapsedRowsRef.current.add(id);
-          if (!reduceMotion && animateCollapseStart(id)) hideDeferred.push(id);
-          else hideNow.push({ id, visible: false });
-        } else if (!shouldHide && isCollapsed) {
-          collapsedRowsRef.current.delete(id);
-          showNow.push({ id, visible: true });
-          if (!reduceMotion) expandAnimate.push(id);
-        }
-      }
-      // Reveal every expanding row in one update so vis lays them out in a single
-      // redraw, THEN animate each (the rows now exist in the DOM to measure).
-      if (showNow.length) groupsRef.current.update(showNow);
-      if (reduceMotion) for (const { id } of showNow) clearInline(id);
-      else for (const id of expandAnimate) animateExpand(id);
-      // Off-screen collapses hide immediately; on-screen ones hide after their
-      // 240ms transition — each direction a single batched update.
-      if (hideNow.length) groupsRef.current.update(hideNow);
-      if (hideDeferred.length) {
-        focusTimersRef.current.push(
-          setTimeout(
-            () =>
-              groupsRef.current.update(
-                hideDeferred.map((id) => ({ id, visible: false })),
-              ),
-            240,
-          ),
-        );
-      }
+    // Force the desired visibility for EVERY row (a background rebuild may have reset
+    // it and added new rows) in one batched update.
+    const batch: { id: string; visible: boolean }[] = [];
+    for (const id of allUserIds) {
+      const shouldHide = keep != null && !keep.has(id);
+      if (shouldHide) collapsedRowsRef.current.add(id);
+      else collapsedRowsRef.current.delete(id);
+      batch.push({ id, visible: !shouldHide });
     }
-
+    if (batch.length) groupsRef.current.update(batch);
     focusedGroupIdsRef.current = keep ? (keepIds as string[]) : null;
-
-    // Drop the cross-band divider for any row we just collapsed (and restore it
-    // for any we just expanded) — collapsedRowsRef now reflects the new state.
+    // Drop the cross-band divider for any row we just collapsed (and restore it for
+    // any we just expanded) — collapsedRowsRef now reflects the new state.
     applyCrossSeps();
   }, [applyCrossSeps]);
 
@@ -845,6 +712,12 @@ export function Timeline(): JSX.Element {
   // class. Re-asserted after each rebuild (which re-creates bar items fresh).
   const isolatePrBars = useCallback((keepPrId: number | null) => {
     const items = itemsRef.current;
+    // Collect every className change and apply them in ONE items.update([...]).
+    // Updating per-item in the loop fires a DataSet event + schedules a redraw for
+    // each PR bar — on a large repo (hundreds of PRs) that was ~270ms on its own,
+    // and ~1.5s when the changes forced layout against the in-flight collapse
+    // animation. A single batched update is one event → one redraw (~10-15ms).
+    const updates: DataItem[] = [];
     for (const id of items.getIds()) {
       const sid = String(id);
       if (!sid.startsWith('pr:')) continue;
@@ -854,11 +727,15 @@ export function Timeline(): JSX.Element {
       const hidden = it.className.includes('pr-focus-hidden');
       const shouldHide = keepPrId != null && prId !== keepPrId;
       if (shouldHide && !hidden) {
-        items.update({ id, className: `${it.className} pr-focus-hidden` });
+        updates.push({ id, className: `${it.className} pr-focus-hidden` } as DataItem);
       } else if (!shouldHide && hidden) {
-        items.update({ id, className: it.className.replace(/\s*pr-focus-hidden/g, '') });
+        updates.push({
+          id,
+          className: it.className.replace(/\s*pr-focus-hidden/g, ''),
+        } as DataItem);
       }
     }
+    if (updates.length) items.update(updates);
   }, []);
 
   // Apply (or clear, with null) the whole combined-context overlay at once: the
@@ -1933,7 +1810,7 @@ export function Timeline(): JSX.Element {
       highlightPr(hp);
     }
     if (focusedGroupIdsRef.current) {
-      focusRows(focusedGroupIdsRef.current, false); // instant re-assert, no animation
+      focusRows(focusedGroupIdsRef.current); // re-assert collapse after rebuild
     }
     if (prFocusActiveRef.current && prFocusPrIdRef.current != null) {
       isolatePrBars(prFocusPrIdRef.current); // re-hide sibling bars after rebuild
