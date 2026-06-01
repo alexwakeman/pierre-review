@@ -82,6 +82,10 @@ export interface FilterState {
   // optional specific event marker to glow once the timeline recenters, resolved
   // against the loaded timeline events by (type, refId). null = recenter only.
   timelineFocusEvent: { type: EventType; refId: number | null } | null;
+  // when true, the pending timelineFocusPr is a request to ISOLATE that PR in a
+  // sticky focus overlay (collapse to its contributors, show only its bar, fit the
+  // window) rather than just centre it. Consumed alongside the other focus hints.
+  timelineIsolate: boolean;
 
   // Timeline focus-mode overlay (clicking a cross-user marker collapses every row
   // except the two involved contributors). The overlay itself — row collapse,
@@ -121,6 +125,10 @@ export interface FilterState {
     focusAt: string,
     event: { type: EventType; refId: number | null },
   ) => void;
+  // Isolate a PR on the timeline (the "Focus" link): select it and ask the
+  // Timeline for the sticky PR-isolation overlay. The overlay only exits via the
+  // Exit-focus button / Escape; see the Timeline's timelineFocusPr consumer.
+  focusPrOnTimeline: (prId: number) => void;
   consumeTimelineFocus: () => void;
   // Focus-mode signalling (the Timeline owns the actual overlay; see fields above).
   // setFocusActive: the Timeline reports whether a focus overlay is currently up.
@@ -184,6 +192,7 @@ function freshDefaults(): FilterData {
     timelineFocusPr: null,
     timelineFocusAt: null,
     timelineFocusEvent: null,
+    timelineIsolate: false,
     focusActive: false,
     exitFocusSignal: 0,
   };
@@ -225,9 +234,23 @@ export const useFilters = create<FilterState>((set) => ({
       timelineFocusPr: prId,
       timelineFocusAt: focusAt,
       timelineFocusEvent: event,
+      timelineIsolate: false,
+    }),
+  focusPrOnTimeline: (prId) =>
+    set({
+      selectedPrId: prId,
+      timelineFocusPr: prId,
+      timelineFocusAt: null,
+      timelineFocusEvent: null,
+      timelineIsolate: true,
     }),
   consumeTimelineFocus: () =>
-    set({ timelineFocusPr: null, timelineFocusAt: null, timelineFocusEvent: null }),
+    set({
+      timelineFocusPr: null,
+      timelineFocusAt: null,
+      timelineFocusEvent: null,
+      timelineIsolate: false,
+    }),
   setFocusActive: (v) => set({ focusActive: v }),
   exitFocus: () =>
     set((s) => ({ focusActive: false, exitFocusSignal: s.exitFocusSignal + 1 })),

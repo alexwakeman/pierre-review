@@ -305,6 +305,8 @@ export function PrDetail({
   const [tab, setTab] = useState<Tab>('overview');
   const [activitySince, setActivitySince] = useState<string | null>(null);
   const qc = useQueryClient();
+  const openPrFocused = useFilters((s) => s.openPrFocused);
+  const focusPrOnTimeline = useFilters((s) => s.focusPrOnTimeline);
 
   // Selecting a thread (e.g. via a timeline marker) forces the Threads tab,
   // where the thread list lives and auto-scrolls to the selected thread.
@@ -401,12 +403,22 @@ export function PrDetail({
           </a>
         </div>
         <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
-          <ShowOnTimeline
-            prId={pr.id}
-            at={pr.openedAt}
-            event={{ type: 'pr_opened', refId: null }}
-            title="Show this PR on the timeline"
-          />
+          <button
+            type="button"
+            onClick={() => openPrFocused(pr.id)}
+            className="shrink-0 font-medium text-blue-500 hover:underline"
+            title="Centre and highlight this PR on the timeline"
+          >
+            Show
+          </button>
+          <button
+            type="button"
+            onClick={() => focusPrOnTimeline(pr.id)}
+            className="shrink-0 font-medium text-blue-500 hover:underline"
+            title="Isolate this PR and its contributors on the timeline (Exit focus / Esc to leave)"
+          >
+            Focus
+          </button>
           <span className="text-gray-300 dark:text-gray-600">·</span>
           <Avatar user={author} size={16} />
           <UserName user={author} fallbackId={pr.authorId} />

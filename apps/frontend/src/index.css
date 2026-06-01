@@ -436,30 +436,27 @@ body {
 .vis-item.pr-stalled {
   box-shadow: 0 0 0 2px #ef4444;
 }
-@keyframes pr-flash {
-  0% {
-    box-shadow:
-      0 0 0 6px rgba(251, 191, 36, 0.95),
-      0 0 20px 5px rgba(251, 191, 36, 0.75);
-  }
-  100% {
-    box-shadow:
-      0 0 0 3px #fbbf24,
-      0 0 12px 2px rgba(251, 191, 36, 0.6);
-  }
-}
+/* The selected PR's bar: the same soft sky pulse used for cross-user focus and
+   selected markers (a glow rather than the old yellow border), so PR highlighting
+   reads consistently everywhere — bar click, j/k cycling, opening detail, the PR
+   panel's Show / Focus links. */
 .vis-item.vis-selected.pr-bar {
-  box-shadow:
-    0 0 0 3px #fbbf24,
-    0 0 12px 2px rgba(251, 191, 36, 0.6);
-  animation: pr-flash 0.6s ease-out;
-  /* keep a short selected PR spottable, same as the cross-link highlight */
-  min-width: 22px;
+  overflow: visible; /* let the glow escape the bar bounds */
+  min-width: 22px; /* keep a sliver-width selected bar spottable */
   z-index: 5;
+  animation: ev-select-pulse 1.8s ease-in-out infinite;
+}
+/* PR-isolation focus: bars sharing the focused PR's packed lane are hidden so only
+   the focused PR's bar shows (see isolatePrBars in Timeline/index.tsx). */
+.vis-item.pr-bar.pr-focus-hidden {
+  display: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .vis-item.vis-selected.pr-bar {
     animation: none;
+    box-shadow:
+      0 0 0 3px rgba(56, 189, 248, 0.85),
+      0 0 12px 3px rgba(56, 189, 248, 0.5);
   }
 }
 /* The PR band — and the marker or cluster — an open marker modal points at, or the

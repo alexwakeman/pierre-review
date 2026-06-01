@@ -117,6 +117,16 @@ function groupClassToken(id: string): string {
   return `tlg-${id.replace(/:/g, '-')}`;
 }
 
+// Midpoint (ms) of a PR's lifetime — opened → merged/closed/now — used to centre
+// the window on a PR bar when no specific event instant is in play.
+function prMidpointMs(pr: TimelinePr): number {
+  const startMs = new Date(pr.openedAt).getTime();
+  const endMs = new Date(
+    pr.mergedAt ?? pr.closedAt ?? new Date().toISOString(),
+  ).getTime();
+  return (startMs + endMs) / 2;
+}
+
 export function Timeline(): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<VisTimeline | null>(null);
@@ -184,6 +194,12 @@ export function Timeline(): JSX.Element {
   // it, so it persists until the next timeline interaction; the click handler
   // and openPrFocused read this to expand back to all users.
   const showFocusActiveRef = useRef(false);
+  // Sticky "Focus" (PR-isolation) overlay from the PR panel: collapse to a PR's
+  // contributors and show only its bar, then explore freely — clicks never exit,
+  // only the Exit-focus button / Escape clears it. prFocusPrIdRef is the isolated
+  // PR, used to recentre + glow it on exit when no specific event was last clicked.
+  const prFocusActiveRef = useRef(false);
+  const prFocusPrIdRef = useRef<number | null>(null);
   // Marker drill-down depth mirrored onto the History API (0 closed / 1 popover
   // / 2 a comment picked from a cluster list); the window captured when the
   // drill-down began (restored on back-out); and a counter of popstate events to
@@ -623,8 +639,16 @@ export function Timeline(): JSX.Element {
     const px = container.clientWidth || 1000;
     const msPerPx = rangeMs / px;
 
+    // In the sticky PR-isolation focus, only this PR's events get markers — the
+    // shared `cross` band can't be trimmed per-PR via subgroups, so we filter here
+    // so a contributor row shows only their activity on the focused PR. The full
+    // set is restored when the focus tears down (applyContext(null) → rebuild).
+    const events =
+      prFocusActiveRef.current && prFocusPrIdRef.current != null
+        ? cur.events.filter((e) => e.prId === prFocusPrIdRef.current)
+        : cur.events;
     const { items, clusterMembers } = buildMarkerItems(
-      cur.events,
+      events,
       groupOf,
       usersByIdRef.current,
       prsByIdRef.current,
@@ -734,6 +758,29 @@ export function Timeline(): JSX.Element {
     [],
   );
 
+  // Hide every PR bar except `keepPrId` (null = show all). The PR-isolation focus
+  // keeps the author's whole packed lane visible (focusSubgroups can only gate by
+  // lane), so a sibling PR sharing that lane would still show its bar — markers are
+  // filtered in rebuildMarkers, and bars are hidden here, via a `display:none`
+  // class. Re-asserted after each rebuild (which re-creates bar items fresh).
+  const isolatePrBars = useCallback((keepPrId: number | null) => {
+    const items = itemsRef.current;
+    for (const id of items.getIds()) {
+      const sid = String(id);
+      if (!sid.startsWith('pr:')) continue;
+      const it = items.get(id) as DataItem | null;
+      if (!it || typeof it.className !== 'string') continue;
+      const prId = Number.parseInt(sid.slice(3), 10);
+      const hidden = it.className.includes('pr-focus-hidden');
+      const shouldHide = keepPrId != null && prId !== keepPrId;
+      if (shouldHide && !hidden) {
+        items.update({ id, className: `${it.className} pr-focus-hidden` });
+      } else if (!shouldHide && hidden) {
+        items.update({ id, className: it.className.replace(/\s*pr-focus-hidden/g, '') });
+      }
+    }
+  }, []);
+
   // Apply (or clear, with null) the whole combined-context overlay at once: the
   // two focused rows, the bands trimmed to the interaction, the linked-PR glow,
   // and the clicked-marker glow. Timeline owns this now (not the popover's
@@ -745,6 +792,7 @@ export function Timeline(): JSX.Element {
       // drop it first so a re-opened marker doesn't carry both the exit glow and
       // the new cross-link / select pulse at once.
       applyExitGlow(null);
+      const wasPrFocus = prFocusActiveRef.current;
       focusSubgroups(ctx?.groupIds ?? null, ctx?.prId ?? null);
       focusRows(ctx?.groupIds ?? null);
       highlightPr(ctx?.prId ?? null);
@@ -756,7 +804,11 @@ export function Timeline(): JSX.Element {
       const active = !!(ctx?.groupIds && ctx.groupIds.length > 0);
       setFocusActive(active);
       useFilters.getState().setFocusActive(active);
-      if (!active) showFocusActiveRef.current = false;
+      if (!active) {
+        showFocusActiveRef.current = false;
+        prFocusActiveRef.current = false;
+        prFocusPrIdRef.current = null;
+      }
       // On focus ENTRY, load the focused PR into the Overview/detail pane so the
       // two-person context the user is inspecting shows there by default. Guard on
       // a real change so this stays idempotent — it must NOT clobber an existing
@@ -767,8 +819,34 @@ export function Timeline(): JSX.Element {
         const store = useFilters.getState();
         if (store.selectedPrId !== ctx.prId) store.selectPr(ctx.prId);
       }
+      // Leaving a PR-isolation focus (any teardown path lands here): restore the
+      // hidden sibling bars and the full, unfiltered marker set it had narrowed to.
+      if (!active && wasPrFocus) {
+        isolatePrBars(null);
+        rebuildMarkers();
+      }
     },
-    [focusSubgroups, focusRows, highlightPr, highlightEvent, applyExitGlow],
+    [
+      focusSubgroups,
+      focusRows,
+      highlightPr,
+      highlightEvent,
+      applyExitGlow,
+      isolatePrBars,
+      rebuildMarkers,
+    ],
+  );
+
+  // The open popover reports a cross-user context to collapse the rows down to a
+  // two-person view. In the sticky PR-isolation focus we must NOT honour that —
+  // every contributor row stays up, and the clicked event's highlight is set by
+  // the click handler / onPick instead. Outside that focus, apply it as usual.
+  const onPopoverContext = useCallback(
+    (ctx: ContextFocus) => {
+      if (prFocusActiveRef.current) return;
+      applyContext(ctx);
+    },
+    [applyContext],
   );
 
   // --- Activity "Show" vertical scrolling ----------------------------------
@@ -1010,13 +1088,18 @@ export function Timeline(): JSX.Element {
   );
 
   // Drill from the cluster list into a single comment (deepens to depth 2).
-  const onPick = useCallback((id: number) => {
-    const p = popoverRef.current;
-    if (!p || p.picked != null || p.eventIds.length <= 1) return;
-    drillDepthRef.current = 2;
-    history.pushState({ ghtmDrill: 2 }, '');
-    setPopover({ ...p, picked: id });
-  }, []);
+  const onPick = useCallback(
+    (id: number) => {
+      const p = popoverRef.current;
+      if (!p || p.picked != null || p.eventIds.length <= 1) return;
+      drillDepthRef.current = 2;
+      history.pushState({ ghtmDrill: 2 }, '');
+      setPopover({ ...p, picked: id });
+      // In PR-isolation focus, the picked event becomes the highlighted exit anchor.
+      if (prFocusActiveRef.current) highlightEvent(id);
+    },
+    [highlightEvent],
+  );
 
   // In-popover back button → route through history so all three back paths
   // (mouse, browser, button) converge on the popstate handler.
@@ -1050,12 +1133,13 @@ export function Timeline(): JSX.Element {
   // switch) pass false to just clear the overlay.
   const exitFocus = useCallback(
     (restoreAnchor = true) => {
-      // Capture the anchor before applyContext(null) clears highlightedEventRef.
+      // Capture the anchor + PR-focus state before applyContext(null) clears them.
       const anchorEvent = restoreAnchor ? highlightedEventRef.current : null;
+      const wasPrFocus = prFocusActiveRef.current;
+      const prId = prFocusPrIdRef.current;
       const depth = drillDepthRef.current;
       applyContext(null);
       setPopover(null);
-      restoreWindow();
       if (depth > 0) {
         suppressPopstateRef.current += 1;
         history.go(-depth);
@@ -1063,9 +1147,48 @@ export function Timeline(): JSX.Element {
       drillDepthRef.current = 0;
       savedWindowRef.current = null;
       savedScrollTopRef.current = null;
+
+      if (wasPrFocus && restoreAnchor) {
+        // PR-isolation exit: don't snap back to a saved pre-focus window — stay in
+        // the PR's neighbourhood. Centre the window on the last-clicked event (or
+        // the PR itself if none), re-select the PR (→ glow pulse) and give the
+        // anchor a persistent pulse so it's clearly the thing you were looking at.
+        const tl = timelineRef.current;
+        const ev =
+          anchorEvent != null ? eventsByIdRef.current.get(anchorEvent) : undefined;
+        const pr = prId != null ? prsByIdRef.current.get(prId) : undefined;
+        if (tl) {
+          const centerMs = ev
+            ? new Date(ev.occurredAt).getTime()
+            : pr
+              ? prMidpointMs(pr)
+              : null;
+          if (centerMs != null) {
+            const win = tl.getWindow();
+            const width = win.end.valueOf() - win.start.valueOf();
+            tl.setWindow(centerMs - width / 2, centerMs + width / 2, {
+              animation: true,
+            });
+          }
+          if (prId != null) tl.setSelection([`pr:${prId}`]);
+        }
+        if (anchorEvent != null) {
+          restoreAnchorView(anchorEvent);
+        } else if (pr) {
+          const token = groupClassToken(prGroupId(pr));
+          window.setTimeout(
+            () =>
+              centerShowTarget(token, false, '.ev-cross-linked', '.pr-bar.vis-selected'),
+            140,
+          );
+        }
+        return;
+      }
+
+      restoreWindow();
       if (anchorEvent != null) restoreAnchorView(anchorEvent);
     },
-    [applyContext, restoreWindow, restoreAnchorView],
+    [applyContext, restoreWindow, restoreAnchorView, centerShowTarget],
   );
 
   // Open-in-detail: close the popover but KEEP the overlay + one history entry,
@@ -1219,6 +1342,15 @@ export function Timeline(): JSX.Element {
         selectPr(Number.parseInt(key.slice(3), 10));
       } else if (key.startsWith('ev:')) {
         const evId = Number.parseInt(key.slice(3), 10);
+        // Sticky PR-isolation focus ("Focus" link): clicking an event highlights
+        // it (it becomes the exit anchor) and opens its popover — we never leave
+        // focus here, so the user can explore the whole PR. The popover's own
+        // cross-user re-collapse is suppressed (see onPopoverContext).
+        if (prFocusActiveRef.current) {
+          highlightEvent(evId);
+          openPopover(x, y, [evId]);
+          return;
+        }
         // In a cross-user focus, clicking a marker on a user's OWN-work line (the
         // actor IS the PR's author) hands off cleanly to a normal single-event
         // selection rather than silently re-expanding the rows and losing the
@@ -1285,6 +1417,7 @@ export function Timeline(): JSX.Element {
     closeModal,
     exitFocus,
     centerShowTarget,
+    highlightEvent,
   ]);
 
   // Rebuild groups + PR bars when data or the derived-state filter changes.
@@ -1490,6 +1623,9 @@ export function Timeline(): JSX.Element {
     if (focusedGroupIdsRef.current) {
       focusRows(focusedGroupIdsRef.current, false); // instant re-assert, no animation
     }
+    if (prFocusActiveRef.current && prFocusPrIdRef.current != null) {
+      isolatePrBars(prFocusPrIdRef.current); // re-hide sibling bars after rebuild
+    }
 
     // Consumed: the staged open-PR bar has been materialized into this rebuild.
     // Clear it so a later background-sync rebuild doesn't keep re-injecting it.
@@ -1505,6 +1641,7 @@ export function Timeline(): JSX.Element {
     rebuildMarkers,
     highlightPr,
     focusRows,
+    isolatePrBars,
   ]);
 
   // Reflect the active PR selection without disturbing the view. Selecting a PR
@@ -1549,6 +1686,57 @@ export function Timeline(): JSX.Element {
     if (!tl) return;
     const inWindow = data?.prs.find((p) => p.id === timelineFocusPr);
     if (inWindow) {
+      // "Focus" link: isolate this PR. Collapse to every contributor's row, show
+      // only this PR's bar + activity, fit the window to its span, and stay there
+      // (sticky) — only Exit focus / Escape leaves. This is the PR-isolation
+      // overlay; the click handler keeps it up while the user explores.
+      if (useFilters.getState().timelineIsolate && data) {
+        const repoId = inWindow.repoId;
+        const contributors = new Set<number>();
+        if (inWindow.authorId != null) contributors.add(inWindow.authorId);
+        let minT = Infinity;
+        let maxT = -Infinity;
+        const span = (ms: number): void => {
+          if (ms < minT) minT = ms;
+          if (ms > maxT) maxT = ms;
+        };
+        span(new Date(inWindow.openedAt).getTime());
+        if (inWindow.mergedAt) span(new Date(inWindow.mergedAt).getTime());
+        if (inWindow.closedAt) span(new Date(inWindow.closedAt).getTime());
+        for (const e of data.events) {
+          if (e.prId !== timelineFocusPr) continue;
+          if (e.actorId != null) contributors.add(e.actorId);
+          span(new Date(e.occurredAt).getTime());
+        }
+        const keepGroupIds = [...contributors].map(
+          (uid) => `repo:${repoId}:user:${uid}`,
+        );
+
+        // Fit the window to the PR's activity span (+8% padding, min 12h).
+        if (Number.isFinite(minT) && Number.isFinite(maxT)) {
+          const pad = Math.max((maxT - minT) * 0.08, 12 * 60 * 60 * 1000);
+          tl.setWindow(minT - pad, maxT + pad, { animation: true });
+        }
+
+        prFocusActiveRef.current = true;
+        prFocusPrIdRef.current = timelineFocusPr;
+        applyContext({
+          groupIds: keepGroupIds.length ? keepGroupIds : null,
+          prId: timelineFocusPr,
+          eventId: null,
+        });
+        rebuildMarkers(); // re-render markers filtered to just this PR
+        isolatePrBars(timelineFocusPr); // hide sibling bars sharing its lane
+        tl.setSelection([`pr:${timelineFocusPr}`]);
+
+        // Vertically centre the PR bar once the collapse + window change settle.
+        const token = groupClassToken(prGroupId(inWindow));
+        window.setTimeout(() => centerShowTarget(token, false), 320);
+
+        useFilters.getState().consumeTimelineFocus();
+        return;
+      }
+
       const focusEv = useFilters.getState().timelineFocusEvent;
 
       // Activity "Show": focus one specific event. Collapse the timeline to the
@@ -1761,6 +1949,8 @@ export function Timeline(): JSX.Element {
     applyContext,
     centerShowTarget,
     flashPrFocusGlow,
+    rebuildMarkers,
+    isolatePrBars,
   ]);
 
   return (
@@ -1797,7 +1987,7 @@ export function Timeline(): JSX.Element {
           eventsById={eventsByIdRef.current}
           usersById={usersById}
           prsById={prsById}
-          onContextFocus={applyContext}
+          onContextFocus={onPopoverContext}
           onDismiss={closeModal}
           onNavigate={navigatePopover}
           onPick={onPick}
