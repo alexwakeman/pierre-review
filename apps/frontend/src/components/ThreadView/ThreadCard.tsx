@@ -60,6 +60,19 @@ export function ThreadCard({
                 <CodeAnchor diffHunk={anchorHunk} threadId={thread.id} />
               ) : undefined
             }
+            // Replies get their own "Show" (the root is covered by the card-header
+            // link above). All review-comment events share the thread's refId, so
+            // navigation disambiguates the specific reply by its createdAt instant.
+            showLink={
+              i > 0 ? (
+                <ShowOnTimeline
+                  prId={thread.prId}
+                  at={c.createdAt}
+                  event={{ type: 'review_comment', refId: thread.id }}
+                  title="Show this reply on the timeline"
+                />
+              ) : undefined
+            }
           />
         ))}
       </div>

@@ -2001,12 +2001,20 @@ export function Timeline(): JSX.Element {
       // (centerShowTarget) once the collapse has settled and the row renders.
       // The overlay is sticky: it stays until the next timeline interaction.
       if (focusEv && data) {
-        const match = data.events.find(
+        // Among events matching (pr, type, refId), prefer the one at the requested
+        // instant: review-comment replies all share their thread's refId, so the
+        // occurredAt is what distinguishes a specific reply's marker. Falls back to
+        // the first match (unchanged behaviour for thread/PR-comment/etc. links).
+        const candidates = data.events.filter(
           (e) =>
             e.prId === timelineFocusPr &&
             e.type === focusEv.type &&
             (focusEv.refId == null || e.refId === focusEv.refId),
         );
+        const match =
+          (timelineFocusAt != null &&
+            candidates.find((e) => e.occurredAt === timelineFocusAt)) ||
+          candidates[0];
 
         const authorId = inWindow.authorId;
         // Lifecycle events have no marker; their actor is the PR author, so the
