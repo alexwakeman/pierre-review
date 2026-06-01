@@ -137,13 +137,18 @@ export function renderUserLabel(
     ? `<button type="button" class="tl-collapse-caret" data-collapse-gid="${escapeHtml(gid)}" title="${escapeHtml(caretTitle)}" aria-label="${escapeHtml(caretTitle)}">${isCollapsed ? '▸' : '▾'}</button>`
     : '';
 
+  // Layout: a left gutter (caret + avatar) beside a stacked main column — the name
+  // (+ maintainer shield) on the first line, the interaction stats indented just
+  // below it. Stacking lets the name use the full label width instead of competing
+  // with the stats for it, so it rarely truncates and the column stays narrow.
   return (
     `<div class="tl-user">` +
     caret +
     avatar +
-    nameHtml +
-    mergerBadge +
+    `<span class="tl-user-main">` +
+    `<span class="tl-user-name-line">${nameHtml}${mergerBadge}</span>` +
     statsHtml +
+    `</span>` +
     `</div>`
   );
 }

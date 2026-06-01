@@ -199,16 +199,32 @@ body {
 .vis-labelset .vis-label.tl-user-row .vis-inner {
   width: 100%;
   /* Cap the contributor column so the timeline gets more room. vis sizes the left
-     panel to the widest label, so a hard ceiling here is what actually narrows it;
-     the name flex-shrinks within (see .tl-user-name) so the stats stay visible. */
-  max-width: 250px;
+     panel to the widest label, so a hard ceiling here is what actually narrows it.
+     With the stats stacked below, the name owns its line and gets ~3x the room it
+     had before; only an unusually long display name truncates at this ceiling. */
+  max-width: 264px;
 }
 .tl-user {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+  width: 100%;
+}
+/* Stacked main column beside the caret+avatar gutter: name line on top, the
+   interaction stats indented just below it (so the name owns its own line). */
+.tl-user-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 1px;
+}
+.tl-user-name-line {
   display: flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
-  width: 100%;
 }
 /* Per-row collapse caret: a small, quiet triangle that brightens on hover. Sits
    flush-left before the avatar; the row shrinks to just this label when collapsed. */
@@ -263,11 +279,10 @@ body {
 .tl-user-name {
   font-size: 12.5px;
   font-weight: 600;
-  /* Shrink to fit the capped column (min-width:0 lets it truncate past content),
-     but never grow wider than this. */
+  /* The name owns its line now (stats moved below), so it uses the full width and
+     only truncates if it would exceed the capped column — rare for real names. */
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 116px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -288,11 +303,12 @@ body {
   align-items: center;
 }
 .tl-user-stats {
-  display: inline-flex;
+  /* On its own line under the name now — wrap (rather than widen the column) if a
+     prolific contributor's stats run long. */
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  padding-left: 6px;
+  gap: 3px 8px;
   font-size: 11px;
   color: #6b7280;
 }
