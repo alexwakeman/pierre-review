@@ -523,6 +523,15 @@ export function Timeline(): JSX.Element {
       persistCollapsedRows();
       // The row's cross-band divider must drop / restore alongside it.
       applyCrossSeps();
+      // vis applies subgroupVisibility only during a group RESTACK, and a bare
+      // groups.update / redraw doesn't mark the group dirty — so without an items
+      // mutation to dirty it (e.g. a row with no cross-band xsep to remove above),
+      // the visibility change wouldn't paint. Force the restack explicitly.
+      const tl = timelineRef.current as
+        | (VisTimeline & { itemSet?: { markDirty?: (o: { restackGroups?: boolean }) => void } })
+        | null;
+      tl?.itemSet?.markDirty?.({ restackGroups: true });
+      tl?.redraw();
     },
     [persistCollapsedRows, applyCrossSeps],
   );
@@ -1586,6 +1595,24 @@ export function Timeline(): JSX.Element {
         // timeline is stable now, so we no longer zoom into the cluster span.
         const members = clusterMembersRef.current.get(key) ?? [];
         openPopover(x, y, members);
+      }
+    });
+
+    // Double-clicking a PR bar enters the unified PR-isolation focus — same end
+    // state as the PR-detail "Focus" link (the preceding single click just selects
+    // it, which enterPrFocus does anyway). Other items ignore double-click.
+    timeline.on('doubleClick', (props: { item: string | number | null }) => {
+      const id = props.item;
+      if (id == null) return;
+      const key = String(id);
+      if (!key.startsWith('pr:')) return;
+      const prId = Number.parseInt(key.slice(3), 10);
+      enterPrFocus(prId, { fitWindow: true });
+      // Vertically centre the PR bar once the collapse + window change settle.
+      const pr = prsByIdRef.current.get(prId);
+      if (pr) {
+        const token = groupClassToken(prGroupId(pr));
+        window.setTimeout(() => centerShowTarget(token, false), 320);
       }
     });
 

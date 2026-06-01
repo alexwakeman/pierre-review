@@ -261,10 +261,11 @@ Key behaviors to know about:
   ring (both removed). Outside focus, clicking empty canvas dismisses **one level at
   a time**: an open popover first, else the selected PR bar, else a lingering
   exit-anchor glow left after leaving focus (`applyExitGlow(null)`).
-- **One unified focus overlay** (`enterPrFocus` in `Timeline/index.tsx`). Both the
-  PR-detail header's **Focus** link (store `focusPrOnTimeline` → `timelineIsolate`)
-  **and** clicking a **cross-user marker** (actor ≠ PR author) — whether a standalone
-  marker or one **picked from a cluster** (`onPick`) — funnel through
+- **One unified focus overlay** (`enterPrFocus` in `Timeline/index.tsx`). The
+  PR-detail header's **Focus** link (store `focusPrOnTimeline` → `timelineIsolate`),
+  **double-clicking a PR bar** (`doubleClick` handler), **and** clicking a
+  **cross-user marker** (actor ≠ PR author) — whether a standalone marker or one
+  **picked from a cluster** (`onPick`) — all funnel through
   `enterPrFocus` to reach a byte-for-byte identical state: collapse to the rows of
   **every** contributor to the PR, show **only that PR** (sibling bars sharing its
   packed lane hidden via `isolatePrBars`; markers filtered to the PR in
@@ -288,7 +289,11 @@ Key behaviors to know about:
   bands via `subgroupVisibility` (`setRowCollapsed`). Distinct from focus-mode's
   whole-row `visible:false`: the thin labelled row stays. The collapsed set
   (`collapsedRowsByUserRef`) persists to `localStorage['ghtm:collapsedRows']` and is
-  re-asserted after each rebuild (new lanes) and after focus exit.
+  re-asserted after each rebuild (new lanes) and after focus exit. vis applies
+  `subgroupVisibility` only during a group **restack**, which a bare
+  `groups.update`/`redraw` doesn't trigger — so `setRowCollapsed` forces it via
+  `itemSet.markDirty({restackGroups:true})` + `redraw()` (otherwise a row with no
+  cross-band `xsep` item to mutate wouldn't repaint).
 - **Show vs Focus (PR detail).** **Show** (`openPrFocused`) just centres + glow-pulses
   the PR in the regular view — no focus. **Focus** enters the PR-isolation overlay
   above. Both, plus the per-thread / per-comment / activity "Show" links
