@@ -1491,19 +1491,19 @@ export function Timeline(): JSX.Element {
       const tgt = (native?.target ?? null) as HTMLElement | null;
       if (tgt?.closest?.('[data-collapse-gid]')) return;
 
-      // Empty-canvas click. Inside a row-collapse focus this stays a no-op — the
-      // only way out of focus is the bottom-right "Exit focus" button / browser-
-      // back, so a stray click can't accidentally tear the overlay down. Outside
-      // focus it dismisses ONE level at a time: an open marker/cluster popover
-      // closes first (via closeModal, so the drill history stays in step — same as
-      // the popover's X / Escape); else a selected PR bar is deselected; else a
-      // lingering exit-anchor glow (left after leaving focus) is cleared. So a
-      // popover-and-bar combo clears the popover without yanking the PR out of the
-      // detail pane, and a final click tidies the leftover anchor pulse.
+      // Empty-canvas click. An open marker/cluster popover always closes first —
+      // even inside a focus overlay (closeModal keeps the focus up since a focus is
+      // active, so this can't accidentally tear the overlay down; focus is left only
+      // via the bottom-right "Exit focus" button / Esc). With no popover open and
+      // OUTSIDE focus, it dismisses ONE more level at a time: a selected PR bar is
+      // deselected; else a lingering exit-anchor glow (left after leaving focus) is
+      // cleared. So a popover-and-bar combo clears the popover without yanking the PR
+      // out of the detail pane, and a final click tidies the leftover anchor pulse.
       if (id == null) {
-        if (!focusedGroupIdsRef.current) {
-          if (popoverRef.current) closeModal();
-          else if (selectedPrIdRef.current != null) useFilters.getState().clearSelection();
+        if (popoverRef.current) {
+          closeModal();
+        } else if (!focusedGroupIdsRef.current) {
+          if (selectedPrIdRef.current != null) useFilters.getState().clearSelection();
           else if (exitGlowEventRef.current != null) applyExitGlow(null);
         }
         return;
