@@ -9,6 +9,7 @@ import { HelpModal } from './components/HelpModal.js';
 import { useUrlState } from './hooks/useUrlState.js';
 import { useLocalStorage } from './hooks/useLocalStorage.js';
 import { useKeyboard } from './hooks/useKeyboard.js';
+import { useFilters } from './store/filters.js';
 
 function useDarkMode(): [boolean, () => void] {
   const [dark, setDark] = useState(
@@ -26,6 +27,9 @@ export default function App(): JSX.Element {
   useKeyboard();
   const [dark, toggleDark] = useDarkMode();
   const [helpOpen, setHelpOpen] = useState(false);
+  // Surfaced as a subtle header badge so it's clear we're in the PR-focus view
+  // mode. The Timeline owns the overlay and reports this; it clears on exit.
+  const focusActive = useFilters((s) => s.focusActive);
 
   // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
   // the dragged height is remembered across reloads. During a drag we set the
@@ -63,6 +67,15 @@ export default function App(): JSX.Element {
         <h1 className="brand-title" title="Pierre — a play on “PR”">
           Pierre
         </h1>
+        {focusActive && (
+          <span
+            className="focus-indicator"
+            title="You're in PR focus mode — Esc, the browser Back button, or Exit focus to leave"
+          >
+            <span className="focus-indicator-dot" aria-hidden="true" />
+            Focus mode
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-3">
           <TimelineSearch />
           <SyncStatus />

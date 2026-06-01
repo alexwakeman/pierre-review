@@ -35,6 +35,51 @@ body {
   padding-bottom: 2px;
 }
 
+/* ---- focus-mode indicator ---- */
+/* A subtle header pill, shown only while a focus overlay is active (App reads the
+   store's focusActive), in the same sky palette as the selection/focus glow. The
+   little dot pulses to echo that glow without being loud. */
+.focus-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #0284c7; /* sky-600 */
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  white-space: nowrap;
+}
+.dark .focus-indicator {
+  color: #7dd3fc; /* sky-300 */
+}
+.focus-indicator-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: #38bdf8;
+  box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.6);
+  animation: focus-dot-pulse 1.8s ease-in-out infinite;
+}
+@keyframes focus-dot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(56, 189, 248, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-indicator-dot {
+    animation: none;
+  }
+}
+
 /* ---- markdown comment bodies ---- */
 .md-body {
   font-size: 13px;
@@ -143,7 +188,7 @@ body {
 
 /* nested member sub-lanes sit slightly indented + dimmer */
 .vis-labelset .vis-label.vis-nested-group {
-  padding-left: 1rem;
+  padding-left: 0.625rem;
   font-size: 11px;
   opacity: 0.85;
 }
@@ -153,11 +198,15 @@ body {
    Scoped to user rows so the repo row's chevron + title layout is untouched. */
 .vis-labelset .vis-label.tl-user-row .vis-inner {
   width: 100%;
+  /* Cap the contributor column so the timeline gets more room. vis sizes the left
+     panel to the widest label, so a hard ceiling here is what actually narrows it;
+     the name flex-shrinks within (see .tl-user-name) so the stats stay visible. */
+  max-width: 250px;
 }
 .tl-user {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
   width: 100%;
 }
@@ -168,8 +217,8 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   margin-right: -1px;
   padding: 0;
   border: 0;
@@ -194,8 +243,8 @@ body {
 }
 .tl-user-avatar {
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border-radius: 9999px;
   object-fit: cover;
   background: #e5e7eb;
@@ -214,7 +263,11 @@ body {
 .tl-user-name {
   font-size: 12.5px;
   font-weight: 600;
-  max-width: 150px;
+  /* Shrink to fit the capped column (min-width:0 lets it truncate past content),
+     but never grow wider than this. */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 116px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -237,10 +290,10 @@ body {
 .tl-user-stats {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-left: auto;
-  padding-left: 8px;
-  font-size: 11.5px;
+  padding-left: 6px;
+  font-size: 11px;
   color: #6b7280;
 }
 .dark .tl-user-stats {
@@ -332,7 +385,7 @@ body {
 .tl-exit-focus {
   position: absolute;
   bottom: 12px;
-  right: 12px;
+  left: 12px;
   z-index: 1000;
   display: inline-flex;
   align-items: center;
