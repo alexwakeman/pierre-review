@@ -171,6 +171,11 @@ body {
 .dark .tl-collapse-caret:hover {
   color: #e5e7eb;
 }
+/* Req 3: per-row collapse is suspended while a focus overlay is active — hide the
+   caret so a kept row can't be collapsed (it must stay expanded). */
+.tl-focus-active .tl-collapse-caret {
+  display: none;
+}
 .tl-user-avatar {
   flex: none;
   width: 20px;

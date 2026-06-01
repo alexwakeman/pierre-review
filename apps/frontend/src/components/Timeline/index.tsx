@@ -474,11 +474,15 @@ export function Timeline(): JSX.Element {
     const collapsed = collapsedRowsRef.current;
     const remove: string[] = [];
     const add: DataItem[] = [];
+    // While a focus overlay owns the rows, per-row collapse is suspended on the kept
+    // rows (Req 2/3) — their cross-band divider must show like any other kept row.
+    // Only honour per-row collapse when NO focus overlay is active.
+    const inFocus = focusedGroupIdsRef.current != null;
     for (const xs of allXsepItemsRef.current) {
       const id = String(xs.id);
       const hidden =
         collapsed.has(String(xs.group)) ||
-        collapsedRowsByUserRef.current.has(String(xs.group));
+        (!inFocus && collapsedRowsByUserRef.current.has(String(xs.group)));
       const present = items.get(id) != null;
       if (hidden && present) remove.push(id);
       else if (!hidden && !present) add.push(xs);
@@ -819,11 +823,16 @@ export function Timeline(): JSX.Element {
           }
         }
         const hide = [...present].filter((sg) => !keep.has(sg));
-        if (hide.length === 0) continue;
         const vis: Record<string, boolean> = {};
         for (const sg of hide) vis[sg] = false;
+        // Req 2: focus SUSPENDS any per-row collapse on a kept row — force its kept
+        // bands visible so a contributor whose row the user collapsed (its subgroups
+        // hidden via setRowCollapsed) still shows the focused PR's activity. The
+        // collapse is restored on exit (applyContext re-collapses on !active).
+        for (const sg of present) if (keep.has(sg)) vis[sg] = true;
+        if (Object.keys(vis).length === 0) continue;
         groups.update({ id: gid, subgroupVisibility: vis });
-        hiddenSubgroupsRef.current.set(gid, hide);
+        if (hide.length) hiddenSubgroupsRef.current.set(gid, hide);
       }
     },
     [],
@@ -967,6 +976,12 @@ export function Timeline(): JSX.Element {
         tl.setWindow(minT - pad, maxT + pad, { animation: true });
       }
 
+      // Req 1 (browser-back leaves Focus): push a dedicated history entry so the
+      // mouse/browser back button has a focus-owned slot to consume. The popstate
+      // handler detects prFocusActiveRef and tears the whole focus down (restoring
+      // the anchor) rather than only stepping through popover drill levels. One
+      // entry per session — enterPrFocus only runs when not already focused.
+      history.pushState({ ghtmFocus: 1 }, '');
       prFocusActiveRef.current = true;
       prFocusPrIdRef.current = prId;
       applyContext({
@@ -1285,24 +1300,21 @@ export function Timeline(): JSX.Element {
     if (!focusedGroupIdsRef.current) applyContext(null);
   }, [applyContext]);
 
-  // Full exit (bottom-right button / browser-back): revert the row collapse +
-  // glow, restore the window to where the user was when they opened the focus,
-  // and close the modal too. `restoreAnchor` (default) re-centres on + glows the
-  // marker that opened the focus; callers where that context is gone (e.g. a repo
-  // switch) pass false to just clear the overlay.
-  const exitFocus = useCallback(
+  // Focus teardown WITHOUT touching the History API (callers manage history): revert
+  // the row collapse + glow, restore the window to where the user was when they
+  // opened the focus, and close the modal too. `restoreAnchor` (default) re-centres
+  // on + glows the marker that opened the focus; callers where that context is gone
+  // (e.g. a repo switch) pass false to just clear the overlay. Used by the browser-
+  // back popstate path (which has already consumed the focus entry) and, via
+  // exitFocus, by the Exit-focus button / Esc.
+  const exitFocusCore = useCallback(
     (restoreAnchor = true) => {
       // Capture the anchor + PR-focus state before applyContext(null) clears them.
       const anchorEvent = restoreAnchor ? highlightedEventRef.current : null;
       const wasPrFocus = prFocusActiveRef.current;
       const prId = prFocusPrIdRef.current;
-      const depth = drillDepthRef.current;
       applyContext(null);
       setPopover(null);
-      if (depth > 0) {
-        suppressPopstateRef.current += 1;
-        history.go(-depth);
-      }
       drillDepthRef.current = 0;
       savedWindowRef.current = null;
       savedScrollTopRef.current = null;
@@ -1350,6 +1362,41 @@ export function Timeline(): JSX.Element {
     [applyContext, restoreWindow, restoreAnchorView, centerShowTarget],
   );
 
+  // Full exit driven by the Exit-focus button / Esc / a repo switch (NOT a browser
+  // back). Unwind every focus-owned history entry — the focus marker enterPrFocus
+  // pushed (1 when in PR focus) plus any open popover drill entries — so the back
+  // button isn't left with stale focus slots, then tear focus down. The single net
+  // popstate the unwind emits is swallowed by suppressPopstateRef.
+  const exitFocus = useCallback(
+    (restoreAnchor = true) => {
+      const entries = (prFocusActiveRef.current ? 1 : 0) + drillDepthRef.current;
+      if (entries > 0) {
+        suppressPopstateRef.current += 1;
+        history.go(-entries);
+      }
+      exitFocusCore(restoreAnchor);
+    },
+    [exitFocusCore],
+  );
+
+  // A fresh strip / my-turn / search navigation abandons any active overlay (a
+  // sticky "Show" or a PR-isolation Focus). Unwind the focus-owned history entries
+  // first — the {ghtmFocus} marker enterPrFocus pushed plus any open popover drill —
+  // so a later browser-back isn't left consuming stale focus slots, THEN clear the
+  // overlay. Reading prFocusActiveRef before applyContext(null) (which resets it) is
+  // load-bearing. No-ops when nothing is active.
+  const dropOverlayForNavigation = useCallback(() => {
+    if (!showFocusActiveRef.current && !focusedGroupIdsRef.current) return;
+    const entries = (prFocusActiveRef.current ? 1 : 0) + drillDepthRef.current;
+    if (entries > 0) {
+      suppressPopstateRef.current += 1;
+      history.go(-entries);
+    }
+    drillDepthRef.current = 0;
+    showFocusActiveRef.current = false;
+    applyContext(null);
+  }, [applyContext]);
+
   // Open-in-detail: close the popover but KEEP the overlay + one history entry,
   // so a later back press clears the overlay and restores the window (the detail
   // pane itself stays open).
@@ -1376,13 +1423,17 @@ export function Timeline(): JSX.Element {
       // list and a back from the list closes it, both WITHOUT applyContext(null) or a
       // window/scroll restore (which would yank us out of the focused view).
       if (prFocusActiveRef.current) {
-        if (depth >= 2) {
-          drillDepthRef.current = 1;
-          setPopover((p) => (p ? { ...p, picked: null } : p));
-        } else if (depth === 1) {
-          drillDepthRef.current = 0;
-          setPopover(null);
+        // Req 1: the mouse/browser back button LEAVES focus, returning to the main
+        // timeline with the anchor (the clicked event, else the PR) re-selected and
+        // glowing — the same teardown as Esc / the Exit-focus button. This popstate
+        // already consumed one focus-owned entry; unwind the remaining drill entries
+        // (the focus marker is the one just consumed) so the stack returns to the
+        // pre-focus baseline, then tear focus down without further history ops.
+        if (depth > 0) {
+          suppressPopstateRef.current += 1;
+          history.go(-depth);
         }
+        exitFocusCore(true);
         return;
       }
       if (depth >= 2) {
@@ -1411,7 +1462,7 @@ export function Timeline(): JSX.Element {
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [applyContext, restoreWindow, restoreScrollTop, restoreAnchorView]);
+  }, [applyContext, restoreWindow, restoreScrollTop, restoreAnchorView, exitFocusCore]);
 
   // Persistently pulse the marker/cluster the open popover refers to, so the user
   // can always see which one they're looking at — but only when we're NOT in
@@ -1659,6 +1710,10 @@ export function Timeline(): JSX.Element {
       if (!gid) return;
       e.stopPropagation();
       e.preventDefault();
+      // Req 3: per-row collapse is suspended in focus mode — a kept row must stay
+      // expanded. Ignore caret clicks while any focus overlay is active (the caret is
+      // also CSS-hidden then; this is the defensive backstop).
+      if (prFocusActiveRef.current || focusedGroupIdsRef.current) return;
       const willCollapse = !collapsedRowsByUserRef.current.has(gid);
       setRowCollapsed(gid, willCollapse);
       btn.textContent = willCollapse ? '▸' : '▾';
@@ -2071,10 +2126,7 @@ export function Timeline(): JSX.Element {
       // under pr-focus-glow). Then recenter horizontally on the clicked event's
       // instant when provided, else the PR bar's midpoint — avoids a big jump when
       // a long-running PR's midpoint is far from the clicked event.
-      if (showFocusActiveRef.current || focusedGroupIdsRef.current) {
-        showFocusActiveRef.current = false;
-        applyContext(null);
-      }
+      dropOverlayForNavigation();
       const win = tl.getWindow();
       const width = win.end.valueOf() - win.start.valueOf();
       let center: number;
@@ -2122,10 +2174,7 @@ export function Timeline(): JSX.Element {
         ? searchData?.prs.find((p) => p.id === timelineFocusPr)
         : undefined;
     if (hiddenByMember) {
-      if (showFocusActiveRef.current || focusedGroupIdsRef.current) {
-        showFocusActiveRef.current = false;
-        applyContext(null);
-      }
+      dropOverlayForNavigation();
       forceShowOpenPrRef.current = hiddenByMember;
       setForceShowNonce((n) => n + 1);
       const token = groupClassToken(prGroupId(hiddenByMember));
@@ -2171,10 +2220,7 @@ export function Timeline(): JSX.Element {
         // Same fresh-navigation teardown as the in-window path above: clear any
         // active "Show" / popover focus so the deferred scroll+glow doesn't land
         // under collapsed rows.
-        if (showFocusActiveRef.current || focusedGroupIdsRef.current) {
-          showFocusActiveRef.current = false;
-          applyContext(null);
-        }
+        dropOverlayForNavigation();
         forceShowOpenPrRef.current = candidate;
         setForceShowNonce((n) => n + 1);
         const winC = tl.getWindow();
@@ -2211,10 +2257,11 @@ export function Timeline(): JSX.Element {
     rebuildMarkers,
     isolatePrBars,
     enterPrFocus,
+    dropOverlayForNavigation,
   ]);
 
   return (
-    <div className="relative h-full w-full">
+    <div className={`relative h-full w-full${focusActive ? ' tl-focus-active' : ''}`}>
       {isLoading && !data && (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-500">
           Loading timeline…

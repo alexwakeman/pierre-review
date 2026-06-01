@@ -275,14 +275,19 @@ Key behaviors to know about:
   `ev-cross-linked` ring). It's **sticky**: clicks only explore and never leave
   focus, and the marker popover is **trimmed to the focused PR's events**
   (`MarkerPopover` `focusPrId`), so a cluster list shows only that PR's activity.
-  Crucially, popover/browser **back navigates the popover drill levels only** (picked
-  event → cluster list → closed) and does **NOT** leave focus — that's handled in the
-  `popstate` guard on `prFocusActiveRef`. Leave focus *only* via the bottom-right
-  **Exit focus** button or **Esc** (which expand the rows, re-centre on whichever
-  element was selected, and leave a **persistent** pulse on it — the exit anchor — so
-  you can relocate it); toggling the repo filter also drops focus. (The marker
-  popover no longer drives any row collapse — `MarkerPopover.focusGroupIds` is gone;
-  it only reports an own-work single click so the PR band glows.)
+  Crucially, the **mouse/browser back button leaves focus** (it used to only step
+  through popover drill levels): `enterPrFocus` pushes a dedicated `{ghtmFocus}`
+  history entry, and the `popstate` guard on `prFocusActiveRef` tears the whole focus
+  down — restoring the rows, re-centring on the anchor (the clicked event, else the PR
+  that triggered focus) and pulsing it — exactly like the bottom-right **Exit focus**
+  button or **Esc**. All three exits run `exitFocusCore` (teardown + anchor restore);
+  the button/Esc route through `exitFocus`, which also unwinds the focus-owned history
+  entries (`(prFocusActive?1:0) + drillDepth`), whereas the back-button path unwinds
+  only the remaining drill entries since the browser already consumed the focus entry.
+  Toggling the repo filter or a fresh strip/search navigation also drops focus (both
+  unwind the history entries first). (The marker popover no longer drives any row
+  collapse — `MarkerPopover.focusGroupIds` is gone; it only reports an own-work single
+  click so the PR band glows.)
 - **Per-row collapse.** Each contributor row label carries a caret
   (`.tl-collapse-caret`, delegated from one capturing click listener on the
   container) that shrinks the row to just its name by hiding the row's subgroup
@@ -293,7 +298,13 @@ Key behaviors to know about:
   `subgroupVisibility` only during a group **restack**, which a bare
   `groups.update`/`redraw` doesn't trigger — so `setRowCollapsed` forces it via
   `itemSet.markDirty({restackGroups:true})` + `redraw()` (otherwise a row with no
-  cross-band `xsep` item to mutate wouldn't repaint).
+  cross-band `xsep` item to mutate wouldn't repaint). **Focus mode suspends per-row
+  collapse**: entering focus force-shows the kept bands of any collapsed contributor
+  row (`focusSubgroups` sets the keep bands visible), the caret is hidden
+  (`.tl-focus-active .tl-collapse-caret`) and its click handler no-ops, and
+  `applyCrossSeps` ignores `collapsedRowsByUserRef` while a focus overlay is up. The
+  collapse is restored on exit (`applyContext` re-collapses), so the choice survives a
+  focus round-trip.
 - **Show vs Focus (PR detail).** **Show** (`openPrFocused`) just centres + glow-pulses
   the PR in the regular view — no focus. **Focus** enters the PR-isolation overlay
   above. Both, plus the per-thread / per-comment / activity "Show" links
