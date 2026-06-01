@@ -111,6 +111,12 @@ export interface FilterState {
   // restore the previous view — a counter (not a boolean) so repeated requests
   // each fire, even if focusActive hasn't yet been observed as flipped.
   exitFocusSignal: number;
+  // `rangeResetSignal`: a monotonic counter bumped on every range-preset click
+  // (even re-selecting the already-active preset). The Timeline watches it to
+  // re-apply the preset's window — so clicking "14d" again snaps the view back to
+  // the last 14 days after you've panned/zoomed away. A counter (not derived from
+  // `preset`) so a same-value re-click still fires.
+  rangeResetSignal: number;
 
   setRepoIds: (ids: number[] | null) => void;
   toggleRepo: (id: number) => void;
@@ -217,6 +223,7 @@ function freshDefaults(): FilterData {
     timelineCenterAt: null,
     focusActive: false,
     exitFocusSignal: 0,
+    rangeResetSignal: 0,
   };
 }
 
@@ -228,7 +235,10 @@ export const useFilters = create<FilterState>((set) => ({
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),
   setUserIds: (ids) => set({ userIds: ids }),
   setExcludeBots: (v) => set({ excludeBots: v }),
-  setPreset: (p) => set({ preset: p }),
+  setPreset: (p) =>
+    // Bump rangeResetSignal so the Timeline re-applies the window even when the
+    // preset is unchanged (re-clicking the active preset resets the view).
+    set((s) => ({ preset: p, rangeResetSignal: s.rangeResetSignal + 1 })),
   setCustomRange: (from, to) =>
     set({ preset: 'custom', customFrom: from, customTo: to }),
   toggleCategory: (c) => set((s) => ({ categories: toggle(s.categories, c) })),

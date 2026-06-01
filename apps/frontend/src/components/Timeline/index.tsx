@@ -279,6 +279,7 @@ export function Timeline(): JSX.Element {
   const preset = useFilters((s) => s.preset);
   const customFrom = useFilters((s) => s.customFrom);
   const customTo = useFilters((s) => s.customTo);
+  const rangeResetSignal = useFilters((s) => s.rangeResetSignal);
 
   const reposById = useMemo(() => {
     const m = new Map<number, string>();
@@ -1910,13 +1911,15 @@ export function Timeline(): JSX.Element {
     if (!same) tl.setSelection(want);
   }, [selectedPrId]);
 
-  // Move the visible window when the range preset changes.
+  // Move the visible window when the range preset changes — and re-apply it on
+  // every preset click via rangeResetSignal, so re-selecting the already-active
+  // preset snaps the view back to that range after panning/zooming away.
   useEffect(() => {
     const tl = timelineRef.current;
     if (!tl) return;
     const { from, to } = resolveRange(useFilters.getState());
     tl.setWindow(from, to, { animation: false });
-  }, [preset, customFrom, customTo]);
+  }, [preset, customFrom, customTo, rangeResetSignal]);
 
   // "Now" button: recenter the window on the current instant, keeping the
   // current zoom width. A transient store signal (epoch ms) the button bumps and
