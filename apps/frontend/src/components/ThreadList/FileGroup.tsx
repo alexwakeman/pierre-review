@@ -3,14 +3,9 @@ import { useFilters } from '../../store/filters.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { ThreadCountChips, rollupCounts } from './ThreadCountChips.js';
 
-// Threads with no line (file-level comments) sort first, then by line asc.
+// Newest thread first (by createdAt).
 function sortThreads(threads: ThreadDetail[]): ThreadDetail[] {
-  return [...threads].sort((a, b) => {
-    if (a.line == null && b.line == null) return 0;
-    if (a.line == null) return -1;
-    if (b.line == null) return 1;
-    return a.line - b.line;
-  });
+  return [...threads].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export function FileGroup({
@@ -18,6 +13,7 @@ export function FileGroup({
   threads,
   usersById,
   prUrl,
+  repoId,
   selectedThreadId,
   viewedSince,
   registerRef,
@@ -26,6 +22,7 @@ export function FileGroup({
   threads: ThreadDetail[];
   usersById: Map<number, User>;
   prUrl: string;
+  repoId?: number;
   selectedThreadId: number | null;
   viewedSince?: string | null;
   registerRef: (threadId: number, el: HTMLDivElement | null) => void;
@@ -73,6 +70,7 @@ export function FileGroup({
                 thread={t}
                 usersById={usersById}
                 prUrl={prUrl}
+                repoId={repoId}
                 selected={t.id === selectedThreadId}
                 viewedSince={viewedSince}
               />

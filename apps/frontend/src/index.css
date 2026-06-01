@@ -145,6 +145,32 @@ body {
   min-width: 0;
   width: 100%;
 }
+/* Per-row collapse caret: a small, quiet triangle that brightens on hover. Sits
+   flush-left before the avatar; the row shrinks to just this label when collapsed. */
+.tl-collapse-caret {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-right: -2px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tl-collapse-caret:hover {
+  background: rgba(120, 120, 120, 0.18);
+  color: #374151;
+}
+.dark .tl-collapse-caret:hover {
+  color: #e5e7eb;
+}
 .tl-user-avatar {
   flex: none;
   width: 20px;
@@ -774,6 +800,20 @@ body {
   margin-left: -2px;
   border-radius: 1px;
   background: rgba(56, 189, 248, 0.05);
+}
+
+/* Transient flash when an Activity entry is deep-linked from the timeline (e.g.
+   the commit popover's "View in Activity") — a soft sky wash that fades out. */
+@keyframes activity-flash {
+  0% {
+    background: rgba(56, 189, 248, 0.28);
+  }
+  100% {
+    background: rgba(56, 189, 248, 0);
+  }
+}
+.activity-flash {
+  animation: activity-flash 1.8s ease-out forwards;
 }
 
 /* ---- "my turn" pulsing ring (cards + timeline bars) ---- */

@@ -98,6 +98,8 @@ export function renderUserLabel(
   uid: number,
   stats: UserStats | undefined,
   isMerger = false,
+  gid?: string,
+  isCollapsed = false,
 ): string {
   const name = userLabel(user, uid);
   const avatar = user?.avatarUrl
@@ -126,8 +128,18 @@ export function renderUserLabel(
     ? `<span class="tl-merger" title="Has merge rights — has merged a PR in this repo">${SHIELD_GLYPH}</span>`
     : '';
 
+  // Collapse/expand caret — shrinks the row to just this label (its bars + markers
+  // hidden via subgroupVisibility). A capturing click listener on the timeline
+  // container (Timeline/index.tsx) does the toggle by matching `data-collapse-gid`;
+  // we only emit the affordance here. Omitted when no gid is supplied.
+  const caretTitle = isCollapsed ? 'Expand row' : 'Collapse row';
+  const caret = gid
+    ? `<button type="button" class="tl-collapse-caret" data-collapse-gid="${escapeHtml(gid)}" title="${escapeHtml(caretTitle)}" aria-label="${escapeHtml(caretTitle)}">${isCollapsed ? '▸' : '▾'}</button>`
+    : '';
+
   return (
     `<div class="tl-user">` +
+    caret +
     avatar +
     nameHtml +
     mergerBadge +

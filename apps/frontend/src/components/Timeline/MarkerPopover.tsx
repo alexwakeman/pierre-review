@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   autoUpdate,
   flip,
@@ -92,6 +92,7 @@ function SingleEvent({
 }): JSX.Element {
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
+  const showActivityEntry = useFilters((s) => s.showActivityEntry);
   const vis = markerVisual(ev);
   const actor = ev.actorId != null ? usersById.get(ev.actorId) : undefined;
   const who = userLabel(actor, ev.actorId);
@@ -120,6 +121,13 @@ function SingleEvent({
   const openInDetail = () => {
     if (ev.threadId != null) selectThread(ev.prId, ev.threadId);
     else if (ev.prId != null) selectPr(ev.prId);
+    onNavigate();
+  };
+
+  // Jump to this commit's row in the PR-detail Activity tab.
+  const viewInActivity = () => {
+    if (ev.prId == null) return;
+    showActivityEntry(ev.prId, { type: ev.type, refId: ev.refId });
     onNavigate();
   };
 
@@ -205,6 +213,16 @@ function SingleEvent({
         >
           Open in detail pane
         </button>
+        {isCommit && ev.prId != null && (
+          <button
+            type="button"
+            onClick={viewInActivity}
+            className="text-blue-500 hover:underline"
+            title="Show this commit in the PR's Activity tab"
+          >
+            View in Activity
+          </button>
+        )}
         {isCommit && commit && prDetail && (
           <a
             href={`${prDetail.githubUrl}/commits/${commit.sha}`}
@@ -277,6 +295,7 @@ export function MarkerPopover({
   eventsById,
   usersById,
   prsById,
+  focusPrId,
   onContextFocus,
   onDismiss,
   onNavigate,
@@ -287,6 +306,11 @@ export function MarkerPopover({
   eventsById: Map<number, TimelineEvent>;
   usersById: Map<number, User>;
   prsById: Map<number, TimelinePr>;
+  // When a sticky PR-isolation focus is active, the cluster list is trimmed to
+  // just that PR's events — the focus view shows only the PR's activity, so a
+  // "back to the list" must not resurface unrelated events from the original
+  // (pre-focus) cluster.
+  focusPrId?: number | null;
   onContextFocus: (ctx: ContextFocus) => void;
   onDismiss: () => void;
   onNavigate: () => void;
@@ -351,46 +375,25 @@ export function MarkerPopover({
 
   const events = state.eventIds
     .map((id) => eventsById.get(id))
-    .filter((e): e is TimelineEvent => e != null);
+    .filter((e): e is TimelineEvent => e != null)
+    // In PR-isolation focus, only the focused PR's events are visible.
+    .filter((e) => focusPrId == null || e.prId === focusPrId);
   const pickedEvent = picked != null ? eventsById.get(picked) : undefined;
 
   const pickedPrId = pickedEvent?.prId ?? null;
 
-  // Cross-user focus: when the displayed event is one person acting on another
-  // person's PR, collapse every other user row so the actor's row and the PR
-  // author's row sit together (no vertical jump). Same-user events, unknown
-  // actor/author, and the cluster-list view leave all rows shown.
-  const focusGroupIds = useMemo(() => {
-    if (!pickedEvent || pickedEvent.prId == null) return null;
-    const pr = prsById.get(pickedEvent.prId);
-    const actorId = pickedEvent.actorId;
-    const authorId = pr?.authorId ?? null;
-    if (actorId == null || authorId == null || actorId === authorId) return null;
-    return [
-      `repo:${pickedEvent.repoId}:user:${actorId}`,
-      `repo:${pr!.repoId}:user:${authorId}`,
-    ];
-  }, [pickedEvent, prsById]);
-
-  // Report the overlay to Timeline, which owns it — so it persists past
-  // "Open in detail pane" and is cleared explicitly on dismiss / back, not on
-  // unmount. The PR always glows when a single event is shown; the clicked
-  // marker only glows in the two-person (cross-user) case.
-  //
-  // Only a *picked* single event defines a focus context — the cluster-LIST view
-  // (picked == null) must NOT drive it. Otherwise opening a cluster while a focus
-  // is active would clear that focus (re-expanding every row, snapping to the
-  // top). The two paths that legitimately clear focus from a list — backing out
-  // and dismissing — do so explicitly in Timeline, so leaving it untouched here
-  // is safe.
+  // Report a *picked* single event to Timeline so it can glow the related PR band.
+  // The two-person row collapse the popover used to drive is superseded by the
+  // unified PR-isolation focus (a cross-user marker click now enters that overlay
+  // directly, in Timeline's click handler) — so we never request a row collapse
+  // (`groupIds: null`); this only handles the own-work single click, glowing the PR
+  // band without collapsing. The cluster-LIST view (picked == null) drives nothing,
+  // so opening a cluster while a focus is active never clears that focus (the two
+  // paths that legitimately clear focus from a list do so explicitly in Timeline).
   useEffect(() => {
     if (picked == null) return;
-    onContextFocus({
-      groupIds: focusGroupIds,
-      prId: pickedPrId,
-      eventId: focusGroupIds != null ? picked : null,
-    });
-  }, [focusGroupIds, pickedPrId, picked, onContextFocus]);
+    onContextFocus({ groupIds: null, prId: pickedPrId, eventId: null });
+  }, [pickedPrId, picked, onContextFocus]);
 
   const persistSize = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = e.currentTarget;

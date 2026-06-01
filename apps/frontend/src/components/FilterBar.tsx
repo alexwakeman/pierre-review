@@ -350,6 +350,14 @@ export function FilterBar(): JSX.Element {
             {p}
           </Chip>
         ))}
+        <button
+          type="button"
+          onClick={() => f.centerTimelineNow()}
+          title="Recenter the timeline on the current time (keeps the zoom)"
+          className="whitespace-nowrap rounded-full border border-sky-300 px-2.5 py-0.5 text-xs text-sky-600 transition hover:border-sky-400 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-400 dark:hover:bg-sky-900/30"
+        >
+          Now
+        </button>
       </Section>
 
       <Section label="Status">

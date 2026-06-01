@@ -97,6 +97,19 @@ export function ChecksTab({
         )}
       </Row>
 
+      {pr.mergedById != null && (
+        <Row label="Merged by">
+          <span className="inline-flex items-center gap-1.5 text-xs">
+            <Avatar user={usersById.get(pr.mergedById)} size={14} />
+            <UserName
+              user={usersById.get(pr.mergedById)}
+              fallbackId={pr.mergedById}
+              repoId={pr.repoId}
+            />
+          </span>
+        </Row>
+      )}
+
       {checks.length > 0 && (
         <Row label="Checks">
           <ul className="space-y-1">
@@ -173,7 +186,7 @@ export function ChecksTab({
                 >
                   <span className="text-green-600 dark:text-green-500">✓</span>
                   <Avatar user={u} size={14} />
-                  <UserName user={u} fallbackId={uid} />
+                  <UserName user={u} fallbackId={uid} repoId={pr.repoId} />
                 </span>
               );
             })}
@@ -192,6 +205,7 @@ export function ChecksTab({
                   <UserName
                     user={r.userId != null ? usersById.get(r.userId) : undefined}
                     fallbackId={r.userId}
+                    repoId={pr.repoId}
                   />
                 )}
               </span>

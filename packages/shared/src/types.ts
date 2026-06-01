@@ -363,6 +363,9 @@ export interface PrDetail {
   firstReviewAt: string | null;
   lastCommitAt: string | null;
   mergedAt: string | null;
+  // Who merged the PR (GraphQL `mergedBy`), distinct from the author; null on
+  // open/closed-unmerged PRs. Resolved via the `users` array below.
+  mergedById: number | null;
   closedAt: string | null;
   updatedAt: string;
   githubUrl: string;

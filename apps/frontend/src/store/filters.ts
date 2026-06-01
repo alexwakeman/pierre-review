@@ -59,6 +59,11 @@ export interface FilterState {
   selectedPrId: number | null;
   selectedThreadId: number | null;
 
+  // transient: a timeline → PR-detail deep link that opens the Activity tab and
+  // scrolls to a specific entry (e.g. the commit popover's "View in Activity").
+  // Matched against the loaded PR by `prId`; cleared by PrDetail after it scrolls.
+  activityFocus: { prId: number; type: EventType; refId: number | null } | null;
+
   // open PRs strip
   stripCollapsed: boolean;
   stripFilter: StripFilter;
@@ -86,6 +91,10 @@ export interface FilterState {
   // sticky focus overlay (collapse to its contributors, show only its bar, fit the
   // window) rather than just centre it. Consumed alongside the other focus hints.
   timelineIsolate: boolean;
+  // transient: request the timeline to recenter its window on a given instant
+  // (epoch ms) keeping the current zoom width — drives the "Now" button. Store-
+  // only (NOT URL-synced); cleared after the Timeline consumes it.
+  timelineCenterAt: number | null;
 
   // Timeline focus-mode overlay (clicking a cross-user marker collapses every row
   // except the two involved contributors). The overlay itself — row collapse,
@@ -130,6 +139,17 @@ export interface FilterState {
   // Exit-focus button / Escape; see the Timeline's timelineFocusPr consumer.
   focusPrOnTimeline: (prId: number) => void;
   consumeTimelineFocus: () => void;
+  // Recenter the timeline window on the current instant ("Now"); the Timeline
+  // consumes the signal and clears it.
+  centerTimelineNow: () => void;
+  consumeTimelineCenter: () => void;
+  // Open the selected PR's Activity tab scrolled to a specific entry (timeline
+  // commit popover → PR Activity). PrDetail consumes it once it has scrolled.
+  showActivityEntry: (
+    prId: number,
+    event: { type: EventType; refId: number | null },
+  ) => void;
+  consumeActivityFocus: () => void;
   // Focus-mode signalling (the Timeline owns the actual overlay; see fields above).
   // setFocusActive: the Timeline reports whether a focus overlay is currently up.
   setFocusActive: (v: boolean) => void;
@@ -183,6 +203,7 @@ function freshDefaults(): FilterData {
     derivedStates: [],
     selectedPrId: null,
     selectedThreadId: null,
+    activityFocus: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     stripFilter: 'all',
     searchQuery: '',
@@ -193,6 +214,7 @@ function freshDefaults(): FilterData {
     timelineFocusAt: null,
     timelineFocusEvent: null,
     timelineIsolate: false,
+    timelineCenterAt: null,
     focusActive: false,
     exitFocusSignal: 0,
   };
@@ -251,6 +273,11 @@ export const useFilters = create<FilterState>((set) => ({
       timelineFocusEvent: null,
       timelineIsolate: false,
     }),
+  centerTimelineNow: () => set({ timelineCenterAt: Date.now() }),
+  consumeTimelineCenter: () => set({ timelineCenterAt: null }),
+  showActivityEntry: (prId, event) =>
+    set({ selectedPrId: prId, selectedThreadId: null, activityFocus: { prId, ...event } }),
+  consumeActivityFocus: () => set({ activityFocus: null }),
   setFocusActive: (v) => set({ focusActive: v }),
   exitFocus: () =>
     set((s) => ({ focusActive: false, exitFocusSignal: s.exitFocusSignal + 1 })),

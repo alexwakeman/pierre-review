@@ -222,7 +222,8 @@ Three layers, deliberately separated:
 2. **Filter & selection state** → the Zustand store in `store/filters.ts`
    (`useFilters`): repos/members/date-range, event-category toggles,
    derived-state filters, the selected PR/thread, transient timeline hints
-   (`timelineFocusPr`, `timelineFocusAt`, `timelineFocusEvent`, `timelineIsolate`),
+   (`timelineFocusPr`, `timelineFocusAt`, `timelineFocusEvent`, `timelineIsolate`,
+   `timelineCenterAt`),
    and focus-mode signals (`focusActive`, `exitFocusSignal`) shared with the
    keyboard hook so Escape can drive focus.
 3. **URL** → `hooks/useUrlState.ts` mirrors the store to the query string both
@@ -232,8 +233,10 @@ Three layers, deliberately separated:
 ### UI regions (`App.tsx`)
 
 - **FilterBar** — add/remove repos, members (auto-scoped to who's active in the
-  window, with an exclude-bots toggle), range presets (7/14/30/90d/custom), event
-  categories, and derived-state tags.
+  window, with an exclude-bots toggle), range presets (7/14/30/90d/custom) plus a
+  **Now** action (recenter the window on the present, keeping the zoom — a
+  transient `timelineCenterAt` store signal), event categories, and derived-state
+  tags.
 - **OpenPrsStrip** — collapsible top strip of open PRs with `all` / `my_turn` /
   `needs_attention` filters.
 - **Timeline** — the centerpiece (see below).
@@ -255,22 +258,37 @@ Key behaviors to know about:
   selects it. Every highlight — the selected PR bar, the open popover's marker
   (`ev-selected`), the focus glows (`pr-cross-linked` / `ev-cross-linked`) — is the
   **same soft sky pulse** (`ev-select-pulse`), *not* a yellow border or marching-ants
-  ring (both removed). Outside focus, clicking empty canvas dismisses one level
-  (open popover first, else the selected PR bar).
-- **Two focus overlays** (both collapse rows; both leave *only* via the bottom-right
-  **Exit focus** button, **Esc**, or browser-back — which expand the rows, re-centre
-  on whichever element was selected, and leave a **persistent** pulse on it so you
-  can relocate it. Toggling the repo filter also drops focus):
-  - **Cross-user marker focus** — clicking a marker whose actor ≠ the PR author
-    collapses to just those two contributor rows. Clicking an *own-work* marker while
-    focused hands off cleanly *out* of focus into a normal single-event selection.
-  - **PR-isolation "Focus"** (the PR-detail header's **Focus** link → store
-    `focusPrOnTimeline` → `timelineIsolate`) — collapses to the rows of **every**
-    contributor to the PR, shows **only that PR** (sibling bars sharing its packed
-    lane are hidden via `isolatePrBars`; markers are filtered to the PR in
-    `rebuildMarkers`, since the shared `cross` band can't be trimmed per-PR), and
-    **fits the window** to the PR's activity span. It's **sticky**: clicks only
-    explore (open popovers, move the highlight) and never leave focus.
+  ring (both removed). Outside focus, clicking empty canvas dismisses **one level at
+  a time**: an open popover first, else the selected PR bar, else a lingering
+  exit-anchor glow left after leaving focus (`applyExitGlow(null)`).
+- **One unified focus overlay** (`enterPrFocus` in `Timeline/index.tsx`). Both the
+  PR-detail header's **Focus** link (store `focusPrOnTimeline` → `timelineIsolate`)
+  **and** clicking a **cross-user marker** (actor ≠ PR author) — whether a standalone
+  marker or one **picked from a cluster** (`onPick`) — funnel through
+  `enterPrFocus` to reach a byte-for-byte identical state: collapse to the rows of
+  **every** contributor to the PR, show **only that PR** (sibling bars sharing its
+  packed lane hidden via `isolatePrBars`; markers filtered to the PR in
+  `rebuildMarkers`, since the shared `cross` band can't be trimmed per-PR). The
+  Focus link **fits the window** to the PR's activity span; a cross-user click
+  recenters on the clicked instant and anchors that event (popover open + the
+  `ev-cross-linked` ring). It's **sticky**: clicks only explore and never leave
+  focus, and the marker popover is **trimmed to the focused PR's events**
+  (`MarkerPopover` `focusPrId`), so a cluster list shows only that PR's activity.
+  Crucially, popover/browser **back navigates the popover drill levels only** (picked
+  event → cluster list → closed) and does **NOT** leave focus — that's handled in the
+  `popstate` guard on `prFocusActiveRef`. Leave focus *only* via the bottom-right
+  **Exit focus** button or **Esc** (which expand the rows, re-centre on whichever
+  element was selected, and leave a **persistent** pulse on it — the exit anchor — so
+  you can relocate it); toggling the repo filter also drops focus. (The marker
+  popover no longer drives any row collapse — `MarkerPopover.focusGroupIds` is gone;
+  it only reports an own-work single click so the PR band glows.)
+- **Per-row collapse.** Each contributor row label carries a caret
+  (`.tl-collapse-caret`, delegated from one capturing click listener on the
+  container) that shrinks the row to just its name by hiding the row's subgroup
+  bands via `subgroupVisibility` (`setRowCollapsed`). Distinct from focus-mode's
+  whole-row `visible:false`: the thin labelled row stays. The collapsed set
+  (`collapsedRowsByUserRef`) persists to `localStorage['ghtm:collapsedRows']` and is
+  re-asserted after each rebuild (new lanes) and after focus exit.
 - **Show vs Focus (PR detail).** **Show** (`openPrFocused`) just centres + glow-pulses
   the PR in the regular view — no focus. **Focus** enters the PR-isolation overlay
   above. Both, plus the per-thread / per-comment / activity "Show" links
@@ -281,7 +299,12 @@ Key behaviors to know about:
 - **Commits are hidden by default** (`DEFAULT_CATEGORIES` excludes `commits`);
   enabling them round-trips through the URL.
 - **Contributor names are GitHub profile links** (the `UserName` component / the
-  timeline row labels), using the login even when a display name is shown.
+  timeline row labels), using the login even when a display name is shown. A
+  **maintainer shield** (`MaintainerShield`) sits next to anyone who has merge rights
+  in the repo in context (has merged a PR there, from `useMergers`); `UserName` takes
+  an optional `repoId` and renders it wherever a username appears in a PR context
+  (ChecksTab, PrDetail header/activity/comments, thread comments), mirroring the
+  timeline rows' own HTML-string shield.
 - **Zebra striping** on contributor rows (alternating subtle band) via `nth-child`
   in `index.css`, applied to both the label and foreground panels.
 - The timeline endpoint stays lean — the selected PR is never filtered out (it's
@@ -291,15 +314,20 @@ Key behaviors to know about:
 
 Header carries left-aligned **Show** + **Focus** links (drive the timeline, see
 above). Three tabs:
-- **Overview** — `ChecksTab.tsx` (CI/checks + **Approvers** — each reviewer whose
-  latest decisive review is `approved` — + requested reviewers + labels + meta), then
-  the PR **Summary** (the PR body as markdown, clamped to the first 3 lines with a
-  Show more/less toggle), then **PR comments** (issue-level), each with a left "Show"
-  link.
-- **Threads** — `ThreadList`/`ThreadView`: review threads grouped by file with code
-  anchors and new-comment highlights; each thread has a left "Show" link.
-- **Activity** — a chronological feed of opens / commits / reviews / comments /
-  merge-close, each with a "Show on timeline" action.
+- **Overview** — `ChecksTab.tsx` (CI/checks + **Merged by** — `pr.mergedById`,
+  resolved via the detail's `users` array; only on merged PRs — + **Approvers** —
+  each reviewer whose latest decisive review is `approved` — + requested reviewers +
+  labels + meta), then the PR **Summary** (the PR body as markdown, clamped to the
+  first 3 lines with a Show more/less toggle), then **PR comments** (issue-level,
+  **newest first**), each with a left "Show" link.
+- **Threads** — `ThreadList`/`ThreadView`: review threads grouped by file, **newest
+  first** (files ordered by their most-recent thread; threads within a file by
+  `createdAt` desc), with code anchors and new-comment highlights; each thread has a
+  left "Show" link.
+- **Activity** — a chronological feed (**newest first**) of opens / commits /
+  reviews / comments / merge-close, each with a "Show on timeline" action. A
+  timeline **commit** popover's "View in Activity" link deep-links here: the store
+  `activityFocus` signal opens this tab and scrolls to + flashes that commit's row.
 
 > Note: **Checks** was merged into Overview (`ChecksTab`); **Threads** is its own tab
 > again. The per-thread / per-comment / activity "Show" links all use the shared

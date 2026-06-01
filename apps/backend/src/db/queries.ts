@@ -809,6 +809,9 @@ export function getPrDetail(id: number): PrDetail | null {
     if (c.committerId) userIds.add(c.committerId);
   }
   for (const r of reviewerRows) if (r.userId) userIds.add(r.userId);
+  // A maintainer who only merged the PR (never authored/reviewed/commented) is
+  // otherwise absent from userList, leaving "Merged by" unresolved.
+  if (pr.mergedById) userIds.add(pr.mergedById);
   const userList =
     userIds.size > 0
       ? db.select().from(users).where(inArray(users.id, [...userIds])).all().map(mapUser)
@@ -851,6 +854,7 @@ export function getPrDetail(id: number): PrDetail | null {
     firstReviewAt: iso(pr.firstReviewAt),
     lastCommitAt: iso(pr.lastCommitAt),
     mergedAt: iso(pr.mergedAt),
+    mergedById: pr.mergedById,
     closedAt: iso(pr.closedAt),
     updatedAt: pr.updatedAt.toISOString(),
     githubUrl: prUrl,

@@ -36,9 +36,11 @@ export function Avatar({
 export function CommentCard({
   comment,
   usersById,
+  repoId,
 }: {
   comment: { authorId: number | null; body: string; createdAt: string };
   usersById: Map<number, User>;
+  repoId?: number;
 }): JSX.Element {
   const user = comment.authorId != null ? usersById.get(comment.authorId) : undefined;
   return (
@@ -46,7 +48,12 @@ export function CommentCard({
       <Avatar user={user} />
       <div className="min-w-0 flex-1 rounded-md border border-gray-200 dark:border-gray-800">
         <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-1 text-xs dark:border-gray-800">
-          <UserName user={user} fallbackId={comment.authorId} className="font-semibold" />
+          <UserName
+            user={user}
+            fallbackId={comment.authorId}
+            repoId={repoId}
+            className="font-semibold"
+          />
           <span className="text-gray-400">{relativeTime(comment.createdAt)}</span>
         </div>
         <div className="px-3 py-2">

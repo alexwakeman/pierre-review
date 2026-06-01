@@ -99,7 +99,8 @@ function buildActivity(pr: PrDetailT): ActivityRow[] {
       event: { type: 'pr_closed', refId: null },
     });
   }
-  return rows.sort((a, b) => a.time.localeCompare(b.time));
+  // Newest first.
+  return rows.sort((a, b) => b.time.localeCompare(a.time));
 }
 
 function ActivityList({
@@ -107,15 +108,44 @@ function ActivityList({
   usersById,
   since,
   onClearSince,
+  focusEvent,
+  onConsumed,
 }: {
   pr: PrDetailT;
   usersById: Map<number, User>;
   since: string | null;
   onClearSince: () => void;
+  // Deep link from the timeline (e.g. a commit popover): scroll to + flash the
+  // matching entry, then consume the request.
+  focusEvent: { type: EventType; refId: number | null } | null;
+  onConsumed: () => void;
 }): JSX.Element {
   const all = useMemo(() => buildActivity(pr), [pr]);
   const rows = since ? all.filter((r) => r.time > since) : all;
   const showEventOnTimeline = useFilters((s) => s.showEventOnTimeline);
+  const rowRefs = useRef(new Map<string, HTMLLIElement>());
+  const [flashKey, setFlashKey] = useState<string | null>(null);
+
+  // Scroll to + flash the targeted entry once it's rendered.
+  useEffect(() => {
+    if (!focusEvent) return;
+    const row = all.find(
+      (r) => r.event.type === focusEvent.type && r.event.refId === focusEvent.refId,
+    );
+    onConsumed();
+    if (!row) return;
+    rowRefs.current.get(row.key)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFlashKey(row.key);
+  }, [focusEvent, all, onConsumed]);
+
+  // Fade the flash after a beat — kept on its own key so consuming focusEvent
+  // (which re-runs the effect above) can't cancel the timer early.
+  useEffect(() => {
+    if (flashKey == null) return;
+    const t = setTimeout(() => setFlashKey(null), 1800);
+    return () => clearTimeout(t);
+  }, [flashKey]);
+
   return (
     <ul className="divide-y divide-gray-100 dark:divide-gray-800">
       {since && (
@@ -133,11 +163,25 @@ function ActivityList({
       {rows.map((r) => {
         const user = r.actorId != null ? usersById.get(r.actorId) : undefined;
         return (
-          <li key={r.key} className="flex items-start gap-2 px-3 py-2 text-sm">
+          <li
+            key={r.key}
+            ref={(el) => {
+              if (el) rowRefs.current.set(r.key, el);
+              else rowRefs.current.delete(r.key);
+            }}
+            className={`flex items-start gap-2 px-3 py-2 text-sm ${
+              r.key === flashKey ? 'activity-flash' : ''
+            }`}
+          >
             <Avatar user={user} size={20} />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                <UserName user={user} fallbackId={r.actorId} className="font-medium" />
+                <UserName
+                  user={user}
+                  fallbackId={r.actorId}
+                  repoId={pr.repoId}
+                  className="font-medium"
+                />
                 <span className="text-gray-500">{r.label}</span>
                 <span className="text-xs text-gray-400" title={dateTime(r.time)}>
                   · {dateTime(r.time)}
@@ -197,9 +241,12 @@ function PrCommentsList({
     );
   }
 
+  // Newest first (the API returns them oldest-first by createdAt).
+  const comments = [...pr.comments].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
   return (
     <div className="space-y-2 px-3 pb-3">
-      {pr.comments.map((c) => {
+      {comments.map((c) => {
         const user = c.authorId != null ? usersById.get(c.authorId) : undefined;
         const isNew = isNewComment(c.createdAt, viewedSince);
         return (
@@ -218,7 +265,12 @@ function PrCommentsList({
               />
               <span className="text-gray-300 dark:text-gray-600">·</span>
               <Avatar user={user} size={18} />
-              <UserName user={user} fallbackId={c.authorId} className="font-semibold" />
+              <UserName
+                user={user}
+                fallbackId={c.authorId}
+                repoId={pr.repoId}
+                className="font-semibold"
+              />
               <span className="text-gray-400" title={dateTime(c.createdAt)}>
                 {relativeTime(c.createdAt)}
               </span>
@@ -307,12 +359,31 @@ export function PrDetail({
   const qc = useQueryClient();
   const openPrFocused = useFilters((s) => s.openPrFocused);
   const focusPrOnTimeline = useFilters((s) => s.focusPrOnTimeline);
+  const activityFocus = useFilters((s) => s.activityFocus);
+  const consumeActivityFocus = useFilters((s) => s.consumeActivityFocus);
+  const activityFocusForPr = useMemo(
+    () =>
+      activityFocus && pr && activityFocus.prId === pr.id
+        ? { type: activityFocus.type, refId: activityFocus.refId }
+        : null,
+    [activityFocus, pr],
+  );
 
   // Selecting a thread (e.g. via a timeline marker) forces the Threads tab,
   // where the thread list lives and auto-scrolls to the selected thread.
   useEffect(() => {
     if (selectedThreadId != null) setTab('threads');
   }, [selectedThreadId]);
+
+  // A timeline deep link to an Activity entry (e.g. the commit popover) forces the
+  // Activity tab and clears the "since" filter so the target is visible; the list
+  // then scrolls to + flashes it.
+  useEffect(() => {
+    if (activityFocusForPr) {
+      setTab('activity');
+      setActivitySince(null);
+    }
+  }, [activityFocusForPr]);
 
   // Capture the last-viewed instant before marking (so new comments highlight
   // on this visit), then mark the PR viewed and refresh the list views' badges.
@@ -421,7 +492,7 @@ export function PrDetail({
           </button>
           <span className="text-gray-300 dark:text-gray-600">·</span>
           <Avatar user={author} size={16} />
-          <UserName user={author} fallbackId={pr.authorId} />
+          <UserName user={author} fallbackId={pr.authorId} repoId={pr.repoId} />
           <span>·</span>
           <span>{pr.repoFullName}</span>
           <span>·</span>
@@ -481,6 +552,7 @@ export function PrDetail({
             threads={pr.threads}
             usersById={usersById}
             prUrl={pr.githubUrl}
+            repoId={pr.repoId}
             selectedThreadId={selectedThreadId}
             viewedSince={pr.lastViewedAt}
           />
@@ -490,6 +562,8 @@ export function PrDetail({
             usersById={usersById}
             since={activitySince}
             onClearSince={() => setActivitySince(null)}
+            focusEvent={activityFocusForPr}
+            onConsumed={consumeActivityFocus}
           />
         )}
       </div>

@@ -11,12 +11,14 @@ export function ThreadCard({
   thread,
   usersById,
   prUrl,
+  repoId,
   selected,
   viewedSince,
 }: {
   thread: ThreadDetail;
   usersById: Map<number, User>;
   prUrl: string;
+  repoId?: number;
   selected?: boolean;
   viewedSince?: string | null;
 }): JSX.Element {
@@ -51,6 +53,7 @@ export function ThreadCard({
             key={c.id}
             comment={c}
             usersById={usersById}
+            repoId={repoId}
             isNew={isNewComment(c.createdAt, viewedSince)}
             anchor={
               i === 0 ? (

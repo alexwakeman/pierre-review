@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { ThreadDetail, User } from '@gh-team-monitor/shared';
 import { FileGroup } from './FileGroup.js';
-import { rollupCounts } from './ThreadCountChips.js';
 
 interface FileBucket {
   path: string;
   threads: ThreadDetail[];
-  unresolved: number;
+  // The most-recent thread's createdAt in this file, for newest-first ordering.
+  newest: string;
 }
 
 function groupByFile(threads: ThreadDetail[]): FileBucket[] {
@@ -16,19 +16,14 @@ function groupByFile(threads: ThreadDetail[]): FileBucket[] {
     arr.push(t);
     byPath.set(t.path, arr);
   }
-  const buckets: FileBucket[] = [...byPath.entries()].map(([path, ts]) => {
-    const c = rollupCounts(ts);
-    return {
-      path,
-      threads: ts,
-      unresolved: c.untouched + c.replied_unresolved + c.likely_addressed,
-    };
-  });
-  // Most-actionable files first: by non-resolved count desc, then path asc.
-  buckets.sort((a, b) => {
-    if (b.unresolved !== a.unresolved) return b.unresolved - a.unresolved;
-    return a.path.localeCompare(b.path);
-  });
+  const buckets: FileBucket[] = [...byPath.entries()].map(([path, ts]) => ({
+    path,
+    threads: ts,
+    newest: ts.reduce((m, t) => (t.createdAt > m ? t.createdAt : m), ''),
+  }));
+  // Files with the most-recent thread first (newest activity rises to the top);
+  // path as a stable tiebreak.
+  buckets.sort((a, b) => b.newest.localeCompare(a.newest) || a.path.localeCompare(b.path));
   return buckets;
 }
 
@@ -36,12 +31,14 @@ export function ThreadList({
   threads,
   usersById,
   prUrl,
+  repoId,
   selectedThreadId,
   viewedSince,
 }: {
   threads: ThreadDetail[];
   usersById: Map<number, User>;
   prUrl: string;
+  repoId?: number;
   selectedThreadId: number | null;
   viewedSince?: string | null;
 }): JSX.Element {
@@ -73,6 +70,7 @@ export function ThreadList({
           threads={b.threads}
           usersById={usersById}
           prUrl={prUrl}
+          repoId={repoId}
           selectedThreadId={selectedThreadId}
           viewedSince={viewedSince}
           registerRef={(id, el) => {

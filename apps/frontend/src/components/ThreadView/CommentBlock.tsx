@@ -10,11 +10,13 @@ import { NewTag } from './NewCommentHighlight.js';
 export function CommentBlock({
   comment,
   usersById,
+  repoId,
   isNew,
   anchor,
 }: {
   comment: CommentDetail;
   usersById: Map<number, User>;
+  repoId?: number;
   isNew?: boolean;
   anchor?: JSX.Element | null;
 }): JSX.Element {
@@ -23,7 +25,12 @@ export function CommentBlock({
     <div className={`pl-2 ${isNew ? 'comment-new' : ''}`}>
       <div className="flex items-center gap-2 text-xs">
         <Avatar user={user} size={18} />
-        <UserName user={user} fallbackId={comment.authorId} className="font-semibold" />
+        <UserName
+          user={user}
+          fallbackId={comment.authorId}
+          repoId={repoId}
+          className="font-semibold"
+        />
         <span className="text-gray-400">{relativeTime(comment.createdAt)}</span>
         {isNew && <NewTag />}
       </div>
