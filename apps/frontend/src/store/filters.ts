@@ -64,6 +64,12 @@ export interface FilterState {
   // Matched against the loaded PR by `prId`; cleared by PrDetail after it scrolls.
   activityFocus: { prId: number; type: EventType; refId: number | null } | null;
 
+  // transient: a timeline → PR-detail deep link that opens the Overview tab and
+  // scrolls to + flashes a specific issue-level PR comment (the pr_comment
+  // marker's "Open in detail pane"). Matched against the loaded PR by `prId`;
+  // cleared by PrCommentsList once it scrolls.
+  commentFocus: { prId: number; commentId: number } | null;
+
   // open PRs strip
   stripCollapsed: boolean;
   stripFilter: StripFilter;
@@ -156,6 +162,11 @@ export interface FilterState {
     event: { type: EventType; refId: number | null },
   ) => void;
   consumeActivityFocus: () => void;
+  // Open the selected PR's Overview tab scrolled to a specific issue-level PR
+  // comment (timeline pr_comment popover → "Open in detail pane"). PrCommentsList
+  // consumes it once it has scrolled to + flashed the card.
+  showPrComment: (prId: number, commentId: number) => void;
+  consumeCommentFocus: () => void;
   // Focus-mode signalling (the Timeline owns the actual overlay; see fields above).
   // setFocusActive: the Timeline reports whether a focus overlay is currently up.
   setFocusActive: (v: boolean) => void;
@@ -210,6 +221,7 @@ function freshDefaults(): FilterData {
     selectedPrId: null,
     selectedThreadId: null,
     activityFocus: null,
+    commentFocus: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     stripFilter: 'all',
     searchQuery: '',
@@ -288,6 +300,9 @@ export const useFilters = create<FilterState>((set) => ({
   showActivityEntry: (prId, event) =>
     set({ selectedPrId: prId, selectedThreadId: null, activityFocus: { prId, ...event } }),
   consumeActivityFocus: () => set({ activityFocus: null }),
+  showPrComment: (prId, commentId) =>
+    set({ selectedPrId: prId, selectedThreadId: null, commentFocus: { prId, commentId } }),
+  consumeCommentFocus: () => set({ commentFocus: null }),
   setFocusActive: (v) => set({ focusActive: v }),
   exitFocus: () =>
     set((s) => ({ focusActive: false, exitFocusSignal: s.exitFocusSignal + 1 })),

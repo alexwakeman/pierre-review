@@ -228,11 +228,37 @@ function PrCommentsList({
   pr,
   usersById,
   viewedSince,
+  focusCommentId,
+  onFocusConsumed,
 }: {
   pr: PrDetailT;
   usersById: Map<number, User>;
   viewedSince: string | null;
+  // Deep link from the timeline (pr_comment popover → "Open in detail pane"):
+  // scroll to + flash this comment card, then consume the request.
+  focusCommentId: number | null;
+  onFocusConsumed: () => void;
 }): JSX.Element {
+  const cardRefs = useRef(new Map<number, HTMLDivElement>());
+  const [flashId, setFlashId] = useState<number | null>(null);
+
+  // Scroll to + flash the deep-linked comment once it's rendered, then consume the
+  // request (the flash lives on its own state so consuming can't cancel it early).
+  useEffect(() => {
+    if (focusCommentId == null) return;
+    onFocusConsumed();
+    const el = cardRefs.current.get(focusCommentId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFlashId(focusCommentId);
+  }, [focusCommentId, onFocusConsumed]);
+
+  useEffect(() => {
+    if (flashId == null) return;
+    const t = setTimeout(() => setFlashId(null), 1800);
+    return () => clearTimeout(t);
+  }, [flashId]);
+
   if (pr.comments.length === 0) {
     return (
       <div className="px-3 py-6 text-center text-sm text-gray-500">
@@ -252,9 +278,13 @@ function PrCommentsList({
         return (
           <div
             key={c.id}
+            ref={(el) => {
+              if (el) cardRefs.current.set(c.id, el);
+              else cardRefs.current.delete(c.id);
+            }}
             className={`rounded-md border border-gray-200 px-2.5 py-2 dark:border-gray-800 ${
               isNew ? 'comment-new' : ''
-            }`}
+            } ${c.id === flashId ? 'activity-flash' : ''}`}
           >
             <div className="flex items-center gap-2 text-xs">
               <ShowOnTimeline
@@ -368,6 +398,10 @@ export function PrDetail({
         : null,
     [activityFocus, pr],
   );
+  const commentFocus = useFilters((s) => s.commentFocus);
+  const consumeCommentFocus = useFilters((s) => s.consumeCommentFocus);
+  const commentFocusForPr =
+    commentFocus && pr && commentFocus.prId === pr.id ? commentFocus.commentId : null;
 
   // Selecting a thread (e.g. via a timeline marker) forces the Threads tab,
   // where the thread list lives and auto-scrolls to the selected thread.
@@ -384,6 +418,13 @@ export function PrDetail({
       setActivitySince(null);
     }
   }, [activityFocusForPr]);
+
+  // A timeline deep link to a PR comment (the pr_comment popover's "Open in detail
+  // pane") forces the Overview tab, where PrCommentsList then scrolls to + flashes
+  // it. PrCommentsList consumes the signal (not here) once it has scrolled.
+  useEffect(() => {
+    if (commentFocusForPr != null) setTab('overview');
+  }, [commentFocusForPr]);
 
   // Capture the last-viewed instant before marking (so new comments highlight
   // on this visit), then mark the PR viewed and refresh the list views' badges.
@@ -544,7 +585,13 @@ export function PrDetail({
                   <span className="ml-1 font-normal opacity-70">· {pr.comments.length}</span>
                 )}
               </div>
-              <PrCommentsList pr={pr} usersById={usersById} viewedSince={pr.lastViewedAt} />
+              <PrCommentsList
+                pr={pr}
+                usersById={usersById}
+                viewedSince={pr.lastViewedAt}
+                focusCommentId={commentFocusForPr}
+                onFocusConsumed={consumeCommentFocus}
+              />
             </div>
           </div>
         ) : tab === 'threads' ? (

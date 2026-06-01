@@ -93,6 +93,7 @@ function SingleEvent({
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
   const showActivityEntry = useFilters((s) => s.showActivityEntry);
+  const showPrComment = useFilters((s) => s.showPrComment);
   const vis = markerVisual(ev);
   const actor = ev.actorId != null ? usersById.get(ev.actorId) : undefined;
   const who = userLabel(actor, ev.actorId);
@@ -120,6 +121,11 @@ function SingleEvent({
 
   const openInDetail = () => {
     if (ev.threadId != null) selectThread(ev.prId, ev.threadId);
+    // A PR comment lives in the Overview tab's "PR comments" section — select the
+    // PR and ask PrDetail to scroll to + flash that specific card (refId is the
+    // comment row id), mirroring how a review comment opens its thread.
+    else if (isPrComment && ev.prId != null && ev.refId != null)
+      showPrComment(ev.prId, ev.refId);
     else if (ev.prId != null) selectPr(ev.prId);
     onNavigate();
   };
