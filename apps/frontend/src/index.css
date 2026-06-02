@@ -821,25 +821,34 @@ body {
   box-shadow: none;
 }
 
-/* Divider above the cross-user band: a full-width background item confined to
-   the `cross` subgroup. A subtle top line (+ faint tint) marks where a user's
-   own-work bands end and their actions on others' PRs begin. Decorative only —
-   never intercept clicks meant for the markers drawn over it. */
+/* Cross-person "zone": the shared band at the bottom of a row holding this user's
+   actions on OTHER people's PRs (a full-width background item confined to the
+   `cross` subgroup). Rendered as a faint indigo wash under a firmer top divider —
+   the SAME indigo that tints the cross markers' chips, so the zone and the markers
+   inside it read as one "outbound" system, instantly separating a user's own-PR
+   work above from their contributions to others below. Decorative only — never
+   intercept clicks meant for the markers drawn over it. */
 .vis-item.vis-background.cross-sep {
-  border-top: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(148, 163, 184, 0.05);
+  border-top: 1px solid rgba(99, 102, 241, 0.38);
+  background: rgba(99, 102, 241, 0.06);
   pointer-events: none;
 }
+.dark .vis-item.vis-background.cross-sep {
+  border-top-color: rgba(129, 140, 248, 0.42);
+  background: rgba(129, 140, 248, 0.09);
+}
 
-/* Own-work chevron: an up-caret above the marker/cluster, pointing at the PR
-   bar it sits directly beneath (markers share their PR's subgroup band). Only
-   own-work events get it (.ev-own = actor is the PR author); cross-user markers,
-   whose PR bar lives in another row, deliberately omit it. */
+/* Own-work cue: events on the actor's OWN PR (.ev-own) are tethered up to the PR
+   bar they sit directly beneath (markers share their PR's subgroup band, one line
+   below the bar). A short vertical stem (::after) runs from the glyph up toward the
+   bar, capped by an up-caret (::before) pointing at it — "this is my work on the
+   bar above." Cross-person markers, whose PR bar lives in another row, get neither
+   (they get the outbound chip instead). */
 .vis-item.ev-own .ev-marker-inner::before,
 .vis-item.ev-own .ev-cluster-inner::before {
   content: '';
   position: absolute;
-  top: -5px;
+  top: -8px;
   left: 50%;
   width: 5px;
   height: 5px;
@@ -847,6 +856,51 @@ body {
   border-left: 2px solid #cbd5e1;
   transform: translateX(-50%) rotate(45deg);
   pointer-events: none;
+}
+.vis-item.ev-own .ev-marker-inner::after,
+.vis-item.ev-own .ev-cluster-inner::after {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  width: 0;
+  height: 6px;
+  border-left: 1.5px solid rgba(203, 213, 225, 0.85);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* Cross-person chip: a soft indigo disc + hairline ring hugging the glyph, marking
+   an action on someone else's PR. It's a per-marker cue (reads even when the row is
+   collapsed or zoomed in), in the same indigo as the cross zone. Built from the
+   inner's own background + box-shadow (not a pseudo-element), so it paints behind
+   the glyph with no stacking tricks — and the animated sky selection/focus pulse
+   (which drives box-shadow via keyframes) cleanly overrides it while selected.
+   Keep the box at the glyph's natural 16px (NO padding): vis top-aligns items in a
+   band, so a taller chip would push single markers below the cluster pills on the
+   shared `cross` line — both must stay 16px to sit on one centreline. */
+.vis-item.ev-cross .ev-marker-inner {
+  border-radius: 9999px;
+  background: rgba(99, 102, 241, 0.1);
+}
+/* The chip's ring is a box-shadow, which the sky selection/focus pulse also drives
+   (animated, and a static fallback under prefers-reduced-motion). Yield the ring
+   to those states so a selected/focused cross marker still reads as sky, not
+   indigo — the faint disc background stays, harmlessly, underneath. */
+.vis-item.ev-cross:not(.ev-selected):not(.ev-cross-linked):not(.ev-exit-glow) .ev-marker-inner {
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.42);
+}
+.vis-item.ev-cross:not(.ev-selected):not(.ev-cross-linked):not(.ev-exit-glow) .ev-cluster-inner {
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+}
+.dark .vis-item.ev-cross .ev-marker-inner {
+  background: rgba(129, 140, 248, 0.16);
+}
+.dark .vis-item.ev-cross:not(.ev-selected):not(.ev-cross-linked):not(.ev-exit-glow) .ev-marker-inner {
+  box-shadow: inset 0 0 0 1px rgba(129, 140, 248, 0.52);
+}
+.dark .vis-item.ev-cross:not(.ev-selected):not(.ev-cross-linked):not(.ev-exit-glow) .ev-cluster-inner {
+  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.32);
 }
 
 /* legacy default-dot styling (kept for any non-custom points) */

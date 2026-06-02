@@ -148,7 +148,12 @@ export function buildMarkerItems(
   }
 
   for (const { group, kind, ownWork, subgroup, sortKey, events: groupEvents } of byBucket.values()) {
-    const cls = (base: string) => (ownWork ? `${base} ev-own` : base);
+    // Tag every marker with its direction so CSS can style it on its own (a
+    // per-marker cue that reads even when the row is collapsed or zoomed in), not
+    // just by which band it lands in: own-work (actor === PR author) gets `ev-own`
+    // (the stem tethering it up to its bar); cross-user gets `ev-cross` (the
+    // outbound chip). Clusters inherit the same class from their bucket.
+    const cls = (base: string) => `${base} ${ownWork ? 'ev-own' : 'ev-cross'}`;
     const sorted = [...groupEvents].sort(
       (a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt),
     );

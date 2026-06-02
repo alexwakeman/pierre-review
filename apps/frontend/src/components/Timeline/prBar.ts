@@ -35,8 +35,9 @@ function commentIndicator(): string {
 }
 
 // Status indicators shown only on (emphasised) open bars: CI dot, merge
-// warning, "N new" badge, comment mark, thread dots.
-function statusLine(pr: TimelinePr, hasComments: boolean): string {
+// warning, "N new" badge, comment mark, thread dots. Split out so barIsTall can
+// reuse the exact same presence check that decides whether a status line renders.
+function statusBits(pr: TimelinePr, hasComments: boolean): string[] {
   const bits: string[] = [];
   const ci = CI_META[pr.ciStatus];
   if (ci) {
@@ -58,8 +59,23 @@ function statusLine(pr: TimelinePr, hasComments: boolean): string {
   const dots = threadDots(pr);
   if (dots) bits.push(`<span class="pr-dots">${dots}</span>`);
 
+  return bits;
+}
+
+function statusLine(pr: TimelinePr, hasComments: boolean): string {
+  const bits = statusBits(pr, hasComments);
   if (bits.length === 0) return '';
   return `<div class="pr-status">${bits.join('')}</div>`;
+}
+
+// Whether a PR's bar renders TALLER than the baseline (a second status-line row
+// under the title). Only open PRs that actually emit a status line qualify — it
+// mirrors renderPrBar exactly, so lane packing can keep equal-height bars together
+// (a short merged bar sharing a lane with a tall open one would float above the
+// band's bottom, stranding its own-work markers far below it). Keep in lockstep
+// with renderPrBar.
+export function barIsTall(pr: TimelinePr, hasComments: boolean): boolean {
+  return pr.state === 'open' && statusBits(pr, hasComments).length > 0;
 }
 
 export interface PrBarAuthor {

@@ -18,7 +18,7 @@ import {
 import { useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
 import { resolveRange, useFilters } from '../../store/filters.js';
 import { indexUsers, userLabel } from '../../lib/ui.js';
-import { renderPrBar, prClassName } from './prBar.js';
+import { renderPrBar, prClassName, barIsTall } from './prBar.js';
 import { computeUserStats, renderUserLabel } from './userRow.js';
 import { buildMarkerItems } from './clustering.js';
 import { assignPrLanes, prGroupId } from './lanes.js';
@@ -59,6 +59,12 @@ const VIS_OPTIONS: TimelineOptions = {
   // run through escapeHtml before reaching here.
   xss: { disabled: true },
 };
+
+// A PR bar's rendered width floor — must track `.vis-item.pr-bar` min-width in
+// index.css (22px), plus a few px so adjacent min-width bars keep a visible gap.
+// Lane packing converts this to ms at the current zoom (MIN_BAR_PX * msPerPx) so
+// near-instant PRs created back-to-back land on separate lanes instead of colliding.
+const MIN_BAR_PX = 26;
 
 function unique<T>(arr: T[]): T[] {
   return [...new Set(arr)];
@@ -218,6 +224,10 @@ export function Timeline(): JSX.Element {
   // payload (it had no in-window activity). The focus path stages it here so the
   // next rebuild materializes its bar; cleared once the rebuild consumes it.
   const forceShowOpenPrRef = useRef<TimelinePr | null>(null);
+  // Window width (ms) the current lane packing was computed for. Since a bar's
+  // min-width floor is in pixels, the lane assignment is zoom-dependent — a real
+  // zoom (width change) re-lanes via laneNonce; a pan (same width) does not.
+  const lanedWindowMsRef = useRef<number | null>(null);
   // True while a sticky "Show on timeline" overlay (from the activity panel) is
   // applied — a glowing marker plus, for a cross-user action, the collapsed
   // two-person row focus. Unlike the marker popover it has nothing to dismiss
@@ -286,6 +296,9 @@ export function Timeline(): JSX.Element {
   // Bumped only when a selection lands on a PR the current filter hides, to ask
   // the rebuild to materialize that one bar.
   const [forceShowNonce, setForceShowNonce] = useState(0);
+  // Bumped (debounced) when the zoom changes, to re-run the rebuild so lane packing
+  // re-evaluates the pixel-based min-width floor against the new px↔ms scale.
+  const [laneNonce, setLaneNonce] = useState(0);
 
   const preset = useFilters((s) => s.preset);
   const customFrom = useFilters((s) => s.customFrom);
@@ -1087,6 +1100,28 @@ export function Timeline(): JSX.Element {
     requestAnimationFrame(() => requestAnimationFrame(step));
   }, [setVisScrollTop, verticalScrollEl]);
 
+  // Pin the vertical scroll to a captured value across the next few frames. Used
+  // by the groups/markers rebuild: rebuildMarkers() does a wholesale remove()+add()
+  // of every marker, which momentarily empties each row's event/cross bands so vis
+  // clamps the scroll toward the top before they re-render. Re-apply synchronously
+  // (best-effort, in case the relayout was already flushed) and over a short rAF
+  // budget until it sticks — unlike restoreScrollTop's long loop this must not
+  // fight an active user scroll, so it bails the moment the target holds.
+  const reapplyScrollTop = useCallback(
+    (top: number) => {
+      setVisScrollTop(top);
+      let frames = 0;
+      const step = (): void => {
+        setVisScrollTop(top);
+        const vs = verticalScrollEl();
+        const atTarget = vs != null && Math.abs(vs.scrollTop - top) <= 2;
+        if (!atTarget && frames++ < 4) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    },
+    [setVisScrollTop, verticalScrollEl],
+  );
+
   // --- Marker drill-down + browser/mouse-back navigation -------------------
   // The popover journey is mirrored onto the History API so the mouse/browser
   // back button (and the in-popover "‹ back" button, routed through
@@ -1567,14 +1602,30 @@ export function Timeline(): JSX.Element {
     // Re-cluster when the zoom level changes (a burst that smears at one zoom
     // may separate at another).
     let reclusterTimer: ReturnType<typeof setTimeout> | null = null;
+    let relaneTimer: ReturnType<typeof setTimeout> | null = null;
     timeline.on('rangechanged', () => {
       if (reclusterTimer) clearTimeout(reclusterTimer);
       reclusterTimer = setTimeout(() => rebuildMarkers(), 120);
+
+      // A bar's min-width floor is pixel-based, so the lane packing depends on the
+      // px↔ms scale. When the WIDTH changes (a real zoom — a pan keeps it constant)
+      // re-lane so min-width bars can't start overlapping at the new zoom. Skip in
+      // focus mode (rows are already collapsed to one PR; lane churn there is
+      // pointless and risks disturbing the locked view). Debounced; a >2% width
+      // delta gates out settle/pan jitter.
+      const lastMs = lanedWindowMsRef.current;
+      if (lastMs == null || prFocusActiveRef.current || focusedGroupIdsRef.current) return;
+      const w = timeline.getWindow();
+      const curMs = w.end.valueOf() - w.start.valueOf();
+      if (Math.abs(curMs - lastMs) / lastMs <= 0.02) return;
+      if (relaneTimer) clearTimeout(relaneTimer);
+      relaneTimer = setTimeout(() => setLaneNonce((n) => n + 1), 160);
     });
 
     timelineRef.current = timeline;
     return () => {
       if (reclusterTimer) clearTimeout(reclusterTimer);
+      if (relaneTimer) clearTimeout(relaneTimer);
       timeline.destroy();
       timelineRef.current = null;
     };
@@ -1681,7 +1732,25 @@ export function Timeline(): JSX.Element {
     // lane as filters toggle and own-work markers can resolve their lane even
     // when the bar itself is filtered out. Mirrored into a ref for
     // rebuildMarkers (own-work event bands) + focusSubgroups (kept lane band).
-    const prLanes = assignPrLanes(basePrs);
+    // tierOf keeps tall (open + status line) and short (merged/closed) bars in
+    // separate lanes so each lane's band height is uniform — otherwise a short bar
+    // sharing a lane with a tall one floats above the band bottom and strands its
+    // own-work markers far below it. hasComments mirrors renderPrBar's input.
+    // minBarMs converts the bar's pixel min-width to ms at the CURRENT zoom so the
+    // packer never lets two min-width bars overlap on one lane (re-runs on zoom via
+    // laneNonce). Falls back to 0 (pack by real span) before the timeline exists.
+    const winForLanes = timelineRef.current?.getWindow();
+    const lanePx = containerRef.current?.clientWidth || 1000;
+    const laneWindowMs = winForLanes
+      ? winForLanes.end.valueOf() - winForLanes.start.valueOf()
+      : null;
+    lanedWindowMsRef.current = laneWindowMs;
+    const minBarMs = laneWindowMs ? (MIN_BAR_PX * laneWindowMs) / lanePx : 0;
+    const prLanes = assignPrLanes(
+      basePrs,
+      (pr) => (barIsTall(pr, prsWithComments.has(pr.id)) ? 1 : 0),
+      minBarMs,
+    );
     prLanesRef.current = prLanes;
 
     // Per-user interaction tallies for the row labels — from the full timeframe
@@ -1790,6 +1859,13 @@ export function Timeline(): JSX.Element {
     // background-sync refetch (Fix 3). Only genuinely-gone ids are removed.
     const tl = timelineRef.current;
     const win = tl?.getWindow();
+    // Preserve the vertical scroll across the rebuild so a background-sync refetch
+    // (SyncStatus invalidates ['timeline'] when a sync lands) doesn't yank a
+    // scrolled-down view to the top when rebuildMarkers() re-adds every marker.
+    // Skip when a navigation has staged an off-window bar (forceShowOpenPrRef /
+    // `extra`): the timelineFocusPr effect drives its own scroll-to-PR afterward,
+    // and re-pinning the old position would fight it.
+    const scrollBefore = extra ? null : verticalScrollEl()?.scrollTop ?? null;
 
     const nextGroupIds = new Set(groups.map((g) => String(g.id)));
     groupsRef.current.update(groups);
@@ -1850,6 +1926,9 @@ export function Timeline(): JSX.Element {
     // Consumed: the staged open-PR bar has been materialized into this rebuild.
     // Clear it so a later background-sync rebuild doesn't keep re-injecting it.
     forceShowOpenPrRef.current = null;
+
+    // Re-pin the vertical scroll the marker remove()+add() above clamped away.
+    if (scrollBefore != null) reapplyScrollTop(scrollBefore);
   }, [
     data,
     derivedStates,
@@ -1858,11 +1937,14 @@ export function Timeline(): JSX.Element {
     usersById,
     mergersByRepo,
     forceShowNonce,
+    laneNonce,
     rebuildMarkers,
     highlightPr,
     focusRows,
     isolatePrBars,
     setRowCollapsed,
+    verticalScrollEl,
+    reapplyScrollTop,
   ]);
 
   // Reflect the active PR selection without disturbing the view. Selecting a PR
