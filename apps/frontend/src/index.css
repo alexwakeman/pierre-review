@@ -840,27 +840,12 @@ body {
   background: rgba(129, 140, 248, 0.09);
 }
 
-/* Own-work cue: events on the actor's OWN PR (.ev-own) are tethered up to the PR
-   bar they sit directly beneath (markers share their PR's subgroup band, one line
-   below the bar). A short vertical stem (::after) runs from the glyph up toward the
-   bar, capped by an up-caret (::before) pointing at it — "this is my work on the
-   bar above." The caret tip reaches a touch into the PR band (top:-10px) so the
-   arrowhead reads as fully landed on the bar without obscuring its content; the
-   stem is lengthened to meet the raised caret. Cross-person markers, whose PR bar
-   lives in another row, get neither (they get the outbound chip instead). */
-.vis-item.ev-own .ev-marker-inner::before,
-.vis-item.ev-own .ev-cluster-inner::before {
-  content: '';
-  position: absolute;
-  top: -10px;
-  left: 50%;
-  width: 5px;
-  height: 5px;
-  border-top: 2px solid #cbd5e1;
-  border-left: 2px solid #cbd5e1;
-  transform: translateX(-50%) rotate(45deg);
-  pointer-events: none;
-}
+/* Own-work cue: events on the actor's OWN PR (.ev-own) sit on the subgroup band
+   directly beneath their PR bar. A short vertical stem (::after) runs from the glyph
+   UP to meet the bar's bottom edge so the marker reads as tethered to — joined with —
+   the bar above, with NO arrowhead/tip. The gap from the glyph box top to the bar is
+   ~4px, so the stem stops exactly at that edge: it must NOT overshoot into the bar.
+   Cross-person markers, whose PR bar lives in another row, get the outbound chip. */
 .vis-item.ev-own .ev-marker-inner::after,
 .vis-item.ev-own .ev-cluster-inner::after {
   content: '';
@@ -868,18 +853,17 @@ body {
   bottom: 100%;
   left: 50%;
   width: 0;
-  height: 8px;
+  height: 4px;
   border-left: 1.5px solid rgba(203, 213, 225, 0.85);
   transform: translateX(-50%);
   pointer-events: none;
 }
-/* Circular glyphs (.ev-round) are inset ~3px from the marker box top, so a stem
-   anchored at the box top floats above the circle. Drop the stem's bottom down to
-   meet the curve and grow its height by the same amount to keep the top at the
-   caret. Filled pills (clusters) and square/full glyphs already reach the box top. */
+/* Circular glyphs (.ev-round) are inset ~3px from the marker box top, so anchor the
+   stem at the curve (bottom: calc(100% - 3px)) and add that 3px back to the height so
+   its TOP still lands on the bar's bottom edge — never past it. */
 .vis-item.ev-own .ev-marker-inner.ev-round::after {
   bottom: calc(100% - 3px);
-  height: 11px;
+  height: 7px;
 }
 
 /* Cross-person chip: a soft indigo disc + hairline ring hugging the glyph, marking

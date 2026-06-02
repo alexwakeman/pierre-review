@@ -313,16 +313,11 @@ export function Timeline(): JSX.Element {
   // PR, used to recentre + glow it on exit when no specific event was last clicked.
   const prFocusActiveRef = useRef(false);
   const prFocusPrIdRef = useRef<number | null>(null);
-  // Marker drill-down depth mirrored onto the History API (0 closed / 1 popover
-  // / 2 a comment picked from a cluster list); the window captured when the
-  // drill-down began (restored on back-out); and a counter of popstate events to
-  // swallow when we unwind history ourselves.
+  // Popover depth mirrored onto the History API (0 closed / 1 popover open), the
+  // window captured when the popover opened (restored on back-out), and a counter of
+  // popstate events to swallow when we unwind history ourselves.
   const drillDepthRef = useRef(0);
   const savedWindowRef = useRef<{ start: Date; end: Date } | null>(null);
-  // Vertical scroll captured alongside savedWindowRef when the cluster popover
-  // opens, so backing out of a picked comment returns to where the cluster sat
-  // (the row-expand on back otherwise leaves the scroll at the top).
-  const savedScrollTopRef = useRef<number | null>(null);
   // The selected marker's persistent "you're looking at this" pulse (the soft sky
   // halo, no marching ants), tracked like the other glows so a re-cluster can
   // re-apply it to whichever item now holds the event — a lone `ev:` marker or
@@ -901,10 +896,9 @@ export function Timeline(): JSX.Element {
     ],
   );
 
-  // The open popover reports a cross-user context to collapse the rows down to a
-  // two-person view. In the sticky PR-isolation focus we must NOT honour that —
-  // every contributor row stays up, and the clicked event's highlight is set by
-  // the click handler / onPick instead. Outside that focus, apply it as usual.
+  // The open popover reports its PR so we can glow that PR's band. In the sticky
+  // PR-isolation focus we must NOT honour it — every contributor row stays up and the
+  // clicked marker's highlight is set by the click handler. Outside focus, apply it.
   const onPopoverContext = useCallback(
     (ctx: ContextFocus) => {
       if (prFocusActiveRef.current) return;
@@ -1151,35 +1145,14 @@ export function Timeline(): JSX.Element {
     tl.setWindow(win.start, win.end, { animation: !reduceMotion });
   }, []);
 
-  // Restore the vertical scroll captured when the cluster popover opened. Backing
-  // out of a picked comment runs applyContext(null), whose row-expand grows the
-  // layout back from the collapsed focus height and leaves the scroll pinned at
-  // the top. Re-apply the saved scrollTop across frames — the expanding rows (and
-  // the animated window restore) only reach full height over a few hundred ms, so
-  // a single set would clamp to the still-short layout — until it sticks, landing
-  // back on the cluster instead of the top.
-  const restoreScrollTop = useCallback(() => {
-    const top = savedScrollTopRef.current;
-    if (top == null) return;
-    let frames = 0;
-    let stable = 0;
-    const step = (): void => {
-      setVisScrollTop(top);
-      const vs = verticalScrollEl();
-      const atTarget = vs != null && Math.abs(vs.scrollTop - top) <= 2;
-      stable = atTarget ? stable + 1 : 0;
-      if (stable < 3 && frames++ < 60) requestAnimationFrame(step);
-    };
-    requestAnimationFrame(() => requestAnimationFrame(step));
-  }, [setVisScrollTop, verticalScrollEl]);
 
   // Pin the vertical scroll to a captured value across the next few frames. Used
   // by the groups/markers rebuild: rebuildMarkers() does a wholesale remove()+add()
   // of every marker, which momentarily empties each row's event/cross bands so vis
   // clamps the scroll toward the top before they re-render. Re-apply synchronously
   // (best-effort, in case the relayout was already flushed) and over a short rAF
-  // budget until it sticks — unlike restoreScrollTop's long loop this must not
-  // fight an active user scroll, so it bails the moment the target holds.
+  // budget until it sticks — it bails the moment the target holds, so it never
+  // fights an active user scroll.
   const reapplyScrollTop = useCallback(
     (top: number) => {
       setVisScrollTop(top);
@@ -1195,93 +1168,32 @@ export function Timeline(): JSX.Element {
     [setVisScrollTop, verticalScrollEl],
   );
 
-  // --- Marker drill-down + browser/mouse-back navigation -------------------
-  // The popover journey is mirrored onto the History API so the mouse/browser
-  // back button (and the in-popover "‹ back" button, routed through
-  // history.back) steps out one level at a time: depth 2 (a comment picked from
-  // a cluster) → depth 1 (the cluster list) → depth 0 (closed). Backing out
-  // restores the pre-drill window. drillDepthRef is the source of truth;
-  // suppressPopstateRef swallows the popstate(s) our own history.go/back emit.
+  // --- Marker popover + browser/mouse-back navigation ----------------------
+  // The popover is mirrored onto the History API so the mouse/browser back button
+  // closes it (and, in a sticky PR-isolation focus, leaves focus): one pushed entry
+  // per open popover. Backing out restores the pre-open window. drillDepthRef is the
+  // source of truth (0 closed / 1 open); suppressPopstateRef swallows the popstate(s)
+  // our own history.go/back emit.
 
   const openPopover = useCallback(
     (x: number, y: number, eventIds: number[]) => {
       if (eventIds.length === 0) return;
-      // Preserve an active row-focus when opening another marker/cluster.
-      // Clearing it here re-expands every row and snaps the timeline to the top,
-      // losing the cluster the user just clicked. Instead: a picked single event
-      // re-targets the focus via the popover's own onContextFocus, and a cluster
-      // list keeps the current focus (its members live on the focused row). Only
-      // a lingering glow with NO row-focus (e.g. a same-user marker left over
-      // post-navigate) still needs an explicit clear.
+      // Preserve an active row-focus when opening another marker/cluster: clearing
+      // it here would re-expand every row and snap the timeline to the top, losing
+      // the cluster the user just clicked. The popover re-targets the focus via its
+      // own onContextFocus (the events live on the focused row). Only a lingering
+      // glow with NO row-focus (e.g. a same-user marker left over post-navigate)
+      // still needs an explicit clear.
       if (!focusedGroupIdsRef.current) applyContext(null);
-      if (drillDepthRef.current === 0) {
-        history.pushState({ ghtmDrill: 1 }, '');
-      } else if (drillDepthRef.current === 2) {
-        // Collapse the extra entry so we sit on a single drill slot.
-        suppressPopstateRef.current += 1;
-        history.go(-1);
-      }
+      if (drillDepthRef.current === 0) history.pushState({ ghtmDrill: 1 }, '');
       drillDepthRef.current = 1;
-      // Capture before any selection/scroll side effect can move the window — both
-      // the horizontal window and the vertical scroll, so a later back-out can
-      // return to exactly where the cluster sat.
+      // Capture before any selection side effect can move the window, so a later
+      // back-out returns to where the marker/cluster sat.
       savedWindowRef.current = timelineRef.current?.getWindow() ?? null;
-      savedScrollTopRef.current = verticalScrollEl()?.scrollTop ?? null;
-      setPopover({
-        x,
-        y,
-        eventIds,
-        picked: eventIds.length === 1 ? eventIds[0]! : null,
-      });
+      setPopover({ x, y, eventIds });
     },
-    [applyContext, verticalScrollEl],
+    [applyContext],
   );
-
-  // Drill from the cluster list into a single comment (deepens to depth 2).
-  const onPick = useCallback(
-    (id: number) => {
-      const p = popoverRef.current;
-      if (!p || p.picked != null || p.eventIds.length <= 1) return;
-      drillDepthRef.current = 2;
-      history.pushState({ ghtmDrill: 2 }, '');
-      setPopover({ ...p, picked: id });
-      // In PR-isolation focus, the picked event becomes the highlighted exit anchor.
-      if (prFocusActiveRef.current) {
-        highlightEvent(id);
-        return;
-      }
-      // Picking a CROSS-USER event from a cluster enters the unified PR-isolation
-      // focus, exactly like clicking that event standalone on the general timeline
-      // (the drilled popover keeps showing this single event as the anchor).
-      const ev = eventsByIdRef.current.get(id);
-      const pr = ev?.prId != null ? prsByIdRef.current.get(ev.prId) : undefined;
-      const crossUser =
-        ev != null &&
-        ev.actorId != null &&
-        pr?.authorId != null &&
-        ev.actorId !== pr.authorId;
-      if (crossUser && ev.prId != null) {
-        enterPrFocus(ev.prId, { anchorEventId: id, fitWindow: false });
-        // Recentre the window on the clicked instant (the showEvent pattern).
-        const tl = timelineRef.current;
-        if (tl) {
-          const c = new Date(ev.occurredAt).getTime();
-          const win = tl.getWindow();
-          const width = win.end.valueOf() - win.start.valueOf();
-          tl.setWindow(c - width / 2, c + width / 2, { animation: false });
-        }
-        const token = groupClassToken(groupOf(ev));
-        window.setTimeout(() => centerShowTarget(token, true, '.ev-cross-linked'), 320);
-      }
-    },
-    [highlightEvent, enterPrFocus, centerShowTarget],
-  );
-
-  // In-popover back button → route through history so all three back paths
-  // (mouse, browser, button) converge on the popstate handler.
-  const onBack = useCallback(() => {
-    history.back();
-  }, []);
 
   // Close the popover modal ONLY (its X button / Escape): the cross-user focus
   // overlay stays put so the user can keep examining the two-row view; the
@@ -1319,7 +1231,6 @@ export function Timeline(): JSX.Element {
       setPopover(null);
       drillDepthRef.current = 0;
       savedWindowRef.current = null;
-      savedScrollTopRef.current = null;
 
       if (wasPrFocus && restoreAnchor) {
         // PR-isolation exit: don't snap back to a saved pre-focus window — stay in
@@ -1405,11 +1316,6 @@ export function Timeline(): JSX.Element {
   // so a later back press clears the overlay and restores the window (the detail
   // pane itself stays open).
   const navigatePopover = useCallback(() => {
-    if (drillDepthRef.current === 2) {
-      suppressPopstateRef.current += 1;
-      drillDepthRef.current = 1;
-      history.go(-1);
-    }
     setPopover(null);
   }, []);
 
@@ -1421,18 +1327,13 @@ export function Timeline(): JSX.Element {
         return;
       }
       const depth = drillDepthRef.current;
-      // In a sticky PR-isolation focus, popover/browser back navigates the popover
-      // levels ONLY — it must never tear the focus down (that's reserved for Esc /
-      // the Exit-focus button). So a back from a picked event returns to the cluster
-      // list and a back from the list closes it, both WITHOUT applyContext(null) or a
-      // window/scroll restore (which would yank us out of the focused view).
       if (prFocusActiveRef.current) {
-        // Req 1: the mouse/browser back button LEAVES focus, returning to the main
-        // timeline with the anchor (the clicked event, else the PR) re-selected and
-        // glowing — the same teardown as Esc / the Exit-focus button. This popstate
-        // already consumed one focus-owned entry; unwind the remaining drill entries
-        // (the focus marker is the one just consumed) so the stack returns to the
-        // pre-focus baseline, then tear focus down without further history ops.
+        // The mouse/browser back button LEAVES a sticky PR-isolation focus, returning
+        // to the main timeline with the anchor (the clicked event, else the PR)
+        // re-selected and glowing — the same teardown as Esc / the Exit-focus button.
+        // This popstate already consumed one focus-owned entry; unwind the remaining
+        // popover entry (if one's open) so the stack returns to the pre-focus
+        // baseline, then tear focus down without further history ops.
         if (depth > 0) {
           suppressPopstateRef.current += 1;
           history.go(-depth);
@@ -1440,33 +1341,21 @@ export function Timeline(): JSX.Element {
         exitFocusCore(true);
         return;
       }
-      if (depth >= 2) {
-        // Back to the cluster list: clear the focus overlay, then restore BOTH the
-        // window and the vertical scroll so the view returns to the cluster that
-        // was clicked rather than snapping to the top when the rows expand. The
-        // cluster is re-marked automatically by the persistent selection pulse
-        // (it's still the open popover's target, and focus is now cleared).
-        drillDepthRef.current = 1;
-        setPopover((p) => (p ? { ...p, picked: null } : p));
-        applyContext(null);
-        restoreWindow();
-        restoreScrollTop();
-      } else if (depth === 1) {
-        // Out of the drill-down entirely — same treatment as the Exit focus
-        // button: re-centre on + glow the marker that opened a two-person focus.
+      if (depth === 1) {
+        // Close the popover — same treatment as the Exit-focus button: re-centre on +
+        // glow the marker/PR that opened it.
         const anchorEvent = highlightedEventRef.current;
         drillDepthRef.current = 0;
         applyContext(null);
         setPopover(null);
         restoreWindow();
         savedWindowRef.current = null;
-        savedScrollTopRef.current = null;
         if (anchorEvent != null) restoreAnchorView(anchorEvent);
       }
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [applyContext, restoreWindow, restoreScrollTop, restoreAnchorView, exitFocusCore]);
+  }, [applyContext, restoreWindow, restoreAnchorView, exitFocusCore]);
 
   // Persistently pulse the marker/cluster the open popover refers to, so the user
   // can always see which one they're looking at — but only when we're NOT in
@@ -1477,16 +1366,16 @@ export function Timeline(): JSX.Element {
     applySelectGlow(popover && !focusActive ? (popover.eventIds[0] ?? null) : null);
   }, [popover, focusActive, applySelectGlow]);
 
-  // Clicking any event loads its PR into the detail pane. Whenever the popover
-  // resolves to a single picked event — a lone marker click, or one chosen from a
-  // cluster list — select that event's PR. PR-level (selectPr); the popover's
-  // "Open in detail pane" remains the route to a specific thread.
-  const pickedEventId = popover?.picked ?? null;
+  // Clicking any marker/cluster loads its PR into the detail pane. Every popover
+  // (a single event or a PR-partitioned cluster) belongs to one PR, so select that
+  // PR. PR-level (selectPr); the popover's "Open in detail pane" remains the route to
+  // a specific thread.
+  const popoverEventId = popover?.eventIds[0] ?? null;
   useEffect(() => {
-    if (pickedEventId == null) return;
-    const ev = eventsByIdRef.current.get(pickedEventId);
+    if (popoverEventId == null) return;
+    const ev = eventsByIdRef.current.get(popoverEventId);
     if (ev?.prId != null) useFilters.getState().selectPr(ev.prId);
-  }, [pickedEventId]);
+  }, [popoverEventId]);
 
   // Toggling the repo filter changes which contributors are on the timeline, so a
   // two-person focus built from another repo no longer makes sense — drop it just
@@ -1647,9 +1536,68 @@ export function Timeline(): JSX.Element {
         // (the related PR band glows via highlightPr through MarkerPopover).
         openPopover(x, y, [evId]);
       } else if (key.startsWith('cl:')) {
-        // A cluster opens the list popover (pick a comment to drill in). The
-        // timeline is stable now, so we no longer zoom into the cluster span.
         const members = clusterMembersRef.current.get(key) ?? [];
+        if (members.length === 0) return;
+        const firstId = members[0]!;
+
+        // Already inside a sticky PR-isolation focus: anchor on this cluster and show
+        // its expanded popover; never re-enter or leave focus (mirrors the ev: branch
+        // above — only the Exit-focus button / Esc / back leaves).
+        if (prFocusActiveRef.current) {
+          highlightEvent(firstId);
+          openPopover(x, y, members);
+          return;
+        }
+
+        // Clusters are single-PR and homogeneous (all own-work OR all cross-user)
+        // after PR-partitioned bucketing, so the first member decides cross-person
+        // status — exactly as for a single marker.
+        const firstEv = eventsByIdRef.current.get(firstId);
+        const pr =
+          firstEv?.prId != null ? prsByIdRef.current.get(firstEv.prId) : undefined;
+        const crossUser =
+          firstEv != null &&
+          firstEv.actorId != null &&
+          pr?.authorId != null &&
+          firstEv.actorId !== pr.authorId;
+
+        // Cross-person cluster → the unified PR-isolation focus, anchored on the
+        // cluster and recentred on its instant, then the expanded popover. Identical
+        // to clicking a cross-user single marker.
+        if (crossUser && firstEv.prId != null) {
+          enterPrFocus(firstEv.prId, { anchorEventId: firstId, fitWindow: false });
+          const tlc = timelineRef.current;
+          if (tlc) {
+            const c = new Date(firstEv.occurredAt).getTime();
+            const win = tlc.getWindow();
+            const width = win.end.valueOf() - win.start.valueOf();
+            tlc.setWindow(c - width / 2, c + width / 2, { animation: false });
+          }
+          openPopover(x, y, members);
+          const token = groupClassToken(groupOf(firstEv));
+          window.setTimeout(
+            () => centerShowTarget(token, true, '.ev-cross-linked'),
+            320,
+          );
+          return;
+        }
+
+        // A legacy "Show" overlay is up (not a sticky PR focus): hand off cleanly OUT
+        // into a normal selection, like the own-work ev: branch.
+        if (focusedGroupIdsRef.current) {
+          exitFocus(false);
+          openPopover(x, y, members);
+          if (firstEv) {
+            const token = groupClassToken(groupOf(firstEv));
+            window.setTimeout(
+              () => centerShowTarget(token, true, '.ev-selected'),
+              320,
+            );
+          }
+          return;
+        }
+
+        // Own-work cluster, no focus → just the expanded popover.
         openPopover(x, y, members);
       }
     });
@@ -2420,8 +2368,6 @@ export function Timeline(): JSX.Element {
           onContextFocus={onPopoverContext}
           onDismiss={closeModal}
           onNavigate={navigatePopover}
-          onPick={onPick}
-          onBack={onBack}
         />
       )}
     </div>

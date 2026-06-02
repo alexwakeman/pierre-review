@@ -103,9 +103,11 @@ export function buildMarkerItems(
   //     that sits just under that lane's bars (sortKey = lane*2+1, one tick below
   //     the bars' lane*2). Distinct PRs sharing a lane share this line; they're
   //     temporally disjoint, so per-PR bucketing keeps their clusters separate.
-  //   • cross-user → ALL of a lane's cross events of a kind merge into one
-  //     bucket → the shared `cross` band pinned to the bottom of the row
-  //     (sortKey = CROSS_SORT). They're someone else's PRs, with no bar here.
+  //   • cross-user → bucket per (row, kind, PR) too, so a cluster only ever holds
+  //     ONE PR's events (a click then has an unambiguous PR to focus). They still
+  //     render on the shared `cross` band pinned to the bottom of the row (subgroup
+  //     'cross', sortKey = CROSS_SORT) — someone else's PRs, no bar here; sibling
+  //     PRs' clusters on that one line are spaced apart by deconflictBands.
   const byBucket = new Map<
     string,
     {
@@ -127,7 +129,7 @@ export function buildMarkerItems(
       ev.actorId != null && pr?.authorId != null && ev.actorId === pr.authorId;
     const bk = ownWork
       ? `${group}::${kind}::own::${prId}`
-      : `${group}::${kind}::cross`;
+      : `${group}::${kind}::cross::${prId ?? 'none'}`;
     const existing = byBucket.get(bk);
     if (existing) {
       existing.events.push(ev);

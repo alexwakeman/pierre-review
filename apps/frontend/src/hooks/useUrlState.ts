@@ -44,7 +44,12 @@ function readFromUrl(): Partial<FilterState> {
   out.repoIds = parseIds(p.get('repos'));
   out.userIds = parseIds(p.get('users'));
   if (p.get('bots') !== null) out.excludeBots = p.get('bots') !== '0';
-  if (p.get('stale') === '1') out.excludeStale = true;
+  // Stale open PRs are hidden by default now, so a clean URL means "hidden". An
+  // explicit `stale=0` turns the filter OFF (show stale); `stale=1` is still honoured
+  // for backward-compat with older shared URLs (now redundant with the default).
+  const stale = p.get('stale');
+  if (stale === '0') out.excludeStale = false;
+  else if (stale === '1') out.excludeStale = true;
   out.customFrom = p.get('from');
   out.customTo = p.get('to');
 
@@ -88,7 +93,8 @@ function writeToUrl(s: FilterState): void {
   if (s.repoIds?.length) p.set('repos', s.repoIds.join(','));
   if (s.userIds?.length) p.set('users', s.userIds.join(','));
   if (!s.excludeBots) p.set('bots', '0');
-  if (s.excludeStale) p.set('stale', '1');
+  // Hidden is the default; only encode the non-default "show stale" choice (stale=0).
+  if (!s.excludeStale) p.set('stale', '0');
   if (s.preset === 'custom' && s.customFrom) p.set('from', s.customFrom);
   if (s.preset === 'custom' && s.customTo) p.set('to', s.customTo);
   // Serialize the category selection whenever it differs from the fresh-load

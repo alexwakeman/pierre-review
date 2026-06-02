@@ -216,7 +216,10 @@ function freshDefaults(): FilterData {
     repoIds: null,
     userIds: null,
     excludeBots: true,
-    excludeStale: false,
+    // Stale open PRs (no commit/comment/review in the active range) are clutter for
+    // situational awareness, so they're HIDDEN on a fresh load. This is the baseline
+    // the URL serializer diffs against; turning the filter off round-trips as stale=0.
+    excludeStale: true,
     preset: '14d',
     customFrom: null,
     customTo: null,

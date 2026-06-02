@@ -20,10 +20,10 @@ import { Markdown } from '../Markdown.js';
 export interface PopoverState {
   x: number;
   y: number;
+  // Every event the clicked marker/cluster holds. A cluster is single-PR after
+  // PR-partitioned bucketing, so they all share one PR. All are shown expanded +
+  // scrollable — there's no "drill into one" step any more.
   eventIds: number[];
-  // Which event is drilled into (null = cluster list). Owned by Timeline so the
-  // back button / history navigation is the single source of truth.
-  picked: number | null;
 }
 
 // The combined-context overlay the popover asks Timeline to apply: the two
@@ -100,7 +100,20 @@ function SingleEvent({
 
   const isReviewComment = ev.type === 'review_comment' && ev.threadId != null;
   const { data: thread } = useThread(isReviewComment ? ev.threadId : null);
-  const anchor = thread ? firstHunkLine(thread.comments[0]?.diffHunk ?? null) : null;
+  // A thread holds many comments; this event represents exactly ONE of them. The
+  // backend emits a review_comment event per comment with occurredAt = that comment's
+  // createdAt and actorId = its author, so resolve the exact comment by (time, author)
+  // rather than always rendering the thread root. Fall back to the root if unmatched.
+  const evMs = Date.parse(ev.occurredAt);
+  const threadComment =
+    thread?.comments.find(
+      (c) => Date.parse(c.createdAt) === evMs && c.authorId === ev.actorId,
+    ) ?? thread?.comments[0];
+  // The code anchor is the thread's location; prefer the clicked comment's hunk but
+  // fall back to the root's (replies often carry no diffHunk).
+  const anchor = thread
+    ? firstHunkLine(threadComment?.diffHunk ?? thread.comments[0]?.diffHunk ?? null)
+    : null;
 
   // Commit + PR-comment markers resolve their detail (sha / message / body /
   // GitHub link) from the PR detail, joined by the event's ref id — keeps the
@@ -190,10 +203,10 @@ function SingleEvent({
         </pre>
       )}
 
-      {thread?.comments[0] && (
+      {threadComment && (
         <div className="text-xs">
-          <Markdown>{thread.comments[0].body}</Markdown>
-          {thread.comments.length > 1 && (
+          <Markdown>{threadComment.body}</Markdown>
+          {thread && thread.comments.length > 1 && (
             <div className="mt-1 text-[11px] text-gray-400">
               +{thread.comments.length - 1} more in thread
             </div>
@@ -260,48 +273,6 @@ function SingleEvent({
   );
 }
 
-function EventList({
-  events,
-  usersById,
-  onPick,
-}: {
-  events: TimelineEvent[];
-  usersById: Map<number, User>;
-  onPick: (id: number) => void;
-}): JSX.Element {
-  return (
-    <div className="space-y-0.5">
-      <div className="px-1 pb-1 text-[11px] font-semibold text-gray-400">
-        {events.length} events
-      </div>
-      {events.map((ev) => {
-        const vis = markerVisual(ev);
-        const actor = ev.actorId != null ? usersById.get(ev.actorId) : undefined;
-        return (
-          <button
-            key={ev.id}
-            type="button"
-            onClick={() => onPick(ev.id)}
-            className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[11px] hover:bg-gray-100 dark:hover:bg-gray-800"
-          >
-            <span
-              className="inline-block h-3 w-3 shrink-0"
-              dangerouslySetInnerHTML={{ __html: vis.svg }}
-            />
-            <span className="font-medium">
-              {userLabel(actor, ev.actorId)}
-            </span>
-            <span className="truncate text-gray-500">{vis.label}</span>
-            <span className="ml-auto shrink-0 text-gray-400">
-              {relativeTime(ev.occurredAt)}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 export function MarkerPopover({
   state,
   eventsById,
@@ -311,28 +282,18 @@ export function MarkerPopover({
   onContextFocus,
   onDismiss,
   onNavigate,
-  onPick,
-  onBack,
 }: {
   state: PopoverState;
   eventsById: Map<number, TimelineEvent>;
   usersById: Map<number, User>;
   prsById: Map<number, TimelinePr>;
-  // When a sticky PR-isolation focus is active, the cluster list is trimmed to
-  // just that PR's events — the focus view shows only the PR's activity, so a
-  // "back to the list" must not resurface unrelated events from the original
-  // (pre-focus) cluster.
+  // When a sticky PR-isolation focus is active, the popover is trimmed to just that
+  // PR's events — the focus view shows only the PR's activity.
   focusPrId?: number | null;
   onContextFocus: (ctx: ContextFocus) => void;
   onDismiss: () => void;
   onNavigate: () => void;
-  onPick: (id: number) => void;
-  onBack: () => void;
 }): JSX.Element {
-  // The drilled-into event (null = cluster list) is owned by Timeline (history
-  // is the source of truth) and arrives via state.picked.
-  const picked = state.picked;
-
   // Persisted across reloads so the user's chosen size becomes the default for
   // every marker modal going forward (Fix 2).
   const [popoverSize, setPopoverSize] = useLocalStorage<{
@@ -340,7 +301,7 @@ export function MarkerPopover({
     height: number;
   } | null>('ghtm:popoverSize', null);
 
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context, isPositioned } = useFloating({
     open: true,
     onOpenChange: (o) => {
       if (!o) onDismiss();
@@ -390,22 +351,17 @@ export function MarkerPopover({
     .filter((e): e is TimelineEvent => e != null)
     // In PR-isolation focus, only the focused PR's events are visible.
     .filter((e) => focusPrId == null || e.prId === focusPrId);
-  const pickedEvent = picked != null ? eventsById.get(picked) : undefined;
 
-  const pickedPrId = pickedEvent?.prId ?? null;
-
-  // Report a *picked* single event to Timeline so it can glow the related PR band.
-  // The two-person row collapse the popover used to drive is superseded by the
-  // unified PR-isolation focus (a cross-user marker click now enters that overlay
-  // directly, in Timeline's click handler) — so we never request a row collapse
-  // (`groupIds: null`); this only handles the own-work single click, glowing the PR
-  // band without collapsing. The cluster-LIST view (picked == null) drives nothing,
-  // so opening a cluster while a focus is active never clears that focus (the two
-  // paths that legitimately clear focus from a list do so explicitly in Timeline).
+  // Every event in the popover belongs to ONE PR (clusters are PR-partitioned), so
+  // report that PR to Timeline to glow its band. We never request a row collapse
+  // (`groupIds: null`): the unified PR-isolation focus is entered by Timeline's click
+  // handler for cross-user markers/clusters, and there `onPopoverContext` ignores
+  // popover context while a focus is up. Outside focus this just glows the own-work
+  // PR band without collapsing anything.
+  const popoverPrId = events[0]?.prId ?? null;
   useEffect(() => {
-    if (picked == null) return;
-    onContextFocus({ groupIds: null, prId: pickedPrId, eventId: null });
-  }, [pickedPrId, picked, onContextFocus]);
+    onContextFocus({ groupIds: null, prId: popoverPrId, eventId: null });
+  }, [popoverPrId, onContextFocus]);
 
   const persistSize = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -447,6 +403,10 @@ export function MarkerPopover({
       style={{
         ...floatingStyles,
         transform: composedTransform,
+        // Hidden until floating-ui has measured against the virtual click reference,
+        // so the modal never flashes at the top-left (0,0) before settling beside the
+        // cursor. visibility (not display:none) keeps it measurable meanwhile.
+        visibility: isPositioned ? 'visible' : 'hidden',
         width: popoverSize?.width ?? 420,
         height: popoverSize?.height ?? 340,
         minWidth: 240,
@@ -487,26 +447,28 @@ export function MarkerPopover({
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-2">
-        {pickedEvent ? (
-          <div className="space-y-1.5">
-            {events.length > 1 && (
-              <button
-                type="button"
-                onClick={onBack}
-                className="text-[11px] text-gray-400 hover:text-gray-600"
-              >
-                ‹ back to {events.length} events
-              </button>
-            )}
-            <SingleEvent
-              ev={pickedEvent}
-              usersById={usersById}
-              prsById={prsById}
-              onNavigate={onNavigate}
-            />
-          </div>
+        {/* Every event in the marker/cluster is shown fully expanded and stacked,
+            scrollable — no intermediate list to click through. */}
+        {events.length === 1 ? (
+          <SingleEvent
+            ev={events[0]!}
+            usersById={usersById}
+            prsById={prsById}
+            onNavigate={onNavigate}
+          />
         ) : (
-          <EventList events={events} usersById={usersById} onPick={onPick} />
+          <div className="divide-y divide-gray-200 dark:divide-gray-800">
+            {events.map((ev) => (
+              <div key={ev.id} className="py-2 first:pt-0 last:pb-0">
+                <SingleEvent
+                  ev={ev}
+                  usersById={usersById}
+                  prsById={prsById}
+                  onNavigate={onNavigate}
+                />
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
