@@ -44,6 +44,7 @@ function readFromUrl(): Partial<FilterState> {
   out.repoIds = parseIds(p.get('repos'));
   out.userIds = parseIds(p.get('users'));
   if (p.get('bots') !== null) out.excludeBots = p.get('bots') !== '0';
+  if (p.get('stale') === '1') out.excludeStale = true;
   out.customFrom = p.get('from');
   out.customTo = p.get('to');
 
@@ -87,6 +88,7 @@ function writeToUrl(s: FilterState): void {
   if (s.repoIds?.length) p.set('repos', s.repoIds.join(','));
   if (s.userIds?.length) p.set('users', s.userIds.join(','));
   if (!s.excludeBots) p.set('bots', '0');
+  if (s.excludeStale) p.set('stale', '1');
   if (s.preset === 'custom' && s.customFrom) p.set('from', s.customFrom);
   if (s.preset === 'custom' && s.customTo) p.set('to', s.customTo);
   // Serialize the category selection whenever it differs from the fresh-load

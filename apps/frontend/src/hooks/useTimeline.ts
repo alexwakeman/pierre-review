@@ -39,7 +39,7 @@ export function useTimeline() {
 // the identical query string to useTimeline, so React Query serves it from the
 // same cache entry — no extra fetch; only an active member filter incurs a second.
 export function useSearchTimeline() {
-  const search = useFilters((s) => buildTimelineSearch(s, false, false));
+  const search = useFilters((s) => buildTimelineSearch(s, false, false, false));
   return useQuery<TimelineResponse>({
     queryKey: ['timeline', search],
     queryFn: () => api.timeline(search),

@@ -59,6 +59,7 @@ export async function timelineRoutes(app: FastifyInstance): Promise<void> {
       types: parseTypes(q.types),
       statuses: parseStatuses(q.statuses),
       excludeBots: q.excludeBots !== 'false',
+      excludeStale: q.excludeStale === 'true',
     };
     return getTimeline(filters);
   });

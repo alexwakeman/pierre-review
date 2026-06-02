@@ -48,6 +48,9 @@ export interface FilterState {
   repoIds: number[] | null;
   userIds: number[] | null;
   excludeBots: boolean;
+  // Hide "stale" open PRs: open PRs with no commits/comments/reviews inside the
+  // active range. A server-side timeline filter (drops the PRs and their events).
+  excludeStale: boolean;
   preset: RangePreset;
   customFrom: string | null; // ISO date (yyyy-mm-dd)
   customTo: string | null;
@@ -128,6 +131,7 @@ export interface FilterState {
   toggleRepo: (id: number) => void;
   setUserIds: (ids: number[] | null) => void;
   setExcludeBots: (v: boolean) => void;
+  setExcludeStale: (v: boolean) => void;
   setPreset: (p: RangePreset) => void;
   setCustomRange: (from: string | null, to: string | null) => void;
   toggleCategory: (c: EventCategory) => void;
@@ -212,6 +216,7 @@ function freshDefaults(): FilterData {
     repoIds: null,
     userIds: null,
     excludeBots: true,
+    excludeStale: false,
     preset: '14d',
     customFrom: null,
     customTo: null,
@@ -247,6 +252,7 @@ export const useFilters = create<FilterState>((set) => ({
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),
   setUserIds: (ids) => set({ userIds: ids }),
   setExcludeBots: (v) => set({ excludeBots: v }),
+  setExcludeStale: (v) => set({ excludeStale: v }),
   setPreset: (p) =>
     // Bump rangeResetSignal so the Timeline re-applies the window even when the
     // preset is unchanged (re-clicking the active preset resets the view).
@@ -384,11 +390,14 @@ export function buildOpenPrsSearch(s: FilterState, includeMembers = true): strin
  * status filters (you can still search a closed/draft PR that's hidden on the
  * timeline). When all statuses are selected the `statuses` param is omitted (=
  * no filter); a non-full selection — including empty (= show none) — is sent.
+ * `includeStaleFilter` defaults true; the search index passes false so the global
+ * "jump to any PR" tool still finds a PR the stale filter hides from the timeline.
  */
 export function buildTimelineSearch(
   s: FilterState,
   includeMembers = true,
   includeStatuses = true,
+  includeStaleFilter = true,
 ): string {
   const { from, to } = resolveRange(s);
   const params = new URLSearchParams();
@@ -404,5 +413,6 @@ export function buildTimelineSearch(
     params.set('statuses', s.prStatuses.join(','));
   }
   params.set('excludeBots', String(s.excludeBots));
+  if (includeStaleFilter && s.excludeStale) params.set('excludeStale', 'true');
   return params.toString();
 }

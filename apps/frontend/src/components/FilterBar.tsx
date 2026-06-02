@@ -372,6 +372,16 @@ export function FilterBar(): JSX.Element {
         ))}
       </Section>
 
+      <Section label="Stale">
+        <Chip
+          active={f.excludeStale}
+          onClick={() => f.setExcludeStale(!f.excludeStale)}
+          title="Hide open PRs with no commits, comments or reviews within the selected time range"
+        >
+          Hide
+        </Chip>
+      </Section>
+
       <Section label="Events">
         {ALL_CATEGORIES.map((c) => (
           <Chip

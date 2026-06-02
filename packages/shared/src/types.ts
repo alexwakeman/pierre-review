@@ -474,4 +474,8 @@ export interface TimelineQuery {
   // empty) = explicit set; an empty value shows nothing.
   statuses?: string;
   excludeBots?: string; // "true" | "false"
+  // "true" → drop "stale" open PRs: open PRs with no commit / comment / review
+  // event inside [from, to]. They (and their events) are removed so the row can
+  // disappear entirely. Absent/"false" = keep them.
+  excludeStale?: string;
 }

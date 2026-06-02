@@ -474,10 +474,12 @@ body {
   color: #fff;
   font-size: 11px;
   cursor: pointer;
-  /* A just-opened or quickly-merged PR spans almost no time, so its bar would be a
-     near-invisible sliver. Guarantee a spottable minimum width for EVERY bar (only
-     affects bars whose natural width is smaller) — no longer only on selection. */
-  min-width: 22px;
+  /* Absolute floor so a near-instant PR is never a 0-width, unclickable sliver. The
+     SPOTTABLE minimum is applied proportionally in JS (fitLaneBars grows each short
+     bar toward MIN_BAR_PX but clips it to its neighbour, preserving relative widths);
+     this stays small so a crowded bar can shrink below that preferred width instead
+     of bloating to a uniform size. Only bites in extreme density. */
+  min-width: 4px;
 }
 /* Open PRs read as "live": full saturation, taller. */
 .vis-item.pr-emph {
@@ -842,13 +844,15 @@ body {
    bar they sit directly beneath (markers share their PR's subgroup band, one line
    below the bar). A short vertical stem (::after) runs from the glyph up toward the
    bar, capped by an up-caret (::before) pointing at it — "this is my work on the
-   bar above." Cross-person markers, whose PR bar lives in another row, get neither
-   (they get the outbound chip instead). */
+   bar above." The caret tip reaches a touch into the PR band (top:-10px) so the
+   arrowhead reads as fully landed on the bar without obscuring its content; the
+   stem is lengthened to meet the raised caret. Cross-person markers, whose PR bar
+   lives in another row, get neither (they get the outbound chip instead). */
 .vis-item.ev-own .ev-marker-inner::before,
 .vis-item.ev-own .ev-cluster-inner::before {
   content: '';
   position: absolute;
-  top: -8px;
+  top: -10px;
   left: 50%;
   width: 5px;
   height: 5px;
@@ -864,10 +868,18 @@ body {
   bottom: 100%;
   left: 50%;
   width: 0;
-  height: 6px;
+  height: 8px;
   border-left: 1.5px solid rgba(203, 213, 225, 0.85);
   transform: translateX(-50%);
   pointer-events: none;
+}
+/* Circular glyphs (.ev-round) are inset ~3px from the marker box top, so a stem
+   anchored at the box top floats above the circle. Drop the stem's bottom down to
+   meet the curve and grow its height by the same amount to keep the top at the
+   caret. Filled pills (clusters) and square/full glyphs already reach the box top. */
+.vis-item.ev-own .ev-marker-inner.ev-round::after {
+  bottom: calc(100% - 3px);
+  height: 11px;
 }
 
 /* Cross-person chip: a soft indigo disc + hairline ring hugging the glyph, marking

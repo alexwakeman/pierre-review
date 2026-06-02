@@ -60,10 +60,13 @@ const VIS_OPTIONS: TimelineOptions = {
   xss: { disabled: true },
 };
 
-// A PR bar's rendered width floor — must track `.vis-item.pr-bar` min-width in
-// index.css (22px). fitLaneBars uses it (as ms, via the current zoom) to keep
-// min-width bars on one lane from overlapping, without spending extra rows.
-const MIN_BAR_PX = 22;
+// A PR bar's PREFERRED minimum width (px). A near-instant PR is grown rightward to
+// this so it's spottable — but only as far as the next bar in its lane: fitLaneBars
+// CLIPS the overhang rather than clamping every short bar to one size, so the bars
+// keep their relative (proportional) widths. The CSS `.vis-item.pr-bar` min-width is
+// a much smaller absolute floor (clickability); a crowded bar shrinks below this
+// preferred width toward that floor instead of overlapping its neighbour. Tunable.
+const MIN_BAR_PX = 12;
 
 function unique<T>(arr: T[]): T[] {
   return [...new Set(arr)];
@@ -97,16 +100,18 @@ function barEndMs(it: DataItem): number {
   return it.end != null ? Date.parse(String(it.end)) : barStartMs(it);
 }
 
-// Resolve min-width PR-bar overlaps WITHIN each lane (group + `bar:<lane>` band)
-// horizontally, so close-succession PRs don't each need their own row. Lanes are
-// packed by real time spans (assignPrLanes), so a near-instant PR renders at the
-// pixel floor (MIN_BAR_PX) and its right overhang can cover the next bar. Walking
-// each lane right-to-left, every bar's right edge is held at/under the next bar's
-// left edge: a bar with slack above the floor is shrunk from the right (no move),
-// and one already at the floor is shifted left bodily — so all bars stay ≥ the
-// floor and none overlap. Runs on freshly-built items (real start/end) at the
-// current zoom (msPerPx), so it re-fits on zoom; pan/selection are unaffected
-// (vis routes by item id, and PR navigation reads pr data, not the nudged item).
+// Give short PR bars a spottable minimum WITHOUT flattening them all to one size.
+// Lanes are packed by real time spans (assignPrLanes), so within a lane the bars'
+// real spans never overlap; only a near-instant bar's min-width growth can cover the
+// next one. For each bar we keep its REAL span — anchored at its true start — grown
+// rightward toward MIN_BAR_PX, but CLIPPED so it never overhangs the next bar's
+// start. So a long PR keeps its full width, a sliver grows to the floor when it has
+// room and is clipped shorter when crowded (its width then tracks the gap, staying
+// proportional), and nothing overlaps (down to the small CSS floor, which only bites
+// in extreme density). The clip never cuts into the real span — same-lane spans
+// don't overlap, so the next start is always ≥ this bar's real end. Runs on
+// freshly-built items (real start/end) at the current zoom, so it re-fits on zoom;
+// only item.end is touched (true start preserved) and PR navigation reads pr data.
 function fitLaneBars(items: DataItem[], msPerPx: number): void {
   if (msPerPx <= 0) return;
   const minMs = MIN_BAR_PX * msPerPx;
@@ -118,26 +123,16 @@ function fitLaneBars(items: DataItem[], msPerPx: number): void {
     else byLane.set(key, [it]);
   }
   for (const bars of byLane.values()) {
-    if (bars.length < 2) continue;
+    if (bars.length === 0) continue;
     bars.sort((a, b) => barStartMs(a) - barStartMs(b));
-    let limit = Infinity; // the left edge (ms) the current bar's right edge must not exceed
-    for (let i = bars.length - 1; i >= 0; i--) {
+    for (let i = 0; i < bars.length; i++) {
       const it = bars[i]!;
       const s = barStartMs(it);
-      const w = Math.max(barEndMs(it) - s, minMs); // rendered width (min-width floor)
-      if (s + w <= limit) {
-        limit = s; // fits (touching allowed) — leave real start/end untouched
-        continue;
-      }
-      if (limit - s >= minMs) {
-        it.end = new Date(limit).toISOString(); // wider bar: pull its right edge in
-        limit = s;
-      } else {
-        const ns = limit - minMs; // at the floor: shift the whole min-width bar left
-        it.start = new Date(ns).toISOString();
-        it.end = new Date(limit).toISOString();
-        limit = ns;
-      }
+      const realEnd = barEndMs(it);
+      const nextStart =
+        i + 1 < bars.length ? barStartMs(bars[i + 1]!) : Number.POSITIVE_INFINITY;
+      const end = Math.min(Math.max(realEnd, s + minMs), nextStart);
+      if (end !== realEnd) it.end = new Date(end).toISOString();
     }
   }
 }

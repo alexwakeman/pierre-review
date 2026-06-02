@@ -4,6 +4,10 @@ export interface MarkerVisual {
   svg: string;
   color: string;
   label: string;
+  // True when the glyph is a small inset circle (top sits ~3px below the marker
+  // box top). The own-work connector stem extends down to meet the curve — see
+  // `.ev-round` in index.css. Square/full-bleed glyphs already reach the box top.
+  round?: boolean;
 }
 
 const C = {
@@ -45,9 +49,9 @@ const bubble = (c: string) =>
 export function markerVisual(ev: TimelineEvent): MarkerVisual {
   switch (ev.type) {
     case 'review_comment':
-      return { svg: filledCircle(C.reviewComment), color: C.reviewComment, label: 'Review comment' };
+      return { svg: filledCircle(C.reviewComment), color: C.reviewComment, label: 'Review comment', round: true };
     case 'pr_comment':
-      return { svg: outlinedCircle(C.prComment), color: C.prComment, label: 'PR comment' };
+      return { svg: outlinedCircle(C.prComment), color: C.prComment, label: 'PR comment', round: true };
     case 'commit_pushed':
       return { svg: square(C.commit), color: C.commit, label: 'Commit pushed' };
     case 'review_submitted':
@@ -57,17 +61,18 @@ export function markerVisual(ev: TimelineEvent): MarkerVisual {
         case 'changes_requested':
           return { svg: chevron(C.changes), color: C.changes, label: 'Changes requested' };
         case 'dismissed':
-          return { svg: dashedCircle(C.dismissed), color: C.dismissed, label: 'Review dismissed' };
+          return { svg: dashedCircle(C.dismissed), color: C.dismissed, label: 'Review dismissed', round: true };
         default:
           return { svg: bubble(C.commented), color: C.commented, label: 'Review comment' };
       }
     default:
-      return { svg: filledCircle(C.lifecycle), color: C.lifecycle, label: 'Event' };
+      return { svg: filledCircle(C.lifecycle), color: C.lifecycle, label: 'Event', round: true };
   }
 }
 
 export function markerHtml(ev: TimelineEvent): string {
-  return `<div class="ev-marker-inner">${markerVisual(ev).svg}</div>`;
+  const v = markerVisual(ev);
+  return `<div class="ev-marker-inner${v.round ? ' ev-round' : ''}">${v.svg}</div>`;
 }
 
 // Clusters are homogeneous by kind so a burst of commits never mixes with a

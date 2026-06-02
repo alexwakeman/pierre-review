@@ -10,6 +10,7 @@ import {
   isNotNull,
   isNull,
   lte,
+  notInArray,
   or,
   sql,
   type SQL,
@@ -135,6 +136,41 @@ export interface TimelineFilters {
   // array shows nothing). A status maps to (state, isDraft) on pullRequests.
   statuses: PrStatus[] | null;
   excludeBots: boolean;
+  // true → hide "stale" open PRs (no commit/comment/review in [from, to]).
+  excludeStale: boolean;
+}
+
+// Event types that count as "touching" a PR for the stale filter: code pushes and
+// any human discussion (inline review comments, issue-level comments, reviews).
+// Lifecycle events (opened/merged/…) are NOT activity — a quiet open PR that was
+// merely opened long ago is exactly what "stale" targets.
+const ACTIVITY_EVENT_TYPES: EventType[] = [
+  'commit_pushed',
+  'review_comment',
+  'pr_comment',
+  'review_submitted',
+];
+
+// Open PRs (from `prRows`) with no activity event inside [from, to] — the "stale"
+// set. Only open PRs are eligible (merged/closed are historical, never stale).
+function staleOpenPrIds(prRows: PrRow[], from: Date, to: Date): Set<number> {
+  const openIds = prRows.filter((p) => p.state === 'open').map((p) => p.id);
+  if (openIds.length === 0) return new Set();
+  const activeRows = db
+    .select({ prId: events.prId })
+    .from(events)
+    .where(
+      and(
+        inArray(events.prId, openIds),
+        inArray(events.type, ACTIVITY_EVENT_TYPES),
+        gte(events.occurredAt, from),
+        lte(events.occurredAt, to),
+      ),
+    )
+    .all();
+  const active = new Set<number>();
+  for (const r of activeRows) if (r.prId != null) active.add(r.prId);
+  return new Set(openIds.filter((id) => !active.has(id)));
 }
 
 // SQL predicate (on the pullRequests table) for "the PR is one of these
@@ -254,7 +290,8 @@ function mapTimelinePr(
 }
 
 export function getTimeline(filters: TimelineFilters): TimelineResponse {
-  const { from, to, repoIds, userIds, types, statuses, excludeBots } = filters;
+  const { from, to, repoIds, userIds, types, statuses, excludeBots, excludeStale } =
+    filters;
 
   // ---- PRs that overlap the window ----
   const prConds = [
@@ -303,11 +340,16 @@ export function getTimeline(filters: TimelineFilters): TimelineResponse {
     }
   }
 
-  const prRows = db
+  let prRows = db
     .select()
     .from(pullRequests)
     .where(and(...prConds))
     .all();
+
+  // Stale filter: drop open PRs with no activity in the window. Computed before
+  // building the lean PRs so their events can be dropped too (below).
+  const staleIds = excludeStale ? staleOpenPrIds(prRows, from, to) : new Set<number>();
+  if (staleIds.size > 0) prRows = prRows.filter((p) => !staleIds.has(p.id));
 
   const prs: TimelinePr[] = buildTimelinePrs(prRows);
 
@@ -329,6 +371,12 @@ export function getTimeline(filters: TimelineFilters): TimelineResponse {
           .where(and(eq(pullRequests.id, events.prId), prStatusWhere(statuses))),
       ),
     );
+  }
+  // Likewise drop a stale open PR's own events (only ever lifecycle markers, since
+  // by definition it has no activity events in-window) so its contributor row can
+  // disappear instead of lingering empty. Keep events with no PR (defensive).
+  if (staleIds.size > 0) {
+    evConds.push(or(isNull(events.prId), notInArray(events.prId, [...staleIds]))!);
   }
   if (excludeBots) {
     const bots = botUserIds();
