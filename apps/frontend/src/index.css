@@ -474,6 +474,12 @@ body {
   color: #fff;
   font-size: 11px;
   cursor: pointer;
+  /* Sit above the own-work event markers (default vis z-index is 1) so an own
+     marker's connector stem, which overlaps up into the bar, is hidden behind the
+     bar's solid fill — making the marker read as joined to the bar even under its
+     rounded corners. Markers never overlap a bar except via that stem, so this has
+     no other visual effect. */
+  z-index: 2;
   /* Absolute floor so a near-instant PR is never a 0-width, unclickable sliver. The
      SPOTTABLE minimum is applied proportionally in JS (fitLaneBars grows each short
      bar toward MIN_BAR_PX but clips it to its neighbour, preserving relative widths);
@@ -841,11 +847,13 @@ body {
 }
 
 /* Own-work cue: events on the actor's OWN PR (.ev-own) sit on the subgroup band
-   directly beneath their PR bar. A short vertical stem (::after) runs from the glyph
-   UP to meet the bar's bottom edge so the marker reads as tethered to — joined with —
-   the bar above, with NO arrowhead/tip. The gap from the glyph box top to the bar is
-   ~4px, so the stem stops exactly at that edge: it must NOT overshoot into the bar.
-   Cross-person markers, whose PR bar lives in another row, get the outbound chip. */
+   directly beneath their PR bar. A vertical stem (::after) runs from the glyph UP and
+   OVERLAPS into the bar's solid body, with NO arrowhead/tip. The glyph-box→bar gap is
+   ~4px, so a ~14px stem runs ~10px past the bar's bottom edge — clear of its 6px
+   corner radius. The bar is given a higher z-index (see .vis-item.pr-bar) so it paints
+   OVER the overlapping portion: the stem emerges from under the bar's solid fill and
+   reads as connected even under the bar's rounded corners. Cross-person markers, whose
+   PR bar lives in another row, get the outbound chip instead. */
 .vis-item.ev-own .ev-marker-inner::after,
 .vis-item.ev-own .ev-cluster-inner::after {
   content: '';
@@ -853,17 +861,17 @@ body {
   bottom: 100%;
   left: 50%;
   width: 0;
-  height: 4px;
+  height: 14px;
   border-left: 1.5px solid rgba(203, 213, 225, 0.85);
   transform: translateX(-50%);
   pointer-events: none;
 }
 /* Circular glyphs (.ev-round) are inset ~3px from the marker box top, so anchor the
    stem at the curve (bottom: calc(100% - 3px)) and add that 3px back to the height so
-   its TOP still lands on the bar's bottom edge — never past it. */
+   its overlap into the bar matches the square markers'. */
 .vis-item.ev-own .ev-marker-inner.ev-round::after {
   bottom: calc(100% - 3px);
-  height: 7px;
+  height: 17px;
 }
 
 /* Cross-person chip: a soft indigo disc + hairline ring hugging the glyph, marking
