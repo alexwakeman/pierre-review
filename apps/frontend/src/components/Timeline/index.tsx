@@ -61,13 +61,85 @@ const VIS_OPTIONS: TimelineOptions = {
 };
 
 // A PR bar's rendered width floor — must track `.vis-item.pr-bar` min-width in
-// index.css (22px), plus a few px so adjacent min-width bars keep a visible gap.
-// Lane packing converts this to ms at the current zoom (MIN_BAR_PX * msPerPx) so
-// near-instant PRs created back-to-back land on separate lanes instead of colliding.
-const MIN_BAR_PX = 26;
+// index.css (22px). fitLaneBars uses it (as ms, via the current zoom) to keep
+// min-width bars on one lane from overlapping, without spending extra rows.
+const MIN_BAR_PX = 22;
 
 function unique<T>(arr: T[]): T[] {
   return [...new Set(arr)];
+}
+
+// The CENTER drawing area's width (px) — what the window maps onto, so fitLaneBars
+// can convert the bars' pixel min-width to ms. Reads vis's own laid-out width
+// (body.domProps.center.width), falling back to the panel/container DOM width. 0
+// when nothing is measurable yet (the gutter is sized asynchronously by vis).
+function barDrawCenterPx(
+  tl: VisTimeline | null,
+  container: HTMLElement | null,
+): number {
+  if (!tl) return 0;
+  const body = (
+    tl as unknown as { body?: { domProps?: { center?: { width?: number } } } }
+  ).body;
+  const center = container?.querySelector<HTMLElement>('.vis-panel.vis-center');
+  return (
+    body?.domProps?.center?.width ||
+    center?.clientWidth ||
+    container?.clientWidth ||
+    0
+  );
+}
+
+function barStartMs(it: DataItem): number {
+  return Date.parse(String(it.start));
+}
+function barEndMs(it: DataItem): number {
+  return it.end != null ? Date.parse(String(it.end)) : barStartMs(it);
+}
+
+// Resolve min-width PR-bar overlaps WITHIN each lane (group + `bar:<lane>` band)
+// horizontally, so close-succession PRs don't each need their own row. Lanes are
+// packed by real time spans (assignPrLanes), so a near-instant PR renders at the
+// pixel floor (MIN_BAR_PX) and its right overhang can cover the next bar. Walking
+// each lane right-to-left, every bar's right edge is held at/under the next bar's
+// left edge: a bar with slack above the floor is shrunk from the right (no move),
+// and one already at the floor is shifted left bodily — so all bars stay ≥ the
+// floor and none overlap. Runs on freshly-built items (real start/end) at the
+// current zoom (msPerPx), so it re-fits on zoom; pan/selection are unaffected
+// (vis routes by item id, and PR navigation reads pr data, not the nudged item).
+function fitLaneBars(items: DataItem[], msPerPx: number): void {
+  if (msPerPx <= 0) return;
+  const minMs = MIN_BAR_PX * msPerPx;
+  const byLane = new Map<string, DataItem[]>();
+  for (const it of items) {
+    const key = `${String(it.group)}|${String(it.subgroup ?? '')}`;
+    const list = byLane.get(key);
+    if (list) list.push(it);
+    else byLane.set(key, [it]);
+  }
+  for (const bars of byLane.values()) {
+    if (bars.length < 2) continue;
+    bars.sort((a, b) => barStartMs(a) - barStartMs(b));
+    let limit = Infinity; // the left edge (ms) the current bar's right edge must not exceed
+    for (let i = bars.length - 1; i >= 0; i--) {
+      const it = bars[i]!;
+      const s = barStartMs(it);
+      const w = Math.max(barEndMs(it) - s, minMs); // rendered width (min-width floor)
+      if (s + w <= limit) {
+        limit = s; // fits (touching allowed) — leave real start/end untouched
+        continue;
+      }
+      if (limit - s >= minMs) {
+        it.end = new Date(limit).toISOString(); // wider bar: pull its right edge in
+        limit = s;
+      } else {
+        const ns = limit - minMs; // at the floor: shift the whole min-width bar left
+        it.start = new Date(ns).toISOString();
+        it.end = new Date(limit).toISOString();
+        limit = ns;
+      }
+    }
+  }
 }
 
 // Pad the VISIBLE window around a resolved {from, to} range so the "current time"
@@ -224,10 +296,16 @@ export function Timeline(): JSX.Element {
   // payload (it had no in-window activity). The focus path stages it here so the
   // next rebuild materializes its bar; cleared once the rebuild consumes it.
   const forceShowOpenPrRef = useRef<TimelinePr | null>(null);
-  // Window width (ms) the current lane packing was computed for. Since a bar's
-  // min-width floor is in pixels, the lane assignment is zoom-dependent — a real
-  // zoom (width change) re-lanes via laneNonce; a pan (same width) does not.
+  // Window width (ms) the current bar fit was computed for. The min-width floor is
+  // in pixels, so fitLaneBars is zoom-dependent — a real zoom (width change) re-fits
+  // via laneNonce; a pan (same width) does not.
   const lanedWindowMsRef = useRef<number | null>(null);
+  // Bar-fit deferral: vis sizes the label gutter asynchronously, so the CENTER draw
+  // width isn't known synchronously during a rebuild. We poll for it (cancellable
+  // rAF) and cache the last settled width so an unchanged-gutter rebuild (zoom,
+  // background sync) can fit synchronously with no flash.
+  const barFitRafRef = useRef<number | null>(null);
+  const settledCenterWidthRef = useRef(0);
   // True while a sticky "Show on timeline" overlay (from the activity panel) is
   // applied — a glowing marker plus, for a cross-user action, the collapsed
   // two-person row focus. Unlike the marker popover it has nothing to dismiss
@@ -296,8 +374,8 @@ export function Timeline(): JSX.Element {
   // Bumped only when a selection lands on a PR the current filter hides, to ask
   // the rebuild to materialize that one bar.
   const [forceShowNonce, setForceShowNonce] = useState(0);
-  // Bumped (debounced) when the zoom changes, to re-run the rebuild so lane packing
-  // re-evaluates the pixel-based min-width floor against the new px↔ms scale.
+  // Bumped (debounced) when the zoom changes, to re-run the rebuild so fitLaneBars
+  // re-resolves min-width bar overlaps against the new px↔ms scale.
   const [laneNonce, setLaneNonce] = useState(0);
 
   const preset = useFilters((s) => s.preset);
@@ -1607,12 +1685,12 @@ export function Timeline(): JSX.Element {
       if (reclusterTimer) clearTimeout(reclusterTimer);
       reclusterTimer = setTimeout(() => rebuildMarkers(), 120);
 
-      // A bar's min-width floor is pixel-based, so the lane packing depends on the
-      // px↔ms scale. When the WIDTH changes (a real zoom — a pan keeps it constant)
-      // re-lane so min-width bars can't start overlapping at the new zoom. Skip in
-      // focus mode (rows are already collapsed to one PR; lane churn there is
-      // pointless and risks disturbing the locked view). Debounced; a >2% width
-      // delta gates out settle/pan jitter.
+      // A bar's min-width floor is pixel-based, so fitLaneBars depends on the px↔ms
+      // scale. When the WIDTH changes (a real zoom — a pan keeps it constant) re-run
+      // the rebuild so the bar fit re-resolves at the new zoom (lanes themselves are
+      // zoom-stable now). Skip in focus mode (rows are collapsed to one PR; the
+      // re-fit is pointless and risks disturbing the locked view). Debounced; a >2%
+      // width delta gates out settle/pan jitter.
       const lastMs = lanedWindowMsRef.current;
       if (lastMs == null || prFocusActiveRef.current || focusedGroupIdsRef.current) return;
       const w = timeline.getWindow();
@@ -1672,6 +1750,73 @@ export function Timeline(): JSX.Element {
     container.addEventListener('click', onClick, true);
     return () => container.removeEventListener('click', onClick, true);
   }, [setRowCollapsed]);
+
+  // Fit min-width PR bars (resolve their pixel overlap) once the CENTER draw width
+  // is known. vis sizes the label gutter asynchronously after a rebuild, so the
+  // width can be wrong synchronously; we fit immediately when it matches the last
+  // settled width (zoom / background sync — no gutter change, no flash), else poll
+  // a few frames until it stabilises. `items` hold REAL start/end (freshly built),
+  // so fitLaneBars always reasons from the true geometry. Supersedes any pending fit.
+  const applyBarFit = useCallback((items: DataItem[]) => {
+    if (barFitRafRef.current != null) {
+      cancelAnimationFrame(barFitRafRef.current);
+      barFitRafRef.current = null;
+    }
+    const fitAt = (w: number): void => {
+      const tl = timelineRef.current;
+      if (!tl || w <= 0) return;
+      const win = tl.getWindow();
+      fitLaneBars(items, (win.end.valueOf() - win.start.valueOf()) / w);
+      itemsRef.current.update(items);
+      settledCenterWidthRef.current = w;
+    };
+    const w0 = barDrawCenterPx(timelineRef.current, containerRef.current);
+    if (w0 > 0 && Math.abs(w0 - settledCenterWidthRef.current) < 1) {
+      fitAt(w0); // gutter already settled at this width — fit now, no flash
+      return;
+    }
+    let lastW = -1;
+    let stable = 0;
+    let frames = 0;
+    const step = (): void => {
+      const w = barDrawCenterPx(timelineRef.current, containerRef.current);
+      if (w > 0 && w === lastW) stable += 1;
+      else {
+        stable = 0;
+        lastW = w;
+      }
+      if ((w > 0 && stable >= 2) || frames++ > 40) {
+        barFitRafRef.current = null;
+        fitAt(w);
+        return;
+      }
+      barFitRafRef.current = requestAnimationFrame(step);
+    };
+    barFitRafRef.current = requestAnimationFrame(step);
+  }, []);
+
+  // Cancel a pending bar-fit on unmount.
+  useEffect(
+    () => () => {
+      if (barFitRafRef.current != null) cancelAnimationFrame(barFitRafRef.current);
+    },
+    [],
+  );
+
+  // A viewport resize changes the CENTER draw width (px↔ms), so re-run the rebuild
+  // to re-fit the bars at the new scale. Debounced; laneNonce drives the rebuild.
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const onResize = (): void => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => setLaneNonce((n) => n + 1), 200);
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      if (t) clearTimeout(t);
+    };
+  }, []);
 
   // Rebuild groups + PR bars when data or the derived-state filter changes.
   useEffect(() => {
@@ -1736,20 +1881,16 @@ export function Timeline(): JSX.Element {
     // separate lanes so each lane's band height is uniform — otherwise a short bar
     // sharing a lane with a tall one floats above the band bottom and strands its
     // own-work markers far below it. hasComments mirrors renderPrBar's input.
-    // minBarMs converts the bar's pixel min-width to ms at the CURRENT zoom so the
-    // packer never lets two min-width bars overlap on one lane (re-runs on zoom via
-    // laneNonce). Falls back to 0 (pack by real span) before the timeline exists.
+    // Lanes pack by real spans now (zoom-stable, compact); the pixel-overlap of
+    // min-width bars is resolved by fitLaneBars after the diff below (which needs
+    // the laid-out draw width, so it runs post-redraw). Track the window width for
+    // the zoom-change detector that re-fits via laneNonce.
     const winForLanes = timelineRef.current?.getWindow();
-    const lanePx = containerRef.current?.clientWidth || 1000;
-    const laneWindowMs = winForLanes
+    lanedWindowMsRef.current = winForLanes
       ? winForLanes.end.valueOf() - winForLanes.start.valueOf()
       : null;
-    lanedWindowMsRef.current = laneWindowMs;
-    const minBarMs = laneWindowMs ? (MIN_BAR_PX * laneWindowMs) / lanePx : 0;
-    const prLanes = assignPrLanes(
-      basePrs,
-      (pr) => (barIsTall(pr, prsWithComments.has(pr.id)) ? 1 : 0),
-      minBarMs,
+    const prLanes = assignPrLanes(basePrs, (pr) =>
+      barIsTall(pr, prsWithComments.has(pr.id)) ? 1 : 0,
     );
     prLanesRef.current = prLanes;
 
@@ -1883,6 +2024,11 @@ export function Timeline(): JSX.Element {
     itemsRef.current.update(prItems);
     if (gonePr.length) itemsRef.current.remove(gonePr);
 
+    // Nudge overlapping min-width bars apart (so close-succession PRs don't each
+    // need their own row), once the CENTER draw width is known (deferred — the
+    // gutter is sized async). prItems still hold REAL start/end here.
+    applyBarFit(prItems);
+
     rebuildMarkers();
 
     // Pin the window across the rebuild (belt-and-suspenders; the diff alone
@@ -1945,6 +2091,7 @@ export function Timeline(): JSX.Element {
     setRowCollapsed,
     verticalScrollEl,
     reapplyScrollTop,
+    applyBarFit,
   ]);
 
   // Reflect the active PR selection without disturbing the view. Selecting a PR
