@@ -1,5 +1,4 @@
-import { homedir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 
 // apps/backend as the base for relative paths regardless of cwd.
 const backendRoot = resolve(import.meta.dirname, '..');
@@ -24,11 +23,14 @@ function intFromEnv(key: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-// Default the SQLite DB to a user-writable location in the home dir so the app
-// works when installed globally (the package dir is read-only). DATABASE_URL /
-// --db override this; a relative override resolves under apps/backend (dev).
-const defaultDbPath = join(homedir(), '.pierre-review', 'pierre-review.sqlite');
-const rawDbUrl = process.env.DATABASE_URL ?? defaultDbPath;
+// Default the SQLite DB under apps/backend/data for local dev. The INSTALLED CLI
+// instead points DATABASE_URL at a user-writable ~/.pierre-review path (see
+// cli.ts) BEFORE config loads — so `pnpm dev` and a globally-installed `pierre`
+// never share a database. Sharing one would be a trap: each process has its own
+// in-memory "is-syncing" guard, so two of them double-sync every repo against the
+// GitHub rate limit and contend on the SQLite write lock. DATABASE_URL / --db
+// override this; a relative override resolves under apps/backend.
+const rawDbUrl = process.env.DATABASE_URL ?? './data/pierre-review.sqlite';
 
 export const config = {
   port: intFromEnv('PORT', 4000),
