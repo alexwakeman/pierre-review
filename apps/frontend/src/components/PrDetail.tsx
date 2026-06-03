@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { EventType, PrDetail as PrDetailT, User } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
@@ -328,54 +328,6 @@ function PrCommentsList({
   );
 }
 
-// The PR description (markdown), shown above the PR comments. Collapsed to the
-// first three lines by default with a Show more/less toggle — surfaced only when
-// the body actually overflows — so a long description never buries the comments
-// and threads below it.
-function PrSummary({ body }: { body: string }): JSX.Element {
-  const [expanded, setExpanded] = useState(false);
-  const [overflowing, setOverflowing] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  // Measure overflow while clamped (skip when expanded — the clamp is off then, so
-  // scrollHeight === clientHeight and the test would always read false).
-  useLayoutEffect(() => {
-    if (expanded) return;
-    const el = ref.current;
-    if (el) setOverflowing(el.scrollHeight - el.clientHeight > 1);
-  }, [body, expanded]);
-
-  return (
-    <div className="border-t border-gray-200 dark:border-gray-800">
-      <div className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-        Summary
-      </div>
-      <div className="px-4 pb-3 text-sm">
-        <div
-          ref={ref}
-          className="overflow-hidden"
-          style={
-            expanded
-              ? undefined
-              : { display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }
-          }
-        >
-          <Markdown>{body}</Markdown>
-        </div>
-        {(overflowing || expanded) && (
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="mt-1 text-xs font-medium text-blue-500 hover:underline"
-          >
-            {expanded ? 'Show less' : 'Show more'}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function PrDetail({
   prId,
   selectedThreadId,
@@ -577,7 +529,6 @@ export function PrDetail({
         {tab === 'overview' ? (
           <div>
             <ChecksTab pr={pr} usersById={usersById} />
-            {pr.body && pr.body.trim() && <PrSummary body={pr.body} />}
             <div className="border-t border-gray-200 dark:border-gray-800">
               <div className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
                 PR comments

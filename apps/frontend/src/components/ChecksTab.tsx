@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { PrDetail as PrDetailT, ReviewState, User } from '@pierre-review/shared';
 import {
   CHECK_STATE_META,
@@ -7,6 +8,7 @@ import {
 } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
+import { Markdown } from './Markdown.js';
 
 function Row({
   label,
@@ -21,6 +23,54 @@ function Row({
         {label}
       </span>
       <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+// The PR description (markdown), shown in the Overview between "Merged by" and
+// "Checks". Collapsed to the first three lines by default with a Show more/less
+// toggle — surfaced only when the body actually overflows. No own top border: it
+// sits inside the divide-y section list, which separates it from its neighbours.
+function PrSummary({ body }: { body: string }): JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Measure overflow while clamped (skip when expanded — the clamp is off then, so
+  // scrollHeight === clientHeight and the test would always read false).
+  useLayoutEffect(() => {
+    if (expanded) return;
+    const el = ref.current;
+    if (el) setOverflowing(el.scrollHeight - el.clientHeight > 1);
+  }, [body, expanded]);
+
+  return (
+    <div>
+      <div className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+        Summary
+      </div>
+      <div className="px-4 pb-3 text-sm">
+        <div
+          ref={ref}
+          className="overflow-hidden"
+          style={
+            expanded
+              ? undefined
+              : { display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }
+          }
+        >
+          <Markdown>{body}</Markdown>
+        </div>
+        {(overflowing || expanded) && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="mt-1 text-xs font-medium text-blue-500 hover:underline"
+          >
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -109,6 +159,8 @@ export function ChecksTab({
           </span>
         </Row>
       )}
+
+      {pr.body != null && pr.body.trim() !== '' && <PrSummary body={pr.body} />}
 
       {checks.length > 0 && (
         <Row label="Checks">
