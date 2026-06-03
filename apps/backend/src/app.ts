@@ -16,6 +16,10 @@ import { mergersRoutes } from './api/routes/mergers.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
+    // In production (the installed CLI) the per-request "incoming request" /
+    // "request completed" lines are pure noise in the user's terminal — silence
+    // them while keeping startup + error logs. Dev keeps them for debugging.
+    disableRequestLogging: process.env.NODE_ENV === 'production',
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
       transport:
