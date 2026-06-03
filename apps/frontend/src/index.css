@@ -558,16 +558,23 @@ body {
   margin-left: 2px;
   opacity: 0.75;
 }
-.vis-item.pr-open {
+/* State colours. These intentionally carry the `.pr-bar` class too (raising them
+   to a 3-class selector): vis-timeline ships a bright-yellow `.vis-item.vis-selected`
+   default (bg #fff785, border #ffc200) at 2-class specificity, and a selected bar
+   has both `.pr-<state>` and `.vis-selected`. At equal specificity the winner is
+   decided by CSS source order — which holds in dev but flips in the Vite production
+   bundle, making a clicked bar flash unreadable yellow in the published app. The
+   extra `.pr-bar` out-specifies vis so the state colour always wins. */
+.vis-item.pr-bar.pr-open {
   background-color: #1d4ed8;
   border-color: #3b82f6;
 }
 /* Merged → green, closed → grey; both keep white text for legibility. */
-.vis-item.pr-merged {
+.vis-item.pr-bar.pr-merged {
   background-color: #15803d;
   border-color: #22c55e;
 }
-.vis-item.pr-closed {
+.vis-item.pr-bar.pr-closed {
   background-color: #4b5563;
   border-color: #9ca3af;
 }

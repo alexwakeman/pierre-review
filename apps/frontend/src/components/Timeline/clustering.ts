@@ -178,6 +178,13 @@ export function buildMarkerItems(
           content: markerHtml(ev),
           className: cls('ev-marker'),
           title: eventTooltip(ev, usersById),
+          // Markers carry their OWN highlight (the custom `ev-selected` glow); we
+          // never want vis-timeline's native selection on them. Left selectable,
+          // vis paints its stock yellow box (.vis-selected) on click — invisible in
+          // dev only because our override happens to win on CSS source order, but it
+          // leaks through in the production bundle. selectable:false stops vis ever
+          // selecting them; click events (which drive the popover) still fire.
+          selectable: false,
         } as DataItem);
         halfPx.set(id, MARKER_HALF_PX);
       } else {
@@ -198,6 +205,7 @@ export function buildMarkerItems(
           content: clusterHtml(bucket.length, kind),
           className: cls('ev-cluster'),
           title: `${bucket.length} ${kind}s`,
+          selectable: false, // see the single-marker note above
         } as DataItem);
         halfPx.set(id, clusterHalfPx(bucket.length));
       }
