@@ -73,6 +73,12 @@ export const api = {
     fetch(`/api/repos/${id}/sync${full ? '?full=true' : ''}`, jsonBody('POST')).then(
       (r) => handle<{ status: string }>(r),
     ),
+  // Cancel an in-flight sync. Resolves once the backend has stopped the sync and
+  // (for an initial-load repo) deleted it. `deleted` says whether it was removed.
+  cancelSync: (id: number) =>
+    fetch(`/api/repos/${id}/cancel`, jsonBody('POST')).then((r) =>
+      handle<{ repoId: number; deleted: boolean }>(r),
+    ),
   syncStatus: (id: number) => get<SyncStatus>(`/api/repos/${id}/sync-status`),
 
   listUsers: () => get<User[]>('/api/users'),

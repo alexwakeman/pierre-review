@@ -6,11 +6,13 @@ import type { Repo, SyncStatus } from '@pierre-review/shared';
 export function SyncProgressModal({
   repos,
   statuses,
-  onClose,
+  cancelling,
+  onCancel,
 }: {
   repos: Repo[];
   statuses: SyncStatus[] | undefined;
-  onClose: () => void;
+  cancelling: boolean;
+  onCancel: () => void;
 }): JSX.Element {
   const statusFor = (id: number): SyncStatus | undefined =>
     statuses?.find((s) => s.repoId === id);
@@ -31,28 +33,24 @@ export function SyncProgressModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
       role="presentation"
     >
       <div
         className="w-[28rem] max-w-[90vw] rounded-lg border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-700 dark:bg-gray-900"
-        onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="Sync progress"
       >
+        {/* No dismiss affordance (no ✕, no outside-click): the sync can only be
+            left by letting it finish — it auto-closes — or by Cancel below. */}
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold">
-            {allDone ? 'Sync complete' : `Syncing ${repos.length} repo${repos.length === 1 ? '' : 's'}`}
+            {cancelling
+              ? 'Cancelling…'
+              : allDone
+                ? 'Sync complete'
+                : `Syncing ${repos.length} repo${repos.length === 1 ? '' : 's'}`}
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-            aria-label="Close"
-          >
-            ✕
-          </button>
         </div>
 
         <ul className="space-y-3">
@@ -97,16 +95,18 @@ export function SyncProgressModal({
           })}
         </ul>
 
-        <div className="mt-4 flex items-center justify-between text-xs text-gray-500">
+        <div className="mt-4 flex items-center justify-between gap-3 text-xs text-gray-500">
           <span>
             {completeCount} of {repos.length} repo{repos.length === 1 ? '' : 's'} complete
           </span>
           <button
             type="button"
-            onClick={onClose}
-            className="rounded border border-gray-300 px-3 py-1 hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+            onClick={onCancel}
+            disabled={cancelling}
+            title="Stop the sync and remove any repos still loading for the first time"
+            className="rounded border border-red-300 px-3 py-1 text-red-600 hover:border-red-400 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
           >
-            {allDone ? 'Done' : 'Close'}
+            {cancelling ? 'Cancelling…' : 'Cancel'}
           </button>
         </div>
       </div>

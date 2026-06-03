@@ -15,7 +15,9 @@ import { upsertRepo } from '../../sync/upsert.js';
 import {
   getSyncStatus,
   isSyncRunning,
+  requestSyncCancel,
   runSyncForRepo,
+  waitForSyncToStop,
 } from '../../sync/sync-manager.js';
 import {
   deleteRepo,
@@ -236,4 +238,29 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       return status;
     },
   );
+
+  // Cancel an in-flight sync. Signals the sync loop to stop, waits for it to
+  // settle, then — if this repo never completed a sync (an initial backfill the
+  // user is aborting) — deletes it and its partially-loaded data. An established
+  // repo whose re-sync was cancelled keeps everything. Drives the modal's Cancel.
+  app.post('/api/repos/:id/cancel', { schema: idParamSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    if (!getRepo(id)) {
+      reply.status(404);
+      return { error: 'NotFound', message: `Repo ${id} not found` };
+    }
+    requestSyncCancel(id);
+    await waitForSyncToStop(id, 30_000);
+    // Re-read AFTER it stops: if the sync actually finished during the wait, the
+    // repo is now "synced" and must NOT be deleted (avoids a cancel-vs-finish race).
+    const fresh = getRepo(id);
+    const neverSynced =
+      fresh != null &&
+      fresh.lastFullSyncAt == null &&
+      fresh.lastIncrementalSyncAt == null;
+    let deleted = false;
+    if (neverSynced && !isSyncRunning(id)) deleted = deleteRepo(id);
+    reply.status(200);
+    return { repoId: id, deleted };
+  });
 }

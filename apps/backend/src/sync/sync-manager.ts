@@ -22,6 +22,31 @@ export function isDeepSyncActive(): boolean {
   return deepSyncing.size > 0;
 }
 
+// Repos the user has asked to STOP mid-sync. syncRepo polls this between pages
+// (and PRs) and bails out without recording the run as complete, so a cancelled
+// initial backfill leaves the repo "never synced" (the cancel endpoint then
+// deletes it + its partial data). Only meaningful while the repo is running.
+const cancelRequested = new Set<number>();
+
+export function requestSyncCancel(repoId: number): void {
+  if (running.has(repoId)) cancelRequested.add(repoId);
+}
+
+// Block until a repo's in-flight sync has actually stopped (the loop notices the
+// cancel flag after its current page/PR), or the timeout elapses. Returns true if
+// it stopped. Used by the cancel endpoint before deleting an initial-load repo.
+export async function waitForSyncToStop(
+  repoId: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const start = Date.now();
+  while (running.has(repoId)) {
+    if (Date.now() - start > timeoutMs) return false;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return true;
+}
+
 // Live progress for in-flight syncs, surfaced via getSyncStatus so the UI can
 // show a determinate bar. Lives only for the duration of the run.
 const progressByRepo = new Map<number, SyncProgress>();
@@ -124,6 +149,7 @@ export function runSyncForRepo(
     ...plan,
     log,
     onProgress: (p) => setSyncProgress(repoId, { ...p, mode: plan.mode }),
+    shouldCancel: () => cancelRequested.has(repoId),
   })
     .catch((err) => {
       log.error(
@@ -133,6 +159,7 @@ export function runSyncForRepo(
     .finally(() => {
       running.delete(repoId);
       deepSyncing.delete(repoId);
+      cancelRequested.delete(repoId);
       clearSyncProgress(repoId);
     });
 
@@ -166,6 +193,7 @@ export async function syncAllRepos(log: Logger): Promise<void> {
         ...plan,
         log,
         onProgress: (p) => setSyncProgress(r.id, { ...p, mode: plan.mode }),
+        shouldCancel: () => cancelRequested.has(r.id),
       });
     } catch (err) {
       log.error(
@@ -173,6 +201,7 @@ export async function syncAllRepos(log: Logger): Promise<void> {
       );
     } finally {
       running.delete(r.id);
+      cancelRequested.delete(r.id);
       clearSyncProgress(r.id);
     }
   }

@@ -34,6 +34,10 @@ export interface SyncRepoOptions {
   log?: Logger;
   // Called as pages/PRs are processed so callers can surface live progress.
   onProgress?: (p: SyncProgressUpdate) => void;
+  // Polled between pages and PRs; when it returns true the walk bails out WITHOUT
+  // recording the run as complete (no syncState timestamp), so a cancelled initial
+  // backfill leaves the repo "never synced". Drives user-initiated cancel.
+  shouldCancel?: () => boolean;
 }
 
 function clamp01(n: number): number {
@@ -76,7 +80,12 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
 
   try {
     let stop = false;
+    let cancelled = false;
     do {
+      if (opts.shouldCancel?.()) {
+        cancelled = true;
+        break;
+      }
       const resp: RepoActivityResponse = await client(REPO_ACTIVITY_QUERY, {
         owner,
         name,
@@ -101,6 +110,10 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
 
       const { nodes, pageInfo } = resp.repository.pullRequests;
       for (const pr of nodes) {
+        if (opts.shouldCancel?.()) {
+          cancelled = true;
+          break;
+        }
         const updatedMs = new Date(pr.updatedAt).getTime();
         if (since && updatedMs < since.getTime()) {
           stop = true;
@@ -132,8 +145,23 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       }
 
       cursor = pageInfo.endCursor;
-      if (stop || !pageInfo.hasNextPage) break;
+      if (cancelled || stop || !pageInfo.hasNextPage) break;
     } while (cursor);
+
+    // Cancelled mid-walk: return WITHOUT writing a syncState timestamp, so the
+    // repo stays "never synced" (an initial backfill) and the cancel endpoint can
+    // safely delete it. Already-persisted PRs are harmless (idempotent) and get
+    // cleaned up with the repo, or resumed on the next sync for an existing repo.
+    if (cancelled) {
+      log.info(`sync ${owner}/${name} cancelled after ${prCount} PRs / ${pages} page(s)`);
+      return {
+        repoId: repoId ?? -1,
+        prCount,
+        pages,
+        rateLimitRemaining: lastRemaining,
+        rateLimitCost: totalCost,
+      };
+    }
 
     // Reached the cutoff / last page — the walk is complete.
     reportProgress(sinceMs);

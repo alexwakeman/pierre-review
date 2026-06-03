@@ -55,6 +55,9 @@ export function SyncStatus(): JSX.Element | null {
   // yet" apart from "finished" — gating completion on this avoids declaring the
   // sync done (and refetching half-written data) before it has even begun.
   const [seenRunning, setSeenRunning] = useState(false);
+  // True while a user-initiated Cancel is in flight (the backend stops the sync
+  // and removes initial-load repos before the request resolves).
+  const [cancelling, setCancelling] = useState(false);
 
   // Dedicated observer on the shared ['repos'] cache that polls for fresh
   // sync timestamps.
@@ -101,6 +104,10 @@ export function SyncStatus(): JSX.Element | null {
     void qc.invalidateQueries({ queryKey: ['timeline'] });
     void qc.invalidateQueries({ queryKey: ['open-prs'] });
     void qc.invalidateQueries({ queryKey: ['users'] });
+    // Merge-rights (maintainer shields) are first fetched empty on a fresh add —
+    // before the backfill lands any merged PRs — so they MUST refresh when a sync
+    // completes, or the shields never appear until a manual page reload.
+    void qc.invalidateQueries({ queryKey: ['mergers'] });
     void qc.invalidateQueries({ queryKey: ['my-turn'] });
     void qc.invalidateQueries({ queryKey: ['me'] });
   };
@@ -168,6 +175,28 @@ export function SyncStatus(): JSX.Element | null {
     void qc.invalidateQueries({ queryKey: ['sync-status'] });
   };
 
+  // Cancel the run: stop every repo that's still syncing (the backend aborts the
+  // sync and deletes any repo still on its initial backfill), then close. Repos
+  // that already had data keep it. This is the modal's ONLY exit besides letting
+  // it finish.
+  const cancelSync = async (): Promise<void> => {
+    setCancelling(true);
+    cancelAutoClose();
+    const runningIds = (statuses ?? [])
+      .filter((s) => s.status === 'running')
+      .map((s) => s.repoId);
+    // Fall back to every repo if the status poll hasn't landed yet — the backend
+    // no-ops on repos that aren't actually running.
+    const ids = runningIds.length ? runningIds : repos.map((r) => r.id);
+    await Promise.allSettled(ids.map((id) => api.cancelSync(id)));
+    setSyncing(false);
+    setSeenRunning(false);
+    setCancelling(false);
+    setModalOpen(false);
+    void qc.invalidateQueries({ queryKey: ['repos'] }); // drop any deleted repos
+    invalidateData();
+  };
+
   const progress =
     runningCount > 0
       ? `syncing ${runningCount} repo${runningCount === 1 ? '' : 's'}…`
@@ -179,11 +208,8 @@ export function SyncStatus(): JSX.Element | null {
         <SyncProgressModal
           repos={repos}
           statuses={statuses}
-          onClose={() => {
-            cancelAutoClose();
-            setModalOpen(false);
-            setSyncing(false);
-          }}
+          cancelling={cancelling}
+          onCancel={() => void cancelSync()}
         />
       )}
       <div className="flex items-center gap-2 text-xs text-gray-500">
