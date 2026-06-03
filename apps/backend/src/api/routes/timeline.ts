@@ -1,14 +1,25 @@
 import type { FastifyInstance } from 'fastify';
-import {
-  EVENT_TYPES,
-  PR_STATUSES,
-  type EventType,
-  type PrStatus,
-  type TimelineQuery,
-} from '@pierre-review/shared';
+import type { EventType, PrStatus, TimelineQuery } from '@pierre-review/shared';
 import { getTimeline, type TimelineFilters } from '../../db/queries.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Local copies of the shared value constants. `@pierre-review/shared` is a
+// types-only workspace package that is NOT shipped in the published tarball, so
+// the backend must not import runtime values from it (only `import type`, which
+// `verbatimModuleSyntax` erases). Keep these in sync with packages/shared.
+const EVENT_TYPES: EventType[] = [
+  'pr_opened',
+  'pr_merged',
+  'pr_closed',
+  'pr_reopened',
+  'pr_ready_for_review',
+  'review_submitted',
+  'review_comment',
+  'pr_comment',
+  'commit_pushed',
+];
+const PR_STATUSES: PrStatus[] = ['draft', 'open', 'merged', 'closed'];
 
 function parseIntList(raw: string | undefined): number[] | null {
   if (!raw) return null;
