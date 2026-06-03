@@ -467,6 +467,25 @@ body {
   background-color: rgba(255, 255, 255, 0.05);
 }
 
+/* Inter-contributor divider: a crisp rail along the bottom of every contributor
+   row so adjacent users read as separate — the zebra band alone is too subtle
+   where one row's cross-person event band abuts the next user's PR bars. Drawn as
+   an inset box-shadow (NOT a border or margin) so it adds ZERO height: the label
+   panel, foreground rows, and the background grid lines stay pixel-aligned, since
+   vis lays those out from its own measured group heights and any real height we
+   added here would desync them. Spans both panels (label + foreground) for a
+   full-width line; repo header rows (no .tl-user-row) keep their own section break.
+   Sits under the row's markers/bars in paint order, so a glyph at the very bottom
+   edge briefly overlaps it without hiding the rail across the rest of the row. */
+.vis-labelset .vis-label.tl-user-row,
+.vis-foreground .vis-group.tl-user-row {
+  box-shadow: inset 0 -2px 0 0 rgba(15, 23, 42, 0.2);
+}
+.dark .vis-labelset .vis-label.tl-user-row,
+.dark .vis-foreground .vis-group.tl-user-row {
+  box-shadow: inset 0 -2px 0 0 rgba(255, 255, 255, 0.16);
+}
+
 /* PR range bars */
 .vis-item.pr-bar {
   border-radius: 6px;
