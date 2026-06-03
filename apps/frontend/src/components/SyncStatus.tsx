@@ -45,9 +45,16 @@ function syncTooltip(lastSync: string | null): string {
 export function SyncStatus(): JSX.Element | null {
   const qc = useQueryClient();
   const [syncing, setSyncing] = useState(false);
-  // The progress overlay is tracked separately from `syncing` so it stays up
-  // showing the "✓ done" state after the sync finishes — the user dismisses it.
+  // The progress overlay is tracked separately from `syncing`: it lingers on the
+  // final "✓ done" state for a beat after the sync settles, then auto-closes (a
+  // pending close is scheduled in the completion effect below).
   const [modalOpen, setModalOpen] = useState(false);
+  // Latch: have we actually OBSERVED a sync running since `syncing` went true?
+  // A just-triggered (or just-added) repo isn't reflected in the status poll for
+  // a tick or two, so `runningCount === 0` on its own can't tell "not started
+  // yet" apart from "finished" — gating completion on this avoids declaring the
+  // sync done (and refetching half-written data) before it has even begun.
+  const [seenRunning, setSeenRunning] = useState(false);
 
   // Dedicated observer on the shared ['repos'] cache that polls for fresh
   // sync timestamps.
@@ -58,9 +65,12 @@ export function SyncStatus(): JSX.Element | null {
   });
 
   // Per-repo running state, polled only while a manual sync is in flight, so
-  // the user sees progress instead of a single opaque "syncing…".
+  // the user sees progress instead of a single opaque "syncing…". Keyed on the
+  // repo-id set so adding a repo mid-session re-scopes the poll to include it
+  // (otherwise a brand-new repo's backfill is invisible to the status poll).
+  const repoIdsKey = (repos ?? []).map((r) => r.id).join(',');
   const { data: statuses } = useQuery<SyncStatusT[]>({
-    queryKey: ['sync-status'],
+    queryKey: ['sync-status', repoIdsKey],
     enabled: syncing && !!repos && repos.length > 0,
     queryFn: () => Promise.all((repos ?? []).map((r) => api.syncStatus(r.id))),
     refetchInterval: 1500,
@@ -69,6 +79,23 @@ export function SyncStatus(): JSX.Element | null {
 
   const lastSync = mostRecentSync(repos ?? []);
   const prevLastSync = useRef<string | null>(lastSync);
+
+  // Pending auto-close of the progress modal. Held in a ref so a fresh sync can
+  // cancel a close that a previous round scheduled.
+  const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelAutoClose = (): void => {
+    if (autoCloseTimerRef.current != null) {
+      clearTimeout(autoCloseTimerRef.current);
+      autoCloseTimerRef.current = null;
+    }
+  };
+  // Mark that a fresh sync round is starting: require a new running observation
+  // before we treat it as complete, and drop any close queued by the last round.
+  const beginSyncRound = (): void => {
+    setSeenRunning(false);
+    cancelAutoClose();
+  };
+  useEffect(() => cancelAutoClose, []);
 
   const invalidateData = (): void => {
     void qc.invalidateQueries({ queryKey: ['timeline'] });
@@ -87,14 +114,27 @@ export function SyncStatus(): JSX.Element | null {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSync]);
 
-  // Drop the "syncing…" indicator once every repo reports idle again.
+  // Latch the moment we first see a repo actually running this round.
   useEffect(() => {
-    if (syncing && statuses && runningCount === 0) {
+    if (runningCount > 0) setSeenRunning(true);
+  }, [runningCount]);
+
+  // Completion: once we've observed a running sync and every repo reports idle
+  // again, drop the "syncing…" indicator, refresh data, and auto-dismiss the
+  // progress modal a second later (long enough to show the final "✓ done").
+  useEffect(() => {
+    if (syncing && seenRunning && statuses && runningCount === 0) {
       setSyncing(false);
+      setSeenRunning(false);
       invalidateData();
+      cancelAutoClose();
+      autoCloseTimerRef.current = setTimeout(() => {
+        setModalOpen(false);
+        autoCloseTimerRef.current = null;
+      }, 1000);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncing, statuses, runningCount]);
+  }, [syncing, seenRunning, statuses, runningCount]);
 
   // A freshly-added repo bumps syncModalSignal: pop the progress modal and start
   // polling so its initial backfill (which can take a while) is visible. The
@@ -109,8 +149,10 @@ export function SyncStatus(): JSX.Element | null {
     prevSyncSignal.current = syncModalSignal;
     setModalOpen(true);
     setSyncing(true);
+    beginSyncRound();
     void qc.invalidateQueries({ queryKey: ['repos'] });
     void qc.invalidateQueries({ queryKey: ['sync-status'] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncModalSignal, qc]);
 
   if (!repos || repos.length === 0) return null;
@@ -120,6 +162,7 @@ export function SyncStatus(): JSX.Element | null {
   const syncNow = async (full = false): Promise<void> => {
     setSyncing(true);
     setModalOpen(true);
+    beginSyncRound();
     await Promise.allSettled(repos.map((r) => api.syncRepo(r.id, full)));
     void qc.invalidateQueries({ queryKey: ['repos'] });
     void qc.invalidateQueries({ queryKey: ['sync-status'] });
@@ -137,6 +180,7 @@ export function SyncStatus(): JSX.Element | null {
           repos={repos}
           statuses={statuses}
           onClose={() => {
+            cancelAutoClose();
             setModalOpen(false);
             setSyncing(false);
           }}

@@ -15,10 +15,15 @@ export function SyncProgressModal({
   const statusFor = (id: number): SyncStatus | undefined =>
     statuses?.find((s) => s.repoId === id);
 
-  // Before the first status poll lands, treat everything as still running so we
-  // don't briefly flash "done".
-  const isRunning = (id: number): boolean =>
-    statuses === undefined || statusFor(id)?.status === 'running';
+  // Treat a repo as still running until a status poll explicitly reports it
+  // idle/done. That covers two "not done yet" cases: before the first poll
+  // lands (`statuses` undefined), and a freshly-added repo the poll hasn't
+  // scoped in yet (no entry for its id) — either way we avoid flashing "done".
+  const isRunning = (id: number): boolean => {
+    if (statuses === undefined) return true;
+    const s = statusFor(id);
+    return s === undefined || s.status === 'running';
+  };
 
   const completeCount = repos.filter((r) => !isRunning(r.id)).length;
   const allDone = completeCount === repos.length;
