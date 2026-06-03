@@ -486,8 +486,12 @@ body {
   box-shadow: inset 0 -2px 0 0 rgba(255, 255, 255, 0.16);
 }
 
-/* PR range bars */
-.vis-item.pr-bar {
+/* PR range bars. The selector carries `.vis-range` (these items are always vis
+   ranges) so it's a 3-class match: vis-timeline's own `.vis-item.vis-range`
+   rounds corners to just 2px at 2-class specificity, and at a tie the CSS source
+   order decides — which holds in dev but flips in the prod bundle, flattening the
+   bars. The extra class makes our 6px radius win deterministically. */
+.vis-item.vis-range.pr-bar {
   border-radius: 6px;
   border-width: 1px;
   color: #fff;
