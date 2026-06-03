@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Repo, SyncStatus as SyncStatusT } from '@gh-team-monitor/shared';
 import { api } from '../api/client.js';
 import { relativeTime } from '../lib/ui.js';
+import { useFilters } from '../store/filters.js';
 import { SyncProgressModal } from './SyncProgressModal.js';
 
 function mostRecentSync(repos: Repo[]): string | null {
@@ -94,6 +95,23 @@ export function SyncStatus(): JSX.Element | null {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncing, statuses, runningCount]);
+
+  // A freshly-added repo bumps syncModalSignal: pop the progress modal and start
+  // polling so its initial backfill (which can take a while) is visible. The
+  // repo's background sync is already running server-side — we don't re-trigger
+  // anything here, just open the overlay and turn on the status poll. This effect
+  // runs even while the component renders null (no repos yet, e.g. the very first
+  // add); the modal paints as soon as the invalidated ['repos'] query refetches.
+  const syncModalSignal = useFilters((s) => s.syncModalSignal);
+  const prevSyncSignal = useRef(syncModalSignal);
+  useEffect(() => {
+    if (syncModalSignal === prevSyncSignal.current) return;
+    prevSyncSignal.current = syncModalSignal;
+    setModalOpen(true);
+    setSyncing(true);
+    void qc.invalidateQueries({ queryKey: ['repos'] });
+    void qc.invalidateQueries({ queryKey: ['sync-status'] });
+  }, [syncModalSignal, qc]);
 
   if (!repos || repos.length === 0) return null;
 

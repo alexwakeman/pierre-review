@@ -7,6 +7,7 @@ import type {
   OpenPrsResponse,
   PrDetail,
   Repo,
+  RepoSearchResponse,
   SyncStatus,
   ThreadDetail,
   TimelineResponse,
@@ -58,6 +59,12 @@ export { ApiError };
 
 export const api = {
   listRepos: () => get<Repo[]>('/api/repos'),
+  searchRepos: (q: string, cursor?: string) =>
+    get<RepoSearchResponse>(
+      `/api/repos/search?q=${encodeURIComponent(q)}${
+        cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+      }`,
+    ),
   addRepo: (body: CreateRepoBody) =>
     fetch('/api/repos', jsonBody('POST', body)).then((r) => handle<Repo>(r)),
   deleteRepo: (id: number) =>

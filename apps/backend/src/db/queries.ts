@@ -107,6 +107,13 @@ export function getRepo(id: number): Repo | null {
   return listRepos().find((r) => r.id === id) ?? null;
 }
 
+// Node IDs of every watched repo. Used to drop already-tracked repos from live
+// search results (a GitHub search hit exposes the same GraphQL `id`).
+export function getWatchedRepoNodeIds(): Set<string> {
+  const rows = db.select({ nodeId: repos.githubNodeId }).from(repos).all();
+  return new Set(rows.map((r) => r.nodeId));
+}
+
 export function listUsers(): User[] {
   return db
     .select()

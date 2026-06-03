@@ -126,6 +126,11 @@ export interface FilterState {
   // the last 14 days after you've panned/zoomed away. A counter (not derived from
   // `preset`) so a same-value re-click still fires.
   rangeResetSignal: number;
+  // `syncModalSignal`: a monotonic counter bumped when a freshly-added repo should
+  // surface the sync-progress modal (so the user sees the initial backfill is
+  // underway and may take a while). SyncStatus watches it, opens the modal and
+  // starts polling. Store-only / transient (NOT URL-synced).
+  syncModalSignal: number;
 
   setRepoIds: (ids: number[] | null) => void;
   toggleRepo: (id: number) => void;
@@ -179,6 +184,9 @@ export interface FilterState {
   // Timeline reacts by tearing down the overlay and re-centering / fade-glowing
   // the marker that opened it (that behaviour is NOT implemented here).
   exitFocus: () => void;
+  // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
+  // so the initial backfill's load time is visible). Bumps syncModalSignal.
+  requestSyncModal: () => void;
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
   setSearchQuery: (q: string) => void;
@@ -244,6 +252,7 @@ function freshDefaults(): FilterData {
     focusActive: false,
     exitFocusSignal: 0,
     rangeResetSignal: 0,
+    syncModalSignal: 0,
   };
 }
 
@@ -315,6 +324,8 @@ export const useFilters = create<FilterState>((set) => ({
   setFocusActive: (v) => set({ focusActive: v }),
   exitFocus: () =>
     set((s) => ({ focusActive: false, exitFocusSignal: s.exitFocusSignal + 1 })),
+  requestSyncModal: () =>
+    set((s) => ({ syncModalSignal: s.syncModalSignal + 1 })),
   setStripCollapsed: (v) => set({ stripCollapsed: v }),
   setStripFilter: (f) => set({ stripFilter: f }),
   setSearchQuery: (q) => set({ searchQuery: q }),

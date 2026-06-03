@@ -201,6 +201,7 @@ Wire format is JSON with ISO-8601 timestamps; payload types live in
 | `GET /api/open-prs?repoIds&userIds` | currently-open PRs (ignores date range) |
 | `GET /api/threads/:id` | single thread detail |
 | `GET /api/repos`, `POST /api/repos`, `DELETE /api/repos/:id` | manage watched repos (delete → 409 if syncing, else 204) |
+| `GET /api/repos/search?q&cursor&limit` | live GitHub repo search for the Add-repo picker → `{ results[], hasNextPage, cursor }`: GraphQL `search(type: REPOSITORY)` best-match, already-watched repos filtered out, owned/member repos floated to top; `limit` default 10 (max 25) |
 | `POST /api/repos/:id/sync?full=true` | trigger sync → `202 {status:'started'}`, or `409` if already running |
 | `GET /api/users` (+ isBot updates) | user list / bot flagging |
 | `GET /api/mergers` | per-repo merge-rights map (who's merged a PR there) → maintainer shield on row labels |
@@ -232,8 +233,16 @@ Three layers, deliberately separated:
 
 ### UI regions (`App.tsx`)
 
-- **FilterBar** — add/remove repos, members (auto-scoped to who's active in the
-  window, with an exclude-bots toggle), range presets (7/14/30/90d/custom) plus a
+- **FilterBar** — add repos via a debounced GitHub search picker (`RepoSearch`,
+  scrollable results panel: avatar, stars, open-PR count, description, paginated;
+  hits `/api/repos/search`; a successful add pops the sync-progress modal via the
+  transient `syncModalSignal` store signal that `SyncStatus` watches). The watched
+  repos live in a **show/hide dropdown** (`RepoSelectPanel`): a checkbox per repo
+  labelled with its full `owner/name` (so same-named repos under different owners
+  stay distinct), immediate visibility toggle (canonicalises to `repoIds=null` when
+  all/none, and won't let you hide the last one), plus a per-row remove. Members
+  (auto-scoped to who's active in the window, with an exclude-bots toggle), range
+  presets (7/14/30/90d/custom) plus a
   **Now** action (recenter the window on the present, keeping the zoom — a
   transient `timelineCenterAt` store signal), event categories, and derived-state
   tags.

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DERIVED_STATES,
@@ -6,6 +6,7 @@ import {
   type DerivedState,
   type EventCategory,
   type PrStatus,
+  type Repo,
   type User,
 } from '@gh-team-monitor/shared';
 import { api, ApiError } from '../api/client.js';
@@ -17,6 +18,8 @@ import {
   type RangePreset,
 } from '../store/filters.js';
 import { DERIVED_STATE_META } from '../lib/ui.js';
+import { RepoSearch } from './RepoSearch.js';
+import { RepoSelectPanel } from './RepoSelectPanel.js';
 import { UserSelectPanel, type MemberSection } from './UserSelectPanel.js';
 
 const PRESETS: Exclude<RangePreset, 'custom'>[] = ['7d', '14d', '30d', '90d'];
@@ -89,59 +92,6 @@ function Chip({
   );
 }
 
-function AddRepo(): JSX.Element {
-  const qc = useQueryClient();
-  const [value, setValue] = useState('');
-  const mutation = useMutation({
-    mutationFn: (slug: string) => {
-      const [owner, name] = slug.split('/');
-      if (!owner || !name) throw new Error('Use owner/name');
-      return api.addRepo({ owner, name });
-    },
-    onSuccess: () => {
-      setValue('');
-      void qc.invalidateQueries({ queryKey: ['repos'] });
-      void qc.invalidateQueries({ queryKey: ['timeline'] });
-      void qc.invalidateQueries({ queryKey: ['open-prs'] });
-      void qc.invalidateQueries({ queryKey: ['users'] });
-      void qc.invalidateQueries({ queryKey: ['my-turn'] });
-      void qc.invalidateQueries({ queryKey: ['me'] });
-    },
-  });
-
-  return (
-    <form
-      className="flex items-center gap-1"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (value.trim()) mutation.mutate(value.trim());
-      }}
-    >
-      <input
-        id="add-repo-input"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="owner/repo"
-        className="w-32 rounded border border-gray-300 bg-transparent px-2 py-0.5 text-xs focus:border-blue-500 focus:outline-none dark:border-gray-700"
-      />
-      <button
-        type="submit"
-        disabled={mutation.isPending}
-        className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white disabled:opacity-50"
-      >
-        {mutation.isPending ? 'Adding…' : 'Add'}
-      </button>
-      {mutation.error && (
-        <span className="max-w-[14rem] truncate text-xs text-red-500" title={String(mutation.error)}>
-          {mutation.error instanceof ApiError
-            ? mutation.error.message
-            : String(mutation.error)}
-        </span>
-      )}
-    </form>
-  );
-}
-
 function Section({
   label,
   children,
@@ -184,6 +134,31 @@ export function FilterBar(): JSX.Element {
       }
     },
   });
+
+  // Show/hide a single repo on the timeline. `repoIds` is the explicit visible
+  // subset (null = all). Toggling canonicalises back to null when every repo is
+  // visible again, so the URL stays clean and the trigger reads "all".
+  const toggleRepoVisibility = (id: number): void => {
+    const allIds = (repos ?? []).map((r) => r.id);
+    const visible = new Set(useFilters.getState().repoIds ?? allIds);
+    if (visible.has(id)) visible.delete(id);
+    else visible.add(id);
+    f.setRepoIds(
+      visible.size === 0 || visible.size === allIds.length
+        ? null
+        : allIds.filter((x) => visible.has(x)),
+    );
+  };
+
+  const confirmRemoveRepo = (r: Repo): void => {
+    if (
+      window.confirm(
+        `Stop watching ${r.fullName}? This deletes all of its locally-synced data.`,
+      )
+    ) {
+      removeRepo.mutate(r.id);
+    }
+  };
 
   // Member picker options, organised into sections: one section per in-scope repo
   // listing that repo's members. A member active in several repos is intentionally
@@ -284,27 +259,14 @@ export function FilterBar(): JSX.Element {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-800 dark:bg-gray-900">
       <Section label="Repos">
-        {(repos ?? []).map((r) => (
-          <Chip
-            key={r.id}
-            active={f.repoIds == null ? false : f.repoIds.includes(r.id)}
-            onClick={() => f.toggleRepo(r.id)}
-            title={r.fullName}
-            removeTitle={`Remove ${r.fullName}`}
-            removeDisabled={removeRepo.isPending}
-            onRemove={() => {
-              if (
-                window.confirm(
-                  `Stop watching ${r.fullName}? This deletes all of its locally-synced data.`,
-                )
-              ) {
-                removeRepo.mutate(r.id);
-              }
-            }}
-          >
-            {r.name}
-          </Chip>
-        ))}
+        <RepoSelectPanel
+          repos={repos ?? []}
+          repoIds={f.repoIds}
+          onToggle={toggleRepoVisibility}
+          onShowAll={() => f.setRepoIds(null)}
+          onRemove={confirmRemoveRepo}
+          removePending={removeRepo.isPending}
+        />
         {removeRepo.error && (
           <span
             className="max-w-[14rem] truncate text-xs text-red-500"
@@ -315,16 +277,7 @@ export function FilterBar(): JSX.Element {
               : 'Failed to remove repo'}
           </span>
         )}
-        {f.repoIds && f.repoIds.length > 0 && (
-          <button
-            type="button"
-            onClick={() => f.setRepoIds(null)}
-            className="text-[11px] text-gray-400 hover:text-gray-600"
-          >
-            all
-          </button>
-        )}
-        <AddRepo />
+        <RepoSearch />
       </Section>
 
       <Section label="Members">

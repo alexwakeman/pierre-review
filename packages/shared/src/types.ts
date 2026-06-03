@@ -445,6 +445,40 @@ export interface CreateRepoBody {
   name: string;
 }
 
+// ---- repo search (Add-repo picker) ----
+
+// A single GitHub repository-search hit, shaped for the Add-repo picker. Sourced
+// live from the GitHub GraphQL search API (never persisted) — only the fields the
+// picker renders. `isOwnedOrMember` floats repos you own or are an org member of
+// to the top of the result list.
+export interface RepoSearchResult {
+  githubNodeId: string;
+  owner: string;
+  name: string;
+  fullName: string; // "owner/name"
+  description: string | null;
+  ownerAvatarUrl: string | null;
+  stargazerCount: number;
+  openPrCount: number;
+  url: string;
+  isPrivate: boolean;
+  isOwnedOrMember: boolean;
+}
+
+// One page of repo-search results. `cursor` feeds the next page's request when
+// `hasNextPage` is true (GitHub's opaque endCursor); null when exhausted.
+export interface RepoSearchResponse {
+  results: RepoSearchResult[];
+  hasNextPage: boolean;
+  cursor: string | null;
+}
+
+export interface RepoSearchQuery {
+  q: string;
+  cursor?: string;
+  limit?: number;
+}
+
 export interface MarkViewedBody {
   sha?: string;
 }
