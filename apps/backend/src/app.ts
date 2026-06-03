@@ -1,5 +1,8 @@
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
 import { registerErrorHandler } from './api/plugins/error-handler.js';
 import { healthRoutes } from './api/routes/health.js';
 import { repoRoutes } from './api/routes/repos.js';
@@ -24,7 +27,18 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(cors, { origin: true });
 
-  registerErrorHandler(app);
+  // Single-process production mode: serve the built SPA when the bundled assets
+  // exist next to the compiled server (release/dist → release/public). In dev
+  // there is no sibling `public/` dir, so this no-ops and Vite (:5173) serves the
+  // UI by proxying /api back to this server — dev stays unchanged.
+  const publicDir = resolve(import.meta.dirname, '../public');
+  const serveSpa = existsSync(resolve(publicDir, 'index.html'));
+  if (serveSpa) {
+    await app.register(fastifyStatic, { root: publicDir, wildcard: false });
+  }
+
+  // The not-found handler doubles as the SPA fallback when serving the SPA.
+  registerErrorHandler(app, serveSpa);
 
   await app.register(healthRoutes);
   await app.register(repoRoutes);

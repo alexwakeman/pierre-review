@@ -399,6 +399,63 @@ a specific view without clicking through.
 
 ---
 
+## Packaging & publishing
+
+The app ships to npm as a **single unscoped package, `pierre-review`**, runnable
+with `npx pierre-review` (or, installed globally, the short `pierre` command — both
+bins point at the same `dist/cli.js`). The published tarball contains **only built
+artifacts** — no `.ts`, no `src/`, no configs, no tests.
+
+**Single-process production mode.** In production the **one Fastify server serves
+both** the JSON API (under `/api`) **and** the built SPA on one port. Static serving
+is gated on the presence of a sibling `public/index.html` next to the compiled
+server (`dist/../public`): present in the assembled release, **absent in the dev
+tree**, so `pnpm dev` (Vite :5173 proxy → :4000) is unchanged. The SPA fallback is
+folded into the **single** `setNotFoundHandler` in `api/plugins/error-handler.ts`
+(Fastify allows only one per context): a non-`/api` GET returns `index.html`, while
+unknown `/api` routes still return a JSON 404. The frontend already calls the API
+with relative `/api` paths, so same-origin serving needs no frontend changes.
+
+**The CLI (`apps/backend/src/cli.ts` → `dist/cli.js`).** Shebang'd bin entry. It:
+parses `--no-open` / `--port <n>` / `--db <path>` (also `NO_OPEN` / `PORT` /
+`DATABASE_URL` env) and maps them to env **before** importing config; sets
+`NODE_ENV=production` (so pino-pretty, a devDep, is never loaded and static serving
+turns on); defaults the DB to `~/.pierre-review/pierre-review.sqlite` (`mkdir -p`,
+**never inside the read-only install dir**); **pre-checks `gh auth token`** with a
+friendly message + non-zero exit before booting; prints the cursive Pierre ASCII
+banner (`ascii.ts`) + tagline + a `▸ http://localhost:<port>` URL line (ANSI colour
+only on a TTY); boots via the exported `start()` from `index.ts`; then opens the
+default browser cross-platform (`open` / `start` / `xdg-open`, a built-in — **no
+browser-open dependency**) unless `--no-open`. `index.ts` exports `start()` and
+guards its auto-invoke with a run-as-main check, so `node dist/index.js` (the
+backend `start` script) and the CLI both boot the server exactly once.
+
+**The `@pierre-review/shared` runtime trap.** Shared is **types-only** and is NOT in
+the published `dependencies`, so the backend must never `import` a runtime *value*
+from it — only `import type` (erased by `verbatimModuleSyntax`). The two prior
+offenders, `EVENT_TYPES`/`PR_STATUSES` in `api/routes/timeline.ts` and
+`REASON_PRIORITY` in `db/queries.ts`, now use **local `const` copies** (kept in sync
+with `packages/shared`). The release assembly greps `release/dist` for real
+`@pierre-review/shared` import/require statements and **fails** if any reappear.
+
+**`pnpm package`** (`scripts/build-release.mjs`, no extra deps) assembles a clean
+`./release/`: builds frontend + backend, copies compiled backend JS (pruning
+`.js.map` and `.test.js`), copies the drizzle `migrations/*.sql` **+ `meta/`
+journal** into `dist/db/migrations/` (tsc doesn't emit `.sql`; the runtime resolves
+them at `dist/db/migrations`), copies the built SPA into `public/`, generates
+`release/package.json` (name `pierre-review`, version copied from
+`apps/backend/package.json`, both bins, curated deps that **drop** shared and
+**add** `@fastify/static`), and copies `scripts/release-README.md` → `README.md`.
+Sanity asserts fail the build on a missing key file, any leaked `.ts`, or a shared
+runtime import. **`better-sqlite3` stays a runtime dependency** (native addon,
+rebuilt per-machine at install) — never bundled. `release/` is gitignored.
+
+Publishing is the **user's** job — `pnpm package`, then `cd release && npm pack
+--dry-run` to audit, then `npm publish` (public by default for the unscoped name).
+**Never run `npm publish` / `npm login` from here.**
+
+---
+
 ## History & planning
 
 `V1_PLAN.md` has the full plan and the Phase 1–6 breakdown; commit messages use

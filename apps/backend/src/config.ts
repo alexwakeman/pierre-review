@@ -1,4 +1,5 @@
-import { resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { isAbsolute, join, resolve } from 'node:path';
 
 // apps/backend as the base for relative paths regardless of cwd.
 const backendRoot = resolve(import.meta.dirname, '..');
@@ -23,12 +24,16 @@ function intFromEnv(key: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-const rawDbUrl = process.env.DATABASE_URL ?? './data/pierre-review.sqlite';
+// Default the SQLite DB to a user-writable location in the home dir so the app
+// works when installed globally (the package dir is read-only). DATABASE_URL /
+// --db override this; a relative override resolves under apps/backend (dev).
+const defaultDbPath = join(homedir(), '.pierre-review', 'pierre-review.sqlite');
+const rawDbUrl = process.env.DATABASE_URL ?? defaultDbPath;
 
 export const config = {
   port: intFromEnv('PORT', 4000),
   host: process.env.HOST ?? '127.0.0.1',
-  dbPath: rawDbUrl.startsWith('/') ? rawDbUrl : resolve(backendRoot, rawDbUrl),
+  dbPath: isAbsolute(rawDbUrl) ? rawDbUrl : resolve(backendRoot, rawDbUrl),
   backfillDays: intFromEnv('BACKFILL_DAYS', 90),
   syncCron: process.env.SYNC_CRON ?? '*/5 * * * *',
   syncOverlapMinutes: intFromEnv('SYNC_OVERLAP_MINUTES', 20),

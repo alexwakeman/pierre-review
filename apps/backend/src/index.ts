@@ -1,9 +1,14 @@
+import { pathToFileURL } from 'node:url';
+import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app.js';
 import { config } from './config.js';
 import { cleanupRedundantReviewEvents } from './db/cleanup.js';
 import { runMigrations } from './db/run-migrations.js';
 
-async function main(): Promise<void> {
+// Boot the server: migrate → cache the local user → build the Fastify app →
+// start the scheduler → listen. Returns the listening Fastify instance and the
+// resolved port so a caller (the CLI) can print the URL / open the browser.
+export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   // Apply any pending migrations before serving.
   runMigrations();
 
@@ -31,9 +36,19 @@ async function main(): Promise<void> {
   }
 
   await app.listen({ port: config.port, host: config.host });
+  return { app, port: config.port };
 }
 
-main().catch((err) => {
-  console.error('Failed to start backend:', err);
-  process.exit(1);
-});
+// Run-as-main guard: only auto-boot when this module is the process entrypoint
+// (e.g. `node dist/index.js` via the `start` script). When the CLI imports
+// `start()`, this stays dormant so the server boots exactly once.
+const isMain =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMain) {
+  start().catch((err) => {
+    console.error('Failed to start backend:', err);
+    process.exit(1);
+  });
+}

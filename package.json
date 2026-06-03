@@ -11,6 +11,7 @@
     "dev:backend": "pnpm --filter @pierre-review/backend dev",
     "dev:frontend": "pnpm --filter @pierre-review/frontend dev",
     "build": "pnpm -r build",
+    "package": "node scripts/build-release.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "db:generate": "pnpm --filter @pierre-review/backend db:generate",
