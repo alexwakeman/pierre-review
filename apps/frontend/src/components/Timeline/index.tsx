@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   DataSet,
   Timeline as VisTimeline,
@@ -349,6 +350,7 @@ export function Timeline(): JSX.Element {
   const { data: repos } = useRepos();
   const { data: users } = useUsers();
   const { data: mergers } = useMergers();
+  const queryClient = useQueryClient();
   const derivedStates = useFilters((s) => s.derivedStates);
   // Member filter: when set, the timeline collapses to just these contributors'
   // rows (see the PR filter in the rebuild effect). Events are already actor-
@@ -387,6 +389,42 @@ export function Timeline(): JSX.Element {
   }, [mergers]);
   const usersById = useMemo(() => indexUsers(users), [users]);
   usersByIdRef.current = usersById;
+
+  // A freshly-synced repo (esp. a just-added one mid-backfill) surfaces events
+  // and PR bars whose authors aren't in the cached ['users'] roster yet — the
+  // lean /timeline payload refreshes independently of the user list, so those
+  // rows would read "user 8401" until the next users refetch (or a full page
+  // reload). Detect any referenced actor/author id we can't name and pull a
+  // fresh roster. The events↔users FK guarantees the user row exists in the DB
+  // once its event does, so this self-heals in a single refetch; React Query's
+  // structural sharing means an unchanged roster returns the same reference, so
+  // usersById doesn't change and this effect doesn't loop.
+  const usersRefetchPendingRef = useRef(false);
+  useEffect(() => {
+    if (!data) return;
+    let missing = false;
+    for (const e of data.events) {
+      if (e.actorId != null && !usersById.has(e.actorId)) {
+        missing = true;
+        break;
+      }
+    }
+    if (!missing) {
+      for (const p of data.prs) {
+        if (p.authorId != null && !usersById.has(p.authorId)) {
+          missing = true;
+          break;
+        }
+      }
+    }
+    if (!missing) {
+      usersRefetchPendingRef.current = false;
+      return;
+    }
+    if (usersRefetchPendingRef.current) return; // a refetch is already in flight
+    usersRefetchPendingRef.current = true;
+    void queryClient.invalidateQueries({ queryKey: ['users'] });
+  }, [data, usersById, queryClient]);
 
   // PR lookup for the marker modal: attribution ("A acted on B's #123") and the
   // commit deep link, without an extra fetch — the timeline already has these.
