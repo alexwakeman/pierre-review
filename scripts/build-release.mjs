@@ -108,11 +108,18 @@ const manifest = {
   description:
     "Local-only dashboard for tracking your team's GitHub PR activity across repos.",
   type: 'module',
+  author: 'Alex Wakeman <wakemana@gmail.com>',
+  repository: {
+    type: 'git',
+    url: 'git+https://github.com/alexwakeman/pierre-review.git',
+  },
+  homepage: 'https://github.com/alexwakeman/pierre-review#readme',
+  bugs: { url: 'https://github.com/alexwakeman/pierre-review/issues' },
   bin: {
     pierre: 'dist/cli.js',
     'pierre-review': 'dist/cli.js',
   },
-  files: ['dist', 'public', 'README.md'],
+  files: ['dist', 'public', 'README.md', 'LICENSE'],
   engines: { node: '>=20' },
   dependencies: {
     '@fastify/cors': backendPkg.dependencies['@fastify/cors'],
@@ -138,9 +145,13 @@ writeFileSync(
   JSON.stringify(manifest, null, 2) + '\n',
 );
 
-// 8. Copy the packaging README.
-log('copying README.md');
+// 8. Copy the packaging README + the LICENSE (npm always ships LICENSE, but it
+//    must physically sit in release/ since that's what gets published).
+log('copying README.md + LICENSE');
 cpSync(join(scriptDir, 'release-README.md'), join(releaseDir, 'README.md'));
+const licenseSrc = join(repoRoot, 'LICENSE');
+if (!existsSync(licenseSrc)) fail('LICENSE missing at repo root');
+cpSync(licenseSrc, join(releaseDir, 'LICENSE'));
 
 // 9. Sanity asserts.
 log('verifying release contents');
