@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { eq } from 'drizzle-orm';
-import type { LocalUser } from '@gh-team-monitor/shared';
+import type { LocalUser } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 
 const { localUser, users } = schema;

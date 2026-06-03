@@ -1,4 +1,4 @@
-import type { DerivedState, TimelinePr } from '@gh-team-monitor/shared';
+import type { DerivedState, TimelinePr } from '@pierre-review/shared';
 import {
   CI_META,
   DERIVED_STATE_META,

@@ -1,4 +1,4 @@
-import type { TimelinePr } from '@gh-team-monitor/shared';
+import type { TimelinePr } from '@pierre-review/shared';
 import { CI_META, mergeWarning } from '../../lib/ui.js';
 
 function newSummary(n: TimelinePr['newSinceLastViewed']): string | null {

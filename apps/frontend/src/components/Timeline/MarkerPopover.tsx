@@ -8,7 +8,7 @@ import {
   useFloating,
   useInteractions,
 } from '@floating-ui/react';
-import type { TimelineEvent, TimelinePr, User } from '@gh-team-monitor/shared';
+import type { TimelineEvent, TimelinePr, User } from '@pierre-review/shared';
 import { usePr, useThread } from '../../hooks/usePr.js';
 import { useLocalStorage } from '../../hooks/useLocalStorage.js';
 import { useFilters } from '../../store/filters.js';
@@ -299,7 +299,7 @@ export function MarkerPopover({
   const [popoverSize, setPopoverSize] = useLocalStorage<{
     width: number;
     height: number;
-  } | null>('ghtm:popoverSize', null);
+  } | null>('pierre:popoverSize', null);
 
   const { refs, floatingStyles, context, isPositioned } = useFloating({
     open: true,

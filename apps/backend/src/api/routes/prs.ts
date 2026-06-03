@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { MarkViewedBody } from '@gh-team-monitor/shared';
+import type { MarkViewedBody } from '@pierre-review/shared';
 import { getPrDetail, markPrViewed } from '../../db/queries.js';
 
 const idParamSchema = {

@@ -8,7 +8,7 @@ import {
   type PrStatus,
   type Repo,
   type User,
-} from '@gh-team-monitor/shared';
+} from '@pierre-review/shared';
 import { api, ApiError } from '../api/client.js';
 import { useMergers, useRepos, useSearchTimeline, useUsers } from '../hooks/useTimeline.js';
 import { useSearchOpenPrs } from '../hooks/useTriage.js';

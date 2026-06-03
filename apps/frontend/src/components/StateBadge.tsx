@@ -1,4 +1,4 @@
-import type { DerivedState } from '@gh-team-monitor/shared';
+import type { DerivedState } from '@pierre-review/shared';
 import { DERIVED_STATE_META } from '../lib/ui.js';
 
 export function StateBadge({

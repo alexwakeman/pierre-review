@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { User } from '@gh-team-monitor/shared';
+import type { User } from '@pierre-review/shared';
 import { Avatar } from './CommentCard.js';
 import { userLabel } from '../lib/ui.js';
 

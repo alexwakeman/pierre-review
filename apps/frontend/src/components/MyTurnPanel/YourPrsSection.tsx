@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { User, YourPrActivityItem } from '@gh-team-monitor/shared';
+import type { User, YourPrActivityItem } from '@pierre-review/shared';
 import { api } from '../../api/client.js';
 import { useFilters } from '../../store/filters.js';
 

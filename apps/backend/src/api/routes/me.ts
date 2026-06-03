@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { MeResponse, MyTurnDismissBody } from '@gh-team-monitor/shared';
+import type { MeResponse, MyTurnDismissBody } from '@pierre-review/shared';
 import { ensureLocalUser } from '../../github/local-user.js';
 import { dismissMyTurn, getMyTurn } from '../../db/queries.js';
 

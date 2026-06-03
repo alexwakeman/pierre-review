@@ -8,7 +8,7 @@ import type {
   PrState,
   ReasonTag,
   User,
-} from '@gh-team-monitor/shared';
+} from '@pierre-review/shared';
 
 export interface StateMeta {
   label: string;

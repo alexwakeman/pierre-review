@@ -1,5 +1,5 @@
 import type { DataItem } from 'vis-timeline/standalone';
-import type { TimelineEvent, TimelinePr, User } from '@gh-team-monitor/shared';
+import type { TimelineEvent, TimelinePr, User } from '@pierre-review/shared';
 import { markerHtml, clusterHtml, type ClusterKind } from './markerTemplate.js';
 import { eventTooltip } from './eventMarker.js';
 

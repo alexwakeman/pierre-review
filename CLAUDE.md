@@ -1,4 +1,4 @@
-# gh-team-monitor
+# pierre-review
 
 A **local-only, single-page dashboard for tracking a team's GitHub activity across
 multiple repositories**. It's built for sprint situational-awareness: at a glance,
@@ -51,9 +51,9 @@ The single most important domain concept is **derived thread state** (see below)
 ## Workspace layout
 
 ```
-gh-team-monitor/
+pierre-review/
 ├─ apps/
-│  ├─ backend/                 @gh-team-monitor/backend
+│  ├─ backend/                 @pierre-review/backend
 │  │  ├─ src/
 │  │  │  ├─ index.ts           entrypoint: migrate → cache user → buildApp → schedule → listen
 │  │  │  ├─ app.ts             Fastify factory: logger, CORS, error handler, route registration
@@ -70,8 +70,8 @@ gh-team-monitor/
 │  │  │  └─ api/
 │  │  │     ├─ routes/          one file per resource (timeline, prs, open-prs, repos, users, mergers, me, threads, health)
 │  │  │     └─ plugins/         error-handler, etc.
-│  │  └─ data/gh-team-monitor.sqlite   the local DB (gitignored)
-│  └─ frontend/                @gh-team-monitor/frontend
+│  │  └─ data/pierre-review.sqlite   the local DB (gitignored)
+│  └─ frontend/                @pierre-review/frontend
 │     └─ src/
 │        ├─ App.tsx            layout: FilterBar / OpenPrsStrip / Timeline / DetailPane
 │        ├─ store/filters.ts   Zustand store: all filter + selection + timeline-hint state
@@ -80,7 +80,7 @@ gh-team-monitor/
 │        ├─ components/        Timeline/, PrDetail, ChecksTab, ThreadList/, ThreadView/, MyTurnPanel/, OpenPrsStrip/, …
 │        └─ lib/ui.ts          shared UI metadata (state colors, labels, shapes) + helpers
 └─ packages/
-   └─ shared/                 @gh-team-monitor/shared — types ONLY, the contract between the two apps
+   └─ shared/                 @pierre-review/shared — types ONLY, the contract between the two apps
       └─ src/types.ts
 ```
 
@@ -285,7 +285,7 @@ Key behaviors to know about:
   focus, and the marker popover is **trimmed to the focused PR's events**
   (`MarkerPopover` `focusPrId`), so a cluster list shows only that PR's activity.
   Crucially, the **mouse/browser back button leaves focus** (it used to only step
-  through popover drill levels): `enterPrFocus` pushes a dedicated `{ghtmFocus}`
+  through popover drill levels): `enterPrFocus` pushes a dedicated `{pierreFocus}`
   history entry, and the `popstate` guard on `prFocusActiveRef` tears the whole focus
   down — restoring the rows, re-centring on the anchor (the clicked event, else the PR
   that triggered focus) and pulsing it — exactly like the bottom-right **Exit focus**
@@ -302,7 +302,7 @@ Key behaviors to know about:
   container) that shrinks the row to just its name by hiding the row's subgroup
   bands via `subgroupVisibility` (`setRowCollapsed`). Distinct from focus-mode's
   whole-row `visible:false`: the thin labelled row stays. The collapsed set
-  (`collapsedRowsByUserRef`) persists to `localStorage['ghtm:collapsedRows']` and is
+  (`collapsedRowsByUserRef`) persists to `localStorage['pierre:collapsedRows']` and is
   re-asserted after each rebuild (new lanes) and after focus exit. vis applies
   `subgroupVisibility` only during a group **restack**, which a bare
   `groups.update`/`redraw` doesn't trigger — so `setRowCollapsed` forces it via
@@ -371,7 +371,7 @@ active (leaving the selection intact) else clears the selection
   **Bundler** — no extensions. Don't mix them up; the compiler will complain but
   it's the #1 source of confusion.
 - **The `shared` package is the only bridge.** Never import backend code from the
-  frontend or vice versa — go through `@gh-team-monitor/shared` (types only; it
+  frontend or vice versa — go through `@pierre-review/shared` (types only; it
   has no build output, `main`/`types` point at `src`).
 - **Schema changes are a two-step commit:** edit `apps/backend/src/db/schema.ts`,
   run `pnpm db:generate`, and commit the generated migration **with** the schema

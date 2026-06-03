@@ -3,7 +3,7 @@ import type {
   MeResponse,
   MyTurnResponse,
   OpenPrsResponse,
-} from '@gh-team-monitor/shared';
+} from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { buildOpenPrsSearch, useFilters } from '../store/filters.js';
 

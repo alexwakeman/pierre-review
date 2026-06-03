@@ -1,4 +1,4 @@
-import type { ReasonTag as ReasonTagT } from '@gh-team-monitor/shared';
+import type { ReasonTag as ReasonTagT } from '@pierre-review/shared';
 import { REASON_META } from '../../lib/ui.js';
 
 export function ReasonTag({ tag }: { tag: ReasonTagT }): JSX.Element {

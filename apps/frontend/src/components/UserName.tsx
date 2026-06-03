@@ -1,4 +1,4 @@
-import type { User } from '@gh-team-monitor/shared';
+import type { User } from '@pierre-review/shared';
 import { profileUrl, userLabel } from '../lib/ui.js';
 import { useMaintainersByRepo } from '../hooks/useMaintainers.js';
 import { MaintainerShield } from './MaintainerShield.js';

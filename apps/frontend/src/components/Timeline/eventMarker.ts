@@ -1,4 +1,4 @@
-import type { TimelineEvent, User } from '@gh-team-monitor/shared';
+import type { TimelineEvent, User } from '@pierre-review/shared';
 import { EVENT_META, relativeTime, userLabel } from '../../lib/ui.js';
 
 export function eventClassName(ev: TimelineEvent): string {

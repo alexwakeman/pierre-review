@@ -1,4 +1,4 @@
-import type { TimelineEvent, TimelinePr, User } from '@gh-team-monitor/shared';
+import type { TimelineEvent, TimelinePr, User } from '@pierre-review/shared';
 import { escapeHtml, profileUrl, userLabel } from '../../lib/ui.js';
 
 // A user's level of interaction within the loaded timeframe, shown on their row

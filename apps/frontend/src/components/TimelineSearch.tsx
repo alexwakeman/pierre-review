@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { TimelinePr } from '@gh-team-monitor/shared';
+import type { TimelinePr } from '@pierre-review/shared';
 import { useSearchTimeline, useRepos, useUsers } from '../hooks/useTimeline.js';
 import { useSearchOpenPrs } from '../hooks/useTriage.js';
 import { useFilters } from '../store/filters.js';

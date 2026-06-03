@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { UpdateUserBody } from '@gh-team-monitor/shared';
+import type { UpdateUserBody } from '@pierre-review/shared';
 import { listUsers, setUserBot } from '../../db/queries.js';
 
 const patchUserSchema = {

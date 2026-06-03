@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   RepoSearchResponse,
   RepoSearchResult,
-} from '@gh-team-monitor/shared';
+} from '@pierre-review/shared';
 import { api, ApiError } from '../api/client.js';
 import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
 import { useFilters } from '../store/filters.js';

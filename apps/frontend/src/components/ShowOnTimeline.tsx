@@ -1,4 +1,4 @@
-import type { EventType } from '@gh-team-monitor/shared';
+import type { EventType } from '@pierre-review/shared';
 import { useFilters } from '../store/filters.js';
 
 // A small "Show" link that recenters the timeline on a specific event marker

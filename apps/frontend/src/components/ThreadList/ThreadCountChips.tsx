@@ -1,4 +1,4 @@
-import type { DerivedState, ThreadDetail } from '@gh-team-monitor/shared';
+import type { DerivedState, ThreadDetail } from '@pierre-review/shared';
 import { DERIVED_STATE_META } from '../../lib/ui.js';
 
 const ORDER: DerivedState[] = [

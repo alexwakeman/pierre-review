@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { OpenPrsResponse } from '@gh-team-monitor/shared';
+import type { OpenPrsResponse } from '@pierre-review/shared';
 import { getOpenPrs } from '../../db/queries.js';
 
 function parseIntList(raw: string | undefined): number[] | null {

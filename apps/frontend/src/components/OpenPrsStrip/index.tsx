@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { isMyTurnReason } from '@gh-team-monitor/shared';
+import { isMyTurnReason } from '@pierre-review/shared';
 import { useOpenPrs } from '../../hooks/useTriage.js';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useFilters, type StripFilter } from '../../store/filters.js';

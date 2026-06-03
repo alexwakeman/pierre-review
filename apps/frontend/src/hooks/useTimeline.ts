@@ -4,7 +4,7 @@ import type {
   Repo,
   TimelineResponse,
   User,
-} from '@gh-team-monitor/shared';
+} from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { buildTimelineSearch, useFilters } from '../store/filters.js';
 

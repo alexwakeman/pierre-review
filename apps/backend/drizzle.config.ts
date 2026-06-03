@@ -1,6 +1,6 @@
 import { defineConfig } from 'drizzle-kit';
 
-const dbUrl = process.env.DATABASE_URL ?? './data/gh-team-monitor.sqlite';
+const dbUrl = process.env.DATABASE_URL ?? './data/pierre-review.sqlite';
 
 export default defineConfig({
   dialect: 'sqlite',

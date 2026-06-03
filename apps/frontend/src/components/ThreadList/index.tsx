@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import type { ThreadDetail, User } from '@gh-team-monitor/shared';
+import type { ThreadDetail, User } from '@pierre-review/shared';
 import { FileGroup } from './FileGroup.js';
 
 interface FileBucket {

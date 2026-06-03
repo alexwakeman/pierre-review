@@ -1,4 +1,4 @@
-import type { User } from '@gh-team-monitor/shared';
+import type { User } from '@pierre-review/shared';
 import { relativeTime, userLabel } from '../lib/ui.js';
 import { Markdown } from './Markdown.js';
 import { UserName } from './UserName.js';

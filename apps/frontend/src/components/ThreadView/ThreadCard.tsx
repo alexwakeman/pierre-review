@@ -1,4 +1,4 @@
-import type { ThreadDetail, User } from '@gh-team-monitor/shared';
+import type { ThreadDetail, User } from '@pierre-review/shared';
 import { StateBadge } from '../StateBadge.js';
 import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';

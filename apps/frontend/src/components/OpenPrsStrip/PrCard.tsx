@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { TimelinePr, User } from '@gh-team-monitor/shared';
-import { isMyTurnReason } from '@gh-team-monitor/shared';
+import type { TimelinePr, User } from '@pierre-review/shared';
+import { isMyTurnReason } from '@pierre-review/shared';
 import { api } from '../../api/client.js';
 import { Avatar } from '../CommentCard.js';
 import { relativeTime, userLabel } from '../../lib/ui.js';

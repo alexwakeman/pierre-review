@@ -43,7 +43,7 @@ import {
   type TimelinePr,
   type TimelineResponse,
   type User,
-} from '@gh-team-monitor/shared';
+} from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { config } from '../config.js';
 import { computeTriage, type TriageResult } from './triage.js';

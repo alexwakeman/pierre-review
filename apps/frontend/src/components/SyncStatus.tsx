@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Repo, SyncStatus as SyncStatusT } from '@gh-team-monitor/shared';
+import type { Repo, SyncStatus as SyncStatusT } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { relativeTime } from '../lib/ui.js';
 import { useFilters } from '../store/filters.js';

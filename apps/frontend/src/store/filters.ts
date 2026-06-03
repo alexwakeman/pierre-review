@@ -6,7 +6,7 @@ import {
   type EventCategory,
   type EventType,
   type PrStatus,
-} from '@gh-team-monitor/shared';
+} from '@pierre-review/shared';
 
 export type RangePreset = '7d' | '14d' | '30d' | '90d' | 'custom';
 

@@ -35,7 +35,7 @@ export default function App(): JSX.Element {
   // the dragged height is remembered across reloads. During a drag we set the
   // height on the DOM node directly (no per-frame React render) and only commit
   // to state — and localStorage — on release.
-  const [paneH, setPaneH] = useLocalStorage<number>('ghtm:detailPaneHeight', 384);
+  const [paneH, setPaneH] = useLocalStorage<number>('pierre:detailPaneHeight', 384);
   const paneRef = useRef<HTMLElement>(null);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 

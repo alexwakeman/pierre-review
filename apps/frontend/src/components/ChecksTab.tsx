@@ -1,4 +1,4 @@
-import type { PrDetail as PrDetailT, ReviewState, User } from '@gh-team-monitor/shared';
+import type { PrDetail as PrDetailT, ReviewState, User } from '@pierre-review/shared';
 import {
   CHECK_STATE_META,
   CI_META,

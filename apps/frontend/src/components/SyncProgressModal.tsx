@@ -1,4 +1,4 @@
-import type { Repo, SyncStatus } from '@gh-team-monitor/shared';
+import type { Repo, SyncStatus } from '@pierre-review/shared';
 
 // A dismissible, determinate progress modal shown while a user-initiated sync
 // (esp. a deep re-sync) is in flight. The sync continues server-side even if

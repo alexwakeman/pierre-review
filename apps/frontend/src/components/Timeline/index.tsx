@@ -7,7 +7,7 @@ import {
   type TimelineOptions,
 } from 'vis-timeline/standalone';
 import 'vis-timeline/styles/vis-timeline-graph2d.css';
-import type { TimelineEvent, TimelinePr, TimelineResponse, User } from '@gh-team-monitor/shared';
+import type { TimelineEvent, TimelinePr, TimelineResponse, User } from '@pierre-review/shared';
 import {
   useMergers,
   useSearchTimeline,
@@ -256,7 +256,7 @@ export function Timeline(): JSX.Element {
   if (!collapsedRowsLoadedRef.current) {
     collapsedRowsLoadedRef.current = true;
     try {
-      const raw = localStorage.getItem('ghtm:collapsedRows');
+      const raw = localStorage.getItem('pierre:collapsedRows');
       if (raw) {
         const arr = JSON.parse(raw) as unknown;
         if (Array.isArray(arr)) collapsedRowsByUserRef.current = new Set(arr.map(String));
@@ -589,7 +589,7 @@ export function Timeline(): JSX.Element {
   const persistCollapsedRows = useCallback(() => {
     try {
       localStorage.setItem(
-        'ghtm:collapsedRows',
+        'pierre:collapsedRows',
         JSON.stringify([...collapsedRowsByUserRef.current]),
       );
     } catch {
@@ -952,7 +952,7 @@ export function Timeline(): JSX.Element {
       // handler detects prFocusActiveRef and tears the whole focus down (restoring
       // the anchor) rather than only stepping through popover drill levels. One
       // entry per session — enterPrFocus only runs when not already focused.
-      history.pushState({ ghtmFocus: 1 }, '');
+      history.pushState({ pierreFocus: 1 }, '');
       prFocusActiveRef.current = true;
       prFocusPrIdRef.current = prId;
       applyContext({
@@ -1185,7 +1185,7 @@ export function Timeline(): JSX.Element {
       // glow with NO row-focus (e.g. a same-user marker left over post-navigate)
       // still needs an explicit clear.
       if (!focusedGroupIdsRef.current) applyContext(null);
-      if (drillDepthRef.current === 0) history.pushState({ ghtmDrill: 1 }, '');
+      if (drillDepthRef.current === 0) history.pushState({ pierreDrill: 1 }, '');
       drillDepthRef.current = 1;
       // Capture before any selection side effect can move the window, so a later
       // back-out returns to where the marker/cluster sat.
@@ -1296,7 +1296,7 @@ export function Timeline(): JSX.Element {
 
   // A fresh strip / my-turn / search navigation abandons any active overlay (a
   // sticky "Show" or a PR-isolation Focus). Unwind the focus-owned history entries
-  // first — the {ghtmFocus} marker enterPrFocus pushed plus any open popover drill —
+  // first — the {pierreFocus} marker enterPrFocus pushed plus any open popover drill —
   // so a later browser-back isn't left consuming stale focus slots, THEN clear the
   // overlay. Reading prFocusActiveRef before applyContext(null) (which resets it) is
   // load-bearing. No-ops when nothing is active.

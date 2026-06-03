@@ -6,7 +6,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
-import type { CheckRun, Label } from '@gh-team-monitor/shared';
+import type { CheckRun, Label } from '@pierre-review/shared';
 
 export const repos = sqliteTable(
   'repos',

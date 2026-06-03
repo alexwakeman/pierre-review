@@ -5,7 +5,7 @@ import {
   type EventType,
   type PrStatus,
   type TimelineQuery,
-} from '@gh-team-monitor/shared';
+} from '@pierre-review/shared';
 import { getTimeline, type TimelineFilters } from '../../db/queries.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;

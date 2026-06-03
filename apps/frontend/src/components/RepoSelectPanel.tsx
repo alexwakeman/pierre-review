@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Repo } from '@gh-team-monitor/shared';
+import type { Repo } from '@pierre-review/shared';
 
 // Show/hide dropdown for the watched repos. Replaces the old pill buttons: each
 // repo is a checkbox row showing the full `owner/name` (so same-named repos under

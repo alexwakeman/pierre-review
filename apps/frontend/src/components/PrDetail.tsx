@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { EventType, PrDetail as PrDetailT, User } from '@gh-team-monitor/shared';
+import type { EventType, PrDetail as PrDetailT, User } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
 import { api } from '../api/client.js';
 import { useFilters } from '../store/filters.js';

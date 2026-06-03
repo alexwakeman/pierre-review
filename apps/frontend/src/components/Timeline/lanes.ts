@@ -1,4 +1,4 @@
-import type { TimelinePr } from '@gh-team-monitor/shared';
+import type { TimelinePr } from '@pierre-review/shared';
 
 // The vis group id a PR's bar lives in: the author's member row, or the repo
 // row when the author is unknown. Shared by the bar build and the marker build

@@ -1,5 +1,5 @@
 {
-  "name": "gh-team-monitor",
+  "name": "pierre-review",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,15 +8,15 @@
   },
   "scripts": {
     "dev": "concurrently -n backend,frontend -c blue,magenta \"pnpm dev:backend\" \"pnpm dev:frontend\"",
-    "dev:backend": "pnpm --filter @gh-team-monitor/backend dev",
-    "dev:frontend": "pnpm --filter @gh-team-monitor/frontend dev",
+    "dev:backend": "pnpm --filter @pierre-review/backend dev",
+    "dev:frontend": "pnpm --filter @pierre-review/frontend dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "db:generate": "pnpm --filter @gh-team-monitor/backend db:generate",
-    "db:migrate": "pnpm --filter @gh-team-monitor/backend db:migrate",
-    "db:studio": "pnpm --filter @gh-team-monitor/backend db:studio",
-    "sync:once": "pnpm --filter @gh-team-monitor/backend sync:once"
+    "db:generate": "pnpm --filter @pierre-review/backend db:generate",
+    "db:migrate": "pnpm --filter @pierre-review/backend db:migrate",
+    "db:studio": "pnpm --filter @pierre-review/backend db:studio",
+    "sync:once": "pnpm --filter @pierre-review/backend sync:once"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

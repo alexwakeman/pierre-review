@@ -1,4 +1,4 @@
-# gh-team-monitor
+# pierre-review
 
 A local-only single-page dashboard for tracking team GitHub activity across
 multiple repos. Horizontal timeline per repo, member sub-lanes, drill-down into

@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import type { SyncProgress, SyncRunStatus, SyncStatus } from '@gh-team-monitor/shared';
+import type { SyncProgress, SyncRunStatus, SyncStatus } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { config } from '../config.js';
 import { syncRepo, type Logger } from './sync-repo.js';

@@ -1,4 +1,4 @@
-import type { CommentDetail, User } from '@gh-team-monitor/shared';
+import type { CommentDetail, User } from '@pierre-review/shared';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';

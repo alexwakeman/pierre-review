@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { PrDetail, ThreadDetail } from '@gh-team-monitor/shared';
+import type { PrDetail, ThreadDetail } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 
 export function usePr(id: number | null) {

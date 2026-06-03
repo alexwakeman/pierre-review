@@ -23,7 +23,7 @@ function intFromEnv(key: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-const rawDbUrl = process.env.DATABASE_URL ?? './data/gh-team-monitor.sqlite';
+const rawDbUrl = process.env.DATABASE_URL ?? './data/pierre-review.sqlite';
 
 export const config = {
   port: intFromEnv('PORT', 4000),

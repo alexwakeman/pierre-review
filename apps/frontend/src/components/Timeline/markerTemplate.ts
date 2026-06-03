@@ -1,4 +1,4 @@
-import type { TimelineEvent } from '@gh-team-monitor/shared';
+import type { TimelineEvent } from '@pierre-review/shared';
 
 export interface MarkerVisual {
   svg: string;

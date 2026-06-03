@@ -3,7 +3,7 @@ import type {
   CreateRepoBody,
   RepoSearchResponse,
   RepoSearchResult,
-} from '@gh-team-monitor/shared';
+} from '@pierre-review/shared';
 import { getGraphqlClient } from '../../github/client.js';
 import {
   REPO_ID_QUERY,

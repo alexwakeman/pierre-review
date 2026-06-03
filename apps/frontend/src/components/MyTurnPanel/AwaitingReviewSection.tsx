@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { AwaitingReviewItem, User } from '@gh-team-monitor/shared';
+import type { AwaitingReviewItem, User } from '@pierre-review/shared';
 import { api } from '../../api/client.js';
 import { useFilters } from '../../store/filters.js';
 import { relativeTime } from '../../lib/ui.js';

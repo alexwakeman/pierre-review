@@ -14,7 +14,7 @@ import {
   type DerivedState,
   type EventCategory,
   type PrStatus,
-} from '@gh-team-monitor/shared';
+} from '@pierre-review/shared';
 
 const PRESETS: RangePreset[] = ['7d', '14d', '30d', '90d', 'custom'];
 

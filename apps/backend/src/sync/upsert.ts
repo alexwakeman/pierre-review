@@ -11,7 +11,7 @@ import type {
   GqlHeadCommit,
   GqlPullRequest,
 } from '../github/queries.js';
-import type { CheckRun, CheckRunState } from '@gh-team-monitor/shared';
+import type { CheckRun, CheckRunState } from '@pierre-review/shared';
 
 const {
   repos,

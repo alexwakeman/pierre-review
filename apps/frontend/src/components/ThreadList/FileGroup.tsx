@@ -1,4 +1,4 @@
-import type { ThreadDetail, User } from '@gh-team-monitor/shared';
+import type { ThreadDetail, User } from '@pierre-review/shared';
 import { useFilters } from '../../store/filters.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { ThreadCountChips, rollupCounts } from './ThreadCountChips.js';

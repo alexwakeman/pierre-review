@@ -7,7 +7,7 @@ import type {
   PrState,
   ReasonTag,
   ThreadStateCounts,
-} from '@gh-team-monitor/shared';
+} from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { getLocalUserId } from '../github/local-user.js';
 
