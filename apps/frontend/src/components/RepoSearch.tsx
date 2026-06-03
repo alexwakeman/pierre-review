@@ -93,15 +93,16 @@ export function RepoSearch(): JSX.Element {
   const addRepo = useMutation({
     mutationFn: (r: RepoSearchResult) =>
       api.addRepo({ owner: r.owner, name: r.name }),
-    onSuccess: () => {
+    onSuccess: (repo) => {
       for (const key of INVALIDATE_KEYS) {
         void qc.invalidateQueries({ queryKey: [key] });
       }
       // Refetch the search so the just-added repo drops out of the results.
       void qc.invalidateQueries({ queryKey: ['repo-search'] });
       // Surface the sync-progress modal so the user sees the initial backfill is
-      // underway (it can take a while for a busy repo).
-      requestSyncModal();
+      // underway (it can take a while for a busy repo). Scope it to JUST this repo
+      // so a concurrent scheduled sync of the others doesn't bounce their bars.
+      requestSyncModal(repo.id);
     },
   });
 

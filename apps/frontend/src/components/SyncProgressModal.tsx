@@ -28,7 +28,10 @@ export function SyncProgressModal({
   };
 
   const completeCount = repos.filter((r) => !isRunning(r.id)).length;
-  const allDone = completeCount === repos.length;
+  // `repos` can be momentarily empty right after an add (the scoped repo hasn't
+  // landed in the ['repos'] cache yet) — guard so an empty list doesn't read as
+  // "all done" and flash the complete state.
+  const allDone = repos.length > 0 && completeCount === repos.length;
 
   return (
     <div
@@ -47,9 +50,11 @@ export function SyncProgressModal({
           <h2 className="text-sm font-semibold">
             {cancelling
               ? 'Cancelling…'
-              : allDone
-                ? 'Sync complete'
-                : `Syncing ${repos.length} repo${repos.length === 1 ? '' : 's'}`}
+              : repos.length === 0
+                ? 'Starting sync…'
+                : allDone
+                  ? 'Sync complete'
+                  : `Syncing ${repos.length} repo${repos.length === 1 ? '' : 's'}`}
           </h2>
         </div>
 

@@ -58,6 +58,10 @@ export function SyncStatus(): JSX.Element | null {
   // True while a user-initiated Cancel is in flight (the backend stops the sync
   // and removes initial-load repos before the request resolves).
   const [cancelling, setCancelling] = useState(false);
+  // Which repos the open modal tracks: a single id (the just-added repo, so the
+  // add-flow modal ignores a concurrent scheduled sync of the OTHER repos that
+  // would otherwise bounce their bars) or null = all repos (a manual sync).
+  const [modalScopeId, setModalScopeId] = useState<number | null>(null);
 
   // Dedicated observer on the shared ['repos'] cache that polls for fresh
   // sync timestamps.
@@ -78,7 +82,17 @@ export function SyncStatus(): JSX.Element | null {
     queryFn: () => Promise.all((repos ?? []).map((r) => api.syncStatus(r.id))),
     refetchInterval: 1500,
   });
-  const runningCount = (statuses ?? []).filter((s) => s.status === 'running').length;
+  // Restrict the modal + completion tracking to the in-scope repos (just the new
+  // one on an add; everything on a manual sync). scopedStatuses stays `undefined`
+  // until the first poll lands so the modal doesn't briefly flash "done".
+  const scopedRepos =
+    modalScopeId == null
+      ? repos ?? []
+      : (repos ?? []).filter((r) => r.id === modalScopeId);
+  const scopedIds = new Set(scopedRepos.map((r) => r.id));
+  const scopedStatuses =
+    statuses == null ? undefined : statuses.filter((s) => scopedIds.has(s.repoId));
+  const runningCount = (scopedStatuses ?? []).filter((s) => s.status === 'running').length;
 
   const lastSync = mostRecentSync(repos ?? []);
   const prevLastSync = useRef<string | null>(lastSync);
@@ -150,10 +164,12 @@ export function SyncStatus(): JSX.Element | null {
   // runs even while the component renders null (no repos yet, e.g. the very first
   // add); the modal paints as soon as the invalidated ['repos'] query refetches.
   const syncModalSignal = useFilters((s) => s.syncModalSignal);
+  const syncModalRepoId = useFilters((s) => s.syncModalRepoId);
   const prevSyncSignal = useRef(syncModalSignal);
   useEffect(() => {
     if (syncModalSignal === prevSyncSignal.current) return;
     prevSyncSignal.current = syncModalSignal;
+    setModalScopeId(syncModalRepoId); // add-flow: show ONLY the just-added repo
     setModalOpen(true);
     setSyncing(true);
     beginSyncRound();
@@ -169,6 +185,7 @@ export function SyncStatus(): JSX.Element | null {
   const syncNow = async (full = false): Promise<void> => {
     setSyncing(true);
     setModalOpen(true);
+    setModalScopeId(null); // manual sync shows ALL repos
     beginSyncRound();
     await Promise.allSettled(repos.map((r) => api.syncRepo(r.id, full)));
     void qc.invalidateQueries({ queryKey: ['repos'] });
@@ -182,12 +199,14 @@ export function SyncStatus(): JSX.Element | null {
   const cancelSync = async (): Promise<void> => {
     setCancelling(true);
     cancelAutoClose();
-    const runningIds = (statuses ?? [])
+    // Only the in-scope repos: cancelling an add must not abort a background
+    // scheduled sync of the established repos.
+    const runningIds = (scopedStatuses ?? [])
       .filter((s) => s.status === 'running')
       .map((s) => s.repoId);
-    // Fall back to every repo if the status poll hasn't landed yet — the backend
-    // no-ops on repos that aren't actually running.
-    const ids = runningIds.length ? runningIds : repos.map((r) => r.id);
+    // Fall back to the scoped repos if the status poll hasn't landed yet — the
+    // backend no-ops on repos that aren't actually running.
+    const ids = runningIds.length ? runningIds : scopedRepos.map((r) => r.id);
     await Promise.allSettled(ids.map((id) => api.cancelSync(id)));
     setSyncing(false);
     setSeenRunning(false);
@@ -206,8 +225,8 @@ export function SyncStatus(): JSX.Element | null {
     <>
       {modalOpen && (
         <SyncProgressModal
-          repos={repos}
-          statuses={statuses}
+          repos={scopedRepos}
+          statuses={scopedStatuses}
           cancelling={cancelling}
           onCancel={() => void cancelSync()}
         />

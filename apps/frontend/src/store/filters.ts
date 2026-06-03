@@ -131,6 +131,11 @@ export interface FilterState {
   // underway and may take a while). SyncStatus watches it, opens the modal and
   // starts polling. Store-only / transient (NOT URL-synced).
   syncModalSignal: number;
+  // The repo id carried by the latest `requestSyncModal` — the just-added repo, so
+  // the add-flow modal can scope itself to ONLY that repo (a concurrent scheduled
+  // sync of the OTHER repos would otherwise bounce their progress bars). Read
+  // alongside syncModalSignal.
+  syncModalRepoId: number | null;
 
   setRepoIds: (ids: number[] | null) => void;
   toggleRepo: (id: number) => void;
@@ -185,8 +190,9 @@ export interface FilterState {
   // the marker that opened it (that behaviour is NOT implemented here).
   exitFocus: () => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
-  // so the initial backfill's load time is visible). Bumps syncModalSignal.
-  requestSyncModal: () => void;
+  // so the initial backfill's load time is visible). Bumps syncModalSignal and
+  // records the added repo id so the modal can scope to just that repo.
+  requestSyncModal: (repoId: number) => void;
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
   setSearchQuery: (q: string) => void;
@@ -253,6 +259,7 @@ function freshDefaults(): FilterData {
     exitFocusSignal: 0,
     rangeResetSignal: 0,
     syncModalSignal: 0,
+    syncModalRepoId: null,
   };
 }
 
@@ -324,8 +331,8 @@ export const useFilters = create<FilterState>((set) => ({
   setFocusActive: (v) => set({ focusActive: v }),
   exitFocus: () =>
     set((s) => ({ focusActive: false, exitFocusSignal: s.exitFocusSignal + 1 })),
-  requestSyncModal: () =>
-    set((s) => ({ syncModalSignal: s.syncModalSignal + 1 })),
+  requestSyncModal: (repoId: number) =>
+    set((s) => ({ syncModalSignal: s.syncModalSignal + 1, syncModalRepoId: repoId })),
   setStripCollapsed: (v) => set({ stripCollapsed: v }),
   setStripFilter: (f) => set({ stripFilter: f }),
   setSearchQuery: (q) => set({ searchQuery: q }),
