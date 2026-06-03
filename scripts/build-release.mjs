@@ -108,7 +108,7 @@ const manifest = {
   description:
     "Local-only dashboard for tracking your team's GitHub PR activity across repos.",
   type: 'module',
-  author: 'Alex Wakeman <wakemana@gmail.com>',
+  author: 'Alex Wakeman',
   repository: {
     type: 'git',
     url: 'git+https://github.com/alexwakeman/pierre-review.git',
