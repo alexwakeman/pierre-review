@@ -5,6 +5,7 @@ import type {
   RepoSearchResult,
 } from '@pierre-review/shared';
 import { api, ApiError } from '../api/client.js';
+import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
 import { useFilters } from '../store/filters.js';
 
@@ -59,6 +60,7 @@ function OwnerAvatar({
 export function RepoSearch(): JSX.Element {
   const qc = useQueryClient();
   const requestSyncModal = useFilters((s) => s.requestSyncModal);
+  const showRepo = useFilters((s) => s.showRepo);
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
@@ -103,6 +105,9 @@ export function RepoSearch(): JSX.Element {
       // underway (it can take a while for a busy repo). Scope it to JUST this repo
       // so a concurrent scheduled sync of the others doesn't bounce their bars.
       requestSyncModal(repo.id);
+      // Ensure the just-added repo is visible even when a repo filter is active —
+      // append it to the visible set (no-op when all repos are already shown).
+      showRepo(repo.id);
     },
   });
 
@@ -114,17 +119,8 @@ export function RepoSearch(): JSX.Element {
     setActive((a) => (results.length ? Math.min(a, results.length - 1) : 0));
   }, [results]);
 
-  // Outside-click + Escape close (mirrors UserSelectPanel).
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
+  // Outside-click close (shared hook). Escape close stays inline in onKeyDown.
+  useClickOutside(rootRef, () => setOpen(false), open);
 
   // Scroll the active row into view as the user arrow-keys through results.
   useEffect(() => {
@@ -210,59 +206,81 @@ export function RepoSearch(): JSX.Element {
                   addRepo.isPending &&
                   addRepo.variables?.githubNodeId === r.githubNodeId;
                 return (
-                  <button
+                  // The row is a flex container so the add <button> and the small
+                  // "open on GitHub" <a> are SIBLINGS (a <button> can't legally
+                  // contain an interactive <a>). The button keeps flex-1/min-w-0 so
+                  // it still fills the row and remains the primary add affordance.
+                  <div
                     key={r.githubNodeId}
-                    data-idx={idx}
-                    type="button"
-                    role="option"
-                    aria-selected={idx === active}
-                    disabled={addRepo.isPending}
-                    onMouseEnter={() => setActive(idx)}
-                    onClick={() => addRepo.mutate(r)}
-                    className={`flex w-full items-start gap-2 px-3 py-2 text-left disabled:opacity-60 ${
+                    className={`flex items-stretch ${
                       idx === active ? 'bg-gray-100 dark:bg-gray-800' : ''
                     } hover:bg-gray-100 dark:hover:bg-gray-800`}
                   >
-                    <OwnerAvatar login={r.owner} src={r.ownerAvatarUrl} />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5">
-                        <span
-                          className="truncate text-xs font-medium text-gray-800 dark:text-gray-100"
-                          title={r.fullName}
-                        >
-                          {r.fullName}
+                    <button
+                      data-idx={idx}
+                      type="button"
+                      role="option"
+                      aria-selected={idx === active}
+                      disabled={addRepo.isPending}
+                      onMouseEnter={() => setActive(idx)}
+                      onClick={() => addRepo.mutate(r)}
+                      className="flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left disabled:opacity-60"
+                    >
+                      <OwnerAvatar login={r.owner} src={r.ownerAvatarUrl} />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5">
+                          <span
+                            className="truncate text-xs font-medium text-gray-800 dark:text-gray-100"
+                            title={r.fullName}
+                          >
+                            {r.fullName}
+                          </span>
+                          {r.isPrivate && (
+                            <span className="shrink-0 rounded bg-gray-200 px-1 text-[9px] uppercase tracking-wide text-gray-500 dark:bg-gray-700 dark:text-gray-300">
+                              private
+                            </span>
+                          )}
+                          {r.isOwnedOrMember && (
+                            <span className="shrink-0 rounded bg-sky-100 px-1 text-[9px] uppercase tracking-wide text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
+                              yours
+                            </span>
+                          )}
                         </span>
-                        {r.isPrivate && (
-                          <span className="shrink-0 rounded bg-gray-200 px-1 text-[9px] uppercase tracking-wide text-gray-500 dark:bg-gray-700 dark:text-gray-300">
-                            private
+                        {r.description && (
+                          <span className="mt-0.5 line-clamp-2 text-[11px] text-gray-500 dark:text-gray-400">
+                            {r.description}
                           </span>
                         )}
-                        {r.isOwnedOrMember && (
-                          <span className="shrink-0 rounded bg-sky-100 px-1 text-[9px] uppercase tracking-wide text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
-                            yours
+                        <span className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400">
+                          <span title={`${r.stargazerCount} stars`}>
+                            ★ {compactNumber(r.stargazerCount)}
                           </span>
-                        )}
-                      </span>
-                      {r.description && (
-                        <span className="mt-0.5 line-clamp-2 text-[11px] text-gray-500 dark:text-gray-400">
-                          {r.description}
-                        </span>
-                      )}
-                      <span className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400">
-                        <span title={`${r.stargazerCount} stars`}>
-                          ★ {compactNumber(r.stargazerCount)}
-                        </span>
-                        <span aria-hidden>·</span>
-                        <span title={`${r.openPrCount} open pull requests`}>
-                          {compactNumber(r.openPrCount)} open PR
-                          {r.openPrCount === 1 ? '' : 's'}
+                          <span aria-hidden>·</span>
+                          <span title={`${r.openPrCount} open pull requests`}>
+                            {compactNumber(r.openPrCount)} open PR
+                            {r.openPrCount === 1 ? '' : 's'}
+                          </span>
                         </span>
                       </span>
-                    </span>
-                    <span className="mt-0.5 shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] text-white">
-                      {adding ? 'Adding…' : 'Add'}
-                    </span>
-                  </button>
+                      <span className="mt-0.5 shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] text-white">
+                        {adding ? 'Adding…' : 'Add'}
+                      </span>
+                    </button>
+                    {/* Small, visually-subordinate link to open the repo on GitHub
+                        in a new tab. stopPropagation keeps it from triggering the
+                        row's add (belt-and-suspenders — it's a sibling, not nested). */}
+                    <a
+                      href={r.url || `https://github.com/${r.owner}/${r.name}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      title="Open on GitHub"
+                      aria-label={`Open ${r.fullName} on GitHub`}
+                      className="flex shrink-0 items-center px-2 text-[10px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                    >
+                      ↗
+                    </a>
+                  </div>
                 );
               })}
             </div>
