@@ -450,9 +450,19 @@ Sanity asserts fail the build on a missing key file, any leaked `.ts`, or a shar
 runtime import. **`better-sqlite3` stays a runtime dependency** (native addon,
 rebuilt per-machine at install) — never bundled. `release/` is gitignored.
 
-Publishing is the **user's** job — `pnpm package`, then `cd release && npm pack
---dry-run` to audit, then `npm publish` (public by default for the unscoped name).
-**Never run `npm publish` / `npm login` from here.**
+**Publishing is now automated by CI** (`.github/workflows/release.yml`, documented
+in `docs/RELEASE.md`): every push/merge to `main` bumps the patch version in
+`apps/backend/package.json` (the canonical published version), runs `pnpm package`,
+pushes the `chore(release): bump to X.Y.Z [skip ci]` commit + `vX.Y.Z` tag, then
+`npm publish`es `./release`. A manual `workflow_dispatch` allows `minor`/`major`
+bumps. A job-level `if:` (skip when the head commit starts with `chore(release):`)
+plus the `[skip ci]` suffix guard against an infinite release loop. The order is
+deliberately **bump → build → push → publish** so a failed publish only leaves an
+npm version gap (self-healing) rather than poisoning the next merge. CI needs an
+`NPM_TOKEN` secret (npm Automation/granular token) and `contents: write`; see
+`docs/RELEASE.md` for token minting, branch-protection options, and the one-time
+manual first publish that claims the unscoped name. **Still never run
+`npm publish` / `npm login` from here** — let CI (or the user) do it.
 
 ---
 

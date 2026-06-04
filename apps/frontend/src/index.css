@@ -154,6 +154,10 @@ body {
 }
 .md-body img {
   max-width: 100%;
+  /* Keep a single tall screenshot from blowing out the layout (and, in the
+     clamped 3-line PR Summary preview, from dominating before Show more). */
+  max-height: 24rem;
+  height: auto;
 }
 .md-body input[type='checkbox'] {
   margin-right: 0.4em;

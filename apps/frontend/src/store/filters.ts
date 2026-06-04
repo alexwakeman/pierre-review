@@ -139,6 +139,11 @@ export interface FilterState {
 
   setRepoIds: (ids: number[] | null) => void;
   toggleRepo: (id: number) => void;
+  // Make a repo visible WITHOUT clearing an active filter: a no-op when all repos
+  // are already shown (repoIds == null) or the id is already in the visible set,
+  // otherwise it appends. Used by the add-repo flow so a freshly-added repo isn't
+  // hidden when a repo filter is active (the repos-list refetch reconciles).
+  showRepo: (id: number) => void;
   setUserIds: (ids: number[] | null) => void;
   setExcludeBots: (v: boolean) => void;
   setExcludeStale: (v: boolean) => void;
@@ -263,12 +268,17 @@ function freshDefaults(): FilterData {
   };
 }
 
-export const useFilters = create<FilterState>((set) => ({
+export const useFilters = create<FilterState>((set, get) => ({
   ...freshDefaults(),
 
   setRepoIds: (ids) => set({ repoIds: ids }),
   toggleRepo: (id) =>
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),
+  showRepo: (id) => {
+    const { repoIds } = get();
+    if (repoIds == null || repoIds.includes(id)) return; // already visible
+    set({ repoIds: [...repoIds, id] });
+  },
   setUserIds: (ids) => set({ userIds: ids }),
   setExcludeBots: (v) => set({ excludeBots: v }),
   setExcludeStale: (v) => set({ excludeStale: v }),

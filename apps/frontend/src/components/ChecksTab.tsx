@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PrDetail as PrDetailT, ReviewState, User } from '@pierre-review/shared';
 import {
   CHECK_STATE_META,
@@ -42,6 +42,21 @@ function PrSummary({ body }: { body: string }): JSX.Element {
     if (expanded) return;
     const el = ref.current;
     if (el) setOverflowing(el.scrollHeight - el.clientHeight > 1);
+  }, [body, expanded]);
+
+  // Images in the body load async, so the initial measurement above runs before
+  // they have intrinsic size — leaving the Show-more state wrong. Re-measure on
+  // any size change of the clamped element (covers image loads + reflow). Only
+  // meaningful while clamped, so we skip wiring it when expanded.
+  useEffect(() => {
+    if (expanded) return;
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      setOverflowing(el.scrollHeight - el.clientHeight > 1);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [body, expanded]);
 
   return (

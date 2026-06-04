@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { User } from '@pierre-review/shared';
 import { Avatar } from './CommentCard.js';
+import { useClickOutside } from '../hooks/useClickOutside.js';
 import { userLabel } from '../lib/ui.js';
 
 // A labelled group of members in the picker (e.g. "Maintainers", a repo name,
@@ -73,26 +74,23 @@ export function UserSelectPanel({
     .filter((s) => s.members.length > 0);
   const totalMembers = sections.reduce((n, s) => n + s.members.length, 0);
 
-  // Outside-click + Escape dismiss. Dismiss discards staged edits (no commit).
+  // Outside-click dismiss via the shared hook; both it and Escape discard staged
+  // edits (no commit) — closing without Apply just drops `staged`, which is
+  // re-seeded from the committed userIds the next time the panel opens. Escape
+  // stays INLINE below: it must stopPropagation() so it doesn't bubble to the
+  // global useKeyboard handler (which would clearSelection() and wipe the selected
+  // PR/thread), so it can't be folded into the mousedown hook.
+  useClickOutside(rootRef, () => setOpen(false), open);
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
-        // Don't let this bubble to the global useKeyboard handler (window), which
-        // would clearSelection() and wipe the selected PR/thread out from under us.
         e.stopPropagation();
         setOpen(false);
       }
     };
-    document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
   const toggle = (id: number): void =>

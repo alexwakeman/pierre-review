@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Repo } from '@pierre-review/shared';
+import { useClickOutside } from '../hooks/useClickOutside.js';
 
 // Show/hide dropdown for the watched repos. Replaces the old pill buttons: each
 // repo is a checkbox row showing the full `owner/name` (so same-named repos under
@@ -32,27 +33,20 @@ export function RepoSelectPanel({
   const shownCount = repoIds == null ? total : repoIds.length;
   const filtered = repoIds != null && shownCount < total;
 
-  // Outside-click + Escape dismiss (mirrors UserSelectPanel). Escape is stopped
-  // from bubbling to the global keyboard handler (which would clear the selection).
+  // Outside-click dismiss via the shared hook. Escape stays INLINE below: it must
+  // stopPropagation() so it doesn't bubble to the global keyboard handler (which
+  // would clear the selection), so it can't be folded into the mousedown hook.
+  useClickOutside(rootRef, () => setOpen(false), open);
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         e.stopPropagation();
         setOpen(false);
       }
     };
-    document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
   const q = filter.trim().toLowerCase();

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { TimelinePr } from '@pierre-review/shared';
 import { useSearchTimeline, useRepos, useUsers } from '../hooks/useTimeline.js';
 import { useSearchOpenPrs } from '../hooks/useTriage.js';
+import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useFilters } from '../store/filters.js';
 import { indexUsers, userLabel } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
@@ -60,15 +61,9 @@ export function TimelineSearch(): JSX.Element {
   // Clamp the highlight to the current result set (it shrinks as you type).
   const activeId = active >= 0 && active < results.length ? results[active]!.id : null;
 
-  // Outside-click hides the panel but never clears the query (sticky).
-  useEffect(() => {
-    if (!showPanel) return;
-    const onDown = (e: MouseEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [showPanel]);
+  // Outside-click hides the panel but never clears the query (sticky). Escape
+  // close stays inline in onKeyDown (it also blurs the input).
+  useClickOutside(rootRef, () => setOpen(false), showPanel);
 
   // Keep the keyboard-highlighted row scrolled into view within the panel.
   useEffect(() => {
