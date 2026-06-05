@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { EventType, PrDetail as PrDetailT, User } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
+import { useMe } from '../hooks/useTriage.js';
 import { api } from '../api/client.js';
 import { useFilters } from '../store/filters.js';
 import { dateTime, indexUsers, PR_STATE_META, relativeTime } from '../lib/ui.js';
@@ -10,6 +11,7 @@ import { UserName } from './UserName.js';
 import { ShowOnTimeline } from './ShowOnTimeline.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
+import { ClaudeReviewTab } from './ClaudeReviewTab.js';
 import { Markdown } from './Markdown.js';
 import { isNewComment, NewTag } from './ThreadView/index.js';
 
@@ -22,7 +24,16 @@ function newSummary(n: PrDetailT['newSinceLastViewed']): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
-type Tab = 'overview' | 'threads' | 'activity';
+type Tab = 'overview' | 'threads' | 'activity' | 'claude_review';
+
+// The tab button uses `capitalize`, which can't produce "Claude Review" from a
+// key, so labels are mapped explicitly.
+const TAB_LABELS: Record<Tab, string> = {
+  overview: 'Overview',
+  threads: 'Threads',
+  activity: 'Activity',
+  claude_review: 'Claude Review',
+};
 
 interface ActivityRow {
   key: string;
@@ -336,6 +347,7 @@ export function PrDetail({
   selectedThreadId: number | null;
 }): JSX.Element {
   const { data: pr, isLoading, error } = usePr(prId);
+  const claudeReviewEnabled = useMe().data?.claudeReviewEnabled ?? false;
   const [tab, setTab] = useState<Tab>('overview');
   const [activitySince, setActivitySince] = useState<string | null>(null);
   const qc = useQueryClient();
@@ -352,6 +364,8 @@ export function PrDetail({
   );
   const commentFocus = useFilters((s) => s.commentFocus);
   const consumeCommentFocus = useFilters((s) => s.consumeCommentFocus);
+  const claudeTabFocus = useFilters((s) => s.claudeTabFocus);
+  const consumeClaudeTabFocus = useFilters((s) => s.consumeClaudeTabFocus);
   const commentFocusForPr =
     commentFocus && pr && commentFocus.prId === pr.id ? commentFocus.commentId : null;
 
@@ -370,6 +384,15 @@ export function PrDetail({
       setActivitySince(null);
     }
   }, [activityFocusForPr]);
+
+  // The global Claude-review banner deep-links here: open the Claude Review tab
+  // for the matching PR, then consume the signal.
+  useEffect(() => {
+    if (claudeReviewEnabled && claudeTabFocus && pr && claudeTabFocus.prId === pr.id) {
+      setTab('claude_review');
+      consumeClaudeTabFocus();
+    }
+  }, [claudeTabFocus, pr, claudeReviewEnabled, consumeClaudeTabFocus]);
 
   // A timeline deep link to a PR comment (the pr_comment popover's "Open in detail
   // pane") forces the Overview tab, where PrCommentsList then scrolls to + flashes
@@ -494,7 +517,10 @@ export function PrDetail({
       </div>
 
       <div className="flex gap-1 border-b border-gray-200 px-3 dark:border-gray-800">
-        {(['overview', 'threads', 'activity'] as Tab[]).map((t) => {
+        {(claudeReviewEnabled
+          ? (['overview', 'threads', 'activity', 'claude_review'] as Tab[])
+          : (['overview', 'threads', 'activity'] as Tab[])
+        ).map((t) => {
           const failing = pr.checkRuns.filter(
             (c) => c.state === 'failure' || c.state === 'error',
           ).length;
@@ -503,13 +529,13 @@ export function PrDetail({
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              className={`-mb-px border-b-2 px-3 py-1.5 text-xs capitalize ${
+              className={`-mb-px border-b-2 px-3 py-1.5 text-xs ${
                 tab === t
                   ? 'border-blue-500 text-blue-500'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
-              {t}
+              {TAB_LABELS[t]}
               {t === 'overview' && failing > 0 && (
                 <span className="ml-1 text-red-500" title={`${failing} failing`}>
                   ●
@@ -554,7 +580,7 @@ export function PrDetail({
             selectedThreadId={selectedThreadId}
             viewedSince={pr.lastViewedAt}
           />
-        ) : (
+        ) : tab === 'activity' ? (
           <ActivityList
             pr={pr}
             usersById={usersById}
@@ -563,6 +589,8 @@ export function PrDetail({
             focusEvent={activityFocusForPr}
             onConsumed={consumeActivityFocus}
           />
+        ) : (
+          <ClaudeReviewTab pr={pr} usersById={usersById} />
         )}
       </div>
     </div>

@@ -25,6 +25,15 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   if (me) app.log.info(`local user: ${me.login}`);
   else app.log.warn('local user unknown (gh api user failed) — "my turn" disabled');
 
+  // Heal any Claude review runs left mid-flight by a crash (their 'running'
+  // status is persisted). Only relevant when the feature is enabled.
+  if (config.claudeReviewEnabled) {
+    const { reconcileReviewsOnStartup } = await import(
+      './review/review-manager.js'
+    );
+    reconcileReviewsOnStartup(app.log);
+  }
+
   // Scheduler is wired in Phase 3; guarded so the skeleton runs without it.
   if (!config.disableScheduler) {
     try {

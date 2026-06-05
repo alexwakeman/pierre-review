@@ -13,6 +13,7 @@ import { threadRoutes } from './api/routes/threads.js';
 import { meRoutes } from './api/routes/me.js';
 import { openPrsRoutes } from './api/routes/open-prs.js';
 import { mergersRoutes } from './api/routes/mergers.js';
+import { claudeReviewRoutes } from './api/routes/claude-review.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -53,6 +54,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(meRoutes);
   await app.register(openPrsRoutes);
   await app.register(mergersRoutes);
+  await app.register(claudeReviewRoutes);
 
   return app;
 }

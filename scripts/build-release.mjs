@@ -122,13 +122,19 @@ const manifest = {
   files: ['dist', 'public', 'README.md', 'LICENSE'],
   engines: { node: '>=20' },
   dependencies: {
+    '@anthropic-ai/claude-agent-sdk':
+      backendPkg.dependencies['@anthropic-ai/claude-agent-sdk'],
+    '@anthropic-ai/sdk': backendPkg.dependencies['@anthropic-ai/sdk'],
     '@fastify/cors': backendPkg.dependencies['@fastify/cors'],
     '@fastify/static': staticVersion,
+    '@modelcontextprotocol/sdk':
+      backendPkg.dependencies['@modelcontextprotocol/sdk'],
     '@octokit/graphql': backendPkg.dependencies['@octokit/graphql'],
     'better-sqlite3': backendPkg.dependencies['better-sqlite3'],
     'drizzle-orm': backendPkg.dependencies['drizzle-orm'],
     fastify: backendPkg.dependencies['fastify'],
     'node-cron': backendPkg.dependencies['node-cron'],
+    zod: backendPkg.dependencies['zod'],
   },
   keywords: [
     'github',
@@ -161,6 +167,9 @@ const mustExist = [
   'dist/app.js',
   'dist/config.js',
   'dist/db/migrations/meta/_journal.json',
+  'dist/db/migrations/0006_cute_violations.sql',
+  'dist/review/agent.js',
+  'dist/api/routes/claude-review.js',
   'public/index.html',
 ];
 for (const rel of mustExist) {

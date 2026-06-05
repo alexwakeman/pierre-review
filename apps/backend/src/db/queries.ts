@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import {
   and,
   asc,
   count,
+  desc,
   eq,
   exists,
   gt,
@@ -43,6 +45,9 @@ import type {
   TimelinePr,
   TimelineResponse,
   User,
+  ClaudeReview,
+  ClaudeFinding,
+  ClaudeReviewSummary,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -76,6 +81,8 @@ const {
   syncState,
   prViews,
   myTurnDismissals,
+  claudeReviews,
+  claudeReviewFindings,
 } = schema;
 
 function iso(d: Date | null): string | null {
@@ -927,6 +934,7 @@ export function getPrDetail(id: number): PrDetail | null {
     closedAt: iso(pr.closedAt),
     updatedAt: pr.updatedAt.toISOString(),
     githubUrl: prUrl,
+    headSha: pr.headSha,
     ciStatus: (pr.ciStatus ?? 'unknown') as CiStatus,
     mergeable: (pr.mergeable ?? 'unknown') as Mergeable,
     mergeStateStatus: (pr.mergeStateStatus ?? 'unknown') as MergeStateStatus,
@@ -1006,10 +1014,252 @@ export function deleteRepo(id: number): boolean {
       db.delete(commits).where(inArray(commits.prId, prIds)).run();
       db.delete(schema.reviewRequests).where(inArray(schema.reviewRequests.prId, prIds)).run();
       db.delete(prViews).where(inArray(prViews.prId, prIds)).run();
+      // Claude review runs + findings reference these PRs (FKs are ON), so clear
+      // them before the PRs.
+      const reviewIds = db
+        .select({ id: claudeReviews.id })
+        .from(claudeReviews)
+        .where(inArray(claudeReviews.prId, prIds))
+        .all()
+        .map((r) => r.id);
+      if (reviewIds.length > 0) {
+        db.delete(claudeReviewFindings)
+          .where(inArray(claudeReviewFindings.reviewId, reviewIds))
+          .run();
+      }
+      db.delete(claudeReviews).where(inArray(claudeReviews.prId, prIds)).run();
       db.delete(pullRequests).where(eq(pullRequests.repoId, id)).run();
     }
     db.delete(syncState).where(eq(syncState.repoId, id)).run();
     db.delete(repos).where(eq(repos.id, id)).run();
   });
   return true;
+}
+
+// ---- Claude Review reads ----
+
+type ClaudeReviewRow = typeof claudeReviews.$inferSelect;
+type ClaudeFindingRow = typeof claudeReviewFindings.$inferSelect;
+
+// GitHub anchors a file in the PR "Files changed" diff by the SHA-256 of its
+// path; we expose it so a finding can deep-link into the PR diff.
+function diffAnchorId(path: string): string {
+  return createHash('sha256').update(path, 'utf8').digest('hex');
+}
+
+function mapFinding(r: ClaudeFindingRow): ClaudeFinding {
+  return {
+    id: r.id,
+    reviewId: r.reviewId,
+    path: r.path,
+    line: r.line,
+    side: r.side,
+    diffAnchorId: diffAnchorId(r.path),
+    severity: r.severity,
+    title: r.title,
+    body: r.body,
+    editedBody: r.editedBody,
+    suggestion: r.suggestion,
+    diffHunk: r.diffHunk,
+    anchored: r.anchored,
+    included: r.included,
+    postedAt: iso(r.postedAt),
+    githubCommentId: r.githubCommentId,
+    createdAt: r.createdAt.toISOString(),
+  };
+}
+
+function mapReview(r: ClaudeReviewRow, findings: ClaudeFindingRow[]): ClaudeReview {
+  return {
+    id: r.id,
+    prId: r.prId,
+    headSha: r.headSha,
+    status: r.status,
+    model: r.model,
+    scope: r.scope,
+    summary: r.summary,
+    verdict: r.verdict,
+    userBody: r.userBody,
+    userVerdict: r.userVerdict,
+    costUsd: r.costUsd,
+    inputTokens: r.inputTokens,
+    outputTokens: r.outputTokens,
+    numTurns: r.numTurns,
+    error: r.error,
+    excludedFiles: r.excludedFiles ?? [],
+    postedReviewId: r.postedReviewId,
+    postedAt: iso(r.postedAt),
+    createdAt: r.createdAt.toISOString(),
+    finishedAt: iso(r.finishedAt),
+    findings: findings.map(mapFinding),
+  };
+}
+
+export function getClaudeReviewById(reviewId: number): ClaudeReview | null {
+  const row = db
+    .select()
+    .from(claudeReviews)
+    .where(eq(claudeReviews.id, reviewId))
+    .get();
+  if (!row) return null;
+  const findings = db
+    .select()
+    .from(claudeReviewFindings)
+    .where(eq(claudeReviewFindings.reviewId, reviewId))
+    .orderBy(asc(claudeReviewFindings.id))
+    .all();
+  return mapReview(row, findings);
+}
+
+// The most recent run for a PR (with findings), or null if never run.
+export function getLatestClaudeReview(prId: number): ClaudeReview | null {
+  const row = db
+    .select({ id: claudeReviews.id })
+    .from(claudeReviews)
+    .where(eq(claudeReviews.prId, prId))
+    .orderBy(desc(claudeReviews.id))
+    .limit(1)
+    .get();
+  if (!row) return null;
+  return getClaudeReviewById(row.id);
+}
+
+// All runs for a PR (newest first), lighter shape for the history selector.
+export function listClaudeReviewHistory(prId: number): ClaudeReviewSummary[] {
+  const rows = db
+    .select()
+    .from(claudeReviews)
+    .where(eq(claudeReviews.prId, prId))
+    .orderBy(desc(claudeReviews.id))
+    .all();
+  return rows.map((r) => ({
+    id: r.id,
+    headSha: r.headSha,
+    status: r.status,
+    model: r.model,
+    scope: r.scope,
+    verdict: r.verdict,
+    userVerdict: r.userVerdict,
+    costUsd: r.costUsd,
+    postedAt: iso(r.postedAt),
+    createdAt: r.createdAt.toISOString(),
+    finishedAt: iso(r.finishedAt),
+  }));
+}
+
+// Resolve a run to its repo/PR coordinates for posting. Returns the raw run row
+// (with the un-serialized fields the post flow needs: headSha, status, userBody,
+// userVerdict).
+export interface ClaudeReviewContext {
+  review: ClaudeReviewRow;
+  owner: string;
+  name: string;
+  prNumber: number;
+}
+
+// A single finding plus its review's head SHA and PR coordinates, for posting it
+// as a standalone inline comment.
+export interface FindingPostContext {
+  finding: ClaudeFindingRow;
+  reviewId: number;
+  reviewHeadSha: string;
+  owner: string;
+  name: string;
+  prNumber: number;
+}
+
+export function getFindingPostContext(
+  findingId: number,
+): FindingPostContext | null {
+  const row = db
+    .select({
+      finding: claudeReviewFindings,
+      reviewId: claudeReviews.id,
+      reviewHeadSha: claudeReviews.headSha,
+      owner: repos.owner,
+      name: repos.name,
+      prNumber: pullRequests.number,
+    })
+    .from(claudeReviewFindings)
+    .innerJoin(claudeReviews, eq(claudeReviews.id, claudeReviewFindings.reviewId))
+    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(eq(claudeReviewFindings.id, findingId))
+    .get();
+  if (!row) return null;
+  return {
+    finding: row.finding,
+    reviewId: row.reviewId,
+    reviewHeadSha: row.reviewHeadSha,
+    owner: row.owner,
+    name: row.name,
+    prNumber: row.prNumber,
+  };
+}
+
+export function getClaudeReviewContext(
+  reviewId: number,
+): ClaudeReviewContext | null {
+  const row = db
+    .select({
+      review: claudeReviews,
+      owner: repos.owner,
+      name: repos.name,
+      prNumber: pullRequests.number,
+    })
+    .from(claudeReviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(eq(claudeReviews.id, reviewId))
+    .get();
+  if (!row) return null;
+  return {
+    review: row.review,
+    owner: row.owner,
+    name: row.name,
+    prNumber: row.prNumber,
+  };
+}
+
+// PR coordinates needed to run a review (owner/name/number/headSha/title/body).
+export interface ReviewPrContext {
+  prId: number;
+  owner: string;
+  name: string;
+  repoFullName: string;
+  number: number;
+  title: string;
+  body: string | null;
+  baseRefName: string | null;
+  headSha: string | null;
+}
+
+export function getReviewPrContext(prId: number): ReviewPrContext | null {
+  const row = db
+    .select({
+      prId: pullRequests.id,
+      owner: repos.owner,
+      name: repos.name,
+      number: pullRequests.number,
+      title: pullRequests.title,
+      body: pullRequests.body,
+      baseRefName: pullRequests.baseRefName,
+      headSha: pullRequests.headSha,
+    })
+    .from(pullRequests)
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(eq(pullRequests.id, prId))
+    .get();
+  if (!row) return null;
+  return {
+    prId: row.prId,
+    owner: row.owner,
+    name: row.name,
+    repoFullName: `${row.owner}/${row.name}`,
+    number: row.number,
+    title: row.title,
+    body: row.body,
+    baseRefName: row.baseRefName,
+    headSha: row.headSha,
+  };
 }

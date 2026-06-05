@@ -2,6 +2,7 @@ import {
   sqliteTable,
   text,
   integer,
+  real,
   index,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
@@ -309,3 +310,92 @@ export const syncState = sqliteTable('sync_state', {
   lastSyncStatus: text('last_sync_status'),
   lastSyncError: text('last_sync_error'),
 });
+
+// ---- Claude Review (agentic PR review) ----
+// One row per review run. Re-reviewing a PR inserts a new row (history kept,
+// keyed by head SHA via cr_pr_sha_idx). Claude's summary/verdict are read-only
+// reference; the user authors `userBody`/`userVerdict` which is what gets posted.
+export const claudeReviews = sqliteTable(
+  'claude_reviews',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id),
+    headSha: text('head_sha').notNull(),
+    status: text('status', {
+      enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
+    }).notNull(),
+    model: text('model', {
+      enum: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+    }).notNull(),
+    // Null until the agent decides whether it explored the worktree.
+    scope: text('scope', { enum: ['diff_only', 'worktree'] }),
+    // Claude's output (read-only; never edited in place).
+    summary: text('summary'),
+    verdict: text('verdict', {
+      enum: ['COMMENT', 'REQUEST_CHANGES', 'APPROVE'],
+    }),
+    // The user-authored review body + verdict that actually get posted.
+    userBody: text('user_body'),
+    userVerdict: text('user_verdict', {
+      enum: ['COMMENT', 'REQUEST_CHANGES', 'APPROVE'],
+    }),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    error: text('error'),
+    // Noise files (lockfiles/generated) stripped from the diff before review.
+    excludedFiles: text('excluded_files', { mode: 'json' }).$type<string[]>(),
+    // GitHub review id + when it was posted (null until posted).
+    postedReviewId: text('posted_review_id'),
+    postedAt: integer('posted_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    finishedAt: integer('finished_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    prIdx: index('cr_pr_idx').on(t.prId),
+    prShaIdx: index('cr_pr_sha_idx').on(t.prId, t.headSha),
+  }),
+);
+
+// One row per line-level finding. Claude's wording is read-only; only `included`
+// (the user's tick) mutates. `anchored` false ⇒ couldn't map onto an addable diff
+// line, so it can't post as an inline comment.
+export const claudeReviewFindings = sqliteTable(
+  'claude_review_findings',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    reviewId: integer('review_id')
+      .notNull()
+      .references(() => claudeReviews.id),
+    path: text('path').notNull(),
+    line: integer('line'),
+    side: text('side', { enum: ['LEFT', 'RIGHT'] })
+      .notNull()
+      .default('RIGHT'),
+    severity: text('severity', {
+      enum: ['blocker', 'warning', 'nit', 'question', 'praise'],
+    }).notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    // The user's reworded version of the finding (markdown). When set and the
+    // finding is included, this is posted verbatim instead of `body`.
+    editedBody: text('edited_body'),
+    suggestion: text('suggestion'),
+    // The unified-diff hunk this finding covers, captured at review time, to show
+    // the code in context in the UI. Null for older runs / unanchored findings.
+    diffHunk: text('diff_hunk'),
+    anchored: integer('anchored', { mode: 'boolean' }).notNull().default(true),
+    included: integer('included', { mode: 'boolean' }).notNull().default(false),
+    postedAt: integer('posted_at', { mode: 'timestamp' }),
+    githubCommentId: text('github_comment_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
+);
