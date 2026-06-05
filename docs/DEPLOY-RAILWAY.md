@@ -1,0 +1,114 @@
+# Deploying pierre-review to Railway (cloud, multi-tenant)
+
+This deploys the **public, multi-tenant** build: a dark landing page at `/`,
+GitHub-App sign-in, per-user accounts, and Postgres. Local mode (SQLite +
+`gh auth token` + `npx pierre-review`) is unaffected and needs none of this.
+
+> Prerequisite: create the GitHub App first — see
+> [GITHUB-APP-SETUP.md](./GITHUB-APP-SETUP.md).
+
+---
+
+## Architecture on Railway
+
+A single Railway **service** (the app, from this repo's `Dockerfile`) + the
+**Railway Postgres plugin**. The one Fastify process serves both the JSON API
+(`/api/*`), the landing page (`/`), and the timeline SPA (`/app`). It binds
+`0.0.0.0:$PORT` (Railway injects `PORT`). Migrations run automatically at boot
+(the Postgres migrator).
+
+```
+ Browser ─▶ Railway service (Dockerfile)
+              ├─ /            landing page (public)
+              ├─ /app         timeline SPA (behind GitHub sign-in)
+              ├─ /api/auth/*  OAuth login/callback/logout
+              └─ /api/*       JSON API (session-gated)
+                     │
+                     ▼
+              Railway Postgres plugin  ($DATABASE_URL)
+```
+
+---
+
+## Step 1 — Create the project + Postgres
+
+1. In Railway, **New Project → Deploy from GitHub repo** and pick this repo.
+   (Or `railway init` with the CLI.)
+2. **Add a plugin → PostgreSQL.** Railway provisions it and exposes a
+   `DATABASE_URL` reference variable.
+3. In the **app service → Variables**, add a reference so the app sees it:
+   `DATABASE_URL = ${{Postgres.DATABASE_URL}}`.
+
+## Step 2 — Set environment variables
+
+On the **app service → Variables**:
+
+| Var | Value | Notes |
+|---|---|---|
+| `DEPLOYMENT_MODE` | `cloud` | the master switch (Postgres + landing + OAuth) |
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | from the Postgres plugin |
+| `APP_BASE_URL` | `https://<your-domain>` | no trailing slash; used to build the OAuth redirect |
+| `GITHUB_APP_CLIENT_ID` | from the GitHub App | |
+| `GITHUB_APP_CLIENT_SECRET` | from the GitHub App | |
+| `GITHUB_APP_SLUG` | the app slug | for the install link |
+| `SESSION_SECRET` | `openssl rand -hex 32` | seals the session cookie |
+| `ENCRYPTION_KEY` | `openssl rand -hex 32` | **must be 64 hex chars (32 bytes)** — AES-256-GCM key for stored tokens |
+| `PORT` | (Railway sets this) | the app reads it; `HOST` defaults to `0.0.0.0` in cloud |
+
+Generate the two secrets locally:
+
+```bash
+openssl rand -hex 32   # SESSION_SECRET
+openssl rand -hex 32   # ENCRYPTION_KEY  (exactly 64 hex chars)
+```
+
+> The app **fails loud at startup** if any required cloud var is missing or if
+> `ENCRYPTION_KEY` isn't 32 bytes (see `assertCloudConfig` in `config.ts`).
+
+## Step 3 — Build & deploy
+
+This repo ships a root **`Dockerfile`** and **`railway.json`**. Railway will:
+
+1. Build the image (installs deps, builds the SPA with `base:'/app/'`, the
+   landing page, and the backend, then assembles `public/` + `public-landing/`
+   next to `dist/`).
+2. Start the server with `DEPLOYMENT_MODE=cloud`.
+3. Health-check `GET /api/health` (configured in `railway.json`).
+
+Migrations (the Postgres baseline in `dist/db/migrations-pg`) run at boot.
+
+## Step 4 — Custom domain + finalize
+
+1. Railway **service → Settings → Networking → Custom Domain**; point your DNS
+   `CNAME` at the Railway target.
+2. Set `APP_BASE_URL` to the final `https://<your-domain>`.
+3. In the **GitHub App settings**, set the **Callback URL** to
+   `https://<your-domain>/api/auth/callback` (must match `APP_BASE_URL`).
+4. Redeploy so the new `APP_BASE_URL` takes effect.
+
+## Step 5 — First sign-in
+
+1. Visit `https://<your-domain>/` → the landing page → **Sign in with GitHub**.
+2. Authorize the App; you're redirected to `/app`.
+3. **Install the App** on the orgs/repos you want to watch (the sign-in flow
+   links to `https://github.com/apps/<slug>/installations/new`).
+4. Add a repo from the picker and watch the first sync run.
+
+---
+
+## Operational notes
+
+- **No SQLite→Postgres data migration.** Cloud starts empty; synced data is
+  regenerable by re-syncing (the project's own philosophy). The `commitFiles`
+  cache rebuilds on demand.
+- **Scheduled sync** runs every 5 minutes per account (`SYNC_CRON`), the same as
+  local. One bad token doesn't abort the loop.
+- **Claude Review is force-disabled in cloud** regardless of `ENABLE_CLAUDE_REVIEW`
+  (it needs a local `gh` + writable clone dir). Its routes 404 and the tab hides.
+- **Rotating secrets:** rotating `SESSION_SECRET` invalidates all sessions
+  (everyone re-signs-in). Do **not** rotate `ENCRYPTION_KEY` without re-encrypting
+  stored tokens — a new key can't decrypt old tokens (users would need to re-auth).
+- **Migrations on redeploy** are idempotent; the migrator only applies new ones.
+
+See [LOCAL-CLOUD-TESTING.md](./LOCAL-CLOUD-TESTING.md) to exercise this whole
+flow on your laptop before deploying.
