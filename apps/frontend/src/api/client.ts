@@ -1,10 +1,19 @@
 import type {
+  ActiveReviewsResponse,
+  ClaudeReview,
+  ClaudeReviewModel,
+  ClaudeReviewResponse,
+  ClaudeReviewStatusResponse,
+  ClaudeReviewVerdict,
   CreateRepoBody,
   MeResponse,
   MergersResponse,
   MyTurnDismissKind,
   MyTurnResponse,
   OpenPrsResponse,
+  PostCommentResult,
+  PostReviewPreview,
+  PostReviewResult,
   PrDetail,
   Repo,
   RepoSearchResponse,
@@ -108,5 +117,52 @@ export const api = {
   dismissPr: (id: number) =>
     fetch(`/api/prs/${id}/dismiss`, jsonBody('POST')).then((r) =>
       handle<{ status: string }>(r),
+    ),
+
+  // ---- Claude Review ----
+  claudeReview: (prId: number) =>
+    get<ClaudeReviewResponse>(`/api/prs/${prId}/claude-review`),
+  claudeReviewById: (reviewId: number) =>
+    get<ClaudeReview>(`/api/claude-reviews/${reviewId}`),
+  generateClaudeReview: (prId: number, model: ClaudeReviewModel) =>
+    fetch(`/api/prs/${prId}/claude-review`, jsonBody('POST', { model })).then(
+      (r) => handle<{ reviewId: number; status: string }>(r),
+    ),
+  claudeReviewStatus: (prId: number) =>
+    get<ClaudeReviewStatusResponse>(`/api/prs/${prId}/claude-review/status`),
+  cancelClaudeReview: (prId: number) =>
+    fetch(`/api/prs/${prId}/claude-review/cancel`, jsonBody('POST')).then((r) =>
+      handle<{ status: string }>(r),
+    ),
+  updateClaudeReview: (
+    reviewId: number,
+    body: { userBody?: string; userVerdict?: ClaudeReviewVerdict },
+  ) =>
+    fetch(`/api/claude-reviews/${reviewId}`, jsonBody('PATCH', body)).then((r) =>
+      handle<{ status: string }>(r),
+    ),
+  updateClaudeFinding: (
+    findingId: number,
+    body: { included?: boolean; editedBody?: string },
+  ) =>
+    fetch(`/api/claude-findings/${findingId}`, jsonBody('PATCH', body)).then((r) =>
+      handle<{ status: string }>(r),
+    ),
+  postClaudeFinding: (findingId: number) =>
+    fetch(`/api/claude-findings/${findingId}/post`, jsonBody('POST')).then((r) =>
+      handle<PostCommentResult>(r),
+    ),
+  activeClaudeReviews: () =>
+    get<ActiveReviewsResponse>('/api/claude-reviews/active'),
+  postClaudeReview: (
+    reviewId: number,
+    userVerdict: ClaudeReviewVerdict,
+    dryRun = false,
+  ) =>
+    fetch(
+      `/api/claude-reviews/${reviewId}/post${dryRun ? '?dryRun=true' : ''}`,
+      jsonBody('POST', { userVerdict }),
+    ).then((r) =>
+      handle<PostReviewPreview | PostReviewResult>(r),
     ),
 };

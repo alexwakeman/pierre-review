@@ -182,6 +182,11 @@ uncertainty**, and the logic is covered by fixture tests (see Conventions).
 - **`myTurnDismissals`** — dismissed "my turn" entries (`review_request` | `thread`);
   auto-resurface on newer activity.
 - **`syncState`** — per-repo sync bookkeeping.
+- **`claudeReviews`** + **`claudeReviewFindings`** — the **Claude Review** feature
+  (see below). One run per row (re-review = new row; history kept, keyed by
+  `(prId, headSha)`); Claude's `summary`/`verdict` are read-only, the user's
+  `userBody`/`userVerdict` are what get posted. Findings carry `anchored`/`included`
+  plus the agent's wording. **Not** part of the lean timeline; loaded on demand.
 
 Conventions: timestamps are stored as unix-epoch integers (`mode: 'timestamp'`),
 node IDs are the stable identity, and **triage fields are computed on read**
@@ -205,8 +210,17 @@ Wire format is JSON with ISO-8601 timestamps; payload types live in
 | `POST /api/repos/:id/sync?full=true` | trigger sync → `202 {status:'started'}`, or `409` if already running |
 | `GET /api/users` (+ isBot updates) | user list / bot flagging |
 | `GET /api/mergers` | per-repo merge-rights map (who's merged a PR there) → maintainer shield on row labels |
-| `GET /api/me`, `GET /api/my-turn`, `POST /api/my-turn/dismiss` | local identity + triage queue + dismissals |
+| `GET /api/me`, `GET /api/my-turn`, `POST /api/my-turn/dismiss` | local identity + triage queue + dismissals (`/me` also carries `claudeReviewEnabled`) |
+| `GET /api/prs/:id/claude-review` | latest run + findings + history + Claude-auth status + `enabled` (Claude Review) |
+| `POST /api/prs/:id/claude-review {model}` | start a run → `202 {reviewId}`; `400` no-auth/no-head, `409` busy, `404` disabled |
+| `GET /api/prs/:id/claude-review/status`, `POST …/cancel` | poll live progress / abort the SDK run |
+| `GET /api/claude-reviews/:reviewId` | a specific past run (history selector) |
+| `PATCH /api/claude-reviews/:reviewId {userBody?,userVerdict?}` | save the user's authored draft (never Claude's text) |
+| `PATCH /api/claude-findings/:findingId {included?}` | tick a finding for inline posting |
+| `POST /api/claude-reviews/:reviewId/post {userVerdict}` (+ `?dryRun=true`) | post one GitHub review (inline comments + body + verdict); `409` if head moved |
 | `GET /api/health` | health check |
+
+All `claude-review` routes return `404` when the feature is off (`ENABLE_CLAUDE_REVIEW`).
 
 ---
 
@@ -363,6 +377,44 @@ active (leaving the selection intact) else clears the selection
 (`hooks/useKeyboard.ts`).
 
 ---
+
+## Claude Review (agentic PR review)
+
+The app's first feature that reaches beyond read-only mirroring. A **Claude Review**
+tab in the PR detail pane runs the **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`)
+against the selected PR, returns **structured JSON findings**, persists them per head
+SHA (history kept), lets the user author their own review + tick which findings to post,
+then posts **one** GitHub review (inline comments + body + verdict).
+
+- **Opt-in & off by default.** Gated behind `ENABLE_CLAUDE_REVIEW=true`
+  (`config.claudeReviewEnabled`) — it spends real money / Agent-SDK credits per run.
+  When off, the routes 404 and the frontend hides the tab (via `/api/me`'s
+  `claudeReviewEnabled`).
+- **No stored secrets.** Claude auth resolves from the ambient environment
+  (`ANTHROPIC_API_KEY` → `CLAUDE_CODE_OAUTH_TOKEN` → a logged-in Claude session);
+  `review/auth.ts` detects it best-effort (the first real SDK auth error is the
+  authoritative gate). Mirrors `github/auth.ts`'s loud-but-friendly failure.
+- **`src/review/`** mirrors the sync machinery: `review-manager.ts` (in-memory job
+  manager, one review per PR, `config.reviewConcurrency` gate, startup reconcile of
+  orphaned `running` rows), `agent.ts` (the SDK run: an in-process MCP `submit_review`
+  tool — `schema.ts` — captures structured output; read-only tools only, `cwd` = a git
+  worktree, `permissionMode:'bypassPermissions'`, `settingSources:[]`, `maxTurns` +
+  `maxBudgetUsd` caps, `AbortController` for cancel), `clone-manager.ts` (partial clones
+  under `config.cloneDir` = `~/.pierre-review/clones`, ephemeral per-run worktrees,
+  LRU cache cleanup), `prompt.ts` (inline reviewer prompt + `NOISE_GLOBS` diff
+  stripping), `post-review.ts` (unified-diff line-anchoring + the single GitHub review
+  POST via `ghRestPost`), `persist.ts` (DB writes).
+- **Line-anchoring is the load-bearing bug risk** (`buildAnchorIndex` in
+  `post-review.ts`): a finding posts inline only if ticked AND its `(path, line, side)`
+  lands on an addable diff line; unticked/unanchored are surfaced, never auto-injected.
+  Posting pins `commit_id` to the head SHA and 409s if the head moved.
+- **Frontend:** `ClaudeReviewTab.tsx` + `useClaudeReview.ts` (TanStack Query, polls
+  `…/status` while running). Claude's output is **read-only** (each finding has a Copy
+  button); a separate "Your review" textarea + verdict is what posts. Re-reviewing the
+  same head SHA **warns but is allowed**.
+- **Packaging:** the SDK + its peers (`@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`)
+  + `zod` are curated runtime deps in `build-release.mjs`; the inline prompt + `import
+  type`-only shared usage keep the no-`.ts`-leak / no-shared-runtime guards passing.
 
 ## Conventions & gotchas
 

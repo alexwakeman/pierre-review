@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { MeResponse, MyTurnDismissBody } from '@pierre-review/shared';
+import { config } from '../../config.js';
 import { ensureLocalUser } from '../../github/local-user.js';
 import { dismissMyTurn, getMyTurn } from '../../db/queries.js';
 
@@ -26,6 +27,7 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
         yourPrsActivity: myTurn.yourPrs.length,
         threadsAwaiting: myTurn.threadsAwaiting.length,
       },
+      claudeReviewEnabled: config.claudeReviewEnabled,
     };
   });
 

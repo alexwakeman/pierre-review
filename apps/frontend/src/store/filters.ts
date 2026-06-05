@@ -73,6 +73,10 @@ export interface FilterState {
   // cleared by PrCommentsList once it scrolls.
   commentFocus: { prId: number; commentId: number } | null;
 
+  // transient: the Claude-review progress banner → open a PR's Claude Review tab.
+  // Matched against the loaded PR by `prId`; cleared by PrDetail once it switches.
+  claudeTabFocus: { prId: number } | null;
+
   // open PRs strip
   stripCollapsed: boolean;
   stripFilter: StripFilter;
@@ -136,6 +140,10 @@ export interface FilterState {
   // sync of the OTHER repos would otherwise bounce their progress bars). Read
   // alongside syncModalSignal.
   syncModalRepoId: number | null;
+  // `claudeReviewKickoff`: a monotonic counter bumped when the user starts a Claude
+  // review, so the global progress banner knows a run is in flight and begins
+  // polling (and stops once the active list drains). Store-only / transient.
+  claudeReviewKickoff: number;
 
   setRepoIds: (ids: number[] | null) => void;
   toggleRepo: (id: number) => void;
@@ -186,6 +194,10 @@ export interface FilterState {
   // consumes it once it has scrolled to + flashed the card.
   showPrComment: (prId: number, commentId: number) => void;
   consumeCommentFocus: () => void;
+  // Open a PR's Claude Review tab (the global progress banner → a running/finished
+  // review). PrDetail consumes it once it has switched tabs.
+  openClaudeReview: (prId: number) => void;
+  consumeClaudeTabFocus: () => void;
   // Focus-mode signalling (the Timeline owns the actual overlay; see fields above).
   // setFocusActive: the Timeline reports whether a focus overlay is currently up.
   setFocusActive: (v: boolean) => void;
@@ -198,6 +210,7 @@ export interface FilterState {
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
   // records the added repo id so the modal can scope to just that repo.
   requestSyncModal: (repoId: number) => void;
+  bumpClaudeReviewKickoff: () => void;
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
   setSearchQuery: (q: string) => void;
@@ -249,6 +262,7 @@ function freshDefaults(): FilterData {
     selectedThreadId: null,
     activityFocus: null,
     commentFocus: null,
+    claudeTabFocus: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     stripFilter: 'all',
     searchQuery: '',
@@ -265,6 +279,7 @@ function freshDefaults(): FilterData {
     rangeResetSignal: 0,
     syncModalSignal: 0,
     syncModalRepoId: null,
+    claudeReviewKickoff: 0,
   };
 }
 
@@ -338,11 +353,16 @@ export const useFilters = create<FilterState>((set, get) => ({
   showPrComment: (prId, commentId) =>
     set({ selectedPrId: prId, selectedThreadId: null, commentFocus: { prId, commentId } }),
   consumeCommentFocus: () => set({ commentFocus: null }),
+  openClaudeReview: (prId) =>
+    set({ selectedPrId: prId, selectedThreadId: null, claudeTabFocus: { prId } }),
+  consumeClaudeTabFocus: () => set({ claudeTabFocus: null }),
   setFocusActive: (v) => set({ focusActive: v }),
   exitFocus: () =>
     set((s) => ({ focusActive: false, exitFocusSignal: s.exitFocusSignal + 1 })),
   requestSyncModal: (repoId: number) =>
     set((s) => ({ syncModalSignal: s.syncModalSignal + 1, syncModalRepoId: repoId })),
+  bumpClaudeReviewKickoff: () =>
+    set((s) => ({ claudeReviewKickoff: s.claudeReviewKickoff + 1 })),
   setStripCollapsed: (v) => set({ stripCollapsed: v }),
   setStripFilter: (f) => set({ stripFilter: f }),
   setSearchQuery: (q) => set({ searchQuery: q }),

@@ -226,6 +226,9 @@ export interface MyTurnCounts {
 export interface MeResponse {
   user: LocalUser | null;
   counts: MyTurnCounts;
+  // Whether the Claude Review feature is enabled (ENABLE_CLAUDE_REVIEW). The
+  // frontend hides the Claude Review tab when false.
+  claudeReviewEnabled: boolean;
 }
 
 // Lean PR shape for the timeline. No bodies, no diff hunks.
@@ -369,6 +372,9 @@ export interface PrDetail {
   closedAt: string | null;
   updatedAt: string;
   githubUrl: string;
+  // The head commit SHA (null until synced). Drives the Claude Review tab's
+  // "you already reviewed this exact SHA" warning.
+  headSha: string | null;
   // v1.2 Checks/Overview tab: CI + mergeability + labels + per-job checks +
   // outstanding reviewers (head-commit derived).
   ciStatus: CiStatus;
@@ -512,4 +518,224 @@ export interface TimelineQuery {
   // event inside [from, to]. They (and their events) are removed so the row can
   // disappear entirely. Absent/"false" = keep them.
   excludeStale?: string;
+}
+
+// ---- Claude Review (agentic PR review) ----
+// The app's first agentic feature: an in-app Claude Agent SDK run that reviews a
+// PR and returns structured findings. Claude's output is read-only reference; the
+// user authors their own review body/verdict and ticks which findings to post.
+
+export type ClaudeReviewModel =
+  | 'claude-opus-4-8'
+  | 'claude-sonnet-4-6'
+  | 'claude-haiku-4-5';
+
+// Runtime list for the model picker (frontend bundles shared; the backend keeps a
+// local copy and only `import type`s from here — shared isn't shipped at runtime).
+export const CLAUDE_REVIEW_MODELS: ClaudeReviewModel[] = [
+  'claude-opus-4-8',
+  'claude-sonnet-4-6',
+  'claude-haiku-4-5',
+];
+
+export type ClaudeReviewStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+
+export type ClaudeReviewScope = 'diff_only' | 'worktree';
+
+export type ClaudeReviewVerdict = 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE';
+
+export type ClaudeFindingSeverity =
+  | 'blocker'
+  | 'warning'
+  | 'nit'
+  | 'question'
+  | 'praise';
+
+export type ClaudeFindingSide = 'LEFT' | 'RIGHT';
+
+// One line-level finding from a review run. Claude's wording (title/body/
+// suggestion) is read-only; only `included` (the user's tick) is mutable.
+export interface ClaudeFinding {
+  id: number;
+  reviewId: number;
+  path: string;
+  // null ⇒ no line anchor (file-level / unanchored).
+  line: number | null;
+  side: ClaudeFindingSide;
+  // SHA-256 of `path` (hex) — GitHub's PR "Files changed" diff anchor, so the
+  // code ref can deep-link into the PR diff at this file/line.
+  diffAnchorId: string;
+  severity: ClaudeFindingSeverity;
+  title: string;
+  body: string;
+  // The user's reworded version (markdown). When set and the finding is
+  // included, this posts instead of `body`. null ⇒ use Claude's wording.
+  editedBody: string | null;
+  suggestion: string | null;
+  // The unified-diff hunk this finding covers, for showing the code in context.
+  // null for older runs / unanchored findings.
+  diffHunk: string | null;
+  // false ⇒ couldn't map onto an addable diff line → can't post inline.
+  anchored: boolean;
+  // The user ticked this finding to post it as an inline comment.
+  included: boolean;
+  postedAt: string | null;
+  githubCommentId: string | null;
+  createdAt: string;
+}
+
+// One review run (re-review = a new run; history kept, keyed by head SHA).
+export interface ClaudeReview {
+  id: number;
+  prId: number;
+  headSha: string;
+  status: ClaudeReviewStatus;
+  model: ClaudeReviewModel;
+  scope: ClaudeReviewScope | null;
+  // Claude's output (read-only reference).
+  summary: string | null;
+  verdict: ClaudeReviewVerdict | null;
+  // The user-authored review that actually gets posted.
+  userBody: string | null;
+  userVerdict: ClaudeReviewVerdict | null;
+  costUsd: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  numTurns: number | null;
+  error: string | null;
+  excludedFiles: string[];
+  postedReviewId: string | null;
+  postedAt: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+  findings: ClaudeFinding[];
+}
+
+// A lighter run row for the history selector (no findings).
+export interface ClaudeReviewSummary {
+  id: number;
+  headSha: string;
+  status: ClaudeReviewStatus;
+  model: ClaudeReviewModel;
+  scope: ClaudeReviewScope | null;
+  verdict: ClaudeReviewVerdict | null;
+  userVerdict: ClaudeReviewVerdict | null;
+  costUsd: number | null;
+  postedAt: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export type ClaudeAuthStatus = 'ok' | 'none';
+
+export interface ClaudeReviewResponse {
+  // Whether the feature is enabled at all (ENABLE_CLAUDE_REVIEW).
+  enabled: boolean;
+  // Claude-auth availability for running a review.
+  auth: ClaudeAuthStatus;
+  authMessage?: string;
+  // The latest run for the PR (with findings), or null if never run.
+  review: ClaudeReview | null;
+  // All prior runs for the PR (newest first), lighter shape.
+  history: ClaudeReviewSummary[];
+}
+
+export type ClaudeReviewPhase =
+  | 'cloning'
+  | 'fetching_diff'
+  | 'deciding'
+  | 'reviewing'
+  | 'persisting';
+
+export interface ClaudeReviewProgress {
+  phase: ClaudeReviewPhase;
+  message?: string;
+}
+
+export interface ClaudeReviewStatusResponse {
+  status: ClaudeReviewStatus | 'idle';
+  reviewId: number | null;
+  progress: ClaudeReviewProgress | null;
+}
+
+// A finding ticked for posting but not anchorable to a diff line (surfaced so the
+// UI can flag it; the user can Copy it into their own body instead).
+export interface SkippedFinding {
+  findingId: number;
+  path: string;
+  title: string;
+}
+
+// The exact GitHub review payload — returned verbatim by the dry-run preview and
+// used as the body of the real POST.
+export interface PostReviewComment {
+  path: string;
+  line: number;
+  side: ClaudeFindingSide;
+  body: string;
+}
+
+export interface PostReviewPreview {
+  commitId: string;
+  body: string;
+  event: ClaudeReviewVerdict;
+  comments: PostReviewComment[];
+  skippedUnanchored: SkippedFinding[];
+}
+
+export interface PostReviewResult {
+  postedReviewId: string | null;
+  postedAt: string;
+  postedCommentCount: number;
+  skippedUnanchored: SkippedFinding[];
+}
+
+// Result of posting a single finding as a standalone inline comment (not a review).
+export interface PostCommentResult {
+  githubCommentId: string | null;
+  postedAt: string;
+}
+
+// ---- request payloads (Claude review) ----
+
+export interface GenerateReviewBody {
+  model: ClaudeReviewModel;
+}
+
+// Saves the user's authored draft; never mutates Claude's summary/verdict.
+export interface UpdateReviewBody {
+  userBody?: string;
+  userVerdict?: ClaudeReviewVerdict;
+}
+
+// Tick a finding for inline posting and/or save the user's reworded body. An
+// empty-string editedBody clears the reword (reverts to Claude's wording).
+export interface UpdateFindingBody {
+  included?: boolean;
+  editedBody?: string;
+}
+
+// A review currently in flight, for the global progress banner. Surfaced from the
+// review manager's in-memory state joined with the PR's coordinates.
+export interface ActiveReview {
+  reviewId: number;
+  prId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  status: ClaudeReviewStatus;
+  phase: ClaudeReviewPhase | null;
+}
+
+export interface ActiveReviewsResponse {
+  reviews: ActiveReview[];
+}
+
+export interface PostReviewBody {
+  userVerdict: ClaudeReviewVerdict;
 }
