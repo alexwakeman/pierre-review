@@ -16,17 +16,30 @@ interface CliOptions {
   open: boolean;
   port?: number;
   db?: string;
+  cloud: boolean;
   help: boolean;
 }
 
 function parseArgs(argv: string[]): CliOptions {
-  const opts: CliOptions = { open: true, help: false };
+  const opts: CliOptions = { open: true, cloud: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     switch (arg) {
       case '--no-open':
         opts.open = false;
         break;
+      case '--cloud':
+        opts.cloud = true;
+        break;
+      case '--mode': {
+        const v = argv[++i];
+        if (v !== 'local' && v !== 'cloud') {
+          console.error('--mode requires `local` or `cloud`');
+          process.exit(1);
+        }
+        opts.cloud = v === 'cloud';
+        break;
+      }
       case '--port': {
         const v = argv[++i];
         const n = v ? Number.parseInt(v, 10) : NaN;
@@ -70,11 +83,19 @@ Options:
   --no-open        Don't open the browser (also honours NO_OPEN env)
   --port <n>       Port to listen on (also PORT env, default 4000)
   --db <path>      SQLite DB path (also DATABASE_URL env)
+  --cloud          Run the deployed (cloud) experience: Postgres + landing page
+                   + GitHub-App OAuth. Requires cloud env (see docs). Equivalent
+                   to DEPLOYMENT_MODE=cloud. Skips the gh-auth pre-check.
+  --mode <m>       'local' (default) or 'cloud'
   -h, --help       Show this help
 
-Prerequisite:
+Prerequisite (local mode):
   Requires the GitHub CLI (https://cli.github.com), authenticated via
   \`gh auth login\`. The dashboard reads your activity using your gh token.
+
+Prerequisite (--cloud):
+  Postgres + a GitHub App. See docs/LOCAL-CLOUD-TESTING.md. Provide
+  DATABASE_URL, APP_BASE_URL, GITHUB_APP_*, SESSION_SECRET, ENCRYPTION_KEY.
 `);
 }
 
@@ -101,47 +122,56 @@ async function main(): Promise<void> {
   if (opts.port !== undefined) process.env.PORT = String(opts.port);
   if (opts.db !== undefined) process.env.DATABASE_URL = opts.db;
   if (opts.open === false) process.env.NO_OPEN = '1';
+  if (opts.cloud) process.env.DEPLOYMENT_MODE = 'cloud';
+  const isCloud = process.env.DEPLOYMENT_MODE === 'cloud';
 
   // Production mode: skip pino-pretty (not shipped) and enable static serving.
   process.env.NODE_ENV ??= 'production';
 
-  // ── default the DB to a user-writable home location (mkdir -p) ────────────
-  // The package dir is read-only for global installs, so never write there.
-  if (!process.env.DATABASE_URL) {
-    const dbPath = join(homedir(), '.pierre-review', 'pierre-review.sqlite');
-    process.env.DATABASE_URL = dbPath;
-  }
-  try {
-    mkdirSync(dirname(process.env.DATABASE_URL), { recursive: true });
-  } catch {
-    /* best-effort; client.ts also mkdirs */
-  }
+  if (!isCloud) {
+    // ── local: default the DB to a user-writable home location (mkdir -p) ────
+    // The package dir is read-only for global installs, so never write there.
+    if (!process.env.DATABASE_URL) {
+      const dbPath = join(homedir(), '.pierre-review', 'pierre-review.sqlite');
+      process.env.DATABASE_URL = dbPath;
+    }
+    try {
+      mkdirSync(dirname(process.env.DATABASE_URL), { recursive: true });
+    } catch {
+      /* best-effort; client.ts also mkdirs */
+    }
 
-  // ── pre-check gh auth with a friendly message (contract §6) ───────────────
-  try {
-    execFileSync('gh', ['auth', 'token'], { stdio: 'ignore' });
-  } catch {
-    console.error('');
-    console.error(bold('GitHub CLI not found or not authenticated.'));
-    console.error(
-      'Install the GitHub CLI (https://cli.github.com) and run `gh auth login`.',
-    );
-    console.error('');
-    process.exit(1);
+    // ── pre-check gh auth with a friendly message (contract §6) ─────────────
+    try {
+      execFileSync('gh', ['auth', 'token'], { stdio: 'ignore' });
+    } catch {
+      console.error('');
+      console.error(bold('GitHub CLI not found or not authenticated.'));
+      console.error(
+        'Install the GitHub CLI (https://cli.github.com) and run `gh auth login`.',
+      );
+      console.error('');
+      process.exit(1);
+    }
   }
+  // Cloud mode: no gh pre-check (each account brings its own OAuth token) and no
+  // SQLite home default (DATABASE_URL must be a Postgres URL). config.ts /
+  // assertCloudConfig validate the required cloud env at boot.
 
   const port = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 4000;
-  const url = `http://localhost:${port}`;
+  const base = `http://localhost:${port}`;
+  // Local goes straight to the app; cloud opens the public landing page.
+  const url = isCloud ? `${base}/` : `${base}/app`;
 
   // ── banner ────────────────────────────────────────────────────────────────
   const { PIERRE_ASCII, TAGLINE } = await import('./ascii.js');
   console.log(cyan(PIERRE_ASCII));
-  console.log(`  ${dim(TAGLINE)}`);
+  console.log(`  ${dim(isCloud ? 'cloud mode — multi-tenant' : TAGLINE)}`);
   console.log('');
   console.log(`  ${cyan('▸')} ${bold(url)}`);
   console.log('');
 
-  // ── boot the server (migrate → user → app → scheduler → listen) ───────────
+  // ── boot the server (migrate → account → app → scheduler → listen) ────────
   const { start } = await import('./index.js');
   await start();
 

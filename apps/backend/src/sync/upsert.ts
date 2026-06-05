@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { db, schema } from '../db/client.js';
+import { db, schema, runTransaction, type Executor } from '../db/client.js';
 import { isLikelyBot } from './bot-detection.js';
 import {
   deriveThreadState,
@@ -50,33 +50,38 @@ function minDate(dates: (Date | null)[]): Date | null {
 export function createUserResolver() {
   const cache = new Map<string, number>();
   return {
-    resolve(actor: GqlActor | null | undefined): number | null {
+    async resolve(
+      exec: Executor,
+      actor: GqlActor | null | undefined,
+    ): Promise<number | null> {
       const login = actor?.login;
       if (!login) return null;
       const cached = cache.get(login);
       if (cached !== undefined) return cached;
 
-      const row = db
-        .insert(users)
-        .values({
-          githubLogin: login,
-          githubNodeId: actor?.id ?? null,
-          displayName: actor?.name ?? null,
-          avatarUrl: actor?.avatarUrl ?? null,
-          isBot: isLikelyBot(login),
-        })
-        .onConflictDoUpdate({
-          target: users.githubLogin,
-          set: {
-            githubNodeId: sql`coalesce(excluded.github_node_id, ${users.githubNodeId})`,
-            displayName: sql`coalesce(excluded.display_name, ${users.displayName})`,
-            avatarUrl: sql`coalesce(excluded.avatar_url, ${users.avatarUrl})`,
-            // Never clobber a manual is_bot override.
-            isBot: sql`case when ${users.isBotOverridden} = 1 then ${users.isBot} else excluded.is_bot end`,
-          },
-        })
-        .returning({ id: users.id })
-        .get();
+      const row = (
+        await exec
+          .insert(users)
+          .values({
+            githubLogin: login,
+            githubNodeId: actor?.id ?? null,
+            displayName: actor?.name ?? null,
+            avatarUrl: actor?.avatarUrl ?? null,
+            isBot: isLikelyBot(login),
+          })
+          .onConflictDoUpdate({
+            target: users.githubLogin,
+            set: {
+              githubNodeId: sql`coalesce(excluded.github_node_id, ${users.githubNodeId})`,
+              displayName: sql`coalesce(excluded.display_name, ${users.displayName})`,
+              avatarUrl: sql`coalesce(excluded.avatar_url, ${users.avatarUrl})`,
+              // Never clobber a manual is_bot override.
+              isBot: sql`case when ${users.isBotOverridden} = true then ${users.isBot} else excluded.is_bot end`,
+            },
+          })
+          .returning({ id: users.id })
+          .execute()
+      )[0]!;
 
       cache.set(login, row.id);
       return row.id;
@@ -87,26 +92,29 @@ export function createUserResolver() {
 export type UserResolver = ReturnType<typeof createUserResolver>;
 
 /** Upsert a repo by its GitHub node id; returns the local repo id. */
-export function upsertRepo(
+export async function upsertRepo(
   owner: string,
   name: string,
   githubNodeId: string,
-  defaultBranch?: string | null,
-): number {
+  defaultBranch: string | null | undefined,
+  accountId: number,
+): Promise<number> {
   // Only overwrite default_branch when we actually know it (the add-repo path
   // calls without it via the lightweight REPO_ID_QUERY) so we never null out a
   // value a prior sync populated.
   const set: { owner: string; name: string; defaultBranch?: string } = { owner, name };
   if (defaultBranch != null) set.defaultBranch = defaultBranch;
-  const row = db
-    .insert(repos)
-    .values({ owner, name, githubNodeId, defaultBranch: defaultBranch ?? null })
-    .onConflictDoUpdate({
-      target: repos.githubNodeId,
-      set,
-    })
-    .returning({ id: repos.id })
-    .get();
+  const row = (
+    await db
+      .insert(repos)
+      .values({ accountId, owner, name, githubNodeId, defaultBranch: defaultBranch ?? null })
+      .onConflictDoUpdate({
+        target: [repos.accountId, repos.githubNodeId],
+        set,
+      })
+      .returning({ id: repos.id })
+      .execute()
+  )[0]!;
   return row.id;
 }
 
@@ -263,20 +271,25 @@ export function isSubstantiveReview(
   return state !== 'commented' || !!body?.trim();
 }
 
-function upsertEvent(row: {
-  repoId: number;
-  actorId: number | null;
-  prId: number;
-  type: (typeof schema.events.$inferInsert)['type'];
-  occurredAt: Date;
-  refTable: string | null;
-  refId: number | null;
-  dedupeKey: string;
-}): void {
-  db.insert(events)
+async function upsertEvent(
+  exec: Executor,
+  row: {
+    accountId: number;
+    repoId: number;
+    actorId: number | null;
+    prId: number;
+    type: (typeof schema.events.$inferInsert)['type'];
+    occurredAt: Date;
+    refTable: string | null;
+    refId: number | null;
+    dedupeKey: string;
+  },
+): Promise<void> {
+  await exec
+    .insert(events)
     .values(row)
     .onConflictDoUpdate({
-      target: events.dedupeKey,
+      target: [events.accountId, events.dedupeKey],
       set: {
         actorId: row.actorId,
         occurredAt: row.occurredAt,
@@ -284,7 +297,7 @@ function upsertEvent(row: {
         refId: row.refId,
       },
     })
-    .run();
+    .execute();
 }
 
 /**
@@ -292,16 +305,17 @@ function upsertEvent(row: {
  * states, and emit timeline events. `commitFilesBySha` must already be
  * populated for any commits relevant to unresolved-thread derivation.
  */
-export function persistPr(
+export async function persistPr(
   pr: GqlPullRequest,
   repoId: number,
   resolver: UserResolver,
   commitFilesBySha: Map<string, string[]>,
-): void {
-  db.transaction(() => {
-    const authorId = resolver.resolve(pr.author);
+  accountId: number,
+): Promise<void> {
+  await runTransaction(async (tx) => {
+    const authorId = await resolver.resolve(tx, pr.author);
     // The actual merger (null for non-merged PRs / when GitHub omits the actor).
-    const mergedById = resolver.resolve(pr.mergedBy);
+    const mergedById = await resolver.resolve(tx, pr.mergedBy);
     const openedAt = new Date(pr.createdAt);
     const mergedAt = toDate(pr.mergedAt);
     const closedAt = toDate(pr.closedAt);
@@ -325,9 +339,11 @@ export function persistPr(
     }));
     const checkRuns = checkRunsFrom(head);
 
-    const prRow = db
+    const prRow = (
+      await tx
       .insert(pullRequests)
       .values({
+        accountId,
         githubNodeId: pr.id,
         repoId,
         number: pr.number,
@@ -352,7 +368,7 @@ export function persistPr(
         checkRuns,
       })
       .onConflictDoUpdate({
-        target: pullRequests.githubNodeId,
+        target: [pullRequests.accountId, pullRequests.githubNodeId],
         set: {
           title: pr.title,
           body: pr.body ?? null,
@@ -375,29 +391,32 @@ export function persistPr(
         },
       })
       .returning({ id: pullRequests.id })
-      .get();
+      .execute()
+    )[0]!;
     const prId = prRow.id;
 
     // ---- review requests (outstanding) — reconcile by delete + reinsert ----
-    db.delete(reviewRequests).where(eq(reviewRequests.prId, prId)).run();
+    await tx.delete(reviewRequests).where(eq(reviewRequests.prId, prId)).execute();
     for (const rr of pr.reviewRequests?.nodes ?? []) {
       const reviewer = rr.requestedReviewer;
       if (!reviewer) continue;
       if (reviewer.__typename === 'User') {
-        const userId = resolver.resolve({
+        const userId = await resolver.resolve(tx, {
           login: reviewer.login,
           id: reviewer.id,
         });
-        db.insert(reviewRequests).values({ prId, userId, teamName: null }).run();
+        await tx.insert(reviewRequests).values({ prId, userId, teamName: null }).execute();
       } else if (reviewer.__typename === 'Team') {
-        db.insert(reviewRequests)
+        await tx
+          .insert(reviewRequests)
           .values({ prId, userId: null, teamName: reviewer.name })
-          .run();
+          .execute();
       }
     }
 
     // ---- lifecycle events ----
-    upsertEvent({
+    await upsertEvent(tx, {
+      accountId,
       repoId,
       actorId: authorId,
       prId,
@@ -408,7 +427,8 @@ export function persistPr(
       dedupeKey: `pr_opened:${pr.id}`,
     });
     if (pr.state === 'MERGED' && mergedAt) {
-      upsertEvent({
+      await upsertEvent(tx, {
+        accountId,
         repoId,
         actorId: authorId,
         prId,
@@ -419,7 +439,8 @@ export function persistPr(
         dedupeKey: `pr_merged:${pr.id}`,
       });
     } else if (pr.state === 'CLOSED' && closedAt) {
-      upsertEvent({
+      await upsertEvent(tx, {
+        accountId,
         repoId,
         actorId: authorId,
         prId,
@@ -433,10 +454,11 @@ export function persistPr(
 
     // ---- reviews ----
     for (const r of pr.reviews.nodes) {
-      const reviewerId = resolver.resolve(r.author);
+      const reviewerId = await resolver.resolve(tx, r.author);
       const submittedAt = toDate(r.submittedAt);
       if (!submittedAt) continue; // pending reviews have no timestamp
-      const reviewRow = db
+      const reviewRow = (
+        await tx
         .insert(reviews)
         .values({
           githubNodeId: r.id,
@@ -448,7 +470,7 @@ export function persistPr(
           submittedAt,
         })
         .onConflictDoUpdate({
-          target: reviews.githubNodeId,
+          target: [reviews.prId, reviews.githubNodeId],
           set: {
             state: reviewState(r.state),
             body: r.body ?? null,
@@ -457,9 +479,11 @@ export function persistPr(
           },
         })
         .returning({ id: reviews.id })
-        .get();
+        .execute()
+      )[0]!;
       if (isSubstantiveReview(reviewState(r.state), r.body)) {
-        upsertEvent({
+        await upsertEvent(tx, {
+          accountId,
           repoId,
           actorId: reviewerId,
           prId,
@@ -480,7 +504,7 @@ export function persistPr(
 
     for (const t of pr.reviewThreads.nodes) {
       const commentNodes = t.comments.nodes;
-      const originalCommenterId = resolver.resolve(commentNodes[0]?.author);
+      const originalCommenterId = await resolver.resolve(tx, commentNodes[0]?.author);
 
       const derivedState = deriveThreadState(
         {
@@ -495,7 +519,8 @@ export function persistPr(
         commitFilesBySha,
       );
 
-      const threadRow = db
+      const threadRow = (
+        await tx
         .insert(reviewThreads)
         .values({
           githubNodeId: t.id,
@@ -511,7 +536,7 @@ export function persistPr(
             : new Date(pr.createdAt),
         })
         .onConflictDoUpdate({
-          target: reviewThreads.githubNodeId,
+          target: [reviewThreads.prId, reviewThreads.githubNodeId],
           set: {
             isResolved: t.isResolved,
             isOutdated: t.isOutdated,
@@ -520,12 +545,14 @@ export function persistPr(
           },
         })
         .returning({ id: reviewThreads.id })
-        .get();
+        .execute()
+      )[0]!;
 
       for (const c of commentNodes) {
-        const commenterId = resolver.resolve(c.author);
+        const commenterId = await resolver.resolve(tx, c.author);
         const createdAt = new Date(c.createdAt);
-        db.insert(reviewComments)
+        await tx
+          .insert(reviewComments)
           .values({
             githubNodeId: c.id,
             threadId: threadRow.id,
@@ -537,15 +564,16 @@ export function persistPr(
             createdAt,
           })
           .onConflictDoUpdate({
-            target: reviewComments.githubNodeId,
+            target: [reviewComments.prId, reviewComments.githubNodeId],
             set: {
               body: c.body,
               diffHunk: c.diffHunk ?? null,
               databaseId: c.fullDatabaseId ?? null,
             },
           })
-          .run();
-        upsertEvent({
+          .execute();
+        await upsertEvent(tx, {
+          accountId,
           repoId,
           actorId: commenterId,
           prId,
@@ -561,9 +589,10 @@ export function persistPr(
 
     // ---- general PR comments ----
     for (const c of pr.comments.nodes) {
-      const commenterId = resolver.resolve(c.author);
+      const commenterId = await resolver.resolve(tx, c.author);
       const createdAt = new Date(c.createdAt);
-      const commentRow = db
+      const commentRow = (
+        await tx
         .insert(prComments)
         .values({
           githubNodeId: c.id,
@@ -574,12 +603,14 @@ export function persistPr(
           createdAt,
         })
         .onConflictDoUpdate({
-          target: prComments.githubNodeId,
+          target: [prComments.prId, prComments.githubNodeId],
           set: { body: c.body, databaseId: c.fullDatabaseId ?? null },
         })
         .returning({ id: prComments.id })
-        .get();
-      upsertEvent({
+        .execute()
+      )[0]!;
+      await upsertEvent(tx, {
+        accountId,
         repoId,
         actorId: commenterId,
         prId,
@@ -594,12 +625,14 @@ export function persistPr(
     // ---- commits ----
     for (const node of pr.commits.nodes) {
       const c = node.commit;
-      const commitAuthorId = resolver.resolve(
+      const commitAuthorId = await resolver.resolve(
+        tx,
         c.author?.user
           ? { login: c.author.user.login, id: c.author.user.id }
           : null,
       );
-      const committerId = resolver.resolve(
+      const committerId = await resolver.resolve(
+        tx,
         c.committer?.user
           ? { login: c.committer.user.login, id: c.committer.user.id }
           : null,
@@ -607,7 +640,8 @@ export function persistPr(
       const committedAt = new Date(c.committedDate);
       // Upsert (not DoNothing) so we always get the row id back to point the
       // timeline event at — the marker modal resolves the commit via ref_id.
-      const commitRow = db
+      const commitRow = (
+        await tx
         .insert(commits)
         .values({
           sha: c.oid,
@@ -622,8 +656,10 @@ export function persistPr(
           set: { message: c.message, committedAt },
         })
         .returning({ id: commits.id })
-        .get();
-      upsertEvent({
+        .execute()
+      )[0]!;
+      await upsertEvent(tx, {
+        accountId,
         repoId,
         actorId: commitAuthorId ?? committerId,
         prId,

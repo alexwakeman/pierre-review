@@ -32,6 +32,15 @@ function floatFromEnv(key: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// ---- Deployment mode (the master switch) ----
+// `local` (default): SQLite via better-sqlite3, `gh auth token` auth, one
+// implicit account, no landing page — the unchanged zero-config experience.
+// `cloud`: Postgres, GitHub App OAuth, many accounts, public landing page.
+// Everything dialect/tenancy-specific branches off `deploymentMode`.
+const deploymentMode: 'local' | 'cloud' =
+  process.env.DEPLOYMENT_MODE === 'cloud' ? 'cloud' : 'local';
+const isCloud = deploymentMode === 'cloud';
+
 // Default the SQLite DB under apps/backend/data for local dev. The INSTALLED CLI
 // instead points DATABASE_URL at a user-writable ~/.pierre-review path (see
 // cli.ts) BEFORE config loads — so `pnpm dev` and a globally-installed `pierre`
@@ -39,12 +48,24 @@ function floatFromEnv(key: string, fallback: number): number {
 // in-memory "is-syncing" guard, so two of them double-sync every repo against the
 // GitHub rate limit and contend on the SQLite write lock. DATABASE_URL / --db
 // override this; a relative override resolves under apps/backend.
-const rawDbUrl = process.env.DATABASE_URL ?? './data/pierre-review.sqlite';
+//
+// In cloud mode DATABASE_URL is a `postgres://…` connection string (not a path),
+// so dbPath is irrelevant there and left as the connection string verbatim.
+const rawDbUrl =
+  process.env.DATABASE_URL ?? (isCloud ? '' : './data/pierre-review.sqlite');
 
 export const config = {
+  deploymentMode,
+  isCloud,
+  // Drives the DB driver + schema selection in client.ts.
+  dbDialect: (isCloud ? 'postgres' : 'sqlite') as 'sqlite' | 'postgres',
+  // Postgres connection string (cloud only). Empty in local mode.
+  databaseUrl: process.env.DATABASE_URL ?? '',
+
   port: intFromEnv('PORT', 4000),
-  host: process.env.HOST ?? '127.0.0.1',
-  dbPath: isAbsolute(rawDbUrl) ? rawDbUrl : resolve(backendRoot, rawDbUrl),
+  host: process.env.HOST ?? (isCloud ? '0.0.0.0' : '127.0.0.1'),
+  dbPath:
+    isCloud || isAbsolute(rawDbUrl) ? rawDbUrl : resolve(backendRoot, rawDbUrl),
   backfillDays: intFromEnv('BACKFILL_DAYS', 90),
   syncCron: process.env.SYNC_CRON ?? '*/5 * * * *',
   syncOverlapMinutes: intFromEnv('SYNC_OVERLAP_MINUTES', 20),
@@ -52,10 +73,26 @@ export const config = {
   // Disable the periodic scheduler (used by scripts/tests).
   disableScheduler: process.env.DISABLE_SCHEDULER === 'true',
 
-  // ---- Claude Review (agentic PR review; opt-in) ----
+  // ---- Cloud (Railway) — GitHub App OAuth + sessions + token encryption ----
+  // Public base URL of the deployment (no trailing slash); used to build the
+  // OAuth redirect_uri and absolute links. Locally http://localhost:<port>.
+  appBaseUrl:
+    process.env.APP_BASE_URL?.replace(/\/$/, '') ??
+    `http://localhost:${intFromEnv('PORT', 4000)}`,
+  githubAppClientId: process.env.GITHUB_APP_CLIENT_ID ?? '',
+  githubAppClientSecret: process.env.GITHUB_APP_CLIENT_SECRET ?? '',
+  githubAppSlug: process.env.GITHUB_APP_SLUG ?? '',
+  // Seals the session cookie ({accountId}). Rotate to invalidate all sessions.
+  sessionSecret: process.env.SESSION_SECRET ?? '',
+  // 32-byte (64-hex) key for AES-256-GCM encryption of stored access tokens.
+  encryptionKey: process.env.ENCRYPTION_KEY ?? '',
+
+  // ---- Claude Review (agentic PR review; opt-in, LOCAL-ONLY) ----
   // OFF by default: the feature spends real money / Agent-SDK credits per run.
-  // Enable with ENABLE_CLAUDE_REVIEW=true.
-  claudeReviewEnabled: process.env.ENABLE_CLAUDE_REVIEW === 'true',
+  // Enable with ENABLE_CLAUDE_REVIEW=true. FORCE-DISABLED in cloud mode (it
+  // shells out to a local gh + writable clone dir that don't exist on Railway).
+  claudeReviewEnabled:
+    !isCloud && process.env.ENABLE_CLAUDE_REVIEW === 'true',
   // Partial clones + ephemeral worktrees live here (a user-writable home path,
   // never the read-only install dir). CLONE_DIR overrides.
   cloneDir: process.env.CLONE_DIR ?? resolve(homedir(), '.pierre-review', 'clones'),
@@ -73,3 +110,30 @@ export const config = {
 } as const;
 
 export type Config = typeof config;
+
+// Fail loud at startup if a required cloud var is missing — mirrors the
+// gh-auth loud failure. Called from index.ts only when deploymentMode==='cloud'.
+export function assertCloudConfig(): void {
+  const required: Array<[string, string]> = [
+    ['DATABASE_URL', config.databaseUrl],
+    ['APP_BASE_URL', process.env.APP_BASE_URL ?? ''],
+    ['GITHUB_APP_CLIENT_ID', config.githubAppClientId],
+    ['GITHUB_APP_CLIENT_SECRET', config.githubAppClientSecret],
+    ['GITHUB_APP_SLUG', config.githubAppSlug],
+    ['SESSION_SECRET', config.sessionSecret],
+    ['ENCRYPTION_KEY', config.encryptionKey],
+  ];
+  const missing = required.filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length > 0) {
+    throw new Error(
+      `Cloud mode (DEPLOYMENT_MODE=cloud) requires these env vars: ${missing.join(
+        ', ',
+      )}. See .env.cloud.example and docs/DEPLOY-RAILWAY.md.`,
+    );
+  }
+  if (Buffer.from(config.encryptionKey, 'hex').length !== 32) {
+    throw new Error(
+      'ENCRYPTION_KEY must be 32 bytes as 64 hex chars (generate with `openssl rand -hex 32`).',
+    );
+  }
+}

@@ -57,6 +57,13 @@
       "when": 1780604381005,
       "tag": "0007_dark_anthem",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1780700000000,
+      "tag": "0008_multitenant_accounts",
+      "breakpoints": true
     }
   ]
 }

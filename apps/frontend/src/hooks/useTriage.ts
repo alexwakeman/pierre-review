@@ -29,7 +29,9 @@ export function useSearchOpenPrs() {
 }
 
 export function useMe() {
-  return useQuery<MeResponse>({ queryKey: ['me'], queryFn: api.me });
+  // `retry: false` so a cloud-mode 401 (signed out) surfaces immediately to the
+  // App auth gate instead of being retried.
+  return useQuery<MeResponse>({ queryKey: ['me'], queryFn: api.me, retry: false });
 }
 
 export function useMyTurn() {

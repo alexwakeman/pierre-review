@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app.js';
-import { config } from './config.js';
+import { assertCloudConfig, config } from './config.js';
 import { cleanupRedundantReviewEvents } from './db/cleanup.js';
 import { runMigrations } from './db/run-migrations.js';
 
@@ -9,21 +9,27 @@ import { runMigrations } from './db/run-migrations.js';
 // start the scheduler → listen. Returns the listening Fastify instance and the
 // resolved port so a caller (the CLI) can print the URL / open the browser.
 export async function start(): Promise<{ app: FastifyInstance; port: number }> {
+  // Cloud mode: fail loud if required env vars are missing/invalid before serving.
+  if (config.isCloud) assertCloudConfig();
+
   // Apply any pending migrations before serving.
-  runMigrations();
+  await runMigrations();
 
   // Drop redundant empty-review-wrapper timeline events left by older syncs.
-  const removed = cleanupRedundantReviewEvents();
+  const removed = await cleanupRedundantReviewEvents();
   if (removed > 0) console.log(`cleanup: removed ${removed} redundant review_submitted events`);
 
-  // Cache the locally-authenticated GitHub user up front so triage ("my turn")
-  // knows who "you" are. Non-fatal if gh isn't available.
-  const { ensureLocalUser } = await import('./github/local-user.js');
-  const me = ensureLocalUser();
+  // Local mode only: synthesize/refresh the single local account from `gh api
+  // user` so triage ("my turn") knows who "you" are. Non-fatal if gh is missing.
+  // In cloud mode accounts are created via OAuth sign-in instead.
+  if (!config.isCloud) {
+    const { ensureLocalAccount } = await import('./auth/account.js');
+    const me = await ensureLocalAccount();
+    if (me?.githubLogin) console.log(`local user: ${me.githubLogin}`);
+    else console.warn('local user unknown (gh api user failed) — "my turn" disabled');
+  }
 
   const app = await buildApp();
-  if (me) app.log.info(`local user: ${me.login}`);
-  else app.log.warn('local user unknown (gh api user failed) — "my turn" disabled');
 
   // Heal any Claude review runs left mid-flight by a crash (their 'running'
   // status is persisted). Only relevant when the feature is enabled.
@@ -31,7 +37,7 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     const { reconcileReviewsOnStartup } = await import(
       './review/review-manager.js'
     );
-    reconcileReviewsOnStartup(app.log);
+    await reconcileReviewsOnStartup(app.log);
   }
 
   // Scheduler is wired in Phase 3; guarded so the skeleton runs without it.

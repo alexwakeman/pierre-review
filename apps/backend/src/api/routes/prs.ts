@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { MarkViewedBody } from '@pierre-review/shared';
 import { getPrDetail, markPrViewed } from '../../db/queries.js';
+import { accountIdOf } from '../plugins/auth.js';
 
 const idParamSchema = {
   params: {
@@ -22,7 +23,7 @@ const markViewedSchema = {
 export async function prRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/prs/:id', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
-    const pr = getPrDetail(id);
+    const pr = await getPrDetail(id, accountIdOf(req));
     if (!pr) {
       reply.status(404);
       return { error: 'NotFound', message: `PR ${id} not found` };
@@ -38,7 +39,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const { id } = req.params as { id: number };
       const { sha } = (req.body ?? {}) as MarkViewedBody;
-      const ok = markPrViewed(id, sha);
+      const ok = await markPrViewed(id, accountIdOf(req), sha);
       if (!ok) {
         reply.status(404);
         return { error: 'NotFound', message: `PR ${id} not found` };
@@ -53,7 +54,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     { schema: idParamSchema },
     async (req, reply) => {
       const { id } = req.params as { id: number };
-      const ok = markPrViewed(id);
+      const ok = await markPrViewed(id, accountIdOf(req));
       if (!ok) {
         reply.status(404);
         return { error: 'NotFound', message: `PR ${id} not found` };

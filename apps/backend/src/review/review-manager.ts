@@ -6,6 +6,7 @@ import type {
 } from '@pierre-review/shared';
 import type { Logger } from '../sync/sync-repo.js';
 import { config } from '../config.js';
+import { LOCAL_ACCOUNT_ID } from '../auth/account.js';
 import { getLatestClaudeReview, getReviewPrContext } from '../db/queries.js';
 import { runReview } from './agent.js';
 import { insertQueuedReview, reconcileOrphanedReviews } from './persist.js';
@@ -24,23 +25,45 @@ export type StartReviewResult =
       reason: 'disabled' | 'already_running' | 'busy' | 'not_found' | 'no_head';
     };
 
-export function startReview(
+export async function startReview(
   prId: number,
   model: ClaudeReviewModel,
   log: Logger,
-): StartReviewResult {
+): Promise<StartReviewResult> {
   if (!config.claudeReviewEnabled) return { ok: false, reason: 'disabled' };
   if (running.has(prId)) return { ok: false, reason: 'already_running' };
   if (running.size >= config.reviewConcurrency) {
     return { ok: false, reason: 'busy' };
   }
-  const ctx = getReviewPrContext(prId);
-  if (!ctx) return { ok: false, reason: 'not_found' };
-  if (!ctx.headSha) return { ok: false, reason: 'no_head' };
+  // Reserve the slot SYNCHRONOUSLY before any await, so a second concurrent
+  // startReview for the same prId sees `running.has(prId)` immediately (no
+  // TOCTOU double-start). Roll it back on any early-bail / insert failure below.
+  running.add(prId);
+
+  let reviewId: number;
+  let ctx: Awaited<ReturnType<typeof getReviewPrContext>>;
+  try {
+    ctx = await getReviewPrContext(prId, LOCAL_ACCOUNT_ID);
+    if (!ctx) {
+      running.delete(prId);
+      return { ok: false, reason: 'not_found' };
+    }
+    if (!ctx.headSha) {
+      running.delete(prId);
+      return { ok: false, reason: 'no_head' };
+    }
+    reviewId = await insertQueuedReview(
+      prId,
+      ctx.headSha,
+      model,
+      LOCAL_ACCOUNT_ID,
+    );
+  } catch (err) {
+    running.delete(prId);
+    throw err;
+  }
   const headSha = ctx.headSha;
 
-  const reviewId = insertQueuedReview(prId, headSha, model);
-  running.add(prId);
   reviewIdByPr.set(prId, reviewId);
   const controller = new AbortController();
   controllers.set(reviewId, controller);
@@ -91,7 +114,9 @@ export function requestReviewCancel(prId: number): boolean {
 
 // Live status when a review is in flight; otherwise the latest persisted run's
 // status (or 'idle' if the PR was never reviewed).
-export function getReviewStatus(prId: number): ClaudeReviewStatusResponse {
+export async function getReviewStatus(
+  prId: number,
+): Promise<ClaudeReviewStatusResponse> {
   const reviewId = reviewIdByPr.get(prId);
   if (reviewId != null && running.has(prId)) {
     return {
@@ -100,19 +125,19 @@ export function getReviewStatus(prId: number): ClaudeReviewStatusResponse {
       progress: progressByReview.get(reviewId) ?? null,
     };
   }
-  const latest = getLatestClaudeReview(prId);
+  const latest = await getLatestClaudeReview(prId, LOCAL_ACCOUNT_ID);
   if (!latest) return { status: 'idle', reviewId: null, progress: null };
   return { status: latest.status, reviewId: latest.id, progress: null };
 }
 
 // All reviews currently in flight (for the global progress banner), joined with
 // their PR coordinates.
-export function listActiveReviews(): ActiveReview[] {
+export async function listActiveReviews(): Promise<ActiveReview[]> {
   const out: ActiveReview[] = [];
   for (const prId of running) {
     const reviewId = reviewIdByPr.get(prId);
     if (reviewId == null) continue;
-    const ctx = getReviewPrContext(prId);
+    const ctx = await getReviewPrContext(prId, LOCAL_ACCOUNT_ID);
     if (!ctx) continue;
     out.push({
       reviewId,
@@ -128,7 +153,7 @@ export function listActiveReviews(): ActiveReview[] {
 }
 
 // Heal runs left 'running'/'queued' by a crash (our status is persisted).
-export function reconcileReviewsOnStartup(log: Logger): void {
-  const n = reconcileOrphanedReviews();
+export async function reconcileReviewsOnStartup(log: Logger): Promise<void> {
+  const n = await reconcileOrphanedReviews();
   if (n > 0) log.info(`reconciled ${n} orphaned claude review(s) -> failed`);
 }

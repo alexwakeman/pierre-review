@@ -9,7 +9,7 @@ import type {
   ThreadStateCounts,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
-import { getLocalUserId } from '../github/local-user.js';
+import { getAccountUserId } from '../auth/account.js';
 
 const { reviewRequests, prViews, events, reviews } = schema;
 
@@ -37,10 +37,10 @@ function emptyNew(): NewSinceLastViewed {
 }
 
 /** Per-author latest review state → is the PR approved with no blocking review? */
-function computeApprovedByPr(prIds: number[]): Set<number> {
+async function computeApprovedByPr(prIds: number[]): Promise<Set<number>> {
   const approved = new Set<number>();
   if (prIds.length === 0) return approved;
-  const rows = db
+  const rows = await db
     .select({
       prId: reviews.prId,
       authorId: reviews.authorId,
@@ -49,7 +49,7 @@ function computeApprovedByPr(prIds: number[]): Set<number> {
     })
     .from(reviews)
     .where(inArray(reviews.prId, prIds))
-    .all();
+    .execute();
 
   // latest review state per (pr, author), ignoring pure "commented" reviews.
   const latest = new Map<string, { state: string; at: number }>();
@@ -80,19 +80,22 @@ function computeApprovedByPr(prIds: number[]): Set<number> {
  * counts) for a batch of PRs. All supporting data is loaded in a handful of
  * batched queries — safe to call on the hot timeline path.
  */
-export function computeTriage(prs: TriagePrInput[]): Map<number, TriageResult> {
+export async function computeTriage(
+  prs: TriagePrInput[],
+  accountId: number,
+): Promise<Map<number, TriageResult>> {
   const out = new Map<number, TriageResult>();
   const prIds = prs.map((p) => p.id);
-  const localUserId = getLocalUserId();
+  const localUserId = await getAccountUserId(accountId);
 
   // ---- review requests (user-type) by PR ----
   const reqByPr = new Map<number, { mine: boolean; others: number }>();
   if (prIds.length > 0) {
-    const rows = db
+    const rows = await db
       .select({ prId: reviewRequests.prId, userId: reviewRequests.userId })
       .from(reviewRequests)
       .where(inArray(reviewRequests.prId, prIds))
-      .all();
+      .execute();
     for (const r of rows) {
       if (r.userId == null) continue; // team requests don't map to "me"
       const entry = reqByPr.get(r.prId) ?? { mine: false, others: 0 };
@@ -105,18 +108,18 @@ export function computeTriage(prs: TriagePrInput[]): Map<number, TriageResult> {
   // ---- last-viewed per PR ----
   const viewedAtByPr = new Map<number, number>();
   if (prIds.length > 0) {
-    const rows = db
+    const rows = await db
       .select({ prId: prViews.prId, lastViewedAt: prViews.lastViewedAt })
       .from(prViews)
       .where(inArray(prViews.prId, prIds))
-      .all();
+      .execute();
     for (const r of rows) viewedAtByPr.set(r.prId, r.lastViewedAt.getTime());
   }
 
   // ---- events per PR (for new-since counts) ----
   const newByPr = new Map<number, NewSinceLastViewed>();
   if (prIds.length > 0 && viewedAtByPr.size > 0) {
-    const rows = db
+    const rows = await db
       .select({
         prId: events.prId,
         type: events.type,
@@ -124,7 +127,7 @@ export function computeTriage(prs: TriagePrInput[]): Map<number, TriageResult> {
       })
       .from(events)
       .where(inArray(events.prId, prIds))
-      .all();
+      .execute();
     for (const r of rows) {
       if (r.prId == null) continue;
       const threshold = viewedAtByPr.get(r.prId);
@@ -139,7 +142,7 @@ export function computeTriage(prs: TriagePrInput[]): Map<number, TriageResult> {
     }
   }
 
-  const approvedByPr = computeApprovedByPr(prIds);
+  const approvedByPr = await computeApprovedByPr(prIds);
 
   for (const pr of prs) {
     const req = reqByPr.get(pr.id);
