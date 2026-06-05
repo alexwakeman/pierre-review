@@ -1,4 +1,5 @@
-import { sqlite } from './client.js';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { db, schema } from './client.js';
 
 // One-time / idempotent maintenance run at startup.
 //
@@ -8,17 +9,30 @@ import { sqlite } from './client.js';
 // them (see sync/upsert.ts), but pre-existing rows linger because upserts only
 // update. This removes them; it also catches reviews whose summary body was
 // later cleared on GitHub. Cheap and safe to run every boot.
-export function cleanupRedundantReviewEvents(): number {
-  const res = sqlite
-    .prepare(
-      `DELETE FROM events
-         WHERE type = 'review_submitted'
-           AND ref_table = 'reviews'
-           AND ref_id IN (
-             SELECT id FROM reviews
-               WHERE state = 'commented' AND (body IS NULL OR trim(body) = '')
-           )`,
+//
+// Written as portable drizzle (no raw better-sqlite3 / db.execute) so it runs on
+// both dialects; the count comes from `.returning().length` (dialect-neutral).
+export async function cleanupRedundantReviewEvents(): Promise<number> {
+  const { events, reviews } = schema;
+  const emptyCommentedReviews = db
+    .select({ id: reviews.id })
+    .from(reviews)
+    .where(
+      and(
+        eq(reviews.state, 'commented'),
+        or(isNull(reviews.body), eq(sql`trim(${reviews.body})`, '')),
+      ),
+    );
+  const deleted = await db
+    .delete(events)
+    .where(
+      and(
+        eq(events.type, 'review_submitted'),
+        eq(events.refTable, 'reviews'),
+        inArray(events.refId, emptyCommentedReviews),
+      ),
     )
-    .run();
-  return res.changes;
+    .returning({ id: events.id })
+    .execute();
+  return deleted.length;
 }

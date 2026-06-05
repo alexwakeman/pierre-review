@@ -63,10 +63,17 @@ const REASON_PRIORITY: ReasonTag[] = [
   'untouched_threads',
   'in_progress',
 ];
-import { db, schema } from './client.js';
+import { db, schema, isPg } from './client.js';
+import { runTransaction } from './client.js';
 import { config } from '../config.js';
 import { computeTriage, type TriageResult } from './triage.js';
-import { getLocalUserId } from '../github/local-user.js';
+import { getAccountUserId } from '../auth/account.js';
+
+// Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
+// timestamptz (drizzle binds the Date through the codec), whereas SQLite columns
+// are integer unix-epoch seconds (`mode:'timestamp'`), so we hand it the int.
+const tsBound = (d: Date): Date | number =>
+  isPg ? d : Math.floor(d.getTime() / 1000);
 
 const {
   repos,
@@ -103,13 +110,14 @@ function mapUser(u: typeof users.$inferSelect): User {
   };
 }
 
-export function listRepos(): Repo[] {
-  const rows = db
+export async function listRepos(accountId: number): Promise<Repo[]> {
+  const rows = await db
     .select()
     .from(repos)
     .leftJoin(syncState, eq(syncState.repoId, repos.id))
+    .where(eq(repos.accountId, accountId))
     .orderBy(asc(repos.owner), asc(repos.name))
-    .all();
+    .execute();
 
   return rows.map((r) => ({
     id: r.repos.id,
@@ -124,37 +132,43 @@ export function listRepos(): Repo[] {
   }));
 }
 
-export function getRepo(id: number): Repo | null {
-  return listRepos().find((r) => r.id === id) ?? null;
+export async function getRepo(id: number, accountId: number): Promise<Repo | null> {
+  return (await listRepos(accountId)).find((r) => r.id === id) ?? null;
 }
 
 // Node IDs of every watched repo. Used to drop already-tracked repos from live
 // search results (a GitHub search hit exposes the same GraphQL `id`).
-export function getWatchedRepoNodeIds(): Set<string> {
-  const rows = db.select({ nodeId: repos.githubNodeId }).from(repos).all();
+export async function getWatchedRepoNodeIds(accountId: number): Promise<Set<string>> {
+  const rows = await db
+    .select({ nodeId: repos.githubNodeId })
+    .from(repos)
+    .where(eq(repos.accountId, accountId))
+    .execute();
   return new Set(rows.map((r) => r.nodeId));
 }
 
-export function listUsers(): User[] {
-  return db
+export async function listUsers(): Promise<User[]> {
+  const rows = await db
     .select()
     .from(users)
     .orderBy(asc(users.githubLogin))
-    .all()
-    .map(mapUser);
+    .execute();
+  return rows.map(mapUser);
 }
 
-export function setUserBot(id: number, isBot: boolean): User | null {
-  const row = db
+export async function setUserBot(id: number, isBot: boolean): Promise<User | null> {
+  const rows = await db
     .update(users)
     .set({ isBot, isBotOverridden: true })
     .where(eq(users.id, id))
     .returning()
-    .get();
+    .execute();
+  const row = rows[0] ?? null;
   return row ? mapUser(row) : null;
 }
 
 export interface TimelineFilters {
+  accountId: number;
   from: Date;
   to: Date;
   repoIds: number[] | null;
@@ -181,10 +195,14 @@ const ACTIVITY_EVENT_TYPES: EventType[] = [
 
 // Open PRs (from `prRows`) with no activity event inside [from, to] — the "stale"
 // set. Only open PRs are eligible (merged/closed are historical, never stale).
-function staleOpenPrIds(prRows: PrRow[], from: Date, to: Date): Set<number> {
+async function staleOpenPrIds(
+  prRows: PrRow[],
+  from: Date,
+  to: Date,
+): Promise<Set<number>> {
   const openIds = prRows.filter((p) => p.state === 'open').map((p) => p.id);
   if (openIds.length === 0) return new Set();
-  const activeRows = db
+  const activeRows = await db
     .select({ prId: events.prId })
     .from(events)
     .where(
@@ -195,7 +213,7 @@ function staleOpenPrIds(prRows: PrRow[], from: Date, to: Date): Set<number> {
         lte(events.occurredAt, to),
       ),
     )
-    .all();
+    .execute();
   const active = new Set<number>();
   for (const r of activeRows) if (r.prId != null) active.add(r.prId);
   return new Set(openIds.filter((id) => !active.has(id)));
@@ -219,19 +237,21 @@ function prStatusWhere(statuses: PrStatus[]): SQL {
   return or(...parts)!;
 }
 
-function botUserIds(): number[] {
-  return db
+async function botUserIds(): Promise<number[]> {
+  const rows = await db
     .select({ id: users.id })
     .from(users)
     .where(eq(users.isBot, true))
-    .all()
-    .map((r) => r.id);
+    .execute();
+  return rows.map((r) => r.id);
 }
 
-function buildThreadCounts(prIds: number[]): Map<number, ThreadStateCounts> {
+async function buildThreadCounts(
+  prIds: number[],
+): Promise<Map<number, ThreadStateCounts>> {
   const map = new Map<number, ThreadStateCounts>();
   if (prIds.length === 0) return map;
-  const rows = db
+  const rows = await db
     .select({
       prId: reviewThreads.prId,
       state: reviewThreads.derivedState,
@@ -240,7 +260,7 @@ function buildThreadCounts(prIds: number[]): Map<number, ThreadStateCounts> {
     .from(reviewThreads)
     .where(inArray(reviewThreads.prId, prIds))
     .groupBy(reviewThreads.prId, reviewThreads.derivedState)
-    .all();
+    .execute();
   for (const r of rows) {
     const entry = map.get(r.prId) ?? emptyCounts();
     entry[r.state] = r.c;
@@ -262,9 +282,12 @@ function isStalled(pr: { state: PrState; lastCommitAt: Date | null }, counts: Th
 type PrRow = typeof pullRequests.$inferSelect;
 
 /** Build full TimelinePr objects (incl. triage fields) for a set of PR rows. */
-function buildTimelinePrs(prRows: PrRow[]): TimelinePr[] {
-  const counts = buildThreadCounts(prRows.map((p) => p.id));
-  const triage = computeTriage(
+async function buildTimelinePrs(
+  prRows: PrRow[],
+  accountId: number,
+): Promise<TimelinePr[]> {
+  const counts = await buildThreadCounts(prRows.map((p) => p.id));
+  const triage = await computeTriage(
     prRows.map((p) => {
       const c = counts.get(p.id) ?? emptyCounts();
       return {
@@ -278,6 +301,7 @@ function buildTimelinePrs(prRows: PrRow[]): TimelinePr[] {
         threadCounts: c,
       };
     }),
+    accountId,
   );
   return prRows.map((p) => {
     const c = counts.get(p.id) ?? emptyCounts();
@@ -317,18 +341,30 @@ function mapTimelinePr(
   };
 }
 
-export function getTimeline(filters: TimelineFilters): TimelineResponse {
-  const { from, to, repoIds, userIds, types, statuses, excludeBots, excludeStale } =
-    filters;
+export async function getTimeline(
+  filters: TimelineFilters,
+): Promise<TimelineResponse> {
+  const {
+    accountId,
+    from,
+    to,
+    repoIds,
+    userIds,
+    types,
+    statuses,
+    excludeBots,
+    excludeStale,
+  } = filters;
 
   // ---- PRs that overlap the window ----
   const prConds = [
+    eq(pullRequests.accountId, accountId),
     lte(pullRequests.openedAt, to),
     or(
       eq(pullRequests.state, 'open'),
       gte(
         sql`coalesce(${pullRequests.mergedAt}, ${pullRequests.closedAt}, ${pullRequests.openedAt})`,
-        Math.floor(from.getTime() / 1000),
+        tsBound(from),
       ),
     ),
   ];
@@ -356,33 +392,38 @@ export function getTimeline(filters: TimelineFilters): TimelineResponse {
       )!,
     );
   }
-  if (excludeBots) {
-    const bots = botUserIds();
-    if (bots.length > 0) {
-      prConds.push(
-        or(
-          sql`${pullRequests.authorId} is null`,
-          sql`${pullRequests.authorId} not in (${sql.join(bots, sql`, `)})`,
-        )!,
-      );
-    }
+  // Resolve the bot set once (used by both the PR and events branches below).
+  const bots = excludeBots ? await botUserIds() : [];
+  if (excludeBots && bots.length > 0) {
+    prConds.push(
+      or(
+        sql`${pullRequests.authorId} is null`,
+        sql`${pullRequests.authorId} not in (${sql.join(bots, sql`, `)})`,
+      )!,
+    );
   }
 
-  let prRows = db
+  let prRows = await db
     .select()
     .from(pullRequests)
     .where(and(...prConds))
-    .all();
+    .execute();
 
   // Stale filter: drop open PRs with no activity in the window. Computed before
   // building the lean PRs so their events can be dropped too (below).
-  const staleIds = excludeStale ? staleOpenPrIds(prRows, from, to) : new Set<number>();
+  const staleIds = excludeStale
+    ? await staleOpenPrIds(prRows, from, to)
+    : new Set<number>();
   if (staleIds.size > 0) prRows = prRows.filter((p) => !staleIds.has(p.id));
 
-  const prs: TimelinePr[] = buildTimelinePrs(prRows);
+  const prs: TimelinePr[] = await buildTimelinePrs(prRows, accountId);
 
   // ---- events in the window ----
-  const evConds = [gte(events.occurredAt, from), lte(events.occurredAt, to)];
+  const evConds = [
+    eq(events.accountId, accountId),
+    gte(events.occurredAt, from),
+    lte(events.occurredAt, to),
+  ];
   if (repoIds) evConds.push(inArray(events.repoId, repoIds));
   if (types) evConds.push(inArray(events.type, types));
   if (userIds && userIds.length > 0) {
@@ -406,24 +447,21 @@ export function getTimeline(filters: TimelineFilters): TimelineResponse {
   if (staleIds.size > 0) {
     evConds.push(or(isNull(events.prId), notInArray(events.prId, [...staleIds]))!);
   }
-  if (excludeBots) {
-    const bots = botUserIds();
-    if (bots.length > 0) {
-      evConds.push(
-        or(
-          sql`${events.actorId} is null`,
-          sql`${events.actorId} not in (${sql.join(bots, sql`, `)})`,
-        )!,
-      );
-    }
+  if (excludeBots && bots.length > 0) {
+    evConds.push(
+      or(
+        sql`${events.actorId} is null`,
+        sql`${events.actorId} not in (${sql.join(bots, sql`, `)})`,
+      )!,
+    );
   }
 
-  const evRows = db
+  const evRows = await db
     .select()
     .from(events)
     .where(and(...evConds))
     .orderBy(asc(events.occurredAt))
-    .all();
+    .execute();
 
   // Batch-load review outcomes for the review_submitted events in view, so
   // markers can show approve/changes/comment without per-marker fetches.
@@ -432,11 +470,11 @@ export function getTimeline(filters: TimelineFilters): TimelineResponse {
     .map((e) => e.refId as number);
   const reviewStateById = new Map<number, ReviewState>();
   if (reviewRefIds.length > 0) {
-    const rows = db
+    const rows = await db
       .select({ id: reviews.id, state: reviews.state })
       .from(reviews)
       .where(inArray(reviews.id, reviewRefIds))
-      .all();
+      .execute();
     for (const r of rows) reviewStateById.set(r.id, r.state as ReviewState);
   }
 
@@ -464,23 +502,27 @@ export function getTimeline(filters: TimelineFilters): TimelineResponse {
 // ---- open PRs strip ----
 
 export interface OpenPrsFilters {
+  accountId: number;
   repoIds: number[] | null;
   userIds: number[] | null;
 }
 
-export function getOpenPrs(filters: OpenPrsFilters): TimelinePr[] {
-  const conds = [eq(pullRequests.state, 'open')];
+export async function getOpenPrs(filters: OpenPrsFilters): Promise<TimelinePr[]> {
+  const conds = [
+    eq(pullRequests.accountId, filters.accountId),
+    eq(pullRequests.state, 'open'),
+  ];
   if (filters.repoIds) conds.push(inArray(pullRequests.repoId, filters.repoIds));
   if (filters.userIds && filters.userIds.length > 0) {
     conds.push(inArray(pullRequests.authorId, filters.userIds));
   }
-  const prRows = db
+  const prRows = await db
     .select()
     .from(pullRequests)
     .where(and(...conds))
-    .all();
+    .execute();
 
-  const prs = buildTimelinePrs(prRows);
+  const prs = await buildTimelinePrs(prRows, filters.accountId);
   const rank = (t: TimelinePr): number => REASON_PRIORITY.indexOf(t.reasonTag);
   return prs.sort((a, b) => {
     const r = rank(a) - rank(b);
@@ -503,13 +545,14 @@ export function getOpenPrs(filters: OpenPrsFilters): TimelinePr[] {
 // repo's default branch and the PR's base branch are known and differ). This
 // keeps already-synced repos populated and tightens to default-only as they
 // re-sync. Repos never (deep-)re-synced for mergedById stay empty regardless.
-export function getMergers(): RepoMergers[] {
-  const rows = db
+export async function getMergers(accountId: number): Promise<RepoMergers[]> {
+  const rows = await db
     .selectDistinct({ repoId: pullRequests.repoId, userId: pullRequests.mergedById })
     .from(pullRequests)
     .innerJoin(repos, eq(repos.id, pullRequests.repoId))
     .where(
       and(
+        eq(repos.accountId, accountId),
         eq(pullRequests.state, 'merged'),
         isNotNull(pullRequests.mergedById),
         or(
@@ -519,7 +562,7 @@ export function getMergers(): RepoMergers[] {
         ),
       ),
     )
-    .all();
+    .execute();
   const byRepo = new Map<number, number[]>();
   for (const r of rows) {
     if (r.userId == null) continue;
@@ -532,36 +575,50 @@ export function getMergers(): RepoMergers[] {
 
 // ---- incremental review: pr_views ----
 
-export function markPrViewed(prId: number, sha?: string): boolean {
-  const pr = db
+export async function markPrViewed(
+  prId: number,
+  accountId: number,
+  sha?: string,
+): Promise<boolean> {
+  const prRows = await db
     .select({ id: pullRequests.id, headSha: pullRequests.headSha })
     .from(pullRequests)
-    .where(eq(pullRequests.id, prId))
-    .get();
+    .where(
+      and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)),
+    )
+    .limit(1)
+    .execute();
+  const pr = prRows[0] ?? null;
   if (!pr) return false;
   const viewedSha = sha ?? pr.headSha ?? null;
   const now = new Date();
-  db.insert(prViews)
+  await db
+    .insert(prViews)
     .values({ prId, lastViewedSha: viewedSha, lastViewedAt: now })
     .onConflictDoUpdate({
       target: prViews.prId,
       set: { lastViewedSha: viewedSha, lastViewedAt: now },
     })
-    .run();
+    .execute();
   return true;
 }
 
 // ---- my turn ----
 
-export function dismissMyTurn(kind: MyTurnDismissKind, refId: number): void {
+export async function dismissMyTurn(
+  accountId: number,
+  kind: MyTurnDismissKind,
+  refId: number,
+): Promise<void> {
   const now = new Date();
-  db.insert(myTurnDismissals)
-    .values({ kind, refId, dismissedAt: now })
+  await db
+    .insert(myTurnDismissals)
+    .values({ accountId, kind, refId, dismissedAt: now })
     .onConflictDoUpdate({
       target: [myTurnDismissals.kind, myTurnDismissals.refId],
       set: { dismissedAt: now },
     })
-    .run();
+    .execute();
 }
 
 function truncate(s: string, n: number): string {
@@ -580,8 +637,8 @@ function summariseNew(n: NewSinceLastViewed): string {
   return parts.join(' · ');
 }
 
-export function getMyTurn(): MyTurnResponse {
-  const localUserId = getLocalUserId();
+export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
+  const localUserId = await getAccountUserId(accountId);
   const empty: MyTurnResponse = {
     awaitingReview: [],
     yourPrs: [],
@@ -593,17 +650,26 @@ export function getMyTurn(): MyTurnResponse {
   const referencedUsers = new Set<number>();
 
   // Open PRs, enriched with triage, are the basis for sections 1 & 2.
-  const openRows = db
+  const openRows = await db
     .select()
     .from(pullRequests)
-    .where(eq(pullRequests.state, 'open'))
-    .all();
-  const open = buildTimelinePrs(openRows);
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.state, 'open'),
+      ),
+    )
+    .execute();
+  const open = await buildTimelinePrs(openRows, accountId);
   const repoNameById = new Map<number, string>();
-  for (const r of listRepos()) repoNameById.set(r.id, r.fullName);
+  for (const r of await listRepos(accountId)) repoNameById.set(r.id, r.fullName);
 
   // Manual dismissals, honoured only until newer activity supersedes them.
-  const dismissals = db.select().from(myTurnDismissals).all();
+  const dismissals = await db
+    .select()
+    .from(myTurnDismissals)
+    .where(eq(myTurnDismissals.accountId, accountId))
+    .execute();
   const reviewDismissedAt = new Map<number, Date>();
   const threadDismissedAt = new Map<number, Date>();
   for (const d of dismissals) {
@@ -633,17 +699,19 @@ export function getMyTurn(): MyTurnResponse {
 
   // 1. Awaiting your review. A dismissal sticks until the PR is updated again
   //    (e.g. new commits → re-review warranted).
-  const awaitingReview = open
-    .filter((t) => t.reviewRequestedFromMe)
-    .filter((t) => {
-      const d = reviewDismissedAt.get(t.id);
-      return !d || meta(t.id).updatedAt.getTime() > d.getTime();
-    })
-    .map((t) => {
-      // otherReviewersRequested is recomputed via triage map; re-derive count.
-      const others = countOtherReviewers(t.id, localUserId);
-      return { ...toMyTurnPr(t), alsoRequested: others };
-    });
+  const awaitingReview = await Promise.all(
+    open
+      .filter((t) => t.reviewRequestedFromMe)
+      .filter((t) => {
+        const d = reviewDismissedAt.get(t.id);
+        return !d || meta(t.id).updatedAt.getTime() > d.getTime();
+      })
+      .map(async (t) => {
+        // otherReviewersRequested is recomputed via triage map; re-derive count.
+        const others = await countOtherReviewers(t.id, localUserId);
+        return { ...toMyTurnPr(t), alsoRequested: others };
+      }),
+  );
 
   // 2. Your PRs with new activity since you last looked.
   const yourPrs = open
@@ -663,43 +731,49 @@ export function getMyTurn(): MyTurnResponse {
 
   // 3. Threads awaiting your response: you opened the thread, someone replied
   //    after you, and it isn't resolved. A dismissal sticks until a newer reply.
-  const threadsAwaiting = getThreadsAwaiting(localUserId, repoNameById).filter(
-    (ta) => {
-      const d = threadDismissedAt.get(ta.threadId);
-      return !d || Date.parse(ta.lastReplyAt) > d.getTime();
-    },
-  );
+  const threadsAwaiting = (
+    await getThreadsAwaiting(localUserId, accountId, repoNameById)
+  ).filter((ta) => {
+    const d = threadDismissedAt.get(ta.threadId);
+    return !d || Date.parse(ta.lastReplyAt) > d.getTime();
+  });
   for (const ta of threadsAwaiting) {
     if (ta.lastReplyAuthorId != null) referencedUsers.add(ta.lastReplyAuthorId);
   }
 
   const users =
     referencedUsers.size > 0
-      ? db
-          .select()
-          .from(schema.users)
-          .where(inArray(schema.users.id, [...referencedUsers]))
-          .all()
-          .map(mapUser)
+      ? (
+          await db
+            .select()
+            .from(schema.users)
+            .where(inArray(schema.users.id, [...referencedUsers]))
+            .execute()
+        ).map(mapUser)
       : [];
 
   return { awaitingReview, yourPrs, threadsAwaiting, users };
 }
 
-function countOtherReviewers(prId: number, localUserId: number): number {
-  return db
+async function countOtherReviewers(
+  prId: number,
+  localUserId: number,
+): Promise<number> {
+  const rows = await db
     .select({ userId: schema.reviewRequests.userId })
     .from(schema.reviewRequests)
     .where(eq(schema.reviewRequests.prId, prId))
-    .all()
-    .filter((r) => r.userId != null && r.userId !== localUserId).length;
+    .execute();
+  return rows.filter((r) => r.userId != null && r.userId !== localUserId).length;
 }
 
-function getThreadsAwaiting(
+async function getThreadsAwaiting(
   localUserId: number,
+  accountId: number,
   repoNameById: Map<number, string>,
-): ThreadAwaitingItem[] {
-  const threads = db
+): Promise<ThreadAwaitingItem[]> {
+  // Scope to the account by joining the thread → its PR → repo.
+  const threadJoinRows = await db
     .select({
       id: reviewThreads.id,
       prId: reviewThreads.prId,
@@ -708,31 +782,46 @@ function getThreadsAwaiting(
       derivedState: reviewThreads.derivedState,
     })
     .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
     .where(
       and(
+        eq(repos.accountId, accountId),
         eq(reviewThreads.originalCommenterId, localUserId),
         sql`${reviewThreads.derivedState} != 'resolved'`,
       ),
     )
-    .all();
+    .execute();
+  const threads = threadJoinRows;
   if (threads.length === 0) return [];
 
   const prIds = [...new Set(threads.map((t) => t.prId))];
-  const prRows = db
+  const prRows = await db
     .select({ id: pullRequests.id, repoId: pullRequests.repoId, number: pullRequests.number })
     .from(pullRequests)
     .where(inArray(pullRequests.id, prIds))
-    .all();
+    .execute();
   const prById = new Map(prRows.map((p) => [p.id, p]));
+
+  // Batch-load the comments for every candidate thread in one query, ordered so
+  // the last entry per thread is the most recent reply (avoids an N+1 loop).
+  const threadIds = threads.map((t) => t.id);
+  const allComments = await db
+    .select()
+    .from(reviewComments)
+    .where(inArray(reviewComments.threadId, threadIds))
+    .orderBy(asc(reviewComments.createdAt))
+    .execute();
+  const commentsByThread = new Map<number, typeof allComments>();
+  for (const c of allComments) {
+    const arr = commentsByThread.get(c.threadId) ?? [];
+    arr.push(c);
+    commentsByThread.set(c.threadId, arr);
+  }
 
   const out: ThreadAwaitingItem[] = [];
   for (const t of threads) {
-    const comments = db
-      .select()
-      .from(reviewComments)
-      .where(eq(reviewComments.threadId, t.id))
-      .orderBy(asc(reviewComments.createdAt))
-      .all();
+    const comments = commentsByThread.get(t.id) ?? [];
     const last = comments.at(-1);
     if (!last) continue;
     // Someone other than you must have had the last word.
@@ -759,48 +848,53 @@ function getThreadsAwaiting(
   return out;
 }
 
-export function getPrDetail(id: number): PrDetail | null {
-  const row = db
+export async function getPrDetail(
+  id: number,
+  accountId: number,
+): Promise<PrDetail | null> {
+  const rows = await db
     .select()
     .from(pullRequests)
     .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(eq(pullRequests.id, id))
-    .get();
+    .where(and(eq(pullRequests.id, id), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  const row = rows[0] ?? null;
   if (!row) return null;
   const pr = row.pull_requests;
   const repo = row.repos;
   // Base for activity deep links; per-item anchors are appended below.
   const prUrl = `https://github.com/${repo.owner}/${repo.name}/pull/${pr.number}`;
 
-  const threadRows = db
+  const threadRows = await db
     .select()
     .from(reviewThreads)
     .where(eq(reviewThreads.prId, id))
-    .all();
-  const commentRows = db
+    .execute();
+  const commentRows = await db
     .select()
     .from(reviewComments)
     .where(eq(reviewComments.prId, id))
     .orderBy(asc(reviewComments.createdAt))
-    .all();
-  const reviewRows = db
+    .execute();
+  const reviewRows = await db
     .select()
     .from(reviews)
     .where(eq(reviews.prId, id))
     .orderBy(asc(reviews.submittedAt))
-    .all();
-  const prCommentRows = db
+    .execute();
+  const prCommentRows = await db
     .select()
     .from(prComments)
     .where(eq(prComments.prId, id))
     .orderBy(asc(prComments.createdAt))
-    .all();
-  const commitRows = db
+    .execute();
+  const commitRows = await db
     .select()
     .from(commits)
     .where(eq(commits.prId, id))
     .orderBy(asc(commits.committedAt))
-    .all();
+    .execute();
 
   const commentsByThread = new Map<number, typeof commentRows>();
   for (const c of commentRows) {
@@ -863,11 +957,11 @@ export function getPrDetail(id: number): PrDetail | null {
   }));
 
   // Outstanding review requests (for the Checks/Overview tab).
-  const reviewerRows = db
+  const reviewerRows = await db
     .select()
     .from(schema.reviewRequests)
     .where(eq(schema.reviewRequests.prId, id))
-    .all();
+    .execute();
   const requestedReviewers: RequestedReviewer[] = reviewerRows.map((r) => ({
     userId: r.userId,
     teamName: r.teamName,
@@ -890,22 +984,34 @@ export function getPrDetail(id: number): PrDetail | null {
   if (pr.mergedById) userIds.add(pr.mergedById);
   const userList =
     userIds.size > 0
-      ? db.select().from(users).where(inArray(users.id, [...userIds])).all().map(mapUser)
+      ? (
+          await db
+            .select()
+            .from(users)
+            .where(inArray(users.id, [...userIds]))
+            .execute()
+        ).map(mapUser)
       : [];
 
-  const counts = buildThreadCounts([id]).get(id) ?? emptyCounts();
+  const counts = (await buildThreadCounts([id])).get(id) ?? emptyCounts();
 
   // Incremental review: capture the last-viewed instant and what's happened
   // since. No "new" once a PR is closed/merged.
-  const view = db.select().from(prViews).where(eq(prViews.prId, id)).get();
+  const viewRows = await db
+    .select()
+    .from(prViews)
+    .where(eq(prViews.prId, id))
+    .limit(1)
+    .execute();
+  const view = viewRows[0] ?? null;
   const lastViewedAt = view?.lastViewedAt ?? null;
   let newSinceLastViewed: NewSinceLastViewed | null = null;
   if (pr.state === 'open' && lastViewedAt) {
-    const since = db
+    const since = await db
       .select({ type: events.type, occurredAt: events.occurredAt })
       .from(events)
       .where(and(eq(events.prId, id), gt(events.occurredAt, lastViewedAt)))
-      .all();
+      .execute();
     const n: NewSinceLastViewed = { commits: 0, comments: 0, reviews: 0 };
     for (const e of since) {
       if (e.type === 'commit_pushed') n.commits += 1;
@@ -951,23 +1057,28 @@ export function getPrDetail(id: number): PrDetail | null {
   };
 }
 
-export function getThreadDetail(id: number): ThreadDetail | null {
-  const row = db
+export async function getThreadDetail(
+  id: number,
+  accountId: number,
+): Promise<ThreadDetail | null> {
+  const rows = await db
     .select()
     .from(reviewThreads)
     .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
     .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(eq(reviewThreads.id, id))
-    .get();
+    .where(and(eq(reviewThreads.id, id), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  const row = rows[0] ?? null;
   if (!row) return null;
   const t = row.review_threads;
   const prUrl = `https://github.com/${row.repos.owner}/${row.repos.name}/pull/${row.pull_requests.number}`;
-  const comments = db
+  const comments = await db
     .select()
     .from(reviewComments)
     .where(eq(reviewComments.threadId, id))
     .orderBy(asc(reviewComments.createdAt))
-    .all();
+    .execute();
   return {
     id: t.id,
     prId: t.prId,
@@ -992,46 +1103,55 @@ export function getThreadDetail(id: number): ThreadDetail | null {
   };
 }
 
-export function deleteRepo(id: number): boolean {
-  const repo = db.select().from(repos).where(eq(repos.id, id)).get();
-  if (!repo) return false;
+export async function deleteRepo(id: number, accountId: number): Promise<boolean> {
+  const repoRows = await db
+    .select()
+    .from(repos)
+    .where(and(eq(repos.id, id), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  if (!repoRows[0]) return false;
 
   // Remove dependents in FK-safe order.
-  const prIds = db
+  const prIdRows = await db
     .select({ id: pullRequests.id })
     .from(pullRequests)
     .where(eq(pullRequests.repoId, id))
-    .all()
-    .map((r) => r.id);
+    .execute();
+  const prIds = prIdRows.map((r) => r.id);
 
-  db.transaction(() => {
-    db.delete(events).where(eq(events.repoId, id)).run();
+  await runTransaction(async (tx) => {
+    await tx.delete(events).where(eq(events.repoId, id)).execute();
     if (prIds.length > 0) {
-      db.delete(reviewComments).where(inArray(reviewComments.prId, prIds)).run();
-      db.delete(reviewThreads).where(inArray(reviewThreads.prId, prIds)).run();
-      db.delete(prComments).where(inArray(prComments.prId, prIds)).run();
-      db.delete(reviews).where(inArray(reviews.prId, prIds)).run();
-      db.delete(commits).where(inArray(commits.prId, prIds)).run();
-      db.delete(schema.reviewRequests).where(inArray(schema.reviewRequests.prId, prIds)).run();
-      db.delete(prViews).where(inArray(prViews.prId, prIds)).run();
+      await tx.delete(reviewComments).where(inArray(reviewComments.prId, prIds)).execute();
+      await tx.delete(reviewThreads).where(inArray(reviewThreads.prId, prIds)).execute();
+      await tx.delete(prComments).where(inArray(prComments.prId, prIds)).execute();
+      await tx.delete(reviews).where(inArray(reviews.prId, prIds)).execute();
+      await tx.delete(commits).where(inArray(commits.prId, prIds)).execute();
+      await tx
+        .delete(schema.reviewRequests)
+        .where(inArray(schema.reviewRequests.prId, prIds))
+        .execute();
+      await tx.delete(prViews).where(inArray(prViews.prId, prIds)).execute();
       // Claude review runs + findings reference these PRs (FKs are ON), so clear
       // them before the PRs.
-      const reviewIds = db
+      const reviewIdRows = await tx
         .select({ id: claudeReviews.id })
         .from(claudeReviews)
         .where(inArray(claudeReviews.prId, prIds))
-        .all()
-        .map((r) => r.id);
+        .execute();
+      const reviewIds = reviewIdRows.map((r) => r.id);
       if (reviewIds.length > 0) {
-        db.delete(claudeReviewFindings)
+        await tx
+          .delete(claudeReviewFindings)
           .where(inArray(claudeReviewFindings.reviewId, reviewIds))
-          .run();
+          .execute();
       }
-      db.delete(claudeReviews).where(inArray(claudeReviews.prId, prIds)).run();
-      db.delete(pullRequests).where(eq(pullRequests.repoId, id)).run();
+      await tx.delete(claudeReviews).where(inArray(claudeReviews.prId, prIds)).execute();
+      await tx.delete(pullRequests).where(eq(pullRequests.repoId, id)).execute();
     }
-    db.delete(syncState).where(eq(syncState.repoId, id)).run();
-    db.delete(repos).where(eq(repos.id, id)).run();
+    await tx.delete(syncState).where(eq(syncState.repoId, id)).execute();
+    await tx.delete(repos).where(eq(repos.id, id)).execute();
   });
   return true;
 }
@@ -1095,44 +1215,62 @@ function mapReview(r: ClaudeReviewRow, findings: ClaudeFindingRow[]): ClaudeRevi
   };
 }
 
-export function getClaudeReviewById(reviewId: number): ClaudeReview | null {
-  const row = db
-    .select()
+export async function getClaudeReviewById(
+  reviewId: number,
+  accountId: number,
+): Promise<ClaudeReview | null> {
+  const rows = await db
+    .select({ review: claudeReviews })
     .from(claudeReviews)
-    .where(eq(claudeReviews.id, reviewId))
-    .get();
+    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(and(eq(claudeReviews.id, reviewId), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  const row = rows[0]?.review ?? null;
   if (!row) return null;
-  const findings = db
+  const findings = await db
     .select()
     .from(claudeReviewFindings)
     .where(eq(claudeReviewFindings.reviewId, reviewId))
     .orderBy(asc(claudeReviewFindings.id))
-    .all();
+    .execute();
   return mapReview(row, findings);
 }
 
 // The most recent run for a PR (with findings), or null if never run.
-export function getLatestClaudeReview(prId: number): ClaudeReview | null {
-  const row = db
+export async function getLatestClaudeReview(
+  prId: number,
+  accountId: number,
+): Promise<ClaudeReview | null> {
+  const rows = await db
     .select({ id: claudeReviews.id })
     .from(claudeReviews)
-    .where(eq(claudeReviews.prId, prId))
+    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(and(eq(claudeReviews.prId, prId), eq(repos.accountId, accountId)))
     .orderBy(desc(claudeReviews.id))
     .limit(1)
-    .get();
+    .execute();
+  const row = rows[0] ?? null;
   if (!row) return null;
-  return getClaudeReviewById(row.id);
+  return getClaudeReviewById(row.id, accountId);
 }
 
 // All runs for a PR (newest first), lighter shape for the history selector.
-export function listClaudeReviewHistory(prId: number): ClaudeReviewSummary[] {
-  const rows = db
-    .select()
+export async function listClaudeReviewHistory(
+  prId: number,
+  accountId: number,
+): Promise<ClaudeReviewSummary[]> {
+  const rows = await db
+    .select({ review: claudeReviews })
     .from(claudeReviews)
-    .where(eq(claudeReviews.prId, prId))
+    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(and(eq(claudeReviews.prId, prId), eq(repos.accountId, accountId)))
     .orderBy(desc(claudeReviews.id))
-    .all();
-  return rows.map((r) => ({
+    .execute();
+  return rows.map(({ review: r }) => ({
     id: r.id,
     headSha: r.headSha,
     status: r.status,
@@ -1168,10 +1306,11 @@ export interface FindingPostContext {
   prNumber: number;
 }
 
-export function getFindingPostContext(
+export async function getFindingPostContext(
   findingId: number,
-): FindingPostContext | null {
-  const row = db
+  accountId: number,
+): Promise<FindingPostContext | null> {
+  const rows = await db
     .select({
       finding: claudeReviewFindings,
       reviewId: claudeReviews.id,
@@ -1184,8 +1323,10 @@ export function getFindingPostContext(
     .innerJoin(claudeReviews, eq(claudeReviews.id, claudeReviewFindings.reviewId))
     .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
     .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(eq(claudeReviewFindings.id, findingId))
-    .get();
+    .where(and(eq(claudeReviewFindings.id, findingId), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  const row = rows[0] ?? null;
   if (!row) return null;
   return {
     finding: row.finding,
@@ -1197,10 +1338,11 @@ export function getFindingPostContext(
   };
 }
 
-export function getClaudeReviewContext(
+export async function getClaudeReviewContext(
   reviewId: number,
-): ClaudeReviewContext | null {
-  const row = db
+  accountId: number,
+): Promise<ClaudeReviewContext | null> {
+  const rows = await db
     .select({
       review: claudeReviews,
       owner: repos.owner,
@@ -1210,8 +1352,10 @@ export function getClaudeReviewContext(
     .from(claudeReviews)
     .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
     .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(eq(claudeReviews.id, reviewId))
-    .get();
+    .where(and(eq(claudeReviews.id, reviewId), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  const row = rows[0] ?? null;
   if (!row) return null;
   return {
     review: row.review,
@@ -1234,8 +1378,11 @@ export interface ReviewPrContext {
   headSha: string | null;
 }
 
-export function getReviewPrContext(prId: number): ReviewPrContext | null {
-  const row = db
+export async function getReviewPrContext(
+  prId: number,
+  accountId: number,
+): Promise<ReviewPrContext | null> {
+  const rows = await db
     .select({
       prId: pullRequests.id,
       owner: repos.owner,
@@ -1248,8 +1395,10 @@ export function getReviewPrContext(prId: number): ReviewPrContext | null {
     })
     .from(pullRequests)
     .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(eq(pullRequests.id, prId))
-    .get();
+    .where(and(eq(pullRequests.id, prId), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  const row = rows[0] ?? null;
   if (!row) return null;
   return {
     prId: row.prId,

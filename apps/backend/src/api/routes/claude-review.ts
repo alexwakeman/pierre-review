@@ -1,9 +1,11 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type {
   ActiveReviewsResponse,
+  ClaudeKeyResponse,
   ClaudeReviewResponse,
   ClaudeReviewStatusResponse,
   GenerateReviewBody,
+  SetClaudeKeyBody,
   PostCommentResult,
   PostReviewBody,
   PostReviewResult,
@@ -32,6 +34,10 @@ import {
 } from '../../review/review-manager.js';
 import { detectClaudeAuth } from '../../review/auth.js';
 import {
+  hasUserAnthropicKey,
+  setUserAnthropicKey,
+} from '../../review/local-settings.js';
+import {
   buildReview,
   fetchCurrentHeadSha,
   fetchPrDiff,
@@ -41,6 +47,7 @@ import {
   submitGithubReview,
 } from '../../review/post-review.js';
 import { isNoiseFile } from '../../review/prompt.js';
+import { accountIdOf } from '../plugins/auth.js';
 
 const MODELS = ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
 const VERDICTS = ['COMMENT', 'REQUEST_CHANGES', 'APPROVE'];
@@ -130,16 +137,45 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
     async (req): Promise<ClaudeReviewResponse> => {
       const { id } = req.params as { id: number };
       if (!config.claudeReviewEnabled) {
-        return { enabled: false, auth: 'none', review: null, history: [] };
+        return {
+          enabled: false,
+          auth: 'none',
+          hasUserKey: false,
+          review: null,
+          history: [],
+        };
       }
+      const accountId = accountIdOf(req);
       const auth = detectClaudeAuth();
       return {
         enabled: true,
         auth: auth.status,
         authMessage: auth.status === 'none' ? auth.message : undefined,
-        review: getLatestClaudeReview(id),
-        history: listClaudeReviewHistory(id),
+        hasUserKey: hasUserAnthropicKey(),
+        review: await getLatestClaudeReview(id, accountId),
+        history: await listClaudeReviewHistory(id, accountId),
       };
+    },
+  );
+
+  // Set or clear the locally-stored Anthropic API key (local mode only — the
+  // whole route file is unregistered in cloud). An empty `key` clears it.
+  app.put(
+    '/api/claude-review/key',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['key'],
+          additionalProperties: false,
+          properties: { key: { type: 'string' } },
+        },
+      },
+    },
+    async (req): Promise<ClaudeKeyResponse> => {
+      const { key } = req.body as SetClaudeKeyBody;
+      setUserAnthropicKey(key);
+      return { hasUserKey: hasUserAnthropicKey(), auth: detectClaudeAuth().status };
     },
   );
 
@@ -158,7 +194,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
         return { error: 'NoClaudeAuth', message: auth.message };
       }
 
-      const result = startReview(id, model, app.log);
+      const result = await startReview(id, model, app.log);
       if (!result.ok) {
         if (result.reason === 'not_found') {
           reply.status(404);
@@ -196,7 +232,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
       if (!config.claudeReviewEnabled) {
         return { status: 'idle', reviewId: null, progress: null };
       }
-      return getReviewStatus(id);
+      return await getReviewStatus(id);
     },
   );
 
@@ -221,7 +257,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
     '/api/claude-reviews/active',
     async (): Promise<ActiveReviewsResponse> => {
       if (!config.claudeReviewEnabled) return { reviews: [] };
-      return { reviews: listActiveReviews() };
+      return { reviews: await listActiveReviews() };
     },
   );
 
@@ -232,7 +268,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       if (!config.claudeReviewEnabled) return featureOff(reply);
       const { reviewId } = req.params as { reviewId: number };
-      const review = getClaudeReviewById(reviewId);
+      const review = await getClaudeReviewById(reviewId, accountIdOf(req));
       if (!review) {
         reply.status(404);
         return { error: 'NotFound', message: `Review ${reviewId} not found` };
@@ -249,7 +285,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
       if (!config.claudeReviewEnabled) return featureOff(reply);
       const { reviewId } = req.params as { reviewId: number };
       const body = req.body as UpdateReviewBody;
-      const ok = updateReviewDraft(reviewId, body);
+      const ok = await updateReviewDraft(reviewId, body);
       if (!ok) {
         reply.status(404);
         return { error: 'NotFound', message: `Review ${reviewId} not found` };
@@ -266,7 +302,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
       if (!config.claudeReviewEnabled) return featureOff(reply);
       const { findingId } = req.params as { findingId: number };
       const body = req.body as UpdateFindingBody;
-      const ok = updateFinding(findingId, body);
+      const ok = await updateFinding(findingId, body);
       if (!ok) {
         reply.status(404);
         return { error: 'NotFound', message: `Finding ${findingId} not found` };
@@ -283,7 +319,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       if (!config.claudeReviewEnabled) return featureOff(reply);
       const { findingId } = req.params as { findingId: number };
-      const ctx = getFindingPostContext(findingId);
+      const ctx = await getFindingPostContext(findingId, accountIdOf(req));
       if (!ctx) {
         reply.status(404);
         return { error: 'NotFound', message: `Finding ${findingId} not found` };
@@ -324,7 +360,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
             suggestion: f.suggestion,
           }),
         });
-        markFindingPosted(findingId, commentId);
+        await markFindingPosted(findingId, commentId);
         const result: PostCommentResult = {
           githubCommentId: commentId,
           postedAt: new Date().toISOString(),
@@ -350,13 +386,14 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
       const { reviewId } = req.params as { reviewId: number };
       const { userVerdict } = req.body as PostReviewBody;
       const dryRun = (req.query as { dryRun?: string }).dryRun === 'true';
+      const accountId = accountIdOf(req);
 
-      const ctx = getClaudeReviewContext(reviewId);
+      const ctx = await getClaudeReviewContext(reviewId, accountId);
       if (!ctx) {
         reply.status(404);
         return { error: 'NotFound', message: `Review ${reviewId} not found` };
       }
-      const review = getClaudeReviewById(reviewId);
+      const review = await getClaudeReviewById(reviewId, accountId);
       if (!review) {
         reply.status(404);
         return { error: 'NotFound', message: `Review ${reviewId} not found` };
@@ -379,7 +416,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
         }
 
         // Persist the chosen verdict so the run records what was posted.
-        updateReviewDraft(reviewId, { userVerdict });
+        await updateReviewDraft(reviewId, { userVerdict });
 
         const rawDiff = await fetchPrDiff(ctx.owner, ctx.name, ctx.prNumber);
         const { diff } = stripNoiseFromDiff(rawDiff, isNoiseFile);
@@ -402,7 +439,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
           event: userVerdict,
           comments: built.preview.comments,
         });
-        markReviewPosted(reviewId, ghReviewId, built.postedFindingIds);
+        await markReviewPosted(reviewId, ghReviewId, built.postedFindingIds);
 
         const result: PostReviewResult = {
           postedReviewId: ghReviewId,

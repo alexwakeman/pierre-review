@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { getThreadDetail } from '../../db/queries.js';
+import { accountIdOf } from '../plugins/auth.js';
 
 const idParamSchema = {
   params: {
@@ -12,7 +13,7 @@ const idParamSchema = {
 export async function threadRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/threads/:id', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
-    const thread = getThreadDetail(id);
+    const thread = await getThreadDetail(id, accountIdOf(req));
     if (!thread) {
       reply.status(404);
       return { error: 'NotFound', message: `Thread ${id} not found` };

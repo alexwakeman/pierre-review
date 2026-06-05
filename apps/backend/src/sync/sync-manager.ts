@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { SyncProgress, SyncRunStatus, SyncStatus } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { config } from '../config.js';
+import { getAccessToken } from '../auth/account.js';
 import { syncRepo, type Logger } from './sync-repo.js';
 
 const { repos, syncState } = schema;
@@ -65,12 +66,15 @@ export function isSyncRunning(repoId: number): boolean {
   return running.has(repoId);
 }
 
-export function getSyncStatus(repoId: number): SyncStatus | null {
-  const state = db
-    .select()
-    .from(syncState)
-    .where(eq(syncState.repoId, repoId))
-    .get();
+export async function getSyncStatus(repoId: number): Promise<SyncStatus | null> {
+  const state = (
+    await db
+      .select()
+      .from(syncState)
+      .where(eq(syncState.repoId, repoId))
+      .limit(1)
+      .execute()
+  )[0];
 
   let status: SyncRunStatus = 'idle';
   if (running.has(repoId)) status = 'running';
@@ -91,25 +95,39 @@ interface RepoRow {
   id: number;
   owner: string;
   name: string;
+  accountId: number;
 }
 
-function getRepoRow(repoId: number): RepoRow | null {
+async function getRepoRow(repoId: number): Promise<RepoRow | null> {
   return (
-    db
-      .select({ id: repos.id, owner: repos.owner, name: repos.name })
-      .from(repos)
-      .where(eq(repos.id, repoId))
-      .get() ?? null
+    (
+      await db
+        .select({
+          id: repos.id,
+          owner: repos.owner,
+          name: repos.name,
+          accountId: repos.accountId,
+        })
+        .from(repos)
+        .where(eq(repos.id, repoId))
+        .limit(1)
+        .execute()
+    )[0] ?? null
   );
 }
 
 // Decide window: incremental if we've ever synced, otherwise a full backfill.
-function planSync(repoId: number): { mode: 'full' | 'incremental'; since: Date } {
-  const state = db
-    .select()
-    .from(syncState)
-    .where(eq(syncState.repoId, repoId))
-    .get();
+async function planSync(
+  repoId: number,
+): Promise<{ mode: 'full' | 'incremental'; since: Date }> {
+  const state = (
+    await db
+      .select()
+      .from(syncState)
+      .where(eq(syncState.repoId, repoId))
+      .limit(1)
+      .execute()
+  )[0];
   if (state?.lastIncrementalSyncAt) {
     const since = new Date(
       state.lastIncrementalSyncAt.getTime() - config.syncOverlapMinutes * 60 * 1000,
@@ -124,28 +142,51 @@ function planSync(repoId: number): { mode: 'full' | 'incremental'; since: Date }
  * returns immediately and the sync continues; the running flag and sync_state
  * reflect progress. Returns false if a sync is already in flight.
  */
-export function runSyncForRepo(
+export async function runSyncForRepo(
   repoId: number,
   log: Logger,
   opts: { background?: boolean; forceFull?: boolean } = {},
-): boolean {
+): Promise<boolean> {
   if (running.has(repoId)) return false;
-  const repo = getRepoRow(repoId);
-  if (!repo) return false;
-
-  const plan = opts.forceFull
-    ? { mode: 'full' as const, since: new Date(Date.now() - config.backfillDays * DAY_MS) }
-    : planSync(repoId);
-
+  // Reserve the slot synchronously, BEFORE any await, so a cron tick (or a
+  // second request) firing during the now-async getRepoRow/planSync below sees
+  // this repo as already in-flight and stands down. Mirror this with a
+  // running.delete on every early-bail after this point.
   running.add(repoId);
   // Track forced-full runs so the scheduler stands down for the whole deep-sync
   // session (added synchronously here, before any await, so a cron tick that
   // fires right after this call already sees the deep sync as active).
   if (opts.forceFull) deepSyncing.add(repoId);
+
+  const repo = await getRepoRow(repoId);
+  if (!repo) {
+    running.delete(repoId);
+    if (opts.forceFull) deepSyncing.delete(repoId);
+    return false;
+  }
+
+  const plan = opts.forceFull
+    ? { mode: 'full' as const, since: new Date(Date.now() - config.backfillDays * DAY_MS) }
+    : await planSync(repoId);
+
   setSyncProgress(repoId, { percent: 0, prsProcessed: 0, pages: 0, mode: plan.mode });
+  let token: string;
+  try {
+    token = await getAccessToken(repo.accountId);
+  } catch (err) {
+    running.delete(repoId);
+    if (opts.forceFull) deepSyncing.delete(repoId);
+    clearSyncProgress(repoId);
+    log.error(
+      `sync ${repo.owner}/${repo.name}: no access token for account ${repo.accountId}: ${err instanceof Error ? err.message : err}`,
+    );
+    return false;
+  }
   const task = syncRepo({
     owner: repo.owner,
     name: repo.name,
+    accountId: repo.accountId,
+    token,
     ...plan,
     log,
     onProgress: (p) => setSyncProgress(repoId, { ...p, mode: plan.mode }),
@@ -179,17 +220,22 @@ export async function syncAllRepos(log: Logger): Promise<void> {
     );
     return;
   }
-  const all = db.select({ id: repos.id }).from(repos).all();
+  const all = await db.select({ id: repos.id }).from(repos).execute();
   for (const r of all) {
     if (running.has(r.id)) continue;
+    // Reserve the slot synchronously before the now-async getRepoRow/planSync
+    // awaits below so a concurrent tick doesn't double-start this repo.
     running.add(r.id);
     try {
-      const repo = getRepoRow(r.id)!;
-      const plan = planSync(r.id);
+      const repo = (await getRepoRow(r.id))!;
+      const token = await getAccessToken(repo.accountId);
+      const plan = await planSync(r.id);
       setSyncProgress(r.id, { percent: 0, prsProcessed: 0, pages: 0, mode: plan.mode });
       await syncRepo({
         owner: repo.owner,
         name: repo.name,
+        accountId: repo.accountId,
+        token,
         ...plan,
         log,
         onProgress: (p) => setSyncProgress(r.id, { ...p, mode: plan.mode }),

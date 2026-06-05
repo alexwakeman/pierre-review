@@ -119,6 +119,17 @@ export function useActiveClaudeReviews(enabled: boolean) {
   });
 }
 
+// Store or clear the user-supplied Anthropic API key, then refetch the review so
+// the auth status (and `hasUserKey`) reflects the change.
+export function useSetClaudeKey(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => api.setClaudeKey(key),
+    onSuccess: () =>
+      void qc.invalidateQueries({ queryKey: ['claude-review', prId] }),
+  });
+}
+
 export function usePostReview(prId: number) {
   const qc = useQueryClient();
   return useMutation({

@@ -11,6 +11,7 @@ import type {
 } from '@pierre-review/shared';
 import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
+import { applyUserAnthropicKey } from './local-settings.js';
 import {
   addWorktree,
   cleanupCloneCache,
@@ -77,11 +78,12 @@ const DISALLOWED_TOOLS = [
 // manager can log them.
 export async function runReview(args: RunReviewArgs): Promise<void> {
   const { reviewId, onProgress, abortController } = args;
-  markReviewRunning(reviewId);
+  await markReviewRunning(reviewId);
 
   let worktreePath: string | null = null;
   let repoCloneDir: string | null = null;
   let result: SDKResultMessage | null = null;
+  let restoreEnv: (() => void) | null = null;
 
   try {
     onProgress({ phase: 'cloning' });
@@ -97,6 +99,10 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
     const changedFiles = splitDiffByFile(strippedDiff).map((s) => s.path);
 
     worktreePath = await addWorktree(repoCloneDir, args.headSha);
+
+    // If the user supplied an Anthropic API key, override ambient Claude auth for
+    // this run (restored in finally). Safe only at reviewConcurrency === 1.
+    restoreEnv = applyUserAnthropicKey();
 
     // ---- run the agent ----
     onProgress({ phase: 'deciding' });
@@ -167,7 +173,7 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
         result && result.subtype !== 'success'
           ? `agent stopped (${result.subtype}) without submitting a review`
           : 'agent finished without calling submit_review';
-      markReviewFailed(reviewId, reason, {
+      await markReviewFailed(reviewId, reason, {
         ...telemetry,
         scope: null,
         excludedFiles: excluded,
@@ -195,7 +201,7 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
       };
     });
 
-    saveReviewSuccess(reviewId, {
+    await saveReviewSuccess(reviewId, {
       scope: payload.scopeUsed,
       summary: payload.summary,
       verdict: payload.verdict,
@@ -209,16 +215,17 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
   } catch (err) {
     // A user cancel aborts the SDK iterator, surfacing as an error here.
     if (abortController.signal.aborted) {
-      markReviewCancelled(reviewId);
+      await markReviewCancelled(reviewId);
       return;
     }
-    markReviewFailed(reviewId, errorMessage(err), {
+    await markReviewFailed(reviewId, errorMessage(err), {
       costUsd: result?.total_cost_usd ?? null,
       inputTokens: result?.usage?.input_tokens ?? null,
       outputTokens: result?.usage?.output_tokens ?? null,
       numTurns: result?.num_turns ?? null,
     });
   } finally {
+    restoreEnv?.();
     if (repoCloneDir && worktreePath) {
       await removeWorktree(repoCloneDir, worktreePath).catch(() => {});
     }

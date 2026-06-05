@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/client.js';
-import { getGraphqlClient } from '../github/client.js';
+import { getGraphqlClientFor } from '../github/client.js';
 import { REPO_ACTIVITY_QUERY, type RepoActivityResponse } from '../github/queries.js';
 import { ensureCommitFiles } from './commit-files.js';
 import { createUserResolver, persistPr, upsertRepo } from './upsert.js';
@@ -28,6 +28,11 @@ export interface SyncProgressUpdate {
 export interface SyncRepoOptions {
   owner: string;
   name: string;
+  // The account that owns this repo; stamped onto every persisted row.
+  accountId: number;
+  // The owning account's GitHub token (gh CLI token in local mode, the account's
+  // decrypted OAuth token in cloud). Never module-cached — passed per sync.
+  token: string;
   mode: 'full' | 'incremental';
   // Stop paginating once a PR's updatedAt falls before this instant.
   since: Date | null;
@@ -53,9 +58,9 @@ export interface SyncRepoResult {
 }
 
 export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
-  const { owner, name, mode, since, onProgress } = opts;
+  const { owner, name, accountId, mode, since, onProgress } = opts;
   const log = opts.log ?? consoleLogger;
-  const client = getGraphqlClient();
+  const client = getGraphqlClientFor(opts.token);
   const resolver = createUserResolver();
 
   let cursor: string | null = null;
@@ -101,12 +106,15 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
         throw err;
       }
 
-      repoId ??= upsertRepo(
-        owner,
-        name,
-        resp.repository.id,
-        resp.repository.defaultBranchRef?.name ?? null,
-      );
+      if (repoId == null) {
+        repoId = await upsertRepo(
+          owner,
+          name,
+          resp.repository.id,
+          resp.repository.defaultBranchRef?.name ?? null,
+          accountId,
+        );
+      }
 
       const { nodes, pageInfo } = resp.repository.pullRequests;
       for (const pr of nodes) {
@@ -137,9 +145,14 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
             .filter((c) => Date.parse(c.commit.committedDate) > threshold)
             .map((c) => c.commit.oid);
         }
-        const commitFilesBySha = await ensureCommitFiles(owner, name, shas);
+        const commitFilesBySha = await ensureCommitFiles(
+          owner,
+          name,
+          shas,
+          opts.token,
+        );
 
-        persistPr(pr, repoId, resolver, commitFilesBySha);
+        await persistPr(pr, repoId, resolver, commitFilesBySha, accountId);
         prCount += 1;
         reportProgress(updatedMs);
       }
@@ -175,13 +188,14 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       mode === 'full'
         ? { lastFullSyncAt: now, lastIncrementalSyncAt: now }
         : { lastIncrementalSyncAt: now };
-    db.insert(syncState)
+    await db
+      .insert(syncState)
       .values({ repoId, ...statePatch, lastSyncStatus: 'ok', lastSyncError: null })
       .onConflictDoUpdate({
         target: syncState.repoId,
         set: { ...statePatch, lastSyncStatus: 'ok', lastSyncError: null },
       })
-      .run();
+      .execute();
 
     log.info(
       `sync ${owner}/${name} [${mode}] done: ${prCount} PRs over ${pages} page(s), cost ${totalCost}, ${lastRemaining} remaining`,
@@ -197,10 +211,11 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (repoId !== null) {
-      db.update(syncState)
+      await db
+        .update(syncState)
         .set({ lastSyncStatus: 'error', lastSyncError: message })
         .where(eq(syncState.repoId, repoId))
-        .run();
+        .execute();
     }
     log.error(`sync ${owner}/${name} failed: ${message}`);
     throw err;

@@ -4,7 +4,8 @@ import type {
   RepoSearchResponse,
   RepoSearchResult,
 } from '@pierre-review/shared';
-import { getGraphqlClient } from '../../github/client.js';
+import { getGraphqlClientFor } from '../../github/client.js';
+import { getAccessToken } from '../../auth/account.js';
 import {
   REPO_ID_QUERY,
   REPO_SEARCH_QUERY,
@@ -25,6 +26,7 @@ import {
   getWatchedRepoNodeIds,
   listRepos,
 } from '../../db/queries.js';
+import { accountIdOf } from '../plugins/auth.js';
 
 const createRepoSchema = {
   body: {
@@ -69,7 +71,7 @@ const searchSchema = {
 };
 
 export async function repoRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/repos', async () => listRepos());
+  app.get('/api/repos', async (req) => listRepos(accountIdOf(req)));
 
   // Live GitHub repository search for the Add-repo picker. Best-match ordering
   // (GitHub default), already-watched repos filtered out, owned/member repos
@@ -86,9 +88,10 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'BadRequest', message: 'Search query must not be empty' };
     }
 
-    const client = getGraphqlClient();
+    const accountId = accountIdOf(req);
     let resp: RepoSearchGqlResponse;
     try {
+      const client = getGraphqlClientFor(await getAccessToken(accountId));
       // NB: the GraphQL variable is `searchQuery`, not `query` — @octokit/graphql
       // reserves `query` for the document body and rejects it as a variable name.
       resp = await client(REPO_SEARCH_QUERY, {
@@ -104,7 +107,7 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       };
     }
 
-    const watched = getWatchedRepoNodeIds();
+    const watched = await getWatchedRepoNodeIds(accountId);
     const me = resp.viewer.login.toLowerCase();
     const orgLogins = new Set(
       resp.viewer.organizations.nodes.map((o) => o.login.toLowerCase()),
@@ -148,10 +151,11 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/api/repos', { schema: createRepoSchema }, async (req, reply) => {
     const { owner, name } = req.body as CreateRepoBody;
+    const accountId = accountIdOf(req);
 
-    const client = getGraphqlClient();
     let resp: RepoIdResponse;
     try {
+      const client = getGraphqlClientFor(await getAccessToken(accountId));
       resp = await client(REPO_ID_QUERY, { owner, name });
     } catch (err) {
       reply.status(502);
@@ -170,17 +174,30 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
 
     const canonOwner = resp.repository.owner.login;
     const canonName = resp.repository.name;
-    const repoId = upsertRepo(canonOwner, canonName, resp.repository.id);
+    const repoId = await upsertRepo(
+      canonOwner,
+      canonName,
+      resp.repository.id,
+      null,
+      accountId,
+    );
 
     // Kick off the initial backfill in the background.
     runSyncForRepo(repoId, app.log, { background: true });
 
     reply.status(201);
-    return getRepo(repoId);
+    return getRepo(repoId, accountId);
   });
 
   app.delete('/api/repos/:id', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
+    const accountId = accountIdOf(req);
+    // Ownership check first: a repo this account doesn't own is a 404 (and we
+    // must not consult the repoId-keyed sync managers for someone else's repo).
+    if (!(await getRepo(id, accountId))) {
+      reply.status(404);
+      return { error: 'NotFound', message: `Repo ${id} not found` };
+    }
     // A sync in flight would re-create the repo (and its rows) right after we
     // delete them, since the sync's upserts are still running. Refuse until it
     // settles — the cron tick / initial backfill is short.
@@ -191,7 +208,7 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
         message: 'A sync is running for this repo — try removing it again in a moment.',
       };
     }
-    const ok = deleteRepo(id);
+    const ok = await deleteRepo(id, accountId);
     if (!ok) {
       reply.status(404);
       return { error: 'NotFound', message: `Repo ${id} not found` };
@@ -205,7 +222,7 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     { schema: syncSchema },
     async (req, reply) => {
       const { id } = req.params as { id: number };
-      if (!getRepo(id)) {
+      if (!(await getRepo(id, accountIdOf(req)))) {
         reply.status(404);
         return { error: 'NotFound', message: `Repo ${id} not found` };
       }
@@ -230,12 +247,11 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     { schema: idParamSchema },
     async (req, reply) => {
       const { id } = req.params as { id: number };
-      const status = getSyncStatus(id);
-      if (!getRepo(id)) {
+      if (!(await getRepo(id, accountIdOf(req)))) {
         reply.status(404);
         return { error: 'NotFound', message: `Repo ${id} not found` };
       }
-      return status;
+      return getSyncStatus(id);
     },
   );
 
@@ -245,7 +261,8 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
   // repo whose re-sync was cancelled keeps everything. Drives the modal's Cancel.
   app.post('/api/repos/:id/cancel', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
-    if (!getRepo(id)) {
+    const accountId = accountIdOf(req);
+    if (!(await getRepo(id, accountId))) {
       reply.status(404);
       return { error: 'NotFound', message: `Repo ${id} not found` };
     }
@@ -253,13 +270,13 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     await waitForSyncToStop(id, 30_000);
     // Re-read AFTER it stops: if the sync actually finished during the wait, the
     // repo is now "synced" and must NOT be deleted (avoids a cancel-vs-finish race).
-    const fresh = getRepo(id);
+    const fresh = await getRepo(id, accountId);
     const neverSynced =
       fresh != null &&
       fresh.lastFullSyncAt == null &&
       fresh.lastIncrementalSyncAt == null;
     let deleted = false;
-    if (neverSynced && !isSyncRunning(id)) deleted = deleteRepo(id);
+    if (neverSynced && !isSyncRunning(id)) deleted = await deleteRepo(id, accountId);
     reply.status(200);
     return { repoId: id, deleted };
   });

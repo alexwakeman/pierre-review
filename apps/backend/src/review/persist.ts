@@ -6,8 +6,9 @@ import type {
   ClaudeReviewScope,
   ClaudeReviewVerdict,
 } from '@pierre-review/shared';
-import { db } from '../db/client.js';
-import { claudeReviewFindings, claudeReviews } from '../db/schema.js';
+import { db, runTransaction, schema } from '../db/client.js';
+
+const { claudeReviewFindings, claudeReviews } = schema;
 
 // One finding as produced by a run, ready to persist. `anchored` is decided by
 // the line-anchoring pass against the (noise-stripped) head diff.
@@ -46,32 +47,38 @@ export interface ReviewTelemetry {
   excludedFiles?: string[];
 }
 
-export function insertQueuedReview(
+export async function insertQueuedReview(
   prId: number,
   headSha: string,
   model: ClaudeReviewModel,
-): number {
-  const row = db
+  accountId: number,
+): Promise<number> {
+  const rows = await db
     .insert(claudeReviews)
-    .values({ prId, headSha, status: 'queued', model })
+    .values({ accountId, prId, headSha, status: 'queued', model })
     .returning({ id: claudeReviews.id })
-    .get();
-  return row.id;
+    .execute();
+  return rows[0]!.id;
 }
 
-export function markReviewRunning(id: number): void {
-  db.update(claudeReviews)
+export async function markReviewRunning(id: number): Promise<void> {
+  await db
+    .update(claudeReviews)
     .set({ status: 'running' })
     .where(eq(claudeReviews.id, id))
-    .run();
+    .execute();
 }
 
 // Record the agent's result + insert its findings, in one transaction. Claude's
 // summary/verdict are stored read-only; the user's `userBody`/`userVerdict` stay
 // null (the "Your review" box starts empty).
-export function saveReviewSuccess(id: number, data: ReviewSuccess): void {
-  db.transaction(() => {
-    db.update(claudeReviews)
+export async function saveReviewSuccess(
+  id: number,
+  data: ReviewSuccess,
+): Promise<void> {
+  await runTransaction(async (tx) => {
+    await tx
+      .update(claudeReviews)
       .set({
         status: 'succeeded',
         scope: data.scope,
@@ -85,9 +92,10 @@ export function saveReviewSuccess(id: number, data: ReviewSuccess): void {
         finishedAt: new Date(),
       })
       .where(eq(claudeReviews.id, id))
-      .run();
+      .execute();
     for (const f of data.findings) {
-      db.insert(claudeReviewFindings)
+      await tx
+        .insert(claudeReviewFindings)
         .values({
           reviewId: id,
           path: f.path,
@@ -100,17 +108,18 @@ export function saveReviewSuccess(id: number, data: ReviewSuccess): void {
           diffHunk: f.diffHunk,
           anchored: f.anchored,
         })
-        .run();
+        .execute();
     }
   });
 }
 
-export function markReviewFailed(
+export async function markReviewFailed(
   id: number,
   error: string,
   telemetry: ReviewTelemetry = {},
-): void {
-  db.update(claudeReviews)
+): Promise<void> {
+  await db
+    .update(claudeReviews)
     .set({
       status: 'failed',
       error: error.slice(0, 4000),
@@ -123,21 +132,22 @@ export function markReviewFailed(
       finishedAt: new Date(),
     })
     .where(eq(claudeReviews.id, id))
-    .run();
+    .execute();
 }
 
-export function markReviewCancelled(id: number): void {
-  db.update(claudeReviews)
+export async function markReviewCancelled(id: number): Promise<void> {
+  await db
+    .update(claudeReviews)
     .set({ status: 'cancelled', finishedAt: new Date() })
     .where(eq(claudeReviews.id, id))
-    .run();
+    .execute();
 }
 
 // Save the user's authored draft. Returns false if the run doesn't exist.
-export function updateReviewDraft(
+export async function updateReviewDraft(
   id: number,
   fields: { userBody?: string; userVerdict?: ClaudeReviewVerdict },
-): boolean {
+): Promise<boolean> {
   const set = {
     ...(fields.userBody !== undefined ? { userBody: fields.userBody } : {}),
     ...(fields.userVerdict !== undefined
@@ -145,21 +155,22 @@ export function updateReviewDraft(
       : {}),
   };
   if (Object.keys(set).length === 0) return true;
-  const res = db
+  const changed = await db
     .update(claudeReviews)
     .set(set)
     .where(eq(claudeReviews.id, id))
-    .run();
-  return res.changes > 0;
+    .returning({ id: claudeReviews.id })
+    .execute();
+  return changed.length > 0;
 }
 
 // Tick/untick a finding and/or save the user's reworded body. An empty-string
 // editedBody clears the reword (reverts to Claude's wording). Returns false if
 // the finding doesn't exist.
-export function updateFinding(
+export async function updateFinding(
   findingId: number,
   fields: { included?: boolean; editedBody?: string },
-): boolean {
+): Promise<boolean> {
   const set = {
     ...(fields.included !== undefined ? { included: fields.included } : {}),
     ...(fields.editedBody !== undefined
@@ -167,50 +178,54 @@ export function updateFinding(
       : {}),
   };
   if (Object.keys(set).length === 0) return true;
-  const res = db
+  const changed = await db
     .update(claudeReviewFindings)
     .set(set)
     .where(eq(claudeReviewFindings.id, findingId))
-    .run();
-  return res.changes > 0;
+    .returning({ id: claudeReviewFindings.id })
+    .execute();
+  return changed.length > 0;
 }
 
 // Stamp the run + its posted findings after a successful GitHub submit.
-export function markReviewPosted(
+export async function markReviewPosted(
   id: number,
   postedReviewId: string,
   postedFindingIds: number[],
-): void {
+): Promise<void> {
   const now = new Date();
-  db.transaction(() => {
-    db.update(claudeReviews)
+  await runTransaction(async (tx) => {
+    await tx
+      .update(claudeReviews)
       .set({ postedReviewId, postedAt: now })
       .where(eq(claudeReviews.id, id))
-      .run();
+      .execute();
     if (postedFindingIds.length > 0) {
-      db.update(claudeReviewFindings)
+      await tx
+        .update(claudeReviewFindings)
         .set({ postedAt: now })
         .where(inArray(claudeReviewFindings.id, postedFindingIds))
-        .run();
+        .execute();
     }
   });
 }
 
 // Stamp a single finding posted as a standalone inline comment.
-export function markFindingPosted(
+export async function markFindingPosted(
   findingId: number,
   githubCommentId: string,
-): void {
-  db.update(claudeReviewFindings)
+): Promise<void> {
+  await db
+    .update(claudeReviewFindings)
     .set({ postedAt: new Date(), githubCommentId })
     .where(eq(claudeReviewFindings.id, findingId))
-    .run();
+    .execute();
 }
 
 // On startup, heal runs left mid-flight by a crash/restart (our `running` status
 // is persisted, unlike the sync manager's purely in-memory guard).
-export function reconcileOrphanedReviews(): number {
-  const res = db
+export async function reconcileOrphanedReviews(): Promise<number> {
+  const changed = await db
     .update(claudeReviews)
     .set({
       status: 'failed',
@@ -218,6 +233,7 @@ export function reconcileOrphanedReviews(): number {
       finishedAt: new Date(),
     })
     .where(inArray(claudeReviews.status, ['queued', 'running']))
-    .run();
-  return res.changes;
+    .returning({ id: claudeReviews.id })
+    .execute();
+  return changed.length;
 }

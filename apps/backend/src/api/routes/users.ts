@@ -22,7 +22,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/api/users/:id', { schema: patchUserSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
     const { isBot } = req.body as UpdateUserBody;
-    const updated = setUserBot(id, isBot);
+    const updated = await setUserBot(id, isBot);
     if (!updated) {
       reply.status(404);
       return { error: 'NotFound', message: `User ${id} not found` };

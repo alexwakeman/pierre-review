@@ -1,5 +1,6 @@
 import type {
   ActiveReviewsResponse,
+  ClaudeKeyResponse,
   ClaudeReview,
   ClaudeReviewModel,
   ClaudeReviewResponse,
@@ -49,16 +50,20 @@ async function handle<T>(res: Response): Promise<T> {
 }
 
 function get<T>(url: string): Promise<T> {
-  return fetch(url).then((r) => handle<T>(r));
+  // `credentials: 'same-origin'` sends the sealed session cookie in cloud mode;
+  // it's harmless (and a no-op) in local mode where there is no cookie.
+  return fetch(url, { credentials: 'same-origin' }).then((r) => handle<T>(r));
 }
 
 function jsonBody(method: string, body?: unknown): RequestInit {
   // Only declare a JSON content-type when we actually send a body. Fastify
   // rejects an empty body that claims `application/json` with a 400, which would
   // break bodyless calls (DELETE repo, POST sync, dismiss).
-  if (body === undefined) return { method };
+  // `credentials: 'same-origin'` carries the session cookie on write paths.
+  if (body === undefined) return { method, credentials: 'same-origin' };
   return {
     method,
+    credentials: 'same-origin',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   };
@@ -105,6 +110,9 @@ export const api = {
   thread: (id: number) => get<ThreadDetail>(`/api/threads/${id}`),
 
   me: () => get<MeResponse>('/api/me'),
+  // Cloud-mode sign-out. 204 No Content; resolves once the session is cleared.
+  logout: (): Promise<Response> =>
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }),
   myTurn: () => get<MyTurnResponse>('/api/my-turn'),
   dismissMyTurn: (kind: MyTurnDismissKind, refId: number) =>
     fetch('/api/my-turn/dismiss', jsonBody('POST', { kind, refId })).then((r) =>
@@ -122,6 +130,12 @@ export const api = {
   // ---- Claude Review ----
   claudeReview: (prId: number) =>
     get<ClaudeReviewResponse>(`/api/prs/${prId}/claude-review`),
+  // Store (or clear, with an empty string) a user-supplied Anthropic API key.
+  // Write-only: the key is never read back; the response just confirms auth state.
+  setClaudeKey: (key: string) =>
+    fetch('/api/claude-review/key', jsonBody('PUT', { key })).then((r) =>
+      handle<ClaudeKeyResponse>(r),
+    ),
   claudeReviewById: (reviewId: number) =>
     get<ClaudeReview>(`/api/claude-reviews/${reviewId}`),
   generateClaudeReview: (prId: number, model: ClaudeReviewModel) =>

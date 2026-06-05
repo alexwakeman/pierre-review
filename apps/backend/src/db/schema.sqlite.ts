@@ -1,3 +1,17 @@
+// SQLite schema (local / default deployment mode, via better-sqlite3).
+//
+// This is the canonical schema for LOCAL mode. Its Postgres twin lives in
+// `schema.pg.ts` and MUST be kept structurally identical (same table + column
+// names, same `$type`s) — the shared query layer is typed against ONE of them
+// and cast in `client.ts`, so any drift breaks the cast's soundness. See the
+// `assertSchemaParity` test for the structural guard.
+//
+// Multi-tenancy: every GitHub entity is owned by an `accounts` row. Locally
+// there is exactly ONE synthesized account (id 1, isLocal=true). `accountId` is
+// denormalized onto the tables that anchor list/feed isolation (repos,
+// pullRequests, events, claudeReviews, myTurnDismissals); everything else
+// reaches its account transitively via repoId/prId. `users` and `commitFiles`
+// stay GLOBAL (non-sensitive actor metadata / content-addressed cache).
 import {
   sqliteTable,
   text,
@@ -9,13 +23,35 @@ import {
 import { sql } from 'drizzle-orm';
 import type { CheckRun, Label } from '@pierre-review/shared';
 
+// A tenant. Local mode synthesizes exactly one row (id 1, isLocal=true) from
+// `gh api user`; cloud mode creates one per signed-in GitHub user. Replaces the
+// old singleton `local_user` table.
+export const accounts = sqliteTable('accounts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  // GitHub user node id (the stable GraphQL id) — the login can change, this can't.
+  githubUserId: text('github_user_id').notNull().unique(),
+  githubLogin: text('github_login').notNull(),
+  avatarUrl: text('avatar_url'),
+  // AES-256-GCM sealed access token (iv:tag:ciphertext, base64). Null for the
+  // local account, whose token comes live from `gh auth token`.
+  accessTokenEnc: text('access_token_enc'),
+  isLocal: integer('is_local', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  lastLoginAt: integer('last_login_at', { mode: 'timestamp' }),
+});
+
 export const repos = sqliteTable(
   'repos',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
     owner: text('owner').notNull(),
     name: text('name').notNull(),
-    githubNodeId: text('github_node_id').notNull().unique(),
+    githubNodeId: text('github_node_id').notNull(),
     // The repo's default branch (GraphQL defaultBranchRef.name), captured each
     // activity sync. Used to scope the "maintainer" inference to PRs merged into
     // the default branch. Null until a sync populates it.
@@ -25,7 +61,17 @@ export const repos = sqliteTable(
       .notNull()
       .default(sql`(unixepoch())`),
   },
-  (t) => ({ ownerNameUx: uniqueIndex('repos_owner_name').on(t.owner, t.name) }),
+  (t) => ({
+    // Composite uniques so two accounts can watch the same GitHub repo (each
+    // gets its own row). The upsert conflict targets these.
+    ownerNameUx: uniqueIndex('repos_account_owner_name').on(
+      t.accountId,
+      t.owner,
+      t.name,
+    ),
+    nodeUx: uniqueIndex('repos_account_node').on(t.accountId, t.githubNodeId),
+    accountIdx: index('repos_account_idx').on(t.accountId),
+  }),
 );
 
 export const users = sqliteTable('users', {
@@ -45,7 +91,12 @@ export const pullRequests = sqliteTable(
   'pull_requests',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    githubNodeId: text('github_node_id').notNull().unique(),
+    githubNodeId: text('github_node_id').notNull(),
+    // Denormalized tenant owner (== repos.accountId) so list/feed isolation is a
+    // single indexed predicate instead of a join to repos.
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
     repoId: integer('repo_id')
       .notNull()
       .references(() => repos.id),
@@ -96,6 +147,8 @@ export const pullRequests = sqliteTable(
   (t) => ({
     repoIdx: index('pr_repo_idx').on(t.repoId),
     openedIdx: index('pr_opened_idx').on(t.openedAt),
+    accountIdx: index('pr_account_idx').on(t.accountId),
+    nodeUx: uniqueIndex('pr_account_node').on(t.accountId, t.githubNodeId),
   }),
 );
 
@@ -118,7 +171,8 @@ export const reviewRequests = sqliteTable(
   }),
 );
 
-// Per-PR "last viewed" state for incremental review. One row per PR.
+// Per-PR "last viewed" state for incremental review. One row per PR. Implicitly
+// per-account (prId is account-specific).
 export const prViews = sqliteTable('pr_views', {
   prId: integer('pr_id')
     .primaryKey()
@@ -130,33 +184,30 @@ export const prViews = sqliteTable('pr_views', {
 // Manual dismissals of "my turn" entries. `refId` is a PR id (review_request)
 // or a review-thread id (thread). The dismissal is honoured only while no newer
 // activity has happened — getMyTurn compares dismissedAt against the PR's
-// updatedAt / the thread's last reply, so it auto-resurfaces.
+// updatedAt / the thread's last reply, so it auto-resurfaces. `accountId` scopes
+// the dismissal set per tenant.
 export const myTurnDismissals = sqliteTable(
   'my_turn_dismissals',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
     kind: text('kind', { enum: ['review_request', 'thread'] }).notNull(),
     refId: integer('ref_id').notNull(),
     dismissedAt: integer('dismissed_at', { mode: 'timestamp' }).notNull(),
   },
-  (t) => ({ kindRefUx: uniqueIndex('mtd_kind_ref_ux').on(t.kind, t.refId) }),
+  (t) => ({
+    kindRefUx: uniqueIndex('mtd_kind_ref_ux').on(t.kind, t.refId),
+    accountIdx: index('mtd_account_idx').on(t.accountId),
+  }),
 );
-
-// Singleton (id always 1): the locally-authenticated GitHub user, cached from
-// `gh api user` so triage ("my turn") knows who "you" are.
-export const localUser = sqliteTable('local_user', {
-  id: integer('id').primaryKey(),
-  githubLogin: text('github_login').notNull(),
-  githubId: text('github_id').notNull(),
-  avatarUrl: text('avatar_url'),
-  cachedAt: integer('cached_at', { mode: 'timestamp' }).notNull(),
-});
 
 export const reviewThreads = sqliteTable(
   'review_threads',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    githubNodeId: text('github_node_id').notNull().unique(),
+    githubNodeId: text('github_node_id').notNull(),
     prId: integer('pr_id')
       .notNull()
       .references(() => pullRequests.id),
@@ -174,14 +225,17 @@ export const reviewThreads = sqliteTable(
     ),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   },
-  (t) => ({ prIdx: index('thread_pr_idx').on(t.prId) }),
+  (t) => ({
+    prIdx: index('thread_pr_idx').on(t.prId),
+    nodeUx: uniqueIndex('thread_pr_node').on(t.prId, t.githubNodeId),
+  }),
 );
 
 export const reviewComments = sqliteTable(
   'review_comments',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    githubNodeId: text('github_node_id').notNull().unique(),
+    githubNodeId: text('github_node_id').notNull(),
     threadId: integer('thread_id')
       .notNull()
       .references(() => reviewThreads.id),
@@ -195,14 +249,17 @@ export const reviewComments = sqliteTable(
     databaseId: text('database_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   },
-  (t) => ({ threadIdx: index('rc_thread_idx').on(t.threadId) }),
+  (t) => ({
+    threadIdx: index('rc_thread_idx').on(t.threadId),
+    nodeUx: uniqueIndex('rc_pr_node').on(t.prId, t.githubNodeId),
+  }),
 );
 
 export const prComments = sqliteTable(
   'pr_comments',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    githubNodeId: text('github_node_id').notNull().unique(),
+    githubNodeId: text('github_node_id').notNull(),
     prId: integer('pr_id')
       .notNull()
       .references(() => pullRequests.id),
@@ -212,14 +269,17 @@ export const prComments = sqliteTable(
     databaseId: text('database_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   },
-  (t) => ({ prIdx: index('prc_pr_idx').on(t.prId) }),
+  (t) => ({
+    prIdx: index('prc_pr_idx').on(t.prId),
+    nodeUx: uniqueIndex('prc_pr_node').on(t.prId, t.githubNodeId),
+  }),
 );
 
 export const reviews = sqliteTable(
   'reviews',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    githubNodeId: text('github_node_id').notNull().unique(),
+    githubNodeId: text('github_node_id').notNull(),
     prId: integer('pr_id')
       .notNull()
       .references(() => pullRequests.id),
@@ -232,7 +292,10 @@ export const reviews = sqliteTable(
     databaseId: text('database_id'),
     submittedAt: integer('submitted_at', { mode: 'timestamp' }).notNull(),
   },
-  (t) => ({ prIdx: index('rv_pr_idx').on(t.prId) }),
+  (t) => ({
+    prIdx: index('rv_pr_idx').on(t.prId),
+    nodeUx: uniqueIndex('reviews_pr_node').on(t.prId, t.githubNodeId),
+  }),
 );
 
 export const commits = sqliteTable(
@@ -254,7 +317,8 @@ export const commits = sqliteTable(
   }),
 );
 
-// SHA -> string[] of changed paths. Cached forever (SHAs are immutable).
+// SHA -> string[] of changed paths. Cached forever (SHAs are immutable). Stays
+// GLOBAL — content-addressed, identical across tenants.
 export const commitFiles = sqliteTable('commit_files', {
   sha: text('sha').primaryKey(),
   paths: text('paths', { mode: 'json' }).$type<string[]>().notNull(),
@@ -268,6 +332,11 @@ export const events = sqliteTable(
   'events',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
+    // Denormalized tenant owner (== the repo's accountId) — the lean timeline
+    // feed filters on this directly.
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
     repoId: integer('repo_id')
       .notNull()
       .references(() => repos.id),
@@ -290,12 +359,16 @@ export const events = sqliteTable(
     refTable: text('ref_table'),
     refId: integer('ref_id'),
     // Stable identity for idempotent upserts: e.g. "pr_opened:<prNodeId>".
-    dedupeKey: text('dedupe_key').notNull().unique(),
+    dedupeKey: text('dedupe_key').notNull(),
   },
   (t) => ({
     timeIdx: index('events_time_idx').on(t.occurredAt),
     repoTimeIdx: index('events_repo_time_idx').on(t.repoId, t.occurredAt),
     actorIdx: index('events_actor_idx').on(t.actorId),
+    accountIdx: index('events_account_idx').on(t.accountId),
+    // Composite so the same dedupeKey can exist once per account (two accounts
+    // watching the same repo share GitHub node ids). Upsert conflict target.
+    dedupeUx: uniqueIndex('events_account_dedupe').on(t.accountId, t.dedupeKey),
   }),
 );
 
@@ -315,10 +388,15 @@ export const syncState = sqliteTable('sync_state', {
 // One row per review run. Re-reviewing a PR inserts a new row (history kept,
 // keyed by head SHA via cr_pr_sha_idx). Claude's summary/verdict are read-only
 // reference; the user authors `userBody`/`userVerdict` which is what gets posted.
+// Local-only feature (force-disabled in cloud), but `accountId` is stamped for
+// consistency (always the local account).
 export const claudeReviews = sqliteTable(
   'claude_reviews',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
     prId: integer('pr_id')
       .notNull()
       .references(() => pullRequests.id),
@@ -359,6 +437,7 @@ export const claudeReviews = sqliteTable(
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
     prShaIdx: index('cr_pr_sha_idx').on(t.prId, t.headSha),
+    accountIdx: index('cr_account_idx').on(t.accountId),
   }),
 );
 

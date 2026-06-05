@@ -6,6 +6,12 @@ import type { Logger } from './sync-repo.js';
 // minimal chainable db whose `.from(table)` decides what rows come back.
 vi.mock('./sync-repo.js', () => ({ syncRepo: vi.fn() }));
 vi.mock('../config.js', () => ({ config: { backfillDays: 90, syncOverlapMinutes: 20 } }));
+// The token is resolved per repo's account; stub it so the manager doesn't hit
+// the real DB / gh CLI.
+vi.mock('../auth/account.js', () => ({
+  getAccessToken: vi.fn(async () => 'test-token'),
+  LOCAL_ACCOUNT_ID: 1,
+}));
 vi.mock('../db/client.js', () => {
   const repos = { id: 'repos.id', owner: 'repos.owner', name: 'repos.name' };
   const syncState = {
@@ -15,16 +21,19 @@ vi.mock('../db/client.js', () => {
     lastSyncStatus: 'ss.status',
     lastSyncError: 'ss.error',
   };
-  const repoRow = { id: 1, owner: 'o', name: 'n' };
+  const repoRow = { id: 1, owner: 'o', name: 'n', accountId: 1 };
   // A prior incremental sync exists, so the scheduled path plans an incremental.
   const syncStateRow = { lastIncrementalSyncAt: new Date('2020-01-01T00:00:00Z') };
+  // The query layer is now portable-async: `.limit(1).execute()` (was `.get()`)
+  // and `.execute()` (was `.all()`), both returning row arrays.
   const select = (): Record<string, unknown> => {
     let table: unknown = null;
     const chain: Record<string, unknown> = {
       from: (t: unknown) => ((table = t), chain),
       where: () => chain,
-      get: () => (table === repos ? repoRow : table === syncState ? syncStateRow : null),
-      all: () => (table === repos ? [{ id: 1 }] : []),
+      limit: () => chain,
+      execute: () =>
+        table === repos ? [repoRow] : table === syncState ? [syncStateRow] : [],
     };
     return chain;
   };
@@ -56,8 +65,11 @@ describe('scheduler stands down during a deep sync', () => {
 
     const log = makeLog();
 
-    // Kick off a deep sync — it stays running.
-    expect(runSyncForRepo(1, log, { background: true, forceFull: true })).toBe(true);
+    // Kick off a deep sync — it stays running. runSyncForRepo is now async
+    // (awaits the repo/plan lookups) but still fire-and-forgets the sync task.
+    expect(
+      await runSyncForRepo(1, log, { background: true, forceFull: true }),
+    ).toBe(true);
     expect(isDeepSyncActive()).toBe(true);
     expect(mockSyncRepo).toHaveBeenCalledTimes(1);
 

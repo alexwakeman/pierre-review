@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getUserAnthropicKey } from './local-settings.js';
 
 // Best-effort detector for whether the Claude Agent SDK has usable credentials.
 // The SDK itself exposes no runtime auth option — auth comes from the environment
@@ -15,6 +16,12 @@ export type ClaudeAuthResult =
   | { status: 'none'; message: string };
 
 export function detectClaudeAuth(): ClaudeAuthResult {
+  // A user-supplied key (stored locally) takes precedence — it overrides the
+  // ambient auth at run time (see local-settings.applyUserAnthropicKey).
+  if (getUserAnthropicKey()) {
+    return { status: 'ok', method: 'api_key' };
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (apiKey && apiKey.length > 0) {
     return { status: 'ok', method: 'api_key' };

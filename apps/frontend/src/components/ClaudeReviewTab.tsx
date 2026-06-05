@@ -20,6 +20,7 @@ import {
   useGenerateReview,
   usePostFinding,
   usePostReview,
+  useSetClaudeKey,
   useUpdateFinding,
   useUpdateReview,
 } from '../hooks/useClaudeReview.js';
@@ -512,6 +513,124 @@ function ClaudesReview({
   );
 }
 
+// Anthropic API-key management — store (or clear) a user-supplied key so reviews
+// bill to the user's own Anthropic account. The key is write-only: the backend
+// never returns it, so the input always renders empty and we never echo it.
+//
+// Rendered in two flavours: `prominent` when Claude auth is missing (it's the fix
+// for the amber gate), and a compact "Manage API key" disclosure when auth is ok.
+function ApiKeyPanel({
+  prId,
+  hasUserKey,
+  prominent,
+}: {
+  prId: number;
+  hasUserKey: boolean;
+  prominent: boolean;
+}): JSX.Element {
+  const setKey = useSetClaudeKey(prId);
+  const [keyInput, setKeyInput] = useState('');
+  // The compact (auth-ok) variant starts collapsed behind a disclosure.
+  const [open, setOpen] = useState(prominent);
+
+  const save = (value: string): void => {
+    setKey.mutate(value, { onSuccess: () => setKeyInput('') });
+  };
+
+  const body = (
+    <div className="space-y-1.5">
+      <div className="text-sm font-semibold">Anthropic API key (optional)</div>
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Paste a key to use your own Anthropic billing for reviews. Stored locally
+        only — never sent to any server but Anthropic.
+      </p>
+      {hasUserKey && (
+        <div className="text-xs text-green-700 dark:text-green-400">
+          ✓ Using your stored Anthropic key
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="password"
+          value={keyInput}
+          onChange={(e) => setKeyInput(e.target.value)}
+          placeholder={hasUserKey ? 'Replace stored key…' : 'sk-ant-…'}
+          autoComplete="off"
+          spellCheck={false}
+          className="min-w-0 flex-1 rounded border border-gray-300 bg-white px-2 py-1 font-mono text-sm dark:border-gray-700 dark:bg-gray-900"
+        />
+        <button
+          type="button"
+          onClick={() => save(keyInput)}
+          disabled={setKey.isPending || keyInput.trim() === ''}
+          className="rounded border border-blue-400 px-2 py-1 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+        >
+          {setKey.isPending ? 'Saving…' : 'Save'}
+        </button>
+        {hasUserKey && (
+          <button
+            type="button"
+            onClick={() => save('')}
+            disabled={setKey.isPending}
+            className="rounded border border-gray-300 px-2 py-1 text-sm text-gray-500 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {setKey.isError && (
+        <div className="text-xs text-red-500">
+          {(setKey.error as Error)?.message ?? 'Failed to save the key.'}
+        </div>
+      )}
+    </div>
+  );
+
+  if (prominent) {
+    return (
+      <div className="mt-3 rounded border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/50">
+        {body}
+      </div>
+    );
+  }
+
+  // Compact disclosure for the auth-ok case.
+  return (
+    <div className="px-4 py-2">
+      {open ? (
+        <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/50">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs uppercase tracking-wide text-gray-400">
+              Manage API key
+            </span>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            >
+              Hide
+            </button>
+          </div>
+          {body}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+        >
+          Manage API key
+          {hasUserKey && (
+            <span className="ml-1 text-green-700 dark:text-green-400">
+              ✓ stored key in use
+            </span>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function ClaudeReviewTab({
   pr,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -684,8 +803,15 @@ export function ClaudeReviewTab({
                 'Claude is not authenticated. Set up Claude credentials to run a review.'}
             </div>
           </div>
+          {/* The fix: paste an Anthropic key (prominent in the no-auth state). */}
+          <ApiKeyPanel
+            prId={pr.id}
+            hasUserKey={data.hasUserKey}
+            prominent
+          />
         </div>
       ) : (
+        <>
         <div className="px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-xs uppercase tracking-wide text-gray-400">
@@ -752,6 +878,15 @@ export function ClaudeReviewTab({
             </div>
           )}
         </div>
+        {/* Compact key management when auth is already satisfied. */}
+        {data != null && (
+          <ApiKeyPanel
+            prId={pr.id}
+            hasUserKey={data.hasUserKey}
+            prominent={false}
+          />
+        )}
+        </>
       )}
 
       {/* Running progress. */}

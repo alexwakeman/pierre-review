@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { EventType, PrStatus, TimelineQuery } from '@pierre-review/shared';
 import { getTimeline, type TimelineFilters } from '../../db/queries.js';
+import { accountIdOf } from '../plugins/auth.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -63,6 +64,7 @@ export async function timelineRoutes(app: FastifyInstance): Promise<void> {
     const q = req.query as TimelineQuery;
     const now = new Date();
     const filters: TimelineFilters = {
+      accountId: accountIdOf(req),
       from: parseDate(q.from, new Date(now.getTime() - 14 * DAY_MS)),
       to: parseDate(q.to, now),
       repoIds: parseIntList(q.repoIds),

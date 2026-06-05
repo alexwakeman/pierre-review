@@ -229,6 +229,9 @@ export interface MeResponse {
   // Whether the Claude Review feature is enabled (ENABLE_CLAUDE_REVIEW). The
   // frontend hides the Claude Review tab when false.
   claudeReviewEnabled: boolean;
+  // Deployment mode. 'cloud' tells the SPA to show a sign-out control and treat a
+  // 401 from /api/me as "signed out" (vs local, where /api/me never 401s).
+  deploymentMode: 'local' | 'cloud';
 }
 
 // Lean PR shape for the timeline. No bodies, no diff hunks.
@@ -639,10 +642,23 @@ export interface ClaudeReviewResponse {
   // Claude-auth availability for running a review.
   auth: ClaudeAuthStatus;
   authMessage?: string;
+  // Whether a user-supplied Anthropic API key is stored locally (local mode
+  // only). When true, that key overrides the ambient Claude auth at run time.
+  hasUserKey: boolean;
   // The latest run for the PR (with findings), or null if never run.
   review: ClaudeReview | null;
   // All prior runs for the PR (newest first), lighter shape.
   history: ClaudeReviewSummary[];
+}
+
+// Set (non-empty) or clear (empty) the locally-stored Anthropic API key.
+export interface SetClaudeKeyBody {
+  key: string;
+}
+
+export interface ClaudeKeyResponse {
+  hasUserKey: boolean;
+  auth: ClaudeAuthStatus;
 }
 
 export type ClaudeReviewPhase =
