@@ -1,0 +1,39 @@
+# Local Postgres for testing pierre-review's CLOUD deployment mode.
+#
+# The cloud (Railway) deployment uses Postgres; local `pnpm dev` / `npx pierre-review`
+# keep using SQLite and don't need this. Bring this up only when you want to test the
+# deployed experience locally (see docs/LOCAL-CLOUD-TESTING.md):
+#
+#   docker compose up -d db          # start Postgres
+#   # then run the app in cloud mode pointing at it:
+#   DATABASE_URL=postgres://pierre:pierre@localhost:5432/pierre_review \
+#     pnpm --filter @pierre-review/backend exec pierre --cloud   (or `pierre --cloud`)
+#
+#   docker compose down              # stop (keeps the named volume)
+#   docker compose down -v           # stop and wipe the database
+#
+# Re-syncing repopulates everything; the cloud DB is regenerable by design, so
+# wiping the volume is safe.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: pierre-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pierre
+      POSTGRES_PASSWORD: pierre
+      POSTGRES_DB: pierre_review
+    ports:
+      # host:container — expose on localhost:5432 for the local cloud-mode app.
+      - '5432:5432'
+    volumes:
+      - pierre_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pierre -d pierre_review']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pierre_pgdata:

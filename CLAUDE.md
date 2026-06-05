@@ -1,14 +1,21 @@
 # pierre-review
 
-A **local-only, single-page dashboard for tracking a team's GitHub activity across
-multiple repositories**. It's built for sprint situational-awareness: at a glance,
-who's doing what, which PRs are stalled, which review threads are sitting
-untouched, and what needs _your_ attention right now.
+A **single-page dashboard for tracking a team's GitHub activity across multiple
+repositories**. It's built for sprint situational-awareness: at a glance, who's
+doing what, which PRs are stalled, which review threads are sitting untouched, and
+what needs _your_ attention right now.
 
-It runs entirely on your machine — there's no hosted backend, no database server,
-and no stored credentials. It authenticates by shelling out to your already
-logged-in `gh` CLI, syncs activity from the GitHub GraphQL/REST APIs into a local
-SQLite file, and renders it as an interactive timeline.
+It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`
+(`config.deploymentMode`):
+
+- **local** (default): runs entirely on your machine — SQLite, no hosted backend,
+  no stored credentials. Authenticates by shelling out to your already logged-in
+  `gh` CLI, syncs into a local SQLite file, opens straight to the timeline. The
+  original, unchanged experience.
+- **cloud** (multi-tenant): a public landing page, GitHub-App OAuth sign-in,
+  per-user encrypted accounts, and Postgres — self-hostable on Railway.
+
+See **[Deployment modes](#deployment-modes-local-vs-cloud)** below for the full split.
 
 > This file is the project's living overview — keep it accurate when you change
 > architecture, conventions, or the data model.
@@ -36,6 +43,97 @@ The single most important domain concept is **derived thread state** (see below)
 
 ---
 
+## Deployment modes (local vs cloud)
+
+One env var — **`DEPLOYMENT_MODE` = `local` (default) | `cloud`** — drives a single
+`config.deploymentMode` field that everything branches off (`config.isCloud`,
+`config.dbDialect`).
+
+| Concern | local (default, unchanged UX) | cloud (Railway) |
+|---|---|---|
+| DB | SQLite (`better-sqlite3`) | Postgres (`pg`) |
+| Schema module | `db/schema.sqlite.ts` | `db/schema.pg.ts` (identical table/col names) |
+| GitHub auth | `gh auth token` (one implicit account) | GitHub App OAuth, per-user tokens |
+| Accounts | 1 synthesized `isLocal` account (id 1) | many, one per signed-in user |
+| Landing page | never served (`/` → 302 `/app`) | served at `/` |
+| Timeline SPA | `/app` (browser opens there) | `/app`, behind the auth gate |
+| Claude Review | allowed (flag + local) | force-disabled (routes unregistered) |
+| Sessions/OAuth | none | sealed cookie + `/api/auth/*` routes |
+
+**Dual-dialect DB (the foundation).** The query layer is written **once**,
+`await`-based, against a PORTABLE async surface and is dialect-agnostic:
+
+- `db/client.ts` mode-selects the driver + schema at boot: local =
+  `drizzle(better-sqlite3, sqliteSchema)`, cloud = `drizzle(node-postgres Pool,
+  pgSchema)` (pg + the driver are dynamically imported so the unused one isn't
+  loaded). It exports `db` (TYPED as the node-postgres instance — so any stray
+  `.get()/.all()/.run()` is a compile error), the active `schema`, `isPg`,
+  `closeDb()`, and `runTransaction(fn)`.
+- **Portable terminals only**: `await q.execute()` (selects/inserts/updates/
+  deletes), `.returning().execute()`, `onConflictDoUpdate`. NO `.get()/.all()/
+  .run()`, NO `db.execute(sql)` (pg-only — use the query builder). "Rows affected"
+  comes from `.returning({id}).execute().length`. Booleans in raw `sql` use
+  `= true` (works on both). These were empirically verified on both drivers.
+- **Transactions are the one dialect fork**: better-sqlite3 rejects async
+  transaction callbacks, so `runTransaction` uses a manual `BEGIN/COMMIT/ROLLBACK`
+  on the sqlite path and a real `db.transaction(async tx => …)` on pg. Callbacks
+  take a `tx` executor; the ~4 tx blocks (`persistPr`, `deleteRepo`,
+  `saveReviewSuccess`, `markReviewPosted`) use it.
+- **`schema.sqlite.ts` and `schema.pg.ts` are kept in sync BY HAND** and guarded by
+  `db/schema-parity.test.ts` (same tables, columns, nullability). Migrations are
+  per-dialect: hand-maintained `db/migrations/*.sql` (sqlite) + a generated
+  `db/migrations-pg/` baseline (`pnpm db:generate:pg`). `run-migrations.ts` picks
+  the folder + migrator by mode (async either way).
+
+**Multi-tenancy.** Every GitHub entity is owned by an `accounts` row.
+`accountId` is **denormalized** onto `repos`, `pullRequests`, `events`,
+`claudeReviews`, `myTurnDismissals` (so isolation is a single indexed predicate);
+everything else reaches its account via `repoId`/`prId`. `users` + `commitFiles`
+stay **global**. GitHub-node-id uniques are **composite** so two accounts can watch
+the same repo: `repos (accountId, githubNodeId)`, `pullRequests (accountId,
+githubNodeId)`, `events (accountId, dedupeKey)`, child tables `(prId,
+githubNodeId)`. Every list/feed query filters by `accountId`; every id-addressed
+getter scopes ownership and returns null/false on mismatch (the route → 404). The
+query-layer IDOR guarantee is checked by `scripts/verify-isolation.ts`
+(`pnpm --filter @pierre-review/backend verify:isolation`).
+
+**Auth & tenancy plumbing.**
+- `auth/account.ts` — the account context: `ensureLocalAccount()` (local, from
+  `gh api user`, id 1), `getAccountById`, `getAccountUserId(accountId)` (the "who
+  am I" for triage, replaces the old `getLocalUserId`), `getAccessToken(accountId)`
+  (local → `gh auth token`; cloud → decrypt), `upsertCloudAccount` (OAuth).
+- `auth/crypto.ts` — AES-256-GCM sealing of stored tokens (`ENCRYPTION_KEY`).
+- `github/client.ts` — **per-account** factories `getGraphqlClientFor(token)` /
+  `ghRestGetFor(token,…)` / `ghRestPostFor(token,…)`. NO module-level token cache
+  (the #1 leak risk). `ghRestGet/Post` (gh-token wrappers) remain for the
+  local-only Claude Review posting path.
+- `api/plugins/auth.ts` — `registerAccountContext` (sets `request.account` every
+  request: local account, or the session's account in cloud), `registerSession`
+  (cloud: `@fastify/cookie` + `@fastify/secure-session`), `registerAuthGate`
+  (cloud: 401 unauthenticated `/api` data routes, skipping `/api/health` +
+  `/api/auth/*`), `accountIdOf(req)`.
+- `api/routes/auth.ts` (cloud only) — `GET /api/auth/login` (302 → GitHub authorize
+  + CSRF state cookie), `GET /api/auth/callback` (exchange code → upsert account →
+  set session → 302 `/app`), `POST /api/auth/logout`.
+
+**Serving & routing.** The SPA is built with **`base:'/app/'`**; the landing app
+(`apps/landing`) builds to `/`. `app.ts` registers two `@fastify/static` roots
+(`public/` at `/app/`, `public-landing/` at `/` in cloud). The single
+`setNotFoundHandler` (`api/plugins/error-handler.ts`) routes: unknown `/api` →
+JSON 404; `/app*` GET → SPA index; `/` + other GET → landing (cloud) or 302 `/app`
+(local).
+
+**Running cloud locally / packaging.** `cli.ts` gains `--cloud` / `--mode`
+(sets `DEPLOYMENT_MODE=cloud`, skips the gh pre-check + SQLite default). `pnpm
+package` builds frontend@`/app` + landing + backend and assembles
+`public/` + `public-landing/` + `dist/db/migrations{,-pg}`; curated deps add `pg`,
+`@fastify/cookie`, `@fastify/secure-session`. `docker-compose.yml` stands up a
+local Postgres; `Dockerfile` + `railway.json` deploy to Railway. Cloud startup
+fails loud on missing env (`assertCloudConfig`). Docs:
+`docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-APP-SETUP.md`, `docs/LOCAL-CLOUD-TESTING.md`.
+
+---
+
 ## Stack
 
 - **Monorepo:** pnpm workspaces, TypeScript everywhere, ESM throughout. Node ≥20
@@ -59,7 +157,7 @@ pierre-review/
 │  │  │  ├─ app.ts             Fastify factory: logger, CORS, error handler, route registration
 │  │  │  ├─ config.ts          env-driven config (port, dbPath, cron, backfill, thresholds)
 │  │  │  ├─ db/
-│  │  │  │  ├─ schema.ts        ← Drizzle table definitions (source of truth for the data model)
+│  │  │  │  ├─ schema.sqlite.ts  ← Drizzle tables (sqlite-core); schema.pg.ts is its pg-core twin (kept in sync; schema-parity.test.ts guards drift)
 │  │  │  │  ├─ client.ts        better-sqlite3 + drizzle, sets WAL + foreign_keys pragmas
 │  │  │  │  ├─ queries.ts       read layer: getTimeline(), getPrDetail(), getOpenPrs(), getMyTurn(), getMergers()
 │  │  │  │  ├─ triage.ts        computeTriage(): reasonTag, "my turn", new-since-viewed, approvals

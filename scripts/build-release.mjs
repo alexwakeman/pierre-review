@@ -28,9 +28,12 @@ const repoRoot = resolve(scriptDir, '..');
 
 const backendDir = join(repoRoot, 'apps', 'backend');
 const frontendDir = join(repoRoot, 'apps', 'frontend');
+const landingDir = join(repoRoot, 'apps', 'landing');
 const backendDist = join(backendDir, 'dist');
 const frontendDist = join(frontendDir, 'dist');
+const landingDist = join(landingDir, 'dist');
 const migrationsSrc = join(backendDir, 'src', 'db', 'migrations');
+const migrationsPgSrc = join(backendDir, 'src', 'db', 'migrations-pg');
 const releaseDir = join(repoRoot, 'release');
 
 const log = (msg) => console.log(`\x1b[36m▸\x1b[0m ${msg}`);
@@ -52,11 +55,15 @@ mkdirSync(releaseDir, { recursive: true });
 // 2. Build frontend (Vite → apps/frontend/dist).
 run('pnpm', ['--filter', '@pierre-review/frontend', 'build']);
 
+// 2b. Build the landing page (Vite → apps/landing/dist) — served at / in cloud.
+run('pnpm', ['--filter', '@pierre-review/landing', 'build']);
+
 // 3. Build backend (tsc → apps/backend/dist; picks up cli.ts via tsconfig.build).
 run('pnpm', ['--filter', '@pierre-review/backend', 'build']);
 
 if (!existsSync(backendDist)) fail('backend dist/ missing after build');
 if (!existsSync(frontendDist)) fail('frontend dist/ missing after build');
+if (!existsSync(landingDist)) fail('landing dist/ missing after build');
 
 // 4. Copy compiled backend → release/dist, then prune non-artifact files
 //    (sourcemaps + any stray compiled tests) so only production JS ships.
@@ -91,9 +98,28 @@ for (const entry of readdirSync(metaSrc)) {
   }
 }
 
-// 6. Copy built SPA → release/public.
+// 5b. Copy pg migrations (.sql + meta/*.json) → release/dist/db/migrations-pg.
+log('copying pg migrations → release/dist/db/migrations-pg');
+const migrationsPgDst = join(releaseDir, 'dist', 'db', 'migrations-pg');
+mkdirSync(join(migrationsPgDst, 'meta'), { recursive: true });
+for (const entry of readdirSync(migrationsPgSrc)) {
+  if (entry.endsWith('.sql')) {
+    cpSync(join(migrationsPgSrc, entry), join(migrationsPgDst, entry));
+  }
+}
+const metaPgSrc = join(migrationsPgSrc, 'meta');
+for (const entry of readdirSync(metaPgSrc)) {
+  if (entry.endsWith('.json')) {
+    cpSync(join(metaPgSrc, entry), join(migrationsPgDst, 'meta', entry));
+  }
+}
+
+// 6. Copy built SPA → release/public (served under /app), and the landing page
+//    → release/public-landing (served at / in cloud).
 log('copying SPA → release/public');
 cpSync(frontendDist, join(releaseDir, 'public'), { recursive: true });
+log('copying landing → release/public-landing');
+cpSync(landingDist, join(releaseDir, 'public-landing'), { recursive: true });
 
 // 7. Generate release/package.json (version copied from backend; curated deps).
 log('generating release/package.json');
@@ -106,7 +132,7 @@ const manifest = {
   name: 'pierre-review',
   version: backendPkg.version,
   description:
-    "Local-only dashboard for tracking your team's GitHub PR activity across repos.",
+    "Dashboard for tracking your team's GitHub PR activity across repos — local (SQLite + gh) or self-hosted multi-tenant cloud (Postgres + GitHub App).",
   type: 'module',
   author: 'Alex Wakeman',
   repository: {
@@ -119,13 +145,15 @@ const manifest = {
     pierre: 'dist/cli.js',
     'pierre-review': 'dist/cli.js',
   },
-  files: ['dist', 'public', 'README.md', 'LICENSE'],
+  files: ['dist', 'public', 'public-landing', 'README.md', 'LICENSE'],
   engines: { node: '>=20' },
   dependencies: {
     '@anthropic-ai/claude-agent-sdk':
       backendPkg.dependencies['@anthropic-ai/claude-agent-sdk'],
     '@anthropic-ai/sdk': backendPkg.dependencies['@anthropic-ai/sdk'],
+    '@fastify/cookie': backendPkg.dependencies['@fastify/cookie'],
     '@fastify/cors': backendPkg.dependencies['@fastify/cors'],
+    '@fastify/secure-session': backendPkg.dependencies['@fastify/secure-session'],
     '@fastify/static': staticVersion,
     '@modelcontextprotocol/sdk':
       backendPkg.dependencies['@modelcontextprotocol/sdk'],
@@ -134,6 +162,8 @@ const manifest = {
     'drizzle-orm': backendPkg.dependencies['drizzle-orm'],
     fastify: backendPkg.dependencies['fastify'],
     'node-cron': backendPkg.dependencies['node-cron'],
+    // Postgres driver — only loaded in cloud mode (dynamic import in client.ts).
+    pg: backendPkg.dependencies['pg'],
     zod: backendPkg.dependencies['zod'],
   },
   keywords: [
@@ -166,11 +196,19 @@ const mustExist = [
   'dist/index.js',
   'dist/app.js',
   'dist/config.js',
+  'dist/db/client.js',
+  'dist/db/schema.sqlite.js',
+  'dist/db/schema.pg.js',
   'dist/db/migrations/meta/_journal.json',
-  'dist/db/migrations/0006_cute_violations.sql',
+  'dist/db/migrations/0008_multitenant_accounts.sql',
+  'dist/db/migrations-pg/meta/_journal.json',
+  'dist/auth/account.js',
+  'dist/auth/crypto.js',
+  'dist/api/routes/auth.js',
   'dist/review/agent.js',
   'dist/api/routes/claude-review.js',
   'public/index.html',
+  'public-landing/index.html',
 ];
 for (const rel of mustExist) {
   if (!existsSync(join(releaseDir, rel))) fail(`missing required file: ${rel}`);
