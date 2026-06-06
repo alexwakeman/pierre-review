@@ -1195,11 +1195,21 @@ export function Timeline(): JSX.Element {
     (top: number) => {
       setVisScrollTop(top);
       let frames = 0;
+      let stable = 0;
       const step = (): void => {
         setVisScrollTop(top);
         const vs = verticalScrollEl();
-        const atTarget = vs != null && Math.abs(vs.scrollTop - top) <= 2;
-        if (!atTarget && frames++ < 4) requestAnimationFrame(step);
+        // setVisScrollTop clamps to the panel's CURRENT scrollHeight, which only
+        // grows back to full over several frames after the marker remove()+add()
+        // (much slower on a hundreds-of-rows board like three.js). A single
+        // on-target frame can still be a short-clamp mid-relayout, so keep
+        // re-pinning until the target HOLDS for 3 consecutive frames. Once the
+        // layout settles that's ~3 frames (a no-op on small boards); the 30-frame
+        // cap is only a backstop for when the target is genuinely unreachable
+        // (the content actually shrank).
+        if (vs != null && Math.abs(vs.scrollTop - top) <= 2) stable += 1;
+        else stable = 0;
+        if (stable < 3 && frames++ < 30) requestAnimationFrame(step);
       };
       requestAnimationFrame(step);
     },
@@ -1738,7 +1748,7 @@ export function Timeline(): JSX.Element {
   // settled width (zoom / background sync — no gutter change, no flash), else poll
   // a few frames until it stabilises. `items` hold REAL start/end (freshly built),
   // so fitLaneBars always reasons from the true geometry. Supersedes any pending fit.
-  const applyBarFit = useCallback((items: DataItem[]) => {
+  const applyBarFit = useCallback((items: DataItem[], onSettled?: () => void) => {
     if (barFitRafRef.current != null) {
       cancelAnimationFrame(barFitRafRef.current);
       barFitRafRef.current = null;
@@ -1750,6 +1760,10 @@ export function Timeline(): JSX.Element {
       fitLaneBars(items, (win.end.valueOf() - win.start.valueOf()) / w);
       itemsRef.current.update(items);
       settledCenterWidthRef.current = w;
+      // This items.update fires a vis _redraw → _updateScrollTop clamp that can
+      // land up to ~40 frames after the rebuild's own reapplyScrollTop budget has
+      // already expired. Let the caller re-pin the saved scroll once it flushes.
+      onSettled?.();
     };
     const w0 = barDrawCenterPx(timelineRef.current, containerRef.current);
     if (w0 > 0 && Math.abs(w0 - settledCenterWidthRef.current) < 1) {
@@ -2007,8 +2021,12 @@ export function Timeline(): JSX.Element {
 
     // Nudge overlapping min-width bars apart (so close-succession PRs don't each
     // need their own row), once the CENTER draw width is known (deferred — the
-    // gutter is sized async). prItems still hold REAL start/end here.
-    applyBarFit(prItems);
+    // gutter is sized async). prItems still hold REAL start/end here. The deferred
+    // items.update re-clamps the vertical scroll long after reapplyScrollTop (below)
+    // has finished, so re-pin once it settles to close that second clamp window.
+    applyBarFit(prItems, () => {
+      if (scrollBefore != null) reapplyScrollTop(scrollBefore);
+    });
 
     rebuildMarkers();
 
