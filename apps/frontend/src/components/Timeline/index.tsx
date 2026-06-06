@@ -1037,6 +1037,12 @@ export function Timeline(): JSX.Element {
     [verticalScrollEl],
   );
 
+  // True while an intentional vertical scroll (centerShowTarget) is animating, so
+  // the rebuild's DEFERRED onSettled re-pin doesn't fight it on the rare overlap of
+  // a background-sync rebuild with a "Show"/focus centring. The synchronous
+  // reapplyScrollTop in the rebuild still runs — only the late re-pin is gated.
+  const intentionalScrollRef = useRef(false);
+
   // Bring the "Show" target into view and centre it. Called after the row-focus
   // collapse has settled. The target glow is the clicked marker (`ev-cross-linked`)
   // when the event has one, else the PR bar (`pr-cross-linked`) for lifecycle.
@@ -1120,6 +1126,7 @@ export function Timeline(): JSX.Element {
 
       let frames = 0;
       let stable = 0;
+      intentionalScrollRef.current = true;
       const step = (): void => {
         const r = measureDelta();
         if (r != null) {
@@ -1133,6 +1140,7 @@ export function Timeline(): JSX.Element {
           }
         }
         if (stable < 6 && frames++ < 90) requestAnimationFrame(step);
+        else intentionalScrollRef.current = false; // settled — release the gate
       };
       requestAnimationFrame(() => requestAnimationFrame(step));
     },
@@ -2025,7 +2033,13 @@ export function Timeline(): JSX.Element {
     // items.update re-clamps the vertical scroll long after reapplyScrollTop (below)
     // has finished, so re-pin once it settles to close that second clamp window.
     applyBarFit(prItems, () => {
-      if (scrollBefore != null) reapplyScrollTop(scrollBefore);
+      // Skip the late re-pin if an intentional scroll (a "Show"/focus centring) is
+      // animating — this onSettled lands ~40 frames out, inside that window. The
+      // synchronous reapplyScrollTop below already covered the normal background-
+      // sync case, so the scroll is never left unguarded by gating only here.
+      if (scrollBefore != null && !intentionalScrollRef.current) {
+        reapplyScrollTop(scrollBefore);
+      }
     });
 
     rebuildMarkers();
