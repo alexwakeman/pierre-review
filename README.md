@@ -70,4 +70,4 @@ pnpm --filter @pierre-review/backend verify:isolation
 - `apps/landing` — public marketing landing page (cloud mode, served at `/`)
 - `packages/shared` — API types shared by both sides
 
-See `CLAUDE.md` for conventions and `V1_PLAN.md` for the full design.
+See `CLAUDE.md` for the architecture, conventions, and the local/cloud split.

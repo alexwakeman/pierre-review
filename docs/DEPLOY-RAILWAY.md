@@ -47,7 +47,7 @@ On the **app service → Variables**:
 |---|---|---|
 | `DEPLOYMENT_MODE` | `cloud` | the master switch (Postgres + landing + OAuth) |
 | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | from the Postgres plugin |
-| `APP_BASE_URL` | `https://<your-domain>` | no trailing slash; used to build the OAuth redirect |
+| `APP_BASE_URL` | `https://pierre-review.com` | no trailing slash; the canonical origin — OAuth redirect, CORS, and the session cookie all derive from it |
 | `GITHUB_APP_CLIENT_ID` | from the GitHub App | |
 | `GITHUB_APP_CLIENT_SECRET` | from the GitHub App | |
 | `GITHUB_APP_SLUG` | the app slug | for the install link |
@@ -77,18 +77,32 @@ This repo ships a root **`Dockerfile`** and **`railway.json`**. Railway will:
 
 Migrations (the Postgres baseline in `dist/db/migrations-pg`) run at boot.
 
-## Step 4 — Custom domain + finalize
+## Step 4 — Custom domain (`pierre-review.com`)
 
-1. Railway **service → Settings → Networking → Custom Domain**; point your DNS
-   `CNAME` at the Railway target.
-2. Set `APP_BASE_URL` to the final `https://<your-domain>`.
-3. In the **GitHub App settings**, set the **Callback URL** to
-   `https://<your-domain>/api/auth/callback` (must match `APP_BASE_URL`).
-4. Redeploy so the new `APP_BASE_URL` takes effect.
+`pierre-review.com` was registered **through Railway**, so Railway manages its DNS
+automatically — there's no external registrar or manual `CNAME` step.
+
+1. **Attach it to the service.** Railway **service → Settings → Networking →
+   Domains → Custom Domain** → add **`pierre-review.com`**. Because the domain is
+   Railway-managed, Railway creates the DNS records and provisions TLS for you —
+   wait for the certificate to go green.
+   - Optional but recommended: also add **`www.pierre-review.com`** and redirect it
+     to the apex, so both resolve and everyone lands on the canonical origin.
+2. **Set `APP_BASE_URL=https://pierre-review.com`** (no trailing slash) on the app
+   service. This is the canonical origin: the OAuth `redirect_uri`, the CORS
+   allow-list (`origin: [APP_BASE_URL]`), and the sealed session cookie are all
+   derived from it — so it must match the domain users actually land on. Use the
+   **apex**, and redirect `www` → apex (step 1) so the OAuth round-trip and cookie
+   stay on one host.
+3. **Point the GitHub App at it.** In the App's settings, set the **Callback URL**
+   to **`https://pierre-review.com/api/auth/callback`** and the **Homepage URL** to
+   `https://pierre-review.com`. The callback must match `APP_BASE_URL` exactly, or
+   the OAuth exchange fails.
+4. **Redeploy** so the new `APP_BASE_URL` takes effect.
 
 ## Step 5 — First sign-in
 
-1. Visit `https://<your-domain>/` → the landing page → **Sign in with GitHub**.
+1. Visit `https://pierre-review.com/` → the landing page → **Sign in with GitHub**.
 2. Authorize the App; you're redirected to `/app`.
 3. Add any **public** repo from the picker and watch the first sync run — no
    installation needed (sign-in alone grants read access to public repos).
