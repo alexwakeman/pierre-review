@@ -150,20 +150,24 @@ export function RepoSearch(): JSX.Element {
   const searching =
     showPanel && (debouncePending || query.isFetching || query.isPlaceholderData);
 
-  // Keep the active index in range when the result set shrinks/changes.
+  // The keyboard-navigable list is the live results, or the curated suggestions in
+  // the empty-query state (both carry owner+name, so one Enter handler adds either).
+  const navItems = showSuggestions ? suggestions : results;
+
+  // Keep the active index in range when the active list shrinks/changes.
   useEffect(() => {
-    setActive((a) => (results.length ? Math.min(a, results.length - 1) : 0));
-  }, [results]);
+    setActive((a) => (navItems.length ? Math.min(a, navItems.length - 1) : 0));
+  }, [navItems]);
 
   // Outside-click close (shared hook). Escape close stays inline in onKeyDown.
   useClickOutside(rootRef, () => setOpen(false), open);
 
-  // Scroll the active row into view as the user arrow-keys through results.
+  // Scroll the active row into view as the user arrow-keys through the list.
   useEffect(() => {
     listRef.current
       ?.querySelector(`[data-idx="${active}"]`)
       ?.scrollIntoView({ block: 'nearest' });
-  }, [active, results]);
+  }, [active, navItems]);
 
   function gotoNext(): void {
     const next = query.data?.cursor;
@@ -184,17 +188,19 @@ export function RepoSearch(): JSX.Element {
       setOpen(false);
       return;
     }
-    if (!showPanel) return;
+    if (!panelOpen) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActive((a) => Math.min(a + 1, Math.max(results.length - 1, 0)));
+      setActive((a) => Math.min(a + 1, Math.max(navItems.length - 1, 0)));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActive((a) => Math.max(a - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const r = results[active];
-      if (r && !addRepo.isPending) addRepo.mutate(r);
+      const item = navItems[active];
+      if (item && !addRepo.isPending) {
+        addRepo.mutate({ owner: item.owner, name: item.name });
+      }
     }
   }
 
@@ -215,6 +221,11 @@ export function RepoSearch(): JSX.Element {
         aria-expanded={panelOpen}
         aria-controls={listboxId}
         aria-autocomplete="list"
+        aria-activedescendant={
+          panelOpen && navItems[active]
+            ? `${listboxId}-opt-${active}`
+            : undefined
+        }
         className="w-44 rounded border border-gray-300 bg-transparent px-2 py-0.5 text-xs focus:border-blue-500 focus:outline-none dark:border-gray-700"
       />
 
@@ -235,7 +246,8 @@ export function RepoSearch(): JSX.Element {
                   You&rsquo;re already watching all the suggestions.
                 </div>
               ) : (
-                suggestions.map((s) => {
+                <div ref={listRef}>
+                  {suggestions.map((s, idx) => {
                   const adding =
                     addRepo.isPending &&
                     addRepo.variables?.owner === s.owner &&
@@ -243,11 +255,18 @@ export function RepoSearch(): JSX.Element {
                   return (
                     <div
                       key={`${s.owner}/${s.name}`}
-                      className="flex items-stretch hover:bg-gray-100 dark:hover:bg-gray-800"
+                      className={`flex items-stretch ${
+                        idx === active ? 'bg-gray-100 dark:bg-gray-800' : ''
+                      } hover:bg-gray-100 dark:hover:bg-gray-800`}
                     >
                       <button
+                        id={`${listboxId}-opt-${idx}`}
+                        data-idx={idx}
                         type="button"
+                        role="option"
+                        aria-selected={idx === active}
                         disabled={addRepo.isPending}
+                        onMouseEnter={() => setActive(idx)}
                         onClick={() =>
                           addRepo.mutate({ owner: s.owner, name: s.name })
                         }
@@ -287,7 +306,8 @@ export function RepoSearch(): JSX.Element {
                       </a>
                     </div>
                   );
-                })
+                  })}
+                </div>
               )}
             </div>
           ) : query.isError ? (
@@ -330,6 +350,7 @@ export function RepoSearch(): JSX.Element {
                     } hover:bg-gray-100 dark:hover:bg-gray-800`}
                   >
                     <button
+                      id={`${listboxId}-opt-${idx}`}
                       data-idx={idx}
                       type="button"
                       role="option"
