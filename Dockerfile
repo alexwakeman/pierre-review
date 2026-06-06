@@ -10,9 +10,12 @@
 # ---- build stage: full toolchain (needed to compile native addons) ----
 FROM node:22-bookworm AS build
 WORKDIR /app
-RUN corepack enable
+# Pin pnpm explicitly so the build never drifts to corepack's bundled default
+# (that drift — corepack pulling pnpm 11, which blocks native build scripts — is
+# what broke the Railway build). Mirrors the root "packageManager" field.
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
-# Install workspace deps first (better layer caching), then build.
+# Bring in the whole workspace, then install (the committed lockfile drives it).
 COPY . .
 RUN pnpm install --frozen-lockfile
 
