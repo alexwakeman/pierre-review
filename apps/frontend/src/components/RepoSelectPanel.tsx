@@ -12,6 +12,7 @@ export function RepoSelectPanel({
   repos,
   repoIds,
   onToggle,
+  onOnly,
   onShowAll,
   onRemove,
   removePending,
@@ -19,6 +20,7 @@ export function RepoSelectPanel({
   repos: Repo[];
   repoIds: number[] | null; // committed visibility filter (null = all visible)
   onToggle: (id: number) => void; // immediate show/hide of one repo
+  onOnly: (id: number) => void; // isolate to just this repo (deselect the rest)
   onShowAll: () => void; // clear the filter → show every repo
   onRemove: (repo: Repo) => void; // stop watching (caller confirms + mutates)
   removePending: boolean;
@@ -148,6 +150,20 @@ export function RepoSelectPanel({
                         </span>
                       )}
                     </label>
+                    {/* Quick-isolate: show only this repo (deselect the rest), so
+                        you can hop between repos without unchecking everything.
+                        Hidden when this repo is already the sole visible one. */}
+                    {!(isVisible(r.id) && shownCount === 1) && (
+                      <button
+                        type="button"
+                        onClick={() => onOnly(r.id)}
+                        title={`Show only ${r.fullName}`}
+                        aria-label={`Show only ${r.fullName}`}
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-400 opacity-0 hover:bg-gray-200 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                      >
+                        only
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => onRemove(r)}

@@ -150,6 +150,14 @@ export function FilterBar(): JSX.Element {
     );
   };
 
+  // Isolate the timeline to a single repo (deselect the rest) — for quick switching
+  // between repos without unchecking everything. Canonicalises to null when that
+  // repo is the only watched one (so the trigger still reads "all").
+  const showOnlyRepo = (id: number): void => {
+    const allIds = (repos ?? []).map((r) => r.id);
+    f.setRepoIds(allIds.length <= 1 ? null : [id]);
+  };
+
   const confirmRemoveRepo = (r: Repo): void => {
     if (
       window.confirm(
@@ -263,6 +271,7 @@ export function FilterBar(): JSX.Element {
           repos={repos ?? []}
           repoIds={f.repoIds}
           onToggle={toggleRepoVisibility}
+          onOnly={showOnlyRepo}
           onShowAll={() => f.setRepoIds(null)}
           onRemove={confirmRemoveRepo}
           removePending={removeRepo.isPending}
