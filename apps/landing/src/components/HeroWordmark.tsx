@@ -20,9 +20,9 @@ export default function HeroWordmark() {
   useEffect(() => {
     if (prefersReducedMotion()) return; // already initialised to the final state
     const timers = [
-      window.setTimeout(() => setStep(1), 1300), // backspace R  → "P"
-      window.setTimeout(() => setStep(2), 1750), // backspace P  → bare caret
-      window.setTimeout(() => setStep(3), 2150), // clear prompt → cursive wordmark
+      window.setTimeout(() => setStep(1), 3300), // backspace R  → "P" (PR holds ~3.3s)
+      window.setTimeout(() => setStep(2), 3750), // backspace P  → bare caret
+      window.setTimeout(() => setStep(3), 4150), // clear prompt → cursive wordmark
     ];
     return () => timers.forEach((t) => window.clearTimeout(t));
   }, []);
@@ -39,7 +39,7 @@ export default function HeroWordmark() {
           accessible state. Starts transparent, fades in once the prompt clears. */}
       <span
         aria-hidden="true"
-        className={`brand-title block transition-opacity duration-1000 ease-out ${
+        className={`brand-title block transition-opacity duration-[2500ms] ease-out ${
           resolved ? 'opacity-100' : 'opacity-0'
         }`}
       >
