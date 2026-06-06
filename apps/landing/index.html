@@ -32,21 +32,39 @@
         rel="stylesheet"
       />
     </noscript>
+    <style>
+      /* Splash caret blink (matches the in-app HeroWordmark caret) — defined inline
+         so the pre-React splash can blink before the bundled CSS loads. */
+      @keyframes pierre-splash-caret {
+        0%,
+        50% {
+          opacity: 1;
+        }
+        50.01%,
+        100% {
+          opacity: 0;
+        }
+      }
+    </style>
   </head>
   <body>
-    <!-- Instant branded splash so mobile Safari paints something immediately rather
-         than a white screen while the JS bundle downloads/parses. It lives INSIDE
-         #root, so React's createRoot().render() replaces it on mount — no teardown.
-         Inline styles (not the bundled CSS) so it shows even before the app's CSS
-         is applied; background matches App's bg-gray-950 (#030712) for zero flash. -->
+    <!-- Instant splash so mobile Safari paints immediately instead of a white screen
+         while the JS bundle loads. It opens on the SAME terminal "PR" prompt the
+         HeroWordmark animation starts from, so the load→animation handoff is seamless.
+         Lives INSIDE #root, so React's createRoot().render() replaces it on mount —
+         no teardown. Inline styles (not the bundled CSS) so it shows before the app's
+         CSS loads; background matches App's bg-gray-950 (#030712) for zero flash. -->
     <div id="root">
       <div
         style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #030712; color: #f3f4f6"
       >
         <span
-          style="font-family: 'Great Vibes', ui-serif, Georgia, cursive; font-size: 3rem; line-height: 1"
-          >Pierre</span
+          style="display: inline-flex; align-items: center; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; font-size: 3rem; line-height: 1; letter-spacing: 0.04em"
         >
+          PR<span
+            style="display: inline-block; width: 0.55ch; height: 0.92em; margin-left: 0.14em; background: #38bdf8; animation: pierre-splash-caret 1s steps(1, end) infinite"
+          ></span>
+        </span>
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>

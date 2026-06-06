@@ -1,4 +1,5 @@
 import { GitHubMark } from './icons';
+import HeroWordmark from './HeroWordmark';
 
 export default function Hero() {
   return (
@@ -25,9 +26,7 @@ export default function Hero() {
       </nav>
 
       <div className="mx-auto max-w-4xl px-6 pb-24 pt-20 text-center sm:pt-28">
-        <p className="brand-title mb-6 text-6xl text-gray-100 sm:text-8xl">
-          Pierre
-        </p>
+        <HeroWordmark />
 
         <h1 className="mx-auto max-w-3xl text-balance text-4xl font-bold leading-tight tracking-tight text-gray-50 sm:text-6xl">
           See your team&apos;s GitHub activity{' '}
