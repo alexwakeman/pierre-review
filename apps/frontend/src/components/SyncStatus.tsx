@@ -93,9 +93,19 @@ export function SyncStatus(): JSX.Element | null {
   const scopedStatuses =
     statuses == null ? undefined : statuses.filter((s) => scopedIds.has(s.repoId));
   const runningCount = (scopedStatuses ?? []).filter((s) => s.status === 'running').length;
+  // Aggregate PRs committed so far across the in-scope repos. The backend commits
+  // per-PR (newest-first) and the timeline endpoint serves committed rows, so as
+  // this advances there is genuinely more to show.
+  const processedTotal = (scopedStatuses ?? []).reduce(
+    (sum, s) => sum + (s.progress?.prsProcessed ?? 0),
+    0,
+  );
 
   const lastSync = mostRecentSync(repos ?? []);
   const prevLastSync = useRef<string | null>(lastSync);
+  // Highest aggregate prsProcessed seen this round, so we only refetch the feed
+  // when the running PR count actually advances (not on every status poll).
+  const prevProcessedRef = useRef(0);
 
   // Pending auto-close of the progress modal. Held in a ref so a fresh sync can
   // cancel a close that a previous round scheduled.
@@ -110,9 +120,18 @@ export function SyncStatus(): JSX.Element | null {
   // before we treat it as complete, and drop any close queued by the last round.
   const beginSyncRound = (): void => {
     setSeenRunning(false);
+    prevProcessedRef.current = 0;
     cancelAutoClose();
   };
   useEffect(() => cancelAutoClose, []);
+
+  // Mid-sync feed refresh: only the queries that accrete new rows as PRs land.
+  // The heavier reference data (users/mergers/my-turn/me) refreshes once at
+  // completion via invalidateData(), so we don't re-fetch all of it every 1.5s.
+  const refreshFeeds = (): void => {
+    void qc.invalidateQueries({ queryKey: ['timeline'] });
+    void qc.invalidateQueries({ queryKey: ['open-prs'] });
+  };
 
   const invalidateData = (): void => {
     void qc.invalidateQueries({ queryKey: ['timeline'] });
@@ -134,6 +153,27 @@ export function SyncStatus(): JSX.Element | null {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSync]);
+
+  // Progressive load: the syncState timestamp (and so the effect above) only
+  // advances at the very END of a sync, but rows are committed continuously. So
+  // during the add-repo backfill, refetch the feed whenever the processed-PR
+  // count advances — turning a 2-3 min blank board into rows that appear within
+  // seconds and accrete. Naturally throttled to the 1.5s status-poll cadence (the
+  // only thing that moves processedTotal), and gated on an actual increase so a
+  // steady poll doesn't thrash the timeline. placeholderData in useTimeline keeps
+  // the existing rows on screen across each refetch (no flicker). Scoped to the
+  // add-flow (modalScopeId set): a manual "deep" re-sync of an already-populated
+  // board would otherwise rebuild the timeline every 1.5s over mostly-unchanged
+  // data for no benefit (the board isn't blank), and background scheduled syncs
+  // never set `syncing` so they're already excluded.
+  useEffect(() => {
+    if (!syncing || modalScopeId == null) return;
+    if (processedTotal > prevProcessedRef.current) {
+      prevProcessedRef.current = processedTotal;
+      refreshFeeds();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processedTotal, syncing, modalScopeId]);
 
   // Latch the moment we first see a repo actually running this round.
   useEffect(() => {

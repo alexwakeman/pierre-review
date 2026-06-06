@@ -17,11 +17,13 @@ import {
   useUsers,
 } from '../../hooks/useTimeline.js';
 import { useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
+import { useSyncOverview } from '../../hooks/useSyncOverview.js';
 import { resolveRange, useFilters } from '../../store/filters.js';
 import { indexUsers, userLabel } from '../../lib/ui.js';
 import { renderPrBar, prClassName, barIsTall } from './prBar.js';
 import { computeUserStats, renderUserLabel } from './userRow.js';
 import { buildMarkerItems } from './clustering.js';
+import { SyncSkeleton } from './SyncSkeleton.js';
 import { assignPrLanes, prGroupId } from './lanes.js';
 import {
   MarkerPopover,
@@ -339,6 +341,17 @@ export function Timeline(): JSX.Element {
   const [focusActive, setFocusActive] = useState(false);
 
   const { data, isLoading, error } = useTimeline();
+  const sync = useSyncOverview();
+  // Show a first-paint skeleton instead of the "Loading…/No activity" text while
+  // an initial full backfill is filling an otherwise-empty board. Yields the
+  // instant real rows arrive (gated on the board being empty), and never shows for
+  // an incremental sync of an already-populated board.
+  const showSyncSkeleton =
+    !error &&
+    sync.running &&
+    sync.isFullSync &&
+    sync.prsProcessed > 0 &&
+    (!data || (data.prs.length === 0 && data.events.length === 0));
   const { data: openPrsData } = useOpenPrs();
   // Member-agnostic PR sets (shared cache with the PR-title search). They let a
   // global search pick focus a PR the member filter hides: if it overlaps the
@@ -2402,7 +2415,8 @@ export function Timeline(): JSX.Element {
 
   return (
     <div className={`relative h-full w-full${focusActive ? ' tl-focus-active' : ''}`}>
-      {isLoading && !data && (
+      {showSyncSkeleton && <SyncSkeleton prsProcessed={sync.prsProcessed} />}
+      {isLoading && !data && !showSyncSkeleton && (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-500">
           Loading timeline…
         </div>
@@ -2412,7 +2426,7 @@ export function Timeline(): JSX.Element {
           {String(error)}
         </div>
       )}
-      {data && data.prs.length === 0 && data.events.length === 0 && (
+      {data && data.prs.length === 0 && data.events.length === 0 && !showSyncSkeleton && (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-500">
           No activity in this window. Add a repo or widen the date range.
         </div>

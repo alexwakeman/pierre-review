@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/client.js';
 import { getGraphqlClientFor } from '../github/client.js';
@@ -69,6 +70,15 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
   let pages = 0;
   let totalCost = 0;
   let lastRemaining = 0;
+  // Per-stage wall-clock accumulators, so the final log attributes the 2-3 min:
+  // page fetch (network/GraphQL) vs commit-file REST fan-out vs DB persist. This
+  // is the baseline that tells us which stage to optimise next.
+  let graphqlMs = 0;
+  let commitFilesMs = 0;
+  let persistMs = 0;
+  const timingSummary = (): string =>
+    `graphql ${(graphqlMs / 1000).toFixed(1)}s / commit-files ` +
+    `${(commitFilesMs / 1000).toFixed(1)}s / persist ${(persistMs / 1000).toFixed(1)}s`;
   // Time-walked progress: PRs arrive newest-first and we stop at `since`, so the
   // span [since .. newest] is the work and the current PR's updatedAt marks how
   // far through it we are.
@@ -91,11 +101,13 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
         cancelled = true;
         break;
       }
+      const tPage = performance.now();
       const resp: RepoActivityResponse = await client(REPO_ACTIVITY_QUERY, {
         owner,
         name,
         cursor,
       });
+      graphqlMs += performance.now() - tPage;
       pages += 1;
       totalCost += resp.rateLimit.cost;
       lastRemaining = resp.rateLimit.remaining;
@@ -145,14 +157,18 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
             .filter((c) => Date.parse(c.commit.committedDate) > threshold)
             .map((c) => c.commit.oid);
         }
+        const tFiles = performance.now();
         const commitFilesBySha = await ensureCommitFiles(
           owner,
           name,
           shas,
           opts.token,
         );
+        commitFilesMs += performance.now() - tFiles;
 
+        const tPersist = performance.now();
         await persistPr(pr, repoId, resolver, commitFilesBySha, accountId);
+        persistMs += performance.now() - tPersist;
         prCount += 1;
         reportProgress(updatedMs);
       }
@@ -166,7 +182,9 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
     // safely delete it. Already-persisted PRs are harmless (idempotent) and get
     // cleaned up with the repo, or resumed on the next sync for an existing repo.
     if (cancelled) {
-      log.info(`sync ${owner}/${name} cancelled after ${prCount} PRs / ${pages} page(s)`);
+      log.info(
+        `sync ${owner}/${name} cancelled after ${prCount} PRs / ${pages} page(s) — timing: ${timingSummary()}`,
+      );
       return {
         repoId: repoId ?? -1,
         prCount,
@@ -198,7 +216,8 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       .execute();
 
     log.info(
-      `sync ${owner}/${name} [${mode}] done: ${prCount} PRs over ${pages} page(s), cost ${totalCost}, ${lastRemaining} remaining`,
+      `sync ${owner}/${name} [${mode}] done: ${prCount} PRs over ${pages} page(s), ` +
+        `cost ${totalCost}, ${lastRemaining} remaining — timing: ${timingSummary()}`,
     );
 
     return {
