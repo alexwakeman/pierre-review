@@ -108,10 +108,10 @@ export const SUGGESTED_REPOS: readonly CuratedRepo[] = [
     why: 'The ubiquitous in-memory data store used for caching, queues, and real-time data.',
   },
   {
-    owner: 'postgres',
-    name: 'postgres',
+    owner: 'cockroachdb',
+    name: 'cockroach',
     category: 'Databases',
-    why: 'The official mirror of PostgreSQL, the world’s most advanced open-source relational database.',
+    why: 'A distributed, PostgreSQL-compatible SQL database built for resilience and horizontal scale.',
   },
   {
     owner: 'sveltejs',
