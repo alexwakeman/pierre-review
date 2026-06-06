@@ -46,6 +46,10 @@ The app needs **no write permissions** — pierre-review is read-only mirroring.
 (The local-only Claude Review feature posts reviews using your local `gh` token,
 not the App, and is disabled in cloud mode.)
 
+> These repository permissions only matter for **private** repos (they're granted
+> when a user installs the App). **Public** repos are readable with **no
+> installation and no permissions at all** — see §5.
+
 ## 3. Where it can be installed
 
 - **Only on this account** (simplest for a personal deployment), or **Any account**
@@ -61,18 +65,36 @@ After creating the App, on its settings page:
 - The **App slug** is the lowercased app name in the URL
   (`https://github.com/apps/<slug>`) → `GITHUB_APP_SLUG`.
 
-## 5. Installation flow (what users do)
+## 5. Public vs. private repos — what installation is (and isn't) for
 
-A GitHub App user token can only see repositories where the **App is installed**
-and that the **user can access**. So after first sign-in, users should **install
-the App** on the accounts/orgs whose repos they want to watch:
+The single most important thing to understand, because it's a common GitHub-App
+misconception:
 
-- The sign-in page links users to `https://github.com/apps/<GITHUB_APP_SLUG>/installations/new`
-  to choose which repos to grant.
-- They can revisit `https://github.com/settings/installations` to add/remove repos.
+- **Public repositories work with NO installation.** When a user signs in
+  (authorizes the App), the resulting user access token has GitHub's *implicit
+  read access to public resources* — it can read any public repo's PRs, reviews,
+  comments, and commits via **both** the GraphQL and REST APIs, **even if the App
+  is not installed** on the repo's owner/org. So watching a public repo is one
+  click: sign in → search → add. No per-org install, no owner approval, ever.
+  (Ref: GitHub's [2023-04-27 changelog](https://github.blog/changelog/2023-04-27-graphql-improvements-for-fine-grained-pats-and-github-apps/)
+  — *"GitHub Apps now have read access to public resources via GraphQL by default
+  when using user-to-server tokens. This is true even if they are not installed on
+  the organization or user that owns the resource."*)
 
-If a user tries to add a repo the App can't see, the repo-search/add will simply
-not return it — point them at the install/configure page.
+- **Private repositories DO require installation.** A user access token can only
+  reach private repos in the **intersection** of (a) what the *user* can access
+  and (b) where the *App is installed*. So to watch a private repo:
+  - **Own account / an org they own** → install in one click at
+    `https://github.com/apps/<GITHUB_APP_SLUG>/installations/new`, choosing
+    **"All repositories"** (covers current + future) or just the ones they want.
+  - **An org they don't own** → GitHub shows a **"Request"** button that notifies
+    an org owner to approve the installation.
+  - Manage later at `https://github.com/settings/installations`.
+
+`authorize` (sign-in) and `install` are **independent**: sign-in alone unlocks all
+public repos; installation only extends the same token to specific **private**
+repos. So most users never install anything — installation is the exception (a
+private repo), not the rule.
 
 ---
 
@@ -82,7 +104,7 @@ not return it — point them at the install/configure page.
 |---|---|
 | `GITHUB_APP_CLIENT_ID` | App's Client ID |
 | `GITHUB_APP_CLIENT_SECRET` | a generated client secret |
-| `GITHUB_APP_SLUG` | the app slug (for the install link) |
+| `GITHUB_APP_SLUG` | the app slug (for the private-repo install link) |
 
 Put these (plus `SESSION_SECRET`, `ENCRYPTION_KEY`, `APP_BASE_URL`,
 `DATABASE_URL`, `DEPLOYMENT_MODE=cloud`) into your deployment — see

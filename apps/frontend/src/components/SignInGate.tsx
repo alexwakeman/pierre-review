@@ -12,11 +12,12 @@ export function SignInGate(): JSX.Element {
           Pierre
         </span>
         <p className="mt-4 text-sm text-gray-400">
-          Sign in to view your team&rsquo;s GitHub activity.
+          Sign in to view your team&rsquo;s GitHub activity — pull requests,
+          reviews, and what needs your attention.
         </p>
         <a
           href="/api/auth/login"
-          className="mt-8 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-offset-2 focus:ring-offset-gray-950"
+          className="mt-7 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-offset-2 focus:ring-offset-gray-950"
         >
           <svg
             viewBox="0 0 16 16"
@@ -32,6 +33,10 @@ export function SignInGate(): JSX.Element {
           </svg>
           Sign in with GitHub
         </a>
+        <p className="mt-5 text-xs leading-relaxed text-gray-500">
+          Read-only access. Add any public repo instantly; private repos only when
+          you install Pierre on them. Revoke anytime from GitHub settings.
+        </p>
       </div>
     </div>
   );
