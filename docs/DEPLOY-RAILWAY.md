@@ -77,6 +77,31 @@ This repo ships a root **`Dockerfile`** and **`railway.json`**. Railway will:
 
 Migrations (the Postgres baseline in `dist/db/migrations-pg`) run at boot.
 
+### Watch Paths (skip doc-only deploys)
+
+By default every push to `main` redeploys. To skip pushes that touch **only** docs/
+CI/markdown, set **service → Settings → Build → Watch Paths**. They're gitignore-
+style globs (one per line, anchored at the repo root `/`); a push deploys only if a
+changed file matches, and `!` negations only work **after** a positive include.
+
+The image is built from the whole repo (`Dockerfile` does `COPY . .`), so "code" is
+everything except docs/CI/markdown — use the denylist form:
+
+```
+/**
+!/docs/**
+!**/*.md
+!/.github/**
+!/.claude/**
+!/docker-compose.yml
+```
+
+Note that `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `tsconfig.base.json`,
+`Dockerfile`, and `railway.json` **are** build inputs — changes there correctly
+redeploy. Watch Paths gate **GitHub auto-deploys only**; a manual **Redeploy** always
+works, so a skipped commit is never stuck. (Stricter alternative: an allowlist of
+`/apps/**`, `/packages/**`, and those root build files.)
+
 ## Step 4 — Custom domain (`pierre-review.com`)
 
 `pierre-review.com` was registered **through Railway**, so Railway manages its DNS
