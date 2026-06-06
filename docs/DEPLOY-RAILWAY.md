@@ -90,9 +90,12 @@ Migrations (the Postgres baseline in `dist/db/migrations-pg`) run at boot.
 
 1. Visit `https://<your-domain>/` → the landing page → **Sign in with GitHub**.
 2. Authorize the App; you're redirected to `/app`.
-3. **Install the App** on the orgs/repos you want to watch (the sign-in flow
-   links to `https://github.com/apps/<slug>/installations/new`).
-4. Add a repo from the picker and watch the first sync run.
+3. Add any **public** repo from the picker and watch the first sync run — no
+   installation needed (sign-in alone grants read access to public repos).
+4. To watch **private** repos, install the App where they live
+   (`https://github.com/apps/<slug>/installations/new`, "All repositories" or a
+   selection); for orgs you don't own, GitHub's "Request" flow notifies an owner.
+   See [GITHUB-APP-SETUP.md §5](./GITHUB-APP-SETUP.md).
 
 ---
 
