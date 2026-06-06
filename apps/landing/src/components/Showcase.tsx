@@ -3,10 +3,15 @@ function Frame({
   src,
   alt,
   className = '',
+  eager = false,
 }: {
   src: string;
   alt: string;
   className?: string;
+  /** Above-the-fold hero: load eagerly. lazy on an above-the-fold image is wrong
+   *  and is historically unreliable on iOS Safari (it can fail to load until a
+   *  scroll/resize), making the hero shot "pop in" late. */
+  eager?: boolean;
 }) {
   return (
     <figure
@@ -21,7 +26,15 @@ function Frame({
           pierre · /app
         </span>
       </div>
-      <img src={src} alt={alt} loading="lazy" className="block w-full" />
+      <img
+        src={src}
+        alt={alt}
+        width={3200}
+        height={2000}
+        loading={eager ? 'eager' : 'lazy'}
+        decoding="async"
+        className="block w-full"
+      />
     </figure>
   );
 }
@@ -38,6 +51,7 @@ export default function Showcase() {
         <Frame
           src="/shots/timeline.png"
           alt="The pierre-review timeline: pull-request activity grouped repo → contributor, with shaped review markers and a My Turn triage panel."
+          eager
         />
 
         <div className="mt-10 grid items-center gap-8 lg:grid-cols-5">

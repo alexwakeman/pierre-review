@@ -16,13 +16,39 @@
          Vibes is a single 400 weight — never bolden it (faux-bold mangles the script). -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Loaded NON-render-blocking: fetched as media="print" so it never blocks
+         first paint, then flipped to "all" once it arrives (the decorative wordmark
+         falls back to cursive until then). iOS Safari otherwise holds first paint
+         for this cross-origin stylesheet — the cause of the mobile blank screen. -->
     <link
       href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap"
       rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Instant branded splash so mobile Safari paints something immediately rather
+         than a white screen while the JS bundle downloads/parses. It lives INSIDE
+         #root, so React's createRoot().render() replaces it on mount — no teardown.
+         Inline styles (not the bundled CSS) so it shows even before the app's CSS
+         is applied; background matches App's bg-gray-950 (#030712) for zero flash. -->
+    <div id="root">
+      <div
+        style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #030712; color: #f3f4f6"
+      >
+        <span
+          style="font-family: 'Great Vibes', ui-serif, Georgia, cursive; font-size: 3rem; line-height: 1"
+          >Pierre</span
+        >
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
