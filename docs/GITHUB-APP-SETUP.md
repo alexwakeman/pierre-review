@@ -17,8 +17,8 @@ deployment env: `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, and
    (for an org app, use the org's Developer settings instead).
 2. **GitHub App name** — e.g. `pierre-review` (this becomes part of the public
    slug). The lowercased, hyphenated name is the **App slug** (`GITHUB_APP_SLUG`).
-3. **Homepage URL** — your deployment URL, e.g. `https://pierre.example.com`.
-4. **Callback URL** — `https://<your-domain>/api/auth/callback`.
+3. **Homepage URL** — `https://pierre-review.com`.
+4. **Callback URL** — `https://pierre-review.com/api/auth/callback`.
    - For local cloud testing add a second callback: `http://localhost:4000/api/auth/callback`.
    - ✅ Check **"Request user authorization (OAuth) during installation"**.
 5. **Expire user authorization tokens** — **UNCHECK this** (disable expiration).

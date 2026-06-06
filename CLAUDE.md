@@ -714,8 +714,9 @@ manual first publish that claims the unscoped name. **Still never run
 
 ## History & planning
 
-`V1_PLAN.md` has the full v1 plan and the Phase 1–6 breakdown; commit messages use
-phase notation (e.g. `feat(p3): add timeline endpoint`). The SQLite migration files
+The original v1/v1.1 build used a Phase 1–6 plan (now removed); early commit
+messages still carry the phase notation (e.g. `feat(p3): add timeline endpoint`).
+The SQLite migration files
 (`0000`–`0008`) track the schema's evolution (v1.1 added CI/labels, later ones added
 my-turn dismissals and review `databaseId` deep-link fields; **`0008_multitenant_
 accounts`** added the `accounts` table, `accountId` columns, and the composite
