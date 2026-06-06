@@ -1,12 +1,11 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type {
-  RepoSearchResponse,
-  RepoSearchResult,
-} from '@pierre-review/shared';
+import type { RepoSearchResponse } from '@pierre-review/shared';
 import { api, ApiError } from '../api/client.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
+import { useRepos } from '../hooks/useTimeline.js';
+import { SUGGESTED_REPOS } from '../lib/suggestedRepos.js';
 import { useFilters } from '../store/filters.js';
 
 // Don't fire a search until there's something to match on.
@@ -52,6 +51,13 @@ function OwnerAvatar({
   );
 }
 
+// Small inline spinner (matches the convention used in the Claude Review tab).
+function Spinner(): JSX.Element {
+  return (
+    <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500 dark:border-gray-600 dark:border-t-blue-400" />
+  );
+}
+
 // Debounced, search-on-keypress repository picker that replaces the old plain
 // "owner/repo" input. Results come live from GitHub (best-match order), already-
 // watched repos are filtered server-side, and repos you own / are an org member
@@ -73,9 +79,27 @@ export function RepoSearch(): JSX.Element {
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const [pageIdx, setPageIdx] = useState(0);
 
-  const debounced = useDebouncedValue(value.trim(), 300);
+  const trimmed = value.trim();
+  const debounced = useDebouncedValue(trimmed, 300);
   const showPanel = open && debounced.length >= MIN_QUERY;
+  // Focusing the box with an empty (or <2-char) query shows curated suggestions.
+  const showSuggestions = open && debounced.length < MIN_QUERY;
+  const panelOpen = showPanel || showSuggestions;
   const cursor = cursors[pageIdx] ?? null;
+
+  // Curated suggestions for the empty-query state, minus repos already watched.
+  const { data: repos } = useRepos();
+  const watched = useMemo(
+    () => new Set((repos ?? []).map((r) => `${r.owner}/${r.name}`.toLowerCase())),
+    [repos],
+  );
+  const suggestions = useMemo(
+    () =>
+      SUGGESTED_REPOS.filter(
+        (s) => !watched.has(`${s.owner}/${s.name}`.toLowerCase()),
+      ),
+    [watched],
+  );
 
   // A fresh search term resets pagination back to the first page.
   useEffect(() => {
@@ -93,7 +117,9 @@ export function RepoSearch(): JSX.Element {
   });
 
   const addRepo = useMutation({
-    mutationFn: (r: RepoSearchResult) =>
+    // Accepts a live search result OR a curated suggestion — both carry owner+name,
+    // which is all the POST needs (CreateRepoBody).
+    mutationFn: (r: { owner: string; name: string }) =>
       api.addRepo({ owner: r.owner, name: r.name }),
     onSuccess: (repo) => {
       for (const key of INVALIDATE_KEYS) {
@@ -113,6 +139,16 @@ export function RepoSearch(): JSX.Element {
 
   const results = query.data?.results ?? [];
   const hasNextPage = query.data?.hasNextPage ?? false;
+
+  // Show a spinner as soon as a search is in flight, through the fetch, while
+  // placeholderData keeps the previous term's rows on screen. For a REFINEMENT (an
+  // already-active search) it appears on the first keystroke — debounce pending,
+  // before any network; for the first search the panel shows suggestions until the
+  // debounce settles, then the spinner. Gated on showPanel so clearing the box
+  // (→ suggestions / closed) never spins forever.
+  const debouncePending = trimmed.length >= MIN_QUERY && trimmed !== debounced;
+  const searching =
+    showPanel && (debouncePending || query.isFetching || query.isPlaceholderData);
 
   // Keep the active index in range when the result set shrinks/changes.
   useEffect(() => {
@@ -176,35 +212,112 @@ export function RepoSearch(): JSX.Element {
         onKeyDown={onKeyDown}
         placeholder="Search repos to add…"
         role="combobox"
-        aria-expanded={showPanel}
+        aria-expanded={panelOpen}
         aria-controls={listboxId}
         aria-autocomplete="list"
         className="w-44 rounded border border-gray-300 bg-transparent px-2 py-0.5 text-xs focus:border-blue-500 focus:outline-none dark:border-gray-700"
       />
 
-      {showPanel && (
+      {panelOpen && (
         <div
           id={listboxId}
           role="listbox"
           aria-label="Repository search results"
           className="absolute left-0 top-full z-[60] mt-1 max-h-96 w-96 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900"
         >
-          {query.isError ? (
+          {showSuggestions ? (
+            <div>
+              <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700 dark:bg-gray-900">
+                Suggested repos
+              </div>
+              {suggestions.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-gray-500">
+                  You&rsquo;re already watching all the suggestions.
+                </div>
+              ) : (
+                suggestions.map((s) => {
+                  const adding =
+                    addRepo.isPending &&
+                    addRepo.variables?.owner === s.owner &&
+                    addRepo.variables?.name === s.name;
+                  return (
+                    <div
+                      key={`${s.owner}/${s.name}`}
+                      className="flex items-stretch hover:bg-gray-100 dark:hover:bg-gray-800"
+                    >
+                      <button
+                        type="button"
+                        disabled={addRepo.isPending}
+                        onClick={() =>
+                          addRepo.mutate({ owner: s.owner, name: s.name })
+                        }
+                        className="flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left disabled:opacity-60"
+                      >
+                        <OwnerAvatar login={s.owner} src={null} />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1.5">
+                            <span
+                              className="truncate text-xs font-medium text-gray-800 dark:text-gray-100"
+                              title={`${s.owner}/${s.name}`}
+                            >
+                              {s.owner}/{s.name}
+                            </span>
+                            <span className="shrink-0 rounded bg-gray-100 px-1 text-[9px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                              {s.category}
+                            </span>
+                          </span>
+                          <span className="mt-0.5 line-clamp-2 text-[11px] text-gray-500 dark:text-gray-400">
+                            {s.why}
+                          </span>
+                        </span>
+                        <span className="mt-0.5 shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] text-white">
+                          {adding ? 'Adding…' : 'Add'}
+                        </span>
+                      </button>
+                      <a
+                        href={`https://github.com/${s.owner}/${s.name}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        title="Open on GitHub"
+                        aria-label={`Open ${s.owner}/${s.name} on GitHub`}
+                        className="flex shrink-0 items-center px-2 text-[10px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                      >
+                        ↗
+                      </a>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : query.isError ? (
             <div className="px-3 py-2 text-xs text-red-500">
               {query.error instanceof ApiError
                 ? query.error.message
                 : 'Search failed'}
             </div>
+          ) : searching && results.length === 0 ? (
+            <div className="flex items-center justify-center gap-2 px-3 py-6 text-xs text-gray-500">
+              <Spinner />
+              <span>Searching…</span>
+            </div>
           ) : results.length === 0 ? (
             <div className="px-3 py-2 text-xs text-gray-500">
-              {query.isFetching ? 'Searching…' : 'No matching repositories.'}
+              No matching repositories.
             </div>
           ) : (
             <div ref={listRef}>
+              {searching && (
+                <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-gray-200 bg-white/95 px-3 py-1.5 text-[11px] text-gray-500 backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-400">
+                  <Spinner />
+                  <span>Searching…</span>
+                </div>
+              )}
               {results.map((r, idx) => {
                 const adding =
                   addRepo.isPending &&
-                  addRepo.variables?.githubNodeId === r.githubNodeId;
+                  addRepo.variables?.owner === r.owner &&
+                  addRepo.variables?.name === r.name;
                 return (
                   // The row is a flex container so the add <button> and the small
                   // "open on GitHub" <a> are SIBLINGS (a <button> can't legally
@@ -286,7 +399,7 @@ export function RepoSearch(): JSX.Element {
             </div>
           )}
 
-          {(pageIdx > 0 || hasNextPage) && (
+          {!showSuggestions && (pageIdx > 0 || hasNextPage) && (
             <div className="sticky bottom-0 flex items-center justify-between border-t border-gray-200 bg-white px-3 py-1.5 text-[11px] dark:border-gray-700 dark:bg-gray-900">
               <button
                 type="button"
