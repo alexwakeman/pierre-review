@@ -25,21 +25,23 @@ See **[Deployment modes](#deployment-modes-local-vs-cloud)** below for the full 
 ## Mental model (read this first)
 
 ```
- gh auth token ─┐
-                ▼
-   GitHub API ──► sync pipeline ──► SQLite ──► Fastify API ──► React SPA
-  (GraphQL+REST)  (every 5 min,     (local    (lean /timeline,  (vis-timeline,
-                   idempotent)       file)     detail on demand) zustand, RQ)
+ gh token / OAuth ─┐
+                   ▼
+   GitHub API ──► sync pipeline ──► SQLite | Postgres ──► Fastify API ──► React SPA
+  (GraphQL+REST)  (every 5 min,     (local  |  cloud)    (lean /timeline,  (vis-timeline,
+                   idempotent)                            detail on demand) zustand, RQ)
 ```
 
-- **Sync** pulls PR activity and writes it to SQLite. It runs on a 5-minute cron
+- **Sync** pulls PR activity and writes it to the DB. It runs on a 5-minute cron
   and is fully idempotent (safe to run repeatedly / overlap).
-- **The API** is a thin read layer over SQLite. The timeline endpoint is
+- **The API** is a thin read layer over the DB. The timeline endpoint is
   deliberately _lean_; heavy detail is fetched on demand.
 - **The frontend** is a timeline-first dashboard. Server state lives in React
   Query; UI/filter state lives in a Zustand store mirrored to the URL.
 
 The single most important domain concept is **derived thread state** (see below).
+The second is the **local/cloud split** (next section): one codebase, SQLite + `gh`
+locally, Postgres + GitHub-App OAuth + a public landing page in the cloud.
 
 ---
 
@@ -137,12 +139,14 @@ fails loud on missing env (`assertCloudConfig`). Docs:
 ## Stack
 
 - **Monorepo:** pnpm workspaces, TypeScript everywhere, ESM throughout. Node ≥20
-  (developed on 24).
-- **Backend:** Fastify + Drizzle ORM + SQLite (`better-sqlite3`), `node-cron`,
-  pino logging.
+  (developed on 24). Three workspaces: `backend`, `frontend` (the SPA), `landing`
+  (the cloud marketing page) + the types-only `shared`.
+- **Backend:** Fastify + Drizzle ORM, **dual-dialect** — SQLite (`better-sqlite3`,
+  local) or Postgres (`pg`, cloud); `node-cron`, pino logging. Cloud adds
+  `@fastify/cookie` + `@fastify/secure-session` (sealed sessions).
 - **Frontend:** React + Vite + Tailwind + `vis-timeline`, Zustand, TanStack Query.
-- **GitHub:** `@octokit/graphql` (one fat query per repo) + occasional REST, auth
-  via `gh auth token`.
+- **GitHub:** `@octokit/graphql` (one fat query per repo) + occasional REST; auth
+  via `gh auth token` (local) or a per-account GitHub-App OAuth token (cloud).
 
 ---
 
@@ -153,32 +157,37 @@ pierre-review/
 ├─ apps/
 │  ├─ backend/                 @pierre-review/backend
 │  │  ├─ src/
-│  │  │  ├─ index.ts           entrypoint: migrate → cache user → buildApp → schedule → listen
-│  │  │  ├─ app.ts             Fastify factory: logger, CORS, error handler, route registration
-│  │  │  ├─ config.ts          env-driven config (port, dbPath, cron, backfill, thresholds)
+│  │  │  ├─ index.ts           entrypoint: (cloud) assertCloudConfig → migrate → cleanup → (local) ensureLocalAccount → buildApp → schedule → listen
+│  │  │  ├─ app.ts             Fastify factory: CORS, (cloud) session+account-context+auth-gate, static (public@/app + public-landing@/), routes
+│  │  │  ├─ config.ts          env-driven config incl. deploymentMode/dbDialect + cloud vars; assertCloudConfig()
+│  │  │  ├─ cli.ts             bin (dist/cli.js): --no-open/--port/--db/--cloud/--mode, gh pre-check (local), banner, browser-open
+│  │  │  ├─ auth/              account.ts (account context + per-account tokens), crypto.ts (AES-256-GCM token sealing)
 │  │  │  ├─ db/
 │  │  │  │  ├─ schema.sqlite.ts  ← Drizzle tables (sqlite-core); schema.pg.ts is its pg-core twin (kept in sync; schema-parity.test.ts guards drift)
-│  │  │  │  ├─ client.ts        better-sqlite3 + drizzle, sets WAL + foreign_keys pragmas
-│  │  │  │  ├─ queries.ts       read layer: getTimeline(), getPrDetail(), getOpenPrs(), getMyTurn(), getMergers()
+│  │  │  │  ├─ client.ts        mode-aware: better-sqlite3+sqliteSchema (local) | node-postgres Pool+pgSchema (cloud); exports db, schema, runTransaction, closeDb, isPg
+│  │  │  │  ├─ queries.ts       read layer (async, accountId-scoped): getTimeline(), getPrDetail(), getOpenPrs(), getMyTurn(), getMergers()
 │  │  │  │  ├─ triage.ts        computeTriage(): reasonTag, "my turn", new-since-viewed, approvals
-│  │  │  │  └─ migrations/      drizzle-kit SQL migrations (commit alongside schema changes)
-│  │  │  ├─ github/             auth.ts (gh token), client.ts (graphql/REST), queries.ts (the big query)
+│  │  │  │  ├─ migrations/      sqlite migrations (.sql + meta/ journal), commit alongside schema changes
+│  │  │  │  └─ migrations-pg/   Postgres baseline (generated via `pnpm db:generate:pg`)
+│  │  │  ├─ github/             auth.ts (gh token, local), client.ts (per-account graphql/REST factories), queries.ts (the big query)
 │  │  │  ├─ sync/               scheduler, sync-manager, sync-repo, upsert, derive-thread-state, commit-files
 │  │  │  │  └─ __fixtures__/threads/   JSON fixtures for the thread-state heuristic tests
+│  │  │  ├─ review/             Claude Review (local-only): agent, review-manager, persist, post-review, clone-manager, prompt, auth, local-settings (user key)
 │  │  │  └─ api/
-│  │  │     ├─ routes/          one file per resource (timeline, prs, open-prs, repos, users, mergers, me, threads, health)
-│  │  │     └─ plugins/         error-handler, etc.
+│  │  │     ├─ routes/          one file per resource (timeline, prs, open-prs, repos, users, mergers, me, threads, health, auth[cloud], claude-review)
+│  │  │     └─ plugins/         error-handler (single notFoundHandler / SPA+landing router), auth (account context + session + gate)
 │  │  └─ data/pierre-review.sqlite   the local DB (gitignored)
-│  └─ frontend/                @pierre-review/frontend
-│     └─ src/
-│        ├─ App.tsx            layout: FilterBar / OpenPrsStrip / Timeline / DetailPane
-│        ├─ store/filters.ts   Zustand store: all filter + selection + timeline-hint state
-│        ├─ hooks/             useUrlState, useTimeline, usePr, useTriage, useKeyboard, useLocalStorage
-│        ├─ api/client.ts      typed fetch wrapper for every endpoint (throws ApiError)
-│        ├─ components/        Timeline/, PrDetail, ChecksTab, ThreadList/, ThreadView/, MyTurnPanel/, OpenPrsStrip/, …
-│        └─ lib/ui.ts          shared UI metadata (state colors, labels, shapes) + helpers
+│  ├─ frontend/                @pierre-review/frontend — the timeline SPA (built with base `/app/`)
+│  │  └─ src/
+│  │     ├─ App.tsx            useMe() 401 → SignInGate + cloud sign-out; layout: FilterBar / OpenPrsStrip / Timeline / DetailPane
+│  │     ├─ store/filters.ts   Zustand store: all filter + selection + timeline-hint state
+│  │     ├─ hooks/             useUrlState, useTimeline, usePr, useTriage (+useMe), useKeyboard, useLocalStorage
+│  │     ├─ api/client.ts      typed fetch wrapper (credentialed; throws ApiError)
+│  │     ├─ components/        Timeline/, PrDetail, ChecksTab, ThreadList/, ThreadView/, MyTurnPanel/, OpenPrsStrip/, SignInGate, …
+│  │     └─ lib/ui.ts          shared UI metadata (state colors, labels, shapes) + helpers
+│  └─ landing/                 @pierre-review/landing — public marketing page (cloud, served at `/`); independent Vite+React+Tailwind, shares no runtime code
 └─ packages/
-   └─ shared/                 @pierre-review/shared — types ONLY, the contract between the two apps
+   └─ shared/                 @pierre-review/shared — types ONLY, the contract between the apps
       └─ src/types.ts
 ```
 
@@ -196,14 +205,22 @@ All from the repo root unless noted.
 | `pnpm build` | recursive build across workspaces |
 | `pnpm typecheck` | `tsc --noEmit` across all packages — **run this before considering work done** |
 | `pnpm test` | recursive `vitest` (backend has tests; frontend/shared are no-ops) |
-| `pnpm db:generate` | generate a Drizzle migration from `schema.ts` changes |
-| `pnpm db:migrate` | apply pending migrations (also runs automatically on backend startup) |
-| `pnpm db:studio` | open drizzle-studio against the local DB |
+| `pnpm db:generate` | generate a Drizzle migration from `schema.sqlite.ts` changes |
+| `pnpm db:generate:pg` | (re)generate the Postgres baseline from `schema.pg.ts` → `migrations-pg/` |
+| `pnpm db:migrate` | apply pending migrations (dialect-aware; also runs on backend startup) |
+| `pnpm db:studio` / `db:studio:pg` | open drizzle-studio against the local DB / a Postgres |
 | `pnpm sync:once owner/repo` | one-off sync of a single repo without starting the server |
+| `pnpm --filter @pierre-review/backend verify:isolation` | query-layer cross-account IDOR check (15 assertions, throwaway DB) |
+| `pnpm package` | assemble `./release` (app + landing + backend) for publishing |
 
-The frontend dev server proxies `/api` to the backend (`BACKEND_PORT`, default 4000).
-Config comes from `.env` at the repo root then `apps/backend/.env` (see `config.ts`);
-`DATABASE_URL` overrides the SQLite path.
+`DEPLOYMENT_MODE=local` (default) vs `cloud` selects the whole stack (SQLite vs
+Postgres, landing page, OAuth). `pnpm dev` is local unless `DEPLOYMENT_MODE=cloud`
+is set. The frontend dev server proxies `/api` to the backend (`BACKEND_PORT`,
+default 4000); the landing has its own dev server on `:5174`
+(`pnpm --filter @pierre-review/landing dev`). Config comes from `.env` at the repo
+root then `apps/backend/.env` (see `config.ts`); local `DATABASE_URL` overrides the
+SQLite path, cloud `DATABASE_URL` is the Postgres connection string. To run the
+full cloud experience locally, see `docs/LOCAL-CLOUD-TESTING.md`.
 
 ---
 
@@ -211,12 +228,19 @@ Config comes from `.env` at the repo root then `apps/backend/.env` (see `config.
 
 ### Startup & auth
 
-`index.ts` runs migrations, prunes stale data, caches the local user, builds the
-Fastify app, starts the scheduler, then listens. **Auth is one-shot at startup**:
-it shells out to `gh auth token` (inheriting your SSO/keyring) and **fails loudly
-if `gh` isn't authenticated**. The local user identity (`gh api user`) is cached in
-the DB and refreshed ~daily; it's non-fatal if offline (you just lose "my turn"
-triage). The DB connection opens with `journal_mode=WAL` and `foreign_keys=ON`.
+`index.ts` (cloud: `assertCloudConfig()` first) runs migrations, prunes redundant
+events, builds the Fastify app, starts the scheduler, then listens. Auth differs by
+mode (see **Deployment modes**):
+
+- **Local:** one synthesized account (id 1). `ensureLocalAccount()` shells out to
+  `gh api user` at startup (inheriting your SSO/keyring) and caches the identity on
+  the `accounts` row, refreshed ~daily; non-fatal if offline (you just lose "my
+  turn" triage). GitHub API calls use `gh auth token`. The SQLite connection opens
+  with `journal_mode=WAL` and `foreign_keys=ON`. (The CLI also pre-checks
+  `gh auth token` and fails loudly with a friendly message.)
+- **Cloud:** no `gh`; accounts are created per user via GitHub-App OAuth, each with
+  an encrypted token. `assertCloudConfig()` fails loud at boot on a missing cloud
+  env var. The DB is a node-postgres `Pool`.
 
 ### Sync pipeline (`src/sync/`)
 
@@ -232,9 +256,17 @@ triage). The DB connection opens with `journal_mode=WAL` and `foreign_keys=ON`.
   per commit are fetched via REST (`commit-files.ts`) and cached **permanently**
   (SHAs are immutable).
 - **Persist** (`upsert.ts`): `persistPr()` upserts the whole PR subtree in one
-  transaction. **Idempotency** is structural — every GitHub entity upserts on its
-  **node ID** (the opaque GraphQL `id`), and timeline `events` upsert on a unique
-  `dedupeKey` (e.g. `pr_opened:<prNodeId>`, `commit_pushed:<prNodeId>:<sha>`).
+  transaction (via the dialect-aware `runTransaction`), stamping the owning
+  `accountId` on the repo/PR/event rows. **Idempotency** is structural — every
+  GitHub entity upserts on its **node ID** (the opaque GraphQL `id`), and timeline
+  `events` upsert on a `dedupeKey` (e.g. `pr_opened:<prNodeId>`). Under
+  multi-tenancy the node-id/dedupeKey uniques are **composite** (`(accountId,
+  githubNodeId)`, `(accountId, dedupeKey)`, child tables `(prId, githubNodeId)`) so
+  two accounts can watch the same repo — the upsert conflict targets match.
+- **Per-account token:** `sync-manager` resolves each repo's account token
+  (`getAccessToken`) and threads it into `syncRepo`/`commit-files`; the GitHub
+  client is built per token (no module-level cache). Per-account `try/catch` so one
+  bad token doesn't abort the loop.
 - **Status** is tracked in the `syncState` table (`lastFullSyncAt`,
   `lastIncrementalSyncAt`, `lastSyncStatus`, `lastSyncError`) plus an in-memory
   progress/running set surfaced to the UI while a sync is live.
@@ -255,39 +287,52 @@ computed during sync and **stored** on `reviewThreads.derivedState`:
 false negatives from file renames/deletes) — **the UI communicates that
 uncertainty**, and the logic is covered by fixture tests (see Conventions).
 
-### Data model (`src/db/schema.ts` is authoritative)
+### Data model (`src/db/schema.sqlite.ts` + its `schema.pg.ts` twin are authoritative)
 
-~15 tables. The core entities:
+17 tables. Multi-tenancy: `accountId` is denormalized onto the tenancy-anchor
+tables (`repos`, `pullRequests`, `events`, `claudeReviews`, `myTurnDismissals`) and
+indexed; everything else reaches its account via `repoId`/`prId`. `users` and
+`commitFiles` stay **global**. The core entities:
 
-- **`repos`** — watched repos (`owner`+`name` unique, `githubNodeId`).
-- **`users`** / **`localUser`** — GitHub users (`githubLogin` unique, `isBot`,
-  `displayName`, `avatarUrl`) and the cached identity of the `gh`-authed user.
-- **`pullRequests`** — PR metadata, state, draft, timestamps, CI/mergeable, etc.
+- **`accounts`** — a tenant. Local mode has exactly one (`id 1`, `isLocal=true`,
+  synthesized from `gh api user`); cloud has one per signed-in user (with an
+  encrypted `accessTokenEnc`). Replaces the old `localUser` singleton.
+- **`repos`** — watched repos (`accountId`; unique `(accountId, owner, name)` and
+  `(accountId, githubNodeId)`).
+- **`users`** — GitHub actor metadata (`githubLogin` unique, `isBot`,
+  `displayName`, `avatarUrl`); **global** (shared across accounts).
+- **`pullRequests`** — PR metadata, state, draft, timestamps, CI/mergeable, etc.;
+  carries `accountId`, unique `(accountId, githubNodeId)`.
 - **`reviews`** — submitted reviews (`state`: approved / changes_requested /
   commented / dismissed / pending). A reviewer's *standing* decision is their
   latest non-`commented` review.
 - **`reviewThreads`** + **`reviewComments`** — inline threads (carry stored
   `derivedState`) and their comments; **`prComments`** — issue-level PR comments.
 - **`commits`** (`sha`+`prId`) + **`commitFiles`** (`sha` → changed paths, cached).
-- **`events`** — the timeline feed; unique `dedupeKey`, typed (`pr_opened`,
-  `pr_merged`, `pr_closed`, `review_submitted`, `review_comment`, `pr_comment`,
-  `commit_pushed`). Only *substantive* reviews emit an event (an empty
-  `commented` review is suppressed so it doesn't duplicate inline markers).
+- **`events`** — the timeline feed; carries `accountId`, unique `(accountId,
+  dedupeKey)`, typed (`pr_opened`, `pr_merged`, `pr_closed`, `review_submitted`,
+  `review_comment`, `pr_comment`, `commit_pushed`). Only *substantive* reviews emit
+  an event (an empty `commented` review is suppressed so it doesn't duplicate inline
+  markers).
 - **`reviewRequests`** — *ephemeral* pending review requests (a `userId` or a
   `teamName`, surfaced as `requestedReviewers` in PR detail); re-derived each sync
   (GitHub drops the request once a review lands).
 - **`prViews`** — last-viewed SHA + timestamp per PR (drives "new since you looked").
-- **`myTurnDismissals`** — dismissed "my turn" entries (`review_request` | `thread`);
-  auto-resurface on newer activity.
+- **`myTurnDismissals`** — dismissed "my turn" entries (`accountId`,
+  `review_request` | `thread`); auto-resurface on newer activity.
 - **`syncState`** — per-repo sync bookkeeping.
 - **`claudeReviews`** + **`claudeReviewFindings`** — the **Claude Review** feature
-  (see below). One run per row (re-review = new row; history kept, keyed by
-  `(prId, headSha)`); Claude's `summary`/`verdict` are read-only, the user's
-  `userBody`/`userVerdict` are what get posted. Findings carry `anchored`/`included`
-  plus the agent's wording. **Not** part of the lean timeline; loaded on demand.
+  (see below; `claudeReviews` carries `accountId`). One run per row (re-review = new
+  row; history kept, keyed by `(prId, headSha)`); Claude's `summary`/`verdict` are
+  read-only, the user's `userBody`/`userVerdict` are what get posted. Findings carry
+  `anchored`/`included` plus the agent's wording. **Not** part of the lean timeline;
+  loaded on demand.
 
-Conventions: timestamps are stored as unix-epoch integers (`mode: 'timestamp'`),
-node IDs are the stable identity, and **triage fields are computed on read**
+Conventions: timestamps are stored as unix-epoch integers in SQLite
+(`mode: 'timestamp'`) / `timestamptz` in Postgres — both infer `Date` in the read
+layer, so the query code is dialect-agnostic (one hand-rolled epoch comparison in
+`getTimeline` uses the `tsBound` helper to bridge). Node IDs are the stable
+identity; reads are **accountId-scoped**; and **triage fields are computed on read**
 (`triage.ts`) — `reasonTag`, `reviewRequestedFromMe`, `newSinceLastViewed`,
 approvals, and `isStalled` (`lastCommitAt` vs `stallThresholdDays`) are *not* stored.
 
@@ -308,7 +353,8 @@ Wire format is JSON with ISO-8601 timestamps; payload types live in
 | `POST /api/repos/:id/sync?full=true` | trigger sync → `202 {status:'started'}`, or `409` if already running |
 | `GET /api/users` (+ isBot updates) | user list / bot flagging |
 | `GET /api/mergers` | per-repo merge-rights map (who's merged a PR there) → maintainer shield on row labels |
-| `GET /api/me`, `GET /api/my-turn`, `POST /api/my-turn/dismiss` | local identity + triage queue + dismissals (`/me` also carries `claudeReviewEnabled`) |
+| `GET /api/me`, `GET /api/my-turn`, `POST /api/my-turn/dismiss` | account identity + triage queue + dismissals (`/me` also carries `claudeReviewEnabled` + `deploymentMode`; cloud: 401 when signed out) |
+| `GET /api/auth/login`, `GET /api/auth/callback`, `POST /api/auth/logout` | **cloud only** — GitHub-App OAuth: 302→authorize / exchange+upsert+session→`/app` / clear session |
 | `GET /api/prs/:id/claude-review` | latest run + findings + history + Claude-auth status + `enabled` (Claude Review) |
 | `POST /api/prs/:id/claude-review {model}` | start a run → `202 {reviewId}`; `400` no-auth/no-head, `409` busy, `404` disabled |
 | `GET /api/prs/:id/claude-review/status`, `POST …/cancel` | poll live progress / abort the SDK run |
@@ -316,9 +362,15 @@ Wire format is JSON with ISO-8601 timestamps; payload types live in
 | `PATCH /api/claude-reviews/:reviewId {userBody?,userVerdict?}` | save the user's authored draft (never Claude's text) |
 | `PATCH /api/claude-findings/:findingId {included?}` | tick a finding for inline posting |
 | `POST /api/claude-reviews/:reviewId/post {userVerdict}` (+ `?dryRun=true`) | post one GitHub review (inline comments + body + verdict); `409` if head moved |
-| `GET /api/health` | health check |
+| `PUT /api/claude-review/key {key}` | set/clear the local user-supplied Anthropic key (empty clears); local-only |
+| `GET /api/health` | health check (unauthenticated) |
 
-All `claude-review` routes return `404` when the feature is off (`ENABLE_CLAUDE_REVIEW`).
+The `claude-review` routes are **only registered when the feature is enabled** —
+which is local-only (`config.claudeReviewEnabled` is force-`false` in cloud), so in
+cloud they don't exist at all. **Cloud auth gate:** every `/api/*` data route 401s
+when unauthenticated, except `/api/health` and `/api/auth/*` (`registerAuthGate`);
+in local mode there's always an account so nothing 401s. Reads are accountId-scoped
+and id-addressed routes verify ownership (→ 404 on mismatch).
 
 ---
 
@@ -342,6 +394,13 @@ Three layers, deliberately separated:
 3. **URL** → `hooks/useUrlState.ts` mirrors the store to the query string both
    ways, so views are shareable/reloadable. The serializer diffs against the
    **defaults**, so the common case stays a clean URL.
+
+**Auth gate (cloud only).** `App.tsx` calls `useMe()` first; if it returns **401**
+(cloud, signed out) it renders `<SignInGate>` (a "Sign in with GitHub" →
+`/api/auth/login`) instead of the app, and a **sign-out** control shows in the
+header when `me.deploymentMode === 'cloud'`. In local mode `/api/me` never 401s, so
+the app renders exactly as before. `api/client.ts` sends `credentials` on every
+request (the session cookie) and `setClaudeKey()` posts the local Anthropic key.
 
 ### UI regions (`App.tsx`)
 
@@ -484,14 +543,20 @@ against the selected PR, returns **structured JSON findings**, persists them per
 SHA (history kept), lets the user author their own review + tick which findings to post,
 then posts **one** GitHub review (inline comments + body + verdict).
 
-- **Opt-in & off by default.** Gated behind `ENABLE_CLAUDE_REVIEW=true`
+- **Opt-in, off by default, LOCAL-ONLY.** Gated behind `ENABLE_CLAUDE_REVIEW=true`
   (`config.claudeReviewEnabled`) — it spends real money / Agent-SDK credits per run.
-  When off, the routes 404 and the frontend hides the tab (via `/api/me`'s
-  `claudeReviewEnabled`).
-- **No stored secrets.** Claude auth resolves from the ambient environment
-  (`ANTHROPIC_API_KEY` → `CLAUDE_CODE_OAUTH_TOKEN` → a logged-in Claude session);
-  `review/auth.ts` detects it best-effort (the first real SDK auth error is the
-  authoritative gate). Mirrors `github/auth.ts`'s loud-but-friendly failure.
+  **Force-disabled in cloud** (`config.claudeReviewEnabled = !isCloud && …`): the
+  routes aren't even registered (`app.ts`), keeping the gh-CLI / clone-manager
+  dependency unreachable on Railway. When off, the frontend hides the tab (via
+  `/api/me`'s `claudeReviewEnabled`).
+- **Auth resolves from the ambient environment** (`ANTHROPIC_API_KEY` →
+  `CLAUDE_CODE_OAUTH_TOKEN` → a logged-in Claude session); `review/auth.ts` detects
+  it best-effort (the first real SDK auth error is the authoritative gate). A
+  **user-supplied key** (pasted in the tab, `PUT /api/claude-review/key`, stored
+  local-only in `~/.pierre-review/config.json` via `review/local-settings.ts`)
+  takes precedence: `agent.ts` overrides `process.env.ANTHROPIC_API_KEY` for the run
+  (`applyUserAnthropicKey`, restored in `finally`, gated on `reviewConcurrency===1`
+  to avoid an env race). Nothing is ever written to the cloud DB.
 - **`src/review/`** mirrors the sync machinery: `review-manager.ts` (in-memory job
   manager, one review per PR, `config.reviewConcurrency` gate, startup reconcile of
   orphaned `running` rows), `agent.ts` (the SDK run: an in-process MCP `submit_review`
@@ -523,29 +588,52 @@ then posts **one** GitHub review (inline comments + body + verdict).
 - **The `shared` package is the only bridge.** Never import backend code from the
   frontend or vice versa — go through `@pierre-review/shared` (types only; it
   has no build output, `main`/`types` point at `src`).
-- **Schema changes are a two-step commit:** edit `apps/backend/src/db/schema.ts`,
-  run `pnpm db:generate`, and commit the generated migration **with** the schema
-  change.
+- **Two schemas, kept in sync BY HAND.** Edit **both** `db/schema.sqlite.ts` and
+  `db/schema.pg.ts` (same tables/columns/`$type`s — `schema-parity.test.ts` fails on
+  drift). Then `pnpm db:generate` for the sqlite migration (commit it with the
+  change) **and** `pnpm db:generate:pg` to refresh the Postgres baseline. The sqlite
+  schema changes since the original `localUser`-era are hand-written
+  (`0008_multitenant_accounts.sql`), so prefer hand-writing additive sqlite
+  migrations over a full `db:generate`.
+- **Dual-dialect query layer = portable async only.** `db` is typed as the
+  node-postgres instance; use `await q.execute()` / `.returning().execute()` /
+  `runTransaction` — never `.get()/.all()/.run()` or `db.execute(sql)` (a compile
+  error / pg-only). Booleans in raw `sql` use `= true`. See **Deployment modes**.
+- **Per-account isolation is load-bearing.** Every list/feed query must filter by
+  `accountId`; every id-addressed read/write must scope ownership (→ null/false →
+  404). New id-routes: run `verify:isolation` after. GitHub tokens come from the
+  account (`getAccessToken`) — never a module-level cache.
 - **Keep `/api/timeline` lean.** No comment bodies, no diff hunks — fetch detail
   on demand via `/api/prs/:id`. This endpoint is on the hot path.
 - **Heuristics get fixture tests.** Before changing `derive-thread-state.ts`, add
   a sample to `apps/backend/src/sync/__fixtures__/threads/` (see the README there
   for the JSON shape and how to capture a real thread via `gh api`).
 - **Idempotency is load-bearing.** New entities must upsert on their GitHub node
-  ID; new event types must produce a deterministic, unique `dedupeKey`.
+  ID — under multi-tenancy the unique/conflict target is **composite** with the
+  scoping column (`accountId` or `prId`); new event types produce a deterministic
+  `dedupeKey` (unique per `(accountId, dedupeKey)`).
 - **TypeScript is strict** (`noUncheckedIndexedAccess`, `verbatimModuleSyntax`).
 - The local DB (`apps/backend/data/`) and `.env` files are gitignored — no team
-  activity data or tokens are ever committed.
+  activity data or tokens are ever committed. Cloud secrets (`ENCRYPTION_KEY`,
+  `SESSION_SECRET`, GitHub-App creds) live only in env (`.env.cloud.example` is the
+  template); stored OAuth tokens are AES-256-GCM-sealed.
 
 ---
 
 ## Verifying changes
 
-For backend/heuristic logic, `pnpm test` + `pnpm typecheck`. For UI work, `pnpm
-dev` is usually already running; the SQLite DB at `apps/backend/data/` holds real
-synced data you can query (e.g. with `sqlite3`) to pick test cases, and you can
-deep-link app state via URL params (`?pr=<id>`, `?repos=<ids>`, `?cats=…`) to reach
-a specific view without clicking through.
+For backend/heuristic logic, `pnpm test` + `pnpm typecheck` (4 workspaces). For UI
+work, `pnpm dev` is usually already running; the SQLite DB at `apps/backend/data/`
+holds real synced data you can query (e.g. with `sqlite3`) to pick test cases, and
+you can deep-link app state via URL params (`?pr=<id>`, `?repos=<ids>`, `?cats=…`)
+to reach a specific view without clicking through.
+
+For **multi-tenant / cloud** changes: `verify:isolation` proves cross-account IDOR
+at the query layer (15 assertions against a throwaway DB). To exercise the full
+deployed experience locally — landing at `/`, OAuth, Postgres, app at `/app` —
+bring up `docker compose up -d db` and run `--cloud` / `DEPLOYMENT_MODE=cloud` per
+`docs/LOCAL-CLOUD-TESTING.md`. Confirm **local is unchanged** (`pnpm dev` →
+straight to `/app`, no landing, no sign-in).
 
 ---
 
@@ -557,28 +645,33 @@ bins point at the same `dist/cli.js`). The published tarball contains **only bui
 artifacts** — no `.ts`, no `src/`, no configs, no tests.
 
 **Single-process production mode.** In production the **one Fastify server serves
-both** the JSON API (under `/api`) **and** the built SPA on one port. Static serving
-is gated on the presence of a sibling `public/index.html` next to the compiled
-server (`dist/../public`): present in the assembled release, **absent in the dev
-tree**, so `pnpm dev` (Vite :5173 proxy → :4000) is unchanged. The SPA fallback is
-folded into the **single** `setNotFoundHandler` in `api/plugins/error-handler.ts`
-(Fastify allows only one per context): a non-`/api` GET returns `index.html`, while
-unknown `/api` routes still return a JSON 404. The frontend already calls the API
-with relative `/api` paths, so same-origin serving needs no frontend changes.
+the JSON API (under `/api`), the built SPA (under `/app`), and — in cloud mode —
+the landing page (at `/`)** on one port. Static serving is gated on sibling asset
+dirs next to the compiled server: `public/index.html` (the SPA, at prefix `/app/`)
+and `public-landing/index.html` (the landing, at `/`, cloud only) — both present in
+the assembled release, **absent in the dev tree**, so `pnpm dev` (Vite proxy) is
+unchanged. The routing lives in the **single** `setNotFoundHandler` in
+`api/plugins/error-handler.ts` (Fastify allows one per context): unknown `/api` →
+JSON 404; `/app*` GET → SPA `index.html`; `/` + other GET → landing (cloud) or
+302→`/app` (local, so local never shows a homepage). The SPA is built with
+`base:'/app/'`; the frontend calls the API with relative `/api` paths.
 
 **The CLI (`apps/backend/src/cli.ts` → `dist/cli.js`).** Shebang'd bin entry. It:
-parses `--no-open` / `--port <n>` / `--db <path>` (also `NO_OPEN` / `PORT` /
-`DATABASE_URL` env) and maps them to env **before** importing config; sets
-`NODE_ENV=production` (so pino-pretty, a devDep, is never loaded and static serving
-turns on); defaults the DB to `~/.pierre-review/pierre-review.sqlite` (`mkdir -p`,
-**never inside the read-only install dir**); **pre-checks `gh auth token`** with a
-friendly message + non-zero exit before booting; prints the cursive Pierre ASCII
-banner (`ascii.ts`) + tagline + a `▸ http://localhost:<port>` URL line (ANSI colour
-only on a TTY); boots via the exported `start()` from `index.ts`; then opens the
-default browser cross-platform (`open` / `start` / `xdg-open`, a built-in — **no
-browser-open dependency**) unless `--no-open`. `index.ts` exports `start()` and
-guards its auto-invoke with a run-as-main check, so `node dist/index.js` (the
-backend `start` script) and the CLI both boot the server exactly once.
+parses `--no-open` / `--port <n>` / `--db <path>` / `--cloud` / `--mode <m>` (also
+`NO_OPEN` / `PORT` / `DATABASE_URL` / `DEPLOYMENT_MODE` env) and maps them to env
+**before** importing config; sets `NODE_ENV=production` (so pino-pretty, a devDep,
+is never loaded and static serving turns on). **Local mode** defaults the DB to
+`~/.pierre-review/pierre-review.sqlite` (`mkdir -p`, **never inside the read-only
+install dir**) and **pre-checks `gh auth token`** with a friendly message + non-zero
+exit. **`--cloud`** (= `DEPLOYMENT_MODE=cloud`) **skips** the gh pre-check and the
+SQLite default (the DB is the Postgres `DATABASE_URL`; `assertCloudConfig` validates
+the rest at boot). It prints the cursive Pierre ASCII banner (`ascii.ts`) + tagline
+(or "cloud mode" line) + a `▸ http://localhost:<port>/app` (local) / `…/` (cloud,
+the landing) URL line; boots via the exported `start()` from `index.ts`; then opens
+the browser cross-platform (`open`/`start`/`xdg-open`, built-in — **no browser-open
+dependency**) unless `--no-open`. `index.ts` exports `start()` and guards its
+auto-invoke with a run-as-main check, so `node dist/index.js` and the CLI both boot
+the server exactly once.
 
 **The `@pierre-review/shared` runtime trap.** Shared is **types-only** and is NOT in
 the published `dependencies`, so the backend must never `import` a runtime *value*
@@ -589,16 +682,19 @@ with `packages/shared`). The release assembly greps `release/dist` for real
 `@pierre-review/shared` import/require statements and **fails** if any reappear.
 
 **`pnpm package`** (`scripts/build-release.mjs`, no extra deps) assembles a clean
-`./release/`: builds frontend + backend, copies compiled backend JS (pruning
-`.js.map` and `.test.js`), copies the drizzle `migrations/*.sql` **+ `meta/`
-journal** into `dist/db/migrations/` (tsc doesn't emit `.sql`; the runtime resolves
-them at `dist/db/migrations`), copies the built SPA into `public/`, generates
-`release/package.json` (name `pierre-review`, version copied from
-`apps/backend/package.json`, both bins, curated deps that **drop** shared and
-**add** `@fastify/static`), and copies `scripts/release-README.md` → `README.md`.
-Sanity asserts fail the build on a missing key file, any leaked `.ts`, or a shared
-runtime import. **`better-sqlite3` stays a runtime dependency** (native addon,
-rebuilt per-machine at install) — never bundled. `release/` is gitignored.
+`./release/`: builds frontend (base `/app/`) **+ landing + backend**, copies
+compiled backend JS (pruning `.js.map` and `.test.js`), copies the drizzle
+`migrations/*.sql` **+ `meta/`** into `dist/db/migrations/` **and the Postgres
+baseline into `dist/db/migrations-pg/`** (tsc doesn't emit `.sql`; the runtime
+resolves them per dialect), copies the built SPA into `public/` **and the landing
+into `public-landing/`**, generates `release/package.json` (name `pierre-review`,
+version from `apps/backend/package.json`, both bins, curated deps that **drop**
+shared and **add** `@fastify/static`, `@fastify/cookie`, `@fastify/secure-session`,
+`pg`), and copies `scripts/release-README.md` → `README.md`. Sanity asserts fail the
+build on a missing key file (incl. `public-landing/index.html`, the pg journal, the
+auth/schema/account files), any leaked `.ts`, or a shared runtime import.
+**`better-sqlite3` stays a runtime dependency** (native addon, rebuilt per-machine);
+`pg` is only loaded in cloud mode (dynamic import). `release/` is gitignored.
 
 **Publishing is now automated by CI** (`.github/workflows/release.yml`, documented
 in `docs/RELEASE.md`): every push/merge to `main` bumps the patch version in
@@ -618,7 +714,13 @@ manual first publish that claims the unscoped name. **Still never run
 
 ## History & planning
 
-`V1_PLAN.md` has the full plan and the Phase 1–6 breakdown; commit messages use
-phase notation (e.g. `feat(p3): add timeline endpoint`). Migration files
-(`0000`–`…`) track the schema's evolution (v1.1 added CI/labels, later ones added
-my-turn dismissals and review `databaseId` deep-link fields).
+`V1_PLAN.md` has the full v1 plan and the Phase 1–6 breakdown; commit messages use
+phase notation (e.g. `feat(p3): add timeline endpoint`). The SQLite migration files
+(`0000`–`0008`) track the schema's evolution (v1.1 added CI/labels, later ones added
+my-turn dismissals and review `databaseId` deep-link fields; **`0008_multitenant_
+accounts`** added the `accounts` table, `accountId` columns, and the composite
+uniques). The Postgres baseline (`migrations-pg/0000_*`) is a fresh squash of the
+current schema — cloud starts empty (synced data is regenerable; no SQLite→Postgres
+migration). The cloud/multi-tenant deployment (dual-dialect DB, OAuth, landing,
+Railway) is documented in `docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-APP-SETUP.md`, and
+`docs/LOCAL-CLOUD-TESTING.md`.
