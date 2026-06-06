@@ -2,6 +2,7 @@ import Hero from './components/Hero';
 import Showcase from './components/Showcase';
 import Features from './components/Features';
 import HowItWorks from './components/HowItWorks';
+import LocalInstall from './components/LocalInstall';
 import Footer from './components/Footer';
 
 export default function App() {
@@ -12,6 +13,7 @@ export default function App() {
         <Showcase />
         <Features />
         <HowItWorks />
+        <LocalInstall />
       </main>
       <Footer />
     </div>
