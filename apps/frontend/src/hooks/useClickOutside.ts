@@ -14,11 +14,17 @@ export function useClickOutside(
   cb.current = onOutside;
   useEffect(() => {
     if (!enabled) return;
-    function handle(e: MouseEvent): void {
+    function handle(e: Event): void {
       const el = ref.current;
       if (el && !el.contains(e.target as Node)) cb.current();
     }
-    document.addEventListener('mousedown', handle);
-    return () => document.removeEventListener('mousedown', handle);
+    // Listen on `pointerdown` in the CAPTURE phase. vis-timeline (Hammer.js) drives
+    // the canvas with Pointer events and preventDefault()s pointerdown, which
+    // SUPPRESSES the compatibility `mousedown` entirely — so a `mousedown` listener
+    // (bubble or capture) never fires for clicks on the timeline and the panel stays
+    // open. `pointerdown` always dispatches (preventDefault only blocks default
+    // actions, not listeners), and capture means document runs first, before Hammer.
+    document.addEventListener('pointerdown', handle, true);
+    return () => document.removeEventListener('pointerdown', handle, true);
   }, [ref, enabled]);
 }
