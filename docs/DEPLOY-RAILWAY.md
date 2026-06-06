@@ -111,6 +111,12 @@ automatically — there's no external registrar or manual `CNAME` step.
    selection); for orgs you don't own, GitHub's "Request" flow notifies an owner.
    See [GITHUB-APP-SETUP.md §5](./GITHUB-APP-SETUP.md).
 
+> **Other users get a 404 on github.com when signing in (but you don't)?** The
+> GitHub App is still **private** ("Only on this account"), so only the owner can
+> authorize it — everyone else 404s on the authorize page. Make the App public:
+> **GitHub App → Advanced → Danger zone → Make public**. This is the most common
+> cloud-deploy snag — see [GITHUB-APP-SETUP.md §3](./GITHUB-APP-SETUP.md).
+
 ---
 
 ## Operational notes

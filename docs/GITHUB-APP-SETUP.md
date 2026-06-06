@@ -26,6 +26,8 @@ deployment env: `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, and
    (Refreshing tokens is a later hardening item.)
 6. **Webhook** — uncheck **Active** (pierre-review polls; it doesn't need webhooks).
 7. **Setup URL / redirect on install** — leave default.
+8. **Where can this GitHub App be installed?** — choose **Any account** (makes the
+   App public). **Required** so anyone other than you can sign in — see §3.
 
 ## 2. Permissions (read-only)
 
@@ -50,10 +52,26 @@ not the App, and is disabled in cloud mode.)
 > when a user installs the App). **Public** repos are readable with **no
 > installation and no permissions at all** — see §5.
 
-## 3. Where it can be installed
+## 3. Where it can be installed — **make it public for cloud**
 
-- **Only on this account** (simplest for a personal deployment), or **Any account**
-  if you want others to install it.
+The **"Where can this GitHub App be installed?"** setting decides who can sign in,
+and it's the #1 cloud-deploy gotcha:
+
+- **Any account** — **required for the public/cloud deployment.** Any GitHub user can
+  authorize (sign in) and, for private repos, install the App.
+- **Only on this account** (the default) makes the App **private**: GitHub renders
+  the OAuth **authorize** *and* install pages **only for the account that owns the
+  App**. Every *other* user who tries to sign in gets a bare **404 from github.com**
+  on the authorize URL — so the owner can log in but everyone else 404s. Fine for a
+  single-user/local deployment, broken for a shared one.
+
+For `pierre-review.com` (multi-user by design), choose **Any account**.
+
+> **Already created the App as private?** Flip it without recreating: **Settings →
+> Developer settings → GitHub Apps → Edit** (your app) → **Advanced** → under
+> **"Danger zone"** click **Make public**. It takes effect immediately — no redeploy,
+> no code change; signed-out users can retry the flow right away. (Caveat: a public
+> App **can't** be switched back to private once it's installed on other accounts.)
 
 ## 4. Grab the credentials
 
