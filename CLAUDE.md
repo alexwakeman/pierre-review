@@ -696,19 +696,33 @@ auth/schema/account files), any leaked `.ts`, or a shared runtime import.
 **`better-sqlite3` stays a runtime dependency** (native addon, rebuilt per-machine);
 `pg` is only loaded in cloud mode (dynamic import). `release/` is gitignored.
 
-**Publishing is now automated by CI** (`.github/workflows/release.yml`, documented
-in `docs/RELEASE.md`): every push/merge to `main` bumps the patch version in
-`apps/backend/package.json` (the canonical published version), runs `pnpm package`,
-pushes the `chore(release): bump to X.Y.Z [skip ci]` commit + `vX.Y.Z` tag, then
-`npm publish`es `./release`. A manual `workflow_dispatch` allows `minor`/`major`
-bumps. A job-level `if:` (skip when the head commit starts with `chore(release):`)
-plus the `[skip ci]` suffix guard against an infinite release loop. The order is
-deliberately **bump → build → push → publish** so a failed publish only leaves an
+**Publishing is automated by CI** (`.github/workflows/release.yml`, documented in
+`docs/RELEASE.md`): every push/merge to `main` (except the bot's own
+`chore(release):` commit) **computes the next version from the highest of {npm's
+latest published version, `apps/backend/package.json` (the canonical version), the
+newest `vX.Y.Z` git tag}** and bumps from there — so a run never reuses or collides
+with an existing version even if `main`, the tags, and npm have drifted apart (the
+old failure mode was a blind `npm version patch` re-creating an existing tag). It
+then runs `pnpm package`, **atomically** pushes the `chore(release): bump to X.Y.Z
+[skip ci]` commit + `vX.Y.Z` tag (so a rejected push leaves no dangling tag), and
+`npm publish`es `./release` **idempotently** (skips if that version is already on
+npm, so re-runs are safe). A manual `workflow_dispatch` (from `main`) does
+`minor`/`major`. A job-level `if:` (skip the bot's `chore(release):` commit) plus
+the `[skip ci]` suffix guard against an infinite release loop. The order is
+deliberately **compute → build → push → publish** so a failed publish only leaves an
 npm version gap (self-healing) rather than poisoning the next merge. CI needs an
 `NPM_TOKEN` secret (npm Automation/granular token) and `contents: write`; see
 `docs/RELEASE.md` for token minting, branch-protection options, and the one-time
 manual first publish that claims the unscoped name. **Still never run
 `npm publish` / `npm login` from here** — let CI (or the user) do it.
+
+**pnpm is pinned** via the root `package.json` `"packageManager": "pnpm@9.15.9"`, so
+CI (`pnpm/action-setup`), the Railway `Dockerfile` (corepack — which also runs
+`corepack prepare pnpm@9.15.9 --activate`), and local dev all run the same pnpm.
+Without the pin, corepack pulls a newer pnpm that blocks native build scripts
+(`ERR_PNPM_IGNORED_BUILDS` on `better-sqlite3` + `esbuild`); those two are also
+declared in `pnpm.onlyBuiltDependencies` for pnpm-10/11 forward-compat. Bumping the
+pin means regenerating `pnpm-lock.yaml` in the same change.
 
 ---
 

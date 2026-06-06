@@ -15,25 +15,37 @@ Actions workflow (`.github/workflows/release.yml`).
 
 On every release run it:
 
-1. Checks out the repo (full history, so the tag/commit can be pushed).
-2. Installs pnpm 9 + Node 20 and runs `pnpm install --frozen-lockfile`.
+1. Checks out the repo (full history + tags, so the tag/commit can be pushed and
+   the next version can be computed from existing tags).
+2. Installs pnpm (pinned to `pnpm@9.15.9` via the root `package.json`
+   `packageManager` field, read by `pnpm/action-setup`) + Node 20 and runs
+   `pnpm install --frozen-lockfile`.
 3. Runs `pnpm typecheck` and `pnpm test` (a failure here aborts the release).
-4. **Bumps the version** in `apps/backend/package.json` with
-   `npm version <bump> --no-git-tag-version` (default `patch`).
+4. **Computes the next version**, drift-proof: it takes the **highest** of {npm's
+   latest published version, the committed `apps/backend/package.json` version, the
+   newest `vX.Y.Z` git tag} as the base, applies the bump (`npm version <bump>
+   --no-git-tag-version`, default `patch`), and then skips forward past any version
+   whose tag already exists. So a run never reuses or collides with an existing
+   version even if `main`, the tags, and npm have drifted apart.
 5. **Builds** the publishable package with `pnpm package`
    (`scripts/build-release.mjs` assembles `./release`, copies the bumped version
    into `release/package.json`, and self-verifies — it exits non-zero on any
    problem).
-6. **Commits & pushes** the bump as `chore(release): bump to X.Y.Z [skip ci]`,
-   plus a `vX.Y.Z` git tag, to `main`.
-7. **Publishes** `./release` to npm with `npm publish --access public`.
+6. **Commits & pushes** the bump as `chore(release): bump to X.Y.Z [skip ci]`
+   plus a `vX.Y.Z` git tag to `main`, in a single **atomic** push
+   (`git push --atomic`) — so a rejected push never leaves a dangling tag behind.
+7. **Publishes** `./release` to npm with `npm publish --access public`,
+   **idempotently** — if `pierre-review@X.Y.Z` is already on npm (e.g. a re-run),
+   it skips instead of failing.
 
 ### When it runs
 
 - **Automatically** on every push/merge to `main` — this performs a **patch**
   release.
 - **Manually** for a non-patch release: go to the repo's **Actions** tab →
-  **Release** workflow → **Run workflow** → choose `patch`, `minor`, or `major`.
+  **Release** workflow → **Run workflow** (**from the `main` branch**) → choose
+  `patch`, `minor`, or `major`. (Dispatch is gated to `main` — see [Loop
+  guard](#loop-guard).)
 
 ---
 
@@ -115,11 +127,12 @@ release (which would otherwise loop forever):
 1. **The job-level `if:`** check:
 
    ```yaml
-   if: ${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):') }}
+   if: ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore(release):')) }}
    ```
 
    A push whose head commit starts with `chore(release):` is skipped. Manual
-   dispatch always runs.
+   dispatch runs **only from `main`** (so a dispatch off a feature branch can't push
+   that branch's tree onto `main`).
 
 2. **The `[skip ci]` suffix** on the bump commit message
    (`chore(release): bump to X.Y.Z [skip ci]`) tells GitHub Actions not to start
@@ -143,13 +156,19 @@ bump them.
 
 ---
 
-## The self-healing order (bump → build → push → publish)
+## The self-healing order (compute → build → push → publish)
 
 The steps run in a deliberate order:
 
 ```
-bump version → build release → PUSH bump commit + tag → THEN publish to npm
+compute next version → build release → atomic PUSH (commit + tag) → THEN publish
 ```
+
+The **compute** step is drift-proof (highest of npm / `package.json` / tag, then
+bump, skipping any already-tagged version), the push is **atomic** (commit + tag
+land together or not at all), and publish is **idempotent** (skips a version that's
+already on npm). Together these mean a run can never collide on an existing tag —
+the old failure mode, `fatal: tag 'vX.Y.Z' already exists` — or double-publish.
 
 Publish is intentionally the **last** step. The rationale:
 
@@ -172,7 +191,7 @@ and fail with a duplicate-version error — poisoning an innocent merge.
 | Failure | State | What to do |
 | --- | --- | --- |
 | Push rejected (branch protection) | Nothing pushed, nothing published | Fix workflow/ruleset permissions, then re-run the job. |
-| Publish failed after push | Bump + tag on `main`; that npm version skipped | Re-run the job or merge again; the next version publishes. Optionally publish the skipped one manually. |
+| Publish failed after push | Bump + tag on `main`; that npm version skipped | Re-run the job or merge again — the next version publishes (the idempotent publish + tag-skip loop make re-runs safe). Optionally publish the skipped one manually. |
 
 ---
 
