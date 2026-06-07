@@ -4,7 +4,6 @@ import {
   DERIVED_STATES,
   PR_STATUSES,
   type DerivedState,
-  type EventCategory,
   type PrStatus,
   type Repo,
   type User,
@@ -12,24 +11,14 @@ import {
 import { api, ApiError } from '../api/client.js';
 import { useMergers, useRepos, useSearchTimeline, useUsers } from '../hooks/useTimeline.js';
 import { useSearchOpenPrs } from '../hooks/useTriage.js';
-import {
-  ALL_CATEGORIES,
-  useFilters,
-  type RangePreset,
-} from '../store/filters.js';
+import { useFilters, type RangePreset } from '../store/filters.js';
 import { DERIVED_STATE_META } from '../lib/ui.js';
+import { EventSelectPanel } from './EventSelectPanel.js';
 import { RepoSearch } from './RepoSearch.js';
 import { RepoSelectPanel } from './RepoSelectPanel.js';
 import { UserSelectPanel, type MemberSection } from './UserSelectPanel.js';
 
 const PRESETS: Exclude<RangePreset, 'custom'>[] = ['7d', '14d', '30d', '90d'];
-const CATEGORY_LABELS: Record<EventCategory, string> = {
-  lifecycle: 'Lifecycle',
-  reviews: 'Reviews',
-  review_comments: 'Review comments',
-  pr_comments: 'PR comments',
-  commits: 'Commits',
-};
 const STATUS_LABELS: Record<PrStatus, string> = {
   draft: 'Draft',
   open: 'Open',
@@ -345,15 +334,11 @@ export function FilterBar(): JSX.Element {
       </Section>
 
       <Section label="Events">
-        {ALL_CATEGORIES.map((c) => (
-          <Chip
-            key={c}
-            active={f.categories.includes(c)}
-            onClick={() => f.toggleCategory(c)}
-          >
-            {CATEGORY_LABELS[c]}
-          </Chip>
-        ))}
+        <EventSelectPanel
+          categories={f.categories}
+          onToggle={(c) => f.toggleCategory(c)}
+          onSet={(c) => f.setCategories(c)}
+        />
       </Section>
 
       <Section label="Threads">

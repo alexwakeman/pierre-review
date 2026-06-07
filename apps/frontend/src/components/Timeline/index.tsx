@@ -891,6 +891,10 @@ export function Timeline(): JSX.Element {
       if (!active && collapsedRowsByUserRef.current.size > 0) {
         for (const gid of collapsedRowsByUserRef.current) setRowCollapsed(gid, true);
       }
+      // A "Clear all" pressed while focused was deferred so it wouldn't disturb the
+      // overlay (resetAllFilters → pendingClearAll). Now that focus is torn down,
+      // apply it. No-op when nothing was deferred.
+      if (!active) useFilters.getState().flushPendingClearAll();
     },
     [
       focusSubgroups,
@@ -1281,8 +1285,15 @@ export function Timeline(): JSX.Element {
   // exitFocus, by the Exit-focus button / Esc.
   const exitFocusCore = useCallback(
     (restoreAnchor = true) => {
+      // A "Clear all" deferred while focused is applied by applyContext(null) below
+      // (flushPendingClearAll). When that's pending, skip our own window restore /
+      // PR re-centre: the flush bumps rangeResetSignal, so the range effect snaps
+      // the timeline to the cleared default view. We only keep the PR selected
+      // (Clear all preserves the selection). Read it before applyContext clears it.
+      const hadPendingClear = useFilters.getState().pendingClearAll;
       // Capture the anchor + PR-focus state before applyContext(null) clears them.
-      const anchorEvent = restoreAnchor ? highlightedEventRef.current : null;
+      const anchorEvent =
+        restoreAnchor && !hadPendingClear ? highlightedEventRef.current : null;
       const wasPrFocus = prFocusActiveRef.current;
       const prId = prFocusPrIdRef.current;
       const preFocusWindow = preFocusWindowRef.current;
@@ -1291,6 +1302,12 @@ export function Timeline(): JSX.Element {
       drillDepthRef.current = 0;
       savedWindowRef.current = null;
       preFocusWindowRef.current = null;
+
+      if (hadPendingClear) {
+        const sel = useFilters.getState().selectedPrId;
+        if (sel != null) timelineRef.current?.setSelection([`pr:${sel}`]);
+        return;
+      }
 
       if (wasPrFocus && restoreAnchor) {
         // PR-isolation exit: restore the ORIGINAL zoom + position the user had when
@@ -1450,11 +1467,13 @@ export function Timeline(): JSX.Element {
   }, [repoIds, focusActive, exitFocus]);
 
   // Leave focus on the store's edge-triggered exit request (Escape via the
-  // keyboard hook, and "Clear all" via resetAllFilters both bump
-  // exitFocusSignal). Each bump is a fresh request: run the exact same teardown
-  // as the on-canvas "Exit focus" button — restore the rows, re-centre on the
-  // marker that opened the focus, and fade-glow it. exitFocus() no-ops cleanly
-  // when nothing is focused (anchor null, depth 0), so a stray bump is harmless.
+  // keyboard hook, and the header focus-badge ✕, both bump exitFocusSignal).
+  // ("Clear all" deliberately does NOT bump it — it must not exit focus; see
+  // resetAllFilters / pendingClearAll.) Each bump is a fresh request: run the
+  // exact same teardown as the on-canvas "Exit focus" button — restore the rows,
+  // re-centre on the marker that opened the focus, and fade-glow it. exitFocus()
+  // no-ops cleanly when nothing is focused (anchor null, depth 0), so a stray
+  // bump is harmless.
   const exitFocusSignal = useFilters((s) => s.exitFocusSignal);
   const prevExitSignalRef = useRef(exitFocusSignal);
   useEffect(() => {

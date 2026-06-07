@@ -144,6 +144,12 @@ export interface FilterState {
   // review, so the global progress banner knows a run is in flight and begins
   // polling (and stops once the active list drains). Store-only / transient.
   claudeReviewKickoff: number;
+  // `pendingClearAll`: set when "Clear all" is pressed WHILE a focus overlay is up.
+  // Clearing the filters must NOT disturb or exit focus, so the reset is deferred —
+  // stashed here and applied (flushPendingClearAll, called by the Timeline when it
+  // tears the overlay down) once the user leaves focus, so nothing visibly changes
+  // until then. Store-only / transient.
+  pendingClearAll: boolean;
 
   setRepoIds: (ids: number[] | null) => void;
   toggleRepo: (id: number) => void;
@@ -158,6 +164,7 @@ export interface FilterState {
   setPreset: (p: RangePreset) => void;
   setCustomRange: (from: string | null, to: string | null) => void;
   toggleCategory: (c: EventCategory) => void;
+  setCategories: (c: EventCategory[]) => void;
   togglePrStatus: (s: PrStatus) => void;
   toggleDerivedState: (s: DerivedState) => void;
   selectPr: (id: number | null) => void;
@@ -216,12 +223,18 @@ export interface FilterState {
   setSearchQuery: (q: string) => void;
   toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
-  // Reset every filter (repos, members, range, categories, PR statuses, derived
-  // states, search, excludeBots) back to its fresh-load default, and clear any
-  // selection / timeline-focus hint so the detail pane and overlay don't orphan.
-  // Values mirror freshDefaults() exactly so useUrlState's diff-against-defaults
-  // produces a clean (empty) query string.
+  // Reset every user-set FILTER (repos, members, range, categories, PR statuses,
+  // derived states, search, excludeBots, excludeStale, strip filter) back to its
+  // fresh-load default. Selection and focus state are deliberately left intact —
+  // "Clear all" only clears filters, it doesn't deselect the PR or exit focus.
+  // The filter defaults mirror freshFilterDefaults() so useUrlState's diff-against-
+  // defaults drops those params from the URL. While a focus overlay is active the
+  // reset is DEFERRED (see pendingClearAll / flushPendingClearAll) so nothing
+  // visibly changes until the user leaves focus.
   resetAllFilters: () => void;
+  // Apply a deferred "Clear all" (no-op unless pendingClearAll is set). The
+  // Timeline calls this when it tears a focus overlay down.
+  flushPendingClearAll: () => void;
   hydrate: (partial: Partial<FilterState>) => void;
 }
 
@@ -229,7 +242,7 @@ function toggle<T>(arr: T[], value: T): T[] {
   return arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value];
 }
 
-// Every non-action piece of state. resetAllFilters() restores exactly these keys.
+// Every non-action piece of state. freshDefaults() restores exactly these keys.
 type FilterData = Omit<
   FilterState,
   {
@@ -239,11 +252,29 @@ type FilterData = Omit<
   }[keyof FilterState]
 >;
 
-// The fresh-load defaults for every (non-action) piece of state. Single source of
-// truth used both for the initial store and resetAllFilters(); array defaults are
-// rebuilt per call (freshDefaults) so callers never share a mutable reference.
-// These values are what useUrlState diffs against, so a reset yields a clean URL.
-function freshDefaults(): FilterData {
+// The user-set FILTERS — exactly what "Clear all" (resetAllFilters) resets.
+// Selection, focus, transient signals and detail-view state are NOT here: Clear
+// all leaves them alone. These values are what useUrlState diffs against, so a
+// reset drops the filter params from the URL.
+type FilterDefaults = Pick<
+  FilterState,
+  | 'repoIds'
+  | 'userIds'
+  | 'excludeBots'
+  | 'excludeStale'
+  | 'preset'
+  | 'customFrom'
+  | 'customTo'
+  | 'categories'
+  | 'prStatuses'
+  | 'derivedStates'
+  | 'searchQuery'
+  | 'stripFilter'
+>;
+
+// Single source of truth for the filter defaults; array defaults are rebuilt per
+// call so callers never share a mutable reference.
+function freshFilterDefaults(): FilterDefaults {
   return {
     repoIds: null,
     userIds: null,
@@ -258,14 +289,23 @@ function freshDefaults(): FilterData {
     categories: [...DEFAULT_CATEGORIES],
     prStatuses: [...DEFAULT_PR_STATUSES],
     derivedStates: [],
+    searchQuery: '',
+    stripFilter: 'all',
+  };
+}
+
+// The fresh-load defaults for every (non-action) piece of state: the filters above
+// plus selection, transient signals and detail-view state. Used for the initial
+// store. (resetAllFilters resets only the filter subset.)
+function freshDefaults(): FilterData {
+  return {
+    ...freshFilterDefaults(),
     selectedPrId: null,
     selectedThreadId: null,
     activityFocus: null,
     commentFocus: null,
     claudeTabFocus: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
-    stripFilter: 'all',
-    searchQuery: '',
     expandedFileGroups: [],
     collapsedFileGroups: [],
     expandedDiffHunks: [],
@@ -280,6 +320,7 @@ function freshDefaults(): FilterData {
     syncModalSignal: 0,
     syncModalRepoId: null,
     claudeReviewKickoff: 0,
+    pendingClearAll: false,
   };
 }
 
@@ -304,6 +345,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   setCustomRange: (from, to) =>
     set({ preset: 'custom', customFrom: from, customTo: to }),
   toggleCategory: (c) => set((s) => ({ categories: toggle(s.categories, c) })),
+  setCategories: (c) => set({ categories: c }),
   togglePrStatus: (st) => set((s) => ({ prStatuses: toggle(s.prStatuses, st) })),
   toggleDerivedState: (st) =>
     set((s) => ({ derivedStates: toggle(s.derivedStates, st) })),
@@ -388,9 +430,29 @@ export const useFilters = create<FilterState>((set, get) => ({
   toggleDiffHunk: (threadId) =>
     set((s) => ({ expandedDiffHunks: toggle(s.expandedDiffHunks, threadId) })),
   resetAllFilters: () =>
-    // Also drop any active focus overlay so a "clear all" truly returns to the
-    // baseline view (the Timeline reacts to the bumped exitFocusSignal).
-    set((s) => ({ ...freshDefaults(), exitFocusSignal: s.exitFocusSignal + 1 })),
+    set((s) =>
+      // In focus mode, DEFER: clearing the filters must not disturb or exit the
+      // focus overlay. Stash the request; the Timeline applies it on teardown
+      // (flushPendingClearAll) so nothing visibly changes until the user leaves
+      // focus. Outside focus, reset the filters now. Either way only the FILTERS
+      // reset (selection / focus state is preserved); bumping rangeResetSignal
+      // snaps the window back to the default range.
+      s.focusActive
+        ? { pendingClearAll: true }
+        : {
+            ...freshFilterDefaults(),
+            rangeResetSignal: s.rangeResetSignal + 1,
+            pendingClearAll: false,
+          },
+    ),
+  flushPendingClearAll: () => {
+    if (!get().pendingClearAll) return;
+    set((s) => ({
+      ...freshFilterDefaults(),
+      rangeResetSignal: s.rangeResetSignal + 1,
+      pendingClearAll: false,
+    }));
+  },
   hydrate: (partial) => set(partial),
 }));
 
