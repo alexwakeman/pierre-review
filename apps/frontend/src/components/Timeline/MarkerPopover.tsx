@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   autoUpdate,
   flip,
+  FloatingPortal,
   offset,
   shift,
   useDismiss,
@@ -306,6 +307,11 @@ export function MarkerPopover({
     onOpenChange: (o) => {
       if (!o) onDismiss();
     },
+    // Rendered through a FloatingPortal at <body> (below) so the modal escapes the
+    // timeline section's `overflow-hidden` clip and can hang over the PR detail
+    // pane. With a portal, `fixed` strategy positions it relative to the viewport —
+    // matching the click's viewport (clientX/clientY) virtual reference exactly.
+    strategy: 'fixed',
     // Open to the SIDE of the click, not on top of it: `right-start` puts the
     // modal's top-left just past the cursor so the clicked marker stays visible,
     // and being top-aligned it extends downward — never up over an own-work PR
@@ -398,79 +404,83 @@ export function MarkerPopover({
   const composedTransform = `${floatingStyles.transform ?? ''} translate(${dragOffset.x}px, ${dragOffset.y}px)`.trim();
 
   return (
-    <div
-      ref={refs.setFloating}
-      style={{
-        ...floatingStyles,
-        transform: composedTransform,
-        // Hidden until floating-ui has measured against the virtual click reference,
-        // so the modal never flashes at the top-left (0,0) before settling beside the
-        // cursor. visibility (not display:none) keeps it measurable meanwhile.
-        visibility: isPositioned ? 'visible' : 'hidden',
-        width: popoverSize?.width ?? 420,
-        height: popoverSize?.height ?? 340,
-        minWidth: 240,
-        minHeight: 120,
-        maxWidth: '92vw',
-        maxHeight: '80vh',
-        resize: 'both',
-        overflow: 'hidden',
-      }}
-      {...getFloatingProps()}
-      onPointerUp={persistSize}
-      className="z-50 flex flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
-    >
-      <div className="tl-modal-header" onPointerDown={onDragStart}>
-        <svg className="tl-grip" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-          <g fill="currentColor">
-            <circle cx="2" cy="2" r="1" />
-            <circle cx="8" cy="2" r="1" />
-            <circle cx="2" cy="5" r="1" />
-            <circle cx="8" cy="5" r="1" />
-            <circle cx="2" cy="8" r="1" />
-            <circle cx="8" cy="8" r="1" />
-          </g>
-        </svg>
-        <span className="tl-modal-title">
-          {events.length > 1 ? `${events.length} events` : 'Activity'}
-        </span>
-        <button
-          type="button"
-          className="tl-modal-close"
-          // Stop the pointerdown so it doesn't start a header drag; the click closes.
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={onDismiss}
-          aria-label="Close"
-          title="Close"
-        >
-          ✕
-        </button>
+    // Portal to <body> so the modal escapes the timeline section's overflow-hidden
+    // clip and can extend over the PR detail pane (and anywhere on screen).
+    <FloatingPortal>
+      <div
+        ref={refs.setFloating}
+        style={{
+          ...floatingStyles,
+          transform: composedTransform,
+          // Hidden until floating-ui has measured against the virtual click reference,
+          // so the modal never flashes at the top-left (0,0) before settling beside the
+          // cursor. visibility (not display:none) keeps it measurable meanwhile.
+          visibility: isPositioned ? 'visible' : 'hidden',
+          width: popoverSize?.width ?? 420,
+          height: popoverSize?.height ?? 340,
+          minWidth: 240,
+          minHeight: 120,
+          maxWidth: '92vw',
+          maxHeight: '80vh',
+          resize: 'both',
+          overflow: 'hidden',
+        }}
+        {...getFloatingProps()}
+        onPointerUp={persistSize}
+        className="z-50 flex flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+      >
+        <div className="tl-modal-header" onPointerDown={onDragStart}>
+          <svg className="tl-grip" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <g fill="currentColor">
+              <circle cx="2" cy="2" r="1" />
+              <circle cx="8" cy="2" r="1" />
+              <circle cx="2" cy="5" r="1" />
+              <circle cx="8" cy="5" r="1" />
+              <circle cx="2" cy="8" r="1" />
+              <circle cx="8" cy="8" r="1" />
+            </g>
+          </svg>
+          <span className="tl-modal-title">
+            {events.length > 1 ? `${events.length} events` : 'Activity'}
+          </span>
+          <button
+            type="button"
+            className="tl-modal-close"
+            // Stop the pointerdown so it doesn't start a header drag; the click closes.
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={onDismiss}
+            aria-label="Close"
+            title="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto p-2">
+          {/* Every event in the marker/cluster is shown fully expanded and stacked,
+              scrollable — no intermediate list to click through. */}
+          {events.length === 1 ? (
+            <SingleEvent
+              ev={events[0]!}
+              usersById={usersById}
+              prsById={prsById}
+              onNavigate={onNavigate}
+            />
+          ) : (
+            <div className="divide-y divide-gray-200 dark:divide-gray-800">
+              {events.map((ev) => (
+                <div key={ev.id} className="py-2 first:pt-0 last:pb-0">
+                  <SingleEvent
+                    ev={ev}
+                    usersById={usersById}
+                    prsById={prsById}
+                    onNavigate={onNavigate}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-2">
-        {/* Every event in the marker/cluster is shown fully expanded and stacked,
-            scrollable — no intermediate list to click through. */}
-        {events.length === 1 ? (
-          <SingleEvent
-            ev={events[0]!}
-            usersById={usersById}
-            prsById={prsById}
-            onNavigate={onNavigate}
-          />
-        ) : (
-          <div className="divide-y divide-gray-200 dark:divide-gray-800">
-            {events.map((ev) => (
-              <div key={ev.id} className="py-2 first:pt-0 last:pb-0">
-                <SingleEvent
-                  ev={ev}
-                  usersById={usersById}
-                  prsById={prsById}
-                  onNavigate={onNavigate}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+    </FloatingPortal>
   );
 }

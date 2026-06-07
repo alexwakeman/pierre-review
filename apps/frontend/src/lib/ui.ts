@@ -132,6 +132,19 @@ export function indexUsers(users: User[] | undefined): Map<number, User> {
   return map;
 }
 
+// Single source of truth for a plain calendar date. Locale-aware: the runtime
+// locale decides field order + separators, so en-GB renders "02/05/2026" (dd/mm/
+// yyyy) and en-US "05/02/2026" (mm/dd/yyyy). 2-digit day/month + 4-digit year give
+// an unambiguous, stable-width date. Every date the app shows goes through here (or
+// dateTime), so the format stays consistent everywhere.
+export function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
 export function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   const diff = Date.now() - then;
@@ -144,15 +157,16 @@ export function relativeTime(iso: string): string {
   if (abs < hr) return fmt(Math.round(diff / min), 'min');
   if (abs < day) return fmt(Math.round(diff / hr), 'hour');
   if (abs < 30 * day) return fmt(Math.round(diff / day), 'day');
-  return new Date(iso).toLocaleDateString();
+  return formatDate(iso);
 }
 
-// Absolute date *with* time of day, e.g. "30 May 2026, 09:04" — used where the
-// exact moment matters (the activity feed) rather than a fuzzy "4 days ago".
+// Absolute date *with* time of day, e.g. "02/05/2026, 09:04" — used where the exact
+// moment matters (the activity feed) rather than a fuzzy "4 days ago". The date part
+// matches formatDate (locale-aware dd/mm/yyyy ordering) for consistency.
 export function dateTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
-    day: 'numeric',
-    month: 'short',
+    day: '2-digit',
+    month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',

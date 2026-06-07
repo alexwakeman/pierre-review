@@ -1254,6 +1254,24 @@ export function Timeline(): JSX.Element {
     if (!focusedGroupIdsRef.current) applyContext(null);
   }, [applyContext]);
 
+  // A click on empty timeline canvas, dismissing ONE level at a time: an open
+  // marker/cluster popover closes first — even inside a focus overlay (closeModal
+  // keeps the focus up since a focus is active, so this can't tear the overlay
+  // down; focus is left only via the "Exit focus" button / Esc). With no popover
+  // open and OUTSIDE focus, a selected PR bar is deselected, else a lingering
+  // exit-anchor glow (left after leaving focus) is cleared. So a popover-and-bar
+  // combo clears the popover without yanking the PR out of the detail pane, and a
+  // final click tidies the leftover anchor pulse. Shared by vis's own empty-canvas
+  // click and the pane-gap click (the timeline pane beyond vis's drawn surface).
+  const dismissEmptyCanvas = useCallback(() => {
+    if (popoverRef.current) {
+      closeModal();
+    } else if (!focusedGroupIdsRef.current) {
+      if (selectedPrIdRef.current != null) useFilters.getState().clearSelection();
+      else if (exitGlowEventRef.current != null) applyExitGlow(null);
+    }
+  }, [closeModal, applyExitGlow]);
+
   // Focus teardown WITHOUT touching the History API (callers manage history): revert
   // the row collapse + glow, restore the window to where the user was when they
   // opened the focus, and close the modal too. `restoreAnchor` (default) re-centres
@@ -1476,21 +1494,9 @@ export function Timeline(): JSX.Element {
       const tgt = (native?.target ?? null) as HTMLElement | null;
       if (tgt?.closest?.('[data-collapse-gid]')) return;
 
-      // Empty-canvas click. An open marker/cluster popover always closes first —
-      // even inside a focus overlay (closeModal keeps the focus up since a focus is
-      // active, so this can't accidentally tear the overlay down; focus is left only
-      // via the bottom-right "Exit focus" button / Esc). With no popover open and
-      // OUTSIDE focus, it dismisses ONE more level at a time: a selected PR bar is
-      // deselected; else a lingering exit-anchor glow (left after leaving focus) is
-      // cleared. So a popover-and-bar combo clears the popover without yanking the PR
-      // out of the detail pane, and a final click tidies the leftover anchor pulse.
+      // Empty-canvas click → one-level-at-a-time dismissal (see dismissEmptyCanvas).
       if (id == null) {
-        if (popoverRef.current) {
-          closeModal();
-        } else if (!focusedGroupIdsRef.current) {
-          if (selectedPrIdRef.current != null) useFilters.getState().clearSelection();
-          else if (exitGlowEventRef.current != null) applyExitGlow(null);
-        }
+        dismissEmptyCanvas();
         return;
       }
       const key = String(id);
@@ -1728,12 +1734,11 @@ export function Timeline(): JSX.Element {
     rebuildMarkers,
     openPopover,
     applyContext,
-    closeModal,
+    dismissEmptyCanvas,
     exitFocus,
     centerShowTarget,
     highlightEvent,
     enterPrFocus,
-    applyExitGlow,
   ]);
 
   // Per-row collapse caret (Item 6). vis re-parses / re-appends label HTML on every
@@ -1766,6 +1771,28 @@ export function Timeline(): JSX.Element {
     container.addEventListener('click', onClick, true);
     return () => container.removeEventListener('click', onClick, true);
   }, [setRowCollapsed]);
+
+  // Clicking the timeline PANE outside vis's own drawn surface — the empty gap
+  // under a short, few-row board (between the rows and the detail pane) — dismisses
+  // like empty canvas too. vis's `click` handler only fires within `.vis-timeline`
+  // itself (sized to content via maxHeight:'100%'), so that gap was a dead zone
+  // where a click did nothing and an open popover lingered. We listen on the
+  // container — the PARENT of `.vis-timeline` — and act only on clicks that land
+  // OUTSIDE `.vis-timeline`: clicks INSIDE it are left to vis (it closes on empty
+  // canvas, reopens on a marker); clicks OUTSIDE the container entirely (PR detail
+  // pane, filter panels) never reach here; and the popover is portaled to <body>,
+  // so its own clicks don't bubble in either.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const onPaneClick = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('.vis-timeline')) return; // vis owns its own surface
+      dismissEmptyCanvas();
+    };
+    container.addEventListener('click', onPaneClick);
+    return () => container.removeEventListener('click', onPaneClick);
+  }, [dismissEmptyCanvas]);
 
   // Fit min-width PR bars (resolve their pixel overlap) once the CENTER draw width
   // is known. vis sizes the label gutter asynchronously after a rebuild, so the
@@ -1984,6 +2011,16 @@ export function Timeline(): JSX.Element {
       });
     });
 
+    // While a PR-isolation focus is active, bake the `pr-focus-hidden` class into
+    // every sibling bar's className up front. isolatePrBars re-hides them after this
+    // rebuild too (below), but applyBarFit's DEFERRED items.update(prItems) — it
+    // adjusts each bar's `end` a few frames later, once the gutter width settles —
+    // would otherwise re-apply the un-hidden className straight from this array and
+    // un-hide the siblings. That's the intermittent "focus suddenly shows the
+    // author's other PRs" bug. Baking it in keeps prItems self-consistent so the
+    // deferred fit can't undo the isolation.
+    const focusHiddenPrId = prFocusActiveRef.current ? prFocusPrIdRef.current : null;
+
     const prItems: DataItem[] = prs.map((pr) => {
       const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
       // The PR creator owns the band in their own row; fall back to the repo
@@ -2009,7 +2046,10 @@ export function Timeline(): JSX.Element {
           },
           hasComments: prsWithComments.has(pr.id),
         }),
-        className: prClassName(pr),
+        className:
+          focusHiddenPrId != null && pr.id !== focusHiddenPrId
+            ? `${prClassName(pr)} pr-focus-hidden`
+            : prClassName(pr),
         title: `#${pr.number} ${pr.title}`,
       } as DataItem;
     });

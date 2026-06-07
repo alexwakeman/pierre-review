@@ -12,6 +12,7 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { CLAUDE_REVIEW_MODELS } from '@pierre-review/shared';
+import { formatDate } from '../lib/ui.js';
 import {
   useCancelReview,
   useClaudeReview,
@@ -939,7 +940,7 @@ export function ClaudeReviewTab({
             {data.history.map((h) => (
               <option key={h.id} value={h.id}>
                 {shortSha(h.headSha)} · {h.model} · {h.status} ·{' '}
-                {new Date(h.createdAt).toLocaleDateString()}
+                {formatDate(h.createdAt)}
                 {h.id === review?.id ? ' (latest)' : ''}
               </option>
             ))}

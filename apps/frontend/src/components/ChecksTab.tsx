@@ -3,6 +3,8 @@ import type { PrDetail as PrDetailT, ReviewState, User } from '@pierre-review/sh
 import {
   CHECK_STATE_META,
   CI_META,
+  dateTime,
+  formatDate,
   mergeWarning,
   relativeTime,
 } from '../lib/ui.js';
@@ -171,6 +173,11 @@ export function ChecksTab({
               fallbackId={pr.mergedById}
               repoId={pr.repoId}
             />
+            {pr.mergedAt != null && (
+              <span className="text-gray-400" title={dateTime(pr.mergedAt)}>
+                · {formatDate(pr.mergedAt)}
+              </span>
+            )}
           </span>
         </Row>
       )}
