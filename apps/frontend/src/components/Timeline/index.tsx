@@ -30,7 +30,6 @@ import {
 } from './MarkerPopover.js';
 
 const ZOOM_MIN_MS = 1000 * 60 * 60;
-const FOCUS_GLOW_MS = 2000; // matches the pr-focus-glow keyframe in index.css
 
 const VIS_OPTIONS: TimelineOptions = {
   // stack:false + stackSubgroups:true is the "subgroups as ordered single-line
@@ -283,9 +282,6 @@ export function Timeline(): JSX.Element {
   // for the `ev-exit-glow` class; it stays until the next applyContext clears it.
   const exitGlowEventRef = useRef<number | null>(null);
   const exitGlowItemRef = useRef<string | null>(null);
-  // The strip / search "locate the bar" cue: a finite sky glow (no marching ants)
-  // on a focused PR bar, plus a timer that strips it once the ~2s fade completes.
-  const prFocusGlowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // An open PR opened *within* the window but absent from the lean /api/timeline
   // payload (it had no in-window activity). The focus path stages it here so the
   // next rebuild materializes its bar; cleared once the rebuild consumes it.
@@ -564,35 +560,6 @@ export function Timeline(): JSX.Element {
       items.update({ id: targetId, className: `${item.className} ev-selected` });
       selectedGlowItemRef.current = targetId;
     }
-  }, []);
-
-  // Flash a finite sky glow on a PR bar for FOCUS_GLOW_MS, then strip it. Used by
-  // the strip / search focus path — "locate the bar" feedback without the infinite
-  // marching-ants ring cross-user focus mode uses (pr-cross-linked). Operates on
-  // the `pr:<id>` DataSet item directly (like highlightPr) so it survives a
-  // restack; re-resolves the item on the strip-off timeout because a background
-  // rebuild may have replaced it in the meantime.
-  const flashPrFocusGlow = useCallback((prId: number) => {
-    const items = itemsRef.current;
-    if (prFocusGlowTimerRef.current) clearTimeout(prFocusGlowTimerRef.current);
-    // Clear the class off any bar that still carries it (rapid re-clicks).
-    for (const it of items.get() as DataItem[]) {
-      if (typeof it.className === 'string' && it.className.includes('pr-focus-glow')) {
-        items.update({ id: it.id, className: it.className.replace(/\s*pr-focus-glow/g, '') });
-      }
-    }
-    const item = items.get(`pr:${prId}`) as DataItem | null;
-    if (!item || typeof item.className !== 'string') return;
-    if (!item.className.includes('pr-focus-glow')) {
-      items.update({ id: `pr:${prId}`, className: `${item.className} pr-focus-glow` });
-    }
-    prFocusGlowTimerRef.current = setTimeout(() => {
-      const it = items.get(`pr:${prId}`) as DataItem | null;
-      if (it && typeof it.className === 'string') {
-        items.update({ id: `pr:${prId}`, className: it.className.replace(/\s*pr-focus-glow/g, '') });
-      }
-      prFocusGlowTimerRef.current = null;
-    }, FOCUS_GLOW_MS);
   }, []);
 
   // Reconcile the cross-band divider items with the current collapsed set: a
@@ -1473,14 +1440,6 @@ export function Timeline(): JSX.Element {
     }
   }, [exitFocusSignal, focusActive, exitFocus]);
 
-  // Don't let the PR-focus glow fade timer fire after unmount.
-  useEffect(
-    () => () => {
-      if (prFocusGlowTimerRef.current) clearTimeout(prFocusGlowTimerRef.current);
-    },
-    [],
-  );
-
   // Create the timeline once.
   useEffect(() => {
     if (!containerRef.current) return;
@@ -2269,11 +2228,10 @@ export function Timeline(): JSX.Element {
       // a sticky "Show" OR a marker-popover cross-user focus (tracked by
       // focusedGroupIdsRef, which showFocusActiveRef alone misses). This is a
       // fresh navigation, so expand back to all rows and clear the cross-link glow
-      // before scrolling+glowing the target — otherwise the rows stay collapsed
-      // and the focus glow paints on a hidden bar (and pr-cross-linked can stack
-      // under pr-focus-glow). Then recenter horizontally on the clicked event's
-      // instant when provided, else the PR bar's midpoint — avoids a big jump when
-      // a long-running PR's midpoint is far from the clicked event.
+      // before scrolling to the target — otherwise the rows stay collapsed and the
+      // selection pulse paints on a hidden bar. Then recenter horizontally on the
+      // clicked event's instant when provided, else the PR bar's midpoint — avoids a
+      // big jump when a long-running PR's midpoint is far from the clicked event.
       dropOverlayForNavigation();
       const win = tl.getWindow();
       const width = win.end.valueOf() - win.start.valueOf();
@@ -2292,19 +2250,15 @@ export function Timeline(): JSX.Element {
       // Vertical scroll: the contributor row may be virtualized off-screen, so
       // vis.focus() can't reach it — drive vis's own vertical scroll via the same
       // settle loop the activity-"Show" path uses (centerShowTarget). hasMarker is
-      // false (lifecycle branch); the lifecycle target is the glow selector below,
-      // so it centres precisely on the focused PR bar (not the row label). The
-      // glow class is applied first so centerShowTarget can find `.pr-focus-glow`.
+      // false (lifecycle branch); the target is the now-selected PR bar, so it
+      // centres precisely on the bar (not the row label). The bar already shows the
+      // soft "selected" pulse from setSelection above — no separate flash glow.
       const token = groupClassToken(prGroupId(inWindow));
-      const focusId = timelineFocusPr;
-      // Defer the glow alongside the scroll: when a thread-state filter hides this
-      // PR, openPrFocused's selection effect schedules a force-show rebuild to
-      // materialize the bar; applying the glow synchronously here would no-op (the
-      // `pr:<id>` item isn't in the DataSet yet) and never retry. Running both
-      // after the rebuild paints guarantees flashPrFocusGlow finds the bar.
+      // Defer the scroll: when a thread-state filter hides this PR, openPrFocused's
+      // selection effect schedules a force-show rebuild to materialize the bar;
+      // scrolling synchronously would miss it, so run after the rebuild paints.
       window.setTimeout(() => {
-        flashPrFocusGlow(focusId);
-        centerShowTarget(token, false, '.ev-cross-linked', '.pr-focus-glow');
+        centerShowTarget(token, false, '.ev-cross-linked', '.pr-bar.vis-selected');
       }, 120);
       useFilters.getState().consumeTimelineFocus();
       return;
@@ -2330,8 +2284,7 @@ export function Timeline(): JSX.Element {
       window.setTimeout(() => {
         // 360ms: after the force-show rebuild paints the bar + its author's row.
         tl.setSelection([`pr:${focusId}`]);
-        flashPrFocusGlow(focusId);
-        centerShowTarget(token, false, '.ev-cross-linked', '.pr-focus-glow');
+        centerShowTarget(token, false, '.ev-cross-linked', '.pr-bar.vis-selected');
       }, 360);
       useFilters.getState().consumeTimelineFocus();
       return;
@@ -2383,8 +2336,7 @@ export function Timeline(): JSX.Element {
         window.setTimeout(() => {
           // 360ms: after the force-show rebuild paints the bar.
           tl.setSelection([`pr:${candidate.id}`]);
-          flashPrFocusGlow(candidate.id);
-          centerShowTarget(token, false, '.ev-cross-linked', '.pr-focus-glow');
+          centerShowTarget(token, false, '.ev-cross-linked', '.pr-bar.vis-selected');
         }, 360);
         useFilters.getState().consumeTimelineFocus();
         return;
@@ -2401,7 +2353,6 @@ export function Timeline(): JSX.Element {
     searchOpenPrsData,
     applyContext,
     centerShowTarget,
-    flashPrFocusGlow,
     rebuildMarkers,
     isolatePrBars,
     enterPrFocus,
