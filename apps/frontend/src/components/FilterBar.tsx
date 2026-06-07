@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DERIVED_STATES,
@@ -109,6 +109,17 @@ export function FilterBar(): JSX.Element {
   const { data: mergers } = useMergers();
 
   const f = useFilters();
+
+  // Focus mode treats the board filters as the layer BENEATH the lens, so while a
+  // focus overlay is active they're disabled + faded and the only live control is
+  // the "Focus mode" pill. `inert` takes the whole group out of pointer/tab/AT
+  // reach; the `.filters-disabled` CSS class does the visual fade. Both keyed off
+  // the store's focusActive (the pill + Clear filters live OUTSIDE this group).
+  const filtersRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (filtersRef.current) filtersRef.current.inert = f.focusActive;
+  }, [f.focusActive]);
+
   const qc = useQueryClient();
   const removeRepo = useMutation({
     mutationFn: (id: number) => api.deleteRepo(id),
@@ -255,117 +266,158 @@ export function FilterBar(): JSX.Element {
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-800 dark:bg-gray-900">
-      <Section label="Repos">
-        <RepoSelectPanel
-          repos={repos ?? []}
-          repoIds={f.repoIds}
-          onToggle={toggleRepoVisibility}
-          onOnly={showOnlyRepo}
-          onShowAll={() => f.setRepoIds(null)}
-          onRemove={confirmRemoveRepo}
-          removePending={removeRepo.isPending}
-        />
-        {removeRepo.error && (
-          <span
-            className="max-w-[14rem] truncate text-xs text-red-500"
-            title={String(removeRepo.error)}
+      {/* The board filters. While a focus overlay is active this group is disabled
+          (inert, set via filtersRef) and faded (.filters-disabled): the focus lens
+          owns the screen, so you leave focus to change the board. The "Focus mode"
+          pill and "Clear filters" live OUTSIDE this group (right cluster below). */}
+      <div
+        ref={filtersRef}
+        className={`flex flex-wrap items-center gap-x-4 gap-y-2${
+          f.focusActive ? ' filters-disabled' : ''
+        }`}
+      >
+        <Section label="Repos">
+          <RepoSelectPanel
+            repos={repos ?? []}
+            repoIds={f.repoIds}
+            onToggle={toggleRepoVisibility}
+            onOnly={showOnlyRepo}
+            onShowAll={() => f.setRepoIds(null)}
+            onRemove={confirmRemoveRepo}
+            removePending={removeRepo.isPending}
+          />
+          {removeRepo.error && (
+            <span
+              className="max-w-[14rem] truncate text-xs text-red-500"
+              title={String(removeRepo.error)}
+            >
+              {removeRepo.error instanceof ApiError
+                ? removeRepo.error.message
+                : 'Failed to remove repo'}
+            </span>
+          )}
+          <RepoSearch />
+        </Section>
+
+        <Section label="Members">
+          <UserSelectPanel
+            sections={memberSections}
+            userIds={f.userIds}
+            maintainerIds={maintainerIds}
+            onApply={(ids) => f.setUserIds(ids)}
+          />
+          <label className="flex items-center gap-1 text-xs text-gray-500">
+            <input
+              type="checkbox"
+              checked={f.excludeBots}
+              onChange={(e) => f.setExcludeBots(e.target.checked)}
+            />
+            exclude bots
+          </label>
+        </Section>
+
+        <Section label="Range">
+          {PRESETS.map((p) => (
+            <Chip key={p} active={f.preset === p} onClick={() => f.setPreset(p)}>
+              {p}
+            </Chip>
+          ))}
+          <button
+            type="button"
+            onClick={() => f.centerTimelineNow()}
+            title="Recenter the timeline on the current time (keeps the zoom)"
+            className="whitespace-nowrap rounded-full border border-sky-300 px-2.5 py-0.5 text-xs text-sky-600 transition hover:border-sky-400 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-400 dark:hover:bg-sky-900/30"
           >
-            {removeRepo.error instanceof ApiError
-              ? removeRepo.error.message
-              : 'Failed to remove repo'}
+            Now
+          </button>
+        </Section>
+
+        <Section label="Status">
+          {PR_STATUSES.map((s: PrStatus) => (
+            <Chip
+              key={s}
+              active={f.prStatuses.includes(s)}
+              onClick={() => f.togglePrStatus(s)}
+            >
+              {STATUS_LABELS[s]}
+            </Chip>
+          ))}
+        </Section>
+
+        <Section label="Stale">
+          <Chip
+            active={f.excludeStale}
+            onClick={() => f.setExcludeStale(!f.excludeStale)}
+            title="Hide open PRs with no commits, comments or reviews within the selected time range"
+          >
+            Hide
+          </Chip>
+        </Section>
+
+        <Section label="Events">
+          <EventSelectPanel
+            categories={f.categories}
+            onToggle={(c) => f.toggleCategory(c)}
+            onSet={(c) => f.setCategories(c)}
+          />
+        </Section>
+
+        <Section label="Threads">
+          {DERIVED_STATES.map((s: DerivedState) => (
+            <Chip
+              key={s}
+              active={f.derivedStates.includes(s)}
+              color={DERIVED_STATE_META[s].color}
+              onClick={() => f.toggleDerivedState(s)}
+              title={DERIVED_STATE_META[s].description}
+            >
+              {DERIVED_STATE_META[s].label}
+            </Chip>
+          ))}
+        </Section>
+      </div>
+
+      {/* Right cluster, pinned next to the timeline. The "Focus mode" pill (shown
+          only in focus, and the ONLY live control then) sits beside "Clear filters",
+          which is disabled during focus — you reshape the board after leaving the
+          lens, via the pill's ✕ / Esc / Back. */}
+      <div className="ml-auto flex items-center gap-2">
+        {f.focusActive && (
+          <span
+            className="focus-indicator"
+            title="You're in PR focus mode — click ✕, press Esc, or use the browser Back button to leave"
+          >
+            <span className="focus-indicator-dot" aria-hidden="true" />
+            Focus mode
+            <button
+              type="button"
+              onClick={() => f.exitFocus()}
+              className="focus-indicator-close"
+              title="Exit focus mode"
+              aria-label="Exit focus mode"
+            >
+              ✕
+            </button>
           </span>
         )}
-        <RepoSearch />
-      </Section>
-
-      <Section label="Members">
-        <UserSelectPanel
-          sections={memberSections}
-          userIds={f.userIds}
-          maintainerIds={maintainerIds}
-          onApply={(ids) => f.setUserIds(ids)}
-        />
-        <label className="flex items-center gap-1 text-xs text-gray-500">
-          <input
-            type="checkbox"
-            checked={f.excludeBots}
-            onChange={(e) => f.setExcludeBots(e.target.checked)}
-          />
-          exclude bots
-        </label>
-      </Section>
-
-      <Section label="Range">
-        {PRESETS.map((p) => (
-          <Chip key={p} active={f.preset === p} onClick={() => f.setPreset(p)}>
-            {p}
-          </Chip>
-        ))}
         <button
           type="button"
-          onClick={() => f.centerTimelineNow()}
-          title="Recenter the timeline on the current time (keeps the zoom)"
-          className="whitespace-nowrap rounded-full border border-sky-300 px-2.5 py-0.5 text-xs text-sky-600 transition hover:border-sky-400 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-400 dark:hover:bg-sky-900/30"
+          onClick={() => f.resetAllFilters()}
+          disabled={f.focusActive}
+          title={
+            f.focusActive
+              ? 'Exit focus mode to change filters'
+              : 'Reset all filters to their defaults'
+          }
+          className={`whitespace-nowrap rounded border px-2 py-0.5 text-xs transition ${
+            f.focusActive
+              ? 'cursor-not-allowed border-gray-300 text-gray-600 opacity-45 dark:border-gray-700 dark:text-gray-300'
+              : 'border-gray-300 text-gray-600 hover:border-gray-400 hover:text-gray-800 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:text-gray-100'
+          }`}
         >
-          Now
+          Clear filters
         </button>
-      </Section>
-
-      <Section label="Status">
-        {PR_STATUSES.map((s: PrStatus) => (
-          <Chip
-            key={s}
-            active={f.prStatuses.includes(s)}
-            onClick={() => f.togglePrStatus(s)}
-          >
-            {STATUS_LABELS[s]}
-          </Chip>
-        ))}
-      </Section>
-
-      <Section label="Stale">
-        <Chip
-          active={f.excludeStale}
-          onClick={() => f.setExcludeStale(!f.excludeStale)}
-          title="Hide open PRs with no commits, comments or reviews within the selected time range"
-        >
-          Hide
-        </Chip>
-      </Section>
-
-      <Section label="Events">
-        <EventSelectPanel
-          categories={f.categories}
-          onToggle={(c) => f.toggleCategory(c)}
-          onSet={(c) => f.setCategories(c)}
-        />
-      </Section>
-
-      <Section label="Threads">
-        {DERIVED_STATES.map((s: DerivedState) => (
-          <Chip
-            key={s}
-            active={f.derivedStates.includes(s)}
-            color={DERIVED_STATE_META[s].color}
-            onClick={() => f.toggleDerivedState(s)}
-            title={DERIVED_STATE_META[s].description}
-          >
-            {DERIVED_STATE_META[s].label}
-          </Chip>
-        ))}
-      </Section>
-
-      {/* Reset everything to fresh-load defaults (clears repos/members/range/
-          categories/statuses/threads/search + any selection). Pushed to the far
-          right so it reads as a distinct, global action. */}
-      <button
-        type="button"
-        onClick={() => f.resetAllFilters()}
-        title="Reset all filters to their defaults"
-        className="ml-auto whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 hover:border-gray-400 hover:text-gray-800 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:text-gray-100"
-      >
-        Clear all
-      </button>
+      </div>
     </div>
   );
 }

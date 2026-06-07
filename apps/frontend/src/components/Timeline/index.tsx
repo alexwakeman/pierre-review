@@ -149,17 +149,6 @@ function paddedViewport(from: Date, to: Date): { start: Date; end: Date } {
   return { start: new Date(from.getTime() - left), end: new Date(to.getTime() + right) };
 }
 
-// Order-independent equality for the repo filter (null = "all repos"). Used to
-// detect a *genuine* repo-selection change so focus mode can be dropped only
-// then — not on every unrelated re-render.
-function sameRepoSelection(a: number[] | null, b: number[] | null): boolean {
-  if (a === b) return true;
-  if (a == null || b == null) return false;
-  if (a.length !== b.length) return false;
-  const set = new Set(a);
-  return b.every((x) => set.has(x));
-}
-
 // Parse a row-label HTML string into a live DOM element ONCE, so it can be
 // handed to vis as the group `content`. vis's Group.setData re-applies a group's
 // content on every `groupsData.update()` — including a bare `{ visible }` toggle.
@@ -891,10 +880,6 @@ export function Timeline(): JSX.Element {
       if (!active && collapsedRowsByUserRef.current.size > 0) {
         for (const gid of collapsedRowsByUserRef.current) setRowCollapsed(gid, true);
       }
-      // A "Clear all" pressed while focused was deferred so it wouldn't disturb the
-      // overlay (resetAllFilters → pendingClearAll). Now that focus is torn down,
-      // apply it. No-op when nothing was deferred.
-      if (!active) useFilters.getState().flushPendingClearAll();
     },
     [
       focusSubgroups,
@@ -1285,15 +1270,8 @@ export function Timeline(): JSX.Element {
   // exitFocus, by the Exit-focus button / Esc.
   const exitFocusCore = useCallback(
     (restoreAnchor = true) => {
-      // A "Clear all" deferred while focused is applied by applyContext(null) below
-      // (flushPendingClearAll). When that's pending, skip our own window restore /
-      // PR re-centre: the flush bumps rangeResetSignal, so the range effect snaps
-      // the timeline to the cleared default view. We only keep the PR selected
-      // (Clear all preserves the selection). Read it before applyContext clears it.
-      const hadPendingClear = useFilters.getState().pendingClearAll;
       // Capture the anchor + PR-focus state before applyContext(null) clears them.
-      const anchorEvent =
-        restoreAnchor && !hadPendingClear ? highlightedEventRef.current : null;
+      const anchorEvent = restoreAnchor ? highlightedEventRef.current : null;
       const wasPrFocus = prFocusActiveRef.current;
       const prId = prFocusPrIdRef.current;
       const preFocusWindow = preFocusWindowRef.current;
@@ -1302,12 +1280,6 @@ export function Timeline(): JSX.Element {
       drillDepthRef.current = 0;
       savedWindowRef.current = null;
       preFocusWindowRef.current = null;
-
-      if (hadPendingClear) {
-        const sel = useFilters.getState().selectedPrId;
-        if (sel != null) timelineRef.current?.setSelection([`pr:${sel}`]);
-        return;
-      }
 
       if (wasPrFocus && restoreAnchor) {
         // PR-isolation exit: restore the ORIGINAL zoom + position the user had when
@@ -1450,30 +1422,18 @@ export function Timeline(): JSX.Element {
     if (ev?.prId != null) useFilters.getState().selectPr(ev.prId);
   }, [popoverEventId]);
 
-  // Toggling the repo filter changes which contributors are on the timeline, so a
-  // two-person focus built from another repo no longer makes sense — drop it just
-  // like the "Exit focus" button. We skip the anchor re-centre/glow because the
-  // clicked marker may not exist in the new repo set. Only a *genuine* repo change
-  // triggers this (not unrelated re-renders, and not member/range/category edits).
-  const repoIds = useFilters((s) => s.repoIds);
-  const prevRepoIdsRef = useRef(repoIds);
-  useEffect(() => {
-    const prev = prevRepoIdsRef.current;
-    prevRepoIdsRef.current = repoIds;
-    if (sameRepoSelection(prev, repoIds)) return;
-    if (focusActive || focusedGroupIdsRef.current || showFocusActiveRef.current) {
-      exitFocus(false);
-    }
-  }, [repoIds, focusActive, exitFocus]);
+  // Changing the repo filter no longer drops focus: filter controls are treated as
+  // the board layer BENEATH the focus lens (and the FilterBar disables them while a
+  // focus overlay is active, so a repo toggle can't even fire mid-focus). The rows
+  // re-derive from the new data on the next rebuild, which re-asserts the overlay.
 
-  // Leave focus on the store's edge-triggered exit request (Escape via the
-  // keyboard hook, and the header focus-badge ✕, both bump exitFocusSignal).
-  // ("Clear all" deliberately does NOT bump it — it must not exit focus; see
-  // resetAllFilters / pendingClearAll.) Each bump is a fresh request: run the
-  // exact same teardown as the on-canvas "Exit focus" button — restore the rows,
-  // re-centre on the marker that opened the focus, and fade-glow it. exitFocus()
-  // no-ops cleanly when nothing is focused (anchor null, depth 0), so a stray
-  // bump is harmless.
+  // Leave focus on the store's edge-triggered exit request (Escape via the keyboard
+  // hook, and the "Focus mode" pill's ✕ in the FilterBar, both bump exitFocusSignal).
+  // ("Clear filters" deliberately does NOT bump it — and is disabled during focus.)
+  // Each bump is a fresh request: run the exact same teardown as the on-canvas
+  // "Exit focus" path — restore the rows, re-centre on the marker that opened the
+  // focus, and fade-glow it. exitFocus() no-ops cleanly when nothing is focused
+  // (anchor null, depth 0), so a stray bump is harmless.
   const exitFocusSignal = useFilters((s) => s.exitFocusSignal);
   const prevExitSignalRef = useRef(exitFocusSignal);
   useEffect(() => {

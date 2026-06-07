@@ -46,12 +46,11 @@ export default function App(): JSX.Element {
   const onSignOut = (): void => {
     void api.logout().finally(() => window.location.assign('/'));
   };
-  // Surfaced as a subtle header badge so it's clear we're in the PR-focus view
-  // mode. The Timeline owns the overlay and reports this; it clears on exit. The
-  // badge's ✕ requests the exit (bumps exitFocusSignal, which the Timeline tears
-  // the overlay down on) — the same path as Esc / the browser Back button.
+  // Drives the focus-mode frame around the timeline + detail pane (the "lens").
+  // The Timeline owns the overlay and reports this via the store; it clears on
+  // exit. The on-screen exit control (the "Focus mode" pill) now lives in the
+  // FilterBar, next to "Clear filters"; Esc and the browser Back button still work.
   const focusActive = useFilters((s) => s.focusActive);
-  const exitFocus = useFilters((s) => s.exitFocus);
 
   // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
   // the dragged height is remembered across reloads. During a drag we set the
@@ -103,24 +102,6 @@ export default function App(): JSX.Element {
         <h1 className="brand-title" title="Pierre — a play on “PR”">
           Pierre
         </h1>
-        {focusActive && (
-          <span
-            className="focus-indicator"
-            title="You're in PR focus mode — click ✕, press Esc, or use the browser Back button to leave"
-          >
-            <span className="focus-indicator-dot" aria-hidden="true" />
-            Focus mode
-            <button
-              type="button"
-              onClick={() => exitFocus()}
-              className="focus-indicator-close"
-              title="Exit focus mode"
-              aria-label="Exit focus mode"
-            >
-              ✕
-            </button>
-          </span>
-        )}
         <div className="ml-auto flex items-center gap-3">
           <TimelineSearch />
           <SyncStatus />
@@ -174,7 +155,7 @@ export default function App(): JSX.Element {
       <FilterBar />
       <OpenPrsStrip />
 
-      <main className="flex min-h-0 flex-1 flex-col">
+      <main className={`flex min-h-0 flex-1 flex-col${focusActive ? ' focus-frame' : ''}`}>
         <section className="min-h-0 flex-1 overflow-hidden">
           <Timeline />
         </section>

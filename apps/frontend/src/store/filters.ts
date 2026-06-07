@@ -144,12 +144,6 @@ export interface FilterState {
   // review, so the global progress banner knows a run is in flight and begins
   // polling (and stops once the active list drains). Store-only / transient.
   claudeReviewKickoff: number;
-  // `pendingClearAll`: set when "Clear all" is pressed WHILE a focus overlay is up.
-  // Clearing the filters must NOT disturb or exit focus, so the reset is deferred —
-  // stashed here and applied (flushPendingClearAll, called by the Timeline when it
-  // tears the overlay down) once the user leaves focus, so nothing visibly changes
-  // until then. Store-only / transient.
-  pendingClearAll: boolean;
 
   setRepoIds: (ids: number[] | null) => void;
   toggleRepo: (id: number) => void;
@@ -226,15 +220,11 @@ export interface FilterState {
   // Reset every user-set FILTER (repos, members, range, categories, PR statuses,
   // derived states, search, excludeBots, excludeStale, strip filter) back to its
   // fresh-load default. Selection and focus state are deliberately left intact —
-  // "Clear all" only clears filters, it doesn't deselect the PR or exit focus.
+  // "Clear filters" only clears filters, it doesn't deselect the PR or exit focus.
   // The filter defaults mirror freshFilterDefaults() so useUrlState's diff-against-
-  // defaults drops those params from the URL. While a focus overlay is active the
-  // reset is DEFERRED (see pendingClearAll / flushPendingClearAll) so nothing
-  // visibly changes until the user leaves focus.
+  // defaults drops those params from the URL. (The FilterBar disables this while a
+  // focus overlay is active, so it never runs mid-focus.)
   resetAllFilters: () => void;
-  // Apply a deferred "Clear all" (no-op unless pendingClearAll is set). The
-  // Timeline calls this when it tears a focus overlay down.
-  flushPendingClearAll: () => void;
   hydrate: (partial: Partial<FilterState>) => void;
 }
 
@@ -320,7 +310,6 @@ function freshDefaults(): FilterData {
     syncModalSignal: 0,
     syncModalRepoId: null,
     claudeReviewKickoff: 0,
-    pendingClearAll: false,
   };
 }
 
@@ -430,29 +419,10 @@ export const useFilters = create<FilterState>((set, get) => ({
   toggleDiffHunk: (threadId) =>
     set((s) => ({ expandedDiffHunks: toggle(s.expandedDiffHunks, threadId) })),
   resetAllFilters: () =>
-    set((s) =>
-      // In focus mode, DEFER: clearing the filters must not disturb or exit the
-      // focus overlay. Stash the request; the Timeline applies it on teardown
-      // (flushPendingClearAll) so nothing visibly changes until the user leaves
-      // focus. Outside focus, reset the filters now. Either way only the FILTERS
-      // reset (selection / focus state is preserved); bumping rangeResetSignal
-      // snaps the window back to the default range.
-      s.focusActive
-        ? { pendingClearAll: true }
-        : {
-            ...freshFilterDefaults(),
-            rangeResetSignal: s.rangeResetSignal + 1,
-            pendingClearAll: false,
-          },
-    ),
-  flushPendingClearAll: () => {
-    if (!get().pendingClearAll) return;
-    set((s) => ({
-      ...freshFilterDefaults(),
-      rangeResetSignal: s.rangeResetSignal + 1,
-      pendingClearAll: false,
-    }));
-  },
+    // Reset only the user-set filters (selection / focus state is preserved);
+    // bumping rangeResetSignal snaps the window back to the default range. The
+    // FilterBar disables this control during focus, so it never runs mid-focus.
+    set((s) => ({ ...freshFilterDefaults(), rangeResetSignal: s.rangeResetSignal + 1 })),
   hydrate: (partial) => set(partial),
 }));
 

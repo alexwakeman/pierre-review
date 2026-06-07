@@ -105,6 +105,54 @@ body {
   }
 }
 
+/* ---- focus-mode lens frame ---- */
+/* While a focus overlay is active the timeline + detail pane read as ONE framed
+   "lens" unit (App adds .focus-frame to <main>). A crisp sky border with a gentle
+   breathing glow — the same palette as the PR selection pulse (ev-select-pulse) but
+   sharper-edged and more subtle. Drawn on an overlay pseudo-element (inset:0,
+   pointer-events:none, box-sizing inherited as border-box from Tailwind preflight)
+   so it sits ABOVE the panes' own backgrounds without shifting layout or being
+   clipped, and never blocks interaction. */
+.focus-frame {
+  position: relative;
+}
+.focus-frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  border: 1.5px solid rgba(56, 189, 248, 0.8);
+  border-radius: 8px;
+  animation: focus-frame-pulse 2.4s ease-in-out infinite;
+}
+@keyframes focus-frame-pulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px rgba(56, 189, 248, 0.12),
+      inset 0 0 10px 0 rgba(56, 189, 248, 0.1);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px rgba(56, 189, 248, 0.28),
+      inset 0 0 18px 2px rgba(56, 189, 248, 0.2);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-frame::after {
+    animation: none;
+  }
+}
+
+/* The board filters, faded while the focus lens owns the screen. `inert` (set on
+   the group in FilterBar) handles interactivity + AT; this is just the visual cue
+   (pointer-events is a belt-and-suspenders fallback for the rare no-inert engine). */
+.filters-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 /* ---- markdown comment bodies ---- */
 .md-body {
   font-size: 13px;
