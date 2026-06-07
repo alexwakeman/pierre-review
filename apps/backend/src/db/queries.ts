@@ -838,7 +838,9 @@ async function getThreadsAwaiting(
       path: t.path,
       line: t.line,
       derivedState: t.derivedState,
-      lastReplyExcerpt: truncate(last.body, 140),
+      // Prefer the stored excerpt (always present, incl. lean mode); fall back to
+      // truncating the full body for rows synced before the excerpt column existed.
+      lastReplyExcerpt: last.excerpt ?? truncate(last.body ?? '', 140),
       lastReplyAt: last.createdAt.toISOString(),
       lastReplyAuthorId: last.authorId,
       githubUrl: `https://github.com/${owner}/${name}/pull/${pr.number}`,
@@ -918,7 +920,9 @@ export async function getPrDetail(
       comments: tComments.map((c) => ({
         id: c.id,
         authorId: c.authorId,
-        body: c.body,
+        // Lean mode (cloud): full body is null until hydrated on demand; fall back
+        // to the stored excerpt so the UI degrades gracefully.
+        body: c.body ?? c.excerpt ?? '',
         diffHunk: c.diffHunk,
         createdAt: c.createdAt.toISOString(),
         url: c.databaseId ? `${prUrl}#discussion_r${c.databaseId}` : null,
@@ -942,7 +946,8 @@ export async function getPrDetail(
   const commentsOut: PrCommentDetail[] = prCommentRows.map((c) => ({
     id: c.id,
     authorId: c.authorId,
-    body: c.body,
+    // Lean mode: null until hydrated on demand (no excerpt kept for PR comments).
+    body: c.body ?? '',
     createdAt: c.createdAt.toISOString(),
     url: c.databaseId ? `${prUrl}#issuecomment-${c.databaseId}` : null,
   }));
@@ -1092,7 +1097,8 @@ export async function getThreadDetail(
     comments: comments.map((c) => ({
       id: c.id,
       authorId: c.authorId,
-      body: c.body,
+      // Lean mode: null until hydrated; fall back to the stored excerpt.
+      body: c.body ?? c.excerpt ?? '',
       diffHunk: c.diffHunk,
       createdAt: c.createdAt.toISOString(),
       url: c.databaseId ? `${prUrl}#discussion_r${c.databaseId}` : null,

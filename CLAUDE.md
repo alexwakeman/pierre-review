@@ -100,39 +100,27 @@ query-layer IDOR guarantee is checked by `scripts/verify-isolation.ts`
 (`pnpm --filter @pierre-review/backend verify:isolation`).
 
 **Auth & tenancy plumbing.**
-- `auth/account.ts` — the account context: `ensureLocalAccount()` (local, from
-  `gh api user`, id 1), `getAccountById`, `getAccountUserId(accountId)` (the "who
-  am I" for triage, replaces the old `getLocalUserId`), `getAccessToken(accountId)`
-  (local → `gh auth token`; cloud → decrypt), `upsertCloudAccount` (OAuth).
-- `auth/crypto.ts` — AES-256-GCM sealing of stored tokens (`ENCRYPTION_KEY`).
+- `auth/account.ts` — `ensureLocalAccount()` (local, from `gh api user`, id 1),
+  `getAccountById`, `getAccountUserId(accountId)` ("who am I" for triage),
+  `getAccessToken(accountId)` (local → `gh auth token`; cloud → decrypt),
+  `upsertCloudAccount` (OAuth). `auth/crypto.ts` — AES-256-GCM token sealing
+  (`ENCRYPTION_KEY`).
 - `github/client.ts` — **per-account** factories `getGraphqlClientFor(token)` /
-  `ghRestGetFor(token,…)` / `ghRestPostFor(token,…)`. NO module-level token cache
-  (the #1 leak risk). `ghRestGet/Post` (gh-token wrappers) remain for the
-  local-only Claude Review posting path.
-- `api/plugins/auth.ts` — `registerAccountContext` (sets `request.account` every
-  request: local account, or the session's account in cloud), `registerSession`
-  (cloud: `@fastify/cookie` + `@fastify/secure-session`), `registerAuthGate`
-  (cloud: 401 unauthenticated `/api` data routes, skipping `/api/health` +
-  `/api/auth/*`), `accountIdOf(req)`.
-- `api/routes/auth.ts` (cloud only) — `GET /api/auth/login` (302 → GitHub authorize
-  + CSRF state cookie), `GET /api/auth/callback` (exchange code → upsert account →
-  set session → 302 `/app`), `POST /api/auth/logout`.
+  `ghRestGetFor`/`PostFor(token,…)`. **NO module-level token cache** (the #1 leak
+  risk); `ghRestGet/Post` (gh-token) remain for the local-only Claude Review path.
+- `api/plugins/auth.ts` — `registerAccountContext` (sets `request.account`),
+  `registerSession` (cloud cookie + secure-session), `registerAuthGate` (cloud: 401
+  unauthed `/api`, skipping `/api/health` + `/api/auth/*`), `accountIdOf(req)`.
+- `api/routes/auth.ts` (cloud) — OAuth `login` (302→authorize+CSRF) / `callback`
+  (exchange→upsert→session→`/app`) / `logout`.
 
-**Serving & routing.** The SPA is built with **`base:'/app/'`**; the landing app
-(`apps/landing`) builds to `/`. `app.ts` registers two `@fastify/static` roots
-(`public/` at `/app/`, `public-landing/` at `/` in cloud). The single
-`setNotFoundHandler` (`api/plugins/error-handler.ts`) routes: unknown `/api` →
-JSON 404; `/app*` GET → SPA index; `/` + other GET → landing (cloud) or 302 `/app`
-(local).
-
-**Running cloud locally / packaging.** `cli.ts` gains `--cloud` / `--mode`
-(sets `DEPLOYMENT_MODE=cloud`, skips the gh pre-check + SQLite default). `pnpm
-package` builds frontend@`/app` + landing + backend and assembles
-`public/` + `public-landing/` + `dist/db/migrations{,-pg}`; curated deps add `pg`,
-`@fastify/cookie`, `@fastify/secure-session`. `docker-compose.yml` stands up a
-local Postgres; `Dockerfile` + `railway.json` deploy to Railway. Cloud startup
-fails loud on missing env (`assertCloudConfig`). Docs:
-`docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-APP-SETUP.md`, `docs/LOCAL-CLOUD-TESTING.md`.
+**Serving & routing.** SPA built `base:'/app/'`, landing (`apps/landing`) at `/`;
+`app.ts` registers two `@fastify/static` roots and the single `setNotFoundHandler`
+(`api/plugins/error-handler.ts`) routes them (full routing under **Packaging**).
+**Running cloud:** `cli.ts --cloud`/`--mode` set `DEPLOYMENT_MODE=cloud` (skipping the
+gh pre-check + SQLite default); `docker-compose.yml` is a local Postgres, `Dockerfile`
++ `railway.json` deploy to Railway, `assertCloudConfig` fails loud on missing env.
+Docs: `docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-APP-SETUP.md`, `docs/LOCAL-CLOUD-TESTING.md`.
 
 ---
 
@@ -244,32 +232,43 @@ mode (see **Deployment modes**):
 
 ### Sync pipeline (`src/sync/`)
 
-- **Scheduler** (`scheduler.ts`) runs `config.syncCron` (default `*/5 * * * *`)
-  and calls `syncAllRepos()`. Disabled by `config.disableScheduler`.
-- **Modes** (`sync-manager.ts`): a repo never synced gets a **full backfill**
-  (`since = now − backfillDays`, default 90). Otherwise an **incremental** sync
-  uses `lastIncrementalSyncAt − syncOverlapMinutes` (default 20) as `since`, so
-  events that landed mid-sync aren't missed.
+Pulls PR activity from GitHub into the DB; fully idempotent. **See
+[docs/SYNC.md](docs/SYNC.md)** for the full pipeline — triggers, two-phase initial
+backfill vs incremental, the fetch loop, cancel, rate limits. In brief:
+
+- **Trigger** (`scheduler.ts`): `node-cron` at `config.syncCron` (default `*/5`) →
+  `syncAllRepos()` (off via `config.disableScheduler`); also repo-add and the
+  manual/deep `POST /api/repos/:id/sync`.
+- **Plan** (`sync-manager.ts`): never-synced → **full backfill** (`since = now −
+  backfillDays`, default 90), run **two-phase** (a fast ~14-day foreground pass, then
+  the deep backfill in the background) so the board fills in seconds; else
+  **incremental** from `lastIncrementalSyncAt − syncOverlapMinutes` (default 20) so
+  mid-sync events aren't missed. Status is in `syncState`; an in-memory
+  running/progress set (process-local) feeds the live UI.
 - **Fetch** (`sync-repo.ts` + `github/queries.ts`): one fat `REPO_ACTIVITY_QUERY`
-  pulls PRs (25/page, `updatedAt DESC`) with their reviews, threads, comments,
-  commits, and checks, walking pages until `updatedAt < since`. Changed-file paths
-  per commit are fetched via REST (`commit-files.ts`) and cached **permanently**
-  (SHAs are immutable).
+  (25 PRs/page, `updatedAt DESC`) walked until `updatedAt < since`; changed-file paths
+  per commit via REST (`commit-files.ts`), cached **permanently** (immutable SHAs).
 - **Persist** (`upsert.ts`): `persistPr()` upserts the whole PR subtree in one
-  transaction (via the dialect-aware `runTransaction`), stamping the owning
-  `accountId` on the repo/PR/event rows. **Idempotency** is structural — every
-  GitHub entity upserts on its **node ID** (the opaque GraphQL `id`), and timeline
-  `events` upsert on a `dedupeKey` (e.g. `pr_opened:<prNodeId>`). Under
-  multi-tenancy the node-id/dedupeKey uniques are **composite** (`(accountId,
-  githubNodeId)`, `(accountId, dedupeKey)`, child tables `(prId, githubNodeId)`) so
-  two accounts can watch the same repo — the upsert conflict targets match.
-- **Per-account token:** `sync-manager` resolves each repo's account token
-  (`getAccessToken`) and threads it into `syncRepo`/`commit-files`; the GitHub
-  client is built per token (no module-level cache). Per-account `try/catch` so one
-  bad token doesn't abort the loop.
-- **Status** is tracked in the `syncState` table (`lastFullSyncAt`,
-  `lastIncrementalSyncAt`, `lastSyncStatus`, `lastSyncError`) plus an in-memory
-  progress/running set surfaced to the UI while a sync is live.
+  `runTransaction`, stamping `accountId`. **Idempotency is structural** — entities
+  upsert on their GitHub **node id**, events on a `dedupeKey`; under multi-tenancy the
+  conflict targets are **composite** (`(accountId, githubNodeId)` / `(accountId,
+  dedupeKey)` / child `(prId, githubNodeId)`). Derived thread state computed here.
+- **Per-account token** (`getAccessToken`) threaded into the fetch, never
+  module-cached; per-account `try/catch` so one bad token doesn't abort the loop.
+
+**Lean storage (both modes; default).** `config.persistBodies` is `false` by default
+(`PERSIST_BODIES=true` stores everything — larger DB, fully-offline detail). When
+lean, sync neither persists nor fetches bulky user text — comment/review/PR bodies,
+review-comment `diffHunk`, commit `message`, the `checkRuns` JSON (the `ciStatus` enum
+is kept); `REPO_ACTIVITY_QUERY` is trimmed (keeping review bodies for
+substantive-review detection + review-comment bodies for a stored
+`reviewComments.excerpt`). That text — regenerable, per-tenant-duplicated, the dominant
+storage cost (~70%) — is instead **hydrated on demand** when a PR/thread opens
+(`sync/hydrate-detail.ts` → `PR_DETAIL_QUERY`, matched by node id/sha) and
+**browser-cached** in IndexedDB (`PersistQueryClientProvider` + `lib/queryPersist.ts`;
+`pr`/`thread` queries `staleTime:Infinity`; `hooks/useDetailCache.ts` invalidates only
+on a newer feed `updatedAt`). `cleanupRedundantReviewEvents` is skipped when lean;
+SQLite migration `0010` makes the two `body` columns nullable.
 
 ### Derived thread state — the heart of the app
 
@@ -308,6 +307,9 @@ indexed; everything else reaches its account via `repoId`/`prId`. `users` and
   latest non-`commented` review.
 - **`reviewThreads`** + **`reviewComments`** — inline threads (carry stored
   `derivedState`) and their comments; **`prComments`** — issue-level PR comments.
+  Under lean storage `reviewComments`/`prComments` `body` is nullable (and null when
+  lean); `reviewComments.excerpt` always holds a short preview (see **Lean storage**
+  under Sync).
 - **`commits`** (`sha`+`prId`) + **`commitFiles`** (`sha` → changed paths, cached).
 - **`events`** — the timeline feed; carries `accountId`, unique `(accountId,
   dedupeKey)`, typed (`pr_opened`, `pr_merged`, `pr_closed`, `review_submitted`,
@@ -442,49 +444,24 @@ Key behaviors to know about:
   a time**: an open popover first, else the selected PR bar, else a lingering
   exit-anchor glow left after leaving focus (`applyExitGlow(null)`).
 - **One unified focus overlay** (`enterPrFocus` in `Timeline/index.tsx`). The
-  PR-detail header's **Focus** link (store `focusPrOnTimeline` → `timelineIsolate`),
-  **double-clicking a PR bar** (`doubleClick` handler), **and** clicking a
-  **cross-user marker** (actor ≠ PR author) — whether a standalone marker or one
-  **picked from a cluster** (`onPick`) — all funnel through
-  `enterPrFocus` to reach a byte-for-byte identical state: collapse to the rows of
-  **every** contributor to the PR, show **only that PR** (sibling bars sharing its
-  packed lane hidden via `isolatePrBars`; markers filtered to the PR in
-  `rebuildMarkers`, since the shared `cross` band can't be trimmed per-PR). The
-  Focus link **fits the window** to the PR's activity span; a cross-user click
-  recenters on the clicked instant and anchors that event (popover open + the
-  `ev-cross-linked` ring). It's **sticky**: clicks only explore and never leave
-  focus, and the marker popover is **trimmed to the focused PR's events**
-  (`MarkerPopover` `focusPrId`), so a cluster list shows only that PR's activity.
-  Crucially, the **mouse/browser back button leaves focus** (it used to only step
-  through popover drill levels): `enterPrFocus` pushes a dedicated `{pierreFocus}`
-  history entry, and the `popstate` guard on `prFocusActiveRef` tears the whole focus
-  down — restoring the rows, re-centring on the anchor (the clicked event, else the PR
-  that triggered focus) and pulsing it — exactly like the bottom-right **Exit focus**
-  button or **Esc**. All three exits run `exitFocusCore` (teardown + anchor restore);
-  the button/Esc route through `exitFocus`, which also unwinds the focus-owned history
-  entries (`(prFocusActive?1:0) + drillDepth`), whereas the back-button path unwinds
-  only the remaining drill entries since the browser already consumed the focus entry.
-  Toggling the repo filter or a fresh strip/search navigation also drops focus (both
-  unwind the history entries first). (The marker popover no longer drives any row
-  collapse — `MarkerPopover.focusGroupIds` is gone; it only reports an own-work single
-  click so the PR band glows.)
-- **Per-row collapse.** Each contributor row label carries a caret
-  (`.tl-collapse-caret`, delegated from one capturing click listener on the
-  container) that shrinks the row to just its name by hiding the row's subgroup
-  bands via `subgroupVisibility` (`setRowCollapsed`). Distinct from focus-mode's
-  whole-row `visible:false`: the thin labelled row stays. The collapsed set
-  (`collapsedRowsByUserRef`) persists to `localStorage['pierre:collapsedRows']` and is
-  re-asserted after each rebuild (new lanes) and after focus exit. vis applies
-  `subgroupVisibility` only during a group **restack**, which a bare
-  `groups.update`/`redraw` doesn't trigger — so `setRowCollapsed` forces it via
-  `itemSet.markDirty({restackGroups:true})` + `redraw()` (otherwise a row with no
-  cross-band `xsep` item to mutate wouldn't repaint). **Focus mode suspends per-row
-  collapse**: entering focus force-shows the kept bands of any collapsed contributor
-  row (`focusSubgroups` sets the keep bands visible), the caret is hidden
-  (`.tl-focus-active .tl-collapse-caret`) and its click handler no-ops, and
-  `applyCrossSeps` ignores `collapsedRowsByUserRef` while a focus overlay is up. The
-  collapse is restored on exit (`applyContext` re-collapses), so the choice survives a
-  focus round-trip.
+  PR-detail **Focus** link (`focusPrOnTimeline` → `timelineIsolate`), **double-clicking
+  a PR bar**, and clicking a **cross-user marker** (standalone or picked from a
+  cluster) all funnel through `enterPrFocus` to one identical state: collapse to every
+  contributor's row, show **only that PR** (siblings hidden via `isolatePrBars`;
+  markers filtered in `rebuildMarkers`). The Focus link fits the PR's span; a
+  cross-user click recenters on the clicked instant + anchors it. It's **sticky**
+  (clicks only explore), and the popover is trimmed to the focused PR (`focusPrId`).
+  All exits — bottom-right **Exit focus**, **Esc**, **and the browser back button**
+  (`enterPrFocus` pushes a `{pierreFocus}` history entry the `popstate` guard tears
+  down) — run `exitFocusCore`: restore the rows, re-center + pulse the anchor.
+  Repo-filter toggles and fresh strip/search nav also drop focus.
+- **Per-row collapse.** A caret on each contributor label (`setRowCollapsed`) shrinks
+  the row to its name by hiding its subgroup bands via `subgroupVisibility` — distinct
+  from focus's whole-row `visible:false` (the labelled row stays). The collapsed set
+  persists to `localStorage['pierre:collapsedRows']`, re-asserted after each rebuild.
+  **Gotcha:** vis applies `subgroupVisibility` only during a group restack, so
+  `setRowCollapsed` forces `itemSet.markDirty({restackGroups:true})` + `redraw()`.
+  Focus mode suspends it (force-shows kept bands, hides the caret) and restores on exit.
 - **Show vs Focus (PR detail).** **Show** (`openPrFocused`) just centres + glow-pulses
   the PR in the regular view — no focus. **Focus** enters the PR-isolation overlay
   above. Both, plus the per-thread / per-comment / activity "Show" links
@@ -639,103 +616,55 @@ straight to `/app`, no landing, no sign-in).
 
 ## Packaging & publishing
 
-The app ships to npm as a **single unscoped package, `pierre-review`**, runnable
-with `npx pierre-review` (or, installed globally, the short `pierre` command — both
-bins point at the same `dist/cli.js`). The published tarball contains **only built
-artifacts** — no `.ts`, no `src/`, no configs, no tests.
+Ships to npm as a **single unscoped package `pierre-review`** (`npx pierre-review`,
+or `pierre` installed globally — both bins → `dist/cli.js`). Tarball is **built
+artifacts only** (no `.ts`/`src`/configs/tests). The CI publishing automation
+(version computation, atomic tag+commit, idempotent publish) is documented in
+**[docs/RELEASE.md](docs/RELEASE.md)** — and **never run `npm publish`/`npm login`
+from here**; let CI (or the user) do it.
 
-**Single-process production mode.** In production the **one Fastify server serves
-the JSON API (under `/api`), the built SPA (under `/app`), and — in cloud mode —
-the landing page (at `/`)** on one port. Static serving is gated on sibling asset
-dirs next to the compiled server: `public/index.html` (the SPA, at prefix `/app/`)
-and `public-landing/index.html` (the landing, at `/`, cloud only) — both present in
-the assembled release, **absent in the dev tree**, so `pnpm dev` (Vite proxy) is
-unchanged. The routing lives in the **single** `setNotFoundHandler` in
-`api/plugins/error-handler.ts` (Fastify allows one per context): unknown `/api` →
-JSON 404; `/app*` GET → SPA `index.html`; `/` + other GET → landing (cloud) or
-302→`/app` (local, so local never shows a homepage). The SPA is built with
-`base:'/app/'`; the frontend calls the API with relative `/api` paths.
+**Single-process production.** One Fastify server serves the JSON API (`/api`), the
+SPA (`/app`), and — in cloud — the landing (`/`). Static serving is gated on sibling
+`public/index.html` + `public-landing/index.html` (present in the release, **absent
+in the dev tree**, so `pnpm dev`'s Vite proxy is unchanged). All routing is the
+**single** `setNotFoundHandler` (`api/plugins/error-handler.ts`): unknown `/api` →
+JSON 404; `/app*` → SPA; `/` + other → landing (cloud) or 302 `/app` (local). SPA
+built `base:'/app/'`, calls the API with relative `/api`.
 
-**The CLI (`apps/backend/src/cli.ts` → `dist/cli.js`).** Shebang'd bin entry. It:
-parses `--no-open` / `--port <n>` / `--db <path>` / `--cloud` / `--mode <m>` (also
-`NO_OPEN` / `PORT` / `DATABASE_URL` / `DEPLOYMENT_MODE` env) and maps them to env
-**before** importing config; sets `NODE_ENV=production` (so pino-pretty, a devDep,
-is never loaded and static serving turns on). **Local mode** defaults the DB to
-`~/.pierre-review/pierre-review.sqlite` (`mkdir -p`, **never inside the read-only
-install dir**) and **pre-checks `gh auth token`** with a friendly message + non-zero
-exit. **`--cloud`** (= `DEPLOYMENT_MODE=cloud`) **skips** the gh pre-check and the
-SQLite default (the DB is the Postgres `DATABASE_URL`; `assertCloudConfig` validates
-the rest at boot). It prints the cursive Pierre ASCII banner (`ascii.ts`) + tagline
-(or "cloud mode" line) + a `▸ http://localhost:<port>/app` (local) / `…/` (cloud,
-the landing) URL line; boots via the exported `start()` from `index.ts`; then opens
-the browser cross-platform (`open`/`start`/`xdg-open`, built-in — **no browser-open
-dependency**) unless `--no-open`. `index.ts` exports `start()` and guards its
-auto-invoke with a run-as-main check, so `node dist/index.js` and the CLI both boot
-the server exactly once.
+**CLI** (`cli.ts` → `dist/cli.js`): parses `--no-open/--port/--db/--cloud/--mode`
+(and matching env), maps them to env **before** importing config, sets
+`NODE_ENV=production` (no pino-pretty; static serving on). Local defaults the DB to
+`~/.pierre-review/…sqlite` (never the read-only install dir) and pre-checks
+`gh auth token`; `--cloud` skips both (Postgres `DATABASE_URL`; `assertCloudConfig`
+validates at boot). Prints the ASCII banner + URL, boots via `start()` from
+`index.ts` (guarded run-as-main), opens the browser cross-platform (built-in, no dep)
+unless `--no-open`.
 
-**The `@pierre-review/shared` runtime trap.** Shared is **types-only** and is NOT in
-the published `dependencies`, so the backend must never `import` a runtime *value*
-from it — only `import type` (erased by `verbatimModuleSyntax`). The two prior
-offenders, `EVENT_TYPES`/`PR_STATUSES` in `api/routes/timeline.ts` and
-`REASON_PRIORITY` in `db/queries.ts`, now use **local `const` copies** (kept in sync
-with `packages/shared`). The release assembly greps `release/dist` for real
-`@pierre-review/shared` import/require statements and **fails** if any reappear.
+**Two load-bearing traps:**
+- **`@pierre-review/shared` is types-only** and NOT a published dep — the backend must
+  `import type` only (never a runtime value); offenders use local `const` copies. The
+  release greps `release/dist` and **fails** on any real shared import/require.
+- **pnpm is pinned** (`packageManager: pnpm@9.15.9`) so CI, the Railway `Dockerfile`
+  (corepack), and local dev match; a newer pnpm blocks native builds
+  (`ERR_PNPM_IGNORED_BUILDS` on `better-sqlite3`/`esbuild` — also in
+  `pnpm.onlyBuiltDependencies`). Bumping the pin = regenerate `pnpm-lock.yaml`.
 
-**`pnpm package`** (`scripts/build-release.mjs`, no extra deps) assembles a clean
-`./release/`: builds frontend (base `/app/`) **+ landing + backend**, copies
-compiled backend JS (pruning `.js.map` and `.test.js`), copies the drizzle
-`migrations/*.sql` **+ `meta/`** into `dist/db/migrations/` **and the Postgres
-baseline into `dist/db/migrations-pg/`** (tsc doesn't emit `.sql`; the runtime
-resolves them per dialect), copies the built SPA into `public/` **and the landing
-into `public-landing/`**, generates `release/package.json` (name `pierre-review`,
-version from `apps/backend/package.json`, both bins, curated deps that **drop**
-shared and **add** `@fastify/static`, `@fastify/cookie`, `@fastify/secure-session`,
-`pg`), and copies `scripts/release-README.md` → `README.md`. Sanity asserts fail the
-build on a missing key file (incl. `public-landing/index.html`, the pg journal, the
-auth/schema/account files), any leaked `.ts`, or a shared runtime import.
-**`better-sqlite3` stays a runtime dependency** (native addon, rebuilt per-machine);
-`pg` is only loaded in cloud mode (dynamic import). `release/` is gitignored.
-
-**Publishing is automated by CI** (`.github/workflows/release.yml`, documented in
-`docs/RELEASE.md`): every push/merge to `main` (except the bot's own
-`chore(release):` commit) **computes the next version from the highest of {npm's
-latest published version, `apps/backend/package.json` (the canonical version), the
-newest `vX.Y.Z` git tag}** and bumps from there — so a run never reuses or collides
-with an existing version even if `main`, the tags, and npm have drifted apart (the
-old failure mode was a blind `npm version patch` re-creating an existing tag). It
-then runs `pnpm package`, **atomically** pushes the `chore(release): bump to X.Y.Z
-[skip ci]` commit + `vX.Y.Z` tag (so a rejected push leaves no dangling tag), and
-`npm publish`es `./release` **idempotently** (skips if that version is already on
-npm, so re-runs are safe). A manual `workflow_dispatch` (from `main`) does
-`minor`/`major`. A job-level `if:` (skip the bot's `chore(release):` commit) plus
-the `[skip ci]` suffix guard against an infinite release loop. The order is
-deliberately **compute → build → push → publish** so a failed publish only leaves an
-npm version gap (self-healing) rather than poisoning the next merge. CI needs an
-`NPM_TOKEN` secret (npm Automation/granular token) and `contents: write`; see
-`docs/RELEASE.md` for token minting, branch-protection options, and the one-time
-manual first publish that claims the unscoped name. **Still never run
-`npm publish` / `npm login` from here** — let CI (or the user) do it.
-
-**pnpm is pinned** via the root `package.json` `"packageManager": "pnpm@9.15.9"`, so
-CI (`pnpm/action-setup`), the Railway `Dockerfile` (corepack — which also runs
-`corepack prepare pnpm@9.15.9 --activate`), and local dev all run the same pnpm.
-Without the pin, corepack pulls a newer pnpm that blocks native build scripts
-(`ERR_PNPM_IGNORED_BUILDS` on `better-sqlite3` + `esbuild`); those two are also
-declared in `pnpm.onlyBuiltDependencies` for pnpm-10/11 forward-compat. Bumping the
-pin means regenerating `pnpm-lock.yaml` in the same change.
+**`pnpm package`** (`scripts/build-release.mjs`) assembles `./release/`: builds
+frontend(`/app`)+landing+backend, copies compiled JS + both migration folders
+(`.sql`+`meta/`) + SPA→`public/` + landing→`public-landing/`, generates
+`package.json` (curated deps: **drop** shared, **add** `@fastify/static|cookie|
+secure-session`, `pg`), `release-README.md`→`README.md`. Sanity asserts fail on a
+missing key file, a leaked `.ts`, or a shared runtime import. `better-sqlite3` stays a
+runtime dep (native); `pg` loads only in cloud (dynamic import).
 
 ---
 
 ## History & planning
 
-The original v1/v1.1 build used a Phase 1–6 plan (now removed); early commit
-messages still carry the phase notation (e.g. `feat(p3): add timeline endpoint`).
-The SQLite migration files
-(`0000`–`0008`) track the schema's evolution (v1.1 added CI/labels, later ones added
-my-turn dismissals and review `databaseId` deep-link fields; **`0008_multitenant_
-accounts`** added the `accounts` table, `accountId` columns, and the composite
-uniques). The Postgres baseline (`migrations-pg/0000_*`) is a fresh squash of the
+Early commits carry `pN` phase notation from the original v1/v1.1 plan (removed). The
+SQLite migrations (`0000`+) track the schema's evolution — `0008_multitenant_accounts`
+added the `accounts` table + `accountId` + composite uniques; `0009`/`0010` added lean
+storage. The Postgres baseline (`migrations-pg/0000_*` + `0001`) is a squash of the
 current schema — cloud starts empty (synced data is regenerable; no SQLite→Postgres
-migration). The cloud/multi-tenant deployment (dual-dialect DB, OAuth, landing,
-Railway) is documented in `docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-APP-SETUP.md`, and
-`docs/LOCAL-CLOUD-TESTING.md`.
+migration). **Docs:** `docs/SYNC.md` (sync pipeline), `docs/DEPLOY-RAILWAY.md`,
+`docs/GITHUB-APP-SETUP.md`, `docs/LOCAL-CLOUD-TESTING.md`, `docs/RELEASE.md`.

@@ -55,6 +55,7 @@ pierre-review [options]
 | `--no-open` | `NO_OPEN` | — | Don't open the browser on start. |
 | `--port <n>` | `PORT` | `4000` | Port to listen on. |
 | `--db <path>` | `DATABASE_URL` | `~/.pierre-review/pierre-review.sqlite` | SQLite DB path. |
+| — | `PERSIST_BODIES` | `false` | Store full comment/PR text in the DB instead of loading it on demand (larger DB, but PR detail works fully offline). |
 | `-h`, `--help` | — | — | Show usage. |
 
 Examples:
@@ -82,6 +83,12 @@ Once running, open the printed URL (default <http://localhost:4000>). Add the
 repositories you want to watch from the in-app picker; the app syncs their PR
 activity (full backfill on first sync, incremental every few minutes thereafter)
 into your local DB and renders it as a timeline.
+
+To keep the database small and backfills fast, bulky text — PR/comment/review
+bodies and diff hunks — isn't stored; it's fetched from GitHub (using your `gh`
+token) the first time you open a PR and cached in your browser, so re-opening an
+unchanged PR is instant and offline. Set `PERSIST_BODIES=true` to store that text
+locally instead — a larger database, but PR detail then works fully offline.
 
 ## License
 

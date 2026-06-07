@@ -1,7 +1,9 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import App from './App.js';
+import { queryPersister } from './lib/queryPersist.js';
 import 'highlight.js/styles/github-dark.css';
 import './index.css';
 
@@ -15,13 +17,37 @@ const queryClient = new QueryClient({
   },
 });
 
+// Ask the browser to keep our storage durable (best-effort — see OPFS/IndexedDB
+// eviction caveats). The persisted detail cache is disposable: on a miss it just
+// re-hydrates from the server.
+void navigator.storage?.persist?.();
+
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('#root not found');
 
+// One week; bump `buster` to invalidate the whole persisted cache on a deploy that
+// changes the detail shape.
+const PERSIST_MAX_AGE = 1000 * 60 * 60 * 24 * 7;
+
 createRoot(rootEl).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
+    <PersistQueryClientProvider
+      client={queryClient}
+      persistOptions={{
+        persister: queryPersister,
+        maxAge: PERSIST_MAX_AGE,
+        buster: 'pierre-detail-v1',
+        // Persist ONLY the on-demand detail queries (the bulky hydrated text), not
+        // the lean timeline/triage feeds which should always come fresh from the API.
+        dehydrateOptions: {
+          shouldDehydrateQuery: (q) => {
+            const k = q.queryKey[0];
+            return (k === 'pr' || k === 'thread') && q.state.status === 'success';
+          },
+        },
+      }}
+    >
       <App />
-    </QueryClientProvider>
+    </PersistQueryClientProvider>
   </StrictMode>,
 );

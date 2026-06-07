@@ -225,7 +225,10 @@ export const reviewComments = pgTable(
       .notNull()
       .references(() => pullRequests.id),
     authorId: integer('author_id').references(() => users.id),
-    body: text('body').notNull(),
+    // Nullable in cloud lean-storage mode (body hydrated on demand; see the
+    // sqlite twin for the full rationale). `excerpt` keeps a short preview.
+    body: text('body'),
+    excerpt: text('excerpt'),
     diffHunk: text('diff_hunk'),
     databaseId: text('database_id'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
@@ -245,7 +248,8 @@ export const prComments = pgTable(
       .notNull()
       .references(() => pullRequests.id),
     authorId: integer('author_id').references(() => users.id),
-    body: text('body').notNull(),
+    // Nullable: not persisted in cloud lean-storage mode (hydrated on demand).
+    body: text('body'),
     databaseId: text('database_id'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
   },

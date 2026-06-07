@@ -59,6 +59,19 @@ export const config = {
   isCloud,
   // Drives the DB driver + schema selection in client.ts.
   dbDialect: (isCloud ? 'postgres' : 'sqlite') as 'sqlite' | 'postgres',
+
+  // ---- Lean storage (both modes by default) ----
+  // When false (the default), sync does NOT persist bulky user-authored text —
+  // comment / review / PR bodies, review-comment diff hunks, commit messages, and
+  // the per-job checkRuns JSON (the ci_status summary enum is kept). That text is
+  // regenerable from GitHub (and duplicated per tenant in cloud), so it's the
+  // dominant storage cost; it's hydrated on demand when a PR/thread is opened
+  // (sync/hydrate-detail.ts, via the gh-CLI token locally or the OAuth token in
+  // cloud) and cached in the browser. Not storing it also shrinks the DB and the
+  // sync payload, speeding up an initial backfill. Set PERSIST_BODIES=true to store
+  // full bodies instead — instant, fully-offline detail at the cost of a larger DB
+  // (e.g. a local instance used without network).
+  persistBodies: process.env.PERSIST_BODIES === 'true',
   // Postgres connection string (cloud only). Empty in local mode.
   databaseUrl: process.env.DATABASE_URL ?? '',
 

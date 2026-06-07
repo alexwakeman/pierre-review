@@ -1,3 +1,16 @@
+import { config } from '../config.js';
+
+// In lean-storage mode the sync still needs SOME text — review bodies (to decide
+// if a "commented" review is substantive) and review-comment bodies (for the
+// stored excerpt) — but NOT the PR body, PR-comment bodies, commit messages, or
+// the large review-comment diff hunks (none are used at sync time and they aren't
+// stored). Dropping them from the query shrinks each backfill page substantially.
+const fullText = config.persistBodies;
+const prBodyField = fullText ? '\n          body' : '';
+const commitMessageField = fullText ? '\n                message' : '';
+const reviewCommentDiffHunkField = fullText ? '\n                  diffHunk' : '';
+const prCommentBodyField = fullText ? '\n              body' : '';
+
 // One query per repo per sync: PRs, reviews, review threads (+comments),
 // general PR comments, and commits in a single round trip.
 export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
@@ -20,8 +33,7 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
         nodes {
           id
           number
-          title
-          body
+          title${prBodyField}
           isDraft
           state
           createdAt
@@ -99,8 +111,7 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
             nodes {
               commit {
                 oid
-                committedDate
-                message
+                committedDate${commitMessageField}
                 author {
                   user {
                     login
@@ -146,8 +157,7 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
                   id
                   fullDatabaseId
                   body
-                  createdAt
-                  diffHunk
+                  createdAt${reviewCommentDiffHunkField}
                   author {
                     login
                     ... on User {
@@ -163,8 +173,7 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
           comments(first: 50) {
             nodes {
               id
-              fullDatabaseId
-              body
+              fullDatabaseId${prCommentBodyField}
               createdAt
               author {
                 login
@@ -197,6 +206,89 @@ export const REPO_ID_QUERY = /* GraphQL */ `
       owner {
         login
       }
+    }
+  }
+`;
+
+// Single-PR detail fetch for on-demand text hydration (cloud "lean storage" mode).
+// Only the bulky text the DB no longer stores: PR body, review/comment/PR-comment
+// bodies, review-comment diff hunks, commit messages, and the head-commit checks
+// (for the per-job checkRuns JSON). Matched back to stored rows by GitHub node id
+// (the `id`/`fullDatabaseId` fields) and, for commits, by `oid`/sha. Cheap (~1 pt).
+export const PR_DETAIL_QUERY = /* GraphQL */ `
+  query PrDetail($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        id
+        number
+        body
+        headCommit: commits(last: 1) {
+          nodes {
+            commit {
+              oid
+              statusCheckRollup {
+                state
+                contexts(first: 100) {
+                  nodes {
+                    __typename
+                    ... on CheckRun {
+                      name
+                      status
+                      conclusion
+                      detailsUrl
+                    }
+                    ... on StatusContext {
+                      context
+                      state
+                      targetUrl
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        reviews(first: 50) {
+          nodes {
+            id
+            fullDatabaseId
+            body
+          }
+        }
+        reviewThreads(first: 50) {
+          nodes {
+            id
+            comments(first: 50) {
+              nodes {
+                id
+                fullDatabaseId
+                body
+                diffHunk
+              }
+            }
+          }
+        }
+        comments(first: 50) {
+          nodes {
+            id
+            fullDatabaseId
+            body
+          }
+        }
+        commits(last: 100) {
+          nodes {
+            commit {
+              oid
+              message
+            }
+          }
+        }
+      }
+    }
+    rateLimit {
+      remaining
+      resetAt
+      cost
     }
   }
 `;
@@ -390,6 +482,40 @@ export interface RepoIdResponse {
     name: string;
     owner: { login: string };
   } | null;
+}
+
+// Response shape for PR_DETAIL_QUERY (on-demand text hydration). Node ids
+// (`id`/`fullDatabaseId`) and commit `oid` are the keys hydration matches on.
+export interface PrDetailResponse {
+  repository: {
+    pullRequest: {
+      id: string;
+      number: number;
+      body: string | null;
+      headCommit: { nodes: GqlHeadCommit[] };
+      reviews: {
+        nodes: Array<{ id: string; fullDatabaseId: string | null; body: string | null }>;
+      };
+      reviewThreads: {
+        nodes: Array<{
+          id: string;
+          comments: {
+            nodes: Array<{
+              id: string;
+              fullDatabaseId: string | null;
+              body: string;
+              diffHunk: string | null;
+            }>;
+          };
+        }>;
+      };
+      comments: {
+        nodes: Array<{ id: string; fullDatabaseId: string | null; body: string }>;
+      };
+      commits: { nodes: Array<{ commit: { oid: string; message: string } }> };
+    } | null;
+  } | null;
+  rateLimit: { remaining: number; resetAt: string; cost: number };
 }
 
 export interface GqlSearchRepo {

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { MarkViewedBody } from '@pierre-review/shared';
 import { getPrDetail, markPrViewed } from '../../db/queries.js';
+import { hydratePrDetail } from '../../sync/hydrate-detail.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 const idParamSchema = {
@@ -23,12 +24,15 @@ const markViewedSchema = {
 export async function prRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/prs/:id', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
-    const pr = await getPrDetail(id, accountIdOf(req));
+    const accountId = accountIdOf(req);
+    const pr = await getPrDetail(id, accountId);
     if (!pr) {
       reply.status(404);
       return { error: 'NotFound', message: `PR ${id} not found` };
     }
-    return pr;
+    // Cloud lean mode: fill in bulky text from GitHub (no-op in local). The client
+    // caches the result in IndexedDB keyed by updatedAt so unchanged PRs don't refetch.
+    return hydratePrDetail(pr, accountId);
   });
 
   // Record that the local user has seen this PR up to `sha` (defaults to the

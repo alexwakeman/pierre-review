@@ -1,0 +1,13 @@
+-- Lean cloud storage groundwork (additive).
+--
+-- Adds review_comments.excerpt: a short (~160 char) preview of the comment body,
+-- kept even when the full body is dropped in cloud "lean storage" mode so the
+-- triage path (getMyTurn / getThreadsAwaiting) and graceful UI degradation work
+-- without a network round trip. Local mode still stores the full body.
+--
+-- Note: in the Drizzle schema review_comments.body / pr_comments.body are now
+-- nullable (to allow cloud's lean Postgres rows to omit them). SQLite cannot drop
+-- a NOT NULL via ALTER, but local mode always persists bodies (config.persistBodies
+-- is true whenever the driver is sqlite), so the live NOT NULL constraint is never
+-- exercised — only the additive column below is needed here.
+ALTER TABLE `review_comments` ADD `excerpt` text;

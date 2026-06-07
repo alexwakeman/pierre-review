@@ -8,7 +8,7 @@ Runs two ways from one codebase (the `DEPLOYMENT_MODE` env var selects):
 
 - **Local** (default): zero-config, SQLite, authenticates via your `gh` CLI.
   `npx pierre-review` opens straight to the timeline — no landing page, no
-  accounts. This is the unchanged original experience.
+  accounts, no hosted backend.
 - **Cloud** (multi-tenant): a public dark landing page, GitHub-App sign-in,
   per-user encrypted accounts, and Postgres. Self-host on Railway. See
   [docs/DEPLOY-RAILWAY.md](docs/DEPLOY-RAILWAY.md).
@@ -32,6 +32,11 @@ pnpm dev                    # backend :4000 + frontend :5173
 
 Open http://localhost:5173. Add repos from the UI (owner/name); the first sync
 backfills the last 90 days, then incremental sync runs every 5 minutes.
+
+By default bulky text (comment/PR/review bodies, diff hunks) isn't stored — it's
+fetched from GitHub when you open a PR and cached in the browser, keeping the DB
+small and backfills fast. Set `PERSIST_BODIES=true` to store it locally (larger DB,
+PR detail works fully offline). Same model in both modes; see CLAUDE.md.
 
 ### One-off sync without the server
 

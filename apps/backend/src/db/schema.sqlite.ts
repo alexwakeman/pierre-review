@@ -243,7 +243,12 @@ export const reviewComments = sqliteTable(
       .notNull()
       .references(() => pullRequests.id),
     authorId: integer('author_id').references(() => users.id),
-    body: text('body').notNull(),
+    // Nullable: in cloud "lean storage" mode the full body is NOT persisted (it's
+    // hydrated on demand from GitHub + browser-cached). `excerpt` keeps a short
+    // (~160 char) preview so the lean triage path (getMyTurn) and graceful UI
+    // degradation work without a network round trip. Local mode still stores body.
+    body: text('body'),
+    excerpt: text('excerpt'),
     diffHunk: text('diff_hunk'),
     // GitHub numeric id (fullDatabaseId) for the #discussion_r<id> deep link.
     databaseId: text('database_id'),
@@ -264,7 +269,8 @@ export const prComments = sqliteTable(
       .notNull()
       .references(() => pullRequests.id),
     authorId: integer('author_id').references(() => users.id),
-    body: text('body').notNull(),
+    // Nullable: not persisted in cloud lean-storage mode (hydrated on demand).
+    body: text('body'),
     // GitHub numeric id (fullDatabaseId) for the #issuecomment-<id> deep link.
     databaseId: text('database_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),

@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { db, schema } from './client.js';
+import { config } from '../config.js';
 
 // One-time / idempotent maintenance run at startup.
 //
@@ -13,6 +14,13 @@ import { db, schema } from './client.js';
 // Written as portable drizzle (no raw better-sqlite3 / db.execute) so it runs on
 // both dialects; the count comes from `.returning().length` (dialect-neutral).
 export async function cleanupRedundantReviewEvents(): Promise<number> {
+  // In cloud "lean storage" mode (config.persistBodies false) reviews.body is
+  // always null, so the body-emptiness signal this relies on is unavailable — and
+  // unnecessary: persistPr already only emits review_submitted for *substantive*
+  // reviews (it checks the in-memory GraphQL body, not the stored one), and cloud
+  // starts empty, so there are no wrapper events to remove. Skipping here avoids
+  // wrongly deleting markers for substantive "commented" reviews.
+  if (!config.persistBodies) return 0;
   const { events, reviews } = schema;
   const emptyCommentedReviews = db
     .select({ id: reviews.id })

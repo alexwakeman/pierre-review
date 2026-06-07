@@ -149,6 +149,13 @@ automatically — there's no external registrar or manual `CNAME` step.
 - **No SQLite→Postgres data migration.** Cloud starts empty; synced data is
   regenerable by re-syncing (the project's own philosophy). The `commitFiles`
   cache rebuilds on demand.
+- **Lean storage keeps Postgres small.** By default (`PERSIST_BODIES` unset) the
+  bulky user-authored text — comment/review/PR bodies, diff hunks, commit messages,
+  the per-job `checkRuns` JSON — is **not** stored in Postgres; it's hydrated from
+  GitHub on demand when a PR is opened (using the account's OAuth token) and cached
+  in the user's browser. This is the dominant per-tenant cost (it's duplicated per
+  account), so dropping it shrinks the database substantially. Set
+  `PERSIST_BODIES=true` only if you want that text stored server-side.
 - **Scheduled sync** runs every 5 minutes per account (`SYNC_CRON`), the same as
   local. One bad token doesn't abort the loop.
 - **Claude Review is force-disabled in cloud** regardless of `ENABLE_CLAUDE_REVIEW`

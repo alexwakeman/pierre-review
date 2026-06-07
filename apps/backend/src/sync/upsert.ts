@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { db, schema, runTransaction, type Executor } from '../db/client.js';
+import { config } from '../config.js';
 import { isLikelyBot } from './bot-detection.js';
 import {
   deriveThreadState,
@@ -44,6 +45,16 @@ function minDate(dates: (Date | null)[]): Date | null {
     if (d && (!min || d < min)) min = d;
   }
   return min;
+}
+
+// Short single-line preview of a comment body. Stored even in lean mode (where the
+// full body is dropped) so the triage path (getMyTurn/getThreadsAwaiting) and
+// graceful UI degradation work without hydrating from GitHub.
+function excerptOf(body: string | null | undefined): string | null {
+  if (!body) return null;
+  const oneLine = body.replace(/\s+/g, ' ').trim();
+  if (!oneLine) return null;
+  return oneLine.length > 160 ? `${oneLine.slice(0, 159)}…` : oneLine;
 }
 
 /** Resolves GraphQL actors to local user ids, caching by login within a run. */
@@ -230,7 +241,7 @@ function checkContextState(c: GqlCheckContext): CheckRunState {
   }
 }
 
-function checkRunsFrom(head: GqlHeadCommit['commit'] | null | undefined): CheckRun[] {
+export function checkRunsFrom(head: GqlHeadCommit['commit'] | null | undefined): CheckRun[] {
   const nodes = head?.statusCheckRollup?.contexts?.nodes ?? [];
   return nodes.map((c) => ({
     name: c.__typename === 'CheckRun' ? c.name : c.context,
@@ -348,7 +359,9 @@ export async function persistPr(
         repoId,
         number: pr.number,
         title: pr.title,
-        body: pr.body ?? null,
+        // Lean mode (cloud): the PR description and the per-job checkRuns JSON are
+        // not stored — hydrated on demand. ciStatus (the summary enum) is kept.
+        body: config.persistBodies ? (pr.body ?? null) : null,
         authorId,
         mergedById,
         baseRefName: pr.baseRefName ?? null,
@@ -365,13 +378,13 @@ export async function persistPr(
         mergeable,
         mergeStateStatus,
         labels,
-        checkRuns,
+        checkRuns: config.persistBodies ? checkRuns : null,
       })
       .onConflictDoUpdate({
         target: [pullRequests.accountId, pullRequests.githubNodeId],
         set: {
           title: pr.title,
-          body: pr.body ?? null,
+          body: config.persistBodies ? (pr.body ?? null) : null,
           authorId,
           mergedById,
           baseRefName: pr.baseRefName ?? null,
@@ -387,7 +400,7 @@ export async function persistPr(
           mergeable,
           mergeStateStatus,
           labels,
-          checkRuns,
+          checkRuns: config.persistBodies ? checkRuns : null,
         },
       })
       .returning({ id: pullRequests.id })
@@ -465,7 +478,7 @@ export async function persistPr(
           prId,
           authorId: reviewerId,
           state: reviewState(r.state),
-          body: r.body ?? null,
+          body: config.persistBodies ? (r.body ?? null) : null,
           databaseId: r.fullDatabaseId ?? null,
           submittedAt,
         })
@@ -473,7 +486,7 @@ export async function persistPr(
           target: [reviews.prId, reviews.githubNodeId],
           set: {
             state: reviewState(r.state),
-            body: r.body ?? null,
+            body: config.persistBodies ? (r.body ?? null) : null,
             databaseId: r.fullDatabaseId ?? null,
             submittedAt,
           },
@@ -558,16 +571,20 @@ export async function persistPr(
             threadId: threadRow.id,
             prId,
             authorId: commenterId,
-            body: c.body,
-            diffHunk: c.diffHunk ?? null,
+            // Lean mode: full body + diff hunk dropped; a short excerpt is always
+            // kept (triage + graceful degradation).
+            body: config.persistBodies ? c.body : null,
+            excerpt: excerptOf(c.body),
+            diffHunk: config.persistBodies ? (c.diffHunk ?? null) : null,
             databaseId: c.fullDatabaseId ?? null,
             createdAt,
           })
           .onConflictDoUpdate({
             target: [reviewComments.prId, reviewComments.githubNodeId],
             set: {
-              body: c.body,
-              diffHunk: c.diffHunk ?? null,
+              body: config.persistBodies ? c.body : null,
+              excerpt: excerptOf(c.body),
+              diffHunk: config.persistBodies ? (c.diffHunk ?? null) : null,
               databaseId: c.fullDatabaseId ?? null,
             },
           })
@@ -598,13 +615,16 @@ export async function persistPr(
           githubNodeId: c.id,
           prId,
           authorId: commenterId,
-          body: c.body,
+          body: config.persistBodies ? c.body : null,
           databaseId: c.fullDatabaseId ?? null,
           createdAt,
         })
         .onConflictDoUpdate({
           target: [prComments.prId, prComments.githubNodeId],
-          set: { body: c.body, databaseId: c.fullDatabaseId ?? null },
+          set: {
+            body: config.persistBodies ? c.body : null,
+            databaseId: c.fullDatabaseId ?? null,
+          },
         })
         .returning({ id: prComments.id })
         .execute()
@@ -648,12 +668,12 @@ export async function persistPr(
           prId,
           authorId: commitAuthorId,
           committerId,
-          message: c.message,
+          message: config.persistBodies ? c.message : null,
           committedAt,
         })
         .onConflictDoUpdate({
           target: [commits.sha, commits.prId],
-          set: { message: c.message, committedAt },
+          set: { message: config.persistBodies ? c.message : null, committedAt },
         })
         .returning({ id: commits.id })
         .execute()

@@ -11,6 +11,7 @@ import { SignInGate } from './components/SignInGate.js';
 import { useUrlState } from './hooks/useUrlState.js';
 import { useLocalStorage } from './hooks/useLocalStorage.js';
 import { useKeyboard } from './hooks/useKeyboard.js';
+import { useDetailCacheReconciler } from './hooks/useDetailCache.js';
 import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
 import { ApiError, api } from './api/client.js';
@@ -34,6 +35,10 @@ export default function App(): JSX.Element {
   const me = useMe();
   useUrlState();
   useKeyboard();
+  // Invalidate persisted PR/thread detail when the lean feed shows a newer
+  // updatedAt, so cloud-hydrated text refetches exactly once on change (no-op for
+  // unchanged PRs). Harmless in local mode.
+  useDetailCacheReconciler();
   const [dark, toggleDark] = useDarkMode();
   const [helpOpen, setHelpOpen] = useState(false);
 

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { getThreadDetail } from '../../db/queries.js';
+import { hydrateThreadDetail } from '../../sync/hydrate-detail.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 const idParamSchema = {
@@ -13,11 +14,12 @@ const idParamSchema = {
 export async function threadRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/threads/:id', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
-    const thread = await getThreadDetail(id, accountIdOf(req));
+    const accountId = accountIdOf(req);
+    const thread = await getThreadDetail(id, accountId);
     if (!thread) {
       reply.status(404);
       return { error: 'NotFound', message: `Thread ${id} not found` };
     }
-    return thread;
+    return hydrateThreadDetail(thread, accountId);
   });
 }
