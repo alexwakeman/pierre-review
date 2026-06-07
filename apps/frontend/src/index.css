@@ -65,6 +65,31 @@ body {
   box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.6);
   animation: focus-dot-pulse 1.8s ease-in-out infinite;
 }
+/* The ✕ that leaves focus mode, tucked against the pill's right edge in the same
+   sky palette. The only on-screen exit control now (the old bottom-left
+   timeline button was removed); Esc and the browser Back button still work. */
+.focus-indicator-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 1px;
+  margin-right: -4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  font-size: 10px;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    opacity 0.15s ease;
+}
+.focus-indicator-close:hover {
+  opacity: 1;
+  background: rgba(56, 189, 248, 0.25);
+}
 @keyframes focus-dot-pulse {
   0%,
   100% {
@@ -396,34 +421,6 @@ body {
   color: #e5e7eb;
 }
 
-/* "Exit focus" button — pinned to the bottom-left of the timeline's VISIBLE
-   viewport (absolute to the timeline wrapper, so it never scrolls with the rows
-   or the time axis), shown only while a cross-user / activity focus has
-   collapsed the rows. Reverts to all rows and the prior window, and closes the
-   modal. The z-index sits well above every vis layer (items top out at 5) so it
-   always floats over the timeline content. */
-.tl-exit-focus {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  z-index: 1000;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  border-radius: 9999px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #fff;
-  background: #2563eb;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-.tl-exit-focus:hover {
-  background: #1d4ed8;
-}
 
 /* Cross-user row focus: when a marker links two users we collapse every other
    user row so the two relevant rows sit together (no vertical jump). Rows are

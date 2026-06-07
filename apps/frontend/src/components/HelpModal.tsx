@@ -65,8 +65,9 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           <Section title="Focus mode">
             To isolate one PR and just its contributors: double-click its bar, click{' '}
             <strong>Focus</strong> in the detail pane, or click a cross-person marker.
-            Leave focus with the <strong>Exit focus</strong> button, <Kbd>Esc</Kbd>, or
-            the browser <strong>Back</strong> button.
+            Leave focus with the <strong>✕</strong> on the header{' '}
+            <strong>Focus mode</strong> badge, <Kbd>Esc</Kbd>, or the browser{' '}
+            <strong>Back</strong> button.
           </Section>
 
           <Section title="Detail pane">

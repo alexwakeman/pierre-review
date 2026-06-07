@@ -930,6 +930,13 @@ export function Timeline(): JSX.Element {
       if (!tl || !cur) return;
       const pr = prsByIdRef.current.get(prId);
       if (!pr) return;
+      // Entering focus supersedes any open marker popover. Once we isolate this PR
+      // and re-render markers filtered to it, a popover left over from another
+      // marker would show stale content — or, if it pointed at a now-hidden PR, the
+      // MarkerPopover's focusPrId filter empties it (an empty, headers-only modal).
+      // Close it here. Callers that DO want a popover in focus (a cross-user marker
+      // click / a marker double-click) re-open it right after, anchored on the PR.
+      setPopover(null);
       // Capture the pre-focus window (zoom + position) before fitting, so Exit /
       // Esc / browser-back can restore the user's original zoom. Guard on not
       // already being focused so a stray re-entry can't clobber it with the focus
@@ -1625,21 +1632,64 @@ export function Timeline(): JSX.Element {
       }
     });
 
-    // Double-clicking a PR bar enters the unified PR-isolation focus — same end
-    // state as the PR-detail "Focus" link (the preceding single click just selects
-    // it, which enterPrFocus does anyway). Other items ignore double-click.
-    timeline.on('doubleClick', (props: { item: string | number | null }) => {
+    // Double-click → the unified PR-isolation focus. A PR bar focuses that PR (same
+    // end state as the PR-detail "Focus" link; the preceding single click just
+    // selects it, which enterPrFocus does anyway). An event marker / cluster focuses
+    // its PR anchored on that event — so a same-person ("in-person") comment, whose
+    // single-click only opens a popover, can also be pushed into focus. A cross-user
+    // marker already enters focus on single-click, so by the time its double-click
+    // fires we're focused and the ev/cl branch bails out.
+    timeline.on('doubleClick', (props: {
+      item: string | number | null;
+      event?: { srcEvent?: MouseEvent } & Partial<MouseEvent>;
+      pageX?: number;
+      pageY?: number;
+    }) => {
       const id = props.item;
       if (id == null) return;
       const key = String(id);
-      if (!key.startsWith('pr:')) return;
-      const prId = Number.parseInt(key.slice(3), 10);
-      enterPrFocus(prId, { fitWindow: true });
-      // Vertically centre the PR bar once the collapse + window change settle.
-      const pr = prsByIdRef.current.get(prId);
-      if (pr) {
-        const token = groupClassToken(prGroupId(pr));
-        window.setTimeout(() => centerShowTarget(token, false), 320);
+
+      if (key.startsWith('pr:')) {
+        const prId = Number.parseInt(key.slice(3), 10);
+        enterPrFocus(prId, { fitWindow: true });
+        // Vertically centre the PR bar once the collapse + window change settle.
+        const pr = prsByIdRef.current.get(prId);
+        if (pr) {
+          const token = groupClassToken(prGroupId(pr));
+          window.setTimeout(() => centerShowTarget(token, false), 320);
+        }
+        return;
+      }
+
+      if (key.startsWith('ev:') || key.startsWith('cl:')) {
+        // The single click preceding this double-click already entered focus for a
+        // cross-user marker — re-entering would push a second focus history entry, so
+        // bail. Own-work markers only opened a popover, so we focus here.
+        if (prFocusActiveRef.current) return;
+        const members = key.startsWith('ev:')
+          ? [Number.parseInt(key.slice(3), 10)]
+          : (clusterMembersRef.current.get(key) ?? []);
+        const evId = members[0] ?? null;
+        if (evId == null) return;
+        const ev = eventsByIdRef.current.get(evId);
+        if (ev?.prId == null) return;
+        const native = props.event?.srcEvent ?? props.event;
+        const x = native?.clientX ?? props.pageX ?? 0;
+        const y = native?.clientY ?? props.pageY ?? 0;
+        // Same end state as a cross-user single-click: isolate the PR anchored on the
+        // event, recentre on its instant (not the bar's far-off midpoint), re-open the
+        // popover, then glow + centre the marker once the rows settle.
+        enterPrFocus(ev.prId, { anchorEventId: evId, fitWindow: false });
+        const tlc = timelineRef.current;
+        if (tlc) {
+          const c = new Date(ev.occurredAt).getTime();
+          const win = tlc.getWindow();
+          const width = win.end.valueOf() - win.start.valueOf();
+          tlc.setWindow(c - width / 2, c + width / 2, { animation: false });
+        }
+        openPopover(x, y, members);
+        const token = groupClassToken(groupOf(ev));
+        window.setTimeout(() => centerShowTarget(token, true, '.ev-cross-linked'), 320);
       }
     });
 
@@ -2178,6 +2228,37 @@ export function Timeline(): JSX.Element {
             candidates.find((e) => e.occurredAt === timelineFocusAt)) ||
           candidates[0];
 
+        // In the sticky PR-isolation focus, EVERY contributor row stays shown — a
+        // "Show" (a PR comment / thread / activity link) must NOT collapse the board
+        // to the event's row(s) the way it does outside focus. The focused PR is the
+        // one whose detail pane the link came from, so its marker is already rendered;
+        // just glow it, recenter horizontally on the instant, and scroll it into view,
+        // leaving the focus overlay (rows + isolated bar) intact.
+        if (prFocusActiveRef.current) {
+          if (timelineFocusAt) {
+            const c = Date.parse(timelineFocusAt);
+            const win = tl.getWindow();
+            const width = win.end.valueOf() - win.start.valueOf();
+            tl.setWindow(c - width / 2, c + width / 2, { animation: true });
+          }
+          tl.setSelection([`pr:${timelineFocusPr}`]);
+          // Move the cross-link glow onto the shown event's marker (a lifecycle event
+          // has no marker — the focused PR's bar already glows, so this is a no-op for
+          // it beyond clearing any stale marker glow).
+          if (match != null) highlightEvent(match.id);
+          const actorId = match?.actorId ?? inWindow.authorId;
+          if (actorId != null) {
+            const token = groupClassToken(`repo:${inWindow.repoId}:user:${actorId}`);
+            const hasMarker =
+              match != null &&
+              (itemsRef.current.get(`ev:${match.id}`) != null ||
+                eventToClusterRef.current.get(match.id) != null);
+            window.setTimeout(() => centerShowTarget(token, hasMarker), 120);
+          }
+          useFilters.getState().consumeTimelineFocus();
+          return;
+        }
+
         const authorId = inWindow.authorId;
         // Lifecycle events have no marker; their actor is the PR author, so the
         // relevant row (and the PR bar) is the author's.
@@ -2357,6 +2438,7 @@ export function Timeline(): JSX.Element {
     isolatePrBars,
     enterPrFocus,
     dropOverlayForNavigation,
+    highlightEvent,
   ]);
 
   return (
@@ -2377,16 +2459,6 @@ export function Timeline(): JSX.Element {
         </div>
       )}
       <div ref={containerRef} className="h-full w-full" />
-      {focusActive && (
-        <button
-          type="button"
-          onClick={() => exitFocus()}
-          className="tl-exit-focus"
-          title="Show all rows again and return to where you were"
-        >
-          <span aria-hidden="true">✕</span> Exit focus
-        </button>
-      )}
       {popover && (
         <MarkerPopover
           state={popover}

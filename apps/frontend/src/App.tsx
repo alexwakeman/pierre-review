@@ -47,8 +47,11 @@ export default function App(): JSX.Element {
     void api.logout().finally(() => window.location.assign('/'));
   };
   // Surfaced as a subtle header badge so it's clear we're in the PR-focus view
-  // mode. The Timeline owns the overlay and reports this; it clears on exit.
+  // mode. The Timeline owns the overlay and reports this; it clears on exit. The
+  // badge's ✕ requests the exit (bumps exitFocusSignal, which the Timeline tears
+  // the overlay down on) — the same path as Esc / the browser Back button.
   const focusActive = useFilters((s) => s.focusActive);
+  const exitFocus = useFilters((s) => s.exitFocus);
 
   // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
   // the dragged height is remembered across reloads. During a drag we set the
@@ -103,10 +106,19 @@ export default function App(): JSX.Element {
         {focusActive && (
           <span
             className="focus-indicator"
-            title="You're in PR focus mode — Esc, the browser Back button, or Exit focus to leave"
+            title="You're in PR focus mode — click ✕, press Esc, or use the browser Back button to leave"
           >
             <span className="focus-indicator-dot" aria-hidden="true" />
             Focus mode
+            <button
+              type="button"
+              onClick={() => exitFocus()}
+              className="focus-indicator-close"
+              title="Exit focus mode"
+              aria-label="Exit focus mode"
+            >
+              ✕
+            </button>
           </span>
         )}
         <div className="ml-auto flex items-center gap-3">

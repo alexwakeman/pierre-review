@@ -502,7 +502,7 @@ export function PrDetail({
             type="button"
             onClick={() => focusPrOnTimeline(pr.id)}
             className="shrink-0 font-medium text-blue-500 hover:underline"
-            title="Isolate this PR and its contributors on the timeline (Exit focus / Esc to leave)"
+            title="Isolate this PR and its contributors on the timeline (✕ on the Focus mode badge / Esc to leave)"
           >
             Focus
           </button>
