@@ -203,14 +203,12 @@ function groupClassToken(id: string): string {
   return `tlg-${id.replace(/:/g, '-')}`;
 }
 
-// Midpoint (ms) of a PR's lifetime — opened → merged/closed/now — used to centre
-// the window on a PR bar when no specific event instant is in play.
-function prMidpointMs(pr: TimelinePr): number {
-  const startMs = new Date(pr.openedAt).getTime();
-  const endMs = new Date(
-    pr.mergedAt ?? pr.closedAt ?? new Date().toISOString(),
-  ).getTime();
-  return (startMs + endMs) / 2;
+// The PR bar's visible right edge (ms): its merged/closed instant, else "now" for
+// an open PR (whose bar runs to the present — see the bar item's `end` in the
+// rebuild). Fitting a focus window to a PR must reach this, not just the last
+// event, or an open PR's bar overflows the viewport.
+function prBarEndMs(pr: TimelinePr): number {
+  return new Date(pr.mergedAt ?? pr.closedAt ?? new Date().toISOString()).getTime();
 }
 
 export function Timeline(): JSX.Element {
@@ -319,6 +317,11 @@ export function Timeline(): JSX.Element {
   // popstate events to swallow when we unwind history ourselves.
   const drillDepthRef = useRef(0);
   const savedWindowRef = useRef<{ start: Date; end: Date } | null>(null);
+  // The horizontal window (zoom + position) captured the instant a PR-isolation
+  // focus is entered, so leaving focus restores the user's ORIGINAL zoom rather
+  // than keeping the zoomed-in focus view. Distinct from savedWindowRef (the
+  // marker-popover drill's pre-open window).
+  const preFocusWindowRef = useRef<{ start: Date; end: Date } | null>(null);
   // The selected marker's persistent "you're looking at this" pulse (the soft sky
   // halo, no marching ants), tracked like the other glows so a re-cluster can
   // re-apply it to whichever item now holds the event — a lone `ev:` marker or
@@ -960,6 +963,11 @@ export function Timeline(): JSX.Element {
       if (!tl || !cur) return;
       const pr = prsByIdRef.current.get(prId);
       if (!pr) return;
+      // Capture the pre-focus window (zoom + position) before fitting, so Exit /
+      // Esc / browser-back can restore the user's original zoom. Guard on not
+      // already being focused so a stray re-entry can't clobber it with the focus
+      // window (enterPrFocus only runs unfocused, but this stays correct if not).
+      if (!prFocusActiveRef.current) preFocusWindowRef.current = tl.getWindow();
       const repoId = pr.repoId;
       const contributors = new Set<number>();
       if (pr.authorId != null) contributors.add(pr.authorId);
@@ -970,8 +978,10 @@ export function Timeline(): JSX.Element {
         if (ms > maxT) maxT = ms;
       };
       span(new Date(pr.openedAt).getTime());
-      if (pr.mergedAt) span(new Date(pr.mergedAt).getTime());
-      if (pr.closedAt) span(new Date(pr.closedAt).getTime());
+      // The bar's visible RIGHT edge — "now" for an open PR, not its last event —
+      // so the fitted window below covers the whole bar (Number.isFinite always
+      // holds with this + openedAt seeded).
+      span(prBarEndMs(pr));
       for (const e of cur.events) {
         if (e.prId !== prId) continue;
         if (e.actorId != null) contributors.add(e.actorId);
@@ -1283,33 +1293,31 @@ export function Timeline(): JSX.Element {
       const anchorEvent = restoreAnchor ? highlightedEventRef.current : null;
       const wasPrFocus = prFocusActiveRef.current;
       const prId = prFocusPrIdRef.current;
+      const preFocusWindow = preFocusWindowRef.current;
       applyContext(null);
       setPopover(null);
       drillDepthRef.current = 0;
       savedWindowRef.current = null;
+      preFocusWindowRef.current = null;
 
       if (wasPrFocus && restoreAnchor) {
-        // PR-isolation exit: don't snap back to a saved pre-focus window — stay in
-        // the PR's neighbourhood. Centre the window on the last-clicked event (or
-        // the PR itself if none), re-select the PR (→ glow pulse) and give the
-        // anchor a persistent pulse so it's clearly the thing you were looking at.
+        // PR-isolation exit: restore the ORIGINAL zoom + position the user had when
+        // they entered focus (captured in preFocusWindowRef by enterPrFocus) — they
+        // came in to inspect one PR and expect to land back where they were, not
+        // stuck at the focus zoom. Then re-select the PR (→ glow pulse) and
+        // vertically re-centre on it so it's easy to spot in the zoomed-out view.
         const tl = timelineRef.current;
-        const ev =
-          anchorEvent != null ? eventsByIdRef.current.get(anchorEvent) : undefined;
         const pr = prId != null ? prsByIdRef.current.get(prId) : undefined;
         if (tl) {
-          const centerMs = ev
-            ? new Date(ev.occurredAt).getTime()
-            : pr
-              ? prMidpointMs(pr)
-              : null;
-          if (centerMs != null) {
-            const win = tl.getWindow();
-            const width = win.end.valueOf() - win.start.valueOf();
-            // Instant re-center (no pan): the board should snap back to its final
-            // position once, not appear and then animate horizontally into place.
-            tl.setWindow(centerMs - width / 2, centerMs + width / 2, {
-              animation: false,
+          if (preFocusWindow) {
+            const reduceMotion =
+              typeof window !== 'undefined' &&
+              typeof window.matchMedia === 'function' &&
+              window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            // Animated zoom-out (unless reduced-motion) reads as "here's where that
+            // PR sits in the whole timeline" rather than a jarring snap.
+            tl.setWindow(preFocusWindow.start, preFocusWindow.end, {
+              animation: !reduceMotion,
             });
           }
           if (prId != null) tl.setSelection([`pr:${prId}`]);
