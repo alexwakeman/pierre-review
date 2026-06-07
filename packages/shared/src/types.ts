@@ -103,6 +103,11 @@ export interface SyncProgress {
   prsProcessed: number;
   pages: number;
   mode: 'full' | 'incremental';
+  // Two-phase first sync: true once the fast "foreground" window (the default
+  // timeline range) is fully loaded and the slower backfill of older history is
+  // continuing in the background. Lets the UI drop the user into the recent view
+  // immediately. Absent/false for incremental syncs and during the foreground pass.
+  foregroundComplete?: boolean;
 }
 
 export interface SyncStatus {

@@ -37,6 +37,16 @@ export interface SyncRepoOptions {
   mode: 'full' | 'incremental';
   // Stop paginating once a PR's updatedAt falls before this instant.
   since: Date | null;
+  // Resume the PR-page walk from this cursor (the `after` value). Used by the
+  // two-phase first sync: phase 2 continues from where phase 1 stopped instead of
+  // re-walking the foreground pages. null/undefined starts from the newest PR.
+  startCursor?: string | null;
+  // Whether to write the authoritative syncState timestamps when the walk
+  // completes. Phase 1 of a two-phase sync passes false so the repo stays "not
+  // fully synced" until phase 2 finishes the deep backfill. Defaults to true.
+  commitState?: boolean;
+  // Max concurrent commit-file REST fetches per page (see ensureCommitFiles).
+  commitFileConcurrency?: number;
   log?: Logger;
   // Called as pages/PRs are processed so callers can surface live progress.
   onProgress?: (p: SyncProgressUpdate) => void;
@@ -56,15 +66,28 @@ export interface SyncRepoResult {
   pages: number;
   rateLimitRemaining: number;
   rateLimitCost: number;
+  // Whether the walk bailed out early on a cancel request (so the caller skips a
+  // follow-on phase).
+  cancelled: boolean;
+  // The cursor a follow-on phase should resume from to continue past where this
+  // walk stopped — the `after` of the page that hit the `since` cutoff (so its
+  // older PRs aren't skipped), or the final page's cursor if the walk reached the
+  // end. Pass it back as `startCursor`.
+  endCursor: string | null;
 }
 
 export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
   const { owner, name, accountId, mode, since, onProgress } = opts;
+  const commitState = opts.commitState ?? true;
   const log = opts.log ?? consoleLogger;
   const client = getGraphqlClientFor(opts.token);
   const resolver = createUserResolver();
 
-  let cursor: string | null = null;
+  let cursor: string | null = opts.startCursor ?? null;
+  // The `after` value used to fetch the page currently being processed. When we
+  // stop at the `since` cutoff mid-page, this (not the page's endCursor) is what a
+  // follow-on phase resumes from, so the cutoff page's older PRs aren't skipped.
+  let pageStartCursor: string | null = cursor;
   let repoId: number | null = null;
   let prCount = 0;
   let pages = 0;
@@ -101,6 +124,7 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
         cancelled = true;
         break;
       }
+      pageStartCursor = cursor;
       const tPage = performance.now();
       const resp: RepoActivityResponse = await client(REPO_ACTIVITY_QUERY, {
         owner,
@@ -129,6 +153,12 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       }
 
       const { nodes, pageInfo } = resp.repository.pullRequests;
+
+      // First select the in-window PRs on this page and gather every commit SHA
+      // whose changed files we need (commits that could plausibly have addressed
+      // an open thread, i.e. landed after its last comment).
+      const pagePrs: { pr: (typeof nodes)[number]; updatedMs: number }[] = [];
+      const pageShas: string[] = [];
       for (const pr of nodes) {
         if (opts.shouldCancel?.()) {
           cancelled = true;
@@ -141,36 +171,47 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
         }
         newestMs ??= updatedMs;
 
-        // Only fetch changed-files for commits that could plausibly have
-        // addressed an open thread (after its last comment).
         const unresolved = pr.reviewThreads.nodes.filter(
           (t) => !t.isResolved && t.comments.nodes.length > 0,
         );
-        let shas: string[] = [];
         if (unresolved.length > 0) {
           const threshold = Math.min(
-            ...unresolved.map((t) =>
-              Date.parse(t.comments.nodes.at(-1)!.createdAt),
-            ),
+            ...unresolved.map((t) => Date.parse(t.comments.nodes.at(-1)!.createdAt)),
           );
-          shas = pr.commits.nodes
-            .filter((c) => Date.parse(c.commit.committedDate) > threshold)
-            .map((c) => c.commit.oid);
+          for (const c of pr.commits.nodes) {
+            if (Date.parse(c.commit.committedDate) > threshold) pageShas.push(c.commit.oid);
+          }
         }
+        pagePrs.push({ pr, updatedMs });
+      }
+
+      // Fetch the whole page's commit files in one saturated pool (replacing the
+      // old per-PR serial waves), then persist each in-window PR. persistPr only
+      // reads the SHAs its own commits need, so a page-wide superset map is fine.
+      // Skip entirely if a cancel arrived mid-gather — don't do network/DB work
+      // we're about to throw away.
+      if (!cancelled && pagePrs.length > 0) {
         const tFiles = performance.now();
         const commitFilesBySha = await ensureCommitFiles(
           owner,
           name,
-          shas,
+          pageShas,
           opts.token,
+          opts.commitFileConcurrency,
         );
         commitFilesMs += performance.now() - tFiles;
 
-        const tPersist = performance.now();
-        await persistPr(pr, repoId, resolver, commitFilesBySha, accountId);
-        persistMs += performance.now() - tPersist;
-        prCount += 1;
-        reportProgress(updatedMs);
+        for (const { pr, updatedMs } of pagePrs) {
+          if (opts.shouldCancel?.()) {
+            cancelled = true;
+            break;
+          }
+          const tPersist = performance.now();
+          await persistPr(pr, repoId, resolver, commitFilesBySha, accountId);
+          persistMs += performance.now() - tPersist;
+          prCount += 1;
+          reportProgress(updatedMs);
+        }
       }
 
       cursor = pageInfo.endCursor;
@@ -191,6 +232,8 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
         pages,
         rateLimitRemaining: lastRemaining,
         rateLimitCost: totalCost,
+        cancelled: true,
+        endCursor: pageStartCursor,
       };
     }
 
@@ -201,31 +244,42 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       throw new Error(`Repository ${owner}/${name} returned no data`);
     }
 
-    const now = new Date();
-    const statePatch =
-      mode === 'full'
-        ? { lastFullSyncAt: now, lastIncrementalSyncAt: now }
-        : { lastIncrementalSyncAt: now };
-    await db
-      .insert(syncState)
-      .values({ repoId, ...statePatch, lastSyncStatus: 'ok', lastSyncError: null })
-      .onConflictDoUpdate({
-        target: syncState.repoId,
-        set: { ...statePatch, lastSyncStatus: 'ok', lastSyncError: null },
-      })
-      .execute();
+    // commitState=false (a two-phase foreground pass) deliberately does NOT stamp
+    // the repo as synced — the authoritative timestamp is written by the deeper
+    // pass that follows, so planSync keeps treating the repo as not-yet-fully-
+    // synced (and the cancel endpoint as an initial backfill) until then.
+    if (commitState) {
+      const now = new Date();
+      const statePatch =
+        mode === 'full'
+          ? { lastFullSyncAt: now, lastIncrementalSyncAt: now }
+          : { lastIncrementalSyncAt: now };
+      await db
+        .insert(syncState)
+        .values({ repoId, ...statePatch, lastSyncStatus: 'ok', lastSyncError: null })
+        .onConflictDoUpdate({
+          target: syncState.repoId,
+          set: { ...statePatch, lastSyncStatus: 'ok', lastSyncError: null },
+        })
+        .execute();
+    }
 
+    const phase = commitState ? mode : `${mode} foreground`;
     log.info(
-      `sync ${owner}/${name} [${mode}] done: ${prCount} PRs over ${pages} page(s), ` +
+      `sync ${owner}/${name} [${phase}] done: ${prCount} PRs over ${pages} page(s), ` +
         `cost ${totalCost}, ${lastRemaining} remaining — timing: ${timingSummary()}`,
     );
 
+    // Resume point for a follow-on phase: re-fetch the cutoff page (so its older
+    // PRs aren't skipped) if we stopped there, else the final cursor.
     return {
       repoId,
       prCount,
       pages,
       rateLimitRemaining: lastRemaining,
       rateLimitCost: totalCost,
+      cancelled: false,
+      endCursor: stop ? pageStartCursor : cursor,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

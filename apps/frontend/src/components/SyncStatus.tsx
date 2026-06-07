@@ -92,20 +92,19 @@ export function SyncStatus(): JSX.Element | null {
   const scopedIds = new Set(scopedRepos.map((r) => r.id));
   const scopedStatuses =
     statuses == null ? undefined : statuses.filter((s) => scopedIds.has(s.repoId));
-  const runningCount = (scopedStatuses ?? []).filter((s) => s.status === 'running').length;
-  // Aggregate PRs committed so far across the in-scope repos. The backend commits
-  // per-PR (newest-first) and the timeline endpoint serves committed rows, so as
-  // this advances there is genuinely more to show.
-  const processedTotal = (scopedStatuses ?? []).reduce(
-    (sum, s) => sum + (s.progress?.prsProcessed ?? 0),
-    0,
-  );
+  const runningScoped = (scopedStatuses ?? []).filter((s) => s.status === 'running');
+  const runningCount = runningScoped.length;
+  // Two-phase first sync: true once every running in-scope repo has finished its
+  // fast foreground window and is extending the backfill in the background — the
+  // moment to drop the user into the (now-populated) recent board.
+  const foregroundComplete =
+    runningCount > 0 && runningScoped.every((s) => s.progress?.foregroundComplete === true);
 
   const lastSync = mostRecentSync(repos ?? []);
   const prevLastSync = useRef<string | null>(lastSync);
-  // Highest aggregate prsProcessed seen this round, so we only refetch the feed
-  // when the running PR count actually advances (not on every status poll).
-  const prevProcessedRef = useRef(0);
+  // Latch so the foreground→background handoff (close the modal, refresh the
+  // recent board) runs once per sync round, not on every poll while phase 2 runs.
+  const foregroundHandledRef = useRef(false);
 
   // Pending auto-close of the progress modal. Held in a ref so a fresh sync can
   // cancel a close that a previous round scheduled.
@@ -120,18 +119,10 @@ export function SyncStatus(): JSX.Element | null {
   // before we treat it as complete, and drop any close queued by the last round.
   const beginSyncRound = (): void => {
     setSeenRunning(false);
-    prevProcessedRef.current = 0;
+    foregroundHandledRef.current = false;
     cancelAutoClose();
   };
   useEffect(() => cancelAutoClose, []);
-
-  // Mid-sync feed refresh: only the queries that accrete new rows as PRs land.
-  // The heavier reference data (users/mergers/my-turn/me) refreshes once at
-  // completion via invalidateData(), so we don't re-fetch all of it every 1.5s.
-  const refreshFeeds = (): void => {
-    void qc.invalidateQueries({ queryKey: ['timeline'] });
-    void qc.invalidateQueries({ queryKey: ['open-prs'] });
-  };
 
   const invalidateData = (): void => {
     void qc.invalidateQueries({ queryKey: ['timeline'] });
@@ -154,26 +145,19 @@ export function SyncStatus(): JSX.Element | null {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSync]);
 
-  // Progressive load: the syncState timestamp (and so the effect above) only
-  // advances at the very END of a sync, but rows are committed continuously. So
-  // during the add-repo backfill, refetch the feed whenever the processed-PR
-  // count advances — turning a 2-3 min blank board into rows that appear within
-  // seconds and accrete. Naturally throttled to the 1.5s status-poll cadence (the
-  // only thing that moves processedTotal), and gated on an actual increase so a
-  // steady poll doesn't thrash the timeline. placeholderData in useTimeline keeps
-  // the existing rows on screen across each refetch (no flicker). Scoped to the
-  // add-flow (modalScopeId set): a manual "deep" re-sync of an already-populated
-  // board would otherwise rebuild the timeline every 1.5s over mostly-unchanged
-  // data for no benefit (the board isn't blank), and background scheduled syncs
-  // never set `syncing` so they're already excluded.
+  // Two-phase first sync handoff: the instant the fast foreground window is done,
+  // close the progress modal and refresh the (now-populated) recent board so the
+  // user can start working — while the deeper backfill keeps running in the
+  // background. The repo stays `running`, so the poll and the completion effect
+  // below still fire when phase 2 finishes (bringing in the older history). Runs
+  // once per round via the latch.
   useEffect(() => {
-    if (!syncing || modalScopeId == null) return;
-    if (processedTotal > prevProcessedRef.current) {
-      prevProcessedRef.current = processedTotal;
-      refreshFeeds();
-    }
+    if (!syncing || !foregroundComplete || foregroundHandledRef.current) return;
+    foregroundHandledRef.current = true;
+    setModalOpen(false);
+    invalidateData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [processedTotal, syncing, modalScopeId]);
+  }, [syncing, foregroundComplete]);
 
   // Latch the moment we first see a repo actually running this round.
   useEffect(() => {
@@ -256,8 +240,9 @@ export function SyncStatus(): JSX.Element | null {
     invalidateData();
   };
 
-  const progress =
-    runningCount > 0
+  const progress = foregroundComplete
+    ? 'loading older history…'
+    : runningCount > 0
       ? `syncing ${runningCount} repo${runningCount === 1 ? '' : 's'}…`
       : 'syncing…';
 

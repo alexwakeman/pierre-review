@@ -18,6 +18,7 @@ export async function ensureCommitFiles(
   name: string,
   shas: string[],
   token: string,
+  concurrency = 10,
 ): Promise<Map<string, string[]>> {
   const result = new Map<string, string[]>();
   const unique = [...new Set(shas)];
@@ -31,12 +32,13 @@ export async function ensureCommitFiles(
     .execute();
   for (const row of cached) result.set(row.sha, row.paths);
 
-  // Fetch cache misses with bounded concurrency. These REST calls dominate
-  // sync latency on a PR that just got several commits addressing threads;
-  // running them serially blocks the whole page loop. SHAs are immutable and
-  // the cache is idempotent, so parallelism is safe.
+  // Fetch cache misses through one continuously-saturated worker pool. These
+  // REST calls dominate sync latency; the caller now hands us a whole page's
+  // worth of misses at once (rather than per-PR waves), so a fixed set of
+  // workers each pull the next SHA the instant they finish — keeping `concurrency`
+  // requests in flight the whole time. SHAs are immutable and the cache upsert is
+  // idempotent, so order doesn't matter.
   const missing = unique.filter((sha) => !result.has(sha));
-  const CONCURRENCY = 5;
   const fetchOne = async (sha: string): Promise<void> => {
     try {
       const commit = await ghRestGetFor<RestCommit>(
@@ -56,9 +58,16 @@ export async function ensureCommitFiles(
       result.set(sha, []);
     }
   };
-  for (let i = 0; i < missing.length; i += CONCURRENCY) {
-    await Promise.all(missing.slice(i, i + CONCURRENCY).map(fetchOne));
-  }
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < missing.length) {
+      const sha = missing[next++]!;
+      await fetchOne(sha);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(Math.max(1, concurrency), missing.length) }, worker),
+  );
 
   return result;
 }

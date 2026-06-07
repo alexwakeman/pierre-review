@@ -182,16 +182,69 @@ export async function runSyncForRepo(
     );
     return false;
   }
-  const task = syncRepo({
+
+  const common = {
     owner: repo.owner,
     name: repo.name,
     accountId: repo.accountId,
     token,
-    ...plan,
     log,
-    onProgress: (p) => setSyncProgress(repoId, { ...p, mode: plan.mode }),
+    commitFileConcurrency: config.commitFileConcurrency,
     shouldCancel: () => cancelRequested.has(repoId),
-  })
+  };
+
+  // Two-phase only for a first full backfill (never-synced, not a forced "deep"
+  // re-sync) when the backfill window is wider than the foreground window. A deep
+  // re-sync stays single-pass — its board is already populated, so there's no
+  // blank-board wait to shorten.
+  const twoPhase =
+    !opts.forceFull && plan.mode === 'full' && config.backfillDays > config.foregroundSyncDays;
+
+  const runWalk = async (): Promise<void> => {
+    if (!twoPhase) {
+      await syncRepo({
+        ...common,
+        mode: plan.mode,
+        since: plan.since,
+        commitState: true,
+        onProgress: (p) => setSyncProgress(repoId, { ...p, mode: plan.mode }),
+      });
+      return;
+    }
+    // Phase 1 — the fast foreground window (the default timeline range). Committed
+    // per-PR so the recent board is usable in seconds, but does NOT stamp
+    // syncState, so the repo stays an "initial backfill" until phase 2 finishes.
+    const foregroundSince = new Date(Date.now() - config.foregroundSyncDays * DAY_MS);
+    const p1 = await syncRepo({
+      ...common,
+      mode: 'full',
+      since: foregroundSince,
+      commitState: false,
+      onProgress: (p) =>
+        setSyncProgress(repoId, { ...p, mode: 'full', foregroundComplete: false }),
+    });
+    if (p1.cancelled) return;
+    // Foreground done — flip the flag so the UI drops the user into the recent
+    // view, then continue the SAME cursor walk back to the full backfill window.
+    setSyncProgress(repoId, {
+      percent: 1,
+      prsProcessed: p1.prCount,
+      pages: p1.pages,
+      mode: 'full',
+      foregroundComplete: true,
+    });
+    await syncRepo({
+      ...common,
+      mode: 'full',
+      since: plan.since, // now − backfillDays
+      startCursor: p1.endCursor,
+      commitState: true,
+      onProgress: (p) =>
+        setSyncProgress(repoId, { ...p, mode: 'full', foregroundComplete: true }),
+    });
+  };
+
+  const task = runWalk()
     .catch((err) => {
       log.error(
         `background sync ${repo.owner}/${repo.name} failed: ${err instanceof Error ? err.message : err}`,
@@ -237,6 +290,8 @@ export async function syncAllRepos(log: Logger): Promise<void> {
         accountId: repo.accountId,
         token,
         ...plan,
+        commitState: true,
+        commitFileConcurrency: config.commitFileConcurrency,
         log,
         onProgress: (p) => setSyncProgress(r.id, { ...p, mode: plan.mode }),
         shouldCancel: () => cancelRequested.has(r.id),

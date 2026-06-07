@@ -67,6 +67,15 @@ export const config = {
   dbPath:
     isCloud || isAbsolute(rawDbUrl) ? rawDbUrl : resolve(backendRoot, rawDbUrl),
   backfillDays: intFromEnv('BACKFILL_DAYS', 90),
+  // First sync runs in two phases: a fast "foreground" window (matching the
+  // default timeline range) so the board is usable in seconds, then the rest of
+  // backfillDays is fetched in the background. Two-phase only kicks in when
+  // backfillDays exceeds this.
+  foregroundSyncDays: intFromEnv('FOREGROUND_SYNC_DAYS', 14),
+  // How many commit-file REST fetches to keep in flight at once (one pool per
+  // page). These draw from the REST quota (disjoint from the GraphQL points
+  // pool), so a modest pool safely cuts the dominant sync stage.
+  commitFileConcurrency: intFromEnv('COMMIT_FILE_CONCURRENCY', 10),
   syncCron: process.env.SYNC_CRON ?? '*/5 * * * *',
   syncOverlapMinutes: intFromEnv('SYNC_OVERLAP_MINUTES', 20),
   stallThresholdDays: intFromEnv('STALL_THRESHOLD_DAYS', 3),
