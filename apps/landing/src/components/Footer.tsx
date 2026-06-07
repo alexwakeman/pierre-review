@@ -11,8 +11,9 @@ export default function Footer() {
         </p>
 
         <a
-          /* TODO: set this to the real public repo URL before launch. */
-          href="https://github.com/"
+          href="https://github.com/alexwakeman/pierre-review"
+          target="_blank"
+          rel="noreferrer noopener"
           className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-sky"
           aria-label="Pierre on GitHub"
         >
