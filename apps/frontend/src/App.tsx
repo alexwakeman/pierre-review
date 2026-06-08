@@ -214,10 +214,15 @@ export default function App(): JSX.Element {
       </header>
 
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
-      <ClaudeReviewsModal
-        open={reviewsOpen}
-        onClose={() => setReviewsOpen(false)}
-      />
+      {/* Only mount when the feature is enabled — the trigger button is already
+          gated, and this ensures the modal never fetches /api/claude-reviews
+          (which doesn't exist when the feature is off, e.g. cloud). */}
+      {claudeReviewEnabled && (
+        <ClaudeReviewsModal
+          open={reviewsOpen}
+          onClose={() => setReviewsOpen(false)}
+        />
+      )}
 
       <FilterBar />
       <OpenPrsStrip />
