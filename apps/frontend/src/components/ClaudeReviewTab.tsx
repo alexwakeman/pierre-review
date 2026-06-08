@@ -215,14 +215,24 @@ function FindingRow({
       ? `${prUrl}#discussion_r${finding.githubCommentId}`
       : null;
 
-  // File-level "Files changed" diff anchor (GitHub hashes the path to SHA-256).
-  // Reliable at the file level; the per-line R<n>/L<n> fragment is NOT (the Files
-  // tab is virtualized/collapsed), so we use it only as a fallback.
-  const fileDiffHref = `${prUrl}/files#diff-${finding.diffAnchorId}`;
+  // The PR "Files changed" diff anchor — lands ON the finding's line, in review
+  // context (the +/- diff, with the comment affordance). GitHub anchors a diff
+  // line by `diff-<sha256(path)>` + side (`R` new / `L` old) + line number; this
+  // is the same scheme GitHub itself emits and (empirically) it scrolls to and
+  // highlights the right line. For a deep file GitHub lazily hydrates the diff and
+  // late-scrolls, so the page briefly sits at the top then jumps to the line — a
+  // cosmetic GitHub-side delay we can't control, but it resolves correctly. When
+  // the finding has no line we fall back to the file-level anchor (file header).
+  const diffLineHref =
+    finding.line != null
+      ? `${prUrl}/files#diff-${finding.diffAnchorId}${finding.side === 'LEFT' ? 'L' : 'R'}${finding.line}`
+      : `${prUrl}/files#diff-${finding.diffAnchorId}`;
 
   // A blob permalink at the reviewed head SHA: non-virtualized, so #L<line> is
-  // honoured reliably, and pinning the SHA keeps the line number correct. Only
-  // valid for a RIGHT-side line (the left/base side isn't this blob).
+  // honoured instantly with no jump — but it shows the file, not the diff. We keep
+  // it only as a SECONDARY "view file" escape hatch for the cases the PR diff
+  // can't serve: a file collapsed under "Large diffs are not rendered", or an
+  // outdated finding. RIGHT-side only (the left/base side isn't in the head blob).
   const blobHref =
     headSha != null && finding.line != null && finding.side === 'RIGHT'
       ? `https://github.com/${repoFullName}/blob/${headSha}/${finding.path
@@ -231,14 +241,13 @@ function FindingRow({
           .join('/')}#L${finding.line}`
       : null;
 
-  // Primary code-anchor link, in reliability order:
-  //   1. posted comment permalink (most reliable)
-  //   2. blob permalink at head (RIGHT-side line)
-  //   3. file-level Files-tab diff anchor (LEFT-side / no line / no head SHA)
-  const primaryHref = commentUrl ?? blobHref ?? fileDiffHref;
-  // Offer the file-level diff as a small secondary affordance when the primary is
-  // the blob (so the in-diff view is still one click away).
-  const secondaryDiffHref = blobHref != null ? fileDiffHref : null;
+  // Primary code-anchor link, in reliability + usefulness order:
+  //   1. posted comment permalink (most reliable, already in PR context)
+  //   2. the PR diff line anchor (in-review context — the useful default)
+  const primaryHref = commentUrl ?? diffLineHref;
+  // Secondary "view file" escape hatch (blob at head) — only when we didn't link a
+  // posted comment and a RIGHT-side blob link is available.
+  const secondaryBlobHref = commentUrl == null ? blobHref : null;
   const canPostComment = editable && finding.anchored && finding.line != null;
 
   const copy = (): void => {
@@ -327,7 +336,9 @@ function FindingRow({
             )}
           </div>
 
-          {/* Code anchor → the most reliable deep-link to this finding's line. */}
+          {/* Code anchor → opens this finding's line in the PR diff (review
+              context). A secondary "view file" links the blob at the reviewed
+              commit as an escape hatch for collapsed/outdated diffs. */}
           <div className="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-xs">
             <a
               href={primaryHref}
@@ -337,22 +348,22 @@ function FindingRow({
               title={
                 commentUrl != null
                   ? 'Open this posted comment on GitHub'
-                  : blobHref != null
-                    ? 'Open this line in the file at the reviewed commit'
+                  : finding.line != null
+                    ? 'Open this line in the PR diff on GitHub'
                     : 'Open this file in the PR diff on GitHub'
               }
             >
               {anchorLabel}
             </a>
-            {secondaryDiffHref != null && (
+            {secondaryBlobHref != null && (
               <a
-                href={secondaryDiffHref}
+                href={secondaryBlobHref}
                 target="_blank"
                 rel="noreferrer noopener"
                 className="text-[10px] font-sans text-gray-400 hover:text-gray-600 hover:underline dark:hover:text-gray-200"
-                title="Open this file in the PR diff on GitHub"
+                title="Open the file at the reviewed commit (no diff, but no jump — use if the PR diff doesn't land right)"
               >
-                in diff
+                view file
               </a>
             )}
           </div>
