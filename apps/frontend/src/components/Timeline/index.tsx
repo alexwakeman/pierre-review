@@ -1013,7 +1013,7 @@ export function Timeline(): JSX.Element {
   // True while an intentional vertical scroll (centerShowTarget) is animating, so
   // the rebuild's DEFERRED onSettled re-pin doesn't fight it on the rare overlap of
   // a background-sync rebuild with a "Show"/focus centring. The synchronous
-  // reapplyScrollTop in the rebuild still runs — only the late re-pin is gated.
+  // restoreScrollAnchor in the rebuild still runs — only the late re-anchor is gated.
   const intentionalScrollRef = useRef(false);
 
   // Bring the "Show" target into view and centre it. Called after the row-focus
@@ -1165,36 +1165,94 @@ export function Timeline(): JSX.Element {
   }, []);
 
 
-  // Pin the vertical scroll to a captured value across the next few frames. Used
-  // by the groups/markers rebuild: rebuildMarkers() does a wholesale remove()+add()
-  // of every marker, which momentarily empties each row's event/cross bands so vis
-  // clamps the scroll toward the top before they re-render. Re-apply synchronously
-  // (best-effort, in case the relayout was already flushed) and over a short rAF
-  // budget until it sticks — it bails the moment the target holds, so it never
-  // fights an active user scroll.
-  const reapplyScrollTop = useCallback(
-    (top: number) => {
-      setVisScrollTop(top);
+  // Preserve the vertical scroll across the groups/markers rebuild by CONTENT
+  // anchor, not by raw pixel offset. Two things move the scroll during a rebuild:
+  // (1) rebuildMarkers() does a wholesale remove()+add() of every marker, which
+  // momentarily empties each row's bands so vis clamps the scroll toward the top
+  // before they re-render — a TRANSIENT artifact to undo; and (2) a background
+  // sync can change the HEIGHT of rows ABOVE the viewport (a new PR/event grows a
+  // contributor's row, or the rows re-sort) — a REAL layout change. Re-pinning the
+  // old pixel scrollTop fixes (1) but mishandles (2): the same offset then shows
+  // different content, so a scrolled-down board visibly rides upward. Instead we
+  // capture the contributor row sitting at the viewport top and, after the rebuild,
+  // re-place that same row at the same offset — so the user's view stays put
+  // regardless of what changed above it. Falls back to the captured pixel scrollTop
+  // when that row no longer exists after the sync.
+  type ScrollAnchor = { token: string | null; offset: number; scrollTop: number };
+
+  const captureScrollAnchor = useCallback((): ScrollAnchor | null => {
+    const vs = verticalScrollEl();
+    const container = containerRef.current;
+    if (!vs || !container) return null;
+    const vsTop = vs.getBoundingClientRect().top;
+    // The contributor label nearest the viewport top — that's the row the user is
+    // looking at. Contributor rows carry a `tlg-…` token class (groupClassToken);
+    // thin repo-header rows don't, so they're skipped as anchors.
+    let bestTok: string | null = null;
+    let bestOffset = 0;
+    let bestDist = Infinity;
+    for (const l of container.querySelectorAll<HTMLElement>(
+      '.vis-labelset .vis-label',
+    )) {
+      const r = l.getBoundingClientRect();
+      if (r.height < 4 || r.bottom <= vsTop + 1) continue; // scrolled off the top
+      const tok = [...l.classList].find((c) => c.startsWith('tlg-'));
+      if (!tok) continue;
+      const dist = Math.abs(r.top - vsTop);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestTok = tok;
+        bestOffset = r.top - vsTop;
+      }
+    }
+    return { token: bestTok, offset: bestOffset, scrollTop: vs.scrollTop };
+  }, [verticalScrollEl]);
+
+  const restoreScrollAnchor = useCallback(
+    (anchor: ScrollAnchor) => {
+      const container = containerRef.current;
+      // One correction pass: nudge the anchor row back to its captured offset.
+      // Returns true once it's within 1px (or the anchor is gone and the pixel
+      // fallback has stuck). setVisScrollTop clamps to the panel's CURRENT
+      // scrollHeight, which only grows back to full over several frames after the
+      // marker remove()+add() (slower on a hundreds-of-rows board), so a single
+      // on-target frame can still be a short-clamp mid-relayout.
+      const applyOnce = (): boolean => {
+        const vs = verticalScrollEl();
+        if (!vs || !container) return true;
+        if (anchor.token) {
+          const lbl = container.querySelector<HTMLElement>(
+            `.vis-labelset .vis-label.${anchor.token}`,
+          );
+          if (lbl && lbl.offsetHeight > 0) {
+            const cur = lbl.getBoundingClientRect().top - vs.getBoundingClientRect().top;
+            const corr = cur - anchor.offset;
+            if (Math.abs(corr) > 1) {
+              setVisScrollTop(vs.scrollTop + corr);
+              return false;
+            }
+            return true;
+          }
+        }
+        // Anchor row gone (its contributor dropped out of the synced data) — fall
+        // back to pinning the captured pixel offset.
+        setVisScrollTop(anchor.scrollTop);
+        return Math.abs((verticalScrollEl()?.scrollTop ?? anchor.scrollTop) - anchor.scrollTop) <= 2;
+      };
+      applyOnce();
       let frames = 0;
       let stable = 0;
+      // Hold until the anchor stays put for 3 consecutive frames (the layout has
+      // settled); the 30-frame cap is only a backstop. It bails the moment the
+      // anchor holds, so it never fights an active user scroll.
       const step = (): void => {
-        setVisScrollTop(top);
-        const vs = verticalScrollEl();
-        // setVisScrollTop clamps to the panel's CURRENT scrollHeight, which only
-        // grows back to full over several frames after the marker remove()+add()
-        // (much slower on a hundreds-of-rows board like three.js). A single
-        // on-target frame can still be a short-clamp mid-relayout, so keep
-        // re-pinning until the target HOLDS for 3 consecutive frames. Once the
-        // layout settles that's ~3 frames (a no-op on small boards); the 30-frame
-        // cap is only a backstop for when the target is genuinely unreachable
-        // (the content actually shrank).
-        if (vs != null && Math.abs(vs.scrollTop - top) <= 2) stable += 1;
+        if (applyOnce()) stable += 1;
         else stable = 0;
         if (stable < 3 && frames++ < 30) requestAnimationFrame(step);
       };
       requestAnimationFrame(step);
     },
-    [setVisScrollTop, verticalScrollEl],
+    [verticalScrollEl, setVisScrollTop],
   );
 
   // --- Marker popover + browser/mouse-back navigation ----------------------
@@ -1792,8 +1850,8 @@ export function Timeline(): JSX.Element {
       itemsRef.current.update(items);
       settledCenterWidthRef.current = w;
       // This items.update fires a vis _redraw → _updateScrollTop clamp that can
-      // land up to ~40 frames after the rebuild's own reapplyScrollTop budget has
-      // already expired. Let the caller re-pin the saved scroll once it flushes.
+      // land up to ~40 frames after the rebuild's own restoreScrollAnchor budget has
+      // already expired. Let the caller re-anchor the saved scroll once it flushes.
       onSettled?.();
     };
     const w0 = barDrawCenterPx(timelineRef.current, containerRef.current);
@@ -2040,12 +2098,14 @@ export function Timeline(): JSX.Element {
     const tl = timelineRef.current;
     const win = tl?.getWindow();
     // Preserve the vertical scroll across the rebuild so a background-sync refetch
-    // (SyncStatus invalidates ['timeline'] when a sync lands) doesn't yank a
-    // scrolled-down view to the top when rebuildMarkers() re-adds every marker.
-    // Skip when a navigation has staged an off-window bar (forceShowOpenPrRef /
-    // `extra`): the timelineFocusPr effect drives its own scroll-to-PR afterward,
-    // and re-pinning the old position would fight it.
-    const scrollBefore = extra ? null : verticalScrollEl()?.scrollTop ?? null;
+    // (SyncStatus invalidates ['timeline'] when a sync lands) neither yanks a
+    // scrolled-down view to the top when rebuildMarkers() re-adds every marker, nor
+    // lets it ride upward when rows above the viewport grow/re-sort — captured by
+    // CONTENT anchor (the row at the viewport top), not raw pixels (see
+    // captureScrollAnchor). Skip when a navigation has staged an off-window bar
+    // (forceShowOpenPrRef / `extra`): the timelineFocusPr effect drives its own
+    // scroll-to-PR afterward, and restoring the old position would fight it.
+    const scrollAnchor = extra ? null : captureScrollAnchor();
 
     const nextGroupIds = new Set(groups.map((g) => String(g.id)));
     groupsRef.current.update(groups);
@@ -2066,15 +2126,15 @@ export function Timeline(): JSX.Element {
     // Nudge overlapping min-width bars apart (so close-succession PRs don't each
     // need their own row), once the CENTER draw width is known (deferred — the
     // gutter is sized async). prItems still hold REAL start/end here. The deferred
-    // items.update re-clamps the vertical scroll long after reapplyScrollTop (below)
-    // has finished, so re-pin once it settles to close that second clamp window.
+    // items.update re-clamps the vertical scroll long after restoreScrollAnchor
+    // (below) has finished, so re-anchor once it settles to close that second window.
     applyBarFit(prItems, () => {
-      // Skip the late re-pin if an intentional scroll (a "Show"/focus centring) is
-      // animating — this onSettled lands ~40 frames out, inside that window. The
-      // synchronous reapplyScrollTop below already covered the normal background-
+      // Skip the late re-anchor if an intentional scroll (a "Show"/focus centring)
+      // is animating — this onSettled lands ~40 frames out, inside that window. The
+      // synchronous restoreScrollAnchor below already covered the normal background-
       // sync case, so the scroll is never left unguarded by gating only here.
-      if (scrollBefore != null && !intentionalScrollRef.current) {
-        reapplyScrollTop(scrollBefore);
+      if (scrollAnchor && !intentionalScrollRef.current) {
+        restoreScrollAnchor(scrollAnchor);
       }
     });
 
@@ -2122,8 +2182,9 @@ export function Timeline(): JSX.Element {
     // Clear it so a later background-sync rebuild doesn't keep re-injecting it.
     forceShowOpenPrRef.current = null;
 
-    // Re-pin the vertical scroll the marker remove()+add() above clamped away.
-    if (scrollBefore != null) reapplyScrollTop(scrollBefore);
+    // Restore the captured content anchor: undo the marker remove()+add() clamp and
+    // absorb any height change in the rows above the viewport.
+    if (scrollAnchor) restoreScrollAnchor(scrollAnchor);
   }, [
     data,
     derivedStates,
@@ -2138,8 +2199,8 @@ export function Timeline(): JSX.Element {
     focusRows,
     isolatePrBars,
     setRowCollapsed,
-    verticalScrollEl,
-    reapplyScrollTop,
+    captureScrollAnchor,
+    restoreScrollAnchor,
     applyBarFit,
   ]);
 
