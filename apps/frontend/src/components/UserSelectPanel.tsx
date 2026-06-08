@@ -38,11 +38,15 @@ export function UserSelectPanel({
   userIds,
   maintainerIds,
   onApply,
+  excludeBots,
+  onExcludeBotsChange,
 }: {
   sections: MemberSection[]; // grouped picker options (maintainers, per-repo, other)
   userIds: number[] | null; // committed selection (null = all)
   maintainerIds: Set<number>; // members with merge rights in the relevant repo(s)
   onApply: (ids: number[] | null) => void; // empty => null (show all)
+  excludeBots: boolean; // hide bot actors from the timeline (committed, immediate)
+  onExcludeBotsChange: (v: boolean) => void; // immediate — NOT staged behind Apply
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   // Staged selection lives here, NOT in the store — nothing filters/refetches
@@ -241,7 +245,19 @@ export function UserSelectPanel({
               })
             )}
           </div>
-          <div className="mt-2 flex items-center justify-between border-t border-gray-200 pt-2 dark:border-gray-700">
+          {/* Exclude-bots toggle. IMMEDIATE — wired straight to the store (not
+              staged behind Apply): it's a visibility switch over bot actors, not a
+              member selection, so it takes effect on click like the repo/event
+              show/hide controls. */}
+          <label className="mt-2 flex cursor-pointer items-center gap-2 border-t border-gray-200 pt-2 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300">
+            <input
+              type="checkbox"
+              checked={excludeBots}
+              onChange={(e) => onExcludeBotsChange(e.target.checked)}
+            />
+            Exclude bots
+          </label>
+          <div className="mt-2 flex items-center justify-between">
             <button
               type="button"
               onClick={clearAll}

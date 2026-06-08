@@ -43,7 +43,10 @@ function readFromUrl(): Partial<FilterState> {
   }
   out.repoIds = parseIds(p.get('repos'));
   out.userIds = parseIds(p.get('users'));
-  if (p.get('bots') !== null) out.excludeBots = p.get('bots') !== '0';
+  // Bots are SHOWN by default now, so a clean URL means "shown". Only an explicit
+  // `bots=1` turns the exclude-bots filter ON (a legacy `bots=0` correctly resolves
+  // to off, matching the new default).
+  if (p.get('bots') !== null) out.excludeBots = p.get('bots') === '1';
   // Stale open PRs are hidden by default now, so a clean URL means "hidden". An
   // explicit `stale=0` turns the filter OFF (show stale); `stale=1` is still honoured
   // for backward-compat with older shared URLs (now redundant with the default).
@@ -92,7 +95,8 @@ function writeToUrl(s: FilterState): void {
   if (s.preset !== '14d') p.set('preset', s.preset);
   if (s.repoIds?.length) p.set('repos', s.repoIds.join(','));
   if (s.userIds?.length) p.set('users', s.userIds.join(','));
-  if (!s.excludeBots) p.set('bots', '0');
+  // Shown is the default; only encode the non-default "exclude bots" choice (bots=1).
+  if (s.excludeBots) p.set('bots', '1');
   // Hidden is the default; only encode the non-default "show stale" choice (stale=0).
   if (!s.excludeStale) p.set('stale', '0');
   if (s.preset === 'custom' && s.customFrom) p.set('from', s.customFrom);

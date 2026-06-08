@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   ActiveReviewsResponse,
   ClaudeReview,
+  ClaudeReviewListResponse,
   ClaudeReviewModel,
   ClaudeReviewResponse,
   ClaudeReviewStatusResponse,
@@ -116,6 +117,17 @@ export function useActiveClaudeReviews(enabled: boolean) {
     queryFn: api.activeClaudeReviews,
     enabled,
     refetchInterval: 2500,
+  });
+}
+
+// All Claude reviews across the timeline window (one entry per PR — its latest
+// succeeded run), for the history modal. Gated by `enabled` so it only fetches
+// when the modal is open.
+export function useAllClaudeReviews(enabled: boolean) {
+  return useQuery<ClaudeReviewListResponse>({
+    queryKey: ['claude-reviews', 'all'],
+    queryFn: api.listAllClaudeReviews,
+    enabled,
   });
 }
 

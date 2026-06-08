@@ -2,9 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DERIVED_STATES,
-  PR_STATUSES,
   type DerivedState,
-  type PrStatus,
   type Repo,
   type User,
 } from '@pierre-review/shared';
@@ -16,15 +14,10 @@ import { DERIVED_STATE_META } from '../lib/ui.js';
 import { EventSelectPanel } from './EventSelectPanel.js';
 import { RepoSearch } from './RepoSearch.js';
 import { RepoSelectPanel } from './RepoSelectPanel.js';
+import { StatusSelectPanel } from './StatusSelectPanel.js';
 import { UserSelectPanel, type MemberSection } from './UserSelectPanel.js';
 
 const PRESETS: Exclude<RangePreset, 'custom'>[] = ['7d', '14d', '30d', '90d'];
-const STATUS_LABELS: Record<PrStatus, string> = {
-  draft: 'Draft',
-  open: 'Open',
-  merged: 'Merged',
-  closed: 'Closed',
-};
 
 function Chip({
   active,
@@ -123,12 +116,28 @@ export function FilterBar(): JSX.Element {
   const qc = useQueryClient();
   const removeRepo = useMutation({
     mutationFn: (id: number) => api.deleteRepo(id),
+    // Optimistically drop the row from the shared ['repos'] cache so it disappears
+    // instantly (this cache also backs useRepos() and SyncStatus's poller). Cancel
+    // in-flight refetches first, snapshot for rollback, then filter the row out.
+    onMutate: async (id: number) => {
+      await qc.cancelQueries({ queryKey: ['repos'] });
+      const previous = qc.getQueryData<Repo[]>(['repos']);
+      qc.setQueryData<Repo[]>(['repos'], (old) => old?.filter((r) => r.id !== id));
+      return { previous };
+    },
+    // DELETE 409s while a sync runs — on any error, restore the snapshot so the row
+    // reappears rather than vanishing optimistically forever.
+    onError: (_e, _id, ctx) => {
+      if (ctx?.previous) qc.setQueryData(['repos'], ctx.previous);
+    },
     onSuccess: (_data, id) => {
       // Drop the deleted repo from the active filter so its now-gone entries
       // don't linger as a selected-but-missing id (empty → null = "all").
       const cur = useFilters.getState();
       const next = cur.repoIds?.filter((r) => r !== id);
       cur.setRepoIds(next && next.length ? next : null);
+    },
+    onSettled: () => {
       for (const key of ['repos', 'timeline', 'open-prs', 'users', 'my-turn', 'me']) {
         void qc.invalidateQueries({ queryKey: [key] });
       }
@@ -277,6 +286,8 @@ export function FilterBar(): JSX.Element {
         }`}
       >
         <Section label="Repos">
+          {/* removePending is hard-false: optimistic removal drops the row instantly,
+              so the list no longer freezes every remove button during a delete. */}
           <RepoSelectPanel
             repos={repos ?? []}
             repoIds={f.repoIds}
@@ -284,7 +295,7 @@ export function FilterBar(): JSX.Element {
             onOnly={showOnlyRepo}
             onShowAll={() => f.setRepoIds(null)}
             onRemove={confirmRemoveRepo}
-            removePending={removeRepo.isPending}
+            removePending={false}
           />
           {removeRepo.error && (
             <span
@@ -305,15 +316,9 @@ export function FilterBar(): JSX.Element {
             userIds={f.userIds}
             maintainerIds={maintainerIds}
             onApply={(ids) => f.setUserIds(ids)}
+            excludeBots={f.excludeBots}
+            onExcludeBotsChange={f.setExcludeBots}
           />
-          <label className="flex items-center gap-1 text-xs text-gray-500">
-            <input
-              type="checkbox"
-              checked={f.excludeBots}
-              onChange={(e) => f.setExcludeBots(e.target.checked)}
-            />
-            exclude bots
-          </label>
         </Section>
 
         <Section label="Range">
@@ -333,15 +338,11 @@ export function FilterBar(): JSX.Element {
         </Section>
 
         <Section label="Status">
-          {PR_STATUSES.map((s: PrStatus) => (
-            <Chip
-              key={s}
-              active={f.prStatuses.includes(s)}
-              onClick={() => f.togglePrStatus(s)}
-            >
-              {STATUS_LABELS[s]}
-            </Chip>
-          ))}
+          <StatusSelectPanel
+            statuses={f.prStatuses}
+            onToggle={f.togglePrStatus}
+            onSet={f.setPrStatuses}
+          />
         </Section>
 
         <Section label="Stale">

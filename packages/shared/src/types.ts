@@ -533,17 +533,13 @@ export interface TimelineQuery {
 // PR and returns structured findings. Claude's output is read-only reference; the
 // user authors their own review body/verdict and ticks which findings to post.
 
-export type ClaudeReviewModel =
-  | 'claude-opus-4-8'
-  | 'claude-sonnet-4-6'
-  | 'claude-haiku-4-5';
+export type ClaudeReviewModel = 'claude-opus-4-8' | 'claude-sonnet-4-6';
 
 // Runtime list for the model picker (frontend bundles shared; the backend keeps a
 // local copy and only `import type`s from here — shared isn't shipped at runtime).
 export const CLAUDE_REVIEW_MODELS: ClaudeReviewModel[] = [
   'claude-opus-4-8',
   'claude-sonnet-4-6',
-  'claude-haiku-4-5',
 ];
 
 export type ClaudeReviewStatus =
@@ -639,6 +635,29 @@ export interface ClaudeReviewSummary {
   finishedAt: string | null;
 }
 
+// One entry in the cross-PR "prior Claude reviews" list (GET /api/claude-reviews):
+// a PR's most-recent SUCCEEDED review, enriched with its PR/repo coordinates so
+// the list can render and deep-link without a second fetch.
+export interface ClaudeReviewListItem {
+  reviewId: number;
+  prId: number;
+  repoFullName: string; // `${owner}/${name}`
+  prNumber: number;
+  prTitle: string;
+  prState: PrState;
+  // Claude's high-level summary (read-only).
+  summary: string | null;
+  verdict: ClaudeReviewVerdict | null;
+  headSha: string;
+  status: ClaudeReviewStatus;
+  createdAt: string; // ISO-8601
+  finishedAt: string | null; // ISO-8601 — "last run" time
+}
+
+export interface ClaudeReviewListResponse {
+  reviews: ClaudeReviewListItem[];
+}
+
 export type ClaudeAuthStatus = 'ok' | 'none';
 
 export interface ClaudeReviewResponse {
@@ -676,6 +695,10 @@ export type ClaudeReviewPhase =
 export interface ClaudeReviewProgress {
   phase: ClaudeReviewPhase;
   message?: string;
+  // A newest-last rolling log of short, human-readable lines describing what the
+  // agent is doing right now (tool calls, brief text snippets). Live progress
+  // only — NOT persisted to the DB; rides the /status poll while running.
+  recentActivity?: string[];
 }
 
 export interface ClaudeReviewStatusResponse {

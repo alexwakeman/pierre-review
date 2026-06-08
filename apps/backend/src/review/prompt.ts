@@ -118,6 +118,7 @@ Decide how far to look using this heuristic:
 When in doubt about whether something exported is used elsewhere, look — a wrong signature change with stale callers is a blocker, not a nit.
 
 # What you're given
+- The COMPLETE unified diff for this PR is inlined in the user message. Use it directly — do NOT run \`git diff\`/\`git show\` to re-derive the change, and do NOT Read files just to see the diff. Explore the worktree only for context the diff doesn't show (callers, dependents, type definitions, surrounding code).
 - Noise files (lockfiles and generated/vendored artifacts) have ALREADY been stripped from the diff. Do not ask for them and do not flag their absence.
 - Line numbers for anchoring findings refer to the NEW-file (RIGHT) side of the diff unless you are pointing at a removed/old line.
 
@@ -226,7 +227,7 @@ export function buildUserPrompt(input: {
   lines.push('## Diff');
   lines.push('');
   lines.push(
-    'This unified diff has already had noise files removed. Line numbers you cite for anchoring refer to the NEW-file (RIGHT) side unless you are pointing at a deleted line (LEFT).',
+    'The COMPLETE unified diff for this PR is provided in full below (noise files already removed). Use it directly — do NOT run `git diff` / `git show` to re-derive it, and do NOT Read files just to see the diff. Explore the worktree only for context the diff does not show: callers, dependents, type definitions, and surrounding code. Line numbers you cite for anchoring refer to the NEW-file (RIGHT) side unless you are pointing at a deleted line (LEFT).',
   );
   lines.push('');
   lines.push('```diff');

@@ -124,8 +124,9 @@ export const config = {
   defaultReviewModel: (process.env.DEFAULT_REVIEW_MODEL as
     | ClaudeReviewModel
     | undefined) ?? 'claude-sonnet-4-6',
-  // Per-run caps (cost/disk/time runaway guards).
-  reviewMaxTurns: intFromEnv('REVIEW_MAX_TURNS', 40),
+  // Per-run caps (cost/disk/time runaway guards). The diff is inlined in full, so
+  // reviews need far fewer turns than the old default; 30 is still generous.
+  reviewMaxTurns: intFromEnv('REVIEW_MAX_TURNS', 30),
   reviewBudgetUsd: floatFromEnv('REVIEW_BUDGET_USD', 1.0),
   // At most one review per PR; this caps concurrent reviews across all PRs.
   reviewConcurrency: intFromEnv('REVIEW_CONCURRENCY', 1),
