@@ -667,4 +667,6 @@ added the `accounts` table + `accountId` + composite uniques; `0009`/`0010` adde
 storage. The Postgres baseline (`migrations-pg/0000_*` + `0001`) is a squash of the
 current schema — cloud starts empty (synced data is regenerable; no SQLite→Postgres
 migration). **Docs:** `docs/SYNC.md` (sync pipeline), `docs/DEPLOY-RAILWAY.md`,
-`docs/GITHUB-APP-SETUP.md`, `docs/LOCAL-CLOUD-TESTING.md`, `docs/RELEASE.md`.
+`docs/GITHUB-APP-SETUP.md`, `docs/LOCAL-CLOUD-TESTING.md`,
+`docs/DOMAIN-REPUTATION.md` (Chrome Safe Browsing warning + Search Console),
+`docs/RELEASE.md`.

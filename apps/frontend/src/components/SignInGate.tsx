@@ -1,3 +1,14 @@
+import { useEffect, useState } from 'react';
+
+// The OAuth callback (api/routes/auth.ts) redirects here with ?auth=<reason>
+// when a sign-in doesn't complete, instead of dumping a raw JSON error. Map each
+// reason to a friendly line; unknown reasons fall back to the generic failure.
+const AUTH_MESSAGES: Record<string, string> = {
+  expired: 'Your sign-in link expired. Please sign in again.',
+  failed: 'We couldn’t complete sign-in with GitHub. Please try again.',
+  error: 'Something went wrong reaching GitHub. Please try again in a moment.',
+};
+
 /**
  * Full-screen dark gate shown to signed-out CLOUD visitors who land directly on
  * `/app`. In local mode `/api/me` never 401s, so this never renders. The
@@ -5,6 +16,20 @@
  * OAuth login route), NOT a fetch — the backend redirects through GitHub.
  */
 export function SignInGate(): JSX.Element {
+  // Read the failed-sign-in reason once, then strip ?auth= from the URL so a
+  // manual reload doesn't keep showing a stale message.
+  const [authMessage] = useState<string | null>(() => {
+    const reason = new URLSearchParams(window.location.search).get('auth');
+    if (!reason) return null;
+    return AUTH_MESSAGES[reason] ?? 'We couldn’t complete sign-in. Please try again.';
+  });
+  useEffect(() => {
+    if (!authMessage) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('auth');
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+  }, [authMessage]);
+
   return (
     <div className="flex h-full min-h-screen w-full items-center justify-center bg-gray-950 px-4 text-gray-100">
       <div className="flex w-full max-w-sm flex-col items-center rounded-2xl border border-gray-800 bg-gray-900/40 px-8 py-10 text-center shadow-xl">
@@ -15,6 +40,14 @@ export function SignInGate(): JSX.Element {
           Sign in to view your team&rsquo;s GitHub activity — pull requests,
           reviews, and what needs your attention.
         </p>
+        {authMessage && (
+          <div
+            role="alert"
+            className="mt-6 w-full rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+          >
+            {authMessage}
+          </div>
+        )}
         <a
           href="/api/auth/login"
           className="mt-7 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-offset-2 focus:ring-offset-gray-950"

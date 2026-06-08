@@ -164,6 +164,10 @@ automatically — there's no external registrar or manual `CNAME` step.
   (everyone re-signs-in). Do **not** rotate `ENCRYPTION_KEY` without re-encrypting
   stored tokens — a new key can't decrypt old tokens (users would need to re-auth).
 - **Migrations on redeploy** are idempotent; the migrator only applies new ones.
+- **Chrome "Dangerous site" warning on sign-in** (seen most on work/org-managed
+  profiles, while personal profiles work fine): this is Google Safe Browsing
+  reacting to a new low-reputation domain, not your server. See
+  [DOMAIN-REPUTATION.md](./DOMAIN-REPUTATION.md) to diagnose and clear it.
 
 See [LOCAL-CLOUD-TESTING.md](./LOCAL-CLOUD-TESTING.md) to exercise this whole
 flow on your laptop before deploying.

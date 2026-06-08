@@ -48,6 +48,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // Verify state → exchange code for a token → fetch the user → upsert account →
   // set session → 302 to the app.
   app.get('/api/auth/callback', async (req, reply) => {
+    // Already signed in? The callback URL carries a one-time ?code= that GitHub
+    // expires in ~10 min and invalidates on first use. A back-button, a restored
+    // tab, or a Chrome profile switch can re-request this exact URL; re-running the
+    // exchange would then fail on the already-consumed code ("code incorrect or
+    // expired"). Short-circuit a valid session straight to the app instead.
+    if (req.session.get('accountId') != null) {
+      return reply.redirect('/app');
+    }
+
     const { code, state } = req.query as { code?: string; state?: string };
     const rawCookie = req.cookies.pierre_oauth_state;
     const unsigned = rawCookie
@@ -56,9 +65,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     reply.clearCookie('pierre_oauth_state', { path: '/' });
 
     if (!code || !state || !unsigned.valid || unsigned.value !== state) {
-      return reply
-        .code(400)
-        .send({ error: 'BadRequest', message: 'Invalid or expired OAuth state.' });
+      // Stale/replayed callback (state cookie expired or CSRF mismatch). Bounce
+      // back so the user starts a fresh sign-in — never render raw JSON to a human.
+      return reply.redirect('/app?auth=expired');
     }
 
     // Exchange the code for a user access token.
@@ -76,17 +85,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       });
       const json = (await res.json()) as OAuthTokenResponse;
       if (!json.access_token) {
-        return reply.code(401).send({
-          error: 'Unauthorized',
-          message: `OAuth token exchange failed: ${json.error_description ?? json.error ?? 'no token'}`,
-        });
+        req.log.warn(
+          { err: json.error_description ?? json.error },
+          'oauth token exchange returned no token',
+        );
+        return reply.redirect('/app?auth=failed');
       }
       token = json.access_token;
     } catch (err) {
-      return reply.code(502).send({
-        error: 'GitHubError',
-        message: `OAuth exchange request failed: ${err instanceof Error ? err.message : err}`,
-      });
+      req.log.error({ err }, 'oauth token exchange request failed');
+      return reply.redirect('/app?auth=error');
     }
 
     // Identify the user.
@@ -100,16 +108,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         },
       });
       if (!res.ok) {
-        return reply
-          .code(401)
-          .send({ error: 'Unauthorized', message: 'Failed to fetch GitHub user.' });
+        req.log.warn({ status: res.status }, 'failed to fetch github user');
+        return reply.redirect('/app?auth=failed');
       }
       user = (await res.json()) as GhUserResponse;
     } catch (err) {
-      return reply.code(502).send({
-        error: 'GitHubError',
-        message: `Fetching GitHub user failed: ${err instanceof Error ? err.message : err}`,
-      });
+      req.log.error({ err }, 'fetching github user failed');
+      return reply.redirect('/app?auth=error');
     }
 
     const account = await upsertCloudAccount({
