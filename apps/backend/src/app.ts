@@ -37,6 +37,46 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
   });
 
+  // Cloud only: canonicalise the host and pin HTTPS. Local mode runs on
+  // http://127.0.0.1, where HSTS would wrongly pin localhost to HTTPS and a www
+  // redirect is meaningless — so both are cloud-gated. Registered first so it runs
+  // before everything else (the redirect short-circuits before CORS/routing).
+  if (config.isCloud) {
+    let canonicalHost = '';
+    try {
+      // hostname (not host) so a configured port never enters the comparison.
+      canonicalHost = new URL(config.appBaseUrl).hostname.toLowerCase();
+    } catch {
+      canonicalHost = '';
+    }
+
+    app.addHook('onRequest', async (req, reply) => {
+      // HSTS: keep browsers on HTTPS for this domain. Honored only over HTTPS
+      // (Railway terminates TLS); ignored on plain HTTP. `includeSubDomains` also
+      // covers www. No `preload` — it's hard to undo. HSTS_MAX_AGE=0 disables it.
+      if (config.hstsMaxAge > 0) {
+        reply.header(
+          'Strict-Transport-Security',
+          `max-age=${config.hstsMaxAge}; includeSubDomains`,
+        );
+      }
+
+      // Canonical host: 301 www.<apex> → <apex> so the OAuth round-trip and the
+      // session cookie stay on a single origin (and crawlers see one canonical
+      // URL). The HSTS header set above still rides on the redirect response.
+      if (canonicalHost) {
+        // Strip any :port from the Host header before comparing hostnames.
+        const host = (req.headers.host ?? '').toLowerCase().split(':')[0] ?? '';
+        if (
+          host !== canonicalHost &&
+          host.replace(/^www\./, '') === canonicalHost
+        ) {
+          return reply.redirect(`${config.appBaseUrl}${req.url}`, 301);
+        }
+      }
+    });
+  }
+
   // CORS: in cloud mode lock to the app's own origin and allow credentials so the
   // session cookie rides along; local mode reflects any origin (dev convenience).
   await app.register(cors, {

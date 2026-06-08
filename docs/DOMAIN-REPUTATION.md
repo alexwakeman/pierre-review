@@ -98,14 +98,20 @@ New-domain scrutiny eases with age, traffic, and signal hygiene:
   `https://pierre-review.com/` for indexing. A real, crawlable marketing page (you
   have one at `/`) is a strong legitimacy signal.
 - **Keep TLS clean.** Railway provisions a valid cert automatically; ensure **no
-  mixed content** (the SPA calls the API with relative `/api`, so this should hold)
-  and consider an **HSTS** header.
+  mixed content** (the SPA calls the API with relative `/api`, so this should hold).
+  An **HSTS** header is now sent automatically in cloud mode (`Strict-Transport-
+  Security: max-age=31536000; includeSubDomains`, set in `app.ts`); tune it with
+  `HSTS_MAX_AGE` (seconds; `0` disables). `preload` is intentionally **not** sent —
+  it is hard to undo; opt in manually only once the domain is proven.
 - **Don't serve error/odd bodies on auth URLs.** Already handled — the callback
   redirects on failure (step note at top). Keep it that way.
-- **Single canonical host.** `www` redirects to the apex and `APP_BASE_URL` matches
-  the host users land on (see [DEPLOY-RAILWAY.md §4](./DEPLOY-RAILWAY.md)), so the
-  OAuth round-trip and cookies stay on one origin — fewer redirect hops for
-  heuristics to distrust.
+- **Single canonical host.** The server now **301-redirects `www.<apex>` → the
+  apex** automatically in cloud mode (`app.ts` derives the apex from
+  `APP_BASE_URL`), so the OAuth round-trip and cookies stay on one origin — fewer
+  redirect hops for heuristics to distrust. Keep `APP_BASE_URL` set to the apex
+  users land on (see [DEPLOY-RAILWAY.md §4](./DEPLOY-RAILWAY.md)); if you add a
+  `www` custom domain in Railway, point it at the same service so its TLS cert is
+  provisioned (the redirect then sends visitors on to the apex).
 
 ---
 

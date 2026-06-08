@@ -108,6 +108,11 @@ export const config = {
   sessionSecret: process.env.SESSION_SECRET ?? '',
   // 32-byte (64-hex) key for AES-256-GCM encryption of stored access tokens.
   encryptionKey: process.env.ENCRYPTION_KEY ?? '',
+  // HSTS max-age (seconds) for the cloud public origin. Sent only in cloud mode
+  // and honored only over HTTPS (Railway terminates TLS). Default 1 year. Set
+  // HSTS_MAX_AGE=0 as a kill switch. `preload` is intentionally NOT sent — it is
+  // hard to undo; opt in manually once the domain is proven.
+  hstsMaxAge: intFromEnv('HSTS_MAX_AGE', 31536000),
 
   // ---- Claude Review (agentic PR review; opt-in, LOCAL-ONLY) ----
   // OFF by default: the feature spends real money / Agent-SDK credits per run.
