@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ClaudeReviewPhase } from '@pierre-review/shared';
 import { useActiveClaudeReviews } from '../hooks/useClaudeReview.js';
 import { useMe } from '../hooks/useTriage.js';
 import { useFilters } from '../store/filters.js';
+import { playReviewComplete } from '../lib/sound.js';
 
 // A tracked review for the banner. We keep finished runs around (done:true) until
 // the user dismisses them, so a review that completes while you're elsewhere is
@@ -52,6 +53,12 @@ export function ClaudeReviewBanner(): JSX.Element | null {
   const [tracked, setTracked] = useState<Record<number, BannerEntry>>({});
   const [dismissed, setDismissed] = useState<Record<number, true>>({});
 
+  // Previously-active review ids, to detect a running → gone transition (a run
+  // completed) so we can play the completion chime globally — even if the user
+  // navigated away from the Claude Review tab. Seeded on the first poll so an
+  // already-running review on mount doesn't immediately "complete".
+  const prevActiveIds = useRef<Set<number> | null>(null);
+
   // A content key so the merge effect only runs when the active set / phases
   // actually change (not on every poll tick).
   const activeKey = (data?.reviews ?? [])
@@ -60,9 +67,26 @@ export function ClaudeReviewBanner(): JSX.Element | null {
 
   useEffect(() => {
     const active = data?.reviews ?? [];
+    const activeIdSet = new Set(active.map((r) => r.reviewId));
+
+    // Completion chime: any id that was active last poll but isn't now finished.
+    // Skip the very first poll (prevActiveIds null) so a run already in flight on
+    // mount doesn't chime spuriously.
+    const prevIds = prevActiveIds.current;
+    if (prevIds != null) {
+      let completed = false;
+      for (const id of prevIds) {
+        if (!activeIdSet.has(id)) {
+          completed = true;
+          break;
+        }
+      }
+      if (completed) playReviewComplete();
+    }
+    prevActiveIds.current = activeIdSet;
+
     setTracked((prev) => {
       const next: Record<number, BannerEntry> = { ...prev };
-      const activeIds = new Set(active.map((r) => r.reviewId));
       for (const r of active) {
         next[r.reviewId] = {
           reviewId: r.reviewId,
@@ -76,7 +100,7 @@ export function ClaudeReviewBanner(): JSX.Element | null {
       }
       // A tracked review that's no longer active has finished.
       for (const e of Object.values(next)) {
-        if (!activeIds.has(e.reviewId) && !e.done) {
+        if (!activeIdSet.has(e.reviewId) && !e.done) {
           next[e.reviewId] = { ...e, done: true };
         }
       }

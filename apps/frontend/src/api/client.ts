@@ -2,6 +2,7 @@ import type {
   ActiveReviewsResponse,
   ClaudeKeyResponse,
   ClaudeReview,
+  ClaudeReviewListResponse,
   ClaudeReviewModel,
   ClaudeReviewResponse,
   ClaudeReviewStatusResponse,
@@ -168,6 +169,10 @@ export const api = {
     ),
   activeClaudeReviews: () =>
     get<ActiveReviewsResponse>('/api/claude-reviews/active'),
+  // One entry per PR (its most-recent succeeded review) within the timeline
+  // window, for the Claude Reviews history modal.
+  listAllClaudeReviews: () =>
+    get<ClaudeReviewListResponse>('/api/claude-reviews'),
   postClaudeReview: (
     reviewId: number,
     userVerdict: ClaudeReviewVerdict,

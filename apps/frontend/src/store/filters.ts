@@ -160,6 +160,7 @@ export interface FilterState {
   toggleCategory: (c: EventCategory) => void;
   setCategories: (c: EventCategory[]) => void;
   togglePrStatus: (s: PrStatus) => void;
+  setPrStatuses: (s: PrStatus[]) => void;
   toggleDerivedState: (s: DerivedState) => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
@@ -268,7 +269,10 @@ function freshFilterDefaults(): FilterDefaults {
   return {
     repoIds: null,
     userIds: null,
-    excludeBots: true,
+    // Bots are SHOWN on a fresh load (default OFF); the user can hide them via the
+    // Members dropdown, and that non-default choice round-trips as bots=1 (see
+    // useUrlState). This is the baseline the URL serializer diffs against.
+    excludeBots: false,
     // Stale open PRs (no commit/comment/review in the active range) are clutter for
     // situational awareness, so they're HIDDEN on a fresh load. This is the baseline
     // the URL serializer diffs against; turning the filter off round-trips as stale=0.
@@ -336,6 +340,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   toggleCategory: (c) => set((s) => ({ categories: toggle(s.categories, c) })),
   setCategories: (c) => set({ categories: c }),
   togglePrStatus: (st) => set((s) => ({ prStatuses: toggle(s.prStatuses, st) })),
+  setPrStatuses: (s) => set({ prStatuses: s }),
   toggleDerivedState: (st) =>
     set((s) => ({ derivedStates: toggle(s.derivedStates, st) })),
   selectPr: (id) => set({ selectedPrId: id, selectedThreadId: null }),

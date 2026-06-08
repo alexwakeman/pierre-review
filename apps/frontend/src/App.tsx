@@ -7,6 +7,7 @@ import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
 import { TimelineSearch } from './components/TimelineSearch.js';
 import { HelpModal } from './components/HelpModal.js';
+import { ClaudeReviewsModal } from './components/ClaudeReviewsModal.js';
 import { SignInGate } from './components/SignInGate.js';
 import { useUrlState } from './hooks/useUrlState.js';
 import { useLocalStorage } from './hooks/useLocalStorage.js';
@@ -15,6 +16,7 @@ import { useDetailCacheReconciler } from './hooks/useDetailCache.js';
 import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
 import { ApiError, api } from './api/client.js';
+import { profileUrl } from './lib/ui.js';
 
 function useDarkMode(): [boolean, () => void] {
   const [dark, setDark] = useState(
@@ -41,8 +43,14 @@ export default function App(): JSX.Element {
   useDetailCacheReconciler();
   const [dark, toggleDark] = useDarkMode();
   const [helpOpen, setHelpOpen] = useState(false);
+  const [reviewsOpen, setReviewsOpen] = useState(false);
 
   const isCloud = me.data?.deploymentMode === 'cloud';
+  // The signed-in GitHub user (local: synthesized from `gh api user`; cloud: the
+  // OAuth user). Can be null even when authenticated (e.g. local + offline), so
+  // every read below is guarded.
+  const meUser = me.data?.user ?? null;
+  const claudeReviewEnabled = me.data?.claudeReviewEnabled ?? false;
   const onSignOut = (): void => {
     void api.logout().finally(() => window.location.assign('/'));
   };
@@ -102,9 +110,64 @@ export default function App(): JSX.Element {
         <h1 className="brand-title" title="Pierre — a play on “PR”">
           Pierre
         </h1>
+        {meUser != null && (
+          <a
+            href={profileUrl(meUser.login)}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:underline dark:text-gray-300"
+            title={`Signed in as ${meUser.login}`}
+          >
+            {meUser.avatarUrl != null ? (
+              <img
+                src={meUser.avatarUrl}
+                alt={meUser.login}
+                width={20}
+                height={20}
+                className="shrink-0 rounded-full"
+                style={{ width: 20, height: 20 }}
+              />
+            ) : (
+              <span
+                className="flex shrink-0 items-center justify-center rounded-full bg-gray-300 text-[9px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                style={{ width: 20, height: 20 }}
+              >
+                {meUser.login.slice(0, 2).toUpperCase()}
+              </span>
+            )}
+            <span>{meUser.login}</span>
+          </a>
+        )}
         <div className="ml-auto flex items-center gap-3">
           <TimelineSearch />
           <SyncStatus />
+          {claudeReviewEnabled && (
+            <button
+              type="button"
+              onClick={() => setReviewsOpen(true)}
+              className="flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs font-semibold hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+              title="Claude reviews — history of agentic PR reviews"
+              aria-label="Claude reviews"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="13"
+                height="13"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M9 2h6a1 1 0 0 1 1 1v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1z" />
+                <path d="M9 4h6" />
+                <path d="M9 11h6" />
+                <path d="M9 15h4" />
+              </svg>
+              Claude Reviews
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setHelpOpen(true)}
@@ -151,6 +214,10 @@ export default function App(): JSX.Element {
       </header>
 
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+      <ClaudeReviewsModal
+        open={reviewsOpen}
+        onClose={() => setReviewsOpen(false)}
+      />
 
       <FilterBar />
       <OpenPrsStrip />

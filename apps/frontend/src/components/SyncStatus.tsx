@@ -58,10 +58,12 @@ export function SyncStatus(): JSX.Element | null {
   // True while a user-initiated Cancel is in flight (the backend stops the sync
   // and removes initial-load repos before the request resolves).
   const [cancelling, setCancelling] = useState(false);
-  // Which repos the open modal tracks: a single id (the just-added repo, so the
+  // Which repos the open modal tracks: a set of just-added repo ids (so the
   // add-flow modal ignores a concurrent scheduled sync of the OTHER repos that
-  // would otherwise bounce their bars) or null = all repos (a manual sync).
-  const [modalScopeId, setModalScopeId] = useState<number | null>(null);
+  // would otherwise bounce their bars). An EMPTY set means "all repos" (a manual
+  // sync) — the same null-sentinel semantics the single id used to carry. Adds in
+  // quick succession accumulate into this set so each new repo gets its own row.
+  const [modalScopeIds, setModalScopeIds] = useState<number[]>([]);
 
   // Dedicated observer on the shared ['repos'] cache that polls for fresh
   // sync timestamps.
@@ -82,13 +84,15 @@ export function SyncStatus(): JSX.Element | null {
     queryFn: () => Promise.all((repos ?? []).map((r) => api.syncStatus(r.id))),
     refetchInterval: 1500,
   });
-  // Restrict the modal + completion tracking to the in-scope repos (just the new
-  // one on an add; everything on a manual sync). scopedStatuses stays `undefined`
-  // until the first poll lands so the modal doesn't briefly flash "done".
+  // Restrict the modal + completion tracking to the in-scope repos (just the
+  // freshly-added one(s) on an add; everything on a manual sync). An empty scope
+  // set is the "all repos" sentinel. scopedStatuses stays `undefined` until the
+  // first poll lands so the modal doesn't briefly flash "done".
+  const scopeSet = new Set(modalScopeIds);
   const scopedRepos =
-    modalScopeId == null
+    scopeSet.size === 0
       ? repos ?? []
-      : (repos ?? []).filter((r) => r.id === modalScopeId);
+      : (repos ?? []).filter((r) => scopeSet.has(r.id));
   const scopedIds = new Set(scopedRepos.map((r) => r.id));
   const scopedStatuses =
     statuses == null ? undefined : statuses.filter((s) => scopedIds.has(s.repoId));
@@ -193,10 +197,22 @@ export function SyncStatus(): JSX.Element | null {
   useEffect(() => {
     if (syncModalSignal === prevSyncSignal.current) return;
     prevSyncSignal.current = syncModalSignal;
-    setModalScopeId(syncModalRepoId); // add-flow: show ONLY the just-added repo
-    setModalOpen(true);
-    setSyncing(true);
-    beginSyncRound();
+    if (syncModalRepoId == null) return; // defensive: requestSyncModal always sets one
+    if (modalOpen) {
+      // A round is already in flight: MERGE the new repo into the scope so it gets
+      // its own progress row, but do NOT call beginSyncRound() — that resets
+      // seenRunning / cancels the auto-close and would stomp the completion
+      // tracking for repos already being watched this round. The completion effect
+      // keys off runningCount===0 across the (now-larger) scope, so it naturally
+      // waits for ALL scoped repos before declaring the round done.
+      setModalScopeIds((ids) => (ids.includes(syncModalRepoId) ? ids : [...ids, syncModalRepoId]));
+    } else {
+      // Modal closed: start a fresh round scoped to just this repo.
+      setModalScopeIds([syncModalRepoId]);
+      setModalOpen(true);
+      setSyncing(true);
+      beginSyncRound();
+    }
     void qc.invalidateQueries({ queryKey: ['repos'] });
     void qc.invalidateQueries({ queryKey: ['sync-status'] });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -209,7 +225,7 @@ export function SyncStatus(): JSX.Element | null {
   const syncNow = async (full = false): Promise<void> => {
     setSyncing(true);
     setModalOpen(true);
-    setModalScopeId(null); // manual sync shows ALL repos
+    setModalScopeIds([]); // empty = manual sync shows ALL repos
     beginSyncRound();
     await Promise.allSettled(repos.map((r) => api.syncRepo(r.id, full)));
     void qc.invalidateQueries({ queryKey: ['repos'] });

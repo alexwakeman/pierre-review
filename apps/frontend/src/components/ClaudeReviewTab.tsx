@@ -13,6 +13,7 @@ import type {
 } from '@pierre-review/shared';
 import { CLAUDE_REVIEW_MODELS } from '@pierre-review/shared';
 import { formatDate } from '../lib/ui.js';
+import { unlockReviewSound } from '../lib/sound.js';
 import {
   useCancelReview,
   useClaudeReview,
@@ -116,6 +117,30 @@ const PHASE_LABEL: Record<string, string> = {
   persisting: 'Saving findings',
 };
 
+// Live activity feed shown under the running spinner — the agent's rolling log
+// (newest-last). Auto-scrolls to the bottom as new lines stream in. Renders
+// nothing when there are no lines.
+function ActivityLog({ lines }: { lines: string[] }): JSX.Element | null {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el != null) el.scrollTop = el.scrollHeight;
+  }, [lines]);
+  if (lines.length === 0) return null;
+  return (
+    <div
+      ref={ref}
+      className="mt-2 max-h-32 overflow-y-auto rounded border border-gray-100 bg-gray-50 px-2 py-1.5 font-mono text-[11px] leading-snug text-gray-500 dark:border-gray-800 dark:bg-gray-900/60 dark:text-gray-400"
+    >
+      {lines.map((l, i) => (
+        <div key={i} className="whitespace-pre-wrap break-words">
+          {l === '' ? ' ' : l}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Per-line colour for a rendered diff hunk.
 function hunkLineClass(line: string): string {
   if (line.startsWith('@@')) return 'text-violet-500';
@@ -132,6 +157,8 @@ function FindingRow({
   finding,
   editable,
   prUrl,
+  repoFullName,
+  headSha,
   posting,
   postError,
   onToggle,
@@ -141,6 +168,11 @@ function FindingRow({
   finding: ClaudeFinding;
   editable: boolean;
   prUrl: string;
+  // "owner/name" — for building a blob permalink to the finding's line.
+  repoFullName: string;
+  // The reviewed head SHA (run's headSha, falling back to the PR head). Pins the
+  // blob link so the line number stays correct. null ⇒ no blob link.
+  headSha: string | null;
   posting: boolean;
   postError: string | null;
   onToggle: (included: boolean) => void;
@@ -177,18 +209,36 @@ function FindingRow({
 
   const anchorLabel =
     finding.line != null ? `${finding.path}:${finding.line}` : finding.path;
-  // Deep-link into the PR's "Files changed" diff at this file (and line). GitHub
-  // anchors a file by the SHA-256 of its path; append R<line>/L<line> for the side.
-  const lineSuffix =
-    finding.line != null
-      ? `${finding.side === 'LEFT' ? 'L' : 'R'}${finding.line}`
-      : '';
-  const lineHref = `${prUrl}/files#diff-${finding.diffAnchorId}${lineSuffix}`;
   const isPosted = finding.postedAt != null;
   const commentUrl =
     finding.githubCommentId != null
       ? `${prUrl}#discussion_r${finding.githubCommentId}`
       : null;
+
+  // File-level "Files changed" diff anchor (GitHub hashes the path to SHA-256).
+  // Reliable at the file level; the per-line R<n>/L<n> fragment is NOT (the Files
+  // tab is virtualized/collapsed), so we use it only as a fallback.
+  const fileDiffHref = `${prUrl}/files#diff-${finding.diffAnchorId}`;
+
+  // A blob permalink at the reviewed head SHA: non-virtualized, so #L<line> is
+  // honoured reliably, and pinning the SHA keeps the line number correct. Only
+  // valid for a RIGHT-side line (the left/base side isn't this blob).
+  const blobHref =
+    headSha != null && finding.line != null && finding.side === 'RIGHT'
+      ? `https://github.com/${repoFullName}/blob/${headSha}/${finding.path
+          .split('/')
+          .map(encodeURIComponent)
+          .join('/')}#L${finding.line}`
+      : null;
+
+  // Primary code-anchor link, in reliability order:
+  //   1. posted comment permalink (most reliable)
+  //   2. blob permalink at head (RIGHT-side line)
+  //   3. file-level Files-tab diff anchor (LEFT-side / no line / no head SHA)
+  const primaryHref = commentUrl ?? blobHref ?? fileDiffHref;
+  // Offer the file-level diff as a small secondary affordance when the primary is
+  // the blob (so the in-diff view is still one click away).
+  const secondaryDiffHref = blobHref != null ? fileDiffHref : null;
   const canPostComment = editable && finding.anchored && finding.line != null;
 
   const copy = (): void => {
@@ -277,17 +327,34 @@ function FindingRow({
             )}
           </div>
 
-          {/* Code anchor → deep-links into this line in the PR's diff. */}
-          <div className="mt-0.5 font-mono text-xs">
+          {/* Code anchor → the most reliable deep-link to this finding's line. */}
+          <div className="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-xs">
             <a
-              href={lineHref}
+              href={primaryHref}
               target="_blank"
               rel="noreferrer noopener"
               className="text-blue-600 hover:underline dark:text-blue-400"
-              title="Open this line in the PR diff on GitHub"
+              title={
+                commentUrl != null
+                  ? 'Open this posted comment on GitHub'
+                  : blobHref != null
+                    ? 'Open this line in the file at the reviewed commit'
+                    : 'Open this file in the PR diff on GitHub'
+              }
             >
               {anchorLabel}
             </a>
+            {secondaryDiffHref != null && (
+              <a
+                href={secondaryDiffHref}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-[10px] font-sans text-gray-400 hover:text-gray-600 hover:underline dark:hover:text-gray-200"
+                title="Open this file in the PR diff on GitHub"
+              >
+                in diff
+              </a>
+            )}
           </div>
 
           {/* The diff hunk this finding covers. */}
@@ -451,6 +518,8 @@ function ClaudesReview({
   review,
   editable,
   prUrl,
+  repoFullName,
+  prHeadSha,
   postingFindingId,
   postErrorFindingId,
   postErrorMessage,
@@ -461,6 +530,10 @@ function ClaudesReview({
   review: ClaudeReview;
   editable: boolean;
   prUrl: string;
+  // "owner/name" + the PR's current head SHA (the per-finding blob link prefers
+  // the run's own headSha, falling back to this).
+  repoFullName: string;
+  prHeadSha: string | null;
   postingFindingId: number | null;
   postErrorFindingId: number | null;
   postErrorMessage: string | null;
@@ -471,6 +544,9 @@ function ClaudesReview({
   const findings = [...review.findings].sort(
     (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
   );
+  // Pin blob links to the reviewed commit so line numbers stay correct; fall back
+  // to the PR's current head when the run didn't record a SHA.
+  const headSha = review.headSha ?? prHeadSha;
 
   return (
     <div className="space-y-2 px-4 py-3">
@@ -497,6 +573,8 @@ function ClaudesReview({
               finding={f}
               editable={editable}
               prUrl={prUrl}
+              repoFullName={repoFullName}
+              headSha={headSha}
               posting={postingFindingId === f.id}
               postError={
                 postErrorFindingId === f.id ? postErrorMessage : null
@@ -750,6 +828,10 @@ export function ClaudeReviewTab({
     review?.status === 'succeeded' && review.headSha === pr.headSha;
 
   const runGenerate = (): void => {
+    // Create/resume the AudioContext now, during this user gesture, so the
+    // completion chime can play later without one (browsers gate WebAudio behind
+    // a gesture). No-op / swallowed if WebAudio is unavailable.
+    unlockReviewSound();
     setConfirmRerun(false);
     setPreview(null);
     setPostResult(null);
@@ -910,6 +992,8 @@ export function ClaudeReviewTab({
               Cancel
             </button>
           </div>
+          {/* Live activity feed from the agent run (newest-last). */}
+          <ActivityLog lines={status?.progress?.recentActivity ?? []} />
         </div>
       )}
 
@@ -954,6 +1038,8 @@ export function ClaudeReviewTab({
           review={shownReview}
           editable={canEdit}
           prUrl={pr.githubUrl}
+          repoFullName={pr.repoFullName}
+          prHeadSha={pr.headSha}
           postingFindingId={postingFindingId}
           postErrorFindingId={postErrorFindingId}
           postErrorMessage={postErrorMessage}

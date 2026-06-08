@@ -74,6 +74,14 @@ export function RepoSearch(): JSX.Element {
   const [value, setValue] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  // Repos added this session, keyed by `owner/name` lowercased. Used to hide a
+  // just-added repo from the results/suggestions INSTANTLY (the POST /api/repos
+  // response has no githubNodeId, so we key on owner/name — available on every
+  // live result, every suggestion, and the mutation variables). The eventual
+  // source of truth is still the ['repo-search'] / ['repos'] refetch.
+  const [justAdded, setJustAdded] = useState<Set<string>>(new Set());
+  const addedKey = (r: { owner: string; name: string }): string =>
+    `${r.owner}/${r.name}`.toLowerCase();
   // Cursor stack for pagination: cursors[i] is the GitHub `after` cursor for
   // page i (page 0 = null/first page). pageIdx indexes into it.
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
@@ -96,9 +104,11 @@ export function RepoSearch(): JSX.Element {
   const suggestions = useMemo(
     () =>
       SUGGESTED_REPOS.filter(
-        (s) => !watched.has(`${s.owner}/${s.name}`.toLowerCase()),
+        (s) =>
+          !watched.has(`${s.owner}/${s.name}`.toLowerCase()) &&
+          !justAdded.has(`${s.owner}/${s.name}`.toLowerCase()),
       ),
-    [watched],
+    [watched, justAdded],
   );
 
   // A fresh search term resets pagination back to the first page.
@@ -121,6 +131,11 @@ export function RepoSearch(): JSX.Element {
     // which is all the POST needs (CreateRepoBody).
     mutationFn: (r: { owner: string; name: string }) =>
       api.addRepo({ owner: r.owner, name: r.name }),
+    // Hide the row IMMEDIATELY (before the search/repos refetch round-trips), keyed
+    // on owner/name from the mutation variables.
+    onMutate: (r) => {
+      setJustAdded((prev) => new Set(prev).add(addedKey(r)));
+    },
     onSuccess: (repo) => {
       for (const key of INVALIDATE_KEYS) {
         void qc.invalidateQueries({ queryKey: [key] });
@@ -137,7 +152,11 @@ export function RepoSearch(): JSX.Element {
     },
   });
 
-  const results = query.data?.results ?? [];
+  // Hide just-added repos from the live results immediately (the search refetch is
+  // the eventual source of truth, but it lags a round-trip).
+  const results = (query.data?.results ?? []).filter(
+    (r) => !justAdded.has(`${r.owner}/${r.name}`.toLowerCase()),
+  );
   const hasNextPage = query.data?.hasNextPage ?? false;
 
   // Show a spinner as soon as a search is in flight, through the fetch, while

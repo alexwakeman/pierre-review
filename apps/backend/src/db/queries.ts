@@ -48,6 +48,7 @@ import type {
   ClaudeReview,
   ClaudeFinding,
   ClaudeReviewSummary,
+  ClaudeReviewListItem,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -1289,6 +1290,76 @@ export async function listClaudeReviewHistory(
     createdAt: r.createdAt.toISOString(),
     finishedAt: iso(r.finishedAt),
   }));
+}
+
+// Cross-PR list of prior Claude reviews: ONE entry per PR = that PR's most-recent
+// SUCCEEDED run, accountId-scoped, restricted to PRs still within the timeline
+// window (open, or last touched within `backfillDays`), newest-first by finish
+// time. Used by GET /api/claude-reviews to populate the "prior reviews" view.
+export async function listAllClaudeReviews(
+  accountId: number,
+): Promise<ClaudeReviewListItem[]> {
+  // Same window cutoff getTimeline uses for its overlap predicate (now − backfillDays).
+  const cutoff = new Date(Date.now() - config.backfillDays * 24 * 60 * 60 * 1000);
+
+  const rows = await db
+    .select({
+      reviewId: claudeReviews.id,
+      prId: claudeReviews.prId,
+      owner: repos.owner,
+      name: repos.name,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      prState: pullRequests.state,
+      summary: claudeReviews.summary,
+      verdict: claudeReviews.verdict,
+      headSha: claudeReviews.headSha,
+      status: claudeReviews.status,
+      createdAt: claudeReviews.createdAt,
+      finishedAt: claudeReviews.finishedAt,
+    })
+    .from(claudeReviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(
+      and(
+        eq(repos.accountId, accountId),
+        eq(claudeReviews.status, 'succeeded'),
+        or(
+          eq(pullRequests.state, 'open'),
+          gte(
+            sql`coalesce(${pullRequests.mergedAt}, ${pullRequests.closedAt}, ${pullRequests.openedAt})`,
+            tsBound(cutoff),
+          ),
+        ),
+      ),
+    )
+    .orderBy(desc(claudeReviews.finishedAt), desc(claudeReviews.createdAt))
+    .execute();
+
+  // Keep the first (most-recent) succeeded run per PR. N is small (single local
+  // user), so a JS pass is simpler and portable across both dialects.
+  const seen = new Set<number>();
+  const items: ClaudeReviewListItem[] = [];
+  for (const r of rows) {
+    if (seen.has(r.prId)) continue;
+    seen.add(r.prId);
+    items.push({
+      reviewId: r.reviewId,
+      prId: r.prId,
+      repoFullName: `${r.owner}/${r.name}`,
+      prNumber: r.prNumber,
+      prTitle: r.prTitle,
+      prState: r.prState,
+      summary: r.summary,
+      verdict: r.verdict,
+      headSha: r.headSha,
+      status: r.status,
+      createdAt: r.createdAt.toISOString(),
+      finishedAt: iso(r.finishedAt),
+    });
+  }
+  return items;
 }
 
 // Resolve a run to its repo/PR coordinates for posting. Returns the raw run row

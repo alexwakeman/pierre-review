@@ -72,6 +72,9 @@ const DISALLOWED_TOOLS = [
   'Bash(git config *)',
 ];
 
+// How many recent-activity lines to keep in the live progress ring buffer.
+const ACTIVITY_LOG_CAP = 25;
+
 // Run a review end-to-end and persist its result. Owns status transitions:
 // running → succeeded/failed/cancelled. Never throws to the caller for an
 // expected failure (it records it); rethrows only truly unexpected errors so the
@@ -151,11 +154,27 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
       },
     });
 
-    let announcedReviewing = false;
+    // Rolling, newest-last log of what the agent is doing right now, surfaced via
+    // onProgress (rides the /status poll). Live-only — never persisted.
+    const activity: string[] = [];
+    const pushActivity = (line: string): void => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      activity.push(trimmed);
+      if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
+    };
+
     for await (const message of q) {
-      if (message.type === 'assistant' && !announcedReviewing) {
-        announcedReviewing = true;
-        onProgress({ phase: 'reviewing' });
+      if (message.type === 'assistant') {
+        // Derive short, human-readable lines from the assistant turn's content
+        // blocks. Defensive throughout: content may be missing and tool input
+        // shapes vary — a malformed block must never abort the review.
+        try {
+          for (const line of describeAssistantBlocks(message)) pushActivity(line);
+        } catch {
+          /* never let progress derivation break the run */
+        }
+        onProgress({ phase: 'reviewing', recentActivity: [...activity] });
       } else if (message.type === 'result') {
         result = message;
       }
@@ -229,11 +248,94 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
     if (repoCloneDir && worktreePath) {
       await removeWorktree(repoCloneDir, worktreePath).catch(() => {});
     }
-    cleanupCloneCache();
+    // LRU eviction does a full recursive dir walk; keep it off the run-teardown
+    // critical path. Defer it (fire-and-forget) so the review result returns
+    // promptly. cleanupCloneCache is itself best-effort and never throws.
+    setImmediate(() => {
+      try {
+        cleanupCloneCache();
+      } catch {
+        /* advisory cleanup — never surface */
+      }
+    });
   }
 }
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+const TEXT_SNIPPET_CAP = 120;
+const BASH_CMD_CAP = 80;
+
+/**
+ * Turn one assistant message into a few short, human-readable progress lines:
+ * a label per tool_use block (e.g. `Read src/foo.ts`, `Grep "TODO"`, `Bash npm
+ * test`) plus a clipped snippet of any assistant text. Defensive throughout —
+ * the SDK content/tool-input shapes vary, so every access is guarded and this
+ * never throws.
+ */
+function describeAssistantBlocks(message: unknown): string[] {
+  const lines: string[] = [];
+  const content = (message as { message?: { content?: unknown } })?.message
+    ?.content;
+  if (!Array.isArray(content)) return lines;
+
+  for (const raw of content) {
+    if (!raw || typeof raw !== 'object') continue;
+    const block = raw as { type?: unknown; name?: unknown; input?: unknown; text?: unknown };
+
+    if (block.type === 'tool_use') {
+      const name = typeof block.name === 'string' ? block.name : 'Tool';
+      const input =
+        block.input && typeof block.input === 'object'
+          ? (block.input as Record<string, unknown>)
+          : {};
+      lines.push(labelToolUse(name, input));
+    } else if (block.type === 'text' && typeof block.text === 'string') {
+      const snippet = clip(block.text.replace(/\s+/g, ' ').trim(), TEXT_SNIPPET_CAP);
+      if (snippet) lines.push(snippet);
+    }
+  }
+  return lines;
+}
+
+/** Build a short label for a tool call from its name + a truncated first arg. */
+function labelToolUse(name: string, input: Record<string, unknown>): string {
+  const str = (v: unknown): string | null =>
+    typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
+
+  switch (name) {
+    case 'Read': {
+      const p = str(input.file_path) ?? str(input.path);
+      return p ? `Read ${p}` : 'Read …';
+    }
+    case 'Glob': {
+      const p = str(input.pattern);
+      return p ? `Glob ${p}` : 'Glob …';
+    }
+    case 'Grep': {
+      const p = str(input.pattern);
+      return p ? `Grep "${clip(p, BASH_CMD_CAP)}"` : 'Grep …';
+    }
+    case 'Bash': {
+      const c = str(input.command);
+      return c ? `Bash ${clip(c, BASH_CMD_CAP)}` : 'Bash …';
+    }
+    case 'mcp__review__submit_review':
+      return 'Submitting review…';
+    default: {
+      // Generic: name + a truncated first string-valued arg, if any.
+      for (const key of Object.keys(input)) {
+        const v = str(input[key]);
+        if (v) return `${name} ${clip(v, BASH_CMD_CAP)}`;
+      }
+      return `${name} …`;
+    }
+  }
+}
+
+function clip(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max)}…` : s;
 }

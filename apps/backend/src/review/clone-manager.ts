@@ -58,15 +58,18 @@ export async function ensureClone(owner: string, name: string): Promise<string> 
  * Fetch a PR's head ref into the clone's object store so its head commit
  * (`sha`) becomes resolvable for a worktree checkout. The current PR head
  * commit equals `pull/<n>/head`, so fetching that ref is sufficient.
+ *
+ * Fast path: if `sha` is already present in the local object store (a prior
+ * review of the same head left it there), skip the network fetch entirely —
+ * it's the dominant per-review network cost and is fully redundant when the
+ * head hasn't moved.
  */
 export async function fetchPrHead(
   repoCloneDir: string,
   prNumber: number,
   sha: string,
 ): Promise<void> {
-  // `sha` is documented in the signature but the head ref fetch is what makes
-  // it resolvable; nothing else is needed here.
-  void sha;
+  if (await hasCommit(repoCloneDir, sha)) return;
   await git([
     '-C',
     repoCloneDir,
@@ -76,6 +79,20 @@ export async function fetchPrHead(
     'origin',
     `pull/${prNumber}/head`,
   ]);
+}
+
+/** True if `sha` resolves to a commit object already in the local store. */
+async function hasCommit(repoCloneDir: string, sha: string): Promise<boolean> {
+  if (!sha) return false;
+  try {
+    await execFileAsync('git', ['-C', repoCloneDir, 'cat-file', '-e', `${sha}^{commit}`], {
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

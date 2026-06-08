@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import type {
   ActiveReviewsResponse,
   ClaudeKeyResponse,
+  ClaudeReviewListResponse,
   ClaudeReviewResponse,
   ClaudeReviewStatusResponse,
   GenerateReviewBody,
@@ -18,6 +19,7 @@ import {
   getClaudeReviewContext,
   getFindingPostContext,
   getLatestClaudeReview,
+  listAllClaudeReviews,
   listClaudeReviewHistory,
 } from '../../db/queries.js';
 import {
@@ -49,7 +51,7 @@ import {
 import { isNoiseFile } from '../../review/prompt.js';
 import { accountIdOf } from '../plugins/auth.js';
 
-const MODELS = ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
+const MODELS = ['claude-opus-4-8', 'claude-sonnet-4-6'];
 const VERDICTS = ['COMMENT', 'REQUEST_CHANGES', 'APPROVE'];
 
 const idParam = {
@@ -248,6 +250,17 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
         return { error: 'NotFound', message: 'No running review for this PR.' };
       }
       return { status: 'cancelling' };
+    },
+  );
+
+  // Cross-PR list of prior Claude reviews (one entry per PR = its most-recent
+  // succeeded run, within the timeline window). Static path — registered before
+  // the /:reviewId param route so Fastify never mis-routes it.
+  app.get(
+    '/api/claude-reviews',
+    async (req): Promise<ClaudeReviewListResponse> => {
+      if (!config.claudeReviewEnabled) return { reviews: [] };
+      return { reviews: await listAllClaudeReviews(accountIdOf(req)) };
     },
   );
 

@@ -345,7 +345,7 @@ Wire format is JSON with ISO-8601 timestamps; payload types live in
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/timeline?from&to&repoIds&userIds&types&statuses&excludeBots` | **lean** feed: `{ prs[], events[] }`, no bodies/diffs. Defaults: last 14d, `excludeBots=true` |
+| `GET /api/timeline?from&to&repoIds&userIds&types&statuses&excludeBots` | **lean** feed: `{ prs[], events[] }`, no bodies/diffs. Defaults: last 14d, `excludeBots=false` (bots shown by default; the toggle lives in the Members dropdown) |
 | `GET /api/prs/:id` | full PR detail (threads, reviews, comments, commits, checks, labels) |
 | `POST /api/prs/:id/mark-viewed` (alias `/dismiss`) | record a view (`sha?` defaults to head) → clears new-since badges |
 | `GET /api/open-prs?repoIds&userIds` | currently-open PRs (ignores date range) |
@@ -360,6 +360,7 @@ Wire format is JSON with ISO-8601 timestamps; payload types live in
 | `GET /api/prs/:id/claude-review` | latest run + findings + history + Claude-auth status + `enabled` (Claude Review) |
 | `POST /api/prs/:id/claude-review {model}` | start a run → `202 {reviewId}`; `400` no-auth/no-head, `409` busy, `404` disabled |
 | `GET /api/prs/:id/claude-review/status`, `POST …/cancel` | poll live progress / abort the SDK run |
+| `GET /api/claude-reviews` | cross-PR history: one entry per PR (its most-recent succeeded run) within the timeline window, account-scoped (drives the header "Claude Reviews" list) |
 | `GET /api/claude-reviews/:reviewId` | a specific past run (history selector) |
 | `PATCH /api/claude-reviews/:reviewId {userBody?,userVerdict?}` | save the user's authored draft (never Claude's text) |
 | `PATCH /api/claude-findings/:findingId {included?}` | tick a finding for inline posting |
