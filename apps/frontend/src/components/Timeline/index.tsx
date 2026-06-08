@@ -1539,6 +1539,19 @@ export function Timeline(): JSX.Element {
       const key = String(id);
 
       if (key.startsWith('pr:')) {
+        // Clicking a PR bar starts a fresh context. If a marker popover is open
+        // (its event marker glowing, the event's PR selected + band-glowed), tear
+        // that down first so the clicked PR becomes the SOLE selection — closeModal
+        // clears the marker/PR glow (applyContext(null)) and pops the modal's
+        // history entry. Skip inside a sticky focus overlay, where a bar click only
+        // explores (the focused PR's bar is the lone clickable one and keeps focus).
+        if (
+          popoverRef.current &&
+          !prFocusActiveRef.current &&
+          !focusedGroupIdsRef.current
+        ) {
+          closeModal();
+        }
         selectPr(Number.parseInt(key.slice(3), 10));
       } else if (key.startsWith('ev:')) {
         const evId = Number.parseInt(key.slice(3), 10);
@@ -1772,6 +1785,7 @@ export function Timeline(): JSX.Element {
     openPopover,
     applyContext,
     dismissEmptyCanvas,
+    closeModal,
     exitFocus,
     centerShowTarget,
     highlightEvent,
