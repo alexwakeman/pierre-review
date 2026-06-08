@@ -13,6 +13,11 @@ Runs two ways from one codebase (the `DEPLOYMENT_MODE` env var selects):
   per-user encrypted accounts, and Postgres. Self-host on Railway. See
   [docs/DEPLOY-RAILWAY.md](docs/DEPLOY-RAILWAY.md).
 
+> **☁️ Try it now — [pierre-review.com](https://pierre-review.com/)**
+> A hosted instance of the cloud deployment is live. Sign in with GitHub, add the
+> repos you want to watch, and get the full timeline dashboard — no install, no
+> local setup. (Prefer to keep everything on your machine? Use local mode below.)
+
 ## Screenshots
 
 The timeline — pull-request activity grouped **repo → contributor**, with shaped
