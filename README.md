@@ -13,6 +13,19 @@ Runs two ways from one codebase (the `DEPLOYMENT_MODE` env var selects):
   per-user encrypted accounts, and Postgres. Self-host on Railway. See
   [docs/DEPLOY-RAILWAY.md](docs/DEPLOY-RAILWAY.md).
 
+## Screenshots
+
+The timeline — pull-request activity grouped **repo → contributor**, with shaped
+review markers, the open-PR strip, and a **My Turn** triage panel:
+
+![pierre-review timeline](apps/landing/public/shots/timeline.png)
+
+Drill into any PR without leaving the dashboard — review threads grouped by file,
+each tagged with its derived state (resolved · replied · likely-addressed ·
+untouched), alongside CI, approvers, and the full activity feed:
+
+![pierre-review PR detail](apps/landing/public/shots/pr-detail.png)
+
 ## Prerequisites
 
 - Node ≥ 20 (developed on 24)
@@ -44,6 +57,57 @@ PR detail works fully offline). Same model in both modes; see CLAUDE.md.
 pnpm sync:once owner/repo
 pnpm db:studio              # inspect the data
 ```
+
+## Claude Review (local only)
+
+An opt-in feature that runs the **Claude Agent SDK** against a PR from its detail
+pane: it produces structured review findings, lets you author your own review and
+tick which findings to post inline, then submits **one** GitHub review. It spends
+real Anthropic credits per run, so it's **off by default** and **local-only**
+(force-disabled in cloud — see below).
+
+![Claude Review tab](apps/landing/public/shots/claude-review.png)
+
+Enable it by setting `ENABLE_CLAUDE_REVIEW=true`, plus an Anthropic auth source
+(next section):
+
+```bash
+# dev
+ENABLE_CLAUDE_REVIEW=true pnpm dev
+
+# published CLI (npx, or the global `pierre`) — it's an env var, there is no flag
+ENABLE_CLAUDE_REVIEW=true npx pierre-review
+```
+
+You can also put `ENABLE_CLAUDE_REVIEW=true` in `.env` (repo root) or
+`apps/backend/.env`. When enabled, a **Claude Review** tab appears in the PR detail
+pane.
+
+### Anthropic auth — precedence order
+
+Auth comes from the ambient environment; the first available source wins:
+
+1. **User-supplied key** — pasted into the Claude Review tab, stored locally at
+   `~/.pierre-review/config.json` (mode `0600`, never sent to any server). It
+   overrides the ambient auth for the run.
+2. **`ANTHROPIC_API_KEY`** environment variable.
+3. **`CLAUDE_CODE_OAUTH_TOKEN`** environment variable.
+4. **Ambient Claude Code session** — run `claude` once to sign in to an eligible
+   plan (Pro / Max / Team / Enterprise); pierre-review detects the on-disk
+   credentials under `~/.claude`.
+
+If none is found, the tab explains how to set one up (the first real SDK call is the
+authoritative check). The precedence and detection live in
+`apps/backend/src/review/auth.ts` and `review/local-settings.ts`.
+
+### Cloud: not available
+
+Claude Review is **force-disabled in cloud mode**
+(`config.claudeReviewEnabled = !isCloud && ENABLE_CLAUDE_REVIEW === 'true'`): the
+routes are never registered and the tab is hidden, regardless of
+`ENABLE_CLAUDE_REVIEW`. There is currently **no** way for cloud (multi-tenant) users
+to bring their own Anthropic key to turn it on — it depends on a local `gh` CLI and a
+writable clone directory, so it only runs in local mode.
 
 ## Cloud mode (multi-tenant)
 

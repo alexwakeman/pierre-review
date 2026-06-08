@@ -16,6 +16,7 @@
     "db:studio": "drizzle-kit studio",
     "db:studio:pg": "drizzle-kit studio --config drizzle.pg.config.ts",
     "verify:isolation": "DATABASE_URL=/tmp/pierre-iso.sqlite DISABLE_SCHEDULER=true tsx scripts/verify-isolation.ts",
+    "seed:demo": "DATABASE_URL=/tmp/pierre-demo.sqlite DISABLE_SCHEDULER=true tsx scripts/seed-demo.ts",
     "sync:once": "tsx scripts/sync-once.ts"
   },
   "dependencies": {

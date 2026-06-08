@@ -74,6 +74,31 @@ export default function Showcase() {
             </p>
           </div>
         </div>
+
+        <div className="mt-10 grid items-center gap-8 lg:grid-cols-5">
+          <div className="lg:col-span-2">
+            <span className="inline-flex items-center rounded-full bg-brand-purple/10 px-2.5 py-0.5 text-xs font-medium text-brand-purpleSoft ring-1 ring-brand-purple/30">
+              Local-only · opt-in
+            </span>
+            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-gray-50 sm:text-3xl">
+              Review a PR with Claude — then post it in your words
+            </h2>
+            <p className="mt-4 text-pretty leading-relaxed text-gray-400">
+              Run the{' '}
+              <span className="font-medium text-brand-purpleSoft">Claude Agent SDK</span>{' '}
+              against a pull request to get structured, line-anchored findings —
+              blockers, nits, questions. Reword them, tick which to include, and post{' '}
+              <span className="font-medium text-gray-200">one</span> GitHub review.
+              Claude&rsquo;s output is reference; your words are what ship.
+            </p>
+          </div>
+          <div className="lg:col-span-3">
+            <Frame
+              src="/shots/claude-review.png"
+              alt="The Claude Review tab: an agentic review of a pull request returning severity-tagged, line-anchored findings you can reword, include, and post as a single GitHub review."
+            />
+          </div>
+        </div>
       </div>
     </section>
   );
