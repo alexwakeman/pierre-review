@@ -2296,16 +2296,14 @@ export function Timeline(): JSX.Element {
 
       const focusEv = useFilters.getState().timelineFocusEvent;
 
-      // Activity "Show": focus one specific event. Collapse the timeline to the
-      // activity's row(s) — the actor's row alone for a same-user action (and
-      // lifecycle, whose actor IS the author), or actor + PR author for a
-      // cross-user one (the cross-user marker-popover treatment) — glow the PR
-      // band and the marker, then centre the marker. We can't use vis.focus()
-      // for the vertical scroll: it only scrolls to an already-rendered item and
-      // the off-screen target row is a virtualised stub. So we recenter
-      // horizontally with setWindow and drive vis's vertical scroll ourselves
-      // (centerShowTarget) once the collapse has settled and the row renders.
-      // The overlay is sticky: it stays until the next timeline interaction.
+      // A "Show" link (PR comment / thread / activity entry): reveal one specific
+      // event on the MAIN timeline. The behaviour is uniform across all Show links
+      // and depends only on focus state: outside focus it's a plain navigate
+      // (recenter on the instant + glow the marker, NO row collapse); inside focus
+      // it does the same but keeps the focus overlay intact. We can't use vis.focus()
+      // for the vertical scroll (it only reaches already-rendered items, and the
+      // target row may be a virtualised stub), so we recenter horizontally with
+      // setWindow and drive vis's vertical scroll ourselves (centerShowTarget).
       if (focusEv && data) {
         // Among events matching (pr, type, refId), prefer the one at the requested
         // instant: review-comment replies all share their thread's refId, so the
@@ -2353,48 +2351,38 @@ export function Timeline(): JSX.Element {
           return;
         }
 
-        const authorId = inWindow.authorId;
+        // Outside focus: a plain NAVIGATE — recenter on the event instant, select the
+        // PR, glow its marker, and scroll the marker's row into view. Deliberately do
+        // NOT collapse the board to the actor/author rows (that read like an unwanted
+        // focus overlay — "it shows all the author's PRs"). This mirrors the in-focus
+        // branch above, minus the focus overlay, so every "Show" link behaves the
+        // same way. Drop any stale soft overlay from a previous Show first so rows are
+        // expanded and old glows cleared.
+        dropOverlayForNavigation();
         // Lifecycle events have no marker; their actor is the PR author, so the
-        // relevant row (and the PR bar) is the author's.
-        const actorId = match?.actorId ?? authorId;
-        const crossUser =
-          actorId != null && authorId != null && actorId !== authorId;
+        // relevant row is the author's.
+        const actorId = match?.actorId ?? inWindow.authorId;
 
-        const keepGroupIds: string[] = [];
-        if (actorId != null) keepGroupIds.push(`repo:${inWindow.repoId}:user:${actorId}`);
-        if (crossUser && authorId != null) {
-          keepGroupIds.push(`repo:${inWindow.repoId}:user:${authorId}`);
-        }
-        applyContext({
-          groupIds: keepGroupIds.length ? keepGroupIds : null,
-          prId: timelineFocusPr,
-          eventId: match?.id ?? null,
-        });
-
-        // Recenter horizontally on the event instant (independent of rendering).
         if (timelineFocusAt) {
           const c = Date.parse(timelineFocusAt);
           const win = tl.getWindow();
           const width = win.end.valueOf() - win.start.valueOf();
-          tl.setWindow(c - width / 2, c + width / 2, { animation: false });
+          tl.setWindow(c - width / 2, c + width / 2, { animation: true });
         }
         tl.setSelection([`pr:${timelineFocusPr}`]);
+        if (match != null) highlightEvent(match.id);
 
-        // Vertically centre the marker after the collapse animation has settled
-        // (rows removed from layout) so positions are stable and the kept row
-        // can render. The marker sits in the actor's row.
+        // Scroll the marker's row into view (it may be virtualized off-screen). The
+        // marker sits in the actor's row; a lifecycle event has no marker, so we
+        // centre on the PR bar instead (hasMarker false).
         if (actorId != null) {
           const token = groupClassToken(`repo:${inWindow.repoId}:user:${actorId}`);
-          // A real marker (commit/comment/review) — not a lifecycle event, which
-          // matches an event but draws no marker (the centre target is the bar).
           const hasMarker =
             match != null &&
             (itemsRef.current.get(`ev:${match.id}`) != null ||
               eventToClusterRef.current.get(match.id) != null);
-          window.setTimeout(() => centerShowTarget(token, hasMarker), 300);
+          window.setTimeout(() => centerShowTarget(token, hasMarker), 120);
         }
-
-        showFocusActiveRef.current = keepGroupIds.length > 0 || match != null;
         useFilters.getState().consumeTimelineFocus();
         return;
       }

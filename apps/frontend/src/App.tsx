@@ -139,8 +139,8 @@ export default function App(): JSX.Element {
             <span>{meUser.login}</span>
           </a>
         )}
+        <CountsPill />
         <div className="ml-auto flex items-center gap-3">
-          <CountsPill />
           <TimelineSearch />
           <SyncStatus />
           {claudeReviewEnabled && (
