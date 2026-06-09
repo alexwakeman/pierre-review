@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { ThreadDetail, User } from '@pierre-review/shared';
+import { useMyTurn } from '../../hooks/useTriage.js';
 import { FileGroup } from './FileGroup.js';
 
 interface FileBucket {
@@ -44,6 +45,14 @@ export function ThreadList({
 }): JSX.Element {
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
 
+  // Threads in the user's My Turn set (awaiting their response) — drives the
+  // per-thread "Done" affordance. Reads the already-loaded my-turn cache.
+  const { data: myTurn } = useMyTurn();
+  const awaitingThreadIds = useMemo(
+    () => new Set((myTurn?.threadsAwaiting ?? []).map((t) => t.threadId)),
+    [myTurn],
+  );
+
   // Scroll to a thread selected from a timeline marker / popover.
   useEffect(() => {
     if (selectedThreadId == null) return;
@@ -73,6 +82,7 @@ export function ThreadList({
           repoId={repoId}
           selectedThreadId={selectedThreadId}
           viewedSince={viewedSince}
+          awaitingThreadIds={awaitingThreadIds}
           registerRef={(id, el) => {
             if (el) rowRefs.current.set(id, el);
             else rowRefs.current.delete(id);

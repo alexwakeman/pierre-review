@@ -1,7 +1,6 @@
 import { useFilters } from '../store/filters.js';
 import { PrDetail } from './PrDetail.js';
 import { MyTurnPanel } from './MyTurnPanel/index.js';
-import { CountsPill } from './MyTurnPanel/CountsPill.js';
 
 export function DetailPane(): JSX.Element {
   const selectedPrId = useFilters((s) => s.selectedPrId);
@@ -10,9 +9,8 @@ export function DetailPane(): JSX.Element {
 
   return (
     <div className="relative h-full">
-      <div className="absolute right-2 top-1.5 z-10 flex items-center gap-2">
-        <CountsPill />
-        {selectedPrId != null && (
+      {selectedPrId != null && (
+        <div className="absolute right-2 top-1.5 z-10 flex items-center gap-2">
           <button
             type="button"
             onClick={clearSelection}
@@ -21,8 +19,8 @@ export function DetailPane(): JSX.Element {
           >
             ✕
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {selectedPrId == null ? (
         <MyTurnPanel />

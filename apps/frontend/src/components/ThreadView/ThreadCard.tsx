@@ -3,6 +3,7 @@ import { StateBadge } from '../StateBadge.js';
 import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';
 import { CodeAnchor } from './CodeAnchor.js';
+import { MarkThreadDone } from './MarkThreadDone.js';
 import { isNewComment } from './NewCommentHighlight.js';
 
 // A single review thread rendered conversation-first: the code it's anchored to
@@ -14,6 +15,7 @@ export function ThreadCard({
   repoId,
   selected,
   viewedSince,
+  inMyTurn = false,
 }: {
   thread: ThreadDetail;
   usersById: Map<number, User>;
@@ -21,6 +23,9 @@ export function ThreadCard({
   repoId?: number;
   selected?: boolean;
   viewedSince?: string | null;
+  // True when this thread is in the user's My Turn set (awaiting their response);
+  // shows a "Done" affordance to clear it from the queue.
+  inMyTurn?: boolean;
 }): JSX.Element {
   const anchorHunk = thread.comments[0]?.diffHunk ?? null;
 
@@ -42,7 +47,8 @@ export function ThreadCard({
         <span className="text-gray-300 dark:text-gray-600">·</span>
         {thread.line != null ? <span>line {thread.line}</span> : <span>file-level</span>}
         {thread.isOutdated && <span>· outdated</span>}
-        <span className="ml-auto">
+        <span className="ml-auto flex items-center gap-2">
+          {inMyTurn && <MarkThreadDone threadId={thread.id} />}
           <StateBadge state={thread.derivedState} />
         </span>
       </div>

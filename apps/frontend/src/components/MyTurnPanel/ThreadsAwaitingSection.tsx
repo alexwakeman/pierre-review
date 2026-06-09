@@ -42,11 +42,6 @@ export function ThreadsAwaitingSection({
               actionTitle="Done — reappears on a newer reply"
               actionPending={dismiss.isPending}
               time={relativeTime(it.lastReplyAt)}
-              show={{
-                prId: it.prId,
-                at: it.lastReplyAt,
-                event: { type: 'review_comment', refId: it.threadId },
-              }}
               title={`“${it.lastReplyExcerpt}”`}
               meta={
                 <>

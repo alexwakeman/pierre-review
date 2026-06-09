@@ -1,11 +1,8 @@
 import type { ReactNode } from 'react';
-import type { EventType } from '@pierre-review/shared';
-import { ShowOnTimeline } from '../ShowOnTimeline.js';
 
 // Shared layout for one My Turn entry (active or completed): a prominent action
 // button on the LEFT (Done / Seen / To do), the content to its right with the main
-// text emphasised over repo/file metadata, and the relative time + a "Show on
-// timeline" link beneath the content.
+// text emphasised over repo/file metadata, and the relative time beneath it.
 export function MyTurnRow({
   onOpen,
   onAction,
@@ -13,7 +10,6 @@ export function MyTurnRow({
   actionTitle,
   actionPending = false,
   time,
-  show,
   title,
   meta,
   sub,
@@ -25,8 +21,6 @@ export function MyTurnRow({
   actionPending?: boolean;
   // Relative time string, shown under the content.
   time: string;
-  // The event to reveal on the timeline (its "Show" link).
-  show?: { prId: number; at: string; event: { type: EventType; refId: number | null } };
   // Prominent main content (PR title / thread excerpt).
   title: ReactNode;
   // Dim metadata under the title (repo #num · file).
@@ -59,21 +53,7 @@ export function MyTurnRow({
           )}
           {sub != null && <div className="mt-0.5 truncate text-[11px]">{sub}</div>}
         </button>
-        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-gray-400">
-          <span className="shrink-0">{time}</span>
-          {show && (
-            <>
-              <span className="text-gray-300 dark:text-gray-600">·</span>
-              <ShowOnTimeline
-                prId={show.prId}
-                at={show.at}
-                event={show.event}
-                title="Show this on the timeline"
-                className="text-[11px]"
-              />
-            </>
-          )}
-        </div>
+        <div className="mt-0.5 text-[11px] text-gray-400">{time}</div>
       </div>
     </li>
   );

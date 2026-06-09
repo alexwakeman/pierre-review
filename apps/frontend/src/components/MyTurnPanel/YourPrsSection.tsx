@@ -42,11 +42,6 @@ export function YourPrsSection({
             actionTitle="Mark seen — clears the new-activity badge"
             actionPending={dismiss.isPending}
             time={relativeTime(it.openedAt)}
-            show={{
-              prId: it.prId,
-              at: it.openedAt,
-              event: { type: 'pr_opened', refId: null },
-            }}
             title={it.title}
             meta={
               <>

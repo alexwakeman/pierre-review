@@ -40,11 +40,6 @@ export function AwaitingReviewSection({
             actionTitle="Done — reappears if the PR is updated"
             actionPending={dismiss.isPending}
             time={relativeTime(it.openedAt)}
-            show={{
-              prId: it.prId,
-              at: it.openedAt,
-              event: { type: 'pr_opened', refId: null },
-            }}
             title={it.title}
             meta={
               <>

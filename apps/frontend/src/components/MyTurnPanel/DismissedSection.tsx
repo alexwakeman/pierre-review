@@ -49,11 +49,6 @@ export function DismissedSection({ active }: { active: boolean }): JSX.Element {
             actionTitle="Move back to your inbox"
             actionPending={undismiss.isPending}
             time={`done ${relativeTime(it.dismissedAt)}`}
-            show={{
-              prId: it.prId,
-              at: it.openedAt,
-              event: { type: 'pr_opened', refId: null },
-            }}
             title={it.title}
             meta={
               <>
@@ -70,11 +65,6 @@ export function DismissedSection({ active }: { active: boolean }): JSX.Element {
             actionTitle="Move back to your inbox"
             actionPending={undismiss.isPending}
             time={`done ${relativeTime(it.dismissedAt)}`}
-            show={{
-              prId: it.prId,
-              at: it.lastReplyAt,
-              event: { type: 'review_comment', refId: it.threadId },
-            }}
             title={`“${it.lastReplyExcerpt}”`}
             meta={
               <>

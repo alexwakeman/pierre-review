@@ -16,6 +16,7 @@ export function FileGroup({
   repoId,
   selectedThreadId,
   viewedSince,
+  awaitingThreadIds,
   registerRef,
 }: {
   path: string;
@@ -25,6 +26,8 @@ export function FileGroup({
   repoId?: number;
   selectedThreadId: number | null;
   viewedSince?: string | null;
+  // Thread ids in the user's My Turn set (awaiting their response).
+  awaitingThreadIds: Set<number>;
   registerRef: (threadId: number, el: HTMLDivElement | null) => void;
 }): JSX.Element {
   const counts = rollupCounts(threads);
@@ -73,6 +76,7 @@ export function FileGroup({
                 repoId={repoId}
                 selected={t.id === selectedThreadId}
                 viewedSince={viewedSince}
+                inMyTurn={awaitingThreadIds.has(t.id)}
               />
             </div>
           ))}

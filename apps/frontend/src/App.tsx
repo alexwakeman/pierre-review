@@ -3,6 +3,7 @@ import { FilterBar } from './components/FilterBar.js';
 import { OpenPrsStrip } from './components/OpenPrsStrip/index.js';
 import { Timeline } from './components/Timeline/index.js';
 import { DetailPane } from './components/DetailPane.js';
+import { CountsPill } from './components/MyTurnPanel/CountsPill.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
 import { TimelineSearch } from './components/TimelineSearch.js';
@@ -139,6 +140,7 @@ export default function App(): JSX.Element {
           </a>
         )}
         <div className="ml-auto flex items-center gap-3">
+          <CountsPill />
           <TimelineSearch />
           <SyncStatus />
           {claudeReviewEnabled && (

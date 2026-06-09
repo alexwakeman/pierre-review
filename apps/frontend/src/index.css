@@ -107,16 +107,31 @@ body {
 .focus-indicator:hover .focus-indicator-close {
   opacity: 0.95;
   background: rgba(56, 189, 248, 0.25);
-  /* Wobble to make it unmistakable that clicking the pill closes focus. */
-  animation: focus-close-wobble 0.45s ease-in-out infinite;
+  /* A single 1s damped wobble that settles back to centred/still — a one-shot
+     "click me to close" cue, not a perpetual jiggle. */
+  animation: focus-close-wobble 1s ease-out;
 }
 @keyframes focus-close-wobble {
-  0%,
-  100% {
-    transform: rotate(-12deg);
+  0% {
+    transform: rotate(0deg);
   }
-  50% {
-    transform: rotate(12deg);
+  12% {
+    transform: rotate(-14deg);
+  }
+  28% {
+    transform: rotate(11deg);
+  }
+  44% {
+    transform: rotate(-8deg);
+  }
+  60% {
+    transform: rotate(5deg);
+  }
+  76% {
+    transform: rotate(-2deg);
+  }
+  100% {
+    transform: rotate(0deg);
   }
 }
 @keyframes focus-dot-pulse {
