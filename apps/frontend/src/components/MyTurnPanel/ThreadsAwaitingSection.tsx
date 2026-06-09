@@ -3,6 +3,7 @@ import type { ThreadAwaitingItem, User } from '@pierre-review/shared';
 import { api } from '../../api/client.js';
 import { useFilters } from '../../store/filters.js';
 import { relativeTime } from '../../lib/ui.js';
+import { MyTurnRow } from './MyTurnRow.js';
 
 export function ThreadsAwaitingSection({
   items,
@@ -16,6 +17,7 @@ export function ThreadsAwaitingSection({
     mutationFn: (threadId: number) => api.dismissMyTurn('thread', threadId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['my-turn'] });
+      void qc.invalidateQueries({ queryKey: ['my-turn-done'] });
       void qc.invalidateQueries({ queryKey: ['me'] });
     },
   });
@@ -30,40 +32,31 @@ export function ThreadsAwaitingSection({
       </h3>
       <ul className="space-y-0.5">
         {items.map((it) => {
-          const file = it.path.split('/').at(-1);
+          const file = `${it.path.split('/').at(-1)}${it.line != null ? `:${it.line}` : ''}`;
           return (
-            <li key={it.threadId} className="group flex items-stretch">
-              <button
-                type="button"
-                onClick={() => openPrFocused(it.prId, it.threadId)}
-                className="min-w-0 flex-1 rounded px-2 py-1 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
-              >
-                <div className="flex items-baseline gap-2 text-sm">
-                  <span className="shrink-0 text-xs text-gray-400">
-                    {it.repoFullName} #{it.prNumber}
-                  </span>
-                  <code className="min-w-0 flex-1 truncate font-mono text-xs" title={it.path}>
+            <MyTurnRow
+              key={it.threadId}
+              onOpen={() => openPrFocused(it.prId, it.threadId)}
+              onAction={() => dismiss.mutate(it.threadId)}
+              actionLabel="Done"
+              actionTitle="Done — reappears on a newer reply"
+              actionPending={dismiss.isPending}
+              time={relativeTime(it.lastReplyAt)}
+              show={{
+                prId: it.prId,
+                at: it.lastReplyAt,
+                event: { type: 'review_comment', refId: it.threadId },
+              }}
+              title={`“${it.lastReplyExcerpt}”`}
+              meta={
+                <>
+                  {it.repoFullName} #{it.prNumber} ·{' '}
+                  <span className="font-mono" title={it.path}>
                     {file}
-                    {it.line != null ? `:${it.line}` : ''}
-                  </code>
-                  <span className="shrink-0 text-[11px] text-gray-400">
-                    {relativeTime(it.lastReplyAt)}
                   </span>
-                </div>
-                <div className="truncate pl-1 text-[11px] italic text-gray-500" title={it.lastReplyExcerpt}>
-                  “{it.lastReplyExcerpt}”
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => dismiss.mutate(it.threadId)}
-                disabled={dismiss.isPending}
-                className="shrink-0 self-start rounded px-1.5 py-1 text-[11px] text-gray-300 opacity-0 hover:text-gray-600 group-hover:opacity-100 dark:text-gray-600 dark:hover:text-gray-300"
-                title="Dismiss — reappears on a newer reply"
-              >
-                ✓ done
-              </button>
-            </li>
+                </>
+              }
+            />
           );
         })}
       </ul>

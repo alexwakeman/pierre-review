@@ -480,6 +480,29 @@ export interface MyTurnResponse {
   users: User[];
 }
 
+// ---- my turn: completed / dismissed (the "Done" tab) ----
+// Previously-dismissed entries, for the My Turn "Done" tab (past 90 days). Only the
+// dismissal-backed kinds appear here (review_request + thread, from myTurnDismissals)
+// — "Your PRs" are cleared via mark-viewed, not a restorable dismissal. Each carries
+// when it was dismissed and can be moved back to the inbox ("To do" = un-dismiss).
+export interface DismissedReviewItem extends MyTurnPr {
+  kind: 'review_request';
+  dismissedAt: string;
+}
+
+export interface DismissedThreadItem extends ThreadAwaitingItem {
+  kind: 'thread';
+  dismissedAt: string;
+}
+
+export type DismissedItem = DismissedReviewItem | DismissedThreadItem;
+
+export interface DismissedMyTurnResponse {
+  items: DismissedItem[];
+  // Users referenced by any item, for client-side lookup.
+  users: User[];
+}
+
 // ---- request payloads ----
 
 export interface CreateRepoBody {

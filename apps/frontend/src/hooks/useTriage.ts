@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type {
+  DismissedMyTurnResponse,
   MeResponse,
   MyTurnResponse,
   OpenPrsResponse,
@@ -36,4 +37,14 @@ export function useMe() {
 
 export function useMyTurn() {
   return useQuery<MyTurnResponse>({ queryKey: ['my-turn'], queryFn: api.myTurn });
+}
+
+// The "Done" tab — completed (dismissed) entries, past 90 days. Only fetched when
+// the tab is active (`enabled`).
+export function useMyTurnDone(enabled: boolean) {
+  return useQuery<DismissedMyTurnResponse>({
+    queryKey: ['my-turn-done'],
+    queryFn: api.myTurnDone,
+    enabled,
+  });
 }

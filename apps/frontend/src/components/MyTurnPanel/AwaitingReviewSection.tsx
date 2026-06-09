@@ -3,6 +3,7 @@ import type { AwaitingReviewItem, User } from '@pierre-review/shared';
 import { api } from '../../api/client.js';
 import { useFilters } from '../../store/filters.js';
 import { relativeTime } from '../../lib/ui.js';
+import { MyTurnRow } from './MyTurnRow.js';
 
 export function AwaitingReviewSection({
   items,
@@ -16,6 +17,7 @@ export function AwaitingReviewSection({
     mutationFn: (prId: number) => api.dismissMyTurn('review_request', prId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['my-turn'] });
+      void qc.invalidateQueries({ queryKey: ['my-turn-done'] });
       void qc.invalidateQueries({ queryKey: ['me'] });
     },
   });
@@ -30,37 +32,29 @@ export function AwaitingReviewSection({
       </h3>
       <ul className="space-y-0.5">
         {items.map((it) => (
-          <li key={it.prId} className="group flex items-stretch">
-            <button
-              type="button"
-              onClick={() => openPrFocused(it.prId)}
-              className="flex min-w-0 flex-1 items-baseline gap-2 rounded px-2 py-1 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
-            >
-              <span className="shrink-0 text-xs text-gray-400">
+          <MyTurnRow
+            key={it.prId}
+            onOpen={() => openPrFocused(it.prId)}
+            onAction={() => dismiss.mutate(it.prId)}
+            actionLabel="Done"
+            actionTitle="Done — reappears if the PR is updated"
+            actionPending={dismiss.isPending}
+            time={relativeTime(it.openedAt)}
+            show={{
+              prId: it.prId,
+              at: it.openedAt,
+              event: { type: 'pr_opened', refId: null },
+            }}
+            title={it.title}
+            meta={
+              <>
                 {it.repoFullName} #{it.number}
-              </span>
-              <span className="min-w-0 flex-1 truncate" title={it.title}>
-                {it.title}
-              </span>
-              {it.alsoRequested > 0 && (
-                <span className="shrink-0 text-[11px] text-gray-400">
-                  +{it.alsoRequested} other{it.alsoRequested === 1 ? '' : 's'}
-                </span>
-              )}
-              <span className="shrink-0 text-[11px] text-gray-400">
-                {relativeTime(it.openedAt)}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => dismiss.mutate(it.prId)}
-              disabled={dismiss.isPending}
-              className="shrink-0 rounded px-1.5 text-[11px] text-gray-300 opacity-0 hover:text-gray-600 group-hover:opacity-100 dark:text-gray-600 dark:hover:text-gray-300"
-              title="Dismiss — reappears if the PR is updated"
-            >
-              ✓ done
-            </button>
-          </li>
+                {it.alsoRequested > 0 && (
+                  <> · +{it.alsoRequested} other{it.alsoRequested === 1 ? '' : 's'}</>
+                )}
+              </>
+            }
+          />
         ))}
       </ul>
     </section>

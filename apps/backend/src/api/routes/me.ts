@@ -3,7 +3,12 @@ import type { MeResponse, MyTurnDismissBody } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { accountToLocalUser } from '../../auth/account.js';
 import { accountIdOf } from '../plugins/auth.js';
-import { dismissMyTurn, getMyTurn } from '../../db/queries.js';
+import {
+  dismissMyTurn,
+  getCompletedDismissals,
+  getMyTurn,
+  undismissMyTurn,
+} from '../../db/queries.js';
 
 const dismissSchema = {
   body: {
@@ -38,6 +43,18 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/my-turn/dismiss', { schema: dismissSchema }, async (req) => {
     const { kind, refId } = req.body as MyTurnDismissBody;
     await dismissMyTurn(accountIdOf(req), kind, refId);
+    return { status: 'ok' };
+  });
+
+  // The "Done" tab: entries dismissed in the past 90 days (review_request + thread).
+  app.get('/api/my-turn/done', async (req) =>
+    getCompletedDismissals(accountIdOf(req), 90),
+  );
+
+  // Un-dismiss: move a completed entry back to the inbox.
+  app.post('/api/my-turn/undismiss', { schema: dismissSchema }, async (req) => {
+    const { kind, refId } = req.body as MyTurnDismissBody;
+    await undismissMyTurn(accountIdOf(req), kind, refId);
     return { status: 'ok' };
   });
 }

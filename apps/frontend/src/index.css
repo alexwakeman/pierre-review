@@ -56,13 +56,20 @@ body {
   background: rgba(56, 189, 248, 0.12);
   border: 1px solid rgba(56, 189, 248, 0.4);
   white-space: nowrap;
-  /* The whole pill is the "exit focus" button: show the regular arrow (not the
-     hand), no I-beam, and reset native <button> chrome. The ✕ reveals on hover. */
-  cursor: default;
+  /* The whole pill is the "exit focus" button: hand pointer to read as clickable,
+     no I-beam, native <button> chrome reset. The ✕ reveals + wobbles on hover. */
+  cursor: pointer;
   user-select: none;
   font: inherit;
   font-size: 11px;
   font-weight: 600;
+  transition: box-shadow 0.15s ease;
+}
+/* Hover glow — the SAME breathing sky pulse the timeline puts on a selected /
+   highlighted PR or event (ev-select-pulse), so the action reads as "this is the
+   focused thing". */
+.focus-indicator:hover {
+  animation: ev-select-pulse 1.8s ease-in-out infinite;
 }
 .dark .focus-indicator {
   color: #7dd3fc; /* sky-300 */
@@ -98,8 +105,19 @@ body {
     opacity 0.15s ease;
 }
 .focus-indicator:hover .focus-indicator-close {
-  opacity: 0.85;
+  opacity: 0.95;
   background: rgba(56, 189, 248, 0.25);
+  /* Wobble to make it unmistakable that clicking the pill closes focus. */
+  animation: focus-close-wobble 0.45s ease-in-out infinite;
+}
+@keyframes focus-close-wobble {
+  0%,
+  100% {
+    transform: rotate(-12deg);
+  }
+  50% {
+    transform: rotate(12deg);
+  }
 }
 @keyframes focus-dot-pulse {
   0%,
@@ -111,7 +129,9 @@ body {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .focus-indicator-dot {
+  .focus-indicator-dot,
+  .focus-indicator:hover,
+  .focus-indicator:hover .focus-indicator-close {
     animation: none;
   }
 }

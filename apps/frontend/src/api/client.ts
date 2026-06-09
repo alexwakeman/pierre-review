@@ -10,6 +10,7 @@ import type {
   CreateRepoBody,
   MeResponse,
   MergersResponse,
+  DismissedMyTurnResponse,
   MyTurnDismissKind,
   MyTurnResponse,
   OpenPrsResponse,
@@ -115,8 +116,13 @@ export const api = {
   logout: (): Promise<Response> =>
     fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }),
   myTurn: () => get<MyTurnResponse>('/api/my-turn'),
+  myTurnDone: () => get<DismissedMyTurnResponse>('/api/my-turn/done'),
   dismissMyTurn: (kind: MyTurnDismissKind, refId: number) =>
     fetch('/api/my-turn/dismiss', jsonBody('POST', { kind, refId })).then((r) =>
+      handle<{ status: string }>(r),
+    ),
+  undismissMyTurn: (kind: MyTurnDismissKind, refId: number) =>
+    fetch('/api/my-turn/undismiss', jsonBody('POST', { kind, refId })).then((r) =>
       handle<{ status: string }>(r),
     ),
   markPrViewed: (id: number, sha?: string) =>

@@ -21,6 +21,9 @@ import type {
   CheckRun,
   CiStatus,
   CommitDetail,
+  DerivedState,
+  DismissedItem,
+  DismissedMyTurnResponse,
   EventType,
   Label,
   RequestedReviewer,
@@ -607,11 +610,41 @@ export async function markPrViewed(
 
 // ---- my turn ----
 
+// Does this (kind, refId) actually belong to the account? Guards the dismiss
+// insert so a buggy/hostile client can't seed orphan dismissal rows for ids it
+// doesn't own (refId is a local PR/thread id). Defense-in-depth; the read path is
+// already account-scoped.
+async function ownsDismissRef(
+  accountId: number,
+  kind: MyTurnDismissKind,
+  refId: number,
+): Promise<boolean> {
+  if (kind === 'review_request') {
+    const rows = await db
+      .select({ id: pullRequests.id })
+      .from(pullRequests)
+      .where(and(eq(pullRequests.id, refId), eq(pullRequests.accountId, accountId)))
+      .limit(1)
+      .execute();
+    return rows.length > 0;
+  }
+  const rows = await db
+    .select({ id: reviewThreads.id })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(and(eq(reviewThreads.id, refId), eq(pullRequests.accountId, accountId)))
+    .limit(1)
+    .execute();
+  return rows.length > 0;
+}
+
 export async function dismissMyTurn(
   accountId: number,
   kind: MyTurnDismissKind,
   refId: number,
 ): Promise<void> {
+  // Skip silently if the ref isn't owned by this account (no-op anyway downstream).
+  if (!(await ownsDismissRef(accountId, kind, refId))) return;
   const now = new Date();
   await db
     .insert(myTurnDismissals)
@@ -621,6 +654,154 @@ export async function dismissMyTurn(
       set: { dismissedAt: now },
     })
     .execute();
+}
+
+// Un-dismiss a "Done" entry: delete its dismissal so it returns to the inbox.
+// Scoped by accountId (defence-in-depth; refId is already account-unique).
+export async function undismissMyTurn(
+  accountId: number,
+  kind: MyTurnDismissKind,
+  refId: number,
+): Promise<void> {
+  await db
+    .delete(myTurnDismissals)
+    .where(
+      and(
+        eq(myTurnDismissals.accountId, accountId),
+        eq(myTurnDismissals.kind, kind),
+        eq(myTurnDismissals.refId, refId),
+      ),
+    )
+    .execute();
+}
+
+// The My Turn "Done" tab: entries the user dismissed within the past `daysBefore`
+// days (default 90), newest-dismissed first. Covers only the dismissal-backed kinds
+// (review_request + thread); "Your PRs" are cleared via mark-viewed, not a
+// restorable dismissal. Rebuilds each entry by joining the dismissal's refId back to
+// its PR / thread. accountId-scoped throughout.
+export async function getCompletedDismissals(
+  accountId: number,
+  daysBefore = 90,
+): Promise<DismissedMyTurnResponse> {
+  const cutoff = new Date(Date.now() - daysBefore * 24 * 60 * 60 * 1000);
+  const dismissals = await db
+    .select()
+    .from(myTurnDismissals)
+    .where(
+      and(
+        eq(myTurnDismissals.accountId, accountId),
+        gte(myTurnDismissals.dismissedAt, cutoff),
+      ),
+    )
+    .execute();
+  if (dismissals.length === 0) return { items: [], users: [] };
+
+  const reviewDismissals = dismissals.filter((d) => d.kind === 'review_request');
+  const threadDismissals = dismissals.filter((d) => d.kind === 'thread');
+  const items: DismissedItem[] = [];
+  const referencedUsers = new Set<number>();
+
+  // review_request dismissals → their PRs (account-scoped).
+  if (reviewDismissals.length > 0) {
+    const prRows = await db
+      .select()
+      .from(pullRequests)
+      .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(
+            pullRequests.id,
+            reviewDismissals.map((d) => d.refId),
+          ),
+        ),
+      )
+      .execute();
+    const byId = new Map(prRows.map((r) => [r.pull_requests.id, r]));
+    for (const d of reviewDismissals) {
+      const row = byId.get(d.refId);
+      if (!row) continue;
+      const { pull_requests: pr, repos: repo } = row;
+      if (pr.authorId != null) referencedUsers.add(pr.authorId);
+      items.push({
+        kind: 'review_request',
+        prId: pr.id,
+        repoFullName: `${repo.owner}/${repo.name}`,
+        number: pr.number,
+        title: pr.title,
+        authorId: pr.authorId,
+        state: pr.state as PrState,
+        openedAt: pr.openedAt.toISOString(),
+        githubUrl: `https://github.com/${repo.owner}/${repo.name}/pull/${pr.number}`,
+        dismissedAt: d.dismissedAt.toISOString(),
+      });
+    }
+  }
+
+  // thread dismissals → their review threads + parent PR + last reply.
+  if (threadDismissals.length > 0) {
+    const threadIds = threadDismissals.map((d) => d.refId);
+    const threadRows = await db
+      .select({ thread: reviewThreads, pr: pullRequests, repo: repos })
+      .from(reviewThreads)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+      .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(reviewThreads.id, threadIds),
+        ),
+      )
+      .execute();
+    const byId = new Map(threadRows.map((r) => [r.thread.id, r]));
+    const commentRows = await db
+      .select()
+      .from(reviewComments)
+      .where(inArray(reviewComments.threadId, threadIds))
+      .orderBy(asc(reviewComments.createdAt))
+      .execute();
+    const lastComment = new Map<number, (typeof commentRows)[number]>();
+    for (const c of commentRows) lastComment.set(c.threadId, c); // asc → last wins
+    for (const d of threadDismissals) {
+      const row = byId.get(d.refId);
+      if (!row) continue;
+      const { thread, pr, repo } = row;
+      const last = lastComment.get(thread.id);
+      if (last?.authorId != null) referencedUsers.add(last.authorId);
+      items.push({
+        kind: 'thread',
+        threadId: thread.id,
+        prId: pr.id,
+        repoFullName: `${repo.owner}/${repo.name}`,
+        prNumber: pr.number,
+        path: thread.path,
+        line: thread.line,
+        derivedState: thread.derivedState as DerivedState,
+        lastReplyExcerpt:
+          last?.excerpt ?? (last?.body ? truncate(last.body, 140) : ''),
+        lastReplyAt: (last?.createdAt ?? thread.createdAt).toISOString(),
+        lastReplyAuthorId: last?.authorId ?? null,
+        githubUrl: `https://github.com/${repo.owner}/${repo.name}/pull/${pr.number}`,
+        dismissedAt: d.dismissedAt.toISOString(),
+      });
+    }
+  }
+
+  // Newest-dismissed first.
+  items.sort((a, b) => b.dismissedAt.localeCompare(a.dismissedAt));
+
+  const usersList =
+    referencedUsers.size > 0
+      ? (
+          await db
+            .select()
+            .from(users)
+            .where(inArray(users.id, [...referencedUsers]))
+            .execute()
+        ).map(mapUser)
+      : [];
+  return { items, users: usersList };
 }
 
 function truncate(s: string, n: number): string {

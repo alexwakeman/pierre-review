@@ -84,6 +84,9 @@ export function ClaudeReviewsModal({
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
   const { data, isLoading, isError, error } = useAllClaudeReviews(open);
   const [muted, setMuted] = useState(() => isReviewSoundMuted());
+  // Paginate the list past 5 entries so a long history doesn't overcrowd the modal.
+  const PAGE_SIZE = 5;
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -97,9 +100,20 @@ export function ClaudeReviewsModal({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [open, onClose]);
 
+  // Reset to the first page each time the modal opens.
+  useEffect(() => {
+    if (open) setPage(0);
+  }, [open]);
+
   if (!open) return null;
 
   const reviews = data?.reviews ?? [];
+  const pageCount = Math.max(1, Math.ceil(reviews.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const paged = reviews.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+  const paginated = reviews.length > PAGE_SIZE;
+  const rangeStart = reviews.length === 0 ? 0 : safePage * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(reviews.length, safePage * PAGE_SIZE + PAGE_SIZE);
 
   const toggleMute = (): void => {
     const next = !muted;
@@ -156,7 +170,7 @@ export function ClaudeReviewsModal({
             </div>
           ) : (
             <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-              {reviews.map((item) => (
+              {paged.map((item) => (
                 <ReviewRow
                   key={item.reviewId}
                   item={item}
@@ -167,26 +181,55 @@ export function ClaudeReviewsModal({
           )}
         </div>
 
-        <div className="flex items-center justify-between border-t border-gray-200 px-4 py-2 dark:border-gray-800">
-          <span className="text-xs text-gray-400">
+        <div className="flex items-center justify-between gap-2 border-t border-gray-200 px-4 py-2 dark:border-gray-800">
+          <span className="shrink-0 text-xs text-gray-400">
             {reviews.length > 0
-              ? `${reviews.length} PR${reviews.length === 1 ? '' : 's'} reviewed`
+              ? paginated
+                ? `${rangeStart}–${rangeEnd} of ${reviews.length} PRs`
+                : `${reviews.length} PR${reviews.length === 1 ? '' : 's'} reviewed`
               : ''}
           </span>
-          <button
-            type="button"
-            onClick={toggleMute}
-            className="flex items-center gap-1.5 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
-            title={
-              muted
-                ? 'Completion sound muted — click to unmute'
-                : 'Completion sound on — click to mute'
-            }
-            aria-pressed={muted}
-          >
-            <span aria-hidden="true">{muted ? '🔇' : '🔔'}</span>
-            {muted ? 'Sound off' : 'Sound on'}
-          </button>
+          <div className="flex items-center gap-2">
+            {paginated && (
+              <div className="flex items-center gap-1 text-xs text-gray-500">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={safePage === 0}
+                  className="rounded border border-gray-300 px-1.5 py-0.5 hover:border-gray-400 disabled:opacity-30 dark:border-gray-700 dark:hover:border-gray-500"
+                  aria-label="Previous page"
+                >
+                  ← Prev
+                </button>
+                <span className="px-1 tabular-nums text-gray-400">
+                  {safePage + 1}/{pageCount}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                  disabled={safePage >= pageCount - 1}
+                  className="rounded border border-gray-300 px-1.5 py-0.5 hover:border-gray-400 disabled:opacity-30 dark:border-gray-700 dark:hover:border-gray-500"
+                  aria-label="Next page"
+                >
+                  Next →
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={toggleMute}
+              className="flex items-center gap-1.5 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+              title={
+                muted
+                  ? 'Completion sound muted — click to unmute'
+                  : 'Completion sound on — click to mute'
+              }
+              aria-pressed={muted}
+            >
+              <span aria-hidden="true">{muted ? '🔇' : '🔔'}</span>
+              {muted ? 'Sound off' : 'Sound on'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
