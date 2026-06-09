@@ -21,7 +21,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
-import type { CheckRun, Label } from '@pierre-review/shared';
+import type { CheckRun, Label, StoredPrFile } from '@pierre-review/shared';
 
 // A tenant. Local mode synthesizes exactly one row (id 1, isLocal=true) from
 // `gh api user`; cloud mode creates one per signed-in GitHub user. Replaces the
@@ -143,6 +143,15 @@ export const pullRequests = sqliteTable(
     labels: text('labels', { mode: 'json' }).$type<Label[]>(),
     // Per-job CI checks on the head commit (CheckRuns + StatusContexts).
     checkRuns: text('check_runs', { mode: 'json' }).$type<CheckRun[]>(),
+    // ---- Diff size (GraphQL additions/deletions/changedFiles + files connection) ----
+    // Small metadata (not bulky text), so ALWAYS stored — independent of lean mode —
+    // and served straight from the DB for the PR-detail LOC label + "Changes" tab.
+    additions: integer('additions').notNull().default(0),
+    deletions: integer('deletions').notNull().default(0),
+    changedFiles: integer('changed_files').notNull().default(0),
+    // Per-file breakdown (capped at 100 files by the sync query). Nullable; the
+    // API resolves it to [] and computes each file's GitHub deep link on read.
+    files: text('files', { mode: 'json' }).$type<StoredPrFile[]>(),
   },
   (t) => ({
     repoIdx: index('pr_repo_idx').on(t.repoId),

@@ -33,6 +33,9 @@ body {
   letter-spacing: 0.3px;
   /* Nudge the baseline so the script sits optically centred next to the meta text. */
   padding-bottom: 2px;
+  /* Brand mark, not selectable text — show the default arrow, not the I-beam caret. */
+  cursor: default;
+  user-select: none;
 }
 
 /* ---- focus-mode indicator ---- */
@@ -53,6 +56,13 @@ body {
   background: rgba(56, 189, 248, 0.12);
   border: 1px solid rgba(56, 189, 248, 0.4);
   white-space: nowrap;
+  /* The whole pill is the "exit focus" button: show the regular arrow (not the
+     hand), no I-beam, and reset native <button> chrome. The ✕ reveals on hover. */
+  cursor: default;
+  user-select: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
 }
 .dark .focus-indicator {
   color: #7dd3fc; /* sky-300 */
@@ -65,9 +75,10 @@ body {
   box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.6);
   animation: focus-dot-pulse 1.8s ease-in-out infinite;
 }
-/* The ✕ that leaves focus mode, tucked against the pill's right edge in the same
-   sky palette. The only on-screen exit control now (the old bottom-left
-   timeline button was removed); Esc and the browser Back button still work. */
+/* The ✕ exit affordance, tucked against the pill's right edge. The WHOLE pill is
+   the clickable exit button now; this ✕ is a non-interactive hint that's HIDDEN by
+   default and fades in when the pill is hovered, signalling what a click does. Esc
+   and the browser Back button still work. */
 .focus-indicator-close {
   display: inline-flex;
   align-items: center;
@@ -80,14 +91,14 @@ body {
   font-size: 10px;
   line-height: 1;
   color: inherit;
-  opacity: 0.7;
-  cursor: pointer;
+  /* Hidden until the pill is hovered (reserve its width so the pill doesn't jump). */
+  opacity: 0;
   transition:
     background 0.15s ease,
     opacity 0.15s ease;
 }
-.focus-indicator-close:hover {
-  opacity: 1;
+.focus-indicator:hover .focus-indicator-close {
+  opacity: 0.85;
   background: rgba(56, 189, 248, 0.25);
 }
 @keyframes focus-dot-pulse {

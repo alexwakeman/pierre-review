@@ -176,6 +176,25 @@ export interface RequestedReviewer {
   teamName: string | null;
 }
 
+// A single file changed by a PR, with its per-file line counts. Stored as a JSON
+// column on pull_requests (synced from GitHub's pullRequest.files connection) and
+// surfaced in the PR-detail "Changes" tab. `githubUrl` deep-links to the file's
+// diff in the PR's "Files changed" view (built server-side in getPrDetail).
+export interface PrFileChange {
+  path: string;
+  additions: number;
+  deletions: number;
+  githubUrl: string;
+}
+
+// The DB-stored shape of a changed file (the `files` JSON column on pull_requests):
+// the API's PrFileChange minus the `githubUrl`, which is derived on read.
+export type StoredPrFile = Omit<PrFileChange, 'githubUrl'>;
+
+// Hard cap on how many repositories a single account may watch. Enforced on the
+// add-repo route (backend, the source of truth) and surfaced in the add-repo UI.
+export const MAX_REPOS_PER_ACCOUNT = 15;
+
 // The single most useful reason a PR matters right now, in priority order.
 export type ReasonTag =
   | 'awaiting_your_review'
@@ -390,6 +409,15 @@ export interface PrDetail {
   mergeStateStatus: MergeStateStatus;
   labels: Label[];
   checkRuns: CheckRun[];
+  // Diff size summary (from GitHub's pullRequest.additions/deletions/changedFiles).
+  // `changedFilesCount` is the true file count, which may exceed `files.length` when
+  // a PR touches more files than the synced page (files is capped at 100).
+  additions: number;
+  deletions: number;
+  changedFilesCount: number;
+  // Per-file breakdown for the "Changes" tab (capped at 100 files; ordered as
+  // GitHub returns them). Empty until a sync has populated it.
+  files: PrFileChange[];
   requestedReviewers: RequestedReviewer[];
   threads: ThreadDetail[];
   reviews: ReviewDetail[];

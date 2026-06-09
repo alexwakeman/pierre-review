@@ -36,6 +36,16 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
           title${prBodyField}
           isDraft
           state
+          additions
+          deletions
+          changedFiles
+          files(first: 100) {
+            nodes {
+              path
+              additions
+              deletions
+            }
+          }
           createdAt
           mergedAt
           closedAt
@@ -222,6 +232,16 @@ export const PR_DETAIL_QUERY = /* GraphQL */ `
         id
         number
         body
+        additions
+        deletions
+        changedFiles
+        files(first: 100) {
+          nodes {
+            path
+            additions
+            deletions
+          }
+        }
         headCommit: commits(last: 1) {
           nodes {
             commit {
@@ -433,6 +453,12 @@ export interface GqlHeadCommit {
   };
 }
 
+export interface GqlPrFile {
+  path: string;
+  additions: number;
+  deletions: number;
+}
+
 export interface GqlPullRequest {
   id: string;
   number: number;
@@ -440,6 +466,11 @@ export interface GqlPullRequest {
   body: string | null;
   isDraft: boolean;
   state: 'OPEN' | 'CLOSED' | 'MERGED';
+  // Diff size — GraphQL scalars + the (capped) per-file connection.
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  files: { nodes: GqlPrFile[] };
   createdAt: string;
   mergedAt: string | null;
   closedAt: string | null;
@@ -492,6 +523,10 @@ export interface PrDetailResponse {
       id: string;
       number: number;
       body: string | null;
+      additions: number;
+      deletions: number;
+      changedFiles: number;
+      files: { nodes: GqlPrFile[] };
       headCommit: { nodes: GqlHeadCommit[] };
       reviews: {
         nodes: Array<{ id: string; fullDatabaseId: string | null; body: string | null }>;

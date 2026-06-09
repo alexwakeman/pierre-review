@@ -4,6 +4,7 @@ import {
   ALL_PR_STATUSES,
   DEFAULT_CATEGORIES,
   DEFAULT_PR_STATUSES,
+  pickFilterBarState,
   useFilters,
   type FilterState,
   type RangePreset,
@@ -122,17 +123,57 @@ function writeToUrl(s: FilterState): void {
   }
 }
 
-/** Two-way sync between the filter store and the URL query string. */
+// Persist the filter-bar state across tabs/reloads. The URL stays the SHAREABLE
+// source of truth: when it carries any query string (a shared deep link, or a
+// duplicated tab — which copies the URL), it wins and localStorage is ignored, so
+// sharing semantics are untouched. localStorage only fills the gap the URL can't:
+// opening a *bare* /app (a fresh tab / bookmark, no params) restores the filters
+// you last used instead of snapping back to hard defaults.
+const FILTER_STORAGE_KEY = 'pierre:filterBarState';
+
+function loadPersistedFilters(): Partial<FilterState> | null {
+  try {
+    const raw = localStorage.getItem(FILTER_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object'
+      ? (parsed as Partial<FilterState>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistFilters(s: FilterState): void {
+  try {
+    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(pickFilterBarState(s)));
+  } catch {
+    /* quota / private-mode — non-fatal, filters just won't persist */
+  }
+}
+
+/** Two-way sync between the filter store and the URL query string + localStorage. */
 export function useUrlState(): void {
   const hydrated = useRef(false);
 
   useEffect(() => {
     if (!hydrated.current) {
-      useFilters.getState().hydrate(readFromUrl());
+      // URL present (?…) → authoritative (shared link / duplicated tab). Bare URL →
+      // restore the last-used filter bar from localStorage.
+      const hasUrlParams = window.location.search.length > 1;
+      if (hasUrlParams) {
+        useFilters.getState().hydrate(readFromUrl());
+      } else {
+        const persisted = loadPersistedFilters();
+        if (persisted) useFilters.getState().hydrate(persisted);
+      }
       hydrated.current = true;
     }
-    // Reflect every subsequent change back into the URL.
-    const unsub = useFilters.subscribe((s) => writeToUrl(s));
+    // Reflect every subsequent change back into the URL and localStorage.
+    const unsub = useFilters.subscribe((s) => {
+      writeToUrl(s);
+      persistFilters(s);
+    });
     return unsub;
   }, []);
 }

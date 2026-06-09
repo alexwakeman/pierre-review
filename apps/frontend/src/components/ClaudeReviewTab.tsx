@@ -149,10 +149,70 @@ function hunkLineClass(line: string): string {
   return 'text-gray-500 dark:text-gray-400';
 }
 
+// Shared action-button styles for the per-finding control bar so Post / Reword /
+// Copy / Ignore line up consistently. Primary = blue (Post / Reword / Un-ignore);
+// secondary = neutral grey (Copy / Ignore / Show).
+const BTN_PRIMARY =
+  'whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
+const BTN_SECONDARY =
+  'whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
+
+// The diff hunk a finding covers, COLLAPSED by default. Clicking the collapsed
+// preview expands it (a convenience); the expanded hunk only collapses via the
+// dedicated "Hide" control (so clicking the code to read/select it never folds it
+// away). State is local + transient — it never persists across reloads.
+function FindingHunk({ hunk }: { hunk: string }): JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const lines = hunk.replace(/\n$/, '').split('\n');
+  // Prefer the @@ header for the collapsed preview; else the anchor (last) line.
+  const preview = lines.find((l) => l.startsWith('@@')) ?? lines.at(-1) ?? '';
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        title="Show the code hunk"
+        className="mt-1 flex w-full items-center gap-2 overflow-hidden rounded bg-gray-50 px-2 py-1.5 text-left font-mono text-xs dark:bg-gray-900/60"
+      >
+        <span className="shrink-0 text-gray-400">▸</span>
+        <span className={`min-w-0 flex-1 truncate ${hunkLineClass(preview)}`}>
+          {preview === '' ? ' ' : preview}
+        </span>
+        {lines.length > 1 && (
+          <span className="shrink-0 font-sans text-[10px] text-gray-400">
+            {lines.length} lines
+          </span>
+        )}
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-1 rounded bg-gray-50 dark:bg-gray-900/60">
+      <pre className="overflow-x-auto px-2 py-1.5 font-mono text-xs leading-snug">
+        {lines.map((l, i) => (
+          <div key={i} className={hunkLineClass(l)}>
+            {l === '' ? ' ' : l}
+          </div>
+        ))}
+      </pre>
+      <button
+        type="button"
+        onClick={() => setExpanded(false)}
+        className="px-2 pb-1.5 text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+      >
+        ⌃ Hide code
+      </button>
+    </div>
+  );
+}
+
 // One finding row: severity pill, title, a code anchor that links to the line on
-// GitHub, the diff hunk it covers, Claude's body, an optional suggestion, a Copy
-// button, a "Reword" editor (your own markdown that posts instead of Claude's),
-// and an include checkbox.
+// GitHub, the (collapsible) diff hunk it covers, Claude's body, an optional
+// suggestion, and a single control bar — Post as comment / Reword / Copy / Ignore.
+// Findings are INCLUDED by default; "Ignore" sets one aside (collapsed + faded,
+// excluded from a submitted review) and it can be re-expanded and un-ignored.
 function FindingRow({
   finding,
   editable,
@@ -291,8 +351,22 @@ function FindingRow({
   };
   const busy = posting || working;
 
+  // Ignore = exclude from the submitted review. Only offered for anchorable
+  // findings on the editable run (unanchored ones never post inline anyway). An
+  // ignored finding collapses + fades but can be re-expanded for a look, then
+  // un-ignored (re-included). `included` defaults true, so a finding is normal
+  // until explicitly ignored.
+  const canIgnore = editable && finding.anchored;
+  const ignored = canIgnore && !finding.included;
+  const [ignoredExpanded, setIgnoredExpanded] = useState(false);
+  const detailsHidden = ignored && !ignoredExpanded;
+
   return (
-    <li className="rounded border border-gray-100 px-3 py-2 text-sm dark:border-gray-800">
+    <li
+      className={`rounded border border-gray-100 px-3 py-2 text-sm dark:border-gray-800 ${
+        ignored ? 'opacity-50' : ''
+      }`}
+    >
       <div className="flex items-start gap-2">
         <span
           className={`mt-0.5 inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${SEVERITY_CLASS[finding.severity]}`}
@@ -334,8 +408,20 @@ function FindingRow({
                 unanchored — won't post inline
               </span>
             )}
+            {ignored && (
+              <span
+                className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500"
+                title="Set aside — excluded from the submitted review"
+              >
+                ignored
+              </span>
+            )}
           </div>
 
+          {/* Detail (anchor / hunk / body / suggestion / reword). Hidden while an
+              ignored finding is collapsed; the action bar can re-expand it. */}
+          {!detailsHidden && (
+          <>
           {/* Code anchor → opens this finding's line in the PR diff (review
               context). A secondary "view file" links the blob at the reviewed
               commit as an escape hatch for collapsed/outdated diffs. */}
@@ -368,15 +454,9 @@ function FindingRow({
             )}
           </div>
 
-          {/* The diff hunk this finding covers. */}
+          {/* The (collapsible) diff hunk this finding covers. */}
           {finding.diffHunk != null && finding.diffHunk !== '' && (
-            <pre className="mt-1 overflow-x-auto rounded bg-gray-50 px-2 py-1.5 font-mono text-xs leading-snug dark:bg-gray-900/60">
-              {finding.diffHunk.split('\n').map((l, i) => (
-                <div key={i} className={hunkLineClass(l)}>
-                  {l === '' ? ' ' : l}
-                </div>
-              ))}
-            </pre>
+            <FindingHunk hunk={finding.diffHunk} />
           )}
 
           {/* Claude's body (read-only). */}
@@ -399,132 +479,150 @@ function FindingRow({
             </div>
           )}
 
-          {editable &&
-            (rewording ? (
-              <div className="mt-2 space-y-1">
-                <textarea
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  rows={4}
-                  placeholder="Reword this finding in your own words (markdown). This is what gets posted as the inline comment."
-                  className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-gray-700 dark:bg-gray-900"
-                />
-                <div className="flex flex-wrap gap-2">
+          {/* Reword editor (inline). The OPEN trigger lives in the action bar. */}
+          {editable && rewording && (
+            <div className="mt-2 space-y-1">
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                rows={4}
+                placeholder="Reword this finding in your own words (markdown). This is what gets posted as the inline comment."
+                className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-gray-700 dark:bg-gray-900"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={saveReword} className={BTN_PRIMARY}>
+                  Save reword
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRewording(false);
+                    setDraft(finding.editedBody ?? '');
+                  }}
+                  className={BTN_SECONDARY}
+                >
+                  Cancel
+                </button>
+                {hasReword && (
                   <button
                     type="button"
-                    onClick={saveReword}
-                    className="rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                    onClick={clearReword}
+                    className={`${BTN_SECONDARY} text-gray-500`}
                   >
-                    Save reword
+                    Clear reword
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRewording(false);
-                      setDraft(finding.editedBody ?? '');
-                    }}
-                    className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
-                  >
-                    Cancel
-                  </button>
-                  {hasReword && (
-                    <button
-                      type="button"
-                      onClick={clearReword}
-                      className="rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-500 hover:border-gray-400 dark:border-gray-700"
-                    >
-                      Clear reword
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
-            ) : (
+            </div>
+          )}
+          </>
+          )}
+        </div>
+      </div>
+
+      {/* One control bar for every per-finding action: Post / Reword / Copy /
+          Ignore, plus posted/error status. Ignored findings show only the
+          re-expand + un-ignore controls. */}
+      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+        {ignored ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setIgnoredExpanded((v) => !v)}
+              className={BTN_SECONDARY}
+            >
+              {ignoredExpanded ? 'Collapse' : 'Show'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onToggle(true)}
+              title="Re-include this finding in the review"
+              className={BTN_PRIMARY}
+            >
+              Un-ignore
+            </button>
+            {ignoredExpanded && (
+              <button type="button" onClick={copy} className={BTN_SECONDARY}>
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            {canPostComment && (
+              <button
+                type="button"
+                onClick={handlePost}
+                disabled={busy}
+                title="Post just this finding as a single inline comment on the PR (no review submitted)"
+                className={BTN_PRIMARY}
+              >
+                {busy
+                  ? 'Posting…'
+                  : isPosted
+                    ? 'Post again as comment'
+                    : 'Post as comment'}
+              </button>
+            )}
+            {editable && !rewording && (
               <button
                 type="button"
                 onClick={() => {
                   setDraft(finding.editedBody ?? '');
                   setRewording(true);
                 }}
-                className="mt-1.5 text-xs text-blue-600 hover:underline dark:text-blue-400"
+                title="Rewrite this finding in your own words — your text posts instead of Claude's"
+                className={BTN_PRIMARY}
               >
                 {hasReword ? 'Edit reword' : 'Reword in my words'}
               </button>
-            ))}
-        </div>
-
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <button
-            type="button"
-            onClick={copy}
-            className="rounded border border-gray-300 px-1.5 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
-          >
-            {copied ? 'Copied' : 'Copy'}
-          </button>
-          <label
-            className="flex items-center gap-1 text-xs text-gray-500"
-            title="Include this finding as an inline comment in the full review"
-          >
-            <input
-              type="checkbox"
-              checked={finding.included}
-              disabled={!editable || !finding.anchored}
-              onChange={(e) => onToggle(e.target.checked)}
-            />
-            include
-          </label>
-        </div>
-      </div>
-
-      {/* Bottom action bar — post this single finding as its own comment. */}
-      {(canPostComment || isPosted || postError != null) && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
-          {canPostComment && (
-            <button
-              type="button"
-              onClick={handlePost}
-              disabled={busy}
-              title="Post just this finding as a single inline comment on the PR (no review submitted)"
-              className="whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
-            >
-              {busy
-                ? 'Posting…'
-                : isPosted
-                  ? 'Post again as comment'
-                  : 'Post as comment'}
+            )}
+            <button type="button" onClick={copy} className={BTN_SECONDARY}>
+              {copied ? 'Copied' : 'Copy'}
             </button>
-          )}
-          {canPostComment && (
-            <span className="text-[11px] text-gray-400">
-              {willPostReword ? 'posts your reworded text' : "posts Claude's text"}
-            </span>
-          )}
-          {isPosted &&
-            (commentUrl != null ? (
-              <a
-                href={commentUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="text-xs text-green-700 hover:underline dark:text-green-400"
+            {canIgnore && (
+              <button
+                type="button"
+                onClick={() => onToggle(false)}
+                title="Set aside — exclude this finding from the submitted review"
+                className={BTN_SECONDARY}
               >
-                view comment ↗
-              </a>
-            ) : (
-              <span className="text-xs text-green-700 dark:text-green-400">
-                posted ✓
+                Ignore
+              </button>
+            )}
+            {canPostComment && (
+              <span className="text-[11px] text-gray-400">
+                {willPostReword ? 'posts your reworded text' : "posts Claude's text"}
               </span>
-            ))}
-          {postError != null && (
-            <span className="ml-auto text-xs text-red-500">{postError}</span>
-          )}
-        </div>
-      )}
+            )}
+            {isPosted &&
+              (commentUrl != null ? (
+                <a
+                  href={commentUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="text-xs text-green-700 hover:underline dark:text-green-400"
+                >
+                  view comment ↗
+                </a>
+              ) : (
+                <span className="text-xs text-green-700 dark:text-green-400">
+                  posted ✓
+                </span>
+              ))}
+            {postError != null && (
+              <span className="ml-auto text-xs text-red-500">{postError}</span>
+            )}
+          </>
+        )}
+      </div>
     </li>
   );
 }
 
 // Section A: Claude's read-only output (verdict, meta, summary, findings). Used
-// for both the latest run and a selected past run; `editable` gates the include
-// checkboxes (only the latest run can be edited).
+// for both the latest run and a selected past run; `editable` gates the per-finding
+// actions — Reword / Ignore / post (only the latest run can be edited).
 function ClaudesReview({
   review,
   editable,
@@ -1074,8 +1172,9 @@ export function ClaudeReviewTab({
             This is the single <strong>top-level review comment</strong> posted on
             the PR (GitHub&apos;s review summary), together with your verdict
             below. It is <strong>not</strong> a line comment — the inline comments
-            come from the findings you tick <em>include</em> above. Leave it short
-            or empty if the inline comments say it all.
+            come from the findings above that you haven&apos;t{' '}
+            <em>ignored</em>. Leave it short or empty if the inline comments say it
+            all.
           </p>
           <textarea
             value={userBody}
@@ -1094,6 +1193,7 @@ export function ClaudeReviewTab({
                 updateReview.mutate({ reviewId: review.id, userBody })
               }
               disabled={updateReview.isPending}
+              title="Save this overall review draft. It's kept until you post to GitHub — it does NOT post anything yet (use “Post to GitHub” below for that)."
               className="rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
             >
               Save

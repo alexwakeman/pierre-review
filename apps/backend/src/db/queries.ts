@@ -31,6 +31,7 @@ import type {
   NewSinceLastViewed,
   PrCommentDetail,
   PrDetail,
+  PrFileChange,
   PrState,
   PrStatus,
   ReasonTag,
@@ -962,6 +963,15 @@ export async function getPrDetail(
     committedAt: c.committedAt.toISOString(),
   }));
 
+  // Per-file diff breakdown for the "Changes" tab. Each links to the file's diff
+  // in the PR's "Files changed" view (GitHub anchors by sha256(path)).
+  const filesOut: PrFileChange[] = (pr.files ?? []).map((f) => ({
+    path: f.path,
+    additions: f.additions,
+    deletions: f.deletions,
+    githubUrl: `${prUrl}/files#diff-${diffAnchorId(f.path)}`,
+  }));
+
   // Outstanding review requests (for the Checks/Overview tab).
   const reviewerRows = await db
     .select()
@@ -1052,6 +1062,10 @@ export async function getPrDetail(
     mergeStateStatus: (pr.mergeStateStatus ?? 'unknown') as MergeStateStatus,
     labels: (pr.labels ?? []) as Label[],
     checkRuns: (pr.checkRuns ?? []) as CheckRun[],
+    additions: pr.additions,
+    deletions: pr.deletions,
+    changedFilesCount: pr.changedFiles,
+    files: filesOut,
     requestedReviewers,
     threads,
     reviews: reviewsOut,

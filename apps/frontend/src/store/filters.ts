@@ -61,6 +61,12 @@ export interface FilterState {
   // selection
   selectedPrId: number | null;
   selectedThreadId: number | null;
+  // A specific issue-level PR comment selected from the timeline popover's "Open in
+  // detail pane". Drives a PERMANENT amber highlight on that comment card (mirroring
+  // selectedThreadId's thread highlight); cleared when another thread/comment/PR is
+  // selected. Distinct from the transient `commentFocus` signal, which only scrolls
+  // + flashes the card once.
+  selectedCommentId: number | null;
 
   // transient: a timeline → PR-detail deep link that opens the Activity tab and
   // scrolls to a specific entry (e.g. the commit popover's "View in Activity").
@@ -288,6 +294,28 @@ function freshFilterDefaults(): FilterDefaults {
   };
 }
 
+// The filter-bar subset of the current state, for persisting to localStorage so a
+// fresh tab (no URL params) restores the user's last filters. EXACTLY the fields
+// the URL also encodes — selection / focus / transient state is deliberately left
+// out. Mirrors freshFilterDefaults() / FilterDefaults so persistence and the URL
+// serializer stay in lockstep. See hooks/useUrlState.
+export function pickFilterBarState(s: FilterState): FilterDefaults {
+  return {
+    repoIds: s.repoIds,
+    userIds: s.userIds,
+    excludeBots: s.excludeBots,
+    excludeStale: s.excludeStale,
+    preset: s.preset,
+    customFrom: s.customFrom,
+    customTo: s.customTo,
+    categories: s.categories,
+    prStatuses: s.prStatuses,
+    derivedStates: s.derivedStates,
+    searchQuery: s.searchQuery,
+    stripFilter: s.stripFilter,
+  };
+}
+
 // The fresh-load defaults for every (non-action) piece of state: the filters above
 // plus selection, transient signals and detail-view state. Used for the initial
 // store. (resetAllFilters resets only the filter subset.)
@@ -296,6 +324,7 @@ function freshDefaults(): FilterData {
     ...freshFilterDefaults(),
     selectedPrId: null,
     selectedThreadId: null,
+    selectedCommentId: null,
     activityFocus: null,
     commentFocus: null,
     claudeTabFocus: null,
@@ -343,17 +372,21 @@ export const useFilters = create<FilterState>((set, get) => ({
   setPrStatuses: (s) => set({ prStatuses: s }),
   toggleDerivedState: (st) =>
     set((s) => ({ derivedStates: toggle(s.derivedStates, st) })),
-  selectPr: (id) => set({ selectedPrId: id, selectedThreadId: null }),
+  selectPr: (id) =>
+    set({ selectedPrId: id, selectedThreadId: null, selectedCommentId: null }),
   selectThread: (prId, threadId) =>
     set((s) => ({
       selectedPrId: prId ?? s.selectedPrId,
       selectedThreadId: threadId,
+      selectedCommentId: null,
     })),
-  clearSelection: () => set({ selectedPrId: null, selectedThreadId: null }),
+  clearSelection: () =>
+    set({ selectedPrId: null, selectedThreadId: null, selectedCommentId: null }),
   openPrFocused: (id, threadId = null, focusAt = null) =>
     set({
       selectedPrId: id,
       selectedThreadId: threadId,
+      selectedCommentId: null,
       timelineFocusPr: id,
       timelineFocusAt: focusAt,
       timelineFocusEvent: null,
@@ -384,13 +417,30 @@ export const useFilters = create<FilterState>((set, get) => ({
   centerTimelineNow: () => set({ timelineCenterAt: Date.now() }),
   consumeTimelineCenter: () => set({ timelineCenterAt: null }),
   showActivityEntry: (prId, event) =>
-    set({ selectedPrId: prId, selectedThreadId: null, activityFocus: { prId, ...event } }),
+    set({
+      selectedPrId: prId,
+      selectedThreadId: null,
+      selectedCommentId: null,
+      activityFocus: { prId, ...event },
+    }),
   consumeActivityFocus: () => set({ activityFocus: null }),
+  // Select the comment (permanent amber highlight) AND fire the transient scroll/
+  // flash signal — the highlight persists, the flash plays once.
   showPrComment: (prId, commentId) =>
-    set({ selectedPrId: prId, selectedThreadId: null, commentFocus: { prId, commentId } }),
+    set({
+      selectedPrId: prId,
+      selectedThreadId: null,
+      selectedCommentId: commentId,
+      commentFocus: { prId, commentId },
+    }),
   consumeCommentFocus: () => set({ commentFocus: null }),
   openClaudeReview: (prId) =>
-    set({ selectedPrId: prId, selectedThreadId: null, claudeTabFocus: { prId } }),
+    set({
+      selectedPrId: prId,
+      selectedThreadId: null,
+      selectedCommentId: null,
+      claudeTabFocus: { prId },
+    }),
   consumeClaudeTabFocus: () => set({ claudeTabFocus: null }),
   setFocusActive: (v) => set({ focusActive: v }),
   exitFocus: () =>

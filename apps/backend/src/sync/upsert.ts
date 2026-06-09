@@ -349,6 +349,17 @@ export async function persistPr(
       color: l.color,
     }));
     const checkRuns = checkRunsFrom(head);
+    // Diff size — always stored (small metadata, not bulky text), so the PR-detail
+    // LOC label + "Changes" tab work in every mode straight from the DB. The files
+    // list is capped at 100 by the query; changedFiles keeps the true total.
+    const additions = pr.additions ?? 0;
+    const deletions = pr.deletions ?? 0;
+    const changedFiles = pr.changedFiles ?? 0;
+    const files = (pr.files?.nodes ?? []).map((f) => ({
+      path: f.path,
+      additions: f.additions ?? 0,
+      deletions: f.deletions ?? 0,
+    }));
 
     const prRow = (
       await tx
@@ -379,6 +390,10 @@ export async function persistPr(
         mergeStateStatus,
         labels,
         checkRuns: config.persistBodies ? checkRuns : null,
+        additions,
+        deletions,
+        changedFiles,
+        files,
       })
       .onConflictDoUpdate({
         target: [pullRequests.accountId, pullRequests.githubNodeId],
@@ -401,6 +416,10 @@ export async function persistPr(
           mergeStateStatus,
           labels,
           checkRuns: config.persistBodies ? checkRuns : null,
+          additions,
+          deletions,
+          changedFiles,
+          files,
         },
       })
       .returning({ id: pullRequests.id })

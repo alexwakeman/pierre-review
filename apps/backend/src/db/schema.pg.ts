@@ -25,7 +25,7 @@ import {
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import type { CheckRun, Label } from '@pierre-review/shared';
+import type { CheckRun, Label, StoredPrFile } from '@pierre-review/shared';
 
 export const accounts = pgTable('accounts', {
   id: serial('id').primaryKey(),
@@ -131,6 +131,15 @@ export const pullRequests = pgTable(
     }),
     labels: jsonb('labels').$type<Label[]>(),
     checkRuns: jsonb('check_runs').$type<CheckRun[]>(),
+    // ---- Diff size (GraphQL additions/deletions/changedFiles + files connection) ----
+    // Small metadata (not bulky text), so ALWAYS stored — independent of lean mode —
+    // and served straight from the DB for the PR-detail LOC label + "Changes" tab.
+    additions: integer('additions').notNull().default(0),
+    deletions: integer('deletions').notNull().default(0),
+    changedFiles: integer('changed_files').notNull().default(0),
+    // Per-file breakdown (capped at 100 files by the sync query). Nullable; the
+    // API resolves it to [] and computes each file's GitHub deep link on read.
+    files: jsonb('files').$type<StoredPrFile[]>(),
   },
   (t) => ({
     repoIdx: index('pr_repo_idx').on(t.repoId),

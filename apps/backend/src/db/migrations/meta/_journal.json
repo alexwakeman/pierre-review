@@ -78,6 +78,20 @@
       "when": 1780800000001,
       "tag": "0010_lean_bodies_nullable",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1780800000002,
+      "tag": "0011_pr_diff_size",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1780800000003,
+      "tag": "0012_findings_included_default",
+      "breakpoints": true
     }
   ]
 }

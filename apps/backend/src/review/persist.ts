@@ -107,6 +107,10 @@ export async function saveReviewSuccess(
           suggestion: f.suggestion,
           diffHunk: f.diffHunk,
           anchored: f.anchored,
+          // Findings are INCLUDED by default — the UI is opt-OUT ("Ignore"), so a
+          // fresh review posts every (anchored) finding unless the user sets it
+          // aside. (The column default is false for back-compat; we set it here.)
+          included: true,
         })
         .execute();
     }

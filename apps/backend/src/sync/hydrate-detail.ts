@@ -12,12 +12,14 @@
 //
 // In LOCAL mode config.persistBodies is true, so these functions are no-ops and the
 // detail is returned exactly as read from SQLite (instant, fully offline).
+import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import type {
   CheckRun,
   CommentDetail,
   PrCommentDetail,
   PrDetail,
+  PrFileChange,
   ReviewDetail,
   ThreadDetail,
 } from '@pierre-review/shared';
@@ -39,6 +41,19 @@ interface GhPrText {
   reviewCommentByNode: Map<string, { body: string; diffHunk: string | null }>;
   prCommentBodyByNode: Map<string, string>;
   commitMessageBySha: Map<string, string>;
+  // Diff size — overlaid fresh so the LOC label + "Changes" tab populate on open
+  // even for PRs synced before these columns existed (incremental sync won't
+  // re-fetch an unchanged PR to backfill them).
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  files: Array<{ path: string; additions: number; deletions: number }>;
+}
+
+// GitHub anchors a file in the PR "Files changed" diff by sha256(path) (matches
+// db/queries.ts's diffAnchorId).
+function diffAnchorId(path: string): string {
+  return createHash('sha256').update(path, 'utf8').digest('hex');
 }
 
 function splitRepoFullName(fullName: string): { owner: string; name: string } {
@@ -92,6 +107,14 @@ async function fetchGhPrText(
     reviewCommentByNode,
     prCommentBodyByNode,
     commitMessageBySha,
+    additions: pr.additions ?? 0,
+    deletions: pr.deletions ?? 0,
+    changedFiles: pr.changedFiles ?? 0,
+    files: (pr.files?.nodes ?? []).map((f) => ({
+      path: f.path,
+      additions: f.additions ?? 0,
+      deletions: f.deletions ?? 0,
+    })),
   };
 }
 
@@ -159,6 +182,14 @@ export async function hydratePrDetail(
     return message !== undefined ? { ...c, message } : c;
   });
 
+  // Overlay fresh diff size + per-file breakdown (with GitHub deep links).
+  const filesOut: PrFileChange[] = gh.files.map((f) => ({
+    path: f.path,
+    additions: f.additions,
+    deletions: f.deletions,
+    githubUrl: `${detail.githubUrl}/files#diff-${diffAnchorId(f.path)}`,
+  }));
+
   return {
     ...detail,
     body: gh.prBody,
@@ -167,6 +198,10 @@ export async function hydratePrDetail(
     reviews: reviewsOut,
     comments: commentsOut,
     commits: commitsOut,
+    additions: gh.additions,
+    deletions: gh.deletions,
+    changedFilesCount: gh.changedFiles,
+    files: filesOut,
   };
 }
 

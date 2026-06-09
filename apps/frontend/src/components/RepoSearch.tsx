@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { RepoSearchResponse } from '@pierre-review/shared';
+import { MAX_REPOS_PER_ACCOUNT, type RepoSearchResponse } from '@pierre-review/shared';
 import { api, ApiError } from '../api/client.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
@@ -97,6 +97,8 @@ export function RepoSearch(): JSX.Element {
 
   // Curated suggestions for the empty-query state, minus repos already watched.
   const { data: repos } = useRepos();
+  // Per-account repo cap (backend enforces it; we disable adds + explain here).
+  const atRepoLimit = (repos?.length ?? 0) >= MAX_REPOS_PER_ACCOUNT;
   const watched = useMemo(
     () => new Set((repos ?? []).map((r) => `${r.owner}/${r.name}`.toLowerCase())),
     [repos],
@@ -217,7 +219,7 @@ export function RepoSearch(): JSX.Element {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const item = navItems[active];
-      if (item && !addRepo.isPending) {
+      if (item && !addRepo.isPending && !atRepoLimit) {
         addRepo.mutate({ owner: item.owner, name: item.name });
       }
     }
@@ -255,6 +257,12 @@ export function RepoSearch(): JSX.Element {
           aria-label="Repository search results"
           className="absolute left-0 top-full z-[60] mt-1 max-h-96 w-96 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900"
         >
+          {atRepoLimit && (
+            <div className="sticky top-0 z-20 border-b border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+              You&rsquo;re watching the maximum of {MAX_REPOS_PER_ACCOUNT} repos.
+              Remove one to add another.
+            </div>
+          )}
           {showSuggestions ? (
             <div>
               <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700 dark:bg-gray-900">
@@ -284,7 +292,7 @@ export function RepoSearch(): JSX.Element {
                         type="button"
                         role="option"
                         aria-selected={idx === active}
-                        disabled={addRepo.isPending}
+                        disabled={addRepo.isPending || atRepoLimit}
                         onMouseEnter={() => setActive(idx)}
                         onClick={() =>
                           addRepo.mutate({ owner: s.owner, name: s.name })

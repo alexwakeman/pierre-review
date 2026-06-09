@@ -28,6 +28,11 @@ import {
 } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
+// Local copy of the shared MAX_REPOS_PER_ACCOUNT value. `@pierre-review/shared` is
+// a types-only package (not shipped in the published tarball), so the backend must
+// only `import type` from it — runtime constants are duplicated here. Keep in sync.
+const MAX_REPOS_PER_ACCOUNT = 15;
+
 const createRepoSchema = {
   body: {
     type: 'object',
@@ -169,6 +174,21 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       return {
         error: 'NotFound',
         message: `Repository ${owner}/${name} not found or inaccessible. Check the name and your gh auth / SSO.`,
+      };
+    }
+
+    // Enforce the per-account repo cap. Re-adding an already-watched repo is an
+    // idempotent no-op (it doesn't grow the count), so only genuinely NEW repos
+    // are blocked once at the limit.
+    const watched = await getWatchedRepoNodeIds(accountId);
+    if (
+      watched.size >= MAX_REPOS_PER_ACCOUNT &&
+      !watched.has(resp.repository.id)
+    ) {
+      reply.status(409);
+      return {
+        error: 'RepoLimitExceeded',
+        message: `You can watch at most ${MAX_REPOS_PER_ACCOUNT} repositories. Remove one to add another.`,
       };
     }
 

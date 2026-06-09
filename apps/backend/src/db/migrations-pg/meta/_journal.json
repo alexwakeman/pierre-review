@@ -15,6 +15,13 @@
       "when": 1780795538359,
       "tag": "0001_dizzy_mockingbird",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781039171462,
+      "tag": "0002_glorious_ikaris",
+      "breakpoints": true
     }
   ]
 }

@@ -11,6 +11,7 @@ import { UserName } from './UserName.js';
 import { ShowOnTimeline } from './ShowOnTimeline.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
+import { ChangesTab } from './ChangesTab.js';
 import { ClaudeReviewTab } from './ClaudeReviewTab.js';
 import { Markdown } from './Markdown.js';
 import { isNewComment, NewTag } from './ThreadView/index.js';
@@ -24,7 +25,7 @@ function newSummary(n: PrDetailT['newSinceLastViewed']): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
-type Tab = 'overview' | 'threads' | 'activity' | 'claude_review';
+type Tab = 'overview' | 'threads' | 'activity' | 'changes' | 'claude_review';
 
 // The tab button uses `capitalize`, which can't produce "Claude Review" from a
 // key, so labels are mapped explicitly.
@@ -32,6 +33,7 @@ const TAB_LABELS: Record<Tab, string> = {
   overview: 'Overview',
   threads: 'Threads',
   activity: 'Activity',
+  changes: 'Changes',
   claude_review: 'Claude Review',
 };
 
@@ -240,6 +242,7 @@ function PrCommentsList({
   usersById,
   viewedSince,
   focusCommentId,
+  selectedCommentId,
   onFocusConsumed,
 }: {
   pr: PrDetailT;
@@ -248,6 +251,9 @@ function PrCommentsList({
   // Deep link from the timeline (pr_comment popover → "Open in detail pane"):
   // scroll to + flash this comment card, then consume the request.
   focusCommentId: number | null;
+  // The selected comment gets a PERMANENT amber border (mirrors a selected thread),
+  // distinct from the one-shot flash above.
+  selectedCommentId: number | null;
   onFocusConsumed: () => void;
 }): JSX.Element {
   const cardRefs = useRef(new Map<number, HTMLDivElement>());
@@ -293,9 +299,13 @@ function PrCommentsList({
               if (el) cardRefs.current.set(c.id, el);
               else cardRefs.current.delete(c.id);
             }}
-            className={`rounded-md border border-gray-200 px-2.5 py-2 dark:border-gray-800 ${
-              isNew ? 'comment-new' : ''
-            } ${c.id === flashId ? 'activity-flash' : ''}`}
+            className={`rounded-md border px-2.5 py-2 ${
+              c.id === selectedCommentId
+                ? 'border-amber-400 bg-amber-400/5'
+                : 'border-gray-200 dark:border-gray-800'
+            } ${isNew ? 'comment-new' : ''} ${
+              c.id === flashId ? 'activity-flash' : ''
+            }`}
           >
             <div className="flex items-center gap-2 text-xs">
               <ShowOnTimeline
@@ -364,6 +374,7 @@ export function PrDetail({
   );
   const commentFocus = useFilters((s) => s.commentFocus);
   const consumeCommentFocus = useFilters((s) => s.consumeCommentFocus);
+  const selectedCommentId = useFilters((s) => s.selectedCommentId);
   const claudeTabFocus = useFilters((s) => s.claudeTabFocus);
   const consumeClaudeTabFocus = useFilters((s) => s.consumeClaudeTabFocus);
   const commentFocusForPr =
@@ -513,13 +524,34 @@ export function PrDetail({
           <span>{pr.repoFullName}</span>
           <span>·</span>
           <span>opened {relativeTime(pr.openedAt)}</span>
+          {pr.changedFilesCount > 0 && (
+            <>
+              <span>·</span>
+              <button
+                type="button"
+                onClick={() => setTab('changes')}
+                className="inline-flex shrink-0 items-center gap-1 font-medium"
+                title="View the files changed by this PR"
+              >
+                <span className="text-gray-500">
+                  {pr.changedFilesCount} file{pr.changedFilesCount === 1 ? '' : 's'}
+                </span>
+                <span className="text-green-600 dark:text-green-400">
+                  +{pr.additions.toLocaleString()}
+                </span>
+                <span className="text-red-500 dark:text-red-400">
+                  −{pr.deletions.toLocaleString()}
+                </span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
       <div className="flex gap-1 border-b border-gray-200 px-3 dark:border-gray-800">
         {(claudeReviewEnabled
-          ? (['overview', 'threads', 'activity', 'claude_review'] as Tab[])
-          : (['overview', 'threads', 'activity'] as Tab[])
+          ? (['overview', 'threads', 'activity', 'changes', 'claude_review'] as Tab[])
+          : (['overview', 'threads', 'activity', 'changes'] as Tab[])
         ).map((t) => {
           const failing = pr.checkRuns.filter(
             (c) => c.state === 'failure' || c.state === 'error',
@@ -546,6 +578,14 @@ export function PrDetail({
                   {pr.threads.length}
                 </span>
               )}
+              {t === 'changes' && pr.changedFilesCount > 0 && (
+                <span
+                  className="ml-1 opacity-60"
+                  title={`${pr.changedFilesCount} files changed`}
+                >
+                  {pr.changedFilesCount}
+                </span>
+              )}
             </button>
           );
         })}
@@ -567,6 +607,7 @@ export function PrDetail({
                 usersById={usersById}
                 viewedSince={pr.lastViewedAt}
                 focusCommentId={commentFocusForPr}
+                selectedCommentId={selectedCommentId}
                 onFocusConsumed={consumeCommentFocus}
               />
             </div>
@@ -589,6 +630,8 @@ export function PrDetail({
             focusEvent={activityFocusForPr}
             onConsumed={consumeActivityFocus}
           />
+        ) : tab === 'changes' ? (
+          <ChangesTab pr={pr} />
         ) : (
           <ClaudeReviewTab pr={pr} usersById={usersById} />
         )}

@@ -384,22 +384,19 @@ export function FilterBar(): JSX.Element {
           lens, via the pill's ✕ / Esc / Back. */}
       <div className="ml-auto flex items-center gap-2">
         {f.focusActive && (
-          <span
+          <button
+            type="button"
+            onClick={() => f.exitFocus()}
             className="focus-indicator"
-            title="You're in PR focus mode — click ✕, press Esc, or use the browser Back button to leave"
+            title="Leave focus mode (or press Esc / browser Back)"
+            aria-label="Exit focus mode"
           >
             <span className="focus-indicator-dot" aria-hidden="true" />
             Focus mode
-            <button
-              type="button"
-              onClick={() => f.exitFocus()}
-              className="focus-indicator-close"
-              title="Exit focus mode"
-              aria-label="Exit focus mode"
-            >
+            <span className="focus-indicator-close" aria-hidden="true">
               ✕
-            </button>
-          </span>
+            </span>
+          </button>
         )}
         <button
           type="button"
