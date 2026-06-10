@@ -36,7 +36,74 @@ function Row({
 function PrSummary({ body }: { body: string }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
+  const [hasHiddenImage, setHasHiddenImage] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  // Classify "tall" images (screenshots) so the collapsed 3-line preview can hide
+  // them instead of letting -webkit-line-clamp squash them — they reappear once
+  // expanded. We measure from NATURAL dimensions: the clamp constrains rendered
+  // height, so offsetHeight would read the (wrong) squashed value. The class lands
+  // on the img itself; CSS only acts on it while the container is collapsed.
+  //
+  // Two robustness traps drive this shape: (1) react-markdown re-renders (and
+  // StrictMode's mount/remount) REPLACE the <img> DOM node, so we must re-query
+  // the live nodes each pass and re-apply via a MutationObserver — a `load`
+  // listener captured on one node fires on a now-detached element. (2) the big
+  // image loads async, so we poll (bounded) until it reports natural dimensions.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Only HIDE genuinely tall screenshots; allow moderately tall images to ride
+    // along in the collapsed preview (they're cropped by the 3-line clamp like any
+    // overflow, no longer squashed — see .md-body img width/height:auto). 160px ≈
+    // 2-3× the preview height; e.g. PR #77's ~384px render stays hidden, a ~100px
+    // inline image does not.
+    const TALL_PX = 160;
+    const MAX_PX = 384; // mirrors .md-body img max-height: 24rem
+
+    // Re-query live nodes, tag the tall ones, and report whether we're settled
+    // (width known + every image classifiable) so polling can stop. We only need
+    // an image's natural dimensions, not a full decode — once it's hidden mid-load
+    // `complete` may never flip, so settling on dimensions avoids spinning.
+    const apply = (): boolean => {
+      const width = el.clientWidth;
+      const imgs = Array.from(el.querySelectorAll('img'));
+      let anyTall = false;
+      let settled = width > 0;
+      for (const img of imgs) {
+        const measurable = img.naturalWidth > 0 && img.naturalHeight > 0;
+        if (!measurable) {
+          if (!img.complete) settled = false; // still loading — keep polling
+          continue; // not yet measurable, or broken (complete with no dimensions)
+        }
+        const renderW = width ? Math.min(img.naturalWidth, width) : img.naturalWidth;
+        const renderH = Math.min((img.naturalHeight * renderW) / img.naturalWidth, MAX_PX);
+        const tall = width > 0 && renderH > TALL_PX;
+        img.classList.toggle('pr-summary-tall-img', tall);
+        if (tall) anyTall = true;
+      }
+      setHasHiddenImage(anyTall);
+      return settled;
+    };
+
+    // Re-tag whenever react-markdown swaps img nodes, so the class follows the
+    // live node (we only watch childList — toggling the class is an attribute
+    // change we deliberately don't observe, so there's no feedback loop).
+    const mo = new MutationObserver(() => apply());
+    mo.observe(el, { childList: true, subtree: true });
+
+    let frames = 0;
+    let raf = 0;
+    const tick = (): void => {
+      if (!apply() && frames++ < 240) raf = requestAnimationFrame(tick);
+    };
+    tick();
+
+    return () => {
+      mo.disconnect();
+      cancelAnimationFrame(raf);
+    };
+  }, [body]);
 
   // Measure overflow while clamped (skip when expanded — the clamp is off then, so
   // scrollHeight === clientHeight and the test would always read false).
@@ -69,7 +136,7 @@ function PrSummary({ body }: { body: string }): JSX.Element {
       <div className="px-4 pb-3 text-sm">
         <div
           ref={ref}
-          className="overflow-hidden"
+          className={`overflow-hidden${expanded ? '' : ' pr-summary-collapsed'}`}
           style={
             expanded
               ? undefined
@@ -78,7 +145,7 @@ function PrSummary({ body }: { body: string }): JSX.Element {
         >
           <Markdown>{body}</Markdown>
         </div>
-        {(overflowing || expanded) && (
+        {(overflowing || hasHiddenImage || expanded) && (
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
@@ -164,6 +231,27 @@ export function ChecksTab({
         )}
       </Row>
 
+      {approverIds.length > 0 && (
+        <Row label="Approvers">
+          <div className="flex flex-wrap gap-2 text-xs">
+            {approverIds.map((uid) => {
+              const u = usersById.get(uid);
+              return (
+                <span
+                  key={uid}
+                  className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-green-700 dark:text-green-400"
+                  title="Approved this PR"
+                >
+                  <span className="text-green-600 dark:text-green-500">✓</span>
+                  <Avatar user={u} size={14} />
+                  <UserName user={u} fallbackId={uid} repoId={pr.repoId} />
+                </span>
+              );
+            })}
+          </div>
+        </Row>
+      )}
+
       {pr.mergedById != null && (
         <Row label="Merged by">
           <span className="inline-flex items-center gap-1.5 text-xs">
@@ -243,27 +331,6 @@ export function ChecksTab({
                 {l.name}
               </span>
             ))}
-          </div>
-        </Row>
-      )}
-
-      {approverIds.length > 0 && (
-        <Row label="Approvers">
-          <div className="flex flex-wrap gap-2 text-xs">
-            {approverIds.map((uid) => {
-              const u = usersById.get(uid);
-              return (
-                <span
-                  key={uid}
-                  className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-green-700 dark:text-green-400"
-                  title="Approved this PR"
-                >
-                  <span className="text-green-600 dark:text-green-500">✓</span>
-                  <Avatar user={u} size={14} />
-                  <UserName user={u} fallbackId={uid} repoId={pr.repoId} />
-                </span>
-              );
-            })}
           </div>
         </Row>
       )}

@@ -276,7 +276,19 @@ body {
   /* Keep a single tall screenshot from blowing out the layout (and, in the
      clamped 3-line PR Summary preview, from dominating before Show more). */
   max-height: 24rem;
+  /* BOTH must be auto: GitHub embeds carry explicit width/height attributes, and
+     if width stays attribute-pinned while max-height clamps the height, the image
+     squashes (used width can't shrink to keep the ratio). With both auto, the CSS
+     replaced-element constraint algorithm scales to fit max-width AND max-height
+     while preserving aspect ratio. */
+  width: auto;
   height: auto;
+}
+/* Collapsed PR Summary: hide tall images (screenshots) so -webkit-line-clamp
+   doesn't squash them. They reappear when the body is expanded (Show more).
+   `.pr-summary-tall-img` is added in ChecksTab once an image measures tall. */
+.pr-summary-collapsed .pr-summary-tall-img {
+  display: none;
 }
 .md-body input[type='checkbox'] {
   margin-right: 0.4em;
