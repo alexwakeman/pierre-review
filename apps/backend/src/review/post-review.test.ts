@@ -4,6 +4,7 @@ import {
   buildAnchorIndex,
   buildReview,
   extractHunk,
+  fallbackAnchor,
   findingCommentBody,
   isFindingAnchored,
   splitDiffByFile,
@@ -122,6 +123,38 @@ describe('buildAnchorIndex', () => {
     expect(anchors?.right.has(12)).toBe(true);
     expect(anchors?.left.has(12)).toBe(true);
   });
+
+  it('records the file first added (RIGHT) and removed (LEFT) line', () => {
+    const anchors = buildAnchorIndex(FOO_DIFF).get('src/foo.ts');
+    expect(anchors?.firstAdded).toBe(11); // `+const added = 2;` at new-line 11
+    expect(anchors?.firstRemoved).toBe(11); // `-const removed = 3;` at old-line 11
+  });
+});
+
+describe('fallbackAnchor', () => {
+  it('prefers the file first added line (RIGHT)', () => {
+    const index = buildAnchorIndex(FOO_DIFF);
+    expect(fallbackAnchor(index, 'src/foo.ts')).toEqual({ line: 11, side: 'RIGHT' });
+  });
+
+  it('uses the first removed line (LEFT) for a pure-deletion file', () => {
+    const diff = [
+      'diff --git a/src/del.ts b/src/del.ts',
+      '--- a/src/del.ts',
+      '+++ b/src/del.ts',
+      '@@ -20,2 +20,1 @@',
+      ' const keep = 1;',
+      '-const gone = 2;',
+    ].join('\n');
+    expect(fallbackAnchor(buildAnchorIndex(diff), 'src/del.ts')).toEqual({
+      line: 21,
+      side: 'LEFT',
+    });
+  });
+
+  it('returns null when the file is not in the diff', () => {
+    expect(fallbackAnchor(buildAnchorIndex(FOO_DIFF), 'src/absent.ts')).toBeNull();
+  });
 });
 
 describe('isFindingAnchored', () => {
@@ -196,14 +229,25 @@ describe('buildReview', () => {
     body: 'This added line is wrong.',
     suggestion: 'const added = 22;',
   });
-  // line 500 RIGHT is not in the diff → unanchored.
-  const unanchored = makeFinding({
+  // line 500 RIGHT isn't in the diff, but the FILE is → re-anchored to the file's
+  // first added line (11, RIGHT) rather than skipped.
+  const offDiffLine = makeFinding({
     id: 202,
     path: 'src/foo.ts',
     line: 500,
     side: 'RIGHT',
-    title: 'Unanchored finding',
+    title: 'Off-diff-line finding',
     body: 'This line is not in the diff.',
+    suggestion: null,
+  });
+  // A finding whose FILE isn't in the diff at all → nothing to anchor onto → skip.
+  const fileNotInDiff = makeFinding({
+    id: 303,
+    path: 'src/absent.ts',
+    line: 7,
+    side: 'RIGHT',
+    title: 'File-not-in-diff finding',
+    body: 'This whole file is untouched by the PR.',
     suggestion: null,
   });
 
@@ -211,32 +255,87 @@ describe('buildReview', () => {
     commitId: 'abcdef0',
     body: 'Overall review body.',
     event: 'COMMENT',
-    includedFindings: [anchorable, unanchored],
+    includedFindings: [anchorable, offDiffLine, fileNotInDiff],
     diff: FOO_DIFF,
   });
 
-  it('includes only the anchorable finding as an inline comment', () => {
-    expect(built.preview.comments).toHaveLength(1);
-    const comment = built.preview.comments[0];
+  it('posts the directly-anchorable finding on its own line', () => {
+    const comment = built.preview.comments.find((c) => c.body.includes('wrong.'));
     expect(comment?.path).toBe('src/foo.ts');
     expect(comment?.line).toBe(11);
     expect(comment?.side).toBe('RIGHT');
   });
 
   it('appends the suggestion as a fenced ```suggestion block', () => {
-    const body = built.preview.comments[0]?.body ?? '';
+    const body = built.preview.comments.find((c) => c.body.includes('wrong.'))?.body ?? '';
     expect(body).toContain('This added line is wrong.');
     expect(body).toContain('```suggestion\nconst added = 22;\n```');
   });
 
-  it('reports the unanchored finding in skippedUnanchored', () => {
+  it('re-anchors an off-diff-line finding to the file first change + notes it', () => {
+    const comment = built.preview.comments.find((c) =>
+      c.body.includes('not in the diff'),
+    );
+    expect(comment).toBeDefined();
+    // First added line of src/foo.ts is 11, RIGHT.
+    expect(comment?.line).toBe(11);
+    expect(comment?.side).toBe('RIGHT');
+    expect(comment?.body).toContain('first change');
+  });
+
+  it('skips a finding whose file is not in the diff', () => {
     expect(built.preview.skippedUnanchored).toEqual([
-      { findingId: 202, path: 'src/foo.ts', title: 'Unanchored finding' },
+      { findingId: 303, path: 'src/absent.ts', title: 'File-not-in-diff finding' },
     ]);
   });
 
-  it('returns postedFindingIds as exactly the anchored finding ids', () => {
-    expect(built.postedFindingIds).toEqual([101]);
+  it('returns postedFindingIds for the directly + fallback anchored findings', () => {
+    expect(built.postedFindingIds).toEqual([101, 202]);
+  });
+
+  it('prefers the first added line, falling back to the first removed line', () => {
+    // A pure-deletion file: no added lines, so the fallback is the first `-` line.
+    const deletionDiff = [
+      'diff --git a/src/del.ts b/src/del.ts',
+      '--- a/src/del.ts',
+      '+++ b/src/del.ts',
+      '@@ -20,2 +20,1 @@',
+      ' const keep = 1;',
+      '-const gone = 2;',
+    ].join('\n');
+    const f = makeFinding({ id: 909, path: 'src/del.ts', line: 999, side: 'RIGHT' });
+    const result = buildReview({
+      commitId: 'abcdef0',
+      body: 'b',
+      event: 'COMMENT',
+      includedFindings: [f],
+      diff: deletionDiff,
+    });
+    // First removed line of src/del.ts is old-line 21, LEFT.
+    expect(result.preview.comments[0]?.line).toBe(21);
+    expect(result.preview.comments[0]?.side).toBe('LEFT');
+  });
+
+  it('renders a fallback finding suggestion as a plain (non-applyable) block', () => {
+    const f = makeFinding({
+      id: 910,
+      path: 'src/foo.ts',
+      line: 777,
+      side: 'RIGHT',
+      body: 'Off-diff with a suggestion.',
+      suggestion: 'const fixed = 1;',
+    });
+    const result = buildReview({
+      commitId: 'abcdef0',
+      body: 'b',
+      event: 'COMMENT',
+      includedFindings: [f],
+      diff: FOO_DIFF,
+    });
+    const body = result.preview.comments[0]?.body ?? '';
+    // Plain ``` fence, NOT an applyable ```suggestion on the wrong line.
+    expect(body).toContain('```\nconst fixed = 1;\n```');
+    expect(body).not.toContain('```suggestion');
   });
 
   it('carries the authored body/event/commitId onto the preview', () => {
@@ -324,6 +423,27 @@ describe('findingCommentBody', () => {
     expect(
       findingCommentBody({ body: 'B', editedBody: '   ', suggestion: null }),
     ).toBe('B');
+  });
+
+  it('appends the fallback note and plainly fences a suggestion on a fallback', () => {
+    const out = findingCommentBody(
+      { body: 'B', editedBody: null, suggestion: 'S' },
+      { fallbackNote: true },
+    );
+    expect(out).toContain('B');
+    // Plain fence, not an applyable ```suggestion (it would target the wrong line).
+    expect(out).toContain('```\nS\n```');
+    expect(out).not.toContain('```suggestion');
+    expect(out).toContain('first change'); // FALLBACK_ANCHOR_NOTE
+  });
+
+  it('appends the fallback note even without a suggestion', () => {
+    const out = findingCommentBody(
+      { body: 'B', editedBody: null, suggestion: null },
+      { fallbackNote: true },
+    );
+    expect(out.startsWith('B')).toBe(true);
+    expect(out).toContain('first change');
   });
 });
 

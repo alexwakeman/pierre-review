@@ -18,6 +18,11 @@ const execFileAsync = promisify(execFile);
 export interface FileAnchors {
   right: Set<number>;
   left: Set<number>;
+  // The file's FIRST added (`+`, RIGHT) and removed (`-`, LEFT) line numbers — the
+  // fallback anchor for a finding whose own line isn't in the diff (see
+  // `fallbackAnchor`). null when the file has no added / no removed lines.
+  firstAdded: number | null;
+  firstRemoved: number | null;
 }
 
 export type AnchorIndex = Map<string, FileAnchors>;
@@ -43,7 +48,12 @@ export function buildAnchorIndex(diff: string): AnchorIndex {
     if (raw.startsWith('+++ ')) {
       const path = parseDiffPath(raw.slice(4));
       if (path) {
-        current = { right: new Set(), left: new Set() };
+        current = {
+          right: new Set(),
+          left: new Set(),
+          firstAdded: null,
+          firstRemoved: null,
+        };
         index.set(path, current);
       } else {
         current = null;
@@ -61,9 +71,11 @@ export function buildAnchorIndex(diff: string): AnchorIndex {
     const marker = raw[0];
     if (marker === '+') {
       current.right.add(newLine);
+      if (current.firstAdded == null) current.firstAdded = newLine;
       newLine += 1;
     } else if (marker === '-') {
       current.left.add(oldLine);
+      if (current.firstRemoved == null) current.firstRemoved = oldLine;
       oldLine += 1;
     } else if (marker === ' ') {
       current.right.add(newLine);
@@ -155,6 +167,25 @@ export function isFindingAnchored(
   return side === 'LEFT' ? anchors.left.has(line) : anchors.right.has(line);
 }
 
+// Where to anchor a finding whose own (line, side) isn't addable: the file's
+// FIRST added line (RIGHT), preferred over its first removed line (LEFT). null
+// when the file isn't in the diff at all (nothing to attach to → stays skipped).
+export function fallbackAnchor(
+  index: AnchorIndex,
+  path: string,
+): { line: number; side: 'LEFT' | 'RIGHT' } | null {
+  const anchors = index.get(path);
+  if (!anchors) return null;
+  if (anchors.firstAdded != null) return { line: anchors.firstAdded, side: 'RIGHT' };
+  if (anchors.firstRemoved != null) return { line: anchors.firstRemoved, side: 'LEFT' };
+  return null;
+}
+
+// Appended to a comment placed on a fallback line, so PR readers know the inline
+// position is approximate (the finding's real line isn't part of this diff).
+export const FALLBACK_ANCHOR_NOTE =
+  '_The line this refers to isn’t part of the PR’s diff, so it’s anchored to the file’s first change._';
+
 // The wire-facing preview plus the finding ids that became inline comments (so a
 // successful post can stamp exactly those findings).
 export interface BuiltReview {
@@ -185,6 +216,20 @@ export function buildReview(input: {
         body: findingCommentBody(f),
       });
       postedFindingIds.push(f.id);
+      continue;
+    }
+    // The finding's own line isn't an addable diff position — anchor it to the
+    // file's first change (added preferred) so it can still post inline. Only when
+    // the file itself isn't in the diff is there nowhere to attach it → skip.
+    const fb = fallbackAnchor(index, f.path);
+    if (fb) {
+      comments.push({
+        path: f.path,
+        line: fb.line,
+        side: fb.side,
+        body: findingCommentBody(f, { fallbackNote: true }),
+      });
+      postedFindingIds.push(f.id);
     } else {
       skippedUnanchored.push({ findingId: f.id, path: f.path, title: f.title });
     }
@@ -205,16 +250,30 @@ export function buildReview(input: {
 // else Claude's wording — with an optional fenced ```suggestion block appended
 // (GitHub renders it as an applyable suggestion). Takes a minimal shape so it
 // works for both the wire ClaudeFinding and a raw DB row.
-export function findingCommentBody(f: {
-  body: string;
-  editedBody: string | null;
-  suggestion: string | null;
-}): string {
+//
+// `fallbackNote` is set when the comment is posted on a fallback line (the
+// finding's real line isn't in the diff). Then we (a) append FALLBACK_ANCHOR_NOTE
+// and (b) render any suggestion as a PLAIN code block rather than ```suggestion —
+// an applyable suggestion on the wrong line would offer to corrupt that line.
+export function findingCommentBody(
+  f: {
+    body: string;
+    editedBody: string | null;
+    suggestion: string | null;
+  },
+  opts?: { fallbackNote?: boolean },
+): string {
   const body = f.editedBody && f.editedBody.trim() ? f.editedBody : f.body;
+  const parts = [body];
   if (f.suggestion && f.suggestion.trim()) {
-    return `${body}\n\n\`\`\`suggestion\n${f.suggestion}\n\`\`\``;
+    parts.push(
+      opts?.fallbackNote
+        ? `\`\`\`\n${f.suggestion}\n\`\`\``
+        : `\`\`\`suggestion\n${f.suggestion}\n\`\`\``,
+    );
   }
-  return body;
+  if (opts?.fallbackNote) parts.push(FALLBACK_ANCHOR_NOTE);
+  return parts.join('\n\n');
 }
 
 // Extract a small unified-diff window around a finding's (path, line, side), to

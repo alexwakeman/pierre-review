@@ -40,7 +40,9 @@ import {
   setUserAnthropicKey,
 } from '../../review/local-settings.js';
 import {
+  buildAnchorIndex,
   buildReview,
+  fallbackAnchor,
   fetchCurrentHeadSha,
   fetchPrDiff,
   findingCommentBody,
@@ -338,13 +340,6 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
         return { error: 'NotFound', message: `Finding ${findingId} not found` };
       }
       const f = ctx.finding;
-      if (f.line == null || !f.anchored) {
-        reply.status(400);
-        return {
-          error: 'NotAnchored',
-          message: "This finding isn't anchored to a diff line, so it can't post inline.",
-        };
-      }
       try {
         const currentHead = await fetchCurrentHeadSha(
           ctx.owner,
@@ -359,19 +354,47 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
               'The PR head has moved since this review. Re-review before posting.',
           };
         }
+        // Anchor: the finding's own line if addable, else the file's first change
+        // (added preferred). A finding whose file isn't in the diff can't inline.
+        let line: number;
+        let side = f.side;
+        let onFallback = false;
+        if (f.line != null && f.anchored) {
+          line = f.line;
+        } else {
+          const { diff } = stripNoiseFromDiff(
+            await fetchPrDiff(ctx.owner, ctx.name, ctx.prNumber),
+            isNoiseFile,
+          );
+          const fb = fallbackAnchor(buildAnchorIndex(diff), f.path);
+          if (!fb) {
+            reply.status(400);
+            return {
+              error: 'NotAnchored',
+              message:
+                "This finding's file has no changes in the PR diff, so it can't post inline.",
+            };
+          }
+          line = fb.line;
+          side = fb.side;
+          onFallback = true;
+        }
         const { commentId } = await submitGithubComment({
           owner: ctx.owner,
           name: ctx.name,
           prNumber: ctx.prNumber,
           commitId: ctx.reviewHeadSha,
           path: f.path,
-          line: f.line,
-          side: f.side,
-          body: findingCommentBody({
-            body: f.body,
-            editedBody: f.editedBody,
-            suggestion: f.suggestion,
-          }),
+          line,
+          side,
+          body: findingCommentBody(
+            {
+              body: f.body,
+              editedBody: f.editedBody,
+              suggestion: f.suggestion,
+            },
+            onFallback ? { fallbackNote: true } : undefined,
+          ),
         });
         await markFindingPosted(findingId, commentId);
         const result: PostCommentResult = {

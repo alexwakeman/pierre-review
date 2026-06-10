@@ -308,7 +308,11 @@ function FindingRow({
   // Secondary "view file" escape hatch (blob at head) — only when we didn't link a
   // posted comment and a RIGHT-side blob link is available.
   const secondaryBlobHref = commentUrl == null ? blobHref : null;
-  const canPostComment = editable && finding.anchored && finding.line != null;
+  // Posting is offered for every finding on the editable run. Unanchored findings
+  // (their own line isn't in the diff) still post inline — the server re-anchors
+  // them onto the file's first change. Only a finding whose file isn't in the diff
+  // can't post, and that surfaces as an error on the attempt.
+  const canPostComment = editable;
 
   const copy = (): void => {
     let text = `${finding.title}\n\n${effectiveBody}`;
@@ -351,12 +355,12 @@ function FindingRow({
   };
   const busy = posting || working;
 
-  // Ignore = exclude from the submitted review. Only offered for anchorable
-  // findings on the editable run (unanchored ones never post inline anyway). An
-  // ignored finding collapses + fades but can be re-expanded for a look, then
-  // un-ignored (re-included). `included` defaults true, so a finding is normal
-  // until explicitly ignored.
-  const canIgnore = editable && finding.anchored;
+  // Ignore = exclude from the submitted review. Offered for every finding on the
+  // editable run — including unanchored ones, which now post inline on the file's
+  // first change, so the user needs a way to opt them out. An ignored finding
+  // collapses + fades but can be re-expanded for a look, then un-ignored
+  // (re-included). `included` defaults true, so a finding is normal until ignored.
+  const canIgnore = editable;
   const ignored = canIgnore && !finding.included;
   const [ignoredExpanded, setIgnoredExpanded] = useState(false);
   const detailsHidden = ignored && !ignoredExpanded;
@@ -403,9 +407,9 @@ function FindingRow({
             {!finding.anchored && (
               <span
                 className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] text-gray-500"
-                title="Couldn't map onto an addable diff line — won't post inline"
+                title="This line isn't in the PR diff — it posts inline on the file's first change (added preferred)"
               >
-                unanchored — won't post inline
+                off-diff — posts on first change
               </span>
             )}
             {ignored && (
@@ -1287,7 +1291,7 @@ export function ClaudeReviewTab({
               </div>
               {preview.skippedUnanchored.length > 0 && (
                 <div className="mt-1 text-xs text-gray-500">
-                  Skipped (unanchored):{' '}
+                  Skipped (file not in diff):{' '}
                   {preview.skippedUnanchored.map((s) => s.title).join(', ')}
                 </div>
               )}
@@ -1304,7 +1308,7 @@ export function ClaudeReviewTab({
               </div>
               {postResult.skippedUnanchored.length > 0 && (
                 <div className="mt-1 text-xs text-green-700/80 dark:text-green-400/80">
-                  Skipped (unanchored):{' '}
+                  Skipped (file not in diff):{' '}
                   {postResult.skippedUnanchored.map((s) => s.title).join(', ')}
                 </div>
               )}
