@@ -4,6 +4,7 @@ import {
   ThreadIcon,
   MyTurnIcon,
   StripIcon,
+  FocusIcon,
   SparkleIcon,
 } from './icons';
 
@@ -24,6 +25,13 @@ const FEATURES: Feature[] = [
     icon: TimelineIcon,
     accent: 'text-brand-sky',
     chip: 'bg-brand-sky/10 ring-brand-sky/30',
+  },
+  {
+    title: 'Focus mode',
+    body: 'A focus overlay that isolates a single PR and every contributor touching it — sibling bars and unrelated markers fall away, so one thread of work fills the timeline. Esc or the browser back button drops you straight out.',
+    icon: FocusIcon,
+    accent: 'text-brand-skySoft',
+    chip: 'bg-brand-skySoft/10 ring-brand-skySoft/30',
   },
   {
     title: 'Derived thread state',
