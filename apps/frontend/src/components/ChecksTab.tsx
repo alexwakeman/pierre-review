@@ -12,6 +12,43 @@ import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
 import { Markdown } from './Markdown.js';
 
+// Per-state styling for the "Reviewers" row badges (everyone who submitted a
+// review, not just approvers): the badge hue + leading glyph hint at each
+// reviewer's LATEST review state, so the row reads at a glance — green check for an
+// approval, red cross for changes-requested, neutral for a plain comment / dismissed
+// review. Mirrors the Approvers badge style (bg-…/10 + soft text) so the two rows
+// sit together visually.
+const REVIEWER_STATE_META: Record<
+  ReviewState,
+  { icon: string; cls: string; title: string }
+> = {
+  approved: {
+    icon: '✓',
+    cls: 'bg-green-500/10 text-green-700 dark:text-green-400',
+    title: 'Approved',
+  },
+  changes_requested: {
+    icon: '✗',
+    cls: 'bg-red-500/10 text-red-700 dark:text-red-400',
+    title: 'Requested changes',
+  },
+  commented: {
+    icon: '',
+    cls: 'bg-gray-500/10 text-gray-600 dark:text-gray-300',
+    title: 'Reviewed (commented)',
+  },
+  dismissed: {
+    icon: '',
+    cls: 'bg-gray-500/10 text-gray-400',
+    title: 'Review dismissed',
+  },
+  pending: {
+    icon: '',
+    cls: 'bg-gray-500/10 text-gray-400',
+    title: 'Review pending',
+  },
+};
+
 function Row({
   label,
   children,
@@ -193,6 +230,19 @@ export function ChecksTab({
     .filter(([, state]) => state === 'approved')
     .map(([id]) => id);
 
+  // Everyone who has SUBMITTED a review (any decisive OR commented state), with
+  // their latest review state — the fuller picture above the Approvers row, which
+  // is just the subset whose standing decision is 'approved'. pr.reviews is
+  // chronological (submittedAt asc), so the last entry per author wins. 'pending'
+  // reviews (an in-progress draft, never submitted) aren't a real review, so skip
+  // them; insertion order is preserved by the Map so reviewers stay first-seen.
+  const latestReviewState = new Map<number, ReviewState>();
+  for (const r of pr.reviews) {
+    if (r.authorId == null || r.state === 'pending') continue;
+    latestReviewState.set(r.authorId, r.state);
+  }
+  const reviewerIds = [...latestReviewState.keys()];
+
   return (
     <div className="divide-y divide-gray-100 py-1 dark:divide-gray-800">
       <Row label="CI">
@@ -230,6 +280,28 @@ export function ChecksTab({
           <span className="text-gray-400">{pr.mergeStateStatus}</span>
         )}
       </Row>
+
+      {reviewerIds.length > 0 && (
+        <Row label="Reviewers">
+          <div className="flex flex-wrap gap-2 text-xs">
+            {reviewerIds.map((uid) => {
+              const u = usersById.get(uid);
+              const meta = REVIEWER_STATE_META[latestReviewState.get(uid)!];
+              return (
+                <span
+                  key={uid}
+                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 ${meta.cls}`}
+                  title={meta.title}
+                >
+                  {meta.icon && <span aria-hidden>{meta.icon}</span>}
+                  <Avatar user={u} size={14} />
+                  <UserName user={u} fallbackId={uid} repoId={pr.repoId} />
+                </span>
+              );
+            })}
+          </div>
+        </Row>
+      )}
 
       {approverIds.length > 0 && (
         <Row label="Approvers">
@@ -336,7 +408,7 @@ export function ChecksTab({
       )}
 
       {pr.requestedReviewers.length > 0 && (
-        <Row label="Reviewers">
+        <Row label="Requested">
           <div className="flex flex-wrap gap-2 text-xs">
             {pr.requestedReviewers.map((r, i) => (
               <span key={i} className="rounded bg-gray-500/10 px-1.5 py-0.5">

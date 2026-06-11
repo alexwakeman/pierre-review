@@ -206,6 +206,12 @@ function prBarEndMs(pr: TimelinePr): number {
   return new Date(pr.mergedAt ?? pr.closedAt ?? new Date().toISOString()).getTime();
 }
 
+// A captured vertical-scroll position, by CONTENT (the contributor row at the
+// viewport top + its offset) rather than raw pixels, so it survives height changes
+// above the viewport. `scrollTop` is the pixel fallback used when the anchor row is
+// gone after a sync. Used both across a rebuild and across a focus enter→exit.
+type ScrollAnchor = { token: string | null; offset: number; scrollTop: number };
+
 export function Timeline(): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<VisTimeline | null>(null);
@@ -314,6 +320,12 @@ export function Timeline(): JSX.Element {
   // than keeping the zoomed-in focus view. Distinct from savedWindowRef (the
   // marker-popover drill's pre-open window).
   const preFocusWindowRef = useRef<{ start: Date; end: Date } | null>(null);
+  // The vertical CONTENT scroll anchor captured the instant a PR-isolation focus is
+  // entered (companion to preFocusWindowRef, the horizontal axis), so leaving focus
+  // lands the user back exactly where they were scrolled — rather than re-centring on
+  // the PR, which yanked a mid-scrolled board upward on exit. Restored as an
+  // intentional scroll so it doesn't fight the rebuild's own anchor restore.
+  const preFocusScrollRef = useRef<ScrollAnchor | null>(null);
   // The selected marker's persistent "you're looking at this" pulse (the soft sky
   // halo, no marching ants), tracked like the other glows so a re-cluster can
   // re-apply it to whichever item now holds the event — a lone `ev:` marker or
@@ -925,6 +937,50 @@ export function Timeline(): JSX.Element {
     [applyContext],
   );
 
+  // Resolve vis's own vertical-scroll panel — the element whose native `scroll` vis
+  // mirrors into the timeline. Driving its scrollTop is how we scroll + materialize
+  // virtualized rows (see the "Activity Show vertical scrolling" note below). Defined
+  // here (above enterPrFocus) so the focus-entry path can capture the scroll anchor.
+  const verticalScrollEl = useCallback((): HTMLElement | null => {
+    const c = containerRef.current;
+    if (!c) return null;
+    return (
+      c.querySelector<HTMLElement>('.vis-panel.vis-left.vis-vertical-scroll') ??
+      c.querySelector<HTMLElement>('.vis-panel.vis-right.vis-vertical-scroll')
+    );
+  }, []);
+
+  // Capture the vertical scroll by CONTENT anchor — the contributor label nearest the
+  // viewport top + its offset — so it can be re-placed after a rebuild OR a focus
+  // enter→exit even when rows above change height. Contributor rows carry a `tlg-…`
+  // token class; thin repo-header rows don't, so they're skipped. Falls back to the
+  // raw pixel scrollTop when the anchor row is gone. (Full rationale at the rebuild
+  // call site.)
+  const captureScrollAnchor = useCallback((): ScrollAnchor | null => {
+    const vs = verticalScrollEl();
+    const container = containerRef.current;
+    if (!vs || !container) return null;
+    const vsTop = vs.getBoundingClientRect().top;
+    let bestTok: string | null = null;
+    let bestOffset = 0;
+    let bestDist = Infinity;
+    for (const l of container.querySelectorAll<HTMLElement>(
+      '.vis-labelset .vis-label',
+    )) {
+      const r = l.getBoundingClientRect();
+      if (r.height < 4 || r.bottom <= vsTop + 1) continue; // scrolled off the top
+      const tok = [...l.classList].find((c) => c.startsWith('tlg-'));
+      if (!tok) continue;
+      const dist = Math.abs(r.top - vsTop);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestTok = tok;
+        bestOffset = r.top - vsTop;
+      }
+    }
+    return { token: bestTok, offset: bestOffset, scrollTop: vs.scrollTop };
+  }, [verticalScrollEl]);
+
   // Enter the unified PR-isolation focus on `prId`: collapse to every contributor
   // to the PR, show ONLY that PR's bar (siblings sharing its packed lane hidden via
   // isolatePrBars) and markers (the shared `cross` band is filtered in
@@ -951,7 +1007,14 @@ export function Timeline(): JSX.Element {
       // Esc / browser-back can restore the user's original zoom. Guard on not
       // already being focused so a stray re-entry can't clobber it with the focus
       // window (enterPrFocus only runs unfocused, but this stays correct if not).
-      if (!prFocusActiveRef.current) preFocusWindowRef.current = tl.getWindow();
+      if (!prFocusActiveRef.current) {
+        preFocusWindowRef.current = tl.getWindow();
+        // Capture the vertical scroll NOW, while every row is still visible — exit
+        // restores it so leaving focus lands the user back exactly where they were
+        // scrolled (rather than re-centring on the PR, which jumped a mid-scrolled
+        // board upward). See exitFocusCore.
+        preFocusScrollRef.current = captureScrollAnchor();
+      }
       const repoId = pr.repoId;
       const contributors = new Set<number>();
       if (pr.authorId != null) contributors.add(pr.authorId);
@@ -997,7 +1060,7 @@ export function Timeline(): JSX.Element {
       tl.setSelection([`pr:${prId}`]);
       if (opts?.anchorEventId != null) highlightEvent(opts.anchorEventId);
     },
-    [applyContext, rebuildMarkers, isolatePrBars, highlightEvent],
+    [applyContext, rebuildMarkers, isolatePrBars, highlightEvent, captureScrollAnchor],
   );
 
   // --- Activity "Show" vertical scrolling ----------------------------------
@@ -1008,16 +1071,8 @@ export function Timeline(): JSX.Element {
   // scroll: vis listens to the native `scroll` of its `.vis-vertical-scroll`
   // panel and mirrors it into the timeline (_setScrollTop + redraw), so setting
   // that element's scrollTop reliably scrolls + materializes rows regardless of
-  // what's currently rendered.
-  const verticalScrollEl = useCallback((): HTMLElement | null => {
-    const c = containerRef.current;
-    if (!c) return null;
-    return (
-      c.querySelector<HTMLElement>('.vis-panel.vis-left.vis-vertical-scroll') ??
-      c.querySelector<HTMLElement>('.vis-panel.vis-right.vis-vertical-scroll')
-    );
-  }, []);
-
+  // what's currently rendered. (`verticalScrollEl`, which resolves that panel, is
+  // defined above so the focus-entry path can capture the scroll anchor.)
   const setVisScrollTop = useCallback(
     (top: number) => {
       const vs = verticalScrollEl();
@@ -1200,49 +1255,18 @@ export function Timeline(): JSX.Element {
   }, []);
 
 
-  // Preserve the vertical scroll across the groups/markers rebuild by CONTENT
-  // anchor, not by raw pixel offset. Two things move the scroll during a rebuild:
-  // (1) rebuildMarkers() does a wholesale remove()+add() of every marker, which
-  // momentarily empties each row's bands so vis clamps the scroll toward the top
-  // before they re-render — a TRANSIENT artifact to undo; and (2) a background
-  // sync can change the HEIGHT of rows ABOVE the viewport (a new PR/event grows a
-  // contributor's row, or the rows re-sort) — a REAL layout change. Re-pinning the
-  // old pixel scrollTop fixes (1) but mishandles (2): the same offset then shows
-  // different content, so a scrolled-down board visibly rides upward. Instead we
-  // capture the contributor row sitting at the viewport top and, after the rebuild,
-  // re-place that same row at the same offset — so the user's view stays put
-  // regardless of what changed above it. Falls back to the captured pixel scrollTop
-  // when that row no longer exists after the sync.
-  type ScrollAnchor = { token: string | null; offset: number; scrollTop: number };
-
-  const captureScrollAnchor = useCallback((): ScrollAnchor | null => {
-    const vs = verticalScrollEl();
-    const container = containerRef.current;
-    if (!vs || !container) return null;
-    const vsTop = vs.getBoundingClientRect().top;
-    // The contributor label nearest the viewport top — that's the row the user is
-    // looking at. Contributor rows carry a `tlg-…` token class (groupClassToken);
-    // thin repo-header rows don't, so they're skipped as anchors.
-    let bestTok: string | null = null;
-    let bestOffset = 0;
-    let bestDist = Infinity;
-    for (const l of container.querySelectorAll<HTMLElement>(
-      '.vis-labelset .vis-label',
-    )) {
-      const r = l.getBoundingClientRect();
-      if (r.height < 4 || r.bottom <= vsTop + 1) continue; // scrolled off the top
-      const tok = [...l.classList].find((c) => c.startsWith('tlg-'));
-      if (!tok) continue;
-      const dist = Math.abs(r.top - vsTop);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestTok = tok;
-        bestOffset = r.top - vsTop;
-      }
-    }
-    return { token: bestTok, offset: bestOffset, scrollTop: vs.scrollTop };
-  }, [verticalScrollEl]);
-
+  // Re-place a captured CONTENT anchor (see captureScrollAnchor, defined above near
+  // enterPrFocus). Used to preserve the vertical scroll across the groups/markers
+  // rebuild. Two things move the scroll during a rebuild: (1) rebuildMarkers() does a
+  // wholesale remove()+add() of every marker, which momentarily empties each row's
+  // bands so vis clamps the scroll toward the top before they re-render — a TRANSIENT
+  // artifact to undo; and (2) a background sync can change the HEIGHT of rows ABOVE
+  // the viewport (a new PR/event grows a contributor's row, or the rows re-sort) — a
+  // REAL layout change. Re-pinning the old pixel scrollTop fixes (1) but mishandles
+  // (2): the same offset then shows different content, so a scrolled-down board
+  // visibly rides upward. Re-placing the captured row at the same offset keeps the
+  // user's view put regardless of what changed above it; falls back to the captured
+  // pixel scrollTop when that row no longer exists after the sync.
   const restoreScrollAnchor = useCallback(
     (anchor: ScrollAnchor) => {
       const container = containerRef.current;
@@ -1288,6 +1312,26 @@ export function Timeline(): JSX.Element {
       requestAnimationFrame(step);
     },
     [verticalScrollEl, setVisScrollTop],
+  );
+
+  // Restore a captured scroll anchor as an INTENTIONAL scroll: claim the scroll for
+  // the duration (a monotonic loop id + a backstop release, mirroring
+  // centerShowTarget) so the rebuild's own anchor-restore and the deferred bar-fit
+  // re-anchor — both gated on intentionalScrollRef — stand down instead of fighting
+  // it frame-for-frame. Used on focus EXIT: the row re-show + window restore + their
+  // follow-on reclusters all perturb the scroll, and this is the single authority
+  // that lands the view back where it was. restoreScrollAnchor's own settle loop does
+  // the actual correcting; the backstop releases the gate once that has surely run.
+  const restoreScrollAnchorIntentional = useCallback(
+    (anchor: ScrollAnchor) => {
+      const myLoop = ++scrollLoopRef.current;
+      intentionalScrollRef.current = true;
+      window.setTimeout(() => {
+        if (scrollLoopRef.current === myLoop) intentionalScrollRef.current = false;
+      }, 1500);
+      restoreScrollAnchor(anchor);
+    },
+    [restoreScrollAnchor],
   );
 
   // --- Marker popover + browser/mouse-back navigation ----------------------
@@ -1368,18 +1412,23 @@ export function Timeline(): JSX.Element {
       const wasPrFocus = prFocusActiveRef.current;
       const prId = prFocusPrIdRef.current;
       const preFocusWindow = preFocusWindowRef.current;
+      const preFocusScroll = preFocusScrollRef.current;
       applyContext(null);
       setPopover(null);
       drillDepthRef.current = 0;
       savedWindowRef.current = null;
       preFocusWindowRef.current = null;
+      preFocusScrollRef.current = null;
 
       if (wasPrFocus && restoreAnchor) {
-        // PR-isolation exit: restore the ORIGINAL zoom + position the user had when
-        // they entered focus (captured in preFocusWindowRef by enterPrFocus) — they
-        // came in to inspect one PR and expect to land back where they were, not
-        // stuck at the focus zoom. Then re-select the PR (→ glow pulse) and
-        // vertically re-centre on it so it's easy to spot in the zoomed-out view.
+        // PR-isolation exit: restore the ORIGINAL window (zoom + position) AND the
+        // vertical scroll the user had when they entered focus (captured by
+        // enterPrFocus) — they came in to inspect one PR and expect to land back
+        // exactly where they were, on BOTH axes. We deliberately do NOT re-centre on
+        // the PR any more: that vertical re-centre is what jumped a mid-scrolled board
+        // upward on exit (the bug). Re-select the PR (→ glow pulse) and re-glow the
+        // anchor marker so it's still easy to relocate, but let restoreScrollAnchor
+        // own the vertical scroll.
         const tl = timelineRef.current;
         const pr = prId != null ? prsByIdRef.current.get(prId) : undefined;
         if (tl) {
@@ -1396,7 +1445,15 @@ export function Timeline(): JSX.Element {
           }
           if (prId != null) tl.setSelection([`pr:${prId}`]);
         }
-        if (anchorEvent != null) {
+        if (preFocusScroll) {
+          // Keep the "you were here" marker glow (no vertical scroll), then restore
+          // the captured scroll as the single intentional authority so it doesn't
+          // fight the row-re-show / window-restore reclusters.
+          if (anchorEvent != null) applyExitGlow(anchorEvent);
+          restoreScrollAnchorIntentional(preFocusScroll);
+        } else if (anchorEvent != null) {
+          // No captured anchor (defensive — every PR-focus entry captures one): fall
+          // back to the old re-centre-on-marker behaviour.
           restoreAnchorView(anchorEvent);
         } else if (pr) {
           const token = groupClassToken(prGroupId(pr));
@@ -1412,7 +1469,14 @@ export function Timeline(): JSX.Element {
       restoreWindow();
       if (anchorEvent != null) restoreAnchorView(anchorEvent);
     },
-    [applyContext, restoreWindow, restoreAnchorView, centerShowTarget],
+    [
+      applyContext,
+      restoreWindow,
+      restoreAnchorView,
+      centerShowTarget,
+      applyExitGlow,
+      restoreScrollAnchorIntentional,
+    ],
   );
 
   // Full exit driven by the Exit-focus button / Esc / a repo switch (NOT a browser
@@ -1620,20 +1684,13 @@ export function Timeline(): JSX.Element {
           ev.actorId !== pr.authorId;
 
         // Cross-user marker → the UNIFIED PR-isolation focus, anchored on this
-        // event: collapse to the PR's contributors, isolate its bar, fit nothing
-        // (we recentre on the clicked instant instead), open the popover, then glow
-        // + centre the marker. Identical end state to the PR-detail "Focus" link.
-        // This supersedes the old two-row marker collapse.
+        // event: collapse to the PR's contributors, isolate its bar, FIT the window
+        // to the PR's full span (so the whole PR zooms into view), open the popover,
+        // then glow + vertically centre the marker. Byte-for-byte the same end state
+        // as double-clicking the PR bar / the PR-detail "Focus" link. This supersedes
+        // the old two-row marker collapse.
         if (crossUser && ev.prId != null) {
-          enterPrFocus(ev.prId, { anchorEventId: evId, fitWindow: false });
-          // Recentre the window on the clicked instant (the showEvent pattern).
-          const tlc = timelineRef.current;
-          if (tlc) {
-            const c = new Date(ev.occurredAt).getTime();
-            const win = tlc.getWindow();
-            const width = win.end.valueOf() - win.start.valueOf();
-            tlc.setWindow(c - width / 2, c + width / 2, { animation: false });
-          }
+          enterPrFocus(ev.prId, { anchorEventId: evId, fitWindow: true });
           openPopover(x, y, [evId]);
           // The popover's select-pulse is auto-suppressed (focusActive is true), so
           // only the `ev-cross-linked` ring shows; centre on it once rows settle.
@@ -1692,17 +1749,10 @@ export function Timeline(): JSX.Element {
           firstEv.actorId !== pr.authorId;
 
         // Cross-person cluster → the unified PR-isolation focus, anchored on the
-        // cluster and recentred on its instant, then the expanded popover. Identical
+        // cluster and FIT to the PR's full span, then the expanded popover. Identical
         // to clicking a cross-user single marker.
         if (crossUser && firstEv.prId != null) {
-          enterPrFocus(firstEv.prId, { anchorEventId: firstId, fitWindow: false });
-          const tlc = timelineRef.current;
-          if (tlc) {
-            const c = new Date(firstEv.occurredAt).getTime();
-            const win = tlc.getWindow();
-            const width = win.end.valueOf() - win.start.valueOf();
-            tlc.setWindow(c - width / 2, c + width / 2, { animation: false });
-          }
+          enterPrFocus(firstEv.prId, { anchorEventId: firstId, fitWindow: true });
           openPopover(x, y, members);
           const token = groupClassToken(groupOf(firstEv));
           window.setTimeout(
@@ -1777,16 +1827,10 @@ export function Timeline(): JSX.Element {
         const x = native?.clientX ?? props.pageX ?? 0;
         const y = native?.clientY ?? props.pageY ?? 0;
         // Same end state as a cross-user single-click: isolate the PR anchored on the
-        // event, recentre on its instant (not the bar's far-off midpoint), re-open the
-        // popover, then glow + centre the marker once the rows settle.
-        enterPrFocus(ev.prId, { anchorEventId: evId, fitWindow: false });
-        const tlc = timelineRef.current;
-        if (tlc) {
-          const c = new Date(ev.occurredAt).getTime();
-          const win = tlc.getWindow();
-          const width = win.end.valueOf() - win.start.valueOf();
-          tlc.setWindow(c - width / 2, c + width / 2, { animation: false });
-        }
+        // event, FIT the window to the PR's full span (matching a PR-bar double-click),
+        // re-open the popover, then glow + vertically centre the marker once the rows
+        // settle.
+        enterPrFocus(ev.prId, { anchorEventId: evId, fitWindow: true });
         openPopover(x, y, members);
         const token = groupClassToken(groupOf(ev));
         window.setTimeout(() => centerShowTarget(token, true, '.ev-cross-linked'), 320);

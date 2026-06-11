@@ -121,6 +121,10 @@ function SingleEvent({
   // timeline payload lean (no bodies on /api/timeline).
   const isCommit = ev.type === 'commit_pushed';
   const isPrComment = ev.type === 'pr_comment';
+  // A submitted review (approve / request-changes / comment summary) has no inline
+  // thread and no Overview card of its own — its home is the Activity feed. Route
+  // its "Open in detail pane" there (scroll to + flash the entry), like commits.
+  const isReviewSubmitted = ev.type === 'review_submitted';
   const { data: prDetail } = usePr(
     (isCommit || isPrComment) && ev.prId != null ? ev.prId : null,
   );
@@ -140,6 +144,10 @@ function SingleEvent({
     // comment row id), mirroring how a review comment opens its thread.
     else if (isPrComment && ev.prId != null && ev.refId != null)
       showPrComment(ev.prId, ev.refId);
+    // A submitted review → open the Activity tab and scroll to + flash its entry
+    // (refId is the review row id, matched against the feed by (type, refId)).
+    else if (isReviewSubmitted && ev.prId != null && ev.refId != null)
+      showActivityEntry(ev.prId, { type: ev.type, refId: ev.refId });
     else if (ev.prId != null) selectPr(ev.prId);
     onNavigate();
   };
