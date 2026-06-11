@@ -68,6 +68,13 @@ const VIS_OPTIONS: TimelineOptions = {
 // preferred width toward that floor instead of overlapping its neighbour. Tunable.
 const MIN_BAR_PX = 12;
 
+// Number of alternating per-repo background tints (see `.tl-repo-tint-N` in
+// index.css). Repos are tinted in a two-colour ZEBRA — consecutive repos (by rank,
+// see repoTintIndexById) alternate between two muted hues (blue / purple) so each
+// repo's block is set off from its neighbours without a loud rainbow. Two is the
+// whole scheme; bumping this would need matching `.tl-repo-tint-N` rules.
+const REPO_TINT_COUNT = 2;
+
 function unique<T>(arr: T[]): T[] {
   return [...new Set(arr)];
 }
@@ -366,6 +373,20 @@ export function Timeline(): JSX.Element {
   const reposById = useMemo(() => {
     const m = new Map<number, string>();
     for (const r of repos ?? []) m.set(r.id, r.fullName);
+    return m;
+  }, [repos]);
+  // repoId → background-tint index (0 or 1 — the two-colour repo zebra). Assigned
+  // by the repo's RANK PARITY among all watched repos (sorted by id), not `id % 2`,
+  // so consecutive repos always alternate (id-mod would put two odd/even-id repos
+  // that happen to sit adjacent on the same tint). Keyed off the full `repos` list,
+  // which is unchanged by view-filtering, so a repo's tint is stable as you toggle
+  // repos in/out of the timeline — it only flips when a repo is added/removed above
+  // it in the rank order. See `.tl-repo-tint-N` (CSS).
+  const repoTintIndexById = useMemo(() => {
+    const m = new Map<number, number>();
+    [...(repos ?? [])]
+      .sort((a, b) => a.id - b.id)
+      .forEach((r, i) => m.set(r.id, i % REPO_TINT_COUNT));
     return m;
   }, [repos]);
   // repoId → set of userIds with merge rights there (have merged a PR). Drives
@@ -2068,6 +2089,13 @@ export function Timeline(): JSX.Element {
       ]);
       const mergerSet = mergersByRepo.get(rid);
       const nested = memberIds.map((uid) => `repo:${rid}:user:${uid}`);
+      // Subtle per-repo background tint, shared by the repo header AND every one of
+      // its contributor rows so the whole repo block (title + user column + its
+      // timeline) reads as one tinted band. Carried on the className; the CSS
+      // palette class sets a `--tl-tint` var the tint rule reads (see index.css).
+      const tintClass = `tl-repo-tint-${
+        repoTintIndexById.get(rid) ?? rid % REPO_TINT_COUNT
+      }`;
       groups.push({
         id: `repo:${rid}`,
         content: reposById.get(rid) ?? `repo ${rid}`,
@@ -2077,6 +2105,9 @@ export function Timeline(): JSX.Element {
         // Order this row's subgroup bands by each item's `sortKey` (bar above its
         // own events; cross-user events last). See VIS_OPTIONS / buildMarkerItems.
         subgroupOrder: 'sortKey',
+        // `tl-repo-header` scopes the repo-tint rule to the title row (it has no
+        // `tl-user-row`); the tint class carries the hue.
+        className: `tl-repo-header ${tintClass}`,
       } as DataGroup);
       memberIds.forEach((uid, i) => {
         const gid = `repo:${rid}:user:${uid}`;
@@ -2099,8 +2130,9 @@ export function Timeline(): JSX.Element {
           order: (isMaintainer ? MAINTAINER_RANK : CONTRIBUTOR_RANK) + i,
           subgroupOrder: 'sortKey',
           // `tl-user-row` scopes the collapse transition; the per-group token
-          // lets focusRows find this row's label + bar to animate (Fix 1).
-          className: `tl-user-row ${groupClassToken(gid)}`,
+          // lets focusRows find this row's label + bar to animate (Fix 1); the
+          // repo tint class shares the hue with the repo header + sibling rows.
+          className: `tl-user-row ${groupClassToken(gid)} ${tintClass}`,
         } as DataGroup);
       });
     });
@@ -2261,6 +2293,7 @@ export function Timeline(): JSX.Element {
     derivedStates,
     userIds,
     reposById,
+    repoTintIndexById,
     usersById,
     mergersByRepo,
     forceShowNonce,

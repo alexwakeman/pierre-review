@@ -548,61 +548,45 @@ body {
   }
 }
 
-/* ---- per-repo background tint ----------------------------------------------
-   Each repo gets a subtle, theme-matching hue so its block — the repo title row,
-   its contributors' user column, and their PR/marker timeline — reads as one
-   visually-grouped band, making it easy to tell repos apart at a glance. The
-   palette class (set per repo in the timeline build by repo RANK — see
-   repoTintIndexById — so a repo keeps its colour as the view is filtered) only
-   assigns a `--tl-tint` custom property
-   here; the apply rule below reads it. Splitting "which hue" (var, no specificity
-   battle — vis never sets --tl-tint) from "paint it" (one rule, high specificity)
-   keeps the palette a flat list and the override robust. Channels are
-   space-separated so the alpha is applied at paint time via rgb(... / a).
+/* ---- per-repo background tint (two-colour zebra) ---------------------------
+   Each repo's block — the repo title row, its contributors' user column, and their
+   PR/marker timeline — gets a subtle background tint so it reads as one grouped band
+   set off from its neighbours. Rather than a unique hue per repo (a loud rainbow at
+   the saturation needed to keep ~10 of them apart), consecutive repos ALTERNATE
+   between just two muted, theme-matching hues — blue and purple — like a zebra: the
+   alternation alone marks where one repo ends and the next begins, so the tints can
+   stay calm. The two are set far enough apart in hue to read as distinct from each
+   other even when muted (composited CIEDE2000 over the light #fff / dark gray-950
+   panel bases ≈ 6 at the in-use alpha, comfortably past the ~2.3 JND).
 
-   The 10 hues are a wheel-spanning set (one family per slot — NOT three blues +
-   three greens, which collapse into each other at low alpha), interleaved warm↔cool
-   so the ordering serves BOTH constraints rank assignment imposes:
-     • ALL pairs distinct — rank hands out indices 0,1,2,… consecutively, so ~10
-       watched repos put every slot on screen at once and every pair must separate.
-     • ADJACENT pairs MOST distinct — consecutive ranks stack as neighbouring rows,
-       the pairs a user compares most, so the order alternates warm/cool to maximise
-       their contrast (red↔teal↔orange↔sky…).
-   Verified by compositing each hue at the in-use alpha over the light (#fff) and dark
-   (gray-950) panel bases and computing pairwise CIEDE2000: min over ALL pairs ≈ 3.15,
-   min over ADJACENT pairs ≈ 10.3 — both above the ~2.3 just-noticeable-difference.
-   Re-run that composited-CIEDE2000 check before editing a hue, reordering a slot, or
-   lowering the alpha, so a tweak can't silently reintroduce two confusable repos. */
-.tl-repo-tint-0 { --tl-tint: 239 68 68; }    /* red     */
-.tl-repo-tint-1 { --tl-tint: 20 184 166; }   /* teal    */
-.tl-repo-tint-2 { --tl-tint: 249 115 22; }   /* orange  */
-.tl-repo-tint-3 { --tl-tint: 14 165 233; }   /* sky     */
-.tl-repo-tint-4 { --tl-tint: 245 158 11; }   /* amber   */
-.tl-repo-tint-5 { --tl-tint: 59 130 246; }   /* blue    */
-.tl-repo-tint-6 { --tl-tint: 132 204 22; }   /* lime    */
-.tl-repo-tint-7 { --tl-tint: 139 92 246; }   /* violet  */
-.tl-repo-tint-8 { --tl-tint: 34 197 94; }    /* green   */
-.tl-repo-tint-9 { --tl-tint: 217 70 239; }   /* fuchsia */
+   The palette class (set per repo in the timeline build by rank PARITY — see
+   repoTintIndexById) only assigns a `--tl-tint` custom property; the apply rule
+   below reads it. Splitting "which hue" (var, no specificity battle — vis never sets
+   --tl-tint) from "paint it" (one rule, high specificity) keeps it robust. Channels
+   are space-separated so the alpha is applied at paint time via rgb(... / a). */
+.tl-repo-tint-0 { --tl-tint: 59 130 246; }   /* blue   (blue-500)   */
+.tl-repo-tint-1 { --tl-tint: 139 92 246; }   /* purple (violet-500) */
 
 /* Paint the tint as the row's BACKGROUND-COLOR on both the label (left) and the
    foreground (right), for the repo header and every contributor row. The
    `[class*="tl-repo-tint-"]` attribute selector lands at specificity (0,4,0) —
    one notch above vis's per-nesting-level label shade
    (`.vis-label.vis-nested-group.vis-group-level-2`, 0,3,0) — so the hue wins on
-   the left labels too, on every palette index in one rule. Very low alpha so the
-   grid lines, divider, bars and markers all read through; the zebra band (below)
-   layers on TOP as a background-image. */
+   the left labels too, on both tints in one rule. Low alpha (kept muted/"less
+   vivid") so the grid lines, divider, and (full-opacity) bars and markers all read
+   through; the per-contributor zebra band (below) layers on TOP as a
+   background-image. */
 .vis-labelset .vis-label.tl-user-row[class*='tl-repo-tint-'],
 .vis-foreground .vis-group.tl-user-row[class*='tl-repo-tint-'],
 .vis-labelset .vis-label.tl-repo-header[class*='tl-repo-tint-'],
 .vis-foreground .vis-group.tl-repo-header[class*='tl-repo-tint-'] {
-  background-color: rgb(var(--tl-tint) / 0.08);
+  background-color: rgb(var(--tl-tint) / 0.10);
 }
 .dark .vis-labelset .vis-label.tl-user-row[class*='tl-repo-tint-'],
 .dark .vis-foreground .vis-group.tl-user-row[class*='tl-repo-tint-'],
 .dark .vis-labelset .vis-label.tl-repo-header[class*='tl-repo-tint-'],
 .dark .vis-foreground .vis-group.tl-repo-header[class*='tl-repo-tint-'] {
-  background-color: rgb(var(--tl-tint) / 0.11);
+  background-color: rgb(var(--tl-tint) / 0.13);
 }
 
 /* Zebra striping: every other contributor row gets a subtle band so adjacent
