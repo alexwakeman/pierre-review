@@ -1844,17 +1844,28 @@ export function Timeline(): JSX.Element {
     timeline.on('rangechanged', () => {
       if (reclusterTimer) clearTimeout(reclusterTimer);
       const recluster = (): void => {
-        // A recluster is a full marker remove()+add() that momentarily empties the
-        // rows, clamping the vertical scroll toward the top. Don't run it while an
-        // intentional scroll (a focus-exit recenter or a "Show" centring) owns the
-        // scroll — the two fight and the board jitters. Re-arm past the settle
-        // instead; the recluster still runs, just never mid-scroll.
+        // Don't recluster while an intentional scroll (a focus-exit restore or a
+        // "Show" centring) owns the scroll — the two fight and the board jitters.
+        // Re-arm past the settle instead; the recluster still runs, just never
+        // mid-scroll.
         if (intentionalScrollRef.current) {
           reclusterTimer = setTimeout(recluster, 120);
           return;
         }
         reclusterTimer = null;
+        // rebuildMarkers() re-renders every marker at the current zoom. At a coarser
+        // zoom (e.g. just after leaving focus, when the window animated back out)
+        // markers cluster differently, which can change the HEIGHT of a row — and a
+        // height change in a row ABOVE the viewport shifts the visible rows even
+        // though scrollTop is unchanged (the "events shuffle, then the board jumps"
+        // symptom on focus exit). Pin the CONTENT anchor (the row at the viewport top)
+        // across the rebuild so the visible rows stay put; restoreScrollAnchor's rAF
+        // settle loop absorbs the async height change after vis redraws the markers.
+        // Safe from races: this branch only runs while NO intentional scroll owns the
+        // gate, and restoreScrollAnchor bails the moment the anchor holds.
+        const anchor = captureScrollAnchor();
         rebuildMarkers();
+        if (anchor) restoreScrollAnchor(anchor);
       };
       reclusterTimer = setTimeout(recluster, 120);
 
@@ -1891,6 +1902,8 @@ export function Timeline(): JSX.Element {
     centerShowTarget,
     highlightEvent,
     enterPrFocus,
+    captureScrollAnchor,
+    restoreScrollAnchor,
   ]);
 
   // Per-row collapse caret (Item 6). vis re-parses / re-appends label HTML on every
