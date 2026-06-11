@@ -12,6 +12,9 @@ release/
 .env
 .env.local
 
+# Playwright UI-check screenshots (scripts/ui-harness)
+scripts/.ui-artifacts/
+
 # Editor / OS
 .DS_Store
 .idea/

@@ -15,6 +15,7 @@
     "package": "node scripts/build-release.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "verify:ui": "node scripts/ui-smoke.mjs",
     "db:generate": "pnpm --filter @pierre-review/backend db:generate",
     "db:migrate": "pnpm --filter @pierre-review/backend db:migrate",
     "db:studio": "pnpm --filter @pierre-review/backend db:studio",
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
+    "playwright": "^1.60.0",
     "typescript": "^5.7.0"
   },
   "pnpm": {
