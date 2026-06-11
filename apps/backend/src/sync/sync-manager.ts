@@ -1,11 +1,11 @@
-import { eq } from 'drizzle-orm';
+import { eq, gte } from 'drizzle-orm';
 import type { SyncProgress, SyncRunStatus, SyncStatus } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { config } from '../config.js';
 import { getAccessToken } from '../auth/account.js';
 import { syncRepo, type Logger } from './sync-repo.js';
 
-const { repos, syncState } = schema;
+const { repos, syncState, accounts } = schema;
 
 // In-memory record of which repos are mid-sync (status isn't persisted as
 // "running" — it lives only for the lifetime of the process).
@@ -273,7 +273,27 @@ export async function syncAllRepos(log: Logger): Promise<void> {
     );
     return;
   }
-  const all = await db.select({ id: repos.id }).from(repos).execute();
+  // CLOUD: only sync repos whose owning account has a loaded frontend (active within
+  // config.syncActiveWindowMinutes). With no open tab a tenant's repos stop being
+  // re-synced — periodic sync follows the user, not the server clock. LOCAL: one
+  // always-on account, so sync every repo unconditionally (unchanged behaviour).
+  const all = config.isCloud
+    ? await db
+        .select({ id: repos.id })
+        .from(repos)
+        .innerJoin(accounts, eq(repos.accountId, accounts.id))
+        .where(
+          gte(
+            accounts.lastActiveAt,
+            new Date(Date.now() - config.syncActiveWindowMinutes * 60_000),
+          ),
+        )
+        .execute()
+    : await db.select({ id: repos.id }).from(repos).execute();
+  if (config.isCloud && all.length === 0) {
+    log.info('scheduled sync skipped: no accounts with a loaded frontend');
+    return;
+  }
   for (const r of all) {
     if (running.has(r.id)) continue;
     // Reserve the slot synchronously before the now-async getRepoRow/planSync

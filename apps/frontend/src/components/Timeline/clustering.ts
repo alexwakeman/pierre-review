@@ -176,7 +176,10 @@ export function buildMarkerItems(
           type: 'point',
           start: ev.occurredAt,
           content: markerHtml(ev),
-          className: cls('ev-marker'),
+          // `ev-key-<id>` lets the popover locate this marker's DOM element by event
+          // id (vis copies className onto the .vis-item), so it can anchor beside the
+          // marker even after a focus-entry rebuild re-clusters/moves it.
+          className: `${cls('ev-marker')} ev-key-${ev.id}`,
           title: eventTooltip(ev, usersById),
           // Markers carry their OWN highlight (the custom `ev-selected` glow); we
           // never want vis-timeline's native selection on them. Left selectable,
@@ -203,7 +206,10 @@ export function buildMarkerItems(
           type: 'point',
           start: new Date(meanMs).toISOString(),
           content: clusterHtml(bucket.length, kind),
-          className: cls('ev-cluster'),
+          // One `ev-key-<id>` per member so any member event (incl. the popover's
+          // anchor) locates this pill by event id, regardless of how re-clustering in
+          // focus regroups them (see the single-marker note above).
+          className: `${cls('ev-cluster')} ${bucket.map((e) => `ev-key-${e.id}`).join(' ')}`,
           title: `${bucket.length} ${kind}s`,
           selectable: false, // see the single-marker note above
         } as DataItem);

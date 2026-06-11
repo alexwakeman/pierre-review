@@ -25,7 +25,12 @@ import {
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import type { CheckRun, Label, StoredPrFile } from '@pierre-review/shared';
+import type {
+  CheckRun,
+  Label,
+  ReviewRouteReason,
+  StoredPrFile,
+} from '@pierre-review/shared';
 
 export const accounts = pgTable('accounts', {
   id: serial('id').primaryKey(),
@@ -38,6 +43,11 @@ export const accounts = pgTable('accounts', {
     .notNull()
     .defaultNow(),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true, mode: 'date' }),
+  // Last time a loaded frontend was seen talking to the backend (cloud: stamped,
+  // throttled, by the per-request account hook + an SPA heartbeat). The scheduler
+  // syncs only accounts active within config.syncActiveWindowMinutes, so a tenant
+  // with no open tab stops being re-synced. Null until first activity.
+  lastActiveAt: timestamp('last_active_at', { withTimezone: true, mode: 'date' }),
 });
 
 export const repos = pgTable(
@@ -399,6 +409,10 @@ export const claudeReviews = pgTable(
       enum: ['claude-opus-4-8', 'claude-sonnet-4-6'],
     }).notNull(),
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),
+    // Deterministic router decision + inputs, recorded before the agent runs. See
+    // the schema.sqlite.ts twin for the full rationale.
+    reviewMode: text('review_mode', { enum: ['skip', 'diff_only', 'worktree'] }),
+    routeReason: jsonb('route_reason').$type<ReviewRouteReason>(),
     summary: text('summary'),
     verdict: text('verdict', {
       enum: ['COMMENT', 'REQUEST_CHANGES', 'APPROVE'],

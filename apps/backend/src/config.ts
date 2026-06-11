@@ -91,6 +91,12 @@ export const config = {
   commitFileConcurrency: intFromEnv('COMMIT_FILE_CONCURRENCY', 10),
   syncCron: process.env.SYNC_CRON ?? '*/5 * * * *',
   syncOverlapMinutes: intFromEnv('SYNC_OVERLAP_MINUTES', 20),
+  // CLOUD ONLY: the scheduled sync skips any account whose loaded frontend hasn't
+  // been seen within this many minutes (accounts.lastActiveAt), so a tenant with no
+  // open tab is not re-synced every 5 min. Comfortably exceeds the cron period so a
+  // user active a few minutes ago isn't dropped between ticks. Local mode ignores
+  // this entirely (one always-on account). SYNC_ACTIVE_WINDOW_MINUTES overrides.
+  syncActiveWindowMinutes: intFromEnv('SYNC_ACTIVE_WINDOW_MINUTES', 15),
   stallThresholdDays: intFromEnv('STALL_THRESHOLD_DAYS', 3),
   // Disable the periodic scheduler (used by scripts/tests).
   disableScheduler: process.env.DISABLE_SCHEDULER === 'true',
@@ -133,8 +139,32 @@ export const config = {
   // reviews need far fewer turns than the old default; 30 is still generous.
   reviewMaxTurns: intFromEnv('REVIEW_MAX_TURNS', 30),
   reviewBudgetUsd: floatFromEnv('REVIEW_BUDGET_USD', 1.0),
+  // Turn cap for a diff-only run. These are TOOL-LESS (only submit_review), so they
+  // should finish in ~2 turns; a tight cap is a cheap runaway guard.
+  reviewDiffOnlyMaxTurns: intFromEnv('REVIEW_DIFF_ONLY_MAX_TURNS', 6),
   // At most one review per PR; this caps concurrent reviews across all PRs.
   reviewConcurrency: intFromEnv('REVIEW_CONCURRENCY', 1),
+
+  // ---- Claude Review routing (diff-only vs worktree) — THE THRESHOLDS ----
+  // The deterministic pre-check (review/routing.ts) decides, BEFORE the agent runs,
+  // whether a PR can be reviewed from its diff alone (fast, tool-less, no worktree)
+  // or needs the full cloned worktree as explorable context. A change stays
+  // 'diff_only' only if it is within EVERY ceiling below AND touches no exported/
+  // public API; otherwise it routes to 'worktree'. The numbers are deliberately
+  // CONSERVATIVE — any tie routes to worktree, since over-reviewing is safe but
+  // under-reviewing a risky change is not. Every decision input is logged on the
+  // run (claude_reviews.route_reason) so these can be tuned against the agent's own
+  // scopeUsed self-report. This is the single place to review/adjust the thresholds.
+  reviewRouting: {
+    // Max (non-noise) files changed for a diff-only review.
+    maxFiles: intFromEnv('REVIEW_ROUTE_MAX_FILES', 5),
+    // Max added + deleted lines (non-noise files) for a diff-only review.
+    maxLines: intFromEnv('REVIEW_ROUTE_MAX_LINES', 150),
+    // Max distinct directories touched for a diff-only review.
+    maxDirs: intFromEnv('REVIEW_ROUTE_MAX_DIRS', 2),
+    // Max distinct top-level subsystems (first path segment) for a diff-only review.
+    maxSubsystems: intFromEnv('REVIEW_ROUTE_MAX_SUBSYSTEMS', 1),
+  },
 } as const;
 
 export type Config = typeof config;

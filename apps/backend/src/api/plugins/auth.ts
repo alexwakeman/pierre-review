@@ -4,6 +4,7 @@ import { config } from '../../config.js';
 import {
   getAccountById,
   getLocalAccountCached,
+  stampAccountActive,
   LOCAL_ACCOUNT_ID,
   type Account,
 } from '../../auth/account.js';
@@ -30,6 +31,12 @@ export function registerAccountContext(app: FastifyInstance): void {
     if (config.isCloud) {
       const accountId = readSessionAccountId(req);
       req.account = accountId != null ? await getAccountById(accountId) : null;
+      // A request from a signed-in account on a real data route means that tenant
+      // has a loaded frontend — stamp activity (throttled) so the scheduler keeps
+      // syncing their repos. Skips static/landing assets and the health/auth probes.
+      if (req.account && req.url.startsWith('/api/')) {
+        stampAccountActive(req.account.id);
+      }
     } else {
       req.account =
         getLocalAccountCached() ?? {

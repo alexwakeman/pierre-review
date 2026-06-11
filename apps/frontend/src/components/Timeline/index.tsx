@@ -1015,6 +1015,11 @@ export function Timeline(): JSX.Element {
   // a background-sync rebuild with a "Show"/focus centring. The synchronous
   // restoreScrollAnchor in the rebuild still runs — only the late re-anchor is gated.
   const intentionalScrollRef = useRef(false);
+  // Monotonic id of the in-flight centerShowTarget settle loop. A newer call
+  // supersedes any older one, so two settle loops can never write `.vis-vertical-
+  // scroll`'s scrollTop on alternating frames (the source of focus-exit jitter); only
+  // the current loop releases the intentional-scroll gate.
+  const scrollLoopRef = useRef(0);
 
   // Bring the "Show" target into view and centre it. Called after the row-focus
   // collapse has settled. The target glow is the clicked marker (`ev-cross-linked`)
@@ -1099,8 +1104,17 @@ export function Timeline(): JSX.Element {
 
       let frames = 0;
       let stable = 0;
+      // Supersede any prior in-flight settle loop: only the latest owns the scroll
+      // and the gate. A backstop releases the gate even if rAF stalls mid-settle
+      // (e.g. the tab is backgrounded), so a stuck-true gate can't permanently
+      // disable the background-sync anchor restore.
+      const myLoop = ++scrollLoopRef.current;
       intentionalScrollRef.current = true;
+      window.setTimeout(() => {
+        if (scrollLoopRef.current === myLoop) intentionalScrollRef.current = false;
+      }, 2500);
       const step = (): void => {
+        if (scrollLoopRef.current !== myLoop) return; // superseded — newer loop owns the gate
         const r = measureDelta();
         if (r != null) {
           if (Math.abs(r.delta) > 6) {
@@ -1533,6 +1547,15 @@ export function Timeline(): JSX.Element {
 
       // Empty-canvas click → one-level-at-a-time dismissal (see dismissEmptyCanvas).
       if (id == null) {
+        // The synthesized SECOND click of a double-click (native detail === 2) on a
+        // marker that just entered focus lands on empty canvas (item:null) — click1's
+        // rebuild + window-recenter moved the marker out from under the cursor. Don't
+        // treat it as an intentional empty-canvas dismissal: it would tear down the
+        // popover click1 just opened. The trailing doubleClick fires next and bails
+        // (focus is active). A genuine single empty-canvas click is detail===1 and
+        // still dismisses. (Timing can't discriminate — click1's focus-entry work
+        // makes the gap to click2 vary widely; the click count is exact.)
+        if ((native?.detail ?? 0) >= 2) return;
         dismissEmptyCanvas();
         return;
       }
@@ -1755,7 +1778,20 @@ export function Timeline(): JSX.Element {
     let relaneTimer: ReturnType<typeof setTimeout> | null = null;
     timeline.on('rangechanged', () => {
       if (reclusterTimer) clearTimeout(reclusterTimer);
-      reclusterTimer = setTimeout(() => rebuildMarkers(), 120);
+      const recluster = (): void => {
+        // A recluster is a full marker remove()+add() that momentarily empties the
+        // rows, clamping the vertical scroll toward the top. Don't run it while an
+        // intentional scroll (a focus-exit recenter or a "Show" centring) owns the
+        // scroll — the two fight and the board jitters. Re-arm past the settle
+        // instead; the recluster still runs, just never mid-scroll.
+        if (intentionalScrollRef.current) {
+          reclusterTimer = setTimeout(recluster, 120);
+          return;
+        }
+        reclusterTimer = null;
+        rebuildMarkers();
+      };
+      reclusterTimer = setTimeout(recluster, 120);
 
       // A bar's min-width floor is pixel-based, so fitLaneBars depends on the px↔ms
       // scale. When the WIDTH changes (a real zoom — a pan keeps it constant) re-run
@@ -1838,7 +1874,14 @@ export function Timeline(): JSX.Element {
     if (!container) return;
     const onPaneClick = (e: MouseEvent): void => {
       const target = e.target as HTMLElement | null;
-      if (target?.closest?.('.vis-timeline')) return; // vis owns its own surface
+      // A marker click that enters focus calls enterPrFocus → rebuildMarkers(),
+      // which removes+re-adds the clicked marker node mid-bubble. By the time the
+      // click reaches here its target is detached, so closest('.vis-timeline')
+      // wrongly returns null and we'd fall through to dismissEmptyCanvas() — closing
+      // the popover focus just opened. A genuine pane-gap click always targets a
+      // still-connected element, so a detached target means the click WAS inside vis.
+      if (!target || !target.isConnected) return;
+      if (target.closest('.vis-timeline')) return; // vis owns its own surface
       dismissEmptyCanvas();
     };
     container.addEventListener('click', onPaneClick);
@@ -2120,6 +2163,12 @@ export function Timeline(): JSX.Element {
     // (forceShowOpenPrRef / `extra`): the timelineFocusPr effect drives its own
     // scroll-to-PR afterward, and restoring the old position would fight it.
     const scrollAnchor = extra ? null : captureScrollAnchor();
+    // Whether an intentional scroll (a "Show"/focus-exit centring) owned the scroll
+    // when we captured the anchor. If so the anchor reflects a TRANSIENT mid-scroll
+    // position and centerShowTarget is the authority on where the view ends up — the
+    // deferred onSettled re-anchor below must not fire from it even once the loop has
+    // settled (it lands up to ~40 frames out, by which time the gate may have cleared).
+    const intentionalAtCapture = intentionalScrollRef.current;
 
     const nextGroupIds = new Set(groups.map((g) => String(g.id)));
     groupsRef.current.update(groups);
@@ -2144,10 +2193,13 @@ export function Timeline(): JSX.Element {
     // (below) has finished, so re-anchor once it settles to close that second window.
     applyBarFit(prItems, () => {
       // Skip the late re-anchor if an intentional scroll (a "Show"/focus centring)
-      // is animating — this onSettled lands ~40 frames out, inside that window. The
-      // synchronous restoreScrollAnchor below already covered the normal background-
+      // is animating, OR was animating when we captured the anchor — this onSettled
+      // lands ~40 frames out, by which time a short settle may have cleared the gate,
+      // and re-anchoring to that stale mid-scroll position would yank the view off the
+      // just-centred target. centerShowTarget self-corrects, so deferring to it is safe.
+      // The synchronous restoreScrollAnchor below already covered the normal background-
       // sync case, so the scroll is never left unguarded by gating only here.
-      if (scrollAnchor && !intentionalScrollRef.current) {
+      if (scrollAnchor && !intentionalScrollRef.current && !intentionalAtCapture) {
         restoreScrollAnchor(scrollAnchor);
       }
     });
@@ -2197,8 +2249,13 @@ export function Timeline(): JSX.Element {
     forceShowOpenPrRef.current = null;
 
     // Restore the captured content anchor: undo the marker remove()+add() clamp and
-    // absorb any height change in the rows above the viewport.
-    if (scrollAnchor) restoreScrollAnchor(scrollAnchor);
+    // absorb any height change in the rows above the viewport. Gate on
+    // intentionalScrollRef like the deferred re-anchor above: when a focus-exit
+    // recenter / "Show" centring owns the scroll, its centerShowTarget loop is the
+    // single authority — re-pinning here would fight it frame-for-frame (the
+    // intermittent exit jitter). A later non-intentional rebuild re-anchors, and the
+    // recenter lands on the intended target anyway.
+    if (scrollAnchor && !intentionalScrollRef.current) restoreScrollAnchor(scrollAnchor);
   }, [
     data,
     derivedStates,

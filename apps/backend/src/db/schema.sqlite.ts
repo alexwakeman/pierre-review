@@ -21,7 +21,12 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
-import type { CheckRun, Label, StoredPrFile } from '@pierre-review/shared';
+import type {
+  CheckRun,
+  Label,
+  ReviewRouteReason,
+  StoredPrFile,
+} from '@pierre-review/shared';
 
 // A tenant. Local mode synthesizes exactly one row (id 1, isLocal=true) from
 // `gh api user`; cloud mode creates one per signed-in GitHub user. Replaces the
@@ -40,6 +45,11 @@ export const accounts = sqliteTable('accounts', {
     .notNull()
     .default(sql`(unixepoch())`),
   lastLoginAt: integer('last_login_at', { mode: 'timestamp' }),
+  // Last time a loaded frontend was seen talking to the backend (cloud: stamped,
+  // throttled, by the per-request account hook + an SPA heartbeat). The scheduler
+  // syncs only accounts active within config.syncActiveWindowMinutes, so a tenant
+  // with no open tab stops being re-synced. Null until first activity.
+  lastActiveAt: integer('last_active_at', { mode: 'timestamp' }),
 });
 
 export const repos = sqliteTable(
@@ -424,6 +434,13 @@ export const claudeReviews = sqliteTable(
     }).notNull(),
     // Null until the agent decides whether it explored the worktree.
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),
+    // The deterministic router's decision (skip/diff_only/worktree) + its inputs,
+    // recorded BEFORE the agent runs (or when the user forces a mode). `scope` above
+    // is the AGENT's self-report; a row with reviewMode 'diff_only' but scope
+    // 'worktree' is the agent flagging it needed a deeper review. Null on pre-routing
+    // rows. See review/routing.ts.
+    reviewMode: text('review_mode', { enum: ['skip', 'diff_only', 'worktree'] }),
+    routeReason: text('route_reason', { mode: 'json' }).$type<ReviewRouteReason>(),
     // Claude's output (read-only; never edited in place).
     summary: text('summary'),
     verdict: text('verdict', {

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   createSdkMcpServer,
   query,
@@ -8,6 +11,7 @@ import type {
   ClaudeFindingSide,
   ClaudeReviewModel,
   ClaudeReviewProgress,
+  RequestedReviewMode,
 } from '@pierre-review/shared';
 import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
@@ -19,7 +23,11 @@ import {
   fetchPrHead,
   removeWorktree,
 } from './clone-manager.js';
-import { REVIEW_SYSTEM_PROMPT, buildUserPrompt, isNoiseFile } from './prompt.js';
+import {
+  buildUserPrompt,
+  isNoiseFile,
+  systemPromptForMode,
+} from './prompt.js';
 import {
   buildAnchorIndex,
   extractHunk,
@@ -28,9 +36,11 @@ import {
   splitDiffByFile,
   stripNoiseFromDiff,
 } from './post-review.js';
+import { decideReviewMode } from './routing.js';
 import {
   markReviewCancelled,
   markReviewFailed,
+  markReviewRouted,
   markReviewRunning,
   saveReviewSuccess,
   type PersistedFinding,
@@ -48,19 +58,26 @@ export interface RunReviewArgs {
   baseRefName: string | null;
   headSha: string;
   model: ClaudeReviewModel;
+  // The user's requested depth: 'auto' lets the router decide; 'diff_only'/'worktree'
+  // force the mode, overriding the router's metrics.
+  requestedMode: RequestedReviewMode;
   abortController: AbortController;
   onProgress: (p: ClaudeReviewProgress) => void;
 }
 
-// Read-only tool surface. submit_review is the ONLY way structured output leaves
-// the agent. Write/Edit are forbidden and destructive Bash is denied.
-const ALLOWED_TOOLS = [
+// Read-only tool surface for a WORKTREE review. submit_review is the ONLY way
+// structured output leaves the agent. Write/Edit are forbidden and destructive Bash
+// is denied (DISALLOWED_TOOLS).
+const WORKTREE_TOOLS = [
   'Read',
   'Glob',
   'Grep',
   'Bash',
   'mcp__review__submit_review',
 ];
+// A DIFF-ONLY review is tool-less: the agent has the full diff in its prompt and no
+// repository to explore, so submit_review is the only tool it gets.
+const DIFF_ONLY_TOOLS = ['mcp__review__submit_review'];
 const DISALLOWED_TOOLS = [
   'Write',
   'Edit',
@@ -85,15 +102,14 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
 
   let worktreePath: string | null = null;
   let repoCloneDir: string | null = null;
+  let tempCwd: string | null = null;
   let result: SDKResultMessage | null = null;
   let restoreEnv: (() => void) | null = null;
 
   try {
-    onProgress({ phase: 'cloning' });
-    repoCloneDir = await ensureClone(args.owner, args.name);
-
+    // Fetch the diff FIRST — it's independent of any clone (`gh pr diff`), so the
+    // router can decide the mode before we do any expensive worktree setup.
     onProgress({ phase: 'fetching_diff' });
-    await fetchPrHead(repoCloneDir, args.prNumber, args.headSha);
     const rawDiff = await fetchPrDiff(args.owner, args.name, args.prNumber);
     const { diff: strippedDiff, excluded } = stripNoiseFromDiff(
       rawDiff,
@@ -101,14 +117,63 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
     );
     const changedFiles = splitDiffByFile(strippedDiff).map((s) => s.path);
 
-    worktreePath = await addWorktree(repoCloneDir, args.headSha);
+    // Route: skip / diff_only / worktree. Recorded on the run for audit BEFORE
+    // anything else runs (or, for skip, instead of running the agent at all).
+    onProgress({ phase: 'deciding' });
+    const decision = decideReviewMode({
+      diff: strippedDiff,
+      requested: args.requestedMode,
+    });
+    await markReviewRouted(reviewId, decision.mode, decision.reason);
+
+    // 'skip' — the diff is entirely noise / binary / rename-only. Synthesize a
+    // succeeded run with a one-line note and spend NO agent turns (no clone either).
+    if (decision.mode === 'skip') {
+      onProgress({ phase: 'persisting' });
+      await saveReviewSuccess(reviewId, {
+        scope: null,
+        summary: skipSummary(decision.reason.changedFiles),
+        verdict: 'COMMENT',
+        costUsd: null,
+        inputTokens: null,
+        outputTokens: null,
+        numTurns: 0,
+        excludedFiles: excluded,
+        findings: [],
+      });
+      return;
+    }
+
+    // The mode that actually runs an agent.
+    const mode = decision.mode; // 'diff_only' | 'worktree'
+
+    // Working directory + tool surface per mode. A worktree review clones + checks
+    // out the head and gets the read-only file tools; a diff-only review is
+    // TOOL-LESS with a throwaway cwd and NO clone/worktree (the dominant per-run
+    // cost), since the whole change is already inlined in its prompt.
+    let cwd: string;
+    let allowedTools: string[];
+    let maxTurns: number;
+    if (mode === 'worktree') {
+      onProgress({ phase: 'cloning', reviewMode: mode });
+      repoCloneDir = await ensureClone(args.owner, args.name);
+      await fetchPrHead(repoCloneDir, args.prNumber, args.headSha);
+      worktreePath = await addWorktree(repoCloneDir, args.headSha);
+      cwd = worktreePath;
+      allowedTools = WORKTREE_TOOLS;
+      maxTurns = config.reviewMaxTurns;
+    } else {
+      tempCwd = mkdtempSync(join(tmpdir(), 'pierre-review-'));
+      cwd = tempCwd;
+      allowedTools = DIFF_ONLY_TOOLS;
+      maxTurns = config.reviewDiffOnlyMaxTurns;
+    }
 
     // If the user supplied an Anthropic API key, override ambient Claude auth for
     // this run (restored in finally). Safe only at reviewConcurrency === 1.
     restoreEnv = applyUserAnthropicKey();
 
     // ---- run the agent ----
-    onProgress({ phase: 'deciding' });
     let captured: SubmitReviewPayload | null = null;
     const server = createSdkMcpServer({
       name: 'review',
@@ -137,15 +202,16 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
         changedFiles,
         excludedFiles: excluded,
         diff: strippedDiff,
+        mode,
       }),
       options: {
         model: args.model,
-        systemPrompt: REVIEW_SYSTEM_PROMPT,
-        cwd: worktreePath,
+        systemPrompt: systemPromptForMode(mode),
+        cwd,
         permissionMode: 'bypassPermissions',
-        allowedTools: ALLOWED_TOOLS,
+        allowedTools,
         disallowedTools: DISALLOWED_TOOLS,
-        maxTurns: config.reviewMaxTurns,
+        maxTurns,
         maxBudgetUsd: config.reviewBudgetUsd,
         // Don't inherit the host's .claude settings / CLAUDE.md / skills.
         settingSources: [],
@@ -164,6 +230,12 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
       if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
     };
 
+    // Flip to 'reviewing' the moment setup is done — BEFORE the first model token.
+    // Otherwise the prior phase ('deciding' for diff-only, 'cloning' for worktree)
+    // would linger through the agent's whole first turn (the model reading the diff),
+    // which makes the instant routing step look slow. Also carries the decided mode.
+    onProgress({ phase: 'reviewing', reviewMode: mode });
+
     for await (const message of q) {
       if (message.type === 'assistant') {
         // Derive short, human-readable lines from the assistant turn's content
@@ -174,7 +246,11 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
         } catch {
           /* never let progress derivation break the run */
         }
-        onProgress({ phase: 'reviewing', recentActivity: [...activity] });
+        onProgress({
+          phase: 'reviewing',
+          recentActivity: [...activity],
+          reviewMode: mode,
+        });
       } else if (message.type === 'result') {
         result = message;
       }
@@ -248,17 +324,36 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
     if (repoCloneDir && worktreePath) {
       await removeWorktree(repoCloneDir, worktreePath).catch(() => {});
     }
-    // LRU eviction does a full recursive dir walk; keep it off the run-teardown
-    // critical path. Defer it (fire-and-forget) so the review result returns
-    // promptly. cleanupCloneCache is itself best-effort and never throws.
-    setImmediate(() => {
+    // Diff-only runs use a throwaway cwd — remove it (best-effort).
+    if (tempCwd) {
       try {
-        cleanupCloneCache();
+        rmSync(tempCwd, { recursive: true, force: true });
       } catch {
         /* advisory cleanup — never surface */
       }
-    });
+    }
+    // Only a worktree run touched the clone cache. LRU eviction does a full
+    // recursive dir walk; keep it off the run-teardown critical path. Defer it
+    // (fire-and-forget) so the review result returns promptly. cleanupCloneCache is
+    // itself best-effort and never throws.
+    if (repoCloneDir) {
+      setImmediate(() => {
+        try {
+          cleanupCloneCache();
+        } catch {
+          /* advisory cleanup — never surface */
+        }
+      });
+    }
   }
+}
+
+// The one-line summary recorded for a 'skip' run (no agent ran). `changedFiles` is
+// the non-noise file count: 0 means the whole diff was lockfile/generated/vendored.
+function skipSummary(changedFiles: number): string {
+  return changedFiles === 0
+    ? 'Skipped — after stripping lockfile/generated/vendored files, this PR has no substantive changes to review.'
+    : 'Skipped — no reviewable line changes (the diff is binary, rename, or mode-only after stripping noise files).';
 }
 
 function errorMessage(err: unknown): string {

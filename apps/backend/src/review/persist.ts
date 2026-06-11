@@ -5,6 +5,8 @@ import type {
   ClaudeReviewModel,
   ClaudeReviewScope,
   ClaudeReviewVerdict,
+  ReviewMode,
+  ReviewRouteReason,
 } from '@pierre-review/shared';
 import { db, runTransaction, schema } from '../db/client.js';
 
@@ -25,7 +27,8 @@ export interface PersistedFinding {
 }
 
 export interface ReviewSuccess {
-  scope: ClaudeReviewScope;
+  // null only for a 'skip' run (no agent, so no self-reported scope).
+  scope: ClaudeReviewScope | null;
   summary: string;
   verdict: ClaudeReviewVerdict;
   costUsd: number | null;
@@ -65,6 +68,22 @@ export async function markReviewRunning(id: number): Promise<void> {
   await db
     .update(claudeReviews)
     .set({ status: 'running' })
+    .where(eq(claudeReviews.id, id))
+    .execute();
+}
+
+// Stamp the router's decision (resolved mode + the metrics behind it) on the run,
+// once the diff is fetched and the mode is chosen — BEFORE the agent runs (or, for
+// 'skip', instead of running it). Recorded for audit/calibration; `scope` (the
+// agent's self-report) is set later by saveReviewSuccess.
+export async function markReviewRouted(
+  id: number,
+  reviewMode: ReviewMode,
+  routeReason: ReviewRouteReason,
+): Promise<void> {
+  await db
+    .update(claudeReviews)
+    .set({ reviewMode, routeReason })
     .where(eq(claudeReviews.id, id))
     .execute();
 }

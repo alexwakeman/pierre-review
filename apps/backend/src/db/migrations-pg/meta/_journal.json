@@ -22,6 +22,20 @@
       "when": 1781039171462,
       "tag": "0002_glorious_ikaris",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781120627931,
+      "tag": "0003_melted_secret_warriors",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781129695742,
+      "tag": "0004_numerous_triton",
+      "breakpoints": true
     }
   ]
 }

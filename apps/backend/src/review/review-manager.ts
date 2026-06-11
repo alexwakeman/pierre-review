@@ -3,6 +3,7 @@ import type {
   ClaudeReviewModel,
   ClaudeReviewProgress,
   ClaudeReviewStatusResponse,
+  RequestedReviewMode,
 } from '@pierre-review/shared';
 import type { Logger } from '../sync/sync-repo.js';
 import { config } from '../config.js';
@@ -28,6 +29,7 @@ export type StartReviewResult =
 export async function startReview(
   prId: number,
   model: ClaudeReviewModel,
+  requestedMode: RequestedReviewMode,
   log: Logger,
 ): Promise<StartReviewResult> {
   if (!config.claudeReviewEnabled) return { ok: false, reason: 'disabled' };
@@ -67,7 +69,9 @@ export async function startReview(
   reviewIdByPr.set(prId, reviewId);
   const controller = new AbortController();
   controllers.set(reviewId, controller);
-  progressByReview.set(reviewId, { phase: 'cloning' });
+  // The diff is fetched (and the mode decided) before any clone now, so the first
+  // real phase is always 'fetching_diff' — not 'cloning' (which a diff-only run skips).
+  progressByReview.set(reviewId, { phase: 'fetching_diff' });
 
   void runReview({
     reviewId,
@@ -81,6 +85,7 @@ export async function startReview(
     baseRefName: ctx.baseRefName,
     headSha,
     model,
+    requestedMode,
     abortController: controller,
     onProgress: (p) => progressByReview.set(reviewId, p),
   })

@@ -55,6 +55,7 @@ import { accountIdOf } from '../plugins/auth.js';
 
 const MODELS = ['claude-opus-4-8', 'claude-sonnet-4-6'];
 const VERDICTS = ['COMMENT', 'REQUEST_CHANGES', 'APPROVE'];
+const REVIEW_MODES = ['auto', 'diff_only', 'worktree'];
 
 const idParam = {
   params: {
@@ -86,7 +87,11 @@ const generateSchema = {
     type: 'object',
     required: ['model'],
     additionalProperties: false,
-    properties: { model: { type: 'string', enum: MODELS } },
+    properties: {
+      model: { type: 'string', enum: MODELS },
+      // Review depth. Omitted defaults to 'auto' (the router decides).
+      mode: { type: 'string', enum: REVIEW_MODES },
+    },
   },
 };
 
@@ -189,7 +194,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
     { schema: generateSchema },
     async (req, reply) => {
       const { id } = req.params as { id: number };
-      const { model } = req.body as GenerateReviewBody;
+      const { model, mode } = req.body as GenerateReviewBody;
       if (!config.claudeReviewEnabled) return featureOff(reply);
 
       const auth = detectClaudeAuth();
@@ -198,7 +203,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
         return { error: 'NoClaudeAuth', message: auth.message };
       }
 
-      const result = await startReview(id, model, app.log);
+      const result = await startReview(id, model, mode ?? 'auto', app.log);
       if (!result.ok) {
         if (result.reason === 'not_found') {
           reply.status(404);

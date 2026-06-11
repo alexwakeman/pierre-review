@@ -78,14 +78,21 @@ function Section({
   label,
   children,
 }: {
-  label: string;
+  // Optional: the dropdown-panel sections (Repos / Members / Status / Events) omit
+  // it because their trigger button already shows the name — the label would be
+  // redundant. The chip sections (Range / Stale / Threads) keep it, since their
+  // chips don't repeat the category name. Without a label the wrapper still groups
+  // its children with the same spacing.
+  label?: string;
   children: React.ReactNode;
 }): JSX.Element {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[11px] uppercase tracking-wide text-gray-400">
-        {label}
-      </span>
+      {label != null && (
+        <span className="text-[11px] uppercase tracking-wide text-gray-400">
+          {label}
+        </span>
+      )}
       {children}
     </div>
   );
@@ -285,7 +292,7 @@ export function FilterBar(): JSX.Element {
           f.focusActive ? ' filters-disabled' : ''
         }`}
       >
-        <Section label="Repos">
+        <Section>
           {/* removePending is hard-false: optimistic removal drops the row instantly,
               so the list no longer freezes every remove button during a delete. */}
           <RepoSelectPanel
@@ -310,7 +317,7 @@ export function FilterBar(): JSX.Element {
           <RepoSearch />
         </Section>
 
-        <Section label="Members">
+        <Section>
           <UserSelectPanel
             sections={memberSections}
             userIds={f.userIds}
@@ -337,7 +344,7 @@ export function FilterBar(): JSX.Element {
           </button>
         </Section>
 
-        <Section label="Status">
+        <Section>
           <StatusSelectPanel
             statuses={f.prStatuses}
             onToggle={f.togglePrStatus}
@@ -355,7 +362,7 @@ export function FilterBar(): JSX.Element {
           </Chip>
         </Section>
 
-        <Section label="Events">
+        <Section>
           <EventSelectPanel
             categories={f.categories}
             onToggle={(c) => f.toggleCategory(c)}

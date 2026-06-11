@@ -602,6 +602,58 @@ export type ClaudeReviewStatus =
 
 export type ClaudeReviewScope = 'diff_only' | 'worktree';
 
+// The RESOLVED review mode a run actually used, chosen by the deterministic router
+// (or forced by the user) BEFORE the agent runs:
+//  - 'skip'       — the diff is entirely noise (generated/vendored/lockfile/binary);
+//                   nothing substantive to review, so no agent runs.
+//  - 'diff_only'  — small/localized change; reviewed from the diff alone, tool-less,
+//                   with NO cloned worktree (fast, fixed turn count).
+//  - 'worktree'   — large/cross-cutting/contract-changing; reviewed with the full
+//                   cloned worktree as explorable context (the original behaviour).
+export type ReviewMode = 'skip' | 'diff_only' | 'worktree';
+
+// What the user asked for when starting a run. 'auto' lets the router decide (and is
+// the only path that can resolve to 'skip'); 'diff_only'/'worktree' force that mode,
+// overriding the router's metrics.
+export type RequestedReviewMode = 'auto' | 'diff_only' | 'worktree';
+
+// Runtime list for the depth picker (frontend bundles shared; the backend keeps a
+// local copy and only `import type`s from here — shared isn't shipped at runtime).
+export const REQUESTED_REVIEW_MODES: RequestedReviewMode[] = [
+  'auto',
+  'diff_only',
+  'worktree',
+];
+
+// The deterministic routing decision's inputs + outcome, recorded on every run so
+// the thresholds can be calibrated (and the choice audited) after the fact. All
+// metrics are computed over the noise-stripped diff's non-noise files.
+export interface ReviewRouteReason {
+  // What the user asked for ('auto' = let the router decide).
+  requested: RequestedReviewMode;
+  // Who actually chose the resolved mode.
+  decidedBy: 'router' | 'user';
+  // Number of (non-noise) files changed.
+  changedFiles: number;
+  // Total added + deleted lines across those files.
+  linesChanged: number;
+  // Distinct directories touched.
+  dirsTouched: number;
+  // Distinct top-level path segments (subsystems) touched.
+  subsystems: number;
+  // A modified/removed exported-or-public symbol, or a changed IDL/schema/route path
+  // — the load-bearing "needs broad context" signal.
+  apiTouch: boolean;
+  // Fraction of changed lines that delete existing code (deletions / linesChanged);
+  // computed + logged for calibration, not yet a gate input.
+  modifyingFraction: number;
+  // Every changed file is a brand-new file (purely additive). Logged for calibration.
+  allFilesNew: boolean;
+  // The first gate ceiling that forced 'worktree' (e.g. 'files', 'lines', 'dirs',
+  // 'subsystems', 'apiTouch'); null when the run stayed diff_only / skip / was forced.
+  trippedBy: string | null;
+}
+
 export type ClaudeReviewVerdict = 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE';
 
 export type ClaudeFindingSeverity =
@@ -652,6 +704,12 @@ export interface ClaudeReview {
   status: ClaudeReviewStatus;
   model: ClaudeReviewModel;
   scope: ClaudeReviewScope | null;
+  // The deterministic routing decision: the mode this run actually used, and the
+  // metrics behind it. Null on pre-routing rows (older runs / not yet decided).
+  // `scope` above is the AGENT's self-report; a run with reviewMode 'diff_only' but
+  // scope 'worktree' is the agent flagging that a deeper review was warranted.
+  reviewMode: ReviewMode | null;
+  routeReason: ReviewRouteReason | null;
   // Claude's output (read-only reference).
   summary: string | null;
   verdict: ClaudeReviewVerdict | null;
@@ -678,6 +736,7 @@ export interface ClaudeReviewSummary {
   status: ClaudeReviewStatus;
   model: ClaudeReviewModel;
   scope: ClaudeReviewScope | null;
+  reviewMode: ReviewMode | null;
   verdict: ClaudeReviewVerdict | null;
   userVerdict: ClaudeReviewVerdict | null;
   costUsd: number | null;
@@ -750,6 +809,9 @@ export interface ClaudeReviewProgress {
   // agent is doing right now (tool calls, brief text snippets). Live progress
   // only — NOT persisted to the DB; rides the /status poll while running.
   recentActivity?: string[];
+  // The resolved review mode, set once the router has decided (and carried through
+  // the rest of the run), so the UI can show the depth while the review runs.
+  reviewMode?: ReviewMode;
 }
 
 export interface ClaudeReviewStatusResponse {
@@ -800,6 +862,9 @@ export interface PostCommentResult {
 
 export interface GenerateReviewBody {
   model: ClaudeReviewModel;
+  // Review depth. Omitted / 'auto' lets the deterministic router decide; an explicit
+  // 'diff_only' or 'worktree' forces that mode, overriding the router's metrics.
+  mode?: RequestedReviewMode;
 }
 
 // Saves the user's authored draft; never mutates Claude's summary/verdict.

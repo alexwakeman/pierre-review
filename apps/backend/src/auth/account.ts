@@ -143,6 +143,9 @@ export async function upsertCloudAccount(input: {
       accessTokenEnc: input.accessTokenEnc,
       isLocal: false,
       lastLoginAt: now,
+      // Seed activity at sign-in so the user's repos are eligible on the very next
+      // scheduled sync tick (don't wait for the first heartbeat).
+      lastActiveAt: now,
     })
     .onConflictDoUpdate({
       target: accounts.githubUserId,
@@ -151,11 +154,42 @@ export async function upsertCloudAccount(input: {
         avatarUrl: input.avatarUrl,
         accessTokenEnc: input.accessTokenEnc,
         lastLoginAt: now,
+        lastActiveAt: now,
       },
     })
     .returning()
     .execute();
   return rowToAccount(rows[0]!);
+}
+
+// In-memory throttle for the activity stamp below: accountId → last-stamp epoch ms.
+// A loaded SPA is chatty (timeline, polls, heartbeat), so we only touch the DB at
+// most once per window per account.
+const lastActiveStampMs = new Map<number, number>();
+const ACTIVE_STAMP_THROTTLE_MS = 60_000;
+
+/**
+ * Record that a loaded frontend for this account just talked to the backend
+ * (drives the scheduler's "only sync accounts with an open tab" gate). Throttled
+ * in-memory and fire-and-forget — a dropped stamp only means a slightly staler
+ * signal, and the next request re-stamps. Cloud-only in practice (the caller gates
+ * on isCloud; local has a single always-synced account).
+ */
+export function stampAccountActive(accountId: number): void {
+  const now = Date.now();
+  const last = lastActiveStampMs.get(accountId) ?? 0;
+  if (now - last < ACTIVE_STAMP_THROTTLE_MS) return;
+  lastActiveStampMs.set(accountId, now);
+  const { accounts } = schema;
+  void db
+    .update(accounts)
+    .set({ lastActiveAt: new Date() })
+    .where(eq(accounts.id, accountId))
+    .execute()
+    .catch(() => {
+      // Best-effort: roll back the throttle so the next request retries the stamp.
+      lastActiveStampMs.delete(accountId);
+    });
 }
 
 /** Load an account by id. */

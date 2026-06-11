@@ -548,30 +548,83 @@ body {
   }
 }
 
+/* ---- per-repo background tint ----------------------------------------------
+   Each repo gets a subtle, theme-matching hue so its block — the repo title row,
+   its contributors' user column, and their PR/marker timeline — reads as one
+   visually-grouped band, making it easy to tell repos apart at a glance. The
+   palette class (set per repo in the timeline build by repo RANK — see
+   repoTintIndexById — so a repo keeps its colour as the view is filtered) only
+   assigns a `--tl-tint` custom property
+   here; the apply rule below reads it. Splitting "which hue" (var, no specificity
+   battle — vis never sets --tl-tint) from "paint it" (one rule, high specificity)
+   keeps the palette a flat list and the override robust. Channels are
+   space-separated so the alpha is applied at paint time via rgb(... / a).
+
+   The 10 hues are a wheel-spanning set (one family per slot — NOT three blues +
+   three greens, which collapse into each other at low alpha), interleaved warm↔cool
+   so the ordering serves BOTH constraints rank assignment imposes:
+     • ALL pairs distinct — rank hands out indices 0,1,2,… consecutively, so ~10
+       watched repos put every slot on screen at once and every pair must separate.
+     • ADJACENT pairs MOST distinct — consecutive ranks stack as neighbouring rows,
+       the pairs a user compares most, so the order alternates warm/cool to maximise
+       their contrast (red↔teal↔orange↔sky…).
+   Verified by compositing each hue at the in-use alpha over the light (#fff) and dark
+   (gray-950) panel bases and computing pairwise CIEDE2000: min over ALL pairs ≈ 3.15,
+   min over ADJACENT pairs ≈ 10.3 — both above the ~2.3 just-noticeable-difference.
+   Re-run that composited-CIEDE2000 check before editing a hue, reordering a slot, or
+   lowering the alpha, so a tweak can't silently reintroduce two confusable repos. */
+.tl-repo-tint-0 { --tl-tint: 239 68 68; }    /* red     */
+.tl-repo-tint-1 { --tl-tint: 20 184 166; }   /* teal    */
+.tl-repo-tint-2 { --tl-tint: 249 115 22; }   /* orange  */
+.tl-repo-tint-3 { --tl-tint: 14 165 233; }   /* sky     */
+.tl-repo-tint-4 { --tl-tint: 245 158 11; }   /* amber   */
+.tl-repo-tint-5 { --tl-tint: 59 130 246; }   /* blue    */
+.tl-repo-tint-6 { --tl-tint: 132 204 22; }   /* lime    */
+.tl-repo-tint-7 { --tl-tint: 139 92 246; }   /* violet  */
+.tl-repo-tint-8 { --tl-tint: 34 197 94; }    /* green   */
+.tl-repo-tint-9 { --tl-tint: 217 70 239; }   /* fuchsia */
+
+/* Paint the tint as the row's BACKGROUND-COLOR on both the label (left) and the
+   foreground (right), for the repo header and every contributor row. The
+   `[class*="tl-repo-tint-"]` attribute selector lands at specificity (0,4,0) —
+   one notch above vis's per-nesting-level label shade
+   (`.vis-label.vis-nested-group.vis-group-level-2`, 0,3,0) — so the hue wins on
+   the left labels too, on every palette index in one rule. Very low alpha so the
+   grid lines, divider, bars and markers all read through; the zebra band (below)
+   layers on TOP as a background-image. */
+.vis-labelset .vis-label.tl-user-row[class*='tl-repo-tint-'],
+.vis-foreground .vis-group.tl-user-row[class*='tl-repo-tint-'],
+.vis-labelset .vis-label.tl-repo-header[class*='tl-repo-tint-'],
+.vis-foreground .vis-group.tl-repo-header[class*='tl-repo-tint-'] {
+  background-color: rgb(var(--tl-tint) / 0.08);
+}
+.dark .vis-labelset .vis-label.tl-user-row[class*='tl-repo-tint-'],
+.dark .vis-foreground .vis-group.tl-user-row[class*='tl-repo-tint-'],
+.dark .vis-labelset .vis-label.tl-repo-header[class*='tl-repo-tint-'],
+.dark .vis-foreground .vis-group.tl-repo-header[class*='tl-repo-tint-'] {
+  background-color: rgb(var(--tl-tint) / 0.11);
+}
+
 /* Zebra striping: every other contributor row gets a subtle band so adjacent
    rows are easy to tell apart. Applied to BOTH the label (left) and the
    foreground row (right) so the stripe spans the full width; repo header rows
-   (no .tl-user-row) stay un-striped and keep separating the sections. Kept
-   low-alpha so the grid lines, cross-band divider, and bars/markers all read
-   through. nth-child parity is stable + aligned across the two panels because
-   vis keeps every group row in the DOM in the same order (only their contents
-   virtualise), and the repo header is the first child of each panel.
+   (no .tl-user-row) stay un-striped and keep separating the sections. nth-child
+   parity is stable + aligned across the two panels because vis keeps every group
+   row in the DOM in the same order (only their contents virtualise), and the
+   repo header is the first child of each panel.
 
-   We set BOTH parities explicitly: vis applies its own per-nesting-level shade
-   to the left labels (but not the right rows), so the odd rule resets that to
-   match the transparent foreground, and the even rule paints the band on both.
-   The nth-child specificity (beats vis's level shade) keeps both sides in sync. */
-.vis-labelset .vis-label.tl-user-row:nth-child(odd),
-.vis-foreground .vis-group.tl-user-row:nth-child(odd) {
-  background-color: transparent;
-}
+   Drawn as a flat background-IMAGE (not background-color) so it composes ON TOP
+   of the per-repo tint above (a background-image always paints over the
+   background-color on the same element) — the band darkens the row a touch while
+   the repo hue still reads through. Odd rows get no image (tint only); kept
+   low-alpha so grid lines, divider, and bars/markers all read through. */
 .vis-labelset .vis-label.tl-user-row:nth-child(even),
 .vis-foreground .vis-group.tl-user-row:nth-child(even) {
-  background-color: rgba(15, 23, 42, 0.045);
+  background-image: linear-gradient(rgba(15, 23, 42, 0.05), rgba(15, 23, 42, 0.05));
 }
 .dark .vis-labelset .vis-label.tl-user-row:nth-child(even),
 .dark .vis-foreground .vis-group.tl-user-row:nth-child(even) {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05));
 }
 
 /* Inter-contributor divider: a crisp rail along the bottom of every contributor

@@ -328,29 +328,67 @@ export function MarkerPopover({
       flip({ fallbackPlacements: ['left-start', 'bottom'] }),
       shift({ padding: 8 }),
     ],
-    whileElementsMounted: autoUpdate,
+    // animationFrame polling: the anchored marker MOVES during a focus-entry
+    // transition (row collapse + window recenter + centerShowTarget scroll) and on
+    // any in-focus vis scroll/zoom. Plain autoUpdate only watches scroll/resize of
+    // the reference's ancestors, but the popover is portaled to <body>, so vis's
+    // internal .vis-vertical-scroll isn't an ancestor of it — only per-frame polling
+    // keeps the popover beside the marker through the whole transition.
+    whileElementsMounted: (ref, float, update) =>
+      autoUpdate(ref, float, update, { animationFrame: true }),
   });
   // Outside-press is disabled: clicking the timeline must NOT close the modal
   // (the user explores while it stays open). Escape + the header X still close it.
   const dismiss = useDismiss(context, { outsidePress: false });
   const { getFloatingProps } = useInteractions([dismiss]);
 
-  // Anchor to the click coordinates via a virtual reference element.
+  // The event whose marker the popover anchors to: the clicked marker, or a
+  // cluster's first member. Used to locate the live marker DOM element by its
+  // `ev-key-<id>` class so the popover tracks the marker, not the stale click point.
+  const anchorEventId = state.eventIds[0] ?? null;
+  // Last rect we resolved from the live marker — used while the marker is briefly
+  // absent (mid-rebuild) or scrolled off-screen, so the popover holds its spot
+  // instead of snapping back to the click point. Cleared when the anchor changes.
+  const lastRectRef = useRef<DOMRect | null>(null);
   useEffect(() => {
+    lastRectRef.current = null;
+  }, [anchorEventId]);
+
+  // Anchor to the LIVE marker element (resolved by event id), falling back to the
+  // last-resolved rect and finally the click point. floating-ui re-invokes this every
+  // animation frame (autoUpdate animationFrame above), so re-querying the DOM here is
+  // what makes the popover ride the marker into its focus-view position.
+  useEffect(() => {
+    const clickPoint = (): DOMRect =>
+      ({
+        x: state.x,
+        y: state.y,
+        top: state.y,
+        left: state.x,
+        right: state.x,
+        bottom: state.y,
+        width: 0,
+        height: 0,
+      }) as DOMRect;
     refs.setReference({
-      getBoundingClientRect: () =>
-        ({
-          x: state.x,
-          y: state.y,
-          top: state.y,
-          left: state.x,
-          right: state.x,
-          bottom: state.y,
-          width: 0,
-          height: 0,
-        }) as DOMRect,
+      getBoundingClientRect: () => {
+        if (anchorEventId != null) {
+          const item = document.querySelector(`.ev-key-${anchorEventId}`);
+          // The .vis-item box is pinned at the timestamp and overhangs to the right;
+          // the inner glyph is translateX(-50%)-centred, so ITS rect is the marker's
+          // true on-screen position.
+          const glyph =
+            item?.querySelector('.ev-marker-inner, .ev-cluster-inner') ?? item;
+          if (glyph) {
+            const r = glyph.getBoundingClientRect();
+            lastRectRef.current = r;
+            return r;
+          }
+        }
+        return lastRectRef.current ?? clickPoint();
+      },
     });
-  }, [refs, state.x, state.y]);
+  }, [refs, anchorEventId, state.x, state.y]);
 
   const events = state.eventIds
     .map((id) => eventsById.get(id))

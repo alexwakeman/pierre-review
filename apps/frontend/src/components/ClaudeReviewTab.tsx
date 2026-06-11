@@ -9,6 +9,8 @@ import type {
   PostReviewPreview,
   PostReviewResult,
   PrDetail,
+  RequestedReviewMode,
+  ReviewMode,
   User,
 } from '@pierre-review/shared';
 import { CLAUDE_REVIEW_MODELS } from '@pierre-review/shared';
@@ -48,6 +50,37 @@ function Row({
 }
 
 const shortSha = (sha: string | null): string => (sha ? sha.slice(0, 7) : '—');
+
+// The resolved review mode (what actually ran), and the user-facing depth options.
+const REVIEW_MODE_LABEL: Record<ReviewMode, string> = {
+  skip: 'Skipped',
+  diff_only: 'Quick',
+  worktree: 'Deep',
+};
+
+const REQUESTED_MODE_OPTIONS: { value: RequestedReviewMode; label: string }[] = [
+  { value: 'auto', label: 'Auto (router decides)' },
+  { value: 'diff_only', label: 'Quick — diff only' },
+  { value: 'worktree', label: 'Deep — full worktree' },
+];
+
+const plural = (n: number, unit: string): string =>
+  `${n} ${unit}${n === 1 ? '' : 's'}`;
+
+// A short, human-readable explanation of why a run got the mode it did — shown as a
+// tooltip on the mode badge.
+function routeReasonText(review: ClaudeReview): string | undefined {
+  const rr = review.routeReason;
+  if (!rr) return undefined;
+  const size = `${plural(rr.changedFiles, 'file')} · ${plural(rr.linesChanged, 'line')} · ${plural(rr.dirsTouched, 'dir')}`;
+  if (rr.decidedBy === 'user') {
+    return `You chose ${REVIEW_MODE_LABEL[review.reviewMode ?? 'worktree']} for this run (${size}).`;
+  }
+  if (rr.trippedBy) {
+    return `Auto chose Deep — ${size}; over the ${rr.trippedBy} limit.`;
+  }
+  return `Auto chose ${REVIEW_MODE_LABEL[review.reviewMode ?? 'diff_only']} — ${size}.`;
+}
 
 const VERDICT_LABEL: Record<ClaudeReviewVerdict, string> = {
   COMMENT: 'Comment',
@@ -663,12 +696,25 @@ function ClaudesReview({
 
   return (
     <div className="space-y-2 px-4 py-3">
-      <div className="flex items-center gap-2 text-sm font-semibold">
+      <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
         Claude&apos;s review
         {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
-        {review.scope != null && (
-          <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-500">
-            {review.scope}
+        {review.reviewMode != null && (
+          <span
+            className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs font-normal text-gray-500"
+            title={routeReasonText(review)}
+          >
+            {REVIEW_MODE_LABEL[review.reviewMode]} review
+          </span>
+        )}
+        {/* Self-escalation: a diff-only run where Claude judged a deeper review was
+            warranted (scopeUsed = worktree). Prompt the user to re-review as Deep. */}
+        {review.reviewMode === 'diff_only' && review.scope === 'worktree' && (
+          <span
+            className="rounded bg-amber-500/10 px-1.5 py-0.5 text-xs font-normal text-amber-700 dark:text-amber-400"
+            title="Reviewed from the diff only, but Claude flagged that this change warrants a deeper, cross-file review. Re-review with depth set to Deep."
+          >
+            ⚠ suggests a deeper review
           </span>
         )}
       </div>
@@ -840,6 +886,11 @@ export function ClaudeReviewTab({
     review?.model ?? 'claude-sonnet-4-6',
   );
 
+  // Review depth. 'auto' lets the deterministic router decide from the diff; the
+  // user can override to force a Quick (diff-only) or Deep (worktree) review.
+  const [reviewModeChoice, setReviewModeChoice] =
+    useState<RequestedReviewMode>('auto');
+
   // Same-SHA re-run confirmation (warn-but-allow).
   const [confirmRerun, setConfirmRerun] = useState(false);
 
@@ -948,7 +999,7 @@ export function ClaudeReviewTab({
     setConfirmRerun(false);
     setPreview(null);
     setPostResult(null);
-    generate.mutate(model);
+    generate.mutate({ model, mode: reviewModeChoice });
   };
 
   const onRunClick = (): void => {
@@ -1025,6 +1076,24 @@ export function ClaudeReviewTab({
                 </option>
               ))}
             </select>
+            <label className="text-xs uppercase tracking-wide text-gray-400">
+              Depth
+            </label>
+            <select
+              value={reviewModeChoice}
+              onChange={(e) =>
+                setReviewModeChoice(e.target.value as RequestedReviewMode)
+              }
+              disabled={isRunning || generate.isPending}
+              title="How deep to review: Auto decides from the diff; Quick reviews the diff only (fast, no repository access); Deep clones the repo and explores callers/dependents."
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
+            >
+              {REQUESTED_MODE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={onRunClick}
@@ -1039,6 +1108,17 @@ export function ClaudeReviewTab({
             >
               {shortSha(pr.headSha)}
             </span>
+          </div>
+
+          {/* Depth hint — the PR's size + what the chosen depth will do. */}
+          <div className="mt-1 text-xs text-gray-400">
+            {plural(pr.changedFilesCount, 'file')} ·{' '}
+            {plural(pr.additions + pr.deletions, 'line')} changed.{' '}
+            {reviewModeChoice === 'auto'
+              ? 'Auto picks Quick (diff-only) for small, localized changes and Deep (worktree) for large or contract-changing ones.'
+              : reviewModeChoice === 'diff_only'
+                ? 'Quick: reviewed from the diff alone — fast, no repository exploration.'
+                : 'Deep: clones the repo and explores callers/dependents — slower, thorough.'}
           </div>
 
           {/* Same-SHA warn-but-allow confirmation. */}
@@ -1074,8 +1154,10 @@ export function ClaudeReviewTab({
             </div>
           )}
         </div>
-        {/* Compact key management when auth is already satisfied. */}
-        {data != null && (
+        {/* Compact key management — only when the user has their OWN stored key to
+            manage. If ambient auth (an env ANTHROPIC_API_KEY / OAuth token / logged-in
+            session) already satisfies Claude, there's nothing to add, so we hide it. */}
+        {data != null && data.hasUserKey && (
           <ApiKeyPanel
             prId={pr.id}
             hasUserKey={data.hasUserKey}
@@ -1088,9 +1170,17 @@ export function ClaudeReviewTab({
       {/* Running progress. */}
       {isRunning && (
         <div className="px-4 py-3">
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500" />
             <span>{phaseLabel}…</span>
+            {status?.progress?.reviewMode != null && (
+              <span
+                className="rounded bg-blue-500/10 px-1.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400"
+                title="The review depth chosen for this run"
+              >
+                {REVIEW_MODE_LABEL[status.progress.reviewMode]} review
+              </span>
+            )}
             {status?.progress?.message != null && (
               <span className="text-xs text-gray-400">
                 {status.progress.message}
@@ -1167,7 +1257,7 @@ export function ClaudeReviewTab({
       )}
 
       {/* Section B — the authored review that gets posted (latest run only). */}
-      {canEdit && review != null && review.status === 'succeeded' && (
+      {canEdit && review != null && review.status === 'succeeded' && review.reviewMode !== 'skip' && (
         <div className="space-y-2 px-4 py-3">
           <div className="text-sm font-semibold">
             Overall review · the PR-level summary comment
@@ -1228,7 +1318,7 @@ export function ClaudeReviewTab({
       )}
 
       {/* Post actions — latest succeeded run only. */}
-      {canEdit && review != null && review.status === 'succeeded' && (
+      {canEdit && review != null && review.status === 'succeeded' && review.reviewMode !== 'skip' && (
         <div className="space-y-2 px-4 py-3">
           <div className="text-sm font-semibold">Post to GitHub</div>
           {review.postedAt != null && (

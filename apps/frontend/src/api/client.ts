@@ -4,6 +4,7 @@ import type {
   ClaudeReview,
   ClaudeReviewListResponse,
   ClaudeReviewModel,
+  RequestedReviewMode,
   ClaudeReviewResponse,
   ClaudeReviewStatusResponse,
   ClaudeReviewVerdict,
@@ -145,8 +146,12 @@ export const api = {
     ),
   claudeReviewById: (reviewId: number) =>
     get<ClaudeReview>(`/api/claude-reviews/${reviewId}`),
-  generateClaudeReview: (prId: number, model: ClaudeReviewModel) =>
-    fetch(`/api/prs/${prId}/claude-review`, jsonBody('POST', { model })).then(
+  generateClaudeReview: (
+    prId: number,
+    model: ClaudeReviewModel,
+    mode: RequestedReviewMode,
+  ) =>
+    fetch(`/api/prs/${prId}/claude-review`, jsonBody('POST', { model, mode })).then(
       (r) => handle<{ reviewId: number; status: string }>(r),
     ),
   claudeReviewStatus: (prId: number) =>

@@ -91,6 +91,25 @@ export default function App(): JSX.Element {
     setPaneH(paneRef.current.offsetHeight); // commit + persist
   };
 
+  // Cloud only: keep this tenant "active" so the backend scheduler keeps syncing
+  // their repos while a tab is open (the server stamps accounts.lastActiveAt on this
+  // request; the cron only syncs accounts active within syncActiveWindowMinutes). The
+  // user chose "any open tab", so this fires on a plain interval rather than gating on
+  // visibility — a backgrounded tab's timer is throttled to ≥1/min by the browser,
+  // still well inside the ~15-min window. This covers an idle-but-open tab whose React
+  // Query polling has paused; normal traffic already stamps. No-op in local mode.
+  useEffect(() => {
+    if (!isCloud) return;
+    const ping = (): void => {
+      // Raw fetch (not React Query) so it always hits the network and re-stamps.
+      void api.me().catch(() => {
+        /* transient / offline / expired session — the next tick retries */
+      });
+    };
+    const id = window.setInterval(ping, 3 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [isCloud]);
+
   // Signed-out cloud visitor → show the sign-in gate; never mount the timeline.
   if (me.error instanceof ApiError && me.error.status === 401) {
     return <SignInGate />;

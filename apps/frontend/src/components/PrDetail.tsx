@@ -491,14 +491,6 @@ export function PrDetail({
               </button>
             ) : null;
           })()}
-          <a
-            href={pr.githubUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className={`${newSummary(pr.newSinceLastViewed) ? '' : 'ml-auto'} shrink-0 text-xs text-blue-500 hover:underline`}
-          >
-            open on GitHub ↗
-          </a>
         </div>
         <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
           <button
