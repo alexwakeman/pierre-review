@@ -1,20 +1,15 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  DERIVED_STATES,
-  type DerivedState,
-  type Repo,
-  type User,
-} from '@pierre-review/shared';
+import { type Repo, type User } from '@pierre-review/shared';
 import { api, ApiError } from '../api/client.js';
 import { useMergers, useRepos, useSearchTimeline, useUsers } from '../hooks/useTimeline.js';
 import { useSearchOpenPrs } from '../hooks/useTriage.js';
 import { useFilters, type RangePreset } from '../store/filters.js';
-import { DERIVED_STATE_META } from '../lib/ui.js';
 import { EventSelectPanel } from './EventSelectPanel.js';
 import { RepoSearch } from './RepoSearch.js';
 import { RepoSelectPanel } from './RepoSelectPanel.js';
 import { StatusSelectPanel } from './StatusSelectPanel.js';
+import { ThreadStateSelectPanel } from './ThreadStateSelectPanel.js';
 import { UserSelectPanel, type MemberSection } from './UserSelectPanel.js';
 
 const PRESETS: Exclude<RangePreset, 'custom'>[] = ['7d', '14d', '30d', '90d'];
@@ -78,11 +73,11 @@ function Section({
   label,
   children,
 }: {
-  // Optional: the dropdown-panel sections (Repos / Members / Status / Events) omit
-  // it because their trigger button already shows the name — the label would be
-  // redundant. The chip sections (Range / Stale / Threads) keep it, since their
-  // chips don't repeat the category name. Without a label the wrapper still groups
-  // its children with the same spacing.
+  // Optional: the dropdown-panel sections (Repos / Members / Status / Events /
+  // Threads) omit it because their trigger button already shows the name — the
+  // label would be redundant. The chip sections (Range / Stale) keep it, since
+  // their chips don't repeat the category name. Without a label the wrapper still
+  // groups its children with the same spacing.
   label?: string;
   children: React.ReactNode;
 }): JSX.Element {
@@ -352,16 +347,6 @@ export function FilterBar(): JSX.Element {
           />
         </Section>
 
-        <Section label="Stale">
-          <Chip
-            active={f.excludeStale}
-            onClick={() => f.setExcludeStale(!f.excludeStale)}
-            title="Hide open PRs with no commits, comments or reviews within the selected time range"
-          >
-            Hide
-          </Chip>
-        </Section>
-
         <Section>
           <EventSelectPanel
             categories={f.categories}
@@ -370,18 +355,22 @@ export function FilterBar(): JSX.Element {
           />
         </Section>
 
-        <Section label="Threads">
-          {DERIVED_STATES.map((s: DerivedState) => (
-            <Chip
-              key={s}
-              active={f.derivedStates.includes(s)}
-              color={DERIVED_STATE_META[s].color}
-              onClick={() => f.toggleDerivedState(s)}
-              title={DERIVED_STATE_META[s].description}
-            >
-              {DERIVED_STATE_META[s].label}
-            </Chip>
-          ))}
+        <Section>
+          <ThreadStateSelectPanel
+            derivedStates={f.derivedStates}
+            onToggle={(s) => f.toggleDerivedState(s)}
+            onClear={() => f.setDerivedStates([])}
+          />
+        </Section>
+
+        <Section label="Stale">
+          <Chip
+            active={f.excludeStale}
+            onClick={() => f.setExcludeStale(!f.excludeStale)}
+            title="Hide open PRs with no commits, comments or reviews within the selected time range"
+          >
+            Hide
+          </Chip>
         </Section>
       </div>
 

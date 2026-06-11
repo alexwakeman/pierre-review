@@ -8,7 +8,7 @@ import {
   type TimelineOptions,
 } from 'vis-timeline/standalone';
 import 'vis-timeline/styles/vis-timeline-graph2d.css';
-import type { TimelineEvent, TimelinePr, TimelineResponse, User } from '@pierre-review/shared';
+import type { Repo, TimelineEvent, TimelinePr, TimelineResponse, User } from '@pierre-review/shared';
 import {
   useMergers,
   useSearchTimeline,
@@ -69,10 +69,12 @@ const VIS_OPTIONS: TimelineOptions = {
 const MIN_BAR_PX = 12;
 
 // Number of alternating per-repo background tints (see `.tl-repo-tint-N` in
-// index.css). Repos are tinted in a two-colour ZEBRA — consecutive repos (by rank,
-// see repoTintIndexById) alternate between two muted hues (blue / purple) so each
-// repo's block is set off from its neighbours without a loud rainbow. Two is the
-// whole scheme; bumping this would need matching `.tl-repo-tint-N` rules.
+// index.css). Repos are tinted in a two-colour ZEBRA — adjacent repos alternate
+// between two muted hues (blue / purple) so each repo's block is set off from its
+// neighbours without a loud rainbow. The tint is keyed off each repo's index in the
+// RENDERED order (not a global id-rank), so the two hues always alternate row-to-row
+// no matter which repos are currently shown. Two is the whole scheme; bumping this
+// would need matching `.tl-repo-tint-N` rules.
 const REPO_TINT_COUNT = 2;
 
 function unique<T>(arr: T[]): T[] {
@@ -237,6 +239,18 @@ export function Timeline(): JSX.Element {
   // event bands) and focusSubgroups (the kept lane band) can read the same lane
   // assignment the bar build used, without re-binding on every data change.
   const prLanesRef = useRef(new Map<number, number>());
+  // The active "Threads" (derived thread-state) filter, mirrored into a ref so the
+  // standalone rebuildMarkers (zoom reclusters call it directly) can drop the
+  // markers of PRs the filter hides — keeping the event markers consistent with the
+  // PR bars. Without this a Threads filter hid the bars (line 2065) but left every
+  // event marker on the board, so picking e.g. "Replied" showed an unrelated jumble
+  // of markers (incl. PR-comment markers, which aren't threads at all) with no bars.
+  // `active` = the filter is on; `ids` = the PR ids that pass it (≥1 thread in a
+  // selected state). Member-agnostic — events are already member-filtered server-side.
+  const derivedPassRef = useRef<{ active: boolean; ids: Set<number> }>({
+    active: false,
+    ids: new Set<number>(),
+  });
   // The PR bar currently glowing as the "linked" partner of an open marker
   // modal, so we can clear it when the modal closes or moves to another PR.
   const highlightedPrRef = useRef<number | null>(null);
@@ -382,23 +396,11 @@ export function Timeline(): JSX.Element {
   const customTo = useFilters((s) => s.customTo);
   const rangeResetSignal = useFilters((s) => s.rangeResetSignal);
 
+  // repoId → its full metadata (owner / name / fullName). Backs both the repo row
+  // label and the owner-grouped ordering of the rendered repos (see the rebuild).
   const reposById = useMemo(() => {
-    const m = new Map<number, string>();
-    for (const r of repos ?? []) m.set(r.id, r.fullName);
-    return m;
-  }, [repos]);
-  // repoId → background-tint index (0 or 1 — the two-colour repo zebra). Assigned
-  // by the repo's RANK PARITY among all watched repos (sorted by id), not `id % 2`,
-  // so consecutive repos always alternate (id-mod would put two odd/even-id repos
-  // that happen to sit adjacent on the same tint). Keyed off the full `repos` list,
-  // which is unchanged by view-filtering, so a repo's tint is stable as you toggle
-  // repos in/out of the timeline — it only flips when a repo is added/removed above
-  // it in the rank order. See `.tl-repo-tint-N` (CSS).
-  const repoTintIndexById = useMemo(() => {
-    const m = new Map<number, number>();
-    [...(repos ?? [])]
-      .sort((a, b) => a.id - b.id)
-      .forEach((r, i) => m.set(r.id, i % REPO_TINT_COUNT));
+    const m = new Map<number, Repo>();
+    for (const r of repos ?? []) m.set(r.id, r);
     return m;
   }, [repos]);
   // repoId → set of userIds with merge rights there (have merged a PR). Drives
@@ -708,10 +710,32 @@ export function Timeline(): JSX.Element {
     // shared `cross` band can't be trimmed per-PR via subgroups, so we filter here
     // so a contributor row shows only their activity on the focused PR. The full
     // set is restored when the focus tears down (applyContext(null) → rebuild).
-    const events =
-      prFocusActiveRef.current && prFocusPrIdRef.current != null
-        ? cur.events.filter((e) => e.prId === prFocusPrIdRef.current)
-        : cur.events;
+    let events: TimelineEvent[];
+    if (prFocusActiveRef.current && prFocusPrIdRef.current != null) {
+      events = cur.events.filter((e) => e.prId === prFocusPrIdRef.current);
+    } else if (derivedPassRef.current.active) {
+      // A "Threads" filter is on. Restrict markers to review-thread comments only:
+      // `review_comment` is the ONLY event type that maps to a review thread, so
+      // every other type (PR reviews, PR comments, commits, lifecycle) doesn't fit a
+      // thread-state filter and just read as a confusing jumble of unrelated markers.
+      // Also keep only those on PRs that pass the filter — their bars are the only
+      // ones rendered (the rebuild's `prs` filter), so markers stay consistent with
+      // bars; the selected PR is always kept so event→PR navigation has a target.
+      // We deliberately don't enrich the lean timeline payload with per-thread state
+      // (would mean a GraphQL change), so we can't tell WHICH thread state a given
+      // review_comment marker belongs to — within a passing PR all its review_comment
+      // markers show, which is fine: the bar already signals the PR matched.
+      const { ids } = derivedPassRef.current;
+      const sel = selectedPrIdRef.current;
+      events = cur.events.filter(
+        (e) =>
+          e.type === 'review_comment' &&
+          e.prId != null &&
+          (ids.has(e.prId) || e.prId === sel),
+      );
+    } else {
+      events = cur.events;
+    }
     const { items, clusterMembers } = buildMarkerItems(
       events,
       groupOf,
@@ -2062,16 +2086,32 @@ export function Timeline(): JSX.Element {
     const authoredByMember = (pr: TimelinePr): boolean =>
       !memberFilter || (pr.authorId != null && memberFilter.has(pr.authorId));
 
+    // Does this PR pass the active "Threads" (derived thread-state) filter? A PR
+    // passes when it has at least one review thread in a selected state. Empty
+    // selection = no filtering (every PR passes). The derived states are thread-
+    // level, so this is genuinely a "PRs that have a thread in state X" filter.
+    const passesDerived = (pr: TimelinePr): boolean =>
+      derivedStates.length === 0 ||
+      derivedStates.some((s) => pr.threadCounts[s] > 0);
+
     const prs: TimelinePr[] = basePrs.filter(
       (pr) =>
         // Always render the selected PR's bar so event→PR navigation (and the
         // global PR-title search) has a target even when the member or
         // derived-state filter would otherwise hide it.
         pr.id === selectedPrIdRef.current ||
-        (authoredByMember(pr) &&
-          (derivedStates.length === 0 ||
-            derivedStates.some((s) => pr.threadCounts[s] > 0))),
+        (authoredByMember(pr) && passesDerived(pr)),
     );
+
+    // Mirror the thread-state filter into a ref so rebuildMarkers (which also runs
+    // standalone on a zoom recluster) drops the markers of PRs the filter hides,
+    // keeping the event markers consistent with the bars above. Member-agnostic:
+    // the server already member-filtered the events, and a PR a selected member
+    // merely acted on (bar dropped by the member filter) still shows its markers.
+    derivedPassRef.current = {
+      active: derivedStates.length > 0,
+      ids: new Set(basePrs.filter(passesDerived).map((pr) => pr.id)),
+    };
 
     const evMap = new Map<number, TimelineEvent>();
     for (const ev of data.events) evMap.set(ev.id, ev);
@@ -2117,18 +2157,33 @@ export function Timeline(): JSX.Element {
     // (all events + all PRs), so they don't shift with the thread-state filter.
     const userStats = computeUserStats(data.events, basePrs);
 
+    // Render the repos GROUPED BY OWNER so a multi-repo board keeps each org's repos
+    // adjacent instead of scattering them in activity-appearance order. Sort by owner,
+    // then repo name, then id (stable, deterministic); repos with no loaded metadata
+    // sort last. `ridx` below (this array's index) then drives BOTH the vis group
+    // `order` AND the zebra tint, so adjacent repos always alternate hues.
     const repoIds = unique([
       ...prs.map((p) => p.repoId),
       ...data.events.map((e) => e.repoId),
-    ]);
+    ]).sort((a, b) => {
+      const ra = reposById.get(a);
+      const rb = reposById.get(b);
+      if (!ra || !rb) return (ra ? 0 : 1) - (rb ? 0 : 1) || a - b;
+      return (
+        ra.owner.localeCompare(rb.owner) ||
+        ra.name.localeCompare(rb.name) ||
+        a - b
+      );
+    });
 
     const groups: DataGroup[] = [];
     // vis sorts groups (and nested groups within each parent) by the `order`
     // field — default groupOrder='order' — re-evaluated on every redraw, so it
-    // survives the in-place DataSet diffing below. We set it explicitly:
-    // repos keep their data order; within a repo, maintainers (those with merge
-    // rights — see mergersByRepo) float to the top, everyone else keeps their
-    // existing relative order beneath them.
+    // survives the in-place DataSet diffing below. We set it explicitly: repos
+    // follow the owner-grouped `repoIds` order computed above (so an org's repos
+    // stay adjacent); within a repo, maintainers (those with merge rights — see
+    // mergersByRepo) float to the top, everyone else keeps their existing relative
+    // order beneath them.
     const MAINTAINER_RANK = 0;
     const CONTRIBUTOR_RANK = 1_000_000; // > any per-repo member count
     repoIds.forEach((rid, ridx) => {
@@ -2150,12 +2205,10 @@ export function Timeline(): JSX.Element {
       // its contributor rows so the whole repo block (title + user column + its
       // timeline) reads as one tinted band. Carried on the className; the CSS
       // palette class sets a `--tl-tint` var the tint rule reads (see index.css).
-      const tintClass = `tl-repo-tint-${
-        repoTintIndexById.get(rid) ?? rid % REPO_TINT_COUNT
-      }`;
+      const tintClass = `tl-repo-tint-${ridx % REPO_TINT_COUNT}`;
       groups.push({
         id: `repo:${rid}`,
-        content: reposById.get(rid) ?? `repo ${rid}`,
+        content: reposById.get(rid)?.fullName ?? `repo ${rid}`,
         nestedGroups: nested.length ? nested : undefined,
         treeLevel: 1,
         order: ridx,
@@ -2350,7 +2403,6 @@ export function Timeline(): JSX.Element {
     derivedStates,
     userIds,
     reposById,
-    repoTintIndexById,
     usersById,
     mergersByRepo,
     forceShowNonce,

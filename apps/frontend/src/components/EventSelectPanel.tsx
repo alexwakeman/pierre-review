@@ -3,8 +3,11 @@ import type { EventCategory } from '@pierre-review/shared';
 import { ALL_CATEGORIES, DEFAULT_CATEGORIES } from '../store/filters.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 
+// Labels for every category. `lifecycle` is kept here (the Record requires all
+// keys) but isn't currently offered as a toggle — see ALL_CATEGORIES — so it never
+// renders; the label is ready for if/when the toggle is reinstated.
 const CATEGORY_LABELS: Record<EventCategory, string> = {
-  lifecycle: 'Lifecycle',
+  lifecycle: 'PR state events',
   reviews: 'Reviews',
   review_comments: 'Review comments',
   pr_comments: 'PR comments',

@@ -12,8 +12,12 @@ export type RangePreset = '7d' | '14d' | '30d' | '90d' | 'custom';
 
 export type StripFilter = 'all' | 'my_turn' | 'needs_attention';
 
+// The user-facing event-type toggles. 'lifecycle' (PR opened/merged/closed/…) is
+// deliberately NOT here: its events draw no markers (they're implicit in each PR
+// bar's start/end), so the toggle looked like a no-op and was removed. Its events
+// still flow — categoriesToTypes always includes them (they keep contributor rows
+// and back the activity-feed jumps). Re-add 'lifecycle' here to bring the toggle back.
 export const ALL_CATEGORIES: EventCategory[] = [
-  'lifecycle',
   'reviews',
   'review_comments',
   'pr_comments',
@@ -168,6 +172,7 @@ export interface FilterState {
   togglePrStatus: (s: PrStatus) => void;
   setPrStatuses: (s: PrStatus[]) => void;
   toggleDerivedState: (s: DerivedState) => void;
+  setDerivedStates: (s: DerivedState[]) => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
   clearSelection: () => void;
@@ -372,6 +377,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   setPrStatuses: (s) => set({ prStatuses: s }),
   toggleDerivedState: (st) =>
     set((s) => ({ derivedStates: toggle(s.derivedStates, st) })),
+  setDerivedStates: (st) => set({ derivedStates: st }),
   selectPr: (id) =>
     set({ selectedPrId: id, selectedThreadId: null, selectedCommentId: null }),
   selectThread: (prId, threadId) =>
@@ -498,6 +504,11 @@ export function resolveRange(s: FilterState): { from: Date; to: Date } {
 /** Map the selected coarse categories to concrete event types. */
 export function categoriesToTypes(categories: EventCategory[]): EventType[] {
   const set = new Set(categories);
+  // 'lifecycle' has no UI toggle (its events draw no markers — see ALL_CATEGORIES),
+  // but its events are still useful (they keep contributor rows for people who only
+  // ever merged/closed a PR, and back the activity-feed "Show on timeline" jumps),
+  // so always include them when a `types` filter is sent.
+  set.add('lifecycle');
   return (Object.keys(EVENT_CATEGORY_BY_TYPE) as EventType[]).filter((t) =>
     set.has(EVENT_CATEGORY_BY_TYPE[t]),
   );
