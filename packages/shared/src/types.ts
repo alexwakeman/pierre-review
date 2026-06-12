@@ -29,6 +29,16 @@ export type ReviewState =
   | 'dismissed'
   | 'pending';
 
+// The review verdicts filterable in the timeline's Events panel — the ones that emit
+// a `review_submitted` marker. 'pending' never submits an event, so it's excluded.
+// Order is the UI display order.
+export const REVIEW_FILTER_STATES: ReviewState[] = [
+  'approved',
+  'changes_requested',
+  'commented',
+  'dismissed',
+];
+
 export type EventType =
   | 'pr_opened'
   | 'pr_merged'
@@ -572,6 +582,11 @@ export interface TimelineQuery {
   // comma-separated PrStatus. Absent = no status filter (all). Present (even
   // empty) = explicit set; an empty value shows nothing.
   statuses?: string;
+  // comma-separated ReviewState (approved/changes_requested/commented/dismissed) —
+  // filters review_submitted events by verdict. Absent = no filter (all verdicts);
+  // present (even empty) = explicit set, an empty value showing no review markers.
+  // Only affects review_submitted events; other event types are untouched.
+  reviewStates?: string;
   excludeBots?: string; // "true" | "false"
   // "true" → drop "stale" open PRs: open PRs with no commit / comment / review
   // event inside [from, to]. They (and their events) are removed so the row can

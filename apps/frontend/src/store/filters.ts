@@ -2,23 +2,29 @@ import { create } from 'zustand';
 import {
   EVENT_CATEGORY_BY_TYPE,
   PR_STATUSES,
+  REVIEW_FILTER_STATES,
   type DerivedState,
   type EventCategory,
   type EventType,
   type PrStatus,
+  type ReviewState,
 } from '@pierre-review/shared';
 
 export type RangePreset = '7d' | '14d' | '30d' | '90d' | 'custom';
 
 export type StripFilter = 'all' | 'my_turn' | 'needs_attention';
 
-// The user-facing event-type toggles. 'lifecycle' (PR opened/merged/closed/…) is
-// deliberately NOT here: its events draw no markers (they're implicit in each PR
-// bar's start/end), so the toggle looked like a no-op and was removed. Its events
-// still flow — categoriesToTypes always includes them (they keep contributor rows
-// and back the activity-feed jumps). Re-add 'lifecycle' here to bring the toggle back.
+// The user-facing event-CATEGORY toggles (Events panel). Two categories are NOT
+// here, by design:
+//  • 'lifecycle' (PR opened/merged/closed/…) — its events draw no markers (they're
+//    implicit in each PR bar), so the toggle was a no-op.
+//  • 'reviews' (review_submitted) — replaced by the finer per-verdict toggles
+//    (ALL_REVIEW_STATES: approved / changes_requested / commented / dismissed),
+//    filtered server-side via the `reviewStates` param.
+// Both still FLOW — categoriesToTypes always includes their event types — so
+// contributor rows / activity-feed jumps are unaffected; the review verdict filter
+// then narrows the review markers. Re-add either here to restore a coarse toggle.
 export const ALL_CATEGORIES: EventCategory[] = [
-  'reviews',
   'review_comments',
   'pr_comments',
   'commits',
@@ -32,6 +38,12 @@ export const DEFAULT_CATEGORIES: EventCategory[] = ALL_CATEGORIES.filter(
 );
 
 export const ALL_PR_STATUSES: PrStatus[] = PR_STATUSES;
+
+// The review verdicts shown in the Events panel (approved / changes_requested /
+// commented / dismissed). All four are shown on a fresh load — a review-verdict
+// filter is opt-in, so the default selects everything and the URL stays clean.
+export const ALL_REVIEW_STATES: ReviewState[] = REVIEW_FILTER_STATES;
+export const DEFAULT_REVIEW_STATES: ReviewState[] = [...ALL_REVIEW_STATES];
 
 // PR statuses shown on a fresh load. Closed PRs are noise for most situational-
 // awareness views, so they start hidden; the choice round-trips through the URL.
@@ -60,6 +72,9 @@ export interface FilterState {
   customTo: string | null;
   categories: EventCategory[];
   prStatuses: PrStatus[]; // which PR statuses are shown (empty = none)
+  // Which review verdicts show as markers (review_submitted events). All four by
+  // default; an empty set hides every review marker. Only affects review markers.
+  reviewStates: ReviewState[];
   derivedStates: DerivedState[]; // empty = no derived-state filtering
 
   // selection
@@ -171,6 +186,8 @@ export interface FilterState {
   setCategories: (c: EventCategory[]) => void;
   togglePrStatus: (s: PrStatus) => void;
   setPrStatuses: (s: PrStatus[]) => void;
+  toggleReviewState: (s: ReviewState) => void;
+  setReviewStates: (s: ReviewState[]) => void;
   toggleDerivedState: (s: DerivedState) => void;
   setDerivedStates: (s: DerivedState[]) => void;
   selectPr: (id: number | null) => void;
@@ -269,6 +286,7 @@ type FilterDefaults = Pick<
   | 'customTo'
   | 'categories'
   | 'prStatuses'
+  | 'reviewStates'
   | 'derivedStates'
   | 'searchQuery'
   | 'stripFilter'
@@ -293,6 +311,7 @@ function freshFilterDefaults(): FilterDefaults {
     customTo: null,
     categories: [...DEFAULT_CATEGORIES],
     prStatuses: [...DEFAULT_PR_STATUSES],
+    reviewStates: [...DEFAULT_REVIEW_STATES],
     derivedStates: [],
     searchQuery: '',
     stripFilter: 'all',
@@ -315,6 +334,7 @@ export function pickFilterBarState(s: FilterState): FilterDefaults {
     customTo: s.customTo,
     categories: s.categories,
     prStatuses: s.prStatuses,
+    reviewStates: s.reviewStates,
     derivedStates: s.derivedStates,
     searchQuery: s.searchQuery,
     stripFilter: s.stripFilter,
@@ -375,6 +395,9 @@ export const useFilters = create<FilterState>((set, get) => ({
   setCategories: (c) => set({ categories: c }),
   togglePrStatus: (st) => set((s) => ({ prStatuses: toggle(s.prStatuses, st) })),
   setPrStatuses: (s) => set({ prStatuses: s }),
+  toggleReviewState: (st) =>
+    set((s) => ({ reviewStates: toggle(s.reviewStates, st) })),
+  setReviewStates: (st) => set({ reviewStates: st }),
   toggleDerivedState: (st) =>
     set((s) => ({ derivedStates: toggle(s.derivedStates, st) })),
   setDerivedStates: (st) => set({ derivedStates: st }),
@@ -504,11 +527,12 @@ export function resolveRange(s: FilterState): { from: Date; to: Date } {
 /** Map the selected coarse categories to concrete event types. */
 export function categoriesToTypes(categories: EventCategory[]): EventType[] {
   const set = new Set(categories);
-  // 'lifecycle' has no UI toggle (its events draw no markers — see ALL_CATEGORIES),
-  // but its events are still useful (they keep contributor rows for people who only
-  // ever merged/closed a PR, and back the activity-feed "Show on timeline" jumps),
-  // so always include them when a `types` filter is sent.
+  // 'lifecycle' and 'reviews' have no coarse UI toggle (see ALL_CATEGORIES), but
+  // their events must still flow: lifecycle keeps contributor rows + activity-feed
+  // jumps; review_submitted is filtered by the separate per-verdict `reviewStates`
+  // param, so it's always fetched here and narrowed there. Always include both.
   set.add('lifecycle');
+  set.add('reviews');
   return (Object.keys(EVENT_CATEGORY_BY_TYPE) as EventType[]).filter((t) =>
     set.has(EVENT_CATEGORY_BY_TYPE[t]),
   );
@@ -541,12 +565,15 @@ export function buildOpenPrsSearch(s: FilterState, includeMembers = true): strin
  * no filter); a non-full selection — including empty (= show none) — is sent.
  * `includeStaleFilter` defaults true; the search index passes false so the global
  * "jump to any PR" tool still finds a PR the stale filter hides from the timeline.
+ * `includeReviewStates` defaults true; the search index passes false so the review-
+ * verdict filter never narrows the member-derivation feed (it only hides markers).
  */
 export function buildTimelineSearch(
   s: FilterState,
   includeMembers = true,
   includeStatuses = true,
   includeStaleFilter = true,
+  includeReviewStates = true,
 ): string {
   const { from, to } = resolveRange(s);
   const params = new URLSearchParams();
@@ -560,6 +587,11 @@ export function buildTimelineSearch(
   }
   if (includeStatuses && s.prStatuses.length < ALL_PR_STATUSES.length) {
     params.set('statuses', s.prStatuses.join(','));
+  }
+  // Review-verdict filter: omit when all verdicts are selected (= no filter); send a
+  // non-full selection — including empty (= hide all review markers) — like statuses.
+  if (includeReviewStates && s.reviewStates.length < ALL_REVIEW_STATES.length) {
+    params.set('reviewStates', s.reviewStates.join(','));
   }
   params.set('excludeBots', String(s.excludeBots));
   if (includeStaleFilter && s.excludeStale) params.set('excludeStale', 'true');

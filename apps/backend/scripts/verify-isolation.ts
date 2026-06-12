@@ -85,6 +85,7 @@ const win = {
   userIds: null,
   types: null,
   statuses: null,
+  reviewStates: null,
   excludeBots: false,
   excludeStale: false,
 };

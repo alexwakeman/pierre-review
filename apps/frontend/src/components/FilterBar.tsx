@@ -73,11 +73,11 @@ function Section({
   label,
   children,
 }: {
-  // Optional: the dropdown-panel sections (Repos / Members / Status / Events /
+  // Optional: the dropdown-panel sections (Repos / Status / Members / Events /
   // Threads) omit it because their trigger button already shows the name — the
-  // label would be redundant. The chip sections (Range / Stale) keep it, since
-  // their chips don't repeat the category name. Without a label the wrapper still
-  // groups its children with the same spacing.
+  // label would be redundant. The Range chip section keeps it, since its chips
+  // don't repeat the category name. Without a label the wrapper still groups its
+  // children with the same spacing.
   label?: string;
   children: React.ReactNode;
 }): JSX.Element {
@@ -312,17 +312,6 @@ export function FilterBar(): JSX.Element {
           <RepoSearch />
         </Section>
 
-        <Section>
-          <UserSelectPanel
-            sections={memberSections}
-            userIds={f.userIds}
-            maintainerIds={maintainerIds}
-            onApply={(ids) => f.setUserIds(ids)}
-            excludeBots={f.excludeBots}
-            onExcludeBotsChange={f.setExcludeBots}
-          />
-        </Section>
-
         <Section label="Range">
           {PRESETS.map((p) => (
             <Chip key={p} active={f.preset === p} onClick={() => f.setPreset(p)}>
@@ -344,14 +333,30 @@ export function FilterBar(): JSX.Element {
             statuses={f.prStatuses}
             onToggle={f.togglePrStatus}
             onSet={f.setPrStatuses}
+            excludeStale={f.excludeStale}
+            onExcludeStaleChange={f.setExcludeStale}
+          />
+        </Section>
+
+        <Section>
+          <UserSelectPanel
+            sections={memberSections}
+            userIds={f.userIds}
+            maintainerIds={maintainerIds}
+            onApply={(ids) => f.setUserIds(ids)}
+            excludeBots={f.excludeBots}
+            onExcludeBotsChange={f.setExcludeBots}
           />
         </Section>
 
         <Section>
           <EventSelectPanel
             categories={f.categories}
-            onToggle={(c) => f.toggleCategory(c)}
-            onSet={(c) => f.setCategories(c)}
+            onToggleCategory={(c) => f.toggleCategory(c)}
+            onSetCategories={(c) => f.setCategories(c)}
+            reviewStates={f.reviewStates}
+            onToggleReviewState={(s) => f.toggleReviewState(s)}
+            onSetReviewStates={(s) => f.setReviewStates(s)}
           />
         </Section>
 
@@ -363,15 +368,6 @@ export function FilterBar(): JSX.Element {
           />
         </Section>
 
-        <Section label="Stale">
-          <Chip
-            active={f.excludeStale}
-            onClick={() => f.setExcludeStale(!f.excludeStale)}
-            title="Hide open PRs with no commits, comments or reviews within the selected time range"
-          >
-            Hide
-          </Chip>
-        </Section>
       </div>
 
       {/* Right cluster, pinned next to the timeline. The "Focus mode" pill (shown

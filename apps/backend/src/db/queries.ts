@@ -12,6 +12,7 @@ import {
   isNotNull,
   isNull,
   lte,
+  ne,
   notInArray,
   or,
   sql,
@@ -182,6 +183,10 @@ export interface TimelineFilters {
   // null = no status filter (all); otherwise the selected PR statuses (an empty
   // array shows nothing). A status maps to (state, isDraft) on pullRequests.
   statuses: PrStatus[] | null;
+  // null = no review-verdict filter (all); otherwise the selected review states
+  // (an empty array hides every review marker). Only filters review_submitted
+  // events — by the verdict of the review they reference.
+  reviewStates: ReviewState[] | null;
   excludeBots: boolean;
   // true → hide "stale" open PRs (no commit/comment/review in [from, to]).
   excludeStale: boolean;
@@ -357,6 +362,7 @@ export async function getTimeline(
     userIds,
     types,
     statuses,
+    reviewStates,
     excludeBots,
     excludeStale,
   } = filters;
@@ -444,6 +450,32 @@ export async function getTimeline(
           .from(pullRequests)
           .where(and(eq(pullRequests.id, events.prId), prStatusWhere(statuses))),
       ),
+    );
+  }
+  // Review-verdict filter: keep every NON-review event; for review_submitted events,
+  // keep only those whose referenced review's state is selected. An empty selection
+  // drops all review markers (the review row exists but no verdict matches). null =
+  // no filter. Pure-reviewer rows vanish when their verdict is deselected because the
+  // event is removed here (not just hidden client-side), so no empty row lingers.
+  if (reviewStates) {
+    evConds.push(
+      reviewStates.length === 0
+        ? ne(events.type, 'review_submitted')
+        : or(
+            ne(events.type, 'review_submitted'),
+            exists(
+              db
+                .select({ x: sql`1` })
+                .from(reviews)
+                .where(
+                  and(
+                    eq(reviews.id, events.refId),
+                    eq(events.refTable, 'reviews'),
+                    inArray(reviews.state, reviewStates),
+                  ),
+                ),
+            ),
+          )!,
     );
   }
   // Likewise drop a stale open PR's own events (only ever lifecycle markers, since

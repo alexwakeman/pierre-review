@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { EventType, PrStatus, TimelineQuery } from '@pierre-review/shared';
+import type { EventType, PrStatus, ReviewState, TimelineQuery } from '@pierre-review/shared';
 import { getTimeline, type TimelineFilters } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
@@ -21,6 +21,12 @@ const EVENT_TYPES: EventType[] = [
   'commit_pushed',
 ];
 const PR_STATUSES: PrStatus[] = ['draft', 'open', 'merged', 'closed'];
+const REVIEW_FILTER_STATES: ReviewState[] = [
+  'approved',
+  'changes_requested',
+  'commented',
+  'dismissed',
+];
 
 function parseIntList(raw: string | undefined): number[] | null {
   if (!raw) return null;
@@ -53,6 +59,18 @@ function parseStatuses(raw: string | undefined): PrStatus[] | null {
     .filter((s) => allowed.has(s)) as PrStatus[];
 }
 
+// Absent (undefined) → null = no review-verdict filter (show all). Present, even
+// empty ("") → an explicit (possibly empty) set, so deselecting every verdict hides
+// all review markers rather than falling back to "all". Mirrors parseStatuses.
+function parseReviewStates(raw: string | undefined): ReviewState[] | null {
+  if (raw === undefined) return null;
+  const allowed = new Set<string>(REVIEW_FILTER_STATES);
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => allowed.has(s)) as ReviewState[];
+}
+
 function parseDate(raw: string | undefined, fallback: Date): Date {
   if (!raw) return fallback;
   const d = new Date(raw);
@@ -71,6 +89,7 @@ export async function timelineRoutes(app: FastifyInstance): Promise<void> {
       userIds: parseIntList(q.userIds),
       types: parseTypes(q.types),
       statuses: parseStatuses(q.statuses),
+      reviewStates: parseReviewStates(q.reviewStates),
       excludeBots: q.excludeBots === 'true',
       excludeStale: q.excludeStale === 'true',
     };

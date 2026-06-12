@@ -309,7 +309,7 @@ file maps to a `client.ts` method.
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/timeline?from&to&repoIds&userIds&types&statuses&excludeBots` | **lean** feed `{prs[],events[]}` — no bodies/diffs. Defaults: 14d, bots shown (toggle in Members) |
+| `GET /api/timeline?from&to&repoIds&userIds&types&statuses&reviewStates&excludeBots` | **lean** feed `{prs[],events[]}` — no bodies/diffs. Defaults: 14d, bots shown (toggle in Members). `reviewStates` filters `review_submitted` markers by verdict (approved/changes_requested/commented/dismissed); absent = all, empty = none |
 | `GET /api/prs/:id` | full PR detail (threads, reviews, comments, commits, checks, labels) |
 | `POST /api/prs/:id/mark-viewed` (alias `/dismiss`) | record a view (`sha?` defaults to head) → clears new-since badges |
 | `GET /api/open-prs?repoIds&userIds` | currently-open PRs (ignores date range) |
