@@ -515,23 +515,45 @@ export async function getTimeline(
     for (const r of rows) reviewStateById.set(r.id, r.state as ReviewState);
   }
 
-  const timelineEvents: TimelineEvent[] = evRows.map((e) => ({
-    id: e.id,
-    repoId: e.repoId,
-    actorId: e.actorId,
-    prId: e.prId,
-    type: e.type,
-    occurredAt: e.occurredAt.toISOString(),
-    threadId:
-      e.type === 'review_comment' && e.refTable === 'review_threads'
-        ? e.refId
-        : null,
-    refId: e.refId,
-    reviewState:
-      e.type === 'review_submitted' && e.refTable === 'reviews' && e.refId != null
-        ? (reviewStateById.get(e.refId) ?? null)
-        : null,
-  }));
+  // Batch-load the derived state of each review_comment event's thread, so the
+  // timeline's "Threads" filter can narrow markers to a specific thread state
+  // (e.g. only resolved) instead of every comment on a PR that has a matching
+  // thread. A single keyed lookup; the thread's id is the event's refId.
+  const threadRefIds = evRows
+    .filter(
+      (e) =>
+        e.type === 'review_comment' && e.refTable === 'review_threads' && e.refId != null,
+    )
+    .map((e) => e.refId as number);
+  const threadStateById = new Map<number, DerivedState>();
+  if (threadRefIds.length > 0) {
+    const rows = await db
+      .select({ id: reviewThreads.id, state: reviewThreads.derivedState })
+      .from(reviewThreads)
+      .where(inArray(reviewThreads.id, threadRefIds))
+      .execute();
+    for (const r of rows) threadStateById.set(r.id, r.state as DerivedState);
+  }
+
+  const timelineEvents: TimelineEvent[] = evRows.map((e) => {
+    const threadId =
+      e.type === 'review_comment' && e.refTable === 'review_threads' ? e.refId : null;
+    return {
+      id: e.id,
+      repoId: e.repoId,
+      actorId: e.actorId,
+      prId: e.prId,
+      type: e.type,
+      occurredAt: e.occurredAt.toISOString(),
+      threadId,
+      derivedState: threadId != null ? (threadStateById.get(threadId) ?? null) : null,
+      refId: e.refId,
+      reviewState:
+        e.type === 'review_submitted' && e.refTable === 'reviews' && e.refId != null
+          ? (reviewStateById.get(e.refId) ?? null)
+          : null,
+    };
+  });
 
   return { prs, events: timelineEvents };
 }

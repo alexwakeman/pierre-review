@@ -329,16 +329,6 @@ export function FilterBar(): JSX.Element {
         </Section>
 
         <Section>
-          <StatusSelectPanel
-            statuses={f.prStatuses}
-            onToggle={f.togglePrStatus}
-            onSet={f.setPrStatuses}
-            excludeStale={f.excludeStale}
-            onExcludeStaleChange={f.setExcludeStale}
-          />
-        </Section>
-
-        <Section>
           <UserSelectPanel
             sections={memberSections}
             userIds={f.userIds}
@@ -346,6 +336,16 @@ export function FilterBar(): JSX.Element {
             onApply={(ids) => f.setUserIds(ids)}
             excludeBots={f.excludeBots}
             onExcludeBotsChange={f.setExcludeBots}
+          />
+        </Section>
+
+        <Section>
+          <StatusSelectPanel
+            statuses={f.prStatuses}
+            onToggle={f.togglePrStatus}
+            onSet={f.setPrStatuses}
+            excludeStale={f.excludeStale}
+            onExcludeStaleChange={f.setExcludeStale}
           />
         </Section>
 

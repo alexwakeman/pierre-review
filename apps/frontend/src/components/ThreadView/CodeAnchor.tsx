@@ -48,22 +48,31 @@ export function CodeAnchor({
     );
   }
 
-  return (
-    <div className="space-y-1">
+  // Single-line hunk: the anchor IS the whole context, nothing to expand.
+  if (lines.length <= 1) {
+    return (
       <pre
         className={`overflow-x-auto border-l-2 bg-gray-50 py-0.5 pl-2 font-mono text-[12px] leading-snug dark:bg-gray-900/60 ${BORDER[kind]}`}
       >
         {anchorLine || ' '}
       </pre>
-      {lines.length > 1 && (
-        <button
-          type="button"
-          onClick={() => toggle(threadId)}
-          className="text-[11px] text-gray-400 hover:text-gray-600"
-        >
-          ⌄ Show full code context ({lines.length} lines)
-        </button>
-      )}
-    </div>
+    );
+  }
+
+  // Collapsed, multi-line: the whole anchor preview is clickable to expand (mirrors
+  // the Claude-review finding hunk) — only "Hide code context" collapses it again,
+  // so clicking the expanded code to read/select it never folds it away.
+  return (
+    <button
+      type="button"
+      onClick={() => toggle(threadId)}
+      title="Show the full code context"
+      className={`flex w-full items-center gap-2 overflow-hidden rounded-r border-l-2 bg-gray-50 py-0.5 pl-2 pr-2 text-left font-mono text-[12px] leading-snug hover:bg-gray-100 dark:bg-gray-900/60 dark:hover:bg-gray-800/60 ${BORDER[kind]}`}
+    >
+      <span className="min-w-0 flex-1 truncate">{anchorLine || ' '}</span>
+      <span className="shrink-0 font-sans text-[10px] text-gray-400">
+        ⌄ {lines.length} lines
+      </span>
+    </button>
   );
 }

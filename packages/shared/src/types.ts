@@ -321,6 +321,11 @@ export interface TimelineEvent {
   occurredAt: string;
   // For navigation: the thread this event points at, when applicable.
   threadId: number | null;
+  // For review_comment markers: the derived state of the thread this comment
+  // belongs to (resolved / likely_addressed / replied_unresolved / untouched),
+  // so the timeline's "Threads" filter can narrow markers to a specific state
+  // rather than showing every comment on a matching PR. null for other events.
+  derivedState: DerivedState | null;
   // The underlying entity row id (events.ref_id). For commit_pushed this is the
   // commit row id, letting the marker modal resolve the commit via /api/prs/:id
   // without bloating the timeline payload.

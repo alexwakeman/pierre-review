@@ -8,7 +8,14 @@ import {
   type TimelineOptions,
 } from 'vis-timeline/standalone';
 import 'vis-timeline/styles/vis-timeline-graph2d.css';
-import type { Repo, TimelineEvent, TimelinePr, TimelineResponse, User } from '@pierre-review/shared';
+import type {
+  DerivedState,
+  Repo,
+  TimelineEvent,
+  TimelinePr,
+  TimelineResponse,
+  User,
+} from '@pierre-review/shared';
 import {
   useMergers,
   useSearchTimeline,
@@ -245,11 +252,12 @@ export function Timeline(): JSX.Element {
   // PR bars. Without this a Threads filter hid the bars (line 2065) but left every
   // event marker on the board, so picking e.g. "Replied" showed an unrelated jumble
   // of markers (incl. PR-comment markers, which aren't threads at all) with no bars.
-  // `active` = the filter is on; `ids` = the PR ids that pass it (≥1 thread in a
-  // selected state). Member-agnostic — events are already member-filtered server-side.
-  const derivedPassRef = useRef<{ active: boolean; ids: Set<number> }>({
+  // `active` = the filter is on; `states` = the selected thread states. Markers are
+  // narrowed to review_comment events whose own thread is in one of these states
+  // (per-event `derivedState`), not just every comment on a matching PR.
+  const derivedPassRef = useRef<{ active: boolean; states: DerivedState[] }>({
     active: false,
-    ids: new Set<number>(),
+    states: [],
   });
   // The PR bar currently glowing as the "linked" partner of an open marker
   // modal, so we can clear it when the modal closes or moves to another PR.
@@ -302,6 +310,10 @@ export function Timeline(): JSX.Element {
   // payload (it had no in-window activity). The focus path stages it here so the
   // next rebuild materializes its bar; cleared once the rebuild consumes it.
   const forceShowOpenPrRef = useRef<TimelinePr | null>(null);
+  // The pending deferred "enter focus / centre after the force-show rebuild paints"
+  // timer (forceShowThen). Held so a rapid second search-pick cancels the first —
+  // otherwise both timeouts fire and the focus flickers between the two PRs.
+  const forceShowFocusTimerRef = useRef<number | null>(null);
   // Window width (ms) the current bar fit was computed for. The min-width floor is
   // in pixels, so fitLaneBars is zoom-dependent — a real zoom (width change) re-fits
   // via laneNonce; a pan (same width) does not.
@@ -718,20 +730,17 @@ export function Timeline(): JSX.Element {
       // `review_comment` is the ONLY event type that maps to a review thread, so
       // every other type (PR reviews, PR comments, commits, lifecycle) doesn't fit a
       // thread-state filter and just read as a confusing jumble of unrelated markers.
-      // Also keep only those on PRs that pass the filter — their bars are the only
-      // ones rendered (the rebuild's `prs` filter), so markers stay consistent with
-      // bars; the selected PR is always kept so event→PR navigation has a target.
-      // We deliberately don't enrich the lean timeline payload with per-thread state
-      // (would mean a GraphQL change), so we can't tell WHICH thread state a given
-      // review_comment marker belongs to — within a passing PR all its review_comment
-      // markers show, which is fine: the bar already signals the PR matched.
-      const { ids } = derivedPassRef.current;
-      const sel = selectedPrIdRef.current;
+      // Each event carries its thread's `derivedState`, so we keep ONLY the comments
+      // whose own thread is in a selected state — selecting "Resolved" shows just the
+      // resolved threads' comments (and, via the PR-bar filter, their PRs), not every
+      // comment on a PR that happens to also have a resolved thread.
+      const { states } = derivedPassRef.current;
       events = cur.events.filter(
         (e) =>
           e.type === 'review_comment' &&
           e.prId != null &&
-          (ids.has(e.prId) || e.prId === sel),
+          e.derivedState != null &&
+          states.includes(e.derivedState),
       );
     } else {
       events = cur.events;
@@ -820,7 +829,15 @@ export function Timeline(): JSX.Element {
 
       const lane = prLanesRef.current.get(prId);
       const pr = prsByIdRef.current.get(prId);
-      const authorGroup = pr ? prGroupId(pr) : null;
+      // A PR force-shown for a filter-free focus (search) isn't in the filtered
+      // prsByIdRef; recover its row from the rendered bar item's group so its lane
+      // band is KEPT — otherwise focusSubgroups would hide the very bar we isolate.
+      const barItem = itemsRef.current.get(`pr:${prId}`) as DataItem | null;
+      const authorGroup = pr
+        ? prGroupId(pr)
+        : barItem && typeof barItem.group === 'string'
+          ? barItem.group
+          : null;
       const items = itemsRef.current.get() as DataItem[];
       for (const gid of groupIds) {
         // Author's row keeps the discussed PR's lane; the commenter's row keeps
@@ -1014,11 +1031,21 @@ export function Timeline(): JSX.Element {
   // Reads REFS (not the `data` closure) so it stays stable and never recreates the
   // vis-init effect. Centring + consumeTimelineFocus are left to the caller.
   const enterPrFocus = useCallback(
-    (prId: number, opts?: { anchorEventId?: number | null; fitWindow?: boolean }) => {
+    (
+      prId: number,
+      opts?: {
+        anchorEventId?: number | null;
+        fitWindow?: boolean;
+        // The PR record, for the search path where the PR is force-shown but not yet
+        // in the (filtered) `prsByIdRef` — pass it so focus can isolate a PR the
+        // active filters would otherwise hide. Falls back to the in-payload lookup.
+        pr?: TimelinePr;
+      },
+    ) => {
       const tl = timelineRef.current;
       const cur = dataRef.current;
       if (!tl || !cur) return;
-      const pr = prsByIdRef.current.get(prId);
+      const pr = opts?.pr ?? prsByIdRef.current.get(prId);
       if (!pr) return;
       // Entering focus supersedes any open marker popover. Once we isolate this PR
       // and re-render markers filtered to it, a popover left over from another
@@ -2086,31 +2113,49 @@ export function Timeline(): JSX.Element {
     const authoredByMember = (pr: TimelinePr): boolean =>
       !memberFilter || (pr.authorId != null && memberFilter.has(pr.authorId));
 
-    // Does this PR pass the active "Threads" (derived thread-state) filter? A PR
-    // passes when it has at least one review thread in a selected state. Empty
-    // selection = no filtering (every PR passes). The derived states are thread-
-    // level, so this is genuinely a "PRs that have a thread in state X" filter.
+    // The active "Threads" (derived thread-state) filter. A PR's bar shows only when
+    // it has at least one review-thread COMMENT *in this window* whose thread is in a
+    // selected state — the very events rebuildMarkers turns into markers. Keying the
+    // bar on the matching in-window events (rather than the all-time `threadCounts`,
+    // which would leave a PR whose only resolved thread sits outside the window
+    // showing an empty bar) keeps bars and markers consistent: every shown bar has
+    // its matching thread's comment markers, and only those. Empty selection = off.
+    const derivedActive = derivedStates.length > 0;
+    const matchingThreadPrIds = new Set<number>();
+    if (derivedActive) {
+      const sel = new Set(derivedStates);
+      for (const e of data.events) {
+        if (
+          e.type === 'review_comment' &&
+          e.prId != null &&
+          e.derivedState != null &&
+          sel.has(e.derivedState)
+        ) {
+          matchingThreadPrIds.add(e.prId);
+        }
+      }
+    }
     const passesDerived = (pr: TimelinePr): boolean =>
-      derivedStates.length === 0 ||
-      derivedStates.some((s) => pr.threadCounts[s] > 0);
+      !derivedActive || matchingThreadPrIds.has(pr.id);
 
     const prs: TimelinePr[] = basePrs.filter(
       (pr) =>
-        // Always render the selected PR's bar so event→PR navigation (and the
-        // global PR-title search) has a target even when the member or
-        // derived-state filter would otherwise hide it.
+        // Always render the selected PR's bar so event→PR navigation (and the global
+        // PR-title search) has a target even when a filter would otherwise hide it,
+        // and the bar a search/strip navigation force-staged (`extra`) so an
+        // out-of-payload PR materializes regardless of the active filters.
         pr.id === selectedPrIdRef.current ||
+        pr.id === extra?.id ||
         (authoredByMember(pr) && passesDerived(pr)),
     );
 
     // Mirror the thread-state filter into a ref so rebuildMarkers (which also runs
-    // standalone on a zoom recluster) drops the markers of PRs the filter hides,
-    // keeping the event markers consistent with the bars above. Member-agnostic:
-    // the server already member-filtered the events, and a PR a selected member
-    // merely acted on (bar dropped by the member filter) still shows its markers.
+    // standalone on a zoom recluster) narrows the review-comment markers to those
+    // whose own thread is in a selected state — only the matching thread's comments
+    // show, not every comment on a PR that merely has one matching thread.
     derivedPassRef.current = {
-      active: derivedStates.length > 0,
-      ids: new Set(basePrs.filter(passesDerived).map((pr) => pr.id)),
+      active: derivedActive,
+      states: derivedStates,
     };
 
     const evMap = new Map<number, TimelineEvent>();
@@ -2476,6 +2521,38 @@ export function Timeline(): JSX.Element {
     if (timelineFocusPr == null) return;
     const tl = timelineRef.current;
     if (!tl) return;
+
+    // A PR absent from the filtered /api/timeline payload (hidden by a filter, or an
+    // open PR outside the window) is still staged into the next rebuild via
+    // forceShowOpenPrRef so its bar materializes. Once it paints we either ISOLATE it
+    // in the filter-free focus overlay (search "enter focus" — isolate=true; pass the
+    // record so enterPrFocus can focus a PR not in prsByIdRef, and fit the window to
+    // its span so an out-of-window PR needs no range change) or just select+centre it.
+    const forceShowThen = (record: TimelinePr, isolate: boolean): void => {
+      dropOverlayForNavigation();
+      forceShowOpenPrRef.current = record;
+      setForceShowNonce((n) => n + 1);
+      const token = groupClassToken(prGroupId(record));
+      // Cancel any earlier still-pending force-show focus so a rapid second pick
+      // doesn't fire two enterPrFocus/centre callbacks (the focus would flicker
+      // between PRs); only the latest pick's deferred action runs.
+      if (forceShowFocusTimerRef.current != null) {
+        window.clearTimeout(forceShowFocusTimerRef.current);
+      }
+      forceShowFocusTimerRef.current = window.setTimeout(() => {
+        forceShowFocusTimerRef.current = null;
+        // 360ms: after the force-show rebuild paints the bar + its author's row.
+        if (isolate) {
+          enterPrFocus(record.id, { fitWindow: true, pr: record });
+          window.setTimeout(() => centerShowTarget(token, false), 320);
+        } else {
+          tl.setSelection([`pr:${record.id}`]);
+          centerShowTarget(token, false, '.ev-cross-linked', '.pr-bar.vis-selected');
+        }
+      }, 360);
+      useFilters.getState().consumeTimelineFocus();
+    };
+
     const inWindow = data?.prs.find((p) => p.id === timelineFocusPr);
     if (inWindow) {
       // "Focus" link: isolate this PR. Collapse to every contributor's row, show
@@ -2638,17 +2715,9 @@ export function Timeline(): JSX.Element {
         ? searchData?.prs.find((p) => p.id === timelineFocusPr)
         : undefined;
     if (hiddenByMember) {
-      dropOverlayForNavigation();
-      forceShowOpenPrRef.current = hiddenByMember;
-      setForceShowNonce((n) => n + 1);
-      const token = groupClassToken(prGroupId(hiddenByMember));
-      const focusId = hiddenByMember.id;
-      window.setTimeout(() => {
-        // 360ms: after the force-show rebuild paints the bar + its author's row.
-        tl.setSelection([`pr:${focusId}`]);
-        centerShowTarget(token, false, '.ev-cross-linked', '.pr-bar.vis-selected');
-      }, 360);
-      useFilters.getState().consumeTimelineFocus();
+      // Force-show the bar; ISOLATE it in the filter-free focus when the request
+      // asked to (a search pick), else just select + centre it (strip / my-turn).
+      forceShowThen(hiddenByMember, useFilters.getState().timelineIsolate);
       return;
     }
 
@@ -2660,6 +2729,13 @@ export function Timeline(): JSX.Element {
       openPrsData?.prs.find((p) => p.id === timelineFocusPr) ??
       searchOpenPrsData?.prs.find((p) => p.id === timelineFocusPr);
     if (candidate) {
+      // Search "enter focus": force-show + isolate WITHOUT widening the range —
+      // enterPrFocus fits the window to the PR's own span, so an out-of-window PR
+      // needs no range change and browser-back restores the exact filtered view.
+      if (useFilters.getState().timelineIsolate) {
+        forceShowThen(candidate, true);
+        return;
+      }
       const { from } = resolveRange(useFilters.getState());
       const openedMs = new Date(candidate.openedAt).getTime();
       if (openedMs < from.getTime()) {

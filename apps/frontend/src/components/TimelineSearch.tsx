@@ -13,14 +13,17 @@ import { Avatar } from './CommentCard.js';
 // open/closed state is local: results show only while the input is focused AND
 // the query is non-empty; Escape / outside-click hides the panel but keeps the
 // query. The filter is purely client-side over already-loaded data, and picking
-// a result (click or Enter) reuses openPrFocused — the same focus+glow path the
-// timeline delivers. The index is GLOBAL: it reads the member-agnostic
-// useSearchTimeline / useSearchOpenPrs sets, so a PR is findable even when the
-// member filter would hide its author's row (picking it force-shows the bar).
+// a result (click or Enter) ENTERS the sticky PR-isolation focus overlay
+// (focusPrOnTimeline) — it isolates that one PR, shown even when the active
+// filters would hide it (its bar is force-shown), and suppresses the marker-level
+// thread/verdict filters for it; browser-back / Esc leaves focus and returns to
+// the exact filtered view the search ran from. The index is GLOBAL: it reads the
+// member-agnostic useSearchTimeline / useSearchOpenPrs sets, so a PR is findable
+// even when the active filters would hide it.
 export function TimelineSearch(): JSX.Element {
   const query = useFilters((s) => s.searchQuery);
   const setQuery = useFilters((s) => s.setSearchQuery);
-  const openPrFocused = useFilters((s) => s.openPrFocused);
+  const focusPrOnTimeline = useFilters((s) => s.focusPrOnTimeline);
 
   const { data: timeline } = useSearchTimeline();
   const { data: openPrs } = useSearchOpenPrs();
@@ -75,7 +78,13 @@ export function TimelineSearch(): JSX.Element {
 
   const pick = (pr: TimelinePr | undefined): void => {
     if (!pr) return;
-    openPrFocused(pr.id); // focus + glow (delivered by the timeline)
+    // Enter the sticky PR-isolation focus overlay for the picked PR (NOT just a
+    // select+scroll): focus isolates that one PR — its bar is shown even when the
+    // active filters would hide it, and the marker-level thread/verdict filters are
+    // suppressed for it — and browser-back / Esc leaves focus and returns to the
+    // exact filtered view the search was run from. The timeline force-shows the bar
+    // when a filter would hide it (see the timelineFocusPr consumer).
+    focusPrOnTimeline(pr.id);
     setOpen(false); // hide panel; query stays sticky for re-focus
   };
 
