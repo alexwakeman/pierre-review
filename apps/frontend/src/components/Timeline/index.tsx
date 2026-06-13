@@ -2642,9 +2642,22 @@ export function Timeline(): JSX.Element {
       for (const gid of collapsedRowsByUserRef.current) setRowCollapsed(gid, true);
     }
 
-    // Consumed: the staged open-PR bar has been materialized into this rebuild.
-    // Clear it so a later background-sync rebuild doesn't keep re-injecting it.
-    forceShowOpenPrRef.current = null;
+    // KEEP re-injecting the force-staged open-PR bar while it's the PR the user is
+    // still looking at (selected or PR-isolation-focused) AND it remains absent from
+    // the lean payload. Otherwise the very next rebuild — a background timeline
+    // refetch (the query is always stale), or a users/mergers refetch — drops `extra`
+    // from basePrs and the bar vanishes ~half a second after the PR was opened from a
+    // place that force-shows it (e.g. the Insights open-PR list, where focus then has
+    // no bar). Clear it once the PR enters the payload, or the user moves off it, so a
+    // stale forced bar never lingers.
+    const fs = forceShowOpenPrRef.current;
+    if (
+      !fs ||
+      data.prs.some((p) => p.id === fs.id) ||
+      (selectedPrIdRef.current !== fs.id && prFocusPrIdRef.current !== fs.id)
+    ) {
+      forceShowOpenPrRef.current = null;
+    }
 
     // Restore the captured content anchor: undo the marker remove()+add() clamp and
     // absorb any height change in the rows above the viewport. Gate on
