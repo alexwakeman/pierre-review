@@ -37,9 +37,13 @@ import type {
   PrDetail,
   PrFileChange,
   PrState,
+  AnalyticsBin,
   InsightsOpenPr,
   InsightsResponse,
   InsightsTimePoint,
+  RepoAnalytics,
+  ReviewerLoadSeries,
+  SizeCyclePoint,
   PrStatus,
   ReasonTag,
   Repo,
@@ -829,6 +833,280 @@ export async function getInsights(filters: InsightsFilters): Promise<InsightsRes
   });
 
   return { ...base, repos: repoInsights };
+}
+
+// Heavier per-repo analytics for the drill-down panel — computed on demand (only
+// when the panel opens). All series cover the last INSIGHTS_CHART_WINDOW_DAYS in
+// weekly buckets, except the distributions (categorical), the size/cycle scatter,
+// and the weekday×hour heatmap. Scoped to the account; returns null when the repo
+// isn't owned by the account (→ 404 at the route).
+export async function getRepoAnalytics(
+  accountId: number,
+  repoId: number,
+): Promise<RepoAnalytics | null> {
+  const repo = await getRepo(repoId, accountId);
+  if (!repo) return null;
+
+  const now = Date.now();
+  const windowDays = INSIGHTS_CHART_WINDOW_DAYS;
+  const windowStartMs = now - windowDays * 86_400_000;
+  const windowStart = new Date(windowStartMs);
+  const nBuckets = Math.round((now - windowStartMs) / WEEK_MS);
+  const weekBuckets: string[] = [];
+  for (let i = 0; i < nBuckets; i++) {
+    weekBuckets.push(new Date(windowStartMs + i * WEEK_MS).toISOString());
+  }
+  const zeros = (): number[] => new Array<number>(nBuckets).fill(0);
+  const bi = (ms: number): number =>
+    Math.max(0, Math.min(nBuckets - 1, Math.floor((ms - windowStartMs) / WEEK_MS)));
+  const inWin = (ms: number): boolean => ms >= windowStartMs && ms <= now;
+  const inc = (arr: number[], i: number): void => {
+    arr[i] = (arr[i] ?? 0) + 1;
+  };
+  const addv = (arr: number[], i: number, v: number): void => {
+    arr[i] = (arr[i] ?? 0) + v;
+  };
+
+  // ---- PRs relevant to the window: opened/closed in window, or still open ----
+  const prRows = await db
+    .select({
+      number: pullRequests.number,
+      openedAt: pullRequests.openedAt,
+      firstReviewAt: pullRequests.firstReviewAt,
+      mergedAt: pullRequests.mergedAt,
+      closedAt: pullRequests.closedAt,
+      lastCommitAt: pullRequests.lastCommitAt,
+      additions: pullRequests.additions,
+      deletions: pullRequests.deletions,
+    })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.repoId, repoId),
+        or(
+          and(isNull(pullRequests.mergedAt), isNull(pullRequests.closedAt)),
+          gte(pullRequests.openedAt, windowStart),
+          gte(pullRequests.mergedAt, windowStart),
+          gte(pullRequests.closedAt, windowStart),
+        ),
+      ),
+    )
+    .execute();
+
+  const opened = zeros();
+  const mergedSeries = zeros();
+  const closedSeries = zeros();
+  const open = zeros();
+  const stalled = zeros();
+  const stallMs = config.stallThresholdDays * 86_400_000;
+  const ttfrByBucket: number[][] = Array.from({ length: nBuckets }, () => []);
+  const cbA = zeros();
+  const cbB = zeros();
+  const cbN = zeros();
+  const LAT_BINS = [
+    { label: '<1h', max: 1 },
+    { label: '1–4h', max: 4 },
+    { label: '4–24h', max: 24 },
+    { label: '1–3d', max: 72 },
+    { label: '>3d', max: Infinity },
+  ];
+  const latCounts = new Array<number>(LAT_BINS.length).fill(0);
+  const SIZE_BINS = [
+    { label: 'XS <10', max: 10 },
+    { label: 'S <50', max: 50 },
+    { label: 'M <200', max: 200 },
+    { label: 'L <500', max: 500 },
+    { label: 'XL 500+', max: Infinity },
+  ];
+  const sizeCounts = new Array<number>(SIZE_BINS.length).fill(0);
+  const binOf = (bins: { max: number }[], v: number): number => {
+    for (let b = 0; b < bins.length; b++) if (v < bins[b]!.max) return b;
+    return bins.length - 1;
+  };
+  const sizeVsCycle: SizeCyclePoint[] = [];
+
+  for (const p of prRows) {
+    const oMs = p.openedAt.getTime();
+    const closeDate = p.mergedAt ?? p.closedAt;
+    const cMs = closeDate ? closeDate.getTime() : null;
+
+    if (inWin(oMs)) inc(opened, bi(oMs));
+    if (p.mergedAt && inWin(p.mergedAt.getTime())) inc(mergedSeries, bi(p.mergedAt.getTime()));
+    if (!p.mergedAt && p.closedAt && inWin(p.closedAt.getTime())) {
+      inc(closedSeries, bi(p.closedAt.getTime()));
+    }
+
+    // Backlog: was this PR open at each week's end, and stalled (no recent commit)?
+    for (let i = 0; i < nBuckets; i++) {
+      const snap = Math.min(windowStartMs + (i + 1) * WEEK_MS, now);
+      if (oMs <= snap && (cMs == null || cMs > snap)) {
+        inc(open, i);
+        const lastAct = p.lastCommitAt ? p.lastCommitAt.getTime() : oMs;
+        if (lastAct < snap - stallMs) inc(stalled, i);
+      }
+    }
+
+    if (p.firstReviewAt && inWin(oMs)) {
+      const hrs = (p.firstReviewAt.getTime() - oMs) / 3_600_000;
+      if (hrs >= 0) ttfrByBucket[bi(oMs)]!.push(hrs);
+    }
+    if (p.firstReviewAt && inWin(p.firstReviewAt.getTime())) {
+      const hrs = (p.firstReviewAt.getTime() - oMs) / 3_600_000;
+      if (hrs >= 0) latCounts[binOf(LAT_BINS, hrs)]!++;
+    }
+    if (cMs != null && inWin(cMs)) {
+      const total = (cMs - oMs) / 3_600_000;
+      if (total >= 0) {
+        const idx = bi(cMs);
+        inc(cbN, idx);
+        if (p.firstReviewAt) {
+          addv(cbA, idx, Math.max(0, (p.firstReviewAt.getTime() - oMs) / 3_600_000));
+          addv(cbB, idx, Math.max(0, (cMs - p.firstReviewAt.getTime()) / 3_600_000));
+        } else {
+          addv(cbA, idx, total);
+        }
+        sizeVsCycle.push({
+          prNumber: p.number,
+          loc: p.additions + p.deletions,
+          hoursOpen: Math.round(total * 10) / 10,
+          merged: p.mergedAt != null,
+        });
+      }
+    }
+    if (inWin(oMs)) sizeCounts[binOf(SIZE_BINS, p.additions + p.deletions)]!++;
+  }
+
+  // ---- reviews in window: verdict mix + per-reviewer load ----
+  const reviewRows = await db
+    .select({
+      reviewerId: reviews.authorId,
+      state: reviews.state,
+      submittedAt: reviews.submittedAt,
+    })
+    .from(reviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.repoId, repoId),
+        gte(reviews.submittedAt, windowStart),
+      ),
+    )
+    .execute();
+  const verdicts = {
+    approved: zeros(),
+    changes_requested: zeros(),
+    commented: zeros(),
+    dismissed: zeros(),
+  };
+  const reviewerWeekly = new Map<number, number[]>();
+  for (const r of reviewRows) {
+    const ms = r.submittedAt.getTime();
+    if (!inWin(ms)) continue;
+    const idx = bi(ms);
+    if (r.state === 'approved') inc(verdicts.approved, idx);
+    else if (r.state === 'changes_requested') inc(verdicts.changes_requested, idx);
+    else if (r.state === 'commented') inc(verdicts.commented, idx);
+    else if (r.state === 'dismissed') inc(verdicts.dismissed, idx);
+    if (r.reviewerId != null) {
+      const arr = reviewerWeekly.get(r.reviewerId) ?? zeros();
+      inc(arr, idx);
+      reviewerWeekly.set(r.reviewerId, arr);
+    }
+  }
+  const reviewerEntries = [...reviewerWeekly.entries()]
+    .map(([userId, weekly]) => ({ userId, weekly, total: weekly.reduce((a, b) => a + b, 0) }))
+    .sort((a, b) => b.total - a.total);
+  const TOP_REVIEWERS = 6;
+  const reviewerLoad: ReviewerLoadSeries[] = reviewerEntries
+    .slice(0, TOP_REVIEWERS)
+    .map((e) => ({ userId: e.userId, total: e.total, weekly: e.weekly }));
+  const rest = reviewerEntries.slice(TOP_REVIEWERS);
+  if (rest.length > 0) {
+    const otherWeekly = zeros();
+    for (const e of rest) for (let i = 0; i < nBuckets; i++) addv(otherWeekly, i, e.weekly[i] ?? 0);
+    reviewerLoad.push({
+      userId: -1,
+      total: otherWeekly.reduce((a, b) => a + b, 0),
+      weekly: otherWeekly,
+    });
+  }
+
+  // ---- review threads in window: derived-state mix by createdAt week ----
+  const threadRows = await db
+    .select({ state: reviewThreads.derivedState, createdAt: reviewThreads.createdAt })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.repoId, repoId),
+        gte(reviewThreads.createdAt, windowStart),
+      ),
+    )
+    .execute();
+  const threadMix = {
+    resolved: zeros(),
+    likely_addressed: zeros(),
+    replied_unresolved: zeros(),
+    untouched: zeros(),
+  };
+  for (const t of threadRows) {
+    const ms = t.createdAt.getTime();
+    if (!inWin(ms)) continue;
+    inc(threadMix[t.state], bi(ms));
+  }
+
+  // ---- activity heatmap: events by weekday×hour (UTC) ----
+  const eventRows = await db
+    .select({ occurredAt: events.occurredAt })
+    .from(events)
+    .where(
+      and(
+        eq(events.accountId, accountId),
+        eq(events.repoId, repoId),
+        gte(events.occurredAt, windowStart),
+      ),
+    )
+    .execute();
+  const activityHeatmap = new Array<number>(168).fill(0);
+  for (const e of eventRows) {
+    const d = e.occurredAt;
+    if (!inWin(d.getTime())) continue;
+    activityHeatmap[d.getUTCDay() * 24 + d.getUTCHours()]!++;
+  }
+
+  const round1 = (x: number): number => Math.round(x * 10) / 10;
+  return {
+    repoId: repo.id,
+    repoFullName: repo.fullName,
+    windowDays,
+    stallThresholdDays: config.stallThresholdDays,
+    generatedAt: new Date().toISOString(),
+    weekBuckets,
+    throughput: { opened, merged: mergedSeries, closed: closedSeries },
+    backlog: { open, stalled },
+    reviewLatencyTrend: {
+      medianHours: ttfrByBucket.map((a) => {
+        const m = median(a);
+        return m == null ? null : round1(m);
+      }),
+      count: ttfrByBucket.map((a) => a.length),
+    },
+    cycleBreakdown: {
+      toFirstReview: cbA.map((s, i) => (cbN[i] ? round1(s / cbN[i]!) : 0)),
+      reviewToMerge: cbB.map((s, i) => (cbN[i] ? round1(s / cbN[i]!) : 0)),
+      count: cbN,
+    },
+    reviewLatencyDist: LAT_BINS.map((b, i): AnalyticsBin => ({ label: b.label, count: latCounts[i]! })),
+    threadMix,
+    reviewVerdicts: verdicts,
+    reviewerLoad,
+    sizeDist: SIZE_BINS.map((b, i): AnalyticsBin => ({ label: b.label, count: sizeCounts[i]! })),
+    sizeVsCycle: sizeVsCycle.slice(0, 500),
+    activityHeatmap,
+  };
 }
 
 // ---- merge-rights inference ----

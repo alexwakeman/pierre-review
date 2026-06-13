@@ -5,6 +5,7 @@ import type {
   MeResponse,
   MyTurnResponse,
   OpenPrsResponse,
+  RepoAnalytics,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { buildOpenPrsSearch, useFilters } from '../store/filters.js';
@@ -51,6 +52,16 @@ export function useInsights(enabled: boolean) {
     queryKey: ['insights', search],
     queryFn: () => api.insights(search),
     enabled,
+  });
+}
+
+// Heavier per-repo analytics for the drill-down chart panel. Fetched only when the
+// panel is open for a specific repo; cached per repo.
+export function useRepoAnalytics(repoId: number | null) {
+  return useQuery<RepoAnalytics>({
+    queryKey: ['repo-analytics', repoId],
+    queryFn: () => api.repoAnalytics(repoId as number),
+    enabled: repoId != null,
   });
 }
 

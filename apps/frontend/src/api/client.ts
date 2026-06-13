@@ -15,6 +15,7 @@ import type {
   MyTurnDismissKind,
   MyTurnResponse,
   InsightsResponse,
+  RepoAnalytics,
   OpenPrsResponse,
   PostCommentResult,
   PostReviewPreview,
@@ -112,6 +113,8 @@ export const api = {
     get<OpenPrsResponse>(`/api/open-prs${search ? `?${search}` : ''}`),
   insights: (search: string) =>
     get<InsightsResponse>(`/api/insights${search ? `?${search}` : ''}`),
+  repoAnalytics: (repoId: number) =>
+    get<RepoAnalytics>(`/api/insights/${repoId}/analytics`),
   pr: (id: number) => get<PrDetail>(`/api/prs/${id}`),
   thread: (id: number) => get<ThreadDetail>(`/api/threads/${id}`),
 

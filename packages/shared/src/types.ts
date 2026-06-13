@@ -398,6 +398,85 @@ export interface InsightsResponse {
   generatedAt: string;
 }
 
+// ---- Repo analytics drill-down (GET /api/insights/:repoId/analytics) ----
+// A heavier, on-demand per-repo bundle of chart series, loaded only when the
+// drill-down panel opens. Every WEEKLY series is an array aligned 1:1 to
+// `weekBuckets` (index i ↔ weekBuckets[i], oldest first); distribution series are
+// labelled bins; the scatter + heatmap carry their own shapes.
+
+// A labelled histogram bin (a categorical bar).
+export interface AnalyticsBin {
+  label: string;
+  count: number;
+}
+
+// One PR in the size-vs-cycle-time scatter.
+export interface SizeCyclePoint {
+  prNumber: number;
+  loc: number; // additions + deletions
+  hoursOpen: number; // close − open
+  merged: boolean; // merged vs closed-without-merge
+}
+
+// Per-reviewer weekly review counts (reviews submitted), aligned to weekBuckets.
+export interface ReviewerLoadSeries {
+  userId: number; // resolves against GET /api/users
+  total: number;
+  weekly: number[];
+}
+
+export interface RepoAnalytics {
+  repoId: number;
+  repoFullName: string;
+  windowDays: number;
+  stallThresholdDays: number;
+  generatedAt: string;
+  // Shared x-axis for every weekly series: ISO bucket-start, oldest first.
+  weekBuckets: string[];
+
+  // Flow & throughput
+  throughput: { opened: number[]; merged: number[]; closed: number[] };
+  // Backlog of open PRs at each week's end, with the stalled subset (open + no
+  // commit within stallThresholdDays at that snapshot).
+  backlog: { open: number[]; stalled: number[] };
+
+  // Speed & latency
+  // Median hours open→first-review for PRs OPENED each week (null = no sample).
+  reviewLatencyTrend: { medianHours: (number | null)[]; count: number[] };
+  // Cycle time decomposed for PRs CLOSED each week: open→first-review and
+  // first-review→close (mean hours; 0 when count is 0).
+  cycleBreakdown: { toFirstReview: number[]; reviewToMerge: number[]; count: number[] };
+  // Distribution of time-to-first-review across PRs first-reviewed in the window.
+  reviewLatencyDist: AnalyticsBin[];
+
+  // Review health
+  // Review threads by derived state, bucketed by the thread's createdAt week.
+  threadMix: {
+    resolved: number[];
+    likely_addressed: number[];
+    replied_unresolved: number[];
+    untouched: number[];
+  };
+  // Submitted reviews by verdict, bucketed by submittedAt week.
+  reviewVerdicts: {
+    approved: number[];
+    changes_requested: number[];
+    commented: number[];
+    dismissed: number[];
+  };
+  // Reviews given per reviewer per week (top reviewers; rest folded into an
+  // `others` row with userId = null-sentinel -1).
+  reviewerLoad: ReviewerLoadSeries[];
+
+  // Size & risk
+  sizeDist: AnalyticsBin[]; // PRs opened in window, by LOC bucket
+  sizeVsCycle: SizeCyclePoint[]; // PRs closed in window (capped)
+
+  // Cadence: activity counts by weekday×hour (UTC), row-major dow*24+hour,
+  // dow 0=Sunday. Length 168.
+  activityHeatmap: number[];
+}
+
 // Lean event shape for the timeline. No bodies.
 export interface TimelineEvent {
   id: number;

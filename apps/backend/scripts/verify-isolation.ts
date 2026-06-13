@@ -125,6 +125,15 @@ check('getPrDetail(B.pr, A) returns null (IDOR blocked)', (await q.getPrDetail(B
 check('markPrViewed(A.pr, A) succeeds', (await q.markPrViewed(A.prId, 1)) === true);
 check('markPrViewed(B.pr, A) returns false (IDOR blocked)', (await q.markPrViewed(B.prId, 1)) === false);
 
+check(
+  'getRepoAnalytics(A.repo, A) returns the repo',
+  (await q.getRepoAnalytics(1, A.repoId))?.repoId === A.repoId,
+);
+check(
+  'getRepoAnalytics(B.repo, A) returns null (IDOR blocked)',
+  (await q.getRepoAnalytics(1, B.repoId)) === null,
+);
+
 const mergersA = await q.getMergers(1);
 check("getMergers(A) excludes B's repo", !mergersA.some((m) => m.repoId === B.repoId));
 

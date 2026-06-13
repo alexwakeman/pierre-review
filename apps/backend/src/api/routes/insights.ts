@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import type { InsightsResponse } from '@pierre-review/shared';
-import { getInsights } from '../../db/queries.js';
+import type { InsightsResponse, RepoAnalytics } from '@pierre-review/shared';
+import { getInsights, getRepoAnalytics } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 function parseIntList(raw: string | undefined): number[] | null {
@@ -21,5 +21,17 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
       accountId: accountIdOf(req),
       repoIds: parseIntList(q.repoIds),
     });
+  });
+
+  // Heavier per-repo analytics for the drill-down chart panel — loaded on demand.
+  // Ownership-scoped: a repo not owned by the account 404s.
+  app.get('/api/insights/:repoId/analytics', async (req, reply): Promise<RepoAnalytics> => {
+    const { repoId } = req.params as { repoId: string };
+    const id = Number.parseInt(repoId, 10);
+    const data = Number.isFinite(id)
+      ? await getRepoAnalytics(accountIdOf(req), id)
+      : null;
+    if (!data) return reply.code(404).send({ error: 'repo not found' }) as never;
+    return data;
   });
 }

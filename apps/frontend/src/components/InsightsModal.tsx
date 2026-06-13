@@ -8,6 +8,7 @@ import { api, ApiError } from '../api/client.js';
 import { indexUsers, userLabel, relativeTime } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
 import { OpenDurationChart } from './InsightsChart.js';
+import { RepoAnalyticsModal } from './RepoAnalyticsModal.js';
 
 // Header "Insights" panel: a per-repo sprint snapshot — open / draft / merged-7d /
 // stalled counts, median time-to-first-review, the oldest unreviewed PR, the
@@ -137,6 +138,7 @@ function RepoCard({
   showStale,
   canReview,
   onPick,
+  onOpenCharts,
 }: {
   repo: RepoInsights;
   usersById: ReturnType<typeof indexUsers>;
@@ -144,6 +146,7 @@ function RepoCard({
   showStale: boolean;
   canReview: boolean;
   onPick: (prId: number) => void;
+  onOpenCharts: (repoId: number, name: string) => void;
 }): JSX.Element {
   const [listOpen, setListOpen] = useState(false);
   const visiblePrs = showStale
@@ -157,6 +160,14 @@ function RepoCard({
         <span className="truncate text-sm font-semibold text-gray-700 dark:text-gray-200">
           {repo.repoFullName}
         </span>
+        <button
+          type="button"
+          onClick={() => onOpenCharts(repo.repoId, repo.repoFullName)}
+          className="ml-auto shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700 dark:border-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+          title="Open the analytics charts for this repo"
+        >
+          📊 Charts
+        </button>
       </div>
 
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-5">
@@ -276,6 +287,7 @@ export function InsightsModal({
   const canReview = useMe().data?.claudeReviewEnabled ?? false;
   const usersById = useMemo(() => indexUsers(users), [users]);
   const [showStale, setShowStale] = useState(true);
+  const [analyticsRepo, setAnalyticsRepo] = useState<{ id: number; name: string } | null>(null);
   const qc = useQueryClient();
   const focusPrOnTimeline = useFilters((s) => s.focusPrOnTimeline);
 
@@ -291,6 +303,8 @@ export function InsightsModal({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent): void => {
+      // When the analytics drill-down is up it owns Escape (closes itself first).
+      if (analyticsRepo) return;
       if (e.key === 'Escape') {
         e.stopImmediatePropagation();
         onClose();
@@ -298,7 +312,7 @@ export function InsightsModal({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [open, onClose]);
+  }, [open, onClose, analyticsRepo]);
 
   if (!open) return null;
 
@@ -309,6 +323,7 @@ export function InsightsModal({
   };
 
   return (
+    <>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={onClose}
@@ -376,10 +391,17 @@ export function InsightsModal({
               showStale={showStale}
               canReview={canReview}
               onPick={onPick}
+              onOpenCharts={(id, name) => setAnalyticsRepo({ id, name })}
             />
           ))}
         </div>
       </div>
     </div>
+    <RepoAnalyticsModal
+      repoId={analyticsRepo?.id ?? null}
+      repoName={analyticsRepo?.name ?? null}
+      onClose={() => setAnalyticsRepo(null)}
+    />
+    </>
   );
 }
