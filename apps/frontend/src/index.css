@@ -1017,6 +1017,29 @@ body {
   height: 17px;
 }
 
+/* Focus-mode cross-person connectors. The own-work stem above is a per-marker CSS
+   pseudo-element that reaches its bar by SUBGROUP ADJACENCY (same row). A cross-person
+   marker's bar lives in another row at an unbounded vertical offset, so a stem can't
+   reach it — instead, in PR-isolation focus ONLY, a read-only SVG overlay (sized over
+   .vis-panel.vis-center, see drawCrossConnectors) draws one line per visible cross
+   marker up/down to the focused PR's bar. The stroke MATCHES the own-work stem (same
+   slate, 1.5px) so the two read as one connector language. Purely decorative: it never
+   intercepts pointer events meant for the markers/bars below it. */
+.tl-cross-connectors {
+  position: absolute;
+  pointer-events: none;
+  overflow: hidden; /* clip lines to the center panel */
+  z-index: 5;
+}
+.tl-cross-connectors path {
+  stroke: rgba(203, 213, 225, 0.85);
+  stroke-width: 1.5;
+  fill: none;
+}
+.dark .tl-cross-connectors path {
+  stroke: rgba(148, 163, 184, 0.7);
+}
+
 /* Cross-person chip: a soft indigo disc + hairline ring hugging the glyph, marking
    an action on someone else's PR. It's a per-marker cue (reads even when the row is
    collapsed or zoomed in), in the same indigo as the cross zone. Built from the

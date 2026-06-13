@@ -343,6 +343,19 @@ export function Timeline(): JSX.Element {
   // PR, used to recentre + glow it on exit when no specific event was last clicked.
   const prFocusActiveRef = useRef(false);
   const prFocusPrIdRef = useRef<number | null>(null);
+  // PR-isolation focus connector overlay. The own-work CSS stem (index.css,
+  // `.ev-own …::after`) joins a marker to its bar by SUBGROUP ADJACENCY — it only
+  // works because the marker sits directly beneath its bar in the SAME row. A
+  // CROSS-person marker lives in the actor's row while the bar lives in the
+  // author's row, an unbounded number of rows away, so a fixed-height pseudo-element
+  // can never reach it. Instead, in focus mode ONLY, this read-only SVG draws a
+  // stem-styled line from each visible cross marker up/down to the focused PR's bar.
+  // It only READS vis's rendered DOM rects (never writes scrollTop / calls focus()),
+  // so it can't disturb the load-bearing scroll gate or any vis internal. The rAF
+  // ref coalesces the many repaint signals (vis `changed`, vertical scroll) into one
+  // paint per frame.
+  const connectorSvgRef = useRef<SVGSVGElement | null>(null);
+  const connectorRafRef = useRef<number | null>(null);
   // Popover depth mirrored onto the History API (0 closed / 1 popover open), the
   // window captured when the popover opened (restored on back-out), and a counter of
   // popstate events to swallow when we unwind history ourselves.
@@ -832,6 +845,121 @@ export function Timeline(): JSX.Element {
       applySelectGlow(ev);
     }
   }, [highlightEvent, applyExitGlow, applySelectGlow, applyCrossSeps]);
+
+  // Repaint the focus-mode cross-person connectors (see connectorSvgRef). Endpoints
+  // are real rendered DOM nodes, so reading their live rects handles re-clustering
+  // and deconflict-nudged timestamps for free — we draw where vis actually placed
+  // them, not where the data says. Pure read + SVG-path write; self-clears and bails
+  // out cheaply whenever a PR-isolation focus isn't active.
+  const drawCrossConnectors = useCallback(() => {
+    const svg = connectorSvgRef.current;
+    if (!svg) return;
+    const clear = (): void => {
+      if (svg.childElementCount) svg.replaceChildren();
+      svg.style.display = 'none';
+    };
+    const container = containerRef.current;
+    const prId = prFocusPrIdRef.current;
+    if (!prFocusActiveRef.current || prId == null || !container) {
+      clear();
+      return;
+    }
+    const center = container.querySelector<HTMLElement>('.vis-panel.vis-center');
+    const pr = prsByIdRef.current.get(prId);
+    if (!center || !pr) {
+      clear();
+      return;
+    }
+
+    // The focused PR's bar is the only SELECTED bar; scope to its author row so a
+    // stray selection elsewhere can't match, and fall back to the lone non-hidden
+    // bar in that row. Bail (clear) when it's virtualized off-screen.
+    const token = groupClassToken(prGroupId(pr));
+    const barEl =
+      container.querySelector<HTMLElement>(
+        `.vis-foreground .vis-group.${token} .vis-item.pr-bar.vis-selected`,
+      ) ??
+      container.querySelector<HTMLElement>(
+        `.vis-foreground .vis-group.${token} .vis-item.pr-bar:not(.pr-focus-hidden)`,
+      );
+    if (!barEl || barEl.offsetHeight === 0) {
+      clear();
+      return;
+    }
+
+    // Lay the overlay exactly over the center panel — its top-left becomes the
+    // coordinate origin, and the SVG's own overflow:hidden clips lines to the panel
+    // so they never paint over the label gutter or the time axis.
+    const wrap = svg.parentElement ?? container;
+    const wrapRect = wrap.getBoundingClientRect();
+    const centerRect = center.getBoundingClientRect();
+    svg.style.display = 'block';
+    svg.style.left = `${centerRect.left - wrapRect.left}px`;
+    svg.style.top = `${centerRect.top - wrapRect.top}px`;
+    svg.style.width = `${centerRect.width}px`;
+    svg.style.height = `${centerRect.height}px`;
+
+    const barRect = barEl.getBoundingClientRect();
+    const barTop = barRect.top - centerRect.top;
+    const barBottom = barRect.bottom - centerRect.top;
+    const barLeft = barRect.left - centerRect.left;
+    const barRight = barRect.right - centerRect.left;
+
+    const NS = 'http://www.w3.org/2000/svg';
+    const frag = document.createDocumentFragment();
+    // In focus, rebuildMarkers filtered events to this PR, so every rendered
+    // `.ev-cross` glyph belongs to it (own-work markers carry `.ev-own` + the CSS
+    // stem and are correctly excluded here).
+    const markers = container.querySelectorAll<HTMLElement>(
+      '.vis-foreground .vis-item.ev-cross',
+    );
+    for (const m of markers) {
+      if (m.offsetHeight === 0) continue; // virtualized off-screen — no endpoint
+      const glyph =
+        m.querySelector<HTMLElement>('.ev-marker-inner, .ev-cluster-inner') ?? m;
+      const gr = glyph.getBoundingClientRect();
+      const mx = gr.left + gr.width / 2 - centerRect.left;
+      const mTop = gr.top - centerRect.top;
+      const mBottom = gr.bottom - centerRect.top;
+      // Land the bar-side anchor ON the bar even when the marker's centre sits a hair
+      // past the bar's edge (a near-instant PR, or a deconflict nudge). Within the
+      // span — the common case — bx === mx, giving a clean vertical line like the stem.
+      const bx = Math.max(barLeft, Math.min(mx, barRight));
+      let y1: number;
+      let y2: number;
+      if (mTop >= barBottom) {
+        y1 = mTop; // marker below the bar → stem upward into the bar's bottom edge
+        y2 = barBottom;
+      } else if (mBottom <= barTop) {
+        y1 = mBottom; // marker above the bar → stem downward to the bar's top edge
+        y2 = barTop;
+      } else {
+        continue; // marker overlaps the bar vertically — no meaningful line
+      }
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute(
+        'd',
+        `M ${mx.toFixed(1)} ${y1.toFixed(1)} L ${bx.toFixed(1)} ${y2.toFixed(1)}`,
+      );
+      frag.appendChild(path);
+    }
+    svg.replaceChildren(frag);
+  }, []);
+
+  // Coalesce the many repaint signals (vis `changed` per redraw, native vertical
+  // scroll) into one connector paint per frame. Skip entirely when there's nothing
+  // to draw or clear, so the unfocused board pays only a couple of ref reads per
+  // vis redraw.
+  const scheduleConnectors = useCallback(() => {
+    const inFocus = prFocusActiveRef.current && prFocusPrIdRef.current != null;
+    const hasLines = (connectorSvgRef.current?.childElementCount ?? 0) > 0;
+    if (!inFocus && !hasLines) return;
+    if (connectorRafRef.current != null) return;
+    connectorRafRef.current = requestAnimationFrame(() => {
+      connectorRafRef.current = null;
+      drawCrossConnectors();
+    });
+  }, [drawCrossConnectors]);
 
   // Within a focused cross-user context, trim each kept row to just the bands
   // that belong to the interaction "actor commented on author's PR":
@@ -1966,10 +2094,23 @@ export function Timeline(): JSX.Element {
       relaneTimer = setTimeout(() => setLaneNonce((n) => n + 1), 160);
     });
 
+    // Repaint the focus-mode cross-person connectors whenever vis repaints (item
+    // changes, pan, zoom — `changed` fires after the DOM is repositioned) and on
+    // native vertical scroll, both coalesced to one rAF paint. The draw self-clears
+    // outside focus, so on the normal board this is a couple of ref reads per redraw.
+    timeline.on('changed', scheduleConnectors);
+    const vScroll = verticalScrollEl();
+    vScroll?.addEventListener('scroll', scheduleConnectors, { passive: true });
+
     timelineRef.current = timeline;
     return () => {
       if (reclusterTimer) clearTimeout(reclusterTimer);
       if (relaneTimer) clearTimeout(relaneTimer);
+      vScroll?.removeEventListener('scroll', scheduleConnectors);
+      if (connectorRafRef.current != null) {
+        cancelAnimationFrame(connectorRafRef.current);
+        connectorRafRef.current = null;
+      }
       timeline.destroy();
       timelineRef.current = null;
     };
@@ -1986,6 +2127,8 @@ export function Timeline(): JSX.Element {
     enterPrFocus,
     captureScrollAnchor,
     restoreScrollAnchor,
+    scheduleConnectors,
+    verticalScrollEl,
   ]);
 
   // Per-row collapse caret (Item 6). vis re-parses / re-appends label HTML on every
@@ -2886,6 +3029,15 @@ export function Timeline(): JSX.Element {
         </div>
       )}
       <div ref={containerRef} className="h-full w-full" />
+      {/* Focus-mode cross-person → PR-bar connectors. Read-only, pointer-events:none,
+          drawn (and sized over the center panel) only while a PR-isolation focus is
+          active; see drawCrossConnectors. */}
+      <svg
+        ref={connectorSvgRef}
+        className="tl-cross-connectors"
+        aria-hidden="true"
+        style={{ display: 'none' }}
+      />
       {popover && (
         <MarkerPopover
           state={popover}
