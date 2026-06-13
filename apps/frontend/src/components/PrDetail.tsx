@@ -284,8 +284,8 @@ function PrCommentsList({
     );
   }
 
-  // Newest first (the API returns them oldest-first by createdAt).
-  const comments = [...pr.comments].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // Oldest first — chronological reading order (matches the API's natural order).
+  const comments = [...pr.comments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
   return (
     <div className="space-y-2 px-3 pb-3">

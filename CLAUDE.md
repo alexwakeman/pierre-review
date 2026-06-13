@@ -448,7 +448,7 @@ Header carries **Show** + **Focus** links (drive the timeline). Three tabs:
 - **Overview** — `ChecksTab.tsx`: CI/checks, **Reviewers** (all who submitted a review,
   badged by latest state) above **Approvers** (latest decisive review = `approved`), then
   **Merged by**, **Requested** reviewers, labels, meta — then the PR **Summary** (markdown,
-  clamped to 3 lines, tall images hidden when collapsed) and **PR comments** (newest first),
+  clamped to 3 lines, tall images hidden when collapsed) and **PR comments** (oldest first),
   each with a "Show" link.
 - **Threads** — `ThreadList`/`ThreadView`: review threads grouped by file, **newest first**
   (files by most-recent thread; within a file by `createdAt` desc), with code anchors +

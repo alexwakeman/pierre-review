@@ -86,20 +86,22 @@ function OpenPrRow({
   pr,
   usersById,
   canReview,
+  onPick,
 }: {
   pr: InsightsOpenPr;
   usersById: ReturnType<typeof indexUsers>;
   canReview: boolean;
+  // Open this PR in the timeline's Focus mode (and close Insights).
+  onPick: (prId: number) => void;
 }): JSX.Element {
   const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
   return (
     <li className="flex items-center gap-2 px-2 py-1 text-xs hover:bg-gray-50 dark:hover:bg-gray-900/40">
-      <a
-        href={pr.githubUrl}
-        target="_blank"
-        rel="noreferrer noopener"
-        className="min-w-0 flex-1"
-        title={pr.title}
+      <button
+        type="button"
+        onClick={() => onPick(pr.prId)}
+        className="min-w-0 flex-1 text-left"
+        title={`Focus #${pr.number} on the timeline`}
       >
         <div className="flex items-center gap-1.5">
           <span className="shrink-0 text-gray-400">#{pr.number}</span>
@@ -121,7 +123,7 @@ function OpenPrRow({
           <span aria-hidden>·</span>
           <span className="shrink-0">opened {relativeTime(pr.openedAt)}</span>
         </div>
-      </a>
+      </button>
       {canReview && <ReviewButton prId={pr.prId} />}
     </li>
   );
@@ -133,12 +135,14 @@ function RepoCard({
   windows,
   showStale,
   canReview,
+  onPick,
 }: {
   repo: RepoInsights;
   usersById: ReturnType<typeof indexUsers>;
   windows: { merged: number; review: number; stall: number };
   showStale: boolean;
   canReview: boolean;
+  onPick: (prId: number) => void;
 }): JSX.Element {
   const [listOpen, setListOpen] = useState(false);
   const visiblePrs = showStale
@@ -245,6 +249,7 @@ function RepoCard({
                     pr={pr}
                     usersById={usersById}
                     canReview={canReview}
+                    onPick={onPick}
                   />
                 ))
               )}
@@ -269,6 +274,16 @@ export function InsightsModal({
   const usersById = useMemo(() => indexUsers(users), [users]);
   const [showStale, setShowStale] = useState(true);
   const qc = useQueryClient();
+  const focusPrOnTimeline = useFilters((s) => s.focusPrOnTimeline);
+
+  // Picking an open PR enters the timeline's sticky PR-isolation Focus for it (the
+  // same overlay the PR-detail "Focus" link / global search use) and closes Insights
+  // so the focused timeline is visible. Works for open PRs outside the loaded window:
+  // the Timeline consumer force-shows the bar from the global open-PRs set.
+  const onPick = (prId: number): void => {
+    focusPrOnTimeline(prId);
+    onClose();
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -357,6 +372,7 @@ export function InsightsModal({
               windows={windows}
               showStale={showStale}
               canReview={canReview}
+              onPick={onPick}
             />
           ))}
         </div>

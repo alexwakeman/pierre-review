@@ -57,7 +57,24 @@ export function TimelineSearch(): JSX.Element {
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    return allPrs.filter((p) => p.title.toLowerCase().includes(q)).slice(0, 30);
+    // Match by title OR by PR number — typing a number (with or without a leading
+    // '#') finds that PR. A purely-numeric query ranks the closest number matches
+    // first (exact, then prefix, then substring) so #24528 leads when you type 24528.
+    const numQ = q.replace(/^#/, '');
+    const numeric = numQ.length > 0 && /^\d+$/.test(numQ);
+    const matched = allPrs.filter(
+      (p) =>
+        p.title.toLowerCase().includes(q) ||
+        (numeric && String(p.number).includes(numQ)),
+    );
+    if (numeric) {
+      const rank = (p: TimelinePr): number => {
+        const n = String(p.number);
+        return n === numQ ? 0 : n.startsWith(numQ) ? 1 : n.includes(numQ) ? 2 : 3;
+      };
+      matched.sort((a, b) => rank(a) - rank(b));
+    }
+    return matched.slice(0, 30);
   }, [allPrs, query]);
 
   const showPanel = open && query.trim().length > 0;
@@ -112,7 +129,7 @@ export function TimelineSearch(): JSX.Element {
       <input
         type="search"
         value={query}
-        placeholder="Search PR titles…"
+        placeholder="Search PRs (title or number)…"
         onChange={(e) => {
           setQuery(e.target.value);
           setActive(-1); // the result set changed; drop the highlight
@@ -125,7 +142,7 @@ export function TimelineSearch(): JSX.Element {
         aria-controls="pr-search-results"
         aria-autocomplete="list"
         aria-activedescendant={activeId != null ? `pr-result-${activeId}` : undefined}
-        aria-label="Search PR titles"
+        aria-label="Search PRs by title or number"
         className="w-56 rounded border border-gray-300 bg-transparent px-2 py-0.5 text-xs focus:border-blue-500 focus:outline-none dark:border-gray-700"
       />
       {showPanel && (
