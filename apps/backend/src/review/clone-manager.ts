@@ -26,6 +26,28 @@ async function git(args: string[], cwd?: string): Promise<void> {
   });
 }
 
+// Serialise git PREP/CLEANUP (clone / fetch / worktree add+remove) PER REPO so
+// concurrent reviews of PRs in the same repo don't race on git's index / worktree
+// locks (`index.lock` exists, worktree-registry contention) once reviewConcurrency
+// > 1. A simple promise-chain mutex keyed by `owner/name`; only this short prep
+// phase serialises — the agent runs themselves (each in its own worktree) overlap.
+const repoLocks = new Map<string, Promise<unknown>>();
+async function withRepoLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = repoLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const next = new Promise<void>((r) => {
+    release = r;
+  });
+  // The map tail resolves when WE release, so the next caller queues behind us.
+  repoLocks.set(key, prev.then(() => next));
+  await prev.catch(() => {}); // our turn once the previous holder releases (ignore its error)
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
 /** Absolute path to a repo's long-lived partial clone under config.cloneDir. */
 function repoCloneDir(owner: string, name: string): string {
   return join(config.cloneDir, `${owner}__${name}`);
@@ -148,6 +170,36 @@ export async function removeWorktree(
   } catch {
     /* best-effort */
   }
+}
+
+/**
+ * Prepare a worktree for a review under the per-repo lock: ensure the clone, fetch
+ * the PR head, add the worktree. Serialised per repo so several concurrent reviews
+ * of the same repo can't collide on git locks; returns both the clone dir (for
+ * later cleanup) and the worktree path the agent runs in.
+ */
+export async function prepWorktree(
+  owner: string,
+  name: string,
+  prNumber: number,
+  sha: string,
+): Promise<{ repoCloneDir: string; worktreePath: string }> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await ensureClone(owner, name);
+    await fetchPrHead(dir, prNumber, sha);
+    const worktreePath = await addWorktree(dir, sha);
+    return { repoCloneDir: dir, worktreePath };
+  });
+}
+
+/** Tear down a per-run worktree under the per-repo lock (matches prepWorktree). */
+export async function removeWorktreeLocked(
+  owner: string,
+  name: string,
+  repoCloneDir: string,
+  worktreePath: string,
+): Promise<void> {
+  await withRepoLock(`${owner}/${name}`, () => removeWorktree(repoCloneDir, worktreePath));
 }
 
 /** Recursively sum file sizes and track the most-recent mtime under `dir`. */

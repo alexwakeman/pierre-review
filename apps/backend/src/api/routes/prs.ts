@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { MarkViewedBody } from '@pierre-review/shared';
-import { getPrDetail, markPrViewed } from '../../db/queries.js';
+import { getPrDetail, markAllViewed, markPrViewed } from '../../db/queries.js';
 import { hydratePrDetail } from '../../sync/hydrate-detail.js';
 import { accountIdOf } from '../plugins/auth.js';
 
@@ -21,7 +21,27 @@ const markViewedSchema = {
   },
 };
 
+const markAllViewedSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { repoIds: { type: 'array', items: { type: 'integer' } } },
+  },
+};
+
 export async function prRoutes(app: FastifyInstance): Promise<void> {
+  // Bulk "mark all seen": stamp every open PR (optionally scoped to repoIds) viewed
+  // at its head, clearing all new-since badges at once. Static path — no :id — so it
+  // doesn't collide with /api/prs/:id.
+  app.post('/api/prs/mark-all-viewed', { schema: markAllViewedSchema }, async (req) => {
+    const { repoIds } = (req.body ?? {}) as { repoIds?: number[] };
+    const count = await markAllViewed(
+      accountIdOf(req),
+      repoIds && repoIds.length > 0 ? repoIds : null,
+    );
+    return { status: 'ok', count };
+  });
+
   app.get('/api/prs/:id', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
     const accountId = accountIdOf(req);

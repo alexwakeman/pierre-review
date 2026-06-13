@@ -8,14 +8,23 @@ function isTypingTarget(el: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
 }
 
-// Global shortcuts: `/` focus filter, `j`/`k` cycle PRs, `esc` clear selection.
+// Global shortcuts: `/` focus filter, `j`/`k` cycle PRs, `m` toggle My Turn,
+// `i` open Insights, `esc` clear selection / exit focus.
 export function useKeyboard(): void {
   const { data } = useTimeline();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const { selectedPrId, selectPr, clearSelection, focusActive, exitFocus } =
-        useFilters.getState();
+      const {
+        selectedPrId,
+        selectPr,
+        clearSelection,
+        focusActive,
+        exitFocus,
+        myTurnOnly,
+        setMyTurnOnly,
+        setInsightsOpen,
+      } = useFilters.getState();
 
       if (e.key === 'Escape') {
         if (isTypingTarget(e.target)) {
@@ -36,6 +45,22 @@ export function useKeyboard(): void {
       if (e.key === '/') {
         e.preventDefault();
         document.getElementById('add-repo-input')?.focus();
+        return;
+      }
+
+      // Toggle the My Turn isolate filter — but not in focus mode (the lens owns the
+      // board; mirrors the disabled header toggle). Clears selection when turning on.
+      if (e.key === 'm') {
+        if (focusActive) return;
+        const next = !myTurnOnly;
+        setMyTurnOnly(next);
+        if (next) clearSelection();
+        return;
+      }
+
+      // Open the Insights panel.
+      if (e.key === 'i') {
+        setInsightsOpen(true);
         return;
       }
 

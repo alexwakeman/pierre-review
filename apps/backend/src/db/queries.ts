@@ -37,9 +37,12 @@ import type {
   PrDetail,
   PrFileChange,
   PrState,
+  InsightsOpenPr,
+  InsightsResponse,
   PrStatus,
   ReasonTag,
   Repo,
+  RepoInsights,
   RepoMergers,
   ReviewDetail,
   ReviewState,
@@ -54,6 +57,7 @@ import type {
   ClaudeFinding,
   ClaudeReviewSummary,
   ClaudeReviewListItem,
+  ClaudeReviewToAction,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -590,6 +594,172 @@ export async function getOpenPrs(filters: OpenPrsFilters): Promise<TimelinePr[]>
   });
 }
 
+// ---- insights (per-repo sprint/team stats) ----
+
+export interface InsightsFilters {
+  accountId: number;
+  repoIds: number[] | null;
+}
+
+const INSIGHTS_MERGED_WINDOW_DAYS = 7;
+const INSIGHTS_REVIEW_WINDOW_DAYS = 30;
+
+function median(xs: number[]): number | null {
+  if (xs.length === 0) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
+}
+
+/**
+ * Per-repo snapshot for the Insights panel. Counts (open/draft/stalled) are current
+ * state; merged is a 7-day window; time-to-first-review is a median over PRs opened
+ * in the last 30 days that got a review. Per-repo only — no team aggregation yet.
+ * Scoped to the account; `repoIds` narrows to the watched-repo selection.
+ */
+export async function getInsights(filters: InsightsFilters): Promise<InsightsResponse> {
+  const { accountId, repoIds } = filters;
+  const now = Date.now();
+  const mergedCutoff = new Date(now - INSIGHTS_MERGED_WINDOW_DAYS * 86_400_000);
+  const reviewCutoff = new Date(now - INSIGHTS_REVIEW_WINDOW_DAYS * 86_400_000);
+  const base: Omit<InsightsResponse, 'repos'> = {
+    mergedWindowDays: INSIGHTS_MERGED_WINDOW_DAYS,
+    reviewWindowDays: INSIGHTS_REVIEW_WINDOW_DAYS,
+    stallThresholdDays: config.stallThresholdDays,
+    generatedAt: new Date().toISOString(),
+  };
+
+  const reposAll = await listRepos(accountId);
+  const repos = repoIds ? reposAll.filter((r) => repoIds.includes(r.id)) : reposAll;
+  if (repos.length === 0) return { ...base, repos: [] };
+  const repoIdSet = new Set(repos.map((r) => r.id));
+
+  // Open PRs for these repos (one query → open/draft/stalled/oldest-unreviewed).
+  const openConds = [eq(pullRequests.accountId, accountId), eq(pullRequests.state, 'open')];
+  if (repoIds) openConds.push(inArray(pullRequests.repoId, repoIds));
+  const openRows = await db.select().from(pullRequests).where(and(...openConds)).execute();
+  const counts = await buildThreadCounts(openRows.map((p) => p.id));
+
+  // Merged in the window (count per repo).
+  const mergedConds = [
+    eq(pullRequests.accountId, accountId),
+    eq(pullRequests.state, 'merged'),
+    gte(pullRequests.mergedAt, mergedCutoff),
+  ];
+  if (repoIds) mergedConds.push(inArray(pullRequests.repoId, repoIds));
+  const mergedRows = await db
+    .select({ repoId: pullRequests.repoId })
+    .from(pullRequests)
+    .where(and(...mergedConds))
+    .execute();
+  const mergedByRepo = new Map<number, number>();
+  for (const r of mergedRows) mergedByRepo.set(r.repoId, (mergedByRepo.get(r.repoId) ?? 0) + 1);
+
+  // Time-to-first-review samples: PRs opened in the review window with a first review.
+  const ttfrConds = [
+    eq(pullRequests.accountId, accountId),
+    gte(pullRequests.openedAt, reviewCutoff),
+    isNotNull(pullRequests.firstReviewAt),
+  ];
+  if (repoIds) ttfrConds.push(inArray(pullRequests.repoId, repoIds));
+  const ttfrRows = await db
+    .select({
+      repoId: pullRequests.repoId,
+      openedAt: pullRequests.openedAt,
+      firstReviewAt: pullRequests.firstReviewAt,
+    })
+    .from(pullRequests)
+    .where(and(...ttfrConds))
+    .execute();
+  const ttfrByRepo = new Map<number, number[]>();
+  for (const r of ttfrRows) {
+    if (!r.firstReviewAt) continue;
+    const hrs = (r.firstReviewAt.getTime() - r.openedAt.getTime()) / 3_600_000;
+    if (hrs < 0) continue;
+    const arr = ttfrByRepo.get(r.repoId) ?? [];
+    arr.push(hrs);
+    ttfrByRepo.set(r.repoId, arr);
+  }
+
+  // Pending review-requests per reviewer, for OPEN PRs only (the review-load signal).
+  const rrRows = await db
+    .select({ repoId: pullRequests.repoId, userId: schema.reviewRequests.userId })
+    .from(schema.reviewRequests)
+    .innerJoin(pullRequests, eq(pullRequests.id, schema.reviewRequests.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.state, 'open'),
+        isNotNull(schema.reviewRequests.userId),
+      ),
+    )
+    .execute();
+  const reviewLoadByRepo = new Map<number, Map<number, number>>();
+  for (const r of rrRows) {
+    if (r.userId == null || !repoIdSet.has(r.repoId)) continue;
+    const m = reviewLoadByRepo.get(r.repoId) ?? new Map<number, number>();
+    m.set(r.userId, (m.get(r.userId) ?? 0) + 1);
+    reviewLoadByRepo.set(r.repoId, m);
+  }
+
+  const OPEN_LIST_CAP = 100; // bound the payload for a pathologically busy repo
+  const repoInsights: RepoInsights[] = repos.map((repo) => {
+    const repoOpen = openRows.filter((p) => p.repoId === repo.id);
+    const [owner, name] = repo.fullName.split('/');
+    const stalledOf = (p: (typeof repoOpen)[number]): boolean =>
+      isStalled(
+        { state: p.state as PrState, lastCommitAt: p.lastCommitAt },
+        counts.get(p.id) ?? emptyCounts(),
+      );
+    const unreviewed = repoOpen
+      .filter((p) => !p.isDraft && p.firstReviewAt == null)
+      .sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime());
+    const oldest = unreviewed[0];
+    // The full open-PR list (oldest first), independent of timeline filters; the
+    // client toggles stale visibility off the per-row flag.
+    const openPrList: InsightsOpenPr[] = [...repoOpen]
+      .sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime())
+      .slice(0, OPEN_LIST_CAP)
+      .map((p) => ({
+        prId: p.id,
+        number: p.number,
+        title: p.title,
+        authorId: p.authorId,
+        isDraft: p.isDraft,
+        isStalled: stalledOf(p),
+        openedAt: p.openedAt.toISOString(),
+        githubUrl: `https://github.com/${owner}/${name}/pull/${p.number}`,
+      }));
+    const med = median(ttfrByRepo.get(repo.id) ?? []);
+    const reviewLoad = [...(reviewLoadByRepo.get(repo.id) ?? new Map<number, number>()).entries()]
+      .map(([userId, pending]) => ({ userId, pending }))
+      .sort((a, b) => b.pending - a.pending)
+      .slice(0, 5);
+    return {
+      repoId: repo.id,
+      repoFullName: repo.fullName,
+      openPrs: repoOpen.filter((p) => !p.isDraft).length,
+      draftPrs: repoOpen.filter((p) => p.isDraft).length,
+      mergedLast7d: mergedByRepo.get(repo.id) ?? 0,
+      stalledPrs: repoOpen.filter(stalledOf).length,
+      medianHoursToFirstReview: med == null ? null : Math.round(med * 10) / 10,
+      oldestUnreviewed: oldest
+        ? {
+            prId: oldest.id,
+            number: oldest.number,
+            title: oldest.title,
+            openedAt: oldest.openedAt.toISOString(),
+            githubUrl: `https://github.com/${owner}/${name}/pull/${oldest.number}`,
+          }
+        : null,
+      reviewLoad,
+      openPrList,
+    };
+  });
+
+  return { ...base, repos: repoInsights };
+}
+
 // ---- merge-rights inference ----
 
 // Distinct users who have merged a PR INTO THE DEFAULT BRANCH per repo (across
@@ -660,6 +830,39 @@ export async function markPrViewed(
     })
     .execute();
   return true;
+}
+
+// Mark every currently-open PR (optionally repo-scoped) viewed at its head — the
+// bulk "mark all seen" that clears all new-since badges at once. Account-scoped;
+// returns how many PRs were stamped. Closed/merged PRs carry no new-since badge,
+// so open is the set that matters. One transaction, one upsert per PR (portable
+// across dialects; the open-PR set is bounded in practice).
+export async function markAllViewed(
+  accountId: number,
+  repoIds: number[] | null,
+): Promise<number> {
+  const conds = [eq(pullRequests.accountId, accountId), eq(pullRequests.state, 'open')];
+  if (repoIds) conds.push(inArray(pullRequests.repoId, repoIds));
+  const rows = await db
+    .select({ id: pullRequests.id, headSha: pullRequests.headSha })
+    .from(pullRequests)
+    .where(and(...conds))
+    .execute();
+  if (rows.length === 0) return 0;
+  const now = new Date();
+  await runTransaction(async (tx) => {
+    for (const r of rows) {
+      await tx
+        .insert(prViews)
+        .values({ prId: r.id, lastViewedSha: r.headSha ?? null, lastViewedAt: now })
+        .onConflictDoUpdate({
+          target: prViews.prId,
+          set: { lastViewedSha: r.headSha ?? null, lastViewedAt: now },
+        })
+        .execute();
+    }
+  });
+  return rows.length;
 }
 
 // ---- my turn ----
@@ -880,6 +1083,7 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
     awaitingReview: [],
     yourPrs: [],
     threadsAwaiting: [],
+    claudeReviewsToAction: [],
     users: [],
   };
   if (localUserId == null) return empty;
@@ -978,6 +1182,11 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
     if (ta.lastReplyAuthorId != null) referencedUsers.add(ta.lastReplyAuthorId);
   }
 
+  // Completed-but-unactioned Claude reviews (local-only feature; empty otherwise).
+  const claudeReviewsToAction = config.claudeReviewEnabled
+    ? await getUnactionedClaudeReviews(accountId)
+    : [];
+
   const users =
     referencedUsers.size > 0
       ? (
@@ -989,7 +1198,7 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
         ).map(mapUser)
       : [];
 
-  return { awaitingReview, yourPrs, threadsAwaiting, users };
+  return { awaitingReview, yourPrs, threadsAwaiting, claudeReviewsToAction, users };
 }
 
 async function countOtherReviewers(
@@ -1612,6 +1821,61 @@ export async function listAllClaudeReviews(
     });
   }
   return items;
+}
+
+// Completed Claude reviews on OPEN PRs that haven't been actioned: each PR's
+// MOST-RECENT succeeded run, kept only when it was never posted (postedAt null).
+// Account-scoped. Feeds the My Turn "Claude reviews to action" section so finished
+// reviews don't fall through the cracks.
+export async function getUnactionedClaudeReviews(
+  accountId: number,
+): Promise<ClaudeReviewToAction[]> {
+  const rows = await db
+    .select({
+      reviewId: claudeReviews.id,
+      prId: claudeReviews.prId,
+      owner: repos.owner,
+      name: repos.name,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      verdict: claudeReviews.verdict,
+      finishedAt: claudeReviews.finishedAt,
+      postedAt: claudeReviews.postedAt,
+      reviewHead: claudeReviews.headSha,
+      prHead: pullRequests.headSha,
+    })
+    .from(claudeReviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(
+      and(
+        eq(repos.accountId, accountId),
+        eq(claudeReviews.status, 'succeeded'),
+        eq(pullRequests.state, 'open'),
+      ),
+    )
+    .orderBy(desc(claudeReviews.finishedAt), desc(claudeReviews.createdAt))
+    .execute();
+
+  const seen = new Set<number>(); // most-recent succeeded run per PR only
+  const out: ClaudeReviewToAction[] = [];
+  for (const r of rows) {
+    if (seen.has(r.prId)) continue;
+    seen.add(r.prId);
+    if (r.postedAt != null) continue; // that latest run was already posted → actioned
+    out.push({
+      reviewId: r.reviewId,
+      prId: r.prId,
+      repoFullName: `${r.owner}/${r.name}`,
+      prNumber: r.prNumber,
+      prTitle: r.prTitle,
+      verdict: r.verdict,
+      finishedAt: iso(r.finishedAt),
+      headStale: r.reviewHead !== r.prHead,
+      githubUrl: `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}`,
+    });
+  }
+  return out;
 }
 
 // Resolve a run to its repo/PR coordinates for posting. Returns the raw run row

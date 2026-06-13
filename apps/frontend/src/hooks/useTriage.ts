@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type {
   DismissedMyTurnResponse,
+  InsightsResponse,
   MeResponse,
   MyTurnResponse,
   OpenPrsResponse,
@@ -37,6 +38,20 @@ export function useMe() {
 
 export function useMyTurn() {
   return useQuery<MyTurnResponse>({ queryKey: ['my-turn'], queryFn: api.myTurn });
+}
+
+// Per-repo Insights stats. Respects the active repo filter (other filters don't
+// apply — insights are a current-state snapshot). Only fetched while the panel is
+// open (`enabled`), and kept fresh-ish on reopen.
+export function useInsights(enabled: boolean) {
+  const search = useFilters((s) =>
+    s.repoIds && s.repoIds.length > 0 ? `repoIds=${s.repoIds.join(',')}` : '',
+  );
+  return useQuery<InsightsResponse>({
+    queryKey: ['insights', search],
+    queryFn: () => api.insights(search),
+    enabled,
+  });
 }
 
 // The "Done" tab — completed (dismissed) entries, past 90 days. Only fetched when

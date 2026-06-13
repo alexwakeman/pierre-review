@@ -17,11 +17,9 @@ import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
 import { applyUserAnthropicKey } from './local-settings.js';
 import {
-  addWorktree,
   cleanupCloneCache,
-  ensureClone,
-  fetchPrHead,
-  removeWorktree,
+  prepWorktree,
+  removeWorktreeLocked,
 } from './clone-manager.js';
 import {
   buildUserPrompt,
@@ -156,9 +154,14 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
     let maxTurns: number;
     if (mode === 'worktree') {
       onProgress({ phase: 'cloning', reviewMode: mode });
-      repoCloneDir = await ensureClone(args.owner, args.name);
-      await fetchPrHead(repoCloneDir, args.prNumber, args.headSha);
-      worktreePath = await addWorktree(repoCloneDir, args.headSha);
+      // Clone/fetch/worktree-add run under a per-repo lock (clone-manager) so several
+      // concurrent reviews of the same repo can't race on git locks.
+      ({ repoCloneDir, worktreePath } = await prepWorktree(
+        args.owner,
+        args.name,
+        args.prNumber,
+        args.headSha,
+      ));
       cwd = worktreePath;
       allowedTools = WORKTREE_TOOLS;
       maxTurns = config.reviewMaxTurns;
@@ -322,7 +325,9 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
   } finally {
     restoreEnv?.();
     if (repoCloneDir && worktreePath) {
-      await removeWorktree(repoCloneDir, worktreePath).catch(() => {});
+      await removeWorktreeLocked(args.owner, args.name, repoCloneDir, worktreePath).catch(
+        () => {},
+      );
     }
     // Diff-only runs use a throwaway cwd — remove it (best-effort).
     if (tempCwd) {

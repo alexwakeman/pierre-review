@@ -111,6 +111,9 @@ export interface FilterState {
   stripCollapsed: boolean;
   stripFilter: StripFilter;
 
+  // Insights panel (header button / `i`): transient UI flag, not URL-synced.
+  insightsOpen: boolean;
+
   // PR-title search box (App.tsx). Sticky: persists across input blur and PR
   // selection so re-focusing re-shows the same results. Store-only (NOT URL-synced
   // — transient per-session intent; keeps shared URLs clean). Client-side filter
@@ -249,6 +252,7 @@ export interface FilterState {
   bumpClaudeReviewKickoff: () => void;
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
+  setInsightsOpen: (v: boolean) => void;
   setSearchQuery: (q: string) => void;
   toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
@@ -363,6 +367,7 @@ function freshDefaults(): FilterData {
     commentFocus: null,
     claudeTabFocus: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
+    insightsOpen: false,
     expandedFileGroups: [],
     collapsedFileGroups: [],
     expandedDiffHunks: [],
@@ -490,6 +495,7 @@ export const useFilters = create<FilterState>((set, get) => ({
     set((s) => ({ claudeReviewKickoff: s.claudeReviewKickoff + 1 })),
   setStripCollapsed: (v) => set({ stripCollapsed: v }),
   setStripFilter: (f) => set({ stripFilter: f }),
+  setInsightsOpen: (v) => set({ insightsOpen: v }),
   setSearchQuery: (q) => set({ searchQuery: q }),
   toggleFileGroup: (path, defaultExpanded) =>
     set((s) => {

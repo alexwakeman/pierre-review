@@ -1,5 +1,16 @@
 import type { ReactNode } from 'react';
 
+// Colour the relative time by how long the item has been waiting, so urgency is
+// visible at a glance: neutral under a day, amber past a day, red (emphasised) past
+// three. Drives the aging indicator on My Turn rows.
+function agingToneClass(iso: string): string {
+  const days = (Date.now() - Date.parse(iso)) / 86_400_000;
+  if (Number.isNaN(days)) return 'text-gray-400';
+  if (days >= 3) return 'font-medium text-red-600 dark:text-red-400';
+  if (days >= 1) return 'text-amber-600 dark:text-amber-400';
+  return 'text-gray-400';
+}
+
 // Shared layout for one My Turn entry (active or completed): a prominent action
 // button on the LEFT (Done / Seen / To do), the content to its right with the main
 // text emphasised over repo/file metadata, and the relative time beneath it.
@@ -10,6 +21,7 @@ export function MyTurnRow({
   actionTitle,
   actionPending = false,
   time,
+  urgencyTs,
   title,
   meta,
   sub,
@@ -21,6 +33,10 @@ export function MyTurnRow({
   actionPending?: boolean;
   // Relative time string, shown under the content.
   time: string;
+  // When set, the time is the "waiting since" instant: it's coloured by age (amber
+  // past a day, red past three) so a stale item reads as urgent. Omit for items
+  // where age isn't the signal (e.g. your-PR new activity).
+  urgencyTs?: string;
   // Prominent main content (PR title / thread excerpt).
   title: ReactNode;
   // Dim metadata under the title (repo #num · file).
@@ -53,7 +69,11 @@ export function MyTurnRow({
           )}
           {sub != null && <div className="mt-0.5 truncate text-[11px]">{sub}</div>}
         </button>
-        <div className="mt-0.5 text-[11px] text-gray-400">{time}</div>
+        <div
+          className={`mt-0.5 text-[11px] ${urgencyTs ? agingToneClass(urgencyTs) : 'text-gray-400'}`}
+        >
+          {time}
+        </div>
       </div>
     </li>
   );

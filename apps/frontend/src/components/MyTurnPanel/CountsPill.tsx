@@ -45,11 +45,25 @@ export function CountsPill(): JSX.Element | null {
     >
       <span>My Turn</span>
       <span className="flex items-center gap-1 font-normal tabular-nums">
-        <span className="text-blue-500">{c.awaitingReview}</span>
+        <span className="text-blue-500" title="Awaiting your review">
+          {c.awaitingReview}
+        </span>
         <span className="text-gray-400">·</span>
-        <span className="text-green-500">{c.yourPrsActivity}</span>
+        <span className="text-green-500" title="Your PRs with new activity">
+          {c.yourPrsActivity}
+        </span>
         <span className="text-gray-400">·</span>
-        <span className="text-amber-500">{c.threadsAwaiting}</span>
+        <span className="text-amber-500" title="Threads awaiting you">
+          {c.threadsAwaiting}
+        </span>
+        {c.claudeReviewsToAction > 0 && (
+          <>
+            <span className="text-gray-400">·</span>
+            <span className="text-purple-500" title="Claude reviews to action">
+              {c.claudeReviewsToAction}
+            </span>
+          </>
+        )}
       </span>
     </button>
   );

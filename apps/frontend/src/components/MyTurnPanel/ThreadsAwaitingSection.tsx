@@ -42,6 +42,7 @@ export function ThreadsAwaitingSection({
               actionTitle="Done — reappears on a newer reply"
               actionPending={dismiss.isPending}
               time={relativeTime(it.lastReplyAt)}
+              urgencyTs={it.lastReplyAt}
               title={`“${it.lastReplyExcerpt}”`}
               meta={
                 <>

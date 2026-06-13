@@ -32,6 +32,7 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
         awaitingReview: myTurn.awaitingReview.length,
         yourPrsActivity: myTurn.yourPrs.length,
         threadsAwaiting: myTurn.threadsAwaiting.length,
+        claudeReviewsToAction: myTurn.claudeReviewsToAction.length,
       },
       claudeReviewEnabled: config.claudeReviewEnabled,
       deploymentMode: config.deploymentMode,

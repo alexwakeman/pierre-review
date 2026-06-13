@@ -8,6 +8,7 @@ import { useFilters, type RangePreset } from '../store/filters.js';
 import { EventSelectPanel } from './EventSelectPanel.js';
 import { RepoSearch } from './RepoSearch.js';
 import { RepoSelectPanel } from './RepoSelectPanel.js';
+import { SavedViews } from './SavedViews.js';
 import { StatusSelectPanel } from './StatusSelectPanel.js';
 import { ThreadStateSelectPanel } from './ThreadStateSelectPanel.js';
 import { UserSelectPanel, type MemberSection } from './UserSelectPanel.js';
@@ -390,6 +391,7 @@ export function FilterBar(): JSX.Element {
             </span>
           </button>
         )}
+        <SavedViews disabled={f.focusActive} />
         <button
           type="button"
           onClick={() => f.resetAllFilters()}

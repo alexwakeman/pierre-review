@@ -14,6 +14,7 @@ import type {
   DismissedMyTurnResponse,
   MyTurnDismissKind,
   MyTurnResponse,
+  InsightsResponse,
   OpenPrsResponse,
   PostCommentResult,
   PostReviewPreview,
@@ -109,6 +110,8 @@ export const api = {
     get<TimelineResponse>(`/api/timeline${search ? `?${search}` : ''}`),
   openPrs: (search: string) =>
     get<OpenPrsResponse>(`/api/open-prs${search ? `?${search}` : ''}`),
+  insights: (search: string) =>
+    get<InsightsResponse>(`/api/insights${search ? `?${search}` : ''}`),
   pr: (id: number) => get<PrDetail>(`/api/prs/${id}`),
   thread: (id: number) => get<ThreadDetail>(`/api/threads/${id}`),
 
@@ -130,6 +133,11 @@ export const api = {
     fetch(`/api/prs/${id}/mark-viewed`, jsonBody('POST', sha ? { sha } : {})).then(
       (r) => handle<{ status: string }>(r),
     ),
+  markAllViewed: (repoIds?: number[]) =>
+    fetch(
+      '/api/prs/mark-all-viewed',
+      jsonBody('POST', repoIds && repoIds.length > 0 ? { repoIds } : {}),
+    ).then((r) => handle<{ status: string; count: number }>(r)),
   dismissPr: (id: number) =>
     fetch(`/api/prs/${id}/dismiss`, jsonBody('POST')).then((r) =>
       handle<{ status: string }>(r),

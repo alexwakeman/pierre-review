@@ -255,6 +255,9 @@ export interface MyTurnCounts {
   awaitingReview: number;
   yourPrsActivity: number;
   threadsAwaiting: number;
+  // Completed Claude reviews not yet actioned (no comments/review posted). Always 0
+  // when Claude Review is disabled (cloud / flag off).
+  claudeReviewsToAction: number;
 }
 
 export interface MeResponse {
@@ -310,6 +313,71 @@ export interface RepoMergers {
 }
 
 export type MergersResponse = RepoMergers[];
+
+// ---- insights (per-repo team/sprint stats) ----
+
+// Open review-requests still pending for one reviewer in a repo — the review-load
+// signal that surfaces a bottleneck reviewer.
+export interface RepoReviewLoad {
+  userId: number;
+  pending: number;
+}
+
+// One open PR in the Insights per-repo list. Independent of the timeline filters
+// (the panel has its own Stale toggle), so isStalled is carried per row.
+export interface InsightsOpenPr {
+  prId: number;
+  number: number;
+  title: string;
+  authorId: number | null;
+  isDraft: boolean;
+  isStalled: boolean;
+  openedAt: string;
+  githubUrl: string;
+}
+
+// A per-repo snapshot for the Insights panel. Counts are current state; the
+// time-windowed figures carry their window in InsightsResponse. Per repo only
+// (no cross-repo/team aggregation yet).
+export interface RepoInsights {
+  repoId: number;
+  repoFullName: string;
+  // Currently-open PRs, split by draft.
+  openPrs: number;
+  draftPrs: number;
+  // PRs merged within InsightsResponse.mergedWindowDays.
+  mergedLast7d: number;
+  // Open PRs flagged stalled (open threads + no recent commit; see stallThresholdDays).
+  stalledPrs: number;
+  // Median hours from open → first review, over PRs opened within reviewWindowDays
+  // that have received a review. null when there's no sample.
+  medianHoursToFirstReview: number | null;
+  // The oldest currently-open, non-draft PR with no review yet — the thing most at
+  // risk of falling through the cracks. null when every open PR has a review.
+  oldestUnreviewed: {
+    prId: number;
+    number: number;
+    title: string;
+    openedAt: string;
+    githubUrl: string;
+  } | null;
+  // Reviewers with the most pending review-requests (top few, desc). userId resolves
+  // against the global user list (GET /api/users).
+  reviewLoad: RepoReviewLoad[];
+  // ALL currently-open PRs in this repo (oldest first; capped), independent of the
+  // timeline filters — the collapsible per-repo list with its own Stale toggle. Each
+  // carries isStalled so the client can filter without another round-trip.
+  openPrList: InsightsOpenPr[];
+}
+
+export interface InsightsResponse {
+  repos: RepoInsights[];
+  // Window descriptors so the UI copy stays in sync with the server's windows.
+  mergedWindowDays: number;
+  reviewWindowDays: number;
+  stallThresholdDays: number;
+  generatedAt: string;
+}
 
 // Lean event shape for the timeline. No bodies.
 export interface TimelineEvent {
@@ -487,10 +555,27 @@ export interface ThreadAwaitingItem {
   githubUrl: string;
 }
 
+// A completed Claude review that hasn't been actioned yet — no GitHub review/
+// comments posted from it. Surfaced in My Turn so finished reviews don't get
+// forgotten. headStale = the reviewed head no longer matches the PR's head.
+export interface ClaudeReviewToAction {
+  reviewId: number;
+  prId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  verdict: ClaudeReviewVerdict | null;
+  finishedAt: string | null;
+  headStale: boolean;
+  githubUrl: string;
+}
+
 export interface MyTurnResponse {
   awaitingReview: AwaitingReviewItem[];
   yourPrs: YourPrActivityItem[];
   threadsAwaiting: ThreadAwaitingItem[];
+  // Completed Claude reviews awaiting action (empty when Claude Review is disabled).
+  claudeReviewsToAction: ClaudeReviewToAction[];
   // Users referenced by any row, for client-side lookup.
   users: User[];
 }

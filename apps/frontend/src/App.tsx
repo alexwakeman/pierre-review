@@ -7,6 +7,8 @@ import { CountsPill } from './components/MyTurnPanel/CountsPill.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
 import { TimelineSearch } from './components/TimelineSearch.js';
+import { InsightsModal } from './components/InsightsModal.js';
+import { WelcomeBackBanner } from './components/WelcomeBackBanner.js';
 import { HelpModal } from './components/HelpModal.js';
 import { ClaudeReviewsModal } from './components/ClaudeReviewsModal.js';
 import { SignInGate } from './components/SignInGate.js';
@@ -14,6 +16,8 @@ import { useUrlState } from './hooks/useUrlState.js';
 import { useLocalStorage } from './hooks/useLocalStorage.js';
 import { useKeyboard } from './hooks/useKeyboard.js';
 import { useDetailCacheReconciler } from './hooks/useDetailCache.js';
+import { useMyTurnNotifications } from './hooks/useMyTurnNotifications.js';
+import { useNotificationPref } from './hooks/useNotificationPref.js';
 import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
 import { ApiError, api } from './api/client.js';
@@ -46,6 +50,25 @@ export default function App(): JSX.Element {
   const [helpOpen, setHelpOpen] = useState(false);
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
+  // Opt-in browser notifications for new My Turn items + completed Claude reviews.
+  // Shared pref (the Claude-review banner reads it too); the watcher fires only
+  // while granted + enabled.
+  const [notifEnabled, setNotifEnabled] = useNotificationPref();
+  const notifSupported = typeof window !== 'undefined' && 'Notification' in window;
+  useMyTurnNotifications(notifEnabled && notifSupported);
+  const toggleNotifs = (): void => {
+    if (!notifSupported) return;
+    if (notifEnabled) {
+      setNotifEnabled(false);
+      return;
+    }
+    if (Notification.permission === 'granted') {
+      setNotifEnabled(true);
+    } else if (Notification.permission !== 'denied') {
+      void Notification.requestPermission().then((p) => setNotifEnabled(p === 'granted'));
+    }
+  };
+
   const isCloud = me.data?.deploymentMode === 'cloud';
   // The signed-in GitHub user (local: synthesized from `gh api user`; cloud: the
   // OAuth user). Can be null even when authenticated (e.g. local + offline), so
@@ -60,6 +83,8 @@ export default function App(): JSX.Element {
   // exit. The on-screen exit control (the "Focus mode" pill) now lives in the
   // FilterBar, next to "Clear filters"; Esc and the browser Back button still work.
   const focusActive = useFilters((s) => s.focusActive);
+  const insightsOpen = useFilters((s) => s.insightsOpen);
+  const setInsightsOpen = useFilters((s) => s.setInsightsOpen);
 
   // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
   // the dragged height is remembered across reloads. During a drag we set the
@@ -162,6 +187,63 @@ export default function App(): JSX.Element {
         <div className="ml-auto flex items-center gap-3">
           <TimelineSearch />
           <SyncStatus />
+          <button
+            type="button"
+            onClick={() => setInsightsOpen(true)}
+            className="flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs font-semibold hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+            title="Insights — per-repo PR stats (open / merged / stalled / review load)"
+            aria-label="Insights"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="13"
+              height="13"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="18" y1="20" x2="18" y2="10" />
+              <line x1="12" y1="20" x2="12" y2="4" />
+              <line x1="6" y1="20" x2="6" y2="14" />
+            </svg>
+            Insights
+          </button>
+          {notifSupported && (
+            <button
+              type="button"
+              onClick={toggleNotifs}
+              aria-pressed={notifEnabled}
+              className={`rounded border px-2 py-0.5 text-xs hover:border-gray-400 dark:hover:border-gray-500 ${
+                notifEnabled
+                  ? 'border-blue-400 text-blue-600 dark:border-blue-600 dark:text-blue-400'
+                  : 'border-gray-300 dark:border-gray-700'
+              }`}
+              title={
+                notifEnabled
+                  ? 'Notifications on — alerts when a new item enters your My Turn. Click to turn off.'
+                  : 'Turn on browser notifications for new My Turn items'
+              }
+              aria-label="Toggle My Turn notifications"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                fill={notifEnabled ? 'currentColor' : 'none'}
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+            </button>
+          )}
           {claudeReviewEnabled && (
             <button
               type="button"
@@ -234,6 +316,7 @@ export default function App(): JSX.Element {
         </div>
       </header>
 
+      <InsightsModal open={insightsOpen} onClose={() => setInsightsOpen(false)} />
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
       {/* Only mount when the feature is enabled — the trigger button is already
           gated, and this ensures the modal never fetches /api/claude-reviews
@@ -245,6 +328,7 @@ export default function App(): JSX.Element {
         />
       )}
 
+      <WelcomeBackBanner />
       <FilterBar />
       <OpenPrsStrip />
 

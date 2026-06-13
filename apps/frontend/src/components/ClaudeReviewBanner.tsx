@@ -2,8 +2,47 @@ import { useEffect, useRef, useState } from 'react';
 import type { ClaudeReviewPhase } from '@pierre-review/shared';
 import { useActiveClaudeReviews } from '../hooks/useClaudeReview.js';
 import { useMe } from '../hooks/useTriage.js';
+import { useNotificationPref } from '../hooks/useNotificationPref.js';
 import { useFilters } from '../store/filters.js';
 import { playReviewComplete } from '../lib/sound.js';
+
+interface CompletedCoord {
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+}
+
+// Fire a browser notification when one or more Claude reviews finish (gated on the
+// shared notifications pref + permission). Mirrors the My Turn notification style.
+function notifyReviewsComplete(done: CompletedCoord[]): void {
+  if (
+    done.length === 0 ||
+    typeof Notification === 'undefined' ||
+    Notification.permission !== 'granted'
+  ) {
+    return;
+  }
+  const title =
+    done.length === 1
+      ? 'Claude review ready'
+      : `${done.length} Claude reviews ready`;
+  const body =
+    done.length === 1
+      ? `${done[0]!.repoFullName} #${done[0]!.prNumber}`
+      : done
+          .slice(0, 3)
+          .map((d) => `${d.repoFullName} #${d.prNumber}`)
+          .join(' · ');
+  try {
+    const n = new Notification(title, { body, tag: 'pierre-claude-review' });
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+  } catch {
+    /* construction can throw on some platforms — non-fatal */
+  }
+}
 
 // A tracked review for the banner. We keep finished runs around (done:true) until
 // the user dismisses them, so a review that completes while you're elsewhere is
@@ -34,6 +73,11 @@ export function ClaudeReviewBanner(): JSX.Element | null {
   const enabled = useMe().data?.claudeReviewEnabled ?? false;
   const kickoff = useFilters((s) => s.claudeReviewKickoff);
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
+  const [notifEnabled] = useNotificationPref();
+  // Read inside the poll effect without widening its deps (the effect keys off the
+  // active set, not the pref).
+  const notifEnabledRef = useRef(notifEnabled);
+  notifEnabledRef.current = notifEnabled;
 
   // Only poll while a run is known to be in flight: start when the user kicks one
   // off (kickoff bump), stop as soon as a poll comes back with no active runs.
@@ -53,11 +97,11 @@ export function ClaudeReviewBanner(): JSX.Element | null {
   const [tracked, setTracked] = useState<Record<number, BannerEntry>>({});
   const [dismissed, setDismissed] = useState<Record<number, true>>({});
 
-  // Previously-active review ids, to detect a running → gone transition (a run
-  // completed) so we can play the completion chime globally — even if the user
-  // navigated away from the Claude Review tab. Seeded on the first poll so an
+  // Previously-active reviews (id → PR coords), to detect a running → gone
+  // transition (a run completed) so we can chime + notify globally — even if the
+  // user navigated away from the Claude Review tab. Seeded on the first poll so an
   // already-running review on mount doesn't immediately "complete".
-  const prevActiveIds = useRef<Set<number> | null>(null);
+  const prevActiveRef = useRef<Map<number, CompletedCoord> | null>(null);
 
   // A content key so the merge effect only runs when the active set / phases
   // actually change (not on every poll tick).
@@ -69,21 +113,27 @@ export function ClaudeReviewBanner(): JSX.Element | null {
     const active = data?.reviews ?? [];
     const activeIdSet = new Set(active.map((r) => r.reviewId));
 
-    // Completion chime: any id that was active last poll but isn't now finished.
-    // Skip the very first poll (prevActiveIds null) so a run already in flight on
-    // mount doesn't chime spuriously.
-    const prevIds = prevActiveIds.current;
-    if (prevIds != null) {
-      let completed = false;
-      for (const id of prevIds) {
-        if (!activeIdSet.has(id)) {
-          completed = true;
-          break;
-        }
+    // Completion: any review active last poll but gone now has finished. Skip the
+    // very first poll (prevActiveRef null) so a run already in flight on mount
+    // doesn't chime/notify spuriously. A QUEUED review going active is NOT a
+    // completion (it's still tracked), so only the gone-entirely transition counts.
+    const prev = prevActiveRef.current;
+    if (prev != null) {
+      const done: CompletedCoord[] = [];
+      for (const [id, coord] of prev) {
+        if (!activeIdSet.has(id)) done.push(coord);
       }
-      if (completed) playReviewComplete();
+      if (done.length > 0) {
+        playReviewComplete();
+        if (notifEnabledRef.current) notifyReviewsComplete(done);
+      }
     }
-    prevActiveIds.current = activeIdSet;
+    prevActiveRef.current = new Map(
+      active.map((r) => [
+        r.reviewId,
+        { repoFullName: r.repoFullName, prNumber: r.prNumber, prTitle: r.prTitle },
+      ]),
+    );
 
     setTracked((prev) => {
       const next: Record<number, BannerEntry> = { ...prev };

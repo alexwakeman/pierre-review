@@ -404,6 +404,7 @@ export function Timeline(): JSX.Element {
     for (const it of myTurnData.awaitingReview) ids.add(it.prId);
     for (const it of myTurnData.yourPrs) ids.add(it.prId);
     for (const it of myTurnData.threadsAwaiting) ids.add(it.prId);
+    for (const it of myTurnData.claudeReviewsToAction) ids.add(it.prId);
     return ids;
   }, [myTurnData]);
   // Member filter: when set, the timeline collapses to just these contributors'

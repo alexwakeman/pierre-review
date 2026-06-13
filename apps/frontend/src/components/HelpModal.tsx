@@ -89,9 +89,18 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             <strong>needs attention</strong>.
           </Section>
 
+          <Section title="My Turn &amp; Insights">
+            The header <strong>My Turn</strong> button isolates the timeline to the PRs
+            that need you now; <strong>Insights</strong> opens a per-repo snapshot
+            (open&nbsp;/&nbsp;merged&nbsp;/&nbsp;stalled, time-to-first-review, review
+            load). Save filter combinations as named <strong>Views</strong>, and use the
+            bell to get notified when something new lands in your queue.
+          </Section>
+
           <Section title="Keyboard">
             <Kbd>/</Kbd> focus the filter · <Kbd>j</Kbd>/<Kbd>k</Kbd> cycle PRs ·{' '}
-            <Kbd>Esc</Kbd> exit focus, else clear the selection.
+            <Kbd>m</Kbd> toggle My Turn · <Kbd>i</Kbd> Insights · <Kbd>Esc</Kbd> exit
+            focus, else clear the selection.
           </Section>
         </div>
       </div>

@@ -223,8 +223,8 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
           error: 'Conflict',
           message:
             result.reason === 'already_running'
-              ? 'A review is already running for this PR.'
-              : 'Another review is in progress; try again shortly.',
+              ? 'A review is already running or queued for this PR.'
+              : 'The review queue is full; try again once some finish.',
         };
       }
       reply.status(202);
