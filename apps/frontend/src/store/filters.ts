@@ -76,6 +76,11 @@ export interface FilterState {
   // default; an empty set hides every review marker. Only affects review markers.
   reviewStates: ReviewState[];
   derivedStates: DerivedState[]; // empty = no derived-state filtering
+  // When true, isolate the timeline to PRs in the current "My Turn" inbox
+  // (awaiting your review / your PRs with new activity / threads awaiting you) —
+  // the same set the My Turn panel shows. A purely client-side filter (the inbox
+  // is fetched separately via useMyTurn), so it never feeds buildTimelineSearch.
+  myTurnOnly: boolean;
 
   // selection
   selectedPrId: number | null;
@@ -190,6 +195,7 @@ export interface FilterState {
   setReviewStates: (s: ReviewState[]) => void;
   toggleDerivedState: (s: DerivedState) => void;
   setDerivedStates: (s: DerivedState[]) => void;
+  setMyTurnOnly: (v: boolean) => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
   clearSelection: () => void;
@@ -288,6 +294,7 @@ type FilterDefaults = Pick<
   | 'prStatuses'
   | 'reviewStates'
   | 'derivedStates'
+  | 'myTurnOnly'
   | 'searchQuery'
   | 'stripFilter'
 >;
@@ -313,6 +320,7 @@ function freshFilterDefaults(): FilterDefaults {
     prStatuses: [...DEFAULT_PR_STATUSES],
     reviewStates: [...DEFAULT_REVIEW_STATES],
     derivedStates: [],
+    myTurnOnly: false,
     searchQuery: '',
     stripFilter: 'all',
   };
@@ -336,6 +344,7 @@ export function pickFilterBarState(s: FilterState): FilterDefaults {
     prStatuses: s.prStatuses,
     reviewStates: s.reviewStates,
     derivedStates: s.derivedStates,
+    myTurnOnly: s.myTurnOnly,
     searchQuery: s.searchQuery,
     stripFilter: s.stripFilter,
   };
@@ -401,6 +410,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   toggleDerivedState: (st) =>
     set((s) => ({ derivedStates: toggle(s.derivedStates, st) })),
   setDerivedStates: (st) => set({ derivedStates: st }),
+  setMyTurnOnly: (v) => set({ myTurnOnly: v }),
   selectPr: (id) =>
     set({ selectedPrId: id, selectedThreadId: null, selectedCommentId: null }),
   selectThread: (prId, threadId) =>

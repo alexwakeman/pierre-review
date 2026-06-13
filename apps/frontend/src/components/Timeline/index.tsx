@@ -23,7 +23,7 @@ import {
   useRepos,
   useUsers,
 } from '../../hooks/useTimeline.js';
-import { useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
+import { useMyTurn, useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
 import { resolveRange, useFilters } from '../../store/filters.js';
 import { indexUsers, userLabel } from '../../lib/ui.js';
 import { renderPrBar, prClassName, barIsTall } from './prBar.js';
@@ -259,6 +259,13 @@ export function Timeline(): JSX.Element {
     active: false,
     states: [],
   });
+  // The "My Turn" isolate filter, mirrored into a ref so rebuildMarkers (which also
+  // runs standalone on a zoom recluster) can drop markers for PRs outside the inbox.
+  // `active` = the filter is on AND the inbox set has loaded; `ids` = its PR ids.
+  const myTurnPassRef = useRef<{ active: boolean; ids: Set<number> }>({
+    active: false,
+    ids: new Set<number>(),
+  });
   // The PR bar currently glowing as the "linked" partner of an open marker
   // modal, so we can clear it when the modal closes or moves to another PR.
   const highlightedPrRef = useRef<number | null>(null);
@@ -385,6 +392,20 @@ export function Timeline(): JSX.Element {
   const { data: mergers } = useMergers();
   const queryClient = useQueryClient();
   const derivedStates = useFilters((s) => s.derivedStates);
+  // "My Turn" isolate filter: when on, restrict the board to PRs in the current My
+  // Turn inbox. The inbox set is fetched separately (deduped with the My Turn panel);
+  // null until it loads, so the filter stays a no-op until the ids are known rather
+  // than briefly blanking the board.
+  const myTurnOnly = useFilters((s) => s.myTurnOnly);
+  const { data: myTurnData } = useMyTurn();
+  const myTurnPrIds = useMemo<Set<number> | null>(() => {
+    if (!myTurnData) return null;
+    const ids = new Set<number>();
+    for (const it of myTurnData.awaitingReview) ids.add(it.prId);
+    for (const it of myTurnData.yourPrs) ids.add(it.prId);
+    for (const it of myTurnData.threadsAwaiting) ids.add(it.prId);
+    return ids;
+  }, [myTurnData]);
   // Member filter: when set, the timeline collapses to just these contributors'
   // rows (see the PR filter in the rebuild effect). Events are already actor-
   // filtered server-side, so restricting which PR bars render is enough to drop
@@ -724,26 +745,35 @@ export function Timeline(): JSX.Element {
     // set is restored when the focus tears down (applyContext(null) → rebuild).
     let events: TimelineEvent[];
     if (prFocusActiveRef.current && prFocusPrIdRef.current != null) {
+      // The sticky PR-isolation focus overrides the board filters: just this PR.
       events = cur.events.filter((e) => e.prId === prFocusPrIdRef.current);
-    } else if (derivedPassRef.current.active) {
-      // A "Threads" filter is on. Restrict markers to review-thread comments only:
-      // `review_comment` is the ONLY event type that maps to a review thread, so
-      // every other type (PR reviews, PR comments, commits, lifecycle) doesn't fit a
-      // thread-state filter and just read as a confusing jumble of unrelated markers.
-      // Each event carries its thread's `derivedState`, so we keep ONLY the comments
-      // whose own thread is in a selected state — selecting "Resolved" shows just the
-      // resolved threads' comments (and, via the PR-bar filter, their PRs), not every
-      // comment on a PR that happens to also have a resolved thread.
-      const { states } = derivedPassRef.current;
-      events = cur.events.filter(
-        (e) =>
-          e.type === 'review_comment' &&
-          e.prId != null &&
-          e.derivedState != null &&
-          states.includes(e.derivedState),
-      );
     } else {
+      // Outside focus the board filters COMPOSE (AND): the "Threads" thread-state
+      // filter and the "My Turn" isolate filter can both be on.
       events = cur.events;
+      if (derivedPassRef.current.active) {
+        // A "Threads" filter is on. Restrict markers to review-thread comments only:
+        // `review_comment` is the ONLY event type that maps to a review thread, so
+        // every other type (PR reviews, PR comments, commits, lifecycle) doesn't fit a
+        // thread-state filter and just reads as a confusing jumble. Each event carries
+        // its thread's `derivedState`, so we keep ONLY the comments whose own thread is
+        // in a selected state — selecting "Resolved" shows just the resolved threads'
+        // comments, not every comment on a PR that happens to also have a resolved one.
+        const { states } = derivedPassRef.current;
+        events = events.filter(
+          (e) =>
+            e.type === 'review_comment' &&
+            e.prId != null &&
+            e.derivedState != null &&
+            states.includes(e.derivedState),
+        );
+      }
+      if (myTurnPassRef.current.active) {
+        // "My Turn" isolate: keep only markers on PRs in the inbox (their bars are
+        // the only ones the rebuild's `prs` filter renders, so markers stay in step).
+        const { ids } = myTurnPassRef.current;
+        events = events.filter((e) => e.prId != null && ids.has(e.prId));
+      }
     }
     const { items, clusterMembers } = buildMarkerItems(
       events,
@@ -2138,6 +2168,13 @@ export function Timeline(): JSX.Element {
     const passesDerived = (pr: TimelinePr): boolean =>
       !derivedActive || matchingThreadPrIds.has(pr.id);
 
+    // The "My Turn" isolate filter: a PR's bar shows only when it's in the current
+    // inbox. Stays a no-op until the inbox set has loaded (myTurnPrIds null) so the
+    // board isn't briefly blanked; once loaded it filters (an empty inbox → empty).
+    const myTurnActive = myTurnOnly && myTurnPrIds != null;
+    const passesMyTurn = (pr: TimelinePr): boolean =>
+      !myTurnActive || myTurnPrIds!.has(pr.id);
+
     const prs: TimelinePr[] = basePrs.filter(
       (pr) =>
         // Always render the selected PR's bar so event→PR navigation (and the global
@@ -2146,7 +2183,7 @@ export function Timeline(): JSX.Element {
         // out-of-payload PR materializes regardless of the active filters.
         pr.id === selectedPrIdRef.current ||
         pr.id === extra?.id ||
-        (authoredByMember(pr) && passesDerived(pr)),
+        (authoredByMember(pr) && passesDerived(pr) && passesMyTurn(pr)),
     );
 
     // Mirror the thread-state filter into a ref so rebuildMarkers (which also runs
@@ -2156,6 +2193,12 @@ export function Timeline(): JSX.Element {
     derivedPassRef.current = {
       active: derivedActive,
       states: derivedStates,
+    };
+    // Same for the My Turn isolate filter, so a standalone recluster keeps the
+    // markers in step with the bars above.
+    myTurnPassRef.current = {
+      active: myTurnActive,
+      ids: myTurnPrIds ?? new Set<number>(),
     };
 
     const evMap = new Map<number, TimelineEvent>();
@@ -2202,6 +2245,30 @@ export function Timeline(): JSX.Element {
     // (all events + all PRs), so they don't shift with the thread-state filter.
     const userStats = computeUserStats(data.events, basePrs);
 
+    // Which events drive the contributor ROWS. When a client-side filter (Threads /
+    // My Turn) is active we collapse the board to just the people in the surviving
+    // events — otherwise every actor in the payload keeps an (empty) row, which
+    // defeats an isolate filter. Mirrors rebuildMarkers' non-focus filtering so rows
+    // and markers agree. Left as the full set under PR-isolation focus, which owns its
+    // own row collapse and must keep every contributor row available to re-show.
+    let rowEvents = data.events;
+    if (!prFocusActiveRef.current && (derivedActive || myTurnActive)) {
+      const sel = derivedActive ? new Set(derivedStates) : null;
+      rowEvents = data.events.filter((e) => {
+        if (
+          sel &&
+          (e.type !== 'review_comment' ||
+            e.prId == null ||
+            e.derivedState == null ||
+            !sel.has(e.derivedState))
+        ) {
+          return false;
+        }
+        if (myTurnActive && (e.prId == null || !myTurnPrIds!.has(e.prId))) return false;
+        return true;
+      });
+    }
+
     // Render the repos GROUPED BY OWNER so a multi-repo board keeps each org's repos
     // adjacent instead of scattering them in activity-appearance order. Sort by owner,
     // then repo name, then id (stable, deterministic); repos with no loaded metadata
@@ -2209,7 +2276,7 @@ export function Timeline(): JSX.Element {
     // `order` AND the zebra tint, so adjacent repos always alternate hues.
     const repoIds = unique([
       ...prs.map((p) => p.repoId),
-      ...data.events.map((e) => e.repoId),
+      ...rowEvents.map((e) => e.repoId),
     ]).sort((a, b) => {
       const ra = reposById.get(a);
       const rb = reposById.get(b);
@@ -2237,7 +2304,7 @@ export function Timeline(): JSX.Element {
       // events (so their bar has a home); the former keeps a row for pure
       // reviewers (markers, no bar) — every contributor stays visible.
       const memberIds = unique([
-        ...data.events
+        ...rowEvents
           .filter((e) => e.repoId === rid && e.actorId != null)
           .map((e) => e.actorId as number),
         ...prs
@@ -2446,6 +2513,8 @@ export function Timeline(): JSX.Element {
   }, [
     data,
     derivedStates,
+    myTurnOnly,
+    myTurnPrIds,
     userIds,
     reposById,
     usersById,

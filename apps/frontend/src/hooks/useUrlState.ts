@@ -84,6 +84,8 @@ function readFromUrl(): Partial<FilterState> {
     const valid = new Set<string>(DERIVED_STATES);
     out.derivedStates = states.split(',').filter((s) => valid.has(s)) as DerivedState[];
   }
+  // `myturn=1` isolates the timeline to the current My Turn inbox (off by default).
+  if (p.get('myturn') === '1') out.myTurnOnly = true;
   const pr = p.get('pr');
   if (pr) out.selectedPrId = Number.parseInt(pr, 10);
   const thread = p.get('thread');
@@ -124,6 +126,7 @@ function writeToUrl(s: FilterState): void {
   // so it survives a reload; the common "all verdicts" case stays out of the URL.
   if (!sameSet(s.reviewStates, DEFAULT_REVIEW_STATES)) p.set('reviews', s.reviewStates.join(','));
   if (s.derivedStates.length) p.set('states', s.derivedStates.join(','));
+  if (s.myTurnOnly) p.set('myturn', '1');
   if (s.selectedPrId) p.set('pr', String(s.selectedPrId));
   if (s.selectedThreadId) p.set('thread', String(s.selectedThreadId));
   if (s.stripFilter !== 'all') p.set('strip', s.stripFilter);
