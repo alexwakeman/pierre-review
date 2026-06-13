@@ -7,6 +7,7 @@ import { useFilters } from '../store/filters.js';
 import { api, ApiError } from '../api/client.js';
 import { indexUsers, userLabel, relativeTime } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
+import { OpenDurationChart } from './InsightsChart.js';
 
 // Header "Insights" panel: a per-repo sprint snapshot — open / draft / merged-7d /
 // stalled counts, median time-to-first-review, the oldest unreviewed PR, the
@@ -179,6 +180,8 @@ function RepoCard({
           title={`Median time from open to first review, over PRs opened in the last ${windows.review} days`}
         />
       </div>
+
+      <OpenDurationChart points={repo.openDurationTrend} />
 
       {repo.oldestUnreviewed != null && (
         <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">

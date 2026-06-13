@@ -39,6 +39,7 @@ import type {
   PrState,
   InsightsOpenPr,
   InsightsResponse,
+  InsightsTimePoint,
   PrStatus,
   ReasonTag,
   Repo,
@@ -603,12 +604,47 @@ export interface InsightsFilters {
 
 const INSIGHTS_MERGED_WINDOW_DAYS = 7;
 const INSIGHTS_REVIEW_WINDOW_DAYS = 30;
+// The "avg time a PR stays open" trend spans this many days back from now, in
+// weekly buckets (84 / 7 = 12 points).
+const INSIGHTS_CHART_WINDOW_DAYS = 84;
+const WEEK_MS = 7 * 86_400_000;
 
 function median(xs: number[]): number | null {
   if (xs.length === 0) return null;
   const s = [...xs].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
   return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
+}
+
+// Bucket PR cycle times (openMs→closeMs) into weekly points over the chart window,
+// oldest first. Each point is the MEAN open-hours of the PRs that CLOSED that week;
+// a week with no closed PRs yields a null average (a gap in the trend line).
+function buildOpenDurationTrend(
+  rows: { openMs: number; closeMs: number }[],
+  windowStartMs: number,
+  nowMs: number,
+): InsightsTimePoint[] {
+  const buckets = Math.round((nowMs - windowStartMs) / WEEK_MS);
+  const sums = new Array<number>(buckets).fill(0);
+  const counts = new Array<number>(buckets).fill(0);
+  for (const r of rows) {
+    if (r.closeMs < windowStartMs || r.closeMs > nowMs) continue;
+    const hrs = (r.closeMs - r.openMs) / 3_600_000;
+    if (hrs < 0) continue;
+    const idx = Math.min(buckets - 1, Math.floor((r.closeMs - windowStartMs) / WEEK_MS));
+    sums[idx]! += hrs;
+    counts[idx]! += 1;
+  }
+  const out: InsightsTimePoint[] = [];
+  for (let i = 0; i < buckets; i++) {
+    const c = counts[i]!;
+    out.push({
+      bucketStart: new Date(windowStartMs + i * WEEK_MS).toISOString(),
+      avgOpenHours: c > 0 ? Math.round((sums[i]! / c) * 10) / 10 : null,
+      count: c,
+    });
+  }
+  return out;
 }
 
 /**
@@ -622,10 +658,12 @@ export async function getInsights(filters: InsightsFilters): Promise<InsightsRes
   const now = Date.now();
   const mergedCutoff = new Date(now - INSIGHTS_MERGED_WINDOW_DAYS * 86_400_000);
   const reviewCutoff = new Date(now - INSIGHTS_REVIEW_WINDOW_DAYS * 86_400_000);
+  const chartWindowStartMs = now - INSIGHTS_CHART_WINDOW_DAYS * 86_400_000;
   const base: Omit<InsightsResponse, 'repos'> = {
     mergedWindowDays: INSIGHTS_MERGED_WINDOW_DAYS,
     reviewWindowDays: INSIGHTS_REVIEW_WINDOW_DAYS,
     stallThresholdDays: config.stallThresholdDays,
+    chartWindowDays: INSIGHTS_CHART_WINDOW_DAYS,
     generatedAt: new Date().toISOString(),
   };
 
@@ -654,6 +692,34 @@ export async function getInsights(filters: InsightsFilters): Promise<InsightsRes
     .execute();
   const mergedByRepo = new Map<number, number>();
   for (const r of mergedRows) mergedByRepo.set(r.repoId, (mergedByRepo.get(r.repoId) ?? 0) + 1);
+
+  // PRs closed/merged within the chart window, for the per-repo "avg time open"
+  // trend. A merged PR's close instant is mergedAt; a plain-closed one's is closedAt.
+  const chartCutoff = new Date(chartWindowStartMs);
+  const closedConds = [
+    eq(pullRequests.accountId, accountId),
+    inArray(pullRequests.state, ['merged', 'closed']),
+    or(gte(pullRequests.mergedAt, chartCutoff), gte(pullRequests.closedAt, chartCutoff)),
+  ];
+  if (repoIds) closedConds.push(inArray(pullRequests.repoId, repoIds));
+  const closedRows = await db
+    .select({
+      repoId: pullRequests.repoId,
+      openedAt: pullRequests.openedAt,
+      mergedAt: pullRequests.mergedAt,
+      closedAt: pullRequests.closedAt,
+    })
+    .from(pullRequests)
+    .where(and(...closedConds))
+    .execute();
+  const closedByRepo = new Map<number, { openMs: number; closeMs: number }[]>();
+  for (const r of closedRows) {
+    const close = r.mergedAt ?? r.closedAt;
+    if (!close) continue;
+    const arr = closedByRepo.get(r.repoId) ?? [];
+    arr.push({ openMs: r.openedAt.getTime(), closeMs: close.getTime() });
+    closedByRepo.set(r.repoId, arr);
+  }
 
   // Time-to-first-review samples: PRs opened in the review window with a first review.
   const ttfrConds = [
@@ -754,6 +820,11 @@ export async function getInsights(filters: InsightsFilters): Promise<InsightsRes
         : null,
       reviewLoad,
       openPrList,
+      openDurationTrend: buildOpenDurationTrend(
+        closedByRepo.get(repo.id) ?? [],
+        chartWindowStartMs,
+        now,
+      ),
     };
   });
 

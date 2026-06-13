@@ -336,6 +336,20 @@ export interface InsightsOpenPr {
   githubUrl: string;
 }
 
+// One weekly bucket of the per-repo "average time a PR stays open" trend. The
+// metric is PR CYCLE TIME bucketed by CLOSE week: over PRs merged/closed in this
+// week, the mean (closedAt − openedAt). `avgOpenHours` is null for a week with no
+// merged/closed PRs (the chart shows a gap / bridges it). Buckets span
+// InsightsResponse.chartWindowDays back from now, oldest first.
+export interface InsightsTimePoint {
+  // ISO timestamp for the start of the weekly bucket.
+  bucketStart: string;
+  // Mean hours a PR stayed open, over PRs closed in this bucket. null = no sample.
+  avgOpenHours: number | null;
+  // How many merged/closed PRs fell in this bucket (the average's sample size).
+  count: number;
+}
+
 // A per-repo snapshot for the Insights panel. Counts are current state; the
 // time-windowed figures carry their window in InsightsResponse. Per repo only
 // (no cross-repo/team aggregation yet).
@@ -368,6 +382,9 @@ export interface RepoInsights {
   // timeline filters — the collapsible per-repo list with its own Stale toggle. Each
   // carries isStalled so the client can filter without another round-trip.
   openPrList: InsightsOpenPr[];
+  // Weekly "average time a PR stays open" trend (cycle time by close week) over
+  // InsightsResponse.chartWindowDays, oldest first. One point per week.
+  openDurationTrend: InsightsTimePoint[];
 }
 
 export interface InsightsResponse {
@@ -376,6 +393,8 @@ export interface InsightsResponse {
   mergedWindowDays: number;
   reviewWindowDays: number;
   stallThresholdDays: number;
+  // Span (days, back from now) covered by each repo's openDurationTrend; weekly buckets.
+  chartWindowDays: number;
   generatedAt: string;
 }
 
