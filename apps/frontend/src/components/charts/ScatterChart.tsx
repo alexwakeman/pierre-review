@@ -17,6 +17,7 @@ export function ScatterChart({
   yLabel,
   formatX = fmtNum,
   formatY = fmtNum,
+  fit = false,
   height = 150,
 }: {
   points: ScatterPoint[];
@@ -24,6 +25,10 @@ export function ScatterChart({
   yLabel: string;
   formatX?: (n: number) => string;
   formatY?: (n: number) => string;
+  // Overlay a power-law fit (least-squares on the log–log points, x>0 & y>0): a
+  // straight line on log–log iff time ∝ LOCᵏ, so slope k > 1 = bigger PRs are
+  // disproportionately slower to land. The slope is annotated on the chart.
+  fit?: boolean;
   height?: number;
 }): JSX.Element {
   const [ref, w] = useChartWidth();
@@ -44,6 +49,41 @@ export function ScatterChart({
   // Gridline ticks at the powers of ten that fall inside each axis range.
   const ticks = (maxLg: number): number[] =>
     [0, 1, 10, 100, 1000, 10000].filter((v) => lg(v) <= maxLg + 0.01);
+
+  // Power-law fit: least-squares on log10(x)/log10(y) over points with x>0 & y>0,
+  // then a sampled polyline (the plot maps via log1p, so sample rather than draw a
+  // single segment). slope = the exponent k in time ∝ LOCᵏ.
+  const fitLine = ((): { d: string; slope: number } | null => {
+    if (!fit) return null;
+    const ps = points.filter((p) => p.x > 0 && p.y > 0);
+    if (ps.length < 4) return null;
+    const lxs = ps.map((p) => Math.log10(p.x));
+    const lys = ps.map((p) => Math.log10(p.y));
+    const N = ps.length;
+    const mx = lxs.reduce((a, b) => a + b, 0) / N;
+    const my = lys.reduce((a, b) => a + b, 0) / N;
+    let sxx = 0;
+    let sxy = 0;
+    for (let i = 0; i < N; i++) {
+      sxx += (lxs[i]! - mx) ** 2;
+      sxy += (lxs[i]! - mx) * (lys[i]! - my);
+    }
+    if (sxx === 0) return null;
+    const slope = sxy / sxx;
+    const intercept = my - slope * mx;
+    const lxMin = Math.min(...lxs);
+    const lxMax = Math.max(...lxs);
+    if (lxMax <= lxMin) return null;
+    const steps = 24;
+    let d = '';
+    for (let i = 0; i <= steps; i++) {
+      const lxv = lxMin + (i / steps) * (lxMax - lxMin);
+      const xv = 10 ** lxv;
+      const yv = 10 ** (intercept + slope * lxv);
+      d += `${i === 0 ? 'M' : ' L'} ${X(xv).toFixed(1)} ${Y(yv).toFixed(1)}`;
+    }
+    return { d, slope };
+  })();
 
   const onMove = (e: React.MouseEvent<SVGRectElement>): void => {
     const mx = e.nativeEvent.offsetX;
@@ -106,6 +146,26 @@ export function ScatterChart({
                 opacity={hover == null || hover === i ? 0.75 : 0.3}
               />
             ))}
+            {fitLine && (
+              <path
+                d={fitLine.d}
+                fill="none"
+                stroke={PALETTE.amber}
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
+                opacity={0.95}
+              />
+            )}
+            {fitLine && (
+              <text
+                x={PAD_L + 5}
+                y={PAD_T + 9}
+                fill={PALETTE.amber}
+                className="text-[8px] font-semibold"
+              >
+                ≈ {yLabel} ∝ {xLabel}^{fitLine.slope.toFixed(1)}
+              </text>
+            )}
             <text x={PAD_L} y={height - 1} className="fill-gray-400 text-[8px]">
               {xLabel} →
             </text>

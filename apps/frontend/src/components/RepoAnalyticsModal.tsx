@@ -92,6 +92,15 @@ function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
     label: `#${p.prNumber}`,
     merged: p.merged,
   }));
+  const sizeCycleLabels = data.sizeCycleByBucket.map((b) => b.label);
+  const sizeCycleSeries: Series[] = [
+    {
+      key: 'median',
+      label: 'Median time open',
+      color: PALETTE.teal,
+      values: data.sizeCycleByBucket.map((b) => b.medianHours ?? 0),
+    },
+  ];
 
   return (
     <div className="space-y-4">
@@ -168,7 +177,19 @@ function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
             <BarChart labels={sizeLabels} series={sizeDist} />
           )}
         </ChartCard>
-        <ChartCard title="Size vs. time open" note="each PR closed in window">
+        <ChartCard title="Median time open by size" note="PRs closed in window">
+          {sum(data.sizeCycleByBucket.map((b) => b.count)) === 0 ? (
+            <ChartEmpty />
+          ) : (
+            <BarChart
+              labels={sizeCycleLabels}
+              series={sizeCycleSeries}
+              formatY={fmtDuration}
+              formatValue={fmtDuration}
+            />
+          )}
+        </ChartCard>
+        <ChartCard title="Size vs. time open" note="log–log · power-law fit">
           {scatter.length === 0 ? (
             <ChartEmpty />
           ) : (
@@ -178,6 +199,7 @@ function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
               yLabel="time open"
               formatX={fmtNum}
               formatY={fmtDuration}
+              fit
             />
           )}
         </ChartCard>

@@ -44,6 +44,7 @@ import type {
   RepoAnalytics,
   ReviewerLoadSeries,
   SizeCyclePoint,
+  SizeCycleBucket,
   PrStatus,
   ReasonTag,
   Repo,
@@ -925,6 +926,9 @@ export async function getRepoAnalytics(
     return bins.length - 1;
   };
   const sizeVsCycle: SizeCyclePoint[] = [];
+  // Time-open samples per LOC bucket, over ALL PRs closed in the window (uncapped,
+  // unlike sizeVsCycle), for the median-by-size view.
+  const sizeBucketDur: number[][] = SIZE_BINS.map(() => []);
 
   for (const p of prRows) {
     const oMs = p.openedAt.getTime();
@@ -966,12 +970,14 @@ export async function getRepoAnalytics(
         } else {
           addv(cbA, idx, total);
         }
+        const loc = p.additions + p.deletions;
         sizeVsCycle.push({
           prNumber: p.number,
-          loc: p.additions + p.deletions,
+          loc,
           hoursOpen: Math.round(total * 10) / 10,
           merged: p.mergedAt != null,
         });
+        sizeBucketDur[binOf(SIZE_BINS, loc)]!.push(total);
       }
     }
     if (inWin(oMs)) sizeCounts[binOf(SIZE_BINS, p.additions + p.deletions)]!++;
@@ -1105,6 +1111,11 @@ export async function getRepoAnalytics(
     reviewerLoad,
     sizeDist: SIZE_BINS.map((b, i): AnalyticsBin => ({ label: b.label, count: sizeCounts[i]! })),
     sizeVsCycle: sizeVsCycle.slice(0, 500),
+    sizeCycleByBucket: SIZE_BINS.map((b, i): SizeCycleBucket => {
+      const arr = sizeBucketDur[i]!;
+      const m = median(arr);
+      return { label: b.label, medianHours: m == null ? null : round1(m), count: arr.length };
+    }),
     activityHeatmap,
   };
 }

@@ -418,6 +418,15 @@ export interface SizeCyclePoint {
   merged: boolean; // merged vs closed-without-merge
 }
 
+// Median time-open per LOC bucket, over PRs closed in the window — surfaces whether
+// review time scales (super-linearly) with PR size. medianHours is null for an empty
+// bucket. Buckets share the labels of `sizeDist`, ordered XS→XL.
+export interface SizeCycleBucket {
+  label: string;
+  medianHours: number | null;
+  count: number;
+}
+
 // Per-reviewer weekly review counts (reviews submitted), aligned to weekBuckets.
 export interface ReviewerLoadSeries {
   userId: number; // resolves against GET /api/users
@@ -471,6 +480,7 @@ export interface RepoAnalytics {
   // Size & risk
   sizeDist: AnalyticsBin[]; // PRs opened in window, by LOC bucket
   sizeVsCycle: SizeCyclePoint[]; // PRs closed in window (capped)
+  sizeCycleByBucket: SizeCycleBucket[]; // median time-open per LOC bucket (all closed)
 
   // Cadence: activity counts by weekday×hour (UTC), row-major dow*24+hour,
   // dow 0=Sunday. Length 168.
