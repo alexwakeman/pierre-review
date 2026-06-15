@@ -313,9 +313,10 @@ export const PR_DETAIL_QUERY = /* GraphQL */ `
   }
 `;
 
-// Live repository search for the Add-repo picker. `query` is the raw user term —
-// GitHub "best match" ordering, identical to the github.com search box; it matches
-// on name/description/topics, so no `owner/` prefix is required. `viewer` is folded
+// Live repository search for the Add-repo picker. `searchQuery` is built by the route
+// from the user term: it always restricts matching to the repo name (`in:name`), and
+// an `owner/...` prefix is turned into an `org:`/`user:` qualifier so results stay
+// within that owner. The route then re-ranks by literal name match. `viewer` is folded
 // into the same round trip so the route can float the user's own / org repos to the
 // top without a second request. Open-PR count comes free via pullRequests.totalCount.
 export const REPO_SEARCH_QUERY = /* GraphQL */ `
@@ -360,6 +361,21 @@ export const REPO_SEARCH_QUERY = /* GraphQL */ `
     }
   }
 `;
+
+// Resolves whether an owner login is a User or an Organization, so an `owner/`
+// prefix search can pick the correct GitHub search qualifier (`org:` vs `user:`).
+// `__typename` is "User" | "Organization" | (null when the login doesn't exist).
+export const OWNER_TYPE_QUERY = /* GraphQL */ `
+  query OwnerType($login: String!) {
+    repositoryOwner(login: $login) {
+      __typename
+    }
+  }
+`;
+
+export interface OwnerTypeResponse {
+  repositoryOwner: { __typename: string } | null;
+}
 
 // ---- response types ----
 

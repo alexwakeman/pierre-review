@@ -130,9 +130,10 @@ export function RepoSearch(): JSX.Element {
 
   const addRepo = useMutation({
     // Accepts a live search result OR a curated suggestion — both carry owner+name,
-    // which is all the POST needs (CreateRepoBody).
-    mutationFn: (r: { owner: string; name: string }) =>
-      api.addRepo({ owner: r.owner, name: r.name }),
+    // which is all the POST needs (CreateRepoBody). `watch` auto-watches the repo for
+    // the inbox on add (true for "yours" — owned/org-member — search hits).
+    mutationFn: (r: { owner: string; name: string; watch?: boolean }) =>
+      api.addRepo({ owner: r.owner, name: r.name, watch: r.watch }),
     // Hide the row IMMEDIATELY (before the search/repos refetch round-trips), keyed
     // on owner/name from the mutation variables.
     onMutate: (r) => {
@@ -220,7 +221,11 @@ export function RepoSearch(): JSX.Element {
       e.preventDefault();
       const item = navItems[active];
       if (item && !addRepo.isPending && !atRepoLimit) {
-        addRepo.mutate({ owner: item.owner, name: item.name });
+        addRepo.mutate({
+          owner: item.owner,
+          name: item.name,
+          watch: 'isOwnedOrMember' in item ? item.isOwnedOrMember : undefined,
+        });
       }
     }
   }
@@ -384,7 +389,13 @@ export function RepoSearch(): JSX.Element {
                       aria-selected={idx === active}
                       disabled={addRepo.isPending}
                       onMouseEnter={() => setActive(idx)}
-                      onClick={() => addRepo.mutate(r)}
+                      onClick={() =>
+                        addRepo.mutate({
+                          owner: r.owner,
+                          name: r.name,
+                          watch: r.isOwnedOrMember,
+                        })
+                      }
                       className="flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left disabled:opacity-60"
                     >
                       <OwnerAvatar login={r.owner} src={r.ownerAvatarUrl} />

@@ -55,6 +55,14 @@ export function CountsPill(): JSX.Element | null {
         <span className="text-amber-500" title="Threads awaiting you">
           {c.threadsAwaiting}
         </span>
+        {c.watchedRepoPrs > 0 && (
+          <>
+            <span className="text-gray-400">·</span>
+            <span className="text-sky-500" title="New PRs in watched repos">
+              {c.watchedRepoPrs}
+            </span>
+          </>
+        )}
         {c.claudeReviewsToAction > 0 && (
           <>
             <span className="text-gray-400">·</span>

@@ -67,6 +67,14 @@ export const repos = sqliteTable(
     // the default branch. Null until a sync populates it.
     defaultBranch: text('default_branch'),
     backfillUntil: integer('backfill_until', { mode: 'timestamp' }),
+    // "Watch for inbox": when true, new open PRs by others (opened on/after
+    // inboxWatchStartedAt) surface in the My Turn inbox. Independent of timeline
+    // visibility and of removing the repo. inboxWatchStartedAt is set on the first
+    // watch and preserved across unwatch so re-watching restores the same window.
+    inboxWatch: integer('inbox_watch', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    inboxWatchStartedAt: integer('inbox_watch_started_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -214,7 +222,7 @@ export const myTurnDismissals = sqliteTable(
       .notNull()
       .references(() => accounts.id),
     kind: text('kind', {
-      enum: ['review_request', 'thread', 'claude_review'],
+      enum: ['review_request', 'thread', 'watched_repo_pr', 'claude_review'],
     }).notNull(),
     refId: integer('ref_id').notNull(),
     dismissedAt: integer('dismissed_at', { mode: 'timestamp' }).notNull(),

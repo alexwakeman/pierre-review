@@ -7,6 +7,7 @@ import { indexUsers } from '../../lib/ui.js';
 import { SummaryStats } from '../SummaryStats.js';
 import { AwaitingReviewSection } from './AwaitingReviewSection.js';
 import { YourPrsSection } from './YourPrsSection.js';
+import { WatchedRepoPrsSection } from './WatchedRepoPrsSection.js';
 import { ThreadsAwaitingSection } from './ThreadsAwaitingSection.js';
 import { ClaudeReviewsToActionSection } from './ClaudeReviewsToActionSection.js';
 import { DismissedSection } from './DismissedSection.js';
@@ -36,6 +37,7 @@ export function MyTurnPanel(): JSX.Element {
   const todoCount =
     (data?.awaitingReview.length ?? 0) +
     (data?.yourPrs.length ?? 0) +
+    (data?.watchedRepoPrs.length ?? 0) +
     (data?.threadsAwaiting.length ?? 0) +
     (data?.claudeReviewsToAction.length ?? 0);
   const empty = !data || todoCount === 0;
@@ -101,6 +103,10 @@ export function MyTurnPanel(): JSX.Element {
                 usersById={usersById}
               />
               <YourPrsSection items={data.yourPrs} usersById={usersById} />
+              <WatchedRepoPrsSection
+                items={data.watchedRepoPrs}
+                usersById={usersById}
+              />
               <ThreadsAwaitingSection
                 items={data.threadsAwaiting}
                 usersById={usersById}

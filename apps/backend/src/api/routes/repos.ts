@@ -7,8 +7,10 @@ import type {
 import { getGraphqlClientFor } from '../../github/client.js';
 import { getAccessToken } from '../../auth/account.js';
 import {
+  OWNER_TYPE_QUERY,
   REPO_ID_QUERY,
   REPO_SEARCH_QUERY,
+  type OwnerTypeResponse,
   type RepoIdResponse,
   type RepoSearchGqlResponse,
 } from '../../github/queries.js';
@@ -25,6 +27,7 @@ import {
   getRepo,
   getWatchedRepoNodeIds,
   listRepos,
+  setRepoInboxWatch,
 } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
@@ -41,6 +44,9 @@ const createRepoSchema = {
     properties: {
       owner: { type: 'string', minLength: 1 },
       name: { type: 'string', minLength: 1 },
+      // When true, also Watch the repo for the inbox on add (the picker passes
+      // true for "yours" repos). Optional; defaults to not-watched.
+      watch: { type: 'boolean' },
     },
   },
 };
@@ -50,6 +56,16 @@ const idParamSchema = {
     type: 'object',
     required: ['id'],
     properties: { id: { type: 'integer' } },
+  },
+};
+
+const watchSchema = {
+  ...idParamSchema,
+  body: {
+    type: 'object',
+    required: ['inboxWatch'],
+    additionalProperties: false,
+    properties: { inboxWatch: { type: 'boolean' } },
   },
 };
 
@@ -94,13 +110,53 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const accountId = accountIdOf(req);
+
+    // Translate the user term into a literal GitHub search query. An `owner/...`
+    // prefix scopes results to that owner (org:/user: qualifier — resolved by type);
+    // the remainder (or the whole term) is matched against the repo NAME only
+    // (`in:name`), and `needle` drives the literal re-rank below.
+    const client = getGraphqlClientFor(await getAccessToken(accountId));
+    const slash = term.indexOf('/');
+    const owner = slash >= 0 ? term.slice(0, slash).trim() : '';
+    const rest = slash >= 0 ? term.slice(slash + 1).trim() : term;
+    let searchQuery: string;
+    let needle: string;
+    if (owner) {
+      // `owner/...` → scope to that owner. Note a stray leading slash ("/foo") leaves
+      // owner empty and falls through to the plain branch (no malformed `user:` query).
+      needle = rest;
+      let qualifier = `user:${owner}`;
+      try {
+        const ownerResp: OwnerTypeResponse = await client(OWNER_TYPE_QUERY, {
+          login: owner,
+        });
+        const kind = ownerResp.repositoryOwner?.__typename ?? null;
+        if (kind == null) {
+          // Owner login doesn't exist → no possible matches.
+          return { results: [], hasNextPage: false, cursor: null };
+        }
+        qualifier = kind === 'Organization' ? `org:${owner}` : `user:${owner}`;
+      } catch (err) {
+        // Lookup failed (network / rate limit) — default to user: scoping and run the
+        // search anyway. Logged so a wrong-scope result is diagnosable.
+        req.log.warn(
+          { err, owner },
+          'repo search: owner-type lookup failed; defaulting to user: scope',
+        );
+      }
+      searchQuery = rest ? `${qualifier} ${rest} in:name` : qualifier;
+    } else {
+      // Plain term (or a stray leading slash) → literal repo-name search.
+      needle = rest;
+      searchQuery = rest ? `${rest} in:name` : term;
+    }
+
     let resp: RepoSearchGqlResponse;
     try {
-      const client = getGraphqlClientFor(await getAccessToken(accountId));
       // NB: the GraphQL variable is `searchQuery`, not `query` — @octokit/graphql
       // reserves `query` for the document body and rejects it as a variable name.
       resp = await client(REPO_SEARCH_QUERY, {
-        searchQuery: term,
+        searchQuery,
         first: limit,
         cursor: cursor ?? null,
       });
@@ -142,9 +198,25 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
         };
       });
 
-    // Float owned/member repos to the top, preserving GitHub's best-match order
-    // within each group (Array.prototype.sort is stable on Node ≥ 12).
-    results.sort((a, b) => Number(b.isOwnedOrMember) - Number(a.isOwnedOrMember));
+    // Re-rank for literal matching: closest name match first (exact < prefix <
+    // substring < other), then your own/org repos, then stars. Array.prototype.sort
+    // is stable (Node ≥ 12), so GitHub's best-match order breaks remaining ties.
+    const lc = needle.toLowerCase();
+    const nameTier = (name: string): number => {
+      if (!lc) return 0;
+      const n = name.toLowerCase();
+      if (n === lc) return 0;
+      if (n.startsWith(lc)) return 1;
+      if (n.includes(lc)) return 2;
+      return 3;
+    };
+    results.sort((a, b) => {
+      const t = nameTier(a.name) - nameTier(b.name);
+      if (t !== 0) return t;
+      const own = Number(b.isOwnedOrMember) - Number(a.isOwnedOrMember);
+      if (own !== 0) return own;
+      return b.stargazerCount - a.stargazerCount;
+    });
 
     const body: RepoSearchResponse = {
       results,
@@ -155,7 +227,7 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/api/repos', { schema: createRepoSchema }, async (req, reply) => {
-    const { owner, name } = req.body as CreateRepoBody;
+    const { owner, name, watch } = req.body as CreateRepoBody;
     const accountId = accountIdOf(req);
 
     let resp: RepoIdResponse;
@@ -202,11 +274,29 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       accountId,
     );
 
+    // Auto-watch "yours" repos for the inbox. Idempotent on re-add and preserves an
+    // existing watch-start (setRepoInboxWatch only stamps the start when unset).
+    if (watch === true) await setRepoInboxWatch(accountId, repoId, true);
+
     // Kick off the initial backfill in the background.
     runSyncForRepo(repoId, app.log, { background: true });
 
     reply.status(201);
     return getRepo(repoId, accountId);
+  });
+
+  // Toggle "Watch for inbox" on a repo. Inbox-only: it does not affect timeline
+  // visibility or syncing. Ownership-scoped → 404 for a repo this account doesn't own.
+  app.patch('/api/repos/:id', { schema: watchSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const { inboxWatch } = req.body as { inboxWatch: boolean };
+    const accountId = accountIdOf(req);
+    const ok = await setRepoInboxWatch(accountId, id, inboxWatch);
+    if (!ok) {
+      reply.status(404);
+      return { error: 'NotFound', message: `Repo ${id} not found` };
+    }
+    return getRepo(id, accountId);
   });
 
   app.delete('/api/repos/:id', { schema: idParamSchema }, async (req, reply) => {

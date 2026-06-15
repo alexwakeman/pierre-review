@@ -145,6 +145,7 @@ export async function listRepos(accountId: number): Promise<Repo[]> {
     lastIncrementalSyncAt: iso(r.sync_state?.lastIncrementalSyncAt ?? null),
     lastSyncStatus: r.sync_state?.lastSyncStatus ?? null,
     lastSyncError: r.sync_state?.lastSyncError ?? null,
+    inboxWatch: r.repos.inboxWatch,
   }));
 }
 
@@ -1236,7 +1237,8 @@ async function ownsDismissRef(
   kind: MyTurnDismissKind,
   refId: number,
 ): Promise<boolean> {
-  if (kind === 'review_request') {
+  if (kind === 'review_request' || kind === 'watched_repo_pr') {
+    // Both reference a PR id directly.
     const rows = await db
       .select({ id: pullRequests.id })
       .from(pullRequests)
@@ -1325,6 +1327,7 @@ export async function getCompletedDismissals(
 
   const reviewDismissals = dismissals.filter((d) => d.kind === 'review_request');
   const threadDismissals = dismissals.filter((d) => d.kind === 'thread');
+  const watchedDismissals = dismissals.filter((d) => d.kind === 'watched_repo_pr');
   const claudeDismissals = dismissals.filter((d) => d.kind === 'claude_review');
   const items: DismissedItem[] = [];
   const referencedUsers = new Set<number>();
@@ -1353,6 +1356,44 @@ export async function getCompletedDismissals(
       if (pr.authorId != null) referencedUsers.add(pr.authorId);
       items.push({
         kind: 'review_request',
+        prId: pr.id,
+        repoFullName: `${repo.owner}/${repo.name}`,
+        number: pr.number,
+        title: pr.title,
+        authorId: pr.authorId,
+        state: pr.state as PrState,
+        openedAt: pr.openedAt.toISOString(),
+        githubUrl: `https://github.com/${repo.owner}/${repo.name}/pull/${pr.number}`,
+        dismissedAt: d.dismissedAt.toISOString(),
+      });
+    }
+  }
+
+  // watched_repo_pr dismissals → their PRs (account-scoped). Same shape as a
+  // review_request dismissal, just a different kind tag.
+  if (watchedDismissals.length > 0) {
+    const prRows = await db
+      .select()
+      .from(pullRequests)
+      .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(
+            pullRequests.id,
+            watchedDismissals.map((d) => d.refId),
+          ),
+        ),
+      )
+      .execute();
+    const byId = new Map(prRows.map((r) => [r.pull_requests.id, r]));
+    for (const d of watchedDismissals) {
+      const row = byId.get(d.refId);
+      if (!row) continue;
+      const { pull_requests: pr, repos: repo } = row;
+      if (pr.authorId != null) referencedUsers.add(pr.authorId);
+      items.push({
+        kind: 'watched_repo_pr',
         prId: pr.id,
         repoFullName: `${repo.owner}/${repo.name}`,
         number: pr.number,
@@ -1495,6 +1536,7 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
     awaitingReview: [],
     yourPrs: [],
     threadsAwaiting: [],
+    watchedRepoPrs: [],
     claudeReviewsToAction: [],
     users: [],
   };
@@ -1528,10 +1570,14 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
   // Dismissed Claude-review run ids. Keyed by run id (not PR id): a fresh run gets
   // a new id, so it naturally re-appears without a timestamp comparison.
   const claudeDismissedIds = new Set<number>();
+  // Dismissed watched-repo PR ids. Sticky: a dismissal removes that PR from the
+  // watched section for good (no timestamp comparison — acknowledging a new PR).
+  const watchedDismissedIds = new Set<number>();
   for (const d of dismissals) {
     if (d.kind === 'review_request') reviewDismissedAt.set(d.refId, d.dismissedAt);
     else if (d.kind === 'thread') threadDismissedAt.set(d.refId, d.dismissedAt);
     else if (d.kind === 'claude_review') claudeDismissedIds.add(d.refId);
+    else if (d.kind === 'watched_repo_pr') watchedDismissedIds.add(d.refId);
   }
 
   const meta = (prId: number) =>
@@ -1586,6 +1632,54 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
       summary: summariseNew(t.newSinceLastViewed!),
     }));
 
+  // 2b. New open PRs in repos you've Watched. Built AFTER awaitingReview + yourPrs
+  //     so those PRs aren't shown twice. Includes only PRs opened on/after the
+  //     watch began, by someone else, non-draft, non-bot. Dismissals are sticky.
+  const watchedRepos = await db
+    .select({
+      repoId: repos.id,
+      startedAt: repos.inboxWatchStartedAt,
+    })
+    .from(repos)
+    .where(and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)))
+    .execute();
+  const watchStartByRepo = new Map<number, Date>();
+  for (const w of watchedRepos) {
+    // A watched row should always carry a start; if it somehow doesn't, treat the
+    // repo as not-watched (show nothing) rather than flooding the inbox.
+    if (w.startedAt != null) watchStartByRepo.set(w.repoId, w.startedAt);
+  }
+
+  let watchedRepoPrs: ReturnType<typeof toMyTurnPr>[] = [];
+  if (watchStartByRepo.size > 0) {
+    const botUserIds = new Set(
+      (
+        await db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(eq(schema.users.isBot, true))
+          .execute()
+      ).map((u) => u.id),
+    );
+    const inOtherSections = new Set<number>([
+      ...awaitingReview.map((i) => i.prId),
+      ...yourPrs.map((i) => i.prId),
+    ]);
+    watchedRepoPrs = open
+      .filter((t) => {
+        const startedAt = watchStartByRepo.get(t.repoId);
+        if (startedAt == null) return false;
+        if (t.authorId == null || t.authorId === localUserId) return false;
+        if (botUserIds.has(t.authorId)) return false;
+        if (inOtherSections.has(t.id) || watchedDismissedIds.has(t.id)) return false;
+        const m = meta(t.id);
+        if (m.isDraft) return false;
+        return m.openedAt.getTime() >= startedAt.getTime();
+      })
+      .map((t) => toMyTurnPr(t))
+      .sort((a, b) => b.openedAt.localeCompare(a.openedAt));
+  }
+
   // 3. Threads awaiting your response: you opened the thread, someone replied
   //    after you, and it isn't resolved. A dismissal sticks until a newer reply.
   const threadsAwaiting = (
@@ -1617,7 +1711,14 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
         ).map(mapUser)
       : [];
 
-  return { awaitingReview, yourPrs, threadsAwaiting, claudeReviewsToAction, users };
+  return {
+    awaitingReview,
+    yourPrs,
+    threadsAwaiting,
+    watchedRepoPrs,
+    claudeReviewsToAction,
+    users,
+  };
 }
 
 async function countOtherReviewers(
@@ -2017,6 +2118,19 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
         .where(inArray(schema.reviewRequests.prId, prIds))
         .execute();
       await tx.delete(prViews).where(inArray(prViews.prId, prIds)).execute();
+      // PR-keyed my-turn dismissals (review_request + watched_repo_pr) would otherwise
+      // be left as inert orphans pointing at deleted PR ids — clear them. (thread /
+      // claude_review dismissals key off other id spaces, so they are scoped out.)
+      await tx
+        .delete(myTurnDismissals)
+        .where(
+          and(
+            eq(myTurnDismissals.accountId, accountId),
+            inArray(myTurnDismissals.kind, ['review_request', 'watched_repo_pr']),
+            inArray(myTurnDismissals.refId, prIds),
+          ),
+        )
+        .execute();
       // Claude review runs + findings reference these PRs (FKs are ON), so clear
       // them before the PRs.
       const reviewIdRows = await tx
@@ -2038,6 +2152,34 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
     await tx.delete(repos).where(eq(repos.id, id)).execute();
   });
   return true;
+}
+
+// Toggle a repo's "Watch for inbox" flag (account-scoped → false/404 if not owned).
+// First watch stamps inboxWatchStartedAt = now; unwatch keeps it; re-watch keeps the
+// original (so the same PR window is restored). Returns false if the repo isn't found.
+export async function setRepoInboxWatch(
+  accountId: number,
+  repoId: number,
+  watch: boolean,
+): Promise<boolean> {
+  // Single atomic UPDATE (no read-then-write). On watch, COALESCE stamps the start
+  // only when it's currently unset, so concurrent toggles can't overwrite the
+  // original watch window; on unwatch, started_at is left untouched. Scoped by
+  // accountId → returns false (→ 404) for a repo this account doesn't own.
+  const updated = await db
+    .update(repos)
+    .set(
+      watch
+        ? {
+            inboxWatch: true,
+            inboxWatchStartedAt: sql`coalesce(${repos.inboxWatchStartedAt}, ${tsBound(new Date())})`,
+          }
+        : { inboxWatch: false },
+    )
+    .where(and(eq(repos.id, repoId), eq(repos.accountId, accountId)))
+    .returning({ id: repos.id })
+    .execute();
+  return updated.length > 0;
 }
 
 // ---- Claude Review reads ----

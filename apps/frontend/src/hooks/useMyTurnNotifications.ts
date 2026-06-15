@@ -18,6 +18,7 @@ export function useMyTurnNotifications(enabled: boolean): void {
     for (const r of data.awaitingReview) ids.add(`r:${r.prId}`);
     for (const p of data.yourPrs) ids.add(`p:${p.prId}`);
     for (const t of data.threadsAwaiting) ids.add(`t:${t.threadId}`);
+    for (const w of data.watchedRepoPrs) ids.add(`w:${w.prId}`);
 
     const prev = prevRef.current;
     prevRef.current = ids; // always advance the baseline, even while disabled
@@ -32,10 +33,12 @@ export function useMyTurnNotifications(enabled: boolean): void {
     const reviews = added.filter((id) => id.startsWith('r:')).length;
     const threads = added.filter((id) => id.startsWith('t:')).length;
     const yours = added.filter((id) => id.startsWith('p:')).length;
+    const watched = added.filter((id) => id.startsWith('w:')).length;
     const bits: string[] = [];
     if (reviews) bits.push(`${reviews} review${reviews === 1 ? '' : 's'} requested`);
     if (threads) bits.push(`${threads} thread${threads === 1 ? '' : 's'} awaiting you`);
     if (yours) bits.push(`${yours} of your PRs active`);
+    if (watched) bits.push(`${watched} new in watched repos`);
 
     try {
       const n = new Notification(`Pierre — ${added.length} new in My Turn`, {

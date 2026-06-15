@@ -2,18 +2,21 @@ import { useEffect, useRef, useState } from 'react';
 import type { Repo } from '@pierre-review/shared';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 
-// Show/hide dropdown for the watched repos. Replaces the old pill buttons: each
-// repo is a checkbox row showing the full `owner/name` (so same-named repos under
-// different owners are distinguishable). A checked row is visible on the timeline;
-// unchecking hides it. Committed state lives in the store's `repoIds` (null = all
-// shown); toggling is immediate (no Apply) — this is a visibility control, not a
-// staged multi-select. Each row also carries a remove (stop-watching) affordance.
+// Show/hide dropdown for the added repos. Each repo is a checkbox row showing the
+// full `owner/name` (so same-named repos under different owners are distinguishable).
+// A checked row is visible on the timeline; unchecking hides it. Committed state lives
+// in the store's `repoIds` (null = all shown); toggling is immediate (no Apply) — this
+// is a visibility control, not a staged multi-select. Each row also carries a "Watch"
+// toggle (new open PRs by others go to the My Turn inbox — independent of timeline
+// visibility) and a Remove (delete) affordance.
 export function RepoSelectPanel({
   repos,
   repoIds,
   onToggle,
   onOnly,
   onShowAll,
+  onToggleWatch,
+  watchPending,
   onRemove,
   removePending,
 }: {
@@ -22,7 +25,9 @@ export function RepoSelectPanel({
   onToggle: (id: number) => void; // immediate show/hide of one repo
   onOnly: (id: number) => void; // isolate to just this repo (deselect the rest)
   onShowAll: () => void; // clear the filter → show every repo
-  onRemove: (repo: Repo) => void; // stop watching (caller confirms + mutates)
+  onToggleWatch: (repo: Repo) => void; // toggle inbox watch (caller mutates)
+  watchPending: boolean;
+  onRemove: (repo: Repo) => void; // remove/delete the repo (caller confirms + mutates)
   removePending: boolean;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -150,6 +155,33 @@ export function RepoSelectPanel({
                         </span>
                       )}
                     </label>
+                    {/* Watch toggle: new open PRs by others in this repo go to the My
+                        Turn inbox (independent of timeline visibility). Persistently
+                        shown (in sky) when watching, so watched repos read at a glance;
+                        a hover affordance otherwise. */}
+                    <button
+                      type="button"
+                      onClick={() => onToggleWatch(r)}
+                      disabled={watchPending}
+                      aria-pressed={r.inboxWatch}
+                      title={
+                        r.inboxWatch
+                          ? `Watching ${r.fullName} — new PRs go to your inbox. Click to stop.`
+                          : `Watch ${r.fullName}: new open PRs go to your My Turn inbox`
+                      }
+                      aria-label={
+                        r.inboxWatch
+                          ? `Stop watching ${r.fullName} for the inbox`
+                          : `Watch ${r.fullName} for the inbox`
+                      }
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide disabled:opacity-30 ${
+                        r.inboxWatch
+                          ? 'text-sky-600 hover:bg-sky-100 dark:text-sky-400 dark:hover:bg-sky-900/40'
+                          : 'text-gray-400 opacity-0 hover:bg-gray-200 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-gray-700 dark:hover:text-gray-200'
+                      }`}
+                    >
+                      {r.inboxWatch ? 'watching' : 'watch'}
+                    </button>
                     {/* Quick-isolate: show only this repo (deselect the rest), so
                         you can hop between repos without unchecking everything.
                         Hidden when this repo is already the sole visible one. */}
@@ -168,8 +200,8 @@ export function RepoSelectPanel({
                       type="button"
                       onClick={() => onRemove(r)}
                       disabled={removePending}
-                      title={`Stop watching ${r.fullName}`}
-                      aria-label={`Stop watching ${r.fullName}`}
+                      title={`Remove ${r.fullName}`}
+                      aria-label={`Remove ${r.fullName}`}
                       className="shrink-0 px-1 text-gray-400 opacity-0 hover:text-red-500 focus:opacity-100 group-hover:opacity-100 disabled:opacity-30"
                     >
                       ✕

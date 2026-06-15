@@ -100,6 +100,10 @@ export interface Repo {
   lastIncrementalSyncAt: string | null;
   lastSyncStatus: string | null;
   lastSyncError: string | null;
+  // Whether this repo is "Watched" for the My Turn inbox: when true, new open PRs
+  // (opened after the watch began) by other people are surfaced in the inbox. This is
+  // independent of timeline visibility (the repoIds filter) and of removing the repo.
+  inboxWatch: boolean;
 }
 
 export type SyncRunStatus = 'idle' | 'running' | 'ok' | 'error';
@@ -255,6 +259,9 @@ export interface MyTurnCounts {
   awaitingReview: number;
   yourPrsActivity: number;
   threadsAwaiting: number;
+  // New open PRs by others in repos you've Watched (opened after the watch began),
+  // not yet dismissed. 0 when no repos are watched.
+  watchedRepoPrs: number;
   // Completed Claude reviews not yet actioned (no comments/review posted). Always 0
   // when Claude Review is disabled (cloud / flag off).
   claudeReviewsToAction: number;
@@ -648,6 +655,12 @@ export interface YourPrActivityItem extends MyTurnPr {
   summary: string;
 }
 
+// A new open PR (by someone other than you, non-draft) in a repo you've Watched,
+// opened after the watch began. Surfaced so new work in repos you care about doesn't
+// get missed. Dismissing one is sticky (it acknowledges that specific PR); unwatching
+// the repo hides all of them, re-watching restores them.
+export type WatchedRepoPrItem = MyTurnPr;
+
 export interface ThreadAwaitingItem {
   threadId: number;
   prId: number;
@@ -682,6 +695,9 @@ export interface MyTurnResponse {
   awaitingReview: AwaitingReviewItem[];
   yourPrs: YourPrActivityItem[];
   threadsAwaiting: ThreadAwaitingItem[];
+  // New open PRs by others in repos you've Watched (deduped against the sections
+  // above). Empty when no repos are watched.
+  watchedRepoPrs: WatchedRepoPrItem[];
   // Completed Claude reviews awaiting action (empty when Claude Review is disabled).
   claudeReviewsToAction: ClaudeReviewToAction[];
   // Users referenced by any row, for client-side lookup.
@@ -719,9 +735,17 @@ export interface DismissedClaudeReviewItem {
   dismissedAt: string;
 }
 
+// A dismissed watched-repo PR. Opening it loads the PR; "To do" restores it to the
+// inbox (only if the PR is still open and the repo is still watched).
+export interface DismissedWatchedRepoPrItem extends MyTurnPr {
+  kind: 'watched_repo_pr';
+  dismissedAt: string;
+}
+
 export type DismissedItem =
   | DismissedReviewItem
   | DismissedThreadItem
+  | DismissedWatchedRepoPrItem
   | DismissedClaudeReviewItem;
 
 export interface DismissedMyTurnResponse {
@@ -735,6 +759,9 @@ export interface DismissedMyTurnResponse {
 export interface CreateRepoBody {
   owner: string;
   name: string;
+  // When true, the repo is also Watched for the My Turn inbox on add (the picker
+  // passes true for repos that are "yours" — owned or org-member).
+  watch?: boolean;
 }
 
 // ---- repo search (Add-repo picker) ----
@@ -779,12 +806,19 @@ export interface MarkViewedBody {
 // a review_request reappears when its PR is updated again; a thread reappears
 // on a newer reply; a claude_review reappears when a newer review run finishes
 // (the dismissal is keyed by the run's id, so a fresh run is a new entry).
-export type MyTurnDismissKind = 'review_request' | 'thread' | 'claude_review';
+// A watched_repo_pr dismissal is sticky — it acknowledges that specific new PR and
+// does not resurface on activity (the PR leaves the inbox for good once dismissed,
+// or when it's merged/closed).
+export type MyTurnDismissKind =
+  | 'review_request'
+  | 'thread'
+  | 'watched_repo_pr'
+  | 'claude_review';
 
 export interface MyTurnDismissBody {
   kind: MyTurnDismissKind;
-  // PR id for review_request, thread id for thread, Claude-review run id for
-  // claude_review.
+  // PR id for review_request and watched_repo_pr, thread id for thread, Claude-review
+  // run id for claude_review.
   refId: number;
 }
 

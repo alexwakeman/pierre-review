@@ -16,7 +16,10 @@ const dismissSchema = {
     required: ['kind', 'refId'],
     additionalProperties: false,
     properties: {
-      kind: { type: 'string', enum: ['review_request', 'thread', 'claude_review'] },
+      kind: {
+        type: 'string',
+        enum: ['review_request', 'thread', 'watched_repo_pr', 'claude_review'],
+      },
       refId: { type: 'integer' },
     },
   },
@@ -32,6 +35,7 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
         awaitingReview: myTurn.awaitingReview.length,
         yourPrsActivity: myTurn.yourPrs.length,
         threadsAwaiting: myTurn.threadsAwaiting.length,
+        watchedRepoPrs: myTurn.watchedRepoPrs.length,
         claudeReviewsToAction: myTurn.claudeReviewsToAction.length,
       },
       claudeReviewEnabled: config.claudeReviewEnabled,

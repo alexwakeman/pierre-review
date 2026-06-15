@@ -66,6 +66,27 @@ export function DismissedSection({ active }: { active: boolean }): JSX.Element {
             />
           );
         }
+        if (it.kind === 'watched_repo_pr') {
+          return (
+            <MyTurnRow
+              key={`w:${it.prId}`}
+              onOpen={() => openPrFocused(it.prId)}
+              onAction={() =>
+                undismiss.mutate({ kind: 'watched_repo_pr', refId: it.prId })
+              }
+              actionLabel="To do"
+              actionTitle="Move back to your inbox"
+              actionPending={undismiss.isPending}
+              time={`done ${relativeTime(it.dismissedAt)}`}
+              title={it.title}
+              meta={
+                <>
+                  {it.repoFullName} #{it.number}
+                </>
+              }
+            />
+          );
+        }
         if (it.kind === 'claude_review') {
           return (
             <MyTurnRow

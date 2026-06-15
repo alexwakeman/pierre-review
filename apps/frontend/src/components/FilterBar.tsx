@@ -147,6 +147,31 @@ export function FilterBar(): JSX.Element {
     },
   });
 
+  // Toggle "Watch for inbox" on a repo. Inbox-only (doesn't touch timeline
+  // visibility). Optimistically flip the flag in the shared ['repos'] cache so the
+  // toggle reflects instantly; invalidate the inbox feeds so the watched section +
+  // counts refresh.
+  const watchRepo = useMutation({
+    mutationFn: (v: { id: number; watch: boolean }) =>
+      api.setRepoInboxWatch(v.id, v.watch),
+    onMutate: async ({ id, watch }) => {
+      await qc.cancelQueries({ queryKey: ['repos'] });
+      const previous = qc.getQueryData<Repo[]>(['repos']);
+      qc.setQueryData<Repo[]>(['repos'], (old) =>
+        old?.map((r) => (r.id === id ? { ...r, inboxWatch: watch } : r)),
+      );
+      return { previous };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.previous) qc.setQueryData(['repos'], ctx.previous);
+    },
+    onSettled: () => {
+      for (const key of ['repos', 'my-turn', 'my-turn-done', 'me']) {
+        void qc.invalidateQueries({ queryKey: [key] });
+      }
+    },
+  });
+
   // Show/hide a single repo on the timeline. `repoIds` is the explicit visible
   // subset (null = all). Toggling canonicalises back to null when every repo is
   // visible again, so the URL stays clean and the trigger reads "all".
@@ -173,7 +198,7 @@ export function FilterBar(): JSX.Element {
   const confirmRemoveRepo = (r: Repo): void => {
     if (
       window.confirm(
-        `Stop watching ${r.fullName}? This deletes all of its locally-synced data.`,
+        `Remove ${r.fullName}? This deletes all of its locally-synced data.`,
       )
     ) {
       removeRepo.mutate(r.id);
@@ -297,6 +322,8 @@ export function FilterBar(): JSX.Element {
             onToggle={toggleRepoVisibility}
             onOnly={showOnlyRepo}
             onShowAll={() => f.setRepoIds(null)}
+            onToggleWatch={(r) => watchRepo.mutate({ id: r.id, watch: !r.inboxWatch })}
+            watchPending={false}
             onRemove={confirmRemoveRepo}
             removePending={false}
           />

@@ -65,6 +65,13 @@ export const repos = pgTable(
       withTimezone: true,
       mode: 'date',
     }),
+    // "Watch for inbox" — see schema.sqlite.ts for the full description. Kept in
+    // sync by hand (schema-parity.test.ts).
+    inboxWatch: boolean('inbox_watch').notNull().default(false),
+    inboxWatchStartedAt: timestamp('inbox_watch_started_at', {
+      withTimezone: true,
+      mode: 'date',
+    }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),
@@ -194,7 +201,7 @@ export const myTurnDismissals = pgTable(
       .notNull()
       .references(() => accounts.id),
     kind: text('kind', {
-      enum: ['review_request', 'thread', 'claude_review'],
+      enum: ['review_request', 'thread', 'watched_repo_pr', 'claude_review'],
     }).notNull(),
     refId: integer('ref_id').notNull(),
     dismissedAt: timestamp('dismissed_at', {

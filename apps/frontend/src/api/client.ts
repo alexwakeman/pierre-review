@@ -86,6 +86,12 @@ export const api = {
     ),
   addRepo: (body: CreateRepoBody) =>
     fetch('/api/repos', jsonBody('POST', body)).then((r) => handle<Repo>(r)),
+  // Toggle "Watch for inbox" on a repo (inbox-only; does not affect timeline
+  // visibility). Returns the updated repo.
+  setRepoInboxWatch: (id: number, inboxWatch: boolean) =>
+    fetch(`/api/repos/${id}`, jsonBody('PATCH', { inboxWatch })).then((r) =>
+      handle<Repo>(r),
+    ),
   deleteRepo: (id: number) =>
     fetch(`/api/repos/${id}`, jsonBody('DELETE')).then((r) => handle<void>(r)),
   syncRepo: (id: number, full = false) =>
