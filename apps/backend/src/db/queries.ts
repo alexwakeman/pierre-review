@@ -1245,6 +1245,15 @@ async function ownsDismissRef(
       .execute();
     return rows.length > 0;
   }
+  if (kind === 'claude_review') {
+    const rows = await db
+      .select({ id: claudeReviews.id })
+      .from(claudeReviews)
+      .where(and(eq(claudeReviews.id, refId), eq(claudeReviews.accountId, accountId)))
+      .limit(1)
+      .execute();
+    return rows.length > 0;
+  }
   const rows = await db
     .select({ id: reviewThreads.id })
     .from(reviewThreads)
@@ -1293,10 +1302,10 @@ export async function undismissMyTurn(
 }
 
 // The My Turn "Done" tab: entries the user dismissed within the past `daysBefore`
-// days (default 90), newest-dismissed first. Covers only the dismissal-backed kinds
-// (review_request + thread); "Your PRs" are cleared via mark-viewed, not a
-// restorable dismissal. Rebuilds each entry by joining the dismissal's refId back to
-// its PR / thread. accountId-scoped throughout.
+// days (default 90), newest-dismissed first. Covers the dismissal-backed kinds
+// (review_request + thread + claude_review); "Your PRs" are cleared via mark-viewed,
+// not a restorable dismissal. Rebuilds each entry by joining the dismissal's refId
+// back to its PR / thread / Claude-review run. accountId-scoped throughout.
 export async function getCompletedDismissals(
   accountId: number,
   daysBefore = 90,
@@ -1316,6 +1325,7 @@ export async function getCompletedDismissals(
 
   const reviewDismissals = dismissals.filter((d) => d.kind === 'review_request');
   const threadDismissals = dismissals.filter((d) => d.kind === 'thread');
+  const claudeDismissals = dismissals.filter((d) => d.kind === 'claude_review');
   const items: DismissedItem[] = [];
   const referencedUsers = new Set<number>();
 
@@ -1405,6 +1415,48 @@ export async function getCompletedDismissals(
     }
   }
 
+  // claude_review dismissals → their run + parent PR (account-scoped). History is
+  // kept, so an old run still resolves even after a newer run superseded it.
+  if (claudeDismissals.length > 0) {
+    const reviewIds = claudeDismissals.map((d) => d.refId);
+    const runRows = await db
+      .select({
+        reviewId: claudeReviews.id,
+        prId: claudeReviews.prId,
+        owner: repos.owner,
+        name: repos.name,
+        prNumber: pullRequests.number,
+        prTitle: pullRequests.title,
+        verdict: claudeReviews.verdict,
+      })
+      .from(claudeReviews)
+      .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
+      .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+      .where(
+        and(
+          eq(claudeReviews.accountId, accountId),
+          inArray(claudeReviews.id, reviewIds),
+        ),
+      )
+      .execute();
+    const byId = new Map(runRows.map((r) => [r.reviewId, r]));
+    for (const d of claudeDismissals) {
+      const r = byId.get(d.refId);
+      if (!r) continue;
+      items.push({
+        kind: 'claude_review',
+        reviewId: r.reviewId,
+        prId: r.prId,
+        repoFullName: `${r.owner}/${r.name}`,
+        prNumber: r.prNumber,
+        prTitle: r.prTitle,
+        verdict: r.verdict,
+        githubUrl: `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}`,
+        dismissedAt: d.dismissedAt.toISOString(),
+      });
+    }
+  }
+
   // Newest-dismissed first.
   items.sort((a, b) => b.dismissedAt.localeCompare(a.dismissedAt));
 
@@ -1473,9 +1525,13 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
     .execute();
   const reviewDismissedAt = new Map<number, Date>();
   const threadDismissedAt = new Map<number, Date>();
+  // Dismissed Claude-review run ids. Keyed by run id (not PR id): a fresh run gets
+  // a new id, so it naturally re-appears without a timestamp comparison.
+  const claudeDismissedIds = new Set<number>();
   for (const d of dismissals) {
     if (d.kind === 'review_request') reviewDismissedAt.set(d.refId, d.dismissedAt);
     else if (d.kind === 'thread') threadDismissedAt.set(d.refId, d.dismissedAt);
+    else if (d.kind === 'claude_review') claudeDismissedIds.add(d.refId);
   }
 
   const meta = (prId: number) =>
@@ -1543,8 +1599,11 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
   }
 
   // Completed-but-unactioned Claude reviews (local-only feature; empty otherwise).
+  // A manual "Done" hides the run until a newer run finishes (see claudeDismissedIds).
   const claudeReviewsToAction = config.claudeReviewEnabled
-    ? await getUnactionedClaudeReviews(accountId)
+    ? (await getUnactionedClaudeReviews(accountId)).filter(
+        (c) => !claudeDismissedIds.has(c.reviewId),
+      )
     : [];
 
   const users =

@@ -11,7 +11,7 @@ export function ThreadsAwaitingSection({
   items: ThreadAwaitingItem[];
   usersById: Map<number, User>;
 }): JSX.Element | null {
-  const openPrFocused = useFilters((s) => s.openPrFocused);
+  const openMyTurnPr = useFilters((s) => s.openMyTurnPr);
   const qc = useQueryClient();
   const dismiss = useMutation({
     mutationFn: (threadId: number) => api.dismissMyTurn('thread', threadId),
@@ -36,7 +36,15 @@ export function ThreadsAwaitingSection({
           return (
             <MyTurnRow
               key={it.threadId}
-              onOpen={() => openPrFocused(it.prId, it.threadId)}
+              onOpen={() =>
+                // Enter My Turn Focus Mode on this PR and glow the thread's
+                // review_comment marker on the (now isolated) board — mirrors the
+                // thread "Show" link.
+                openMyTurnPr(it.prId, it.threadId, it.lastReplyAt, {
+                  type: 'review_comment',
+                  refId: it.threadId,
+                })
+              }
               onAction={() => dismiss.mutate(it.threadId)}
               actionLabel="Done"
               actionTitle="Done — reappears on a newer reply"

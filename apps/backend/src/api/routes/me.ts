@@ -16,7 +16,7 @@ const dismissSchema = {
     required: ['kind', 'refId'],
     additionalProperties: false,
     properties: {
-      kind: { type: 'string', enum: ['review_request', 'thread'] },
+      kind: { type: 'string', enum: ['review_request', 'thread', 'claude_review'] },
       refId: { type: 'integer' },
     },
   },
@@ -47,7 +47,8 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     return { status: 'ok' };
   });
 
-  // The "Done" tab: entries dismissed in the past 90 days (review_request + thread).
+  // The "Done" tab: entries dismissed in the past 90 days (review_request + thread
+  // + claude_review).
   app.get('/api/my-turn/done', async (req) =>
     getCompletedDismissals(accountIdOf(req), 90),
   );

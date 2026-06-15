@@ -28,14 +28,12 @@ function readPrevVisitOnce(): string | null {
 export function WelcomeBackBanner(): JSX.Element | null {
   const prev = readPrevVisitOnce();
   const { data: me } = useMe();
-  const setMyTurnOnly = useFilters((s) => s.setMyTurnOnly);
   const clearSelection = useFilters((s) => s.clearSelection);
   const myTurnOnly = useFilters((s) => s.myTurnOnly);
   const [dismissed, setDismissed] = useState(false);
 
   if (dismissed || prev == null || !me?.user) return null;
-  // Already isolated to My Turn (e.g. restored from the URL) → the board already
-  // shows this; no nag.
+  // Already in My Turn Focus Mode → the board already shows the inbox; no nag.
   if (myTurnOnly) return null;
   const gap = Date.now() - Date.parse(prev);
   if (Number.isNaN(gap) || gap < MIN_GAP_MS) return null;
@@ -64,7 +62,8 @@ export function WelcomeBackBanner(): JSX.Element | null {
       <button
         type="button"
         onClick={() => {
-          setMyTurnOnly(true);
+          // Show the My Turn panel (clear any selection); entering Focus Mode is done
+          // by opening an entry, not from here.
           clearSelection();
           setDismissed(true);
         }}

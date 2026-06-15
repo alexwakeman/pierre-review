@@ -391,18 +391,41 @@ export function FilterBar(): JSX.Element {
             </span>
           </button>
         )}
-        <SavedViews disabled={f.focusActive} />
+        {/* My Turn Focus Mode: the board is isolated to your inbox. This pill (and Esc)
+            leaves it — back to the full board, keeping any selection. Hidden while a
+            PR-isolation overlay is up (that has its own exit pill above). */}
+        {f.myTurnOnly && !f.focusActive && (
+          <button
+            type="button"
+            onClick={() => f.exitMyTurnFocus()}
+            className="focus-indicator"
+            title="Leave My Turn focus (or press Esc) — back to the full board"
+            aria-label="Exit My Turn focus"
+          >
+            <span className="focus-indicator-dot" aria-hidden="true" />
+            My Turn focus
+            <span className="focus-indicator-close" aria-hidden="true">
+              ✕
+            </span>
+          </button>
+        )}
+        {/* Saving / clearing / replacing the persisted filter snapshot is off-limits
+            in EITHER focus mode: the PR-isolation lens owns the board, and My Turn
+            Focus Mode is a transient mode those snapshots can't represent (resetting
+            or applying a snapshot would reshape the filters but leave the board
+            isolated). You exit focus first, then reshape the board. */}
+        <SavedViews disabled={f.focusActive || f.myTurnOnly} />
         <button
           type="button"
           onClick={() => f.resetAllFilters()}
-          disabled={f.focusActive}
+          disabled={f.focusActive || f.myTurnOnly}
           title={
-            f.focusActive
+            f.focusActive || f.myTurnOnly
               ? 'Exit focus mode to change filters'
               : 'Reset all filters to their defaults'
           }
           className={`whitespace-nowrap rounded border px-2 py-0.5 text-xs transition ${
-            f.focusActive
+            f.focusActive || f.myTurnOnly
               ? 'cursor-not-allowed border-gray-300 text-gray-600 opacity-45 dark:border-gray-700 dark:text-gray-300'
               : 'border-gray-300 text-gray-600 hover:border-gray-400 hover:text-gray-800 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:text-gray-100'
           }`}

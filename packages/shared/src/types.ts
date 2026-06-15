@@ -690,9 +690,10 @@ export interface MyTurnResponse {
 
 // ---- my turn: completed / dismissed (the "Done" tab) ----
 // Previously-dismissed entries, for the My Turn "Done" tab (past 90 days). Only the
-// dismissal-backed kinds appear here (review_request + thread, from myTurnDismissals)
-// — "Your PRs" are cleared via mark-viewed, not a restorable dismissal. Each carries
-// when it was dismissed and can be moved back to the inbox ("To do" = un-dismiss).
+// dismissal-backed kinds appear here (review_request + thread + claude_review, from
+// myTurnDismissals) — "Your PRs" are cleared via mark-viewed, not a restorable
+// dismissal. Each carries when it was dismissed and can be moved back to the inbox
+// ("To do" = un-dismiss).
 export interface DismissedReviewItem extends MyTurnPr {
   kind: 'review_request';
   dismissedAt: string;
@@ -703,7 +704,25 @@ export interface DismissedThreadItem extends ThreadAwaitingItem {
   dismissedAt: string;
 }
 
-export type DismissedItem = DismissedReviewItem | DismissedThreadItem;
+// A dismissed Claude review (local-only feature). Keyed by the run id; opening it
+// jumps to the PR's Claude Review tab, "To do" restores it to the inbox (only if it
+// is still that PR's most-recent unposted run).
+export interface DismissedClaudeReviewItem {
+  kind: 'claude_review';
+  reviewId: number;
+  prId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  verdict: ClaudeReviewVerdict | null;
+  githubUrl: string;
+  dismissedAt: string;
+}
+
+export type DismissedItem =
+  | DismissedReviewItem
+  | DismissedThreadItem
+  | DismissedClaudeReviewItem;
 
 export interface DismissedMyTurnResponse {
   items: DismissedItem[];
@@ -758,12 +777,14 @@ export interface MarkViewedBody {
 
 // Dismissing a "my turn" entry. Auto-resurfaces when newer activity arrives:
 // a review_request reappears when its PR is updated again; a thread reappears
-// on a newer reply.
-export type MyTurnDismissKind = 'review_request' | 'thread';
+// on a newer reply; a claude_review reappears when a newer review run finishes
+// (the dismissal is keyed by the run's id, so a fresh run is a new entry).
+export type MyTurnDismissKind = 'review_request' | 'thread' | 'claude_review';
 
 export interface MyTurnDismissBody {
   kind: MyTurnDismissKind;
-  // PR id for review_request, thread id for thread.
+  // PR id for review_request, thread id for thread, Claude-review run id for
+  // claude_review.
   refId: number;
 }
 

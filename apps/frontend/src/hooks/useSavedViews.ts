@@ -1,11 +1,16 @@
 import { useCallback, useState } from 'react';
-import { pickFilterBarState, useFilters } from '../store/filters.js';
+import {
+  pickFilterBarState,
+  sanitizePersistedFilters,
+  useFilters,
+} from '../store/filters.js';
 
 // A named snapshot of the filter bar (exactly pickFilterBarState — repos, members,
-// range, categories, statuses, review verdicts, thread states, My Turn, search,
-// strip filter). Stored in localStorage so a user can flip between "My reviews",
-// "Team sprint", "Stalled", etc. Selection / focus / detail state is deliberately
-// NOT captured — a view reshapes the board, it doesn't move your selection.
+// range, categories, statuses, review verdicts, thread states, search, strip filter).
+// Stored in localStorage so a user can flip between "My reviews", "Team sprint",
+// "Stalled", etc. Selection / focus / detail state is deliberately NOT captured — a
+// view reshapes the board, it doesn't move your selection. (My Turn Focus Mode is a
+// transient mode, not a filter, so it is not captured either.)
 export interface SavedView {
   name: string;
   state: ReturnType<typeof pickFilterBarState>;
@@ -59,10 +64,13 @@ export function useSavedViews(): {
 
   const apply = useCallback((view: SavedView): void => {
     // Replace the whole filter bar, and bump rangeResetSignal so the timeline
-    // re-applies the view's window (mirrors resetAllFilters).
-    useFilters
-      .getState()
-      .hydrate({ ...view.state, rangeResetSignal: useFilters.getState().rangeResetSignal + 1 });
+    // re-applies the view's window (mirrors resetAllFilters). Sanitize first: a view
+    // saved by an older build may carry a stale `myTurnOnly` (now a transient focus
+    // mode) — applying it must reshape the board, not silently enter My Turn focus.
+    useFilters.getState().hydrate({
+      ...sanitizePersistedFilters(view.state),
+      rangeResetSignal: useFilters.getState().rangeResetSignal + 1,
+    });
   }, []);
 
   return { views, save, remove, apply };

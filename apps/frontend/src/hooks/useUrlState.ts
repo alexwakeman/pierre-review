@@ -7,6 +7,7 @@ import {
   DEFAULT_PR_STATUSES,
   DEFAULT_REVIEW_STATES,
   pickFilterBarState,
+  sanitizePersistedFilters,
   useFilters,
   type FilterState,
   type RangePreset,
@@ -84,8 +85,9 @@ function readFromUrl(): Partial<FilterState> {
     const valid = new Set<string>(DERIVED_STATES);
     out.derivedStates = states.split(',').filter((s) => valid.has(s)) as DerivedState[];
   }
-  // `myturn=1` isolates the timeline to the current My Turn inbox (off by default).
-  if (p.get('myturn') === '1') out.myTurnOnly = true;
+  // My Turn Focus Mode is a transient mode (entered only by opening an inbox entry),
+  // so it is deliberately NOT read from / written to the URL — a fresh load is always
+  // the full board + the My Turn panel.
   const pr = p.get('pr');
   if (pr) out.selectedPrId = Number.parseInt(pr, 10);
   const thread = p.get('thread');
@@ -126,7 +128,7 @@ function writeToUrl(s: FilterState): void {
   // so it survives a reload; the common "all verdicts" case stays out of the URL.
   if (!sameSet(s.reviewStates, DEFAULT_REVIEW_STATES)) p.set('reviews', s.reviewStates.join(','));
   if (s.derivedStates.length) p.set('states', s.derivedStates.join(','));
-  if (s.myTurnOnly) p.set('myturn', '1');
+  // myTurnOnly (My Turn Focus Mode) is transient — intentionally not serialized.
   if (s.selectedPrId) p.set('pr', String(s.selectedPrId));
   if (s.selectedThreadId) p.set('thread', String(s.selectedThreadId));
   if (s.stripFilter !== 'all') p.set('strip', s.stripFilter);
@@ -152,8 +154,11 @@ function loadPersistedFilters(): Partial<FilterState> | null {
     const raw = localStorage.getItem(FILTER_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+    // Sanitize: keep only known persisted filter keys. Drops a legacy persisted
+    // `myTurnOnly` (now a transient focus mode) so an upgraded user's stale blob
+    // can't force My Turn Focus Mode on a fresh load.
     return parsed && typeof parsed === 'object'
-      ? (parsed as Partial<FilterState>)
+      ? sanitizePersistedFilters(parsed as Partial<FilterState>)
       : null;
   } catch {
     return null;

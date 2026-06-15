@@ -1,4 +1,6 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ClaudeReviewToAction } from '@pierre-review/shared';
+import { api } from '../../api/client.js';
 import { useFilters } from '../../store/filters.js';
 import { relativeTime } from '../../lib/ui.js';
 import { MyTurnRow } from './MyTurnRow.js';
@@ -10,14 +12,24 @@ const VERDICT_LABEL: Record<string, string> = {
 };
 
 // My Turn section for completed Claude reviews that haven't been actioned yet (no
-// review/comments posted). Opening a row jumps to that PR's Claude Review tab so you
-// can post or discard it. Local-only — empty (and hidden) when Claude Review is off.
+// review/comments posted). Clicking a row jumps to that PR's Claude Review tab so you
+// can post or discard it; "Done" dismisses the entry like any other (it returns when a
+// newer run finishes). Local-only — empty (and hidden) when Claude Review is off.
 export function ClaudeReviewsToActionSection({
   items,
 }: {
   items: ClaudeReviewToAction[];
 }): JSX.Element | null {
-  const openClaudeReview = useFilters((s) => s.openClaudeReview);
+  const openMyTurnClaudeReview = useFilters((s) => s.openMyTurnClaudeReview);
+  const qc = useQueryClient();
+  const dismiss = useMutation({
+    mutationFn: (reviewId: number) => api.dismissMyTurn('claude_review', reviewId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['my-turn'] });
+      void qc.invalidateQueries({ queryKey: ['my-turn-done'] });
+      void qc.invalidateQueries({ queryKey: ['me'] });
+    },
+  });
   if (items.length === 0) return null;
 
   return (
@@ -31,10 +43,11 @@ export function ClaudeReviewsToActionSection({
         {items.map((it) => (
           <MyTurnRow
             key={it.reviewId}
-            onOpen={() => openClaudeReview(it.prId)}
-            onAction={() => openClaudeReview(it.prId)}
-            actionLabel="Open"
-            actionTitle="Open this PR's Claude Review tab to post or discard it"
+            onOpen={() => openMyTurnClaudeReview(it.prId)}
+            onAction={() => dismiss.mutate(it.reviewId)}
+            actionLabel="Done"
+            actionTitle="Done — reappears when a newer review finishes"
+            actionPending={dismiss.isPending}
             time={
               it.finishedAt != null ? `reviewed ${relativeTime(it.finishedAt)}` : 'completed'
             }

@@ -193,7 +193,9 @@ export const myTurnDismissals = pgTable(
     accountId: integer('account_id')
       .notNull()
       .references(() => accounts.id),
-    kind: text('kind', { enum: ['review_request', 'thread'] }).notNull(),
+    kind: text('kind', {
+      enum: ['review_request', 'thread', 'claude_review'],
+    }).notNull(),
     refId: integer('ref_id').notNull(),
     dismissedAt: timestamp('dismissed_at', {
       withTimezone: true,

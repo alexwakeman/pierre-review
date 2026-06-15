@@ -11,7 +11,7 @@ export function YourPrsSection({
   items: YourPrActivityItem[];
   usersById: Map<number, User>;
 }): JSX.Element | null {
-  const openPrFocused = useFilters((s) => s.openPrFocused);
+  const openMyTurnPr = useFilters((s) => s.openMyTurnPr);
   const qc = useQueryClient();
   // "Seen" = mark the PR viewed; its new-activity badge clears and it drops out.
   const dismiss = useMutation({
@@ -36,7 +36,7 @@ export function YourPrsSection({
         {items.map((it) => (
           <MyTurnRow
             key={it.prId}
-            onOpen={() => openPrFocused(it.prId)}
+            onOpen={() => openMyTurnPr(it.prId)}
             onAction={() => dismiss.mutate(it.prId)}
             actionLabel="Seen"
             actionTitle="Mark seen — clears the new-activity badge"

@@ -11,7 +11,7 @@ export function AwaitingReviewSection({
   items: AwaitingReviewItem[];
   usersById: Map<number, User>;
 }): JSX.Element | null {
-  const openPrFocused = useFilters((s) => s.openPrFocused);
+  const openMyTurnPr = useFilters((s) => s.openMyTurnPr);
   const qc = useQueryClient();
   const dismiss = useMutation({
     mutationFn: (prId: number) => api.dismissMyTurn('review_request', prId),
@@ -34,7 +34,7 @@ export function AwaitingReviewSection({
         {items.map((it) => (
           <MyTurnRow
             key={it.prId}
-            onOpen={() => openPrFocused(it.prId)}
+            onOpen={() => openMyTurnPr(it.prId)}
             onAction={() => dismiss.mutate(it.prId)}
             actionLabel="Done"
             actionTitle="Done — reappears if the PR is updated"

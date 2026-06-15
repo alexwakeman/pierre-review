@@ -6,11 +6,18 @@ import { useMyTurnDone } from '../../hooks/useTriage.js';
 import { relativeTime } from '../../lib/ui.js';
 import { MyTurnRow } from './MyTurnRow.js';
 
+const VERDICT_LABEL: Record<string, string> = {
+  APPROVE: 'approve',
+  REQUEST_CHANGES: 'changes',
+  COMMENT: 'comment',
+};
+
 // The "Done" tab: entries dismissed in the past 90 days, each restorable to the
 // inbox via "To do" (un-dismiss). Data is fetched lazily (only while the tab is
 // active).
 export function DismissedSection({ active }: { active: boolean }): JSX.Element {
   const openPrFocused = useFilters((s) => s.openPrFocused);
+  const openClaudeReview = useFilters((s) => s.openClaudeReview);
   const { data, isLoading } = useMyTurnDone(active);
   const qc = useQueryClient();
   const undismiss = useMutation({
@@ -37,26 +44,53 @@ export function DismissedSection({ active }: { active: boolean }): JSX.Element {
 
   return (
     <ul className="space-y-0.5">
-      {items.map((it) =>
-        it.kind === 'review_request' ? (
-          <MyTurnRow
-            key={`r:${it.prId}`}
-            onOpen={() => openPrFocused(it.prId)}
-            onAction={() =>
-              undismiss.mutate({ kind: 'review_request', refId: it.prId })
-            }
-            actionLabel="To do"
-            actionTitle="Move back to your inbox"
-            actionPending={undismiss.isPending}
-            time={`done ${relativeTime(it.dismissedAt)}`}
-            title={it.title}
-            meta={
-              <>
-                {it.repoFullName} #{it.number}
-              </>
-            }
-          />
-        ) : (
+      {items.map((it) => {
+        if (it.kind === 'review_request') {
+          return (
+            <MyTurnRow
+              key={`r:${it.prId}`}
+              onOpen={() => openPrFocused(it.prId)}
+              onAction={() =>
+                undismiss.mutate({ kind: 'review_request', refId: it.prId })
+              }
+              actionLabel="To do"
+              actionTitle="Move back to your inbox"
+              actionPending={undismiss.isPending}
+              time={`done ${relativeTime(it.dismissedAt)}`}
+              title={it.title}
+              meta={
+                <>
+                  {it.repoFullName} #{it.number}
+                </>
+              }
+            />
+          );
+        }
+        if (it.kind === 'claude_review') {
+          return (
+            <MyTurnRow
+              key={`c:${it.reviewId}`}
+              onOpen={() => openClaudeReview(it.prId)}
+              onAction={() =>
+                undismiss.mutate({ kind: 'claude_review', refId: it.reviewId })
+              }
+              actionLabel="To do"
+              actionTitle="Move back to your inbox"
+              actionPending={undismiss.isPending}
+              time={`done ${relativeTime(it.dismissedAt)}`}
+              title={it.prTitle}
+              meta={
+                <>
+                  {it.repoFullName} #{it.prNumber}
+                  {it.verdict != null && (
+                    <> · {VERDICT_LABEL[it.verdict] ?? it.verdict.toLowerCase()}</>
+                  )}
+                </>
+              }
+            />
+          );
+        }
+        return (
           <MyTurnRow
             key={`t:${it.threadId}`}
             onOpen={() => openPrFocused(it.prId, it.threadId)}
@@ -75,8 +109,8 @@ export function DismissedSection({ active }: { active: boolean }): JSX.Element {
               </>
             }
           />
-        ),
-      )}
+        );
+      })}
     </ul>
   );
 }

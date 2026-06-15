@@ -22,7 +22,7 @@ export function useKeyboard(): void {
         focusActive,
         exitFocus,
         myTurnOnly,
-        setMyTurnOnly,
+        exitMyTurnFocus,
         setInsightsOpen,
       } = useFilters.getState();
 
@@ -30,11 +30,15 @@ export function useKeyboard(): void {
         if (isTypingTarget(e.target)) {
           (e.target as HTMLElement).blur();
         } else if (focusActive) {
-          // In focus mode, Escape exits focus exactly like the on-canvas "Exit
-          // focus" button: the Timeline reacts to the bumped exitFocusSignal to
-          // restore the rows, re-centre on the opening marker, and fade-glow it.
+          // In the PR-isolation focus overlay, Escape exits it exactly like the
+          // on-canvas "Exit focus" button: the Timeline reacts to the bumped
+          // exitFocusSignal to restore the rows, re-centre, and fade-glow the marker.
           // Selection is left intact (the detail pane stays put).
           exitFocus();
+        } else if (myTurnOnly) {
+          // In My Turn Focus Mode, Escape leaves it: un-isolate the board back to the
+          // full timeline, keeping any selection (it stays selected on the full board).
+          exitMyTurnFocus();
         } else {
           clearSelection();
         }
@@ -48,13 +52,12 @@ export function useKeyboard(): void {
         return;
       }
 
-      // Toggle the My Turn isolate filter — but not in focus mode (the lens owns the
-      // board; mirrors the disabled header toggle). Clears selection when turning on.
+      // Show the My Turn panel (clear the selection), mirroring the header pill — a
+      // no-op in home, and in My Turn Focus Mode it re-shows the panel without leaving
+      // focus. Suppressed during the PR-isolation overlay (the lens owns the board).
       if (e.key === 'm') {
         if (focusActive) return;
-        const next = !myTurnOnly;
-        setMyTurnOnly(next);
-        if (next) clearSelection();
+        clearSelection();
         return;
       }
 

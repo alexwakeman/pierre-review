@@ -76,10 +76,14 @@ export interface FilterState {
   // default; an empty set hides every review marker. Only affects review markers.
   reviewStates: ReviewState[];
   derivedStates: DerivedState[]; // empty = no derived-state filtering
-  // When true, isolate the timeline to PRs in the current "My Turn" inbox
-  // (awaiting your review / your PRs with new activity / threads awaiting you) —
-  // the same set the My Turn panel shows. A purely client-side filter (the inbox
-  // is fetched separately via useMyTurn), so it never feeds buildTimelineSearch.
+  // "My Turn Focus Mode": when true, the timeline is isolated to the PRs in the
+  // current "My Turn" inbox (awaiting your review / your PRs with new activity /
+  // threads awaiting you) — the same set the My Turn panel shows. Entered ONLY by
+  // opening an inbox entry (openMyTurnPr / openMyTurnClaudeReview); left via
+  // exitMyTurnFocus (Esc / the FilterBar "My Turn focus" pill). A purely client-side
+  // filter (the inbox is fetched separately via useMyTurn) so it never feeds
+  // buildTimelineSearch, and a TRANSIENT mode — NOT mirrored to the URL or
+  // localStorage, so a fresh load is always the full board + the My Turn panel.
   myTurnOnly: boolean;
 
   // selection
@@ -198,13 +202,37 @@ export interface FilterState {
   setReviewStates: (s: ReviewState[]) => void;
   toggleDerivedState: (s: DerivedState) => void;
   setDerivedStates: (s: DerivedState[]) => void;
-  setMyTurnOnly: (v: boolean) => void;
+  // Enter "My Turn Focus Mode" by opening an inbox entry: isolate the board to the
+  // My Turn inbox AND select the PR (+ optionally glow a thread's review_comment
+  // marker via `event`). Entered ONLY from the My Turn panel's active entries. The
+  // board stays isolated until the user exits focus; re-clicking the header pill
+  // (clearSelection) re-shows the panel WITHOUT leaving focus.
+  openMyTurnPr: (
+    id: number,
+    threadId?: number | null,
+    focusAt?: string | null,
+    event?: { type: EventType; refId: number | null } | null,
+  ) => void;
+  // Same, for a Claude-review inbox entry: enter focus + open the PR's Claude tab.
+  openMyTurnClaudeReview: (prId: number) => void;
+  // Leave My Turn Focus Mode: un-isolate the board (back to the full timeline). Any
+  // selection is KEPT (stays selected on the full board) and re-centred into view;
+  // with nothing selected, the My Turn panel stays shown on the now-full board.
+  exitMyTurnFocus: () => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
   clearSelection: () => void;
   // Open a PR from the strip / my-turn / a timeline event: select it AND ask
-  // the timeline to scroll to it (optionally recentering on `focusAt`).
-  openPrFocused: (id: number, threadId?: number | null, focusAt?: string | null) => void;
+  // the timeline to scroll to it (optionally recentering on `focusAt`). Pass `event`
+  // to also glow a specific marker once the timeline recenters (e.g. a thread's
+  // review_comment marker, resolved by (type, refId)) — like a "Show" link, but it
+  // also records the thread/PR selection for the detail pane.
+  openPrFocused: (
+    id: number,
+    threadId?: number | null,
+    focusAt?: string | null,
+    event?: { type: EventType; refId: number | null } | null,
+  ) => void;
   // Show a specific activity entry on the timeline: keep its PR selected, recenter
   // on the event's instant, and glow the matching marker.
   showEventOnTimeline: (
@@ -298,7 +326,6 @@ type FilterDefaults = Pick<
   | 'prStatuses'
   | 'reviewStates'
   | 'derivedStates'
-  | 'myTurnOnly'
   | 'searchQuery'
   | 'stripFilter'
 >;
@@ -324,7 +351,6 @@ function freshFilterDefaults(): FilterDefaults {
     prStatuses: [...DEFAULT_PR_STATUSES],
     reviewStates: [...DEFAULT_REVIEW_STATES],
     derivedStates: [],
-    myTurnOnly: false,
     searchQuery: '',
     stripFilter: 'all',
   };
@@ -348,10 +374,29 @@ export function pickFilterBarState(s: FilterState): FilterDefaults {
     prStatuses: s.prStatuses,
     reviewStates: s.reviewStates,
     derivedStates: s.derivedStates,
-    myTurnOnly: s.myTurnOnly,
     searchQuery: s.searchQuery,
     stripFilter: s.stripFilter,
   };
+}
+
+// Restore an UNTRUSTED persisted blob (old localStorage / a saved view) down to the
+// known persisted filter-bar keys, dropping everything else. Critically this drops a
+// LEGACY persisted `myTurnOnly` — older builds persisted it as a filter, but it's now
+// a TRANSIENT focus mode, so blindly re-hydrating it would silently re-enter My Turn
+// Focus Mode on load / on applying an old view (a fresh load must be the full board).
+// New writes never include such keys (pickFilterBarState), but blobs written by an
+// older build can. Whitelisting against freshFilterDefaults() also future-proofs this.
+export function sanitizePersistedFilters(
+  raw: Partial<FilterState>,
+): Partial<FilterDefaults> {
+  const allowed = freshFilterDefaults();
+  const out: Partial<FilterDefaults> = {};
+  for (const key of Object.keys(allowed) as (keyof FilterDefaults)[]) {
+    if (key in raw && raw[key] !== undefined) {
+      (out as Record<string, unknown>)[key] = raw[key];
+    }
+  }
+  return out;
 }
 
 // The fresh-load defaults for every (non-action) piece of state: the filters above
@@ -360,6 +405,9 @@ export function pickFilterBarState(s: FilterState): FilterDefaults {
 function freshDefaults(): FilterData {
   return {
     ...freshFilterDefaults(),
+    // My Turn Focus Mode is a transient mode (not a persisted filter): a fresh load is
+    // always the full board + the My Turn panel. Entered only via openMyTurnPr/…Review.
+    myTurnOnly: false,
     selectedPrId: null,
     selectedThreadId: null,
     selectedCommentId: null,
@@ -415,7 +463,40 @@ export const useFilters = create<FilterState>((set, get) => ({
   toggleDerivedState: (st) =>
     set((s) => ({ derivedStates: toggle(s.derivedStates, st) })),
   setDerivedStates: (st) => set({ derivedStates: st }),
-  setMyTurnOnly: (v) => set({ myTurnOnly: v }),
+  openMyTurnPr: (id, threadId = null, focusAt = null, event = null) =>
+    set({
+      myTurnOnly: true, // enter My Turn Focus Mode (isolate the board to the inbox)
+      selectedPrId: id,
+      selectedThreadId: threadId,
+      selectedCommentId: null,
+      timelineFocusPr: id,
+      timelineFocusAt: focusAt,
+      timelineFocusEvent: event,
+      timelineIsolate: false,
+    }),
+  openMyTurnClaudeReview: (prId) =>
+    set({
+      myTurnOnly: true, // enter My Turn Focus Mode
+      selectedPrId: prId,
+      selectedThreadId: null,
+      selectedCommentId: null,
+      claudeTabFocus: { prId },
+    }),
+  exitMyTurnFocus: () =>
+    set((s) => {
+      if (!s.myTurnOnly) return {}; // not in My Turn focus — nothing to leave
+      // Keep the selection: it stays selected on the now-full board. If a PR is
+      // selected, re-fire the timeline focus hint so the un-isolated board scrolls it
+      // back into view (the rebuild keeps it selected but never scrolls on its own).
+      if (s.selectedPrId == null) return { myTurnOnly: false };
+      return {
+        myTurnOnly: false,
+        timelineFocusPr: s.selectedPrId,
+        timelineFocusAt: null,
+        timelineFocusEvent: null,
+        timelineIsolate: false,
+      };
+    }),
   selectPr: (id) =>
     set({ selectedPrId: id, selectedThreadId: null, selectedCommentId: null }),
   selectThread: (prId, threadId) =>
@@ -426,14 +507,17 @@ export const useFilters = create<FilterState>((set, get) => ({
     })),
   clearSelection: () =>
     set({ selectedPrId: null, selectedThreadId: null, selectedCommentId: null }),
-  openPrFocused: (id, threadId = null, focusAt = null) =>
+  openPrFocused: (id, threadId = null, focusAt = null, event = null) =>
     set({
       selectedPrId: id,
       selectedThreadId: threadId,
       selectedCommentId: null,
       timelineFocusPr: id,
       timelineFocusAt: focusAt,
-      timelineFocusEvent: null,
+      timelineFocusEvent: event,
+      // A plain navigate, never the sticky isolation overlay — guarantee the event/
+      // centre branch runs even if a prior focus left timelineIsolate set.
+      timelineIsolate: false,
     }),
   showEventOnTimeline: (prId, focusAt, event) =>
     set({

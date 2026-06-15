@@ -83,6 +83,9 @@ export default function App(): JSX.Element {
   // exit. The on-screen exit control (the "Focus mode" pill) now lives in the
   // FilterBar, next to "Clear filters"; Esc and the browser Back button still work.
   const focusActive = useFilters((s) => s.focusActive);
+  // My Turn Focus Mode also frames the board (isolated to your inbox) and shows its
+  // own exit pill in the FilterBar; same frame so the "you're in a focus" cue is one.
+  const myTurnOnly = useFilters((s) => s.myTurnOnly);
   const insightsOpen = useFilters((s) => s.insightsOpen);
   const setInsightsOpen = useFilters((s) => s.setInsightsOpen);
 
@@ -332,7 +335,7 @@ export default function App(): JSX.Element {
       <FilterBar />
       <OpenPrsStrip />
 
-      <main className={`flex min-h-0 flex-1 flex-col${focusActive ? ' focus-frame' : ''}`}>
+      <main className={`flex min-h-0 flex-1 flex-col${focusActive || myTurnOnly ? ' focus-frame' : ''}`}>
         <section className="min-h-0 flex-1 overflow-hidden">
           <Timeline />
         </section>

@@ -200,11 +200,12 @@ export const prViews = sqliteTable('pr_views', {
   lastViewedAt: integer('last_viewed_at', { mode: 'timestamp' }).notNull(),
 });
 
-// Manual dismissals of "my turn" entries. `refId` is a PR id (review_request)
-// or a review-thread id (thread). The dismissal is honoured only while no newer
-// activity has happened — getMyTurn compares dismissedAt against the PR's
-// updatedAt / the thread's last reply, so it auto-resurfaces. `accountId` scopes
-// the dismissal set per tenant.
+// Manual dismissals of "my turn" entries. `refId` is a PR id (review_request),
+// a review-thread id (thread), or a Claude-review run id (claude_review). The
+// dismissal is honoured only while no newer activity has happened — getMyTurn
+// compares dismissedAt against the PR's updatedAt / the thread's last reply, and a
+// claude_review is keyed by run id so a fresh run is a new (undismissed) entry.
+// `accountId` scopes the dismissal set per tenant.
 export const myTurnDismissals = sqliteTable(
   'my_turn_dismissals',
   {
@@ -212,7 +213,9 @@ export const myTurnDismissals = sqliteTable(
     accountId: integer('account_id')
       .notNull()
       .references(() => accounts.id),
-    kind: text('kind', { enum: ['review_request', 'thread'] }).notNull(),
+    kind: text('kind', {
+      enum: ['review_request', 'thread', 'claude_review'],
+    }).notNull(),
     refId: integer('ref_id').notNull(),
     dismissedAt: integer('dismissed_at', { mode: 'timestamp' }).notNull(),
   },

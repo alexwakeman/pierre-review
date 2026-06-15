@@ -2272,10 +2272,24 @@ export function Timeline(): JSX.Element {
     // materialized and then scrolled-to + glowed. Seed it into the rendered PR
     // set; cleared once consumed below so it doesn't linger past this rebuild.
     const extra = forceShowOpenPrRef.current;
-    const basePrs: TimelinePr[] =
+    let basePrs: TimelinePr[] =
       extra && !data.prs.some((p) => p.id === extra.id)
         ? [...data.prs, extra]
         : data.prs;
+
+    // When the "My Turn" isolate filter is on, surface inbox PRs that have NO
+    // in-window timeline activity — so they're absent from the lean payload — most
+    // notably Claude-review PRs (a completed review isn't itself a timeline event)
+    // and stale "awaiting review" PRs. Pull their full records from the open-PRs
+    // feed so their bars render in the isolated board instead of silently dropping
+    // out of it. They still flow through the same member/derived/My-Turn filter below.
+    if (myTurnOnly && myTurnPrIds != null && openPrsData) {
+      const present = new Set(basePrs.map((p) => p.id));
+      const missingInbox = openPrsData.prs.filter(
+        (p) => myTurnPrIds.has(p.id) && !present.has(p.id),
+      );
+      if (missingInbox.length > 0) basePrs = [...basePrs, ...missingInbox];
+    }
 
     // Member filter: when set, only render bars for PRs the selected members
     // authored, so the timeline collapses to just those contributors' rows
@@ -2672,6 +2686,7 @@ export function Timeline(): JSX.Element {
     derivedStates,
     myTurnOnly,
     myTurnPrIds,
+    openPrsData,
     userIds,
     reposById,
     usersById,
