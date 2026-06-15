@@ -24,7 +24,7 @@ import {
   useUsers,
 } from '../../hooks/useTimeline.js';
 import { useMyTurn, useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
-import { resolveRange, useFilters } from '../../store/filters.js';
+import { MAX_RANGE_DAYS, resolveRange, useFilters } from '../../store/filters.js';
 import { indexUsers, userLabel } from '../../lib/ui.js';
 import { renderPrBar, prClassName, barIsTall } from './prBar.js';
 import { computeUserStats, renderUserLabel } from './userRow.js';
@@ -317,6 +317,13 @@ export function Timeline(): JSX.Element {
   // payload (it had no in-window activity). The focus path stages it here so the
   // next rebuild materializes its bar; cleared once the rebuild consumes it.
   const forceShowOpenPrRef = useRef<TimelinePr | null>(null);
+  // Tracks a My Turn Focus Mode focus that's waiting for the widened-range refetch to
+  // bring its inbox PR into the payload (an inbox PR predating the date filter — see
+  // the focus consumer's fall-through). Bounded: once a *fresh* payload still lacks
+  // the PR we stop waiting, so the focus never hangs unconsumed.
+  const myTurnFocusAwaitRef = useRef<{ prId: number; data: TimelineResponse | undefined } | null>(
+    null,
+  );
   // The pending deferred "enter focus / centre after the force-show rebuild paints"
   // timer (forceShowThen). Held so a rapid second search-pick cancels the first —
   // otherwise both timeouts fire and the focus flickers between the two PRs.
@@ -420,6 +427,46 @@ export function Timeline(): JSX.Element {
     for (const it of myTurnData.claudeReviewsToAction) ids.add(it.prId);
     return ids;
   }, [myTurnData]);
+
+  // (B) My Turn Focus Mode range extension. The isolated board only fetches the
+  // active date-range window, so an inbox PR whose activity predates it (e.g. an
+  // "awaiting review" PR opened weeks ago, or a thread on a since-merged PR) would
+  // be absent → empty board. Compute the earliest instant across the inbox PRs and
+  // publish it as myTurnFromMs so resolveRange widens the fetch back to it (capped at
+  // the 90-day backfill horizon). Cleared when not in focus mode. Minute-floored so a
+  // stable value doesn't churn the timeline query across renders.
+  const setMyTurnFrom = useFilters((s) => s.setMyTurnFrom);
+  useEffect(() => {
+    if (!myTurnOnly || myTurnPrIds == null) {
+      setMyTurnFrom(null);
+      return;
+    }
+    let earliest = Infinity;
+    const consider = (ms: number): void => {
+      if (Number.isFinite(ms) && ms < earliest) earliest = ms;
+    };
+    // Open inbox PRs: their bar starts at openedAt (open PRs come from a feed that
+    // ignores the date range, so this is reliable even far outside the window).
+    if (openPrsData) {
+      for (const p of openPrsData.prs) {
+        if (myTurnPrIds.has(p.id)) consider(Date.parse(p.openedAt));
+      }
+    }
+    // Inbox items carry their own relevant instant — covers PRs absent from the
+    // open-PRs feed (a thread on a since-merged PR) via the thread's last reply.
+    if (myTurnData) {
+      for (const it of myTurnData.awaitingReview) consider(Date.parse(it.openedAt));
+      for (const it of myTurnData.yourPrs) consider(Date.parse(it.openedAt));
+      for (const it of myTurnData.threadsAwaiting) consider(Date.parse(it.lastReplyAt));
+    }
+    if (!Number.isFinite(earliest)) {
+      setMyTurnFrom(null);
+      return;
+    }
+    const floor = Date.now() - MAX_RANGE_DAYS * 24 * 60 * 60 * 1000;
+    const clamped = Math.max(earliest, floor);
+    setMyTurnFrom(Math.floor(clamped / 60000) * 60000); // minute-floored; no-op writes skip
+  }, [myTurnOnly, myTurnPrIds, myTurnData, openPrsData, setMyTurnFrom]);
   // Member filter: when set, the timeline collapses to just these contributors'
   // rows (see the PR filter in the rebuild effect). Events are already actor-
   // filtered server-side, so restricting which PR bars render is enough to drop
@@ -442,6 +489,9 @@ export function Timeline(): JSX.Element {
   const customFrom = useFilters((s) => s.customFrom);
   const customTo = useFilters((s) => s.customTo);
   const rangeResetSignal = useFilters((s) => s.rangeResetSignal);
+  // The My Turn Focus Mode range extension (epoch ms or null), for the window-fit
+  // effect below — entering/leaving focus re-fits the window to the widened span.
+  const myTurnFromMs = useFilters((s) => s.myTurnFromMs);
 
   // repoId → its full metadata (owner / name / fullName). Backs both the repo row
   // label and the owner-grouped ordering of the rendered repos (see the rebuild).
@@ -2730,14 +2780,18 @@ export function Timeline(): JSX.Element {
 
   // Move the visible window when the range preset changes — and re-apply it on
   // every preset click via rangeResetSignal, so re-selecting the already-active
-  // preset snaps the view back to that range after panning/zooming away.
+  // preset snaps the view back to that range after panning/zooming away. Also fires
+  // when My Turn Focus Mode toggles or its range extension (myTurnFromMs) lands, so
+  // (C) entering focus fits the window to the widened inbox span (every related PR
+  // visible) and leaving it snaps back to the user's date filter. resolveRange folds
+  // myTurnFromMs in; the per-entry focus consumer then re-centres within this span.
   useEffect(() => {
     const tl = timelineRef.current;
     if (!tl) return;
     const { from, to } = resolveRange(useFilters.getState());
     const { start, end } = paddedViewport(from, to);
     tl.setWindow(start, end, { animation: false });
-  }, [preset, customFrom, customTo, rangeResetSignal]);
+  }, [preset, customFrom, customTo, rangeResetSignal, myTurnOnly, myTurnFromMs]);
 
   // "Now" button: recenter the window on the current instant, keeping the
   // current zoom width. A transient store signal (epoch ms) the button bumps and
@@ -3021,6 +3075,24 @@ export function Timeline(): JSX.Element {
         return;
       }
     }
+    // In My Turn Focus Mode an inbox PR can be absent here because its activity
+    // predates the date-range filter (e.g. a thread on a since-merged PR, which has
+    // no open-PR record to force-show). Effect (B) widens the fetched range to cover
+    // the inbox; KEEP the focus pending so once that refetch lands this effect re-runs
+    // and the PR resolves through a branch above (centre + select + glow). Bounded: we
+    // wait for exactly one fresh payload — if it STILL lacks the PR, give up below so
+    // the focus can't hang. myTurnPassRef mirrors the live My Turn isolate state.
+    const mt = myTurnPassRef.current;
+    if (mt.active && mt.ids.has(timelineFocusPr)) {
+      const awaiting = myTurnFocusAwaitRef.current;
+      if (awaiting?.prId !== timelineFocusPr) {
+        myTurnFocusAwaitRef.current = { prId: timelineFocusPr, data };
+        return; // first miss — wait for the widened-range refetch
+      }
+      if (awaiting.data === data) return; // same payload, refetch still in flight
+      // A fresh payload still lacks it — genuinely unreachable; stop waiting.
+    }
+    myTurnFocusAwaitRef.current = null;
     // Genuinely unreachable (in neither dataset) — fail gracefully.
     useFilters.getState().consumeTimelineFocus();
   }, [

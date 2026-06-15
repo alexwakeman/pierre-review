@@ -52,6 +52,9 @@ export const DEFAULT_PR_STATUSES: PrStatus[] = ALL_PR_STATUSES.filter(
 );
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+// The backfill horizon — the furthest back the timeline holds any data, and the cap
+// on the My Turn Focus Mode range extension (see myTurnFromMs / resolveRange).
+export const MAX_RANGE_DAYS = 90;
 const PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = {
   '7d': 7,
   '14d': 14,
@@ -85,6 +88,14 @@ export interface FilterState {
   // buildTimelineSearch, and a TRANSIENT mode — NOT mirrored to the URL or
   // localStorage, so a fresh load is always the full board + the My Turn panel.
   myTurnOnly: boolean;
+  // While in My Turn Focus Mode, the fetched timeline range is widened back to this
+  // instant (epoch ms) so inbox PRs whose activity predates the active date-range
+  // filter are still loaded + visible — otherwise the isolated board is empty (the
+  // lean /api/timeline payload has nothing for them). Computed by the Timeline from
+  // the inbox PRs' earliest instant, clamped to ≥ 90 days ago (the backfill horizon).
+  // null = no extension (inbox already within range, or not in My Turn Focus Mode).
+  // Transient (like myTurnOnly) — never persisted/URL-synced; resolveRange folds it in.
+  myTurnFromMs: number | null;
 
   // selection
   selectedPrId: number | null;
@@ -215,6 +226,10 @@ export interface FilterState {
   ) => void;
   // Same, for a Claude-review inbox entry: enter focus + open the PR's Claude tab.
   openMyTurnClaudeReview: (prId: number) => void;
+  // Set/clear the My Turn Focus Mode range extension (see myTurnFromMs). The Timeline
+  // computes it from the inbox PRs once their data loads; a no-op write is skipped so
+  // it doesn't churn the timeline query.
+  setMyTurnFrom: (ms: number | null) => void;
   // Leave My Turn Focus Mode: un-isolate the board (back to the full timeline). Any
   // selection is KEPT (stays selected on the full board) and re-centred into view;
   // with nothing selected, the My Turn panel stays shown on the now-full board.
@@ -408,6 +423,7 @@ function freshDefaults(): FilterData {
     // My Turn Focus Mode is a transient mode (not a persisted filter): a fresh load is
     // always the full board + the My Turn panel. Entered only via openMyTurnPr/…Review.
     myTurnOnly: false,
+    myTurnFromMs: null,
     selectedPrId: null,
     selectedThreadId: null,
     selectedCommentId: null,
@@ -482,15 +498,19 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedCommentId: null,
       claudeTabFocus: { prId },
     }),
+  setMyTurnFrom: (ms) =>
+    set((s) => (s.myTurnFromMs === ms ? {} : { myTurnFromMs: ms })),
   exitMyTurnFocus: () =>
     set((s) => {
       if (!s.myTurnOnly) return {}; // not in My Turn focus — nothing to leave
       // Keep the selection: it stays selected on the now-full board. If a PR is
       // selected, re-fire the timeline focus hint so the un-isolated board scrolls it
       // back into view (the rebuild keeps it selected but never scrolls on its own).
-      if (s.selectedPrId == null) return { myTurnOnly: false };
+      // Drop the range extension so the board returns to the user's date filter.
+      if (s.selectedPrId == null) return { myTurnOnly: false, myTurnFromMs: null };
       return {
         myTurnOnly: false,
+        myTurnFromMs: null,
         timelineFocusPr: s.selectedPrId,
         timelineFocusAt: null,
         timelineFocusEvent: null,
@@ -612,6 +632,17 @@ export const useFilters = create<FilterState>((set, get) => ({
 
 /** Resolve the active [from, to] window from the preset or custom range. */
 export function resolveRange(s: FilterState): { from: Date; to: Date } {
+  const base = resolveBaseRange(s);
+  // In My Turn Focus Mode, widen `from` back to cover inbox PRs that predate the
+  // active filter (myTurnFromMs, already clamped to the 90-day backfill horizon) so
+  // the isolated board isn't empty. Never narrows the range — only extends it.
+  if (s.myTurnOnly && s.myTurnFromMs != null && s.myTurnFromMs < base.from.getTime()) {
+    return { from: new Date(s.myTurnFromMs), to: base.to };
+  }
+  return base;
+}
+
+function resolveBaseRange(s: FilterState): { from: Date; to: Date } {
   if (s.preset === 'custom' && (s.customFrom || s.customTo)) {
     const to = s.customTo ? new Date(`${s.customTo}T23:59:59Z`) : new Date();
     const from = s.customFrom
