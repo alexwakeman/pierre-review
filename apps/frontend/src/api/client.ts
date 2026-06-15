@@ -1,5 +1,9 @@
 import type {
   ActiveReviewsResponse,
+  AddReviewCommentBody,
+  AddReviewCommentResult,
+  ApprovePrBody,
+  ApprovePrResult,
   ClaudeKeyResponse,
   ClaudeReview,
   ClaudeReviewListResponse,
@@ -8,6 +12,8 @@ import type {
   ClaudeReviewResponse,
   ClaudeReviewStatusResponse,
   ClaudeReviewVerdict,
+  CreatePrCommentBody,
+  CreatePrCommentResult,
   CreateRepoBody,
   MeResponse,
   MergersResponse,
@@ -21,8 +27,13 @@ import type {
   PostReviewPreview,
   PostReviewResult,
   PrDetail,
+  PrFilesResponse,
   Repo,
   RepoSearchResponse,
+  ReplyResult,
+  ReplyToThreadBody,
+  ResolveThreadBody,
+  ResolveThreadResult,
   SyncStatus,
   ThreadDetail,
   TimelineResponse,
@@ -123,6 +134,29 @@ export const api = {
     get<RepoAnalytics>(`/api/insights/${repoId}/analytics`),
   pr: (id: number) => get<PrDetail>(`/api/prs/${id}`),
   thread: (id: number) => get<ThreadDetail>(`/api/threads/${id}`),
+  prFiles: (id: number) => get<PrFilesResponse>(`/api/prs/${id}/files`),
+
+  // ---- PR write actions ----
+  replyToThread: (threadId: number, body: ReplyToThreadBody) =>
+    fetch(`/api/threads/${threadId}/reply`, jsonBody('POST', body)).then((r) =>
+      handle<ReplyResult>(r),
+    ),
+  resolveThread: (threadId: number, body: ResolveThreadBody) =>
+    fetch(`/api/threads/${threadId}/resolve`, jsonBody('POST', body)).then((r) =>
+      handle<ResolveThreadResult>(r),
+    ),
+  createPrComment: (prId: number, body: CreatePrCommentBody) =>
+    fetch(`/api/prs/${prId}/comment`, jsonBody('POST', body)).then((r) =>
+      handle<CreatePrCommentResult>(r),
+    ),
+  approvePr: (prId: number, body?: ApprovePrBody) =>
+    fetch(`/api/prs/${prId}/approve`, jsonBody('POST', body ?? {})).then((r) =>
+      handle<ApprovePrResult>(r),
+    ),
+  addReviewComment: (prId: number, body: AddReviewCommentBody) =>
+    fetch(`/api/prs/${prId}/review-comment`, jsonBody('POST', body)).then((r) =>
+      handle<AddReviewCommentResult>(r),
+    ),
 
   me: () => get<MeResponse>('/api/me'),
   // Cloud-mode sign-out. 204 No Content; resolves once the session is cleared.

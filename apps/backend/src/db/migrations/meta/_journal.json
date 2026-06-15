@@ -113,6 +113,13 @@
       "when": 1780800000006,
       "tag": "0015_repos_inbox_watch",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1780800000007,
+      "tag": "0016_repo_viewer_permission",
+      "breakpoints": true
     }
   ]
 }

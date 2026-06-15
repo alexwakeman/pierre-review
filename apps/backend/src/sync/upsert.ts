@@ -109,16 +109,33 @@ export async function upsertRepo(
   githubNodeId: string,
   defaultBranch: string | null | undefined,
   accountId: number,
+  viewerPermission?: string | null,
 ): Promise<number> {
-  // Only overwrite default_branch when we actually know it (the add-repo path
-  // calls without it via the lightweight REPO_ID_QUERY) so we never null out a
-  // value a prior sync populated.
-  const set: { owner: string; name: string; defaultBranch?: string } = { owner, name };
+  // default_branch: only overwrite when known (a branch is never revoked, and the
+  // lightweight add-repo path omits it) so we never null a synced value.
+  // viewer_permission: the activity sync ALWAYS fetches it (passing null when
+  // GitHub reports no permission, i.e. access was revoked), so `undefined` means
+  // "not fetched" (add path → preserve) while `null`/string is authoritative and
+  // overwrites — otherwise a revoked-to-null permission would stay stale-elevated.
+  const set: {
+    owner: string;
+    name: string;
+    defaultBranch?: string;
+    viewerPermission?: string | null;
+  } = { owner, name };
   if (defaultBranch != null) set.defaultBranch = defaultBranch;
+  if (viewerPermission !== undefined) set.viewerPermission = viewerPermission;
   const row = (
     await db
       .insert(repos)
-      .values({ accountId, owner, name, githubNodeId, defaultBranch: defaultBranch ?? null })
+      .values({
+        accountId,
+        owner,
+        name,
+        githubNodeId,
+        defaultBranch: defaultBranch ?? null,
+        viewerPermission: viewerPermission ?? null,
+      })
       .onConflictDoUpdate({
         target: [repos.accountId, repos.githubNodeId],
         set,

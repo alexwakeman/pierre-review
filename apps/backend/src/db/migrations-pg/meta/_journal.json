@@ -43,6 +43,13 @@
       "when": 1781528160446,
       "tag": "0005_thick_blockbuster",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781542806502,
+      "tag": "0006_majestic_dracula",
+      "breakpoints": true
     }
   ]
 }

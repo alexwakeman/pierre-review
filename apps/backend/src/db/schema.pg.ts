@@ -61,6 +61,10 @@ export const repos = pgTable(
     name: text('name').notNull(),
     githubNodeId: text('github_node_id').notNull(),
     defaultBranch: text('default_branch'),
+    // The viewer's permission on the repo (GraphQL Repository.viewerPermission).
+    // Drives whether the viewer may approve a PR (WRITE+). See schema.sqlite.ts.
+    // Kept in sync by hand (schema-parity.test.ts).
+    viewerPermission: text('viewer_permission'),
     backfillUntil: timestamp('backfill_until', {
       withTimezone: true,
       mode: 'date',

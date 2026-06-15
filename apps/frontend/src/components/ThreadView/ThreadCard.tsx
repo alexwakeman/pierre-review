@@ -4,6 +4,8 @@ import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';
 import { CodeAnchor } from './CodeAnchor.js';
 import { MarkThreadDone } from './MarkThreadDone.js';
+import { ResolveThread } from './ResolveThread.js';
+import { ReplyComposer } from './ReplyComposer.js';
 import { isNewComment } from './NewCommentHighlight.js';
 
 // A single review thread rendered conversation-first: the code it's anchored to
@@ -49,6 +51,11 @@ export function ThreadCard({
         {thread.isOutdated && <span>· outdated</span>}
         <span className="ml-auto flex items-center gap-2">
           {inMyTurn && <MarkThreadDone threadId={thread.id} />}
+          <ResolveThread
+            prId={thread.prId}
+            threadId={thread.id}
+            isResolved={thread.isResolved}
+          />
           <StateBadge state={thread.derivedState} />
         </span>
       </div>
@@ -83,15 +90,18 @@ export function ThreadCard({
         ))}
       </div>
 
-      <div className="mt-2 pl-2 text-[11px]">
-        <a
-          href={thread.url ?? `${prUrl}/files`}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="text-blue-500 hover:underline"
-        >
-          ↗ {thread.url ? 'View thread on GitHub' : 'Reply on GitHub'}
-        </a>
+      <div className="mt-2 space-y-1.5 pl-2 text-[11px]">
+        <ReplyComposer prId={thread.prId} threadId={thread.id} />
+        <div>
+          <a
+            href={thread.url ?? `${prUrl}/files`}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-blue-500 hover:underline"
+          >
+            ↗ {thread.url ? 'View thread on GitHub' : 'Reply on GitHub'}
+          </a>
+        </div>
       </div>
     </div>
   );

@@ -2001,6 +2001,14 @@ export async function getPrDetail(
     newSinceLastViewed = n;
   }
 
+  // Whether the viewer may approve this PR: WRITE+ permission on the repo AND not
+  // the author. The approve route re-checks this server-side before posting.
+  const viewerUserId = await getAccountUserId(accountId);
+  const viewerCanApprove =
+    viewerUserId != null &&
+    viewerUserId !== pr.authorId &&
+    ['WRITE', 'MAINTAIN', 'ADMIN'].includes(repo.viewerPermission ?? '');
+
   return {
     id: pr.id,
     repoId: pr.repoId,
@@ -2031,6 +2039,7 @@ export async function getPrDetail(
     changedFilesCount: pr.changedFiles,
     files: filesOut,
     requestedReviewers,
+    viewerCanApprove,
     threads,
     reviews: reviewsOut,
     comments: commentsOut,
@@ -2565,4 +2574,338 @@ export async function getReviewPrContext(
     baseRefName: row.baseRefName,
     headSha: row.headSha,
   };
+}
+
+// ---- PR write-action contexts (reply / resolve / comment / approve / inline) ----
+// Each resolves a target (thread / PR) to the GitHub coordinates the corresponding
+// mutation needs, account-scoped via the innerJoin-up-to-repos ownership shape
+// (returns null → the route 404s for a target this account doesn't own). The
+// mutations themselves live in github/mutations.ts (phase 2); the routes (phase 4)
+// thread the per-account token through them.
+
+export interface ThreadWriteContext {
+  threadNodeId: string;
+  prId: number;
+  owner: string;
+  name: string;
+  number: number;
+}
+
+// Resolve a review thread to its GitHub node id + parent-PR coordinates, for a
+// reply (addPullRequestReviewThreadReply) or resolve/unresolve mutation. The
+// thread's GitHub node id is the GraphQL `pullRequestReviewThreadId` / `threadId`.
+export async function getThreadWriteContext(
+  threadId: number,
+  accountId: number,
+): Promise<ThreadWriteContext | null> {
+  const rows = await db
+    .select({
+      threadNodeId: reviewThreads.githubNodeId,
+      prId: reviewThreads.prId,
+      owner: repos.owner,
+      name: repos.name,
+      number: pullRequests.number,
+    })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(and(eq(reviewThreads.id, threadId), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  const row = rows[0] ?? null;
+  if (!row) return null;
+  return {
+    threadNodeId: row.threadNodeId,
+    prId: row.prId,
+    owner: row.owner,
+    name: row.name,
+    number: row.number,
+  };
+}
+
+export interface PrWriteContext {
+  prId: number;
+  prNodeId: string;
+  owner: string;
+  name: string;
+  number: number;
+  headSha: string | null;
+  authorId: number | null;
+  viewerPermission: string | null;
+  prUrl: string;
+}
+
+// Resolve a PR to the coordinates the write actions need: GitHub node id, repo
+// owner/name, number, head SHA (for pinning an inline comment / review to a
+// commit), author id + the synced repo viewerPermission (so the approve route can
+// re-check write+ permission server-side), and the canonical PR URL.
+export async function getPrWriteContext(
+  prId: number,
+  accountId: number,
+): Promise<PrWriteContext | null> {
+  const rows = await db
+    .select({
+      prId: pullRequests.id,
+      prNodeId: pullRequests.githubNodeId,
+      owner: repos.owner,
+      name: repos.name,
+      number: pullRequests.number,
+      headSha: pullRequests.headSha,
+      authorId: pullRequests.authorId,
+      viewerPermission: repos.viewerPermission,
+    })
+    .from(pullRequests)
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(and(eq(pullRequests.id, prId), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  const row = rows[0] ?? null;
+  if (!row) return null;
+  return {
+    prId: row.prId,
+    prNodeId: row.prNodeId,
+    owner: row.owner,
+    name: row.name,
+    number: row.number,
+    headSha: row.headSha,
+    authorId: row.authorId,
+    viewerPermission: row.viewerPermission,
+    prUrl: `https://github.com/${row.owner}/${row.name}/pull/${row.number}`,
+  };
+}
+
+export interface PrFilesContext {
+  owner: string;
+  name: string;
+  number: number;
+  prUrl: string;
+}
+
+// Subset of getPrWriteContext for the Changes-tab files fetch (owner/name/number
+// + the PR URL for building per-file deep links). Reuses getPrWriteContext so the
+// account-scoped ownership check stays in one place.
+export async function getPrFilesContext(
+  prId: number,
+  accountId: number,
+): Promise<PrFilesContext | null> {
+  const ctx = await getPrWriteContext(prId, accountId);
+  if (!ctx) return null;
+  return { owner: ctx.owner, name: ctx.name, number: ctx.number, prUrl: ctx.prUrl };
+}
+
+// ---- optimistic local stamps (write actions) ----
+// After a GitHub mutation succeeds, stamp the new/changed entity into the local DB
+// so the UI reflects it before the next 5-min sync. Idempotent: each upserts on the
+// same composite unique the sync uses, so the next sync overwrites (never
+// duplicates) the row. authorId is the VIEWER's local user id (from
+// getAccountUserId), passed in by the route.
+
+// Local copy of upsert.ts's excerptOf (the `excerpt` column is set even in lean
+// mode so triage + graceful UI degradation work without re-hydrating). Kept in
+// sync with sync/upsert.ts by hand.
+function stampExcerpt(body: string | null | undefined): string | null {
+  if (!body) return null;
+  const oneLine = body.replace(/\s+/g, ' ').trim();
+  if (!oneLine) return null;
+  return oneLine.length > 160 ? `${oneLine.slice(0, 159)}…` : oneLine;
+}
+
+// Update a thread's resolved flag (+ its derivedState) after a resolve/unresolve
+// mutation. On resolve → 'resolved'. On unresolve we re-derive simply (the full
+// commit-aware heuristic needs per-commit changed-file data not loaded here):
+// 'replied_unresolved' if the thread has more than one comment (someone replied),
+// else 'untouched'. Returns the new derivedState. account-scoped (no-op → null if
+// the thread isn't owned). Idempotent — the next sync re-derives authoritatively.
+export async function stampThreadResolved(
+  threadId: number,
+  resolved: boolean,
+  accountId: number,
+): Promise<DerivedState | null> {
+  // Confirm ownership (and read the comment count for unresolve re-derivation).
+  const rows = await db
+    .select({ id: reviewThreads.id })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(and(eq(reviewThreads.id, threadId), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  if (!rows[0]) return null;
+
+  let derivedState: DerivedState;
+  if (resolved) {
+    derivedState = 'resolved';
+  } else {
+    const cnt = await db
+      .select({ c: count() })
+      .from(reviewComments)
+      .where(eq(reviewComments.threadId, threadId))
+      .execute();
+    const commentCount = cnt[0]?.c ?? 0;
+    derivedState = commentCount > 1 ? 'replied_unresolved' : 'untouched';
+  }
+
+  await db
+    .update(reviewThreads)
+    .set({ isResolved: resolved, derivedState })
+    .where(eq(reviewThreads.id, threadId))
+    .execute();
+  return derivedState;
+}
+
+// After the viewer posts a reply, bump the thread's derivedState off 'untouched'
+// so its badge reflects the reply before the next sync re-derives. Conservative:
+// only an unresolved thread currently 'untouched'/'replied_unresolved' is moved
+// to 'replied_unresolved' — never downgrades 'likely_addressed' (a later commit
+// already advanced it) nor touches 'resolved'. Ownership is already confirmed by
+// the route's getThreadWriteContext. Idempotent; the next sync re-derives.
+export async function stampThreadRepliedState(threadId: number): Promise<void> {
+  const rows = await db
+    .select({
+      isResolved: reviewThreads.isResolved,
+      derivedState: reviewThreads.derivedState,
+    })
+    .from(reviewThreads)
+    .where(eq(reviewThreads.id, threadId))
+    .limit(1)
+    .execute();
+  const t = rows[0];
+  if (!t || t.isResolved) return;
+  if (t.derivedState !== 'untouched' && t.derivedState !== 'replied_unresolved') {
+    return;
+  }
+  await db
+    .update(reviewThreads)
+    .set({ derivedState: 'replied_unresolved' })
+    .where(eq(reviewThreads.id, threadId))
+    .execute();
+}
+
+// GitHub mutation payload shared by the comment/reply stamps (the new entity's
+// node id, numeric database id, body, and ISO timestamp).
+export interface StampGithubComment {
+  nodeId: string;
+  databaseId: number | null;
+  body: string;
+  createdAt: string;
+}
+
+// Insert a freshly-posted thread reply into review_comments (so it shows in the
+// thread immediately). Upserts on (prId, githubNodeId) — the sync's conflict
+// target — so the next sync updates rather than duplicates it. Stores the excerpt
+// for lean mode; `body` follows config.persistBodies. Returns the local row id.
+export async function upsertLocalReply(
+  prId: number,
+  threadId: number,
+  authorId: number | null,
+  gh: StampGithubComment,
+): Promise<number> {
+  const createdAt = new Date(gh.createdAt);
+  const row = (
+    await db
+      .insert(reviewComments)
+      .values({
+        githubNodeId: gh.nodeId,
+        threadId,
+        prId,
+        authorId,
+        body: config.persistBodies ? gh.body : null,
+        excerpt: stampExcerpt(gh.body),
+        diffHunk: null,
+        databaseId: gh.databaseId != null ? String(gh.databaseId) : null,
+        createdAt,
+      })
+      .onConflictDoUpdate({
+        target: [reviewComments.prId, reviewComments.githubNodeId],
+        set: {
+          body: config.persistBodies ? gh.body : null,
+          excerpt: stampExcerpt(gh.body),
+          databaseId: gh.databaseId != null ? String(gh.databaseId) : null,
+        },
+      })
+      .returning({ id: reviewComments.id })
+      .execute()
+  )[0]!;
+  return row.id;
+}
+
+// Insert a freshly-posted issue-level PR comment into pr_comments. Upserts on
+// (prId, githubNodeId). Returns the local row id.
+export async function upsertLocalPrComment(
+  prId: number,
+  authorId: number | null,
+  gh: StampGithubComment,
+): Promise<number> {
+  const createdAt = new Date(gh.createdAt);
+  const row = (
+    await db
+      .insert(prComments)
+      .values({
+        githubNodeId: gh.nodeId,
+        prId,
+        authorId,
+        body: config.persistBodies ? gh.body : null,
+        databaseId: gh.databaseId != null ? String(gh.databaseId) : null,
+        createdAt,
+      })
+      .onConflictDoUpdate({
+        target: [prComments.prId, prComments.githubNodeId],
+        set: {
+          body: config.persistBodies ? gh.body : null,
+          databaseId: gh.databaseId != null ? String(gh.databaseId) : null,
+        },
+      })
+      .returning({ id: prComments.id })
+      .execute()
+  )[0]!;
+  return row.id;
+}
+
+// GitHub mutation payload for a freshly-submitted review (the approve stamp).
+export interface StampGithubReview {
+  nodeId: string | null;
+  databaseId: number;
+  body: string | null;
+  submittedAt: string;
+  state: string;
+}
+
+// Insert a freshly-submitted review into reviews after an approve. Forces
+// state='approved' (the approve route only ever submits an APPROVE), upserts on
+// (prId, githubNodeId) — falling back to the databaseId string when GitHub omits
+// the node id — so the next sync reconciles it. Returns the local row id.
+export async function upsertLocalReview(
+  prId: number,
+  authorId: number | null,
+  gh: StampGithubReview,
+): Promise<number> {
+  // The conflict target is the GitHub node id; if GitHub didn't return one, fall
+  // back to the numeric id so the row is still keyed stably for the next sync.
+  const nodeId = gh.nodeId ?? `review:${gh.databaseId}`;
+  const submittedAt = new Date(gh.submittedAt);
+  const row = (
+    await db
+      .insert(reviews)
+      .values({
+        githubNodeId: nodeId,
+        prId,
+        authorId,
+        state: 'approved',
+        body: config.persistBodies ? gh.body : null,
+        databaseId: String(gh.databaseId),
+        submittedAt,
+      })
+      .onConflictDoUpdate({
+        target: [reviews.prId, reviews.githubNodeId],
+        set: {
+          state: 'approved',
+          body: config.persistBodies ? gh.body : null,
+          databaseId: String(gh.databaseId),
+          submittedAt,
+        },
+      })
+      .returning({ id: reviews.id })
+      .execute()
+  )[0]!;
+  return row.id;
 }

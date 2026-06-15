@@ -18,6 +18,7 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
     repository(owner: $owner, name: $name) {
       id
       nameWithOwner
+      viewerPermission
       defaultBranchRef {
         name
       }
@@ -510,6 +511,9 @@ export interface RepoActivityResponse {
   repository: {
     id: string;
     nameWithOwner: string;
+    // GraphQL RepositoryPermission enum (ADMIN/MAINTAIN/WRITE/TRIAGE/READ); may be
+    // null. Drives whether the viewer may approve a PR.
+    viewerPermission: string | null;
     defaultBranchRef: { name: string } | null;
     pullRequests: {
       pageInfo: { hasNextPage: boolean; endCursor: string | null };

@@ -617,6 +617,11 @@ export interface PrDetail {
   // GitHub returns them). Empty until a sync has populated it.
   files: PrFileChange[];
   requestedReviewers: RequestedReviewer[];
+  // Whether the viewer may approve this PR: they have GitHub WRITE/MAINTAIN/ADMIN
+  // permission on the repo AND are not the PR's author. Computed on read from the
+  // synced repos.viewerPermission + the account's user id. The approve route
+  // re-checks this server-side.
+  viewerCanApprove: boolean;
   threads: ThreadDetail[];
   reviews: ReviewDetail[];
   comments: PrCommentDetail[];
@@ -1166,4 +1171,99 @@ export interface ActiveReviewsResponse {
 
 export interface PostReviewBody {
   userVerdict: ClaudeReviewVerdict;
+}
+
+// ---- PR write actions (review threads, comments, approve, inline review comments) ----
+// Standard product features (not feature-gated, not cloud-disabled) for acting on a
+// PR directly from the dashboard. Each maps to a per-account GitHub mutation; the
+// optimistic local stamp keeps the UI in sync until the next sync.
+
+// ---- request payloads ----
+
+// Reply to an existing review thread (GraphQL addPullRequestReviewThreadReply).
+export interface ReplyToThreadBody {
+  body: string;
+}
+
+// Resolve (true) or unresolve (false) a review thread.
+export interface ResolveThreadBody {
+  resolved: boolean;
+}
+
+// Post a new issue-level (PR) comment.
+export interface CreatePrCommentBody {
+  body: string;
+}
+
+// Approve the PR. Only allowed when the viewer has write+ permission and isn't the
+// author (the server re-checks). An optional body accompanies the approval.
+export interface ApprovePrBody {
+  body?: string;
+}
+
+// Add ONE inline review comment, posted immediately as a standalone comment.
+export interface AddReviewCommentBody {
+  path: string;
+  line: number;
+  side?: 'LEFT' | 'RIGHT';
+  body: string;
+}
+
+// ---- result types ----
+
+// Reply result: the newly-created review comment, in the standard detail shape.
+export type ReplyResult = CommentDetail;
+
+export interface ResolveThreadResult {
+  threadId: number;
+  isResolved: boolean;
+  derivedState: DerivedState;
+}
+
+// New PR comment result: the standard issue-comment detail shape.
+export type CreatePrCommentResult = PrCommentDetail;
+
+// Approve result: the submitted review, in the standard review detail shape.
+export type ApprovePrResult = ReviewDetail;
+
+export interface AddReviewCommentResult {
+  commentId: number | null;
+  url: string | null;
+  line: number;
+  side: 'LEFT' | 'RIGHT';
+  // false ⇒ GitHub re-anchored the comment to a different line (the requested
+  // (path, line, side) didn't land on an addable diff line).
+  anchored: boolean;
+}
+
+// ---- Changes tab: per-file diff patches (GET /api/prs/:id/files) ----
+
+// GitHub's per-file PR diff status (REST `status`), passed through verbatim.
+export type PrFileDiffStatus =
+  | 'added'
+  | 'modified'
+  | 'removed'
+  | 'renamed'
+  | 'changed'
+  | 'copied'
+  | 'unchanged';
+
+// One changed file with its unified-diff patch, loaded on demand for the Changes
+// tab. `patch` is null for binary/too-large files. `githubUrl` deep-links to the
+// file's diff in the PR's "Files changed" view; `blobUrl` links to the file blob.
+export interface PrFileDiff {
+  path: string;
+  previousPath?: string | null;
+  status: PrFileDiffStatus;
+  additions: number;
+  deletions: number;
+  patch: string | null;
+  githubUrl: string;
+  blobUrl: string;
+}
+
+export interface PrFilesResponse {
+  files: PrFileDiff[];
+  // true ⇒ the PR has more files than the server's fetch cap; not all are listed.
+  truncated: boolean;
 }

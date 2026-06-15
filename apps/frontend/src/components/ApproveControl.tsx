@@ -1,0 +1,84 @@
+import { useState } from 'react';
+import { useApprovePr } from '../hooks/usePrWrites.js';
+import { ApiError } from '../api/client.js';
+
+// Approve control for the Overview tab, rendered ONLY when the viewer has the
+// right to approve (pr.viewerCanApprove — the server re-checks and 403s
+// otherwise). Collapsed it's a single green "Approve" button; clicking reveals an
+// optional approval message + a Confirm/Cancel pair. On success the invalidate
+// refetch updates the Approvers row above; ApiError (incl. 403 NotPermitted /
+// 502 GitHubError) surfaces inline.
+export function ApproveControl({ prId }: { prId: number }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState('');
+  const approve = useApprovePr(prId);
+
+  const error =
+    approve.error instanceof ApiError
+      ? approve.error.message
+      : approve.error
+        ? 'Failed to approve the PR.'
+        : null;
+
+  const submit = (): void => {
+    if (approve.isPending) return;
+    const trimmed = message.trim();
+    approve.mutate(trimmed || undefined, {
+      onSuccess: () => {
+        setMessage('');
+        setOpen(false);
+      },
+    });
+  };
+
+  if (!open) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-1 rounded border border-green-500 px-2 py-0.5 text-sm font-medium text-green-700 hover:bg-green-50 dark:border-green-600 dark:text-green-400 dark:hover:bg-green-900/30"
+        >
+          <span aria-hidden>✓</span> Approve
+        </button>
+        {error && <span className="text-xs text-red-500">{error}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <textarea
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        rows={3}
+        autoFocus
+        placeholder="Optional approval message (markdown)…"
+        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={approve.isPending}
+          className="whitespace-nowrap rounded border border-green-500 px-2 py-0.5 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-50 dark:border-green-600 dark:text-green-400 dark:hover:bg-green-900/30"
+        >
+          {approve.isPending ? 'Approving…' : 'Approve'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setMessage('');
+            approve.reset();
+          }}
+          disabled={approve.isPending}
+          className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+        >
+          Cancel
+        </button>
+        {error && <span className="text-xs text-red-500">{error}</span>}
+      </div>
+    </div>
+  );
+}

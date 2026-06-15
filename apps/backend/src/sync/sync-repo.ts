@@ -149,6 +149,7 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
           resp.repository.id,
           resp.repository.defaultBranchRef?.name ?? null,
           accountId,
+          resp.repository.viewerPermission ?? null,
         );
       }
 

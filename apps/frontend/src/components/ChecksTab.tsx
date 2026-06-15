@@ -11,6 +11,7 @@ import {
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
 import { Markdown } from './Markdown.js';
+import { ApproveControl } from './ApproveControl.js';
 
 // Per-state styling for the "Reviewers" row badges (everyone who submitted a
 // review, not just approvers): the badge hue + leading glyph hint at each
@@ -321,6 +322,12 @@ export function ChecksTab({
               );
             })}
           </div>
+        </Row>
+      )}
+
+      {pr.viewerCanApprove && (
+        <Row label="Review">
+          <ApproveControl prId={pr.id} />
         </Row>
       )}
 

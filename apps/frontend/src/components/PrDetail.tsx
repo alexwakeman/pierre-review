@@ -12,6 +12,7 @@ import { ShowOnTimeline } from './ShowOnTimeline.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
 import { ChangesTab } from './ChangesTab.js';
+import { PrCommentComposer } from './PrCommentComposer.js';
 import { ClaudeReviewTab } from './ClaudeReviewTab.js';
 import { Markdown } from './Markdown.js';
 import { isNewComment, NewTag } from './ThreadView/index.js';
@@ -602,6 +603,7 @@ export function PrDetail({
                 selectedCommentId={selectedCommentId}
                 onFocusConsumed={consumeCommentFocus}
               />
+              <PrCommentComposer prId={pr.id} />
             </div>
           </div>
         ) : tab === 'threads' ? (

@@ -66,6 +66,11 @@ export const repos = sqliteTable(
     // activity sync. Used to scope the "maintainer" inference to PRs merged into
     // the default branch. Null until a sync populates it.
     defaultBranch: text('default_branch'),
+    // The viewer's permission on the repo (GraphQL Repository.viewerPermission,
+    // enum RepositoryPermission: ADMIN/MAINTAIN/WRITE/TRIAGE/READ), captured each
+    // activity sync. Drives whether the viewer may approve a PR (WRITE+). Null
+    // until a sync populates it (or when GitHub returns null).
+    viewerPermission: text('viewer_permission'),
     backfillUntil: integer('backfill_until', { mode: 'timestamp' }),
     // "Watch for inbox": when true, new open PRs by others (opened on/after
     // inboxWatchStartedAt) surface in the My Turn inbox. Independent of timeline

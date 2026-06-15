@@ -36,13 +36,16 @@ createRoot(rootEl).render(
       persistOptions={{
         persister: queryPersister,
         maxAge: PERSIST_MAX_AGE,
-        buster: 'pierre-detail-v1',
+        buster: 'pierre-detail-v2',
         // Persist ONLY the on-demand detail queries (the bulky hydrated text), not
         // the lean timeline/triage feeds which should always come fresh from the API.
         dehydrateOptions: {
           shouldDehydrateQuery: (q) => {
             const k = q.queryKey[0];
-            return (k === 'pr' || k === 'thread') && q.state.status === 'success';
+            return (
+              (k === 'pr' || k === 'thread' || k === 'pr-files') &&
+              q.state.status === 'success'
+            );
           },
         },
       }}
