@@ -96,7 +96,7 @@ await mkPr(meId, after); // your own PR → excluded
 await mkPr(botId, after); // bot author → excluded
 await mkPr(aliceId, after, { draft: true }); // draft → excluded
 await mkPr(aliceId, before); // opened before watch → excluded
-await mkPr(aliceId, after, { state: 'merged' }); // not open → excluded
+const prMerged = await mkPr(aliceId, after, { state: 'merged' }); // not open → excluded
 
 let pass = 0;
 let fail = 0;
@@ -152,6 +152,35 @@ check(
   'dismissed watched PR appears in the Done tab',
   done.items.some((it) => it.kind === 'watched_repo_pr' && it.prId === prOther),
 );
+
+// 5b. Restorability: a still-eligible dismissed PR can return to the inbox (working
+//     "To do"); one whose PR has since merged cannot — Done shows a reason instead of
+//     a no-op button (the regression this guards).
+check(
+  'still-eligible dismissed watched PR is marked restorable',
+  done.items.some(
+    (it) =>
+      it.kind === 'watched_repo_pr' && it.prId === prOther && it.restorable === true,
+  ),
+);
+await q.dismissMyTurn(1, 'watched_repo_pr', prMerged);
+const doneWithMerged = await q.getCompletedDismissals(1);
+const mergedItem = doneWithMerged.items.find(
+  (it) => it.kind === 'watched_repo_pr' && it.prId === prMerged,
+);
+check('merged-PR dismissal shows in the Done tab', mergedItem != null);
+check(
+  'merged-PR dismissal is NOT restorable',
+  mergedItem != null && mergedItem.restorable === false,
+);
+check(
+  "merged-PR dismissal carries reason 'PR merged'",
+  mergedItem != null &&
+    'reason' in mergedItem &&
+    mergedItem.reason === 'PR merged',
+);
+// Clean up so the merged-PR dismissal doesn't perturb later steps.
+await q.undismissMyTurn(1, 'watched_repo_pr', prMerged);
 
 // 6. Unwatch hides everything; re-watch restores the non-dismissed ones (sticky stays).
 await q.setRepoInboxWatch(1, repoA!.id, false);

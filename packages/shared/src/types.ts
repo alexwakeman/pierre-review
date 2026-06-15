@@ -715,12 +715,23 @@ export interface MyTurnResponse {
 // myTurnDismissals) — "Your PRs" are cleared via mark-viewed, not a restorable
 // dismissal. Each carries when it was dismissed and can be moved back to the inbox
 // ("To do" = un-dismiss).
-export interface DismissedReviewItem extends MyTurnPr {
+// Whether un-dismissing ("To do") would actually return the entry to the inbox.
+// The inbox is derived live from GitHub state, so an entry whose PR has since been
+// merged/closed (or thread resolved, or Claude run superseded) can no longer be
+// actioned: restoring it would be a silent no-op. The UI shows a working "To do"
+// button only when `restorable`, else a static `reason` chip ("PR merged", …).
+interface Restorability {
+  restorable: boolean;
+  // Why it can't be restored; present only when `restorable` is false.
+  reason?: string;
+}
+
+export interface DismissedReviewItem extends MyTurnPr, Restorability {
   kind: 'review_request';
   dismissedAt: string;
 }
 
-export interface DismissedThreadItem extends ThreadAwaitingItem {
+export interface DismissedThreadItem extends ThreadAwaitingItem, Restorability {
   kind: 'thread';
   dismissedAt: string;
 }
@@ -728,7 +739,7 @@ export interface DismissedThreadItem extends ThreadAwaitingItem {
 // A dismissed Claude review (local-only feature). Keyed by the run id; opening it
 // jumps to the PR's Claude Review tab, "To do" restores it to the inbox (only if it
 // is still that PR's most-recent unposted run).
-export interface DismissedClaudeReviewItem {
+export interface DismissedClaudeReviewItem extends Restorability {
   kind: 'claude_review';
   reviewId: number;
   prId: number;
@@ -742,7 +753,7 @@ export interface DismissedClaudeReviewItem {
 
 // A dismissed watched-repo PR. Opening it loads the PR; "To do" restores it to the
 // inbox (only if the PR is still open and the repo is still watched).
-export interface DismissedWatchedRepoPrItem extends MyTurnPr {
+export interface DismissedWatchedRepoPrItem extends MyTurnPr, Restorability {
   kind: 'watched_repo_pr';
   dismissedAt: string;
 }

@@ -27,7 +27,10 @@ export function MyTurnRow({
   sub,
 }: {
   onOpen: () => void;
-  onAction: () => void;
+  // The action button (Done / Seen / To do). Omit it to render `actionLabel` as a
+  // static, non-interactive status chip instead — e.g. a Done entry that can no
+  // longer be restored ("PR merged", "Thread resolved").
+  onAction?: () => void;
   actionLabel: string;
   actionTitle?: string;
   actionPending?: boolean;
@@ -46,15 +49,24 @@ export function MyTurnRow({
 }): JSX.Element {
   return (
     <li className="flex items-start gap-2 rounded px-1.5 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900/40">
-      <button
-        type="button"
-        onClick={onAction}
-        disabled={actionPending}
-        title={actionTitle}
-        className="shrink-0 rounded-md border border-gray-300 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-600 hover:border-gray-400 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-      >
-        {actionLabel}
-      </button>
+      {onAction ? (
+        <button
+          type="button"
+          onClick={onAction}
+          disabled={actionPending}
+          title={actionTitle}
+          className="shrink-0 rounded-md border border-gray-300 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-600 hover:border-gray-400 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+        >
+          {actionLabel}
+        </button>
+      ) : (
+        <span
+          title={actionTitle}
+          className="shrink-0 rounded-md border border-dashed border-gray-200 px-2.5 py-1 text-xs font-medium italic text-gray-400 dark:border-gray-800 dark:text-gray-500"
+        >
+          {actionLabel}
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         <button
           type="button"

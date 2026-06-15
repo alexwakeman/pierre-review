@@ -30,6 +30,29 @@ export function DismissedSection({ active }: { active: boolean }): JSX.Element {
     },
   });
 
+  // A Done entry only gets a working "To do" button when restoring it actually
+  // returns it to the inbox. When GitHub has moved past it (PR merged/closed, thread
+  // resolved, Claude run superseded) the backend marks it not-restorable and supplies
+  // a `reason`, which we render as a static chip — never a button that no-ops.
+  const actionFor = (
+    kind: MyTurnDismissKind,
+    refId: number,
+    it: { restorable: boolean; reason?: string },
+  ) =>
+    it.restorable
+      ? {
+          onAction: () => undismiss.mutate({ kind, refId }),
+          actionLabel: 'To do',
+          actionTitle: 'Move back to your inbox',
+          actionPending: undismiss.isPending,
+        }
+      : {
+          actionLabel: it.reason ?? 'Done',
+          actionTitle: it.reason
+            ? `Can't move back to your inbox — ${it.reason}`
+            : 'No longer in your inbox',
+        };
+
   if (isLoading && !data) {
     return <div className="px-1 py-4 text-sm text-gray-500">Loading…</div>;
   }
@@ -50,12 +73,7 @@ export function DismissedSection({ active }: { active: boolean }): JSX.Element {
             <MyTurnRow
               key={`r:${it.prId}`}
               onOpen={() => openPrFocused(it.prId)}
-              onAction={() =>
-                undismiss.mutate({ kind: 'review_request', refId: it.prId })
-              }
-              actionLabel="To do"
-              actionTitle="Move back to your inbox"
-              actionPending={undismiss.isPending}
+              {...actionFor('review_request', it.prId, it)}
               time={`done ${relativeTime(it.dismissedAt)}`}
               title={it.title}
               meta={
@@ -71,12 +89,7 @@ export function DismissedSection({ active }: { active: boolean }): JSX.Element {
             <MyTurnRow
               key={`w:${it.prId}`}
               onOpen={() => openPrFocused(it.prId)}
-              onAction={() =>
-                undismiss.mutate({ kind: 'watched_repo_pr', refId: it.prId })
-              }
-              actionLabel="To do"
-              actionTitle="Move back to your inbox"
-              actionPending={undismiss.isPending}
+              {...actionFor('watched_repo_pr', it.prId, it)}
               time={`done ${relativeTime(it.dismissedAt)}`}
               title={it.title}
               meta={
@@ -92,12 +105,7 @@ export function DismissedSection({ active }: { active: boolean }): JSX.Element {
             <MyTurnRow
               key={`c:${it.reviewId}`}
               onOpen={() => openClaudeReview(it.prId)}
-              onAction={() =>
-                undismiss.mutate({ kind: 'claude_review', refId: it.reviewId })
-              }
-              actionLabel="To do"
-              actionTitle="Move back to your inbox"
-              actionPending={undismiss.isPending}
+              {...actionFor('claude_review', it.reviewId, it)}
               time={`done ${relativeTime(it.dismissedAt)}`}
               title={it.prTitle}
               meta={
@@ -115,10 +123,7 @@ export function DismissedSection({ active }: { active: boolean }): JSX.Element {
           <MyTurnRow
             key={`t:${it.threadId}`}
             onOpen={() => openPrFocused(it.prId, it.threadId)}
-            onAction={() => undismiss.mutate({ kind: 'thread', refId: it.threadId })}
-            actionLabel="To do"
-            actionTitle="Move back to your inbox"
-            actionPending={undismiss.isPending}
+            {...actionFor('thread', it.threadId, it)}
             time={`done ${relativeTime(it.dismissedAt)}`}
             title={`“${it.lastReplyExcerpt}”`}
             meta={

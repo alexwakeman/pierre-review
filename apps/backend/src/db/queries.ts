@@ -1325,6 +1325,14 @@ export async function getCompletedDismissals(
     .execute();
   if (dismissals.length === 0) return { items: [], users: [] };
 
+  // The currently-actionable inbox (ignoring dismissals) — the source of truth for
+  // whether each Done entry can actually be restored. An entry whose ref is no longer
+  // in the matching set (PR merged/closed, thread resolved, Claude run superseded)
+  // can't return to the inbox, so the UI shows a static reason instead of "To do".
+  const actionable = await getActionableInboxIds(accountId);
+  const prClosedReason = (state: PrState): string | null =>
+    state === 'merged' ? 'PR merged' : state === 'closed' ? 'PR closed' : null;
+
   const reviewDismissals = dismissals.filter((d) => d.kind === 'review_request');
   const threadDismissals = dismissals.filter((d) => d.kind === 'thread');
   const watchedDismissals = dismissals.filter((d) => d.kind === 'watched_repo_pr');
@@ -1354,6 +1362,7 @@ export async function getCompletedDismissals(
       if (!row) continue;
       const { pull_requests: pr, repos: repo } = row;
       if (pr.authorId != null) referencedUsers.add(pr.authorId);
+      const restorable = actionable.reviewRequestPrIds.has(pr.id);
       items.push({
         kind: 'review_request',
         prId: pr.id,
@@ -1365,6 +1374,10 @@ export async function getCompletedDismissals(
         openedAt: pr.openedAt.toISOString(),
         githubUrl: `https://github.com/${repo.owner}/${repo.name}/pull/${pr.number}`,
         dismissedAt: d.dismissedAt.toISOString(),
+        restorable,
+        ...(restorable
+          ? {}
+          : { reason: prClosedReason(pr.state as PrState) ?? 'No longer requested' }),
       });
     }
   }
@@ -1392,6 +1405,11 @@ export async function getCompletedDismissals(
       if (!row) continue;
       const { pull_requests: pr, repos: repo } = row;
       if (pr.authorId != null) referencedUsers.add(pr.authorId);
+      // Restorable if still eligible for the watched section, OR if it has since
+      // become a review request (restoring then surfaces it under "Awaiting review").
+      const restorable =
+        actionable.watchedPrIds.has(pr.id) ||
+        actionable.reviewRequestPrIds.has(pr.id);
       items.push({
         kind: 'watched_repo_pr',
         prId: pr.id,
@@ -1403,6 +1421,10 @@ export async function getCompletedDismissals(
         openedAt: pr.openedAt.toISOString(),
         githubUrl: `https://github.com/${repo.owner}/${repo.name}/pull/${pr.number}`,
         dismissedAt: d.dismissedAt.toISOString(),
+        restorable,
+        ...(restorable
+          ? {}
+          : { reason: prClosedReason(pr.state as PrState) ?? 'No longer new' }),
       });
     }
   }
@@ -1437,6 +1459,11 @@ export async function getCompletedDismissals(
       const { thread, pr, repo } = row;
       const last = lastComment.get(thread.id);
       if (last?.authorId != null) referencedUsers.add(last.authorId);
+      const restorable = actionable.threadIds.has(thread.id);
+      const reason =
+        (thread.derivedState as DerivedState) === 'resolved'
+          ? 'Thread resolved'
+          : (prClosedReason(pr.state as PrState) ?? 'No longer awaiting you');
       items.push({
         kind: 'thread',
         threadId: thread.id,
@@ -1452,6 +1479,8 @@ export async function getCompletedDismissals(
         lastReplyAuthorId: last?.authorId ?? null,
         githubUrl: `https://github.com/${repo.owner}/${repo.name}/pull/${pr.number}`,
         dismissedAt: d.dismissedAt.toISOString(),
+        restorable,
+        ...(restorable ? {} : { reason }),
       });
     }
   }
@@ -1468,6 +1497,7 @@ export async function getCompletedDismissals(
         name: repos.name,
         prNumber: pullRequests.number,
         prTitle: pullRequests.title,
+        prState: pullRequests.state,
         verdict: claudeReviews.verdict,
       })
       .from(claudeReviews)
@@ -1484,6 +1514,7 @@ export async function getCompletedDismissals(
     for (const d of claudeDismissals) {
       const r = byId.get(d.refId);
       if (!r) continue;
+      const restorable = actionable.claudeReviewIds.has(r.reviewId);
       items.push({
         kind: 'claude_review',
         reviewId: r.reviewId,
@@ -1494,6 +1525,10 @@ export async function getCompletedDismissals(
         verdict: r.verdict,
         githubUrl: `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}`,
         dismissedAt: d.dismissedAt.toISOString(),
+        restorable,
+        ...(restorable
+          ? {}
+          : { reason: prClosedReason(r.prState as PrState) ?? 'Superseded' }),
       });
     }
   }
@@ -1528,6 +1563,105 @@ function summariseNew(n: NewSinceLastViewed): string {
   if (n.commits > 0)
     parts.push(`${n.commits} new commit${n.commits === 1 ? '' : 's'}`);
   return parts.join(' · ');
+}
+
+// Watched-repo inbox eligibility, IGNORING dismissals and the cross-section dedupe:
+// the set of open-PR ids that qualify for the "New PRs in watched repos" section
+// (repo watched, opened on/after the watch began, authored by a non-bot human other
+// than you, non-draft). Shared by getMyTurn (which then layers dismissals + dedupe)
+// and getActionableInboxIds (restorability of a Done entry).
+async function getWatchedActionablePrIds(
+  accountId: number,
+  localUserId: number,
+  open: TimelinePr[],
+  openRows: PrRow[],
+): Promise<Set<number>> {
+  const watchedRepos = await db
+    .select({ repoId: repos.id, startedAt: repos.inboxWatchStartedAt })
+    .from(repos)
+    .where(and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)))
+    .execute();
+  const watchStartByRepo = new Map<number, Date>();
+  for (const w of watchedRepos) {
+    // A watched row should always carry a start; if it somehow doesn't, treat the
+    // repo as not-watched (show nothing) rather than flooding the inbox.
+    if (w.startedAt != null) watchStartByRepo.set(w.repoId, w.startedAt);
+  }
+  const out = new Set<number>();
+  if (watchStartByRepo.size === 0) return out;
+  const botUserIds = new Set(
+    (
+      await db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.isBot, true))
+        .execute()
+    ).map((u) => u.id),
+  );
+  const rowById = new Map(openRows.map((p) => [p.id, p]));
+  for (const t of open) {
+    const startedAt = watchStartByRepo.get(t.repoId);
+    if (startedAt == null) continue;
+    if (t.authorId == null || t.authorId === localUserId) continue;
+    if (botUserIds.has(t.authorId)) continue;
+    const m = rowById.get(t.id);
+    if (!m || m.isDraft) continue;
+    if (m.openedAt.getTime() >= startedAt.getTime()) out.add(t.id);
+  }
+  return out;
+}
+
+// The inbox's actionable ids per kind, IGNORING dismissals — i.e. everything that
+// COULD be in "My Turn" if nothing were dismissed. The single source of truth for
+// whether a dismissed "Done" entry is restorable: removing its dismissal returns it
+// to the inbox iff its ref is still in the matching set here. Reuses the same
+// building blocks getMyTurn does (reviewRequestedFromMe, getWatchedActionablePrIds,
+// getThreadsAwaiting, getUnactionedClaudeReviews) so the two never drift.
+async function getActionableInboxIds(accountId: number): Promise<{
+  reviewRequestPrIds: Set<number>;
+  watchedPrIds: Set<number>;
+  threadIds: Set<number>;
+  claudeReviewIds: Set<number>;
+}> {
+  const localUserId = await getAccountUserId(accountId);
+  const empty = {
+    reviewRequestPrIds: new Set<number>(),
+    watchedPrIds: new Set<number>(),
+    threadIds: new Set<number>(),
+    claudeReviewIds: new Set<number>(),
+  };
+  if (localUserId == null) return empty;
+
+  const openRows = await db
+    .select()
+    .from(pullRequests)
+    .where(and(eq(pullRequests.accountId, accountId), eq(pullRequests.state, 'open')))
+    .execute();
+  const open = await buildTimelinePrs(openRows, accountId);
+
+  const reviewRequestPrIds = new Set(
+    open.filter((t) => t.reviewRequestedFromMe).map((t) => t.id),
+  );
+  const watchedPrIds = await getWatchedActionablePrIds(
+    accountId,
+    localUserId,
+    open,
+    openRows,
+  );
+
+  const repoNameById = new Map<number, string>();
+  for (const r of await listRepos(accountId)) repoNameById.set(r.id, r.fullName);
+  const threadIds = new Set(
+    (await getThreadsAwaiting(localUserId, accountId, repoNameById)).map(
+      (ta) => ta.threadId,
+    ),
+  );
+
+  const claudeReviewIds = config.claudeReviewEnabled
+    ? new Set((await getUnactionedClaudeReviews(accountId)).map((c) => c.reviewId))
+    : new Set<number>();
+
+  return { reviewRequestPrIds, watchedPrIds, threadIds, claudeReviewIds };
 }
 
 export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
@@ -1633,52 +1767,29 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
     }));
 
   // 2b. New open PRs in repos you've Watched. Built AFTER awaitingReview + yourPrs
-  //     so those PRs aren't shown twice. Includes only PRs opened on/after the
-  //     watch began, by someone else, non-draft, non-bot. Dismissals are sticky.
-  const watchedRepos = await db
-    .select({
-      repoId: repos.id,
-      startedAt: repos.inboxWatchStartedAt,
-    })
-    .from(repos)
-    .where(and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)))
-    .execute();
-  const watchStartByRepo = new Map<number, Date>();
-  for (const w of watchedRepos) {
-    // A watched row should always carry a start; if it somehow doesn't, treat the
-    // repo as not-watched (show nothing) rather than flooding the inbox.
-    if (w.startedAt != null) watchStartByRepo.set(w.repoId, w.startedAt);
-  }
-
-  let watchedRepoPrs: ReturnType<typeof toMyTurnPr>[] = [];
-  if (watchStartByRepo.size > 0) {
-    const botUserIds = new Set(
-      (
-        await db
-          .select({ id: schema.users.id })
-          .from(schema.users)
-          .where(eq(schema.users.isBot, true))
-          .execute()
-      ).map((u) => u.id),
-    );
-    const inOtherSections = new Set<number>([
-      ...awaitingReview.map((i) => i.prId),
-      ...yourPrs.map((i) => i.prId),
-    ]);
-    watchedRepoPrs = open
-      .filter((t) => {
-        const startedAt = watchStartByRepo.get(t.repoId);
-        if (startedAt == null) return false;
-        if (t.authorId == null || t.authorId === localUserId) return false;
-        if (botUserIds.has(t.authorId)) return false;
-        if (inOtherSections.has(t.id) || watchedDismissedIds.has(t.id)) return false;
-        const m = meta(t.id);
-        if (m.isDraft) return false;
-        return m.openedAt.getTime() >= startedAt.getTime();
-      })
-      .map((t) => toMyTurnPr(t))
-      .sort((a, b) => b.openedAt.localeCompare(a.openedAt));
-  }
+  //     so those PRs aren't shown twice. Eligibility (opened on/after the watch
+  //     began, by a non-bot human other than you, non-draft) is the shared
+  //     getWatchedActionablePrIds; here we layer the cross-section dedupe + sticky
+  //     dismissals on top.
+  const watchedEligible = await getWatchedActionablePrIds(
+    accountId,
+    localUserId,
+    open,
+    openRows,
+  );
+  const inOtherSections = new Set<number>([
+    ...awaitingReview.map((i) => i.prId),
+    ...yourPrs.map((i) => i.prId),
+  ]);
+  const watchedRepoPrs = open
+    .filter(
+      (t) =>
+        watchedEligible.has(t.id) &&
+        !inOtherSections.has(t.id) &&
+        !watchedDismissedIds.has(t.id),
+    )
+    .map((t) => toMyTurnPr(t))
+    .sort((a, b) => b.openedAt.localeCompare(a.openedAt));
 
   // 3. Threads awaiting your response: you opened the thread, someone replied
   //    after you, and it isn't resolved. A dismissal sticks until a newer reply.
