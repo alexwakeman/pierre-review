@@ -350,6 +350,13 @@ export function Timeline(): JSX.Element {
   // PR, used to recentre + glow it on exit when no specific event was last clicked.
   const prFocusActiveRef = useRef(false);
   const prFocusPrIdRef = useRef<number | null>(null);
+  // Whether the current PR-isolation focus pushed its OWN {pierreFocus} history entry.
+  // Normally true — but a focus entered FROM a Feed click rides the {pierreFeed} entry
+  // instead (so the whole feed navigation is a single back-step to the Feed home), in
+  // which case enterPrFocus pushes nothing and this stays false. The history-entry COUNT
+  // in exitFocus / dropOverlayForNavigation reads this (not prFocusActiveRef) so it never
+  // unwinds a focus slot that was never pushed. Reset with prFocusActiveRef in applyContext.
+  const prFocusPushedHistoryRef = useRef(false);
   // PR-isolation focus connector overlay. The own-work CSS stem (index.css,
   // `.ev-own …::after`) joins a marker to its bar by SUBGROUP ADJACENCY — it only
   // works because the marker sits directly beneath its bar in the SAME row. A
@@ -398,6 +405,17 @@ export function Timeline(): JSX.Element {
   // (The window itself is fitted to the inbox span by the resolveRange window effect — the
   // one keyed on myTurnOnly/myTurnFromMs — so every inbox PR is visible on entry.)
   const myTurnDepthRef = useRef(0);
+  // --- Feed → PR back-stack (the SAME shape as My Turn, but one level) -------------
+  // store.feedReturn mirrored into a ref so the once-bound popstate / openPopover
+  // handlers can read it without re-binding. True while a feed-originated selection is
+  // active (a single {pierreFeed} entry pushed); the popstate handler returns to the
+  // Feed home (clear selection + tear down any focus/popover) when it's set.
+  const feedReturnRef = useRef(false);
+  // 0 = no feed entry pushed, 1 = one {pierreFeed} entry on the stack. A reconcile effect
+  // keeps it matched to store.feedReturn so a non-Back exit unwinds the entry, and a
+  // Back-driven exit (popstate) pre-zeroes it so the reconcile no-ops — exactly the
+  // myTurnDepthRef discipline.
+  const feedDepthRef = useRef(0);
 
   const [popover, setPopover] = useState<PopoverState | null>(null);
   // Latest popover state, readable from stable callbacks without re-binding.
@@ -428,6 +446,8 @@ export function Timeline(): JSX.Element {
   // null until it loads, so the filter stays a no-op until the ids are known rather
   // than briefly blanking the board.
   const myTurnOnly = useFilters((s) => s.myTurnOnly);
+  // Feed → PR back-stack flag (see store.feedReturn + the reconcile effect below).
+  const feedReturn = useFilters((s) => s.feedReturn);
   const { data: myTurnData } = useMyTurn();
   const myTurnPrIds = useMemo<Set<number> | null>(() => {
     if (!myTurnData) return null;
@@ -1156,6 +1176,7 @@ export function Timeline(): JSX.Element {
         showFocusActiveRef.current = false;
         prFocusActiveRef.current = false;
         prFocusPrIdRef.current = null;
+        prFocusPushedHistoryRef.current = false;
       }
       // On focus ENTRY, load the focused PR into the Overview/detail pane so the
       // two-person context the user is inspecting shows there by default. Guard on
@@ -1323,7 +1344,15 @@ export function Timeline(): JSX.Element {
       // handler detects prFocusActiveRef and tears the whole focus down (restoring
       // the anchor) rather than only stepping through popover drill levels. One
       // entry per session — enterPrFocus only runs when not already focused.
-      history.pushState({ pierreFocus: 1 }, '');
+      //
+      // EXCEPT when this focus is entered from a Feed click (feedReturn armed): the
+      // {pierreFeed} entry the reconcile already pushed IS the single back-step for the
+      // whole feed navigation (one Back → the Feed home), so pushing a {pierreFocus} on
+      // top would stack two entries and make history.go pop the wrong one. Ride the feed
+      // entry instead — prFocusPushedHistoryRef stays false so the unwind counters skip it.
+      const pushedHistory = !feedReturnRef.current;
+      if (pushedHistory) history.pushState({ pierreFocus: 1 }, '');
+      prFocusPushedHistoryRef.current = pushedHistory;
       prFocusActiveRef.current = true;
       prFocusPrIdRef.current = prId;
       applyContext({
@@ -1627,12 +1656,15 @@ export function Timeline(): JSX.Element {
       // glow with NO row-focus (e.g. a same-user marker left over post-navigate)
       // still needs an explicit clear.
       if (!focusedGroupIdsRef.current) applyContext(null);
-      // My Turn Focus Mode keeps its OWN contiguous {pierreMyTurn} history stack — don't
-      // interleave a drill entry (it would break the L2→L1→home Back stepping). A popover
-      // in that mode is transient: closed by clicking elsewhere / Esc / selecting, never by
-      // Back. Leave drillDepthRef at 0 so closeModal / the popstate handler don't try to
-      // unwind a non-existent entry.
-      if (!myTurnOnlyRef.current) {
+      // My Turn Focus Mode (its own {pierreMyTurn} stack) AND a feed-originated navigation
+      // (its single {pierreFeed} entry) each keep a contiguous history stack — don't
+      // interleave a drill entry, which would break the one-Back-to-home stepping. The
+      // feed popover that a feed click opens is closed AS PART OF the feed-return Back
+      // (it's never independently back-dismissable), so it needs no slot of its own. A
+      // feed click can't even happen with a popover already open — the Feed panel is
+      // hidden whenever a PR is selected. Leave drillDepthRef at 0 in both modes so
+      // closeModal / the popstate handler don't unwind a non-existent entry.
+      if (!myTurnOnlyRef.current && !feedReturnRef.current) {
         if (drillDepthRef.current === 0) history.pushState({ pierreDrill: 1 }, '');
         drillDepthRef.current = 1;
       }
@@ -1764,12 +1796,13 @@ export function Timeline(): JSX.Element {
 
   // Full exit driven by the Exit-focus button / Esc / a repo switch (NOT a browser
   // back). Unwind every focus-owned history entry — the focus marker enterPrFocus
-  // pushed (1 when in PR focus) plus any open popover drill entries — so the back
-  // button isn't left with stale focus slots, then tear focus down. The single net
-  // popstate the unwind emits is swallowed by suppressPopstateRef.
+  // pushed (1 when in PR focus, but 0 for a feed-originated focus, which rode the
+  // {pierreFeed} entry — hence prFocusPushedHistoryRef, not prFocusActiveRef) plus any
+  // open popover drill entries — so the back button isn't left with stale focus slots,
+  // then tear focus down. The single net popstate the unwind emits is swallowed.
   const exitFocus = useCallback(
     (restoreAnchor = true) => {
-      const entries = (prFocusActiveRef.current ? 1 : 0) + drillDepthRef.current;
+      const entries = (prFocusPushedHistoryRef.current ? 1 : 0) + drillDepthRef.current;
       if (entries > 0) {
         suppressPopstateRef.current += 1;
         history.go(-entries);
@@ -1781,13 +1814,15 @@ export function Timeline(): JSX.Element {
 
   // A fresh strip / my-turn / search navigation abandons any active overlay (a
   // sticky "Show" or a PR-isolation Focus). Unwind the focus-owned history entries
-  // first — the {pierreFocus} marker enterPrFocus pushed plus any open popover drill —
-  // so a later browser-back isn't left consuming stale focus slots, THEN clear the
-  // overlay. Reading prFocusActiveRef before applyContext(null) (which resets it) is
-  // load-bearing. No-ops when nothing is active.
+  // first — the {pierreFocus} marker enterPrFocus pushed (0 for a feed-originated focus,
+  // which rode the {pierreFeed} entry — that slot is unwound by the feed reconcile
+  // instead, so counting it here too would double-pop) plus any open popover drill — so a
+  // later browser-back isn't left consuming stale focus slots, THEN clear the overlay.
+  // Reading the refs before applyContext(null) (which resets them) is load-bearing.
+  // No-ops when nothing is active.
   const dropOverlayForNavigation = useCallback(() => {
     if (!showFocusActiveRef.current && !focusedGroupIdsRef.current) return;
-    const entries = (prFocusActiveRef.current ? 1 : 0) + drillDepthRef.current;
+    const entries = (prFocusPushedHistoryRef.current ? 1 : 0) + drillDepthRef.current;
     if (entries > 0) {
       suppressPopstateRef.current += 1;
       history.go(-entries);
@@ -1812,6 +1847,19 @@ export function Timeline(): JSX.Element {
         return;
       }
       const depth = drillDepthRef.current;
+      // A feed-originated navigation pushed a single {pierreFeed} entry and NOTHING sits
+      // above it (a feed-entered focus rides this entry rather than pushing its own; the
+      // feed popover's drill push is suppressed) — so the entry the browser just popped IS
+      // {pierreFeed}. One Back therefore returns all the way to the Feed home: just clear
+      // the selection (→ the Feed panel) after any focus/popover has been torn down, no
+      // further history.go. feedDepthRef is pre-zeroed so the reconcile effect no-ops (the
+      // myTurnDepthRef discipline).
+      const returnToFeedHome = (): void => {
+        feedReturnRef.current = false;
+        feedDepthRef.current = 0;
+        setPopover(null);
+        useFilters.getState().clearSelection();
+      };
       if (prFocusActiveRef.current) {
         // The mouse/browser back button LEAVES a sticky PR-isolation focus, returning
         // to the main timeline with the anchor (the clicked event, else the PR)
@@ -1823,7 +1871,13 @@ export function Timeline(): JSX.Element {
           suppressPopstateRef.current += 1;
           history.go(-depth);
         }
+        // When the focus was entered from a Feed click it rode the {pierreFeed} entry the
+        // browser just popped (no separate {pierreFocus} slot), so one Back skips the
+        // intermediate "full board, PR still selected" state and lands straight on the
+        // Feed home — tear focus down, then clear the selection.
+        const feedReturn = feedReturnRef.current;
         exitFocusCore(true);
+        if (feedReturn) returnToFeedHome();
         return;
       }
       // My Turn Focus Mode: step back one level (the browser already popped our
@@ -1846,7 +1900,9 @@ export function Timeline(): JSX.Element {
       }
       if (depth === 1) {
         // Close the popover — same treatment as the Exit-focus button: re-centre on +
-        // glow the marker/PR that opened it.
+        // glow the marker/PR that opened it. (A feed-originated popover never reaches
+        // here — its drill push is suppressed, so depth is 0 and feedReturn is handled
+        // by the branch below.)
         const anchorEvent = highlightedEventRef.current;
         drillDepthRef.current = 0;
         applyContext(null);
@@ -1854,7 +1910,12 @@ export function Timeline(): JSX.Element {
         restoreWindow();
         savedWindowRef.current = null;
         if (anchorEvent != null) restoreAnchorView(anchorEvent);
+        return;
       }
+      // No focus / popover / My Turn open. If the selection came from a Feed click, the
+      // browser just popped our {pierreFeed} entry → return to the Feed home (an own-work
+      // marker or lifecycle feed entry, which enters no focus).
+      if (feedReturnRef.current) returnToFeedHome();
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -2896,6 +2957,45 @@ export function Timeline(): JSX.Element {
       history.go(-diff);
     }
   }, [myTurnOnly, selectedPrId]);
+
+  // --- Feed → PR browser-history reconcile ----------------------------------------
+  // Clicking a Feed entry navigates to a PR (and, for a cross-person entry, enters PR
+  // Focus). store.feedReturn is armed for that navigation; this effect keeps ONE
+  // {pierreFeed} history entry matched to it so the browser Back button returns straight
+  // to the Feed home (the popstate handler clears the selection + tears down any focus).
+  // The {pierreFeed} entry is NEVER interleaved with a {pierreDrill}: openPopover
+  // suppresses the drill push while feedReturn is armed, and a feed click can't fire with
+  // a popover already open (the Feed panel is hidden whenever a PR is selected) — so the
+  // single-level push/unwind here can't orphan a drill the way the My Turn reuse-slot
+  // guard above protects against. A Back-driven exit pre-zeroes feedDepthRef in the
+  // popstate handler, so this no-ops then (the myTurnDepthRef discipline); a programmatic
+  // exit (selecting another PR, Esc, the Feed pill) flips feedReturn false → we unwind the
+  // entry and close any feed-opened popover. Inert outside a feed navigation (0 → 0).
+  useEffect(() => {
+    feedReturnRef.current = feedReturn;
+    const target = feedReturn ? 1 : 0;
+    const cur = feedDepthRef.current;
+    if (target > cur) {
+      history.pushState({ pierreFeed: 1 }, '');
+      feedDepthRef.current = 1;
+    } else if (target < cur) {
+      feedDepthRef.current = target;
+      setPopover(null); // a non-Back exit also closes the feed-opened popover
+      // A feed-entered PR Focus RODE this {pierreFeed} entry (it pushed no {pierreFocus} of
+      // its own — prFocusPushedHistoryRef false). If it's still active when the feed
+      // navigation ends programmatically (e.g. j/k selecting another PR — selectPr clears
+      // feedReturn but never tears focus down), tear it down here so the overlay can't
+      // outlive its only history entry, leaving the board collapsed to the old PR while the
+      // selection has moved on. (A Back-driven exit never reaches this branch — the popstate
+      // handler pre-zeroes feedDepthRef so target == cur — so this only fires on a
+      // programmatic clear. A focus that pushed its OWN entry is left to its own teardown.)
+      if (prFocusActiveRef.current && !prFocusPushedHistoryRef.current) applyContext(null);
+      // history.go(-diff) emits a SINGLE popstate — swallow exactly one (matching the My
+      // Turn reconcile + exitFocus accounting).
+      suppressPopstateRef.current += 1;
+      history.go(-(cur - target));
+    }
+  }, [feedReturn, applyContext]);
 
   // Move the visible window when the range preset changes — and re-apply it on
   // every preset click via rangeResetSignal, so re-selecting the already-active

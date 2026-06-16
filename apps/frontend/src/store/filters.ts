@@ -101,6 +101,17 @@ export interface FilterState {
   // Transient (like myTurnOnly) — never persisted/URL-synced; resolveRange folds it in.
   myTurnFromMs: number | null;
 
+  // "Feed return": armed when the current selection was reached by clicking a Feed
+  // entry (FeedSection → openFeedEventOnTimeline), so the browser Back button returns
+  // straight to the Feed home — clearing the selection and tearing down any PR-isolation
+  // Focus / popover the click entered. The Timeline reconciles it to a single {pierreFeed}
+  // browser-history entry (mirroring the {pierreMyTurn} stack, one level) and the popstate
+  // handler consumes it. Cleared by every navigation that LEAVES the feed-reached PR
+  // (selecting a different PR, entering/leaving My Turn focus, clearing the selection);
+  // PRESERVED while still exploring the SAME PR (a thread/Show/Focus within its detail).
+  // Transient (like selection) — never persisted / URL-synced.
+  feedReturn: boolean;
+
   // selection
   selectedPrId: number | null;
   selectedThreadId: number | null;
@@ -492,6 +503,7 @@ function freshDefaults(): FilterData {
     // always the full board + the My Turn panel. Entered only via openMyTurnPr/…Review.
     myTurnOnly: false,
     myTurnFromMs: null,
+    feedReturn: false,
     selectedPrId: null,
     selectedThreadId: null,
     selectedCommentId: null,
@@ -551,6 +563,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   openMyTurnPr: (id, threadId = null, focusAt = null, event = null) =>
     set({
       myTurnOnly: true, // enter My Turn Focus Mode (isolate the board to the inbox)
+      feedReturn: false, // My Turn owns its own {pierreMyTurn} back-stack
       selectedPrId: id,
       selectedThreadId: threadId,
       selectedCommentId: null,
@@ -563,6 +576,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   openMyTurnClaudeReview: (prId) =>
     set({
       myTurnOnly: true, // enter My Turn Focus Mode
+      feedReturn: false, // My Turn owns its own {pierreMyTurn} back-stack
       selectedPrId: prId,
       selectedThreadId: null,
       selectedCommentId: null,
@@ -573,6 +587,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   enterMyTurnFocus: () =>
     set({
       myTurnOnly: true, // isolate the board to the inbox
+      feedReturn: false, // My Turn owns its own {pierreMyTurn} back-stack
       // Level 1: the To Do list, nothing selected. Clear any prior selection so the
       // My Turn panel (not a stale PR detail) shows. The Timeline's history reconcile
       // effect pushes the matching {pierreMyTurn} entry so Back can leave again.
@@ -588,12 +603,21 @@ export const useFilters = create<FilterState>((set, get) => ({
     set({
       myTurnOnly: false,
       myTurnFromMs: null,
+      feedReturn: false,
       selectedPrId: null,
       selectedThreadId: null,
       selectedCommentId: null,
     }),
   selectPr: (id) =>
-    set({ selectedPrId: id, selectedThreadId: null, selectedCommentId: null }),
+    set((s) => ({
+      selectedPrId: id,
+      selectedThreadId: null,
+      selectedCommentId: null,
+      // Selecting a DIFFERENT PR leaves the feed-reached one → disarm the feed-return
+      // slot. Re-selecting the SAME PR (e.g. a feed click's own popover, which selects
+      // its event's PR) keeps it, so Back still returns to the Feed.
+      ...(id !== s.selectedPrId ? { feedReturn: false } : {}),
+    })),
   selectThread: (prId, threadId) =>
     set((s) => ({
       selectedPrId: prId ?? s.selectedPrId,
@@ -601,7 +625,12 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedCommentId: null,
     })),
   clearSelection: () =>
-    set({ selectedPrId: null, selectedThreadId: null, selectedCommentId: null }),
+    set({
+      selectedPrId: null,
+      selectedThreadId: null,
+      selectedCommentId: null,
+      feedReturn: false,
+    }),
   openPrFocused: (id, threadId = null, focusAt = null, event = null) =>
     set((s) => ({
       // Navigating to a DIFFERENT PR than the selected one (the open-PRs strip, the Done
@@ -613,6 +642,10 @@ export const useFilters = create<FilterState>((set, get) => ({
       ...(s.myTurnOnly && id !== s.selectedPrId
         ? { myTurnOnly: false, myTurnFromMs: null }
         : {}),
+      // Navigating to a DIFFERENT PR (strip / search / Done tab) leaves the feed-reached
+      // one → disarm the feed-return slot; re-centring the ALREADY-selected PR (the
+      // PrDetail "Show" link) keeps it.
+      ...(id !== s.selectedPrId ? { feedReturn: false } : {}),
       selectedPrId: id,
       selectedThreadId: threadId,
       selectedCommentId: null,
@@ -636,6 +669,9 @@ export const useFilters = create<FilterState>((set, get) => ({
   openFeedEventOnTimeline: (prId, focusAt, event) =>
     set({
       selectedPrId: prId,
+      // Arm the feed-return history slot so the browser Back button returns to the Feed
+      // home (see feedReturn). The Timeline pushes the matching {pierreFeed} entry.
+      feedReturn: true,
       timelineFocusPr: prId,
       timelineFocusAt: focusAt,
       timelineFocusEvent: event,
@@ -682,12 +718,16 @@ export const useFilters = create<FilterState>((set, get) => ({
     }),
   consumeCommentFocus: () => set({ commentFocus: null }),
   openClaudeReview: (prId) =>
-    set({
+    set((s) => ({
       selectedPrId: prId,
       selectedThreadId: null,
       selectedCommentId: null,
       claudeTabFocus: { prId },
-    }),
+      // The global Claude-review banner can open a DIFFERENT PR than the feed-reached one
+      // → disarm the feed-return slot so Back doesn't wrongly snap to the Feed (same guard
+      // as selectPr / openPrFocused). Re-opening the SAME PR keeps it.
+      ...(prId !== s.selectedPrId ? { feedReturn: false } : {}),
+    })),
   consumeClaudeTabFocus: () => set({ claudeTabFocus: null }),
   setFocusActive: (v) => set({ focusActive: v }),
   exitFocus: () =>
