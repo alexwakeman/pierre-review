@@ -114,7 +114,12 @@ const TIMELINE: TimelineResponse = { prs: PRS, events: EVENTS };
 const OPEN_PRS: OpenPrsResponse = { prs: PRS };
 
 const ME_RESPONSE: MeResponse = {
-  user: { login: ME.githubLogin, githubId: 'MDQ6VXNlcjE=', avatarUrl: null },
+  user: {
+    login: ME.githubLogin,
+    githubId: 'MDQ6VXNlcjE=',
+    avatarUrl: null,
+    displayName: null,
+  },
   counts: {
     awaitingReview: AWAITING_IDS.length,
     yourPrsActivity: 0,
@@ -213,6 +218,7 @@ function prDetailFor(id: number): PrDetail {
     files: [],
     requestedReviewers: [],
     viewerCanApprove: false,
+    viewerHasApprovedStanding: false,
     threads: [],
     reviews: [],
     comments: [],

@@ -50,6 +50,20 @@
       "when": 1781542806502,
       "tag": "0006_majestic_dracula",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781636812467,
+      "tag": "0007_same_human_torch",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781638375824,
+      "tag": "0008_slimy_toxin",
+      "breakpoints": true
     }
   ]
 }

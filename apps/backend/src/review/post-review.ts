@@ -4,8 +4,8 @@ import type {
   ClaudeFinding,
   ClaudeReviewVerdict,
   PostReviewComment,
+  PostReviewPrComment,
   PostReviewPreview,
-  SkippedFinding,
 } from '@pierre-review/shared';
 import { ghRestGet, ghRestPost } from '../github/client.js';
 import {
@@ -55,16 +55,22 @@ export function stripNoiseFromDiff(
 export const FALLBACK_ANCHOR_NOTE =
   '_The line this refers to isn’t part of the PR’s diff, so it’s anchored to the file’s first change._';
 
-// The wire-facing preview plus the finding ids that became inline comments (so a
-// successful post can stamp exactly those findings).
+// The wire-facing preview plus the ids of the findings that became INLINE comments
+// (so a successful post can stamp exactly those; PR-level comments are stamped
+// separately, each with its own comment id).
 export interface BuiltReview {
   preview: PostReviewPreview;
-  postedFindingIds: number[];
+  inlineFindingIds: number[];
 }
 
-// Build the exact `{ body, event, comments }` GitHub review payload from the
-// user's authored body/verdict plus the findings they ticked. Ticked findings
-// that don't anchor are reported (not injected) so the UI can flag them.
+// Build the GitHub review payload from the user's authored body/verdict plus the
+// findings they ticked. Each ticked finding is routed:
+//   • anchorable on its own line              → inline comment on that line
+//   • unanchored but its file IS in the diff  → inline comment on the file's first
+//                                                change (with a note)
+//   • its file is NOT in the diff             → a standalone PR-level comment (so a
+//                                                deep review's finding on an unchanged
+//                                                file still posts, marked accordingly)
 export function buildReview(input: {
   commitId: string;
   body: string;
@@ -74,8 +80,8 @@ export function buildReview(input: {
 }): BuiltReview {
   const index = buildAnchorIndex(input.diff);
   const comments: PostReviewComment[] = [];
-  const skippedUnanchored: SkippedFinding[] = [];
-  const postedFindingIds: number[] = [];
+  const prComments: PostReviewPrComment[] = [];
+  const inlineFindingIds: number[] = [];
   for (const f of input.includedFindings) {
     if (f.line != null && isFindingAnchored(index, f.path, f.line, f.side)) {
       comments.push({
@@ -84,12 +90,13 @@ export function buildReview(input: {
         side: f.side,
         body: findingCommentBody(f),
       });
-      postedFindingIds.push(f.id);
+      inlineFindingIds.push(f.id);
       continue;
     }
     // The finding's own line isn't an addable diff position — anchor it to the
-    // file's first change (added preferred) so it can still post inline. Only when
-    // the file itself isn't in the diff is there nowhere to attach it → skip.
+    // file's first change (added preferred) so it can still post inline. When the
+    // file itself isn't in the diff there's no diff line to attach to, so it posts
+    // as a standalone PR-level comment marked as outside the PR's diff.
     const fb = fallbackAnchor(index, f.path);
     if (fb) {
       comments.push({
@@ -98,9 +105,9 @@ export function buildReview(input: {
         side: fb.side,
         body: findingCommentBody(f, { fallbackNote: true }),
       });
-      postedFindingIds.push(f.id);
+      inlineFindingIds.push(f.id);
     } else {
-      skippedUnanchored.push({ findingId: f.id, path: f.path, title: f.title });
+      prComments.push({ findingId: f.id, path: f.path, body: prLevelFindingBody(f) });
     }
   }
   return {
@@ -109,9 +116,9 @@ export function buildReview(input: {
       body: input.body,
       event: input.event,
       comments,
-      skippedUnanchored,
+      prComments,
     },
-    postedFindingIds,
+    inlineFindingIds,
   };
 }
 
@@ -142,6 +149,33 @@ export function findingCommentBody(
     );
   }
   if (opts?.fallbackNote) parts.push(FALLBACK_ANCHOR_NOTE);
+  return parts.join('\n\n');
+}
+
+// Note appended to a PR-level comment, so readers know the referenced code is NOT
+// part of this PR's changes (it can't be an inline comment — there's no diff line).
+export const OUTSIDE_DIFF_NOTE =
+  '_This refers to a file that isn’t part of this PR’s diff, so it’s posted as a PR-level comment rather than inline._';
+
+// Body for a finding posted as a standalone PR-level (issue) comment. Since it
+// isn't attached to a diff line, prefix the file (and line, if known) for context,
+// then the finding text (the user's reword if any, else Claude's), and append a note
+// that it's outside the PR's diff. Any suggestion renders as a PLAIN code block — an
+// applyable ```suggestion only makes sense on a real diff line.
+export function prLevelFindingBody(f: {
+  path: string;
+  line: number | null;
+  body: string;
+  editedBody: string | null;
+  suggestion: string | null;
+}): string {
+  const ref = f.line != null ? `${f.path}:${f.line}` : f.path;
+  const body = f.editedBody && f.editedBody.trim() ? f.editedBody : f.body;
+  const parts = [`**\`${ref}\`**`, body];
+  if (f.suggestion && f.suggestion.trim()) {
+    parts.push(`\`\`\`\n${f.suggestion}\n\`\`\``);
+  }
+  parts.push(OUTSIDE_DIFF_NOTE);
   return parts.join('\n\n');
 }
 
@@ -233,6 +267,27 @@ export async function submitGithubComment(input: {
       line: input.line,
       side: input.side,
     },
+  );
+  return { commentId: String(res.id) };
+}
+
+interface GhIssueCommentResponse {
+  id: number;
+  html_url?: string;
+}
+
+// Post a SINGLE standalone PR-level (issue) comment. Used for an unanchored finding
+// the user chooses to post individually rather than forcing it onto a diff line.
+// Issue comments aren't pinned to a commit or a line, so there's no commit_id/side.
+export async function submitGithubIssueComment(input: {
+  owner: string;
+  name: string;
+  prNumber: number;
+  body: string;
+}): Promise<{ commentId: string }> {
+  const res = await ghRestPost<GhIssueCommentResponse>(
+    `/repos/${input.owner}/${input.name}/issues/${input.prNumber}/comments`,
+    { body: input.body },
   );
   return { commentId: String(res.id) };
 }

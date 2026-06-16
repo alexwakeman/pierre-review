@@ -296,6 +296,10 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
         suggestion: f.suggestion ?? null,
         diffHunk: extractHunk(strippedDiff, f.path, line, side),
         anchored: isFindingAnchored(index, f.path, line, side),
+        // Whether the file is part of the PR diff at all — distinguishes an
+        // unanchored finding that posts inline on the file's first change (file in
+        // diff) from one that posts as a PR-level comment (file outside the diff).
+        fileInDiff: index.has(f.path),
       };
     });
 

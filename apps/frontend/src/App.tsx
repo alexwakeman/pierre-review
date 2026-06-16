@@ -169,12 +169,16 @@ export default function App(): JSX.Element {
             target="_blank"
             rel="noreferrer noopener"
             className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:underline dark:text-gray-300"
-            title={`Signed in as ${meUser.login}`}
+            title={
+              meUser.displayName != null
+                ? `Signed in as ${meUser.displayName} (@${meUser.login})`
+                : `Signed in as ${meUser.login}`
+            }
           >
             {meUser.avatarUrl != null ? (
               <img
                 src={meUser.avatarUrl}
-                alt={meUser.login}
+                alt={meUser.displayName ?? meUser.login}
                 width={20}
                 height={20}
                 className="shrink-0 rounded-full"
@@ -185,10 +189,10 @@ export default function App(): JSX.Element {
                 className="flex shrink-0 items-center justify-center rounded-full bg-gray-300 text-[9px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200"
                 style={{ width: 20, height: 20 }}
               >
-                {meUser.login.slice(0, 2).toUpperCase()}
+                {(meUser.displayName ?? meUser.login).slice(0, 2).toUpperCase()}
               </span>
             )}
-            <span>{meUser.login}</span>
+            <span>{meUser.displayName ?? meUser.login}</span>
           </a>
         )}
         <FeedPill />

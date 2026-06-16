@@ -327,7 +327,10 @@ export function ChecksTab({
 
       {pr.viewerCanApprove && (
         <Row label="Review">
-          <ApproveControl prId={pr.id} />
+          <ApproveControl
+            prId={pr.id}
+            alreadyApproved={pr.viewerHasApprovedStanding}
+          />
         </Row>
       )}
 

@@ -55,7 +55,9 @@ export function useGenerateReview(prId: number) {
   });
 }
 
-// Post a single anchored finding as a standalone inline comment.
+// Post a single finding as a standalone comment. The server auto-routes it: inline
+// on its line / on the file's first change (file in the diff), or as a standalone
+// PR-level comment (file outside the diff).
 export function usePostFinding(prId: number) {
   const qc = useQueryClient();
   return useMutation({

@@ -8,10 +8,32 @@ import { ApiError } from '../api/client.js';
 // optional approval message + a Confirm/Cancel pair. On success the invalidate
 // refetch updates the Approvers row above; ApiError (incl. 403 NotPermitted /
 // 502 GitHubError) surfaces inline.
-export function ApproveControl({ prId }: { prId: number }): JSX.Element {
+//
+// `alreadyApproved` (the viewer's standing review is 'approved') renders a disabled
+// "Approved" state instead — re-approving would just stack a duplicate review.
+export function ApproveControl({
+  prId,
+  alreadyApproved,
+}: {
+  prId: number;
+  alreadyApproved: boolean;
+}): JSX.Element {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState('');
   const approve = useApprovePr(prId);
+
+  if (alreadyApproved) {
+    return (
+      <button
+        type="button"
+        disabled
+        title="You've already approved this PR — your approval still stands"
+        className="inline-flex cursor-default items-center gap-1 rounded border border-green-500/40 px-2 py-0.5 text-sm font-medium text-green-700/70 dark:border-green-700/50 dark:text-green-400/70"
+      >
+        <span aria-hidden>✓</span> Approved
+      </button>
+    );
+  }
 
   const error =
     approve.error instanceof ApiError

@@ -253,6 +253,10 @@ export interface LocalUser {
   login: string;
   githubId: string;
   avatarUrl: string | null;
+  // The user's GitHub display name (the `name` field from `gh api user` / OAuth).
+  // null when GitHub has no name set; the UI falls back to the login. Shown wherever
+  // the signed-in identity appears (header, greeting) in place of the @handle.
+  displayName: string | null;
 }
 
 export interface MyTurnCounts {
@@ -622,6 +626,11 @@ export interface PrDetail {
   // synced repos.viewerPermission + the account's user id. The approve route
   // re-checks this server-side.
   viewerCanApprove: boolean;
+  // Whether the viewer's STANDING review on this PR (their latest decisive review:
+  // approved / changes_requested / dismissed) is 'approved'. When true the Approve
+  // control renders disabled ("Approved") — you've already approved and it still
+  // stands. Distinct from viewerCanApprove (the right to approve at all).
+  viewerHasApprovedStanding: boolean;
   threads: ThreadDetail[];
   reviews: ReviewDetail[];
   comments: PrCommentDetail[];
@@ -1001,12 +1010,22 @@ export interface ClaudeFinding {
   // The unified-diff hunk this finding covers, for showing the code in context.
   // null for older runs / unanchored findings.
   diffHunk: string | null;
-  // false ⇒ couldn't map onto an addable diff line → can't post inline.
+  // false ⇒ couldn't map onto an addable diff line → can't post on its own line.
   anchored: boolean;
+  // Whether the finding's file is part of the PR's diff. true ⇒ an unanchored
+  // finding posts inline on the file's first change; false ⇒ the file is outside the
+  // PR's diff (e.g. a deep review on an unchanged file) so it posts as a standalone
+  // PR-level comment. (Anchored findings are always fileInDiff.)
+  fileInDiff: boolean;
   // The user ticked this finding to post it as an inline comment.
   included: boolean;
   postedAt: string | null;
   githubCommentId: string | null;
+  // How a posted comment was attached: 'inline' (a review comment on a diff line)
+  // or 'pr_comment' (a standalone PR-level issue comment, for an unanchored finding
+  // posted individually). null until posted; drives the GitHub permalink scheme
+  // (#discussion_r vs #issuecomment).
+  postedCommentKind: 'inline' | 'pr_comment' | null;
   createdAt: string;
 }
 
@@ -1134,12 +1153,13 @@ export interface ClaudeReviewStatusResponse {
   progress: ClaudeReviewProgress | null;
 }
 
-// A finding ticked for posting but not anchorable to a diff line (surfaced so the
-// UI can flag it; the user can Copy it into their own body instead).
-export interface SkippedFinding {
+// A finding whose file isn't part of the PR's diff (e.g. a deep review flagging an
+// unchanged file). It can't anchor to a diff line, so it posts as a standalone
+// PR-level (issue) comment, marked as outside the PR's diff.
+export interface PostReviewPrComment {
   findingId: number;
   path: string;
-  title: string;
+  body: string;
 }
 
 // The exact GitHub review payload — returned verbatim by the dry-run preview and
@@ -1156,14 +1176,17 @@ export interface PostReviewPreview {
   body: string;
   event: ClaudeReviewVerdict;
   comments: PostReviewComment[];
-  skippedUnanchored: SkippedFinding[];
+  // Findings whose file isn't in the PR diff — posted as standalone PR-level
+  // comments alongside the review (not dropped).
+  prComments: PostReviewPrComment[];
 }
 
 export interface PostReviewResult {
   postedReviewId: string | null;
   postedAt: string;
   postedCommentCount: number;
-  skippedUnanchored: SkippedFinding[];
+  // Number of findings posted as standalone PR-level comments (file outside the diff).
+  prCommentCount: number;
 }
 
 // Result of posting a single finding as a standalone inline comment (not a review).
@@ -1193,6 +1216,7 @@ export interface UpdateFindingBody {
   included?: boolean;
   editedBody?: string;
 }
+
 
 // A review currently in flight, for the global progress banner. Surfaced from the
 // review manager's in-memory state joined with the PR's coordinates.

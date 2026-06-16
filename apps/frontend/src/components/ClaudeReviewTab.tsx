@@ -303,9 +303,13 @@ function FindingRow({
   const anchorLabel =
     finding.line != null ? `${finding.path}:${finding.line}` : finding.path;
   const isPosted = finding.postedAt != null;
+  // Permalink depends on HOW it was posted: a PR-level issue comment anchors as
+  // #issuecomment-<id>, an inline review comment as #discussion_r<id>.
   const commentUrl =
     finding.githubCommentId != null
-      ? `${prUrl}#discussion_r${finding.githubCommentId}`
+      ? finding.postedCommentKind === 'pr_comment'
+        ? `${prUrl}#issuecomment-${finding.githubCommentId}`
+        : `${prUrl}#discussion_r${finding.githubCommentId}`
       : null;
 
   // The PR "Files changed" diff anchor — lands ON the finding's line, in review
@@ -368,9 +372,11 @@ function FindingRow({
     setRewording(false);
   };
 
-  // Post this finding as a single inline comment. If the user typed a reword that
-  // isn't saved yet, persist it FIRST — the server reads editedBody from the DB,
-  // so without this it would post Claude's text instead of the user's words.
+  // Post this finding as a single comment. The server auto-routes the destination
+  // (inline on the line / first change, or a PR-level comment when the file is
+  // outside the diff). If the user typed a reword that isn't saved yet, persist it
+  // FIRST — the server reads editedBody from the DB, so without this it would post
+  // Claude's text instead of the user's words.
   const [working, setWorking] = useState(false);
   const handlePost = async (): Promise<void> => {
     setWorking(true);
@@ -387,6 +393,10 @@ function FindingRow({
     }
   };
   const busy = posting || working;
+  // Where this finding will post: a PR-level comment when its file is outside the PR
+  // diff (can't anchor inline), otherwise an inline review comment (on its own line,
+  // or — when unanchored but the file IS in the diff — the file's first change).
+  const postsAsPrComment = !finding.anchored && !finding.fileInDiff;
 
   // Ignore = exclude from the submitted review. Offered for every finding on the
   // editable run — including unanchored ones, which now post inline on the file's
@@ -437,14 +447,22 @@ function FindingRow({
                 reworded
               </span>
             )}
-            {!finding.anchored && (
-              <span
-                className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] text-gray-500"
-                title="This line isn't in the PR diff — it posts inline on the file's first change (added preferred)"
-              >
-                off-diff — posts on first change
-              </span>
-            )}
+            {!finding.anchored &&
+              (finding.fileInDiff ? (
+                <span
+                  className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] text-gray-500"
+                  title="This line isn't in the PR diff — it posts inline on the file's first change (added preferred)"
+                >
+                  off-diff line — posts on first change
+                </span>
+              ) : (
+                <span
+                  className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-400"
+                  title="This finding's file isn't part of the PR's diff — it posts as a standalone PR-level comment, marked as outside the diff"
+                >
+                  outside the PR diff — posts as a PR comment
+                </span>
+              ))}
             {ignored && (
               <span
                 className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500"
@@ -591,14 +609,22 @@ function FindingRow({
                 type="button"
                 onClick={handlePost}
                 disabled={busy}
-                title="Post just this finding as a single inline comment on the PR (no review submitted)"
+                title={
+                  postsAsPrComment
+                    ? "This finding's file isn't in the PR diff — posts as a standalone PR-level comment (no review submitted)"
+                    : 'Post just this finding as a single inline comment on the PR (no review submitted)'
+                }
                 className={BTN_PRIMARY}
               >
                 {busy
                   ? 'Posting…'
-                  : isPosted
-                    ? 'Post again as comment'
-                    : 'Post as comment'}
+                  : postsAsPrComment
+                    ? isPosted
+                      ? 'Post again as PR comment'
+                      : 'Post as PR comment'
+                    : isPosted
+                      ? 'Post again as comment'
+                      : 'Post as comment'}
               </button>
             )}
             {editable && !rewording && (
@@ -1379,10 +1405,12 @@ export function ClaudeReviewTab({
                 comment{preview.comments.length === 1 ? '' : 's'} as{' '}
                 <strong>{VERDICT_LABEL[preview.event]}</strong>.
               </div>
-              {preview.skippedUnanchored.length > 0 && (
+              {preview.prComments.length > 0 && (
                 <div className="mt-1 text-xs text-gray-500">
-                  Skipped (file not in diff):{' '}
-                  {preview.skippedUnanchored.map((s) => s.title).join(', ')}
+                  Plus <strong>{preview.prComments.length}</strong> PR-level comment
+                  {preview.prComments.length === 1 ? '' : 's'} for findings outside
+                  the PR diff:{' '}
+                  {preview.prComments.map((c) => c.path).join(', ')}
                 </div>
               )}
             </div>
@@ -1396,10 +1424,11 @@ export function ClaudeReviewTab({
                 {postResult.postedCommentCount} inline comment
                 {postResult.postedCommentCount === 1 ? '' : 's'}
               </div>
-              {postResult.skippedUnanchored.length > 0 && (
+              {postResult.prCommentCount > 0 && (
                 <div className="mt-1 text-xs text-green-700/80 dark:text-green-400/80">
-                  Skipped (file not in diff):{' '}
-                  {postResult.skippedUnanchored.map((s) => s.title).join(', ')}
+                  Plus {postResult.prCommentCount} PR-level comment
+                  {postResult.prCommentCount === 1 ? '' : 's'} (findings outside the
+                  PR diff).
                 </div>
               )}
             </div>

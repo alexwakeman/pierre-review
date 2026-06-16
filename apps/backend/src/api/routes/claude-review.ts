@@ -46,8 +46,10 @@ import {
   fetchCurrentHeadSha,
   fetchPrDiff,
   findingCommentBody,
+  prLevelFindingBody,
   stripNoiseFromDiff,
   submitGithubComment,
+  submitGithubIssueComment,
   submitGithubReview,
 } from '../../review/post-review.js';
 import { isNoiseFile } from '../../review/prompt.js';
@@ -331,8 +333,12 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // Post a single anchored finding as a standalone inline comment (no review
-  // submitted). Pins to the run's head SHA; 409 if the PR head has since moved.
+  // Post a single finding as a standalone comment (no review submitted). The
+  // destination is chosen AUTOMATICALLY from the live diff: anchorable on its own
+  // line → an inline comment there; unanchored but its file is in the diff → an
+  // inline comment on the file's first change; its file is NOT in the diff (e.g. a
+  // deep review on an unchanged file) → a standalone PR-level comment marked as
+  // outside the PR's diff. Pins to the run's head SHA; 409 if the PR head has moved.
   app.post(
     '/api/claude-findings/:findingId/post',
     { schema: findingIdParam },
@@ -359,53 +365,71 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
               'The PR head has moved since this review. Re-review before posting.',
           };
         }
-        // Anchor: the finding's own line if addable, else the file's first change
-        // (added preferred). A finding whose file isn't in the diff can't inline.
-        let line: number;
-        let side = f.side;
-        let onFallback = false;
+
+        const postedAt = new Date().toISOString();
+
+        // Anchorable on its own line → inline comment there.
         if (f.line != null && f.anchored) {
-          line = f.line;
-        } else {
-          const { diff } = stripNoiseFromDiff(
-            await fetchPrDiff(ctx.owner, ctx.name, ctx.prNumber),
-            isNoiseFile,
-          );
-          const fb = fallbackAnchor(buildAnchorIndex(diff), f.path);
-          if (!fb) {
-            reply.status(400);
-            return {
-              error: 'NotAnchored',
-              message:
-                "This finding's file has no changes in the PR diff, so it can't post inline.",
-            };
-          }
-          line = fb.line;
-          side = fb.side;
-          onFallback = true;
-        }
-        const { commentId } = await submitGithubComment({
-          owner: ctx.owner,
-          name: ctx.name,
-          prNumber: ctx.prNumber,
-          commitId: ctx.reviewHeadSha,
-          path: f.path,
-          line,
-          side,
-          body: findingCommentBody(
-            {
+          const { commentId } = await submitGithubComment({
+            owner: ctx.owner,
+            name: ctx.name,
+            prNumber: ctx.prNumber,
+            commitId: ctx.reviewHeadSha,
+            path: f.path,
+            line: f.line,
+            side: f.side,
+            body: findingCommentBody({
               body: f.body,
               editedBody: f.editedBody,
               suggestion: f.suggestion,
-            },
-            onFallback ? { fallbackNote: true } : undefined,
-          ),
+            }),
+          });
+          await markFindingPosted(findingId, commentId, 'inline');
+          const result: PostCommentResult = { githubCommentId: commentId, postedAt };
+          return result;
+        }
+
+        // Otherwise consult the diff. If the file IS in the diff, re-anchor to its
+        // first change (inline). If it isn't, post a standalone PR-level comment.
+        const { diff } = stripNoiseFromDiff(
+          await fetchPrDiff(ctx.owner, ctx.name, ctx.prNumber),
+          isNoiseFile,
+        );
+        const fb = fallbackAnchor(buildAnchorIndex(diff), f.path);
+        if (fb) {
+          const { commentId } = await submitGithubComment({
+            owner: ctx.owner,
+            name: ctx.name,
+            prNumber: ctx.prNumber,
+            commitId: ctx.reviewHeadSha,
+            path: f.path,
+            line: fb.line,
+            side: fb.side,
+            body: findingCommentBody(
+              { body: f.body, editedBody: f.editedBody, suggestion: f.suggestion },
+              { fallbackNote: true },
+            ),
+          });
+          await markFindingPosted(findingId, commentId, 'inline');
+          const result: PostCommentResult = { githubCommentId: commentId, postedAt };
+          return result;
+        }
+
+        // File outside the PR's diff → standalone PR-level (issue) comment.
+        const { commentId } = await submitGithubIssueComment({
+          owner: ctx.owner,
+          name: ctx.name,
+          prNumber: ctx.prNumber,
+          body: prLevelFindingBody({
+            path: f.path,
+            line: f.line,
+            body: f.body,
+            editedBody: f.editedBody,
+            suggestion: f.suggestion,
+          }),
         });
-        await markFindingPosted(findingId, commentId);
-        const result: PostCommentResult = {
-          githubCommentId: commentId,
-          postedAt: new Date().toISOString(),
-        };
+        await markFindingPosted(findingId, commentId, 'pr_comment');
+        const result: PostCommentResult = { githubCommentId: commentId, postedAt };
         return result;
       } catch (err) {
         reply.status(502);
@@ -480,13 +504,45 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
           event: userVerdict,
           comments: built.preview.comments,
         });
-        await markReviewPosted(reviewId, ghReviewId, built.postedFindingIds);
+
+        // The review is now LIVE on GitHub and can't be un-posted. Findings whose
+        // file isn't in the diff post as standalone PR-level comments alongside it
+        // (one issue comment each), so a deep review's findings on unchanged files
+        // still land rather than being dropped. Each post is best-effort: a single
+        // failed comment must NOT strand the already-posted review (that would leave
+        // the run unstamped and tempt a duplicate re-post), so we collect what lands
+        // and ALWAYS stamp afterwards. Findings that fail simply stay un-posted and
+        // can be posted individually from their row.
+        const prCommentResults: { findingId: number; commentId: string }[] = [];
+        for (const pc of built.preview.prComments) {
+          try {
+            const { commentId } = await submitGithubIssueComment({
+              owner: ctx.owner,
+              name: ctx.name,
+              prNumber: ctx.prNumber,
+              body: pc.body,
+            });
+            prCommentResults.push({ findingId: pc.findingId, commentId });
+          } catch (err) {
+            req.log.warn(
+              { err, findingId: pc.findingId, path: pc.path },
+              'failed to post a PR-level comment for an off-diff finding',
+            );
+          }
+        }
+        await markReviewPosted(
+          reviewId,
+          ghReviewId,
+          built.inlineFindingIds,
+          prCommentResults,
+        );
 
         const result: PostReviewResult = {
           postedReviewId: ghReviewId,
           postedAt: new Date().toISOString(),
           postedCommentCount: built.preview.comments.length,
-          skippedUnanchored: built.preview.skippedUnanchored,
+          // Count what actually posted (a comment may have failed best-effort above).
+          prCommentCount: prCommentResults.length,
         };
         return result;
       } catch (err) {

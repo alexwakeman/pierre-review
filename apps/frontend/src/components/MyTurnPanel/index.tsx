@@ -95,7 +95,7 @@ export function MyTurnPanel(): JSX.Element {
           ) : empty ? (
             <div className="text-sm text-gray-500">
               {me?.user
-                ? `Nothing needs you right now, ${me.user.login}. 🎉 Check the Feed pill for watched-repo activity, or the Summary tab for repo stats.`
+                ? `Nothing needs you right now, ${me.user.displayName ?? me.user.login}. 🎉 Check the Feed pill for watched-repo activity, or the Summary tab for repo stats.`
                 : 'Sign in with the gh CLI to see your triage queue.'}
             </div>
           ) : (

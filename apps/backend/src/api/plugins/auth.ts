@@ -43,6 +43,7 @@ export function registerAccountContext(app: FastifyInstance): void {
           id: LOCAL_ACCOUNT_ID,
           githubUserId: '',
           githubLogin: '',
+          displayName: null,
           avatarUrl: null,
           isLocal: true,
         };

@@ -17,6 +17,7 @@ interface OAuthTokenResponse {
 interface GhUserResponse {
   login: string;
   node_id: string;
+  name: string | null;
   avatar_url: string | null;
 }
 
@@ -120,6 +121,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const account = await upsertCloudAccount({
       githubUserId: user.node_id,
       githubLogin: user.login,
+      displayName: user.name ?? null,
       avatarUrl: user.avatar_url,
       accessTokenEnc: encryptToken(token),
     });

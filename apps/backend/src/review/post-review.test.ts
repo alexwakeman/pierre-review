@@ -283,14 +283,19 @@ describe('buildReview', () => {
     expect(comment?.body).toContain('first change');
   });
 
-  it('skips a finding whose file is not in the diff', () => {
-    expect(built.preview.skippedUnanchored).toEqual([
-      { findingId: 303, path: 'src/absent.ts', title: 'File-not-in-diff finding' },
-    ]);
+  it('posts a finding whose file is not in the diff as a PR-level comment', () => {
+    expect(built.preview.prComments).toHaveLength(1);
+    const pc = built.preview.prComments[0];
+    expect(pc?.findingId).toBe(303);
+    expect(pc?.path).toBe('src/absent.ts');
+    // The PR-level body carries the file ref + the outside-the-diff note.
+    expect(pc?.body).toContain('src/absent.ts');
+    expect(pc?.body).toContain('This whole file is untouched');
+    expect(pc?.body).toContain('part of this PR');
   });
 
-  it('returns postedFindingIds for the directly + fallback anchored findings', () => {
-    expect(built.postedFindingIds).toEqual([101, 202]);
+  it('returns inlineFindingIds for the directly + fallback anchored findings', () => {
+    expect(built.inlineFindingIds).toEqual([101, 202]);
   });
 
   it('prefers the first added line, falling back to the first removed line', () => {

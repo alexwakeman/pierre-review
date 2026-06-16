@@ -24,6 +24,7 @@ export interface PersistedFinding {
   suggestion: string | null;
   diffHunk: string | null;
   anchored: boolean;
+  fileInDiff: boolean;
 }
 
 export interface ReviewSuccess {
@@ -126,9 +127,11 @@ export async function saveReviewSuccess(
           suggestion: f.suggestion,
           diffHunk: f.diffHunk,
           anchored: f.anchored,
+          fileInDiff: f.fileInDiff,
           // Findings are INCLUDED by default — the UI is opt-OUT ("Ignore"), so a
-          // fresh review posts every (anchored) finding unless the user sets it
-          // aside. (The column default is false for back-compat; we set it here.)
+          // fresh review posts every finding (inline when its line/file is in the
+          // diff, else as a PR-level comment) unless the user sets it aside. (The
+          // column default is false for back-compat; we set it here.)
           included: true,
         })
         .execute();
@@ -210,11 +213,15 @@ export async function updateFinding(
   return changed.length > 0;
 }
 
-// Stamp the run + its posted findings after a successful GitHub submit.
+// Stamp the run + its posted findings after a successful GitHub submit. Inline
+// findings (posted as part of the one review) are stamped with kind 'inline';
+// findings posted as standalone PR-level comments carry their own comment id + kind
+// 'pr_comment' so the UI builds the right permalink.
 export async function markReviewPosted(
   id: number,
   postedReviewId: string,
-  postedFindingIds: number[],
+  inlineFindingIds: number[],
+  prComments: { findingId: number; commentId: string }[] = [],
 ): Promise<void> {
   const now = new Date();
   await runTransaction(async (tx) => {
@@ -223,24 +230,38 @@ export async function markReviewPosted(
       .set({ postedReviewId, postedAt: now })
       .where(eq(claudeReviews.id, id))
       .execute();
-    if (postedFindingIds.length > 0) {
+    if (inlineFindingIds.length > 0) {
       await tx
         .update(claudeReviewFindings)
-        .set({ postedAt: now })
-        .where(inArray(claudeReviewFindings.id, postedFindingIds))
+        .set({ postedAt: now, postedCommentKind: 'inline' })
+        .where(inArray(claudeReviewFindings.id, inlineFindingIds))
+        .execute();
+    }
+    for (const pc of prComments) {
+      await tx
+        .update(claudeReviewFindings)
+        .set({
+          postedAt: now,
+          githubCommentId: pc.commentId,
+          postedCommentKind: 'pr_comment',
+        })
+        .where(eq(claudeReviewFindings.id, pc.findingId))
         .execute();
     }
   });
 }
 
-// Stamp a single finding posted as a standalone inline comment.
+// Stamp a single finding posted as a standalone comment. `kind` records how it was
+// attached ('inline' review comment vs 'pr_comment' PR-level issue comment) so the
+// UI can build the correct GitHub permalink.
 export async function markFindingPosted(
   findingId: number,
   githubCommentId: string,
+  kind: 'inline' | 'pr_comment' = 'inline',
 ): Promise<void> {
   await db
     .update(claudeReviewFindings)
-    .set({ postedAt: new Date(), githubCommentId })
+    .set({ postedAt: new Date(), githubCommentId, postedCommentKind: kind })
     .where(eq(claudeReviewFindings.id, findingId))
     .execute();
 }

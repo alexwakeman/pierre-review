@@ -426,6 +426,50 @@ export function sanitizePersistedFilters(
   return out;
 }
 
+// Order-insensitive set equality. Two nullable arrays are equal iff both null or the
+// same elements regardless of order (null = "all"/unset, distinct from an empty []).
+function setEqual<T>(a: readonly T[] | null, b: readonly T[] | null): boolean {
+  if (a == null || b == null) return a === b;
+  if (a.length !== b.length) return false;
+  const set = new Set<T>(a);
+  return b.every((v) => set.has(v));
+}
+
+// Whether a saved view's snapshot (any persisted blob) matches the CURRENT filter
+// bar — the basis for the "active view" label. Normalizes the saved state through
+// sanitize + defaults so an older/partial blob compares against the same field set,
+// and treats the array filters as order-insensitive SETS (repoIds/userIds as
+// nullable number sets). Self-correcting: any manual filter edit stops matching, so
+// the label clears.
+export function savedViewMatchesCurrent(
+  savedState: Partial<FilterState>,
+  current: FilterDefaults,
+): boolean {
+  const a: FilterDefaults = {
+    ...freshFilterDefaults(),
+    ...sanitizePersistedFilters(savedState),
+  };
+  return (
+    setEqual(a.repoIds, current.repoIds) &&
+    setEqual(a.userIds, current.userIds) &&
+    a.excludeBots === current.excludeBots &&
+    a.excludeStale === current.excludeStale &&
+    a.preset === current.preset &&
+    // customFrom/customTo only affect the board when preset === 'custom'; a non-custom
+    // preset ignores any lingering dates (they aren't cleared on preset change). Gate
+    // the comparison on preset so two identical-rendering states still match — mirrors
+    // the URL serializer (useUrlState only emits the dates when preset === 'custom').
+    (a.preset !== 'custom' ||
+      (a.customFrom === current.customFrom && a.customTo === current.customTo)) &&
+    setEqual(a.categories, current.categories) &&
+    setEqual(a.prStatuses, current.prStatuses) &&
+    setEqual(a.reviewStates, current.reviewStates) &&
+    setEqual(a.derivedStates, current.derivedStates) &&
+    a.searchQuery === current.searchQuery &&
+    a.stripFilter === current.stripFilter
+  );
+}
+
 // The fresh-load defaults for every (non-action) piece of state: the filters above
 // plus selection, transient signals and detail-view state. Used for the initial
 // store. (resetAllFilters resets only the filter subset.)

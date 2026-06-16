@@ -120,6 +120,27 @@
       "when": 1780800000007,
       "tag": "0016_repo_viewer_permission",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1780800000008,
+      "tag": "0017_account_display_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1780800000009,
+      "tag": "0018_finding_comment_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1780800000010,
+      "tag": "0019_finding_file_in_diff",
+      "breakpoints": true
     }
   ]
 }

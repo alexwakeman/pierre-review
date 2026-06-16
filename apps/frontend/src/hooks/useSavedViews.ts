@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import {
   pickFilterBarState,
   sanitizePersistedFilters,
+  savedViewMatchesCurrent,
   useFilters,
 } from '../store/filters.js';
 
@@ -31,11 +32,24 @@ function load(): SavedView[] {
 
 export function useSavedViews(): {
   views: SavedView[];
+  // The saved view whose snapshot equals the current filter bar, or null when the
+  // current filters don't match any saved view (incl. after a manual edit).
+  activeName: string | null;
   save: (name: string) => void;
   remove: (name: string) => void;
   apply: (view: SavedView) => void;
 } {
   const [views, setViews] = useState<SavedView[]>(load);
+
+  // The active view, derived from the live filter store: the saved view whose
+  // snapshot matches the current filters. The selector returns a primitive (name or
+  // null), so it only re-renders when the active view actually changes — not on
+  // every filter tweak. Self-correcting: editing a filter away from a saved view's
+  // shape clears the label.
+  const activeName = useFilters((s) => {
+    const current = pickFilterBarState(s);
+    return views.find((v) => savedViewMatchesCurrent(v.state, current))?.name ?? null;
+  });
 
   const persist = useCallback((next: SavedView[]): void => {
     const sorted = [...next].sort((a, b) => a.name.localeCompare(b.name));
@@ -73,5 +87,5 @@ export function useSavedViews(): {
     });
   }, []);
 
-  return { views, save, remove, apply };
+  return { views, activeName, save, remove, apply };
 }

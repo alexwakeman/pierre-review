@@ -12,6 +12,7 @@ export interface Account {
   id: number;
   githubUserId: string;
   githubLogin: string;
+  displayName: string | null;
   avatarUrl: string | null;
   isLocal: boolean;
 }
@@ -24,6 +25,7 @@ export const LOCAL_ACCOUNT_ID = 1;
 interface GhUser {
   login: string;
   node_id: string;
+  name: string | null;
   avatar_url: string | null;
 }
 
@@ -35,6 +37,7 @@ function fetchFromGh(): GhUser | null {
     return {
       login: parsed.login,
       node_id: parsed.node_id,
+      name: parsed.name ?? null,
       avatar_url: parsed.avatar_url ?? null,
     };
   } catch {
@@ -48,6 +51,7 @@ function rowToAccount(row: typeof schema.accounts.$inferSelect): Account {
     id: row.id,
     githubUserId: row.githubUserId,
     githubLogin: row.githubLogin,
+    displayName: row.displayName,
     avatarUrl: row.avatarUrl,
     isLocal: row.isLocal,
   };
@@ -76,7 +80,11 @@ export async function ensureLocalAccount(): Promise<Account | null> {
     existing &&
     existing.githubUserId !== '' &&
     existing.lastLoginAt != null &&
-    Date.now() - existing.lastLoginAt.getTime() < STALE_MS;
+    Date.now() - existing.lastLoginAt.getTime() < STALE_MS &&
+    // Backfill the display name on the first run after it was added (older rows have
+    // it NULL). A genuinely name-less GitHub user re-fetches each startup — cheap;
+    // the daily refresh would repopulate it anyway.
+    existing.displayName != null;
   if (existing && fresh) {
     cachedLocalAccount = rowToAccount(existing);
     return cachedLocalAccount;
@@ -95,6 +103,7 @@ export async function ensureLocalAccount(): Promise<Account | null> {
       id: LOCAL_ACCOUNT_ID,
       githubUserId: gh.node_id,
       githubLogin: gh.login,
+      displayName: gh.name,
       avatarUrl: gh.avatar_url,
       isLocal: true,
       lastLoginAt: new Date(),
@@ -104,6 +113,7 @@ export async function ensureLocalAccount(): Promise<Account | null> {
       set: {
         githubUserId: gh.node_id,
         githubLogin: gh.login,
+        displayName: gh.name,
         avatarUrl: gh.avatar_url,
         isLocal: true,
         lastLoginAt: new Date(),
@@ -129,6 +139,7 @@ export function getLocalAccountCached(): Account | null {
 export async function upsertCloudAccount(input: {
   githubUserId: string;
   githubLogin: string;
+  displayName: string | null;
   avatarUrl: string | null;
   accessTokenEnc: string;
 }): Promise<Account> {
@@ -139,6 +150,7 @@ export async function upsertCloudAccount(input: {
     .values({
       githubUserId: input.githubUserId,
       githubLogin: input.githubLogin,
+      displayName: input.displayName,
       avatarUrl: input.avatarUrl,
       accessTokenEnc: input.accessTokenEnc,
       isLocal: false,
@@ -151,6 +163,7 @@ export async function upsertCloudAccount(input: {
       target: accounts.githubUserId,
       set: {
         githubLogin: input.githubLogin,
+        displayName: input.displayName,
         avatarUrl: input.avatarUrl,
         accessTokenEnc: input.accessTokenEnc,
         lastLoginAt: now,
@@ -254,5 +267,6 @@ export function accountToLocalUser(account: Account | null): LocalUser | null {
     login: account.githubLogin,
     githubId: account.githubUserId,
     avatarUrl: account.avatarUrl,
+    displayName: account.displayName,
   };
 }

@@ -36,6 +36,10 @@ export const accounts = pgTable('accounts', {
   id: serial('id').primaryKey(),
   githubUserId: text('github_user_id').notNull().unique(),
   githubLogin: text('github_login').notNull(),
+  // The user's GitHub display name (the `name` field from `gh api user` / OAuth
+  // `GET /user`). Nullable — GitHub `name` can be unset; the UI falls back to the
+  // login. Shown wherever the signed-in identity appears (header, greeting).
+  displayName: text('display_name'),
   avatarUrl: text('avatar_url'),
   accessTokenEnc: text('access_token_enc'),
   isLocal: boolean('is_local').notNull().default(false),
@@ -475,9 +479,20 @@ export const claudeReviewFindings = pgTable(
     suggestion: text('suggestion'),
     diffHunk: text('diff_hunk'),
     anchored: boolean('anchored').notNull().default(true),
+    // Whether the finding's file is part of the PR diff. true ⇒ an unanchored finding
+    // posts inline on the file's first change; false ⇒ outside the diff → posts as a
+    // standalone PR-level comment. Defaults true (back-compat: pre-existing findings).
+    fileInDiff: boolean('file_in_diff').notNull().default(true),
     included: boolean('included').notNull().default(false),
     postedAt: timestamp('posted_at', { withTimezone: true, mode: 'date' }),
     githubCommentId: text('github_comment_id'),
+    // How a posted comment was attached: 'inline' (a review comment on a diff line)
+    // or 'pr_comment' (a standalone PR-level issue comment, for an unanchored
+    // finding posted individually). Null until posted; drives the correct GitHub
+    // permalink (#discussion_r vs #issuecomment).
+    postedCommentKind: text('posted_comment_kind', {
+      enum: ['inline', 'pr_comment'],
+    }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),

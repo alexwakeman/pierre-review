@@ -36,6 +36,10 @@ export const accounts = sqliteTable('accounts', {
   // GitHub user node id (the stable GraphQL id) — the login can change, this can't.
   githubUserId: text('github_user_id').notNull().unique(),
   githubLogin: text('github_login').notNull(),
+  // The user's GitHub display name (the `name` field from `gh api user` / OAuth
+  // `GET /user`). Nullable — GitHub `name` can be unset; the UI falls back to the
+  // login. Shown wherever the signed-in identity appears (header, greeting).
+  displayName: text('display_name'),
   avatarUrl: text('avatar_url'),
   // AES-256-GCM sealed access token (iv:tag:ciphertext, base64). Null for the
   // local account, whose token comes live from `gh auth token`.
@@ -517,9 +521,20 @@ export const claudeReviewFindings = sqliteTable(
     // the code in context in the UI. Null for older runs / unanchored findings.
     diffHunk: text('diff_hunk'),
     anchored: integer('anchored', { mode: 'boolean' }).notNull().default(true),
+    // Whether the finding's file is part of the PR diff. true ⇒ an unanchored finding
+    // posts inline on the file's first change; false ⇒ outside the diff → posts as a
+    // standalone PR-level comment. Defaults true (back-compat: pre-existing findings).
+    fileInDiff: integer('file_in_diff', { mode: 'boolean' }).notNull().default(true),
     included: integer('included', { mode: 'boolean' }).notNull().default(false),
     postedAt: integer('posted_at', { mode: 'timestamp' }),
     githubCommentId: text('github_comment_id'),
+    // How a posted comment was attached: 'inline' (a review comment on a diff line)
+    // or 'pr_comment' (a standalone PR-level issue comment, for an unanchored
+    // finding posted individually). Null until posted; drives the correct GitHub
+    // permalink (#discussion_r vs #issuecomment).
+    postedCommentKind: text('posted_comment_kind', {
+      enum: ['inline', 'pr_comment'],
+    }),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

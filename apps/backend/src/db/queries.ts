@@ -2274,6 +2274,26 @@ export async function getPrDetail(
     viewerUserId !== pr.authorId &&
     ['WRITE', 'MAINTAIN', 'ADMIN'].includes(repo.viewerPermission ?? '');
 
+  // The viewer's STANDING review: their LATEST decisive review (approved /
+  // changes_requested / dismissed; 'commented'/'pending' don't count). reviewRows is
+  // ASC by submittedAt, so the last decisive entry by the viewer wins. When it's
+  // 'approved', the Approve control renders disabled ("already approved").
+  let viewerHasApprovedStanding = false;
+  if (viewerUserId != null) {
+    let standing: string | null = null;
+    for (const r of reviewRows) {
+      if (
+        r.authorId === viewerUserId &&
+        (r.state === 'approved' ||
+          r.state === 'changes_requested' ||
+          r.state === 'dismissed')
+      ) {
+        standing = r.state;
+      }
+    }
+    viewerHasApprovedStanding = standing === 'approved';
+  }
+
   return {
     id: pr.id,
     repoId: pr.repoId,
@@ -2305,6 +2325,7 @@ export async function getPrDetail(
     files: filesOut,
     requestedReviewers,
     viewerCanApprove,
+    viewerHasApprovedStanding,
     threads,
     reviews: reviewsOut,
     comments: commentsOut,
@@ -2482,9 +2503,11 @@ function mapFinding(r: ClaudeFindingRow): ClaudeFinding {
     suggestion: r.suggestion,
     diffHunk: r.diffHunk,
     anchored: r.anchored,
+    fileInDiff: r.fileInDiff,
     included: r.included,
     postedAt: iso(r.postedAt),
     githubCommentId: r.githubCommentId,
+    postedCommentKind: r.postedCommentKind,
     createdAt: r.createdAt.toISOString(),
   };
 }
