@@ -3,6 +3,7 @@ import type {
   AwaitingReviewItem,
   FeedEvent,
   MeResponse,
+  MyTurnPr,
   MyTurnResponse,
   OpenPrsResponse,
   PrDetail,
@@ -11,6 +12,7 @@ import type {
   TimelinePr,
   TimelineResponse,
   User,
+  WatchedRepoPrItem,
 } from '@pierre-review/shared';
 
 // Deterministic, self-contained API fixtures for the My Turn / Feed / Focus-mode
@@ -81,10 +83,17 @@ const PRS: TimelinePr[] = [
   pr(101, 101, ALICE.id, 'Inbox: add login form', 5),
   pr(102, 102, ALICE.id, 'Inbox: fix auth race', 4),
   pr(103, 103, BOB.id, 'Inbox: tidy router', 3),
-  pr(104, 104, BOB.id, 'Other: bump deps', 2),
+  pr(104, 104, BOB.id, 'Watched repo PR by bob', 2),
   pr(105, 105, ALICE.id, 'Other: docs pass', 1),
 ];
-const INBOX_IDS = [101, 102, 103];
+// The inbox spans MULTIPLE My Turn sections: 101-103 are "awaiting your review", 104 is a
+// new PR in a WATCHED repo (a distinct inbox section). My Turn Focus Mode must show ALL of
+// them — the watched-repo section was previously omitted from the focus board's id set, so
+// an inbox containing a watched PR rendered it off the board (regression #54). 105 is in
+// neither section, so the focus board (4) stays strictly smaller than the full board (5).
+const AWAITING_IDS = [101, 102, 103];
+const WATCHED_IDS = [104];
+const INBOX_IDS = [...AWAITING_IDS, ...WATCHED_IDS];
 
 // One lifecycle event per PR (drives the Feed/Activity; lifecycle events draw no
 // timeline markers, which keeps the bar-count assertions clean).
@@ -107,42 +116,48 @@ const OPEN_PRS: OpenPrsResponse = { prs: PRS };
 const ME_RESPONSE: MeResponse = {
   user: { login: ME.githubLogin, githubId: 'MDQ6VXNlcjE=', avatarUrl: null },
   counts: {
-    awaitingReview: INBOX_IDS.length,
+    awaitingReview: AWAITING_IDS.length,
     yourPrsActivity: 0,
     threadsAwaiting: 0,
-    watchedRepoPrs: 0,
+    watchedRepoPrs: WATCHED_IDS.length,
     claudeReviewsToAction: 0,
   },
   claudeReviewEnabled: false,
   deploymentMode: 'local',
 };
 
+function myTurnPr(id: number): MyTurnPr {
+  const p = PRS.find((x) => x.id === id)!;
+  return {
+    prId: p.id,
+    repoFullName: REPO.fullName,
+    number: p.number,
+    title: p.title,
+    authorId: p.authorId,
+    state: p.state,
+    openedAt: p.openedAt,
+    githubUrl: `https://github.com/${REPO.fullName}/pull/${p.number}`,
+  };
+}
+
 const MY_TURN: MyTurnResponse = {
-  awaitingReview: INBOX_IDS.map((id): AwaitingReviewItem => {
-    const p = PRS.find((x) => x.id === id)!;
-    return {
-      prId: p.id,
-      repoFullName: REPO.fullName,
-      number: p.number,
-      title: p.title,
-      authorId: p.authorId,
-      state: p.state,
-      openedAt: p.openedAt,
-      githubUrl: `https://github.com/${REPO.fullName}/pull/${p.number}`,
-      alsoRequested: 0,
-    };
-  }),
+  awaitingReview: AWAITING_IDS.map((id): AwaitingReviewItem => ({
+    ...myTurnPr(id),
+    alsoRequested: 0,
+  })),
   yourPrs: [],
   threadsAwaiting: [],
-  watchedRepoPrs: [],
+  // New open PRs by others in your Watched repos — a separate inbox section that My Turn
+  // Focus Mode must also show on the board (regression #54).
+  watchedRepoPrs: WATCHED_IDS.map((id): WatchedRepoPrItem => myTurnPr(id)),
   claudeReviewsToAction: [],
   users: USERS,
 };
 
-// Feed entries reference the NON-inbox PRs so a Feed click is clearly a full-board
-// navigation (not an inbox open).
+// Feed entries; the first references a non-inbox board PR, so clicking it is clearly a
+// full-board navigation (never an inbox/focus open) regardless of inbox membership.
 const FEED: { events: FeedEvent[]; users: User[] } = {
-  events: [104, 105].map((id, i) => {
+  events: [105, 104].map((id, i) => {
     const p = PRS.find((x) => x.id === id)!;
     return {
       id: 7000 + i,

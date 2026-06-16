@@ -56,6 +56,34 @@ test.describe('My Turn / Feed / Focus-mode flows', () => {
     await expect(feedPill(page)).toHaveAttribute('aria-pressed', 'false');
   });
 
+  test('My Turn focus shows watched-repo PRs, not only awaiting-review (regression #54)', async ({ page }) => {
+    await gotoApp(page);
+    await enterMyTurnFocus(page); // asserts the board shows ALL inbox PRs (count === INBOX)
+    // A new PR in a Watched repo is a distinct inbox section. It was being filtered off the
+    // focus board (watchedRepoPrs wasn't in the focus id set), so an inbox containing one
+    // rendered empty until the card was clicked. Its bar must be present in focus.
+    await expect(
+      page.locator('.vis-item.pr-bar', { hasText: 'Watched repo PR' }),
+    ).toHaveCount(1);
+  });
+
+  test('My Turn focus zooms the window to fit the inbox (PRs fill the available width)', async ({ page }) => {
+    await gotoApp(page);
+    // A bar's width on the full (14-day) board…
+    const bar = page.locator('.vis-item.pr-bar', { hasText: 'Watched repo PR' });
+    await expect(bar).toBeVisible();
+    const before = (await bar.boundingBox())!.width;
+
+    await enterMyTurnFocus(page);
+    // …grows substantially once focus zooms the window tight to the inbox span, instead of
+    // leaving the PR squished in a corner of the wide date-filter view.
+    await expect(async () => {
+      const box = await bar.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.width).toBeGreaterThan(before * 1.3);
+    }).toPass({ timeout: 6000 });
+  });
+
   test('opening a To Do shows its PR detail while keeping ALL inbox PRs on the board', async ({ page }) => {
     await gotoApp(page);
     await enterMyTurnFocus(page);

@@ -435,6 +435,10 @@ export function Timeline(): JSX.Element {
     for (const it of myTurnData.awaitingReview) ids.add(it.prId);
     for (const it of myTurnData.yourPrs) ids.add(it.prId);
     for (const it of myTurnData.threadsAwaiting) ids.add(it.prId);
+    // Watched-repo inbox PRs (new open PRs by others in your Watched repos) are a full
+    // inbox section too — they MUST be here, or My Turn Focus Mode filters them off the
+    // board (an inbox of only watched PRs renders empty until you click one). [[watched-repo-inbox]]
+    for (const it of myTurnData.watchedRepoPrs) ids.add(it.prId);
     for (const it of myTurnData.claudeReviewsToAction) ids.add(it.prId);
     return ids;
   }, [myTurnData]);
@@ -468,6 +472,7 @@ export function Timeline(): JSX.Element {
     if (myTurnData) {
       for (const it of myTurnData.awaitingReview) consider(Date.parse(it.openedAt));
       for (const it of myTurnData.yourPrs) consider(Date.parse(it.openedAt));
+      for (const it of myTurnData.watchedRepoPrs) consider(Date.parse(it.openedAt));
       for (const it of myTurnData.threadsAwaiting) consider(Date.parse(it.lastReplyAt));
     }
     if (!Number.isFinite(earliest)) {
@@ -2894,18 +2899,58 @@ export function Timeline(): JSX.Element {
 
   // Move the visible window when the range preset changes — and re-apply it on
   // every preset click via rangeResetSignal, so re-selecting the already-active
-  // preset snaps the view back to that range after panning/zooming away. Also fires
-  // when My Turn Focus Mode toggles or its range extension (myTurnFromMs) lands, so
-  // (C) entering focus fits the window to the widened inbox span (every related PR
-  // visible) and leaving it snaps back to the user's date filter. resolveRange folds
-  // myTurnFromMs in; the per-entry focus consumer then re-centres within this span.
+  // preset snaps the view back to that range after panning/zooming away. Skips while
+  // My Turn Focus Mode is active: the dedicated fit effect below OWNS the window then
+  // (it zooms tight to the inbox PRs' span). Still fires on the myTurnOnly false edge to
+  // snap the board back to the user's date filter on exit.
   useEffect(() => {
     const tl = timelineRef.current;
     if (!tl) return;
+    if (myTurnOnly) return; // the My Turn fit effect owns the window in focus
     const { from, to } = resolveRange(useFilters.getState());
     const { start, end } = paddedViewport(from, to);
     tl.setWindow(start, end, { animation: false });
   }, [preset, customFrom, customTo, rangeResetSignal, myTurnOnly, myTurnFromMs]);
+
+  // (C) My Turn Focus Mode "zoom to the inbox". resolveRange only EXTENDS the fetched
+  // range backward (to load inbox PRs older than the date filter) — it never narrows the
+  // VISIBLE window, so a recent inbox left the PRs squished into a corner of the 14-day
+  // view. Here we fit the window tight to the inbox PRs' own span ([earliest open, latest
+  // bar end / now] + padding), so they fill the available width. Fits ONCE per focus entry
+  // (myTurnFitDoneRef) — never re-zooming while the user pans, or on a background refetch —
+  // retrying across dep changes only until the inbox records are loaded. Animated so it
+  // reads as a zoom-in. Cleared on exit; the effect above then restores the date filter.
+  const myTurnFitDoneRef = useRef(false);
+  useEffect(() => {
+    const tl = timelineRef.current;
+    if (!myTurnOnly) {
+      myTurnFitDoneRef.current = false;
+      return;
+    }
+    if (myTurnFitDoneRef.current || myTurnPrIds == null || myTurnPrIds.size === 0 || !tl) {
+      return;
+    }
+    let minStart = Infinity;
+    let maxEnd = -Infinity;
+    let found = false;
+    for (const id of myTurnPrIds) {
+      const rec =
+        prsByIdRef.current.get(id) ??
+        data?.prs.find((p) => p.id === id) ??
+        openPrsData?.prs.find((p) => p.id === id);
+      if (!rec) continue;
+      const s = new Date(rec.openedAt).getTime();
+      if (Number.isFinite(s)) {
+        minStart = Math.min(minStart, s);
+        found = true;
+      }
+      maxEnd = Math.max(maxEnd, prBarEndMs(rec));
+    }
+    if (!found || !Number.isFinite(maxEnd)) return; // inbox records not loaded yet — retry
+    const pad = Math.max((maxEnd - minStart) * 0.08, 12 * 60 * 60 * 1000);
+    tl.setWindow(minStart - pad, maxEnd + pad, { animation: true });
+    myTurnFitDoneRef.current = true;
+  }, [myTurnOnly, myTurnPrIds, myTurnFromMs, data, openPrsData]);
 
   // "Now" button: recenter the window on the current instant, keeping the
   // current zoom width. A transient store signal (epoch ms) the button bumps and
