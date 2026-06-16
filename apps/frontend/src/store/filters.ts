@@ -156,6 +156,11 @@ export interface FilterState {
   // sticky focus overlay (collapse to its contributors, show only its bar, fit the
   // window) rather than just centre it. Consumed alongside the other focus hints.
   timelineIsolate: boolean;
+  // when true, after the timeline reveals the focused event it also OPENS that
+  // event's marker popover (so the content is readable immediately) — and, if the
+  // event is cross-person, enters PR Focus mode first. Set only by the Feed; reset
+  // by every other navigation + on consume so it never leaks to a plain "Show".
+  timelineFocusOpenPopover: boolean;
   // transient: request the timeline to recenter its window on a given instant
   // (epoch ms) keeping the current zoom width — drives the "Now" button. Store-
   // only (NOT URL-synced); cleared after the Timeline consumes it.
@@ -263,6 +268,13 @@ export interface FilterState {
   // Show a specific activity entry on the timeline: keep its PR selected, recenter
   // on the event's instant, and glow the matching marker.
   showEventOnTimeline: (
+    prId: number,
+    focusAt: string,
+    event: { type: EventType; refId: number | null },
+  ) => void;
+  // Feed-item click: like showEventOnTimeline, but also opens the event's popover
+  // (read the content inline) and, for a cross-person event, enters PR Focus first.
+  openFeedEventOnTimeline: (
     prId: number,
     focusAt: string,
     event: { type: EventType; refId: number | null },
@@ -495,6 +507,7 @@ function freshDefaults(): FilterData {
     timelineFocusAt: null,
     timelineFocusEvent: null,
     timelineIsolate: false,
+    timelineFocusOpenPopover: false,
     timelineCenterAt: null,
     focusActive: false,
     exitFocusSignal: 0,
@@ -545,6 +558,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineFocusAt: focusAt,
       timelineFocusEvent: event,
       timelineIsolate: false,
+      timelineFocusOpenPopover: false,
     }),
   openMyTurnClaudeReview: (prId) =>
     set({
@@ -608,6 +622,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       // A plain navigate, never the sticky isolation overlay — guarantee the event/
       // centre branch runs even if a prior focus left timelineIsolate set.
       timelineIsolate: false,
+      timelineFocusOpenPopover: false,
     })),
   showEventOnTimeline: (prId, focusAt, event) =>
     set({
@@ -616,6 +631,18 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineFocusAt: focusAt,
       timelineFocusEvent: event,
       timelineIsolate: false,
+      timelineFocusOpenPopover: false,
+    }),
+  openFeedEventOnTimeline: (prId, focusAt, event) =>
+    set({
+      selectedPrId: prId,
+      timelineFocusPr: prId,
+      timelineFocusAt: focusAt,
+      timelineFocusEvent: event,
+      timelineIsolate: false,
+      // The one path that opts in: reveal the event's popover (and enter PR Focus if
+      // it's cross-person). The Timeline consumer reads this in the show-event branch.
+      timelineFocusOpenPopover: true,
     }),
   focusPrOnTimeline: (prId) =>
     set({
@@ -624,6 +651,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineFocusAt: null,
       timelineFocusEvent: null,
       timelineIsolate: true,
+      timelineFocusOpenPopover: false,
     }),
   consumeTimelineFocus: () =>
     set({
@@ -631,6 +659,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineFocusAt: null,
       timelineFocusEvent: null,
       timelineIsolate: false,
+      timelineFocusOpenPopover: false,
     }),
   centerTimelineNow: () => set({ timelineCenterAt: Date.now() }),
   consumeTimelineCenter: () => set({ timelineCenterAt: null }),

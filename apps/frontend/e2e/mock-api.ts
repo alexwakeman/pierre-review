@@ -110,7 +110,39 @@ const EVENTS: TimelineEvent[] = PRS.map((p, i) => ({
   reviewState: null,
 }));
 
-const TIMELINE: TimelineResponse = { prs: PRS, events: EVENTS };
+// Two MARKER events (review / comment). Unlike the lifecycle pr_opened events these
+// DRAW timeline markers, so a feed click on them opens the marker popover. 8001 is
+// cross-person (ME reviewing ALICE's PR #101 → a feed click enters PR Focus); 8002 is
+// own-work (BOB commenting on BOB's PR #103 → popover only, no focus). Dated older than
+// the pr_opened feed items so the lifecycle `.first()` feed test stays unaffected.
+const MARKER_EVENTS: TimelineEvent[] = [
+  {
+    id: 8001,
+    repoId: REPO.id,
+    actorId: ME.id, // cross-person: ME ≠ author ALICE
+    prId: 101,
+    type: 'review_submitted',
+    occurredAt: iso(3),
+    threadId: null,
+    derivedState: null,
+    refId: 5001,
+    reviewState: 'commented',
+  },
+  {
+    id: 8002,
+    repoId: REPO.id,
+    actorId: BOB.id, // own-work: BOB == author of #103
+    prId: 103,
+    type: 'pr_comment',
+    occurredAt: iso(4),
+    threadId: null,
+    derivedState: null,
+    refId: 6001,
+    reviewState: null,
+  },
+];
+
+const TIMELINE: TimelineResponse = { prs: PRS, events: [...EVENTS, ...MARKER_EVENTS] };
 const OPEN_PRS: OpenPrsResponse = { prs: PRS };
 
 const ME_RESPONSE: MeResponse = {
@@ -162,24 +194,46 @@ const MY_TURN: MyTurnResponse = {
 // Feed entries; the first references a non-inbox board PR, so clicking it is clearly a
 // full-board navigation (never an inbox/focus open) regardless of inbox membership.
 const FEED: { events: FeedEvent[]; users: User[] } = {
-  events: [105, 104].map((id, i) => {
-    const p = PRS.find((x) => x.id === id)!;
-    return {
-      id: 7000 + i,
-      type: 'pr_opened',
-      occurredAt: p.openedAt,
-      repoId: REPO.id,
-      repoFullName: REPO.fullName,
-      prId: p.id,
-      prNumber: p.number,
-      prTitle: p.title,
-      prState: p.state,
-      actorId: p.authorId,
-      refId: p.id,
-      reviewState: null,
-      excerpt: null,
-    };
-  }),
+  events: [
+    ...[105, 104].map((id, i): FeedEvent => {
+      const p = PRS.find((x) => x.id === id)!;
+      return {
+        id: 7000 + i,
+        type: 'pr_opened',
+        occurredAt: p.openedAt,
+        repoId: REPO.id,
+        repoFullName: REPO.fullName,
+        prId: p.id,
+        prNumber: p.number,
+        prTitle: p.title,
+        prState: p.state,
+        actorId: p.authorId,
+        refId: p.id,
+        reviewState: null,
+        excerpt: null,
+      };
+    }),
+    // The two MARKER feed items (mirror MARKER_EVENTS by id). A feed click on these opens
+    // the popover; the cross-person one (8001) also enters PR Focus.
+    ...MARKER_EVENTS.map((e): FeedEvent => {
+      const p = PRS.find((x) => x.id === e.prId)!;
+      return {
+        id: e.id,
+        type: e.type,
+        occurredAt: e.occurredAt,
+        repoId: REPO.id,
+        repoFullName: REPO.fullName,
+        prId: p.id,
+        prNumber: p.number,
+        prTitle: p.title,
+        prState: p.state,
+        actorId: e.actorId,
+        refId: e.refId,
+        reviewState: e.reviewState,
+        excerpt: e.type === 'pr_comment' ? 'a standalone PR comment' : null,
+      };
+    }),
+  ],
   users: USERS,
 };
 

@@ -156,17 +156,57 @@ test.describe('My Turn / Feed / Focus-mode flows', () => {
     await expect(myTurnPill(page)).toHaveAttribute('aria-pressed', 'false');
   });
 
-  test('clicking a Feed item navigates the timeline WITHOUT entering any focus mode', async ({ page }) => {
+  test('clicking a LIFECYCLE Feed item navigates the timeline WITHOUT entering any focus mode', async ({ page }) => {
     await gotoApp(page);
     await expect(page.getByTestId('feed-panel')).toBeVisible();
+    // The first feed item is a pr_opened lifecycle event (no marker) → a plain navigate.
     await page.getByRole('button', { name: 'Show on timeline' }).first().click();
 
-    // A PR is now selected (its detail), but we are NOT in My Turn focus and the board is
-    // the FULL board — a feed click is a plain timeline navigation.
+    // A PR is now selected (its detail), but we are NOT in My Turn focus, NOT in the
+    // PR-isolation overlay, and the board is the FULL board — a plain timeline navigation.
     await expect(page.getByTestId('detail-clear')).toBeVisible();
     await expect(myTurnPill(page)).toHaveAttribute('aria-pressed', 'false');
     await expect(exitMyTurnPill(page)).toHaveCount(0);
+    await expect(page.locator('.tl-focus-active')).toHaveCount(0);
     await expect(prBars(page)).toHaveCount(FULL_BOARD);
+  });
+
+  test('clicking an OWN-WORK marker Feed item opens its popover WITHOUT entering focus', async ({ page }) => {
+    await gotoApp(page);
+    const panel = page.getByTestId('feed-panel');
+    await expect(panel).toBeVisible();
+    // BOB's comment on BOB's own PR #103 ("Inbox: tidy router") is own-work + has a marker.
+    await panel
+      .locator('li', { hasText: 'Inbox: tidy router' })
+      .getByRole('button', { name: 'Show on timeline' })
+      .click();
+
+    // The event's popover opens (content readable inline), but the board stays full and
+    // un-focused — own-work events never enter the PR-isolation overlay.
+    await expect(page.getByTestId('marker-popover')).toBeVisible();
+    await expect(page.locator('.tl-focus-active')).toHaveCount(0);
+    await expect(myTurnPill(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(prBars(page)).toHaveCount(FULL_BOARD);
+  });
+
+  test('clicking a CROSS-PERSON marker Feed item enters PR Focus AND opens the popover', async ({ page }) => {
+    await gotoApp(page);
+    const panel = page.getByTestId('feed-panel');
+    await expect(panel).toBeVisible();
+    // My review on ALICE's PR #101 ("Inbox: add login form") is cross-person + has a marker.
+    await panel
+      .locator('li', { hasText: 'Inbox: add login form' })
+      .getByRole('button', { name: 'Show on timeline' })
+      .click();
+
+    // The timeline enters the PR-isolation Focus overlay (NOT My Turn focus) and opens the
+    // event's popover after focusing, so the content reads inline immediately.
+    await expect(page.locator('.tl-focus-active')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Exit focus mode' })).toBeVisible();
+    await expect(page.getByTestId('marker-popover')).toBeVisible();
+    await expect(myTurnPill(page)).toHaveAttribute('aria-pressed', 'false');
+    // Focus isolates the board to the PR's contributors — strictly fewer bars than full.
+    await expect(prBars(page)).toHaveCount(1);
   });
 
   test('PR-isolation focus is discrete from My Turn focus', async ({ page }) => {

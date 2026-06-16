@@ -3148,6 +3148,33 @@ export function Timeline(): JSX.Element {
         // Lifecycle events have no marker; their actor is the PR author, so the
         // relevant row is the author's.
         const actorId = match?.actorId ?? inWindow.authorId;
+        const hasMarker =
+          match != null &&
+          (itemsRef.current.get(`ev:${match.id}`) != null ||
+            eventToClusterRef.current.get(match.id) != null);
+        // Feed click (timelineFocusOpenPopover): reveal the event's popover so its
+        // content reads inline. Only events WITH a marker (comments/reviews) have a
+        // popover — lifecycle entries fall through to the plain navigate below.
+        const wantPopover = useFilters.getState().timelineFocusOpenPopover;
+
+        // Cross-person feed entry → enter the unified PR-isolation focus anchored on
+        // the event, THEN open its popover (byte-for-byte the cross-user marker-click
+        // path). enterPrFocus drops any stale popover, so openPopover MUST follow it.
+        if (
+          wantPopover &&
+          match != null &&
+          hasMarker &&
+          match.actorId != null &&
+          inWindow.authorId != null &&
+          match.actorId !== inWindow.authorId
+        ) {
+          enterPrFocus(timelineFocusPr, { anchorEventId: match.id, fitWindow: true });
+          openPopover(window.innerWidth / 2, window.innerHeight / 2, [match.id]);
+          const token = groupClassToken(`repo:${inWindow.repoId}:user:${match.actorId}`);
+          window.setTimeout(() => centerShowTarget(token, true, '.ev-cross-linked'), 320);
+          useFilters.getState().consumeTimelineFocus();
+          return;
+        }
 
         if (timelineFocusAt) {
           const c = Date.parse(timelineFocusAt);
@@ -3163,11 +3190,13 @@ export function Timeline(): JSX.Element {
         // centre on the PR bar instead (hasMarker false).
         if (actorId != null) {
           const token = groupClassToken(`repo:${inWindow.repoId}:user:${actorId}`);
-          const hasMarker =
-            match != null &&
-            (itemsRef.current.get(`ev:${match.id}`) != null ||
-              eventToClusterRef.current.get(match.id) != null);
           window.setTimeout(() => centerShowTarget(token, hasMarker), 120);
+        }
+        // Own-work feed entry → also open the event's popover so the content reads
+        // inline (the recenter + glow above already located its marker; the popover
+        // re-anchors to it and rides the deferred scroll into view).
+        if (wantPopover && match != null && hasMarker) {
+          openPopover(window.innerWidth / 2, window.innerHeight / 2, [match.id]);
         }
         useFilters.getState().consumeTimelineFocus();
         return;
@@ -3322,6 +3351,7 @@ export function Timeline(): JSX.Element {
     rebuildMarkers,
     isolatePrBars,
     enterPrFocus,
+    openPopover,
     dropOverlayForNavigation,
     highlightEvent,
   ]);

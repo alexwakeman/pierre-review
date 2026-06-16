@@ -473,6 +473,7 @@ export function MarkerPopover({
         }}
         {...getFloatingProps()}
         onPointerUp={persistSize}
+        data-testid="marker-popover"
         className="z-50 flex flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
       >
         <div className="tl-modal-header" onPointerDown={onDragStart}>

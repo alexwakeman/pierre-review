@@ -40,14 +40,17 @@ function FeedRow({
   isNew: boolean;
 }): JSX.Element {
   const usersById = indexUsers(useUsers().data);
-  const showEventOnTimeline = useFilters((s) => s.showEventOnTimeline);
+  const openFeedEventOnTimeline = useFilters((s) => s.openFeedEventOnTimeline);
   const meta = EVENT_META[ev.type];
   const actor = ev.actorId != null ? usersById.get(ev.actorId) : undefined;
   const verdict = ev.reviewState ? VERDICT[ev.reviewState] : null;
 
+  // Reveal this event on the timeline: open its marker popover (so the comment/
+  // review content reads inline) + highlight it; a cross-person entry enters PR
+  // Focus mode first. Lifecycle entries (no marker) just centre + glow as before.
   const show = (): void => {
     if (ev.prId == null) return;
-    showEventOnTimeline(ev.prId, ev.occurredAt, { type: ev.type, refId: ev.refId });
+    openFeedEventOnTimeline(ev.prId, ev.occurredAt, { type: ev.type, refId: ev.refId });
   };
 
   return (
