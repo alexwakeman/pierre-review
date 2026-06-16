@@ -11,9 +11,12 @@ function agingToneClass(iso: string): string {
   return 'text-gray-400';
 }
 
-// Shared layout for one My Turn entry (active or completed): a prominent action
-// button on the LEFT (Done / Seen / To do), the content to its right with the main
-// text emphasised over repo/file metadata, and the relative time beneath it.
+// Shared layout for one My Turn entry (active or completed): the content on top —
+// the main text emphasised over repo/file metadata, then the relative time — and the
+// action nested UNDERNEATH it at the bottom-left. The action is a button (Done / Seen
+// / To do) or, for a non-restorable Done item, a static status chip ("PR merged",
+// "Thread resolved"). The To do and Done tabs share this one layout so they read
+// identically; no card border.
 export function MyTurnRow({
   onOpen,
   onAction,
@@ -48,45 +51,46 @@ export function MyTurnRow({
   sub?: ReactNode;
 }): JSX.Element {
   return (
-    <li className="flex items-start gap-2 rounded px-1.5 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900/40">
-      {onAction ? (
-        <button
-          type="button"
-          onClick={onAction}
-          disabled={actionPending}
-          title={actionTitle}
-          className="shrink-0 rounded-md border border-gray-300 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-600 hover:border-gray-400 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-        >
-          {actionLabel}
-        </button>
-      ) : (
-        <span
-          title={actionTitle}
-          className="shrink-0 rounded-md border border-dashed border-gray-200 px-2.5 py-1 text-xs font-medium italic text-gray-400 dark:border-gray-800 dark:text-gray-500"
-        >
-          {actionLabel}
-        </span>
-      )}
-      <div className="min-w-0 flex-1">
-        <button
-          type="button"
-          onClick={onOpen}
-          data-testid="myturn-row-open"
-          className="block w-full min-w-0 text-left"
-        >
-          <div className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">
-            {title}
-          </div>
-          {meta != null && (
-            <div className="mt-0.5 truncate text-xs text-gray-400">{meta}</div>
-          )}
-          {sub != null && <div className="mt-0.5 truncate text-[11px]">{sub}</div>}
-        </button>
-        <div
-          className={`mt-0.5 text-[11px] ${urgencyTs ? agingToneClass(urgencyTs) : 'text-gray-400'}`}
-        >
-          {time}
+    <li className="rounded px-1.5 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900/40">
+      <button
+        type="button"
+        onClick={onOpen}
+        data-testid="myturn-row-open"
+        className="block w-full min-w-0 text-left"
+      >
+        <div className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">
+          {title}
         </div>
+        {meta != null && (
+          <div className="mt-0.5 truncate text-xs text-gray-400">{meta}</div>
+        )}
+        {sub != null && <div className="mt-0.5 truncate text-[11px]">{sub}</div>}
+      </button>
+      <div
+        className={`mt-0.5 text-[11px] ${urgencyTs ? agingToneClass(urgencyTs) : 'text-gray-400'}`}
+      >
+        {time}
+      </div>
+      {/* Action nested underneath the content, bottom-left. */}
+      <div className="mt-1.5">
+        {onAction ? (
+          <button
+            type="button"
+            onClick={onAction}
+            disabled={actionPending}
+            title={actionTitle}
+            className="rounded-md border border-gray-300 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-600 hover:border-gray-400 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+          >
+            {actionLabel}
+          </button>
+        ) : (
+          <span
+            title={actionTitle}
+            className="inline-block rounded-md border border-dashed border-gray-200 px-2.5 py-1 text-xs font-medium italic text-gray-400 dark:border-gray-800 dark:text-gray-500"
+          >
+            {actionLabel}
+          </span>
+        )}
       </div>
     </li>
   );
