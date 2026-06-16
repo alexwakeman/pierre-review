@@ -770,6 +770,36 @@ export interface DismissedMyTurnResponse {
   users: User[];
 }
 
+// ---- my turn: activity Feed (watched repos, last 14 days) ----
+// One activity entry in the watched-repo Feed. A denormalized, render-ready view of
+// an `events` row (commit pushes excluded) — the frontend mirrors these into an
+// append-only IndexedDB store. `id` is the stable `events.id`, used to dedupe on
+// merge. Excludes `commit_pushed`; includes `pr_ready_for_review` / `pr_reopened`.
+export interface FeedEvent {
+  id: number;
+  type: EventType;
+  occurredAt: string;
+  repoId: number;
+  repoFullName: string;
+  prId: number | null;
+  prNumber: number | null;
+  prTitle: string | null;
+  prState: PrState | null;
+  actorId: number | null;
+  // The underlying entity row id (for the timeline "Show" deep link).
+  refId: number | null;
+  // review_submitted → the verdict (approved / changes_requested / …); else null.
+  reviewState: ReviewState | null;
+  // review_comment / pr_comment → a short preview of the comment; else null.
+  excerpt: string | null;
+}
+
+export interface FeedResponse {
+  events: FeedEvent[];
+  // Actors referenced by any entry, for client-side login/avatar lookup.
+  users: User[];
+}
+
 // ---- request payloads ----
 
 export interface CreateRepoBody {

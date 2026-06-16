@@ -12,7 +12,15 @@ import { ThreadsAwaitingSection } from './ThreadsAwaitingSection.js';
 import { ClaudeReviewsToActionSection } from './ClaudeReviewsToActionSection.js';
 import { DismissedSection } from './DismissedSection.js';
 
-type Tab = 'todo' | 'done';
+// The Feed lives in its own panel + header pill now (see FeedPanel); this panel is the
+// My Turn inbox shown while in My Turn Focus Mode: what needs you ("To do"), a "Done" tab
+// of recently-completed items you can restore, then the window summary as context.
+type Tab = 'todo' | 'done' | 'summary';
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'todo', label: 'To do' },
+  { id: 'done', label: 'Done' },
+  { id: 'summary', label: 'Summary' },
+];
 
 // The empty-detail-pane view: what needs you right now ("To do"), a "Done" tab of
 // recently-completed items you can restore, then the window summary as context.
@@ -43,27 +51,26 @@ export function MyTurnPanel(): JSX.Element {
   const empty = !data || todoCount === 0;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" data-testid="myturn-panel">
       <div className="flex items-center gap-3 px-4 pt-3">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">
           My turn
         </h2>
         <div className="flex gap-1">
-          {(['todo', 'done'] as const).map((t) => (
+          {TABS.map(({ id, label }) => (
             <button
-              key={t}
+              key={id}
               type="button"
-              onClick={() => setTab(t)}
+              onClick={() => setTab(id)}
               className={`rounded px-2 py-0.5 text-xs font-medium ${
-                tab === t
+                tab === id
                   ? 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-100'
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
               }`}
             >
-              {t === 'todo' ? (
-                <>To do{todoCount > 0 && <span className="ml-1 opacity-60">{todoCount}</span>}</>
-              ) : (
-                'Done'
+              {label}
+              {id === 'todo' && todoCount > 0 && (
+                <span className="ml-1 opacity-60">{todoCount}</span>
               )}
             </button>
           ))}
@@ -86,16 +93,11 @@ export function MyTurnPanel(): JSX.Element {
           isLoading && !data ? (
             <div className="text-sm text-gray-500">Loading…</div>
           ) : empty ? (
-            <>
-              <div className="text-sm text-gray-500">
-                {me?.user
-                  ? `Nothing needs you right now, ${me.user.login}. 🎉`
-                  : 'Sign in with the gh CLI to see your triage queue.'}
-              </div>
-              <div className="mt-3">
-                <SummaryStats />
-              </div>
-            </>
+            <div className="text-sm text-gray-500">
+              {me?.user
+                ? `Nothing needs you right now, ${me.user.login}. 🎉 Check the Feed pill for watched-repo activity, or the Summary tab for repo stats.`
+                : 'Sign in with the gh CLI to see your triage queue.'}
+            </div>
           ) : (
             <div className="space-y-4">
               <AwaitingReviewSection
@@ -114,8 +116,10 @@ export function MyTurnPanel(): JSX.Element {
               <ClaudeReviewsToActionSection items={data.claudeReviewsToAction} />
             </div>
           )
-        ) : (
+        ) : tab === 'done' ? (
           <DismissedSection active={tab === 'done'} />
+        ) : (
+          <SummaryStats />
         )}
       </div>
     </div>

@@ -15,6 +15,7 @@ import type {
   CreatePrCommentBody,
   CreatePrCommentResult,
   CreateRepoBody,
+  FeedResponse,
   MeResponse,
   MergersResponse,
   DismissedMyTurnResponse,
@@ -164,6 +165,8 @@ export const api = {
     fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }),
   myTurn: () => get<MyTurnResponse>('/api/my-turn'),
   myTurnDone: () => get<DismissedMyTurnResponse>('/api/my-turn/done'),
+  // Watched-repo activity feed (last 14 days, newest first, no commits).
+  feed: () => get<FeedResponse>('/api/feed'),
   dismissMyTurn: (kind: MyTurnDismissKind, refId: number) =>
     fetch('/api/my-turn/dismiss', jsonBody('POST', { kind, refId })).then((r) =>
       handle<{ status: string }>(r),

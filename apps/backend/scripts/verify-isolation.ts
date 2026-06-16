@@ -26,6 +26,7 @@ for (const suffix of ['', '-shm', '-wal']) {
 const { runMigrations } = await import('../src/db/run-migrations.js');
 const { closeDb, db, schema } = await import('../src/db/client.js');
 const q = await import('../src/db/queries.js');
+const { eq } = await import('drizzle-orm');
 
 await runMigrations();
 
@@ -136,6 +137,17 @@ check(
 
 const mergersA = await q.getMergers(1);
 check("getMergers(A) excludes B's repo", !mergersA.some((m) => m.repoId === B.repoId));
+
+// Activity Feed: watch both repos, then each account's feed must contain only its own
+// watched-repo events (cross-account IDOR).
+await db.update(repos).set({ inboxWatch: true }).where(eq(repos.id, A.repoId)).execute();
+await db.update(repos).set({ inboxWatch: true }).where(eq(repos.id, B.repoId)).execute();
+const feedA = await q.getFeed(1, 14);
+check(
+  "getFeed(A) returns only A's events",
+  feedA.events.length === 1 && feedA.events[0]!.prId === A.prId,
+);
+check("getFeed(A) excludes B's events", !feedA.events.some((e) => e.repoId === B.repoId));
 
 check('deleteRepo(B.repo, A) returns false (IDOR blocked)', (await q.deleteRepo(B.repoId, 1)) === false);
 check("B's repo survives A's delete attempt", (await q.listRepos(2)).length === 1);

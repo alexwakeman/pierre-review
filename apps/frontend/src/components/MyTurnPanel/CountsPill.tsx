@@ -2,42 +2,39 @@ import { useMe } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 
 // Header "My Turn" button: a label + the queue sizes
-// [awaiting review · your PRs · threads awaiting]. The button SHOWS the My Turn
-// panel: clicking it clears any selection so the DetailPane renders the panel (it
-// shows only when nothing is selected). It is "active" whenever the panel is showing
-// (nothing selected) — including on first load, and after re-clicking it while in My
-// Turn Focus Mode to re-view the panel without leaving focus. You ENTER My Turn Focus
-// Mode by opening an inbox entry, not via this pill; you LEAVE it via Esc / the
-// FilterBar "My Turn focus" pill.
+// [awaiting review · your PRs · threads awaiting · watched · claude]. Clicking it ENTERS
+// My Turn Focus Mode — the timeline isolates to your inbox PRs (fitted to span them all)
+// and the My Turn panel (To Do list) shows. It is "active" (aria-pressed) whenever that
+// mode is on. Calling enterMyTurnFocus() repeatedly is safe: from a drilled-in To Do
+// (level 2, a PR selected) it steps back to the To Do list (level 1); when already on the
+// To Do list it's a no-op. Leave the mode via the FilterBar "My Turn focus" pill, the
+// "Feed" pill, Esc, or the browser Back button.
 //
-// Disabled only while a PR-isolation focus overlay is up (focusActive) — that lens
-// owns the board, mirroring the FilterBar's other disabled controls.
+// Disabled only while a PR-isolation focus overlay is up (focusActive) — that lens owns
+// the board, mirroring the FilterBar's other disabled controls.
 export function CountsPill(): JSX.Element | null {
   const { data: me } = useMe();
-  const selectedPrId = useFilters((s) => s.selectedPrId);
-  const clearSelection = useFilters((s) => s.clearSelection);
+  const myTurnOnly = useFilters((s) => s.myTurnOnly);
+  const enterMyTurnFocus = useFilters((s) => s.enterMyTurnFocus);
   const focusActive = useFilters((s) => s.focusActive);
   if (!me?.user) return null;
 
-  const panelShowing = selectedPrId == null; // the pill's "active" state
   const c = me.counts;
   return (
     <button
       type="button"
+      data-testid="myturn-pill"
       disabled={focusActive}
-      // Show the My Turn panel (clear the selection). In home this is a no-op (the
-      // panel already shows); in My Turn Focus Mode it re-shows the panel WITHOUT
-      // leaving focus (the board stays isolated to the inbox).
-      onClick={clearSelection}
-      aria-pressed={panelShowing}
+      onClick={enterMyTurnFocus}
+      aria-pressed={myTurnOnly}
       title={
         focusActive
           ? 'Leave focus mode (Esc / Back / the Focus-mode pill) to change the board'
-          : 'My Turn — your inbox: awaiting your review · your PRs with activity · threads awaiting your response. Open an entry to focus the board on it.'
+          : 'My Turn — focus the board on your inbox: awaiting your review · your PRs with activity · threads awaiting your response. Esc / Back returns to the Feed.'
       }
-      aria-label="Show the My Turn panel"
+      aria-label="Enter My Turn focus"
       className={`flex items-center gap-1.5 rounded border px-2 py-0.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
-        panelShowing
+        myTurnOnly
           ? 'border-blue-400 text-blue-600 dark:border-blue-600 dark:text-blue-400'
           : 'border-gray-300 hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500'
       }`}

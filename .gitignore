@@ -15,6 +15,12 @@ release/
 # Playwright UI-check screenshots (scripts/ui-harness)
 scripts/.ui-artifacts/
 
+# Playwright E2E (@playwright/test) output
+test-results/
+playwright-report/
+/blob-report/
+/.playwright/
+
 # Editor / OS
 .DS_Store
 .idea/

@@ -419,14 +419,15 @@ export function FilterBar(): JSX.Element {
           </button>
         )}
         {/* My Turn Focus Mode: the board is isolated to your inbox. This pill (and Esc)
-            leaves it — back to the full board, keeping any selection. Hidden while a
-            PR-isolation overlay is up (that has its own exit pill above). */}
+            leaves it entirely — back to the full board + the Feed home. The browser Back
+            button steps one level at a time instead. Hidden while a PR-isolation overlay
+            is up (that has its own exit pill above). */}
         {f.myTurnOnly && !f.focusActive && (
           <button
             type="button"
             onClick={() => f.exitMyTurnFocus()}
             className="focus-indicator"
-            title="Leave My Turn focus (or press Esc) — back to the full board"
+            title="Leave My Turn focus (or press Esc) — back to the full board + Feed"
             aria-label="Exit My Turn focus"
           >
             <span className="focus-indicator-dot" aria-hidden="true" />

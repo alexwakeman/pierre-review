@@ -8,8 +8,8 @@ function isTypingTarget(el: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
 }
 
-// Global shortcuts: `/` focus filter, `j`/`k` cycle PRs, `m` toggle My Turn,
-// `i` open Insights, `esc` clear selection / exit focus.
+// Global shortcuts: `/` focus filter, `j`/`k` cycle PRs, `m` enter My Turn focus,
+// `i` open Insights, `esc` exit focus (PR-isolation or My Turn) / clear selection.
 export function useKeyboard(): void {
   const { data } = useTimeline();
 
@@ -22,6 +22,7 @@ export function useKeyboard(): void {
         focusActive,
         exitFocus,
         myTurnOnly,
+        enterMyTurnFocus,
         exitMyTurnFocus,
         setInsightsOpen,
       } = useFilters.getState();
@@ -36,8 +37,9 @@ export function useKeyboard(): void {
           // Selection is left intact (the detail pane stays put).
           exitFocus();
         } else if (myTurnOnly) {
-          // In My Turn Focus Mode, Escape leaves it: un-isolate the board back to the
-          // full timeline, keeping any selection (it stays selected on the full board).
+          // In My Turn Focus Mode, Escape leaves it entirely → the Feed home: un-isolate
+          // the board and clear any selection. (The browser Back button, by contrast,
+          // steps one level: a To Do's PR detail → the To Do list → the Feed.)
           exitMyTurnFocus();
         } else {
           clearSelection();
@@ -52,12 +54,14 @@ export function useKeyboard(): void {
         return;
       }
 
-      // Show the My Turn panel (clear the selection), mirroring the header pill — a
-      // no-op in home, and in My Turn Focus Mode it re-shows the panel without leaving
-      // focus. Suppressed during the PR-isolation overlay (the lens owns the board).
+      // Enter My Turn Focus Mode (mirrors the header "My Turn" pill): isolate the board
+      // to your inbox + show the To Do list. From a drilled-in To Do it steps back to the
+      // list; on the list it's a no-op. Suppressed during the PR-isolation overlay (that
+      // lens owns the board). `clearSelection` is unused now but kept destructured above
+      // for the Escape branch.
       if (e.key === 'm') {
         if (focusActive) return;
-        clearSelection();
+        enterMyTurnFocus();
         return;
       }
 

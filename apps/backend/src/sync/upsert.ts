@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db, schema, runTransaction, type Executor } from '../db/client.js';
 import { config } from '../config.js';
 import { isLikelyBot } from './bot-detection.js';
@@ -299,6 +299,21 @@ export function isSubstantiveReview(
   return state !== 'commented' || !!body?.trim();
 }
 
+// Lifecycle transitions GitHub exposes no discrete event for, detected by comparing the
+// PR's prior persisted row (`prev`) against the incoming sync (`next`). Returns the
+// event types to emit: draft→ready (`pr_ready_for_review`) and closed→open
+// (`pr_reopened`). `prev` is null on a PR's first sight, so nothing is emitted then —
+// we never observed it as draft/closed, so there's no transition to report.
+export function lifecycleTransitions(
+  prev: { isDraft: boolean; state: string } | null,
+  next: { isDraft: boolean; state: 'open' | 'merged' | 'closed' },
+): ('pr_ready_for_review' | 'pr_reopened')[] {
+  const out: ('pr_ready_for_review' | 'pr_reopened')[] = [];
+  if (prev?.isDraft === true && next.isDraft === false) out.push('pr_ready_for_review');
+  if (prev?.state === 'closed' && next.state === 'open') out.push('pr_reopened');
+  return out;
+}
+
 async function upsertEvent(
   exec: Executor,
   row: {
@@ -377,6 +392,23 @@ export async function persistPr(
       additions: f.additions ?? 0,
       deletions: f.deletions ?? 0,
     }));
+
+    // The PR's prior draft/state, read BEFORE the upsert below, so we can emit the
+    // lifecycle transitions GitHub doesn't expose as discrete events (draft → ready,
+    // reopened). null on first sight of a PR → no transition event.
+    const prev =
+      (
+        await tx
+          .select({ isDraft: pullRequests.isDraft, state: pullRequests.state })
+          .from(pullRequests)
+          .where(
+            and(
+              eq(pullRequests.accountId, accountId),
+              eq(pullRequests.githubNodeId, pr.id),
+            ),
+          )
+          .execute()
+      )[0] ?? null;
 
     const prRow = (
       await tx
@@ -498,6 +530,27 @@ export async function persistPr(
         refTable: 'pull_requests',
         refId: prId,
         dedupeKey: `pr_closed:${pr.id}`,
+      });
+    }
+    // Transitions GitHub gives no discrete event for (draft→ready, reopened): emitted
+    // only when THIS sync observed the flip (`prev` is the pre-upsert row), so a PR
+    // first seen already ready/open emits nothing. dedupeKey is keyed on the PR (one
+    // ready / one reopened per PR) — re-toggling re-emits at most once. occurredAt =
+    // updatedAt is the closest available signal (GitHub gives no ready-at/reopened-at).
+    for (const type of lifecycleTransitions(prev, {
+      isDraft: pr.isDraft,
+      state: prState(pr.state),
+    })) {
+      await upsertEvent(tx, {
+        accountId,
+        repoId,
+        actorId: authorId,
+        prId,
+        type,
+        occurredAt: new Date(pr.updatedAt),
+        refTable: 'pull_requests',
+        refId: prId,
+        dedupeKey: `${type}:${pr.id}`,
       });
     }
 

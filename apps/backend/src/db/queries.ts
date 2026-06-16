@@ -26,6 +26,8 @@ import type {
   DismissedItem,
   DismissedMyTurnResponse,
   EventType,
+  FeedEvent,
+  FeedResponse,
   Label,
   RequestedReviewer,
   Mergeable,
@@ -567,6 +569,158 @@ export async function getTimeline(
   });
 
   return { prs, events: timelineEvents };
+}
+
+// ---- watched-repo activity Feed (My Turn panel) ----
+
+// Recent activity across the account's WATCHED repos (inboxWatch=true), newest first,
+// over the last `daysBefore` days. Commit pushes are excluded (too noisy); draft→ready
+// and reopened are included (emitted during sync). Each row is denormalized into a
+// render-ready FeedEvent (repo name, PR number/title/state, review verdict, comment
+// excerpt). The frontend mirrors these into an append-only IndexedDB store.
+// accountId-scoped throughout (events + repos both carry accountId).
+export async function getFeed(
+  accountId: number,
+  daysBefore = 14,
+): Promise<FeedResponse> {
+  const since = new Date(Date.now() - daysBefore * 24 * 60 * 60 * 1000);
+  const rows = await db
+    .select({
+      id: events.id,
+      type: events.type,
+      occurredAt: events.occurredAt,
+      repoId: events.repoId,
+      repoOwner: repos.owner,
+      repoName: repos.name,
+      actorId: events.actorId,
+      prId: events.prId,
+      refId: events.refId,
+      refTable: events.refTable,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      prState: pullRequests.state,
+    })
+    .from(events)
+    .innerJoin(repos, eq(repos.id, events.repoId))
+    .leftJoin(pullRequests, eq(pullRequests.id, events.prId))
+    .where(
+      and(
+        eq(events.accountId, accountId),
+        eq(repos.inboxWatch, true),
+        gte(events.occurredAt, since),
+        ne(events.type, 'commit_pushed'),
+      ),
+    )
+    .orderBy(desc(events.occurredAt))
+    .execute();
+  if (rows.length === 0) return { events: [], users: [] };
+
+  // Verdicts for review_submitted events (refId → reviews.state).
+  const reviewIds = rows
+    .filter((r) => r.type === 'review_submitted' && r.refTable === 'reviews' && r.refId != null)
+    .map((r) => r.refId as number);
+  const reviewStateById = new Map<number, ReviewState>();
+  if (reviewIds.length > 0) {
+    for (const r of await db
+      .select({ id: reviews.id, state: reviews.state })
+      .from(reviews)
+      .where(inArray(reviews.id, reviewIds))
+      .execute())
+      reviewStateById.set(r.id, r.state as ReviewState);
+  }
+
+  // review_comment events reference their THREAD (refId); match the specific comment
+  // by (threadId, createdAt, authorId) to pull its excerpt.
+  const threadIds = [
+    ...new Set(
+      rows
+        .filter((r) => r.type === 'review_comment' && r.refTable === 'review_threads' && r.refId != null)
+        .map((r) => r.refId as number),
+    ),
+  ];
+  type CommentRow = { createdAt: Date; authorId: number | null; excerpt: string | null; body: string | null };
+  const commentsByThread = new Map<number, CommentRow[]>();
+  if (threadIds.length > 0) {
+    const cs = await db
+      .select({
+        threadId: reviewComments.threadId,
+        createdAt: reviewComments.createdAt,
+        authorId: reviewComments.authorId,
+        excerpt: reviewComments.excerpt,
+        body: reviewComments.body,
+      })
+      .from(reviewComments)
+      .where(inArray(reviewComments.threadId, threadIds))
+      .execute();
+    for (const c of cs) {
+      const arr = commentsByThread.get(c.threadId) ?? [];
+      arr.push(c);
+      commentsByThread.set(c.threadId, arr);
+    }
+  }
+
+  // pr_comment events reference the pr_comments row directly (refId → body; no excerpt
+  // column, so truncate the body — present in local mode, null under lean storage).
+  const prCommentIds = rows
+    .filter((r) => r.type === 'pr_comment' && r.refTable === 'pr_comments' && r.refId != null)
+    .map((r) => r.refId as number);
+  const prCommentBodyById = new Map<number, string | null>();
+  if (prCommentIds.length > 0) {
+    for (const c of await db
+      .select({ id: prComments.id, body: prComments.body })
+      .from(prComments)
+      .where(inArray(prComments.id, prCommentIds))
+      .execute())
+      prCommentBodyById.set(c.id, c.body);
+  }
+
+  const referencedUsers = new Set<number>();
+  const feedEvents: FeedEvent[] = rows.map((r) => {
+    if (r.actorId != null) referencedUsers.add(r.actorId);
+    let excerpt: string | null = null;
+    if (r.type === 'review_comment' && r.refId != null) {
+      const arr = commentsByThread.get(r.refId) ?? [];
+      const match =
+        arr.find(
+          (c) => c.createdAt.getTime() === r.occurredAt.getTime() && c.authorId === r.actorId,
+        ) ?? arr.find((c) => c.createdAt.getTime() === r.occurredAt.getTime());
+      excerpt = match?.excerpt ?? (match?.body ? truncate(match.body, 160) : null);
+    } else if (r.type === 'pr_comment' && r.refId != null) {
+      const body = prCommentBodyById.get(r.refId) ?? null;
+      excerpt = body ? truncate(body, 160) : null;
+    }
+    return {
+      id: r.id,
+      type: r.type as EventType,
+      occurredAt: r.occurredAt.toISOString(),
+      repoId: r.repoId,
+      repoFullName: `${r.repoOwner}/${r.repoName}`,
+      prId: r.prId,
+      prNumber: r.prNumber ?? null,
+      prTitle: r.prTitle ?? null,
+      prState: (r.prState as PrState | null) ?? null,
+      actorId: r.actorId,
+      refId: r.refId,
+      reviewState:
+        r.type === 'review_submitted' && r.refId != null
+          ? (reviewStateById.get(r.refId) ?? null)
+          : null,
+      excerpt,
+    };
+  });
+
+  const users =
+    referencedUsers.size > 0
+      ? (
+          await db
+            .select()
+            .from(schema.users)
+            .where(inArray(schema.users.id, [...referencedUsers]))
+            .execute()
+        ).map(mapUser)
+      : [];
+
+  return { events: feedEvents, users };
 }
 
 // ---- open PRs strip ----

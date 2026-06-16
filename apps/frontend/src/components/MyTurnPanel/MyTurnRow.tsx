@@ -71,6 +71,7 @@ export function MyTurnRow({
         <button
           type="button"
           onClick={onOpen}
+          data-testid="myturn-row-open"
           className="block w-full min-w-0 text-left"
         >
           <div className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">

@@ -49,6 +49,14 @@ jobs:
 
       - run: pnpm test
 
+      # Browser regression gate for the My Turn / Feed / Focus-mode UX flows. Uses
+      # API-mocked fixtures (no backend) against the Vite dev server it boots itself.
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: E2E regression tests
+        run: pnpm test:e2e
+
       - name: Compute & bump version
         id: bump
         run: |

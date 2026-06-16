@@ -19,6 +19,7 @@ import { prRoutes } from './api/routes/prs.js';
 import { threadRoutes } from './api/routes/threads.js';
 import { meRoutes } from './api/routes/me.js';
 import { openPrsRoutes } from './api/routes/open-prs.js';
+import { feedRoutes } from './api/routes/feed.js';
 import { mergersRoutes } from './api/routes/mergers.js';
 import { insightsRoutes } from './api/routes/insights.js';
 import { claudeReviewRoutes } from './api/routes/claude-review.js';
@@ -145,6 +146,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(threadRoutes);
   await app.register(meRoutes);
   await app.register(openPrsRoutes);
+  await app.register(feedRoutes);
   await app.register(mergersRoutes);
   await app.register(insightsRoutes);
   // Claude Review is local-only + opt-in. Only register its routes when enabled,
