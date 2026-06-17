@@ -12,16 +12,17 @@
 //   pnpm --filter @pierre-review/backend seed:demo
 //   (≡ DATABASE_URL=/tmp/pierre-demo.sqlite DISABLE_SCHEDULER=true tsx scripts/seed-demo.ts)
 //
-// To (re)capture the README / landing screenshots from this data, run an ISOLATED
-// stack against the demo DB so your real :4000/:5173 dev server is untouched:
-//   1. backend  : DATABASE_URL=/tmp/pierre-demo.sqlite PORT=4100 DISABLE_SCHEDULER=true \
-//                 ENABLE_CLAUDE_REVIEW=true ANTHROPIC_API_KEY=dummy \
-//                 pnpm --filter @pierre-review/backend exec tsx src/index.ts
-//   2. frontend : BACKEND_PORT=4100 pnpm --filter @pierre-review/frontend exec vite --port 5273
-//   3. capture  : drive http://localhost:5273/app/ (timeline) and …/app/?pr=113
-//                 (PR-detail → Threads tab, then Claude Review tab) with a headless
-//                 browser at viewport 1600×1000 @2x → 3200×2000 PNGs in
-//                 apps/landing/public/shots/{timeline,pr-detail,claude-review}.png
+// To (re)capture the landing screenshots from this data, run an ISOLATED stack
+// against the demo DB so your real :4000/:5173 dev server is untouched, then drive
+// scripts/capture-shots.mjs. NOTE: start the backend with `gh` OFF its PATH so
+// ensureLocalAccount() can't overwrite the seeded "Morgan Diaz" identity with your
+// real GitHub user (which empties the My Turn triage). Full recipe + the shot list
+// in apps/landing/README.md ("Product screenshots"):
+//   1. backend  : (gh off PATH) DATABASE_URL=/tmp/pierre-demo.sqlite PORT=4100 \
+//                 DISABLE_SCHEDULER=true ENABLE_CLAUDE_REVIEW=true ANTHROPIC_API_KEY=dummy \
+//                 node_modules/.bin/tsx src/index.ts   (from apps/backend)
+//   2. frontend : BACKEND_PORT=4100 node_modules/.bin/vite --port 5273  (from apps/frontend)
+//   3. capture  : node scripts/capture-shots.mjs       (all 10 shots → public/shots/)
 import { rmSync } from 'node:fs';
 import { config } from '../src/config.js';
 
@@ -54,6 +55,11 @@ await db
   .set({
     githubUserId: 'U_demo_morgan',
     githubLogin: 'morgan-diaz',
+    // displayName must be set (and lastLoginAt fresh) so ensureLocalAccount() treats
+    // the row as "fresh" and SKIPS the `gh api user` refresh — otherwise a server
+    // started against this demo DB overwrites Morgan with the host's real GitHub
+    // identity and the My Turn triage (which targets users.id 1 = Morgan) goes empty.
+    displayName: 'Morgan Diaz',
     avatarUrl: null,
     isLocal: true,
     lastLoginAt: now,
@@ -81,8 +87,11 @@ const API = 2;
 await db
   .insert(schema.repos)
   .values([
-    { id: WEB, accountId: 1, owner: 'acme', name: 'web-app', githubNodeId: 'R_web', defaultBranch: 'main', createdAt: day(40) },
-    { id: API, accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_api', defaultBranch: 'main', createdAt: day(40) },
+    // inboxWatch=true so the watched-repo activity Feed populates (and new open PRs
+    // by others surface in the My Turn inbox). inboxWatchStartedAt well in the past
+    // so all the recent curated activity falls inside the Feed's 14-day window.
+    { id: WEB, accountId: 1, owner: 'acme', name: 'web-app', githubNodeId: 'R_web', defaultBranch: 'main', createdAt: day(40), inboxWatch: true, inboxWatchStartedAt: day(40) },
+    { id: API, accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_api', defaultBranch: 'main', createdAt: day(40), inboxWatch: true, inboxWatchStartedAt: day(40) },
   ])
   .execute();
 await db
@@ -373,10 +382,525 @@ await db
   ])
   .execute();
 
+// ===========================================================================
+// HISTORICAL ACTIVITY (weeks 3–12) — purely to populate the Insights/analytics
+// charts (getRepoAnalytics, window = 84 days / 12 weeks). NONE of this touches
+// the curated board: every PR below is MERGED/CLOSED with both openedAt AND its
+// close instant strictly OLDER than 16 days ago, so the default 14-day timeline
+// and the hero screenshots are unaffected. All ids are in a high, non-colliding
+// range (PRs ≥ 200; reviews/threads/comments/commits/events ≥ 5000).
+//
+// Determinism: a fixed-seed mulberry32 PRNG (NO Math.random) so re-running the
+// seeder produces byte-identical screenshots.
+// ===========================================================================
+
+// --- seeded PRNG (xmur3 seed → mulberry32) ---------------------------------
+function xmur3(str: string): () => number {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return () => {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return h >>> 0;
+  };
+}
+function mulberry32(a: number): () => number {
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const seedFn = xmur3('pierre-review-demo-history-v1');
+const rng = mulberry32(seedFn());
+const rand = (): number => rng();
+const randInt = (lo: number, hi: number): number => lo + Math.floor(rand() * (hi - lo + 1));
+const pick = <T>(arr: readonly T[]): T => arr[Math.floor(rand() * arr.length)]!;
+// Right-skewed weighted choice over [value, weight] pairs.
+const weighted = <T>(pairs: readonly (readonly [T, number])[]): T => {
+  const total = pairs.reduce((s, [, w]) => s + w, 0);
+  let r = rand() * total;
+  for (const [v, w] of pairs) {
+    r -= w;
+    if (r <= 0) return v;
+  }
+  return pairs[pairs.length - 1]![0];
+};
+const HOUR = 3_600_000;
+const DAY_MS = 86_400_000;
+
+// --- distributions ---------------------------------------------------------
+// LOC size buckets, right-skewed: mostly S/M, some L, few XL, few XS. We pick a
+// bucket, then a (additions, deletions, changedFiles) inside it.
+type SizeBucket = 'XS' | 'S' | 'M' | 'L' | 'XL';
+const SIZE_WEIGHTS: readonly (readonly [SizeBucket, number])[] = [
+  ['XS', 6],
+  ['S', 34],
+  ['M', 38],
+  ['L', 16],
+  ['XL', 6],
+];
+const sizeFor = (b: SizeBucket): { additions: number; deletions: number; changedFiles: number } => {
+  // loc = additions + deletions, kept inside the bucket's [lo, hi).
+  const ranges: Record<SizeBucket, [number, number, number, number]> = {
+    // [locLo, locHi, filesLo, filesHi]
+    XS: [2, 9, 1, 2],
+    S: [12, 49, 1, 5],
+    M: [60, 199, 2, 12],
+    L: [220, 499, 5, 22],
+    XL: [520, 1400, 14, 60],
+  };
+  const [lo, hi, fLo, fHi] = ranges[b];
+  const loc = randInt(lo, hi);
+  // Skew toward additions but keep some deletions.
+  const delFrac = 0.15 + rand() * 0.45;
+  const deletions = Math.max(0, Math.min(loc - 1, Math.round(loc * delFrac)));
+  const additions = loc - deletions;
+  return { additions, deletions, changedFiles: randInt(fLo, fHi) };
+};
+
+// First-review latency buckets (hours), spread so the latency dist + cycle-time
+// breakdown + TTFR trend all populate. ~15% never reviewed (handled below).
+const LATENCY_WEIGHTS: readonly (readonly [[number, number], number])[] = [
+  [[0.2, 1], 10], // <1h
+  [[1, 4], 22], // 1–4h
+  [[4, 24], 30], // 4–24h
+  [[24, 72], 24], // 1–3d
+  [[72, 200], 14], // >3d
+];
+
+const reviewTitlesByRepo: Record<number, readonly string[]> = {
+  [WEB]: [
+    'Memoize the timeline lane packer',
+    'Fix focus-mode scroll jitter on rebuild',
+    'Debounce the repo-search picker',
+    'Persist per-row collapse to localStorage',
+    'Virtualize the open-PR strip',
+    'Tidy the zebra-tint repo ranking',
+    'Add keyboard shortcuts to the detail pane',
+    'Cache PR detail in IndexedDB',
+    'Show maintainer shield in PR context',
+    'Cluster event markers at coarse zoom',
+    'Improve dark-mode contrast on markers',
+    'Handle empty timeline gracefully',
+    'Reduce forced reflows in the sync modal',
+    'Flatten the thread-list grouping',
+    'Wire the Now action to recenter',
+    'Trim the focus popover to one PR',
+    'Fix off-by-one in lane assignment',
+    'Add a custom date-range preset',
+    'Round avatar fallbacks consistently',
+    'Lazy-load the Insights charts',
+  ],
+  [API]: [
+    'Batch per-row upserts in the sync loop',
+    'Add an index on events(repo_id, occurred_at)',
+    'Tighten the maintainer-merge inference',
+    'Backfill baseRefName on old PRs',
+    'Cancel in-flight syncs cleanly',
+    'Add overlap window to incremental sync',
+    'Cache commit changed-files permanently',
+    'Hydrate detail on demand under lean mode',
+    'Dedupe events on a composite key',
+    'Skip idle accounts in the periodic sync',
+    'Two-phase backfill for new repos',
+    'Stream sync progress over SSE',
+    'Guard against octokit query var clash',
+    'Make body columns nullable for lean storage',
+    'Add a health endpoint',
+    'Fix rate-limit backoff jitter',
+    'Scope every getter to accountId',
+    'Persist diff size on the PR row',
+    'Compute triage fields on read',
+    'Add the substantive-review event filter',
+  ],
+};
+
+interface HistPr {
+  id: number;
+  repoId: number;
+  authorId: number;
+  title: string;
+  state: 'merged' | 'closed';
+  openedAt: Date;
+  closeAt: Date; // mergedAt or closedAt
+  firstReviewAt: Date | null;
+  lastCommitAt: Date;
+  mergedById: number | null;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  longLived: boolean;
+}
+
+const HUMAN_AUTHORS = [1, 2, 3, 4, 5, 6] as const; // exclude dependabot from "normal" weighting
+const REVIEWERS = [1, 2, 3, 4, 5, 6] as const;
+
+// Place commit/review/event timestamps on a realistic work-hours pattern:
+// busier Tue–Thu, 9–18 UTC, lighter weekends/nights. We nudge a base instant
+// toward a "work moment" within a day or two of it.
+const WORKDAY_WEIGHTS: readonly (readonly [number, number])[] = [
+  [0, 2], // Sun
+  [1, 7], // Mon
+  [2, 10], // Tue
+  [3, 11], // Wed
+  [4, 9], // Thu
+  [5, 6], // Fri
+  [6, 2], // Sat
+];
+const WORKHOUR_WEIGHTS: readonly (readonly [number, number])[] = [
+  [9, 8],
+  [10, 12],
+  [11, 11],
+  [12, 7],
+  [13, 9],
+  [14, 12],
+  [15, 11],
+  [16, 9],
+  [17, 6],
+  [18, 4],
+  [8, 3],
+  [19, 2],
+  [20, 1],
+  [22, 1],
+];
+// Snap a Date to a nearby work-hours moment, staying within [floor, base].
+const workMoment = (base: Date, floor: Date): Date => {
+  const targetDow = weighted(WORKDAY_WEIGHTS);
+  const targetHour = weighted(WORKHOUR_WEIGHTS);
+  // Walk back up to 3 days from `base` to land on the chosen weekday.
+  const b = new Date(base.getTime());
+  for (let i = 0; i < 4; i++) {
+    if (b.getUTCDay() === targetDow) break;
+    b.setUTCDate(b.getUTCDate() - 1);
+  }
+  b.setUTCHours(targetHour, randInt(0, 59), randInt(0, 59), 0);
+  let ms = b.getTime();
+  if (ms > base.getTime()) {
+    // Overshot: step back a whole day and re-snap the hour into the work band so
+    // the fallback doesn't inherit `base`'s (uniform-random) clock hour.
+    b.setUTCDate(b.getUTCDate() - 1);
+    b.setUTCHours(weighted(WORKHOUR_WEIGHTS), randInt(0, 59), randInt(0, 59), 0);
+    ms = b.getTime();
+  }
+  if (ms > base.getTime()) ms = base.getTime() - randInt(1, 6) * HOUR;
+  if (ms < floor.getTime()) ms = floor.getTime() + randInt(1, 4) * HOUR;
+  return new Date(ms);
+};
+
+// --- generate the historical PRs across weeks 3–12 (16d → 84d ago) ---------
+const histPrs: HistPr[] = [];
+let histPrId = 200;
+const titleCursor: Record<number, number> = { [WEB]: 0, [API]: 0 };
+
+// 10 weekly cohorts ending at ~16d ago and reaching back to ~86d ago. A gentle
+// upward trend (older weeks slightly quieter) reads well on the throughput chart.
+const COHORTS = 10;
+for (let w = 0; w < COHORTS; w++) {
+  // w=0 is the OLDEST cohort (~week 12), w=COHORTS-1 the most recent (~week 3).
+  const weekEndDaysAgo = 16 + w * 7; // newest cohort opens ~16–23d ago (>16d close, see below)
+  const weekStartDaysAgo = weekEndDaysAgo + 7;
+  // Opened per week ramps from ~5 (oldest) to ~8 (most recent).
+  const opensThisWeek = 5 + Math.round((w / (COHORTS - 1)) * 3) + (rand() < 0.4 ? 1 : 0);
+  for (let k = 0; k < opensThisWeek; k++) {
+    const repoId = rand() < 0.55 ? WEB : API;
+    // ~12% dependabot PRs (bots), else a weighted human author.
+    const isDep = rand() < 0.12;
+    const authorId = isDep ? 7 : pick(HUMAN_AUTHORS);
+
+    // openedAt somewhere inside this cohort's week.
+    const openedDaysAgo = weekStartDaysAgo - rand() * 7;
+    const openedAt = day(openedDaysAgo);
+
+    // Lifetime: most close within a few days; a few long-lived (2–4 weeks) to
+    // keep the backlog/stalled lines non-zero. Clamp so closeAt is STILL >16d ago.
+    const longLived = rand() < 0.16;
+    const lifeDays = longLived ? 14 + rand() * 14 : 0.4 + rand() * 6;
+    let closeDaysAgo = openedDaysAgo - lifeDays;
+    if (closeDaysAgo < 16.5) closeDaysAgo = 16.5 + rand() * 1.5; // never inside 16d
+    const closeAt = day(closeDaysAgo);
+
+    // ~85% merged, ~15% closed-unmerged.
+    const merged = rand() < 0.85;
+    const state: 'merged' | 'closed' = merged ? 'merged' : 'closed';
+    const mergedById = merged ? pick(REVIEWERS.filter((u) => u !== authorId)) ?? 1 : null;
+
+    // size
+    const sz = sizeFor(weighted(SIZE_WEIGHTS));
+
+    // first review: ~85% reviewed (dependabot less often). Latency from the dist,
+    // but never after the close instant.
+    const reviewed = (isDep ? rand() < 0.55 : rand() < 0.85);
+    let firstReviewAt: Date | null = null;
+    if (reviewed) {
+      const [loH, hiH] = weighted(LATENCY_WEIGHTS);
+      const lat = (loH + rand() * (hiH - loH)) * HOUR;
+      let frMs = openedAt.getTime() + lat;
+      // keep strictly before close (and at least a little before)
+      const ceiling = closeAt.getTime() - HOUR;
+      if (frMs > ceiling) frMs = openedAt.getTime() + Math.max(HOUR, (ceiling - openedAt.getTime()) * (0.3 + rand() * 0.5));
+      if (frMs <= openedAt.getTime()) frMs = openedAt.getTime() + HOUR;
+      firstReviewAt = new Date(frMs);
+    }
+
+    // lastCommitAt: long-lived PRs go stale (old last commit) to drive "stalled";
+    // others commit up to near their close.
+    let lastCommitAt: Date;
+    if (longLived) {
+      // last commit shortly after open → stale by week's end.
+      lastCommitAt = new Date(openedAt.getTime() + (1 + rand() * 3) * DAY_MS);
+    } else {
+      lastCommitAt = new Date(
+        openedAt.getTime() + Math.max(HOUR, (closeAt.getTime() - openedAt.getTime()) * (0.5 + rand() * 0.4)),
+      );
+    }
+
+    histPrs.push({
+      id: histPrId++,
+      repoId,
+      authorId,
+      title:
+        reviewTitlesByRepo[repoId]![titleCursor[repoId]!++ % reviewTitlesByRepo[repoId]!.length]!,
+      state,
+      openedAt,
+      closeAt,
+      firstReviewAt,
+      lastCommitAt,
+      mergedById,
+      additions: sz.additions,
+      deletions: sz.deletions,
+      changedFiles: sz.changedFiles,
+      longLived,
+    });
+  }
+}
+
+// --- rows: pull_requests ---------------------------------------------------
+const histPrRows = histPrs.map((p) => ({
+  id: p.id,
+  githubNodeId: `PR_${p.id}`,
+  accountId: 1,
+  repoId: p.repoId,
+  number: p.id,
+  title: p.title,
+  body: `Demo PR — ${p.title}.`,
+  authorId: p.authorId,
+  mergedById: p.mergedById,
+  baseRefName: 'main',
+  state: p.state,
+  isDraft: false,
+  openedAt: p.openedAt,
+  firstReviewAt: p.firstReviewAt,
+  lastCommitAt: p.lastCommitAt,
+  mergedAt: p.state === 'merged' ? p.closeAt : null,
+  closedAt: p.closeAt,
+  updatedAt: p.closeAt,
+  headSha: `sha${p.id}headcommit`,
+  ciStatus: 'success' as const,
+  mergeable: 'mergeable' as const,
+  mergeStateStatus: 'clean' as const,
+  labels: null,
+  checkRuns: null,
+  additions: p.additions,
+  deletions: p.deletions,
+  changedFiles: p.changedFiles,
+}));
+await db.insert(schema.pullRequests).values(histPrRows).execute();
+
+// --- rows: reviews / threads / comments / commits / events -----------------
+let hReviewId = 5000;
+let hThreadId = 5000;
+let hCommentId = 5000;
+let hCommitId = 5000;
+let hEventId = 5000;
+
+const histReviewRows: {
+  id: number; githubNodeId: string; prId: number; authorId: number;
+  state: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | 'pending';
+  body: string | null; databaseId: string; submittedAt: Date;
+}[] = [];
+const histThreadRows: {
+  id: number; githubNodeId: string; prId: number; path: string; line: number;
+  isResolved: boolean; isOutdated: boolean;
+  derivedState: 'resolved' | 'likely_addressed' | 'replied_unresolved' | 'untouched';
+  originalCommenterId: number; createdAt: Date;
+}[] = [];
+const histCommentRows: {
+  id: number; githubNodeId: string; threadId: number; prId: number; authorId: number;
+  body: string; excerpt: string; diffHunk: string; databaseId: string; createdAt: Date;
+}[] = [];
+const histCommitRows: {
+  id: number; sha: string; prId: number; authorId: number; committerId: number; message: string; committedAt: Date;
+}[] = [];
+const histEventRows: {
+  id: number; accountId: number; repoId: number; actorId: number | null; prId: number | null;
+  type:
+    | 'pr_opened' | 'pr_merged' | 'pr_closed' | 'pr_reopened' | 'pr_ready_for_review'
+    | 'review_submitted' | 'review_comment' | 'pr_comment' | 'commit_pushed';
+  occurredAt: Date; refTable: string | null; refId: number | null; dedupeKey: string;
+}[] = [];
+
+let evCounter = 0;
+const pushEvent = (
+  repoId: number, actorId: number | null, prId: number, type: typeof histEventRows[number]['type'],
+  occurredAt: Date, refTable: string | null = null, refId: number | null = null,
+): void => {
+  const id = hEventId++;
+  histEventRows.push({
+    id, accountId: 1, repoId, actorId, prId, type, occurredAt, refTable, refId,
+    dedupeKey: `${type}:${prId}:${evCounter++}`,
+  });
+};
+
+// Verdict mix: mostly approved, regular changes_requested, some commented, rare
+// dismissed. (getRepoAnalytics counts approved/changes_requested/commented/dismissed.)
+const VERDICTS: readonly (readonly ['approved' | 'changes_requested' | 'commented' | 'dismissed', number])[] = [
+  ['approved', 58],
+  ['changes_requested', 22],
+  ['commented', 16],
+  ['dismissed', 4],
+];
+
+// Thread derived-state mix: more resolved/likely than untouched.
+const THREAD_STATE_WEIGHTS: readonly (readonly [
+  'resolved' | 'likely_addressed' | 'replied_unresolved' | 'untouched', number,
+])[] = [
+  ['resolved', 40],
+  ['likely_addressed', 28],
+  ['replied_unresolved', 20],
+  ['untouched', 12],
+];
+
+const THREAD_PATHS = [
+  'src/index.ts', 'src/app.ts', 'src/db/queries.ts', 'src/sync/upsert.ts',
+  'src/sync/sync-repo.ts', 'src/api/routes/timeline.ts', 'src/lib/ui.ts',
+  'src/components/Timeline/lanes.ts', 'README.md', 'src/config.ts',
+] as const;
+
+for (const p of histPrs) {
+  // ----- reviews: 1–3 per PR, by distinct reviewers (never the author) -----
+  const reviewerPool = REVIEWERS.filter((u) => u !== p.authorId);
+  const nReviews = p.firstReviewAt ? randInt(1, 3) : (rand() < 0.25 ? 1 : 0);
+  const usedReviewers = new Set<number>();
+  for (let i = 0; i < nReviews && usedReviewers.size < reviewerPool.length; i++) {
+    let reviewer = pick(reviewerPool);
+    let guard = 0;
+    while (usedReviewers.has(reviewer) && guard++ < 8) reviewer = pick(reviewerPool);
+    usedReviewers.add(reviewer);
+    const verdict = weighted(VERDICTS);
+    // submittedAt: from firstReviewAt onward, before close, inside the window.
+    const base = (p.firstReviewAt ?? p.openedAt).getTime();
+    const span = Math.max(HOUR, p.closeAt.getTime() - base);
+    let subMs = base + (i === 0 ? 0 : rand() * span);
+    if (subMs > p.closeAt.getTime()) subMs = p.closeAt.getTime() - randInt(1, 4) * HOUR;
+    const submittedAt = workMoment(new Date(subMs), p.openedAt);
+    const rid = hReviewId++;
+    histReviewRows.push({
+      id: rid, githubNodeId: `RV_${rid}`, prId: p.id, authorId: reviewer,
+      state: verdict, body: null, databaseId: `${2_500_000 + rid}`, submittedAt,
+    });
+    pushEvent(p.repoId, reviewer, p.id, 'review_submitted', submittedAt, 'reviews', rid);
+  }
+
+  // ----- review threads: 0–4 per PR -----
+  const nThreads = weighted([
+    [0, 14],
+    [1, 30],
+    [2, 28],
+    [3, 18],
+    [4, 10],
+  ] as const);
+  for (let i = 0; i < nThreads; i++) {
+    const tid = hThreadId++;
+    const derivedState = weighted(THREAD_STATE_WEIGHTS);
+    const opener = pick(reviewerPool);
+    // createdAt within the open window (after open, before close), in the chart window.
+    const span = Math.max(HOUR, p.closeAt.getTime() - p.openedAt.getTime());
+    const createdAt = workMoment(
+      new Date(p.openedAt.getTime() + (0.2 + rand() * 0.6) * span),
+      p.openedAt,
+    );
+    histThreadRows.push({
+      id: tid, githubNodeId: `RT_${tid}`, prId: p.id, path: pick(THREAD_PATHS),
+      line: randInt(8, 320), isResolved: derivedState === 'resolved', isOutdated: rand() < 0.1,
+      derivedState, originalCommenterId: opener, createdAt,
+    });
+    // one comment per thread (charts don't need more, but it keeps events richer)
+    const body = pick([
+      'Could we simplify this branch?',
+      'Is this covered by a test?',
+      'nit: rename for clarity.',
+      'This allocates on the hot path — worth caching?',
+      'Edge case: what if the array is empty?',
+      'Consider extracting a helper here.',
+    ] as const);
+    const cid = hCommentId++;
+    histCommentRows.push({
+      id: cid, githubNodeId: `RC_${cid}`, threadId: tid, prId: p.id, authorId: opener,
+      body, excerpt: body, diffHunk: `@@ -10,3 +10,4 @@`, databaseId: `${1_500_000 + cid}`,
+      createdAt,
+    });
+    pushEvent(p.repoId, opener, p.id, 'review_comment', createdAt, 'review_threads', tid);
+  }
+
+  // ----- commits: 1–4, spread across work-hours weekdays for the heatmap -----
+  const nCommits = weighted([
+    [1, 26],
+    [2, 36],
+    [3, 24],
+    [4, 14],
+  ] as const);
+  for (let i = 0; i < nCommits; i++) {
+    const cid = hCommitId++;
+    // spread commits between open and lastCommit, then snap to a work moment.
+    const lo = p.openedAt.getTime();
+    const hi = Math.max(lo + HOUR, p.lastCommitAt.getTime());
+    const frac = nCommits === 1 ? rand() : i / (nCommits - 1);
+    const committedAt = workMoment(new Date(lo + frac * (hi - lo)), p.openedAt);
+    histCommitRows.push({
+      id: cid, sha: `sha${p.id}c${i}`, prId: p.id, authorId: p.authorId, committerId: p.authorId,
+      message: i === 0 ? p.title : pick(['Address review feedback', 'Fix lint', 'Add tests', 'Tidy up']),
+      committedAt,
+    });
+    pushEvent(p.repoId, p.authorId, p.id, 'commit_pushed', committedAt, 'commits', cid);
+  }
+
+  // ----- lifecycle events -----
+  // The PR ROW keeps its exact open/close instants (the size/cycle/backlog charts
+  // depend on them); the EVENTS for the heatmap are snapped to nearby work moments
+  // so weekday×hour reads as a real work-hours pattern rather than uniform noise.
+  // (openedAt floors at openedAt − a few days so the snapped opener stays sane.)
+  const openedEvAt = workMoment(p.openedAt, new Date(p.openedAt.getTime() - 3 * DAY_MS));
+  pushEvent(p.repoId, p.authorId, p.id, 'pr_opened', openedEvAt);
+  const closeEvAt = workMoment(p.closeAt, new Date(p.closeAt.getTime() - 3 * DAY_MS));
+  if (p.state === 'merged') {
+    pushEvent(p.repoId, p.mergedById ?? p.authorId, p.id, 'pr_merged', closeEvAt);
+  } else {
+    pushEvent(p.repoId, p.authorId, p.id, 'pr_closed', closeEvAt);
+  }
+}
+
+if (histReviewRows.length) await db.insert(schema.reviews).values(histReviewRows).execute();
+if (histThreadRows.length) await db.insert(schema.reviewThreads).values(histThreadRows).execute();
+if (histCommentRows.length) await db.insert(schema.reviewComments).values(histCommentRows).execute();
+if (histCommitRows.length) await db.insert(schema.commits).values(histCommitRows).execute();
+if (histEventRows.length) await db.insert(schema.events).values(histEventRows).execute();
+
 console.log('Seeded demo data into', config.dbPath);
 console.log('  repos: acme/web-app (1), acme/api (2)');
 console.log('  me: Morgan Diaz (account 1 → users.id 1)');
 console.log('  PR-detail / Claude shot: ?pr=113');
 console.log('  open PRs:', prRows.filter((p) => p.state === 'open').map((p) => p.id).join(', '));
+console.log(
+  `  history: ${histPrs.length} PRs (ids ${histPrs[0]?.id}–${histPrs[histPrs.length - 1]?.id}),`,
+  `${histReviewRows.length} reviews, ${histThreadRows.length} threads,`,
+  `${histCommitRows.length} commits, ${histEventRows.length} events (weeks 3–12)`,
+);
 
 await closeDb();
