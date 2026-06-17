@@ -16,7 +16,7 @@ export function DetailPane(): JSX.Element {
   const clearSelection = useFilters((s) => s.clearSelection);
 
   return (
-    <div className="relative h-full">
+    <div className="relative h-full" data-testid="detail-pane">
       {selectedPrId != null && (
         <div className="absolute right-2 top-1.5 z-10 flex items-center gap-2">
           <button

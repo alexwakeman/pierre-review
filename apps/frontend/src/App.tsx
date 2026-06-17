@@ -24,6 +24,7 @@ import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
 import { ApiError, api } from './api/client.js';
 import { profileUrl } from './lib/ui.js';
+import { initAnalytics, trackPageView } from './lib/analytics.js';
 
 function useDarkMode(): [boolean, () => void] {
   const [dark, setDark] = useState(
@@ -141,6 +142,16 @@ export default function App(): JSX.Element {
     };
     const id = window.setInterval(ping, 3 * 60 * 1000);
     return () => window.clearInterval(id);
+  }, [isCloud]);
+
+  // Google Analytics — CLOUD ONLY. Init once the signed-in cloud app mounts and
+  // record one page view ("someone opened the app"). Gated on isCloud so local
+  // installs never load gtag or phone home (see lib/analytics.ts). No-op until a
+  // VITE_GA_ID is supplied at build time (the same id the landing uses).
+  useEffect(() => {
+    if (!isCloud) return;
+    initAnalytics();
+    trackPageView();
   }, [isCloud]);
 
   // Signed-out cloud visitor → show the sign-in gate; never mount the timeline.
