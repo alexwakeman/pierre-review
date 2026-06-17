@@ -19,6 +19,17 @@ RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 COPY . .
 RUN pnpm install --frozen-lockfile
 
+# Google Analytics — BUILD-TIME ONLY. Vite inlines import.meta.env.VITE_GA_ID into
+# the landing + SPA bundles when `vite build` runs (below, inside `pnpm package`),
+# so the id MUST be present in the build env, not just at runtime. Railway exposes a
+# service variable to a Dockerfile build only when it's declared as an ARG here; the
+# ENV then puts it on process.env so Vite's loadEnv() picks it up. Declared late so
+# changing the id doesn't bust the cached `pnpm install` layer. Empty default = GA
+# stays disabled (analytics.ts no-ops on a missing/invalid id) — set VITE_GA_ID in
+# the Railway service variables to enable.
+ARG VITE_GA_ID=""
+ENV VITE_GA_ID=$VITE_GA_ID
+
 # Assemble ./release (frontend@/app + landing + backend + migrations + public dirs).
 RUN pnpm package
 

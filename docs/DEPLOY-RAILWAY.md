@@ -54,6 +54,7 @@ On the **app service → Variables**:
 | `SESSION_SECRET` | `openssl rand -hex 32` | seals the session cookie |
 | `ENCRYPTION_KEY` | `openssl rand -hex 32` | **must be 64 hex chars (32 bytes)** — AES-256-GCM key for stored tokens |
 | `PORT` | (Railway sets this) | the app reads it; `HOST` defaults to `0.0.0.0` in cloud |
+| `VITE_GA_ID` | `G-XXXXXXXXXX` (optional) | **BUILD-TIME** GA4 Measurement ID. Vite inlines it into the landing + SPA bundles at build, so it must reach the Docker build — the `Dockerfile` declares `ARG VITE_GA_ID`, and Railway passes the service variable to it. Empty/unset → analytics stays off. **Changing it requires a rebuild**, not just a restart. |
 
 Generate the two secrets locally:
 
@@ -76,6 +77,14 @@ This repo ships a root **`Dockerfile`** and **`railway.json`**. Railway will:
 3. Health-check `GET /api/health` (configured in `railway.json`).
 
 Migrations (the Postgres baseline in `dist/db/migrations-pg`) run at boot.
+
+> **Build-time vs runtime variables.** Most cloud vars above are read by the running
+> server, so editing them + restarting is enough. `VITE_GA_ID` is the exception: it's
+> baked into the static JS by Vite **during the image build**. Setting it (or changing
+> it) only takes effect after Railway **rebuilds the image** — a plain restart reuses
+> the old bundle. If GA's "Test installation" says no tag was detected, the build ran
+> without the variable: confirm `VITE_GA_ID` is set on the service and trigger a fresh
+> deploy/rebuild (a no-cache build if Railway cached the old `pnpm package` layer).
 
 ### Watch Paths (skip doc-only deploys)
 
