@@ -3,23 +3,94 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Pierre — team GitHub activity, at a glance</title>
+    <meta name="theme-color" content="#0b1020" />
+
+    <!-- Primary SEO. These are the home-page defaults / what a no-JS crawler sees;
+         per-route <title>/description/canonical/og:url are set at runtime by the
+         useSeo() hook (src/lib/seo.ts) — so canonical is NOT hard-coded here (a
+         non-JS crawl of a sub-page would otherwise canonicalise it to home). -->
+    <title>Pierre — see your team’s GitHub activity at a glance</title>
     <meta
       name="description"
-      content="Pierre is a timeline-first dashboard for sprint situational awareness — see who's doing what across your repos, which PRs are stalled, and what needs your review right now."
+      content="Pierre turns GitHub’s firehose of emails, pings and pulls into one calm, timeline-first dashboard — who’s doing what, what’s stalled, and what needs your review."
     />
-    <link
-      rel="icon"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📊</text></svg>"
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph / Twitter (home defaults; useSeo() sets per-route title/desc/url). -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Pierre" />
+    <meta property="og:title" content="Pierre — see your team’s GitHub activity at a glance" />
+    <meta
+      property="og:description"
+      content="One calm, timeline-first dashboard for the whole team’s GitHub activity — persistent Claude code reviews, always there to refer back to."
     />
-    <!-- Brand wordmark font (the "Pierre" title). Loaded from Google Fonts. Great
-         Vibes is a single 400 weight — never bolden it (faux-bold mangles the script). -->
+    <meta property="og:image" content="https://pierre-review.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="The Pierre timeline dashboard showing pull-request activity across a team’s repositories."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Pierre — see your team’s GitHub activity at a glance" />
+    <meta
+      name="twitter:description"
+      content="One calm, timeline-first dashboard for the whole team’s GitHub activity — persistent Claude code reviews, always there to refer back to."
+    />
+    <meta name="twitter:image" content="https://pierre-review.com/og-image.png" />
+    <meta
+      name="twitter:image:alt"
+      content="The Pierre timeline dashboard showing pull-request activity across a team’s repositories."
+    />
+
+    <!-- Favicons (generated from the brand mark). -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!-- Structured data: helps search engines understand what Pierre is. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://pierre-review.com/#org",
+            "name": "Pierre",
+            "url": "https://pierre-review.com/",
+            "logo": "https://pierre-review.com/icon-512.png",
+            "sameAs": ["https://github.com/alexwakeman/pierre-review"]
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://pierre-review.com/#site",
+            "name": "Pierre",
+            "url": "https://pierre-review.com/",
+            "publisher": { "@id": "https://pierre-review.com/#org" }
+          },
+          {
+            "@type": "SoftwareApplication",
+            "name": "Pierre",
+            "applicationCategory": "DeveloperApplication",
+            "operatingSystem": "Web, macOS, Linux, Windows",
+            "description": "A timeline-first dashboard for tracking a team’s GitHub activity across repositories — sprint situational awareness, PR triage, engineering insights, and persistent Claude code reviews.",
+            "url": "https://pierre-review.com/",
+            "publisher": { "@id": "https://pierre-review.com/#org" },
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+            "softwareHelp": "https://github.com/alexwakeman/pierre-review"
+          }
+        ]
+      }
+    </script>
+
+    <!-- Brand wordmark font (the "Pierre" title). Loaded NON-render-blocking
+         (media="print" → flipped to "all" on load) so it never holds first paint
+         — iOS Safari otherwise blanks the screen on a cross-origin stylesheet.
+         Great Vibes ships a single 400 weight — never bolden it. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Loaded NON-render-blocking: fetched as media="print" so it never blocks
-         first paint, then flipped to "all" once it arrives (the decorative wordmark
-         falls back to cursive until then). iOS Safari otherwise holds first paint
-         for this cross-origin stylesheet — the cause of the mobile blank screen. -->
     <link
       href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap"
       rel="stylesheet"
@@ -49,11 +120,9 @@
   </head>
   <body>
     <!-- Instant splash so mobile Safari paints immediately instead of a white screen
-         while the JS bundle loads. It opens on the SAME terminal "PR" prompt the
-         HeroWordmark animation starts from, so the load→animation handoff is seamless.
-         Lives INSIDE #root, so React's createRoot().render() replaces it on mount —
-         no teardown. Inline styles (not the bundled CSS) so it shows before the app's
-         CSS loads; background matches App's bg-gray-950 (#030712) for zero flash. -->
+         while the JS bundle loads. Opens on the SAME terminal "PR" prompt the
+         HeroWordmark animation starts from, so load→animation is seamless. Lives
+         INSIDE #root, so React's createRoot().render() replaces it on mount. -->
     <div id="root">
       <div
         style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #030712; color: #f3f4f6"

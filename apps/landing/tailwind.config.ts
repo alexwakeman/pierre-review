@@ -21,6 +21,9 @@ export default {
           amber: '#f59e0b',
           amberSoft: '#eab308',
           red: '#ef4444',
+          // The brand mark's deep navy (favicon background) — used for nav/section tints.
+          navy: '#0b1020',
+          navySoft: '#111a30',
         },
       },
       fontFamily: {

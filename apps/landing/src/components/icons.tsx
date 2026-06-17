@@ -1,5 +1,6 @@
 // Inline SVG icons — no icon-library dependency. Each accepts a className so the
 // caller controls size/color (color via `text-*` since strokes use currentColor).
+import type { ReactNode } from 'react';
 
 type IconProps = { className?: string };
 
@@ -127,5 +128,165 @@ export function SparkleIcon({ className }: IconProps) {
       <path d="M12 3l1.8 4.9L18.7 9.7 13.8 11.5 12 16.4 10.2 11.5 5.3 9.7l4.9-1.8L12 3Z" />
       <path d="M19 14l.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7L19 14Z" />
     </svg>
+  );
+}
+
+// ---- chrome / navigation ----
+
+function Stroke({ className, children }: IconProps & { children: ReactNode }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      {children}
+    </svg>
+  );
+}
+
+export function MenuIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M3 6h18M3 12h18M3 18h18" />
+    </Stroke>
+  );
+}
+
+export function CloseIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M6 6l12 12M18 6L6 18" />
+    </Stroke>
+  );
+}
+
+export function ArrowRightIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M5 12h14M13 6l6 6-6 6" />
+    </Stroke>
+  );
+}
+
+export function ChevronDownIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M6 9l6 6 6-6" />
+    </Stroke>
+  );
+}
+
+// ---- content / feature icons ----
+
+export function FeedIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16" />
+      <circle cx="5" cy="19" r="1.6" fill="currentColor" stroke="none" />
+    </Stroke>
+  );
+}
+
+export function InsightsIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M4 20V4M20 20H4" />
+      <path d="M8 16l3-4 3 2 4-6" />
+    </Stroke>
+  );
+}
+
+export function SyncIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-7.2-3.6M3 12a9 9 0 0 1 9-9 9 9 0 0 1 7.2 3.6" />
+      <path d="M21 3v5h-5M3 21v-5h5" />
+    </Stroke>
+  );
+}
+
+export function LockIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </Stroke>
+  );
+}
+
+export function BoltIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" />
+    </Stroke>
+  );
+}
+
+export function ClockIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </Stroke>
+  );
+}
+
+export function FilterIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M3 5h18l-7 8v5l-4 2v-7L3 5Z" />
+    </Stroke>
+  );
+}
+
+export function KeyboardIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <rect x="2.5" y="6" width="19" height="12" rx="2" />
+      <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
+    </Stroke>
+  );
+}
+
+export function ShieldIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3Z" />
+      <path d="M9 12l2 2 4-4" />
+    </Stroke>
+  );
+}
+
+export function MapIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z" />
+      <path d="M9 4v14M15 6v14" />
+    </Stroke>
+  );
+}
+
+export function RouteIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <circle cx="6" cy="19" r="2" />
+      <circle cx="18" cy="5" r="2" />
+      <path d="M8 19h6a4 4 0 0 0 4-4V7M6 17V9a4 4 0 0 1 4-4h6" />
+    </Stroke>
+  );
+}
+
+export function DocIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M7 3h7l5 5v13H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+      <path d="M14 3v5h5M9 13h6M9 17h6" />
+    </Stroke>
   );
 }

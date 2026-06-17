@@ -1,0 +1,8 @@
+# https://pierre-review.com
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /app
+Disallow: /app/
+
+Sitemap: https://pierre-review.com/sitemap.xml
