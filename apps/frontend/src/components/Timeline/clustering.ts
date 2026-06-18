@@ -7,11 +7,33 @@ import { eventTooltip } from './eventMarker.js';
 // bar/own-event key (openMs*2[+1] ≈ 3.5e12) so it always orders to the bottom.
 const CROSS_SORT = Number.MAX_SAFE_INTEGER;
 
-// A full-width background item dropped into each row's `cross` subgroup draws the
-// subtle divider line above the cross-user band. The span just needs to dwarf any
-// realistic window so it always covers the visible width (vis clips it).
+// A background item dropped into each row's `cross` subgroup draws the divider
+// rule + translucent wash above the cross-user band. It only needs to cover the
+// visible window — a fixed 100-year span is an enormous translucent rect that vis
+// re-lays-out and the compositor re-rasterises on every redraw, once PER cross-row,
+// so on a big board it multiplied every marker rebuild into a board-wide repaint.
+// We bound the span to a generous multiple of the current window instead (see
+// sepSpanFor); SEP_* is the fallback when no window is supplied.
 const SEP_START = '2000-01-01T00:00:00Z';
 const SEP_END = '2100-01-01T00:00:00Z';
+
+// Span for a cross-band divider given the current timeline window (epoch ms).
+// Margin = 3× the window on each side so the wash still covers the viewport after
+// a pan/zoom until the next rebuild (a recluster runs on `rangechanged`). Falls
+// back to the wide fixed span when the window is unknown.
+function sepSpanFor(windowMs?: { start: number; end: number }): {
+  start: string;
+  end: string;
+} {
+  if (!windowMs || windowMs.end <= windowMs.start) {
+    return { start: SEP_START, end: SEP_END };
+  }
+  const span = windowMs.end - windowMs.start;
+  return {
+    start: new Date(windowMs.start - span * 3).toISOString(),
+    end: new Date(windowMs.end + span * 3).toISOString(),
+  };
+}
 
 // Event types that get their own markers. PR lifecycle events are implicit in
 // the bar's start/end, so they're not drawn as separate points.
@@ -86,6 +108,10 @@ export function buildMarkerItems(
   prLanes: Map<number, number>,
   msPerPx: number,
   thresholdPx = 8,
+  // Current timeline window (epoch ms) — bounds the cross-band divider span so it
+  // isn't a 100-year-wide rect (see sepSpanFor). Optional: omitting it keeps the
+  // wide fixed fallback.
+  windowMs?: { start: number; end: number },
 ): ClusterResult {
   const thresholdMs = Math.max(1, thresholdPx * msPerPx);
   const items: DataItem[] = [];
@@ -241,7 +267,9 @@ export function buildMarkerItems(
   deconflictBands(items, msPerPx, halfPx);
 
   // Divider line above each row's cross-user band (a background item confined to
-  // the `cross` subgroup; styled via .cross-sep).
+  // the `cross` subgroup; styled via .cross-sep). Bounded to the current window so
+  // it's a viewport-sized rect, not a 100-year one (see sepSpanFor).
+  const sep = sepSpanFor(windowMs);
   for (const group of crossGroups) {
     items.push({
       id: `xsep:${group}`,
@@ -249,8 +277,8 @@ export function buildMarkerItems(
       subgroup: 'cross',
       sortKey: CROSS_SORT,
       type: 'background',
-      start: SEP_START,
-      end: SEP_END,
+      start: sep.start,
+      end: sep.end,
       content: '',
       className: 'cross-sep',
     } as DataItem);

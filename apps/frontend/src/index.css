@@ -1130,25 +1130,51 @@ body {
 }
 
 /* ---- "my turn" pulsing ring (cards + timeline bars) ---- */
+/* The ring is drawn on an overlay pseudo-element and pulsed via OPACITY — a
+   compositor-accelerated property — instead of animating `box-shadow` directly on
+   the element. Animated box-shadow is never composited: it forces a full
+   main-thread repaint of the element on EVERY frame. With one "my turn" bar per
+   review request, a busy board had many bars (plus the strip cards) all repainting
+   their shadow continuously at ~60fps for as long as the tab was foregrounded — a
+   board-wide paint storm that pegged the renderer/compositor yet was invisible to
+   the JS-function profiler (it's Paint work, not script). Animating only the
+   opacity of a promoted layer lets the compositor vary the layer's alpha per frame
+   with no repaint, so the pulse costs ~nothing regardless of how many bars show. */
 @keyframes myturn-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.9);
+    opacity: 1;
   }
   50% {
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
+    opacity: 0.35;
   }
 }
-.my-turn-ring {
-  animation: myturn-pulse 2s ease-in-out infinite;
-}
+.my-turn-ring,
 .vis-item.pr-myturn {
+  /* containing block for the ::after overlay (the strip card is already `relative`) */
+  position: relative;
+  /* vis range items clip overflow by default, so a pseudo-child's box-shadow would
+     be cut off; let the overlay ring escape the bar bounds (matches
+     .vis-selected.pr-bar / .pr-cross-linked). The bar's title + status truncate on
+     their own elements (.pr-title / .pr-status), so this does NOT un-clip them. */
+  overflow: visible;
+}
+.my-turn-ring::after,
+.vis-item.pr-myturn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  /* painted once into the layer; only opacity animates, so it never re-rasterises */
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.9);
   animation: myturn-pulse 2s ease-in-out infinite;
+  will-change: opacity;
 }
 @media (prefers-reduced-motion: reduce) {
-  .my-turn-ring,
-  .vis-item.pr-myturn {
+  .my-turn-ring::after,
+  .vis-item.pr-myturn::after {
     animation: none;
-    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.9);
+    opacity: 0.85;
   }
 }

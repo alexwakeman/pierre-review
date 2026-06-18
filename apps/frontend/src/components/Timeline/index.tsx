@@ -882,6 +882,8 @@ export function Timeline(): JSX.Element {
       prsByIdRef.current,
       prLanesRef.current,
       msPerPx,
+      8,
+      { start: win.start.valueOf(), end: win.end.valueOf() },
     );
     clusterMembersRef.current = clusterMembers;
     const evToCl = new Map<number, string>();

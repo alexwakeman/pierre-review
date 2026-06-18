@@ -22,6 +22,13 @@ const queryClient = new QueryClient({
 // re-hydrates from the server.
 void navigator.storage?.persist?.();
 
+// Opt-in performance probe: add `?perf` to the URL to log fps / longtasks / a
+// timeline DOM census (see lib/perfProbe.ts). Dynamically imported so it never
+// ships in a normal session.
+if (new URLSearchParams(window.location.search).has('perf')) {
+  void import('./lib/perfProbe.js').then((m) => m.startPerfProbe());
+}
+
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('#root not found');
 
