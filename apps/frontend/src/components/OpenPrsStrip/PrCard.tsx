@@ -7,14 +7,17 @@ import { relativeTime, userLabel } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
 import { StatusRow } from './StatusRow.js';
 import { ReasonTag } from './ReasonTag.js';
+import { WatchedBadge } from '../WatchedBadge.js';
 
 export function PrCard({
   pr,
   repoFullName,
+  repoWatched = false,
   usersById,
 }: {
   pr: TimelinePr;
   repoFullName: string;
+  repoWatched?: boolean;
   usersById: Map<number, User>;
 }): JSX.Element {
   const openPrFocused = useFilters((s) => s.openPrFocused);
@@ -65,6 +68,7 @@ export function PrCard({
       )}
       <div className="flex items-center gap-1 text-[10px] text-gray-400">
         <span className="truncate">{repoFullName}</span>
+        {repoWatched && <WatchedBadge size={10} />}
         <span>·</span>
         <span className="shrink-0">#{pr.number}</span>
         <a

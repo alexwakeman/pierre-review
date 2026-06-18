@@ -181,6 +181,26 @@ export interface CheckRun {
   name: string;
   state: CheckRunState;
   url: string | null;
+  // For GitHub Actions checks, the Actions run id + job id parsed from the check's
+  // detailsUrl (.../actions/runs/<runId>/job/<jobId>). Lets the frontend offer
+  // "view logs" on a failed Actions check (fetched on demand via the job id) and
+  // gate it off for third-party CI, which only has an external detailsUrl. null when
+  // the check isn't an Actions job (or the detailsUrl isn't in that shape).
+  runId: number | null;
+  jobId: number | null;
+}
+
+// On-demand failed-check log tail (GET /api/prs/:id/checks/:jobId/logs). Logs are
+// fetched live from the GitHub Actions API, never stored. `available` is false when
+// the logs can't be retrieved (expired after ~90 days, the job was re-run, or the
+// token lacks actions:read) — `reason` explains why. `text` is the LAST `returnedLines`
+// lines of the log; `totalLines` is the full count so the UI can say "last N of M".
+export interface CheckLogsResponse {
+  available: boolean;
+  reason?: string;
+  text: string;
+  totalLines: number;
+  returnedLines: number;
 }
 
 // An outstanding review request on a PR (user resolved via the users array;
@@ -262,6 +282,8 @@ export interface LocalUser {
 export interface MyTurnCounts {
   awaitingReview: number;
   yourPrsActivity: number;
+  // Your authored, still-open PRs that have a standing approval (ready to merge).
+  approvedPrs: number;
   threadsAwaiting: number;
   // New open PRs by others in repos you've Watched (opened after the watch began),
   // not yet dismissed. 0 when no repos are watched.
@@ -669,6 +691,17 @@ export interface YourPrActivityItem extends MyTurnPr {
   summary: string;
 }
 
+// A PR you authored that is still open and has a standing approval — at least one
+// approving review and no outstanding changes-requested. I.e. someone approved your
+// PR, so it's likely ready to merge. `approvals` is how many reviewers approved;
+// mergeable/mergeStateStatus let the row hint whether GitHub would actually let it
+// merge yet (it's shown even when blocked — the approval itself is the signal).
+export interface ApprovedPrItem extends MyTurnPr {
+  approvals: number;
+  mergeable: Mergeable;
+  mergeStateStatus: MergeStateStatus;
+}
+
 // A new open PR (by someone other than you, non-draft) in a repo you've Watched,
 // opened after the watch began. Surfaced so new work in repos you care about doesn't
 // get missed. Dismissing one is sticky (it acknowledges that specific PR); unwatching
@@ -708,6 +741,9 @@ export interface ClaudeReviewToAction {
 export interface MyTurnResponse {
   awaitingReview: AwaitingReviewItem[];
   yourPrs: YourPrActivityItem[];
+  // Your authored, open PRs with a standing approval (ready to merge). Deduped
+  // against `yourPrs` — an approved PR shows here, not under "new activity".
+  approvedPrs: ApprovedPrItem[];
   threadsAwaiting: ThreadAwaitingItem[];
   // New open PRs by others in repos you've Watched (deduped against the sections
   // above). Empty when no repos are watched.
@@ -767,10 +803,18 @@ export interface DismissedWatchedRepoPrItem extends MyTurnPr, Restorability {
   dismissedAt: string;
 }
 
+// A dismissed "your PR was approved" entry. Opening it loads the PR; "To do" restores
+// it (only while the PR is still open and approved).
+export interface DismissedApprovedPrItem extends MyTurnPr, Restorability {
+  kind: 'pr_approved';
+  dismissedAt: string;
+}
+
 export type DismissedItem =
   | DismissedReviewItem
   | DismissedThreadItem
   | DismissedWatchedRepoPrItem
+  | DismissedApprovedPrItem
   | DismissedClaudeReviewItem;
 
 export interface DismissedMyTurnResponse {
@@ -860,7 +904,9 @@ export interface MarkViewedBody {
 // Dismissing a "my turn" entry. Auto-resurfaces when newer activity arrives:
 // a review_request reappears when its PR is updated again; a thread reappears
 // on a newer reply; a claude_review reappears when a newer review run finishes
-// (the dismissal is keyed by the run's id, so a fresh run is a new entry).
+// (the dismissal is keyed by the run's id, so a fresh run is a new entry); a
+// pr_approved reappears when a NEWER approval lands (compared against the latest
+// approving review's timestamp — not the PR's updatedAt, which any commit bumps).
 // A watched_repo_pr dismissal is sticky — it acknowledges that specific new PR and
 // does not resurface on activity (the PR leaves the inbox for good once dismissed,
 // or when it's merged/closed).
@@ -868,12 +914,13 @@ export type MyTurnDismissKind =
   | 'review_request'
   | 'thread'
   | 'watched_repo_pr'
+  | 'pr_approved'
   | 'claude_review';
 
 export interface MyTurnDismissBody {
   kind: MyTurnDismissKind;
-  // PR id for review_request and watched_repo_pr, thread id for thread, Claude-review
-  // run id for claude_review.
+  // PR id for review_request, watched_repo_pr and pr_approved; thread id for thread;
+  // Claude-review run id for claude_review.
   refId: number;
 }
 

@@ -258,13 +258,31 @@ function checkContextState(c: GqlCheckContext): CheckRunState {
   }
 }
 
+// A GitHub Actions check's detailsUrl is .../actions/runs/<runId>/job/<jobId> — parse
+// the two ids so the frontend can fetch that job's logs on demand. Third-party CI
+// (StatusContext / external CheckRuns) has a detailsUrl pointing elsewhere; no match →
+// null, and the UI keeps it as a plain external link (logs aren't retrievable).
+const ACTIONS_JOB_RE = /\/actions\/runs\/(\d+)\/job\/(\d+)/;
+function parseActionsIds(url: string | null): { runId: number | null; jobId: number | null } {
+  const m = url ? ACTIONS_JOB_RE.exec(url) : null;
+  if (!m) return { runId: null, jobId: null };
+  return { runId: Number(m[1]), jobId: Number(m[2]) };
+}
+
 export function checkRunsFrom(head: GqlHeadCommit['commit'] | null | undefined): CheckRun[] {
   const nodes = head?.statusCheckRollup?.contexts?.nodes ?? [];
-  return nodes.map((c) => ({
-    name: c.__typename === 'CheckRun' ? c.name : c.context,
-    state: checkContextState(c),
-    url: c.__typename === 'CheckRun' ? c.detailsUrl : c.targetUrl,
-  }));
+  return nodes.map((c) => {
+    const url = c.__typename === 'CheckRun' ? c.detailsUrl : c.targetUrl;
+    const { runId, jobId } =
+      c.__typename === 'CheckRun' ? parseActionsIds(url) : { runId: null, jobId: null };
+    return {
+      name: c.__typename === 'CheckRun' ? c.name : c.context,
+      state: checkContextState(c),
+      url,
+      runId,
+      jobId,
+    };
+  });
 }
 
 const REVIEW_STATES = new Set([

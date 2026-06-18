@@ -161,7 +161,11 @@ const prRows = PRS.map((p) => {
     mergeable: p.mergeable ?? null,
     mergeStateStatus: p.mss ?? null,
     labels: p.labels ?? null,
-    checkRuns: p.checks ?? null,
+    // runId/jobId are only set for real GitHub Actions checks (parsed from the
+    // detailsUrl during sync); the demo's synthetic checks aren't loggable.
+    checkRuns: p.checks
+      ? p.checks.map((c) => ({ ...c, runId: null, jobId: null }))
+      : null,
   };
 });
 await db.insert(schema.pullRequests).values(prRows).execute();

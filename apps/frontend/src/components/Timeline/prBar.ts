@@ -35,8 +35,8 @@ function commentIndicator(): string {
 }
 
 // Status indicators shown only on (emphasised) open bars: CI dot, merge
-// warning, "N new" badge, comment mark, thread dots. Split out so barIsTall can
-// reuse the exact same presence check that decides whether a status line renders.
+// warning, comment mark, thread dots. Split out so barIsTall can reuse the exact
+// same presence check that decides whether a status line renders.
 function statusBits(pr: TimelinePr, hasComments: boolean): string[] {
   const bits: string[] = [];
   const ci = CI_META[pr.ciStatus];
@@ -47,12 +47,6 @@ function statusBits(pr: TimelinePr, hasComments: boolean): string[] {
   }
   const warn = mergeWarning(pr.mergeable, pr.mergeStateStatus);
   if (warn) bits.push(`<span class="pr-warn" title="merge: ${warn}">⚠</span>`);
-
-  const n = pr.newSinceLastViewed;
-  const newTotal = n ? n.commits + n.comments + n.reviews : 0;
-  if (newTotal > 0) {
-    bits.push(`<span class="pr-new" title="new since last viewed">👁 ${newTotal}</span>`);
-  }
 
   if (hasComments) bits.push(commentIndicator());
 

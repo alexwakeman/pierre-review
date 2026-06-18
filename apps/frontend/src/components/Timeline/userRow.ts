@@ -48,51 +48,17 @@ export function computeUserStats(
   return m;
 }
 
-// 10px glyphs, matching the timeline's existing inline-SVG icon language.
-const GLYPH = {
-  comment: `<svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="#f59e0b"/></svg>`,
-  review: `<svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="#22c55e"/><path d="M4.5 8.3 L7 10.8 L11.5 5.5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  pr: `<svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path fill="#a78bfa" d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"/></svg>`,
-} as const;
-
-function stat(kind: keyof typeof GLYPH, value: string | number, title: string): string {
-  return `<span class="tl-stat" title="${escapeHtml(title)}">${GLYPH[kind]}<span>${value}</span></span>`;
-}
-
 // Maintainer shield — shown next to a contributor who has merged a PR in this
 // repo (our proxy for "has merge rights"). Purple to echo the pr_merged marker.
 const SHIELD_GLYPH = `<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path fill="#8957e5" d="M8 .8 2.2 2.9v4.2c0 3.3 2.5 6.4 5.8 7.3 3.3-.9 5.8-4 5.8-7.3V2.9L8 .8Z"/><path d="M5.2 8 7.1 9.9 10.9 6" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`;
-}
+// Bar-chart glyph for the per-contributor metrics toggle — opens a popover with the
+// same numbers spelled out in a labelled table (the inline glyph summary is quick to
+// skim but easy to misread).
+const STATS_GLYPH = `<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><rect x="2" y="9" width="3" height="5" rx="0.5" fill="currentColor"/><rect x="6.5" y="6" width="3" height="8" rx="0.5" fill="currentColor"/><rect x="11" y="3" width="3" height="11" rx="0.5" fill="currentColor"/></svg>`;
 
-// Dot colours mirror the timeline PR bars: open (blue), merged (green),
-// closed (grey).
-const PR_STATE_COLORS = {
-  open: '#3b82f6',
-  merged: '#22c55e',
-  closed: '#9ca3af',
-} as const;
-
-// Precise authored-PR breakdown — a coloured count per state instead of the old
-// open/closed lump, so the row shows exactly how many are open vs merged vs
-// closed. Zero states are dropped so the numbers stay exact without padding the
-// label; the tooltip always spells out all three.
-function prBreakdown(s: UserStats): string {
-  const cell = (n: number, color: string): string =>
-    `<span class="tl-pr"><span class="tl-pr-dot" style="background:${color}"></span>${n}</span>`;
-  const cells: string[] = [];
-  if (s.prsOpen) cells.push(cell(s.prsOpen, PR_STATE_COLORS.open));
-  if (s.prsMerged) cells.push(cell(s.prsMerged, PR_STATE_COLORS.merged));
-  if (s.prsClosed) cells.push(cell(s.prsClosed, PR_STATE_COLORS.closed));
-  if (cells.length === 0) return '';
-  const title = `PRs authored: ${s.prsOpen} open · ${s.prsMerged} merged · ${s.prsClosed} closed`;
-  return `<span class="tl-stat tl-prs" title="${escapeHtml(title)}">${GLYPH.pr}${cells.join('')}</span>`;
-}
-
-// HTML for a vis-timeline user-row group label: avatar + name + a compact
-// interaction summary. Zero-valued stats are omitted to keep the row readable.
+// HTML for a vis-timeline user-row group label: avatar + name (+ maintainer shield +
+// metrics-toggle). The interaction numbers themselves live in the metrics popover.
 export function renderUserLabel(
   user: User | undefined,
   uid: number,
@@ -106,16 +72,6 @@ export function renderUserLabel(
     ? `<img class="tl-user-avatar" src="${escapeHtml(user.avatarUrl)}" width="18" height="18" loading="lazy" referrerpolicy="no-referrer" alt="" />`
     : `<span class="tl-user-avatar tl-user-avatar-fallback">${escapeHtml((name[0] ?? '?').toUpperCase())}</span>`;
 
-  const s = stats ?? emptyStats();
-  const parts: string[] = [];
-  if (s.comments) parts.push(stat('comment', s.comments, plural(s.comments, 'comment')));
-  if (s.reviews) parts.push(stat('review', s.reviews, `${plural(s.reviews, 'review')} given`));
-  const prs = prBreakdown(s);
-  if (prs) parts.push(prs);
-  const statsHtml = parts.length
-    ? `<span class="tl-user-stats">${parts.join('')}</span>`
-    : '';
-
   // Link the name to the contributor's GitHub profile when we know their login.
   // `stopPropagation` keeps the click from also hitting vis's row handler, and
   // the link opens in a new tab. vis's sanitizer is disabled (see VIS_OPTIONS),
@@ -128,6 +84,15 @@ export function renderUserLabel(
     ? `<span class="tl-merger" title="Has merge rights — has merged a PR in this repo">${SHIELD_GLYPH}</span>`
     : '';
 
+  // Metrics toggle — opens a labelled-table popover of the same stats. A capturing
+  // click listener on the timeline container (Timeline/index.tsx) handles it by
+  // matching `data-stats-gid`; we only emit the affordance. On the name line so it
+  // stays visible even when the row is collapsed (which hides the stats span).
+  // Omitted when no gid is supplied.
+  const statsToggle = gid
+    ? `<button type="button" class="tl-stats-toggle" data-stats-gid="${escapeHtml(gid)}" title="Show metrics" aria-label="Show contributor metrics">${STATS_GLYPH}</button>`
+    : '';
+
   // Collapse/expand caret — shrinks the row to just this label (its bars + markers
   // hidden via subgroupVisibility). A capturing click listener on the timeline
   // container (Timeline/index.tsx) does the toggle by matching `data-collapse-gid`;
@@ -137,17 +102,16 @@ export function renderUserLabel(
     ? `<button type="button" class="tl-collapse-caret" data-collapse-gid="${escapeHtml(gid)}" title="${escapeHtml(caretTitle)}" aria-label="${escapeHtml(caretTitle)}">${isCollapsed ? '▸' : '▾'}</button>`
     : '';
 
-  // Layout: a left gutter (caret + avatar) beside a stacked main column — the name
-  // (+ maintainer shield) on the first line, the interaction stats indented just
-  // below it. Stacking lets the name use the full label width instead of competing
-  // with the stats for it, so it rarely truncates and the column stays narrow.
+  // Layout: a left gutter (caret + avatar) beside the name line — the name (+ maintainer
+  // shield + metrics toggle). The per-contributor metrics used to render inline under the
+  // name, but the numbers were visually noisy; they now live behind the metrics-toggle
+  // popover instead (computeUserStats still feeds it). [[six-feature-batch-2026-06]]
   return (
     `<div class="tl-user">` +
     caret +
     avatar +
     `<span class="tl-user-main">` +
-    `<span class="tl-user-name-line">${nameHtml}${mergerBadge}</span>` +
-    statsHtml +
+    `<span class="tl-user-name-line">${nameHtml}${mergerBadge}${statsToggle}</span>` +
     `</span>` +
     `</div>`
   );

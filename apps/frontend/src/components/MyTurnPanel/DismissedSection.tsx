@@ -100,6 +100,22 @@ export function DismissedSection({ active }: { active: boolean }): JSX.Element {
             />
           );
         }
+        if (it.kind === 'pr_approved') {
+          return (
+            <MyTurnRow
+              key={`a:${it.prId}`}
+              onOpen={() => openPrFocused(it.prId)}
+              {...actionFor('pr_approved', it.prId, it)}
+              time={`done ${relativeTime(it.dismissedAt)}`}
+              title={it.title}
+              meta={
+                <>
+                  {it.repoFullName} #{it.number}
+                </>
+              }
+            />
+          );
+        }
         if (it.kind === 'claude_review') {
           return (
             <MyTurnRow

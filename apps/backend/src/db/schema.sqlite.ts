@@ -231,7 +231,7 @@ export const myTurnDismissals = sqliteTable(
       .notNull()
       .references(() => accounts.id),
     kind: text('kind', {
-      enum: ['review_request', 'thread', 'watched_repo_pr', 'claude_review'],
+      enum: ['review_request', 'thread', 'watched_repo_pr', 'pr_approved', 'claude_review'],
     }).notNull(),
     refId: integer('ref_id').notNull(),
     dismissedAt: integer('dismissed_at', { mode: 'timestamp' }).notNull(),

@@ -36,10 +36,29 @@ function emptyNew(): NewSinceLastViewed {
   return { commits: 0, comments: 0, reviews: 0 };
 }
 
-/** Per-author latest review state → is the PR approved with no blocking review? */
-async function computeApprovedByPr(prIds: number[]): Promise<Set<number>> {
-  const approved = new Set<number>();
-  if (prIds.length === 0) return approved;
+// Per-PR approval standing, derived from each reviewer's LATEST decisive review.
+export interface ApprovalInfo {
+  // approvals > 0 AND no outstanding changes-requested (the "approved" condition).
+  approved: boolean;
+  // How many distinct reviewers' standing decision is "approved".
+  approvals: number;
+  // Timestamp of the most recent standing approval (for "new since dismissed"
+  // comparisons); null when there are no approving reviews.
+  latestApprovalAt: Date | null;
+}
+
+/**
+ * Per-author latest review state → per-PR approval standing. A reviewer's standing
+ * decision is their latest non-"commented" review (approved / changes_requested);
+ * a PR is "approved" when at least one reviewer's standing decision is approved and
+ * none is changes_requested. Used both for the `approved_ready` reason tag and the
+ * "your PR was approved" My Turn section.
+ */
+export async function computeApprovalInfoByPr(
+  prIds: number[],
+): Promise<Map<number, ApprovalInfo>> {
+  const out = new Map<number, ApprovalInfo>();
+  if (prIds.length === 0) return out;
   const rows = await db
     .select({
       prId: reviews.prId,
@@ -52,26 +71,48 @@ async function computeApprovedByPr(prIds: number[]): Promise<Set<number>> {
     .execute();
 
   // latest review state per (pr, author), ignoring pure "commented" reviews.
-  const latest = new Map<string, { state: string; at: number }>();
+  const latest = new Map<string, { prId: number; state: string; at: Date }>();
   for (const r of rows) {
     if (r.state !== 'approved' && r.state !== 'changes_requested') continue;
     const key = `${r.prId}:${r.authorId}`;
-    const at = r.submittedAt.getTime();
     const prev = latest.get(key);
-    if (!prev || at > prev.at) latest.set(key, { state: r.state, at });
+    if (!prev || r.submittedAt.getTime() > prev.at.getTime()) {
+      latest.set(key, { prId: r.prId, state: r.state, at: r.submittedAt });
+    }
   }
 
-  const byPr = new Map<number, { approvals: number; blocks: number }>();
-  for (const [key, v] of latest) {
-    const prId = Number.parseInt(key.split(':')[0]!, 10);
-    const entry = byPr.get(prId) ?? { approvals: 0, blocks: 0 };
-    if (v.state === 'approved') entry.approvals += 1;
-    else entry.blocks += 1;
-    byPr.set(prId, entry);
+  const byPr = new Map<
+    number,
+    { approvals: number; blocks: number; latestApprovalAt: Date | null }
+  >();
+  for (const v of latest.values()) {
+    const entry =
+      byPr.get(v.prId) ?? { approvals: 0, blocks: 0, latestApprovalAt: null };
+    if (v.state === 'approved') {
+      entry.approvals += 1;
+      if (!entry.latestApprovalAt || v.at.getTime() > entry.latestApprovalAt.getTime()) {
+        entry.latestApprovalAt = v.at;
+      }
+    } else {
+      entry.blocks += 1;
+    }
+    byPr.set(v.prId, entry);
   }
   for (const [prId, e] of byPr) {
-    if (e.approvals > 0 && e.blocks === 0) approved.add(prId);
+    out.set(prId, {
+      approved: e.approvals > 0 && e.blocks === 0,
+      approvals: e.approvals,
+      latestApprovalAt: e.latestApprovalAt,
+    });
   }
+  return out;
+}
+
+/** Per-author latest review state → is the PR approved with no blocking review? */
+async function computeApprovedByPr(prIds: number[]): Promise<Set<number>> {
+  const info = await computeApprovalInfoByPr(prIds);
+  const approved = new Set<number>();
+  for (const [prId, e] of info) if (e.approved) approved.add(prId);
   return approved;
 }
 

@@ -4,6 +4,7 @@ import type {
   AddReviewCommentResult,
   ApprovePrBody,
   ApprovePrResult,
+  CheckLogsResponse,
   ClaudeKeyResponse,
   ClaudeReview,
   ClaudeReviewListResponse,
@@ -136,6 +137,11 @@ export const api = {
   pr: (id: number) => get<PrDetail>(`/api/prs/${id}`),
   thread: (id: number) => get<ThreadDetail>(`/api/threads/${id}`),
   prFiles: (id: number) => get<PrFilesResponse>(`/api/prs/${id}/files`),
+  // Tail of a failed GitHub Actions check's logs (fetched live, never stored).
+  checkLogs: (prId: number, jobId: number, tail?: number) =>
+    get<CheckLogsResponse>(
+      `/api/prs/${prId}/checks/${jobId}/logs${tail ? `?tail=${tail}` : ''}`,
+    ),
 
   // ---- PR write actions ----
   replyToThread: (threadId: number, body: ReplyToThreadBody) =>

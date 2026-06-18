@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Repo } from '@pierre-review/shared';
 import { useClickOutside } from '../hooks/useClickOutside.js';
+import { WatchedBadge } from './WatchedBadge.js';
 
 // Show/hide dropdown for the added repos. Each repo is a checkbox row showing the
 // full `owner/name` (so same-named repos under different owners are distinguishable).
@@ -145,6 +146,7 @@ export function RepoSelectPanel({
                           {r.name}
                         </span>
                       </span>
+                      {r.inboxWatch && <WatchedBadge size={11} />}
                       {r.lastSyncStatus === 'error' && (
                         <span
                           className="shrink-0 text-red-500"

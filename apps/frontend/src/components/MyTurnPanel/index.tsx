@@ -6,6 +6,7 @@ import { api } from '../../api/client.js';
 import { indexUsers } from '../../lib/ui.js';
 import { SummaryStats } from '../SummaryStats.js';
 import { AwaitingReviewSection } from './AwaitingReviewSection.js';
+import { ApprovedPrsSection } from './ApprovedPrsSection.js';
 import { YourPrsSection } from './YourPrsSection.js';
 import { WatchedRepoPrsSection } from './WatchedRepoPrsSection.js';
 import { ThreadsAwaitingSection } from './ThreadsAwaitingSection.js';
@@ -29,14 +30,34 @@ export function MyTurnPanel(): JSX.Element {
   const { data: me } = useMe();
   const usersById = useMemo(() => indexUsers(data?.users), [data]);
   const [tab, setTab] = useState<Tab>('todo');
-  const repoIds = useFilters((s) => s.repoIds);
   const qc = useQueryClient();
-  // Bulk "mark all seen": clears every open PR's new-since badge (scoped to the
-  // active repo filter). Refresh the triage queue + feeds that show the badges.
+  // Bulk "mark all seen": actually clears the whole To-do inbox by dismissing every
+  // currently-shown item via its proper (kind, refId) — NOT just stamping prViews,
+  // which only cleared the "your PRs with new activity" badges and left review
+  // requests / threads / watched PRs / approvals untouched (so the button looked dead).
+  // Each kind keeps its own auto-resurface semantics, so nothing is lost permanently
+  // except the intentionally-sticky watched-repo acknowledgements.
   const markAll = useMutation({
-    mutationFn: () => api.markAllViewed(repoIds ?? undefined),
-    onSuccess: () => {
-      for (const key of ['my-turn', 'me', 'open-prs', 'timeline']) {
+    // allSettled (not all): the dismissals are independent + idempotent, so if one
+    // POST fails the rest still persist — we don't want a single transient failure to
+    // skip the refresh and leave the inbox looking untouched. Always refetch after.
+    mutationFn: async () => {
+      if (!data) return;
+      await Promise.allSettled([
+        ...data.awaitingReview.map((it) => api.dismissMyTurn('review_request', it.prId)),
+        ...data.approvedPrs.map((it) => api.dismissMyTurn('pr_approved', it.prId)),
+        ...data.threadsAwaiting.map((it) => api.dismissMyTurn('thread', it.threadId)),
+        ...data.watchedRepoPrs.map((it) => api.dismissMyTurn('watched_repo_pr', it.prId)),
+        ...data.claudeReviewsToAction.map((it) =>
+          api.dismissMyTurn('claude_review', it.reviewId),
+        ),
+        // "Your PRs with new activity" clear via mark-viewed (their per-row "Seen"
+        // action), matching that section's existing semantics.
+        ...data.yourPrs.map((it) => api.dismissPr(it.prId)),
+      ]);
+    },
+    onSettled: () => {
+      for (const key of ['my-turn', 'my-turn-done', 'me', 'open-prs', 'timeline']) {
         void qc.invalidateQueries({ queryKey: [key] });
       }
     },
@@ -45,6 +66,7 @@ export function MyTurnPanel(): JSX.Element {
   const todoCount =
     (data?.awaitingReview.length ?? 0) +
     (data?.yourPrs.length ?? 0) +
+    (data?.approvedPrs.length ?? 0) +
     (data?.watchedRepoPrs.length ?? 0) +
     (data?.threadsAwaiting.length ?? 0) +
     (data?.claudeReviewsToAction.length ?? 0);
@@ -79,8 +101,8 @@ export function MyTurnPanel(): JSX.Element {
           <button
             type="button"
             onClick={() => markAll.mutate()}
-            disabled={markAll.isPending}
-            title="Mark every open PR seen — clears all new-since badges (respects the active repo filter)"
+            disabled={markAll.isPending || todoCount === 0}
+            title="Clear your whole To-do inbox — marks every item done (each reappears when there's new activity; watched-repo PRs stay acknowledged)"
             className="ml-auto rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-500 hover:border-gray-400 hover:text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-200"
           >
             {markAll.isPending ? 'Marking…' : 'Mark all seen'}
@@ -102,6 +124,10 @@ export function MyTurnPanel(): JSX.Element {
             <div className="space-y-4">
               <AwaitingReviewSection
                 items={data.awaitingReview}
+                usersById={usersById}
+              />
+              <ApprovedPrsSection
+                items={data.approvedPrs}
                 usersById={usersById}
               />
               <YourPrsSection items={data.yourPrs} usersById={usersById} />

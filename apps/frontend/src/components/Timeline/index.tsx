@@ -25,9 +25,10 @@ import {
 } from '../../hooks/useTimeline.js';
 import { useMyTurn, useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
 import { MAX_RANGE_DAYS, resolveRange, useFilters } from '../../store/filters.js';
-import { indexUsers, userLabel } from '../../lib/ui.js';
+import { escapeHtml, indexUsers, userLabel, watchedGlyphHtml } from '../../lib/ui.js';
 import { renderPrBar, prClassName, barIsTall } from './prBar.js';
-import { computeUserStats, renderUserLabel } from './userRow.js';
+import { computeUserStats, renderUserLabel, type UserStats } from './userRow.js';
+import { UserStatsPopover } from './UserStatsPopover.js';
 import { buildMarkerItems } from './clustering.js';
 import { assignPrLanes, prGroupId } from './lanes.js';
 import {
@@ -421,6 +422,18 @@ export function Timeline(): JSX.Element {
   // Latest popover state, readable from stable callbacks without re-binding.
   const popoverRef = useRef<PopoverState | null>(null);
   popoverRef.current = popover;
+  // The per-contributor metrics popover (its toggle lives in each row label). Holds
+  // the row's group id + the clicked uid + the click point (fallback anchor). Local
+  // state, like `popover` — it's transient UI, not filter/URL state.
+  const [statsPopover, setStatsPopover] = useState<{
+    gid: string;
+    uid: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  // Latest per-user stats from the last rebuild, read by the metrics popover without
+  // re-deriving the basePrs set. Updated in the rebuild effect alongside the labels.
+  const userStatsRef = useRef<Map<number, UserStats>>(new Map());
   // True whenever a row-collapse focus overlay is active (a cross-user marker or
   // an activity "Show"). Drives the bottom-right "Exit focus" button. Clicking the
   // timeline no longer reverts focus — this button (or browser-back) is the way
@@ -454,6 +467,10 @@ export function Timeline(): JSX.Element {
     const ids = new Set<number>();
     for (const it of myTurnData.awaitingReview) ids.add(it.prId);
     for (const it of myTurnData.yourPrs) ids.add(it.prId);
+    // Approved PRs are deduped OUT of yourPrs server-side, so they live ONLY in this
+    // section — they MUST be added here or My Turn Focus filters an approved-only inbox
+    // off the board entirely.
+    for (const it of myTurnData.approvedPrs) ids.add(it.prId);
     for (const it of myTurnData.threadsAwaiting) ids.add(it.prId);
     // Watched-repo inbox PRs (new open PRs by others in your Watched repos) are a full
     // inbox section too — they MUST be here, or My Turn Focus Mode filters them off the
@@ -492,6 +509,7 @@ export function Timeline(): JSX.Element {
     if (myTurnData) {
       for (const it of myTurnData.awaitingReview) consider(Date.parse(it.openedAt));
       for (const it of myTurnData.yourPrs) consider(Date.parse(it.openedAt));
+      for (const it of myTurnData.approvedPrs) consider(Date.parse(it.openedAt));
       for (const it of myTurnData.watchedRepoPrs) consider(Date.parse(it.openedAt));
       for (const it of myTurnData.threadsAwaiting) consider(Date.parse(it.lastReplyAt));
     }
@@ -1673,6 +1691,9 @@ export function Timeline(): JSX.Element {
       // Capture before any selection side effect can move the window, so a later
       // back-out returns to where the marker/cluster sat.
       savedWindowRef.current = timelineRef.current?.getWindow() ?? null;
+      // The marker popover and the metrics popover are mutually exclusive — opening
+      // one closes the other so two floating panels never overlap.
+      setStatsPopover(null);
       setPopover({ x, y, eventIds });
     },
     [applyContext],
@@ -1988,11 +2009,11 @@ export function Timeline(): JSX.Element {
       const x = native?.clientX ?? props.pageX ?? 0;
       const y = native?.clientY ?? props.pageY ?? 0;
 
-      // A row-collapse caret click is handled by its own capturing listener; ignore
-      // it here so it never doubles as a row / empty-canvas click (which would
-      // clear the selection).
+      // A row-collapse caret OR a metrics-toggle click is handled by its own capturing
+      // listener; ignore it here so it never doubles as a row / empty-canvas click
+      // (which would clear the selection).
       const tgt = (native?.target ?? null) as HTMLElement | null;
-      if (tgt?.closest?.('[data-collapse-gid]')) return;
+      if (tgt?.closest?.('[data-collapse-gid]') || tgt?.closest?.('[data-stats-gid]')) return;
 
       // Empty-canvas click → one-level-at-a-time dismissal (see dismissEmptyCanvas).
       if (id == null) {
@@ -2353,6 +2374,34 @@ export function Timeline(): JSX.Element {
     return () => container.removeEventListener('click', onClick, true);
   }, [setRowCollapsed]);
 
+  // Per-contributor metrics toggle (the bar-chart glyph on each row label). Same
+  // delegated-capture pattern as the collapse caret — vis re-creates labels on every
+  // rebuild, so an inline React handler can't survive; capture + stopPropagation keep
+  // the click from registering as a vis row click. Toggles a labelled-table popover
+  // for that row; allowed during focus mode (it's read-only and harmless).
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const onClick = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null;
+      const btn = target?.closest?.('[data-stats-gid]') as HTMLElement | null;
+      if (!btn) return;
+      const gid = btn.getAttribute('data-stats-gid');
+      if (!gid) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const uid = Number(gid.split(':user:')[1]);
+      if (!Number.isFinite(uid)) return;
+      // Mutually exclusive with the marker popover.
+      setPopover(null);
+      setStatsPopover((cur) =>
+        cur && cur.gid === gid ? null : { gid, uid, x: e.clientX, y: e.clientY },
+      );
+    };
+    container.addEventListener('click', onClick, true);
+    return () => container.removeEventListener('click', onClick, true);
+  }, []);
+
   // Clicking the timeline PANE outside vis's own drawn surface — the empty gap
   // under a short, few-row board (between the rows and the detail pane) — dismisses
   // like empty canvas too. vis's `click` handler only fires within `.vis-timeline`
@@ -2593,6 +2642,7 @@ export function Timeline(): JSX.Element {
     // Per-user interaction tallies for the row labels — from the full timeframe
     // (all events + all PRs), so they don't shift with the thread-state filter.
     const userStats = computeUserStats(data.events, basePrs);
+    userStatsRef.current = userStats;
 
     // Which events drive the contributor ROWS. When a client-side filter (Threads /
     // My Turn) is active we collapse the board to just the people in the surviving
@@ -2667,9 +2717,17 @@ export function Timeline(): JSX.Element {
       // timeline) reads as one tinted band. Carried on the className; the CSS
       // palette class sets a `--tl-tint` var the tint rule reads (see index.css).
       const tintClass = `tl-repo-tint-${ridx % REPO_TINT_COUNT}`;
+      const repoMeta = reposById.get(rid);
+      const repoName = repoMeta?.fullName ?? `repo ${rid}`;
+      // Repo-header label is an HTML string (vis renders it via innerHTML, sanitizer
+      // disabled — see VIS_OPTIONS) so a watched repo gets a small eye next to its
+      // name. The name is GitHub-controlled, so escape it; the glyph SVG is static.
+      const repoContent = repoMeta?.inboxWatch
+        ? `${escapeHtml(repoName)}${watchedGlyphHtml()}`
+        : escapeHtml(repoName);
       groups.push({
         id: `repo:${rid}`,
-        content: reposById.get(rid)?.fullName ?? `repo ${rid}`,
+        content: repoContent,
         nestedGroups: nested.length ? nested : undefined,
         treeLevel: 1,
         order: ridx,
@@ -3495,6 +3553,25 @@ export function Timeline(): JSX.Element {
           onContextFocus={onPopoverContext}
           onDismiss={closeModal}
           onNavigate={navigatePopover}
+        />
+      )}
+      {statsPopover && (
+        <UserStatsPopover
+          gid={statsPopover.gid}
+          uid={statsPopover.uid}
+          user={usersById.get(statsPopover.uid)}
+          stats={
+            userStatsRef.current.get(statsPopover.uid) ?? {
+              comments: 0,
+              reviews: 0,
+              prsOpen: 0,
+              prsMerged: 0,
+              prsClosed: 0,
+            }
+          }
+          x={statsPopover.x}
+          y={statsPopover.y}
+          onDismiss={() => setStatsPopover(null)}
         />
       )}
     </div>

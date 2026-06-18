@@ -72,6 +72,7 @@ export function WelcomeBackBanner(): JSX.Element | null {
   const total =
     c.awaitingReview +
     c.yourPrsActivity +
+    c.approvedPrs +
     c.threadsAwaiting +
     c.watchedRepoPrs +
     c.claudeReviewsToAction;
@@ -80,6 +81,8 @@ export function WelcomeBackBanner(): JSX.Element | null {
   const parts: string[] = [];
   if (c.awaitingReview > 0) parts.push(`${c.awaitingReview} awaiting your review`);
   if (c.yourPrsActivity > 0) parts.push(`${c.yourPrsActivity} of your PRs active`);
+  if (c.approvedPrs > 0)
+    parts.push(`${c.approvedPrs} of your PRs approved`);
   if (c.threadsAwaiting > 0)
     parts.push(`${c.threadsAwaiting} thread${c.threadsAwaiting === 1 ? '' : 's'} awaiting you`);
   if (c.watchedRepoPrs > 0)

@@ -3,6 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { EventType, PrDetail as PrDetailT, User } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
 import { useMe } from '../hooks/useTriage.js';
+import { useRepos } from '../hooks/useTimeline.js';
+import { WatchedBadge } from './WatchedBadge.js';
 import { api } from '../api/client.js';
 import { useFilters } from '../store/filters.js';
 import { dateTime, indexUsers, PR_STATE_META, relativeTime } from '../lib/ui.js';
@@ -358,6 +360,7 @@ export function PrDetail({
   selectedThreadId: number | null;
 }): JSX.Element {
   const { data: pr, isLoading, error } = usePr(prId);
+  const { data: repos } = useRepos();
   const claudeReviewEnabled = useMe().data?.claudeReviewEnabled ?? false;
   const [tab, setTab] = useState<Tab>('overview');
   const [activitySince, setActivitySince] = useState<string | null>(null);
@@ -514,7 +517,12 @@ export function PrDetail({
           <Avatar user={author} size={16} />
           <UserName user={author} fallbackId={pr.authorId} repoId={pr.repoId} />
           <span>·</span>
-          <span>{pr.repoFullName}</span>
+          <span className="inline-flex items-center gap-1">
+            {pr.repoFullName}
+            {repos?.find((r) => r.id === pr.repoId)?.inboxWatch && (
+              <WatchedBadge size={11} />
+            )}
+          </span>
           <span>·</span>
           <span>opened {relativeTime(pr.openedAt)}</span>
           {pr.changedFilesCount > 0 && (

@@ -5,6 +5,7 @@ import type {
   AddReviewCommentResult,
   ApprovePrBody,
   ApprovePrResult,
+  CheckLogsResponse,
   CreatePrCommentBody,
   CreatePrCommentResult,
   MarkViewedBody,
@@ -13,6 +14,7 @@ import type {
   PrFilesResponse,
 } from '@pierre-review/shared';
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
+import { ghRestGetText } from '../../github/client.js';
 import {
   getPrDetail,
   getPrFilesContext,
@@ -66,6 +68,21 @@ const idParamSchema = {
     type: 'object',
     required: ['id'],
     properties: { id: { type: 'integer' } },
+  },
+};
+
+const checkLogsSchema = {
+  params: {
+    type: 'object',
+    required: ['id', 'jobId'],
+    properties: {
+      id: { type: 'integer' },
+      jobId: { type: 'integer', minimum: 1 },
+    },
+  },
+  querystring: {
+    type: 'object',
+    properties: { tail: { type: 'integer', minimum: 1, maximum: 1000 } },
   },
 };
 
@@ -421,4 +438,66 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       return result;
     }
   });
+
+  // Failed-check logs: the tail of a GitHub Actions job's log, fetched live (never
+  // stored). The jobId comes from CheckRun.jobId (parsed from the Actions detailsUrl);
+  // only Actions checks have one, so the frontend offers this on failed Actions rows.
+  // Degrades to {available:false, reason} on any GitHub error (expired logs, no
+  // actions:read, network) instead of 500ing.
+  app.get(
+    '/api/prs/:id/checks/:jobId/logs',
+    { schema: checkLogsSchema },
+    async (req, reply) => {
+      const { id, jobId } = req.params as { id: number; jobId: number };
+      const { tail } = req.query as { tail?: number };
+      const accountId = accountIdOf(req);
+
+      const ctx = await getPrWriteContext(id, accountId);
+      if (!ctx) {
+        reply.status(404);
+        return { error: 'NotFound', message: `PR ${id} not found` };
+      }
+
+      const tailLines = Math.min(Math.max(tail ?? 200, 1), 1000);
+      const unavailable = (reason: string): CheckLogsResponse => ({
+        available: false,
+        reason,
+        text: '',
+        totalLines: 0,
+        returnedLines: 0,
+      });
+
+      try {
+        const token = await getAccessToken(accountId);
+        const res = await ghRestGetText(
+          token,
+          `/repos/${ctx.owner}/${ctx.name}/actions/jobs/${jobId}/logs`,
+        );
+        if (!res.ok) {
+          const reason =
+            res.status === 404 || res.status === 410
+              ? 'Logs are no longer available (expired, or the job was re-run).'
+              : res.status === 403
+                ? 'No permission to read GitHub Actions logs for this repo.'
+                : `Couldn't fetch logs (GitHub returned ${res.status}).`;
+          return unavailable(reason);
+        }
+        // A job log can be many MB — normalise line endings, drop a trailing blank,
+        // and tail server-side so only the last N lines reach the browser. Guard the
+        // empty/blank body so it reports 0 lines (not [''] → a misleading "1 of 1").
+        const trimmed = res.text.replace(/\r\n/g, '\n').replace(/\n+$/, '');
+        const lines = trimmed === '' ? [] : trimmed.split('\n');
+        const tailed = lines.slice(-tailLines);
+        const result: CheckLogsResponse = {
+          available: true,
+          text: tailed.join('\n'),
+          totalLines: lines.length,
+          returnedLines: tailed.length,
+        };
+        return result;
+      } catch {
+        return unavailable("Couldn't reach GitHub to fetch the logs.");
+      }
+    },
+  );
 }

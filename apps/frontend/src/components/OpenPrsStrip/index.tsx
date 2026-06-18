@@ -35,8 +35,8 @@ export function OpenPrsStrip(): JSX.Element | null {
   }, [collapsed]);
 
   const reposById = useMemo(() => {
-    const m = new Map<number, string>();
-    for (const r of repos ?? []) m.set(r.id, r.fullName);
+    const m = new Map<number, { fullName: string; inboxWatch: boolean }>();
+    for (const r of repos ?? []) m.set(r.id, { fullName: r.fullName, inboxWatch: r.inboxWatch });
     return m;
   }, [repos]);
   const usersById = useMemo(() => indexUsers(users), [users]);
@@ -129,7 +129,8 @@ export function OpenPrsStrip(): JSX.Element | null {
                 <PrCard
                   key={pr.id}
                   pr={pr}
-                  repoFullName={reposById.get(pr.repoId) ?? `repo ${pr.repoId}`}
+                  repoFullName={reposById.get(pr.repoId)?.fullName ?? `repo ${pr.repoId}`}
+                  repoWatched={reposById.get(pr.repoId)?.inboxWatch ?? false}
                   usersById={usersById}
                 />
               ))

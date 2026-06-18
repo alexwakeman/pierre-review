@@ -48,6 +48,14 @@ export function CountsPill(): JSX.Element | null {
         <span className="text-green-500" title="Your PRs with new activity">
           {c.yourPrsActivity}
         </span>
+        {c.approvedPrs > 0 && (
+          <>
+            <span className="text-gray-400">·</span>
+            <span className="text-emerald-500" title="Your approved PRs (ready to merge)">
+              {c.approvedPrs}
+            </span>
+          </>
+        )}
         <span className="text-gray-400">·</span>
         <span className="text-amber-500" title="Threads awaiting you">
           {c.threadsAwaiting}

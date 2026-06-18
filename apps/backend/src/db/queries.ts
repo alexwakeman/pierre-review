@@ -19,6 +19,7 @@ import {
   type SQL,
 } from 'drizzle-orm';
 import type {
+  ApprovedPrItem,
   CheckRun,
   CiStatus,
   CommitDetail,
@@ -84,7 +85,11 @@ const REASON_PRIORITY: ReasonTag[] = [
 import { db, schema, isPg } from './client.js';
 import { runTransaction } from './client.js';
 import { config } from '../config.js';
-import { computeTriage, type TriageResult } from './triage.js';
+import {
+  computeApprovalInfoByPr,
+  computeTriage,
+  type TriageResult,
+} from './triage.js';
 import { getAccountUserId } from '../auth/account.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
@@ -1391,8 +1396,12 @@ async function ownsDismissRef(
   kind: MyTurnDismissKind,
   refId: number,
 ): Promise<boolean> {
-  if (kind === 'review_request' || kind === 'watched_repo_pr') {
-    // Both reference a PR id directly.
+  if (
+    kind === 'review_request' ||
+    kind === 'watched_repo_pr' ||
+    kind === 'pr_approved'
+  ) {
+    // All three reference a PR id directly.
     const rows = await db
       .select({ id: pullRequests.id })
       .from(pullRequests)
@@ -1490,6 +1499,7 @@ export async function getCompletedDismissals(
   const reviewDismissals = dismissals.filter((d) => d.kind === 'review_request');
   const threadDismissals = dismissals.filter((d) => d.kind === 'thread');
   const watchedDismissals = dismissals.filter((d) => d.kind === 'watched_repo_pr');
+  const approvedDismissals = dismissals.filter((d) => d.kind === 'pr_approved');
   const claudeDismissals = dismissals.filter((d) => d.kind === 'claude_review');
   const items: DismissedItem[] = [];
   const referencedUsers = new Set<number>();
@@ -1579,6 +1589,49 @@ export async function getCompletedDismissals(
         ...(restorable
           ? {}
           : { reason: prClosedReason(pr.state as PrState) ?? 'No longer new' }),
+      });
+    }
+  }
+
+  // pr_approved dismissals → their PRs (account-scoped). Same shape as a
+  // review_request dismissal, a different kind tag.
+  if (approvedDismissals.length > 0) {
+    const prRows = await db
+      .select()
+      .from(pullRequests)
+      .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(
+            pullRequests.id,
+            approvedDismissals.map((d) => d.refId),
+          ),
+        ),
+      )
+      .execute();
+    const byId = new Map(prRows.map((r) => [r.pull_requests.id, r]));
+    for (const d of approvedDismissals) {
+      const row = byId.get(d.refId);
+      if (!row) continue;
+      const { pull_requests: pr, repos: repo } = row;
+      if (pr.authorId != null) referencedUsers.add(pr.authorId);
+      const restorable = actionable.approvedPrIds.has(pr.id);
+      items.push({
+        kind: 'pr_approved',
+        prId: pr.id,
+        repoFullName: `${repo.owner}/${repo.name}`,
+        number: pr.number,
+        title: pr.title,
+        authorId: pr.authorId,
+        state: pr.state as PrState,
+        openedAt: pr.openedAt.toISOString(),
+        githubUrl: `https://github.com/${repo.owner}/${repo.name}/pull/${pr.number}`,
+        dismissedAt: d.dismissedAt.toISOString(),
+        restorable,
+        ...(restorable
+          ? {}
+          : { reason: prClosedReason(pr.state as PrState) ?? 'No longer approved' }),
       });
     }
   }
@@ -1774,6 +1827,7 @@ async function getWatchedActionablePrIds(
 async function getActionableInboxIds(accountId: number): Promise<{
   reviewRequestPrIds: Set<number>;
   watchedPrIds: Set<number>;
+  approvedPrIds: Set<number>;
   threadIds: Set<number>;
   claudeReviewIds: Set<number>;
 }> {
@@ -1781,6 +1835,7 @@ async function getActionableInboxIds(accountId: number): Promise<{
   const empty = {
     reviewRequestPrIds: new Set<number>(),
     watchedPrIds: new Set<number>(),
+    approvedPrIds: new Set<number>(),
     threadIds: new Set<number>(),
     claudeReviewIds: new Set<number>(),
   };
@@ -1802,6 +1857,16 @@ async function getActionableInboxIds(accountId: number): Promise<{
     open,
     openRows,
   );
+  // Your authored, open PRs with a standing approval (restorability source for the
+  // pr_approved Done entries).
+  const approvalInfo = await computeApprovalInfoByPr(open.map((t) => t.id));
+  const approvedPrIds = new Set(
+    open
+      .filter(
+        (t) => t.authorId === localUserId && !t.isDraft && approvalInfo.get(t.id)?.approved,
+      )
+      .map((t) => t.id),
+  );
 
   const repoNameById = new Map<number, string>();
   for (const r of await listRepos(accountId)) repoNameById.set(r.id, r.fullName);
@@ -1815,7 +1880,7 @@ async function getActionableInboxIds(accountId: number): Promise<{
     ? new Set((await getUnactionedClaudeReviews(accountId)).map((c) => c.reviewId))
     : new Set<number>();
 
-  return { reviewRequestPrIds, watchedPrIds, threadIds, claudeReviewIds };
+  return { reviewRequestPrIds, watchedPrIds, approvedPrIds, threadIds, claudeReviewIds };
 }
 
 export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
@@ -1823,6 +1888,7 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
   const empty: MyTurnResponse = {
     awaitingReview: [],
     yourPrs: [],
+    approvedPrs: [],
     threadsAwaiting: [],
     watchedRepoPrs: [],
     claudeReviewsToAction: [],
@@ -1855,6 +1921,9 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
     .execute();
   const reviewDismissedAt = new Map<number, Date>();
   const threadDismissedAt = new Map<number, Date>();
+  // Dismissed "your PR was approved" entries. Keyed by PR id; honoured until a NEWER
+  // approval lands (compared against the latest approving review's timestamp below).
+  const approvedDismissedAt = new Map<number, Date>();
   // Dismissed Claude-review run ids. Keyed by run id (not PR id): a fresh run gets
   // a new id, so it naturally re-appears without a timestamp comparison.
   const claudeDismissedIds = new Set<number>();
@@ -1864,6 +1933,7 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
   for (const d of dismissals) {
     if (d.kind === 'review_request') reviewDismissedAt.set(d.refId, d.dismissedAt);
     else if (d.kind === 'thread') threadDismissedAt.set(d.refId, d.dismissedAt);
+    else if (d.kind === 'pr_approved') approvedDismissedAt.set(d.refId, d.dismissedAt);
     else if (d.kind === 'claude_review') claudeDismissedIds.add(d.refId);
     else if (d.kind === 'watched_repo_pr') watchedDismissedIds.add(d.refId);
   }
@@ -1904,11 +1974,38 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
       }),
   );
 
-  // 2. Your PRs with new activity since you last looked.
+  // 2. Your authored, open PRs that have a standing approval (likely ready to merge).
+  //    An approving review lands them here; a "Done" dismissal hides them until a
+  //    NEWER approval arrives (compared against the latest approving review's
+  //    timestamp — not the PR's updatedAt, which any commit would bump and re-nag).
+  //    They leave automatically once the PR is merged/closed (drops out of `open`).
+  const approvalInfo = await computeApprovalInfoByPr(open.map((t) => t.id));
+  const approvedPrs: ApprovedPrItem[] = open
+    .filter((t) => {
+      // Drafts can't merge even when approved — don't claim "ready to merge".
+      if (t.authorId !== localUserId || t.isDraft) return false;
+      const info = approvalInfo.get(t.id);
+      if (!info?.approved) return false;
+      const dismissedAt = approvedDismissedAt.get(t.id);
+      if (!dismissedAt) return true;
+      const latest = info.latestApprovalAt?.getTime() ?? 0;
+      return latest > dismissedAt.getTime();
+    })
+    .map((t) => ({
+      ...toMyTurnPr(t),
+      approvals: approvalInfo.get(t.id)?.approvals ?? 0,
+      mergeable: t.mergeable,
+      mergeStateStatus: t.mergeStateStatus,
+    }));
+  const approvedShownIds = new Set(approvedPrs.map((i) => i.prId));
+
+  // 3. Your PRs with new activity since you last looked — excluding ones already shown
+  //    under "approved" (the stronger, more actionable signal wins).
   const yourPrs = open
     .filter(
       (t) =>
         t.authorId === localUserId &&
+        !approvedShownIds.has(t.id) &&
         t.newSinceLastViewed != null &&
         (t.newSinceLastViewed.comments > 0 ||
           t.newSinceLastViewed.reviews > 0 ||
@@ -1934,6 +2031,7 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
   const inOtherSections = new Set<number>([
     ...awaitingReview.map((i) => i.prId),
     ...yourPrs.map((i) => i.prId),
+    ...approvedPrs.map((i) => i.prId),
   ]);
   const watchedRepoPrs = open
     .filter(
@@ -1979,6 +2077,7 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
   return {
     awaitingReview,
     yourPrs,
+    approvedPrs,
     threadsAwaiting,
     watchedRepoPrs,
     claudeReviewsToAction,
