@@ -17,7 +17,7 @@ export function useMyTurnNotifications(enabled: boolean): void {
     const ids = new Set<string>();
     for (const r of data.awaitingReview) ids.add(`r:${r.prId}`);
     for (const p of data.yourPrs) ids.add(`p:${p.prId}`);
-    for (const a of data.approvedPrs) ids.add(`a:${a.prId}`);
+    for (const a of data.approvedPrs ?? []) ids.add(`a:${a.prId}`);
     for (const t of data.threadsAwaiting) ids.add(`t:${t.threadId}`);
     for (const w of data.watchedRepoPrs) ids.add(`w:${w.prId}`);
 

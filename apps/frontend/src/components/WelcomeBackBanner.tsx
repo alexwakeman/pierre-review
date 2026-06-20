@@ -72,7 +72,7 @@ export function WelcomeBackBanner(): JSX.Element | null {
   const total =
     c.awaitingReview +
     c.yourPrsActivity +
-    c.approvedPrs +
+    (c.approvedPrs ?? 0) +
     c.threadsAwaiting +
     c.watchedRepoPrs +
     c.claudeReviewsToAction;

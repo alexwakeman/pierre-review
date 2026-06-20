@@ -469,8 +469,8 @@ export function Timeline(): JSX.Element {
     for (const it of myTurnData.yourPrs) ids.add(it.prId);
     // Approved PRs are deduped OUT of yourPrs server-side, so they live ONLY in this
     // section — they MUST be added here or My Turn Focus filters an approved-only inbox
-    // off the board entirely.
-    for (const it of myTurnData.approvedPrs) ids.add(it.prId);
+    // off the board entirely. (?? [] tolerates an older backend without the field.)
+    for (const it of myTurnData.approvedPrs ?? []) ids.add(it.prId);
     for (const it of myTurnData.threadsAwaiting) ids.add(it.prId);
     // Watched-repo inbox PRs (new open PRs by others in your Watched repos) are a full
     // inbox section too — they MUST be here, or My Turn Focus Mode filters them off the
@@ -509,7 +509,7 @@ export function Timeline(): JSX.Element {
     if (myTurnData) {
       for (const it of myTurnData.awaitingReview) consider(Date.parse(it.openedAt));
       for (const it of myTurnData.yourPrs) consider(Date.parse(it.openedAt));
-      for (const it of myTurnData.approvedPrs) consider(Date.parse(it.openedAt));
+      for (const it of myTurnData.approvedPrs ?? []) consider(Date.parse(it.openedAt));
       for (const it of myTurnData.watchedRepoPrs) consider(Date.parse(it.openedAt));
       for (const it of myTurnData.threadsAwaiting) consider(Date.parse(it.lastReplyAt));
     }

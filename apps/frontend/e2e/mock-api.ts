@@ -155,6 +155,7 @@ const ME_RESPONSE: MeResponse = {
   counts: {
     awaitingReview: AWAITING_IDS.length,
     yourPrsActivity: 0,
+    approvedPrs: 0,
     threadsAwaiting: 0,
     watchedRepoPrs: WATCHED_IDS.length,
     claudeReviewsToAction: 0,
@@ -183,6 +184,7 @@ const MY_TURN: MyTurnResponse = {
     alsoRequested: 0,
   })),
   yourPrs: [],
+  approvedPrs: [],
   threadsAwaiting: [],
   // New open PRs by others in your Watched repos — a separate inbox section that My Turn
   // Focus Mode must also show on the board (regression #54).

@@ -45,7 +45,7 @@ export function MyTurnPanel(): JSX.Element {
       if (!data) return;
       await Promise.allSettled([
         ...data.awaitingReview.map((it) => api.dismissMyTurn('review_request', it.prId)),
-        ...data.approvedPrs.map((it) => api.dismissMyTurn('pr_approved', it.prId)),
+        ...(data.approvedPrs ?? []).map((it) => api.dismissMyTurn('pr_approved', it.prId)),
         ...data.threadsAwaiting.map((it) => api.dismissMyTurn('thread', it.threadId)),
         ...data.watchedRepoPrs.map((it) => api.dismissMyTurn('watched_repo_pr', it.prId)),
         ...data.claudeReviewsToAction.map((it) =>
@@ -66,7 +66,7 @@ export function MyTurnPanel(): JSX.Element {
   const todoCount =
     (data?.awaitingReview.length ?? 0) +
     (data?.yourPrs.length ?? 0) +
-    (data?.approvedPrs.length ?? 0) +
+    (data?.approvedPrs?.length ?? 0) +
     (data?.watchedRepoPrs.length ?? 0) +
     (data?.threadsAwaiting.length ?? 0) +
     (data?.claudeReviewsToAction.length ?? 0);
@@ -127,7 +127,7 @@ export function MyTurnPanel(): JSX.Element {
                 usersById={usersById}
               />
               <ApprovedPrsSection
-                items={data.approvedPrs}
+                items={data.approvedPrs ?? []}
                 usersById={usersById}
               />
               <YourPrsSection items={data.yourPrs} usersById={usersById} />
