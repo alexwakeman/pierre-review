@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import type { EventType, FeedEvent, ReviewState } from '@pierre-review/shared';
+import type { EventType, FeedEvent, ReviewState, User } from '@pierre-review/shared';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { useFeedStore } from '../../store/feed.js';
@@ -35,11 +35,12 @@ const VERDICT: Record<ReviewState, { label: string; cls: string } | null> = {
 function FeedRow({
   ev,
   isNew,
+  usersById,
 }: {
   ev: FeedEvent;
   isNew: boolean;
+  usersById: Map<number, User>;
 }): JSX.Element {
-  const usersById = indexUsers(useUsers().data);
   const openFeedEventOnTimeline = useFilters((s) => s.openFeedEventOnTimeline);
   const meta = EVENT_META[ev.type];
   const actor = ev.actorId != null ? usersById.get(ev.actorId) : undefined;
@@ -55,7 +56,7 @@ function FeedRow({
 
   return (
     <li
-      className={`rounded px-2 py-2 hover:bg-gray-50 dark:hover:bg-gray-900/40 ${
+      className={`rounded px-2 py-2 hover:bg-gray-50 dark:hover:bg-gray-900/40 [contain-intrinsic-size:auto_72px] [content-visibility:auto] ${
         isNew ? 'border-l-2 border-blue-400 bg-blue-50/40 dark:bg-blue-500/5' : 'border-l-2 border-transparent'
       }`}
     >
@@ -130,6 +131,13 @@ export function FeedSection(): JSX.Element {
   const seenAt = useFeedStore((s) => s.seenAt);
   const markSeen = useFeedStore((s) => s.markSeen);
 
+  // Build the user index ONCE here, not per row. FeedRow used to call
+  // useUsers() + indexUsers() itself, so a feed of N rows created N query
+  // observers and rebuilt the whole user Map N times on every mount — the bulk of
+  // the deselect re-render cost (this panel re-mounts whenever a PR is deselected).
+  const { data: users } = useUsers();
+  const usersById = useMemo(() => indexUsers(users), [users]);
+
   // Freeze the "new" boundary at the value it had when the tab opened, then mark seen
   // so the badge clears — entries above the frozen line keep their highlight this visit.
   const newBoundary = useRef(seenAt);
@@ -140,9 +148,14 @@ export function FeedSection(): JSX.Element {
   const rows = useMemo(
     () =>
       events.map((ev) => (
-        <FeedRow key={ev.id} ev={ev} isNew={Date.parse(ev.occurredAt) > newBoundary.current} />
+        <FeedRow
+          key={ev.id}
+          ev={ev}
+          isNew={Date.parse(ev.occurredAt) > newBoundary.current}
+          usersById={usersById}
+        />
       )),
-    [events],
+    [events, usersById],
   );
 
   if (events.length === 0) {
