@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { isMyTurnReason } from '@pierre-review/shared';
 import { useOpenPrs } from '../../hooks/useTriage.js';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
@@ -55,6 +55,56 @@ export function OpenPrsStrip(): JSX.Element | null {
     // Most recently opened first.
     return [...base].sort((a, b) => Date.parse(b.openedAt) - Date.parse(a.openedAt));
   }, [all, filter]);
+
+  // Horizontal virtualization. The strip can hold hundreds of open-PR cards, but
+  // only ~6-10 fit the viewport. Rendering them all put thousands of off-screen
+  // card nodes in the DOM (the bulk of the whole page) — so every open-prs refetch
+  // reconciled the entire set, selecting/deselecting re-rendered every card, and a
+  // huge flex row was re-laid-out on every layout pass. Render only the cards in
+  // (or near) the visible window; spacer divs reserve the off-screen width so the
+  // scrollbar geometry is unchanged. Cards are fixed-width (w-52); we measure the
+  // real stride from the DOM (rem/font-size independent), defaulting to 208+6px.
+  const STRIP_GAP = 6;
+  const BUFFER = 4; // cards rendered past each edge so a fast scroll never blanks
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const strideRef = useRef(208 + STRIP_GAP);
+  const total = shown.length;
+  const [range, setRange] = useState({ start: 0, end: 24 });
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    let raf: number | null = null;
+    const recompute = (): void => {
+      raf = null;
+      // Measure the true card stride once ≥2 cards are on-screen.
+      const cards = Array.from(el.children).filter(
+        (c) => !(c as HTMLElement).hasAttribute('aria-hidden'),
+      ) as HTMLElement[];
+      if (cards.length >= 2) {
+        const s = cards[1]!.offsetLeft - cards[0]!.offsetLeft;
+        if (s > 0) strideRef.current = s;
+      }
+      const stride = strideRef.current;
+      const start = Math.max(0, Math.floor(el.scrollLeft / stride) - BUFFER);
+      const end = Math.min(
+        total,
+        Math.ceil((el.scrollLeft + el.clientWidth) / stride) + BUFFER,
+      );
+      setRange((p) => (p.start === start && p.end === end ? p : { start, end }));
+    };
+    const onScroll = (): void => {
+      if (raf == null) raf = requestAnimationFrame(recompute);
+    };
+    recompute();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    const ro = new ResizeObserver(onScroll);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      ro.disconnect();
+      if (raf != null) cancelAnimationFrame(raf);
+    };
+  }, [total, filter]);
 
   if (!isLoading && all.length === 0) return null;
 
@@ -117,7 +167,10 @@ export function OpenPrsStrip(): JSX.Element | null {
         }`}
       >
         <div className="min-h-0 overflow-hidden">
-          <div className="flex items-stretch gap-1.5 overflow-x-auto px-3 pb-1.5 pt-0.5">
+          <div
+            ref={scrollRef}
+            className="flex items-stretch gap-1.5 overflow-x-auto px-3 pb-1.5 pt-0.5"
+          >
             {shown.length === 0 ? (
               <div className="flex items-center text-xs text-gray-500">
                 {filter === 'my_turn'
@@ -125,15 +178,34 @@ export function OpenPrsStrip(): JSX.Element | null {
                   : 'No PRs match this filter.'}
               </div>
             ) : (
-              shown.map((pr) => (
-                <PrCard
-                  key={pr.id}
-                  pr={pr}
-                  repoFullName={reposById.get(pr.repoId)?.fullName ?? `repo ${pr.repoId}`}
-                  repoWatched={reposById.get(pr.repoId)?.inboxWatch ?? false}
-                  usersById={usersById}
-                />
-              ))
+              <>
+                {/* Spacers reserve the off-screen card width so the horizontal
+                    scrollbar matches the full list while only the visible cards
+                    (+buffer) are mounted. */}
+                {range.start > 0 && (
+                  <div
+                    aria-hidden
+                    className="shrink-0"
+                    style={{ width: range.start * strideRef.current - STRIP_GAP }}
+                  />
+                )}
+                {shown.slice(range.start, range.end).map((pr) => (
+                  <PrCard
+                    key={pr.id}
+                    pr={pr}
+                    repoFullName={reposById.get(pr.repoId)?.fullName ?? `repo ${pr.repoId}`}
+                    repoWatched={reposById.get(pr.repoId)?.inboxWatch ?? false}
+                    usersById={usersById}
+                  />
+                ))}
+                {range.end < total && (
+                  <div
+                    aria-hidden
+                    className="shrink-0"
+                    style={{ width: (total - range.end) * strideRef.current }}
+                  />
+                )}
+              </>
             )}
           </div>
         </div>

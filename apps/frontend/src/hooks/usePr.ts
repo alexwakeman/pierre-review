@@ -2,8 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 import type { PrDetail, PrFilesResponse, ThreadDetail } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 
-// One week — detail entries persist in IndexedDB and are reused until evicted.
-const DETAIL_GC_TIME = 1000 * 60 * 60 * 24 * 7;
+// 45 minutes. Detail carries the bulky hydrated TEXT (bodies, diff hunks); a
+// 7-day in-memory gcTime meant every PR/thread/file-diff opened in a session
+// stayed resident forever — and got walked by every dehydrate/serialize pass to
+// IndexedDB — so a long-lived tab steadily accumulated memory + GC pressure (a
+// contributor to the OS-level jank on a board that's been open for hours).
+// Evicting inactive detail after 45 min bounds the working set; cross-session
+// reuse still comes from the IndexedDB persist layer (lib/queryPersist.ts), which
+// re-hydrates a re-opened PR on demand.
+const DETAIL_GC_TIME = 1000 * 60 * 45;
 
 // PR / thread detail carries the bulky text that, in cloud mode, is hydrated on
 // demand from GitHub and persisted to IndexedDB (see lib/queryPersist.ts). We mark

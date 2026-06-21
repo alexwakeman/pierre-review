@@ -2502,10 +2502,36 @@ export function Timeline(): JSX.Element {
     };
   }, []);
 
+  // Set when a data change arrives while the tab is hidden, so the deferred
+  // rebuild runs once when the tab becomes visible again (see the rebuild effect).
+  const pendingHiddenRebuildRef = useRef(false);
+  useEffect(() => {
+    const onVisible = (): void => {
+      if (!document.hidden && pendingHiddenRebuildRef.current) {
+        pendingHiddenRebuildRef.current = false;
+        setLaneNonce((n) => n + 1); // re-run the rebuild with the latest data
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+
   // Rebuild groups + PR bars when data or the derived-state filter changes.
   useEffect(() => {
     if (!data) return;
     dataRef.current = data;
+
+    // Skip the expensive groups+bars+markers rebuild while the tab is hidden: a
+    // background sync (the */5 cron keeps refetching) would otherwise run a
+    // multi-second main-thread rebuild on a tab nobody is looking at, and several
+    // queued landings would all fire the instant the tab is foregrounded (a big
+    // part of the "foreground → stall" report). Defer to a single rebuild when the
+    // tab becomes visible — the visibilitychange listener above bumps laneNonce.
+    if (document.hidden) {
+      pendingHiddenRebuildRef.current = true;
+      return;
+    }
+    pendingHiddenRebuildRef.current = false;
 
     // An open PR being focused may be absent from the lean /api/timeline payload
     // (no in-window activity). The focus effect stages it here so its bar can be
@@ -2867,9 +2893,21 @@ export function Timeline(): JSX.Element {
 
     rebuildMarkers();
 
-    // Pin the window across the rebuild (belt-and-suspenders; the diff alone
-    // shouldn't move it).
-    if (tl && win) tl.setWindow(win.start, win.end, { animation: false });
+    // Pin the window across the rebuild ONLY if the diff actually moved it. An
+    // unconditional setWindow — even same-range with animation:false — fires
+    // `rangechanged`, which schedules a recluster → a SECOND full rebuildMarkers
+    // ~120ms later: a duplicate of the work just done, and on a large board the
+    // dominant per-sync cost. The diff shouldn't move the window, so in the common
+    // unchanged case skip the setWindow (and the recluster it would trigger).
+    if (tl && win) {
+      const now = tl.getWindow();
+      if (
+        now.start.valueOf() !== win.start.valueOf() ||
+        now.end.valueOf() !== win.end.valueOf()
+      ) {
+        tl.setWindow(win.start, win.end, { animation: false });
+      }
+    }
 
     // Re-assert overlay state so an open marker modal survives a background
     // sync untouched: selection, the cross-link glow, and the row focus.
