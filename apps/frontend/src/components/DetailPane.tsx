@@ -1,3 +1,4 @@
+import { useDeferredValue } from 'react';
 import { useFilters } from '../store/filters.js';
 import { PrDetail } from './PrDetail.js';
 import { MyTurnPanel } from './MyTurnPanel/index.js';
@@ -15,6 +16,15 @@ export function DetailPane(): JSX.Element {
   const myTurnOnly = useFilters((s) => s.myTurnOnly);
   const clearSelection = useFilters((s) => s.clearSelection);
 
+  // The ✕ and the timeline selection ring read `selectedPrId` urgently, so deselect
+  // FEEDBACK is instant. The heavy panel body (unmount PrDetail → mount
+  // FeedSection/MyTurnPanel) reads `bodyPrId`, which lags to null on deselect — so
+  // that mount runs in a later, low-priority render instead of competing with the
+  // ring teardown in the same frame. The `!= null` guard keeps SELECT/SWITCH
+  // instant: only the swap-to-empty (deselect) is deferred.
+  const deferredPrId = useDeferredValue(selectedPrId);
+  const bodyPrId = selectedPrId != null ? selectedPrId : deferredPrId;
+
   return (
     <div className="relative h-full" data-testid="detail-pane">
       {selectedPrId != null && (
@@ -31,10 +41,10 @@ export function DetailPane(): JSX.Element {
         </div>
       )}
 
-      {selectedPrId != null ? (
+      {bodyPrId != null ? (
         <PrDetail
-          key={selectedPrId}
-          prId={selectedPrId}
+          key={bodyPrId}
+          prId={bodyPrId}
           selectedThreadId={selectedThreadId}
         />
       ) : myTurnOnly ? (
