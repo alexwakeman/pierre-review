@@ -65,11 +65,10 @@ body {
   font-weight: 600;
   transition: box-shadow 0.15s ease;
 }
-/* Hover glow — the SAME breathing sky pulse the timeline puts on a selected /
-   highlighted PR or event (ev-select-pulse), so the action reads as "this is the
-   focused thing". */
+/* Hover cue — a static sky ring (the same colour the timeline puts on a selected /
+   highlighted PR), so the action reads as "this is the focused thing". */
 .focus-indicator:hover {
-  animation: ev-select-pulse 1.8s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.6);
 }
 .dark .focus-indicator {
   color: #7dd3fc; /* sky-300 */
@@ -79,8 +78,6 @@ body {
   height: 7px;
   border-radius: 9999px;
   background: #38bdf8;
-  box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.6);
-  animation: focus-dot-pulse 1.8s ease-in-out infinite;
 }
 /* The ✕ exit affordance, tucked against the pill's right edge. The WHOLE pill is
    the clickable exit button now; this ✕ is a non-interactive hint that's HIDDEN by
@@ -134,18 +131,7 @@ body {
     transform: rotate(0deg);
   }
 }
-@keyframes focus-dot-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.55);
-  }
-  50% {
-    box-shadow: 0 0 0 5px rgba(56, 189, 248, 0);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
-  .focus-indicator-dot,
-  .focus-indicator:hover,
   .focus-indicator:hover .focus-indicator-close {
     animation: none;
   }
@@ -153,9 +139,8 @@ body {
 
 /* ---- focus-mode lens frame ---- */
 /* While a focus overlay is active the timeline + detail pane read as ONE framed
-   "lens" unit (App adds .focus-frame to <main>). A crisp sky border with a gentle
-   breathing glow — the same palette as the PR selection pulse (ev-select-pulse) but
-   sharper-edged and more subtle. Drawn on an overlay pseudo-element (inset:0,
+   "lens" unit (App adds .focus-frame to <main>). A static 3px sky border, same
+   colour as the PR selection ring. Drawn on an overlay pseudo-element (inset:0,
    pointer-events:none, box-sizing inherited as border-box from Tailwind preflight)
    so it sits ABOVE the panes' own backgrounds without shifting layout or being
    clipped, and never blocks interaction. */
@@ -168,27 +153,8 @@ body {
   inset: 0;
   z-index: 20;
   pointer-events: none;
-  border: 1.5px solid rgba(56, 189, 248, 0.8);
+  border: 3px solid rgba(56, 189, 248, 0.8);
   border-radius: 8px;
-  animation: focus-frame-pulse 2.4s ease-in-out infinite;
-}
-@keyframes focus-frame-pulse {
-  0%,
-  100% {
-    box-shadow:
-      inset 0 0 0 1px rgba(56, 189, 248, 0.12),
-      inset 0 0 10px 0 rgba(56, 189, 248, 0.1);
-  }
-  50% {
-    box-shadow:
-      inset 0 0 0 1px rgba(56, 189, 248, 0.28),
-      inset 0 0 18px 2px rgba(56, 189, 248, 0.2);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .focus-frame::after {
-    animation: none;
-  }
 }
 
 /* The board filters, faded while the focus lens owns the screen. `inert` (set on
@@ -736,116 +702,65 @@ body {
    selected markers (a glow rather than the old yellow border), so PR highlighting
    reads consistently everywhere — bar click, j/k cycling, opening detail, the PR
    panel's Show / Focus links. */
+/* PR / marker selection + focus highlighting: a STATIC 3px sky ring, no animation.
+   (The pulsing glow this replaced was continuous compositor work for the whole time
+   a thing was selected/focused; a static box-shadow ring paints once and costs
+   nothing.) Same sky colour everywhere so selection, cross-user focus, the
+   focus-exit cue and the open-popover marker all read alike. */
 .vis-item.vis-selected.pr-bar {
-  overflow: visible; /* let the glow escape the bar bounds */
+  overflow: visible; /* let the ring escape the bar bounds */
   z-index: 5;
-  animation: ev-select-pulse 1.8s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.9);
 }
 /* PR-isolation focus: bars sharing the focused PR's packed lane are hidden so only
    the focused PR's bar shows (see isolatePrBars in Timeline/index.tsx). */
 .vis-item.pr-bar.pr-focus-hidden {
   display: none;
 }
-@media (prefers-reduced-motion: reduce) {
-  .vis-item.vis-selected.pr-bar {
-    animation: none;
-    box-shadow:
-      0 0 0 3px rgba(56, 189, 248, 0.85),
-      0 0 12px 3px rgba(56, 189, 248, 0.5);
-  }
-}
 /* The PR band — and the marker or cluster — an open marker modal points at, or the
-   two-person rows held in cross-user focus: the SAME soft sky pulse used for a
-   same-person selected event (see ev-select-pulse below). This previously carried a
-   bright marching-ants dashed ring, which read as excessive in focus mode; now it
-   just breathes the gentle glow so cross-user and same-person cues match. */
+   two-person rows held in cross-user focus. */
 .vis-item.pr-bar.pr-cross-linked,
 .vis-item.ev-cross-linked .ev-marker-inner,
 .vis-item.ev-cross-linked .ev-cluster-inner {
-  animation: ev-select-pulse 1.8s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.9);
 }
 .vis-item.pr-bar.pr-cross-linked {
   overflow: visible; /* let the ring escape the bar bounds */
-  z-index: 5; /* ride above neighbours so the glow isn't clipped by them */
+  z-index: 5; /* ride above neighbours so the ring isn't clipped by them */
 }
 .vis-item.ev-cross-linked .ev-marker-inner,
 .vis-item.ev-cross-linked .ev-cluster-inner {
-  position: relative; /* ride above neighbours so the glow isn't clipped */
+  position: relative; /* ride above neighbours so the ring isn't clipped */
   z-index: 5;
 }
 .vis-item.ev-cross-linked .ev-marker-inner {
-  border-radius: 9999px; /* circular halo around the tiny marker */
-}
-@media (prefers-reduced-motion: reduce) {
-  .vis-item.pr-bar.pr-cross-linked,
-  .vis-item.ev-cross-linked .ev-marker-inner,
-  .vis-item.ev-cross-linked .ev-cluster-inner {
-    animation: none;
-    box-shadow:
-      0 0 0 3px rgba(56, 189, 248, 0.85),
-      0 0 12px 3px rgba(56, 189, 248, 0.5);
-  }
+  border-radius: 9999px; /* circular ring around the tiny marker */
 }
 
 /* Focus-exit cue: leaving focus mode re-centres on the marker that opened it and
-   keeps a soft sky pulse on it — the SAME persistent breathing glow as a selected
-   event (ev-select-pulse), rather than a flash that fades away, so it anchors the
-   user in a large repo until their next marker / focus interaction clears it
-   (applyContext → applyExitGlow(null)). */
+   keeps a static sky ring on it (applyContext → applyExitGlow(null)) so it stays
+   locatable until the next marker / focus interaction clears it. */
 .vis-item.ev-exit-glow .ev-marker-inner,
 .vis-item.ev-exit-glow .ev-cluster-inner {
   position: relative;
   z-index: 5;
-  animation: ev-select-pulse 1.8s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.9);
 }
 .vis-item.ev-exit-glow .ev-marker-inner {
-  border-radius: 9999px; /* circular halo around the tiny marker */
-}
-@media (prefers-reduced-motion: reduce) {
-  .vis-item.ev-exit-glow .ev-marker-inner,
-  .vis-item.ev-exit-glow .ev-cluster-inner {
-    animation: none;
-    box-shadow:
-      0 0 0 3px rgba(56, 189, 248, 0.8),
-      0 0 12px 3px rgba(56, 189, 248, 0.5);
-  }
+  border-radius: 9999px; /* circular ring around the tiny marker */
 }
 
-/* Selection pulse: the marker/cluster the open popover refers to breathes a soft
-   sky halo for as long as it's selected, so it's always locatable — the exit-cue
-   glow above, but looping instead of fading out. Used only outside cross-user
-   focus (the :not(.ev-cross-linked) guard hands the marker to the marching-ants
-   ring when a two-person focus owns it, so the two never stack). */
-@keyframes ev-select-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 3px rgba(56, 189, 248, 0.85),
-      0 0 14px 5px rgba(56, 189, 248, 0.55);
-  }
-  50% {
-    box-shadow:
-      0 0 0 5px rgba(56, 189, 248, 0.4),
-      0 0 8px 2px rgba(56, 189, 248, 0.25);
-  }
-}
+/* The marker/cluster the open popover refers to: a static sky ring for as long as
+   it's selected, so it's always locatable. Used only outside cross-user focus (the
+   :not(.ev-cross-linked) guard hands the marker to the cross-link ring instead). */
 .vis-item.ev-selected:not(.ev-cross-linked) .ev-marker-inner,
 .vis-item.ev-selected:not(.ev-cross-linked) .ev-cluster-inner {
   position: relative;
   z-index: 5;
-  animation: ev-select-pulse 1.8s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.9);
 }
 .vis-item.ev-selected:not(.ev-cross-linked) .ev-marker-inner {
-  border-radius: 9999px; /* circular halo around the tiny marker */
-}
-@media (prefers-reduced-motion: reduce) {
-  .vis-item.ev-selected:not(.ev-cross-linked) .ev-marker-inner,
-  .vis-item.ev-selected:not(.ev-cross-linked) .ev-cluster-inner {
-    animation: none;
-    box-shadow:
-      0 0 0 3px rgba(56, 189, 248, 0.85),
-      0 0 12px 3px rgba(56, 189, 248, 0.5);
-  }
+  border-radius: 9999px; /* circular ring around the tiny marker */
 }
 .pr-bar-inner {
   display: flex;
@@ -1123,52 +1038,16 @@ body {
   animation: activity-flash 1.8s ease-out forwards;
 }
 
-/* ---- "my turn" pulsing ring (cards + timeline bars) ---- */
-/* The ring is drawn on an overlay pseudo-element and pulsed via OPACITY — a
-   compositor-accelerated property — instead of animating `box-shadow` directly on
-   the element. Animated box-shadow is never composited: it forces a full
-   main-thread repaint of the element on EVERY frame. With one "my turn" bar per
-   review request, a busy board had many bars (plus the strip cards) all repainting
-   their shadow continuously at ~60fps for as long as the tab was foregrounded — a
-   board-wide paint storm that pegged the renderer/compositor yet was invisible to
-   the JS-function profiler (it's Paint work, not script). Animating only the
-   opacity of a promoted layer lets the compositor vary the layer's alpha per frame
-   with no repaint, so the pulse costs ~nothing regardless of how many bars show. */
-@keyframes myturn-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
+/* ---- "my turn" ring (cards + timeline bars) ---- */
+/* A STATIC 3px ring in the my-turn blue — no animation. (Earlier versions pulsed
+   box-shadow, then opacity; both were continuous compositor work. A static
+   box-shadow paints once into the layer and never re-rasterises.) The element's own
+   box-shadow is not clipped by its own overflow, so no pseudo-element / overflow
+   override is needed. */
+.my-turn-ring {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.9);
 }
-.my-turn-ring,
 .vis-item.pr-myturn {
-  /* containing block for the ::after overlay (the strip card is already `relative`) */
-  position: relative;
-  /* vis range items clip overflow by default, so a pseudo-child's box-shadow would
-     be cut off; let the overlay ring escape the bar bounds (matches
-     .vis-selected.pr-bar / .pr-cross-linked). The bar's title + status truncate on
-     their own elements (.pr-title / .pr-status), so this does NOT un-clip them. */
-  overflow: visible;
-}
-.my-turn-ring::after,
-.vis-item.pr-myturn::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  /* painted once into the layer; only opacity animates, so it never re-rasterises */
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.9);
-  animation: myturn-pulse 2s ease-in-out infinite;
-  will-change: opacity;
-}
-@media (prefers-reduced-motion: reduce) {
-  .my-turn-ring::after,
-  .vis-item.pr-myturn::after {
-    animation: none;
-    opacity: 0.85;
-  }
+  overflow: visible; /* keep the ring clear of neighbouring bars */
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.9);
 }
