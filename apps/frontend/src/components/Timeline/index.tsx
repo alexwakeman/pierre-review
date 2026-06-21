@@ -2287,6 +2287,15 @@ export function Timeline(): JSX.Element {
         // gate, and restoreScrollAnchor bails the moment the anchor holds.
         const anchor = captureScrollAnchor();
         rebuildMarkers();
+        // rebuildMarkers' remove()+add() leaves vis to relayout ASYNCHRONOUSLY, so the
+        // rows' bands are momentarily empty and scrollHeight transiently short. Without
+        // a flush, the synchronous restore below clamps scrollTop against that short
+        // height and vis paints ONE wrong-position frame (the pan-back row FLICKER) before
+        // the rAF settle loop corrects it. Flush vis's relayout NOW so scrollHeight is
+        // full and the anchor lands before the next paint — no intermediate frame. This
+        // adds NO new scroll writer (restoreScrollAnchor stays the sole authority, gate
+        // untouched); same redraw() flush setRowCollapsed uses for the same reason.
+        timeline.redraw();
         if (anchor) restoreScrollAnchor(anchor);
       };
       reclusterTimer = setTimeout(recluster, 120);
