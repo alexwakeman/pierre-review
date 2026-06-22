@@ -49,6 +49,15 @@ const VIS_OPTIONS: TimelineOptions = {
   // (With stack:true vis ignores subgroups for layout and full-stacks instead.)
   stack: false,
   stackSubgroups: true,
+  // Compute each row's height from ALL its items, not just the ones in the visible
+  // time window — so a horizontal pan can't collapse a row whose markers scrolled out
+  // of view (the vertical-jump bug: vis's default 'auto' derives height from in-window
+  // items only, so tall rows collapse/grow as you pan and the board reflows). The cost
+  // is rows always reserving their full height (a taller board) — an accepted trade for
+  // stable navigation. Per-group override to 'auto' for user-COLLAPSED rows (see
+  // setRowCollapsed) so collapse can still shrink them, since 'fixed' ignores
+  // subgroupVisibility.
+  groupHeightMode: 'fixed',
   orientation: { axis: 'top', item: 'top' },
   zoomMin: ZOOM_MIN_MS,
   zoomMax: 1000 * 60 * 60 * 24 * 365 * 2,
@@ -333,6 +342,9 @@ export function Timeline(): JSX.Element {
   // in pixels, so fitLaneBars is zoom-dependent — a real zoom (width change) re-fits
   // via laneNonce; a pan (same width) does not.
   const lanedWindowMsRef = useRef<number | null>(null);
+  // Window WIDTH (ms) at the last marker rebuild — gates the rangechanged recluster
+  // so a pure horizontal PAN (width unchanged) doesn't rebuild identical markers.
+  const reclusterWindowMsRef = useRef<number | null>(null);
   // Bar-fit deferral: vis sizes the label gutter asynchronously, so the CENTER draw
   // width isn't known synchronously during a rebuild. We poll for it (cancellable
   // rAF) and cache the last settled width so an unchanged-gutter rebuild (zoom,
@@ -796,7 +808,21 @@ export function Timeline(): JSX.Element {
       }
       const vis: Record<string, boolean> = {};
       for (const sg of present) vis[sg] = !collapsed;
-      groups.update({ id: gid, subgroupVisibility: vis });
+      // heightMode must flip with collapse: an EXPANDED row is 'fixed' (height from ALL
+      // items, so a horizontal pan can't collapse it — see VIS_OPTIONS groupHeightMode),
+      // but 'fixed' IGNORES subgroupVisibility, so a collapsed row would stay tall. A
+      // COLLAPSED row uses 'auto' so it shrinks to its label. vis reads heightMode ONLY
+      // in the Group constructor (Group.setData ignores it), so we must RECONSTRUCT the
+      // group (remove + re-add) to change it — a plain update won't take.
+      const existing = groups.get(gid) as DataGroup | null;
+      if (existing) {
+        groups.remove(gid);
+        groups.add({
+          ...existing,
+          subgroupVisibility: vis,
+          heightMode: collapsed ? 'auto' : 'fixed',
+        } as unknown as DataGroup);
+      }
       if (collapsed) collapsedRowsByUserRef.current.add(gid);
       else collapsedRowsByUserRef.current.delete(gid);
       persistCollapsedRows();
@@ -854,6 +880,9 @@ export function Timeline(): JSX.Element {
     if (!tl || !container || !cur) return;
     const win = tl.getWindow();
     const rangeMs = win.end.valueOf() - win.start.valueOf();
+    // Record the width we're clustering at, so the rangechanged handler can skip a
+    // recluster on a pure pan (same width) — see the recluster gate.
+    reclusterWindowMsRef.current = rangeMs;
     const px = container.clientWidth || 1000;
     const msPerPx = rangeMs / px;
 
@@ -2264,6 +2293,21 @@ export function Timeline(): JSX.Element {
     let reclusterTimer: ReturnType<typeof setTimeout> | null = null;
     let relaneTimer: ReturnType<typeof setTimeout> | null = null;
     timeline.on('rangechanged', () => {
+      // Only RECLUSTER when the window WIDTH (zoom) actually changed. Clustering is
+      // bucketed by absolute time at a fixed msPerPx, so a pure horizontal PAN (width
+      // constant) produces byte-identical markers — rebuilding is pure churn that, even
+      // with groupHeightMode:fixed, nudges band heights at pan-end (the residual jump).
+      // A pan no longer collapses rows (fixed heights), so there's nothing to re-anchor
+      // either. Same >2% tolerance the relane guard below uses.
+      const wNow = timeline.getWindow();
+      const curReclusterMs = wNow.end.valueOf() - wNow.start.valueOf();
+      const lastReclusterMs = reclusterWindowMsRef.current;
+      const zoomChanged =
+        lastReclusterMs == null ||
+        Math.abs(curReclusterMs - lastReclusterMs) / lastReclusterMs > 0.02;
+      if (!zoomChanged) {
+        // pure pan — markers + heights are unchanged; skip the rebuild entirely.
+      } else {
       if (reclusterTimer) clearTimeout(reclusterTimer);
       const recluster = (): void => {
         // Don't recluster while an intentional scroll (a focus-exit restore or a
@@ -2299,6 +2343,7 @@ export function Timeline(): JSX.Element {
         if (anchor) restoreScrollAnchor(anchor);
       };
       reclusterTimer = setTimeout(recluster, 120);
+      }
 
       // A bar's min-width floor is pixel-based, so fitLaneBars depends on the px↔ms
       // scale. When the WIDTH changes (a real zoom — a pan keeps it constant) re-run
@@ -2793,6 +2838,11 @@ export function Timeline(): JSX.Element {
           // existing relative order within each band.
           order: (isMaintainer ? MAINTAINER_RANK : CONTRIBUTOR_RANK) + i,
           subgroupOrder: 'sortKey',
+          // 'fixed' height (from ALL items) keeps the row stable during a horizontal
+          // pan; a user-collapsed row uses 'auto' so it can still shrink to its label
+          // (collapse hides bands via subgroupVisibility, which 'fixed' ignores).
+          // Re-asserted on toggle in setRowCollapsed.
+          heightMode: collapsedRowsByUserRef.current.has(gid) ? 'auto' : 'fixed',
           // `tl-user-row` scopes the collapse transition; the per-group token
           // lets focusRows find this row's label + bar to animate (Fix 1); the
           // repo tint class shares the hue with the repo header + sibling rows.
