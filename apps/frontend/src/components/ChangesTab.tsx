@@ -280,7 +280,12 @@ function FileDiffBlock({ file, prId }: { file: PrFileDiff; prId: number }): JSX.
 
   return (
     <div>
-      <div className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-50 dark:hover:bg-gray-900/50">
+      {/* The file header is `sticky` to the Changes-tab scroll container: as you scroll
+          through a file's diff, its name stays pinned to the top of the pane and is
+          pushed up — and replaced — by the next file's header. Needs an opaque
+          background so the diff rows scrolling underneath don't show through, and a
+          z-index above the diff table. */}
+      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-gray-100 bg-white px-3 py-1.5 text-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:hover:bg-gray-900">
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
@@ -314,7 +319,7 @@ function FileDiffBlock({ file, prId }: { file: PrFileDiff; prId: number }): JSX.
       </div>
 
       {expanded && (
-        <div className="border-y border-gray-100 dark:border-gray-800">
+        <div className="border-b border-gray-100 dark:border-gray-800">
           {file.patch == null ? (
             <div className="px-3 py-3 text-center text-xs text-gray-500">
               Diff is too large or binary —{' '}
@@ -472,7 +477,10 @@ export function ChangesTab({ pr }: { pr: PrDetail }): JSX.Element {
   return (
     <div>
       <Header pr={pr} />
-      <div className="divide-y divide-gray-100 dark:divide-gray-800">
+      {/* No divide-y: each file's (sticky) header carries its own bottom border, so
+          divider lines would double up — and a sticky element scrolling over a
+          divide-y border looks broken. */}
+      <div>
         {files.map((f) => (
           <FileDiffBlock key={f.path} file={f} prId={pr.id} />
         ))}

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { usePinnedTabs } from './pinnedTabs.js';
 import {
   EVENT_CATEGORY_BY_TYPE,
   PR_STATUSES,
@@ -631,7 +632,10 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedCommentId: null,
       feedReturn: false,
     }),
-  openPrFocused: (id, threadId = null, focusAt = null, event = null) =>
+  openPrFocused: (id, threadId = null, focusAt = null, event = null) => {
+    // Any timeline navigation leaves a full-screen pinned PR tab so the move is visible
+    // (no-op when the board is already showing — the common case).
+    usePinnedTabs.getState().showTimeline();
     set((s) => ({
       // Navigating to a DIFFERENT PR than the selected one (the open-PRs strip, the Done
       // tab, search) is a full-board move — leave My Turn Focus Mode so it isn't a stale,
@@ -656,8 +660,10 @@ export const useFilters = create<FilterState>((set, get) => ({
       // centre branch runs even if a prior focus left timelineIsolate set.
       timelineIsolate: false,
       timelineFocusOpenPopover: false,
-    })),
-  showEventOnTimeline: (prId, focusAt, event) =>
+    }));
+  },
+  showEventOnTimeline: (prId, focusAt, event) => {
+    usePinnedTabs.getState().showTimeline();
     set({
       selectedPrId: prId,
       timelineFocusPr: prId,
@@ -665,8 +671,10 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineFocusEvent: event,
       timelineIsolate: false,
       timelineFocusOpenPopover: false,
-    }),
-  openFeedEventOnTimeline: (prId, focusAt, event) =>
+    });
+  },
+  openFeedEventOnTimeline: (prId, focusAt, event) => {
+    usePinnedTabs.getState().showTimeline();
     set({
       selectedPrId: prId,
       // Arm the feed-return history slot so the browser Back button returns to the Feed
@@ -679,8 +687,10 @@ export const useFilters = create<FilterState>((set, get) => ({
       // The one path that opts in: reveal the event's popover (and enter PR Focus if
       // it's cross-person). The Timeline consumer reads this in the show-event branch.
       timelineFocusOpenPopover: true,
-    }),
-  focusPrOnTimeline: (prId) =>
+    });
+  },
+  focusPrOnTimeline: (prId) => {
+    usePinnedTabs.getState().showTimeline();
     set({
       selectedPrId: prId,
       timelineFocusPr: prId,
@@ -688,7 +698,8 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineFocusEvent: null,
       timelineIsolate: true,
       timelineFocusOpenPopover: false,
-    }),
+    });
+  },
   consumeTimelineFocus: () =>
     set({
       timelineFocusPr: null,
@@ -697,7 +708,10 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineIsolate: false,
       timelineFocusOpenPopover: false,
     }),
-  centerTimelineNow: () => set({ timelineCenterAt: Date.now() }),
+  centerTimelineNow: () => {
+    usePinnedTabs.getState().showTimeline();
+    set({ timelineCenterAt: Date.now() });
+  },
   consumeTimelineCenter: () => set({ timelineCenterAt: null }),
   showActivityEntry: (prId, event) =>
     set({

@@ -2886,10 +2886,12 @@ export function Timeline(): JSX.Element {
           },
           hasComments: prsWithComments.has(pr.id),
         }),
-        className:
-          focusHiddenPrId != null && pr.id !== focusHiddenPrId
-            ? `${prClassName(pr)} pr-focus-hidden`
-            : prClassName(pr),
+        className: (() => {
+          const base = prClassName(pr, prsWithComments.has(pr.id));
+          return focusHiddenPrId != null && pr.id !== focusHiddenPrId
+            ? `${base} pr-focus-hidden`
+            : base;
+        })(),
         title: `#${pr.number} ${pr.title}`,
       } as DataItem;
     });

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useTimeline } from './useTimeline.js';
 import { useFilters } from '../store/filters.js';
+import { usePinnedTabs } from '../store/pinnedTabs.js';
 
 function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
@@ -30,6 +31,11 @@ export function useKeyboard(): void {
       if (e.key === 'Escape') {
         if (isTypingTarget(e.target)) {
           (e.target as HTMLElement).blur();
+        } else if (usePinnedTabs.getState().activeTab !== 'timeline') {
+          // A pinned PR is showing full-screen — Escape returns to the board (the
+          // tab stays pinned), taking precedence over focus/selection handling
+          // (those concern the timeline, which is hidden behind the overlay).
+          usePinnedTabs.getState().showTimeline();
         } else if (focusActive) {
           // In the PR-isolation focus overlay, Escape exits it exactly like the
           // on-canvas "Exit focus" button: the Timeline reacts to the bumped
@@ -47,6 +53,17 @@ export function useKeyboard(): void {
         return;
       }
       if (isTypingTarget(e.target)) return;
+
+      // While a pinned PR tab is full-screen the board is hidden behind the overlay —
+      // suppress the board-navigation shortcuts (j/k cycle, m My Turn focus) so they
+      // don't silently mutate it out of sight. `/` (filter) + `i` (Insights) stay, as
+      // their UI is still visible above the overlay.
+      if (
+        usePinnedTabs.getState().activeTab !== 'timeline' &&
+        (e.key === 'j' || e.key === 'k' || e.key === 'm')
+      ) {
+        return;
+      }
 
       if (e.key === '/') {
         e.preventDefault();

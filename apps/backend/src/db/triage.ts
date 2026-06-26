@@ -29,6 +29,12 @@ export interface TriageResult {
   reviewRequestedFromMe: boolean;
   // Count of other (user) reviewers also requested — for "also requested N".
   otherReviewersRequested: number;
+  // Standing review state (≥1 approving reviewer & none blocking → isApproved; any
+  // blocking changes_requested → isChangesRequested), independent of CI/mergeability —
+  // distinct from the `approved_ready` reason tag, which also requires the PR to be
+  // mergeable. Drive the green / red review-status outline on open timeline bars.
+  isApproved: boolean;
+  isChangesRequested: boolean;
   newSinceLastViewed: NewSinceLastViewed | null;
 }
 
@@ -40,6 +46,9 @@ function emptyNew(): NewSinceLastViewed {
 export interface ApprovalInfo {
   // approvals > 0 AND no outstanding changes-requested (the "approved" condition).
   approved: boolean;
+  // At least one reviewer's standing decision is "changes_requested" (blocking).
+  // Mutually exclusive with `approved` (a single block flips approved → false).
+  changesRequested: boolean;
   // How many distinct reviewers' standing decision is "approved".
   approvals: number;
   // Timestamp of the most recent standing approval (for "new since dismissed"
@@ -101,19 +110,12 @@ export async function computeApprovalInfoByPr(
   for (const [prId, e] of byPr) {
     out.set(prId, {
       approved: e.approvals > 0 && e.blocks === 0,
+      changesRequested: e.blocks > 0,
       approvals: e.approvals,
       latestApprovalAt: e.latestApprovalAt,
     });
   }
   return out;
-}
-
-/** Per-author latest review state → is the PR approved with no blocking review? */
-async function computeApprovedByPr(prIds: number[]): Promise<Set<number>> {
-  const info = await computeApprovalInfoByPr(prIds);
-  const approved = new Set<number>();
-  for (const [prId, e] of info) if (e.approved) approved.add(prId);
-  return approved;
 }
 
 /**
@@ -183,12 +185,13 @@ export async function computeTriage(
     }
   }
 
-  const approvedByPr = await computeApprovedByPr(prIds);
+  const approvalByPr = await computeApprovalInfoByPr(prIds);
 
   for (const pr of prs) {
     const req = reqByPr.get(pr.id);
     const reviewRequestedFromMe = req?.mine ?? false;
     const otherReviewersRequested = req?.others ?? 0;
+    const approval = approvalByPr.get(pr.id);
 
     // No "new" badges on closed/merged PRs — done is done.
     const newSinceLastViewed =
@@ -199,12 +202,14 @@ export async function computeTriage(
     out.set(pr.id, {
       reviewRequestedFromMe,
       otherReviewersRequested,
+      isApproved: approval?.approved ?? false,
+      isChangesRequested: approval?.changesRequested ?? false,
       newSinceLastViewed,
       reasonTag: deriveReasonTag(pr, {
         reviewRequestedFromMe,
         localUserId,
         newComments: newSinceLastViewed?.comments ?? 0,
-        approvedReady: approvedByPr.has(pr.id),
+        approvedReady: approval?.approved ?? false,
       }),
     });
   }

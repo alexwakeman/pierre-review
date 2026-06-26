@@ -686,6 +686,23 @@ body {
   background-color: #4b5563;
   border-color: #9ca3af;
 }
+/* Review-status outline on OPEN bars (added by prClassName, mutually exclusive):
+   green = approved, red = changes requested, grey = has discussion but no standing
+   verdict. Placed AFTER the state-colour rules so it overrides .pr-open's blue border.
+   A 2px BORDER (not a box-shadow) so it coexists with the selection / stalled /
+   cross-link rings, which all use box-shadow. */
+.vis-item.pr-bar.pr-changes-requested {
+  border-color: #ef4444;
+  border-width: 2px;
+}
+.vis-item.pr-bar.pr-approved {
+  border-color: #22c55e;
+  border-width: 2px;
+}
+.vis-item.pr-bar.pr-commented {
+  border-color: #9ca3af;
+  border-width: 2px;
+}
 .vis-item.pr-draft {
   background-image: repeating-linear-gradient(
     45deg,

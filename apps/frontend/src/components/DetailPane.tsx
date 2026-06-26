@@ -1,5 +1,6 @@
 import { useDeferredValue } from 'react';
 import { useFilters } from '../store/filters.js';
+import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { PrDetail } from './PrDetail.js';
 import { MyTurnPanel } from './MyTurnPanel/index.js';
 import { FeedPanel } from './FeedPanel.js';
@@ -25,6 +26,13 @@ export function DetailPane(): JSX.Element {
   const deferredPrId = useDeferredValue(selectedPrId);
   const bodyPrId = selectedPrId != null ? selectedPrId : deferredPrId;
 
+  // When the SAME PR is shown full-screen in the pinned-tab overlay, don't ALSO mount
+  // it here (it would sit invisibly behind the overlay) — two PrDetail instances for one
+  // PR would double the markViewed POST and let the hidden copy consume deep-link signals
+  // meant for the visible one. A different pinned PR (or the timeline tab) renders normally.
+  const activeTab = usePinnedTabs((s) => s.activeTab);
+  const showBody = bodyPrId != null && bodyPrId !== activeTab;
+
   return (
     <div className="relative h-full" data-testid="detail-pane">
       {selectedPrId != null && (
@@ -41,10 +49,10 @@ export function DetailPane(): JSX.Element {
         </div>
       )}
 
-      {bodyPrId != null ? (
+      {showBody ? (
         <PrDetail
           key={bodyPrId}
-          prId={bodyPrId}
+          prId={bodyPrId as number}
           selectedThreadId={selectedThreadId}
         />
       ) : myTurnOnly ? (

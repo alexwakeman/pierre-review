@@ -365,6 +365,8 @@ function mapTimelinePr(
     labels: (p.labels ?? []) as Label[],
     reasonTag: tr?.reasonTag ?? 'in_progress',
     reviewRequestedFromMe: tr?.reviewRequestedFromMe ?? false,
+    isApproved: tr?.isApproved ?? false,
+    isChangesRequested: tr?.isChangesRequested ?? false,
     newSinceLastViewed: tr?.newSinceLastViewed ?? null,
   };
 }

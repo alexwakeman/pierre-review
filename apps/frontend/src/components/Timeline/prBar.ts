@@ -127,12 +127,20 @@ export function renderPrBar(pr: TimelinePr, meta: PrBarMeta = {}): string {
   return title;
 }
 
-export function prClassName(pr: TimelinePr): string {
+export function prClassName(pr: TimelinePr, hasComments = false): string {
   const cls = ['pr-bar', `pr-${pr.state}`];
   if (pr.state === 'open') cls.push('pr-emph');
   else cls.push('pr-muted');
   if (pr.isDraft) cls.push('pr-draft');
   if (pr.isStalled) cls.push('pr-stalled');
   if (pr.reviewRequestedFromMe) cls.push('pr-myturn');
+  // Review-status outline on OPEN bars only (precedence: changes-requested → approved
+  // → has-comments). Mutually exclusive — at most one outline class is added — so a
+  // commented-but-approved PR reads as approved, and any blocking review wins.
+  if (pr.state === 'open') {
+    if (pr.isChangesRequested) cls.push('pr-changes-requested');
+    else if (pr.isApproved) cls.push('pr-approved');
+    else if (hasComments) cls.push('pr-commented');
+  }
   return cls.join(' ');
 }

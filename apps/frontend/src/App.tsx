@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { FilterBar } from './components/FilterBar.js';
 import { OpenPrsStrip } from './components/OpenPrsStrip/index.js';
+import { PinnedTabsBar } from './components/PinnedTabsBar.js';
+import { PrDetail } from './components/PrDetail.js';
 import { Timeline } from './components/Timeline/index.js';
 import { DetailPane } from './components/DetailPane.js';
 import { CountsPill } from './components/MyTurnPanel/CountsPill.js';
@@ -22,6 +24,7 @@ import { useFeedSync } from './hooks/useFeed.js';
 import { useNotificationPref } from './hooks/useNotificationPref.js';
 import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
+import { usePinnedTabs } from './store/pinnedTabs.js';
 import { ApiError, api } from './api/client.js';
 import { profileUrl } from './lib/ui.js';
 import { initAnalytics, trackPageView } from './lib/analytics.js';
@@ -82,6 +85,8 @@ export default function App(): JSX.Element {
   const meUser = me.data?.user ?? null;
   const claudeReviewEnabled = me.data?.claudeReviewEnabled ?? false;
   const onSignOut = (): void => {
+    // Drop pinned tabs so they don't leak to the next user on a shared browser.
+    usePinnedTabs.getState().clear();
     void api.logout().finally(() => window.location.assign('/'));
   };
   // Drives the focus-mode frame around the timeline + detail pane (the "lens").
@@ -95,13 +100,40 @@ export default function App(): JSX.Element {
   const insightsOpen = useFilters((s) => s.insightsOpen);
   const setInsightsOpen = useFilters((s) => s.setInsightsOpen);
 
+  // Pinned-PR tabs (under the Open-PRs strip). When a PR tab is active the main
+  // area shows that PR full-screen — rendered as an overlay OVER the timeline +
+  // detail pane (which stay mounted underneath, so returning to the board is
+  // instant and preserves all vis-timeline state). Guarded against an active id
+  // that's no longer pinned.
+  const activeTab = usePinnedTabs((s) => s.activeTab);
+  const pinned = usePinnedTabs((s) => s.pinned);
+  const activePinnedId =
+    typeof activeTab === 'number' && pinned.some((p) => p.id === activeTab)
+      ? activeTab
+      : null;
+
   // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
   // the dragged height is remembered across reloads. During a drag we set the
   // height on the DOM node directly (no per-frame React render) and only commit
   // to state — and localStorage — on release.
   const [paneH, setPaneH] = useLocalStorage<number>('pierre:detailPaneHeight', 384);
   const paneRef = useRef<HTMLElement>(null);
+  const timelineSectionRef = useRef<HTMLElement>(null);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+
+  // A11y: when a pinned PR is shown full-screen, the timeline + detail pane sit behind
+  // an opaque overlay. Mark them `inert` so keyboard / screen-reader users don't tab
+  // into hidden content (the overlay's controls become the only focusable ones in the
+  // main area). `inert` isn't typed in this @types/react version, so set it
+  // imperatively — same pattern as OpenPrsStrip's collapsed panel.
+  useEffect(() => {
+    const hidden = activePinnedId != null;
+    for (const el of [timelineSectionRef.current, paneRef.current]) {
+      if (!el) continue;
+      if (hidden) el.setAttribute('inert', '');
+      else el.removeAttribute('inert');
+    }
+  }, [activePinnedId]);
 
   const onResizeDown = (e: React.PointerEvent<HTMLDivElement>): void => {
     dragRef.current = {
@@ -355,9 +387,16 @@ export default function App(): JSX.Element {
       <WelcomeBackBanner />
       <FilterBar />
       <OpenPrsStrip />
+      <PinnedTabsBar />
 
-      <main className={`flex min-h-0 flex-1 flex-col${focusActive || myTurnOnly ? ' focus-frame' : ''}`}>
-        <section className="min-h-0 flex-1 overflow-hidden">
+      {/* `relative` anchors the full-screen pinned-PR overlay below. The focus-frame
+          lens is suppressed while a PR tab is active (it would draw under the overlay). */}
+      <main
+        className={`relative flex min-h-0 flex-1 flex-col${
+          activePinnedId == null && (focusActive || myTurnOnly) ? ' focus-frame' : ''
+        }`}
+      >
+        <section ref={timelineSectionRef} className="min-h-0 flex-1 overflow-hidden">
           <Timeline />
         </section>
         <div
@@ -377,6 +416,18 @@ export default function App(): JSX.Element {
         >
           <DetailPane />
         </section>
+
+        {/* A pinned PR shown full-screen: an overlay covering the timeline + detail
+            pane (both stay mounted underneath for instant, state-preserving return).
+            Keyed by id so switching tabs remounts a fresh PrDetail. */}
+        {activePinnedId != null && (
+          <div
+            data-testid="pinned-pr-overlay"
+            className="absolute inset-0 z-20 bg-white dark:bg-gray-950"
+          >
+            <PrDetail key={activePinnedId} prId={activePinnedId} selectedThreadId={null} />
+          </div>
+        )}
       </main>
       <ClaudeReviewBanner />
     </div>

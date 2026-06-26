@@ -328,6 +328,13 @@ export interface TimelinePr {
   labels: Label[];
   reasonTag: ReasonTag;
   reviewRequestedFromMe: boolean;
+  // Standing review state, derived from each reviewer's LATEST decisive review,
+  // independent of CI / mergeability. Drive the review-status outline on open timeline
+  // bars (green = approved, red = changes requested). Mutually exclusive: a PR with any
+  // blocking changes_requested is `isChangesRequested` (never `isApproved`). Always
+  // present; the UI only emphasises them on open PRs.
+  isApproved: boolean;
+  isChangesRequested: boolean;
   // null on closed/merged PRs (no "new" badges once a PR is done) and when
   // the PR has never been viewed.
   newSinceLastViewed: NewSinceLastViewed | null;
