@@ -50,6 +50,40 @@ export function stripNoiseFromDiff(
   return { diff: kept.join('\n'), excluded };
 }
 
+// Truncate a (noise-stripped) unified diff to roughly `maxChars`, cutting only at
+// whole-FILE boundaries (never mid-hunk), for the PROMPT only — routing + anchoring
+// keep the full diff. Whole file segments are kept in order until the next one would
+// blow the budget; the rest are reported as omitted. The first file is always kept
+// (even if it alone exceeds the budget), so a single huge file still gets reviewed.
+export function capDiff(
+  diff: string,
+  maxChars: number,
+): { diff: string; capped: boolean; omittedFiles: string[]; totalBytes: number } {
+  const totalBytes = diff.length;
+  if (totalBytes <= maxChars) {
+    return { diff, capped: false, omittedFiles: [], totalBytes };
+  }
+  const segs = splitDiffByFile(diff);
+  const kept: string[] = [];
+  const omittedFiles: string[] = [];
+  let used = 0;
+  for (const seg of segs) {
+    const cost = seg.text.length + 1; // +1 for the '\n' join
+    if (kept.length === 0 || used + cost <= maxChars) {
+      kept.push(seg.text);
+      used += cost;
+    } else {
+      omittedFiles.push(seg.path);
+    }
+  }
+  return {
+    diff: kept.join('\n'),
+    capped: omittedFiles.length > 0,
+    omittedFiles,
+    totalBytes,
+  };
+}
+
 // Appended to a comment placed on a fallback line, so PR readers know the inline
 // position is approximate (the finding's real line isn't part of this diff).
 export const FALLBACK_ANCHOR_NOTE =

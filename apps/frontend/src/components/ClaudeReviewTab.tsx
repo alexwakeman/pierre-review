@@ -132,9 +132,6 @@ const SEVERITY_CLASS: Record<ClaudeFindingSeverity, string> = {
 function metaLine(review: ClaudeReview): string {
   const parts: string[] = [review.model];
   if (review.costUsd != null) parts.push(`$${review.costUsd.toFixed(4)}`);
-  const tokens =
-    (review.inputTokens ?? 0) + (review.outputTokens ?? 0);
-  if (tokens > 0) parts.push(`${tokens.toLocaleString()} tokens`);
   if (review.numTurns != null) parts.push(`${review.numTurns} turns`);
   if (review.excludedFiles.length > 0) {
     parts.push(`${review.excludedFiles.length} noise files excluded`);
@@ -149,6 +146,70 @@ const PHASE_LABEL: Record<string, string> = {
   reviewing: 'Reviewing',
   persisting: 'Saving findings',
 };
+
+// Compact token count: 1234 → "1.2k", 1_200_000 → "1.2M".
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+// Token/cost breakdown for a finished run — the SAME shape as the live readout, so
+// the running tally visibly settles into the final figures. Surfaces the cache
+// split (read vs write), the hidden driver of a multi-turn run's cost. Renders
+// nothing for a 'skip' run / older rows with no token data.
+function UsageBreakdown({ review }: { review: ClaudeReview }): JSX.Element | null {
+  const { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens } =
+    review;
+  const total =
+    (inputTokens ?? 0) +
+    (outputTokens ?? 0) +
+    (cacheReadTokens ?? 0) +
+    (cacheCreationTokens ?? 0);
+  if (total <= 0) return null;
+
+  const items: { key: string; label: string; value: number; title: string }[] =
+    [];
+  if (outputTokens != null)
+    items.push({
+      key: 'out',
+      label: '↓ out',
+      value: outputTokens,
+      title: 'Output tokens generated (billed at the output rate — the priciest per token)',
+    });
+  if (inputTokens != null)
+    items.push({
+      key: 'in',
+      label: '↑ in',
+      value: inputTokens,
+      title: 'New (uncached) input tokens',
+    });
+  if (cacheReadTokens != null)
+    items.push({
+      key: 'cr',
+      label: '⟳ cache read',
+      value: cacheReadTokens,
+      title:
+        'Cached input tokens re-read each turn — billed at ~10% of the input rate, but the volume driver of a multi-turn run',
+    });
+  if (cacheCreationTokens != null)
+    items.push({
+      key: 'cw',
+      label: '✎ cache write',
+      value: cacheCreationTokens,
+      title: 'Tokens written to the prompt cache (billed at ~1.25× the input rate)',
+    });
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-xs text-gray-500 dark:text-gray-400">
+      {items.map((it) => (
+        <span key={it.key} title={it.title}>
+          {it.label} {fmtTokens(it.value)}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 // Live activity feed shown under the running spinner — the agent's rolling log
 // (newest-last). Auto-scrolls to the bottom as new lines stream in. Renders
@@ -743,8 +804,17 @@ function ClaudesReview({
             ⚠ suggests a deeper review
           </span>
         )}
+        {review.diffCapped && (
+          <span
+            className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs font-normal text-gray-500"
+            title="The diff shown to Claude was truncated to a size budget to control cost. Routing and line-anchoring still used the full diff, and any omitted files were listed for the worktree to read."
+          >
+            diff capped
+          </span>
+        )}
       </div>
       <div className="text-xs text-gray-500">{metaLine(review)}</div>
+      <UsageBreakdown review={review} />
       {review.summary != null && review.summary !== '' && (
         <div className="text-sm">
           <Markdown>{review.summary}</Markdown>
@@ -1218,9 +1288,29 @@ export function ClaudeReviewTab({
               disabled={cancel.isPending}
               className="ml-auto rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
             >
-              Cancel
+              {cancel.isPending ? 'Stopping…' : 'Stop'}
             </button>
           </div>
+          {/* Live token usage + running cost estimate (once the agent has a turn). */}
+          {status?.progress?.usage && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-xs text-gray-500 dark:text-gray-400">
+              <span title="Output tokens generated so far">
+                ↓ {fmtTokens(status.progress.usage.outputTokens)} out
+              </span>
+              <span title="New (uncached) input tokens billed so far">
+                ↑ {fmtTokens(status.progress.usage.inputTokens)} in
+              </span>
+              <span title="Cached input tokens read so far (billed at ~10% of input)">
+                ⟳ {fmtTokens(status.progress.usage.cacheReadTokens)} cache
+              </span>
+              <span
+                className="font-semibold text-gray-600 dark:text-gray-300"
+                title="Estimated cost so far. The cost recorded when the run finishes is the authoritative figure."
+              >
+                ~${status.progress.usage.estCostUsd.toFixed(2)}
+              </span>
+            </div>
+          )}
           {/* Live activity feed from the agent run (newest-last). */}
           <ActivityLog lines={status?.progress?.recentActivity ?? []} />
         </div>

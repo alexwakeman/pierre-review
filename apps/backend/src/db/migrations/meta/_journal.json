@@ -141,6 +141,13 @@
       "when": 1780800000010,
       "tag": "0019_finding_file_in_diff",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1780800000011,
+      "tag": "0020_claude_review_cost_telemetry",
+      "breakpoints": true
     }
   ]
 }

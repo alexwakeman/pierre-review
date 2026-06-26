@@ -218,6 +218,10 @@ export function buildUserPrompt(input: {
   // diff doesn't show; 'diff_only' states the diff is the whole change (no other
   // access). Defaults to 'worktree' to match the historical prompt.
   mode?: PromptMode;
+  // When the diff was size-capped (feature flag), the files whose diff bodies were
+  // omitted from the block below. Their names still appear in "Changed files"; the
+  // prompt tells the agent how to recover them per mode.
+  omittedFiles?: string[];
 }): string {
   const {
     repoFullName,
@@ -230,6 +234,7 @@ export function buildUserPrompt(input: {
     excludedFiles,
     diff,
     mode = 'worktree',
+    omittedFiles = [],
   } = input;
 
   const lines: string[] = [];
@@ -285,6 +290,16 @@ export function buildUserPrompt(input: {
   lines.push(diff);
   lines.push('```');
   lines.push('');
+
+  if (omittedFiles.length > 0) {
+    lines.push(
+      mode === 'diff_only'
+        ? `## ⚠ Diff truncated\nThis diff was truncated to a size budget, so the changes to the following ${omittedFiles.length} file(s) are NOT shown, and you have no repository access to read them. Review what IS shown, and set scopeUsed: 'worktree' to flag that a full review of the whole change is needed:`
+        : `## ⚠ Diff truncated\nThis diff was truncated to a size budget, so the changes to the following ${omittedFiles.length} file(s) are NOT shown below. They ARE in the checked-out worktree — use Read/Grep/Glob to inspect any you judge relevant (their names are in "Changed files" above):`,
+    );
+    for (const file of omittedFiles) lines.push(`- ${file}`);
+    lines.push('');
+  }
 
   lines.push(
     mode === 'diff_only'

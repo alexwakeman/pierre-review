@@ -35,7 +35,15 @@ export interface ReviewSuccess {
   costUsd: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
+  // Cache-token split (the bulk of input on a multi-turn run is cache reads — the
+  // hidden cost driver). Null when not captured.
+  cacheReadTokens?: number | null;
+  cacheCreationTokens?: number | null;
   numTurns: number | null;
+  // Full (noise-stripped) diff size in chars + whether the diff-size cap truncated
+  // the prompt — recorded so capped/uncapped runs can be cost-compared (A/B).
+  diffBytes?: number | null;
+  diffCapped?: boolean | null;
   excludedFiles: string[];
   findings: PersistedFinding[];
 }
@@ -46,7 +54,11 @@ export interface ReviewTelemetry {
   costUsd?: number | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheCreationTokens?: number | null;
   numTurns?: number | null;
+  diffBytes?: number | null;
+  diffCapped?: boolean | null;
   scope?: ClaudeReviewScope | null;
   excludedFiles?: string[];
 }
@@ -107,7 +119,11 @@ export async function saveReviewSuccess(
         costUsd: data.costUsd,
         inputTokens: data.inputTokens,
         outputTokens: data.outputTokens,
+        cacheReadTokens: data.cacheReadTokens ?? null,
+        cacheCreationTokens: data.cacheCreationTokens ?? null,
         numTurns: data.numTurns,
+        diffBytes: data.diffBytes ?? null,
+        diffCapped: data.diffCapped ?? null,
         excludedFiles: data.excludedFiles,
         finishedAt: new Date(),
       })
@@ -152,7 +168,11 @@ export async function markReviewFailed(
       costUsd: telemetry.costUsd ?? null,
       inputTokens: telemetry.inputTokens ?? null,
       outputTokens: telemetry.outputTokens ?? null,
+      cacheReadTokens: telemetry.cacheReadTokens ?? null,
+      cacheCreationTokens: telemetry.cacheCreationTokens ?? null,
       numTurns: telemetry.numTurns ?? null,
+      diffBytes: telemetry.diffBytes ?? null,
+      diffCapped: telemetry.diffCapped ?? null,
       scope: telemetry.scope ?? null,
       excludedFiles: telemetry.excludedFiles ?? null,
       finishedAt: new Date(),

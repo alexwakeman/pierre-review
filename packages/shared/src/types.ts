@@ -954,13 +954,20 @@ export interface TimelineQuery {
 // PR and returns structured findings. Claude's output is read-only reference; the
 // user authors their own review body/verdict and ticks which findings to post.
 
-export type ClaudeReviewModel = 'claude-opus-4-8' | 'claude-sonnet-4-6';
+export type ClaudeReviewModel =
+  | 'claude-opus-4-8'
+  | 'claude-sonnet-4-6'
+  | 'claude-haiku-4-5';
 
 // Runtime list for the model picker (frontend bundles shared; the backend keeps a
 // local copy and only `import type`s from here — shared isn't shipped at runtime).
+// Ordered most→least capable (and most→least expensive). Haiku 4.5 is the cheap
+// fast option — ideal for a quick pass on a small/bounded diff; it does not accept
+// the `effort` knob, so it runs at the model's own default thinking depth.
 export const CLAUDE_REVIEW_MODELS: ClaudeReviewModel[] = [
   'claude-opus-4-8',
   'claude-sonnet-4-6',
+  'claude-haiku-4-5',
 ];
 
 export type ClaudeReviewStatus =
@@ -1099,7 +1106,15 @@ export interface ClaudeReview {
   costUsd: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
+  // Cache-token split — on a multi-turn run the input is mostly cache reads, the
+  // dominant cost the plain inputTokens figure hid. Null on older/uncaptured runs.
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
   numTurns: number | null;
+  // Full noise-stripped diff size (chars) + whether the diff-size cap truncated the
+  // prompt — for cost-comparing capped vs uncapped runs. Null on older runs.
+  diffBytes: number | null;
+  diffCapped: boolean | null;
   error: string | null;
   excludedFiles: string[];
   postedReviewId: string | null;
@@ -1192,6 +1207,16 @@ export interface ClaudeReviewProgress {
   // The resolved review mode, set once the router has decided (and carried through
   // the rest of the run), so the UI can show the depth while the review runs.
   reviewMode?: ReviewMode;
+  // Live, cumulative token usage + a running cost ESTIMATE (from a per-model price
+  // table — the persisted run uses the SDK's authoritative cost). Present once the
+  // agent has produced at least one turn. Live-only; not persisted.
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    estCostUsd: number;
+  };
 }
 
 export interface ClaudeReviewStatusResponse {

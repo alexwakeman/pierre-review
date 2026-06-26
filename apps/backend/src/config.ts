@@ -32,6 +32,19 @@ function floatFromEnv(key: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// The Claude Agent SDK `effort` levels (guides thinking depth + overall token
+// spend). Lower effort → fewer/cheaper thinking tokens + terser output. NOTE:
+// `effort` is rejected by Haiku 4.5 — only models that accept it get it (see
+// review/agent.ts EFFORT_CAPABLE_MODELS).
+const REVIEW_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type ReviewEffort = (typeof REVIEW_EFFORTS)[number];
+function effortFromEnv(key: string, fallback: ReviewEffort): ReviewEffort {
+  const raw = process.env[key];
+  return (REVIEW_EFFORTS as readonly string[]).includes(raw ?? '')
+    ? (raw as ReviewEffort)
+    : fallback;
+}
+
 // ---- Deployment mode (the master switch) ----
 // `local` (default): SQLite via better-sqlite3, `gh auth token` auth, one
 // implicit account, no landing page — the unchanged zero-config experience.
@@ -138,10 +151,42 @@ export const config = {
   // Per-run caps (cost/disk/time runaway guards). The diff is inlined in full, so
   // reviews need far fewer turns than the old default; 30 is still generous.
   reviewMaxTurns: intFromEnv('REVIEW_MAX_TURNS', 30),
-  reviewBudgetUsd: floatFromEnv('REVIEW_BUDGET_USD', 1.0),
+  // Hard USD ceiling per run. When the SDK trips this it returns an
+  // `error_max_budget_usd` result BEFORE the agent calls submit_review — so a run
+  // that hits the cap is recorded FAILED and still bills (you pay for no review).
+  // The cap must therefore sit ABOVE the cost of a normal completed review, not at
+  // it; `reviewEffort` below is the real cost lever (a large diff at default-high
+  // effort is what blew the old $1 cap). Lower REVIEW_BUDGET_USD only if you'd
+  // rather a borderline review fail than complete.
+  reviewBudgetUsd: floatFromEnv('REVIEW_BUDGET_USD', 1.5),
   // Turn cap for a diff-only run. These are TOOL-LESS (only submit_review), so they
   // should finish in ~2 turns; a tight cap is a cheap runaway guard.
   reviewDiffOnlyMaxTurns: intFromEnv('REVIEW_DIFF_ONLY_MAX_TURNS', 6),
+  // Haiku reaches a conclusion in MORE steps than Sonnet/Opus (smaller model, more
+  // tool round-trips), so it routinely tripped the turn cap mid-review and failed.
+  // Give it proportionally more turns in both modes. Its low per-token price means
+  // the extra turns are cheap, and maxBudgetUsd is still the real spend guard.
+  reviewHaikuTurnMultiplier: floatFromEnv('REVIEW_HAIKU_TURN_MULTIPLIER', 2),
+
+  // ---- Diff-size cap ----
+  // A very large inlined diff is the dominant cost on a big PR (it's the cached
+  // prefix re-read every turn). The diff shown IN THE PROMPT is truncated at a
+  // whole-file boundary to this many characters; routing + line anchoring still use
+  // the FULL diff, and the changed-file LIST stays complete (so a worktree run can
+  // Read the omitted files). ON by default — it proved its worth on a large PR that
+  // failed without it. ~60k chars ≈ ~15k tokens, so only outlier PRs are truncated
+  // and a normal review is unaffected; each run records diffCapped + the full diff
+  // size, so you can still A/B by setting REVIEW_DIFF_CAP_ENABLED=false for a
+  // baseline run and comparing the recorded cost.
+  reviewDiffCapEnabled: process.env.REVIEW_DIFF_CAP_ENABLED !== 'false',
+  reviewDiffCapChars: intFromEnv('REVIEW_DIFF_CAP_CHARS', 60000),
+  // Agent `effort` per mode — the dominant cost knob (unset ⇒ the SDK default
+  // `high`, which over-thinks bounded reviews). A diff-only run just hunts bugs in a
+  // small inlined diff, so `low` is plenty; a worktree run reasons across files, so
+  // `medium` keeps that while trimming the over-exploration that ran up the bill.
+  // Applied only to effort-capable models (Sonnet/Opus); Haiku ignores it.
+  reviewEffort: effortFromEnv('REVIEW_EFFORT', 'medium'),
+  reviewDiffOnlyEffort: effortFromEnv('REVIEW_DIFF_ONLY_EFFORT', 'low'),
   // At most one review per PR; this caps concurrent reviews across all PRs. Default
   // 4 so the user can bulk-review (extras queue, see review-manager). Raising this
   // also DISABLES the pasted-key override (which mutates process.env and is only

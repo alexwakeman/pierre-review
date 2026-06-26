@@ -28,6 +28,7 @@ import {
 } from './prompt.js';
 import {
   buildAnchorIndex,
+  capDiff,
   extractHunk,
   fetchPrDiff,
   isFindingAnchored,
@@ -35,6 +36,13 @@ import {
   stripNoiseFromDiff,
 } from './post-review.js';
 import { decideReviewMode } from './routing.js';
+import { estimateCostUsd } from './pricing.js';
+import {
+  recordUsage,
+  sumModelUsage,
+  sumUsageMap,
+  type UsageTokens,
+} from './usage.js';
 import {
   markReviewCancelled,
   markReviewFailed,
@@ -76,6 +84,12 @@ const WORKTREE_TOOLS = [
 // A DIFF-ONLY review is tool-less: the agent has the full diff in its prompt and no
 // repository to explore, so submit_review is the only tool it gets.
 const DIFF_ONLY_TOOLS = ['mcp__review__submit_review'];
+// Models that accept the `effort` option. Haiku 4.5 rejects it (the API 400s), so it
+// runs without an effort hint — its low per-token price is its cost lever instead.
+const EFFORT_CAPABLE_MODELS: ReadonlySet<string> = new Set([
+  'claude-opus-4-8',
+  'claude-sonnet-4-6',
+]);
 const DISALLOWED_TOOLS = [
   'Write',
   'Edit',
@@ -103,6 +117,39 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
   let tempCwd: string | null = null;
   let result: SDKResultMessage | null = null;
   let restoreEnv: (() => void) | null = null;
+  // Cost/size telemetry, accumulated as the run progresses so it's available even on
+  // an early failure (function-scoped so the catch block can read it too). Token
+  // totals are summed from each turn's usage (the SDK result's `usage` reports only
+  // the LAST turn's uncached input — misleadingly tiny); the authoritative cost is
+  // the result's total_cost_usd, with the live estimate as a fallback.
+  let diffBytes: number | null = null;
+  let diffCapped = false;
+  // Per-message usage keyed by the message UUID (latest-wins). The SDK streams each
+  // assistant turn such that a naive running SUM double-counts (~2× — it re-emits a
+  // message per turn); keying by UUID collapses duplicates so the live tally tracks
+  // the SDK's own accounting. The PERSISTED totals don't trust this at all — they
+  // come from the result message's authoritative `modelUsage` (see buildTelemetry).
+  const usageByUuid = new Map<string, UsageTokens>();
+  const buildTelemetry = () => {
+    // Prefer the SDK's authoritative cumulative usage (the same tally behind
+    // total_cost_usd); fall back to the de-duplicated live map if it's absent
+    // (e.g. an early failure with no result message).
+    const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
+    const hasUsage =
+      usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
+    return {
+      costUsd:
+        result?.total_cost_usd ??
+        (hasUsage ? estimateCostUsd(args.model, usage) : null),
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheCreationTokens: usage.cacheCreationTokens,
+      numTurns: result?.num_turns ?? null,
+      diffBytes,
+      diffCapped,
+    };
+  };
 
   try {
     // Fetch the diff FIRST — it's independent of any clone (`gh pr diff`), so the
@@ -113,6 +160,7 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
       rawDiff,
       isNoiseFile,
     );
+    diffBytes = strippedDiff.length;
     const changedFiles = splitDiffByFile(strippedDiff).map((s) => s.path);
 
     // Route: skip / diff_only / worktree. Recorded on the run for audit BEFORE
@@ -171,6 +219,34 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
       allowedTools = DIFF_ONLY_TOOLS;
       maxTurns = config.reviewDiffOnlyMaxTurns;
     }
+    // Haiku reaches a verdict in more steps than Sonnet/Opus, so it tripped the turn
+    // cap and failed. Give it proportionally more turns (cheap at its token price;
+    // maxBudgetUsd remains the spend guard).
+    if (args.model === 'claude-haiku-4-5') {
+      maxTurns = Math.ceil(maxTurns * config.reviewHaikuTurnMultiplier);
+    }
+
+    // Effort guides thinking depth + overall token spend — the dominant cost knob.
+    // Per-mode (diff-only runs need far less than a cross-file worktree review), and
+    // only for models that accept it (Haiku rejects `effort`; it runs unset).
+    const effort = EFFORT_CAPABLE_MODELS.has(args.model)
+      ? mode === 'diff_only'
+        ? config.reviewDiffOnlyEffort
+        : config.reviewEffort
+      : undefined;
+
+    // Diff-size cap (feature-flagged): truncate the diff shown IN THE PROMPT at a
+    // whole-file boundary. Routing already ran on the full diff, the changed-file
+    // LIST stays complete, and anchoring below still uses `strippedDiff` — only the
+    // prompt's diff body shrinks. `diffCapped` is recorded for the A/B comparison.
+    let promptDiff = strippedDiff;
+    let omittedFiles: string[] = [];
+    if (config.reviewDiffCapEnabled) {
+      const capped = capDiff(strippedDiff, config.reviewDiffCapChars);
+      promptDiff = capped.diff;
+      omittedFiles = capped.omittedFiles;
+      diffCapped = capped.capped;
+    }
 
     // If the user supplied an Anthropic API key, override ambient Claude auth for
     // this run (restored in finally). Safe only at reviewConcurrency === 1.
@@ -204,11 +280,13 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
         baseRef: args.baseRefName,
         changedFiles,
         excludedFiles: excluded,
-        diff: strippedDiff,
+        diff: promptDiff,
         mode,
+        omittedFiles,
       }),
       options: {
         model: args.model,
+        ...(effort ? { effort } : {}),
         systemPrompt: systemPromptForMode(mode),
         cwd,
         permissionMode: 'bypassPermissions',
@@ -241,6 +319,14 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
 
     for await (const message of q) {
       if (message.type === 'assistant') {
+        // Record this turn's usage de-duplicated by API request (see usage.ts) — a
+        // naive per-message sum double-counts (~2×) because the SDK emits several
+        // messages per request, each carrying that request's same usage.
+        try {
+          recordUsage(usageByUuid, message);
+        } catch {
+          /* usage shape varies — never let it break the run */
+        }
         // Derive short, human-readable lines from the assistant turn's content
         // blocks. Defensive throughout: content may be missing and tool input
         // shapes vary — a malformed block must never abort the review.
@@ -249,22 +335,17 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
         } catch {
           /* never let progress derivation break the run */
         }
+        const live = sumUsageMap(usageByUuid);
         onProgress({
           phase: 'reviewing',
           recentActivity: [...activity],
           reviewMode: mode,
+          usage: { ...live, estCostUsd: estimateCostUsd(args.model, live) },
         });
       } else if (message.type === 'result') {
         result = message;
       }
     }
-
-    const telemetry = {
-      costUsd: result?.total_cost_usd ?? null,
-      inputTokens: result?.usage?.input_tokens ?? null,
-      outputTokens: result?.usage?.output_tokens ?? null,
-      numTurns: result?.num_turns ?? null,
-    };
 
     if (!captured) {
       const reason =
@@ -272,7 +353,7 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
           ? `agent stopped (${result.subtype}) without submitting a review`
           : 'agent finished without calling submit_review';
       await markReviewFailed(reviewId, reason, {
-        ...telemetry,
+        ...buildTelemetry(),
         scope: null,
         excludedFiles: excluded,
       });
@@ -307,10 +388,7 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
       scope: payload.scopeUsed,
       summary: payload.summary,
       verdict: payload.verdict,
-      costUsd: telemetry.costUsd,
-      inputTokens: telemetry.inputTokens,
-      outputTokens: telemetry.outputTokens,
-      numTurns: telemetry.numTurns,
+      ...buildTelemetry(),
       excludedFiles: excluded,
       findings,
     });
@@ -320,12 +398,7 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
       await markReviewCancelled(reviewId);
       return;
     }
-    await markReviewFailed(reviewId, errorMessage(err), {
-      costUsd: result?.total_cost_usd ?? null,
-      inputTokens: result?.usage?.input_tokens ?? null,
-      outputTokens: result?.usage?.output_tokens ?? null,
-      numTurns: result?.num_turns ?? null,
-    });
+    await markReviewFailed(reviewId, errorMessage(err), buildTelemetry());
   } finally {
     restoreEnv?.();
     if (repoCloneDir && worktreePath) {

@@ -423,7 +423,7 @@ export const claudeReviews = pgTable(
       enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
     }).notNull(),
     model: text('model', {
-      enum: ['claude-opus-4-8', 'claude-sonnet-4-6'],
+      enum: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
     }).notNull(),
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),
     // Deterministic router decision + inputs, recorded before the agent runs. See
@@ -441,7 +441,15 @@ export const claudeReviews = pgTable(
     costUsd: doublePrecision('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
+    // Cache-token split (a multi-turn run's input is mostly cache reads — the hidden
+    // cost driver the plain input_tokens column hid). Null when not captured.
+    cacheReadTokens: integer('cache_read_tokens'),
+    cacheCreationTokens: integer('cache_creation_tokens'),
     numTurns: integer('num_turns'),
+    // Full (noise-stripped) diff size in chars + whether the diff-size cap truncated
+    // the prompt — for A/B cost comparison of capped vs uncapped runs.
+    diffBytes: integer('diff_bytes'),
+    diffCapped: boolean('diff_capped'),
     error: text('error'),
     excludedFiles: jsonb('excluded_files').$type<string[]>(),
     postedReviewId: text('posted_review_id'),

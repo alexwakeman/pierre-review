@@ -64,6 +64,13 @@
       "when": 1781638375824,
       "tag": "0008_slimy_toxin",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782463748175,
+      "tag": "0009_fuzzy_jubilee",
+      "breakpoints": true
     }
   ]
 }

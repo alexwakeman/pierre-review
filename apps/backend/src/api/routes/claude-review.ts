@@ -55,7 +55,7 @@ import {
 import { isNoiseFile } from '../../review/prompt.js';
 import { accountIdOf } from '../plugins/auth.js';
 
-const MODELS = ['claude-opus-4-8', 'claude-sonnet-4-6'];
+const MODELS = ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
 const VERDICTS = ['COMMENT', 'REQUEST_CHANGES', 'APPROVE'];
 const REVIEW_MODES = ['auto', 'diff_only', 'worktree'];
 

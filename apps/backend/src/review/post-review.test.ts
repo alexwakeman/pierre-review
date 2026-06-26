@@ -3,6 +3,7 @@ import type { ClaudeFinding } from '@pierre-review/shared';
 import {
   buildAnchorIndex,
   buildReview,
+  capDiff,
   extractHunk,
   fallbackAnchor,
   findingCommentBody,
@@ -203,6 +204,36 @@ describe('stripNoiseFromDiff', () => {
     expect(excluded).toEqual([]);
     expect(diff).toContain('src/foo.ts');
     expect(diff).toContain('pnpm-lock.yaml');
+  });
+});
+
+describe('capDiff', () => {
+  it('returns the diff unchanged when it fits the budget', () => {
+    const r = capDiff(TWO_FILE_DIFF, TWO_FILE_DIFF.length);
+    expect(r.capped).toBe(false);
+    expect(r.omittedFiles).toEqual([]);
+    expect(r.diff).toBe(TWO_FILE_DIFF);
+    expect(r.totalBytes).toBe(TWO_FILE_DIFF.length);
+  });
+
+  it('truncates at a whole-file boundary, keeping earlier files', () => {
+    const [first] = splitDiffByFile(TWO_FILE_DIFF);
+    // A budget that fits the first file but not the second.
+    const r = capDiff(TWO_FILE_DIFF, first!.text.length);
+    expect(r.capped).toBe(true);
+    expect(r.omittedFiles).toEqual(['pnpm-lock.yaml']);
+    // The kept file is intact; the omitted file's body is gone entirely (no
+    // mid-hunk truncation).
+    expect(r.diff).toContain('+const added = 2;');
+    expect(r.diff).not.toContain('newdep: 1.0.0');
+    expect(r.diff).not.toContain('pnpm-lock.yaml');
+  });
+
+  it('always keeps the first file even if it alone exceeds the budget', () => {
+    const r = capDiff(TWO_FILE_DIFF, 1);
+    expect(r.capped).toBe(true);
+    expect(r.diff).toContain('diff --git a/src/foo.ts b/src/foo.ts');
+    expect(r.omittedFiles).toEqual(['pnpm-lock.yaml']);
   });
 });
 

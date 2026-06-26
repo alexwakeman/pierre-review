@@ -450,7 +450,7 @@ export const claudeReviews = sqliteTable(
       enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
     }).notNull(),
     model: text('model', {
-      enum: ['claude-opus-4-8', 'claude-sonnet-4-6'],
+      enum: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
     }).notNull(),
     // Null until the agent decides whether it explored the worktree.
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),
@@ -474,7 +474,15 @@ export const claudeReviews = sqliteTable(
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
+    // Cache-token split (a multi-turn run's input is mostly cache reads — the hidden
+    // cost driver the plain input_tokens column hid). Null when not captured.
+    cacheReadTokens: integer('cache_read_tokens'),
+    cacheCreationTokens: integer('cache_creation_tokens'),
     numTurns: integer('num_turns'),
+    // Full (noise-stripped) diff size in chars + whether the diff-size cap truncated
+    // the prompt — for A/B cost comparison of capped vs uncapped runs.
+    diffBytes: integer('diff_bytes'),
+    diffCapped: integer('diff_capped', { mode: 'boolean' }),
     error: text('error'),
     // Noise files (lockfiles/generated) stripped from the diff before review.
     excludedFiles: text('excluded_files', { mode: 'json' }).$type<string[]>(),
