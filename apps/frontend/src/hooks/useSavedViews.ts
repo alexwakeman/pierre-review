@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   pickFilterBarState,
   sanitizePersistedFilters,
@@ -18,6 +18,12 @@ export interface SavedView {
 }
 
 const KEY = 'pierre:savedViews';
+// The NAME of the saved view that was active when the app last had focus. Persisted
+// so a bare load (no URL params) re-applies that view (see loadActiveSavedView /
+// useUrlState). Distinct from the generic 'pierre:filterBarState' blob: this records
+// the user's INTENT ("I'm in view X"), so the view stays authoritative even if the
+// two ever diverge, and falls back to the filter blob when no view is active.
+const ACTIVE_KEY = 'pierre:activeView';
 
 function load(): SavedView[] {
   try {
@@ -27,6 +33,19 @@ function load(): SavedView[] {
     return Array.isArray(parsed) ? (parsed as SavedView[]) : [];
   } catch {
     return [];
+  }
+}
+
+// The saved view that was active on last use, resolved against the current saved-view
+// list (null if none was active, or it has since been deleted/renamed). Called by
+// useUrlState on a bare load to restore the user's last view.
+export function loadActiveSavedView(): SavedView | null {
+  try {
+    const name = localStorage.getItem(ACTIVE_KEY);
+    if (!name) return null;
+    return load().find((v) => v.name === name) ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -50,6 +69,18 @@ export function useSavedViews(): {
     const current = pickFilterBarState(s);
     return views.find((v) => savedViewMatchesCurrent(v.state, current))?.name ?? null;
   });
+
+  // Mirror the live active view to localStorage so a bare load restores it (Part 1).
+  // Cleared when no view matches (a manual filter edit), so we never resurrect a view
+  // the user has since edited away from.
+  useEffect(() => {
+    try {
+      if (activeName != null) localStorage.setItem(ACTIVE_KEY, activeName);
+      else localStorage.removeItem(ACTIVE_KEY);
+    } catch {
+      /* quota / private-mode — non-fatal */
+    }
+  }, [activeName]);
 
   const persist = useCallback((next: SavedView[]): void => {
     const sorted = [...next].sort((a, b) => a.name.localeCompare(b.name));

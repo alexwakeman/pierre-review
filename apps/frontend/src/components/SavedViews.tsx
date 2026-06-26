@@ -3,10 +3,12 @@ import { useSavedViews } from '../hooks/useSavedViews.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 
 // "Views ▾" dropdown in the filter bar: save the current filter set under a name
-// and switch between saved views in one click (apply / delete / save). Snapshots
-// only the filter bar (see useSavedViews); applying replaces the board's filters.
-// Disabled during focus, like Clear filters — you reshape the board after leaving
-// the lens.
+// and switch between saved views in one click. Each row carries apply (the name),
+// overwrite (↻ — re-save THIS view with the current filters; disabled when it already
+// matches), and delete (✕). Snapshots only the filter bar (see useSavedViews);
+// applying replaces the board's filters. The active view is remembered across reloads
+// (useSavedViews persists its name; useUrlState restores it on a bare load). Disabled
+// during focus, like Clear filters — you reshape the board after leaving the lens.
 export function SavedViews({ disabled }: { disabled: boolean }): JSX.Element {
   const { views, activeName, save, remove, apply } = useSavedViews();
   const [open, setOpen] = useState(false);
@@ -86,6 +88,20 @@ export function SavedViews({ disabled }: { disabled: boolean }): JSX.Element {
                       {isActive ? '✓' : ''}
                     </span>
                     <span className="min-w-0 truncate">{v.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => save(v.name)}
+                    disabled={isActive}
+                    title={
+                      isActive
+                        ? `"${v.name}" already matches the current filters`
+                        : `Overwrite "${v.name}" with the current filters`
+                    }
+                    aria-label={`Overwrite view ${v.name} with current filters`}
+                    className="px-1.5 py-1.5 text-xs text-gray-400 hover:text-blue-500 disabled:cursor-default disabled:opacity-30 disabled:hover:text-gray-400"
+                  >
+                    ↻
                   </button>
                   <button
                     type="button"

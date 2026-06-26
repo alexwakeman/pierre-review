@@ -20,6 +20,7 @@ import {
   type PrStatus,
   type ReviewState,
 } from '@pierre-review/shared';
+import { loadActiveSavedView } from './useSavedViews.js';
 
 const PRESETS: RangePreset[] = ['7d', '14d', '30d', '90d', 'custom'];
 
@@ -180,12 +181,17 @@ export function useUrlState(): void {
   useEffect(() => {
     if (!hydrated.current) {
       // URL present (?…) → authoritative (shared link / duplicated tab). Bare URL →
-      // restore the last-used filter bar from localStorage.
+      // restore the last ACTIVE saved view by name if there was one (Part 1: the user's
+      // explicit "remember my view"), otherwise the generic last-used filter bar blob.
+      // Both resolve to the same pickFilterBarState shape, so hydrate handles either.
       const hasUrlParams = window.location.search.length > 1;
       if (hasUrlParams) {
         useFilters.getState().hydrate(readFromUrl());
       } else {
-        const persisted = loadPersistedFilters();
+        const activeView = loadActiveSavedView();
+        const persisted = activeView
+          ? sanitizePersistedFilters(activeView.state)
+          : loadPersistedFilters();
         if (persisted) useFilters.getState().hydrate(persisted);
       }
       hydrated.current = true;

@@ -623,48 +623,27 @@ body {
   font-size: 11px;
 }
 /* Closed / merged recede into historical context — but stay legible: the dim is
-   gentle (0.5 washed the white label out) and state is carried by colour. */
+   gentle (0.5 washed the white label out) and state is carried by colour. They keep
+   the same font-size (and so the same single-row height) as open bars now — the
+   recede is opacity + tighter title truncation, not a shorter bar. */
 .vis-item.pr-muted {
   opacity: 0.85;
-  font-size: 10px;
 }
 .vis-item.pr-muted .pr-title {
   max-width: 16ch;
 }
-/* status line under the title on open bars */
-.pr-status {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 1px 4px 2px;
-  font-size: 9px;
-  line-height: 1.2;
-}
+/* Leading CI dot at the very start of an open PR's bar — a success/fail glance.
+   The fuller detail (merge state, comment/thread stats) lives in the hover tooltip
+   (.vis-tooltip / .pr-tt below). */
 .pr-ci {
   display: inline-block;
   width: 7px;
   height: 7px;
   border-radius: 50%;
 }
-.pr-warn {
-  color: #fdba74;
-  font-weight: 700;
-}
-/* "Has comments" mark — a small speech bubble, kept low-key (the thread-state
-   dots carry the detail). Sits among the status-line bits on open bars and
-   inline at the end of muted (closed/merged) bars. */
-.pr-comment-mark {
-  display: inline-flex;
-  align-items: center;
-  color: #e0f2fe;
-  opacity: 0.85;
-}
-.pr-comment-mark svg {
-  display: block;
-}
-.vis-item.pr-muted .pr-comment-mark {
-  margin-left: 2px;
-  opacity: 0.75;
+.pr-ci-lead {
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55);
 }
 /* State colours. These intentionally carry the `.pr-bar` class too (raising them
    to a 3-class selector): vis-timeline ships a bright-yellow `.vis-item.vis-selected`
@@ -821,22 +800,63 @@ body {
 .pr-stall {
   color: #fca5a5;
 }
-.pr-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: 2px;
+
+/* Hover tooltip for a PR bar. vis renders the item `title` as HTML (the timeline
+   runs with xss disabled); prTooltip builds the markup. Override vis's default
+   pale-yellow single-line box into a dark, multi-line card that reads on either
+   theme — it floats above the board, so a dark card is legible regardless. */
+div.vis-tooltip {
+  white-space: normal;
+  max-width: 22rem;
+  padding: 7px 9px;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #e5e7eb;
+  background-color: #111827;
+  border: 1px solid #374151;
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
-.pr-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+.pr-tt-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: #f9fafb;
 }
-.pr-dot-n {
+.pr-tt-meta {
+  margin-top: 1px;
+  font-size: 10px;
+  color: #9ca3af;
+}
+.pr-tt-section {
+  margin-top: 5px;
   font-size: 9px;
   font-weight: 700;
-  margin-right: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9ca3af;
+}
+.pr-tt-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+.pr-tt-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.pr-tt-warn {
+  color: #fdba74;
+}
+.pr-tt-warn-icon {
+  font-weight: 700;
+}
+.pr-tt-quiet {
+  color: #cbd5e1;
 }
 
 /* ---- custom SVG event markers + clusters ---- */

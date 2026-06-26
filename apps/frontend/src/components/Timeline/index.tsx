@@ -26,7 +26,7 @@ import {
 import { useMyTurn, useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
 import { MAX_RANGE_DAYS, resolveRange, useFilters } from '../../store/filters.js';
 import { escapeHtml, indexUsers, userLabel, watchedGlyphHtml } from '../../lib/ui.js';
-import { renderPrBar, prClassName, barIsTall } from './prBar.js';
+import { renderPrBar, prClassName, prTooltip } from './prBar.js';
 import { computeUserStats, renderUserLabel, type UserStats } from './userRow.js';
 import { UserStatsPopover } from './UserStatsPopover.js';
 import { buildMarkerItems } from './clustering.js';
@@ -2702,10 +2702,9 @@ export function Timeline(): JSX.Element {
     // lane as filters toggle and own-work markers can resolve their lane even
     // when the bar itself is filtered out. Mirrored into a ref for
     // rebuildMarkers (own-work event bands) + focusSubgroups (kept lane band).
-    // tierOf keeps tall (open + status line) and short (merged/closed) bars in
-    // separate lanes so each lane's band height is uniform — otherwise a short bar
-    // sharing a lane with a tall one floats above the band bottom and strands its
-    // own-work markers far below it. hasComments mirrors renderPrBar's input.
+    // Every bar is now a single uniform row (open and closed alike — the old taller
+    // open-bar status line moved to the hover tooltip), so one lane tier suffices and
+    // any bar can share a lane with any other.
     // Lanes pack by real spans now (zoom-stable, compact); the pixel-overlap of
     // min-width bars is resolved by fitLaneBars after the diff below (which needs
     // the laid-out draw width, so it runs post-redraw). Track the window width for
@@ -2714,9 +2713,7 @@ export function Timeline(): JSX.Element {
     lanedWindowMsRef.current = winForLanes
       ? winForLanes.end.valueOf() - winForLanes.start.valueOf()
       : null;
-    const prLanes = assignPrLanes(basePrs, (pr) =>
-      barIsTall(pr, prsWithComments.has(pr.id)) ? 1 : 0,
-    );
+    const prLanes = assignPrLanes(basePrs);
     prLanesRef.current = prLanes;
 
     // Per-user interaction tallies for the row labels — from the full timeframe
@@ -2867,6 +2864,13 @@ export function Timeline(): JSX.Element {
       // row only when the author is unknown.
       const group = prGroupId(pr);
       const lane = prLanes.get(pr.id) ?? 0;
+      const barMeta = {
+        author: {
+          label: userLabel(author, pr.authorId),
+          avatarUrl: author?.avatarUrl ?? null,
+        },
+        hasComments: prsWithComments.has(pr.id),
+      };
       // Each lane is one bar line (`bar:<lane>`) shared by the row's non-
       // overlapping PRs; that lane's own-work events get the adjacent `ev:<lane>`
       // band just below (sortKey = lane*2 vs lane*2+1), so markers always sit on
@@ -2879,20 +2883,14 @@ export function Timeline(): JSX.Element {
         type: 'range',
         start: pr.openedAt,
         end: pr.mergedAt ?? pr.closedAt ?? new Date().toISOString(),
-        content: renderPrBar(pr, {
-          author: {
-            label: userLabel(author, pr.authorId),
-            avatarUrl: author?.avatarUrl ?? null,
-          },
-          hasComments: prsWithComments.has(pr.id),
-        }),
+        content: renderPrBar(pr, barMeta),
         className: (() => {
-          const base = prClassName(pr, prsWithComments.has(pr.id));
+          const base = prClassName(pr, barMeta.hasComments);
           return focusHiddenPrId != null && pr.id !== focusHiddenPrId
             ? `${base} pr-focus-hidden`
             : base;
         })(),
-        title: `#${pr.number} ${pr.title}`,
+        title: prTooltip(pr, barMeta),
       } as DataItem;
     });
 
