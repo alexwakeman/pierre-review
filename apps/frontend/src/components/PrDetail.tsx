@@ -531,7 +531,7 @@ export function PrDetail({
           </button>
           {pr.isStalled && (
             <span
-              className="rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-500"
+              className="rounded bg-orange-500/15 px-1.5 py-0.5 text-xs font-medium text-orange-500"
               title="Open, no recent commits, and has open threads"
             >
               Stalled

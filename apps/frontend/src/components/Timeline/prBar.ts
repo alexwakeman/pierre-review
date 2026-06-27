@@ -56,9 +56,8 @@ export interface PrBarMeta {
 export function renderPrBar(pr: TimelinePr, meta: PrBarMeta = {}): string {
   const { author } = meta;
   const draft = pr.isDraft ? '<span class="pr-draft-tag">draft</span>' : '';
-  const stalled = pr.isStalled
-    ? '<span class="pr-stall" title="Stalled">●</span>'
-    : '';
+  // No stalled glyph: stalled PRs are now colour-coded (an orange bar), so the dot
+  // was redundant. "stalled" still appears in the hover tooltip's meta line.
   return (
     `<div class="pr-bar-inner">` +
     (pr.state === 'open' ? ciLead(pr) : '') +
@@ -66,7 +65,6 @@ export function renderPrBar(pr: TimelinePr, meta: PrBarMeta = {}): string {
     authorHtml(author) +
     `${draft}` +
     `<span class="pr-title">${escapeHtml(pr.title)}</span>` +
-    `${stalled}` +
     `</div>`
   );
 }

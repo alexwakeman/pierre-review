@@ -62,7 +62,10 @@ const VIS_OPTIONS: TimelineOptions = {
   zoomMin: ZOOM_MIN_MS,
   zoomMax: 1000 * 60 * 60 * 24 * 365 * 2,
   margin: { item: 4, axis: 8 },
-  tooltip: { followMouse: true, overflowMethod: 'flip' },
+  // delay: how long to hover a bar before its tooltip shows. vis defaults to 500ms,
+  // which feels sluggish for the PR detail tooltip — drop to 150ms (still long enough
+  // that sweeping the cursor across bars doesn't flash tooltips).
+  tooltip: { followMouse: true, overflowMethod: 'flip', delay: 150 },
   // Plain wheel scrolls rows vertically; trackpad/side-scroll (deltaX) pans the
   // time axis. Zoom requires a modifier key (zoomKey, set per-platform at
   // construction) so the wheel no longer zooms by accident.

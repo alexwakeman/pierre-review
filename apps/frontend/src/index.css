@@ -665,11 +665,21 @@ body {
   background-color: #4b5563;
   border-color: #9ca3af;
 }
+/* Stalled open PRs read as "going stale": an orange FILL (replacing the blue open
+   fill) so they're unmistakable at a glance. Placed BEFORE the review-status border
+   rules below so that a PR which is stalled AND has changes requested still gets the
+   red border — red now means changes-requested ONLY. (Previously stalled used a red
+   box-shadow glow, which read identically to the changes-requested red border.) */
+.vis-item.pr-bar.pr-stalled {
+  background-color: #c2410c;
+  border-color: #f97316;
+}
 /* Review-status outline on OPEN bars (added by prClassName, mutually exclusive):
    green = approved, red = changes requested, grey = has discussion but no standing
-   verdict. Placed AFTER the state-colour rules so it overrides .pr-open's blue border.
-   A 2px BORDER (not a box-shadow) so it coexists with the selection / stalled /
-   cross-link rings, which all use box-shadow. */
+   verdict. Placed AFTER the state-colour AND stalled rules so it overrides their
+   border (red border == changes requested, even on a stalled/orange bar). A 2px
+   BORDER (not a box-shadow) so it coexists with the selection / my-turn / cross-link
+   rings, which all use box-shadow. */
 .vis-item.pr-bar.pr-changes-requested {
   border-color: #ef4444;
   border-width: 2px;
@@ -690,9 +700,6 @@ body {
     transparent 4px,
     transparent 8px
   );
-}
-.vis-item.pr-stalled {
-  box-shadow: 0 0 0 2px #ef4444;
 }
 /* The selected PR's bar: the same soft sky pulse used for cross-user focus and
    selected markers (a glow rather than the old yellow border), so PR highlighting
@@ -796,9 +803,6 @@ body {
   background: rgba(0, 0, 0, 0.25);
   border-radius: 3px;
   padding: 0 3px;
-}
-.pr-stall {
-  color: #fca5a5;
 }
 
 /* Hover tooltip for a PR bar. vis renders the item `title` as HTML (the timeline
