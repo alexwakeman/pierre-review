@@ -1,7 +1,10 @@
 import type { Page, Route } from '@playwright/test';
 import type {
   AwaitingReviewItem,
+  ConsolidatedFeedItem,
+  ConsolidatedFeedResponse,
   FeedEvent,
+  InboxResponse,
   MeResponse,
   MyTurnPr,
   MyTurnResponse,
@@ -162,6 +165,8 @@ const ME_RESPONSE: MeResponse = {
   },
   claudeReviewEnabled: false,
   deploymentMode: 'local',
+  // Pro off in e2e — the consolidated Feed (core) renders without the AI digest panel.
+  pro: { inboxDigest: false, reviewMemory: false },
 };
 
 function myTurnPr(id: number): MyTurnPr {
@@ -239,6 +244,112 @@ const FEED: { events: FeedEvent[]; users: User[] } = {
   users: USERS,
 };
 
+// The Inbox aggregate (the rail) — one watched repo with the 5 open PRs.
+const INBOX: InboxResponse = {
+  repos: [
+    {
+      repoId: REPO.id,
+      repoFullName: REPO.fullName,
+      stats: {
+        openPrs: PRS.length,
+        draftPrs: 0,
+        mergedLast7d: 0,
+        stalledPrs: 0,
+        medianHoursToFirstReview: null,
+        oldestUnreviewed: null,
+      },
+      threadTotals: { resolved: 0, likely_addressed: 0, replied_unresolved: 0, untouched: 1 },
+      maintainerIds: [],
+      attentionCount: 1,
+      hasUnread: false,
+      prs: PRS,
+    },
+  ],
+  generatedAt: iso(0),
+};
+
+// The consolidated Feed (the Inbox "Feed" entry). Spans the three tiers + sources so
+// the click-to-focus behaviour is checkable: a tier-0 thread (#101 → PR Focus + thread),
+// a tier-1 My Turn item (#102 → My Turn Focus), and a tier-2 feed event (#105 → PR Focus).
+const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
+  items: [
+    {
+      id: 'thread:5001',
+      source: 'thread',
+      tier: 0,
+      kind: 'thread',
+      occurredAt: iso(5),
+      repoId: REPO.id,
+      repoFullName: REPO.fullName,
+      prId: 101,
+      prNumber: 101,
+      prTitle: 'Inbox: add login form',
+      prState: 'open',
+      actorId: ALICE.id,
+      content: 'Please address this nit before merge.',
+      threadId: 5001,
+      path: 'src/login.ts',
+      line: 10,
+      derivedState: 'untouched',
+      ageDays: 5,
+      reasonTag: null,
+      reviewState: null,
+      githubUrl: `https://github.com/${REPO.fullName}/pull/101`,
+      dismiss: { kind: 'thread', refId: 5001 },
+    },
+    {
+      id: 'mt:review_request:102',
+      source: 'my_turn',
+      tier: 1,
+      kind: 'awaiting_review',
+      occurredAt: iso(4),
+      repoId: REPO.id,
+      repoFullName: REPO.fullName,
+      prId: 102,
+      prNumber: 102,
+      prTitle: 'Inbox: fix auth race',
+      prState: 'open',
+      actorId: ALICE.id,
+      content: null,
+      threadId: null,
+      path: null,
+      line: null,
+      derivedState: null,
+      ageDays: null,
+      reasonTag: 'awaiting_your_review',
+      reviewState: null,
+      githubUrl: `https://github.com/${REPO.fullName}/pull/102`,
+      dismiss: { kind: 'review_request', refId: 102 },
+    },
+    {
+      id: 'feed:7000',
+      source: 'feed',
+      tier: 2,
+      kind: 'pr_opened',
+      occurredAt: iso(1),
+      repoId: REPO.id,
+      repoFullName: REPO.fullName,
+      prId: 105,
+      prNumber: 105,
+      prTitle: 'Other: docs pass',
+      prState: 'open',
+      actorId: ALICE.id,
+      content: null,
+      threadId: null,
+      path: null,
+      line: null,
+      derivedState: null,
+      ageDays: null,
+      reasonTag: null,
+      reviewState: null,
+      githubUrl: `https://github.com/${REPO.fullName}/pull/105`,
+      dismiss: null,
+    },
+  ] satisfies ConsolidatedFeedItem[],
+  users: USERS,
+  generatedAt: iso(0),
+};
+
 // A complete-but-empty PR detail so opening a PR never crashes the (error-boundary-less)
 // app. Self-contained: PrDetail renders from this object's own users/labels/etc.
 function prDetailFor(id: number): PrDetail {
@@ -307,11 +418,19 @@ export async function installMockApi(page: Page): Promise<void> {
 
       if (path.endsWith('/api/me')) return json(route, ME_RESPONSE);
       if (path.endsWith('/api/my-turn')) return json(route, MY_TURN);
+      // The consolidated Feed (new) — MUST precede the generic `/api/feed` check below,
+      // since `/api/inbox/feed` also contains the substring `/api/feed`.
+      if (path.endsWith('/api/inbox/feed')) return json(route, CONSOLIDATED_FEED);
+      if (path.endsWith('/api/inbox')) return json(route, INBOX);
       if (path.includes('/api/timeline')) return json(route, TIMELINE);
       if (path.includes('/api/open-prs')) return json(route, OPEN_PRS);
       if (path.endsWith('/api/users')) return json(route, USERS);
       if (path.endsWith('/api/repos')) return json(route, [REPO]);
       if (path.endsWith('/api/mergers')) return json(route, []);
+      // Pro digest endpoints — disabled in e2e (pro:{inboxDigest:false}); harmless stub.
+      if (path.includes('/api/pro/')) {
+        return json(route, { enabled: false, model: 'claude-haiku-4-5', digests: [], digest: null, generatedAt: iso(0) });
+      }
       if (path.includes('/api/feed')) return json(route, FEED);
       if (prDetailMatch) return json(route, prDetailFor(Number(prDetailMatch[1])));
       // mark-viewed, my-turn-done, insights, and anything else: a harmless empty 200.
@@ -323,4 +442,4 @@ export async function installMockApi(page: Page): Promise<void> {
   );
 }
 
-export const fixtures = { PRS, INBOX_IDS, REPO, USERS, FEED };
+export const fixtures = { PRS, INBOX_IDS, REPO, USERS, FEED, CONSOLIDATED_FEED, INBOX };

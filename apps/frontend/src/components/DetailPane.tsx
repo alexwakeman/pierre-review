@@ -2,27 +2,22 @@ import { useDeferredValue } from 'react';
 import { useFilters } from '../store/filters.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { PrDetail } from './PrDetail.js';
-import { MyTurnPanel } from './MyTurnPanel/index.js';
-import { FeedPanel } from './FeedPanel.js';
 
-// The bottom pane's content, by state (see store/filters.ts):
-//  • a PR is selected      → its detail (PrDetail)
-//  • else in My Turn focus → the My Turn inbox (To Do list, level 1)
-//  • else (the default)    → the Feed home
-// So a fresh load lands on the Feed; the My Turn panel only appears once you ENTER My
-// Turn Focus Mode (the header pill / `m` / opening a To Do), never by default.
+// The bottom pane's content:
+//  • a PR is selected → its detail (PrDetail)
+//  • else             → a hint to pick a PR
+// The old My Turn / Feed panels are gone: that state-of-play now lives in the Inbox
+// tab's consolidated Feed, so the detail pane only opens when you click a PR.
 export function DetailPane(): JSX.Element {
   const selectedPrId = useFilters((s) => s.selectedPrId);
   const selectedThreadId = useFilters((s) => s.selectedThreadId);
-  const myTurnOnly = useFilters((s) => s.myTurnOnly);
   const clearSelection = useFilters((s) => s.clearSelection);
 
   // The ✕ and the timeline selection ring read `selectedPrId` urgently, so deselect
-  // FEEDBACK is instant. The heavy panel body (unmount PrDetail → mount
-  // FeedSection/MyTurnPanel) reads `bodyPrId`, which lags to null on deselect — so
-  // that mount runs in a later, low-priority render instead of competing with the
-  // ring teardown in the same frame. The `!= null` guard keeps SELECT/SWITCH
-  // instant: only the swap-to-empty (deselect) is deferred.
+  // feedback is instant. The heavy panel body (unmount PrDetail) reads `bodyPrId`,
+  // which lags to null on deselect — so the swap runs in a later, low-priority render
+  // instead of competing with the ring teardown. The `!= null` guard keeps
+  // SELECT/SWITCH instant: only the swap-to-empty (deselect) is deferred.
   const deferredPrId = useDeferredValue(selectedPrId);
   const bodyPrId = selectedPrId != null ? selectedPrId : deferredPrId;
 
@@ -55,10 +50,11 @@ export function DetailPane(): JSX.Element {
           prId={bodyPrId as number}
           selectedThreadId={selectedThreadId}
         />
-      ) : myTurnOnly ? (
-        <MyTurnPanel />
       ) : (
-        <FeedPanel />
+        <div className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-400">
+          Select a PR on the timeline to see its details — your relevance-ranked state
+          of play lives in the Inbox.
+        </div>
       )}
     </div>
   );

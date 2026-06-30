@@ -151,7 +151,9 @@ function writeToUrl(s: FilterState): void {
   // is emitted only for a single-repo console (the 'all' feed is the default).
   if (usePinnedTabs.getState().activeTab === 'inbox') {
     p.set('view', 'inbox');
-    if (s.inboxRepoId !== 'all' && s.inboxRepoId != null) {
+    // Only a single-repo console is deep-linkable; the 'all' / 'feed' pseudo-rows are
+    // defaults and stay out of the URL.
+    if (typeof s.inboxRepoId === 'number') {
       p.set('inboxRepo', String(s.inboxRepoId));
     }
   }
@@ -219,6 +221,10 @@ export function useUrlState(): void {
           ? sanitizePersistedFilters(activeView.state)
           : loadPersistedFilters();
         if (persisted) useFilters.getState().hydrate(persisted);
+        // Inbox-first: a bare load (a fresh sign-in / "open the app") lands on the
+        // Inbox — the relevance-ranked state of play — with the timeline secondary.
+        // (A URL WITH params is a deep link: it keeps timeline unless `?view=inbox`.)
+        usePinnedTabs.getState().setActiveTab('inbox');
       }
       hydrated.current = true;
     }

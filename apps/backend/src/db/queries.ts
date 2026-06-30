@@ -72,6 +72,8 @@ import type {
   InboxRepoStats,
   RepoClaudeReviewsResponse,
   RepoClaudeReviewPr,
+  ConsolidatedFeedItem,
+  ConsolidatedFeedResponse,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -1421,6 +1423,446 @@ export async function getInbox(
   });
 
   return { repos: inboxRepos, generatedAt: new Date().toISOString() };
+}
+
+// ---- consolidated Feed (the Inbox "Feed" entry; CORE, no AI) ----
+// A single relevance-ranked stream merging three sources — unresolved review threads,
+// "My Turn" actionables, and the activity feed — deduped + deterministically tiered.
+
+interface UnresolvedThreadFeedRow {
+  threadId: number;
+  prId: number;
+  repoId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  prState: PrState;
+  path: string;
+  line: number | null;
+  derivedState: DerivedState;
+  originalCommenterId: number | null;
+  excerpt: string;
+  lastActivityAt: string; // ISO-8601
+  githubUrl: string;
+}
+
+// Open-PR review threads still needing attention (untouched | likely_addressed),
+// across every repo on the account, with a recency anchor (last comment, else the
+// thread's own createdAt) and the originating comment's excerpt. `replied_unresolved`
+// threads are intentionally excluded here — those surface via getMyTurn.threadsAwaiting.
+async function getUnresolvedThreadsForFeed(
+  accountId: number,
+  repoNameById: Map<number, string>,
+): Promise<{ items: UnresolvedThreadFeedRow[]; userIds: Set<number> }> {
+  const rows = await db
+    .select({
+      id: reviewThreads.id,
+      prId: reviewThreads.prId,
+      repoId: pullRequests.repoId,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      prState: pullRequests.state,
+      path: reviewThreads.path,
+      line: reviewThreads.line,
+      derivedState: reviewThreads.derivedState,
+      originalCommenterId: reviewThreads.originalCommenterId,
+      createdAt: reviewThreads.createdAt,
+    })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.state, 'open'),
+        inArray(reviewThreads.derivedState, ['untouched', 'likely_addressed'] as DerivedState[]),
+      ),
+    )
+    // Bounded candidate pool: a busy account can have thousands of open unresolved
+    // threads (incl. ancient ones on long-dead-but-open PRs), but the Feed is a curated
+    // RECENT state-of-play. Take a wider pool of the newest-CREATED threads here, then
+    // (below) keep the most-recently-ACTIVE FEED_THREAD_CAP of them — so the retained
+    // set is selected on the same last-activity axis the caller tiers/ages/sorts by.
+    .orderBy(desc(reviewThreads.createdAt))
+    .limit(FEED_THREAD_FETCH)
+    .execute();
+  if (rows.length === 0) return { items: [], userIds: new Set() };
+
+  const threadIds = rows.map((r) => r.id);
+  const allComments = await db
+    .select({
+      threadId: reviewComments.threadId,
+      excerpt: reviewComments.excerpt,
+      body: reviewComments.body,
+      createdAt: reviewComments.createdAt,
+    })
+    .from(reviewComments)
+    .where(inArray(reviewComments.threadId, threadIds))
+    .orderBy(asc(reviewComments.createdAt))
+    .execute();
+  const byThread = new Map<number, typeof allComments>();
+  for (const c of allComments) {
+    const arr = byThread.get(c.threadId) ?? [];
+    arr.push(c);
+    byThread.set(c.threadId, arr);
+  }
+
+  const userIds = new Set<number>();
+  const items: UnresolvedThreadFeedRow[] = [];
+  for (const r of rows) {
+    const comments = byThread.get(r.id) ?? [];
+    const first = comments[0];
+    const last = comments.at(-1);
+    const lastActivity = last?.createdAt ?? r.createdAt;
+    const excerpt = first?.excerpt ?? truncate(first?.body ?? '', 140);
+    if (r.originalCommenterId != null) userIds.add(r.originalCommenterId);
+    const repoFullName = repoNameById.get(r.repoId) ?? `repo ${r.repoId}`;
+    items.push({
+      threadId: r.id,
+      prId: r.prId,
+      repoId: r.repoId,
+      repoFullName,
+      prNumber: r.prNumber,
+      prTitle: r.prTitle,
+      prState: r.prState as PrState,
+      path: r.path,
+      line: r.line,
+      derivedState: r.derivedState,
+      originalCommenterId: r.originalCommenterId,
+      excerpt,
+      lastActivityAt: lastActivity.toISOString(),
+      githubUrl: `https://github.com/${repoFullName}/pull/${r.prNumber}`,
+    });
+  }
+  // Keep the most-recently-ACTIVE FEED_THREAD_CAP threads (the axis the Feed tiers,
+  // ages and sorts on) — not the most-recently-created, which can diverge for a
+  // likely_addressed thread whose original comment is old but whose last activity isn't.
+  items.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+  return { items: items.slice(0, FEED_THREAD_CAP), userIds };
+}
+
+// Bounds on the consolidated Feed (a curated relevance view, not an exhaustive list).
+const FEED_THREAD_FETCH = 400; // candidate threads pulled (newest-created), then…
+const FEED_THREAD_CAP = 150; // …trimmed to the most-recently-active of them
+const FEED_TIER0_CAP = 75; // stale-thread rows shown
+const FEED_TIER2_CAP = 120; // recent threads + activity-feed events shown
+
+// Tier-1 ordering: the My Turn sections (+ awaited threads) in a stable, urgency-led
+// sequence before recency breaks ties.
+const FEED_KIND_RANK: Record<string, number> = {
+  awaiting_review: 0,
+  approved: 1,
+  your_pr: 2,
+  thread: 3,
+  watched_repo_pr: 4,
+  claude_review: 5,
+};
+
+export async function getConsolidatedFeed(
+  accountId: number,
+): Promise<ConsolidatedFeedResponse> {
+  const repoNameById = new Map<number, string>();
+  const repoIdByName = new Map<string, number>();
+  for (const r of await listRepos(accountId)) {
+    repoNameById.set(r.id, r.fullName);
+    repoIdByName.set(r.fullName, r.id);
+  }
+
+  const [myTurn, feed, threadsRes, threadDismissalRows] = await Promise.all([
+    getMyTurn(accountId),
+    getFeed(accountId, 14),
+    getUnresolvedThreadsForFeed(accountId, repoNameById),
+    db
+      .select({ refId: myTurnDismissals.refId, dismissedAt: myTurnDismissals.dismissedAt })
+      .from(myTurnDismissals)
+      .where(and(eq(myTurnDismissals.accountId, accountId), eq(myTurnDismissals.kind, 'thread')))
+      .execute(),
+  ]);
+
+  const threadDismissedAt = new Map<number, Date>();
+  for (const d of threadDismissalRows) threadDismissedAt.set(d.refId, d.dismissedAt);
+
+  const usersById = new Map<number, User>();
+  for (const u of myTurn.users) usersById.set(u.id, u);
+  for (const u of feed.users) usersById.set(u.id, u);
+
+  const items: ConsolidatedFeedItem[] = [];
+  const surfacedThreadIds = new Set<number>();
+  const DAY_MS = 86_400_000;
+  const now = Date.now();
+
+  // Threads already awaiting your reply are a stronger ("My Turn") signal — let the
+  // tier-1 threadsAwaiting representation win the dedup. A `likely_addressed` thread you
+  // opened that got a reply qualifies for BOTH this block and threadsAwaiting; without
+  // this it would render as a low-priority tier-2 thread instead of tier-1.
+  const awaitingThreadIds = new Set(myTurn.threadsAwaiting.map((ta) => ta.threadId));
+
+  // --- unresolved threads → tier 0 (>2 days stale) or tier 2 (recent) ---
+  for (const t of threadsRes.items) {
+    if (awaitingThreadIds.has(t.threadId)) continue; // handled as tier 1 below
+    const d = threadDismissedAt.get(t.threadId);
+    // A dismissal sticks until newer activity (a fresh comment) supersedes it.
+    if (d && Date.parse(t.lastActivityAt) <= d.getTime()) continue;
+    surfacedThreadIds.add(t.threadId);
+    const ageDays = (now - Date.parse(t.lastActivityAt)) / DAY_MS;
+    items.push({
+      id: `thread:${t.threadId}`,
+      source: 'thread',
+      tier: ageDays > 2 ? 0 : 2,
+      kind: 'thread',
+      occurredAt: t.lastActivityAt,
+      repoId: t.repoId,
+      repoFullName: t.repoFullName,
+      prId: t.prId,
+      prNumber: t.prNumber,
+      prTitle: t.prTitle,
+      prState: t.prState,
+      actorId: t.originalCommenterId,
+      content: t.excerpt || null,
+      threadId: t.threadId,
+      path: t.path,
+      line: t.line,
+      derivedState: t.derivedState,
+      ageDays: Math.floor(ageDays),
+      reasonTag: null,
+      reviewState: null,
+      githubUrl: t.githubUrl,
+      dismiss: { kind: 'thread', refId: t.threadId },
+    });
+  }
+
+  // --- My Turn actionables → tier 1 ---
+  const repoIdOf = (fullName: string): number => repoIdByName.get(fullName) ?? 0;
+  for (const i of myTurn.awaitingReview) {
+    items.push({
+      id: `mt:review_request:${i.prId}`,
+      source: 'my_turn',
+      tier: 1,
+      kind: 'awaiting_review',
+      occurredAt: i.openedAt,
+      repoId: repoIdOf(i.repoFullName),
+      repoFullName: i.repoFullName,
+      prId: i.prId,
+      prNumber: i.number,
+      prTitle: i.title,
+      prState: i.state,
+      actorId: i.authorId,
+      content: null,
+      threadId: null,
+      path: null,
+      line: null,
+      derivedState: null,
+      ageDays: null,
+      reasonTag: 'awaiting_your_review',
+      reviewState: null,
+      githubUrl: i.githubUrl,
+      dismiss: { kind: 'review_request', refId: i.prId },
+    });
+  }
+  for (const i of myTurn.approvedPrs) {
+    items.push({
+      id: `mt:pr_approved:${i.prId}`,
+      source: 'my_turn',
+      tier: 1,
+      kind: 'approved',
+      occurredAt: i.openedAt,
+      repoId: repoIdOf(i.repoFullName),
+      repoFullName: i.repoFullName,
+      prId: i.prId,
+      prNumber: i.number,
+      prTitle: i.title,
+      prState: i.state,
+      actorId: i.authorId,
+      content: null,
+      threadId: null,
+      path: null,
+      line: null,
+      derivedState: null,
+      ageDays: null,
+      reasonTag: 'approved_ready',
+      reviewState: null,
+      githubUrl: i.githubUrl,
+      dismiss: { kind: 'pr_approved', refId: i.prId },
+    });
+  }
+  for (const i of myTurn.yourPrs) {
+    items.push({
+      id: `mt:your_pr:${i.prId}`,
+      source: 'my_turn',
+      tier: 1,
+      kind: 'your_pr',
+      occurredAt: i.openedAt,
+      repoId: repoIdOf(i.repoFullName),
+      repoFullName: i.repoFullName,
+      prId: i.prId,
+      prNumber: i.number,
+      prTitle: i.title,
+      prState: i.state,
+      actorId: i.authorId,
+      content: i.summary,
+      threadId: null,
+      path: null,
+      line: null,
+      derivedState: null,
+      ageDays: null,
+      reasonTag: 'your_pr_new_comments',
+      reviewState: null,
+      githubUrl: i.githubUrl,
+      // "Your PRs" clear via mark-viewed, not a dismissal (mirrors getMyTurn).
+      dismiss: null,
+    });
+  }
+  for (const i of myTurn.watchedRepoPrs) {
+    items.push({
+      id: `mt:watched_repo_pr:${i.prId}`,
+      source: 'my_turn',
+      tier: 1,
+      kind: 'watched_repo_pr',
+      occurredAt: i.openedAt,
+      repoId: repoIdOf(i.repoFullName),
+      repoFullName: i.repoFullName,
+      prId: i.prId,
+      prNumber: i.number,
+      prTitle: i.title,
+      prState: i.state,
+      actorId: i.authorId,
+      content: null,
+      threadId: null,
+      path: null,
+      line: null,
+      derivedState: null,
+      ageDays: null,
+      reasonTag: null,
+      reviewState: null,
+      githubUrl: i.githubUrl,
+      dismiss: { kind: 'watched_repo_pr', refId: i.prId },
+    });
+  }
+  for (const c of myTurn.claudeReviewsToAction) {
+    items.push({
+      id: `mt:claude_review:${c.reviewId}`,
+      source: 'my_turn',
+      tier: 1,
+      kind: 'claude_review',
+      occurredAt: c.finishedAt ?? new Date(now).toISOString(),
+      repoId: repoIdOf(c.repoFullName),
+      repoFullName: c.repoFullName,
+      prId: c.prId,
+      prNumber: c.prNumber,
+      prTitle: c.prTitle,
+      prState: null,
+      actorId: null,
+      content: null,
+      threadId: null,
+      path: null,
+      line: null,
+      derivedState: null,
+      ageDays: null,
+      reasonTag: null,
+      reviewState: null,
+      githubUrl: c.githubUrl,
+      dismiss: { kind: 'claude_review', refId: c.reviewId },
+    });
+  }
+  // Threads someone replied to and now await you (replied_unresolved) — a My Turn
+  // signal, but rendered as a thread row. Dedupe against the tier-0/2 thread block.
+  for (const ta of myTurn.threadsAwaiting) {
+    if (surfacedThreadIds.has(ta.threadId)) continue;
+    surfacedThreadIds.add(ta.threadId);
+    items.push({
+      id: `thread:${ta.threadId}`,
+      source: 'thread',
+      tier: 1,
+      kind: 'thread',
+      occurredAt: ta.lastReplyAt,
+      repoId: repoIdOf(ta.repoFullName),
+      repoFullName: ta.repoFullName,
+      prId: ta.prId,
+      prNumber: ta.prNumber,
+      prTitle: null,
+      prState: null,
+      actorId: ta.lastReplyAuthorId,
+      content: ta.lastReplyExcerpt || null,
+      threadId: ta.threadId,
+      path: ta.path,
+      line: ta.line,
+      derivedState: ta.derivedState,
+      ageDays: null,
+      reasonTag: null,
+      reviewState: null,
+      githubUrl: ta.githubUrl,
+      dismiss: { kind: 'thread', refId: ta.threadId },
+    });
+  }
+
+  // --- activity feed → tier 2 (drop review_comment events whose thread is already
+  //     surfaced above, the clearest source of repetition) ---
+  for (const f of feed.events) {
+    if (f.type === 'review_comment' && f.refId != null && surfacedThreadIds.has(f.refId)) {
+      continue;
+    }
+    items.push({
+      id: `feed:${f.id}`,
+      source: 'feed',
+      tier: 2,
+      kind: f.type,
+      occurredAt: f.occurredAt,
+      repoId: f.repoId,
+      repoFullName: f.repoFullName,
+      prId: f.prId,
+      prNumber: f.prNumber,
+      prTitle: f.prTitle,
+      prState: f.prState,
+      actorId: f.actorId,
+      content: f.excerpt,
+      threadId: f.type === 'review_comment' ? f.refId : null,
+      path: null,
+      line: null,
+      derivedState: null,
+      ageDays: null,
+      reasonTag: null,
+      reviewState: f.reviewState,
+      githubUrl:
+        f.prNumber != null ? `https://github.com/${f.repoFullName}/pull/${f.prNumber}` : null,
+      dismiss: null,
+    });
+  }
+
+  // Deterministic tiering: tier 0 (stalest first) → tier 1 (section order, then
+  // recent first) → tier 2 (most recent first). Tier 0 and 2 are capped (the Feed is a
+  // curated relevance view); tier 1 is your own actionables, naturally bounded.
+  const tier0 = items
+    .filter((i) => i.tier === 0)
+    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
+    .slice(0, FEED_TIER0_CAP);
+  const tier1 = items.filter((i) => i.tier === 1).sort((a, b) => {
+    const r = (FEED_KIND_RANK[a.kind] ?? 9) - (FEED_KIND_RANK[b.kind] ?? 9);
+    return r !== 0 ? r : b.occurredAt.localeCompare(a.occurredAt);
+  });
+  const tier2 = items
+    .filter((i) => i.tier === 2)
+    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+    .slice(0, FEED_TIER2_CAP);
+  const ordered = [...tier0, ...tier1, ...tier2];
+
+  // Backfill any referenced users not already loaded by getMyTurn/getFeed (thread
+  // commenters in particular).
+  const needed = new Set<number>(threadsRes.userIds);
+  for (const i of ordered) if (i.actorId != null) needed.add(i.actorId);
+  for (const id of usersById.keys()) needed.delete(id);
+  if (needed.size > 0) {
+    for (const u of await db
+      .select()
+      .from(schema.users)
+      .where(inArray(schema.users.id, [...needed]))
+      .execute())
+      usersById.set(u.id, mapUser(u));
+  }
+
+  return {
+    items: ordered,
+    users: [...usersById.values()],
+    generatedAt: new Date().toISOString(),
+  };
 }
 
 // ---- incremental review: pr_views ----

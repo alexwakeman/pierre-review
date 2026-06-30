@@ -6,8 +6,6 @@ import { PrDetail } from './components/PrDetail.js';
 import { Timeline } from './components/Timeline/index.js';
 import { InboxView } from './components/Inbox/index.js';
 import { DetailPane } from './components/DetailPane.js';
-import { CountsPill } from './components/MyTurnPanel/CountsPill.js';
-import { FeedPill } from './components/FeedPill.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
 import { TimelineSearch } from './components/TimelineSearch.js';
@@ -21,7 +19,6 @@ import { useLocalStorage } from './hooks/useLocalStorage.js';
 import { useKeyboard } from './hooks/useKeyboard.js';
 import { useDetailCacheReconciler } from './hooks/useDetailCache.js';
 import { useMyTurnNotifications } from './hooks/useMyTurnNotifications.js';
-import { useFeedSync } from './hooks/useFeed.js';
 import { useNotificationPref } from './hooks/useNotificationPref.js';
 import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
@@ -100,9 +97,6 @@ export default function App(): JSX.Element {
   // updatedAt, so cloud-hydrated text refetches exactly once on change (no-op for
   // unchanged PRs). Harmless in local mode.
   useDetailCacheReconciler();
-  // Background watched-repo activity Feed: poll + accumulate into the IndexedDB store
-  // regardless of which view is open, so the My Turn → Feed tab is always current.
-  useFeedSync();
   const [dark, toggleDark] = useDarkMode();
   const [helpOpen, setHelpOpen] = useState(false);
   const [reviewsOpen, setReviewsOpen] = useState(false);
@@ -291,8 +285,6 @@ export default function App(): JSX.Element {
           </a>
         )}
         <TabSwitcher />
-        <FeedPill />
-        <CountsPill />
         <div className="ml-auto flex items-center gap-3">
           <TimelineSearch />
           <SyncStatus />

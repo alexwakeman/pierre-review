@@ -1,5 +1,5 @@
 import { useProCapabilities } from '../../hooks/useTriage.js';
-import { useRepoDigest, useRefreshRepoDigests } from '../../hooks/useRepoDigest.js';
+import { useFeedDigest, useRefreshFeedDigest } from '../../hooks/useFeedDigest.js';
 import { useOpenPrTab } from '../../hooks/useOpenPrTab.js';
 import { relativeTime } from '../../lib/ui.js';
 import { DigestMarkdown } from './DigestMarkdown.js';
@@ -14,28 +14,28 @@ function modelLabel(model: string | undefined): string {
   return model;
 }
 
-// The per-repo LLM "headlines" digest — the ONLY Pro/flagged surface inside Inbox.
-// Rendered nothing-at-all unless pro.inboxDigest is true (no greyed stub, no layout
-// shift, no in-card upsell). Lazily fetches its own per-repo query so a slow Haiku
-// call never blocks the core grid. The amethyst sparkle + "Pro" tag matches the
-// app's Claude/agentic accent (violet/purple).
-export function DigestBanner({ repoId }: { repoId: number }): JSX.Element | null {
+// The cross-all-repos AI digest atop the Inbox "Feed" entry — the ONLY Pro/flagged
+// surface in the Feed (the consolidated list below it is core). Renders nothing unless
+// pro.inboxDigest is true (no greyed stub). One bulleted change-report per watched
+// repo, with clickable "#N" PR refs that open the PR as a new tab.
+export function FeedDigestPanel(): JSX.Element | null {
   const { inboxDigest } = useProCapabilities();
-  // Hooks run unconditionally (rules of hooks); the query self-gates on `enabled`.
-  const { data: digest, isLoading } = useRepoDigest(repoId, inboxDigest);
-  const refresh = useRefreshRepoDigests();
+  const { data, isLoading } = useFeedDigest(inboxDigest);
+  const refresh = useRefreshFeedDigest();
   const openPr = useOpenPrTab();
-  const regenerating = refresh.isPending && refresh.variables === repoId;
 
   // Absent Pro → render nothing. This is the load-bearing gate.
   if (!inboxDigest) return null;
 
+  const digest = data?.digest ?? null;
+  const sections = digest?.sections ?? [];
+
   return (
     <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-900/50 dark:bg-violet-950/20">
-      <div className="mb-1 flex items-center gap-2">
+      <div className="mb-1.5 flex items-center gap-2">
         <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
           <span aria-hidden="true">✨</span>
-          Digest
+          Across all repos
         </span>
         <span className="rounded bg-violet-500/15 px-1 text-[10px] font-semibold text-violet-600 dark:text-violet-300">
           Pro
@@ -51,28 +51,36 @@ export function DigestBanner({ repoId }: { repoId: number }): JSX.Element | null
           )}
           <button
             type="button"
-            onClick={() => refresh.mutate(repoId)}
-            disabled={regenerating}
+            onClick={() => refresh.mutate()}
+            disabled={refresh.isPending}
             className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
-            title="Regenerate this repo's digest (runs the cheap-tier model)"
+            title="Regenerate the cross-repo digest (runs the cheap-tier model; unchanged repos are free)"
           >
             <span aria-hidden="true">↻</span>
-            {regenerating ? 'Regenerating…' : 'Regenerate'}
+            {refresh.isPending ? 'Regenerating…' : 'Regenerate'}
           </button>
         </span>
       </div>
-      <div className={regenerating ? 'opacity-50 transition-opacity' : ''}>
+      <div className={refresh.isPending ? 'opacity-50 transition-opacity' : ''}>
         {isLoading ? (
-          <div className="h-3 w-2/3 animate-pulse rounded bg-violet-200/60 dark:bg-violet-900/40" />
-        ) : digest != null && digest.summary.trim() !== '' ? (
-          <DigestMarkdown
-            markdown={digest.summary}
-            prRefs={digest.prRefs}
-            onOpenPr={openPr}
-          />
+          <div className="space-y-1.5">
+            <div className="h-3 w-1/3 animate-pulse rounded bg-violet-200/60 dark:bg-violet-900/40" />
+            <div className="h-3 w-2/3 animate-pulse rounded bg-violet-200/60 dark:bg-violet-900/40" />
+          </div>
+        ) : sections.length > 0 ? (
+          <div className="space-y-2.5">
+            {sections.map((s) => (
+              <div key={s.repoId}>
+                <div className="mb-0.5 text-[11px] font-semibold text-violet-700 dark:text-violet-200">
+                  {s.repoFullName}
+                </div>
+                <DigestMarkdown markdown={s.markdown} prRefs={s.prRefs} onOpenPr={openPr} />
+              </div>
+            ))}
+          </div>
         ) : (
           <p className="text-xs text-gray-400">
-            No digest yet — click Regenerate to summarise this repo's recent activity.
+            No digest yet — click Regenerate to summarise activity across all your repos.
           </p>
         )}
       </div>

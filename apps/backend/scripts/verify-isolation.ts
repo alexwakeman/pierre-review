@@ -165,6 +165,14 @@ check(
   !inboxCross.repos.some((r) => r.repoId === A.repoId),
 );
 
+// Consolidated Feed: A's stream must reference only A's repos/PRs (it composes
+// getMyTurn + getFeed + the unresolved-threads reader, all accountId-scoped).
+const cfA = await q.getConsolidatedFeed(1);
+check(
+  "getConsolidatedFeed(A) references only A's repos",
+  !cfA.items.some((i) => i.repoId === B.repoId || i.prId === B.prId),
+);
+
 // Repo-scoped Claude reviews: B cannot read A's repo's reviews (IDOR blocked).
 const crCross = await q.listClaudeReviewsByRepo(A.repoId, 2);
 check('listClaudeReviewsByRepo(A.repo, B) leaks no PRs', crCross.prs.length === 0);

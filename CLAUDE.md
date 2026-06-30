@@ -152,7 +152,7 @@ pierre-review/
 │  │     ├─ store/filters.ts   Zustand: all filter + selection + timeline-hint state (+ transient inboxRepoId/inboxThreadFilter)
 │  │     ├─ hooks/             useUrlState, useTimeline, usePr, useTriage, useMe (+ useProCapabilities), useInbox, useReviewLearnings, …
 │  │     ├─ api/client.ts      typed fetch wrapper (credentialed; throws ApiError)
-│  │     ├─ components/        Timeline/, Inbox/ (Pro Inbox tab), PrDetail, ChecksTab, ThreadList/, ThreadView/, MyTurnPanel/, …
+│  │     ├─ components/        Timeline/, Inbox/ (rail + FeedView + digest panels), PrDetail, ChecksTab, ThreadList/, ThreadView/, PinnedTabsBar, …
 │  │     └─ lib/ui.ts          shared UI metadata (state colors/labels/shapes) + helpers
 │  └─ landing/                 @pierre-review/landing — public marketing page (cloud, served at `/`); no shared runtime code
 └─ packages/
@@ -328,8 +328,9 @@ file maps to a `client.ts` method.
 | `GET /api/mergers` | per-repo merge-rights map (who's merged there) → the maintainer shield |
 | `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{inboxDigest,reviewMemory}`; cloud: 401 signed out) |
 | `GET /api/inbox?repoIds` | **Inbox tab** (core, no AI): per watched repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getInbox` from existing readers |
+| `GET /api/inbox/feed` | **Consolidated Feed** (core, no AI; the Inbox "Feed" entry): one relevance-ranked stream merging unresolved threads + My Turn + the activity feed, deduped + tiered (`getConsolidatedFeed`). `{items[],users[],generatedAt}` |
 | `GET /api/repos/:id/claude-reviews` | repo-scoped Claude-review history (retrieval only; `enabled:false` when the flag is off) → `{prs:[{runs[]}]}` |
-| `GET·POST /api/pro/inbox/digests*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest + review-memory data. See "Open-core Pro plugin" |
+| `GET·POST /api/pro/inbox/digests*` · `GET·POST /api/pro/feed/digest*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest + the cross-repo Feed digest (aggregates the per-repo digests; no new table) + review-memory data. See "Open-core Pro plugin" |
 | `GET /api/auth/login` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub-App OAuth: authorize / exchange+upsert+session→`/app` / clear session |
 | `GET /api/prs/:id/claude-review` | latest run + findings + history + auth status + `enabled` |
 | `POST /api/prs/:id/claude-review {model}` | start a run → `202 {reviewId}`; `400` no-auth/no-head, `409` busy, `404` disabled |
@@ -380,8 +381,10 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   categories, derived-state tags.
 - **OpenPrsStrip** — collapsible top strip of open PRs (`all` / `my_turn` / `needs_attention`).
 - **Timeline** — the centerpiece (below).
-- **DetailPane** — resizable bottom pane (height persisted). Shows **MyTurnPanel** (the
-  no-selection state: awaiting-your-review, your PRs, threads awaiting you) or **PrDetail**.
+- **DetailPane** — resizable bottom pane (height persisted). Shows **PrDetail** when a PR is
+  selected, else a placeholder hint. The legacy MyTurnPanel/FeedPanel are **gone** — all
+  state-of-play now lives in the Inbox's consolidated **Feed** (below). **App lands on the
+  Inbox by default** (Inbox-first; a bare load → `?view=inbox`, deep links keep timeline).
 
 ### The timeline (`components/Timeline/`)
 
@@ -553,22 +556,41 @@ dual-dialect tables (`review_learnings`, `repo_digests`), migrations
 (`packages/pro/migrations{,-pg}/*.sql` run via `ctx.registerMigrations` → `src/pro/migrate.ts`,
 the one sanctioned raw-`$client` DDL site + `pro_migrations` bookkeeping), and isolation test.
 
-**Inbox tab — CORE, always-on, NO AI (not flagged).** A peer of Timeline (`ActiveTab =
-'timeline' | 'inbox' | number` in `store/pinnedTabs.ts`, rendered as a full-`<main>` overlay
-like the pinned-PR overlay; `?view=inbox&inboxRepo`). A repo rail + per-repo console
-(stats → thread-state bar → PRs-by-author → prior Claude reviews) built **entirely on the
-read layer**: `getInbox` composes `getInsights`/`getOpenPrs`/`getMergers` (only new
-aggregation = per-repo `threadTotals`); `listClaudeReviewsByRepo` is retrieval-only (no new
-storage). Reuses the whole `lib/ui.ts` glyph vocabulary. Refresh re-queries the **DB only**
-(not a GitHub sync), never blanks.
+**Inbox tab — CORE, always-on, NO AI (not flagged); the DEFAULT landing view.** A peer of
+Timeline (`ActiveTab = 'timeline' | 'inbox' | number` in `store/pinnedTabs.ts`, rendered as a
+full-`<main>` overlay like the pinned-PR overlay; `?view=inbox&inboxRepo`). A "State of play"
+rail whose first entry is **Feed** (cross-repo), then **All repos**, then each repo's console
+(stats → thread-state bar → PRs-by-author → prior Claude reviews). The rail selection is
+`store/filters.ts` `inboxRepoId` (`'feed'` default | `'all'` | a repoId). Built **entirely on
+the read layer**: `getInbox` composes `getInsights`/`getOpenPrs`/`getMergers` (per-repo
+`threadTotals`); `listClaudeReviewsByRepo` is retrieval-only. Refresh re-queries the **DB
+only** (not a GitHub sync), never blanks.
 
-**Pro: per-repo Haiku digest** (`packages/pro/src/inbox-digest/`). The flagged sub-panel in
-the Inbox console. `metrics.ts` compacts `getInbox`+`getRepoAnalytics` into a bounded
-`RepoDigestPayload`; one non-agentic `ctx.llm.complete` (Haiku) → stored in `repo_digests`.
-**Cost-safe:** generation only on `POST /refresh`; a **payload-hash cache** (unchanged repo =
-$0 — and the hash MUST zero `Date.now()`-derived fields like `age_hours` or a dormant repo
-re-bills hourly), per-account min-interval + in-flight guard, USD/repo caps. Capability
-`inboxDigest` tracks `PRO_DIGEST_ENABLED` (else a dead "Regenerate" button).
+**Consolidated Feed — CORE, the Inbox "Feed" entry (`getConsolidatedFeed` → `FeedView`).** One
+relevance-ranked stream across all repos that merges three sources — unresolved review threads,
+"My Turn" actionables, and the activity feed — deduped + deterministically **tiered**: tier 0 =
+an unresolved thread (untouched|likely_addressed) older than 2 days; tier 1 = a My Turn item;
+tier 2 = a recent thread or activity event (thread query bounded recent-first + per-tier caps).
+Comment-based items inline their content; My Turn items keep their dismiss/Done plumbing.
+**Focus-as-tab:** clicking a My Turn item → My Turn Focus; a thread/feed item → PR Focus — both
+drive the ONE shared timeline (shared-timeline-focus) and surface a focus tab in
+`PinnedTabsBar` (driven by `myTurnOnly`/`focusActive`); a digest's `#N` PR ref opens the PR as
+a new pinned tab. The old MyTurnPanel/FeedPanel + their header pills are removed.
+
+**Pro: Haiku digests — per-repo + cross-repo Feed** (`packages/pro/src/inbox-digest/` +
+`feed-digest/`). The flagged AI panels: a per-repo banner in each console, and the cross-repo
+panel atop the Inbox "Feed" entry. Each digest is a **bulleted markdown change-report** that
+references PRs as `#<number>` tokens (resolved to clickable PR refs via `inbox-digest/refs.ts`,
+scoped to `(accountId, repoId)`; the SPA linkifies them → open the PR as a new tab) and is
+**chained from the prior stored summary** so it reads as "what changed since last time".
+`metrics.ts` compacts `getInbox`+`getRepoAnalytics` into a bounded `RepoDigestPayload`; one
+non-agentic `ctx.llm.complete` (Haiku) → stored in `repo_digests`. The **cross-repo Feed digest
+AGGREGATES the per-repo digests** (`feed-digest/routes.ts`) — **no new table/migration**, one
+source of truth for the caps. **Cost-safe:** generation only on `POST /refresh`; a
+**payload-hash cache** (unchanged repo = $0 — the prior summary is fed to the LLM only on a
+cache MISS and is NOT in the hash; the hash MUST zero `Date.now()`-derived fields like
+`age_hours` or a dormant repo re-bills hourly), per-account min-interval + in-flight guard,
+USD/repo caps. Capability `inboxDigest` tracks `PRO_DIGEST_ENABLED` (gates both panels).
 
 **Pro: Claude Review learnings/memory** (`packages/pro/src/review-memory/`). Core seam =
 `src/review/events.ts`: an **inert** typed event-bus (5 emit sites in `claude-review.ts`,

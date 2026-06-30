@@ -1476,10 +1476,27 @@ export interface RepoClaudeReviewsResponse {
 
 // ---- Pro per-repo digest (Workstream 2; @pierre/pro, flagged) ----
 
+// One resolved PR reference inside a digest's markdown. The Haiku digests reference
+// PRs as "#123" tokens; the backend resolves each to its watched PR so the frontend
+// can linkify the token and open the PR as a new tab. `prId` is null when a "#N"
+// token didn't resolve to a known PR in that repo (render it as plain text).
+export interface DigestPrRef {
+  prNumber: number;
+  prId: number | null;
+  repoId: number;
+  repoFullName: string;
+  title: string | null;
+  state: PrState | null;
+}
+
 export interface RepoDigest {
   repoId: number;
   repoFullName: string;
+  // Markdown change-report: a bulleted list of key events. May contain "#123" PR
+  // tokens (resolved in `prRefs`). Chained from the prior digest to highlight change.
   summary: string;
+  // Resolved "#N" references mentioned in `summary`, for linkification.
+  prRefs: DigestPrRef[];
   model: string;
   generatedAt: string; // ISO-8601
   costUsd: number | null;
@@ -1492,6 +1509,93 @@ export interface RepoDigestsResponse {
   digests: RepoDigest[];
   generatedAt: string; // ISO-8601
   budgetReached?: boolean;
+}
+
+// ---- Pro cross-repo Feed digest (the AI panel atop the Inbox "Feed" entry) ----
+// One bulleted change-report per watched repo, across ALL repos, chained from the
+// prior digest. Same shape/clickable-PR-ref pattern as the per-repo digest. Pro-only
+// (gated on the inboxDigest capability); the consolidated Feed list below it is core.
+
+export interface FeedDigestRepoSection {
+  repoId: number;
+  repoFullName: string;
+  // Markdown bullets (one "- …" per line); may contain "#123" PR tokens.
+  markdown: string;
+  prRefs: DigestPrRef[];
+}
+
+export interface FeedDigest {
+  sections: FeedDigestRepoSection[];
+  model: string;
+  generatedAt: string; // ISO-8601
+  costUsd: number | null;
+  stale: boolean;
+}
+
+export interface FeedDigestResponse {
+  enabled: boolean;
+  model: string;
+  // null until first generated for this account.
+  digest: FeedDigest | null;
+  generatedAt: string; // ISO-8601
+  budgetReached?: boolean;
+}
+
+// ---- Consolidated Feed (CORE, no AI; the Inbox "Feed" entry's main list) ----
+// A single relevance-ranked stream across all repos that merges three sources —
+// unresolved review threads, "My Turn" actionables, and the activity feed — deduped
+// and deterministically prioritised. Tiers (lower = higher up / more urgent):
+//   0 = an unresolved thread (untouched | likely_addressed) older than 2 days
+//   1 = a "My Turn" actionable (awaiting review, your PR activity, approved, …)
+//   2 = a recent unresolved thread (≤2 days) or an activity-feed event
+export type FeedItemTier = 0 | 1 | 2;
+
+// Which of the three merged sources an item came from. Drives click navigation:
+// 'my_turn' → My Turn Focus (the inbox-scoped timeline); 'thread' | 'feed' → PR
+// Focus (isolate that one PR on the timeline).
+export type FeedItemSource = 'thread' | 'my_turn' | 'feed';
+
+export interface ConsolidatedFeedItem {
+  // Stable unique id, e.g. "thread:42", "mt:review_request:99", "feed:1234".
+  id: string;
+  source: FeedItemSource;
+  tier: FeedItemTier;
+  // Finer-grained kind for row chrome: a my-turn section key
+  // ('awaiting_review' | 'your_pr' | 'approved' | 'watched_repo_pr' |
+  // 'claude_review'), 'thread', or an activity EventType.
+  kind: string;
+  occurredAt: string; // ISO-8601 — the item's relevant timestamp (sort + display)
+  repoId: number;
+  repoFullName: string;
+  prId: number | null;
+  prNumber: number | null;
+  prTitle: string | null;
+  prState: PrState | null;
+  actorId: number | null;
+  // Inlined content for comment-based items (thread reply, review_comment,
+  // pr_comment) or the "what's new" summary for your-PR rows; null otherwise.
+  content: string | null;
+  // Thread items only:
+  threadId: number | null;
+  path: string | null;
+  line: number | null;
+  derivedState: DerivedState | null;
+  ageDays: number | null; // thread age in days (drives the >2d high-priority tier)
+  // Row-chrome extras:
+  reasonTag: ReasonTag | null;
+  reviewState: ReviewState | null;
+  githubUrl: string | null;
+  // Dismissal coordinates when the item is actionable (my-turn items, threads); null
+  // for pure activity events. Mirrors MyTurnDismissBody so the existing dismiss/Done
+  // plumbing is reused unchanged.
+  dismiss: { kind: MyTurnDismissKind; refId: number } | null;
+}
+
+export interface ConsolidatedFeedResponse {
+  items: ConsolidatedFeedItem[];
+  // Actors/authors referenced by any item, for client-side login/avatar lookup.
+  users: User[];
+  generatedAt: string; // ISO-8601
 }
 
 // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----

@@ -90,8 +90,9 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           </Section>
 
           <Section title="My Turn &amp; Insights">
-            The header <strong>My Turn</strong> button isolates the timeline to the PRs
-            that need you now; <strong>Insights</strong> opens a per-repo snapshot
+            Opening a <strong>My Turn</strong> item in the Inbox Feed (or pressing{' '}
+            <Kbd>m</Kbd>) isolates the timeline to the PRs that need you now;{' '}
+            <strong>Insights</strong> opens a per-repo snapshot
             (open&nbsp;/&nbsp;merged&nbsp;/&nbsp;stalled, time-to-first-review, review
             load). Save filter combinations as named <strong>Views</strong>, and use the
             bell to get notified when something new lands in your queue.

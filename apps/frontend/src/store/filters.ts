@@ -102,8 +102,9 @@ export interface FilterState {
   // Transient (like myTurnOnly) — never persisted/URL-synced; resolveRange folds it in.
   myTurnFromMs: number | null;
 
-  // "Feed return": armed when the current selection was reached by clicking a Feed
-  // entry (FeedSection → openFeedEventOnTimeline), so the browser Back button returns
+  // "Feed return": armed when the current selection was reached via `openFeedEventOnTimeline`
+  // (a legacy back-stack slot — the old Feed pane is gone; retained only for the Timeline's
+  // {pierreFeed} history reconcile), so the browser Back button returns
   // straight to the Feed home — clearing the selection and tearing down any PR-isolation
   // Focus / popover the click entered. The Timeline reconciles it to a single {pierreFeed}
   // browser-history entry (mirroring the {pierreMyTurn} stack, one level) and the popstate
@@ -145,13 +146,14 @@ export interface FilterState {
   // Insights panel (header button / `i`): transient UI flag, not URL-synced.
   insightsOpen: boolean;
 
-  // Inbox tab (the master-detail triage console). Which repo's detail is shown:
-  // 'all' = the all-repos briefing feed, a number = that single repo's console,
-  // null = nothing selected yet (treated as 'all'). Client-side narrow, no refetch.
-  // Transient (mirrors myTurnOnly/insightsOpen): in freshDefaults() but NOT in
+  // Inbox tab (the master-detail triage console). Which detail is shown:
+  // 'feed' = the cross-repo consolidated Feed (the default landing detail), 'all' =
+  // the all-repos briefing feed of per-repo consoles, a number = that single repo's
+  // console, null = nothing selected yet (treated as 'feed'). Client-side narrow, no
+  // refetch. Transient (mirrors myTurnOnly/insightsOpen): in freshDefaults() but NOT in
   // pickFilterBarState / sanitizePersistedFilters. `?inboxRepo=<id>` is the only
   // URL mirror (see useUrlState); the active TAB lives in the pinnedTabs store.
-  inboxRepoId: number | 'all' | null;
+  inboxRepoId: number | 'all' | 'feed' | null;
   // Soft thread-state filter inside an Inbox repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
@@ -344,8 +346,9 @@ export interface FilterState {
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
   setInsightsOpen: (v: boolean) => void;
-  // Select an Inbox detail target (a repo id, or 'all' for the briefing feed).
-  setInboxRepo: (id: number | 'all') => void;
+  // Select an Inbox detail target (a repo id, 'all' for the briefing feed, or 'feed'
+  // for the cross-repo consolidated Feed).
+  setInboxRepo: (id: number | 'all' | 'feed') => void;
   // Set/clear the Inbox repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
   setInboxThreadFilter: (s: DerivedState | null) => void;
@@ -531,8 +534,9 @@ function freshDefaults(): FilterData {
     stripCollapsed: true, // strip starts collapsed for more timeline room
     insightsOpen: false,
     // Inbox detail state — transient (like myTurnOnly / insightsOpen). A fresh open
-    // lands on the all-repos briefing feed with no thread-state filter.
-    inboxRepoId: 'all',
+    // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
+    // with no thread-state filter.
+    inboxRepoId: 'feed',
     inboxThreadFilter: null,
     expandedFileGroups: [],
     collapsedFileGroups: [],
@@ -714,6 +718,11 @@ export const useFilters = create<FilterState>((set, get) => ({
     usePinnedTabs.getState().showTimeline();
     set({
       selectedPrId: prId,
+      // Clear any thread/comment selection from a previously-selected PR so the opened
+      // PR's detail doesn't highlight a thread that belongs to a different PR. (Callers
+      // that want a specific thread re-select it right after, e.g. the Feed thread rows.)
+      selectedThreadId: null,
+      selectedCommentId: null,
       timelineFocusPr: prId,
       timelineFocusAt: null,
       timelineFocusEvent: null,

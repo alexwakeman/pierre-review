@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import type { InboxResponse, RepoClaudeReviewsResponse } from '@pierre-review/shared';
-import { getInbox, listClaudeReviewsByRepo } from '../../db/queries.js';
+import type {
+  InboxResponse,
+  RepoClaudeReviewsResponse,
+  ConsolidatedFeedResponse,
+} from '@pierre-review/shared';
+import { getInbox, getConsolidatedFeed, listClaudeReviewsByRepo } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 function parseIntList(raw: string | undefined): number[] | null {
@@ -19,6 +23,13 @@ export async function inboxRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/inbox', async (req): Promise<InboxResponse> => {
     const q = req.query as { repoIds?: string };
     return getInbox(accountIdOf(req), parseIntList(q.repoIds));
+  });
+
+  // The consolidated Feed (the Inbox "Feed" entry): one relevance-ranked stream
+  // across all repos merging unresolved threads + My Turn actionables + the activity
+  // feed, deduped and deterministically tiered. Pure DB read — no GitHub sync, no AI.
+  app.get('/api/inbox/feed', async (req): Promise<ConsolidatedFeedResponse> => {
+    return getConsolidatedFeed(accountIdOf(req));
   });
 
   // Repo-scoped Claude-review history for the Inbox single-repo console. Ownership +

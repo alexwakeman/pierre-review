@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { InboxRepo, ThreadStateCounts } from '@pierre-review/shared';
 import { useInbox } from '../../hooks/useInbox.js';
 import { useRepos } from '../../hooks/useTimeline.js';
@@ -9,6 +10,7 @@ import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { RepoSection } from './RepoSection.js';
+import { FeedView } from './FeedView.js';
 
 const EMPTY_COUNTS: ThreadStateCounts = {
   untouched: 0,
@@ -115,6 +117,7 @@ export function InboxView(): JSX.Element {
   const { data, isFetching, isLoading, refetch } = useInbox(repoIds);
   const { data: allRepos } = useRepos();
   const { data: me } = useMe();
+  const qc = useQueryClient();
   const claudeEnabled = me?.claudeReviewEnabled ?? false;
 
   // Per-card expand state for the all-repos feed, persisted + re-asserted across
@@ -144,12 +147,14 @@ export function InboxView(): JSX.Element {
     return { threadTotals, attention, open, unread, stalled: sorted.reduce((n, r) => n + r.stats.stalledPrs, 0) };
   }, [sorted]);
 
-  // The selected repo (single-repo console). null ⇒ all-repos feed.
+  // The selected repo (single-repo console). null ⇒ a pseudo-row (Feed / All repos).
   const selectedRepo =
     typeof inboxRepoId === 'number'
       ? sorted.find((r) => r.repoId === inboxRepoId) ?? null
       : null;
-  const showingAll = inboxRepoId === 'all' || inboxRepoId == null || selectedRepo == null;
+  // The cross-repo consolidated Feed is the default detail (also when nothing's set).
+  const showingFeed = inboxRepoId === 'feed' || inboxRepoId == null;
+  const showingAll = inboxRepoId === 'all';
 
   const topRepoId = sorted[0]?.repoId ?? null;
   const isExpanded = (repoId: number): boolean =>
@@ -211,7 +216,11 @@ export function InboxView(): JSX.Element {
           </span>
           <button
             type="button"
-            onClick={() => void refetch()}
+            onClick={() => {
+              void refetch();
+              // The Feed entry reads a separate query — refresh it too (pure DB read).
+              void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
+            }}
             disabled={isFetching}
             className="ml-auto flex items-center gap-1 rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
             title="Re-query the local database (does not trigger a GitHub sync)"
@@ -246,6 +255,27 @@ export function InboxView(): JSX.Element {
             isFetching && data != null ? 'opacity-60 transition-opacity' : ''
           }`}
         >
+          {/* FEED pseudo-row — the cross-repo consolidated state of play (the default
+              landing detail). Sits above "All repos". */}
+          <button
+            type="button"
+            onClick={() => setInboxRepo('feed')}
+            aria-pressed={showingFeed}
+            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+              showingFeed
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            title="A relevance-ranked stream across all your repos"
+          >
+            <span aria-hidden="true" className="shrink-0 text-sky-500">
+              ✦
+            </span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+              Feed
+            </span>
+          </button>
+
           {/* ALL REPOS pseudo-row */}
           <RailRow
             fullName="All repos"
@@ -298,6 +328,8 @@ export function InboxView(): JSX.Element {
           <div className="flex h-full items-center justify-center text-sm text-gray-400">
             No watched repos yet. Add a repo from the filter bar to populate the Inbox.
           </div>
+        ) : showingFeed ? (
+          <FeedView />
         ) : isLoading && data == null ? (
           <div className="space-y-3">
             {[0, 1, 2].map((i) => (
@@ -333,7 +365,10 @@ export function InboxView(): JSX.Element {
             tintIndex={sorted.findIndex((r) => r.repoId === selectedRepo.repoId)}
             claudeEnabled={claudeEnabled}
           />
-        ) : null}
+        ) : (
+          // A numeric repo id that didn't resolve (e.g. removed) — fall back to Feed.
+          <FeedView />
+        )}
       </div>
     </div>
   );

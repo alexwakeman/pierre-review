@@ -1,4 +1,32 @@
 import { usePinnedTabs, type PinnedPr } from '../store/pinnedTabs.js';
+import { useFilters } from '../store/filters.js';
+
+// The "focus tab": the active timeline-focus (My Turn inbox, or an isolated PR) shown
+// as its own tab. With the shared-timeline-focus model there's at most one at a time,
+// and it's a STATE of the one timeline (not a separate ActiveTab value) — so it's
+// active whenever the board is showing and a focus is engaged. Clicking it re-shows
+// the focused board; the plain "Timeline" tab exits the focus.
+function FocusTab({ label }: { label: string }): JSX.Element {
+  const activeTab = usePinnedTabs((s) => s.activeTab);
+  const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
+  const active = activeTab === 'timeline';
+  return (
+    <button
+      type="button"
+      onClick={() => setActiveTab('timeline')}
+      className={`flex shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
+        active
+          ? 'border-gray-300 bg-white text-sky-600 dark:border-gray-700 dark:bg-gray-950 dark:text-sky-400'
+          : 'border-transparent bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-900 dark:text-gray-400 dark:hover:bg-gray-800'
+      }`}
+      title="The focused board"
+      aria-current={active ? 'page' : undefined}
+    >
+      <span aria-hidden="true">◎</span>
+      {label}
+    </button>
+  );
+}
 
 // A single pinned-PR tab: fixed width, two lines (title + author), with an ✕ to
 // unpin. Clicking the body opens the PR full-screen (sets it as the active tab).
@@ -71,10 +99,19 @@ function PinnedTab({ pr }: { pr: PinnedPr }): JSX.Element {
 // entirely when nothing is pinned, so the default UI is unchanged.
 export function PinnedTabsBar(): JSX.Element | null {
   const pinned = usePinnedTabs((s) => s.pinned);
-  const timelineActive = usePinnedTabs((s) => s.activeTab === 'timeline');
+  const activeTab = usePinnedTabs((s) => s.activeTab);
   const showTimeline = usePinnedTabs((s) => s.showTimeline);
+  // A timeline-focus is engaged: My Turn Focus Mode, or a PR-isolation overlay.
+  const myTurnOnly = useFilters((s) => s.myTurnOnly);
+  const focusActive = useFilters((s) => s.focusActive);
+  const exitMyTurnFocus = useFilters((s) => s.exitMyTurnFocus);
+  const exitFocus = useFilters((s) => s.exitFocus);
+  const focusEngaged = myTurnOnly || focusActive;
+  // The plain "Timeline" tab is active only on the UN-focused board.
+  const timelineActive = activeTab === 'timeline' && !focusEngaged;
 
-  if (pinned.length === 0) return null;
+  // Show the bar once there's a pinned PR OR a focus to represent as a tab.
+  if (pinned.length === 0 && !focusEngaged) return null;
 
   return (
     // No bottom border on the bar + no `-mb-px` overlap trick: the bar's `overflow-x-auto`
@@ -89,13 +126,20 @@ export function PinnedTabsBar(): JSX.Element | null {
           tabs scroll under it; its opaque bg (matching the bar) hides them. */}
       <button
         type="button"
-        onClick={showTimeline}
+        onClick={() => {
+          // "Timeline" is the un-focused board: leave any focus, then show it.
+          if (focusEngaged) {
+            exitMyTurnFocus();
+            exitFocus();
+          }
+          showTimeline();
+        }}
         className={`sticky left-0 z-10 flex shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
           timelineActive
             ? 'border-gray-300 bg-white text-blue-600 dark:border-gray-700 dark:bg-gray-950 dark:text-blue-400'
             : 'border-transparent bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-900 dark:text-gray-400 dark:hover:bg-gray-800'
         }`}
-        title="Return to the timeline view"
+        title="Return to the full timeline (leaves focus)"
         aria-current={timelineActive ? 'page' : undefined}
       >
         <svg
@@ -115,6 +159,7 @@ export function PinnedTabsBar(): JSX.Element | null {
         </svg>
         Timeline
       </button>
+      {focusEngaged && <FocusTab label={myTurnOnly ? 'My Turn' : 'PR Focus'} />}
       {pinned.map((pr) => (
         <PinnedTab key={pr.id} pr={pr} />
       ))}

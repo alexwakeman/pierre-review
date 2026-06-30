@@ -16,7 +16,8 @@ import type {
   CreatePrCommentBody,
   CreatePrCommentResult,
   CreateRepoBody,
-  FeedResponse,
+  ConsolidatedFeedResponse,
+  FeedDigestResponse,
   MeResponse,
   MergersResponse,
   DismissedMyTurnResponse,
@@ -177,6 +178,9 @@ export const api = {
   // read — "Refresh" re-queries this, it never triggers a GitHub sync.
   inbox: (search: string) =>
     get<InboxResponse>(`/api/inbox${search ? `?${search}` : ''}`),
+  // The consolidated Feed (the Inbox "Feed" entry): one relevance-ranked stream
+  // across all repos (unresolved threads + My Turn + activity feed). Pure DB read.
+  consolidatedFeed: () => get<ConsolidatedFeedResponse>('/api/inbox/feed'),
   // Repo-scoped Claude review history (all runs per PR, newest-first). Gated on
   // config.claudeReviewEnabled; the response's `enabled` flag reflects that.
   repoClaudeReviews: (repoId: number) =>
@@ -195,6 +199,13 @@ export const api = {
   // A single repo's digest (lazy per-repo so a slow Haiku call never blocks the grid).
   repoDigest: (repoId: number) =>
     get<RepoDigest>(`/api/pro/inbox/digests/${repoId}`),
+  // The cross-all-repos Feed digest (the AI panel atop the Inbox "Feed" entry): a
+  // per-repo bulleted change-report, assembled from the per-repo digests. Pro-only.
+  feedDigest: () => get<FeedDigestResponse>('/api/pro/feed/digest'),
+  refreshFeedDigest: () =>
+    fetch('/api/pro/feed/digest/refresh', jsonBody('POST')).then((r) =>
+      handle<FeedDigestResponse>(r),
+    ),
 
   // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----
   // Aggregated retrieval signals shown BEFORE a run (Surface 1). Only fetched when
@@ -211,8 +222,6 @@ export const api = {
     fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }),
   myTurn: () => get<MyTurnResponse>('/api/my-turn'),
   myTurnDone: () => get<DismissedMyTurnResponse>('/api/my-turn/done'),
-  // Watched-repo activity feed (last 14 days, newest first, no commits).
-  feed: () => get<FeedResponse>('/api/feed'),
   dismissMyTurn: (kind: MyTurnDismissKind, refId: number) =>
     fetch('/api/my-turn/dismiss', jsonBody('POST', { kind, refId })).then((r) =>
       handle<{ status: string }>(r),
