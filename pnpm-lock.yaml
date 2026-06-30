@@ -210,6 +210,30 @@ importers:
         specifier: ^6.0.7
         version: 6.4.2(@types/node@22.19.19)(jiti@1.21.7)(tsx@4.22.3)
 
+  packages/pro:
+    devDependencies:
+      '@anthropic-ai/sdk':
+        specifier: '>=0.93.0'
+        version: 0.100.1(zod@4.4.3)
+      '@pierre-review/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.19.19
+      drizzle-orm:
+        specifier: ^0.38.3
+        version: 0.38.4(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(@types/react@18.3.29)(better-sqlite3@11.10.0)(pg@8.21.0)(react@18.3.1)
+      fastify:
+        specifier: ^5.2.1
+        version: 5.8.5
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      zod:
+        specifier: ^4
+        version: 4.4.3
+
   packages/shared: {}
 
 packages:

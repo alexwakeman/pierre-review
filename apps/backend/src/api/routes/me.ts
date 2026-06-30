@@ -3,6 +3,7 @@ import type { MeResponse, MyTurnDismissBody } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { accountToLocalUser } from '../../auth/account.js';
 import { accountIdOf } from '../plugins/auth.js';
+import { getProCapabilities } from '../../pro/contract.js';
 import {
   dismissMyTurn,
   getCompletedDismissals,
@@ -41,6 +42,7 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       },
       claudeReviewEnabled: config.claudeReviewEnabled,
       deploymentMode: config.deploymentMode,
+      pro: getProCapabilities(),
     };
   });
 

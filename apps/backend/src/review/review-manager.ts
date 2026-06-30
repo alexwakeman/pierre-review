@@ -9,6 +9,7 @@ import type { Logger } from '../sync/sync-repo.js';
 import { config } from '../config.js';
 import { LOCAL_ACCOUNT_ID } from '../auth/account.js';
 import { getLatestClaudeReview, getReviewPrContext } from '../db/queries.js';
+import { getLearningsProvider } from './events.js';
 import { runReview } from './agent.js';
 import {
   insertQueuedReview,
@@ -26,6 +27,9 @@ interface QueueItem {
   headSha: string;
   ctx: PrCtx;
   log: Logger;
+  // Optional learnings context from a registered @pierre/pro provider; undefined
+  // in OSS mode (no provider) ⇒ the review prompt is byte-identical to today.
+  priorReviewContext?: string;
 }
 
 // In-memory state (analogous to sync/sync-manager.ts). At most one review per PR.
@@ -78,6 +82,14 @@ export async function startReview(
     throw err;
   }
 
+  // Optional injection seam: a registered @pierre/pro learnings provider renders a
+  // "reviewer preferences" block for this PR. Optional-chaining short-circuits to
+  // undefined when no provider is registered (OSS mode) WITHOUT calling .catch, so
+  // the run is unchanged; a provider error degrades to undefined too.
+  const priorReviewContext = await getLearningsProvider()
+    ?.buildContext({ accountId: LOCAL_ACCOUNT_ID, prId, headSha: ctx.headSha })
+    .catch(() => undefined);
+
   const item: QueueItem = {
     reviewId,
     prId,
@@ -86,6 +98,7 @@ export async function startReview(
     headSha: ctx.headSha,
     ctx,
     log,
+    priorReviewContext,
   };
   reviewIdByPr.set(prId, reviewId);
   if (running.size < config.reviewConcurrency) {
@@ -121,6 +134,7 @@ function launch(item: QueueItem): void {
     headSha: item.headSha,
     model: item.model,
     requestedMode: item.requestedMode,
+    priorReviewContext: item.priorReviewContext,
     abortController: controller,
     onProgress: (p) => progressByReview.set(reviewId, p),
   })

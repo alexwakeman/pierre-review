@@ -67,6 +67,11 @@ import type {
   ClaudeReviewSummary,
   ClaudeReviewListItem,
   ClaudeReviewToAction,
+  InboxResponse,
+  InboxRepo,
+  InboxRepoStats,
+  RepoClaudeReviewsResponse,
+  RepoClaudeReviewPr,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -1322,6 +1327,100 @@ export async function getMergers(accountId: number): Promise<RepoMergers[]> {
     else byRepo.set(r.repoId, [r.userId]);
   }
   return [...byRepo.entries()].map(([repoId, userIds]) => ({ repoId, userIds }));
+}
+
+// ---- inbox (CORE, always-on, no AI) ----
+
+// Reason tags that, on an open PR, count as "needs attention" for the Inbox rail
+// badge (a my-turn-shaped triage reason). Stalled + untouched threads are folded
+// in separately via the per-PR flags. Keep in sync with REASON_PRIORITY values.
+const INBOX_ATTENTION_REASONS = new Set<ReasonTag>([
+  'awaiting_your_review',
+  'your_pr_new_comments',
+  'ci_failing',
+  'merge_conflicts',
+  'untouched_threads',
+]);
+
+// The Inbox aggregate: per watched repo, current-state stats + a per-repo thread
+// total + maintainer ids + attention/unread flags + the open PRs (caller groups by
+// author). Composes EXISTING accountId-scoped readers — getInsights / getOpenPrs /
+// getMergers / listRepos — so isolation + triage logic stay single-sourced. The
+// one genuinely new aggregation is `threadTotals` (sum each open PR's threadCounts
+// per repo). Every watched repo is included (a quiet repo → empty prs, zeroed stats).
+export async function getInbox(
+  accountId: number,
+  repoIds: number[] | null,
+): Promise<InboxResponse> {
+  const reposAll = await listRepos(accountId);
+  const reposScoped = repoIds ? reposAll.filter((r) => repoIds.includes(r.id)) : reposAll;
+
+  const [insights, openPrs, mergers] = await Promise.all([
+    getInsights({ accountId, repoIds }),
+    getOpenPrs({ accountId, repoIds, userIds: null }),
+    getMergers(accountId),
+  ]);
+
+  const insightsByRepo = new Map(insights.repos.map((r) => [r.repoId, r]));
+  const mergersByRepo = new Map(mergers.map((m) => [m.repoId, m.userIds]));
+  const prsByRepo = new Map<number, TimelinePr[]>();
+  for (const pr of openPrs) {
+    const arr = prsByRepo.get(pr.repoId);
+    if (arr) arr.push(pr);
+    else prsByRepo.set(pr.repoId, [pr]);
+  }
+
+  // Preserve listRepos order (stable, not jumpy across loads).
+  const inboxRepos: InboxRepo[] = reposScoped.map((repo) => {
+    const repoPrs = prsByRepo.get(repo.id) ?? [];
+    const ins = insightsByRepo.get(repo.id);
+    const stats: InboxRepoStats = ins
+      ? {
+          openPrs: ins.openPrs,
+          draftPrs: ins.draftPrs,
+          mergedLast7d: ins.mergedLast7d,
+          stalledPrs: ins.stalledPrs,
+          medianHoursToFirstReview: ins.medianHoursToFirstReview,
+          oldestUnreviewed: ins.oldestUnreviewed,
+        }
+      : {
+          openPrs: 0,
+          draftPrs: 0,
+          mergedLast7d: 0,
+          stalledPrs: 0,
+          medianHoursToFirstReview: null,
+          oldestUnreviewed: null,
+        };
+
+    const threadTotals = emptyCounts();
+    for (const pr of repoPrs) {
+      threadTotals.untouched += pr.threadCounts.untouched;
+      threadTotals.replied_unresolved += pr.threadCounts.replied_unresolved;
+      threadTotals.likely_addressed += pr.threadCounts.likely_addressed;
+      threadTotals.resolved += pr.threadCounts.resolved;
+    }
+
+    const attentionCount = repoPrs.filter(
+      (pr) =>
+        pr.isStalled ||
+        pr.threadCounts.untouched > 0 ||
+        INBOX_ATTENTION_REASONS.has(pr.reasonTag),
+    ).length;
+    const hasUnread = repoPrs.some((pr) => pr.newSinceLastViewed != null);
+
+    return {
+      repoId: repo.id,
+      repoFullName: repo.fullName,
+      stats,
+      threadTotals,
+      maintainerIds: mergersByRepo.get(repo.id) ?? [],
+      attentionCount,
+      hasUnread,
+      prs: repoPrs,
+    };
+  });
+
+  return { repos: inboxRepos, generatedAt: new Date().toISOString() };
 }
 
 // ---- incremental review: pr_views ----
@@ -2714,6 +2813,68 @@ export async function listClaudeReviewHistory(
     createdAt: r.createdAt.toISOString(),
     finishedAt: iso(r.finishedAt),
   }));
+}
+
+// Repo-oriented Claude-review retrieval for the Inbox single-repo console: ALL runs
+// for a repo's PRs, grouped by PR (newest run first within each), PRs ordered by
+// most-recent run desc. Richer than listAllClaudeReviews (which keeps only one
+// latest-succeeded run per PR). IDOR-sensitive id getter: scoped by accountId, and
+// gated on config.claudeReviewEnabled. An unowned repo (cross-account) → empty list.
+export async function listClaudeReviewsByRepo(
+  repoId: number,
+  accountId: number,
+): Promise<RepoClaudeReviewsResponse> {
+  if (!config.claudeReviewEnabled) return { enabled: false, prs: [] };
+  // Ownership: a repo not owned by this account leaks nothing (404-equivalent).
+  const owned = await getRepo(repoId, accountId);
+  if (!owned) return { enabled: config.claudeReviewEnabled, prs: [] };
+
+  const rows = await db
+    .select({
+      review: claudeReviews,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      prState: pullRequests.state,
+      authorId: pullRequests.authorId,
+    })
+    .from(claudeReviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
+    .where(and(eq(claudeReviews.accountId, accountId), eq(pullRequests.repoId, repoId)))
+    .orderBy(desc(claudeReviews.id))
+    .execute();
+
+  // Rows are globally id-desc (newest-first). The first row seen for each PR is its
+  // newest run, so map-insertion order = PRs by most-recent run desc, and each PR's
+  // runs[] accumulate newest-first — no extra sort needed.
+  const byPr = new Map<number, RepoClaudeReviewPr>();
+  for (const { review: r, prNumber, prTitle, prState, authorId } of rows) {
+    const summary: ClaudeReviewSummary = {
+      id: r.id,
+      headSha: r.headSha,
+      status: r.status,
+      model: r.model,
+      scope: r.scope,
+      reviewMode: r.reviewMode,
+      verdict: r.verdict,
+      userVerdict: r.userVerdict,
+      costUsd: r.costUsd,
+      postedAt: iso(r.postedAt),
+      createdAt: r.createdAt.toISOString(),
+      finishedAt: iso(r.finishedAt),
+    };
+    const existing = byPr.get(r.prId);
+    if (existing) existing.runs.push(summary);
+    else
+      byPr.set(r.prId, {
+        prId: r.prId,
+        prNumber,
+        prTitle,
+        prState,
+        authorId,
+        runs: [summary],
+      });
+  }
+  return { enabled: true, prs: [...byPr.values()] };
 }
 
 // Cross-PR list of prior Claude reviews: ONE entry per PR = that PR's most-recent

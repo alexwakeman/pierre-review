@@ -13,9 +13,12 @@ import type {
   ReviewMode,
   User,
 } from '@pierre-review/shared';
+import type { LearningMatch } from '@pierre-review/shared';
 import { CLAUDE_REVIEW_MODELS } from '@pierre-review/shared';
 import { formatDate } from '../lib/ui.js';
 import { unlockReviewSound } from '../lib/sound.js';
+import { useProCapabilities } from '../hooks/useTriage.js';
+import { useReviewLearnings } from '../hooks/useReviewLearnings.js';
 import {
   useCancelReview,
   useClaudeReview,
@@ -965,6 +968,111 @@ function ApiKeyPanel({
   );
 }
 
+// Subtle confidence label (right-aligned on a match row) — never a hard claim,
+// mirroring the app's heuristic-honesty ethos.
+const CONFIDENCE_CLASS: Record<LearningMatch['confidence'], string> = {
+  high: 'text-green-600 dark:text-green-400',
+  medium: 'text-amber-600 dark:text-amber-400',
+  low: 'text-gray-400',
+};
+
+function LearningMatchRow({ match }: { match: LearningMatch }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const hasExample =
+    match.example != null && (match.example.claude != null || match.example.you != null);
+  return (
+    <li className="px-2 py-1.5">
+      <div className="flex items-baseline gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+            <span className="truncate font-mono">{match.glob}</span>
+            {match.category != null && (
+              <>
+                <span className="text-gray-300 dark:text-gray-600">·</span>
+                <span>{match.category}</span>
+              </>
+            )}
+          </div>
+          <div className="text-xs text-gray-700 dark:text-gray-200">{match.summary}</div>
+        </div>
+        <span className={`shrink-0 text-[10px] ${CONFIDENCE_CLASS[match.confidence]}`}>
+          {match.confidence}
+        </span>
+      </div>
+      {hasExample && (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="mt-0.5 text-[10px] text-gray-400 hover:underline"
+        >
+          {open ? 'hide example' : 'show example ▸'}
+        </button>
+      )}
+      {open && hasExample && (
+        <div className="mt-1 space-y-0.5 rounded bg-gray-50 px-2 py-1 text-[11px] dark:bg-gray-800/60">
+          {match.example?.claude != null && (
+            <div>
+              <span className="font-medium text-gray-400">Claude: </span>
+              <span className="text-gray-600 dark:text-gray-300">
+                “{match.example.claude}”
+              </span>
+            </div>
+          )}
+          {match.example?.you != null && (
+            <div>
+              <span className="font-medium text-gray-400">You: </span>
+              <span className="text-gray-600 dark:text-gray-300">
+                “{match.example.you}”
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+// Surface 1 (Pro): a collapsible panel of aggregated signals from the reviewer's
+// past reviews in this repo, shown ABOVE the Run/Re-review controls. The same
+// signals are injected into the run as context. Gated on pro.reviewMemory; renders
+// nothing in OSS mode or when there are no matches.
+function ReviewLearningsPanel({ prId }: { prId: number }): JSX.Element | null {
+  const { reviewMemory } = useProCapabilities();
+  const { data } = useReviewLearnings(prId, reviewMemory);
+  const [open, setOpen] = useState(false);
+  const matches = data?.matches ?? [];
+  if (!reviewMemory || matches.length === 0) return null;
+  return (
+    <div className="mb-2 rounded border border-violet-200 bg-violet-50/50 dark:border-violet-900/50 dark:bg-violet-950/20">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-violet-700 dark:text-violet-300"
+        aria-expanded={open}
+      >
+        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+        From your past reviews in this repo ({matches.length} signal
+        {matches.length === 1 ? '' : 's'})
+        <span className="ml-auto text-[10px] font-normal text-violet-500/70">
+          {open ? 'hide' : 'show'}
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-violet-200 px-1 pb-1 dark:border-violet-900/50">
+          <div className="px-2 py-1 text-[10px] text-gray-500 dark:text-gray-400">
+            ⓘ These are given to Claude as context for this run.
+          </div>
+          <ul className="divide-y divide-violet-100 dark:divide-violet-900/40">
+            {matches.map((m, i) => (
+              <LearningMatchRow key={i} match={m} />
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ClaudeReviewTab({
   pr,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1156,6 +1264,8 @@ export function ClaudeReviewTab({
       ) : (
         <>
         <div className="px-4 py-3">
+          {/* Surface 1 (Pro): matches from past reviews, injected into this run. */}
+          <ReviewLearningsPanel prId={pr.id} />
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-xs uppercase tracking-wide text-gray-400">
               Model

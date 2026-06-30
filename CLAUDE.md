@@ -139,21 +139,27 @@ pierre-review/
 │  │  │  ├─ sync/               scheduler, sync-manager, sync-repo, upsert, derive-thread-state, commit-files, hydrate-detail
 │  │  │  │  └─ __fixtures__/threads/   JSON fixtures for the thread-state heuristic tests
 │  │  │  ├─ review/             Claude Review (local-only): agent, review-manager, routing, persist, post-review, clone-manager, prompt
+│  │  │  │                      + events.ts (inert review event-bus + learnings-provider registry), llm.ts (cheapComplete Haiku seam)
+│  │  │  ├─ pro/                open-core seam (no premium logic): contract.ts (ProContext/ProPlugin + capability singleton),
+│  │  │  │                      bind.ts (guarded runtime import of @pierre/pro), migrate.ts (plugin-owned dual-dialect migrator)
 │  │  │  └─ api/
-│  │  │     ├─ routes/          one file per resource (timeline, prs, repos, users, me, threads, claude-review, auth[cloud], …)
+│  │  │     ├─ routes/          one file per resource (timeline, prs, repos, users, me, threads, inbox, claude-review, auth[cloud], …)
 │  │  │     └─ plugins/         error-handler (notFoundHandler / SPA+landing router), auth (context + session + gate)
 │  │  └─ data/                 the local SQLite DB (gitignored)
 │  ├─ frontend/                @pierre-review/frontend — the timeline SPA (base `/app/`)
 │  │  └─ src/
-│  │     ├─ App.tsx            useMe() 401 → SignInGate; layout: FilterBar / OpenPrsStrip / Timeline / DetailPane
-│  │     ├─ store/filters.ts   Zustand: all filter + selection + timeline-hint state
-│  │     ├─ hooks/             useUrlState, useTimeline, usePr, useTriage, useMe, useKeyboard, useDetailCache
+│  │     ├─ App.tsx            useMe() 401 → SignInGate; header Timeline|Inbox switch; FilterBar / OpenPrsStrip / Timeline / DetailPane / Inbox+pinned overlays
+│  │     ├─ store/filters.ts   Zustand: all filter + selection + timeline-hint state (+ transient inboxRepoId/inboxThreadFilter)
+│  │     ├─ hooks/             useUrlState, useTimeline, usePr, useTriage, useMe (+ useProCapabilities), useInbox, useReviewLearnings, …
 │  │     ├─ api/client.ts      typed fetch wrapper (credentialed; throws ApiError)
-│  │     ├─ components/        Timeline/, PrDetail, ChecksTab, ThreadList/, ThreadView/, MyTurnPanel/, …
+│  │     ├─ components/        Timeline/, Inbox/ (Pro Inbox tab), PrDetail, ChecksTab, ThreadList/, ThreadView/, MyTurnPanel/, …
 │  │     └─ lib/ui.ts          shared UI metadata (state colors/labels/shapes) + helpers
 │  └─ landing/                 @pierre-review/landing — public marketing page (cloud, served at `/`); no shared runtime code
 └─ packages/
-   └─ shared/                 @pierre-review/shared — types ONLY, the contract between the apps (src/types.ts)
+   ├─ shared/                 @pierre-review/shared — types ONLY, the contract between the apps (src/types.ts)
+   └─ pro/                    @pierre/pro — PRIVATE git submodule (alexwakeman/pierre-pro), runtime-imported plugin (per-repo
+                              Haiku digest + Claude Review learnings). Resolved by PATH (not a declared dep); absent → clean OSS
+                              mode + install still succeeds. `git submodule update --init` to fetch. See "Open-core Pro plugin".
 ```
 
 ---
@@ -176,6 +182,7 @@ All from the repo root unless noted.
 | `pnpm db:studio` / `db:studio:pg` | drizzle-studio against the local DB / a Postgres |
 | `pnpm sync:once owner/repo` | one-off sync of one repo without starting the server |
 | `pnpm --filter @pierre-review/backend verify:isolation` | query-layer cross-account IDOR check (throwaway DB) |
+| `pnpm --filter @pierre/pro typecheck` | typecheck the private Pro plugin (present only when the submodule is checked out) |
 | `pnpm package` | assemble `./release` for publishing |
 
 `DEPLOYMENT_MODE=local` (default) vs `cloud` selects the whole stack (SQLite vs Postgres,
@@ -319,7 +326,10 @@ file maps to a `client.ts` method.
 | `POST /api/repos/:id/sync?full=true` | trigger sync → `202 {status:'started'}`, or `409` if already running |
 | `GET /api/users` (+ isBot updates) | user list / bot flagging |
 | `GET /api/mergers` | per-repo merge-rights map (who's merged there) → the maintainer shield |
-| `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode`; cloud: 401 signed out) |
+| `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{inboxDigest,reviewMemory}`; cloud: 401 signed out) |
+| `GET /api/inbox?repoIds` | **Inbox tab** (core, no AI): per watched repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getInbox` from existing readers |
+| `GET /api/repos/:id/claude-reviews` | repo-scoped Claude-review history (retrieval only; `enabled:false` when the flag is off) → `{prs:[{runs[]}]}` |
+| `GET·POST /api/pro/inbox/digests*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest + review-memory data. See "Open-core Pro plugin" |
 | `GET /api/auth/login` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub-App OAuth: authorize / exchange+upsert+session→`/app` / clear session |
 | `GET /api/prs/:id/claude-review` | latest run + findings + history + auth status + `enabled` |
 | `POST /api/prs/:id/claude-review {model}` | start a run → `202 {reviewId}`; `400` no-auth/no-head, `409` busy, `404` disabled |
@@ -508,6 +518,75 @@ posts **one** GitHub review (inline + body + verdict).
   are curated runtime deps in `build-release.mjs`; the inline prompt + `import type`-only
   shared usage keep the no-`.ts`-leak / no-shared-runtime guards passing.
 
+## Open-core Pro plugin (`@pierre/pro`) + the Inbox tab
+
+Three workstreams sit behind one **open-core seam**: the public repo holds only the
+contract + a guarded import + inert hooks; **all premium logic lives in the private,
+runtime-imported `packages/pro`** package. Docs: **[docs/PRO-PLATFORM.md](docs/PRO-PLATFORM.md)**.
+
+**`packages/pro` is a PRIVATE git submodule** (`github.com/alexwakeman/pierre-pro`, SSH).
+A pure-OSS checkout of `pierre-review` does **not** have it — `git clone` leaves
+`packages/pro/` empty unless you `git submodule update --init` with access. Because the
+public repo is genuinely public, the premium source must never be committed here; only the
+`.gitmodules` entry + the submodule gitlink are public. It IS a `pnpm` workspace member
+(`packages/*` glob) when checked out, so `pnpm install` installs its deps into
+`packages/pro/node_modules`; when absent the glob skips the empty dir and install still
+succeeds.
+
+**The plugin boundary.** `src/pro/contract.ts` defines `ProContext` (the host hands the
+plugin `db`/`schema`/`runTransaction`/`isPg`/`accountIdOf`/`llm.complete`/`queries`/
+`reviewEvents`/`registerLearningsProvider`/`registerMigrations`), `ProPlugin
+{apiVersion:1, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
+`/api/me` (`pro:{inboxDigest,reviewMemory}`) exactly like `claudeReviewEnabled`. `src/pro/bind.ts`
+runs in `index.ts` between `buildApp()` and `listen()`: gated on **`config.proEnabled` (`=!isCloud`)**.
+It is **NOT a declared dependency** — instead `bind.ts` resolves the plugin by **filesystem
+path** (`packages/pro/dist/index.js` then `packages/pro/src/index.ts`, relative to the repo
+root via `import.meta.url`) and `await import(...)`s it. **Absent submodule ⇒ no entry file ⇒
+clean OSS no-op, and `pnpm install` never fails** (the public-CI path). The path-based loader
+(not a bare `@pierre/pro` specifier / workspace dep) is what keeps install working without the
+submodule — don't reintroduce a `package.json` dependency on it. The plugin imports **no host
+internals** — everything arrives via `ctx`; `ctx.db` is node-postgres-typed so a stray `.get()`
+is a compile error in the plugin too. It resolves under **tsx** (dev, `src/index.ts`); a built
+`node dist` run would need `packages/pro/dist` (no build step yet — Pro is local/dev-only). The
+plugin is **never in the release allowlist** (`build-release.mjs`). Plugin owns its **own**
+dual-dialect tables (`review_learnings`, `repo_digests`), migrations
+(`packages/pro/migrations{,-pg}/*.sql` run via `ctx.registerMigrations` → `src/pro/migrate.ts`,
+the one sanctioned raw-`$client` DDL site + `pro_migrations` bookkeeping), and isolation test.
+
+**Inbox tab — CORE, always-on, NO AI (not flagged).** A peer of Timeline (`ActiveTab =
+'timeline' | 'inbox' | number` in `store/pinnedTabs.ts`, rendered as a full-`<main>` overlay
+like the pinned-PR overlay; `?view=inbox&inboxRepo`). A repo rail + per-repo console
+(stats → thread-state bar → PRs-by-author → prior Claude reviews) built **entirely on the
+read layer**: `getInbox` composes `getInsights`/`getOpenPrs`/`getMergers` (only new
+aggregation = per-repo `threadTotals`); `listClaudeReviewsByRepo` is retrieval-only (no new
+storage). Reuses the whole `lib/ui.ts` glyph vocabulary. Refresh re-queries the **DB only**
+(not a GitHub sync), never blanks.
+
+**Pro: per-repo Haiku digest** (`packages/pro/src/inbox-digest/`). The flagged sub-panel in
+the Inbox console. `metrics.ts` compacts `getInbox`+`getRepoAnalytics` into a bounded
+`RepoDigestPayload`; one non-agentic `ctx.llm.complete` (Haiku) → stored in `repo_digests`.
+**Cost-safe:** generation only on `POST /refresh`; a **payload-hash cache** (unchanged repo =
+$0 — and the hash MUST zero `Date.now()`-derived fields like `age_hours` or a dormant repo
+re-bills hourly), per-account min-interval + in-flight guard, USD/repo caps. Capability
+`inboxDigest` tracks `PRO_DIGEST_ENABLED` (else a dead "Regenerate" button).
+
+**Pro: Claude Review learnings/memory** (`packages/pro/src/review-memory/`). Core seam =
+`src/review/events.ts`: an **inert** typed event-bus (5 emit sites in `claude-review.ts`,
+zero subscribers in OSS) + a learnings-provider registry, plus an optional
+`priorReviewContext` prompt slot threaded `review-manager → agent → prompt` (byte-identical
+when no provider). The plugin subscribes, enriches via `ctx.db`, appends `review_learnings`
+rows (9 `kind`s, `dedupeKey`-idempotent), and on a new run injects a bounded markdown context
+block. Two capability-gated UI surfaces in core: a pre-run "matches" panel (`ClaudeReviewTab`)
+and a per-entry action log (`ClaudeReviewsModal`).
+
+**`review/llm.ts` `cheapComplete` — the cheap-tier LLM seam (auth is load-bearing).** Core-owned
+so the plugin adds no Anthropic dep. It MUST accept **every** credential Claude Review does:
+explicit `ANTHROPIC_API_KEY`/local key → raw `@anthropic-ai/sdk` (metered); **otherwise the
+Claude Agent SDK `query()`** (single-turn, no tools) — the same runtime Claude Review uses —
+which resolves a `CLAUDE_CODE_OAUTH_TOKEN` **or an ambient logged-in `claude` session**. The
+raw SDK alone can't use an ambient session (the common Pro/Max local case), which silently
+broke the digest. Any new core LLM seam must follow this dual-auth pattern.
+
 ## Conventions & gotchas
 
 - **ESM module resolution differs per package.** Backend **NodeNext** — relative imports
@@ -524,6 +603,15 @@ posts **one** GitHub review (inline + body + verdict).
 - **Per-account isolation is load-bearing.** Every list/feed query filters by `accountId`;
   every id-addressed read/write scopes ownership (→ 404). New id-routes: run
   `verify:isolation`. Tokens come from `getAccessToken`, never a module cache.
+- **Open-core boundary (`@pierre/pro`).** Premium code lives ONLY in the private submodule
+  `packages/pro` (`alexwakeman/pierre-pro`) — never commit it into this public repo (only
+  `.gitmodules` + the gitlink are public). The public repo holds just the contract, the
+  path-based guarded import, the capability passthrough, and inert seams (an emitter with zero
+  subscribers, an optional prompt string). Never add `@pierre/pro` to any `package.json`
+  `dependencies` / lockfile / `build-release.mjs` allowlist — `bind.ts` loads it by FILE PATH
+  so `pnpm install` works without the submodule. The plugin ships its **own** dual-dialect
+  tables + parity + migrations + isolation test (core's `verify:isolation` can't see plugin
+  tables). Bump `apiVersion` on any breaking `ProContext` change; `bind.ts` log-and-degrades.
 - **Keep `/api/timeline` lean** — no bodies/diff hunks; fetch detail on demand via
   `/api/prs/:id` (hot path).
 - **Heuristics get fixture tests.** Before changing `derive-thread-state.ts`, add a sample to

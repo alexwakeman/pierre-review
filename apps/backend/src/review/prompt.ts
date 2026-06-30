@@ -222,6 +222,10 @@ export function buildUserPrompt(input: {
   // omitted from the block below. Their names still appear in "Changed files"; the
   // prompt tells the agent how to recover them per mode.
   omittedFiles?: string[];
+  // Optional injection seam: a pre-rendered "reviewer preferences from past
+  // reviews" block produced by the @pierre/pro learnings provider. Absent/empty in
+  // OSS mode (no provider) ⇒ this prompt is byte-identical to today.
+  priorReviewContext?: string;
 }): string {
   const {
     repoFullName,
@@ -235,6 +239,7 @@ export function buildUserPrompt(input: {
     diff,
     mode = 'worktree',
     omittedFiles = [],
+    priorReviewContext,
   } = input;
 
   const lines: string[] = [];
@@ -275,6 +280,17 @@ export function buildUserPrompt(input: {
       `The following lockfile/generated files were stripped from the diff below and are NOT shown — do not review them:`,
     );
     for (const file of excludedFiles) lines.push(`- ${file}`);
+    lines.push('');
+  }
+
+  // Injection seam: reviewer preferences learned from past reviews, rendered by
+  // the @pierre/pro provider. Only present when a provider is registered AND it
+  // returned a non-empty string — otherwise nothing is pushed, so the OSS prompt
+  // is unchanged.
+  if (priorReviewContext && priorReviewContext.trim().length > 0) {
+    lines.push('## Reviewer preferences from past reviews');
+    lines.push('');
+    lines.push(priorReviewContext.trim());
     lines.push('');
   }
 

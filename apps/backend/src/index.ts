@@ -40,6 +40,13 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     await reconcileReviewsOnStartup(app.log);
   }
 
+  // Bind the optional Pro plugin (dynamic import; no-ops in OSS mode). Same
+  // "optional subsystem, degrade gracefully" posture as the scheduler below.
+  {
+    const { bindProPlugin } = await import('./pro/bind.js');
+    await bindProPlugin(app);
+  }
+
   // Scheduler is wired in Phase 3; guarded so the skeleton runs without it.
   if (!config.disableScheduler) {
     try {

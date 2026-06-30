@@ -5,6 +5,7 @@ import type {
   MeResponse,
   MyTurnResponse,
   OpenPrsResponse,
+  ProCapabilities,
   RepoAnalytics,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
@@ -35,6 +36,12 @@ export function useMe() {
   // `retry: false` so a cloud-mode 401 (signed out) surfaces immediately to the
   // App auth gate instead of being retried.
   return useQuery<MeResponse>({ queryKey: ['me'], queryFn: api.me, retry: false });
+}
+
+// Premium capability flags (mirrors claudeReviewEnabled). All-false until /api/me
+// loads and in OSS mode (no @pierre/pro plugin).
+export function useProCapabilities(): ProCapabilities {
+  return useMe().data?.pro ?? { inboxDigest: false, reviewMemory: false };
 }
 
 export function useMyTurn() {

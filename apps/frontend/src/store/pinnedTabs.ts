@@ -13,9 +13,12 @@ export interface PinnedPr {
   authorAvatarUrl: string | null;
 }
 
-// Which "tab" the main area is showing: the standard timeline board, or a pinned
-// PR rendered full-screen (by its PR id).
-export type ActiveTab = 'timeline' | number;
+// Which "tab" the main area is showing: the standard timeline board, the Inbox
+// triage console, or a pinned PR rendered full-screen (by its PR id). The three
+// are ONE axis — only one renders at a time. Code that branches on "is the board
+// showing" must treat the `'inbox'` string (a non-number, non-'timeline' value)
+// like any other non-timeline overlay.
+export type ActiveTab = 'timeline' | 'inbox' | number;
 
 interface PinnedTabsState {
   // The pinned PRs, in pin order — each becomes a tab under the Open-PRs strip.
@@ -37,6 +40,9 @@ interface PinnedTabsState {
   syncMeta: (pr: PinnedPr) => void;
   setActiveTab: (tab: ActiveTab) => void;
   showTimeline: () => void;
+  // Switch the main area to the Inbox triage console. A no-op when it's already
+  // showing, mirroring showTimeline()'s idempotence.
+  showInbox: () => void;
   // Drop all pins (and the persisted blob). Called on cloud sign-out so one user's
   // pinned PRs — which carry account-scoped ids + titles/authors — don't leak to the
   // next user on a shared browser.
@@ -137,6 +143,9 @@ export const usePinnedTabs = create<PinnedTabsState>((set, get) => ({
   // pinned tab is open (the common case).
   showTimeline: () => {
     if (get().activeTab !== 'timeline') set({ activeTab: 'timeline' });
+  },
+  showInbox: () => {
+    if (get().activeTab !== 'inbox') set({ activeTab: 'inbox' });
   },
 
   clear: () => {

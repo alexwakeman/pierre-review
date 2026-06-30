@@ -67,6 +67,10 @@ export interface RunReviewArgs {
   // The user's requested depth: 'auto' lets the router decide; 'diff_only'/'worktree'
   // force the mode, overriding the router's metrics.
   requestedMode: RequestedReviewMode;
+  // Optional injection seam (review-manager fills it from a registered @pierre/pro
+  // learnings provider). Undefined in OSS mode ⇒ buildUserPrompt emits the
+  // unchanged prompt.
+  priorReviewContext?: string;
   abortController: AbortController;
   onProgress: (p: ClaudeReviewProgress) => void;
 }
@@ -283,6 +287,7 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
         diff: promptDiff,
         mode,
         omittedFiles,
+        priorReviewContext: args.priorReviewContext,
       }),
       options: {
         model: args.model,

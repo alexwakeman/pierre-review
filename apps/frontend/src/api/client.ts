@@ -22,8 +22,14 @@ import type {
   DismissedMyTurnResponse,
   MyTurnDismissKind,
   MyTurnResponse,
+  InboxResponse,
   InsightsResponse,
   RepoAnalytics,
+  RepoClaudeReviewsResponse,
+  RepoDigest,
+  RepoDigestsResponse,
+  ReviewActionsResponse,
+  ReviewLearningsResponse,
   OpenPrsResponse,
   PostCommentResult,
   PostReviewPreview,
@@ -164,6 +170,40 @@ export const api = {
     fetch(`/api/prs/${prId}/review-comment`, jsonBody('POST', body)).then((r) =>
       handle<AddReviewCommentResult>(r),
     ),
+
+  // ---- Inbox (Workstream 1; CORE, no AI) ----
+  // The multi-repo triage aggregate (per watched repo: stats, thread totals,
+  // grouped PRs). Respects the active repo filter via the query string. A pure DB
+  // read — "Refresh" re-queries this, it never triggers a GitHub sync.
+  inbox: (search: string) =>
+    get<InboxResponse>(`/api/inbox${search ? `?${search}` : ''}`),
+  // Repo-scoped Claude review history (all runs per PR, newest-first). Gated on
+  // config.claudeReviewEnabled; the response's `enabled` flag reflects that.
+  repoClaudeReviews: (repoId: number) =>
+    get<RepoClaudeReviewsResponse>(`/api/repos/${repoId}/claude-reviews`),
+
+  // ---- Pro per-repo digest (Workstream 2; @pierre/pro, flagged) ----
+  // Cached per-repo LLM headline digests for the watched repos. Only fetched when
+  // pro.inboxDigest is true (absent plugin → 404 / enabled:false).
+  repoDigests: (search: string) =>
+    get<RepoDigestsResponse>(`/api/pro/inbox/digests${search ? `?${search}` : ''}`),
+  refreshRepoDigests: (search?: string) =>
+    fetch(
+      `/api/pro/inbox/digests/refresh${search ? `?${search}` : ''}`,
+      jsonBody('POST'),
+    ).then((r) => handle<{ status: string }>(r)),
+  // A single repo's digest (lazy per-repo so a slow Haiku call never blocks the grid).
+  repoDigest: (repoId: number) =>
+    get<RepoDigest>(`/api/pro/inbox/digests/${repoId}`),
+
+  // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----
+  // Aggregated retrieval signals shown BEFORE a run (Surface 1). Only fetched when
+  // pro.reviewMemory is true.
+  reviewLearnings: (prId: number) =>
+    get<ReviewLearningsResponse>(`/api/pro/prs/${prId}/review-learnings`),
+  // The raw captured action log for one review run (Surface 2).
+  reviewActions: (reviewId: number) =>
+    get<ReviewActionsResponse>(`/api/pro/claude-reviews/${reviewId}/actions`),
 
   me: () => get<MeResponse>('/api/me'),
   // Cloud-mode sign-out. 204 No Content; resolves once the session is cleared.

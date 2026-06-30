@@ -149,6 +149,26 @@ check(
 );
 check("getFeed(A) excludes B's events", !feedA.events.some((e) => e.repoId === B.repoId));
 
+// Inbox aggregate: each account's inbox must contain only its own repos.
+const inboxB = await q.getInbox(2, null);
+check(
+  "getInbox(B) returns only B's repo",
+  inboxB.repos.length === 1 && inboxB.repos[0]!.repoId === B.repoId,
+);
+check(
+  "getInbox(B) excludes A's repo",
+  !inboxB.repos.some((r) => r.repoId === A.repoId),
+);
+const inboxCross = await q.getInbox(2, [A.repoId]);
+check(
+  "getInbox(B, repoIds=[A.repo]) leaks nothing",
+  !inboxCross.repos.some((r) => r.repoId === A.repoId),
+);
+
+// Repo-scoped Claude reviews: B cannot read A's repo's reviews (IDOR blocked).
+const crCross = await q.listClaudeReviewsByRepo(A.repoId, 2);
+check('listClaudeReviewsByRepo(A.repo, B) leaks no PRs', crCross.prs.length === 0);
+
 check('deleteRepo(B.repo, A) returns false (IDOR blocked)', (await q.deleteRepo(B.repoId, 1)) === false);
 check("B's repo survives A's delete attempt", (await q.listRepos(2)).length === 1);
 

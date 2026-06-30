@@ -54,6 +54,7 @@ import {
 } from '../../review/post-review.js';
 import { isNoiseFile } from '../../review/prompt.js';
 import { accountIdOf } from '../plugins/auth.js';
+import { reviewEvents } from '../../review/events.js';
 
 const MODELS = ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
 const VERDICTS = ['COMMENT', 'REQUEST_CHANGES', 'APPROVE'];
@@ -229,6 +230,13 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
               : 'The review queue is full; try again once some finish.',
         };
       }
+      reviewEvents.emit({
+        type: 'review.requested',
+        accountId: accountIdOf(req),
+        prId: id,
+        model,
+        requestedMode: mode ?? 'auto',
+      });
       reply.status(202);
       return { reviewId: result.reviewId, status: 'queued' };
     },
@@ -312,6 +320,12 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
         reply.status(404);
         return { error: 'NotFound', message: `Review ${reviewId} not found` };
       }
+      reviewEvents.emit({
+        type: 'review.draftUpdated',
+        accountId: accountIdOf(req),
+        reviewId,
+        change: { userBody: body.userBody, userVerdict: body.userVerdict },
+      });
       return { status: 'ok' };
     },
   );
@@ -329,6 +343,12 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
         reply.status(404);
         return { error: 'NotFound', message: `Finding ${findingId} not found` };
       }
+      reviewEvents.emit({
+        type: 'finding.updated',
+        accountId: accountIdOf(req),
+        findingId,
+        change: { included: body.included, editedBody: body.editedBody },
+      });
       return { status: 'ok' };
     },
   );
@@ -345,7 +365,8 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       if (!config.claudeReviewEnabled) return featureOff(reply);
       const { findingId } = req.params as { findingId: number };
-      const ctx = await getFindingPostContext(findingId, accountIdOf(req));
+      const accountId = accountIdOf(req);
+      const ctx = await getFindingPostContext(findingId, accountId);
       if (!ctx) {
         reply.status(404);
         return { error: 'NotFound', message: `Finding ${findingId} not found` };
@@ -385,6 +406,12 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
             }),
           });
           await markFindingPosted(findingId, commentId, 'inline');
+          reviewEvents.emit({
+            type: 'finding.posted',
+            accountId,
+            findingId,
+            postedCommentKind: 'inline',
+          });
           const result: PostCommentResult = { githubCommentId: commentId, postedAt };
           return result;
         }
@@ -411,6 +438,12 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
             ),
           });
           await markFindingPosted(findingId, commentId, 'inline');
+          reviewEvents.emit({
+            type: 'finding.posted',
+            accountId,
+            findingId,
+            postedCommentKind: 'inline',
+          });
           const result: PostCommentResult = { githubCommentId: commentId, postedAt };
           return result;
         }
@@ -429,6 +462,12 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
           }),
         });
         await markFindingPosted(findingId, commentId, 'pr_comment');
+        reviewEvents.emit({
+          type: 'finding.posted',
+          accountId,
+          findingId,
+          postedCommentKind: 'pr_comment',
+        });
         const result: PostCommentResult = { githubCommentId: commentId, postedAt };
         return result;
       } catch (err) {
@@ -536,6 +575,15 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
           built.inlineFindingIds,
           prCommentResults,
         );
+
+        reviewEvents.emit({
+          type: 'review.posted',
+          accountId,
+          reviewId,
+          userVerdict,
+          inlineFindingIds: built.inlineFindingIds,
+          prCommentFindingIds: prCommentResults.map((r) => r.findingId),
+        });
 
         const result: PostReviewResult = {
           postedReviewId: ghReviewId,

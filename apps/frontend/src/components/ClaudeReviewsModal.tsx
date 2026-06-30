@@ -2,8 +2,12 @@ import { useEffect, useState } from 'react';
 import type {
   ClaudeReviewListItem,
   ClaudeReviewVerdict,
+  ReviewAction,
+  ReviewLearningKind,
 } from '@pierre-review/shared';
 import { useAllClaudeReviews } from '../hooks/useClaudeReview.js';
+import { useReviewActions } from '../hooks/useReviewActions.js';
+import { useProCapabilities } from '../hooks/useTriage.js';
 import { useFilters } from '../store/filters.js';
 import { isReviewSoundMuted, setReviewSoundMuted } from '../lib/sound.js';
 import { relativeTime } from '../lib/ui.js';
@@ -30,12 +34,110 @@ function VerdictBadge({ verdict }: { verdict: ClaudeReviewVerdict }): JSX.Elemen
   );
 }
 
+// Action-kind glyph + short label for the per-review action log (Surface 2). Glyphs
+// reuse the app's existing vocabulary (✓ keep, ✕ dismiss, ✎ reword, ↗ posted, ⚡ run).
+const ACTION_META: Record<ReviewLearningKind, { icon: string; label: string }> = {
+  finding_dismissed: { icon: '✕', label: 'dismissed' },
+  finding_kept: { icon: '✓', label: 'kept' },
+  finding_reworded: { icon: '✎', label: 'reworded' },
+  finding_reword_cleared: { icon: '↺', label: 'reword cleared' },
+  finding_posted: { icon: '↗', label: 'posted' },
+  review_body_rewritten: { icon: '✎', label: 'rewrote body' },
+  verdict_overridden: { icon: '⚖', label: 'verdict' },
+  review_posted: { icon: '📨', label: 'submitted' },
+  run_requested: { icon: '⚡', label: 'run requested' },
+};
+
+function ActionLogRow({ action }: { action: ReviewAction }): JSX.Element {
+  const meta = ACTION_META[action.kind];
+  const isReword =
+    action.kind === 'finding_reworded' || action.kind === 'review_body_rewritten';
+  const isVerdict = action.kind === 'verdict_overridden';
+  return (
+    <li className="px-2 py-1">
+      <div className="flex items-center gap-1.5 text-[11px]">
+        <span aria-hidden="true" className="w-3 shrink-0 text-center text-gray-400">
+          {meta.icon}
+        </span>
+        <span className="font-medium text-gray-600 dark:text-gray-300">{meta.label}</span>
+        {action.category != null && <span className="text-gray-400">{action.category}</span>}
+        {action.glob != null && (
+          <span className="truncate font-mono text-gray-400">{action.glob}</span>
+        )}
+        {action.postedCommentKind != null && (
+          <span className="text-gray-400">({action.postedCommentKind})</span>
+        )}
+        <span className="ml-auto shrink-0 text-gray-400">
+          {relativeTime(action.createdAt)}
+        </span>
+      </div>
+      {isVerdict && (
+        <div className="ml-4 text-[11px] text-gray-500 dark:text-gray-400">
+          Claude {action.claudeVerdict ?? '—'} → you {action.userVerdict ?? '—'}
+        </div>
+      )}
+      {isReword && (action.claudeText != null || action.userText != null) && (
+        <div className="ml-4 mt-0.5 space-y-0.5 text-[11px]">
+          {action.claudeText != null && (
+            <div>
+              <span className="font-medium text-gray-400">Claude: </span>
+              <span className="text-gray-600 dark:text-gray-300">“{action.claudeText}”</span>
+            </div>
+          )}
+          {action.userText != null && (
+            <div>
+              <span className="font-medium text-gray-400">You: </span>
+              <span className="text-gray-600 dark:text-gray-300">“{action.userText}”</span>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+// Surface 2 (Pro): a collapsible log of the reviewer's actions on one review run.
+// Collapsed by default; fetches only on expand (so the common zero-action case never
+// hits the network until the user asks). Once loaded empty it reads "Actions (0)".
+function ActionsDisclosure({ reviewId }: { reviewId: number }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading } = useReviewActions(reviewId, open);
+  const actions = data?.actions ?? [];
+  const count = data != null ? actions.length : null;
+  const emptyLoaded = count === 0;
+  return (
+    <div className="px-3 pb-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={emptyLoaded}
+        className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 disabled:cursor-default disabled:opacity-60 dark:hover:text-gray-200"
+        aria-expanded={open}
+      >
+        <span aria-hidden="true">{open && !emptyLoaded ? '▾' : '▸'}</span>
+        Actions on this review{count != null ? ` (${count})` : ''}
+      </button>
+      {open && !emptyLoaded && (
+        <ul className="mt-0.5 divide-y divide-gray-100 rounded border border-gray-100 dark:divide-gray-800 dark:border-gray-800">
+          {isLoading ? (
+            <li className="px-2 py-1.5 text-[11px] text-gray-400">Loading…</li>
+          ) : (
+            actions.map((a) => <ActionLogRow key={a.id} action={a} />)
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function ReviewRow({
   item,
   onSelect,
+  reviewMemory,
 }: {
   item: ClaudeReviewListItem;
   onSelect: () => void;
+  reviewMemory: boolean;
 }): JSX.Element {
   const when = item.finishedAt ?? item.createdAt;
   return (
@@ -64,6 +166,8 @@ function ReviewRow({
           </div>
         )}
       </button>
+      {/* Surface 2 (Pro): per-run action log. Renders nothing in OSS mode. */}
+      {reviewMemory && <ActionsDisclosure reviewId={item.reviewId} />}
     </li>
   );
 }
@@ -82,6 +186,7 @@ export function ClaudeReviewsModal({
   onClose: () => void;
 }): JSX.Element | null {
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
+  const { reviewMemory } = useProCapabilities();
   const { data, isLoading, isError, error } = useAllClaudeReviews(open);
   const [muted, setMuted] = useState(() => isReviewSoundMuted());
   // Paginate the list past 5 entries so a long history doesn't overcrowd the modal.
@@ -175,6 +280,7 @@ export function ClaudeReviewsModal({
                   key={item.reviewId}
                   item={item}
                   onSelect={() => select(item.prId)}
+                  reviewMemory={reviewMemory}
                 />
               ))}
             </ul>

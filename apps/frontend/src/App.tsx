@@ -4,6 +4,7 @@ import { OpenPrsStrip } from './components/OpenPrsStrip/index.js';
 import { PinnedTabsBar } from './components/PinnedTabsBar.js';
 import { PrDetail } from './components/PrDetail.js';
 import { Timeline } from './components/Timeline/index.js';
+import { InboxView } from './components/Inbox/index.js';
 import { DetailPane } from './components/DetailPane.js';
 import { CountsPill } from './components/MyTurnPanel/CountsPill.js';
 import { FeedPill } from './components/FeedPill.js';
@@ -38,6 +39,53 @@ function useDarkMode(): [boolean, () => void] {
     localStorage.setItem('theme', dark ? 'dark' : 'light');
   }, [dark]);
   return [dark, () => setDark((d) => !d)];
+}
+
+// Header segmented control switching the main area between the Timeline board and
+// the Inbox triage console (always-on core, NOT feature-flagged). The two share the
+// pinnedTabs `activeTab` axis: "Inbox" sets it to 'inbox' (rendering the full-main
+// overlay); "Timeline" calls showTimeline() (which every timeline-nav action already
+// calls, so the board is always the exit). A pinned-PR tab counts as the board side
+// here — the Timeline segment reads active whenever the Inbox isn't showing.
+function TabSwitcher(): JSX.Element {
+  const activeTab = usePinnedTabs((s) => s.activeTab);
+  const showTimeline = usePinnedTabs((s) => s.showTimeline);
+  const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
+  const inboxActive = activeTab === 'inbox';
+  const seg = (active: boolean): string =>
+    `rounded px-2 py-0.5 text-xs font-semibold ${
+      active
+        ? 'bg-white text-blue-600 shadow-sm dark:bg-gray-700 dark:text-blue-400'
+        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+    }`;
+  return (
+    <div
+      className="flex items-center gap-0.5 rounded border border-gray-300 bg-gray-100 p-0.5 dark:border-gray-700 dark:bg-gray-800"
+      role="tablist"
+      aria-label="Main view"
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={!inboxActive}
+        onClick={showTimeline}
+        className={seg(!inboxActive)}
+        title="Timeline — the activity board"
+      >
+        Timeline
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={inboxActive}
+        onClick={() => setActiveTab('inbox')}
+        className={seg(inboxActive)}
+        title="Inbox — per-repo triage console"
+      >
+        Inbox
+      </button>
+    </div>
+  );
 }
 
 export default function App(): JSX.Element {
@@ -111,6 +159,11 @@ export default function App(): JSX.Element {
     typeof activeTab === 'number' && pinned.some((p) => p.id === activeTab)
       ? activeTab
       : null;
+  const inboxActive = activeTab === 'inbox';
+  // Either full-main overlay (a pinned PR or the Inbox) covers the timeline + detail
+  // pane: they share one `activeTab` axis, so never both at once. Drives the `inert`
+  // a11y treatment and suppresses the focus-frame lens (which would draw underneath).
+  const overlayActive = activePinnedId != null || inboxActive;
 
   // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
   // the dragged height is remembered across reloads. During a drag we set the
@@ -127,13 +180,12 @@ export default function App(): JSX.Element {
   // main area). `inert` isn't typed in this @types/react version, so set it
   // imperatively — same pattern as OpenPrsStrip's collapsed panel.
   useEffect(() => {
-    const hidden = activePinnedId != null;
     for (const el of [timelineSectionRef.current, paneRef.current]) {
       if (!el) continue;
-      if (hidden) el.setAttribute('inert', '');
+      if (overlayActive) el.setAttribute('inert', '');
       else el.removeAttribute('inert');
     }
-  }, [activePinnedId]);
+  }, [overlayActive]);
 
   const onResizeDown = (e: React.PointerEvent<HTMLDivElement>): void => {
     dragRef.current = {
@@ -238,6 +290,7 @@ export default function App(): JSX.Element {
             <span>{meUser.displayName ?? meUser.login}</span>
           </a>
         )}
+        <TabSwitcher />
         <FeedPill />
         <CountsPill />
         <div className="ml-auto flex items-center gap-3">
@@ -393,7 +446,7 @@ export default function App(): JSX.Element {
           lens is suppressed while a PR tab is active (it would draw under the overlay). */}
       <main
         className={`relative flex min-h-0 flex-1 flex-col${
-          activePinnedId == null && (focusActive || myTurnOnly) ? ' focus-frame' : ''
+          !overlayActive && (focusActive || myTurnOnly) ? ' focus-frame' : ''
         }`}
       >
         <section ref={timelineSectionRef} className="min-h-0 flex-1 overflow-hidden">
@@ -426,6 +479,18 @@ export default function App(): JSX.Element {
             className="absolute inset-0 z-20 bg-white dark:bg-gray-950"
           >
             <PrDetail key={activePinnedId} prId={activePinnedId} selectedThreadId={null} />
+          </div>
+        )}
+
+        {/* The Inbox triage console — a sibling full-main overlay over the timeline +
+            detail pane (which stay mounted underneath, like the pinned-PR overlay, so
+            returning to the board is instant). Never co-renders with a pinned PR. */}
+        {inboxActive && (
+          <div
+            data-testid="inbox-overlay"
+            className="absolute inset-0 z-20 overflow-hidden bg-white dark:bg-gray-950"
+          >
+            <InboxView />
           </div>
         )}
       </main>

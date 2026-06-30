@@ -145,6 +145,18 @@ export interface FilterState {
   // Insights panel (header button / `i`): transient UI flag, not URL-synced.
   insightsOpen: boolean;
 
+  // Inbox tab (the master-detail triage console). Which repo's detail is shown:
+  // 'all' = the all-repos briefing feed, a number = that single repo's console,
+  // null = nothing selected yet (treated as 'all'). Client-side narrow, no refetch.
+  // Transient (mirrors myTurnOnly/insightsOpen): in freshDefaults() but NOT in
+  // pickFilterBarState / sanitizePersistedFilters. `?inboxRepo=<id>` is the only
+  // URL mirror (see useUrlState); the active TAB lives in the pinnedTabs store.
+  inboxRepoId: number | 'all' | null;
+  // Soft thread-state filter inside an Inbox repo console: clicking a thread-state
+  // segment narrows the PRs-by-author list to PRs carrying that derived state.
+  // null = no filter. Transient, URL-silent.
+  inboxThreadFilter: DerivedState | null;
+
   // PR-title search box (App.tsx). Sticky: persists across input blur and PR
   // selection so re-focusing re-shows the same results. Store-only (NOT URL-synced
   // — transient per-session intent; keeps shared URLs clean). Client-side filter
@@ -332,6 +344,11 @@ export interface FilterState {
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
   setInsightsOpen: (v: boolean) => void;
+  // Select an Inbox detail target (a repo id, or 'all' for the briefing feed).
+  setInboxRepo: (id: number | 'all') => void;
+  // Set/clear the Inbox repo console's soft thread-state filter (toggles off when
+  // the same state is re-selected).
+  setInboxThreadFilter: (s: DerivedState | null) => void;
   setSearchQuery: (q: string) => void;
   toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
@@ -513,6 +530,10 @@ function freshDefaults(): FilterData {
     claudeTabFocus: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     insightsOpen: false,
+    // Inbox detail state — transient (like myTurnOnly / insightsOpen). A fresh open
+    // lands on the all-repos briefing feed with no thread-state filter.
+    inboxRepoId: 'all',
+    inboxThreadFilter: null,
     expandedFileGroups: [],
     collapsedFileGroups: [],
     expandedDiffHunks: [],
@@ -753,6 +774,12 @@ export const useFilters = create<FilterState>((set, get) => ({
   setStripCollapsed: (v) => set({ stripCollapsed: v }),
   setStripFilter: (f) => set({ stripFilter: f }),
   setInsightsOpen: (v) => set({ insightsOpen: v }),
+  // Selecting a different repo console drops any lingering thread-state filter so a
+  // narrow from one repo doesn't carry over to the next.
+  setInboxRepo: (id) =>
+    set((s) => (s.inboxRepoId === id ? {} : { inboxRepoId: id, inboxThreadFilter: null })),
+  setInboxThreadFilter: (st) =>
+    set((s) => ({ inboxThreadFilter: s.inboxThreadFilter === st ? null : st })),
   setSearchQuery: (q) => set({ searchQuery: q }),
   toggleFileGroup: (path, defaultExpanded) =>
     set((s) => {

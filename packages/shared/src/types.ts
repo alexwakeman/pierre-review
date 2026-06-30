@@ -293,6 +293,14 @@ export interface MyTurnCounts {
   claudeReviewsToAction: number;
 }
 
+// Premium (@pierre/pro) capability map, mirrored from a backend singleton the
+// plugin populates at boot. All-false in OSS mode (plugin absent). Flows to the
+// frontend through /api/me exactly like claudeReviewEnabled.
+export interface ProCapabilities {
+  inboxDigest: boolean; // per-repo LLM headlines digest (Inbox)
+  reviewMemory: boolean; // Claude Review learnings
+}
+
 export interface MeResponse {
   user: LocalUser | null;
   counts: MyTurnCounts;
@@ -302,6 +310,8 @@ export interface MeResponse {
   // Deployment mode. 'cloud' tells the SPA to show a sign-out control and treat a
   // 401 from /api/me as "signed out" (vs local, where /api/me never 401s).
   deploymentMode: 'local' | 'cloud';
+  // Premium capability flags (all-false in OSS mode).
+  pro: ProCapabilities;
 }
 
 // Lean PR shape for the timeline. No bodies, no diff hunks.
@@ -1410,4 +1420,124 @@ export interface PrFilesResponse {
   files: PrFileDiff[];
   // true ⇒ the PR has more files than the server's fetch cap; not all are listed.
   truncated: boolean;
+}
+
+// ---- Inbox tab (Workstream 1; CORE, always-on, no AI) ----
+
+// Per-repo current-state stats for an Inbox repo card. A RepoInsights subset
+// (reuses getInsights internals) plus the oldest still-unreviewed open PR.
+export interface InboxRepoStats {
+  openPrs: number;
+  draftPrs: number;
+  mergedLast7d: number;
+  stalledPrs: number;
+  medianHoursToFirstReview: number | null;
+  oldestUnreviewed: {
+    prId: number;
+    number: number;
+    title: string;
+    openedAt: string;
+    githubUrl: string;
+  } | null;
+}
+
+export interface InboxRepo {
+  repoId: number;
+  repoFullName: string; // `${owner}/${name}`
+  stats: InboxRepoStats;
+  // Sum of buildThreadCounts over the repo's open-PR ids (the one new aggregation).
+  threadTotals: ThreadStateCounts;
+  maintainerIds: number[]; // from getMergers
+  attentionCount: number; // PRs needing attention (my-turn reason | stalled | untouched>0)
+  hasUnread: boolean; // any PR newSinceLastViewed != null
+  prs: TimelinePr[]; // caller groups by authorId
+}
+
+export interface InboxResponse {
+  repos: InboxRepo[];
+  generatedAt: string; // ISO-8601
+}
+
+// Repo-scoped Claude review history (retrieval; no new storage). One PR with all
+// its runs (newest-first) — richer than the cross-PR latest-only list.
+export interface RepoClaudeReviewPr {
+  prId: number;
+  prNumber: number;
+  prTitle: string;
+  prState: PrState;
+  authorId: number | null;
+  runs: ClaudeReviewSummary[];
+}
+
+export interface RepoClaudeReviewsResponse {
+  enabled: boolean;
+  prs: RepoClaudeReviewPr[];
+}
+
+// ---- Pro per-repo digest (Workstream 2; @pierre/pro, flagged) ----
+
+export interface RepoDigest {
+  repoId: number;
+  repoFullName: string;
+  summary: string;
+  model: string;
+  generatedAt: string; // ISO-8601
+  costUsd: number | null;
+  stale: boolean;
+}
+
+export interface RepoDigestsResponse {
+  enabled: boolean;
+  model: string;
+  digests: RepoDigest[];
+  generatedAt: string; // ISO-8601
+  budgetReached?: boolean;
+}
+
+// ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----
+
+// The 9 captured action kinds (see PRO-PLATFORM.md §5.2).
+export type ReviewLearningKind =
+  | 'finding_dismissed'
+  | 'finding_kept'
+  | 'finding_reworded'
+  | 'finding_reword_cleared'
+  | 'finding_posted'
+  | 'review_body_rewritten'
+  | 'verdict_overridden'
+  | 'review_posted'
+  | 'run_requested';
+
+// One aggregated retrieval signal shown BEFORE a run ("Matches from past reviews").
+export interface LearningMatch {
+  glob: string;
+  category: string | null;
+  kind: string;
+  summary: string;
+  confidence: 'low' | 'medium' | 'high';
+  example?: { claude?: string | null; you?: string | null };
+}
+
+export interface ReviewLearningsResponse {
+  enabled: boolean;
+  matches: LearningMatch[];
+}
+
+// One raw captured action, for the per-review action log (Surface 2).
+export interface ReviewAction {
+  id: number;
+  kind: ReviewLearningKind;
+  category: string | null;
+  path: string | null;
+  glob: string | null;
+  claudeText: string | null;
+  userText: string | null;
+  claudeVerdict: ClaudeReviewVerdict | null;
+  userVerdict: ClaudeReviewVerdict | null;
+  postedCommentKind: string | null;
+  createdAt: string; // ISO-8601
+}
+
+export interface ReviewActionsResponse {
+  actions: ReviewAction[];
 }

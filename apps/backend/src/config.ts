@@ -133,6 +133,20 @@ export const config = {
   // hard to undo; opt in manually once the domain is proven.
   hstsMaxAge: intFromEnv('HSTS_MAX_AGE', 31536000),
 
+  // Pro plugin master gate. Pro is local-only for now; bind.ts skips the dynamic
+  // import entirely when false.
+  proEnabled: !isCloud,
+  // Per-repo digest (Pro, Workstream 2) config — consumed by @pierre/pro, kept in
+  // core so the model id / budgets live in one place and aren't hardcoded at call
+  // sites. Inert until the plugin is present AND digestEnabled.
+  pro: {
+    digestModel: process.env.PRO_DIGEST_MODEL ?? 'claude-haiku-4-5',
+    digestEnabled: process.env.PRO_DIGEST_ENABLED === 'true',
+    digestMaxUsdPerRefresh: floatFromEnv('PRO_DIGEST_MAX_USD', 0.5),
+    digestMaxReposPerRefresh: intFromEnv('PRO_DIGEST_MAX_REPOS', 30),
+    digestMinIntervalSec: intFromEnv('PRO_DIGEST_MIN_INTERVAL_SEC', 60),
+  },
+
   // ---- Claude Review (agentic PR review; opt-in, LOCAL-ONLY) ----
   // OFF by default: the feature spends real money / Agent-SDK credits per run.
   // Enable with ENABLE_CLAUDE_REVIEW=true. FORCE-DISABLED in cloud mode (it
