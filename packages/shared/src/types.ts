@@ -1543,28 +1543,25 @@ export interface FeedDigestResponse {
 
 // ---- Consolidated Feed (CORE, no AI; the Inbox "Feed" entry's main list) ----
 // A single relevance-ranked stream across all repos that merges three sources —
-// unresolved review threads, "My Turn" actionables, and the activity feed — deduped
-// and deterministically prioritised. Tiers (lower = higher up / more urgent):
-//   0 = an unresolved thread (untouched | likely_addressed) older than 2 days
-//   1 = a "My Turn" actionable (awaiting review, your PR activity, approved, …)
-//   2 = a recent unresolved thread (≤2 days) or an activity-feed event
-export type FeedItemTier = 0 | 1 | 2;
-
-// Which of the three merged sources an item came from. Drives click navigation:
-// 'my_turn' → My Turn Focus (the inbox-scoped timeline); 'thread' | 'feed' → PR
-// Focus (isolate that one PR on the timeline).
-export type FeedItemSource = 'thread' | 'my_turn' | 'feed';
+// "My Turn" actionables and activity-feed events, deduped and ordered purely
+// chronologically (newest first). (Unresolved-thread surfacing was dropped — too noisy
+// on large repos.) Click nav: 'my_turn' → My Turn Focus (the inbox-scoped timeline);
+// 'feed' → PR Focus (isolate that one PR on the timeline).
+export type FeedItemSource = 'my_turn' | 'feed';
 
 export interface ConsolidatedFeedItem {
-  // Stable unique id, e.g. "thread:42", "mt:review_request:99", "feed:1234".
+  // Stable unique id, e.g. "mt:review_request:99", "feed:1234".
   id: string;
   source: FeedItemSource;
-  tier: FeedItemTier;
   // Finer-grained kind for row chrome: a my-turn section key
-  // ('awaiting_review' | 'your_pr' | 'approved' | 'watched_repo_pr' |
-  // 'claude_review'), 'thread', or an activity EventType.
+  // ('awaiting_review' | 'approved' | 'watched_repo_pr' | 'claude_review' | 'thread'),
+  // or an activity EventType.
   kind: string;
   occurredAt: string; // ISO-8601 — the item's relevant timestamp (sort + display)
+  // A "My Turn" item the user marked seen/handled. It STAYS in the feed (rendered
+  // muted); reverts to false when newer activity supersedes the acknowledgement. Always
+  // false for pure activity events.
+  acknowledged: boolean;
   repoId: number;
   repoFullName: string;
   prId: number | null;
@@ -1572,22 +1569,19 @@ export interface ConsolidatedFeedItem {
   prTitle: string | null;
   prState: PrState | null;
   actorId: number | null;
-  // Inlined content for comment-based items (thread reply, review_comment,
-  // pr_comment) or the "what's new" summary for your-PR rows; null otherwise.
+  // Inlined content for comment-based items (thread reply, review_comment, pr_comment);
+  // null otherwise.
   content: string | null;
-  // Thread items only:
+  // Thread ("awaiting your reply") items only — for code anchor + thread-scoped nav.
   threadId: number | null;
   path: string | null;
   line: number | null;
-  derivedState: DerivedState | null;
-  ageDays: number | null; // thread age in days (drives the >2d high-priority tier)
   // Row-chrome extras:
   reasonTag: ReasonTag | null;
   reviewState: ReviewState | null;
   githubUrl: string | null;
-  // Dismissal coordinates when the item is actionable (my-turn items, threads); null
-  // for pure activity events. Mirrors MyTurnDismissBody so the existing dismiss/Done
-  // plumbing is reused unchanged.
+  // Dismissal coordinates for a "My Turn" item (the seen/unseen toggle); null for pure
+  // activity events. Mirrors MyTurnDismissBody so the existing dismiss plumbing is reused.
   dismiss: { kind: MyTurnDismissKind; refId: number } | null;
 }
 

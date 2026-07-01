@@ -328,7 +328,7 @@ file maps to a `client.ts` method.
 | `GET /api/mergers` | per-repo merge-rights map (who's merged there) → the maintainer shield |
 | `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{inboxDigest,reviewMemory}`; cloud: 401 signed out) |
 | `GET /api/inbox?repoIds` | **Inbox tab** (core, no AI): per watched repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getInbox` from existing readers |
-| `GET /api/inbox/feed` | **Consolidated Feed** (core, no AI; the Inbox "Feed" entry): one relevance-ranked stream merging unresolved threads + My Turn + the activity feed, deduped + tiered (`getConsolidatedFeed`). `{items[],users[],generatedAt}` |
+| `GET /api/inbox/feed` | **Consolidated Feed** (core, no AI; the Inbox "Feed" entry): one flat, chronological (newest-first) stream merging My Turn actionables + the activity feed, deduped; My Turn items carry an `acknowledged` (seen) flag (`getConsolidatedFeed`). `{items[],users[],generatedAt}` |
 | `GET /api/repos/:id/claude-reviews` | repo-scoped Claude-review history (retrieval only; `enabled:false` when the flag is off) → `{prs:[{runs[]}]}` |
 | `GET·POST /api/pro/inbox/digests*` · `GET·POST /api/pro/feed/digest*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest + the cross-repo Feed digest (aggregates the per-repo digests; no new table) + review-memory data. See "Open-core Pro plugin" |
 | `GET /api/auth/login` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub-App OAuth: authorize / exchange+upsert+session→`/app` / clear session |
@@ -567,11 +567,16 @@ the read layer**: `getInbox` composes `getInsights`/`getOpenPrs`/`getMergers` (p
 only** (not a GitHub sync), never blanks.
 
 **Consolidated Feed — CORE, the Inbox "Feed" entry (`getConsolidatedFeed` → `FeedView`).** One
-relevance-ranked stream across all repos that merges three sources — unresolved review threads,
-"My Turn" actionables, and the activity feed — deduped + deterministically **tiered**: tier 0 =
-an unresolved thread (untouched|likely_addressed) older than 2 days; tier 1 = a My Turn item;
-tier 2 = a recent thread or activity event (thread query bounded recent-first + per-tier caps).
-Comment-based items inline their content; My Turn items keep their dismiss/Done plumbing.
+flat, purely-**chronological** (newest-first) stream across all repos merging **"My Turn"
+actionables + the activity feed**, deduped. (Unresolved-thread surfacing was dropped — too
+noisy on large repos; "threads awaiting your reply" survive as a My Turn item.) Comment-based
+items inline their content. Every My Turn item is kept; activity events are capped to the most
+recent (`FEED_EVENT_CAP`). PR-level My Turn items sort by the PR's `updatedAt`. **"Done" = seen,
+not removal:** the ✓ marks an item acknowledged (reuses the dismissal store) — it STAYS in the
+stream rendered muted, and reverts to unseen when newer activity supersedes it (active from
+`getMyTurn` wins over the acknowledged copy from `getCompletedDismissals` via id-dedupe). The
+"your PRs with new activity" section is dropped from the feed (its individual events already
+appear).
 **Focus-as-tab:** clicking a My Turn item → My Turn Focus; a thread/feed item → PR Focus — both
 drive the ONE shared timeline (shared-timeline-focus) and surface a focus tab in
 `PinnedTabsBar` (driven by `myTurnOnly`/`focusActive`); a digest's `#N` PR ref opens the PR as
