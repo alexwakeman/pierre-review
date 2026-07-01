@@ -64,22 +64,22 @@ function TabSwitcher(): JSX.Element {
       <button
         type="button"
         role="tab"
-        aria-selected={!inboxActive}
-        onClick={showTimeline}
-        className={seg(!inboxActive)}
-        title="Timeline — the activity board"
-      >
-        Timeline
-      </button>
-      <button
-        type="button"
-        role="tab"
         aria-selected={inboxActive}
         onClick={() => setActiveTab('inbox')}
         className={seg(inboxActive)}
         title="Inbox — per-repo triage console"
       >
         Inbox
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={!inboxActive}
+        onClick={showTimeline}
+        className={seg(!inboxActive)}
+        title="Timeline — the activity board"
+      >
+        Timeline
       </button>
     </div>
   );

@@ -567,8 +567,9 @@ the read layer**: `getInbox` composes `getInsights`/`getOpenPrs`/`getMergers` (p
 only** (not a GitHub sync), never blanks.
 
 **Consolidated Feed — CORE, the Inbox "Feed" entry (`getConsolidatedFeed` → `FeedView`).** One
-flat, purely-**chronological** (newest-first) stream across all repos merging **"My Turn"
-actionables + the activity feed**, deduped. (Unresolved-thread surfacing was dropped — too
+flat, purely-**chronological** (newest-first) stream across **Watched repos only** (`inboxWatch`;
+getFeed already filters, My Turn is filtered to match) merging **"My Turn" actionables + the
+activity feed**, deduped. (Unresolved-thread surfacing was dropped — too
 noisy on large repos; "threads awaiting your reply" survive as a My Turn item.) Comment-based
 items inline their content. Every My Turn item is kept; activity events are capped to the most
 recent (`FEED_EVENT_CAP`). PR-level My Turn items sort by the PR's `updatedAt`. **"Done" = seen,

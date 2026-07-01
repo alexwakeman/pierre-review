@@ -1440,8 +1440,15 @@ export async function getConsolidatedFeed(
   accountId: number,
 ): Promise<ConsolidatedFeedResponse> {
   const repoIdByName = new Map<string, number>();
-  for (const r of await listRepos(accountId)) repoIdByName.set(r.fullName, r.id);
+  const watchedRepoIds = new Set<number>();
+  for (const r of await listRepos(accountId)) {
+    repoIdByName.set(r.fullName, r.id);
+    if (r.inboxWatch) watchedRepoIds.add(r.id);
+  }
   const repoIdOf = (fullName: string): number => repoIdByName.get(fullName) ?? 0;
+  // The Feed is scoped to WATCHED repos only. getFeed already filters to inboxWatch; My
+  // Turn spans every added repo, so filter its items to watched repos here to match.
+  const isWatched = (fullName: string): boolean => watchedRepoIds.has(repoIdOf(fullName));
 
   const [myTurn, feed, done] = await Promise.all([
     getMyTurn(accountId),
@@ -1548,15 +1555,18 @@ export async function getConsolidatedFeed(
   const awaitedThreadIds = new Set<number>();
   const watchedPrIds = new Set<number>();
 
-  // --- My Turn actionables (active = unacknowledged) ---
-  for (const i of myTurn.awaitingReview) push(mtReview(i, false));
-  for (const i of myTurn.approvedPrs) push(mtApproved(i, false));
+  // --- My Turn actionables (active = unacknowledged); WATCHED repos only ---
+  for (const i of myTurn.awaitingReview) if (isWatched(i.repoFullName)) push(mtReview(i, false));
+  for (const i of myTurn.approvedPrs) if (isWatched(i.repoFullName)) push(mtApproved(i, false));
   for (const i of myTurn.watchedRepoPrs) {
-    watchedPrIds.add(i.prId);
+    watchedPrIds.add(i.prId); // watched by definition
     push(mtWatched(i, false));
   }
-  for (const c of myTurn.claudeReviewsToAction) push(mtClaude(c, c.finishedAt ?? nowIso, false));
+  for (const c of myTurn.claudeReviewsToAction) {
+    if (isWatched(c.repoFullName)) push(mtClaude(c, c.finishedAt ?? nowIso, false));
+  }
   for (const ta of myTurn.threadsAwaiting) {
+    if (!isWatched(ta.repoFullName)) continue;
     awaitedThreadIds.add(ta.threadId);
     push(mtThread(ta, false));
   }
@@ -1568,6 +1578,7 @@ export async function getConsolidatedFeed(
   //     active copy win, which is how an item reverts to unseen on newer activity. ---
   for (const d of done.items) {
     if (!d.restorable) continue; // the underlying PR / thread / run is gone — drop it
+    if (!isWatched(d.repoFullName)) continue; // Feed is watched-repos only
     switch (d.kind) {
       case 'review_request':
         push(mtReview(d, true));
