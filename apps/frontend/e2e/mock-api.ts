@@ -364,6 +364,7 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
     },
   ] satisfies ConsolidatedFeedItem[],
   users: USERS,
+  total: 4, // all mock items fit in one page (< FEED_PAGE_SIZE) → no "Load more"
   generatedAt: iso(0),
 };
 

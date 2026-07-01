@@ -3,11 +3,12 @@ import { installMockApi } from './mock-api.js';
 
 // Regression gates for the consolidated Inbox Feed + focus-as-tab UX (see CLAUDE.md):
 //   • the app lands on the INBOX by default (timeline is secondary)
-//   • the "Feed" rail entry is selected and the consolidated stream renders, tiered
+//   • the "Feed" rail entry is selected and the consolidated stream renders, flat
 //   • the legacy My Turn / Feed header pills are GONE
-//   • clicking a My Turn item enters My Turn Focus as a tab ("My Turn")
-//   • clicking a thread / feed item enters PR Focus as a tab ("PR Focus") and leaves
-//     the Inbox overlay
+//   • the feed has no "seen/Done" control; acknowledged items are simply dropped
+//   • clicking ANY feed item (My Turn or activity) opens a closable PR-focus tab (its
+//     own isolated timeline) and leaves the Inbox overlay; My Turn items are marked
+//     with a yellow-bordered card
 //   • the header Timeline | Inbox switch toggles the board
 
 const overlay = (p: Page) => p.getByTestId('inbox-overlay');
@@ -32,8 +33,10 @@ test.describe('Inbox Feed / focus-as-tab flows', () => {
     await gotoInbox(page);
     // One flat list, no tier section headers.
     await expect(overlay(page).locator('section h3')).toHaveCount(0);
-    await expect(overlay(page).locator('ul > li')).toHaveCount(4);
-    // Comment-based items inline their content.
+    // 4 mock items, but the acknowledged (seen) one is dropped now that the feed has no
+    // "Done" concept → 3 rendered.
+    await expect(overlay(page).locator('ul > li')).toHaveCount(3);
+    // Comment-based items inline their (markdown-rendered) content.
     await expect(overlay(page).getByText('Can you take another look at this?')).toBeVisible();
   });
 
@@ -44,29 +47,37 @@ test.describe('Inbox Feed / focus-as-tab flows', () => {
     await expect(page.getByTestId('feed-pill')).toHaveCount(0);
   });
 
-  test('clicking a My Turn item enters My Turn Focus as a tab', async ({ page }) => {
-    await gotoInbox(page);
-    await overlay(page).getByText('Inbox: fix auth race').click(); // the awaiting_review item
-    // Leaves the Inbox overlay and surfaces the focus tab labelled "My Turn".
-    await expect(overlay(page)).toBeHidden();
-    await expect(tabs(page).getByRole('button', { name: /My Turn/ })).toBeVisible();
-  });
-
-  test('clicking a feed event enters PR Focus as a tab', async ({ page }) => {
-    await gotoInbox(page);
-    await overlay(page).getByText('Other: docs pass').click(); // the pr_opened feed event
-    await expect(overlay(page)).toBeHidden();
-    // PR-isolation focus surfaces a "PR Focus" tab (set once the timeline isolates).
-    await expect(tabs(page).getByRole('button', { name: /PR Focus/ })).toBeVisible();
-  });
-
-  test('marking a My Turn item seen acknowledges it without removing it', async ({ page }) => {
+  test('a My Turn item is marked with a yellow-bordered card', async ({ page }) => {
     await gotoInbox(page);
     const row = overlay(page).locator('ul > li', { hasText: 'Inbox: fix auth race' });
     await expect(row).toBeVisible();
-    // The seen toggle (✓) acknowledges — the item must stay in the list, not vanish.
-    await row.getByRole('button', { name: 'Mark seen' }).click();
-    await expect(overlay(page).getByText('Inbox: fix auth race')).toBeVisible();
+    // My Turn items render as a yellow-bordered card (no Done/seen control).
+    await expect(row.locator('article.border-yellow-400')).toBeVisible();
+    await expect(row.getByText('My Turn')).toBeVisible();
+  });
+
+  test('clicking a My Turn item opens a PR-focus tab', async ({ page }) => {
+    await gotoInbox(page);
+    await overlay(page).getByText('Inbox: fix auth race').click(); // the awaiting_review item
+    // Leaves the Inbox overlay and surfaces a closable PR-focus tab named by the PR.
+    await expect(overlay(page)).toBeHidden();
+    await expect(tabs(page).getByRole('button', { name: /PR focus/i })).toBeVisible();
+    await expect(tabs(page).getByRole('button', { name: /Close focus tab/i })).toBeVisible();
+  });
+
+  test('clicking a feed event opens a PR-focus tab', async ({ page }) => {
+    await gotoInbox(page);
+    await overlay(page).getByText('Other: docs pass').click(); // the pr_opened feed event
+    await expect(overlay(page)).toBeHidden();
+    await expect(tabs(page).getByRole('button', { name: /PR focus/i })).toBeVisible();
+  });
+
+  test('the feed has no Done/seen control and drops acknowledged items', async ({ page }) => {
+    await gotoInbox(page);
+    // The old ✓ acknowledge toggle is gone entirely.
+    await expect(overlay(page).getByRole('button', { name: /Mark seen/i })).toHaveCount(0);
+    // The acknowledged mock item (#104 "Watched repo PR by bob") is not rendered.
+    await expect(overlay(page).getByText('Watched repo PR by bob')).toHaveCount(0);
   });
 
   test('the Timeline | Inbox header switch toggles the board', async ({ page }) => {

@@ -178,9 +178,11 @@ export const api = {
   // read — "Refresh" re-queries this, it never triggers a GitHub sync.
   inbox: (search: string) =>
     get<InboxResponse>(`/api/inbox${search ? `?${search}` : ''}`),
-  // The consolidated Feed (the Inbox "Feed" entry): one relevance-ranked stream
-  // across all repos (unresolved threads + My Turn + activity feed). Pure DB read.
-  consolidatedFeed: () => get<ConsolidatedFeedResponse>('/api/inbox/feed'),
+  // The consolidated Feed (the Inbox "Feed" entry): one chronological stream across
+  // the watched repos (My Turn actionables + the activity feed). Pure DB read. The
+  // `search` string carries the active repo/member scope (repoIds/userIds).
+  consolidatedFeed: (search: string) =>
+    get<ConsolidatedFeedResponse>(`/api/inbox/feed${search ? `?${search}` : ''}`),
   // Repo-scoped Claude review history (all runs per PR, newest-first). Gated on
   // config.claudeReviewEnabled; the response's `enabled` flag reflects that.
   repoClaudeReviews: (repoId: number) =>
@@ -199,11 +201,13 @@ export const api = {
   // A single repo's digest (lazy per-repo so a slow Haiku call never blocks the grid).
   repoDigest: (repoId: number) =>
     get<RepoDigest>(`/api/pro/inbox/digests/${repoId}`),
-  // The cross-all-repos Feed digest (the AI panel atop the Inbox "Feed" entry): a
-  // per-repo bulleted change-report, assembled from the per-repo digests. Pro-only.
-  feedDigest: () => get<FeedDigestResponse>('/api/pro/feed/digest'),
-  refreshFeedDigest: () =>
-    fetch('/api/pro/feed/digest/refresh', jsonBody('POST')).then((r) =>
+  // The cross-repo Feed digest (the AI panel atop the Inbox "Feed" entry): a per-repo
+  // bulleted change-report, assembled from the per-repo digests. Pro-only. Scoped to the
+  // currently-visible Watched repos via `search` (?repoIds=…).
+  feedDigest: (search: string) =>
+    get<FeedDigestResponse>(`/api/pro/feed/digest${search ? `?${search}` : ''}`),
+  refreshFeedDigest: (search: string) =>
+    fetch(`/api/pro/feed/digest/refresh${search ? `?${search}` : ''}`, jsonBody('POST')).then((r) =>
       handle<FeedDigestResponse>(r),
     ),
 

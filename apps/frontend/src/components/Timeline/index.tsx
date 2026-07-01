@@ -25,6 +25,11 @@ import {
 } from '../../hooks/useTimeline.js';
 import { useMyTurn, useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
 import { MAX_RANGE_DAYS, resolveRange, useFilters } from '../../store/filters.js';
+import {
+  usePinnedTabs,
+  type TabMeta,
+  type TimelineMode,
+} from '../../store/pinnedTabs.js';
 import { escapeHtml, indexUsers, userLabel, watchedGlyphHtml } from '../../lib/ui.js';
 import { renderPrBar, prClassName, prTooltip } from './prBar.js';
 import { computeUserStats, renderUserLabel, type UserStats } from './userRow.js';
@@ -234,7 +239,18 @@ function prBarEndMs(pr: TimelinePr): number {
 // gone after a sync. Used both across a rebuild and across a focus enter→exit.
 type ScrollAnchor = { token: string | null; offset: number; scrollTop: number };
 
-export function Timeline(): JSX.Element {
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// `mode` turns this into an EMBEDDED per-tab instance (App keys the remount, so only
+// ONE Timeline is ever mounted — the isolation is purely component-LOCAL):
+//   • { kind: 'isolate', prId } — boots DIRECTLY into PR-isolation focus for prId, its
+//     initial + only state (exit = closing/switching the tab → unmount);
+//   • { kind: 'my-turn' }       — boots scoped to the "My Turn" inbox set.
+// Absent = the full shared board (the base timeline), behaving as before minus the
+// removed overlay entry paths.
+export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
+  const embeddedPrId = mode?.kind === 'isolate' ? mode.prId : null;
+  const myTurnScope = mode?.kind === 'my-turn';
   const containerRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<VisTimeline | null>(null);
   const itemsRef = useRef(new DataSet<DataItem>());
@@ -330,13 +346,6 @@ export function Timeline(): JSX.Element {
   // payload (it had no in-window activity). The focus path stages it here so the
   // next rebuild materializes its bar; cleared once the rebuild consumes it.
   const forceShowOpenPrRef = useRef<TimelinePr | null>(null);
-  // Tracks a My Turn Focus Mode focus that's waiting for the widened-range refetch to
-  // bring its inbox PR into the payload (an inbox PR predating the date filter — see
-  // the focus consumer's fall-through). Bounded: once a *fresh* payload still lacks
-  // the PR we stop waiting, so the focus never hangs unconsumed.
-  const myTurnFocusAwaitRef = useRef<{ prId: number; data: TimelineResponse | undefined } | null>(
-    null,
-  );
   // The pending deferred "enter focus / centre after the force-show rebuild paints"
   // timer (forceShowThen). Held so a rapid second search-pick cancels the first —
   // otherwise both timeouts fire and the focus flickers between the two PRs.
@@ -354,25 +363,11 @@ export function Timeline(): JSX.Element {
   // background sync) can fit synchronously with no flash.
   const barFitRafRef = useRef<number | null>(null);
   const settledCenterWidthRef = useRef(0);
-  // True while a sticky "Show on timeline" overlay (from the activity panel) is
-  // applied — a glowing marker plus, for a cross-user action, the collapsed
-  // two-person row focus. Unlike the marker popover it has nothing to dismiss
-  // it, so it persists until the next timeline interaction; the click handler
-  // and openPrFocused read this to expand back to all users.
-  const showFocusActiveRef = useRef(false);
-  // Sticky "Focus" (PR-isolation) overlay from the PR panel: collapse to a PR's
-  // contributors and show only its bar, then explore freely — clicks never exit,
-  // only the Exit-focus button / Escape clears it. prFocusPrIdRef is the isolated
-  // PR, used to recentre + glow it on exit when no specific event was last clicked.
+  // Sticky "Focus" (PR-isolation) overlay: collapse to a PR's contributors and show
+  // only its bar. In an isolate-mode tab this is the tab's whole, permanent state
+  // (booted once, left only by unmounting the tab). prFocusPrIdRef is the isolated PR.
   const prFocusActiveRef = useRef(false);
   const prFocusPrIdRef = useRef<number | null>(null);
-  // Whether the current PR-isolation focus pushed its OWN {pierreFocus} history entry.
-  // Normally true — but a focus entered FROM a Feed click rides the {pierreFeed} entry
-  // instead (so the whole feed navigation is a single back-step to the Feed home), in
-  // which case enterPrFocus pushes nothing and this stays false. The history-entry COUNT
-  // in exitFocus / dropOverlayForNavigation reads this (not prFocusActiveRef) so it never
-  // unwinds a focus slot that was never pushed. Reset with prFocusActiveRef in applyContext.
-  const prFocusPushedHistoryRef = useRef(false);
   // PR-isolation focus connector overlay. The own-work CSS stem (index.css,
   // `.ev-own …::after`) joins a marker to its bar by SUBGROUP ADJACENCY — it only
   // works because the marker sits directly beneath its bar in the SAME row. A
@@ -386,22 +381,6 @@ export function Timeline(): JSX.Element {
   // paint per frame.
   const connectorSvgRef = useRef<SVGSVGElement | null>(null);
   const connectorRafRef = useRef<number | null>(null);
-  // Popover depth mirrored onto the History API (0 closed / 1 popover open), the
-  // window captured when the popover opened (restored on back-out), and a counter of
-  // popstate events to swallow when we unwind history ourselves.
-  const drillDepthRef = useRef(0);
-  const savedWindowRef = useRef<{ start: Date; end: Date } | null>(null);
-  // The horizontal window (zoom + position) captured the instant a PR-isolation
-  // focus is entered, so leaving focus restores the user's ORIGINAL zoom rather
-  // than keeping the zoomed-in focus view. Distinct from savedWindowRef (the
-  // marker-popover drill's pre-open window).
-  const preFocusWindowRef = useRef<{ start: Date; end: Date } | null>(null);
-  // The vertical CONTENT scroll anchor captured the instant a PR-isolation focus is
-  // entered (companion to preFocusWindowRef, the horizontal axis), so leaving focus
-  // lands the user back exactly where they were scrolled — rather than re-centring on
-  // the PR, which yanked a mid-scrolled board upward on exit. Restored as an
-  // intentional scroll so it doesn't fight the rebuild's own anchor restore.
-  const preFocusScrollRef = useRef<ScrollAnchor | null>(null);
   // The selected marker's persistent "you're looking at this" pulse (the soft sky
   // halo, no marching ants), tracked like the other glows so a re-cluster can
   // re-apply it to whichever item now holds the event — a lone `ev:` marker or
@@ -409,29 +388,10 @@ export function Timeline(): JSX.Element {
   // we're NOT in cross-user focus (focus uses the cross-link ring instead).
   const selectedGlowEventRef = useRef<number | null>(null);
   const selectedGlowItemRef = useRef<string | null>(null);
-  const suppressPopstateRef = useRef(0);
-  // --- My Turn Focus Mode (the OTHER discrete focus mode; see store/filters.ts) ---
-  // myTurnOnly mirrored into a ref so the once-bound vis click/dblclick handlers can read
-  // it without re-binding. Drives "marker/bar click selects (level 2) instead of entering
-  // the PR-isolation overlay" — the two modes stay discrete.
+  // Mirrors `myTurnScope` (a My-Turn tab) so the once-bound vis click/dblclick handlers
+  // can read it without re-binding — a bar/marker click SELECTS its PR (drives the tab's
+  // detail pane) instead of opening a popover / focus tab. Set during render below.
   const myTurnOnlyRef = useRef(false);
-  // How many {pierreMyTurn} browser-history entries we've pushed (0 = not in focus, 1 =
-  // the To Do list, 2 = a To Do's PR detail). A reconcile effect pushes/unwinds these to
-  // match (myTurnOnly, selectedPrId) so the browser Back button steps L2 → L1 → Feed home.
-  // (The window itself is fitted to the inbox span by the resolveRange window effect — the
-  // one keyed on myTurnOnly/myTurnFromMs — so every inbox PR is visible on entry.)
-  const myTurnDepthRef = useRef(0);
-  // --- Feed → PR back-stack (the SAME shape as My Turn, but one level) -------------
-  // store.feedReturn mirrored into a ref so the once-bound popstate / openPopover
-  // handlers can read it without re-binding. True while a feed-originated selection is
-  // active (a single {pierreFeed} entry pushed); the popstate handler returns to the
-  // Feed home (clear selection + tear down any focus/popover) when it's set.
-  const feedReturnRef = useRef(false);
-  // 0 = no feed entry pushed, 1 = one {pierreFeed} entry on the stack. A reconcile effect
-  // keeps it matched to store.feedReturn so a non-Back exit unwinds the entry, and a
-  // Back-driven exit (popstate) pre-zeroes it so the reconcile no-ops — exactly the
-  // myTurnDepthRef discipline.
-  const feedDepthRef = useRef(0);
 
   const [popover, setPopover] = useState<PopoverState | null>(null);
   // Latest popover state, readable from stable callbacks without re-binding.
@@ -455,7 +415,24 @@ export function Timeline(): JSX.Element {
   // out, so it must be visible the whole time the timeline is collapsed.
   const [focusActive, setFocusActive] = useState(false);
 
-  const { data, isLoading, error } = useTimeline();
+  // Mirror the My-Turn tab scope into the ref the once-bound vis handlers read.
+  myTurnOnlyRef.current = myTurnScope;
+
+  // Embedded-tab range: an isolate / My-Turn tab widens `from` back ~90 days so its
+  // subject / inbox PRs are present regardless of the active date filter (captured once
+  // per mount → a stable query key, a separate cache entry). An isolate tab ALSO drops
+  // the member filter so a subject PR the member filter would hide is still fetched.
+  const embeddedFromMs = useMemo(
+    () => (embeddedPrId != null || myTurnScope ? Date.now() - MAX_RANGE_DAYS * DAY_MS : null),
+    [embeddedPrId, myTurnScope],
+  );
+  const { data, isLoading, error } = useTimeline(
+    embeddedPrId != null
+      ? { dropMembers: true, fromMs: embeddedFromMs }
+      : myTurnScope
+        ? { fromMs: embeddedFromMs }
+        : undefined,
+  );
   const { data: openPrsData } = useOpenPrs();
   // Member-agnostic PR sets (shared cache with the PR-title search). They let a
   // global search pick focus a PR the member filter hides: if it overlaps the
@@ -469,13 +446,11 @@ export function Timeline(): JSX.Element {
   const { data: mergers } = useMergers();
   const queryClient = useQueryClient();
   const derivedStates = useFilters((s) => s.derivedStates);
-  // "My Turn" isolate filter: when on, restrict the board to PRs in the current My
+  // "My Turn" isolate scope: a My-Turn TAB restricts the board to PRs in the current My
   // Turn inbox. The inbox set is fetched separately (deduped with the My Turn panel);
   // null until it loads, so the filter stays a no-op until the ids are known rather
-  // than briefly blanking the board.
-  const myTurnOnly = useFilters((s) => s.myTurnOnly);
-  // Feed → PR back-stack flag (see store.feedReturn + the reconcile effect below).
-  const feedReturn = useFilters((s) => s.feedReturn);
+  // than briefly blanking the board. Purely component-LOCAL (the tab's `mode`), not a
+  // shared store flag.
   const { data: myTurnData } = useMyTurn();
   const myTurnPrIds = useMemo<Set<number> | null>(() => {
     if (!myTurnData) return null;
@@ -495,47 +470,6 @@ export function Timeline(): JSX.Element {
     return ids;
   }, [myTurnData]);
 
-  // (B) My Turn Focus Mode range extension. The isolated board only fetches the
-  // active date-range window, so an inbox PR whose activity predates it (e.g. an
-  // "awaiting review" PR opened weeks ago, or a thread on a since-merged PR) would
-  // be absent → empty board. Compute the earliest instant across the inbox PRs and
-  // publish it as myTurnFromMs so resolveRange widens the fetch back to it (capped at
-  // the 90-day backfill horizon). Cleared when not in focus mode. Minute-floored so a
-  // stable value doesn't churn the timeline query across renders.
-  const setMyTurnFrom = useFilters((s) => s.setMyTurnFrom);
-  useEffect(() => {
-    if (!myTurnOnly || myTurnPrIds == null) {
-      setMyTurnFrom(null);
-      return;
-    }
-    let earliest = Infinity;
-    const consider = (ms: number): void => {
-      if (Number.isFinite(ms) && ms < earliest) earliest = ms;
-    };
-    // Open inbox PRs: their bar starts at openedAt (open PRs come from a feed that
-    // ignores the date range, so this is reliable even far outside the window).
-    if (openPrsData) {
-      for (const p of openPrsData.prs) {
-        if (myTurnPrIds.has(p.id)) consider(Date.parse(p.openedAt));
-      }
-    }
-    // Inbox items carry their own relevant instant — covers PRs absent from the
-    // open-PRs feed (a thread on a since-merged PR) via the thread's last reply.
-    if (myTurnData) {
-      for (const it of myTurnData.awaitingReview) consider(Date.parse(it.openedAt));
-      for (const it of myTurnData.yourPrs) consider(Date.parse(it.openedAt));
-      for (const it of myTurnData.approvedPrs ?? []) consider(Date.parse(it.openedAt));
-      for (const it of myTurnData.watchedRepoPrs) consider(Date.parse(it.openedAt));
-      for (const it of myTurnData.threadsAwaiting) consider(Date.parse(it.lastReplyAt));
-    }
-    if (!Number.isFinite(earliest)) {
-      setMyTurnFrom(null);
-      return;
-    }
-    const floor = Date.now() - MAX_RANGE_DAYS * 24 * 60 * 60 * 1000;
-    const clamped = Math.max(earliest, floor);
-    setMyTurnFrom(Math.floor(clamped / 60000) * 60000); // minute-floored; no-op writes skip
-  }, [myTurnOnly, myTurnPrIds, myTurnData, openPrsData, setMyTurnFrom]);
   // Member filter: when set, the timeline collapses to just these contributors'
   // rows (see the PR filter in the rebuild effect). Events are already actor-
   // filtered server-side, so restricting which PR bars render is enough to drop
@@ -558,9 +492,6 @@ export function Timeline(): JSX.Element {
   const customFrom = useFilters((s) => s.customFrom);
   const customTo = useFilters((s) => s.customTo);
   const rangeResetSignal = useFilters((s) => s.rangeResetSignal);
-  // The My Turn Focus Mode range extension (epoch ms or null), for the window-fit
-  // effect below — entering/leaving focus re-fits the window to the widened span.
-  const myTurnFromMs = useFilters((s) => s.myTurnFromMs);
 
   // repoId → its full metadata (owner / name / fullName). Backs both the repo row
   // label and the owner-grouped ordering of the rendered repos (see the rebuild).
@@ -569,6 +500,10 @@ export function Timeline(): JSX.Element {
     for (const r of repos ?? []) m.set(r.id, r);
     return m;
   }, [repos]);
+  // Mirror reposById into a ref so the once-bound vis handlers (metaOf) read current
+  // repo metadata without re-binding.
+  const reposByIdRef = useRef(reposById);
+  reposByIdRef.current = reposById;
   // repoId → set of userIds with merge rights there (have merged a PR). Drives
   // the maintainer shield on each contributor row label.
   const mergersByRepo = useMemo(() => {
@@ -1218,17 +1153,15 @@ export function Timeline(): JSX.Element {
       highlightPr(ctx?.prId ?? null);
       highlightEvent(ctx?.eventId ?? null);
       // Track whether rows are collapsed so the "Exit focus" button shows. A null
-      // context (or one with no kept rows) means we're back to the full view.
-      // Mirror it into the store too so the keyboard hook (Escape) can tell
-      // focus is up and route to exitFocus instead of clearing the selection.
+      // context (or one with no kept rows) means we're back to the full view. Purely
+      // LOCAL React state now — it drives the tl-focus-active class, the connector gate,
+      // and the on-canvas exit button; there's no shared store flag any more (the
+      // isolation is component-local — only one Timeline is ever mounted).
       const active = !!(ctx?.groupIds && ctx.groupIds.length > 0);
       setFocusActive(active);
-      useFilters.getState().setFocusActive(active);
       if (!active) {
-        showFocusActiveRef.current = false;
         prFocusActiveRef.current = false;
         prFocusPrIdRef.current = null;
-        prFocusPushedHistoryRef.current = false;
       }
       // On focus ENTRY, load the focused PR into the Overview/detail pane so the
       // two-person context the user is inspecting shows there by default. Guard on
@@ -1352,18 +1285,6 @@ export function Timeline(): JSX.Element {
       // Close it here. Callers that DO want a popover in focus (a cross-user marker
       // click / a marker double-click) re-open it right after, anchored on the PR.
       setPopover(null);
-      // Capture the pre-focus window (zoom + position) before fitting, so Exit /
-      // Esc / browser-back can restore the user's original zoom. Guard on not
-      // already being focused so a stray re-entry can't clobber it with the focus
-      // window (enterPrFocus only runs unfocused, but this stays correct if not).
-      if (!prFocusActiveRef.current) {
-        preFocusWindowRef.current = tl.getWindow();
-        // Capture the vertical scroll NOW, while every row is still visible — exit
-        // restores it so leaving focus lands the user back exactly where they were
-        // scrolled (rather than re-centring on the PR, which jumped a mid-scrolled
-        // board upward). See exitFocusCore.
-        preFocusScrollRef.current = captureScrollAnchor();
-      }
       const repoId = pr.repoId;
       const contributors = new Set<number>();
       if (pr.authorId != null) contributors.add(pr.authorId);
@@ -1385,26 +1306,13 @@ export function Timeline(): JSX.Element {
       }
       const keepGroupIds = [...contributors].map((uid) => `repo:${repoId}:user:${uid}`);
 
-      // Fit the window to the PR's activity span (+8% padding, min 12h).
+      // Fit the window to the PR's activity span (+8% padding, min 12h). Horizontal
+      // only — the boot effect's deferred centerShowTarget owns the vertical scroll.
       if (opts?.fitWindow !== false && Number.isFinite(minT) && Number.isFinite(maxT)) {
         const pad = Math.max((maxT - minT) * 0.08, 12 * 60 * 60 * 1000);
         tl.setWindow(minT - pad, maxT + pad, { animation: true });
       }
 
-      // Req 1 (browser-back leaves Focus): push a dedicated history entry so the
-      // mouse/browser back button has a focus-owned slot to consume. The popstate
-      // handler detects prFocusActiveRef and tears the whole focus down (restoring
-      // the anchor) rather than only stepping through popover drill levels. One
-      // entry per session — enterPrFocus only runs when not already focused.
-      //
-      // EXCEPT when this focus is entered from a Feed click (feedReturn armed): the
-      // {pierreFeed} entry the reconcile already pushed IS the single back-step for the
-      // whole feed navigation (one Back → the Feed home), so pushing a {pierreFocus} on
-      // top would stack two entries and make history.go pop the wrong one. Ride the feed
-      // entry instead — prFocusPushedHistoryRef stays false so the unwind counters skip it.
-      const pushedHistory = !feedReturnRef.current;
-      if (pushedHistory) history.pushState({ pierreFocus: 1 }, '');
-      prFocusPushedHistoryRef.current = pushedHistory;
       prFocusActiveRef.current = true;
       prFocusPrIdRef.current = prId;
       applyContext({
@@ -1417,7 +1325,7 @@ export function Timeline(): JSX.Element {
       tl.setSelection([`pr:${prId}`]);
       if (opts?.anchorEventId != null) highlightEvent(opts.anchorEventId);
     },
-    [applyContext, rebuildMarkers, isolatePrBars, highlightEvent, captureScrollAnchor],
+    [applyContext, rebuildMarkers, isolatePrBars, highlightEvent],
   );
 
   // --- Activity "Show" vertical scrolling ----------------------------------
@@ -1433,7 +1341,11 @@ export function Timeline(): JSX.Element {
   const setVisScrollTop = useCallback(
     (top: number) => {
       const vs = verticalScrollEl();
-      if (!vs) return;
+      // Bail if the instance is torn down or the scroll panel is detached: the
+      // synthetic 'scroll' dispatch below would otherwise reach vis's own scroll
+      // handler on destroyed internals (_updateScrollTop → null). Guards the rare
+      // race where a settle loop frame fires just as a focus/My-Turn tab unmounts.
+      if (!vs || timelineRef.current == null || !vs.isConnected) return;
       const max = Math.max(0, vs.scrollHeight - vs.clientHeight);
       vs.scrollTop = Math.max(0, Math.min(max, top));
       // The programmatic set fires a native 'scroll' too, but dispatching now
@@ -1567,51 +1479,6 @@ export function Timeline(): JSX.Element {
     [verticalScrollEl, setVisScrollTop],
   );
 
-  // Leaving focus: instead of letting the row-expand rebuild snap the timeline
-  // to the top, re-show the marker that opened the focus with a persistent soft
-  // pulse and re-centre the viewport on it — "you were here". The glow stays
-  // (anchoring the user in a large repo) until their next marker / focus action
-  // clears it via applyContext, and survives reclusters (rebuildMarkers re-asserts
-  // exitGlowEventRef). The collapse is instant now (no animation to wait out), so we
-  // drive the scroll on the next frame — the board snaps to the anchor as it paints
-  // rather than appearing, pausing, then visibly scrolling.
-  const restoreAnchorView = useCallback(
-    (eventId: number) => {
-      applyExitGlow(eventId);
-      const ev = eventsByIdRef.current.get(eventId);
-      if (!ev) return;
-      const token = groupClassToken(groupOf(ev));
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => centerShowTarget(token, true, '.ev-exit-glow')),
-      );
-    },
-    [applyExitGlow, centerShowTarget],
-  );
-
-  // Restore the window captured when the drill-down began (idempotent across the
-  // two back steps). Honors reduced-motion like focusRows does.
-  const restoreWindow = useCallback(() => {
-    const tl = timelineRef.current;
-    const win = savedWindowRef.current;
-    if (!tl || !win) return;
-    // Opening/drilling a marker no longer zooms, so the horizontal window is
-    // usually unchanged from when it was captured. Skip the setWindow then: an
-    // animated setWindow to the same range still fires `rangechanged`, which
-    // schedules a full marker recluster (rebuildMarkers) — wasted work on the
-    // back path. Only restore when the window genuinely moved.
-    const cur = tl.getWindow();
-    const unchanged =
-      Math.abs(cur.start.valueOf() - win.start.valueOf()) < 1000 &&
-      Math.abs(cur.end.valueOf() - win.end.valueOf()) < 1000;
-    if (unchanged) return;
-    const reduceMotion =
-      typeof window !== 'undefined' &&
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    tl.setWindow(win.start, win.end, { animation: !reduceMotion });
-  }, []);
-
-
   // Re-place a captured CONTENT anchor (see captureScrollAnchor, defined above near
   // enterPrFocus). Used to preserve the vertical scroll across the groups/markers
   // rebuild. Two things move the scroll during a rebuild: (1) rebuildMarkers() does a
@@ -1671,33 +1538,9 @@ export function Timeline(): JSX.Element {
     [verticalScrollEl, setVisScrollTop],
   );
 
-  // Restore a captured scroll anchor as an INTENTIONAL scroll: claim the scroll for
-  // the duration (a monotonic loop id + a backstop release, mirroring
-  // centerShowTarget) so the rebuild's own anchor-restore and the deferred bar-fit
-  // re-anchor — both gated on intentionalScrollRef — stand down instead of fighting
-  // it frame-for-frame. Used on focus EXIT: the row re-show + window restore + their
-  // follow-on reclusters all perturb the scroll, and this is the single authority
-  // that lands the view back where it was. restoreScrollAnchor's own settle loop does
-  // the actual correcting; the backstop releases the gate once that has surely run.
-  const restoreScrollAnchorIntentional = useCallback(
-    (anchor: ScrollAnchor) => {
-      const myLoop = ++scrollLoopRef.current;
-      intentionalScrollRef.current = true;
-      window.setTimeout(() => {
-        if (scrollLoopRef.current === myLoop) intentionalScrollRef.current = false;
-      }, 1500);
-      restoreScrollAnchor(anchor);
-    },
-    [restoreScrollAnchor],
-  );
-
-  // --- Marker popover + browser/mouse-back navigation ----------------------
-  // The popover is mirrored onto the History API so the mouse/browser back button
-  // closes it (and, in a sticky PR-isolation focus, leaves focus): one pushed entry
-  // per open popover. Backing out restores the pre-open window. drillDepthRef is the
-  // source of truth (0 closed / 1 open); suppressPopstateRef swallows the popstate(s)
-  // our own history.go/back emit.
-
+  // --- Marker popover -------------------------------------------------------
+  // The popover is plain local state now (no History-API mirroring): it closes via
+  // its X / Escape / a click on empty canvas, not the browser Back button.
   const openPopover = useCallback(
     (x: number, y: number, eventIds: number[]) => {
       if (eventIds.length === 0) return;
@@ -1708,21 +1551,6 @@ export function Timeline(): JSX.Element {
       // glow with NO row-focus (e.g. a same-user marker left over post-navigate)
       // still needs an explicit clear.
       if (!focusedGroupIdsRef.current) applyContext(null);
-      // My Turn Focus Mode (its own {pierreMyTurn} stack) AND a feed-originated navigation
-      // (its single {pierreFeed} entry) each keep a contiguous history stack — don't
-      // interleave a drill entry, which would break the one-Back-to-home stepping. The
-      // feed popover that a feed click opens is closed AS PART OF the feed-return Back
-      // (it's never independently back-dismissable), so it needs no slot of its own. A
-      // feed click can't even happen with a popover already open — the Feed panel is
-      // hidden whenever a PR is selected. Leave drillDepthRef at 0 in both modes so
-      // closeModal / the popstate handler don't unwind a non-existent entry.
-      if (!myTurnOnlyRef.current && !feedReturnRef.current) {
-        if (drillDepthRef.current === 0) history.pushState({ pierreDrill: 1 }, '');
-        drillDepthRef.current = 1;
-      }
-      // Capture before any selection side effect can move the window, so a later
-      // back-out returns to where the marker/cluster sat.
-      savedWindowRef.current = timelineRef.current?.getWindow() ?? null;
       // The marker popover and the metrics popover are mutually exclusive — opening
       // one closes the other so two floating panels never overlap.
       setStatsPopover(null);
@@ -1731,22 +1559,12 @@ export function Timeline(): JSX.Element {
     [applyContext],
   );
 
-  // Close the popover modal ONLY (its X button / Escape): the cross-user focus
-  // overlay stays put so the user can keep examining the two-row view; the
-  // bottom-right "Exit focus" button is what reverts that. We still pop the
-  // modal's own history entries so the back button isn't left out of step, but we
-  // keep savedWindowRef so a later exitFocus can still restore the window.
+  // Close the popover modal ONLY (its X button / Escape): a PR-isolation focus
+  // (an isolate tab) stays put — its rows are the tab's whole state. When there's no
+  // collapsed-row focus to keep examining (a same-user marker that only glowed its
+  // PR) also clear that glow, since clicks no longer dismiss it.
   const closeModal = useCallback(() => {
-    const depth = drillDepthRef.current;
     setPopover(null);
-    if (depth > 0) {
-      suppressPopstateRef.current += 1;
-      history.go(-depth);
-    }
-    drillDepthRef.current = 0;
-    // When there's no collapsed-row focus to keep examining (e.g. a same-user
-    // marker that only glowed its PR), also clear that glow — there'd be no
-    // affordance left to clear it, since clicks no longer dismiss.
     if (!focusedGroupIdsRef.current) applyContext(null);
   }, [applyContext]);
 
@@ -1768,213 +1586,10 @@ export function Timeline(): JSX.Element {
     }
   }, [closeModal, applyExitGlow]);
 
-  // Focus teardown WITHOUT touching the History API (callers manage history): revert
-  // the row collapse + glow, restore the window to where the user was when they
-  // opened the focus, and close the modal too. `restoreAnchor` (default) re-centres
-  // on + glows the marker that opened the focus; callers where that context is gone
-  // (e.g. a repo switch) pass false to just clear the overlay. Used by the browser-
-  // back popstate path (which has already consumed the focus entry) and, via
-  // exitFocus, by the Exit-focus button / Esc.
-  const exitFocusCore = useCallback(
-    (restoreAnchor = true) => {
-      // Capture the anchor + PR-focus state before applyContext(null) clears them.
-      const anchorEvent = restoreAnchor ? highlightedEventRef.current : null;
-      const wasPrFocus = prFocusActiveRef.current;
-      const prId = prFocusPrIdRef.current;
-      const preFocusWindow = preFocusWindowRef.current;
-      const preFocusScroll = preFocusScrollRef.current;
-      applyContext(null);
-      setPopover(null);
-      drillDepthRef.current = 0;
-      savedWindowRef.current = null;
-      preFocusWindowRef.current = null;
-      preFocusScrollRef.current = null;
-
-      if (wasPrFocus && restoreAnchor) {
-        // PR-isolation exit: restore the ORIGINAL window (zoom + position) AND the
-        // vertical scroll the user had when they entered focus (captured by
-        // enterPrFocus) — they came in to inspect one PR and expect to land back
-        // exactly where they were, on BOTH axes. We deliberately do NOT re-centre on
-        // the PR any more: that vertical re-centre is what jumped a mid-scrolled board
-        // upward on exit (the bug). Re-select the PR (→ glow pulse) and re-glow the
-        // anchor marker so it's still easy to relocate, but let restoreScrollAnchor
-        // own the vertical scroll.
-        const tl = timelineRef.current;
-        const pr = prId != null ? prsByIdRef.current.get(prId) : undefined;
-        if (tl) {
-          if (preFocusWindow) {
-            const reduceMotion =
-              typeof window !== 'undefined' &&
-              typeof window.matchMedia === 'function' &&
-              window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-            // Animated zoom-out (unless reduced-motion) reads as "here's where that
-            // PR sits in the whole timeline" rather than a jarring snap.
-            tl.setWindow(preFocusWindow.start, preFocusWindow.end, {
-              animation: !reduceMotion,
-            });
-          }
-          if (prId != null) tl.setSelection([`pr:${prId}`]);
-        }
-        if (preFocusScroll) {
-          // Keep the "you were here" marker glow (no vertical scroll), then restore
-          // the captured scroll as the single intentional authority so it doesn't
-          // fight the row-re-show / window-restore reclusters.
-          if (anchorEvent != null) applyExitGlow(anchorEvent);
-          restoreScrollAnchorIntentional(preFocusScroll);
-        } else if (anchorEvent != null) {
-          // No captured anchor (defensive — every PR-focus entry captures one): fall
-          // back to the old re-centre-on-marker behaviour.
-          restoreAnchorView(anchorEvent);
-        } else if (pr) {
-          const token = groupClassToken(prGroupId(pr));
-          requestAnimationFrame(() =>
-            requestAnimationFrame(() =>
-              centerShowTarget(token, false, '.ev-cross-linked', '.pr-bar.vis-selected'),
-            ),
-          );
-        }
-        return;
-      }
-
-      restoreWindow();
-      if (anchorEvent != null) restoreAnchorView(anchorEvent);
-    },
-    [
-      applyContext,
-      restoreWindow,
-      restoreAnchorView,
-      centerShowTarget,
-      applyExitGlow,
-      restoreScrollAnchorIntentional,
-    ],
-  );
-
-  // Full exit driven by the Exit-focus button / Esc / a repo switch (NOT a browser
-  // back). Unwind every focus-owned history entry — the focus marker enterPrFocus
-  // pushed (1 when in PR focus, but 0 for a feed-originated focus, which rode the
-  // {pierreFeed} entry — hence prFocusPushedHistoryRef, not prFocusActiveRef) plus any
-  // open popover drill entries — so the back button isn't left with stale focus slots,
-  // then tear focus down. The single net popstate the unwind emits is swallowed.
-  const exitFocus = useCallback(
-    (restoreAnchor = true) => {
-      const entries = (prFocusPushedHistoryRef.current ? 1 : 0) + drillDepthRef.current;
-      if (entries > 0) {
-        suppressPopstateRef.current += 1;
-        history.go(-entries);
-      }
-      exitFocusCore(restoreAnchor);
-    },
-    [exitFocusCore],
-  );
-
-  // A fresh strip / my-turn / search navigation abandons any active overlay (a
-  // sticky "Show" or a PR-isolation Focus). Unwind the focus-owned history entries
-  // first — the {pierreFocus} marker enterPrFocus pushed (0 for a feed-originated focus,
-  // which rode the {pierreFeed} entry — that slot is unwound by the feed reconcile
-  // instead, so counting it here too would double-pop) plus any open popover drill — so a
-  // later browser-back isn't left consuming stale focus slots, THEN clear the overlay.
-  // Reading the refs before applyContext(null) (which resets them) is load-bearing.
-  // No-ops when nothing is active.
-  const dropOverlayForNavigation = useCallback(() => {
-    if (!showFocusActiveRef.current && !focusedGroupIdsRef.current) return;
-    const entries = (prFocusPushedHistoryRef.current ? 1 : 0) + drillDepthRef.current;
-    if (entries > 0) {
-      suppressPopstateRef.current += 1;
-      history.go(-entries);
-    }
-    drillDepthRef.current = 0;
-    showFocusActiveRef.current = false;
-    applyContext(null);
-  }, [applyContext]);
-
-  // Open-in-detail: close the popover but KEEP the overlay + one history entry,
-  // so a later back press clears the overlay and restores the window (the detail
-  // pane itself stays open).
+  // Open-in-detail: close the popover. The isolate tab's focus + detail pane stay.
   const navigatePopover = useCallback(() => {
     setPopover(null);
   }, []);
-
-  // The single back-handler for the mouse/browser back button.
-  useEffect(() => {
-    const onPopState = (): void => {
-      if (suppressPopstateRef.current > 0) {
-        suppressPopstateRef.current -= 1;
-        return;
-      }
-      const depth = drillDepthRef.current;
-      // A feed-originated navigation pushed a single {pierreFeed} entry and NOTHING sits
-      // above it (a feed-entered focus rides this entry rather than pushing its own; the
-      // feed popover's drill push is suppressed) — so the entry the browser just popped IS
-      // {pierreFeed}. One Back therefore returns all the way to the Feed home: just clear
-      // the selection (→ the Feed panel) after any focus/popover has been torn down, no
-      // further history.go. feedDepthRef is pre-zeroed so the reconcile effect no-ops (the
-      // myTurnDepthRef discipline).
-      const returnToFeedHome = (): void => {
-        feedReturnRef.current = false;
-        feedDepthRef.current = 0;
-        setPopover(null);
-        useFilters.getState().clearSelection();
-      };
-      if (prFocusActiveRef.current) {
-        // The mouse/browser back button LEAVES a sticky PR-isolation focus, returning
-        // to the main timeline with the anchor (the clicked event, else the PR)
-        // re-selected and glowing — the same teardown as Esc / the Exit-focus button.
-        // This popstate already consumed one focus-owned entry; unwind the remaining
-        // popover entry (if one's open) so the stack returns to the pre-focus
-        // baseline, then tear focus down without further history ops.
-        if (depth > 0) {
-          suppressPopstateRef.current += 1;
-          history.go(-depth);
-        }
-        // When the focus was entered from a Feed click it rode the {pierreFeed} entry the
-        // browser just popped (no separate {pierreFocus} slot), so one Back skips the
-        // intermediate "full board, PR still selected" state and lands straight on the
-        // Feed home — tear focus down, then clear the selection.
-        const feedReturn = feedReturnRef.current;
-        exitFocusCore(true);
-        if (feedReturn) returnToFeedHome();
-        return;
-      }
-      // My Turn Focus Mode: step back one level (the browser already popped our
-      // {pierreMyTurn} entry, so just mirror the store down — no further history ops —
-      // keeping myTurnDepthRef in lockstep so the reconcile effect above no-ops). L2 (a
-      // To Do's PR is open) → L1 (the To Do list); L1 → the Feed home. Checked before the
-      // popover-drill branch, though they're exclusive (drill history is suppressed in My
-      // Turn focus). Close any transient popover on the way.
-      if (myTurnOnlyRef.current) {
-        const st = useFilters.getState();
-        setPopover(null);
-        if (st.selectedPrId != null) {
-          myTurnDepthRef.current = 1;
-          st.clearSelection();
-        } else {
-          myTurnDepthRef.current = 0;
-          st.exitMyTurnFocus();
-        }
-        return;
-      }
-      if (depth === 1) {
-        // Close the popover — same treatment as the Exit-focus button: re-centre on +
-        // glow the marker/PR that opened it. (A feed-originated popover never reaches
-        // here — its drill push is suppressed, so depth is 0 and feedReturn is handled
-        // by the branch below.)
-        const anchorEvent = highlightedEventRef.current;
-        drillDepthRef.current = 0;
-        applyContext(null);
-        setPopover(null);
-        restoreWindow();
-        savedWindowRef.current = null;
-        if (anchorEvent != null) restoreAnchorView(anchorEvent);
-        return;
-      }
-      // No focus / popover / My Turn open. If the selection came from a Feed click, the
-      // browser just popped our {pierreFeed} entry → return to the Feed home (an own-work
-      // marker or lifecycle feed entry, which enters no focus).
-      if (feedReturnRef.current) returnToFeedHome();
-    };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, [applyContext, restoreWindow, restoreAnchorView, exitFocusCore]);
 
   // Persistently pulse the marker/cluster the open popover refers to, so the user
   // can always see which one they're looking at — but only when we're NOT in
@@ -1996,27 +1611,27 @@ export function Timeline(): JSX.Element {
     if (ev?.prId != null) useFilters.getState().selectPr(ev.prId);
   }, [popoverEventId]);
 
-  // Changing the repo filter no longer drops focus: filter controls are treated as
-  // the board layer BENEATH the focus lens (and the FilterBar disables them while a
-  // focus overlay is active, so a repo toggle can't even fire mid-focus). The rows
-  // re-derive from the new data on the next rebuild, which re-asserts the overlay.
+  // An isolate/My-Turn tab's focus is the tab's whole state — it's left by closing /
+  // switching the tab (this Timeline unmounts), never torn down in place. So there's
+  // no in-Timeline exit signal or browser-history unwind any more (App owns the single
+  // popstate handler + the one Back-to-Inbox marker).
 
-  // Leave focus on the store's edge-triggered exit request (Escape via the keyboard
-  // hook, and the "Focus mode" pill's ✕ in the FilterBar, both bump exitFocusSignal).
-  // ("Clear filters" deliberately does NOT bump it — and is disabled during focus.)
-  // Each bump is a fresh request: run the exact same teardown as the on-canvas
-  // "Exit focus" path — restore the rows, re-centre on the marker that opened the
-  // focus, and fade-glow it. exitFocus() no-ops cleanly when nothing is focused
-  // (anchor null, depth 0), so a stray bump is harmless.
-  const exitFocusSignal = useFilters((s) => s.exitFocusSignal);
-  const prevExitSignalRef = useRef(exitFocusSignal);
-  useEffect(() => {
-    if (exitFocusSignal === prevExitSignalRef.current) return;
-    prevExitSignalRef.current = exitFocusSignal;
-    if (focusActive || focusedGroupIdsRef.current || showFocusActiveRef.current) {
-      exitFocus();
-    }
-  }, [exitFocusSignal, focusActive, exitFocus]);
+  // Build a tab-label meta from a TimelinePr, for opening a PR-focus tab from a
+  // double-click. Reads REFS (current repo/user metadata) so it stays stable and never
+  // recreates the once-bound vis handlers.
+  const metaOf = useCallback((pr: TimelinePr): TabMeta => {
+    const repo = reposByIdRef.current.get(pr.repoId);
+    const author = pr.authorId != null ? usersByIdRef.current.get(pr.authorId) : undefined;
+    return {
+      id: pr.id,
+      number: pr.number,
+      title: pr.title,
+      repoFullName: repo?.fullName ?? `repo ${pr.repoId}`,
+      authorLogin: author?.githubLogin ?? null,
+      authorDisplayName: author?.displayName ?? null,
+      authorAvatarUrl: author?.avatarUrl ?? null,
+    };
+  }, []);
 
   // Create the timeline once.
   useEffect(() => {
@@ -2080,165 +1695,51 @@ export function Timeline(): JSX.Element {
         selectPr(Number.parseInt(key.slice(3), 10));
       } else if (key.startsWith('ev:')) {
         const evId = Number.parseInt(key.slice(3), 10);
-        // Sticky PR-isolation focus: clicking an event highlights it (it becomes the
-        // exit anchor) and opens its popover — we never leave focus here, so the
-        // user can explore the whole PR. The popover's own cross-user re-collapse is
-        // suppressed (see onPopoverContext).
+        // Isolate-focus tab: clicking an event highlights it and opens its popover —
+        // never leaves focus (the tab IS the focus). The popover's own cross-user
+        // re-collapse is suppressed (see onPopoverContext).
         if (prFocusActiveRef.current) {
           highlightEvent(evId);
           openPopover(x, y, [evId]);
           return;
         }
-
-        // My Turn Focus Mode: a marker click SELECTS its PR (level 2) — its detail opens
-        // and the marker glows, while EVERY inbox PR bar stays visible. It must NOT enter
-        // the PR-isolation overlay (that would collapse to one PR and leave My Turn focus);
-        // the two modes stay discrete. openMyTurnPr routes through the timelineFocusPr
-        // consumer's My Turn branch (select + glow + scroll, no re-zoom).
+        // My-Turn tab: a marker click SELECTS its PR (drives the tab's detail pane),
+        // leaving every inbox PR bar visible — no popover, no focus.
         if (myTurnOnlyRef.current) {
           const mev = eventsByIdRef.current.get(evId);
-          if (mev?.prId != null) {
-            useFilters
-              .getState()
-              .openMyTurnPr(mev.prId, null, mev.occurredAt, {
-                type: mev.type,
-                refId: mev.refId,
-              });
-          }
+          if (mev?.prId != null) useFilters.getState().selectPr(mev.prId);
           return;
         }
-
-        const ev = eventsByIdRef.current.get(evId);
-        const pr = ev?.prId != null ? prsByIdRef.current.get(ev.prId) : undefined;
-        // Cross-user iff actor and author are both known and differ — anything else
-        // (incl. unknown actor/author) is own-work.
-        const crossUser =
-          ev != null &&
-          ev.actorId != null &&
-          pr?.authorId != null &&
-          ev.actorId !== pr.authorId;
-
-        // Cross-user marker → the UNIFIED PR-isolation focus, anchored on this
-        // event: collapse to the PR's contributors, isolate its bar, FIT the window
-        // to the PR's full span (so the whole PR zooms into view), open the popover,
-        // then glow + vertically centre the marker. Byte-for-byte the same end state
-        // as double-clicking the PR bar / the PR-detail "Focus" link. This supersedes
-        // the old two-row marker collapse.
-        if (crossUser && ev.prId != null) {
-          enterPrFocus(ev.prId, { anchorEventId: evId, fitWindow: true });
-          openPopover(x, y, [evId]);
-          // The popover's select-pulse is auto-suppressed (focusActive is true), so
-          // only the `ev-cross-linked` ring shows; centre on it once rows settle.
-          const token = groupClassToken(groupOf(ev));
-          window.setTimeout(
-            () => centerShowTarget(token, true, '.ev-cross-linked'),
-            320,
-          );
-          return;
-        }
-
-        // Own-work marker clicked while a legacy "Show" overlay is up: hand off
-        // cleanly OUT of focus into a normal single-event selection rather than
-        // silently re-expanding the rows and losing the marker. The soft
-        // `ev-selected` pulse is applied automatically once focusActive flips false.
-        if (focusedGroupIdsRef.current) {
-          exitFocus(false);
-          openPopover(x, y, [evId]);
-          if (ev) {
-            const token = groupClassToken(groupOf(ev));
-            window.setTimeout(
-              () => centerShowTarget(token, true, '.ev-selected'),
-              320,
-            );
-          }
-          return;
-        }
-
-        // Default: same-user / own-work marker, no focus — open the marker modal
-        // (the related PR band glows via highlightPr through MarkerPopover).
+        // Base board: open the marker popover in place (read the event). Isolating a
+        // PR is a DOUBLE-click (→ a PR-focus tab); a single click no longer collapses
+        // the board into an overlay.
         openPopover(x, y, [evId]);
       } else if (key.startsWith('cl:')) {
         const members = clusterMembersRef.current.get(key) ?? [];
         if (members.length === 0) return;
         const firstId = members[0]!;
-
-        // Already inside a sticky PR-isolation focus: anchor on this cluster and show
-        // its expanded popover; never re-enter or leave focus (mirrors the ev: branch
-        // above — only the Exit-focus button / Esc / back leaves).
+        // Isolate-focus tab: anchor on this cluster and show its expanded popover.
         if (prFocusActiveRef.current) {
           highlightEvent(firstId);
           openPopover(x, y, members);
           return;
         }
-
-        // My Turn Focus Mode: select the cluster's PR (level 2) without entering the
-        // PR-isolation overlay — same discrete-mode rule as the single-marker branch above.
+        // My-Turn tab: select the cluster's PR (drives the tab's detail pane).
         if (myTurnOnlyRef.current) {
           const mev = eventsByIdRef.current.get(firstId);
-          if (mev?.prId != null) {
-            useFilters
-              .getState()
-              .openMyTurnPr(mev.prId, null, mev.occurredAt, {
-                type: mev.type,
-                refId: mev.refId,
-              });
-          }
+          if (mev?.prId != null) useFilters.getState().selectPr(mev.prId);
           return;
         }
-
-        // Clusters are single-PR and homogeneous (all own-work OR all cross-user)
-        // after PR-partitioned bucketing, so the first member decides cross-person
-        // status — exactly as for a single marker.
-        const firstEv = eventsByIdRef.current.get(firstId);
-        const pr =
-          firstEv?.prId != null ? prsByIdRef.current.get(firstEv.prId) : undefined;
-        const crossUser =
-          firstEv != null &&
-          firstEv.actorId != null &&
-          pr?.authorId != null &&
-          firstEv.actorId !== pr.authorId;
-
-        // Cross-person cluster → the unified PR-isolation focus, anchored on the
-        // cluster and FIT to the PR's full span, then the expanded popover. Identical
-        // to clicking a cross-user single marker.
-        if (crossUser && firstEv.prId != null) {
-          enterPrFocus(firstEv.prId, { anchorEventId: firstId, fitWindow: true });
-          openPopover(x, y, members);
-          const token = groupClassToken(groupOf(firstEv));
-          window.setTimeout(
-            () => centerShowTarget(token, true, '.ev-cross-linked'),
-            320,
-          );
-          return;
-        }
-
-        // A legacy "Show" overlay is up (not a sticky PR focus): hand off cleanly OUT
-        // into a normal selection, like the own-work ev: branch.
-        if (focusedGroupIdsRef.current) {
-          exitFocus(false);
-          openPopover(x, y, members);
-          if (firstEv) {
-            const token = groupClassToken(groupOf(firstEv));
-            window.setTimeout(
-              () => centerShowTarget(token, true, '.ev-selected'),
-              320,
-            );
-          }
-          return;
-        }
-
-        // Own-work cluster, no focus → just the expanded popover.
+        // Base board: open the expanded popover in place.
         openPopover(x, y, members);
       }
     });
 
-    // Double-click → the unified PR-isolation focus. A PR bar focuses that PR (same
-    // end state as the PR-detail "Focus" link; the preceding single click just
-    // selects it, which enterPrFocus does anyway). An event marker / cluster focuses
-    // its PR anchored on that event — so a same-person ("in-person") comment, whose
-    // single-click only opens a popover, can also be pushed into focus. A cross-user
-    // marker already enters focus on single-click, so by the time its double-click
-    // fires we're focused and the ev/cl branch bails out.
+    // Double-click → open the PR as its OWN isolated PR-focus TAB (a fresh <Timeline
+    // mode='isolate'> that boots into isolation). A PR bar opens its PR; an event
+    // marker / cluster opens the event's PR. In an isolate/My-Turn tab a double-click
+    // is a no-op — the isolate tab is already focused, and a My-Turn double-click would
+    // just re-open the same board; the single click already selected the PR.
     timeline.on('doubleClick', (props: {
       item: string | number | null;
       event?: { srcEvent?: MouseEvent } & Partial<MouseEvent>;
@@ -2247,29 +1748,17 @@ export function Timeline(): JSX.Element {
     }) => {
       const id = props.item;
       if (id == null) return;
-      // In My Turn Focus Mode a double-click must NOT open the PR-isolation overlay (the
-      // two focus modes are discrete) — the single click already selected the PR (level 2)
-      // with every inbox PR still visible. Bail.
-      if (myTurnOnlyRef.current) return;
+      if (prFocusActiveRef.current || myTurnOnlyRef.current) return;
       const key = String(id);
 
       if (key.startsWith('pr:')) {
         const prId = Number.parseInt(key.slice(3), 10);
-        enterPrFocus(prId, { fitWindow: true });
-        // Vertically centre the PR bar once the collapse + window change settle.
         const pr = prsByIdRef.current.get(prId);
-        if (pr) {
-          const token = groupClassToken(prGroupId(pr));
-          window.setTimeout(() => centerShowTarget(token, false), 320);
-        }
+        if (pr) usePinnedTabs.getState().openPrFocusTab(metaOf(pr));
         return;
       }
 
       if (key.startsWith('ev:') || key.startsWith('cl:')) {
-        // The single click preceding this double-click already entered focus for a
-        // cross-user marker — re-entering would push a second focus history entry, so
-        // bail. Own-work markers only opened a popover, so we focus here.
-        if (prFocusActiveRef.current) return;
         const members = key.startsWith('ev:')
           ? [Number.parseInt(key.slice(3), 10)]
           : (clusterMembersRef.current.get(key) ?? []);
@@ -2277,17 +1766,8 @@ export function Timeline(): JSX.Element {
         if (evId == null) return;
         const ev = eventsByIdRef.current.get(evId);
         if (ev?.prId == null) return;
-        const native = props.event?.srcEvent ?? props.event;
-        const x = native?.clientX ?? props.pageX ?? 0;
-        const y = native?.clientY ?? props.pageY ?? 0;
-        // Same end state as a cross-user single-click: isolate the PR anchored on the
-        // event, FIT the window to the PR's full span (matching a PR-bar double-click),
-        // re-open the popover, then glow + vertically centre the marker once the rows
-        // settle.
-        enterPrFocus(ev.prId, { anchorEventId: evId, fitWindow: true });
-        openPopover(x, y, members);
-        const token = groupClassToken(groupOf(ev));
-        window.setTimeout(() => centerShowTarget(token, true, '.ev-cross-linked'), 320);
+        const pr = prsByIdRef.current.get(ev.prId);
+        if (pr) usePinnedTabs.getState().openPrFocusTab(metaOf(pr));
       }
     });
 
@@ -2373,6 +1853,13 @@ export function Timeline(): JSX.Element {
 
     timelineRef.current = timeline;
     return () => {
+      // Supersede any in-flight centerShowTarget settle loop so its next rAF `step`
+      // bails (scrollLoopRef.current !== myLoop) instead of writing scrollTop on the
+      // now-destroyed vis instance — that write would fire vis's own scroll handler on
+      // torn-down internals (_updateScrollTop → null). Matters when a focus / My-Turn
+      // tab is closed within the ~2.5s settle window right after its boot centre.
+      scrollLoopRef.current += 1;
+      intentionalScrollRef.current = false;
       if (reclusterTimer) clearTimeout(reclusterTimer);
       if (relaneTimer) clearTimeout(relaneTimer);
       vScroll?.removeEventListener('scroll', scheduleConnectors);
@@ -2387,13 +1874,10 @@ export function Timeline(): JSX.Element {
     selectPr,
     rebuildMarkers,
     openPopover,
-    applyContext,
     dismissEmptyCanvas,
     closeModal,
-    exitFocus,
-    centerShowTarget,
     highlightEvent,
-    enterPrFocus,
+    metaOf,
     captureScrollAnchor,
     restoreScrollAnchor,
     scheduleConnectors,
@@ -2606,7 +2090,7 @@ export function Timeline(): JSX.Element {
     // and stale "awaiting review" PRs. Pull their full records from the open-PRs
     // feed so their bars render in the isolated board instead of silently dropping
     // out of it. They still flow through the same member/derived/My-Turn filter below.
-    if (myTurnOnly && myTurnPrIds != null && openPrsData) {
+    if (myTurnScope && myTurnPrIds != null && openPrsData) {
       const present = new Set(basePrs.map((p) => p.id));
       const missingInbox = openPrsData.prs.filter(
         (p) => myTurnPrIds.has(p.id) && !present.has(p.id),
@@ -2652,7 +2136,7 @@ export function Timeline(): JSX.Element {
     // The "My Turn" isolate filter: a PR's bar shows only when it's in the current
     // inbox. Stays a no-op until the inbox set has loaded (myTurnPrIds null) so the
     // board isn't briefly blanked; once loaded it filters (an empty inbox → empty).
-    const myTurnActive = myTurnOnly && myTurnPrIds != null;
+    const myTurnActive = myTurnScope && myTurnPrIds != null;
     const passesMyTurn = (pr: TimelinePr): boolean =>
       !myTurnActive || myTurnPrIds!.has(pr.id);
 
@@ -3033,7 +2517,7 @@ export function Timeline(): JSX.Element {
   }, [
     data,
     derivedStates,
-    myTurnOnly,
+    myTurnScope,
     myTurnPrIds,
     openPrsData,
     userIds,
@@ -3077,100 +2561,61 @@ export function Timeline(): JSX.Element {
     if (!same) tl.setSelection(want);
   }, [selectedPrId]);
 
-  // --- My Turn Focus Mode browser-history reconcile -------------------------------
-  // Keep the {pierreMyTurn} history stack matched to the mode's logical depth so the
-  // browser Back button steps one level at a time: L2 (a To Do's PR open) → L1 (the To Do
-  // list) → the Feed home. targetDepth = myTurnOnly ? (a PR selected ? 2 : 1) : 0.
-  //  • depth GREW (entered focus / opened a To Do) → push the new entries.
-  //  • depth SHRANK programmatically (the Feed pill, the FilterBar pill, the ✕, or
-  //    navigating to a non-inbox PR) → unwind via history.go, swallowing our own popstates.
-  // A Back/Esc-driven shrink does NOT reach the else-branch: the popstate handler decrements
-  // myTurnDepthRef in lockstep with the store change BEFORE this effect runs, so target ==
-  // current and it no-ops. Outside My Turn focus this effect is inert (target 0, current 0).
+  // Boot an ISOLATE-mode tab DIRECTLY into PR-isolation focus for `mode.prId` — the
+  // tab's initial + only state (exit = closing / switching the tab → unmount). Runs
+  // UNCONDITIONALLY (the mode gate is INSIDE the body, so no conditional hook), once
+  // per mount (bootedRef), only after the first payload carrying the PR has built its
+  // bar (declared AFTER the rebuild effect → dataRef + bars are ready).
+  //
+  // LANDMINE-SAFE: enterPrFocus does horizontal setWindow + collapse/isolate/markers
+  // only (NO vertical scroll, NO focus()). The SINGLE deferred centerShowTarget is the
+  // ONLY vertical-scroll authority at boot, and it CLAIMS the scroll gate (++scrollLoopRef
+  // / intentionalScrollRef=true) so nothing else fights it. A keyed remount means a fresh
+  // instance, so no competing scroll loop exists. enterPrFocus/applyContext only selectPr
+  // when selectedPrId !== prId, so a caller that pre-selected a thread keeps it.
+  const bootedRef = useRef(false);
   useEffect(() => {
-    myTurnOnlyRef.current = myTurnOnly;
-    const target = myTurnOnly ? (selectedPrId != null ? 2 : 1) : 0;
-    let cur = myTurnDepthRef.current;
-    if (target > cur) {
-      // Entering focus (cur 0) while a normal-board marker popover is open would stack the
-      // {pierreMyTurn} entries ON TOP of its {pierreDrill} entry, orphaning the drill (the
-      // popstate My-Turn branch ignores drillDepthRef) and swallowing a later Back. Instead
-      // REUSE the drill entry's slot as the first My Turn level: close the popover, forget
-      // the drill, and count its slot as level 1 — no history.go (which would race the
-      // pushes below). enterMyTurnFocus clears the selection, so the entry-with-popover case
-      // only ever targets level 1; the loop still covers a defensive deeper target.
-      if (cur === 0 && drillDepthRef.current > 0) {
-        setPopover(null);
-        drillDepthRef.current = 0;
-        cur = 1;
-        myTurnDepthRef.current = 1;
-      }
-      for (let i = cur; i < target; i++) history.pushState({ pierreMyTurn: i + 1 }, '');
-      myTurnDepthRef.current = target;
-    } else if (target < cur) {
-      const diff = cur - target;
-      myTurnDepthRef.current = target;
-      // history.go(-diff) emits a SINGLE popstate (the destination), not `diff` of them —
-      // so swallow exactly one, matching exitFocus / dropOverlayForNavigation. (Adding
-      // `diff` left the counter > 0 and ate the user's next genuine Back press.)
-      suppressPopstateRef.current += 1;
-      history.go(-diff);
+    if (embeddedPrId == null || bootedRef.current) return;
+    const tl = timelineRef.current;
+    if (!tl || !dataRef.current) return; // wait for vis + the first payload/rebuild
+    // Select the PR up front so its detail pane populates even if it turns out to be
+    // outside this tab's ~90-day window (an old merged PR reached via the PrDetail
+    // "Focus" link) and can't be isolated on the board — graceful degradation instead
+    // of a bare un-isolated board. Respects a caller's pre-selected thread (only sets
+    // when the PR isn't already the selection).
+    if (useFilters.getState().selectedPrId !== embeddedPrId) {
+      useFilters.getState().selectPr(embeddedPrId);
     }
-  }, [myTurnOnly, selectedPrId]);
-
-  // --- Feed → PR browser-history reconcile ----------------------------------------
-  // Clicking a Feed entry navigates to a PR (and, for a cross-person entry, enters PR
-  // Focus). store.feedReturn is armed for that navigation; this effect keeps ONE
-  // {pierreFeed} history entry matched to it so the browser Back button returns straight
-  // to the Feed home (the popstate handler clears the selection + tears down any focus).
-  // The {pierreFeed} entry is NEVER interleaved with a {pierreDrill}: openPopover
-  // suppresses the drill push while feedReturn is armed, and a feed click can't fire with
-  // a popover already open (the Feed panel is hidden whenever a PR is selected) — so the
-  // single-level push/unwind here can't orphan a drill the way the My Turn reuse-slot
-  // guard above protects against. A Back-driven exit pre-zeroes feedDepthRef in the
-  // popstate handler, so this no-ops then (the myTurnDepthRef discipline); a programmatic
-  // exit (selecting another PR, Esc, the Feed pill) flips feedReturn false → we unwind the
-  // entry and close any feed-opened popover. Inert outside a feed navigation (0 → 0).
-  useEffect(() => {
-    feedReturnRef.current = feedReturn;
-    const target = feedReturn ? 1 : 0;
-    const cur = feedDepthRef.current;
-    if (target > cur) {
-      history.pushState({ pierreFeed: 1 }, '');
-      feedDepthRef.current = 1;
-    } else if (target < cur) {
-      feedDepthRef.current = target;
-      setPopover(null); // a non-Back exit also closes the feed-opened popover
-      // A feed-entered PR Focus RODE this {pierreFeed} entry (it pushed no {pierreFocus} of
-      // its own — prFocusPushedHistoryRef false). If it's still active when the feed
-      // navigation ends programmatically (e.g. j/k selecting another PR — selectPr clears
-      // feedReturn but never tears focus down), tear it down here so the overlay can't
-      // outlive its only history entry, leaving the board collapsed to the old PR while the
-      // selection has moved on. (A Back-driven exit never reaches this branch — the popstate
-      // handler pre-zeroes feedDepthRef so target == cur — so this only fires on a
-      // programmatic clear. A focus that pushed its OWN entry is left to its own teardown.)
-      if (prFocusActiveRef.current && !prFocusPushedHistoryRef.current) applyContext(null);
-      // history.go(-diff) emits a SINGLE popstate — swallow exactly one (matching the My
-      // Turn reconcile + exitFocus accounting).
-      suppressPopstateRef.current += 1;
-      history.go(-(cur - target));
-    }
-  }, [feedReturn, applyContext]);
+    const record =
+      prsByIdRef.current.get(embeddedPrId) ??
+      data?.prs.find((p) => p.id === embeddedPrId) ??
+      openPrsData?.prs.find((p) => p.id === embeddedPrId) ??
+      searchOpenPrsData?.prs.find((p) => p.id === embeddedPrId);
+    if (!record) return; // absent from this payload — retry on the next one (pane already shows it)
+    bootedRef.current = true;
+    enterPrFocus(embeddedPrId, { fitWindow: true, pr: record });
+    const token = groupClassToken(prGroupId(record));
+    // Cleared on unmount so a fast tab-close before the deferred centre can't start a
+    // settle loop on a torn-down instance.
+    const t = window.setTimeout(() => centerShowTarget(token, false), 320);
+    return () => window.clearTimeout(t);
+  }, [embeddedPrId, data, openPrsData, searchOpenPrsData, enterPrFocus, centerShowTarget]);
 
   // Move the visible window when the range preset changes — and re-apply it on
   // every preset click via rangeResetSignal, so re-selecting the already-active
-  // preset snaps the view back to that range after panning/zooming away. Skips while
-  // My Turn Focus Mode is active: the dedicated fit effect below OWNS the window then
-  // (it zooms tight to the inbox PRs' span). Still fires on the myTurnOnly false edge to
-  // snap the board back to the user's date filter on exit.
+  // preset snaps the view back to that range after panning/zooming away. Skips in a
+  // My-Turn tab: the dedicated fit effect below OWNS the window there (it zooms tight
+  // to the inbox PRs' span). This whole effect is inert in an isolate tab (the boot
+  // effect / enterPrFocus own the window there).
   useEffect(() => {
     const tl = timelineRef.current;
     if (!tl) return;
-    if (myTurnOnly) return; // the My Turn fit effect owns the window in focus
+    if (myTurnScope) return; // the My Turn fit effect owns the window in a My-Turn tab
+    if (embeddedPrId != null) return; // an isolate tab: the boot effect / enterPrFocus own the window
     const { from, to } = resolveRange(useFilters.getState());
     const { start, end } = paddedViewport(from, to);
     tl.setWindow(start, end, { animation: false });
-  }, [preset, customFrom, customTo, rangeResetSignal, myTurnOnly, myTurnFromMs]);
+  }, [preset, customFrom, customTo, rangeResetSignal, myTurnScope, embeddedPrId]);
 
   // (C) My Turn Focus Mode "zoom to the inbox". resolveRange only EXTENDS the fetched
   // range backward (to load inbox PRs older than the date filter) — it never narrows the
@@ -3183,7 +2628,7 @@ export function Timeline(): JSX.Element {
   const myTurnFitDoneRef = useRef(false);
   useEffect(() => {
     const tl = timelineRef.current;
-    if (!myTurnOnly) {
+    if (!myTurnScope) {
       myTurnFitDoneRef.current = false;
       return;
     }
@@ -3210,7 +2655,7 @@ export function Timeline(): JSX.Element {
     const pad = Math.max((maxEnd - minStart) * 0.08, 12 * 60 * 60 * 1000);
     tl.setWindow(minStart - pad, maxEnd + pad, { animation: true });
     myTurnFitDoneRef.current = true;
-  }, [myTurnOnly, myTurnPrIds, myTurnFromMs, data, openPrsData]);
+  }, [myTurnScope, myTurnPrIds, data, openPrsData]);
 
   // "Now" button: recenter the window on the current instant, keeping the
   // current zoom width. A transient store signal (epoch ms) the button bumps and
@@ -3228,7 +2673,12 @@ export function Timeline(): JSX.Element {
     useFilters.getState().consumeTimelineCenter();
   }, [timelineCenterAt]);
 
-  // Scroll the timeline to a PR opened from the strip / my-turn / an event.
+  // Scroll the SHARED board to a PR opened from the strip / j-k cycle / a PrDetail
+  // "Show" link. BASE-BOARD navigation only: centre on the PR (or a clicked event's
+  // instant), select it, and glow the matching marker. PR isolation / My-Turn scope are
+  // now separate TABS (a fresh keyed <Timeline mode>), never entered from here — so this
+  // effect no longer has any focus / overlay / history branches. (These setters call
+  // showTimeline() first, so this runs on the base board.)
   const timelineFocusPr = useFilters((s) => s.timelineFocusPr);
   const timelineFocusAt = useFilters((s) => s.timelineFocusAt);
   useEffect(() => {
@@ -3236,125 +2686,19 @@ export function Timeline(): JSX.Element {
     const tl = timelineRef.current;
     if (!tl) return;
 
-    // My Turn Focus Mode navigation (opening a To Do / clicking an inbox marker). The
-    // window is already fitted to span the WHOLE inbox (the resolveRange window effect),
-    // so we must NOT re-centre/zoom on this one PR — that's exactly what used to reduce
-    // the board to a single PR. Just select it (→ its detail), glow its marker, and scroll
-    // its row into view, leaving every inbox PR bar visible. Runs BEFORE the single-PR
-    // branches below so a My Turn open never falls into the recentre path.
-    if (myTurnOnlyRef.current) {
-      const rec =
-        data?.prs.find((p) => p.id === timelineFocusPr) ??
-        prsByIdRef.current.get(timelineFocusPr) ??
-        openPrsData?.prs.find((p) => p.id === timelineFocusPr);
-      if (!rec) {
-        // Absent from the current payload — an inbox PR whose activity predates the date
-        // filter. Effect (B) widens the fetch; wait for exactly one fresh payload (bounded
-        // so the focus can't hang), then give up gracefully if it still isn't there.
-        const awaiting = myTurnFocusAwaitRef.current;
-        if (awaiting?.prId !== timelineFocusPr) {
-          myTurnFocusAwaitRef.current = { prId: timelineFocusPr, data };
-          return;
-        }
-        if (awaiting.data === data) return; // same payload, refetch still in flight
-        myTurnFocusAwaitRef.current = null;
-        useFilters.getState().consumeTimelineFocus();
-        return;
-      }
-      myTurnFocusAwaitRef.current = null;
-      tl.setSelection([`pr:${timelineFocusPr}`]);
-      const focusEv = useFilters.getState().timelineFocusEvent;
-      const candidates = focusEv
-        ? (data?.events ?? []).filter(
-            (e) =>
-              e.prId === timelineFocusPr &&
-              e.type === focusEv.type &&
-              (focusEv.refId == null || e.refId === focusEv.refId),
-          )
-        : [];
-      const match =
-        (timelineFocusAt != null &&
-          candidates.find((e) => e.occurredAt === timelineFocusAt)) ||
-        candidates[0];
-      if (match != null) highlightEvent(match.id);
-      // Scroll the PR's row into view (it may be virtualised off-screen). Use the marker's
-      // actor row when there's a marker, else the PR author's row / the bar itself.
-      const actorId = match?.actorId ?? rec.authorId;
-      if (actorId != null) {
-        const token = groupClassToken(`repo:${rec.repoId}:user:${actorId}`);
-        const hasMarker =
-          match != null &&
-          (itemsRef.current.get(`ev:${match.id}`) != null ||
-            eventToClusterRef.current.get(match.id) != null);
-        window.setTimeout(() => centerShowTarget(token, hasMarker), 120);
-      }
-      useFilters.getState().consumeTimelineFocus();
-      return;
-    }
-
-    // A PR absent from the filtered /api/timeline payload (hidden by a filter, or an
-    // open PR outside the window) is still staged into the next rebuild via
-    // forceShowOpenPrRef so its bar materializes. Once it paints we either ISOLATE it
-    // in the filter-free focus overlay (search "enter focus" — isolate=true; pass the
-    // record so enterPrFocus can focus a PR not in prsByIdRef, and fit the window to
-    // its span so an out-of-window PR needs no range change) or just select+centre it.
-    const forceShowThen = (record: TimelinePr, isolate: boolean): void => {
-      dropOverlayForNavigation();
-      forceShowOpenPrRef.current = record;
-      setForceShowNonce((n) => n + 1);
-      const token = groupClassToken(prGroupId(record));
-      // Cancel any earlier still-pending force-show focus so a rapid second pick
-      // doesn't fire two enterPrFocus/centre callbacks (the focus would flicker
-      // between PRs); only the latest pick's deferred action runs.
-      if (forceShowFocusTimerRef.current != null) {
-        window.clearTimeout(forceShowFocusTimerRef.current);
-      }
-      forceShowFocusTimerRef.current = window.setTimeout(() => {
-        forceShowFocusTimerRef.current = null;
-        // 360ms: after the force-show rebuild paints the bar + its author's row.
-        if (isolate) {
-          enterPrFocus(record.id, { fitWindow: true, pr: record });
-          window.setTimeout(() => centerShowTarget(token, false), 320);
-        } else {
-          tl.setSelection([`pr:${record.id}`]);
-          centerShowTarget(token, false, '.ev-cross-linked', '.pr-bar.vis-selected');
-        }
-      }, 360);
-      useFilters.getState().consumeTimelineFocus();
-    };
-
     const inWindow = data?.prs.find((p) => p.id === timelineFocusPr);
     if (inWindow) {
-      // "Focus" link: isolate this PR. Collapse to every contributor's row, show
-      // only this PR's bar + activity, fit the window to its span, and stay there
-      // (sticky) — only Exit focus / Escape leaves. This is the PR-isolation
-      // overlay; the click handler keeps it up while the user explores.
-      if (useFilters.getState().timelineIsolate && data) {
-        // The "Focus" link and a cross-user marker click both funnel through the one
-        // enterPrFocus path so they reach an identical end state. Here we fit the
-        // window to the PR's span and centre its bar vertically once rows settle.
-        enterPrFocus(timelineFocusPr, { fitWindow: true });
-        const token = groupClassToken(prGroupId(inWindow));
-        window.setTimeout(() => centerShowTarget(token, false), 320);
-        useFilters.getState().consumeTimelineFocus();
-        return;
-      }
-
       const focusEv = useFilters.getState().timelineFocusEvent;
 
       // A "Show" link (PR comment / thread / activity entry): reveal one specific
-      // event on the MAIN timeline. The behaviour is uniform across all Show links
-      // and depends only on focus state: outside focus it's a plain navigate
-      // (recenter on the instant + glow the marker, NO row collapse); inside focus
-      // it does the same but keeps the focus overlay intact. We can't use vis.focus()
-      // for the vertical scroll (it only reaches already-rendered items, and the
-      // target row may be a virtualised stub), so we recenter horizontally with
-      // setWindow and drive vis's vertical scroll ourselves (centerShowTarget).
+      // event. Recenter horizontally on its instant, select the PR, glow its marker,
+      // and scroll the marker's row into view. We can't use vis.focus() for the
+      // vertical scroll (it only reaches already-rendered items, and the target row may
+      // be a virtualised stub), so we drive vis's vertical scroll (centerShowTarget).
       if (focusEv && data) {
         // Among events matching (pr, type, refId), prefer the one at the requested
-        // instant: review-comment replies all share their thread's refId, so the
-        // occurredAt is what distinguishes a specific reply's marker. Falls back to
-        // the first match (unchanged behaviour for thread/PR-comment/etc. links).
+        // instant: review-comment replies share their thread's refId, so occurredAt is
+        // what distinguishes a specific reply's marker. Falls back to the first match.
         const candidates = data.events.filter(
           (e) =>
             e.prId === timelineFocusPr &&
@@ -3366,76 +2710,11 @@ export function Timeline(): JSX.Element {
             candidates.find((e) => e.occurredAt === timelineFocusAt)) ||
           candidates[0];
 
-        // In the sticky PR-isolation focus, EVERY contributor row stays shown — a
-        // "Show" (a PR comment / thread / activity link) must NOT collapse the board
-        // to the event's row(s) the way it does outside focus. The focused PR is the
-        // one whose detail pane the link came from, so its marker is already rendered;
-        // just glow it, recenter horizontally on the instant, and scroll it into view,
-        // leaving the focus overlay (rows + isolated bar) intact.
-        if (prFocusActiveRef.current) {
-          if (timelineFocusAt) {
-            const c = Date.parse(timelineFocusAt);
-            const win = tl.getWindow();
-            const width = win.end.valueOf() - win.start.valueOf();
-            tl.setWindow(c - width / 2, c + width / 2, { animation: true });
-          }
-          tl.setSelection([`pr:${timelineFocusPr}`]);
-          // Move the cross-link glow onto the shown event's marker (a lifecycle event
-          // has no marker — the focused PR's bar already glows, so this is a no-op for
-          // it beyond clearing any stale marker glow).
-          if (match != null) highlightEvent(match.id);
-          const actorId = match?.actorId ?? inWindow.authorId;
-          if (actorId != null) {
-            const token = groupClassToken(`repo:${inWindow.repoId}:user:${actorId}`);
-            const hasMarker =
-              match != null &&
-              (itemsRef.current.get(`ev:${match.id}`) != null ||
-                eventToClusterRef.current.get(match.id) != null);
-            window.setTimeout(() => centerShowTarget(token, hasMarker), 120);
-          }
-          useFilters.getState().consumeTimelineFocus();
-          return;
-        }
-
-        // Outside focus: a plain NAVIGATE — recenter on the event instant, select the
-        // PR, glow its marker, and scroll the marker's row into view. Deliberately do
-        // NOT collapse the board to the actor/author rows (that read like an unwanted
-        // focus overlay — "it shows all the author's PRs"). This mirrors the in-focus
-        // branch above, minus the focus overlay, so every "Show" link behaves the
-        // same way. Drop any stale soft overlay from a previous Show first so rows are
-        // expanded and old glows cleared.
-        dropOverlayForNavigation();
-        // Lifecycle events have no marker; their actor is the PR author, so the
-        // relevant row is the author's.
         const actorId = match?.actorId ?? inWindow.authorId;
         const hasMarker =
           match != null &&
           (itemsRef.current.get(`ev:${match.id}`) != null ||
             eventToClusterRef.current.get(match.id) != null);
-        // Feed click (timelineFocusOpenPopover): reveal the event's popover so its
-        // content reads inline. Only events WITH a marker (comments/reviews) have a
-        // popover — lifecycle entries fall through to the plain navigate below.
-        const wantPopover = useFilters.getState().timelineFocusOpenPopover;
-
-        // Cross-person feed entry → enter the unified PR-isolation focus anchored on
-        // the event, THEN open its popover (byte-for-byte the cross-user marker-click
-        // path). enterPrFocus drops any stale popover, so openPopover MUST follow it.
-        if (
-          wantPopover &&
-          match != null &&
-          hasMarker &&
-          match.actorId != null &&
-          inWindow.authorId != null &&
-          match.actorId !== inWindow.authorId
-        ) {
-          enterPrFocus(timelineFocusPr, { anchorEventId: match.id, fitWindow: true });
-          openPopover(window.innerWidth / 2, window.innerHeight / 2, [match.id]);
-          const token = groupClassToken(`repo:${inWindow.repoId}:user:${match.actorId}`);
-          window.setTimeout(() => centerShowTarget(token, true, '.ev-cross-linked'), 320);
-          useFilters.getState().consumeTimelineFocus();
-          return;
-        }
-
         if (timelineFocusAt) {
           const c = Date.parse(timelineFocusAt);
           const win = tl.getWindow();
@@ -3444,33 +2723,19 @@ export function Timeline(): JSX.Element {
         }
         tl.setSelection([`pr:${timelineFocusPr}`]);
         if (match != null) highlightEvent(match.id);
-
-        // Scroll the marker's row into view (it may be virtualized off-screen). The
-        // marker sits in the actor's row; a lifecycle event has no marker, so we
+        // The marker sits in the actor's row; a lifecycle event has no marker, so we
         // centre on the PR bar instead (hasMarker false).
         if (actorId != null) {
           const token = groupClassToken(`repo:${inWindow.repoId}:user:${actorId}`);
           window.setTimeout(() => centerShowTarget(token, hasMarker), 120);
         }
-        // Own-work feed entry → also open the event's popover so the content reads
-        // inline (the recenter + glow above already located its marker; the popover
-        // re-anchors to it and rides the deferred scroll into view).
-        if (wantPopover && match != null && hasMarker) {
-          openPopover(window.innerWidth / 2, window.innerHeight / 2, [match.id]);
-        }
         useFilters.getState().consumeTimelineFocus();
         return;
       }
 
-      // openPrFocused (strip / my-turn / search): drop ANY active overlay first —
-      // a sticky "Show" OR a marker-popover cross-user focus (tracked by
-      // focusedGroupIdsRef, which showFocusActiveRef alone misses). This is a
-      // fresh navigation, so expand back to all rows and clear the cross-link glow
-      // before scrolling to the target — otherwise the rows stay collapsed and the
-      // selection pulse paints on a hidden bar. Then recenter horizontally on the
-      // clicked event's instant when provided, else the PR bar's midpoint — avoids a
-      // big jump when a long-running PR's midpoint is far from the clicked event.
-      dropOverlayForNavigation();
+      // openPrFocused (strip / j-k): recenter on the clicked event's instant when
+      // provided, else the PR bar's midpoint (avoids a big jump when a long-running
+      // PR's midpoint is far from the clicked event), select it, and scroll its bar in.
       const win = tl.getWindow();
       const width = win.end.valueOf() - win.start.valueOf();
       let center: number;
@@ -3485,12 +2750,6 @@ export function Timeline(): JSX.Element {
       }
       tl.setWindow(center - width / 2, center + width / 2, { animation: true });
       tl.setSelection([`pr:${timelineFocusPr}`]);
-      // Vertical scroll: the contributor row may be virtualized off-screen, so
-      // vis.focus() can't reach it — drive vis's own vertical scroll via the same
-      // settle loop the activity-"Show" path uses (centerShowTarget). hasMarker is
-      // false (lifecycle branch); the target is the now-selected PR bar, so it
-      // centres precisely on the bar (not the row label). The bar already shows the
-      // soft "selected" pulse from setSelection above — no separate flash glow.
       const token = groupClassToken(prGroupId(inWindow));
       // Defer the scroll: when a thread-state filter hides this PR, openPrFocused's
       // selection effect schedules a force-show rebuild to materialize the bar;
@@ -3502,101 +2761,55 @@ export function Timeline(): JSX.Element {
       return;
     }
 
-    // Not in the member-filtered lean payload, but the global PR-title search can
-    // target a PR the member filter hides. If it overlaps the current window it's
-    // present in the member-agnostic search payload — force-show its bar in place
-    // (the rebuild force-adds its author's row), with no range change since an
-    // open/overlapping bar already spans the window. Reuses the same
-    // forceShowOpenPrRef path as a PR absent from the lean payload for lack of
-    // in-window activity; centerShowTarget then scrolls it vertically into view.
+    // Force-show helper: stage an off-payload bar into the next rebuild, then select +
+    // centre it once it paints.
+    const forceShowThen = (record: TimelinePr): void => {
+      forceShowOpenPrRef.current = record;
+      setForceShowNonce((n) => n + 1);
+      const token = groupClassToken(prGroupId(record));
+      if (forceShowFocusTimerRef.current != null) {
+        window.clearTimeout(forceShowFocusTimerRef.current);
+      }
+      forceShowFocusTimerRef.current = window.setTimeout(() => {
+        forceShowFocusTimerRef.current = null;
+        tl.setSelection([`pr:${record.id}`]);
+        centerShowTarget(token, false, '.ev-cross-linked', '.pr-bar.vis-selected');
+      }, 360);
+      useFilters.getState().consumeTimelineFocus();
+    };
+
+    // Hidden by the member filter but present in the member-agnostic search payload —
+    // force its bar in place (no range change; an open/overlapping bar spans the window).
     const hiddenByMember =
       data && !data.prs.some((p) => p.id === timelineFocusPr)
         ? searchData?.prs.find((p) => p.id === timelineFocusPr)
         : undefined;
     if (hiddenByMember) {
-      // Force-show the bar; ISOLATE it in the filter-free focus when the request
-      // asked to (a search pick), else just select + centre it (strip / my-turn).
-      forceShowThen(hiddenByMember, useFilters.getState().timelineIsolate);
+      forceShowThen(hiddenByMember);
       return;
     }
 
-    // The PR isn't in the lean /api/timeline payload. It can still be focused if
-    // it's a currently-open PR (those come from a separate endpoint and may be
-    // outside the window or have no in-window activity) — including an out-of-
-    // filter open PR surfaced by the global search but with no in-window activity.
+    // A currently-open PR (separate endpoint) outside the window / with no in-window
+    // activity. Widen the range if it opened before the window, else force-show it.
     const candidate =
       openPrsData?.prs.find((p) => p.id === timelineFocusPr) ??
       searchOpenPrsData?.prs.find((p) => p.id === timelineFocusPr);
     if (candidate) {
-      // Search "enter focus": force-show + isolate WITHOUT widening the range —
-      // enterPrFocus fits the window to the PR's own span, so an out-of-window PR
-      // needs no range change and browser-back restores the exact filtered view.
-      if (useFilters.getState().timelineIsolate) {
-        forceShowThen(candidate, true);
-        return;
-      }
       const { from } = resolveRange(useFilters.getState());
       const openedMs = new Date(candidate.openedAt).getTime();
       if (openedMs < from.getTime()) {
-        // Opened before the window — widen the range so it enters data.prs, then
-        // the effect re-runs into the openPrFocused sub-path above (which
-        // scrolls + glows). Keep the focus pending (don't consume).
-        const day = new Date(openedMs - 24 * 60 * 60 * 1000)
-          .toISOString()
-          .slice(0, 10);
+        // Opened before the window — widen the range so it enters data.prs, then the
+        // effect re-runs into the in-window path above. Keep the focus pending.
+        const day = new Date(openedMs - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
         const today = new Date().toISOString().slice(0, 10);
         useFilters.getState().setCustomRange(day, today);
         return;
       }
-      // Open + within the window but absent from data.prs (no in-window activity,
-      // so it never entered the lean payload). Stage it for the next rebuild —
-      // forceShowOpenPrRef is seeded into the rebuild's PR set so the bar
-      // materializes — then bump the nonce to trigger that rebuild. The bar can't
-      // be focused until it paints, so we center + glow on a short delay using the
-      // open-PR record directly (best-effort; never crashes). Consume the focus.
       if (data && !data.prs.some((p) => p.id === candidate.id)) {
-        // Same fresh-navigation teardown as the in-window path above: clear any
-        // active "Show" / popover focus so the deferred scroll+glow doesn't land
-        // under collapsed rows.
-        dropOverlayForNavigation();
-        forceShowOpenPrRef.current = candidate;
-        setForceShowNonce((n) => n + 1);
-        const winC = tl.getWindow();
-        const w = winC.end.valueOf() - winC.start.valueOf();
-        const sMs = new Date(candidate.openedAt).getTime();
-        const eMs = new Date(
-          candidate.mergedAt ?? candidate.closedAt ?? new Date().toISOString(),
-        ).getTime();
-        const c = (sMs + eMs) / 2;
-        tl.setWindow(c - w / 2, c + w / 2, { animation: true });
-        const token = groupClassToken(prGroupId(candidate));
-        window.setTimeout(() => {
-          // 360ms: after the force-show rebuild paints the bar.
-          tl.setSelection([`pr:${candidate.id}`]);
-          centerShowTarget(token, false, '.ev-cross-linked', '.pr-bar.vis-selected');
-        }, 360);
-        useFilters.getState().consumeTimelineFocus();
+        forceShowThen(candidate);
         return;
       }
     }
-    // In My Turn Focus Mode an inbox PR can be absent here because its activity
-    // predates the date-range filter (e.g. a thread on a since-merged PR, which has
-    // no open-PR record to force-show). Effect (B) widens the fetched range to cover
-    // the inbox; KEEP the focus pending so once that refetch lands this effect re-runs
-    // and the PR resolves through a branch above (centre + select + glow). Bounded: we
-    // wait for exactly one fresh payload — if it STILL lacks the PR, give up below so
-    // the focus can't hang. myTurnPassRef mirrors the live My Turn isolate state.
-    const mt = myTurnPassRef.current;
-    if (mt.active && mt.ids.has(timelineFocusPr)) {
-      const awaiting = myTurnFocusAwaitRef.current;
-      if (awaiting?.prId !== timelineFocusPr) {
-        myTurnFocusAwaitRef.current = { prId: timelineFocusPr, data };
-        return; // first miss — wait for the widened-range refetch
-      }
-      if (awaiting.data === data) return; // same payload, refetch still in flight
-      // A fresh payload still lacks it — genuinely unreachable; stop waiting.
-    }
-    myTurnFocusAwaitRef.current = null;
     // Genuinely unreachable (in neither dataset) — fail gracefully.
     useFilters.getState().consumeTimelineFocus();
   }, [
@@ -3606,13 +2819,7 @@ export function Timeline(): JSX.Element {
     openPrsData,
     searchData,
     searchOpenPrsData,
-    applyContext,
     centerShowTarget,
-    rebuildMarkers,
-    isolatePrBars,
-    enterPrFocus,
-    openPopover,
-    dropOverlayForNavigation,
     highlightEvent,
   ]);
 

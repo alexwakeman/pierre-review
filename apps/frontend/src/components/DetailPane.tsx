@@ -1,6 +1,6 @@
 import { useDeferredValue } from 'react';
 import { useFilters } from '../store/filters.js';
-import { usePinnedTabs } from '../store/pinnedTabs.js';
+import { usePinnedTabs, parseTabKey } from '../store/pinnedTabs.js';
 import { PrDetail } from './PrDetail.js';
 
 // The bottom pane's content:
@@ -21,12 +21,14 @@ export function DetailPane(): JSX.Element {
   const deferredPrId = useDeferredValue(selectedPrId);
   const bodyPrId = selectedPrId != null ? selectedPrId : deferredPrId;
 
-  // When the SAME PR is shown full-screen in the pinned-tab overlay, don't ALSO mount
+  // When the SAME PR is shown full-screen in the pr-detail overlay, don't ALSO mount
   // it here (it would sit invisibly behind the overlay) — two PrDetail instances for one
   // PR would double the markViewed POST and let the hidden copy consume deep-link signals
-  // meant for the visible one. A different pinned PR (or the timeline tab) renders normally.
+  // meant for the visible one. A different tab renders normally.
   const activeTab = usePinnedTabs((s) => s.activeTab);
-  const showBody = bodyPrId != null && bodyPrId !== activeTab;
+  const activeDetail = parseTabKey(activeTab);
+  const activeDetailPrId = activeDetail?.kind === 'pr-detail' ? activeDetail.prId : null;
+  const showBody = bodyPrId != null && bodyPrId !== activeDetailPrId;
 
   return (
     <div className="relative h-full" data-testid="detail-pane">

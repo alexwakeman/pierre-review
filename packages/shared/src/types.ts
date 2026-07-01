@@ -735,6 +735,9 @@ export interface ThreadAwaitingItem {
   derivedState: DerivedState;
   // Last reply (the one awaiting your response), truncated.
   lastReplyExcerpt: string;
+  // Full markdown of the awaiting reply; null on rows synced lean before full-body
+  // persistence — the consumer falls back to `lastReplyExcerpt`.
+  lastReplyBody: string | null;
   lastReplyAt: string;
   lastReplyAuthorId: number | null;
   githubUrl: string;
@@ -861,7 +864,12 @@ export interface FeedEvent {
   // review_submitted → the verdict (approved / changes_requested / …); else null.
   reviewState: ReviewState | null;
   // review_comment / pr_comment → a short preview of the comment; else null.
+  // (Kept for the legacy IndexedDB activity mirror.)
   excerpt: string | null;
+  // Full markdown body for text events (review_comment / pr_comment /
+  // review_submitted); null for non-text events. Null on rows synced lean before
+  // full-body persistence — the consumer falls back to `excerpt`.
+  content: string | null;
 }
 
 export interface FeedResponse {
@@ -1580,15 +1588,26 @@ export interface ConsolidatedFeedItem {
   reasonTag: ReasonTag | null;
   reviewState: ReviewState | null;
   githubUrl: string | null;
+  // Merge context: who merged the PR (pr_merged items) — null otherwise. Backfilled
+  // into `users`.
+  mergedById: number | null;
+  // Review context: who submitted reviews on this PR, each with their latest standing
+  // state (for merge/review-credit cards); null when not loaded / no reviews. User ids
+  // are backfilled into `users`.
+  reviewers: { userId: number; state: ReviewState }[] | null;
   // Dismissal coordinates for a "My Turn" item (the seen/unseen toggle); null for pure
   // activity events. Mirrors MyTurnDismissBody so the existing dismiss plumbing is reused.
   dismiss: { kind: MyTurnDismissKind; refId: number } | null;
 }
 
 export interface ConsolidatedFeedResponse {
+  // The requested page of the merged, newest-first stream (see the `limit`/`offset`
+  // query params). `items` is just this page; `total` is the full stream length so the
+  // client knows when to stop "Load more". Users are those referenced by THIS page.
   items: ConsolidatedFeedItem[];
-  // Actors/authors referenced by any item, for client-side login/avatar lookup.
+  // Actors/authors referenced by items on this page, for client-side login/avatar lookup.
   users: User[];
+  total: number;
   generatedAt: string; // ISO-8601
 }
 

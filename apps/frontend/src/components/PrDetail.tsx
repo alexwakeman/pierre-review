@@ -381,7 +381,7 @@ export function PrDetail({
   const [activitySince, setActivitySince] = useState<string | null>(null);
   const qc = useQueryClient();
   const openPrFocused = useFilters((s) => s.openPrFocused);
-  const focusPrOnTimeline = useFilters((s) => s.focusPrOnTimeline);
+  const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
   const activityFocus = useFilters((s) => s.activityFocus);
   const consumeActivityFocus = useFilters((s) => s.consumeActivityFocus);
   const activityFocusForPr = useMemo(
@@ -403,7 +403,9 @@ export function PrDetail({
   const pinPr = usePinnedTabs((s) => s.pin);
   const unpinPr = usePinnedTabs((s) => s.unpin);
   const syncPinnedMeta = usePinnedTabs((s) => s.syncMeta);
-  const isPinned = usePinnedTabs((s) => (pr != null ? s.pinned.some((p) => p.id === pr.id) : false));
+  const isPinned = usePinnedTabs((s) =>
+    pr != null ? s.tabs.some((t) => t.kind === 'pr-detail' && t.prId === pr.id) : false,
+  );
 
   // Selecting a thread (e.g. via a timeline marker) forces the Threads tab,
   // where the thread list lives and auto-scrolls to the selected thread.
@@ -565,9 +567,9 @@ export function PrDetail({
           </button>
           <button
             type="button"
-            onClick={() => focusPrOnTimeline(pr.id)}
+            onClick={() => openPrFocusTab(pinnedMetaOf(pr, usersById))}
             className="shrink-0 font-medium text-blue-500 hover:underline"
-            title="Isolate this PR and its contributors on the timeline (✕ on the Focus mode badge / Esc to leave)"
+            title="Open this PR in its own focus tab — an isolated timeline of it and its contributors (✕ on the tab to close)"
           >
             Focus
           </button>

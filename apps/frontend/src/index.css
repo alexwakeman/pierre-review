@@ -137,26 +137,6 @@ body {
   }
 }
 
-/* ---- focus-mode lens frame ---- */
-/* While a focus overlay is active the timeline + detail pane read as ONE framed
-   "lens" unit (App adds .focus-frame to <main>). A static 3px sky border, same
-   colour as the PR selection ring. Drawn on an overlay pseudo-element (inset:0,
-   pointer-events:none, box-sizing inherited as border-box from Tailwind preflight)
-   so it sits ABOVE the panes' own backgrounds without shifting layout or being
-   clipped, and never blocks interaction. */
-.focus-frame {
-  position: relative;
-}
-.focus-frame::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  pointer-events: none;
-  border: 3px solid rgba(56, 189, 248, 0.8);
-  border-radius: 8px;
-}
-
 /* The board filters, faded while the focus lens owns the screen. `inert` (set on
    the group in FilterBar) handles interactivity + AT; this is just the visual cue
    (pointer-events is a belt-and-suspenders fallback for the rare no-inert engine). */

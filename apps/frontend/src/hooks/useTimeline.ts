@@ -22,9 +22,18 @@ export function useMergers() {
   return useQuery<MergersResponse>({ queryKey: ['mergers'], queryFn: api.mergers });
 }
 
-export function useTimeline() {
+// `override` scopes an EMBEDDED (per-tab) timeline instead of the shared board:
+//  • dropMembers — ignore the active member filter (so a focus tab's subject PR /
+//    a My-Turn tab's inbox PRs are present even when a member filter would hide them);
+//  • fromMs — widen `from` back to this instant (e.g. ~90 days) so an out-of-window PR
+//    is fetched. Both feed a SEPARATE query key → a separate cache entry, so they never
+//    touch the store/URL and the base board's query (override omitted → identical string)
+//    is unchanged. Base call: `useTimeline()`.
+export function useTimeline(override?: { dropMembers?: boolean; fromMs?: number | null }) {
   // Selector returns a stable query string; re-runs the query only when it changes.
-  const search = useFilters(buildTimelineSearch);
+  const search = useFilters((s) =>
+    buildTimelineSearch(s, !override?.dropMembers, true, true, true, override?.fromMs ?? null),
+  );
   return useQuery<TimelineResponse>({
     queryKey: ['timeline', search],
     queryFn: () => api.timeline(search),

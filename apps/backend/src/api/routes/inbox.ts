@@ -17,19 +17,34 @@ function parseIntList(raw: string | undefined): number[] | null {
 }
 
 export async function inboxRoutes(app: FastifyInstance): Promise<void> {
-  // The Inbox aggregate: per watched repo, current-state stats + thread totals +
-  // attention/unread flags + open PRs. Scoped to the account; `repoIds` narrows to
-  // the active watched-repo selection. Pure DB read — no GitHub sync, no AI.
+  // The Inbox aggregate: per repo, current-state stats + thread totals +
+  // attention/unread flags + open PRs. Scoped to the account; `repoIds` + `userIds`
+  // narrow to the active FilterBar repo + member selection (across ALL the account's
+  // repos — watched-only was dropped). Pure DB read — no GitHub sync, no AI.
   app.get('/api/inbox', async (req): Promise<InboxResponse> => {
-    const q = req.query as { repoIds?: string };
-    return getInbox(accountIdOf(req), parseIntList(q.repoIds));
+    const q = req.query as { repoIds?: string; userIds?: string };
+    return getInbox(accountIdOf(req), parseIntList(q.repoIds), parseIntList(q.userIds));
   });
 
-  // The consolidated Feed (the Inbox "Feed" entry): one relevance-ranked stream
-  // across all repos merging unresolved threads + My Turn actionables + the activity
-  // feed, deduped and deterministically tiered. Pure DB read — no GitHub sync, no AI.
+  // The consolidated Feed (the Inbox "Feed" entry): one flat, chronological stream
+  // merging My Turn actionables + the activity feed, deduped. Scoped by the FilterBar
+  // repo + member selection across ALL the account's repos (watched-only dropped).
+  // Pure DB read — no GitHub sync, no AI.
   app.get('/api/inbox/feed', async (req): Promise<ConsolidatedFeedResponse> => {
-    return getConsolidatedFeed(accountIdOf(req));
+    const q = req.query as {
+      repoIds?: string;
+      userIds?: string;
+      limit?: string;
+      offset?: string;
+    };
+    const limit = q.limit != null ? Number(q.limit) : null;
+    const offset = q.offset != null ? Number(q.offset) : 0;
+    return getConsolidatedFeed(accountIdOf(req), {
+      repoIds: parseIntList(q.repoIds),
+      userIds: parseIntList(q.userIds),
+      limit: Number.isFinite(limit) && limit != null && limit > 0 ? limit : null,
+      offset: Number.isFinite(offset) && offset > 0 ? offset : 0,
+    });
   });
 
   // Repo-scoped Claude-review history for the Inbox single-repo console. Ownership +

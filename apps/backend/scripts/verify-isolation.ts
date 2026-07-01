@@ -142,7 +142,7 @@ check("getMergers(A) excludes B's repo", !mergersA.some((m) => m.repoId === B.re
 // watched-repo events (cross-account IDOR).
 await db.update(repos).set({ inboxWatch: true }).where(eq(repos.id, A.repoId)).execute();
 await db.update(repos).set({ inboxWatch: true }).where(eq(repos.id, B.repoId)).execute();
-const feedA = await q.getFeed(1, 14);
+const feedA = await q.getFeed(1, { daysBefore: 14, watchedOnly: true });
 check(
   "getFeed(A) returns only A's events",
   feedA.events.length === 1 && feedA.events[0]!.prId === A.prId,

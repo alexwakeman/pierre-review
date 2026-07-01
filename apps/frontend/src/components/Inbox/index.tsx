@@ -10,6 +10,7 @@ import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { RepoSection } from './RepoSection.js';
+import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { FeedView } from './FeedView.js';
 
 const EMPTY_COUNTS: ThreadStateCounts = {
@@ -67,40 +68,51 @@ function RailRow({
   selected: boolean;
   onSelect: () => void;
 }): JSX.Element {
+  // The metrics line is suppressed entirely while only the repo name is known (the
+  // name-only loading fallback), so there's no empty second row.
+  const hasMetrics = threadTotals != null || hasUnread || attentionCount > 0 || openPrs != null;
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+      className={`flex w-56 shrink-0 flex-col gap-0.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
         selected
           ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
           : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
       }`}
     >
-      <span className="min-w-0 flex-1 truncate font-medium text-gray-700 dark:text-gray-200">
-        {fullName}
+      {/* line 1: repo name */}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="min-w-0 flex-1 truncate font-medium text-gray-700 dark:text-gray-200">
+          {fullName}
+        </span>
+        {maintainerCount > 0 && <MaintainerShield />}
       </span>
-      {maintainerCount > 0 && <MaintainerShield />}
-      {hasUnread && (
-        <span
-          aria-hidden="true"
-          title="New activity"
-          className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500"
-        />
-      )}
-      {threadTotals != null && <ThreadStateBar counts={threadTotals} compact />}
-      {attentionCount > 0 && (
-        <span
-          className="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400"
-          title="PRs needing attention"
-        >
-          ⚠{attentionCount}
+      {/* line 2: metrics, only once loaded */}
+      {hasMetrics && (
+        <span className="flex items-center gap-1.5 pl-0.5">
+          {hasUnread && (
+            <span
+              aria-hidden="true"
+              title="New activity"
+              className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500"
+            />
+          )}
+          {threadTotals != null && <ThreadStateBar counts={threadTotals} compact />}
+          {attentionCount > 0 && (
+            <span
+              className="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400"
+              title="PRs needing attention"
+            >
+              ⚠{attentionCount}
+            </span>
+          )}
+          <span className="ml-auto shrink-0 tabular-nums text-gray-400">
+            {openPrs == null ? '' : openPrs > 0 ? `[${openPrs}]` : '[—]'}
+          </span>
         </span>
       )}
-      <span className="shrink-0 tabular-nums text-gray-400">
-        {openPrs == null ? '' : openPrs > 0 ? `[${openPrs}]` : '[—]'}
-      </span>
     </button>
   );
 }
@@ -112,9 +124,10 @@ function RailRow({
 export function InboxView(): JSX.Element {
   useStalenessTick();
   const repoIds = useFilters((s) => s.repoIds);
+  const userIds = useFilters((s) => s.userIds);
   const inboxRepoId = useFilters((s) => s.inboxRepoId);
   const setInboxRepo = useFilters((s) => s.setInboxRepo);
-  const { data, isFetching, isLoading, refetch } = useInbox(repoIds);
+  const { data, isFetching, isLoading, refetch } = useInbox(repoIds, userIds);
   const { data: allRepos } = useRepos();
   const { data: me } = useMe();
   const qc = useQueryClient();
@@ -359,12 +372,10 @@ export function InboxView(): JSX.Element {
             ))}
           </div>
         ) : selectedRepo != null ? (
-          <RepoSection
-            repo={selectedRepo}
-            density="console"
-            tintIndex={sorted.findIndex((r) => r.repoId === selectedRepo.repoId)}
-            claudeEnabled={claudeEnabled}
-          />
+          <div className="space-y-3">
+            <RepoFeedHeader repo={selectedRepo} />
+            <FeedView repoId={selectedRepo.repoId} />
+          </div>
         ) : (
           // A numeric repo id that didn't resolve (e.g. removed) — fall back to Feed.
           <FeedView />

@@ -9,44 +9,26 @@ function isTypingTarget(el: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
 }
 
-// Global shortcuts: `/` focus filter, `j`/`k` cycle PRs, `m` enter My Turn focus,
-// `i` open Insights, `esc` exit focus (PR-isolation or My Turn) / clear selection.
+// Global shortcuts: `/` focus filter, `j`/`k` cycle PRs (board only), `m` open the
+// My Turn tab, `i` open Insights, `esc` leave the current tab/overlay → the board (or
+// clear the selection when already on the board).
 export function useKeyboard(): void {
   const { data } = useTimeline();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const {
-        selectedPrId,
-        selectPr,
-        clearSelection,
-        focusActive,
-        exitFocus,
-        myTurnOnly,
-        enterMyTurnFocus,
-        exitMyTurnFocus,
-        setInsightsOpen,
-      } = useFilters.getState();
+      const { selectedPrId, selectPr, clearSelection, setInsightsOpen } =
+        useFilters.getState();
+      const tabsApi = usePinnedTabs.getState();
+      const onBoard = tabsApi.activeTab === 'timeline';
 
       if (e.key === 'Escape') {
         if (isTypingTarget(e.target)) {
           (e.target as HTMLElement).blur();
-        } else if (usePinnedTabs.getState().activeTab !== 'timeline') {
-          // A pinned PR is showing full-screen — Escape returns to the board (the
-          // tab stays pinned), taking precedence over focus/selection handling
-          // (those concern the timeline, which is hidden behind the overlay).
-          usePinnedTabs.getState().showTimeline();
-        } else if (focusActive) {
-          // In the PR-isolation focus overlay, Escape exits it exactly like the
-          // on-canvas "Exit focus" button: the Timeline reacts to the bumped
-          // exitFocusSignal to restore the rows, re-centre, and fade-glow the marker.
-          // Selection is left intact (the detail pane stays put).
-          exitFocus();
-        } else if (myTurnOnly) {
-          // In My Turn Focus Mode, Escape leaves it entirely → the Feed home: un-isolate
-          // the board and clear any selection. (The browser Back button, by contrast,
-          // steps one level: a To Do's PR detail → the To Do list → the Feed.)
-          exitMyTurnFocus();
+        } else if (!onBoard) {
+          // Any tab/overlay (Inbox, pr-detail, pr-focus, my-turn) → the plain board.
+          // The tab stays open; this just re-shows the shared timeline.
+          tabsApi.showTimeline();
         } else {
           clearSelection();
         }
@@ -54,31 +36,15 @@ export function useKeyboard(): void {
       }
       if (isTypingTarget(e.target)) return;
 
-      // While a pinned PR tab is full-screen the board is hidden behind the overlay —
-      // suppress the board-navigation shortcuts (j/k cycle, m My Turn focus) so they
-      // don't silently mutate it out of sight. `/` (filter) + `i` (Insights) stay, as
-      // their UI is still visible above the overlay.
-      if (
-        usePinnedTabs.getState().activeTab !== 'timeline' &&
-        (e.key === 'j' || e.key === 'k' || e.key === 'm')
-      ) {
-        return;
-      }
-
       if (e.key === '/') {
         e.preventDefault();
         document.getElementById('add-repo-input')?.focus();
         return;
       }
 
-      // Enter My Turn Focus Mode (mirrors the header "My Turn" pill): isolate the board
-      // to your inbox + show the To Do list. From a drilled-in To Do it steps back to the
-      // list; on the list it's a no-op. Suppressed during the PR-isolation overlay (that
-      // lens owns the board). `clearSelection` is unused now but kept destructured above
-      // for the Escape branch.
+      // Open (or switch to) the My Turn tab — its own isolated triage timeline.
       if (e.key === 'm') {
-        if (focusActive) return;
-        enterMyTurnFocus();
+        tabsApi.openMyTurnTab();
         return;
       }
 
@@ -88,6 +54,9 @@ export function useKeyboard(): void {
         return;
       }
 
+      // j/k cycle the board's PRs only when the shared board is showing (they mutate
+      // its selection; an isolated focus/my-turn tab owns its own board).
+      if (!onBoard) return;
       if (e.key === 'j' || e.key === 'k') {
         const prs = [...(data?.prs ?? [])].sort((a, b) =>
           b.openedAt.localeCompare(a.openedAt),

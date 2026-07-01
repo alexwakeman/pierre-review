@@ -4,6 +4,7 @@ import type { InsightsOpenPr, RepoInsights } from '@pierre-review/shared';
 import { useInsights, useMe } from '../hooks/useTriage.js';
 import { useUsers } from '../hooks/useTimeline.js';
 import { useFilters } from '../store/filters.js';
+import { usePinnedTabs, type TabMeta } from '../store/pinnedTabs.js';
 import { api, ApiError } from '../api/client.js';
 import { indexUsers, userLabel, relativeTime } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
@@ -86,22 +87,34 @@ function ReviewButton({ prId }: { prId: number }): JSX.Element {
 
 function OpenPrRow({
   pr,
+  repoFullName,
   usersById,
   canReview,
   onPick,
 }: {
   pr: InsightsOpenPr;
+  repoFullName: string;
   usersById: ReturnType<typeof indexUsers>;
   canReview: boolean;
-  // Open this PR in the timeline's Focus mode (and close Insights).
-  onPick: (prId: number) => void;
+  // Open this PR as its own PR-focus tab (and close Insights).
+  onPick: (meta: TabMeta) => void;
 }): JSX.Element {
   const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
   return (
     <li className="flex items-center gap-2 px-2 py-1 text-xs hover:bg-gray-50 dark:hover:bg-gray-900/40">
       <button
         type="button"
-        onClick={() => onPick(pr.prId)}
+        onClick={() =>
+          onPick({
+            id: pr.prId,
+            number: pr.number,
+            title: pr.title,
+            repoFullName,
+            authorLogin: author?.githubLogin ?? null,
+            authorDisplayName: author?.displayName ?? null,
+            authorAvatarUrl: author?.avatarUrl ?? null,
+          })
+        }
         className="min-w-0 flex-1 text-left"
         title={`Focus #${pr.number} on the timeline`}
       >
@@ -145,7 +158,7 @@ function RepoCard({
   windows: { merged: number; review: number; stall: number };
   showStale: boolean;
   canReview: boolean;
-  onPick: (prId: number) => void;
+  onPick: (meta: TabMeta) => void;
   onOpenCharts: (repoId: number, name: string) => void;
 }): JSX.Element {
   const [listOpen, setListOpen] = useState(false);
@@ -261,6 +274,7 @@ function RepoCard({
                   <OpenPrRow
                     key={pr.prId}
                     pr={pr}
+                    repoFullName={repo.repoFullName}
                     usersById={usersById}
                     canReview={canReview}
                     onPick={onPick}
@@ -289,14 +303,13 @@ export function InsightsModal({
   const [showStale, setShowStale] = useState(true);
   const [analyticsRepo, setAnalyticsRepo] = useState<{ id: number; name: string } | null>(null);
   const qc = useQueryClient();
-  const focusPrOnTimeline = useFilters((s) => s.focusPrOnTimeline);
+  const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
 
-  // Picking an open PR enters the timeline's sticky PR-isolation Focus for it (the
-  // same overlay the PR-detail "Focus" link / global search use) and closes Insights
-  // so the focused timeline is visible. Works for open PRs outside the loaded window:
-  // the Timeline consumer force-shows the bar from the global open-PRs set.
-  const onPick = (prId: number): void => {
-    focusPrOnTimeline(prId);
+  // Picking an open PR opens it as its own PR-focus TAB (a fresh isolated Timeline)
+  // and closes Insights. Works for open PRs outside the loaded window: the PR-focus
+  // tab fetches a ~90-day member-agnostic window so the subject PR is present.
+  const onPick = (meta: TabMeta): void => {
+    openPrFocusTab(meta);
     onClose();
   };
 

@@ -96,7 +96,7 @@ export function RepoSelectPanel({
         <div
           role="dialog"
           aria-label="Repositories"
-          className="absolute left-0 top-full z-[60] mt-1 w-80 rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute left-0 top-full z-[60] mt-1 w-[28rem] max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900"
         >
           {total > 8 && (
             <input

@@ -1,6 +1,7 @@
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFeedDigest, useRefreshFeedDigest } from '../../hooks/useFeedDigest.js';
 import { useOpenPrTab } from '../../hooks/useOpenPrTab.js';
+import { useFilters } from '../../store/filters.js';
 import { relativeTime } from '../../lib/ui.js';
 import { DigestMarkdown } from './DigestMarkdown.js';
 
@@ -20,8 +21,11 @@ function modelLabel(model: string | undefined): string {
 // repo, with clickable "#N" PR refs that open the PR as a new tab.
 export function FeedDigestPanel(): JSX.Element | null {
   const { inboxDigest } = useProCapabilities();
-  const { data, isLoading } = useFeedDigest(inboxDigest);
-  const refresh = useRefreshFeedDigest();
+  // Scope the digest to the currently-visible Watched repos (the FilterBar selection;
+  // null = all). So the "all repos" Feed digest summarises only what you're viewing.
+  const repoIds = useFilters((s) => s.repoIds);
+  const { data, isLoading } = useFeedDigest(inboxDigest, repoIds);
+  const refresh = useRefreshFeedDigest(repoIds);
   const openPr = useOpenPrTab();
 
   // Absent Pro → render nothing. This is the load-bearing gate.

@@ -594,11 +594,30 @@ export async function getTimeline(
 // render-ready FeedEvent (repo name, PR number/title/state, review verdict, comment
 // excerpt). The frontend mirrors these into an append-only IndexedDB store.
 // accountId-scoped throughout (events + repos both carry accountId).
+export interface FeedFilters {
+  daysBefore?: number;
+  // null / omitted → all the account's repos; a list → scope to those repo ids.
+  repoIds?: number[] | null;
+  // Filters events by actor (member filter); null / empty → all actors.
+  userIds?: number[] | null;
+  // Legacy /api/feed IndexedDB-mirror semantics only: restrict to inbox-watched repos.
+  watchedOnly?: boolean;
+}
+
 export async function getFeed(
   accountId: number,
-  daysBefore = 14,
+  opts: FeedFilters = {},
 ): Promise<FeedResponse> {
+  const { daysBefore = 14, repoIds = null, userIds = null, watchedOnly = false } = opts;
   const since = new Date(Date.now() - daysBefore * 24 * 60 * 60 * 1000);
+  const conds: SQL[] = [
+    eq(events.accountId, accountId),
+    gte(events.occurredAt, since),
+    ne(events.type, 'commit_pushed'),
+  ];
+  if (watchedOnly) conds.push(eq(repos.inboxWatch, true));
+  if (repoIds) conds.push(inArray(events.repoId, repoIds));
+  if (userIds && userIds.length > 0) conds.push(inArray(events.actorId, userIds));
   const rows = await db
     .select({
       id: events.id,
@@ -618,14 +637,7 @@ export async function getFeed(
     .from(events)
     .innerJoin(repos, eq(repos.id, events.repoId))
     .leftJoin(pullRequests, eq(pullRequests.id, events.prId))
-    .where(
-      and(
-        eq(events.accountId, accountId),
-        eq(repos.inboxWatch, true),
-        gte(events.occurredAt, since),
-        ne(events.type, 'commit_pushed'),
-      ),
-    )
+    .where(and(...conds))
     .orderBy(desc(events.occurredAt))
     .execute();
   if (rows.length === 0) return { events: [], users: [] };
@@ -635,13 +647,16 @@ export async function getFeed(
     .filter((r) => r.type === 'review_submitted' && r.refTable === 'reviews' && r.refId != null)
     .map((r) => r.refId as number);
   const reviewStateById = new Map<number, ReviewState>();
+  const reviewBodyById = new Map<number, string | null>();
   if (reviewIds.length > 0) {
     for (const r of await db
-      .select({ id: reviews.id, state: reviews.state })
+      .select({ id: reviews.id, state: reviews.state, body: reviews.body })
       .from(reviews)
       .where(inArray(reviews.id, reviewIds))
-      .execute())
+      .execute()) {
       reviewStateById.set(r.id, r.state as ReviewState);
+      reviewBodyById.set(r.id, r.body);
+    }
   }
 
   // review_comment events reference their THREAD (refId); match the specific comment
@@ -693,6 +708,9 @@ export async function getFeed(
   const feedEvents: FeedEvent[] = rows.map((r) => {
     if (r.actorId != null) referencedUsers.add(r.actorId);
     let excerpt: string | null = null;
+    // The full markdown body for text events (fallback to `excerpt` when a row was
+    // synced lean before full-body persistence).
+    let content: string | null = null;
     if (r.type === 'review_comment' && r.refId != null) {
       const arr = commentsByThread.get(r.refId) ?? [];
       const match =
@@ -700,9 +718,13 @@ export async function getFeed(
           (c) => c.createdAt.getTime() === r.occurredAt.getTime() && c.authorId === r.actorId,
         ) ?? arr.find((c) => c.createdAt.getTime() === r.occurredAt.getTime());
       excerpt = match?.excerpt ?? (match?.body ? truncate(match.body, 160) : null);
+      content = match?.body ?? null;
     } else if (r.type === 'pr_comment' && r.refId != null) {
       const body = prCommentBodyById.get(r.refId) ?? null;
       excerpt = body ? truncate(body, 160) : null;
+      content = body;
+    } else if (r.type === 'review_submitted' && r.refId != null) {
+      content = reviewBodyById.get(r.refId) ?? null;
     }
     return {
       id: r.id,
@@ -721,6 +743,7 @@ export async function getFeed(
           ? (reviewStateById.get(r.refId) ?? null)
           : null,
       excerpt,
+      content,
     };
   });
 
@@ -1354,13 +1377,17 @@ const INBOX_ATTENTION_REASONS = new Set<ReasonTag>([
 export async function getInbox(
   accountId: number,
   repoIds: number[] | null,
+  userIds: number[] | null = null,
 ): Promise<InboxResponse> {
   const reposAll = await listRepos(accountId);
   const reposScoped = repoIds ? reposAll.filter((r) => repoIds.includes(r.id)) : reposAll;
 
+  // The compact-header `stats` stay REPO-scoped (repo health: open/draft/merged/stalled/
+  // median-first-review) — filtering them by member would misreport repo throughput. The
+  // PR cards + thread bar reflect the member filter via getOpenPrs' userIds.
   const [insights, openPrs, mergers] = await Promise.all([
     getInsights({ accountId, repoIds }),
-    getOpenPrs({ accountId, repoIds, userIds: null }),
+    getOpenPrs({ accountId, repoIds, userIds }),
     getMergers(accountId),
   ]);
 
@@ -1436,30 +1463,49 @@ export async function getInbox(
 // to the most recent, so a busy multi-repo account doesn't render thousands of rows.
 const FEED_EVENT_CAP = 250;
 
+export interface ConsolidatedFeedFilters {
+  // null / omitted → ALL the account's repos; a list → scope to those repo ids.
+  repoIds?: number[] | null;
+  // Member filter: null / empty → all actors; a list → only those actors.
+  userIds?: number[] | null;
+  // Pagination over the merged, chronologically-sorted stream. `limit` omitted → the
+  // whole stream (legacy). The response `total` is the full count so the client knows
+  // when to stop "Load more". Only the returned page is enriched (merge/review credit)
+  // + has its users backfilled, so hidden items cost nothing to fetch or render.
+  limit?: number | null;
+  offset?: number | null;
+}
+
 export async function getConsolidatedFeed(
   accountId: number,
+  opts: ConsolidatedFeedFilters = {},
 ): Promise<ConsolidatedFeedResponse> {
+  const { repoIds = null, userIds = null, limit = null, offset = 0 } = opts;
   const repoIdByName = new Map<string, number>();
-  const watchedRepoIds = new Set<number>();
   for (const r of await listRepos(accountId)) {
     repoIdByName.set(r.fullName, r.id);
-    if (r.inboxWatch) watchedRepoIds.add(r.id);
   }
   const repoIdOf = (fullName: string): number => repoIdByName.get(fullName) ?? 0;
-  // The Feed is scoped to WATCHED repos only. getFeed already filters to inboxWatch; My
-  // Turn spans every added repo, so filter its items to watched repos here to match.
-  const isWatched = (fullName: string): boolean => watchedRepoIds.has(repoIdOf(fullName));
+  // Scope: repoIds provided → those repos; else ALL the account's repos (watched-only
+  // was dropped as the scoping mechanism — the FilterBar repo selection drives it). My
+  // Turn spans every added repo, so filter its items here to match getFeed's SQL scope.
+  const repoScope = repoIds ? new Set(repoIds) : null;
+  const inScope = (fullName: string): boolean =>
+    repoScope == null || repoScope.has(repoIdOf(fullName));
+  // Member filter: applies to a PR/thread's author/replier (activity events are already
+  // actor-filtered in getFeed's SQL). Claude runs have no member author → not filtered.
+  const actorScope = userIds && userIds.length > 0 ? new Set(userIds) : null;
+  const actorOk = (id: number | null): boolean =>
+    actorScope == null || (id != null && actorScope.has(id));
 
-  const [myTurn, feed, done] = await Promise.all([
+  const [myTurn, feed] = await Promise.all([
     getMyTurn(accountId),
-    getFeed(accountId, 14),
-    getCompletedDismissals(accountId, 90),
+    getFeed(accountId, { daysBefore: 14, repoIds, userIds }),
   ]);
 
   const usersById = new Map<number, User>();
   for (const u of myTurn.users) usersById.set(u.id, u);
   for (const u of feed.users) usersById.set(u.id, u);
-  for (const u of done.users) usersById.set(u.id, u);
   const nowIso = new Date().toISOString();
 
   // PR-level My Turn items sort by the PR's last-updated time (a real recency signal;
@@ -1468,11 +1514,6 @@ export async function getConsolidatedFeed(
   for (const i of myTurn.awaitingReview) prIdsForTs.add(i.prId);
   for (const i of myTurn.approvedPrs) prIdsForTs.add(i.prId);
   for (const i of myTurn.watchedRepoPrs) prIdsForTs.add(i.prId);
-  for (const d of done.items) {
-    if (d.kind === 'review_request' || d.kind === 'watched_repo_pr' || d.kind === 'pr_approved') {
-      prIdsForTs.add(d.prId);
-    }
-  }
   const updatedAtByPr = new Map<number, string>();
   if (prIdsForTs.size > 0) {
     for (const row of await db
@@ -1495,6 +1536,7 @@ export async function getConsolidatedFeed(
     prId: i.prId, prNumber: i.number, prTitle: i.title, prState: i.state,
     actorId: i.authorId, content: null, threadId: null, path: null, line: null,
     reasonTag: 'awaiting_your_review', reviewState: null, githubUrl: i.githubUrl,
+    mergedById: null, reviewers: null,
     dismiss: { kind: 'review_request', refId: i.prId },
   });
   const mtApproved = (i: MyTurnPr, acknowledged: boolean): ConsolidatedFeedItem => ({
@@ -1504,6 +1546,7 @@ export async function getConsolidatedFeed(
     prId: i.prId, prNumber: i.number, prTitle: i.title, prState: i.state,
     actorId: i.authorId, content: null, threadId: null, path: null, line: null,
     reasonTag: 'approved_ready', reviewState: null, githubUrl: i.githubUrl,
+    mergedById: null, reviewers: null,
     dismiss: { kind: 'pr_approved', refId: i.prId },
   });
   const mtWatched = (i: MyTurnPr, acknowledged: boolean): ConsolidatedFeedItem => ({
@@ -1513,6 +1556,7 @@ export async function getConsolidatedFeed(
     prId: i.prId, prNumber: i.number, prTitle: i.title, prState: i.state,
     actorId: i.authorId, content: null, threadId: null, path: null, line: null,
     reasonTag: null, reviewState: null, githubUrl: i.githubUrl,
+    mergedById: null, reviewers: null,
     dismiss: { kind: 'watched_repo_pr', refId: i.prId },
   });
   const mtThread = (ta: ThreadAwaitingItem, acknowledged: boolean): ConsolidatedFeedItem => ({
@@ -1520,9 +1564,10 @@ export async function getConsolidatedFeed(
     occurredAt: ta.lastReplyAt, acknowledged,
     repoId: repoIdOf(ta.repoFullName), repoFullName: ta.repoFullName,
     prId: ta.prId, prNumber: ta.prNumber, prTitle: null, prState: null,
-    actorId: ta.lastReplyAuthorId, content: ta.lastReplyExcerpt || null,
+    actorId: ta.lastReplyAuthorId, content: ta.lastReplyBody ?? ta.lastReplyExcerpt ?? null,
     threadId: ta.threadId, path: ta.path, line: ta.line,
     reasonTag: null, reviewState: null, githubUrl: ta.githubUrl,
+    mergedById: null, reviewers: null,
     dismiss: { kind: 'thread', refId: ta.threadId },
   });
   const mtClaude = (
@@ -1536,6 +1581,7 @@ export async function getConsolidatedFeed(
     prId: c.prId, prNumber: c.prNumber, prTitle: c.prTitle, prState: null,
     actorId: null, content: null, threadId: null, path: null, line: null,
     reasonTag: null, reviewState: null, githubUrl: c.githubUrl,
+    mergedById: null, reviewers: null,
     dismiss: { kind: 'claude_review', refId: c.reviewId },
   });
 
@@ -1555,50 +1601,32 @@ export async function getConsolidatedFeed(
   const awaitedThreadIds = new Set<number>();
   const watchedPrIds = new Set<number>();
 
-  // --- My Turn actionables (active = unacknowledged); WATCHED repos only ---
-  for (const i of myTurn.awaitingReview) if (isWatched(i.repoFullName)) push(mtReview(i, false));
-  for (const i of myTurn.approvedPrs) if (isWatched(i.repoFullName)) push(mtApproved(i, false));
+  // --- My Turn actionables (active = unacknowledged); scoped by repo + member filter ---
+  for (const i of myTurn.awaitingReview)
+    if (inScope(i.repoFullName) && actorOk(i.authorId)) push(mtReview(i, false));
+  for (const i of myTurn.approvedPrs)
+    if (inScope(i.repoFullName) && actorOk(i.authorId)) push(mtApproved(i, false));
   for (const i of myTurn.watchedRepoPrs) {
-    watchedPrIds.add(i.prId); // watched by definition
+    if (!(inScope(i.repoFullName) && actorOk(i.authorId))) continue;
+    watchedPrIds.add(i.prId);
     push(mtWatched(i, false));
   }
   for (const c of myTurn.claudeReviewsToAction) {
-    if (isWatched(c.repoFullName)) push(mtClaude(c, c.finishedAt ?? nowIso, false));
+    // Claude runs have no member author, so they aren't member-filtered.
+    if (inScope(c.repoFullName)) push(mtClaude(c, c.finishedAt ?? nowIso, false));
   }
   for (const ta of myTurn.threadsAwaiting) {
-    if (!isWatched(ta.repoFullName)) continue;
+    if (!(inScope(ta.repoFullName) && actorOk(ta.lastReplyAuthorId))) continue;
     awaitedThreadIds.add(ta.threadId);
     push(mtThread(ta, false));
   }
   // "Your PRs with new activity" is intentionally dropped — its individual comment /
   // review events already appear in the activity feed below (dedup).
-
-  // --- My Turn items you've marked seen (acknowledged; kept only while still relevant =
-  //     restorable). They STAY in the stream (rendered muted); push's id-dedupe lets an
-  //     active copy win, which is how an item reverts to unseen on newer activity. ---
-  for (const d of done.items) {
-    if (!d.restorable) continue; // the underlying PR / thread / run is gone — drop it
-    if (!isWatched(d.repoFullName)) continue; // Feed is watched-repos only
-    switch (d.kind) {
-      case 'review_request':
-        push(mtReview(d, true));
-        break;
-      case 'pr_approved':
-        push(mtApproved(d, true));
-        break;
-      case 'watched_repo_pr':
-        watchedPrIds.add(d.prId);
-        push(mtWatched(d, true));
-        break;
-      case 'thread':
-        awaitedThreadIds.add(d.threadId);
-        push(mtThread(d, true));
-        break;
-      case 'claude_review':
-        push(mtClaude(d, d.dismissedAt, true));
-        break;
-    }
-  }
+  //
+  // NOTE: the feed no longer surfaces "acknowledged/done" copies. The seen concept was
+  // removed from the feed UI, so an item handled elsewhere (e.g. a thread marked done in
+  // the PR detail) simply leaves the My Turn set; its underlying activity events still
+  // appear as normal feed rows below.
 
   // --- activity feed. Drop the events a My Turn row already represents (a watched PR's
   //     pr_opened; an awaited thread's reply review_comment) — the clearest duplicates. ---
@@ -1618,7 +1646,8 @@ export async function getConsolidatedFeed(
       prTitle: f.prTitle,
       prState: f.prState,
       actorId: f.actorId,
-      content: f.excerpt,
+      // Full markdown body (fallback to the short preview on pre-persistence lean rows).
+      content: f.content ?? f.excerpt,
       threadId: f.type === 'review_comment' ? f.refId : null,
       path: null,
       line: null,
@@ -1626,6 +1655,8 @@ export async function getConsolidatedFeed(
       reviewState: f.reviewState,
       githubUrl:
         f.prNumber != null ? `https://github.com/${f.repoFullName}/pull/${f.prNumber}` : null,
+      mergedById: null,
+      reviewers: null,
       dismiss: null,
     });
   }
@@ -1640,9 +1671,78 @@ export async function getConsolidatedFeed(
     b.occurredAt.localeCompare(a.occurredAt),
   );
 
-  // Backfill any referenced users not already loaded by getMyTurn / getFeed / done.
+  // Paginate: `total` is the full stream length; `page` is the requested window. Only
+  // the page is enriched + has its users backfilled, so hidden items cost nothing.
+  const total = ordered.length;
+  const start = Math.max(0, offset ?? 0);
+  const page =
+    limit != null ? ordered.slice(start, start + Math.max(0, limit)) : ordered.slice(start);
+
+  // Enrich PR items with merge + review credit, bounded to the PRs actually on the page.
+  const prIdsForCtx = new Set<number>();
+  for (const it of page) if (it.prId != null) prIdsForCtx.add(it.prId);
+  const mergedByPr = new Map<number, number | null>();
+  const reviewersByPr = new Map<number, { userId: number; state: ReviewState }[]>();
+  if (prIdsForCtx.size > 0) {
+    const prIdList = [...prIdsForCtx];
+    // mergedById — account-scoped via pullRequests.accountId.
+    for (const row of await db
+      .select({ id: pullRequests.id, mergedById: pullRequests.mergedById })
+      .from(pullRequests)
+      .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, prIdList)))
+      .execute())
+      mergedByPr.set(row.id, row.mergedById);
+
+    // reviewers — `reviews` has NO accountId, so isolation MUST come from the join to
+    // pullRequests (eq accountId). Ascending order → the last write per (prId, userId)
+    // is that reviewer's standing state; non-'pending' only.
+    const reviewRows = await db
+      .select({ prId: reviews.prId, userId: reviews.authorId, state: reviews.state })
+      .from(reviews)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(reviews.prId, prIdList),
+          isNotNull(reviews.authorId),
+          ne(reviews.state, 'pending'),
+        ),
+      )
+      .orderBy(asc(reviews.submittedAt))
+      .execute();
+    const latestReview = new Map<string, { userId: number; state: ReviewState }>();
+    const reviewOrderByPr = new Map<number, string[]>();
+    for (const r of reviewRows) {
+      if (r.userId == null) continue;
+      const key = `${r.prId}:${r.userId}`;
+      if (!latestReview.has(key)) {
+        const arr = reviewOrderByPr.get(r.prId) ?? [];
+        arr.push(key);
+        reviewOrderByPr.set(r.prId, arr);
+      }
+      latestReview.set(key, { userId: r.userId, state: r.state as ReviewState });
+    }
+    for (const [prId, keys] of reviewOrderByPr)
+      reviewersByPr.set(prId, keys.map((k) => latestReview.get(k)!));
+  }
+  for (const it of page) {
+    if (it.prId == null) continue;
+    it.mergedById = mergedByPr.get(it.prId) ?? null;
+    it.reviewers = reviewersByPr.get(it.prId) ?? null;
+  }
+
+  // Backfill any referenced users on the page not already loaded by getMyTurn / getFeed —
+  // including merger + reviewer ids so the SPA resolves their login/avatar.
   const needed = new Set<number>();
-  for (const i of ordered) if (i.actorId != null) needed.add(i.actorId);
+  for (const i of page) {
+    if (i.actorId != null) needed.add(i.actorId);
+    if (i.mergedById != null) needed.add(i.mergedById);
+    if (i.reviewers) for (const r of i.reviewers) needed.add(r.userId);
+  }
+  // Only ship the users the page references (paginated pages merge client-side).
+  const pageUsers: User[] = [];
+  const pageUserIds = new Set(needed);
+  for (const i of page) if (i.actorId != null) pageUserIds.add(i.actorId);
   for (const id of usersById.keys()) needed.delete(id);
   if (needed.size > 0) {
     for (const u of await db
@@ -1652,10 +1752,15 @@ export async function getConsolidatedFeed(
       .execute())
       usersById.set(u.id, mapUser(u));
   }
+  for (const id of pageUserIds) {
+    const u = usersById.get(id);
+    if (u) pageUsers.push(u);
+  }
 
   return {
-    items: ordered,
-    users: [...usersById.values()],
+    items: page,
+    users: pageUsers,
+    total,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -2020,6 +2125,7 @@ export async function getCompletedDismissals(
         derivedState: thread.derivedState as DerivedState,
         lastReplyExcerpt:
           last?.excerpt ?? (last?.body ? truncate(last.body, 140) : ''),
+        lastReplyBody: last?.body ?? null,
         lastReplyAt: (last?.createdAt ?? thread.createdAt).toISOString(),
         lastReplyAuthorId: last?.authorId ?? null,
         githubUrl: `https://github.com/${repo.owner}/${repo.name}/pull/${pr.number}`,
@@ -2509,6 +2615,9 @@ async function getThreadsAwaiting(
       // Prefer the stored excerpt (always present, incl. lean mode); fall back to
       // truncating the full body for rows synced before the excerpt column existed.
       lastReplyExcerpt: last.excerpt ?? truncate(last.body ?? '', 140),
+      // Full markdown (comment bodies are always persisted); null on pre-persistence
+      // lean rows — the Feed then falls back to the excerpt.
+      lastReplyBody: last.body ?? null,
       lastReplyAt: last.createdAt.toISOString(),
       lastReplyAuthorId: last.authorId,
       githubUrl: `https://github.com/${owner}/${name}/pull/${pr.number}`,
@@ -3584,7 +3693,7 @@ export interface StampGithubComment {
 // Insert a freshly-posted thread reply into review_comments (so it shows in the
 // thread immediately). Upserts on (prId, githubNodeId) — the sync's conflict
 // target — so the next sync updates rather than duplicates it. Stores the excerpt
-// for lean mode; `body` follows config.persistBodies. Returns the local row id.
+// and the full body (comment bodies are always persisted). Returns the local row id.
 export async function upsertLocalReply(
   prId: number,
   threadId: number,
@@ -3600,7 +3709,9 @@ export async function upsertLocalReply(
         threadId,
         prId,
         authorId,
-        body: config.persistBodies ? gh.body : null,
+        // Comment bodies are always persisted now, so don't clobber a synced body
+        // back to null under lean storage.
+        body: gh.body,
         excerpt: stampExcerpt(gh.body),
         diffHunk: null,
         databaseId: gh.databaseId != null ? String(gh.databaseId) : null,
@@ -3609,7 +3720,7 @@ export async function upsertLocalReply(
       .onConflictDoUpdate({
         target: [reviewComments.prId, reviewComments.githubNodeId],
         set: {
-          body: config.persistBodies ? gh.body : null,
+          body: gh.body,
           excerpt: stampExcerpt(gh.body),
           databaseId: gh.databaseId != null ? String(gh.databaseId) : null,
         },
@@ -3635,14 +3746,15 @@ export async function upsertLocalPrComment(
         githubNodeId: gh.nodeId,
         prId,
         authorId,
-        body: config.persistBodies ? gh.body : null,
+        // Comment bodies are always persisted now — don't clobber to null under lean.
+        body: gh.body,
         databaseId: gh.databaseId != null ? String(gh.databaseId) : null,
         createdAt,
       })
       .onConflictDoUpdate({
         target: [prComments.prId, prComments.githubNodeId],
         set: {
-          body: config.persistBodies ? gh.body : null,
+          body: gh.body,
           databaseId: gh.databaseId != null ? String(gh.databaseId) : null,
         },
       })
@@ -3682,7 +3794,8 @@ export async function upsertLocalReview(
         prId,
         authorId,
         state: 'approved',
-        body: config.persistBodies ? gh.body : null,
+        // Review bodies are always persisted now — don't clobber to null under lean.
+        body: gh.body ?? null,
         databaseId: String(gh.databaseId),
         submittedAt,
       })
@@ -3690,7 +3803,7 @@ export async function upsertLocalReview(
         target: [reviews.prId, reviews.githubNodeId],
         set: {
           state: 'approved',
-          body: config.persistBodies ? gh.body : null,
+          body: gh.body ?? null,
           databaseId: String(gh.databaseId),
           submittedAt,
         },

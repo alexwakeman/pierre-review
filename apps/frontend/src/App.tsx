@@ -22,7 +22,7 @@ import { useMyTurnNotifications } from './hooks/useMyTurnNotifications.js';
 import { useNotificationPref } from './hooks/useNotificationPref.js';
 import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
-import { usePinnedTabs } from './store/pinnedTabs.js';
+import { usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
 import { ApiError, api } from './api/client.js';
 import { profileUrl } from './lib/ui.js';
 import { initAnalytics, trackPageView } from './lib/analytics.js';
@@ -131,33 +131,38 @@ export default function App(): JSX.Element {
     usePinnedTabs.getState().clear();
     void api.logout().finally(() => window.location.assign('/'));
   };
-  // Drives the focus-mode frame around the timeline + detail pane (the "lens").
-  // The Timeline owns the overlay and reports this via the store; it clears on
-  // exit. The on-screen exit control (the "Focus mode" pill) now lives in the
-  // FilterBar, next to "Clear filters"; Esc and the browser Back button still work.
-  const focusActive = useFilters((s) => s.focusActive);
-  // My Turn Focus Mode also frames the board (isolated to your inbox) and shows its
-  // own exit pill in the FilterBar; same frame so the "you're in a focus" cue is one.
-  const myTurnOnly = useFilters((s) => s.myTurnOnly);
   const insightsOpen = useFilters((s) => s.insightsOpen);
   const setInsightsOpen = useFilters((s) => s.setInsightsOpen);
+  // Item 7: the detail pane exists only once a PR is selected on the board; no
+  // selection → the Timeline takes the full height.
+  const selectedPrId = useFilters((s) => s.selectedPrId);
 
-  // Pinned-PR tabs (under the Open-PRs strip). When a PR tab is active the main
-  // area shows that PR full-screen — rendered as an overlay OVER the timeline +
-  // detail pane (which stay mounted underneath, so returning to the board is
-  // instant and preserves all vis-timeline state). Guarded against an active id
-  // that's no longer pinned.
+  // The main area is ONE axis (`activeTab`): the shared board, the Inbox, or one of
+  // the persistent tabs (pr-detail / pr-focus / my-turn). Exactly one <Timeline> is
+  // ever mounted — the "board slot" below — whose `mode` is derived from the active
+  // tab. pr-detail + Inbox are overlays OVER the warm full board; pr-focus / my-turn
+  // REPLACE the board slot with their own isolated Timeline instance (keyed remount).
   const activeTab = usePinnedTabs((s) => s.activeTab);
-  const pinned = usePinnedTabs((s) => s.pinned);
-  const activePinnedId =
-    typeof activeTab === 'number' && pinned.some((p) => p.id === activeTab)
-      ? activeTab
+  const tabs = usePinnedTabs((s) => s.tabs);
+  const activeTabObj =
+    activeTab !== 'timeline' && activeTab !== 'inbox'
+      ? tabs.find((t) => t.key === activeTab) ?? null // stale/closed key → full board
       : null;
   const inboxActive = activeTab === 'inbox';
-  // Either full-main overlay (a pinned PR or the Inbox) covers the timeline + detail
-  // pane: they share one `activeTab` axis, so never both at once. Drives the `inert`
-  // a11y treatment and suppresses the focus-frame lens (which would draw underneath).
-  const overlayActive = activePinnedId != null || inboxActive;
+  const prDetailId = activeTabObj?.kind === 'pr-detail' ? activeTabObj.prId : null;
+  const boardMode: TimelineMode | null =
+    activeTabObj?.kind === 'pr-focus' && activeTabObj.prId != null
+      ? { kind: 'isolate', prId: activeTabObj.prId }
+      : activeTabObj?.kind === 'my-turn'
+        ? { kind: 'my-turn' }
+        : null; // full board
+  // A full-main overlay (a pr-detail PR or the Inbox) covers the warm full board.
+  // Drives the `inert` a11y treatment. pr-focus / my-turn are NOT overlays — they
+  // replace the board slot, so they don't set this.
+  const overlayActive = prDetailId != null || inboxActive;
+  // The detail pane is shown at the bottom of any board-slot Timeline (shared,
+  // pr-focus, or my-turn) once a PR is selected there.
+  const paneVisible = selectedPrId != null && !overlayActive;
 
   // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
   // the dragged height is remembered across reloads. During a drag we set the
@@ -180,6 +185,23 @@ export default function App(): JSX.Element {
       else el.removeAttribute('inert');
     }
   }, [overlayActive]);
+
+  // Item 4: the single browser-Back handler. Opening a tab from the Inbox pushes one
+  // {pierreTab} history entry (see store/pinnedTabs.ts openTab). {pierreTab} is now the
+  // ONLY pushState in the app, so any popstate while armed means the browser popped that
+  // entry → return to the Inbox. Mounted once; reads only our own store, so it survives
+  // every tab remount.
+  useEffect(() => {
+    const onPop = (): void => usePinnedTabs.getState().consumeInboxReturn();
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // Item 7: when the detail pane mounts/unmounts (a PR is selected/cleared), the
+  // board-slot Timeline's flex height changes — nudge vis to recompute it.
+  useEffect(() => {
+    window.dispatchEvent(new Event('resize'));
+  }, [paneVisible]);
 
   const onResizeDown = (e: React.PointerEvent<HTMLDivElement>): void => {
     dragRef.current = {
@@ -434,49 +456,60 @@ export default function App(): JSX.Element {
       <OpenPrsStrip />
       <PinnedTabsBar />
 
-      {/* `relative` anchors the full-screen pinned-PR overlay below. The focus-frame
-          lens is suppressed while a PR tab is active (it would draw under the overlay). */}
-      <main
-        className={`relative flex min-h-0 flex-1 flex-col${
-          !overlayActive && (focusActive || myTurnOnly) ? ' focus-frame' : ''
-        }`}
-      >
+      {/* `relative` anchors the full-main overlays (pr-detail / Inbox) below. */}
+      <main className="relative flex min-h-0 flex-1 flex-col">
+        {/* The one board-slot Timeline. `mode` absent = the shared board; an isolate
+            mode = a PR's own timeline; my-turn = the triage board — each a keyed
+            remount so vis tears down cleanly (never reconfigured in place). */}
         <section ref={timelineSectionRef} className="min-h-0 flex-1 overflow-hidden">
-          <Timeline />
-        </section>
-        <div
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Resize detail pane"
-          onPointerDown={onResizeDown}
-          onPointerMove={onResizeMove}
-          onPointerUp={onResizeUp}
-          title="Drag to resize"
-          className="h-1 shrink-0 cursor-row-resize bg-gray-200 transition-colors hover:bg-blue-400 dark:bg-gray-800 dark:hover:bg-blue-500"
-        />
-        <section
-          ref={paneRef}
-          style={{ height: paneH }}
-          className="shrink-0 overflow-auto"
-        >
-          <DetailPane />
+          {boardMode == null ? (
+            <Timeline key="board" />
+          ) : boardMode.kind === 'isolate' ? (
+            <Timeline key={`focus:${boardMode.prId}`} mode={boardMode} />
+          ) : (
+            <Timeline key="my-turn" mode={boardMode} />
+          )}
         </section>
 
-        {/* A pinned PR shown full-screen: an overlay covering the timeline + detail
-            pane (both stay mounted underneath for instant, state-preserving return).
-            Keyed by id so switching tabs remounts a fresh PrDetail. */}
-        {activePinnedId != null && (
+        {/* Item 7: the resize handle + detail pane exist only once a PR is selected on
+            the board. No selection → the Timeline takes the full height. */}
+        {paneVisible && (
+          <>
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Resize detail pane"
+              onPointerDown={onResizeDown}
+              onPointerMove={onResizeMove}
+              onPointerUp={onResizeUp}
+              title="Drag to resize"
+              className="h-1 shrink-0 cursor-row-resize bg-gray-200 transition-colors hover:bg-blue-400 dark:bg-gray-800 dark:hover:bg-blue-500"
+            />
+            <section
+              ref={paneRef}
+              style={{ height: paneH }}
+              className="shrink-0 overflow-auto"
+            >
+              <DetailPane />
+            </section>
+          </>
+        )}
+
+        {/* A pr-detail PR shown full-screen: an overlay covering the board (which stays
+            mounted underneath for instant, state-preserving return). Keyed by id so
+            switching tabs remounts a fresh PrDetail. */}
+        {prDetailId != null && (
           <div
             data-testid="pinned-pr-overlay"
             className="absolute inset-0 z-20 bg-white dark:bg-gray-950"
           >
-            <PrDetail key={activePinnedId} prId={activePinnedId} selectedThreadId={null} />
+            <PrDetail key={prDetailId} prId={prDetailId} selectedThreadId={null} />
           </div>
         )}
 
-        {/* The Inbox triage console — a sibling full-main overlay over the timeline +
-            detail pane (which stay mounted underneath, like the pinned-PR overlay, so
-            returning to the board is instant). Never co-renders with a pinned PR. */}
+        {/* The Inbox triage console — a sibling full-main overlay over the board (which
+            stays mounted underneath, like the pr-detail overlay). Never co-renders with
+            a pr-detail PR. */}
         {inboxActive && (
           <div
             data-testid="inbox-overlay"

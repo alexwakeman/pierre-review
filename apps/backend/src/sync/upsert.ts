@@ -585,7 +585,9 @@ export async function persistPr(
           prId,
           authorId: reviewerId,
           state: reviewState(r.state),
-          body: config.persistBodies ? (r.body ?? null) : null,
+          // Review bodies are always persisted (Feed renders them; also drives
+          // substantive-review detection) regardless of lean storage.
+          body: r.body ?? null,
           databaseId: r.fullDatabaseId ?? null,
           submittedAt,
         })
@@ -593,7 +595,7 @@ export async function persistPr(
           target: [reviews.prId, reviews.githubNodeId],
           set: {
             state: reviewState(r.state),
-            body: config.persistBodies ? (r.body ?? null) : null,
+            body: r.body ?? null,
             databaseId: r.fullDatabaseId ?? null,
             submittedAt,
           },
@@ -678,9 +680,9 @@ export async function persistPr(
             threadId: threadRow.id,
             prId,
             authorId: commenterId,
-            // Lean mode: full body + diff hunk dropped; a short excerpt is always
-            // kept (triage + graceful degradation).
-            body: config.persistBodies ? c.body : null,
+            // Review-comment bodies are always persisted (Feed renders them); only
+            // the large diff hunk stays lean-gated. Excerpt kept for triage.
+            body: c.body,
             excerpt: excerptOf(c.body),
             diffHunk: config.persistBodies ? (c.diffHunk ?? null) : null,
             databaseId: c.fullDatabaseId ?? null,
@@ -689,7 +691,7 @@ export async function persistPr(
           .onConflictDoUpdate({
             target: [reviewComments.prId, reviewComments.githubNodeId],
             set: {
-              body: config.persistBodies ? c.body : null,
+              body: c.body,
               excerpt: excerptOf(c.body),
               diffHunk: config.persistBodies ? (c.diffHunk ?? null) : null,
               databaseId: c.fullDatabaseId ?? null,
@@ -722,14 +724,15 @@ export async function persistPr(
           githubNodeId: c.id,
           prId,
           authorId: commenterId,
-          body: config.persistBodies ? c.body : null,
+          // PR-comment bodies are always persisted (Feed renders them).
+          body: c.body ?? null,
           databaseId: c.fullDatabaseId ?? null,
           createdAt,
         })
         .onConflictDoUpdate({
           target: [prComments.prId, prComments.githubNodeId],
           set: {
-            body: config.persistBodies ? c.body : null,
+            body: c.body ?? null,
             databaseId: c.fullDatabaseId ?? null,
           },
         })

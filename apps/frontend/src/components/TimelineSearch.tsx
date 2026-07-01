@@ -4,6 +4,7 @@ import { useSearchTimeline, useRepos, useUsers } from '../hooks/useTimeline.js';
 import { useSearchOpenPrs } from '../hooks/useTriage.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useFilters } from '../store/filters.js';
+import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { indexUsers, userLabel } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
 
@@ -23,7 +24,7 @@ import { Avatar } from './CommentCard.js';
 export function TimelineSearch(): JSX.Element {
   const query = useFilters((s) => s.searchQuery);
   const setQuery = useFilters((s) => s.setSearchQuery);
-  const focusPrOnTimeline = useFilters((s) => s.focusPrOnTimeline);
+  const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
 
   const { data: timeline } = useSearchTimeline();
   const { data: openPrs } = useSearchOpenPrs();
@@ -95,13 +96,19 @@ export function TimelineSearch(): JSX.Element {
 
   const pick = (pr: TimelinePr | undefined): void => {
     if (!pr) return;
-    // Enter the sticky PR-isolation focus overlay for the picked PR (NOT just a
-    // select+scroll): focus isolates that one PR — its bar is shown even when the
-    // active filters would hide it, and the marker-level thread/verdict filters are
-    // suppressed for it — and browser-back / Esc leaves focus and returns to the
-    // exact filtered view the search was run from. The timeline force-shows the bar
-    // when a filter would hide it (see the timelineFocusPr consumer).
-    focusPrOnTimeline(pr.id);
+    // Open the picked PR as its own PR-focus TAB (a fresh isolated Timeline that boots
+    // into isolation). The tab fetches a ~90-day member-agnostic window, so the PR is
+    // present even when the active board filters would hide it.
+    const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
+    openPrFocusTab({
+      id: pr.id,
+      number: pr.number,
+      title: pr.title,
+      repoFullName: reposById.get(pr.repoId) ?? `repo ${pr.repoId}`,
+      authorLogin: author?.githubLogin ?? null,
+      authorDisplayName: author?.displayName ?? null,
+      authorAvatarUrl: author?.avatarUrl ?? null,
+    });
     setOpen(false); // hide panel; query stays sticky for re-focus
   };
 

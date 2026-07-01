@@ -1,15 +1,16 @@
 import { config } from '../config.js';
 
-// In lean-storage mode the sync still needs SOME text — review bodies (to decide
-// if a "commented" review is substantive) and review-comment bodies (for the
-// stored excerpt) — but NOT the PR body, PR-comment bodies, commit messages, or
-// the large review-comment diff hunks (none are used at sync time and they aren't
-// stored). Dropping them from the query shrinks each backfill page substantially.
+// Comment + review bodies are now ALWAYS persisted (the consolidated Feed renders
+// full markdown), so they're always fetched: review bodies + review-comment bodies
+// are already unconditional in the query below, and PR-comment bodies join them here.
+// Only the PR description, commit messages, and the large review-comment diff hunks
+// stay lean-gated (none are used at sync time and they aren't stored when lean) —
+// dropping them from the query shrinks each backfill page substantially.
 const fullText = config.persistBodies;
 const prBodyField = fullText ? '\n          body' : '';
 const commitMessageField = fullText ? '\n                message' : '';
 const reviewCommentDiffHunkField = fullText ? '\n                  diffHunk' : '';
-const prCommentBodyField = fullText ? '\n              body' : '';
+const prCommentBodyField = '\n              body';
 
 // One query per repo per sync: PRs, reviews, review threads (+comments),
 // general PR comments, and commits in a single round trip.

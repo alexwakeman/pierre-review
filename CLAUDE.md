@@ -239,15 +239,20 @@ incremental, fetch loop, cancel, rate limits). In brief:
   module-cached; per-account `try/catch` so one bad token doesn't abort the loop.
 
 **Lean storage (both modes; default).** `config.persistBodies=false` by default
-(`PERSIST_BODIES=true` stores everything — larger DB, fully-offline detail). When lean,
-sync neither persists nor fetches bulky text — comment/review/PR bodies, review-comment
-`diffHunk`, commit `message`, the `checkRuns` JSON (the `ciStatus` enum is kept); it keeps
-review bodies (substantive-review detection) + review-comment bodies (the stored
-`reviewComments.excerpt`). That text (regenerable, per-tenant-duplicated, ~70% of storage)
-is **hydrated on demand** when a PR/thread opens (`sync/hydrate-detail.ts` → `PR_DETAIL_QUERY`,
-matched by node id/sha) and **browser-cached** in IndexedDB (`PersistQueryClientProvider`;
-`pr`/`thread` queries `staleTime:Infinity`; `useDetailCache.ts` invalidates only on a newer
-feed `updatedAt`). Migration `0010` makes the two `body` columns nullable.
+(`PERSIST_BODIES=true` stores everything — larger DB, fully-offline detail).
+**Comment + review bodies are ALWAYS persisted** (both modes): `reviews.body`,
+`reviewComments.body`, and `prComments.body` are stored unconditionally so the
+consolidated Feed can render full markdown (and review bodies still drive
+substantive-review detection). Only the truly bulky, regenerable text stays
+**lean-gated** — under lean, sync neither persists nor fetches the **PR description**
+(`pullRequests.body`), the review-comment **`diffHunk`**, commit **`message`**, and the
+**`checkRuns` JSON** (the `ciStatus` enum is kept); `reviewComments.excerpt` is always
+kept too. That gated text (per-tenant-duplicated) is **hydrated on demand** when a
+PR/thread opens (`sync/hydrate-detail.ts` → `PR_DETAIL_QUERY`, matched by node id/sha) and
+**browser-cached** in IndexedDB (`PersistQueryClientProvider`; `pr`/`thread` queries
+`staleTime:Infinity`; `useDetailCache.ts` invalidates only on a newer feed `updatedAt`).
+Migration `0010` makes the two `body` columns nullable (they're now written non-null on
+every sync).
 
 ### Derived thread state — the heart of the app
 
@@ -327,8 +332,8 @@ file maps to a `client.ts` method.
 | `GET /api/users` (+ isBot updates) | user list / bot flagging |
 | `GET /api/mergers` | per-repo merge-rights map (who's merged there) → the maintainer shield |
 | `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{inboxDigest,reviewMemory}`; cloud: 401 signed out) |
-| `GET /api/inbox?repoIds` | **Inbox tab** (core, no AI): per watched repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getInbox` from existing readers |
-| `GET /api/inbox/feed` | **Consolidated Feed** (core, no AI; the Inbox "Feed" entry): one flat, chronological (newest-first) stream merging My Turn actionables + the activity feed, deduped; My Turn items carry an `acknowledged` (seen) flag (`getConsolidatedFeed`). `{items[],users[],generatedAt}` |
+| `GET /api/inbox?repoIds&userIds` | **Inbox tab** (core, no AI): per repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getInbox`; scoped by the FilterBar repo + member selection (see Inbox) |
+| `GET /api/inbox/feed?repoIds&userIds&limit&offset` | **Consolidated Feed** (core, no AI; the Inbox "Feed" entry): one flat, chronological (newest-first) stream of TWO item sources — **My Turn** actionables + the **activity** feed — deduped, scoped by the FilterBar repos/members (`getConsolidatedFeed`). **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, generatedAt}` where `users` are only those the page references. No "seen"/acknowledged concept (removed with the feed's Done control). |
 | `GET /api/repos/:id/claude-reviews` | repo-scoped Claude-review history (retrieval only; `enabled:false` when the flag is off) → `{prs:[{runs[]}]}` |
 | `GET·POST /api/pro/inbox/digests*` · `GET·POST /api/pro/feed/digest*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest + the cross-repo Feed digest (aggregates the per-repo digests; no new table) + review-memory data. See "Open-core Pro plugin" |
 | `GET /api/auth/login` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub-App OAuth: authorize / exchange+upsert+session→`/app` / clear session |
@@ -360,9 +365,14 @@ Three layers, deliberately separated:
    fetched **on demand** on selection.
 2. **Filter & selection state** → the Zustand store `store/filters.ts` (`useFilters`):
    repos/members/range, category + derived-state filters, the selected PR/thread, transient
-   timeline hints (`timelineFocusPr/At/Event`, `timelineIsolate`, `timelineCenterAt`), and
-   focus-mode signals (`focusActive`, `exitFocusSignal`) shared with the keyboard hook.
-3. **URL** → `useUrlState.ts` mirrors the store to the query string both ways (shareable /
+   timeline hints (`timelineFocusPr/At/Event`, `timelineCenterAt`), and the `feedMyTurnOnly`
+   feed filter. (The old overlay-focus signals `focusActive`/`myTurnOnly`/`timelineIsolate`/
+   `exitFocusSignal` were **removed** — focus is now a tab, see below.)
+3. **Tab state** → `store/pinnedTabs.ts` (`usePinnedTabs`): `ActiveTab = 'timeline' | 'inbox'
+   | <Tab.key>`; a `Tab{key,kind:'pr-detail'|'pr-focus'|'my-turn'}` list. `openPrDetailTab` /
+   `openPrFocusTab` / `openMyTurnTab` / `closeTab`. Exactly one board mounts at a time (App
+   keys the board slot; see "focus tabs").
+4. **URL** → `useUrlState.ts` mirrors the store to the query string both ways (shareable /
    reloadable); the serializer diffs against **defaults**, so the common case stays clean.
 
 **Auth gate (cloud only).** `App.tsx` calls `useMe()` first; a **401** (cloud, signed out)
@@ -381,10 +391,18 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   categories, derived-state tags.
 - **OpenPrsStrip** — collapsible top strip of open PRs (`all` / `my_turn` / `needs_attention`).
 - **Timeline** — the centerpiece (below).
-- **DetailPane** — resizable bottom pane (height persisted). Shows **PrDetail** when a PR is
-  selected, else a placeholder hint. The legacy MyTurnPanel/FeedPanel are **gone** — all
-  state-of-play now lives in the Inbox's consolidated **Feed** (below). **App lands on the
-  Inbox by default** (Inbox-first; a bare load → `?view=inbox`, deep links keep timeline).
+- **DetailPane** — resizable bottom pane (height persisted) under the board slot. **Hidden
+  until a PR is selected** (`selectedPrId != null && !overlayActive`); no selection → the
+  Timeline takes the full height (App fires a synthetic `resize` on the transition so vis
+  refits). Shows **PrDetail** for the selected PR. **App lands on the Inbox by default**
+  (Inbox-first; a bare load → `?view=inbox`, deep links keep timeline).
+- **Tabs / board slot** (`PinnedTabsBar` + `App.tsx`). `<main>` renders exactly ONE
+  `<Timeline>` "board slot" whose `mode` derives from the active tab: absent = the shared
+  board; `{kind:'isolate',prId}` = a **pr-focus** tab's own isolated Timeline; `{kind:'my-turn'}`
+  = the My-Turn tab's. `inbox` + `pr-detail` render as overlays OVER the warm board; `pr-focus`
+  / `my-turn` REPLACE the slot (keyed remount → at most one vis instance live). `PinnedTabsBar`
+  shows the open tabs (pr-detail / pr-focus / my-turn) as closable PR-named chips — there is
+  NO "Timeline" chip (the header Timeline|Inbox pill covers it).
 
 ### The timeline (`components/Timeline/`)
 
@@ -401,25 +419,28 @@ Key behaviors to know about:
   `ev-cross-linked`) is the **same soft sky pulse** (`ev-select-pulse`). Outside focus,
   clicking empty canvas dismisses **one level at a time**: popover, else selected bar,
   else a lingering exit-anchor glow (`applyExitGlow(null)`).
-- **One unified focus overlay** (`enterPrFocus`). The PR-detail **Focus** link
-  (`focusPrOnTimeline` → `timelineIsolate`), **double-clicking a PR bar**, and clicking a
-  **cross-user marker / cluster** all funnel through `enterPrFocus` to one identical state:
-  collapse to every contributor's row, show **only that PR** (siblings hidden via
-  `isolatePrBars`; markers filtered in `rebuildMarkers`), and **fit the window to the PR's
-  full span** (`fitWindow` — every entry path fits now, matching double-click). It's
-  **sticky** (clicks only explore); the popover is trimmed to the focused PR (`focusPrId`).
-  All exits — the FilterBar **Focus mode** pill, **Esc**, the **browser back button**
-  (`enterPrFocus` pushes a `{pierreFocus}` history entry the `popstate` guard tears down) —
-  run `exitFocusCore`, which restores the rows + the **pre-focus window AND vertical scroll**
-  (`preFocusWindowRef`/`preFocusScrollRef`, captured on entry — NOT a re-center on the PR,
-  which used to jump a mid-scrolled board to the top) and re-glows the anchor. Repo-filter
-  toggles + fresh strip/search nav also drop focus.
+- **Focus is a TAB, not an overlay** (`mode?: TimelineMode` prop). The PR-detail **Focus**
+  link, **double-clicking a PR bar**, clicking a **cross-user marker / cluster**, and a feed
+  card all call `usePinnedTabs.openPrFocusTab(meta)` → a persistent, closable **pr-focus tab**
+  whose board slot mounts `<Timeline mode={{kind:'isolate',prId}}/>`. That instance **boots
+  directly into isolation** (a `bootedRef` effect reuses the internal `enterPrFocus`/
+  `isolatePrBars`/`rebuildMarkers`/`fitWindow` as the initial+only state — collapse to the PR's
+  contributor rows, show only its bar, fit the window to its span). There is **no exit/restore**
+  — leaving = switching/closing the tab (unmount). The isolation is purely component-LOCAL
+  (only one instance is ever mounted), so it does NOT drive shared store flags. The `m` key /
+  a feed My-Turn card open the **my-turn** tab (`mode:{kind:'my-turn'}`, scoped to the inbox
+  set, range widened). **Back button:** opening a tab from the Inbox pushes ONE deduped
+  `{pierreTab}` history entry (the app's ONLY `pushState`); App's single `popstate` handler
+  (`consumeInboxReturn`) returns to the Inbox. **Landmine:** an isolate-tab range-preset/window
+  effect must be inert (`if (embeddedPrId != null) return`) or a date-preset click overrides the
+  boot fit. **Known gap:** a PR merged >90d ago is outside the isolate fetch window → can't
+  isolate (the boot `selectPr`s it so the pane still shows).
 - **Vertical scroll is GATED — route every programmatic scroll through it.** vis
   virtualizes rows (`timeline.focus()` can't reach off-screen stubs), so all programmatic
   scrolling drives the `.vis-vertical-scroll` panel via `setVisScrollTop`. Several
   authorities move it — the background-sync rebuild's `restoreScrollAnchor` (content
-  anchor), `centerShowTarget` ("Show"/focus centring), `restoreScrollAnchorIntentional`
-  (focus-exit restore), the `rangechanged` recluster — arbitrated by **`intentionalScrollRef`
+  anchor), `centerShowTarget` ("Show" centring + the isolate-tab boot centre), the
+  `rangechanged` recluster — arbitrated by **`intentionalScrollRef`
   (is a scroll claimed?) + `scrollLoopRef` (monotonic loop id)**. An intentional scroll
   CLAIMS ownership (`++scrollLoopRef`; `intentionalScrollRef=true`; a backstop that clears
   the gate only if `scrollLoopRef` is still its id — so a newer claim supersedes the older
@@ -430,6 +451,10 @@ Key behaviors to know about:
   claim the gate (copy `centerShowTarget` / `restoreScrollAnchorIntentional`), or it WILL
   fight the live loops and jitter.** Position is preserved by CONTENT anchor (the row at the
   viewport top), not raw pixels, so rows growing/re-sorting above don't ride it upward.
+  **On unmount** (closing/leaving a focus / My-Turn tab) the vis cleanup bumps `scrollLoopRef`
+  (+`intentionalScrollRef=false`) and `setVisScrollTop` no-ops when the instance is gone /
+  detached — else a mid-settle `centerShowTarget` loop writes scroll on a torn-down vis and
+  triggers its internal `_updateScrollTop`→null crash.
 - **Per-row collapse.** A caret per contributor label (`setRowCollapsed`) shrinks the row
   to its name by hiding its subgroup bands via `subgroupVisibility` (distinct from focus's
   whole-row `visible:false`). Persisted to `localStorage['pierre:collapsedRows']`,
@@ -437,10 +462,11 @@ Key behaviors to know about:
   group restack, so `setRowCollapsed` forces `itemSet.markDirty({restackGroups:true})` +
   `redraw()`. Focus suspends it (force-shows kept bands, hides the caret), restores on exit.
 - **Show vs Focus (PR detail).** **Show** (`openPrFocused`) just centres + glow-pulses the
-  PR (no focus); **Focus** enters the PR-isolation overlay above. Both, plus the per-thread
-  /comment/activity "Show" links (`ShowOnTimeline` → `showEventOnTimeline`), funnel through
-  the one `timelineFocusPr` consumer effect — its three branches (isolate / show-event /
-  centre-only) are the place to start for any timeline-navigation change.
+  PR on the shared board (no isolation); **Focus** (`openPrFocusTab`) opens the PR's own
+  isolated pr-focus **tab** (above). The per-thread/comment/activity "Show" links
+  (`ShowOnTimeline` → `showEventOnTimeline`) + `openPrFocused` funnel through the one
+  `timelineFocusPr` consumer effect (now centre-only on the shared board) — the place to start
+  for any board-navigation change.
 - **Commits are hidden by default** (`DEFAULT_CATEGORIES` excludes `commits`);
   enabling them round-trips through the URL.
 - **Contributor names are GitHub profile links** (`UserName` + the row labels). A
@@ -472,8 +498,9 @@ Header carries **Show** + **Focus** links (drive the timeline). Three tabs:
   `activityFocus` signal (matched by `{type, refId}`) → opens this tab, scrolls to + flashes
   the entry. The "Show" links share `ShowOnTimeline`.
 
-Keyboard (`useKeyboard.ts`): `/` focuses the filter, `j`/`k` cycle PRs, `esc` exits focus
-mode if active (selection intact) else clears the selection.
+Keyboard (`useKeyboard.ts`): `/` focuses the filter, `j`/`k` cycle the board's PRs (board
+only), `m` opens the My-Turn tab, `i` opens Insights, `esc` leaves any tab/overlay → the
+board (else clears the selection).
 
 ---
 
@@ -557,31 +584,41 @@ dual-dialect tables (`review_learnings`, `repo_digests`), migrations
 the one sanctioned raw-`$client` DDL site + `pro_migrations` bookkeeping), and isolation test.
 
 **Inbox tab — CORE, always-on, NO AI (not flagged); the DEFAULT landing view.** A peer of
-Timeline (`ActiveTab = 'timeline' | 'inbox' | number` in `store/pinnedTabs.ts`, rendered as a
-full-`<main>` overlay like the pinned-PR overlay; `?view=inbox&inboxRepo`). A "State of play"
-rail whose first entry is **Feed** (cross-repo), then **All repos**, then each repo's console
-(stats → thread-state bar → PRs-by-author → prior Claude reviews). The rail selection is
-`store/filters.ts` `inboxRepoId` (`'feed'` default | `'all'` | a repoId). Built **entirely on
-the read layer**: `getInbox` composes `getInsights`/`getOpenPrs`/`getMergers` (per-repo
-`threadTotals`); `listClaudeReviewsByRepo` is retrieval-only. Refresh re-queries the **DB
-only** (not a GitHub sync), never blanks.
+Timeline on the **tab axis** (`ActiveTab = 'timeline' | 'inbox' | <Tab.key>` in
+`store/pinnedTabs.ts`; the Inbox is a full-`<main>` overlay over the warm board; `?view=inbox&inboxRepo`).
+A "State of play" rail whose first entry is **Feed** (cross-repo), then **All repos**, then each
+repo — selecting a repo shows a **compact header** (Pro digest + stats + thread-state bar) atop
+that **repo's own feed** (`RepoFeedHeader` + `<FeedView repoId>`). The rail selection is
+`store/filters.ts` `inboxRepoId` (`'feed'` default | `'all'` | a repoId). Built **entirely on the
+read layer**: `getInbox` composes `getInsights`/`getOpenPrs`/`getMergers`; `listClaudeReviewsByRepo`
+is retrieval-only. **Scoped by the FilterBar** — the repo + member selection flows into `useInbox`
+/ `useConsolidatedFeed` query keys (watched-only is NOT the scoping mechanism), so a filter change
+re-scopes the whole Inbox and refetches (dim, never blank). Refresh re-queries the **DB only**.
 
 **Consolidated Feed — CORE, the Inbox "Feed" entry (`getConsolidatedFeed` → `FeedView`).** One
-flat, purely-**chronological** (newest-first) stream across **Watched repos only** (`inboxWatch`;
-getFeed already filters, My Turn is filtered to match) merging **"My Turn" actionables + the
-activity feed**, deduped. (Unresolved-thread surfacing was dropped — too
-noisy on large repos; "threads awaiting your reply" survive as a My Turn item.) Comment-based
-items inline their content. Every My Turn item is kept; activity events are capped to the most
-recent (`FEED_EVENT_CAP`). PR-level My Turn items sort by the PR's `updatedAt`. **"Done" = seen,
-not removal:** the ✓ marks an item acknowledged (reuses the dismissal store) — it STAYS in the
-stream rendered muted, and reverts to unseen when newer activity supersedes it (active from
-`getMyTurn` wins over the acknowledged copy from `getCompletedDismissals` via id-dedupe). The
-"your PRs with new activity" section is dropped from the feed (its individual events already
-appear).
-**Focus-as-tab:** clicking a My Turn item → My Turn Focus; a thread/feed item → PR Focus — both
-drive the ONE shared timeline (shared-timeline-focus) and surface a focus tab in
-`PinnedTabsBar` (driven by `myTurnOnly`/`focusActive`); a digest's `#N` PR ref opens the PR as
-a new pinned tab. The old MyTurnPanel/FeedPanel + their header pills are removed.
+flat, purely-**chronological** (newest-first) stream of **TWO item sources** distinguished by
+`item.source`:
+- **`my_turn`** — your actionables (review requests, approvals-ready, watched-repo PRs, threads
+  awaiting your reply, Claude reviews to action). Rendered as **content-rich, yellow-bordered
+  cards** with a "My Turn" badge, and filterable via a **"My Turn only"** toggle
+  (`feedMyTurnOnly`, transient). These are the more-relevant items — same shape as a feed event,
+  just highlighted.
+- **`feed`** — the plain activity stream (opens / merges / reviews / comments / commits),
+  capped to the most recent (`FEED_EVENT_CAP`).
+Cards render the **full comment/review body as markdown** (`components/Markdown.tsx`) + a
+merge/review credit line ("Merged by …", "Reviewed by …" from `mergedById`/`reviewers`). Deduped
+(a watched PR's `pr_opened` / an awaited thread's reply are dropped in favour of their My Turn
+row). **PAGINATED** — `useConsolidatedFeed` is a `useInfiniteQuery`: page 0 loads
+`FEED_PAGE_SIZE` (50), "Load more" fetches the next page by `offset`; only loaded pages are
+fetched/rendered (bounded memory on large accounts). The response carries `total` so the client
+knows when to stop. **There is NO "seen"/Done concept** (removed): an item handled elsewhere
+(e.g. a thread marked done in the PR detail) simply leaves the My Turn set; the backend no longer
+emits acknowledged copies.
+**Focus-as-tab:** clicking ANY feed card → `usePinnedTabs.openPrFocusTab(meta)` opens a
+persistent, closable, PR-named **pr-focus tab** with its OWN isolated Timeline (the caller then
+selects the thread/PR), pushing a Back-to-Inbox history entry; the **`m` key** opens the My-Turn
+tab. A digest's `#N` PR ref opens the PR as a `pr-detail` tab. (Overlay focus + the old
+MyTurnPanel/FeedPanel/pills are gone — see "focus tabs" below.)
 
 **Pro: Haiku digests — per-repo + cross-repo Feed** (`packages/pro/src/inbox-digest/` +
 `feed-digest/`). The flagged AI panels: a per-repo banner in each console, and the cross-repo
@@ -592,7 +629,10 @@ scoped to `(accountId, repoId)`; the SPA linkifies them → open the PR as a new
 `metrics.ts` compacts `getInbox`+`getRepoAnalytics` into a bounded `RepoDigestPayload`; one
 non-agentic `ctx.llm.complete` (Haiku) → stored in `repo_digests`. The **cross-repo Feed digest
 AGGREGATES the per-repo digests** (`feed-digest/routes.ts`) — **no new table/migration**, one
-source of truth for the caps. **Cost-safe:** generation only on `POST /refresh`; a
+source of truth for the caps. **Scoped to the currently-visible Watched repos** (`?repoIds=` from
+the FilterBar selection, threaded through `loadRepoNames`/`cachedDigests` and the refresh loop) so
+the "all repos" panel only summarises what you're viewing — NOT every watched repo. **Cost-safe:**
+generation only on `POST /refresh` (which regenerates only the in-scope repos); a
 **payload-hash cache** (unchanged repo = $0 — the prior summary is fed to the LLM only on a
 cache MISS and is NOT in the hash; the hash MUST zero `Date.now()`-derived fields like
 `age_hours` or a dormant repo re-bills hourly), per-account min-interval + in-flight guard,

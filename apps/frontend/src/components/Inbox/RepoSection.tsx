@@ -3,6 +3,7 @@ import type {
   ClaudeReviewSummary,
   ClaudeReviewVerdict,
   InboxRepo,
+  InboxRepoStats,
   TimelinePr,
   User,
 } from '@pierre-review/shared';
@@ -303,6 +304,55 @@ function AuthorGroup({
   );
 }
 
+// The one-line repo stat summary (open / draft / merged-7d / stalled / TTFR / oldest
+// unreviewed). Extracted so both the all-repos RepoSection and the single-repo
+// RepoFeedHeader render the identical block from one source.
+export function RepoStatsLine({ stats: s }: { stats: InboxRepoStats }): JSX.Element {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+      <span>
+        <span className="font-semibold text-gray-700 dark:text-gray-200 tabular-nums">
+          {s.openPrs}
+        </span>{' '}
+        open
+      </span>
+      <span>
+        <span className="tabular-nums">{s.draftPrs}</span> draft
+      </span>
+      <span>
+        <span className="tabular-nums">{s.mergedLast7d}</span> merged 7d
+      </span>
+      {s.stalledPrs > 0 && (
+        <span className="text-amber-500">
+          <span className="tabular-nums">{s.stalledPrs}</span> stalled ⏱
+        </span>
+      )}
+      {s.medianHoursToFirstReview != null && (
+        <span title="Median hours to first review">
+          TTFR{' '}
+          <span className="tabular-nums">
+            {s.medianHoursToFirstReview < 1
+              ? `${Math.round(s.medianHoursToFirstReview * 60)}m`
+              : `${Math.round(s.medianHoursToFirstReview)}h`}
+          </span>
+        </span>
+      )}
+      {s.oldestUnreviewed != null && (
+        <a
+          href={s.oldestUnreviewed.githubUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="hover:underline"
+          title={s.oldestUnreviewed.title}
+        >
+          oldest unreviewed #{s.oldestUnreviewed.number} ·{' '}
+          {relativeTime(s.oldestUnreviewed.openedAt)}
+        </a>
+      )}
+    </div>
+  );
+}
+
 // One repo's Inbox panel at two densities: a collapsible CARD in the all-repos feed
 // ('feed'), or the always-expanded single-repo console ('console'). The body follows
 // the strict narrative order: Digest (Pro) → Stats → Thread State → PRs-by-author →
@@ -327,8 +377,7 @@ export function RepoSection({
   const inboxThreadFilter = useFilters((s) => s.inboxThreadFilter);
   const setInboxThreadFilter = useFilters((s) => s.setInboxThreadFilter);
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
-  const pin = usePinnedTabs((s) => s.pin);
-  const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
+  const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
 
   const isOpen = density === 'console' || expanded;
   const tint = TINTS[tintIndex % TINTS.length] ?? TINTS[0];
@@ -358,12 +407,11 @@ export function RepoSection({
   }, [repo.prs, filterActive, inboxThreadFilter]);
 
   const openPr = (pr: TimelinePr): void => {
-    pin(pinnedMetaOf(pr, repo.repoFullName, usersById));
-    setActiveTab(pr.id); // leaves the Inbox (activeTab is one axis)
+    // Open a full-screen PR-detail tab; `fromInbox` arms the Back-to-Inbox history entry.
+    openPrDetailTab(pinnedMetaOf(pr, repo.repoFullName, usersById), { fromInbox: true });
   };
   const openClaude = (pr: TimelinePr): void => {
-    pin(pinnedMetaOf(pr, repo.repoFullName, usersById));
-    setActiveTab(pr.id);
+    openPrDetailTab(pinnedMetaOf(pr, repo.repoFullName, usersById), { fromInbox: true });
     openClaudeReview(pr.id); // requests the PR's Claude Review tab (claudeTabFocus)
   };
 
@@ -445,47 +493,7 @@ export function RepoSection({
           <DigestBanner repoId={repo.repoId} />
 
           {/* 2) Stats */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-            <span>
-              <span className="font-semibold text-gray-700 dark:text-gray-200 tabular-nums">
-                {s.openPrs}
-              </span>{' '}
-              open
-            </span>
-            <span>
-              <span className="tabular-nums">{s.draftPrs}</span> draft
-            </span>
-            <span>
-              <span className="tabular-nums">{s.mergedLast7d}</span> merged 7d
-            </span>
-            {s.stalledPrs > 0 && (
-              <span className="text-amber-500">
-                <span className="tabular-nums">{s.stalledPrs}</span> stalled ⏱
-              </span>
-            )}
-            {s.medianHoursToFirstReview != null && (
-              <span title="Median hours to first review">
-                TTFR{' '}
-                <span className="tabular-nums">
-                  {s.medianHoursToFirstReview < 1
-                    ? `${Math.round(s.medianHoursToFirstReview * 60)}m`
-                    : `${Math.round(s.medianHoursToFirstReview)}h`}
-                </span>
-              </span>
-            )}
-            {s.oldestUnreviewed != null && (
-              <a
-                href={s.oldestUnreviewed.githubUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="hover:underline"
-                title={s.oldestUnreviewed.title}
-              >
-                oldest unreviewed #{s.oldestUnreviewed.number} ·{' '}
-                {relativeTime(s.oldestUnreviewed.openedAt)}
-              </a>
-            )}
-          </div>
+          <RepoStatsLine stats={s} />
 
           {/* 3) Thread state — clickable segments soft-filter the author list */}
           <div>
@@ -565,25 +573,27 @@ export function RepoSection({
                       key={p.prId}
                       type="button"
                       onClick={() => {
-                        pin({
-                          id: p.prId,
-                          number: p.prNumber,
-                          title: p.prTitle,
-                          repoFullName: repo.repoFullName,
-                          authorLogin:
-                            (p.authorId != null
-                              ? usersById.get(p.authorId)?.githubLogin
-                              : null) ?? null,
-                          authorDisplayName:
-                            (p.authorId != null
-                              ? usersById.get(p.authorId)?.displayName
-                              : null) ?? null,
-                          authorAvatarUrl:
-                            (p.authorId != null
-                              ? usersById.get(p.authorId)?.avatarUrl
-                              : null) ?? null,
-                        });
-                        setActiveTab(p.prId);
+                        openPrDetailTab(
+                          {
+                            id: p.prId,
+                            number: p.prNumber,
+                            title: p.prTitle,
+                            repoFullName: repo.repoFullName,
+                            authorLogin:
+                              (p.authorId != null
+                                ? usersById.get(p.authorId)?.githubLogin
+                                : null) ?? null,
+                            authorDisplayName:
+                              (p.authorId != null
+                                ? usersById.get(p.authorId)?.displayName
+                                : null) ?? null,
+                            authorAvatarUrl:
+                              (p.authorId != null
+                                ? usersById.get(p.authorId)?.avatarUrl
+                                : null) ?? null,
+                          },
+                          { fromInbox: true },
+                        );
                         openClaudeReview(p.prId);
                       }}
                       className="flex items-center gap-1 rounded border border-gray-200 px-1.5 py-0.5 text-[11px] hover:border-gray-300 dark:border-gray-700 dark:hover:border-gray-600"

@@ -7,5 +7,11 @@ import { accountIdOf } from '../plugins/auth.js';
 // has Watched, newest first, commit pushes excluded. The frontend mirrors these into an
 // append-only IndexedDB store (see lib/feedStore.ts). Account-scoped.
 export async function feedRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/feed', async (req): Promise<FeedResponse> => getFeed(accountIdOf(req), 14));
+  // getFeed's default is now all-repos; preserve this legacy mirror's watched-repo-only
+  // semantics explicitly (the consolidated Inbox Feed supersedes this endpoint).
+  app.get(
+    '/api/feed',
+    async (req): Promise<FeedResponse> =>
+      getFeed(accountIdOf(req), { daysBefore: 14, watchedOnly: true }),
+  );
 }

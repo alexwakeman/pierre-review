@@ -80,39 +80,11 @@ export interface FilterState {
   // default; an empty set hides every review marker. Only affects review markers.
   reviewStates: ReviewState[];
   derivedStates: DerivedState[]; // empty = no derived-state filtering
-  // "My Turn Focus Mode": when true, the timeline is isolated to the PRs in the
-  // current "My Turn" inbox (awaiting your review / your PRs with new activity /
-  // threads awaiting you) — the same set the My Turn panel shows, with the window
-  // fitted to span them all. One of the two DISCRETE focus modes (the other is the
-  // PR-isolation overlay, `focusActive`); they never overlap. Entered via the header
-  // "My Turn" pill / `m` (enterMyTurnFocus → level 1, the To Do list) or by opening an
-  // inbox entry (openMyTurnPr / openMyTurnClaudeReview → level 2, a PR's detail). Left
-  // one level at a time by Back / Esc, or entirely via exitMyTurnFocus (the FilterBar
-  // "My Turn focus" pill / the header "Feed" pill). A purely client-side filter (the
-  // inbox is fetched separately via useMyTurn) so it never feeds buildTimelineSearch,
-  // and a TRANSIENT mode — NOT mirrored to the URL or localStorage, so a fresh load is
-  // always the full board + the default Feed panel.
-  myTurnOnly: boolean;
-  // While in My Turn Focus Mode, the fetched timeline range is widened back to this
-  // instant (epoch ms) so inbox PRs whose activity predates the active date-range
-  // filter are still loaded + visible — otherwise the isolated board is empty (the
-  // lean /api/timeline payload has nothing for them). Computed by the Timeline from
-  // the inbox PRs' earliest instant, clamped to ≥ 90 days ago (the backfill horizon).
-  // null = no extension (inbox already within range, or not in My Turn Focus Mode).
-  // Transient (like myTurnOnly) — never persisted/URL-synced; resolveRange folds it in.
-  myTurnFromMs: number | null;
-
-  // "Feed return": armed when the current selection was reached via `openFeedEventOnTimeline`
-  // (a legacy back-stack slot — the old Feed pane is gone; retained only for the Timeline's
-  // {pierreFeed} history reconcile), so the browser Back button returns
-  // straight to the Feed home — clearing the selection and tearing down any PR-isolation
-  // Focus / popover the click entered. The Timeline reconciles it to a single {pierreFeed}
-  // browser-history entry (mirroring the {pierreMyTurn} stack, one level) and the popstate
-  // handler consumes it. Cleared by every navigation that LEAVES the feed-reached PR
-  // (selecting a different PR, entering/leaving My Turn focus, clearing the selection);
-  // PRESERVED while still exploring the SAME PR (a thread/Show/Focus within its detail).
-  // Transient (like selection) — never persisted / URL-synced.
-  feedReturn: boolean;
+  // Inbox "Feed" scope toggle: when true, the consolidated Feed shows only "My Turn"
+  // actionables. A TRANSIENT flag owned by the Inbox lane (not a persisted filter, not
+  // URL-synced) — present in freshDefaults() but NOT in FilterDefaults /
+  // pickFilterBarState / sanitizePersistedFilters, so a fresh load starts false.
+  feedMyTurnOnly: boolean;
 
   // selection
   selectedPrId: number | null;
@@ -178,35 +150,11 @@ export interface FilterState {
   // optional specific event marker to glow once the timeline recenters, resolved
   // against the loaded timeline events by (type, refId). null = recenter only.
   timelineFocusEvent: { type: EventType; refId: number | null } | null;
-  // when true, the pending timelineFocusPr is a request to ISOLATE that PR in a
-  // sticky focus overlay (collapse to its contributors, show only its bar, fit the
-  // window) rather than just centre it. Consumed alongside the other focus hints.
-  timelineIsolate: boolean;
-  // when true, after the timeline reveals the focused event it also OPENS that
-  // event's marker popover (so the content is readable immediately) — and, if the
-  // event is cross-person, enters PR Focus mode first. Set only by the Feed; reset
-  // by every other navigation + on consume so it never leaks to a plain "Show".
-  timelineFocusOpenPopover: boolean;
   // transient: request the timeline to recenter its window on a given instant
   // (epoch ms) keeping the current zoom width — drives the "Now" button. Store-
   // only (NOT URL-synced); cleared after the Timeline consumes it.
   timelineCenterAt: number | null;
 
-  // Timeline focus-mode overlay (clicking a cross-user marker collapses every row
-  // except the two involved contributors). The overlay itself — row collapse,
-  // glows, viewport save/restore, re-center — is owned by the Timeline component;
-  // these fields are the shared signal so BOTH the on-canvas "Exit focus" button
-  // and the global keyboard hook (Escape) can drive it consistently.
-  //
-  // `focusActive`: the Timeline sets this true while a focus overlay is showing
-  // and false when it tears one down. Other code reads it (e.g. Escape should
-  // exit focus before clearing selection).
-  focusActive: boolean;
-  // `exitFocusSignal`: a monotonic counter the Timeline watches. Bumping it (via
-  // exitFocus()) is an explicit, edge-triggered request to leave focus mode and
-  // restore the previous view — a counter (not a boolean) so repeated requests
-  // each fire, even if focusActive hasn't yet been observed as flipped.
-  exitFocusSignal: number;
   // `rangeResetSignal`: a monotonic counter bumped on every range-preset click
   // (even re-selecting the already-active preset). The Timeline watches it to
   // re-apply the preset's window — so clicking "14d" again snaps the view back to
@@ -248,35 +196,8 @@ export interface FilterState {
   setReviewStates: (s: ReviewState[]) => void;
   toggleDerivedState: (s: DerivedState) => void;
   setDerivedStates: (s: DerivedState[]) => void;
-  // Open an inbox To Do entry → My Turn Focus Mode "level 2": isolate the board to the
-  // WHOLE inbox (not just this PR) AND select the PR (its detail opens) + optionally glow
-  // a thread's review_comment marker via `event`. The Timeline keeps every inbox PR bar
-  // visible and just highlights/scrolls to this one (no single-PR zoom). Works whether or
-  // not the user was already in focus (level 1): the Timeline reconciles the history so
-  // Back returns to the To Do list, then to the Feed home.
-  openMyTurnPr: (
-    id: number,
-    threadId?: number | null,
-    focusAt?: string | null,
-    event?: { type: EventType; refId: number | null } | null,
-  ) => void;
-  // Same, for a Claude-review inbox entry: enter focus + open the PR's Claude tab.
-  openMyTurnClaudeReview: (prId: number) => void;
-  // Set/clear the My Turn Focus Mode range extension (see myTurnFromMs). The Timeline
-  // computes it from the inbox PRs once their data loads; a no-op write is skipped so
-  // it doesn't churn the timeline query.
-  setMyTurnFrom: (ms: number | null) => void;
-  // Enter My Turn Focus Mode at "level 1" (the To Do list, no PR selected): isolate the
-  // board to your inbox and show the My Turn panel. Driven by the header "My Turn" pill
-  // and the `m` shortcut. Selecting a To Do afterwards (openMyTurnPr) drills to "level 2"
-  // (its PR detail) while the board stays isolated to the WHOLE inbox. The Timeline owns
-  // the two-level browser-history stack that lets Back step L2 → L1 → Feed home.
-  enterMyTurnFocus: () => void;
-  // Leave My Turn Focus Mode entirely → the Feed home: un-isolate the board (full
-  // timeline) AND clear any selection + range extension, so the default Feed panel shows.
-  // Driven by the FilterBar "My Turn focus" pill and the header "Feed" pill (a full exit;
-  // the browser Back button / Esc step ONE level at a time instead — see the Timeline).
-  exitMyTurnFocus: () => void;
+  // Toggle the Inbox "Feed" My-Turn-only scope (see feedMyTurnOnly).
+  toggleFeedMyTurnOnly: () => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
   clearSelection: () => void;
@@ -298,17 +219,6 @@ export interface FilterState {
     focusAt: string,
     event: { type: EventType; refId: number | null },
   ) => void;
-  // Feed-item click: like showEventOnTimeline, but also opens the event's popover
-  // (read the content inline) and, for a cross-person event, enters PR Focus first.
-  openFeedEventOnTimeline: (
-    prId: number,
-    focusAt: string,
-    event: { type: EventType; refId: number | null },
-  ) => void;
-  // Isolate a PR on the timeline (the "Focus" link): select it and ask the
-  // Timeline for the sticky PR-isolation overlay. The overlay only exits via the
-  // Exit-focus button / Escape; see the Timeline's timelineFocusPr consumer.
-  focusPrOnTimeline: (prId: number) => void;
   consumeTimelineFocus: () => void;
   // Recenter the timeline window on the current instant ("Now"); the Timeline
   // consumes the signal and clears it.
@@ -330,14 +240,6 @@ export interface FilterState {
   // review). PrDetail consumes it once it has switched tabs.
   openClaudeReview: (prId: number) => void;
   consumeClaudeTabFocus: () => void;
-  // Focus-mode signalling (the Timeline owns the actual overlay; see fields above).
-  // setFocusActive: the Timeline reports whether a focus overlay is currently up.
-  setFocusActive: (v: boolean) => void;
-  // exitFocus: request the Timeline to leave focus mode and restore the previous
-  // view. Bumps exitFocusSignal (edge-triggered) and clears focusActive. The
-  // Timeline reacts by tearing down the overlay and re-centering / fade-glowing
-  // the marker that opened it (that behaviour is NOT implemented here).
-  exitFocus: () => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
   // records the added repo id so the modal can scope to just that repo.
@@ -520,11 +422,8 @@ export function savedViewMatchesCurrent(
 function freshDefaults(): FilterData {
   return {
     ...freshFilterDefaults(),
-    // My Turn Focus Mode is a transient mode (not a persisted filter): a fresh load is
-    // always the full board + the My Turn panel. Entered only via openMyTurnPr/…Review.
-    myTurnOnly: false,
-    myTurnFromMs: null,
-    feedReturn: false,
+    // Transient Inbox "Feed" scope toggle (not a persisted filter): fresh load = false.
+    feedMyTurnOnly: false,
     selectedPrId: null,
     selectedThreadId: null,
     selectedCommentId: null,
@@ -544,11 +443,7 @@ function freshDefaults(): FilterData {
     timelineFocusPr: null,
     timelineFocusAt: null,
     timelineFocusEvent: null,
-    timelineIsolate: false,
-    timelineFocusOpenPopover: false,
     timelineCenterAt: null,
-    focusActive: false,
-    exitFocusSignal: 0,
     rangeResetSignal: 0,
     syncModalSignal: 0,
     syncModalRepoId: null,
@@ -586,64 +481,14 @@ export const useFilters = create<FilterState>((set, get) => ({
   toggleDerivedState: (st) =>
     set((s) => ({ derivedStates: toggle(s.derivedStates, st) })),
   setDerivedStates: (st) => set({ derivedStates: st }),
-  openMyTurnPr: (id, threadId = null, focusAt = null, event = null) =>
-    set({
-      myTurnOnly: true, // enter My Turn Focus Mode (isolate the board to the inbox)
-      feedReturn: false, // My Turn owns its own {pierreMyTurn} back-stack
-      selectedPrId: id,
-      selectedThreadId: threadId,
-      selectedCommentId: null,
-      timelineFocusPr: id,
-      timelineFocusAt: focusAt,
-      timelineFocusEvent: event,
-      timelineIsolate: false,
-      timelineFocusOpenPopover: false,
-    }),
-  openMyTurnClaudeReview: (prId) =>
-    set({
-      myTurnOnly: true, // enter My Turn Focus Mode
-      feedReturn: false, // My Turn owns its own {pierreMyTurn} back-stack
-      selectedPrId: prId,
-      selectedThreadId: null,
-      selectedCommentId: null,
-      claudeTabFocus: { prId },
-    }),
-  setMyTurnFrom: (ms) =>
-    set((s) => (s.myTurnFromMs === ms ? {} : { myTurnFromMs: ms })),
-  enterMyTurnFocus: () =>
-    set({
-      myTurnOnly: true, // isolate the board to the inbox
-      feedReturn: false, // My Turn owns its own {pierreMyTurn} back-stack
-      // Level 1: the To Do list, nothing selected. Clear any prior selection so the
-      // My Turn panel (not a stale PR detail) shows. The Timeline's history reconcile
-      // effect pushes the matching {pierreMyTurn} entry so Back can leave again.
-      selectedPrId: null,
-      selectedThreadId: null,
-      selectedCommentId: null,
-    }),
-  exitMyTurnFocus: () =>
-    // Full exit → the Feed home: un-isolate the board, drop the range extension, and
-    // clear any selection so the default Feed panel shows. The Timeline's reconcile
-    // effect unwinds every pushed {pierreMyTurn} history entry. (Harmless when not in
-    // focus — it just normalises to the Feed home, e.g. the Feed pill deselecting a PR.)
-    set({
-      myTurnOnly: false,
-      myTurnFromMs: null,
-      feedReturn: false,
-      selectedPrId: null,
-      selectedThreadId: null,
-      selectedCommentId: null,
-    }),
+  toggleFeedMyTurnOnly: () =>
+    set((s) => ({ feedMyTurnOnly: !s.feedMyTurnOnly })),
   selectPr: (id) =>
-    set((s) => ({
+    set({
       selectedPrId: id,
       selectedThreadId: null,
       selectedCommentId: null,
-      // Selecting a DIFFERENT PR leaves the feed-reached one → disarm the feed-return
-      // slot. Re-selecting the SAME PR (e.g. a feed click's own popover, which selects
-      // its event's PR) keeps it, so Back still returns to the Feed.
-      ...(id !== s.selectedPrId ? { feedReturn: false } : {}),
-    })),
+    }),
   selectThread: (prId, threadId) =>
     set((s) => ({
       selectedPrId: prId ?? s.selectedPrId,
@@ -655,37 +500,19 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedPrId: null,
       selectedThreadId: null,
       selectedCommentId: null,
-      feedReturn: false,
     }),
   openPrFocused: (id, threadId = null, focusAt = null, event = null) => {
-    // Any timeline navigation leaves a full-screen pinned PR tab so the move is visible
-    // (no-op when the board is already showing — the common case).
+    // Any timeline navigation leaves an open focus/PR tab so the move is visible on the
+    // shared board (no-op when the board is already showing — the common case).
     usePinnedTabs.getState().showTimeline();
-    set((s) => ({
-      // Navigating to a DIFFERENT PR than the selected one (the open-PRs strip, the Done
-      // tab, search) is a full-board move — leave My Turn Focus Mode so it isn't a stale,
-      // marker-less bar on the isolated inbox board (the Timeline's history reconcile
-      // unwinds the {pierreMyTurn} entries). Navigating to the ALREADY-selected PR (the
-      // PrDetail "Show" link) keeps focus — it just re-centres the current PR. No-op when
-      // not in focus.
-      ...(s.myTurnOnly && id !== s.selectedPrId
-        ? { myTurnOnly: false, myTurnFromMs: null }
-        : {}),
-      // Navigating to a DIFFERENT PR (strip / search / Done tab) leaves the feed-reached
-      // one → disarm the feed-return slot; re-centring the ALREADY-selected PR (the
-      // PrDetail "Show" link) keeps it.
-      ...(id !== s.selectedPrId ? { feedReturn: false } : {}),
+    set({
       selectedPrId: id,
       selectedThreadId: threadId,
       selectedCommentId: null,
       timelineFocusPr: id,
       timelineFocusAt: focusAt,
       timelineFocusEvent: event,
-      // A plain navigate, never the sticky isolation overlay — guarantee the event/
-      // centre branch runs even if a prior focus left timelineIsolate set.
-      timelineIsolate: false,
-      timelineFocusOpenPopover: false,
-    }));
+    });
   },
   showEventOnTimeline: (prId, focusAt, event) => {
     usePinnedTabs.getState().showTimeline();
@@ -694,40 +521,6 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineFocusPr: prId,
       timelineFocusAt: focusAt,
       timelineFocusEvent: event,
-      timelineIsolate: false,
-      timelineFocusOpenPopover: false,
-    });
-  },
-  openFeedEventOnTimeline: (prId, focusAt, event) => {
-    usePinnedTabs.getState().showTimeline();
-    set({
-      selectedPrId: prId,
-      // Arm the feed-return history slot so the browser Back button returns to the Feed
-      // home (see feedReturn). The Timeline pushes the matching {pierreFeed} entry.
-      feedReturn: true,
-      timelineFocusPr: prId,
-      timelineFocusAt: focusAt,
-      timelineFocusEvent: event,
-      timelineIsolate: false,
-      // The one path that opts in: reveal the event's popover (and enter PR Focus if
-      // it's cross-person). The Timeline consumer reads this in the show-event branch.
-      timelineFocusOpenPopover: true,
-    });
-  },
-  focusPrOnTimeline: (prId) => {
-    usePinnedTabs.getState().showTimeline();
-    set({
-      selectedPrId: prId,
-      // Clear any thread/comment selection from a previously-selected PR so the opened
-      // PR's detail doesn't highlight a thread that belongs to a different PR. (Callers
-      // that want a specific thread re-select it right after, e.g. the Feed thread rows.)
-      selectedThreadId: null,
-      selectedCommentId: null,
-      timelineFocusPr: prId,
-      timelineFocusAt: null,
-      timelineFocusEvent: null,
-      timelineIsolate: true,
-      timelineFocusOpenPopover: false,
     });
   },
   consumeTimelineFocus: () =>
@@ -735,8 +528,6 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineFocusPr: null,
       timelineFocusAt: null,
       timelineFocusEvent: null,
-      timelineIsolate: false,
-      timelineFocusOpenPopover: false,
     }),
   centerTimelineNow: () => {
     usePinnedTabs.getState().showTimeline();
@@ -762,20 +553,13 @@ export const useFilters = create<FilterState>((set, get) => ({
     }),
   consumeCommentFocus: () => set({ commentFocus: null }),
   openClaudeReview: (prId) =>
-    set((s) => ({
+    set({
       selectedPrId: prId,
       selectedThreadId: null,
       selectedCommentId: null,
       claudeTabFocus: { prId },
-      // The global Claude-review banner can open a DIFFERENT PR than the feed-reached one
-      // → disarm the feed-return slot so Back doesn't wrongly snap to the Feed (same guard
-      // as selectPr / openPrFocused). Re-opening the SAME PR keeps it.
-      ...(prId !== s.selectedPrId ? { feedReturn: false } : {}),
-    })),
+    }),
   consumeClaudeTabFocus: () => set({ claudeTabFocus: null }),
-  setFocusActive: (v) => set({ focusActive: v }),
-  exitFocus: () =>
-    set((s) => ({ focusActive: false, exitFocusSignal: s.exitFocusSignal + 1 })),
   requestSyncModal: (repoId: number) =>
     set((s) => ({ syncModalSignal: s.syncModalSignal + 1, syncModalRepoId: repoId })),
   bumpClaudeReviewKickoff: () =>
@@ -821,14 +605,7 @@ export const useFilters = create<FilterState>((set, get) => ({
 
 /** Resolve the active [from, to] window from the preset or custom range. */
 export function resolveRange(s: FilterState): { from: Date; to: Date } {
-  const base = resolveBaseRange(s);
-  // In My Turn Focus Mode, widen `from` back to cover inbox PRs that predate the
-  // active filter (myTurnFromMs, already clamped to the 90-day backfill horizon) so
-  // the isolated board isn't empty. Never narrows the range — only extends it.
-  if (s.myTurnOnly && s.myTurnFromMs != null && s.myTurnFromMs < base.from.getTime()) {
-    return { from: new Date(s.myTurnFromMs), to: base.to };
-  }
-  return base;
+  return resolveBaseRange(s);
 }
 
 function resolveBaseRange(s: FilterState): { from: Date; to: Date } {
@@ -894,10 +671,19 @@ export function buildTimelineSearch(
   includeStatuses = true,
   includeStaleFilter = true,
   includeReviewStates = true,
+  // Embedded-tab range override (epoch ms): when set AND earlier than the resolved
+  // `from`, widens the fetched window back to it (e.g. a PR-focus / My-Turn tab needs
+  // ~90 days so its subject/inbox PRs are present) WITHOUT touching the store or URL.
+  // Floored to the minute like the base range so it yields a stable query string.
+  fromOverrideMs?: number | null,
 ): string {
   const { from, to } = resolveRange(s);
+  const effectiveFrom =
+    fromOverrideMs != null && fromOverrideMs < from.getTime()
+      ? new Date(fromOverrideMs)
+      : from;
   const params = new URLSearchParams();
-  params.set('from', floorMinute(from).toISOString());
+  params.set('from', floorMinute(effectiveFrom).toISOString());
   params.set('to', floorMinute(to).toISOString());
   if (s.repoIds && s.repoIds.length > 0) params.set('repoIds', s.repoIds.join(','));
   if (includeMembers && s.userIds && s.userIds.length > 0)

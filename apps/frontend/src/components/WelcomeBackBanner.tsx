@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMe } from '../hooks/useTriage.js';
-import { useFilters } from '../store/filters.js';
+import { MY_TURN_KEY, usePinnedTabs } from '../store/pinnedTabs.js';
 import { relativeTime } from '../lib/ui.js';
 
 // A dismissible "welcome back" digest shown once per page load when you've been away
@@ -40,8 +40,8 @@ function markActive(): void {
 export function WelcomeBackBanner(): JSX.Element | null {
   const prev = readPrevVisitOnce();
   const { data: me } = useMe();
-  const clearSelection = useFilters((s) => s.clearSelection);
-  const myTurnOnly = useFilters((s) => s.myTurnOnly);
+  const activeTab = usePinnedTabs((s) => s.activeTab);
+  const openMyTurnTab = usePinnedTabs((s) => s.openMyTurnTab);
   const [dismissed, setDismissed] = useState(false);
 
   // Heartbeat the last-active timestamp. Runs regardless of whether the banner shows;
@@ -63,8 +63,8 @@ export function WelcomeBackBanner(): JSX.Element | null {
   }, []);
 
   if (dismissed || prev == null || !me?.user) return null;
-  // Already in My Turn Focus Mode → the board already shows the inbox; no nag.
-  if (myTurnOnly) return null;
+  // Already looking at the My Turn tab → no nag.
+  if (activeTab === MY_TURN_KEY) return null;
   const gap = Date.now() - Date.parse(prev);
   if (Number.isNaN(gap) || gap < MIN_GAP_MS) return null;
 
@@ -94,10 +94,10 @@ export function WelcomeBackBanner(): JSX.Element | null {
       `${c.claudeReviewsToAction} Claude review${c.claudeReviewsToAction === 1 ? '' : 's'} to action`,
     );
 
-  // Show the My Turn panel (clear any selection); entering Focus Mode is done by
-  // opening an entry, not from here. The whole digest is clickable, plus the button.
+  // Open the My Turn tab (its own isolated Timeline). The whole digest is clickable,
+  // plus the button.
   const showMyTurn = (): void => {
-    clearSelection();
+    openMyTurnTab();
     setDismissed(true);
   };
 
