@@ -533,6 +533,46 @@ body {
   background-color: rgb(var(--tl-tint) / 0.13);
 }
 
+/* Sticky repo-name header — an absolutely-positioned overlay built in the Timeline
+   component (see stickyHeaderRef) pinned over the left label gutter, keeping the repo
+   currently at the viewport top labelled as you scroll vertically (mirrors the
+   Changes-tab sticky filename). Opaque base (light/dark) so the scrolling rows below
+   don't bleed through; small bold name truncated when long; sits above the vis rows
+   but below popovers. Read-only decoration — pointer-events:none so it never
+   intercepts clicks on the rows below. Position + width are set inline per frame to
+   track the left panel. */
+.tl-repo-sticky {
+  position: absolute;
+  z-index: 15;
+  pointer-events: none;
+  box-sizing: border-box;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #111827; /* gray-900 */
+  background-color: #ffffff; /* opaque light base */
+  border-bottom: 1px solid #e5e7eb; /* gray-200 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dark .tl-repo-sticky {
+  color: #f3f4f6; /* gray-100 */
+  background-color: #030712; /* gray-950 opaque base */
+  border-bottom-color: #1f2937; /* gray-800 */
+}
+/* Faint zebra wash echoing the current repo's tint. Drawn as a background-IMAGE so it
+   composes OVER the opaque background-color (which stays fully opaque) — same trick as
+   the row zebra above. `--tl-tint` comes from the `tl-repo-tint-N` class the updater
+   copies onto the node. */
+.tl-repo-sticky[class*='tl-repo-tint-'] {
+  background-image: linear-gradient(rgb(var(--tl-tint) / 0.1), rgb(var(--tl-tint) / 0.1));
+}
+.dark .tl-repo-sticky[class*='tl-repo-tint-'] {
+  background-image: linear-gradient(rgb(var(--tl-tint) / 0.13), rgb(var(--tl-tint) / 0.13));
+}
+
 /* Zebra striping: every other contributor row gets a subtle band so adjacent
    rows are easy to tell apart. Applied to BOTH the label (left) and the
    foreground row (right) so the stripe spans the full width; repo header rows

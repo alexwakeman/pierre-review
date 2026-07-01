@@ -38,53 +38,6 @@ function useDarkMode(): [boolean, () => void] {
   return [dark, () => setDark((d) => !d)];
 }
 
-// Header segmented control switching the main area between the Timeline board and
-// the Inbox triage console (always-on core, NOT feature-flagged). The two share the
-// pinnedTabs `activeTab` axis: "Inbox" sets it to 'inbox' (rendering the full-main
-// overlay); "Timeline" calls showTimeline() (which every timeline-nav action already
-// calls, so the board is always the exit). A pinned-PR tab counts as the board side
-// here — the Timeline segment reads active whenever the Inbox isn't showing.
-function TabSwitcher(): JSX.Element {
-  const activeTab = usePinnedTabs((s) => s.activeTab);
-  const showTimeline = usePinnedTabs((s) => s.showTimeline);
-  const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
-  const inboxActive = activeTab === 'inbox';
-  const seg = (active: boolean): string =>
-    `rounded px-2 py-0.5 text-xs font-semibold ${
-      active
-        ? 'bg-white text-blue-600 shadow-sm dark:bg-gray-700 dark:text-blue-400'
-        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-    }`;
-  return (
-    <div
-      className="flex items-center gap-0.5 rounded border border-gray-300 bg-gray-100 p-0.5 dark:border-gray-700 dark:bg-gray-800"
-      role="tablist"
-      aria-label="Main view"
-    >
-      <button
-        type="button"
-        role="tab"
-        aria-selected={inboxActive}
-        onClick={() => setActiveTab('inbox')}
-        className={seg(inboxActive)}
-        title="Inbox — per-repo triage console"
-      >
-        Inbox
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={!inboxActive}
-        onClick={showTimeline}
-        className={seg(!inboxActive)}
-        title="Timeline — the activity board"
-      >
-        Timeline
-      </button>
-    </div>
-  );
-}
-
 export default function App(): JSX.Element {
   // Auth gate (cloud mode only). In local mode /api/me never 401s, so `me` just
   // resolves to a `deploymentMode: 'local'` payload and the branches below are
@@ -306,7 +259,6 @@ export default function App(): JSX.Element {
             <span>{meUser.displayName ?? meUser.login}</span>
           </a>
         )}
-        <TabSwitcher />
         <div className="ml-auto flex items-center gap-3">
           <TimelineSearch />
           <SyncStatus />

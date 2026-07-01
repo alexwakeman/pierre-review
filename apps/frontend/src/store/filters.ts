@@ -119,13 +119,14 @@ export interface FilterState {
   insightsOpen: boolean;
 
   // Inbox tab (the master-detail triage console). Which detail is shown:
-  // 'feed' = the cross-repo consolidated Feed (the default landing detail), 'all' =
-  // the all-repos briefing feed of per-repo consoles, a number = that single repo's
-  // console, null = nothing selected yet (treated as 'feed'). Client-side narrow, no
-  // refetch. Transient (mirrors myTurnOnly/insightsOpen): in freshDefaults() but NOT in
-  // pickFilterBarState / sanitizePersistedFilters. `?inboxRepo=<id>` is the only
-  // URL mirror (see useUrlState); the active TAB lives in the pinnedTabs store.
-  inboxRepoId: number | 'all' | 'feed' | null;
+  // 'feed' = the cross-repo consolidated Feed (the default landing detail), a number =
+  // that single repo's console, null = nothing selected yet (treated as 'feed'). Client-
+  // side narrow, no refetch. (The old 'all' briefing-feed pseudo-row was removed — it was
+  // redundant with the Feed + per-repo entries.) Transient (mirrors myTurnOnly/
+  // insightsOpen): in freshDefaults() but NOT in pickFilterBarState /
+  // sanitizePersistedFilters. `?inboxRepo=<id>` is the only URL mirror (see useUrlState);
+  // the active TAB lives in the pinnedTabs store.
+  inboxRepoId: number | 'feed' | null;
   // Soft thread-state filter inside an Inbox repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
@@ -248,9 +249,9 @@ export interface FilterState {
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
   setInsightsOpen: (v: boolean) => void;
-  // Select an Inbox detail target (a repo id, 'all' for the briefing feed, or 'feed'
-  // for the cross-repo consolidated Feed).
-  setInboxRepo: (id: number | 'all' | 'feed') => void;
+  // Select an Inbox detail target (a repo id, or 'feed' for the cross-repo consolidated
+  // Feed).
+  setInboxRepo: (id: number | 'feed') => void;
   // Set/clear the Inbox repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
   setInboxThreadFilter: (s: DerivedState | null) => void;

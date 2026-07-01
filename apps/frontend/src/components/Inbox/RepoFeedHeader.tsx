@@ -2,12 +2,11 @@ import type { InboxRepo } from '@pierre-review/shared';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { DigestBanner } from './DigestBanner.js';
-import { RepoStatsLine } from './RepoSection.js';
+import { RepoStatsLine } from './RepoStats.js';
 
 // The compact console header shown above a single repo's feed (when a repo is selected
 // in the rail): the Pro digest banner (null in OSS), the repo name + maintainer / open
-// counts, the one-line stats summary, and a display-only thread-state bar. It reuses the
-// exact same building blocks as the all-repos RepoSection so the two stay consistent.
+// counts, the one-line stats summary, and a display-only thread-state bar.
 export function RepoFeedHeader({ repo }: { repo: InboxRepo }): JSX.Element {
   const maintainerCount = repo.maintainerIds.length;
   return (

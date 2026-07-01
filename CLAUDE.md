@@ -148,7 +148,7 @@ pierre-review/
 │  │  └─ data/                 the local SQLite DB (gitignored)
 │  ├─ frontend/                @pierre-review/frontend — the timeline SPA (base `/app/`)
 │  │  └─ src/
-│  │     ├─ App.tsx            useMe() 401 → SignInGate; header Timeline|Inbox switch; FilterBar / OpenPrsStrip / Timeline / DetailPane / Inbox+pinned overlays
+│  │     ├─ App.tsx            useMe() 401 → SignInGate; FilterBar / OpenPrsStrip / PinnedTabsBar (Inbox|Timeline + dynamic tabs) / Timeline / DetailPane / Inbox+pinned overlays
 │  │     ├─ store/filters.ts   Zustand: all filter + selection + timeline-hint state (+ transient inboxRepoId/inboxThreadFilter)
 │  │     ├─ hooks/             useUrlState, useTimeline, usePr, useTriage, useMe (+ useProCapabilities), useInbox, useReviewLearnings, …
 │  │     ├─ api/client.ts      typed fetch wrapper (credentialed; throws ApiError)
@@ -333,7 +333,7 @@ file maps to a `client.ts` method.
 | `GET /api/mergers` | per-repo merge-rights map (who's merged there) → the maintainer shield |
 | `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{inboxDigest,reviewMemory}`; cloud: 401 signed out) |
 | `GET /api/inbox?repoIds&userIds` | **Inbox tab** (core, no AI): per repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getInbox`; scoped by the FilterBar repo + member selection (see Inbox) |
-| `GET /api/inbox/feed?repoIds&userIds&limit&offset` | **Consolidated Feed** (core, no AI; the Inbox "Feed" entry): one flat, chronological (newest-first) stream of TWO item sources — **My Turn** actionables + the **activity** feed — deduped, scoped by the FilterBar repos/members (`getConsolidatedFeed`). **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, generatedAt}` where `users` are only those the page references. No "seen"/acknowledged concept (removed with the feed's Done control). |
+| `GET /api/inbox/feed?repoIds&userIds&limit&offset&excludeBots` | **Consolidated Feed** (core, no AI; the Inbox "Feed" entry): one flat, chronological (newest-first) stream of TWO item sources — **My Turn** actionables + the **activity** feed — deduped, scoped by the FilterBar repos/members (`getConsolidatedFeed`). Activity now also includes **commit-push items that ADDRESSED a review thread** (only those; coalesced per author/PR into runs, carrying the affected threads inline via `affectedThreads`/`commitCount`/`changeSummary` — plain pushes stay excluded). `excludeBots=true` drops bot-authored My Turn + activity items (Claude-review items are exempt — no member author). **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, generatedAt}` where `users` are only those the page references. No "seen"/acknowledged concept (removed with the feed's Done control). |
 | `GET /api/repos/:id/claude-reviews` | repo-scoped Claude-review history (retrieval only; `enabled:false` when the flag is off) → `{prs:[{runs[]}]}` |
 | `GET·POST /api/pro/inbox/digests*` · `GET·POST /api/pro/feed/digest*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest + the cross-repo Feed digest (aggregates the per-repo digests; no new table) + review-memory data. See "Open-core Pro plugin" |
 | `GET /api/auth/login` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub-App OAuth: authorize / exchange+upsert+session→`/app` / clear session |
@@ -401,8 +401,12 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   board; `{kind:'isolate',prId}` = a **pr-focus** tab's own isolated Timeline; `{kind:'my-turn'}`
   = the My-Turn tab's. `inbox` + `pr-detail` render as overlays OVER the warm board; `pr-focus`
   / `my-turn` REPLACE the slot (keyed remount → at most one vis instance live). `PinnedTabsBar`
-  shows the open tabs (pr-detail / pr-focus / my-turn) as closable PR-named chips — there is
-  NO "Timeline" chip (the header Timeline|Inbox pill covers it).
+  is **always shown**: **Inbox** + **Timeline** are the first two chips — permanent,
+  **non-closable** tabs (the header segmented control was removed; the tab strip is now the
+  single place to switch views). The dynamic tabs (pr-detail / pr-focus / my-turn) follow as
+  closable PR-named chips. **Closing the active tab moves to the adjacent tab** (left, else
+  right, else the Timeline board) — it does NOT snap back to the board when other tabs remain
+  (`closeTab` in `store/pinnedTabs.ts`).
 
 ### The timeline (`components/Timeline/`)
 
@@ -478,6 +482,14 @@ Key behaviors to know about:
   alternating by repo **rank parity** (`repoTintIndexById` — not `id % 2`, so tints
   stay stable as repos toggle in/out), via `tl-repo-tint-N` / `REPO_TINT_COUNT`;
   contributor rows also carry a subtle `nth-child` band.
+- **Sticky repo header** (`.tl-repo-sticky` overlay, mirrors the Changes-tab sticky
+  filenames). An absolutely-positioned DOM overlay over the left label panel shows the
+  repo currently at the top of the viewport while you scroll. It's a **pure READER** of
+  the scroll panel + `.vis-label.tl-repo-header` rects (`updateStickyRepoHeader` /
+  `scheduleStickyHeader`, rAF-coalesced) — it NEVER writes `scrollTop` / touches the
+  scroll gate, so it can't fight the scroll loops. Registered next to the connectors
+  overlay (passive `scroll` listener + `timeline.on('changed')` + `resize`, all torn down
+  on unmount); hides when the real header is already visible (no double header).
 - The timeline endpoint stays lean — the selected PR is never filtered out (force-shown if a
   filter would hide it); detail loads only on selection.
 
@@ -586,10 +598,11 @@ the one sanctioned raw-`$client` DDL site + `pro_migrations` bookkeeping), and i
 **Inbox tab — CORE, always-on, NO AI (not flagged); the DEFAULT landing view.** A peer of
 Timeline on the **tab axis** (`ActiveTab = 'timeline' | 'inbox' | <Tab.key>` in
 `store/pinnedTabs.ts`; the Inbox is a full-`<main>` overlay over the warm board; `?view=inbox&inboxRepo`).
-A "State of play" rail whose first entry is **Feed** (cross-repo), then **All repos**, then each
-repo — selecting a repo shows a **compact header** (Pro digest + stats + thread-state bar) atop
+A "State of play" rail whose first entry is **Feed** (cross-repo), then each repo (the old
+"All repos" briefing pseudo-row was removed — redundant with the Feed + per-repo entries) —
+selecting a repo shows a **compact header** (Pro digest + stats + thread-state bar) atop
 that **repo's own feed** (`RepoFeedHeader` + `<FeedView repoId>`). The rail selection is
-`store/filters.ts` `inboxRepoId` (`'feed'` default | `'all'` | a repoId). Built **entirely on the
+`store/filters.ts` `inboxRepoId` (`'feed'` default | a repoId). Built **entirely on the
 read layer**: `getInbox` composes `getInsights`/`getOpenPrs`/`getMergers`; `listClaudeReviewsByRepo`
 is retrieval-only. **Scoped by the FilterBar** — the repo + member selection flows into `useInbox`
 / `useConsolidatedFeed` query keys (watched-only is NOT the scoping mechanism), so a filter change
@@ -603,12 +616,20 @@ flat, purely-**chronological** (newest-first) stream of **TWO item sources** dis
   cards** with a "My Turn" badge, and filterable via a **"My Turn only"** toggle
   (`feedMyTurnOnly`, transient). These are the more-relevant items — same shape as a feed event,
   just highlighted.
-- **`feed`** — the plain activity stream (opens / merges / reviews / comments / commits),
-  capped to the most recent (`FEED_EVENT_CAP`).
-Cards render the **full comment/review body as markdown** (`components/Markdown.tsx`) + a
-merge/review credit line ("Merged by …", "Reviewed by …" from `mergedById`/`reviewers`). Deduped
-(a watched PR's `pr_opened` / an awaited thread's reply are dropped in favour of their My Turn
-row). **PAGINATED** — `useConsolidatedFeed` is a `useInfiniteQuery`: page 0 loads
+- **`feed`** — the plain activity stream (opens / merges / reviews / comments), capped to the
+  most recent (`FEED_EVENT_CAP`), plus **commit-push items that ADDRESSED a review thread**
+  (`getCommitThreadItems`): consecutive commits by one author on one PR are coalesced into a
+  run (a >6h gap splits runs), kept only if a commit touched a still-`likely_addressed`
+  thread's file after that thread's last comment, carrying the addressed threads inline
+  (`affectedThreads` + `commitCount` + `changeSummary` — "pushed N commits · addressed M
+  threads"). Plain (non-thread-touching) pushes stay excluded, like the timeline default.
+Cards render the **full comment/review body as markdown** (`components/Markdown.tsx`), the
+affected threads inline (each a clickable row → opens that thread in a PR-focus tab), + a
+merge/review credit line ("Merged by …", "Reviewed by …" from `mergedById`/`reviewers`). A
+**Claude-review** item (no member author) renders its actor as **"Claude"** (violet ✦ avatar),
+not 'unknown'. The **`excludeBots`** filter (shared with the timeline) drops bot-authored My
+Turn + activity items. Deduped (a watched PR's `pr_opened` / an awaited thread's reply are
+dropped in favour of their My Turn row). **PAGINATED** — `useConsolidatedFeed` is a `useInfiniteQuery`: page 0 loads
 `FEED_PAGE_SIZE` (50), "Load more" fetches the next page by `offset`; only loaded pages are
 fetched/rendered (bounded memory on large accounts). The response carries `total` so the client
 knows when to stop. **There is NO "seen"/Done concept** (removed): an item handled elsewhere

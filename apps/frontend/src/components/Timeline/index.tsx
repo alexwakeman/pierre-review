@@ -381,6 +381,15 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   // paint per frame.
   const connectorSvgRef = useRef<SVGSVGElement | null>(null);
   const connectorRafRef = useRef<number | null>(null);
+  // Sticky repo-name header (mirrors the Changes-tab sticky filename): an
+  // absolutely-positioned DOM overlay over the LEFT label gutter that pins the repo
+  // currently at the viewport top as you scroll vertically. A PURE READER of scroll
+  // position + label rects — it never writes scrollTop / calls focus(), so it can't
+  // disturb the load-bearing vertical-scroll gate. The rAF ref coalesces the many
+  // repaint signals (vis `changed`, native vertical scroll, window resize) into one
+  // paint per frame, exactly like the cross-connector overlay above.
+  const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
+  const stickyHeaderRafRef = useRef<number | null>(null);
   // The selected marker's persistent "you're looking at this" pulse (the soft sky
   // halo, no marching ants), tracked like the other glows so a re-cluster can
   // re-apply it to whichever item now holds the event — a lone `ev:` marker or
@@ -1222,6 +1231,90 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     );
   }, []);
 
+  // Recompute the sticky repo-name header: find the repo block currently spanning the
+  // viewport top and pin its name over the left label gutter. Pure DOM read + a couple
+  // of direct writes to the overlay node (no React re-render, no scroll write) — the
+  // same spirit as drawCrossConnectors. Guards every read against a torn-down instance.
+  const updateStickyRepoHeader = useCallback((): void => {
+    const host = stickyHeaderRef.current;
+    const container = containerRef.current;
+    if (!host || !container) return;
+    const hide = (): void => {
+      if (host.style.display !== 'none') host.style.display = 'none';
+    };
+    const vs = verticalScrollEl();
+    if (!vs) {
+      hide();
+      return;
+    }
+    const wrap = host.parentElement ?? container;
+    const wrapRect = wrap.getBoundingClientRect();
+    const panelRect = vs.getBoundingClientRect();
+    const panelTop = panelRect.top;
+    const EPS = 1;
+
+    // Repo headers in DOM/vertical order; the LAST one whose top has reached (or passed
+    // above) the viewport top is the repo currently at the top. vis keeps every group
+    // label in the DOM even when scrolled off (see captureScrollAnchor), so a header far
+    // above stays findable — the name never drops out deep inside a big repo block.
+    let current: HTMLElement | null = null;
+    for (const h of container.querySelectorAll<HTMLElement>(
+      '.vis-labelset .vis-label.tl-repo-header',
+    )) {
+      const r = h.getBoundingClientRect();
+      if (r.height < 1) continue; // detached / not laid out
+      if (r.top <= panelTop + EPS) current = h;
+    }
+    // Nothing at/above the top → we're at the very top and the real first header is
+    // fully visible; a sticky copy would just double it. Same when the current repo's
+    // OWN header is still sitting at the top (not yet scrolled above) — hide until it
+    // scrolls up, so there's never a double header.
+    if (!current) {
+      hide();
+      return;
+    }
+    const curRect = current.getBoundingClientRect();
+    if (curRect.top >= panelTop - EPS) {
+      hide();
+      return;
+    }
+
+    const inner = current.querySelector<HTMLElement>('.vis-inner') ?? current;
+    const name = (inner.textContent ?? '').trim();
+    if (!name) {
+      hide();
+      return;
+    }
+    // Echo the current repo's zebra tint by carrying its `tl-repo-tint-N` class (which
+    // sets `--tl-tint`; our CSS reads it for a faint wash over the opaque base).
+    const tintClass = [...current.classList].find((c) => c.startsWith('tl-repo-tint-')) ?? '';
+
+    if (host.dataset.repo !== name) {
+      host.textContent = name;
+      host.dataset.repo = name;
+    }
+    if (host.dataset.tint !== tintClass) {
+      host.className = `tl-repo-sticky${tintClass ? ` ${tintClass}` : ''}`;
+      host.dataset.tint = tintClass;
+    }
+    // Align to the left label panel's edge + width; both are stable (the panel is the
+    // scroll viewport, its content scrolls within), so this is a couple of writes/frame.
+    host.style.left = `${panelRect.left - wrapRect.left}px`;
+    host.style.top = `${panelRect.top - wrapRect.top}px`;
+    host.style.width = `${panelRect.width}px`;
+    if (host.style.display !== 'block') host.style.display = 'block';
+  }, [verticalScrollEl]);
+
+  // Coalesce the repaint signals (vis `changed`, native vertical scroll, window resize)
+  // into one sticky-header recompute per frame — mirrors scheduleConnectors.
+  const scheduleStickyHeader = useCallback((): void => {
+    if (stickyHeaderRafRef.current != null) return;
+    stickyHeaderRafRef.current = requestAnimationFrame(() => {
+      stickyHeaderRafRef.current = null;
+      updateStickyRepoHeader();
+    });
+  }, [updateStickyRepoHeader]);
+
   // Capture the vertical scroll by CONTENT anchor — the contributor label nearest the
   // viewport top + its offset — so it can be re-placed after a rebuild OR a focus
   // enter→exit even when rows above change height. Contributor rows carry a `tlg-…`
@@ -1851,6 +1944,15 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     const vScroll = verticalScrollEl();
     vScroll?.addEventListener('scroll', scheduleConnectors, { passive: true });
 
+    // Sticky repo-name header: recompute on the same repaint signals as the connectors
+    // (vis redraw + native vertical scroll) plus window resize (panel geometry), and
+    // once now so it's correct before the first scroll. Pure reader; see
+    // updateStickyRepoHeader. Listeners torn down in the cleanup below.
+    timeline.on('changed', scheduleStickyHeader);
+    vScroll?.addEventListener('scroll', scheduleStickyHeader, { passive: true });
+    window.addEventListener('resize', scheduleStickyHeader, { passive: true });
+    scheduleStickyHeader();
+
     timelineRef.current = timeline;
     return () => {
       // Supersede any in-flight centerShowTarget settle loop so its next rAF `step`
@@ -1863,9 +1965,15 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       if (reclusterTimer) clearTimeout(reclusterTimer);
       if (relaneTimer) clearTimeout(relaneTimer);
       vScroll?.removeEventListener('scroll', scheduleConnectors);
+      vScroll?.removeEventListener('scroll', scheduleStickyHeader);
+      window.removeEventListener('resize', scheduleStickyHeader);
       if (connectorRafRef.current != null) {
         cancelAnimationFrame(connectorRafRef.current);
         connectorRafRef.current = null;
+      }
+      if (stickyHeaderRafRef.current != null) {
+        cancelAnimationFrame(stickyHeaderRafRef.current);
+        stickyHeaderRafRef.current = null;
       }
       timeline.destroy();
       timelineRef.current = null;
@@ -1881,6 +1989,7 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     captureScrollAnchor,
     restoreScrollAnchor,
     scheduleConnectors,
+    scheduleStickyHeader,
     verticalScrollEl,
   ]);
 
@@ -2847,6 +2956,16 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       <svg
         ref={connectorSvgRef}
         className="tl-cross-connectors"
+        aria-hidden="true"
+        style={{ display: 'none' }}
+      />
+      {/* Sticky repo-name header. A read-only, pointer-events:none DOM overlay pinned
+          over the left label gutter, showing the repo currently at the viewport top as
+          you scroll vertically (mirrors the Changes-tab sticky filename). Positioned +
+          filled directly by updateStickyRepoHeader; never intercepts row clicks. */}
+      <div
+        ref={stickyHeaderRef}
+        className="tl-repo-sticky"
         aria-hidden="true"
         style={{ display: 'none' }}
       />

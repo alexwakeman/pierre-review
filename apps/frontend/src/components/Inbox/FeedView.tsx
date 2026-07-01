@@ -3,13 +3,21 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 import type {
   ConsolidatedFeedItem,
   EventType,
+  FeedAffectedThread,
   ReviewState,
   User,
 } from '@pierre-review/shared';
 import { useConsolidatedFeed } from '../../hooks/useConsolidatedFeed.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
-import { EVENT_META, REASON_META, indexUsers, relativeTime, userLabel } from '../../lib/ui.js';
+import {
+  DERIVED_STATE_META,
+  EVENT_META,
+  REASON_META,
+  indexUsers,
+  relativeTime,
+  userLabel,
+} from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { Markdown } from '../Markdown.js';
 import { FeedDigestPanel } from './FeedDigestPanel.js';
@@ -48,6 +56,7 @@ const REVIEW_STATE_META: Record<ReviewState, { label: string; color: string }> =
 export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const storeRepoIds = useFilters((s) => s.repoIds);
   const userIds = useFilters((s) => s.userIds);
+  const excludeBots = useFilters((s) => s.excludeBots);
   const feedMyTurnOnly = useFilters((s) => s.feedMyTurnOnly);
   const toggleFeedMyTurnOnly = useFilters((s) => s.toggleFeedMyTurnOnly);
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
@@ -56,11 +65,13 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
 
   // A selected rail repo scopes the feed to just that repo; otherwise follow the store's
-  // active repo filter (a FilterBar change refetches via the query key).
+  // active repo filter (a FilterBar change refetches via the query key). The bots toggle
+  // flows in too, so hiding bots on the timeline also hides them here.
   const effectiveRepoIds = repoId != null ? [repoId] : storeRepoIds;
   const { items: loaded, users, hasMore, loadMore, isFetchingMore } = useConsolidatedFeed({
     repoIds: effectiveRepoIds,
     userIds,
+    excludeBots,
   });
 
   const usersById = useMemo(() => indexUsers(users), [users]);
@@ -71,25 +82,35 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const myTurnCount = items.filter((i) => i.source === 'my_turn').length;
   const visible = feedMyTurnOnly ? items.filter((i) => i.source === 'my_turn') : items;
 
+  const metaOf = (item: ConsolidatedFeedItem, prId: number): TabMeta => ({
+    id: prId,
+    number: item.prNumber ?? 0,
+    title: item.prTitle ?? `#${item.prNumber ?? ''}`,
+    repoFullName: item.repoFullName,
+    authorLogin: null, // backfilled by PrDetail.syncMeta once the tab opens
+    authorDisplayName: null,
+    authorAvatarUrl: null,
+  });
+
   // Open an item: tab management (activate a PR-focus tab + auto-push a Back-to-Inbox
   // history entry, since the Inbox is active at click time) is `openPrFocusTab`; it does
   // NOT drive selection, so we drive it ourselves (Claude tab / thread / PR).
   function open(item: ConsolidatedFeedItem): void {
     const prId = item.prId;
     if (prId == null) return;
-    const meta: TabMeta = {
-      id: prId,
-      number: item.prNumber ?? 0,
-      title: item.prTitle ?? `#${item.prNumber ?? ''}`,
-      repoFullName: item.repoFullName,
-      authorLogin: null, // backfilled by PrDetail.syncMeta once the tab opens
-      authorDisplayName: null,
-      authorAvatarUrl: null,
-    };
-    openPrFocusTab(meta);
+    openPrFocusTab(metaOf(item, prId));
     if (item.kind === 'claude_review') openClaudeReview(prId);
     else if (item.threadId != null) selectThread(prId, item.threadId);
     else selectPr(prId);
+  }
+
+  // Open a specific affected review thread inline on a commit item — jump straight to that
+  // addressed thread in the PR-focus tab rather than the PR's first thread.
+  function openThread(item: ConsolidatedFeedItem, threadId: number): void {
+    const prId = item.prId;
+    if (prId == null) return;
+    openPrFocusTab(metaOf(item, prId));
+    selectThread(prId, threadId);
   }
 
   return (
@@ -152,7 +173,9 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
                 actorUser={actorUser}
                 mergedByLabel={mergedByLabel}
                 reviewerLabels={reviewerLabels}
+                usersById={usersById}
                 onOpen={() => open(item)}
+                onOpenThread={(tid) => openThread(item, tid)}
               />
             );
           })}
@@ -177,26 +200,83 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   );
 }
 
+// One review thread that a commit item likely addressed — a clickable row (opens that
+// thread in the PR-focus tab) showing the file/line, the thread's new derived state, and
+// a preview of what the reviewer originally asked.
+function AffectedThreadRow({
+  thread,
+  author,
+  onOpen,
+}: {
+  thread: FeedAffectedThread;
+  author: User | undefined;
+  onOpen: () => void;
+}): JSX.Element {
+  const meta = DERIVED_STATE_META[thread.derivedState];
+  const file = thread.path.split('/').pop() ?? thread.path;
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="group/th block w-full rounded border border-gray-200 bg-white/60 px-2 py-1 text-left hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
+      >
+        <span className="flex items-center gap-1.5 text-[11px]">
+          <span
+            aria-hidden="true"
+            className="inline-block h-2 w-2 shrink-0 rounded-full"
+            style={{ background: meta.color }}
+          />
+          <code className="truncate font-mono text-gray-600 group-hover/th:text-sky-600 dark:text-gray-300">
+            {file}
+            {thread.line != null ? `:${thread.line}` : ''}
+          </code>
+          <span className="shrink-0 text-gray-400">{meta.label.toLowerCase()}</span>
+        </span>
+        {thread.excerpt.trim() !== '' && (
+          <span className="mt-0.5 block truncate text-xs italic text-gray-500 dark:text-gray-400">
+            {author != null ? `${userLabel(author, thread.authorId)}: ` : ''}“{thread.excerpt}”
+          </span>
+        )}
+      </button>
+    </li>
+  );
+}
+
 function FeedRow({
   item,
   actorUser,
   mergedByLabel,
   reviewerLabels,
+  usersById,
   onOpen,
+  onOpenThread,
 }: {
   item: ConsolidatedFeedItem;
   actorUser: User | undefined;
   mergedByLabel: string | null;
   reviewerLabels: string[];
+  usersById: Map<number, User>;
   onOpen: () => void;
+  onOpenThread: (threadId: number) => void;
 }): JSX.Element {
   const glyph = itemGlyph(item);
   const isMyTurn = item.source === 'my_turn';
+  // Claude runs have no GitHub actor (actorId null) — render them as "Claude" with a
+  // distinct badge rather than the generic 'unknown' user. A commit push whose author
+  // didn't resolve to a GitHub login shows a neutral label instead of the bare 'unknown'.
+  const isClaude = item.source === 'my_turn' && item.kind === 'claude_review';
+  const actorName = isClaude
+    ? 'Claude'
+    : item.actorId == null && item.kind === 'commit_pushed'
+      ? 'A contributor'
+      : userLabel(actorUser, item.actorId);
   const prLabel =
     item.prNumber != null
       ? `#${item.prNumber}${item.prTitle != null ? ` ${item.prTitle}` : ''}`
       : '';
   const reviewMeta = item.reviewState != null ? REVIEW_STATE_META[item.reviewState] : null;
+  const affected = item.affectedThreads ?? [];
 
   // Convenience: a click anywhere on the card opens it, but let markdown links / the PR
   // button win (they call their own handlers).
@@ -217,9 +297,19 @@ function FeedRow({
       >
         {/* header: avatar + actor + action chip + (My Turn badge) + time */}
         <div className="flex items-center gap-2">
-          <Avatar user={actorUser} size={20} />
+          {isClaude ? (
+            <span
+              aria-hidden="true"
+              title="Claude"
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-[11px] text-violet-600 dark:text-violet-300"
+            >
+              ✦
+            </span>
+          ) : (
+            <Avatar user={actorUser} size={20} />
+          )}
           <span className="truncate font-medium text-gray-800 dark:text-gray-100">
-            {userLabel(actorUser, item.actorId)}
+            {actorName}
           </span>
           <span
             className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
@@ -258,6 +348,28 @@ function FeedRow({
         {item.content != null && item.content.trim() !== '' && (
           <div className="mt-1.5 rounded bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50">
             <Markdown>{item.content}</Markdown>
+          </div>
+        )}
+
+        {/* what changed: a commit push that addressed review threads → show them inline so
+            the reader sees the actual change without opening the PR. */}
+        {affected.length > 0 && (
+          <div className="mt-1.5 space-y-1.5">
+            {item.changeSummary != null && (
+              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                {item.changeSummary}
+              </div>
+            )}
+            <ul className="space-y-1.5">
+              {affected.map((t) => (
+                <AffectedThreadRow
+                  key={t.threadId}
+                  thread={t}
+                  author={t.authorId != null ? usersById.get(t.authorId) : undefined}
+                  onOpen={() => onOpenThread(t.threadId)}
+                />
+              ))}
+            </ul>
           </div>
         )}
 

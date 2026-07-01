@@ -1,10 +1,8 @@
 import { usePinnedTabs, type Tab } from '../store/pinnedTabs.js';
 
-// A single tab chip: fixed width, closable (✕). Clicking the body activates the tab
-// (App.tsx renders the matching content — a PrDetail overlay for pr-detail, or an
-// isolated Timeline for pr-focus / my-turn). PR tabs show the PR title + author;
-// the My-Turn tab is glyph + label. Items 8/10/11: every tab is closable and there
-// is no redundant "Timeline" tab (the header Timeline|Inbox pill is the board exit).
+// A single closable tab chip (pr-detail / pr-focus / my-turn): fixed width, closable (✕).
+// Clicking the body activates the tab (App.tsx renders the matching content). PR tabs
+// show the PR title + author; the My-Turn tab is glyph + label.
 function TabChip({ tab }: { tab: Tab }): JSX.Element {
   const active = usePinnedTabs((s) => s.activeTab === tab.key);
   const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
@@ -26,6 +24,7 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
 
   return (
     <div
+      role="presentation"
       className={`group flex w-52 shrink-0 items-center gap-1 rounded-t-md border border-b-0 pl-2 pr-1 ${
         active
           ? 'border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950'
@@ -34,10 +33,11 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
     >
       <button
         type="button"
+        role="tab"
+        aria-selected={active}
         onClick={() => setActiveTab(tab.key)}
         className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
         title={title}
-        aria-current={active ? 'page' : undefined}
       >
         {isMyTurn ? (
           <span aria-hidden="true" className="shrink-0 text-amber-500">
@@ -96,18 +96,86 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
   );
 }
 
-// The tab strip, shown under the Open-PRs bar once at least one persistent tab
-// exists (a pinned PR-detail, a PR-focus, or the My-Turn tab). There is no
-// "Timeline" tab here — item 11: the header Timeline|Inbox pill is the board
-// affordance. Hidden entirely when nothing is open, so the default UI is unchanged.
-export function PinnedTabsBar(): JSX.Element | null {
+// A permanent, NON-closable tab (Inbox / Timeline). These live at the head of the strip
+// as first-class tabs so the two core views read the same as the dynamic PR tabs — one
+// clear place to switch, no separate header toggle (reduces confusion).
+function FixedChip({
+  active,
+  onClick,
+  icon,
+  label,
+  title,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: JSX.Element;
+  label: string;
+  title: string;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      title={title}
+      className={`flex shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-semibold ${
+        active
+          ? 'border-gray-300 bg-white text-blue-600 dark:border-gray-700 dark:bg-gray-950 dark:text-blue-400'
+          : 'border-transparent bg-transparent text-gray-600 hover:bg-gray-200/60 dark:text-gray-300 dark:hover:bg-gray-800/60'
+      }`}
+    >
+      <span aria-hidden="true" className="shrink-0">
+        {icon}
+      </span>
+      {label}
+    </button>
+  );
+}
+
+const InboxIcon = (
+  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+    <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+  </svg>
+);
+const TimelineIcon = (
+  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="4" y1="7" x2="20" y2="7" />
+    <line x1="4" y1="12" x2="14" y2="12" />
+    <line x1="4" y1="17" x2="18" y2="17" />
+  </svg>
+);
+
+// The tab strip: Inbox + Timeline are permanent, non-closable tabs at the head (the two
+// core views — no separate header toggle); the dynamic pinned tabs (pr-detail / pr-focus /
+// my-turn) follow and are closable. Always shown, so switching views has one home.
+export function PinnedTabsBar(): JSX.Element {
   const tabs = usePinnedTabs((s) => s.tabs);
-  if (tabs.length === 0) return null;
+  const activeTab = usePinnedTabs((s) => s.activeTab);
+  const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
+  const showTimeline = usePinnedTabs((s) => s.showTimeline);
   return (
     <div
       data-testid="pinned-tabs"
+      role="tablist"
+      aria-label="Views"
       className="flex shrink-0 items-end gap-1 overflow-x-auto bg-gray-100 px-2 pt-1 dark:bg-gray-900"
     >
+      <FixedChip
+        active={activeTab === 'inbox'}
+        onClick={() => setActiveTab('inbox')}
+        icon={InboxIcon}
+        label="Inbox"
+        title="Inbox — per-repo triage console"
+      />
+      <FixedChip
+        active={activeTab === 'timeline'}
+        onClick={showTimeline}
+        icon={TimelineIcon}
+        label="Timeline"
+        title="Timeline — the activity board"
+      />
       {tabs.map((t) => (
         <TabChip key={t.key} tab={t} />
       ))}

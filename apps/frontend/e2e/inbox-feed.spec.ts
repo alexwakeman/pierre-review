@@ -9,7 +9,8 @@ import { installMockApi } from './mock-api.js';
 //   • clicking ANY feed item (My Turn or activity) opens a closable PR-focus tab (its
 //     own isolated timeline) and leaves the Inbox overlay; My Turn items are marked
 //     with a yellow-bordered card
-//   • the header Timeline | Inbox switch toggles the board
+//   • Inbox + Timeline are permanent, non-closable TABS in the tab strip (no separate
+//     header toggle); clicking them toggles the board
 
 const overlay = (p: Page) => p.getByTestId('inbox-overlay');
 const tabs = (p: Page) => p.getByTestId('pinned-tabs');
@@ -61,7 +62,7 @@ test.describe('Inbox Feed / focus-as-tab flows', () => {
     await overlay(page).getByText('Inbox: fix auth race').click(); // the awaiting_review item
     // Leaves the Inbox overlay and surfaces a closable PR-focus tab named by the PR.
     await expect(overlay(page)).toBeHidden();
-    await expect(tabs(page).getByRole('button', { name: /PR focus/i })).toBeVisible();
+    await expect(tabs(page).getByRole('tab', { name: /PR focus/i })).toBeVisible();
     await expect(tabs(page).getByRole('button', { name: /Close focus tab/i })).toBeVisible();
   });
 
@@ -69,7 +70,7 @@ test.describe('Inbox Feed / focus-as-tab flows', () => {
     await gotoInbox(page);
     await overlay(page).getByText('Other: docs pass').click(); // the pr_opened feed event
     await expect(overlay(page)).toBeHidden();
-    await expect(tabs(page).getByRole('button', { name: /PR focus/i })).toBeVisible();
+    await expect(tabs(page).getByRole('tab', { name: /PR focus/i })).toBeVisible();
   });
 
   test('the feed has no Done/seen control and drops acknowledged items', async ({ page }) => {
@@ -80,14 +81,14 @@ test.describe('Inbox Feed / focus-as-tab flows', () => {
     await expect(overlay(page).getByText('Watched repo PR by bob')).toHaveCount(0);
   });
 
-  test('the Timeline | Inbox header switch toggles the board', async ({ page }) => {
+  test('the Inbox | Timeline tabs toggle the board', async ({ page }) => {
     await gotoInbox(page);
-    // The header switch is a tablist (role=tab), not plain buttons.
-    await page.getByRole('tab', { name: 'Timeline' }).click();
+    // Inbox + Timeline are permanent tabs (role=tab) in the tab strip, not a header pill.
+    await tabs(page).getByRole('tab', { name: 'Timeline' }).click();
     await expect(overlay(page)).toBeHidden();
     await expect(page.locator('.vis-timeline')).toBeVisible();
     // …and back to the Inbox.
-    await page.getByRole('tab', { name: 'Inbox' }).click();
+    await tabs(page).getByRole('tab', { name: 'Inbox' }).click();
     await expect(overlay(page)).toBeVisible();
   });
 });

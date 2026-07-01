@@ -3,31 +3,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { InboxRepo, ThreadStateCounts } from '@pierre-review/shared';
 import { useInbox } from '../../hooks/useInbox.js';
 import { useRepos } from '../../hooks/useTimeline.js';
-import { useMe } from '../../hooks/useTriage.js';
-import { useLocalStorage } from '../../hooks/useLocalStorage.js';
 import { useFilters } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
-import { RepoSection } from './RepoSection.js';
 import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { FeedView } from './FeedView.js';
-
-const EMPTY_COUNTS: ThreadStateCounts = {
-  untouched: 0,
-  replied_unresolved: 0,
-  likely_addressed: 0,
-  resolved: 0,
-};
-
-function addCounts(a: ThreadStateCounts, b: ThreadStateCounts): ThreadStateCounts {
-  return {
-    untouched: a.untouched + b.untouched,
-    replied_unresolved: a.replied_unresolved + b.replied_unresolved,
-    likely_addressed: a.likely_addressed + b.likely_addressed,
-    resolved: a.resolved + b.resolved,
-  };
-}
 
 // Rail sort: attention desc → unread → alphabetical. Computed once per data load so
 // the rail is stable (not jumpy) as the user interacts.
@@ -118,9 +99,9 @@ function RailRow({
 }
 
 // The Inbox "Triage Console with a Briefing Feed": a fixed left rail of repos (the
-// cross-repo glance) + a right detail that defaults to an all-repos briefing feed and
-// narrows to a single-repo console on selection. Entirely on the core query layer —
-// no AI (the only Pro surface is the per-repo digest banner inside RepoSection).
+// cross-repo glance) + a right detail that defaults to the cross-repo consolidated Feed
+// and narrows to a single-repo console on selection. Entirely on the core query layer —
+// no AI (the only Pro surface is the per-repo digest banner inside RepoFeedHeader).
 export function InboxView(): JSX.Element {
   useStalenessTick();
   const repoIds = useFilters((s) => s.repoIds);
@@ -129,57 +110,17 @@ export function InboxView(): JSX.Element {
   const setInboxRepo = useFilters((s) => s.setInboxRepo);
   const { data, isFetching, isLoading, refetch } = useInbox(repoIds, userIds);
   const { data: allRepos } = useRepos();
-  const { data: me } = useMe();
   const qc = useQueryClient();
-  const claudeEnabled = me?.claudeReviewEnabled ?? false;
-
-  // Per-card expand state for the all-repos feed, persisted + re-asserted across
-  // refresh. Stored as an explicit list of expanded repoIds. `null` = the untouched
-  // default (expand only the top repo); `[]` = the user explicitly collapsed
-  // everything (distinct from the default — so collapsing the lone default-expanded
-  // top card actually sticks instead of snapping back open).
-  const [expandedList, setExpandedList] = useLocalStorage<number[] | null>(
-    'pierre:inboxExpanded',
-    null,
-  );
 
   const sorted = useMemo(() => sortRepos(data?.repos ?? []), [data?.repos]);
 
-  // ALL REPOS aggregate row.
-  const aggregate = useMemo(() => {
-    let threadTotals = EMPTY_COUNTS;
-    let attention = 0;
-    let open = 0;
-    let unread = false;
-    for (const r of sorted) {
-      threadTotals = addCounts(threadTotals, r.threadTotals);
-      attention += r.attentionCount;
-      open += r.stats.openPrs;
-      unread = unread || r.hasUnread;
-    }
-    return { threadTotals, attention, open, unread, stalled: sorted.reduce((n, r) => n + r.stats.stalledPrs, 0) };
-  }, [sorted]);
-
-  // The selected repo (single-repo console). null ⇒ a pseudo-row (Feed / All repos).
+  // The selected repo (single-repo console). null ⇒ the Feed pseudo-row.
   const selectedRepo =
     typeof inboxRepoId === 'number'
       ? sorted.find((r) => r.repoId === inboxRepoId) ?? null
       : null;
   // The cross-repo consolidated Feed is the default detail (also when nothing's set).
   const showingFeed = inboxRepoId === 'feed' || inboxRepoId == null;
-  const showingAll = inboxRepoId === 'all';
-
-  const topRepoId = sorted[0]?.repoId ?? null;
-  const isExpanded = (repoId: number): boolean =>
-    expandedList == null ? repoId === topRepoId : expandedList.includes(repoId);
-  const toggleExpand = (repoId: number): void => {
-    const cur = new Set(
-      expandedList == null ? (topRepoId != null ? [topRepoId] : []) : expandedList,
-    );
-    if (cur.has(repoId)) cur.delete(repoId);
-    else cur.add(repoId);
-    setExpandedList([...cur]);
-  };
 
   // Staleness: amber past ~10 minutes.
   const generatedAt = data?.generatedAt ?? null;
@@ -269,7 +210,8 @@ export function InboxView(): JSX.Element {
           }`}
         >
           {/* FEED pseudo-row — the cross-repo consolidated state of play (the default
-              landing detail). Sits above "All repos". */}
+              landing detail). The old "All repos" pseudo-row was removed (redundant with
+              the Feed + the per-repo entries below). */}
           <button
             type="button"
             onClick={() => setInboxRepo('feed')}
@@ -289,17 +231,6 @@ export function InboxView(): JSX.Element {
             </span>
           </button>
 
-          {/* ALL REPOS pseudo-row */}
-          <RailRow
-            fullName="All repos"
-            maintainerCount={0}
-            hasUnread={aggregate.unread}
-            attentionCount={aggregate.attention}
-            openPrs={data != null ? aggregate.open : null}
-            threadTotals={data != null ? aggregate.threadTotals : null}
-            selected={showingAll}
-            onSelect={() => setInboxRepo('all')}
-          />
           {railItems.map((r) => (
             <RailRow
               key={r.repoId}
@@ -309,7 +240,7 @@ export function InboxView(): JSX.Element {
               attentionCount={r.attentionCount}
               openPrs={r.openPrs}
               threadTotals={r.threadTotals}
-              selected={!showingAll && inboxRepoId === r.repoId}
+              selected={inboxRepoId === r.repoId}
               onSelect={() => setInboxRepo(r.repoId)}
             />
           ))}
@@ -349,25 +280,6 @@ export function InboxView(): JSX.Element {
               <div
                 key={i}
                 className="h-24 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40"
-              />
-            ))}
-          </div>
-        ) : showingAll ? (
-          <div className="space-y-3">
-            <div className="text-xs text-gray-400">
-              All watched repos · {sorted.length} repo{sorted.length === 1 ? '' : 's'} ·{' '}
-              {aggregate.open} open
-              {aggregate.stalled > 0 ? ` · ${aggregate.stalled} stalled` : ''}
-            </div>
-            {sorted.map((r, i) => (
-              <RepoSection
-                key={r.repoId}
-                repo={r}
-                density="feed"
-                tintIndex={i}
-                claudeEnabled={claudeEnabled}
-                expanded={isExpanded(r.repoId)}
-                onToggleExpand={() => toggleExpand(r.repoId)}
               />
             ))}
           </div>

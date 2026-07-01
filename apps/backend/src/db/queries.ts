@@ -74,6 +74,7 @@ import type {
   RepoClaudeReviewPr,
   ConsolidatedFeedItem,
   ConsolidatedFeedResponse,
+  FeedAffectedThread,
   MyTurnPr,
 } from '@pierre-review/shared';
 
@@ -115,6 +116,7 @@ const {
   prComments,
   reviews,
   commits,
+  commitFiles,
   events,
   syncState,
   prViews,
@@ -1468,6 +1470,10 @@ export interface ConsolidatedFeedFilters {
   repoIds?: number[] | null;
   // Member filter: null / empty → all actors; a list → only those actors.
   userIds?: number[] | null;
+  // Mirror the timeline's "exclude bots" toggle: drop feed activity + My Turn items whose
+  // actor is a known bot (users.isBot). Claude-review items are never dropped (no member
+  // author). Absent/false → bots shown.
+  excludeBots?: boolean;
   // Pagination over the merged, chronologically-sorted stream. `limit` omitted → the
   // whole stream (legacy). The response `total` is the full count so the client knows
   // when to stop "Load more". Only the returned page is enriched (merge/review credit)
@@ -1476,11 +1482,276 @@ export interface ConsolidatedFeedFilters {
   offset?: number | null;
 }
 
+// Commit runs that ADDRESSED a review thread — the only commit activity surfaced in the
+// consolidated feed (plain pushes are noise, hidden on the timeline by default too). A
+// "run" is consecutive commits by one author on one PR (a >6h gap splits runs). A run is
+// kept only when some commit in it touched a still-`likely_addressed` thread's file AFTER
+// that thread's last comment — exactly the derive-thread-state heuristic — and the
+// addressed threads ride along inline. All queries are accountId-scoped (the seed
+// commit_pushed events carry accountId; every downstream id derives from them).
+const COMMIT_ITEM_SCAN_CAP = 600; // most-recent commit_pushed events scanned
+const COMMIT_RUN_GAP_MS = 6 * 60 * 60 * 1000; // >6h between an author's commits splits runs
+
+async function getCommitThreadItems(
+  accountId: number,
+  opts: { repoIds: number[] | null; userIds: number[] | null; botIds: Set<number>; since: Date },
+): Promise<ConsolidatedFeedItem[]> {
+  const { repoIds, userIds, botIds, since } = opts;
+  const conds: SQL[] = [
+    eq(events.accountId, accountId),
+    eq(events.type, 'commit_pushed'),
+    eq(events.refTable, 'commits'),
+    isNotNull(events.refId),
+    isNotNull(events.prId),
+    gte(events.occurredAt, since),
+  ];
+  if (repoIds) conds.push(inArray(events.repoId, repoIds));
+  if (userIds && userIds.length > 0) conds.push(inArray(events.actorId, userIds));
+  if (botIds.size > 0)
+    conds.push(
+      sql`(${events.actorId} is null or ${events.actorId} not in (${sql.join(
+        [...botIds],
+        sql`, `,
+      )}))`,
+    );
+
+  const evRows = await db
+    .select({
+      id: events.id,
+      actorId: events.actorId,
+      prId: events.prId,
+      occurredAt: events.occurredAt,
+      commitId: events.refId,
+      repoId: events.repoId,
+      repoOwner: repos.owner,
+      repoName: repos.name,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      prState: pullRequests.state,
+    })
+    .from(events)
+    .innerJoin(repos, eq(repos.id, events.repoId))
+    .leftJoin(pullRequests, eq(pullRequests.id, events.prId))
+    .where(and(...conds))
+    .orderBy(desc(events.occurredAt))
+    .limit(COMMIT_ITEM_SCAN_CAP)
+    .execute();
+  if (evRows.length === 0) return [];
+  type EvRow = (typeof evRows)[number];
+
+  // Resolve each commit event's sha + committed time.
+  const commitIds = [...new Set(evRows.map((r) => r.commitId as number))];
+  const commitById = new Map<number, { sha: string; committedAt: Date }>();
+  for (const c of await db
+    .select({ id: commits.id, sha: commits.sha, committedAt: commits.committedAt })
+    .from(commits)
+    .where(inArray(commits.id, commitIds))
+    .execute())
+    commitById.set(c.id, { sha: c.sha, committedAt: c.committedAt });
+
+  // Changed-file paths per commit sha (immutable, content-addressed).
+  const shas = [...new Set([...commitById.values()].map((c) => c.sha))];
+  const filesBySha = new Map<string, string[]>();
+  if (shas.length > 0)
+    for (const f of await db
+      .select({ sha: commitFiles.sha, paths: commitFiles.paths })
+      .from(commitFiles)
+      .where(inArray(commitFiles.sha, shas))
+      .execute())
+      filesBySha.set(f.sha, f.paths ?? []);
+
+  // Candidate threads (currently `likely_addressed`) on the involved PRs.
+  const prIds = [...new Set(evRows.map((r) => r.prId as number))];
+  type Cand = {
+    id: number;
+    prId: number;
+    path: string;
+    line: number | null;
+    originalCommenterId: number | null;
+  };
+  const threadsByPr = new Map<number, Cand[]>();
+  const candThreadIds: number[] = [];
+  for (const t of await db
+    .select({
+      id: reviewThreads.id,
+      prId: reviewThreads.prId,
+      path: reviewThreads.path,
+      line: reviewThreads.line,
+      originalCommenterId: reviewThreads.originalCommenterId,
+    })
+    .from(reviewThreads)
+    .where(
+      and(inArray(reviewThreads.prId, prIds), eq(reviewThreads.derivedState, 'likely_addressed')),
+    )
+    .execute()) {
+    const arr = threadsByPr.get(t.prId) ?? [];
+    arr.push(t);
+    threadsByPr.set(t.prId, arr);
+    candThreadIds.push(t.id);
+  }
+  if (candThreadIds.length === 0) return [];
+
+  // First-comment excerpt/author + last-comment time per candidate thread. Only the
+  // short `excerpt` is loaded (always populated — never the bulky `body`), keeping this
+  // per-page pass cheap.
+  const firstByThread = new Map<number, { excerpt: string | null; authorId: number | null }>();
+  const lastAtByThread = new Map<number, number>();
+  for (const c of await db
+    .select({
+      threadId: reviewComments.threadId,
+      createdAt: reviewComments.createdAt,
+      excerpt: reviewComments.excerpt,
+      authorId: reviewComments.authorId,
+    })
+    .from(reviewComments)
+    .where(inArray(reviewComments.threadId, candThreadIds))
+    .orderBy(asc(reviewComments.createdAt))
+    .execute()) {
+    if (!firstByThread.has(c.threadId))
+      firstByThread.set(c.threadId, { excerpt: c.excerpt, authorId: c.authorId });
+    lastAtByThread.set(c.threadId, c.createdAt.getTime());
+  }
+
+  // Coalesce a PR-author's commit events into contiguous runs (gap > COMMIT_RUN_GAP_MS).
+  interface Run {
+    prId: number;
+    actorId: number | null;
+    repoId: number;
+    repoFullName: string;
+    prNumber: number | null;
+    prTitle: string | null;
+    prState: PrState | null;
+    commitShas: { sha: string; committedAt: Date }[];
+    latestOccurredAt: Date;
+    latestEventId: number;
+    commitCount: number;
+  }
+  const groups = new Map<string, EvRow[]>();
+  for (const r of evRows) {
+    const key = `${r.prId}:${r.actorId ?? 'null'}`;
+    const arr = groups.get(key) ?? [];
+    arr.push(r);
+    groups.set(key, arr);
+  }
+  const runs: Run[] = [];
+  for (const arr of groups.values()) {
+    const sorted = [...arr].sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+    let cur: EvRow[] = [];
+    const flush = (): void => {
+      if (cur.length === 0) return;
+      const first = cur[0]!;
+      const last = cur[cur.length - 1]!;
+      const commitShas = cur
+        .map((e) => commitById.get(e.commitId as number))
+        .filter((c): c is { sha: string; committedAt: Date } => c != null);
+      runs.push({
+        prId: first.prId as number,
+        actorId: first.actorId,
+        repoId: first.repoId,
+        repoFullName: `${first.repoOwner}/${first.repoName}`,
+        prNumber: first.prNumber ?? null,
+        prTitle: first.prTitle ?? null,
+        prState: (first.prState as PrState | null) ?? null,
+        commitShas,
+        latestOccurredAt: last.occurredAt,
+        latestEventId: last.id,
+        commitCount: cur.length,
+      });
+      cur = [];
+    };
+    for (const e of sorted) {
+      if (cur.length === 0) {
+        cur = [e];
+        continue;
+      }
+      const prev = cur[cur.length - 1]!;
+      if (e.occurredAt.getTime() - prev.occurredAt.getTime() > COMMIT_RUN_GAP_MS) flush();
+      cur.push(e);
+    }
+    flush();
+  }
+
+  // Keep only runs that addressed ≥1 thread; attach those threads inline. Attribute each
+  // thread to exactly ONE run — the most RECENT run that addressed it — so a thread never
+  // appears under two commit cards of the same PR (two co-authors → two runs by key; or one
+  // author's pushes split by the >6h gap). Claim newest-first via a shared set.
+  const out: ConsolidatedFeedItem[] = [];
+  const claimed = new Set<number>();
+  const runsByRecency = [...runs].sort(
+    (a, b) => b.latestOccurredAt.getTime() - a.latestOccurredAt.getTime(),
+  );
+  for (const run of runsByRecency) {
+    const cands = threadsByPr.get(run.prId) ?? [];
+    if (cands.length === 0) continue;
+    const affected: FeedAffectedThread[] = [];
+    for (const t of cands) {
+      if (claimed.has(t.id)) continue;
+      const lastAt = lastAtByThread.get(t.id);
+      if (lastAt == null) continue;
+      const hit = run.commitShas.some(
+        (c) => c.committedAt.getTime() > lastAt && (filesBySha.get(c.sha) ?? []).includes(t.path),
+      );
+      if (!hit) continue;
+      claimed.add(t.id);
+      const first = firstByThread.get(t.id);
+      const excerpt = first?.excerpt ?? '';
+      affected.push({
+        threadId: t.id,
+        path: t.path,
+        line: t.line,
+        derivedState: 'likely_addressed',
+        excerpt,
+        authorId: t.originalCommenterId ?? first?.authorId ?? null,
+      });
+    }
+    if (affected.length === 0) continue;
+    const commitWord = run.commitCount === 1 ? 'commit' : 'commits';
+    const threadWord = affected.length === 1 ? 'thread' : 'threads';
+    out.push({
+      id: `feed:commitrun:${run.prId}:${run.latestEventId}`,
+      source: 'feed',
+      kind: 'commit_pushed',
+      occurredAt: run.latestOccurredAt.toISOString(),
+      acknowledged: false,
+      repoId: run.repoId,
+      repoFullName: run.repoFullName,
+      prId: run.prId,
+      prNumber: run.prNumber,
+      prTitle: run.prTitle,
+      prState: run.prState,
+      actorId: run.actorId,
+      content: null,
+      threadId: null,
+      path: null,
+      line: null,
+      reasonTag: null,
+      reviewState: null,
+      githubUrl:
+        run.prNumber != null
+          ? `https://github.com/${run.repoFullName}/pull/${run.prNumber}`
+          : null,
+      mergedById: null,
+      reviewers: null,
+      dismiss: null,
+      affectedThreads: affected,
+      commitCount: run.commitCount,
+      changeSummary: `pushed ${run.commitCount} ${commitWord} · addressed ${affected.length} ${threadWord}`,
+    });
+  }
+  return out;
+}
+
 export async function getConsolidatedFeed(
   accountId: number,
   opts: ConsolidatedFeedFilters = {},
 ): Promise<ConsolidatedFeedResponse> {
-  const { repoIds = null, userIds = null, limit = null, offset = 0 } = opts;
+  const { repoIds = null, userIds = null, limit = null, offset = 0, excludeBots = false } = opts;
+  // Bot set (only loaded when the filter is on) — used to drop bot-authored My Turn +
+  // activity items, mirroring the timeline's excludeBots. Claude items (actorId null) are
+  // never affected.
+  const botIds = excludeBots ? new Set(await botUserIds()) : new Set<number>();
+  const notBot = (id: number | null): boolean =>
+    !excludeBots || id == null || !botIds.has(id);
   const repoIdByName = new Map<string, number>();
   for (const r of await listRepos(accountId)) {
     repoIdByName.set(r.fullName, r.id);
@@ -1498,9 +1769,13 @@ export async function getConsolidatedFeed(
   const actorOk = (id: number | null): boolean =>
     actorScope == null || (id != null && actorScope.has(id));
 
-  const [myTurn, feed] = await Promise.all([
+  const feedSince = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  const [myTurn, feed, commitItems] = await Promise.all([
     getMyTurn(accountId),
     getFeed(accountId, { daysBefore: 14, repoIds, userIds }),
+    // Commit-push activity that ADDRESSED a review thread (the only commit rows we surface
+    // — plain pushes are noise). Each carries the affected threads inline.
+    getCommitThreadItems(accountId, { repoIds, userIds, botIds, since: feedSince }),
   ]);
 
   const usersById = new Map<number, User>();
@@ -1538,6 +1813,7 @@ export async function getConsolidatedFeed(
     reasonTag: 'awaiting_your_review', reviewState: null, githubUrl: i.githubUrl,
     mergedById: null, reviewers: null,
     dismiss: { kind: 'review_request', refId: i.prId },
+    affectedThreads: null, commitCount: null, changeSummary: null,
   });
   const mtApproved = (i: MyTurnPr, acknowledged: boolean): ConsolidatedFeedItem => ({
     id: `mt:pr_approved:${i.prId}`, source: 'my_turn', kind: 'approved',
@@ -1548,6 +1824,7 @@ export async function getConsolidatedFeed(
     reasonTag: 'approved_ready', reviewState: null, githubUrl: i.githubUrl,
     mergedById: null, reviewers: null,
     dismiss: { kind: 'pr_approved', refId: i.prId },
+    affectedThreads: null, commitCount: null, changeSummary: null,
   });
   const mtWatched = (i: MyTurnPr, acknowledged: boolean): ConsolidatedFeedItem => ({
     id: `mt:watched_repo_pr:${i.prId}`, source: 'my_turn', kind: 'watched_repo_pr',
@@ -1558,6 +1835,7 @@ export async function getConsolidatedFeed(
     reasonTag: null, reviewState: null, githubUrl: i.githubUrl,
     mergedById: null, reviewers: null,
     dismiss: { kind: 'watched_repo_pr', refId: i.prId },
+    affectedThreads: null, commitCount: null, changeSummary: null,
   });
   const mtThread = (ta: ThreadAwaitingItem, acknowledged: boolean): ConsolidatedFeedItem => ({
     id: `thread:${ta.threadId}`, source: 'my_turn', kind: 'thread',
@@ -1569,6 +1847,7 @@ export async function getConsolidatedFeed(
     reasonTag: null, reviewState: null, githubUrl: ta.githubUrl,
     mergedById: null, reviewers: null,
     dismiss: { kind: 'thread', refId: ta.threadId },
+    affectedThreads: null, commitCount: null, changeSummary: null,
   });
   const mtClaude = (
     c: { reviewId: number; prId: number; prNumber: number; prTitle: string; repoFullName: string; githubUrl: string },
@@ -1583,6 +1862,7 @@ export async function getConsolidatedFeed(
     reasonTag: null, reviewState: null, githubUrl: c.githubUrl,
     mergedById: null, reviewers: null,
     dismiss: { kind: 'claude_review', refId: c.reviewId },
+    affectedThreads: null, commitCount: null, changeSummary: null,
   });
 
   // Merge active + acknowledged My Turn items + the activity feed into one flat stream.
@@ -1601,22 +1881,26 @@ export async function getConsolidatedFeed(
   const awaitedThreadIds = new Set<number>();
   const watchedPrIds = new Set<number>();
 
-  // --- My Turn actionables (active = unacknowledged); scoped by repo + member filter ---
+  // --- My Turn actionables (active = unacknowledged); scoped by repo + member filter,
+  //     and (when excludeBots) dropping bot-authored rows (e.g. a Dependabot PR). ---
   for (const i of myTurn.awaitingReview)
-    if (inScope(i.repoFullName) && actorOk(i.authorId)) push(mtReview(i, false));
+    if (inScope(i.repoFullName) && actorOk(i.authorId) && notBot(i.authorId))
+      push(mtReview(i, false));
   for (const i of myTurn.approvedPrs)
-    if (inScope(i.repoFullName) && actorOk(i.authorId)) push(mtApproved(i, false));
+    if (inScope(i.repoFullName) && actorOk(i.authorId) && notBot(i.authorId))
+      push(mtApproved(i, false));
   for (const i of myTurn.watchedRepoPrs) {
-    if (!(inScope(i.repoFullName) && actorOk(i.authorId))) continue;
+    if (!(inScope(i.repoFullName) && actorOk(i.authorId) && notBot(i.authorId))) continue;
     watchedPrIds.add(i.prId);
     push(mtWatched(i, false));
   }
   for (const c of myTurn.claudeReviewsToAction) {
-    // Claude runs have no member author, so they aren't member-filtered.
+    // Claude runs have no member author, so they aren't member- or bot-filtered.
     if (inScope(c.repoFullName)) push(mtClaude(c, c.finishedAt ?? nowIso, false));
   }
   for (const ta of myTurn.threadsAwaiting) {
-    if (!(inScope(ta.repoFullName) && actorOk(ta.lastReplyAuthorId))) continue;
+    if (!(inScope(ta.repoFullName) && actorOk(ta.lastReplyAuthorId) && notBot(ta.lastReplyAuthorId)))
+      continue;
     awaitedThreadIds.add(ta.threadId);
     push(mtThread(ta, false));
   }
@@ -1633,6 +1917,8 @@ export async function getConsolidatedFeed(
   for (const f of feed.events) {
     if (f.type === 'pr_opened' && f.prId != null && watchedPrIds.has(f.prId)) continue;
     if (f.type === 'review_comment' && f.refId != null && awaitedThreadIds.has(f.refId)) continue;
+    // excludeBots: drop bot-authored activity (getFeed doesn't filter bots).
+    if (!notBot(f.actorId)) continue;
     push({
       id: `feed:${f.id}`,
       source: 'feed',
@@ -1658,8 +1944,15 @@ export async function getConsolidatedFeed(
       mergedById: null,
       reviewers: null,
       dismiss: null,
+      affectedThreads: null,
+      commitCount: null,
+      changeSummary: null,
     });
   }
+
+  // Commit-push items (already repo/member/bot-scoped + thread-enriched in the SQL helper).
+  // They're `source:'feed'`, so the sort + cap below treats them like any activity row.
+  for (const it of commitItems) push(it);
 
   // Pure chronological — newest first. Keep all My Turn items; cap activity events.
   const myTurnRows = items.filter((i) => i.source === 'my_turn');
@@ -1738,6 +2031,9 @@ export async function getConsolidatedFeed(
     if (i.actorId != null) needed.add(i.actorId);
     if (i.mergedById != null) needed.add(i.mergedById);
     if (i.reviewers) for (const r of i.reviewers) needed.add(r.userId);
+    // Affected-thread original commenters (commit items) resolve to a login/avatar too.
+    if (i.affectedThreads)
+      for (const t of i.affectedThreads) if (t.authorId != null) needed.add(t.authorId);
   }
   // Only ship the users the page references (paginated pages merge client-side).
   const pageUsers: User[] = [];

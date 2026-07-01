@@ -36,6 +36,7 @@ export async function inboxRoutes(app: FastifyInstance): Promise<void> {
       userIds?: string;
       limit?: string;
       offset?: string;
+      excludeBots?: string;
     };
     const limit = q.limit != null ? Number(q.limit) : null;
     const offset = q.offset != null ? Number(q.offset) : 0;
@@ -44,6 +45,7 @@ export async function inboxRoutes(app: FastifyInstance): Promise<void> {
       userIds: parseIntList(q.userIds),
       limit: Number.isFinite(limit) && limit != null && limit > 0 ? limit : null,
       offset: Number.isFinite(offset) && offset > 0 ? offset : 0,
+      excludeBots: q.excludeBots === 'true',
     });
   });
 

@@ -224,13 +224,22 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
 
     closeTab: (key) =>
       set((s) => {
-        if (!s.tabs.some((t) => t.key === key)) return s;
+        const idx = s.tabs.findIndex((t) => t.key === key);
+        if (idx === -1) return s;
         const tabs = s.tabs.filter((t) => t.key !== key);
         persist(tabs);
-        return {
-          tabs,
-          activeTab: s.activeTab === key ? 'timeline' : s.activeTab,
-        };
+        // Closing a non-active tab leaves the active one alone. Closing the ACTIVE tab
+        // moves to a logical neighbour rather than snapping back to the board: the tab
+        // immediately to its LEFT (still present in `tabs` at idx-1), else the one to its
+        // RIGHT (now the leftmost, tabs[0]), else — no dynamic tabs remain — the board.
+        if (s.activeTab !== key) return { tabs };
+        const nextActive: ActiveTab =
+          idx - 1 >= 0
+            ? (s.tabs[idx - 1] as Tab).key
+            : tabs.length > 0
+              ? (tabs[0] as Tab).key
+              : 'timeline';
+        return { tabs, activeTab: nextActive };
       }),
     unpin: (id) => get().closeTab(prDetailKey(id)),
 

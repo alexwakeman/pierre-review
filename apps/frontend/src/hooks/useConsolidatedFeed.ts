@@ -8,11 +8,17 @@ import { api } from '../api/client.js';
 // and its memory bounded on large accounts.
 export const FEED_PAGE_SIZE = 50;
 
-/** Build the /api/inbox/feed query string from the active repo + member scope. */
-function feedSearch(repoIds: number[] | null, userIds: number[] | null): string {
+/** Build the /api/inbox/feed query string from the active repo + member + bot scope. */
+function feedSearch(
+  repoIds: number[] | null,
+  userIds: number[] | null,
+  excludeBots: boolean,
+): string {
   const p = new URLSearchParams();
   if (repoIds && repoIds.length > 0) p.set('repoIds', repoIds.join(','));
   if (userIds && userIds.length > 0) p.set('userIds', userIds.join(','));
+  // Mirror the timeline: only emit when hiding bots (default false keeps the key clean).
+  if (excludeBots) p.set('excludeBots', 'true');
   return p.toString();
 }
 
@@ -28,9 +34,10 @@ function feedSearch(repoIds: number[] | null, userIds: number[] | null): string 
 export function useConsolidatedFeed(opts: {
   repoIds: number[] | null;
   userIds: number[] | null;
+  excludeBots?: boolean;
   enabled?: boolean;
 }) {
-  const search = feedSearch(opts.repoIds, opts.userIds);
+  const search = feedSearch(opts.repoIds, opts.userIds, opts.excludeBots ?? false);
   const query = useInfiniteQuery<ConsolidatedFeedResponse>({
     queryKey: ['consolidated-feed', search],
     initialPageParam: 0,

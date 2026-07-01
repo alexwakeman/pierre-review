@@ -1550,12 +1550,27 @@ export interface FeedDigestResponse {
 }
 
 // ---- Consolidated Feed (CORE, no AI; the Inbox "Feed" entry's main list) ----
-// A single relevance-ranked stream across all repos that merges three sources —
-// "My Turn" actionables and activity-feed events, deduped and ordered purely
-// chronologically (newest first). (Unresolved-thread surfacing was dropped — too noisy
-// on large repos.) Click nav: 'my_turn' → My Turn Focus (the inbox-scoped timeline);
-// 'feed' → PR Focus (isolate that one PR on the timeline).
+// A single relevance-ranked stream across all repos that merges "My Turn" actionables
+// and activity-feed events (opens / merges / reviews / comments, plus commit pushes that
+// addressed a review thread), deduped and ordered purely chronologically (newest first).
+// Click nav: 'my_turn' → My Turn Focus (the inbox-scoped timeline); 'feed' → PR Focus
+// (isolate that one PR on the timeline).
 export type FeedItemSource = 'my_turn' | 'feed';
+
+// One review thread that a feed item's change likely addressed — a commit touched the
+// thread's file AFTER its last comment, so the thread flipped to 'likely_addressed'.
+// Rendered inline under the item so the reader sees WHAT changed without opening the PR.
+export interface FeedAffectedThread {
+  threadId: number;
+  path: string;
+  line: number | null;
+  derivedState: DerivedState;
+  // A short preview of the thread's opening comment (what the reviewer originally asked).
+  excerpt: string;
+  // The thread's original commenter (whose point was likely addressed); resolved via the
+  // response's `users` array.
+  authorId: number | null;
+}
 
 export interface ConsolidatedFeedItem {
   // Stable unique id, e.g. "mt:review_request:99", "feed:1234".
@@ -1598,6 +1613,16 @@ export interface ConsolidatedFeedItem {
   // Dismissal coordinates for a "My Turn" item (the seen/unseen toggle); null for pure
   // activity events. Mirrors MyTurnDismissBody so the existing dismiss plumbing is reused.
   dismiss: { kind: MyTurnDismissKind; refId: number } | null;
+  // Context — review threads this item's change likely addressed. Populated for
+  // 'commit_pushed' feed items (a push that touched a thread's file after its last
+  // comment). Rendered inline so the reader sees WHAT changed. null/empty otherwise.
+  affectedThreads: FeedAffectedThread[] | null;
+  // For a coalesced commit-push item: how many commits the push run contained (so the
+  // row can read "pushed N commits"). null for non-commit items.
+  commitCount: number | null;
+  // Short human-readable "what changed" summary (e.g. "pushed 3 commits · addressed 2
+  // threads"); null when the row chrome already says everything.
+  changeSummary: string | null;
 }
 
 export interface ConsolidatedFeedResponse {
