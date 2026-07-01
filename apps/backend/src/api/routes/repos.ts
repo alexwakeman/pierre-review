@@ -285,7 +285,7 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     return getRepo(repoId, accountId);
   });
 
-  // Toggle "Watch for inbox" on a repo. Inbox-only: it does not affect timeline
+  // Toggle "Watch for inbox" on a repo. Activity-only: it does not affect timeline
   // visibility or syncing. Ownership-scoped → 404 for a repo this account doesn't own.
   app.patch('/api/repos/:id', { schema: watchSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };

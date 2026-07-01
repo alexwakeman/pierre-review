@@ -89,9 +89,10 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             <strong>needs attention</strong>.
           </Section>
 
-          <Section title="My Turn &amp; Insights">
-            Opening a <strong>My Turn</strong> item in the Inbox Feed (or pressing{' '}
-            <Kbd>m</Kbd>) isolates the timeline to the PRs that need you now;{' '}
+          <Section title="Activity &amp; Insights">
+            Clicking an item in the <strong>Activity Feed</strong> opens that PR's detail
+            tab, where <strong>Show</strong> / <strong>Focus</strong> drive the timeline; the
+            feed's <strong>My Turn only</strong> toggle narrows it to what needs you.{' '}
             <strong>Insights</strong> opens a per-repo snapshot
             (open&nbsp;/&nbsp;merged&nbsp;/&nbsp;stalled, time-to-first-review, review
             load). Save filter combinations as named <strong>Views</strong>, and use the
@@ -100,8 +101,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
 
           <Section title="Keyboard">
             <Kbd>/</Kbd> focus the filter · <Kbd>j</Kbd>/<Kbd>k</Kbd> cycle PRs ·{' '}
-            <Kbd>m</Kbd> toggle My Turn · <Kbd>i</Kbd> Insights · <Kbd>Esc</Kbd> exit
-            focus, else clear the selection.
+            <Kbd>i</Kbd> Insights · <Kbd>Esc</Kbd> exit focus, else clear the selection.
           </Section>
         </div>
       </div>

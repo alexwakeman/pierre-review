@@ -67,9 +67,9 @@ import type {
   ClaudeReviewSummary,
   ClaudeReviewListItem,
   ClaudeReviewToAction,
-  InboxResponse,
-  InboxRepo,
-  InboxRepoStats,
+  ActivityResponse,
+  ActivityRepo,
+  ActivityRepoStats,
   RepoClaudeReviewsResponse,
   RepoClaudeReviewPr,
   ConsolidatedFeedItem,
@@ -111,6 +111,7 @@ const {
   repos,
   users,
   pullRequests,
+  reviewRequests,
   reviewThreads,
   reviewComments,
   prComments,
@@ -1359,10 +1360,10 @@ export async function getMergers(accountId: number): Promise<RepoMergers[]> {
 
 // ---- inbox (CORE, always-on, no AI) ----
 
-// Reason tags that, on an open PR, count as "needs attention" for the Inbox rail
+// Reason tags that, on an open PR, count as "needs attention" for the Activity rail
 // badge (a my-turn-shaped triage reason). Stalled + untouched threads are folded
 // in separately via the per-PR flags. Keep in sync with REASON_PRIORITY values.
-const INBOX_ATTENTION_REASONS = new Set<ReasonTag>([
+const ACTIVITY_ATTENTION_REASONS = new Set<ReasonTag>([
   'awaiting_your_review',
   'your_pr_new_comments',
   'ci_failing',
@@ -1370,17 +1371,17 @@ const INBOX_ATTENTION_REASONS = new Set<ReasonTag>([
   'untouched_threads',
 ]);
 
-// The Inbox aggregate: per watched repo, current-state stats + a per-repo thread
+// The Activity aggregate: per watched repo, current-state stats + a per-repo thread
 // total + maintainer ids + attention/unread flags + the open PRs (caller groups by
 // author). Composes EXISTING accountId-scoped readers — getInsights / getOpenPrs /
 // getMergers / listRepos — so isolation + triage logic stay single-sourced. The
 // one genuinely new aggregation is `threadTotals` (sum each open PR's threadCounts
 // per repo). Every watched repo is included (a quiet repo → empty prs, zeroed stats).
-export async function getInbox(
+export async function getActivity(
   accountId: number,
   repoIds: number[] | null,
   userIds: number[] | null = null,
-): Promise<InboxResponse> {
+): Promise<ActivityResponse> {
   const reposAll = await listRepos(accountId);
   const reposScoped = repoIds ? reposAll.filter((r) => repoIds.includes(r.id)) : reposAll;
 
@@ -1403,10 +1404,10 @@ export async function getInbox(
   }
 
   // Preserve listRepos order (stable, not jumpy across loads).
-  const inboxRepos: InboxRepo[] = reposScoped.map((repo) => {
+  const activityRepos: ActivityRepo[] = reposScoped.map((repo) => {
     const repoPrs = prsByRepo.get(repo.id) ?? [];
     const ins = insightsByRepo.get(repo.id);
-    const stats: InboxRepoStats = ins
+    const stats: ActivityRepoStats = ins
       ? {
           openPrs: ins.openPrs,
           draftPrs: ins.draftPrs,
@@ -1436,7 +1437,7 @@ export async function getInbox(
       (pr) =>
         pr.isStalled ||
         pr.threadCounts.untouched > 0 ||
-        INBOX_ATTENTION_REASONS.has(pr.reasonTag),
+        ACTIVITY_ATTENTION_REASONS.has(pr.reasonTag),
     ).length;
     const hasUnread = repoPrs.some((pr) => pr.newSinceLastViewed != null);
 
@@ -1452,17 +1453,16 @@ export async function getInbox(
     };
   });
 
-  return { repos: inboxRepos, generatedAt: new Date().toISOString() };
+  return { repos: activityRepos, generatedAt: new Date().toISOString() };
 }
 
-// ---- consolidated Feed (the Inbox "Feed" entry; CORE, no AI) ----
-// A single flat, purely-chronological (newest-first) stream merging "My Turn"
-// actionables + the activity feed, deduped. Unresolved-thread surfacing was dropped
-// (too noisy on large repos). A My Turn item can be marked seen/acknowledged — it stays
-// in the stream (muted) and reverts to unseen when newer activity supersedes it.
+// ---- consolidated Feed (the Activity "Feed" entry; CORE, no AI) ----
+// A single flat, purely-chronological (newest-first) stream of real activity events, each
+// flagged isMyTurn by participation (see getConsolidatedFeed). There is no synthesized
+// "My Turn" layer or dedup anymore — one row per underlying event.
 
-// Every My Turn item (the actionables) is always kept; activity-feed events are bounded
-// to the most recent, so a busy multi-repo account doesn't render thousands of rows.
+// Every My Turn (participated) event is always kept; the plain activity rows are bounded to
+// the most recent, so a busy multi-repo account doesn't render thousands of them.
 const FEED_EVENT_CAP = 250;
 
 export interface ConsolidatedFeedFilters {
@@ -1709,10 +1709,10 @@ async function getCommitThreadItems(
     const threadWord = affected.length === 1 ? 'thread' : 'threads';
     out.push({
       id: `feed:commitrun:${run.prId}:${run.latestEventId}`,
-      source: 'feed',
+      // Flagged by the caller (getConsolidatedFeed) once participation is resolved.
+      isMyTurn: false,
       kind: 'commit_pushed',
       occurredAt: run.latestOccurredAt.toISOString(),
-      acknowledged: false,
       repoId: run.repoId,
       repoFullName: run.repoFullName,
       prId: run.prId,
@@ -1732,7 +1732,6 @@ async function getCommitThreadItems(
           : null,
       mergedById: null,
       reviewers: null,
-      dismiss: null,
       affectedThreads: affected,
       commitCount: run.commitCount,
       changeSummary: `pushed ${run.commitCount} ${commitWord} · addressed ${affected.length} ${threadWord}`,
@@ -1741,133 +1740,110 @@ async function getCommitThreadItems(
   return out;
 }
 
+// Participation ("is this PR mine?") for the consolidated feed's isMyTurn flag. Given a
+// candidate set of PR ids (all account-owned — they come from the account-scoped feed),
+// returns the subset the viewer participates in: PRs they authored, are a requested
+// reviewer on, or previously reviewed / commented on (issue comment OR inline review
+// comment). Isolation rides on prId ∈ the account-owned candidate set, so the un-scoped
+// child tables (reviews/reviewRequests/prComments/reviewComments) need no accountId
+// predicate here. `authored`/`requested` are broken out so the caller can colour the badge.
+// Empty when the viewer is unknown (offline / not yet synced) → isMyTurn defaults false.
+async function getParticipatingPrIds(
+  accountId: number,
+  localUserId: number | null,
+  prIds: number[],
+): Promise<{ all: Set<number>; authored: Set<number>; requested: Set<number> }> {
+  const authored = new Set<number>();
+  const requested = new Set<number>();
+  const all = new Set<number>();
+  if (localUserId == null || prIds.length === 0) return { all, authored, requested };
+  for (const row of await db
+    .select({ id: pullRequests.id })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.authorId, localUserId),
+        inArray(pullRequests.id, prIds),
+      ),
+    )
+    .execute()) {
+    authored.add(row.id);
+    all.add(row.id);
+  }
+  for (const row of await db
+    .select({ prId: reviewRequests.prId })
+    .from(reviewRequests)
+    .where(and(eq(reviewRequests.userId, localUserId), inArray(reviewRequests.prId, prIds)))
+    .execute()) {
+    requested.add(row.prId);
+    all.add(row.prId);
+  }
+  for (const row of await db
+    .select({ prId: reviews.prId })
+    .from(reviews)
+    .where(and(eq(reviews.authorId, localUserId), inArray(reviews.prId, prIds)))
+    .execute())
+    all.add(row.prId);
+  for (const row of await db
+    .select({ prId: prComments.prId })
+    .from(prComments)
+    .where(and(eq(prComments.authorId, localUserId), inArray(prComments.prId, prIds)))
+    .execute())
+    all.add(row.prId);
+  for (const row of await db
+    .select({ prId: reviewComments.prId })
+    .from(reviewComments)
+    .where(and(eq(reviewComments.authorId, localUserId), inArray(reviewComments.prId, prIds)))
+    .execute())
+    all.add(row.prId);
+  return { all, authored, requested };
+}
+
 export async function getConsolidatedFeed(
   accountId: number,
   opts: ConsolidatedFeedFilters = {},
 ): Promise<ConsolidatedFeedResponse> {
   const { repoIds = null, userIds = null, limit = null, offset = 0, excludeBots = false } = opts;
-  // Bot set (only loaded when the filter is on) — used to drop bot-authored My Turn +
-  // activity items, mirroring the timeline's excludeBots. Claude items (actorId null) are
-  // never affected.
+  // Bot set (only loaded when the filter is on) — drops bot-authored activity, mirroring
+  // the timeline's excludeBots. getFeed doesn't filter bots, so we do it here; the commit
+  // helper filters in its own SQL.
   const botIds = excludeBots ? new Set(await botUserIds()) : new Set<number>();
   const notBot = (id: number | null): boolean =>
     !excludeBots || id == null || !botIds.has(id);
-  const repoIdByName = new Map<string, number>();
-  for (const r of await listRepos(accountId)) {
-    repoIdByName.set(r.fullName, r.id);
-  }
-  const repoIdOf = (fullName: string): number => repoIdByName.get(fullName) ?? 0;
-  // Scope: repoIds provided → those repos; else ALL the account's repos (watched-only
-  // was dropped as the scoping mechanism — the FilterBar repo selection drives it). My
-  // Turn spans every added repo, so filter its items here to match getFeed's SQL scope.
-  const repoScope = repoIds ? new Set(repoIds) : null;
-  const inScope = (fullName: string): boolean =>
-    repoScope == null || repoScope.has(repoIdOf(fullName));
-  // Member filter: applies to a PR/thread's author/replier (activity events are already
-  // actor-filtered in getFeed's SQL). Claude runs have no member author → not filtered.
-  const actorScope = userIds && userIds.length > 0 ? new Set(userIds) : null;
-  const actorOk = (id: number | null): boolean =>
-    actorScope == null || (id != null && actorScope.has(id));
 
   const feedSince = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-  const [myTurn, feed, commitItems] = await Promise.all([
-    getMyTurn(accountId),
+  const [feed, commitItems, localUserId] = await Promise.all([
     getFeed(accountId, { daysBefore: 14, repoIds, userIds }),
     // Commit-push activity that ADDRESSED a review thread (the only commit rows we surface
     // — plain pushes are noise). Each carries the affected threads inline.
     getCommitThreadItems(accountId, { repoIds, userIds, botIds, since: feedSince }),
+    getAccountUserId(accountId),
   ]);
 
+  // Participation ("is this PR mine?") drives the isMyTurn flag: which of the PRs the feed
+  // references does the viewer participate in — a direct linkage to their account based on
+  // past activity. Resolved once for every PR on the (uncapped) stream.
+  const candidatePrIds = new Set<number>();
+  for (const f of feed.events) if (f.prId != null) candidatePrIds.add(f.prId);
+  for (const it of commitItems) if (it.prId != null) candidatePrIds.add(it.prId);
+  const participation = await getParticipatingPrIds(accountId, localUserId, [...candidatePrIds]);
+  // An event is "my turn" when it's on a PR I participate in AND the actor isn't me (my own
+  // actions don't need my attention). The reason tag colours the badge.
+  const isMine = (prId: number | null, actorId: number | null): boolean =>
+    localUserId != null && prId != null && actorId !== localUserId && participation.all.has(prId);
+  const myTurnReason = (prId: number | null): ReasonTag | null =>
+    prId == null
+      ? null
+      : participation.requested.has(prId)
+        ? 'awaiting_your_review'
+        : participation.authored.has(prId)
+          ? 'your_pr_new_comments'
+          : null;
+
   const usersById = new Map<number, User>();
-  for (const u of myTurn.users) usersById.set(u.id, u);
   for (const u of feed.users) usersById.set(u.id, u);
-  const nowIso = new Date().toISOString();
 
-  // PR-level My Turn items sort by the PR's last-updated time (a real recency signal;
-  // openedAt would sink an actively-updated old PR). Batch-load it for every PR involved.
-  const prIdsForTs = new Set<number>();
-  for (const i of myTurn.awaitingReview) prIdsForTs.add(i.prId);
-  for (const i of myTurn.approvedPrs) prIdsForTs.add(i.prId);
-  for (const i of myTurn.watchedRepoPrs) prIdsForTs.add(i.prId);
-  const updatedAtByPr = new Map<number, string>();
-  if (prIdsForTs.size > 0) {
-    for (const row of await db
-      .select({ id: pullRequests.id, updatedAt: pullRequests.updatedAt })
-      .from(pullRequests)
-      .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, [...prIdsForTs])))
-      .execute())
-      updatedAtByPr.set(row.id, row.updatedAt.toISOString());
-  }
-  const prTs = (prId: number, fallbackIso: string): string =>
-    updatedAtByPr.get(prId) ?? fallbackIso;
-
-  // Item builders — `dismiss` is present on every My Turn row (it's the seen/unseen
-  // toggle). PR-level builders accept any MyTurnPr (an active AwaitingReviewItem/… or a
-  // Dismissed* copy — both are structurally MyTurnPr).
-  const mtReview = (i: MyTurnPr, acknowledged: boolean): ConsolidatedFeedItem => ({
-    id: `mt:review_request:${i.prId}`, source: 'my_turn', kind: 'awaiting_review',
-    occurredAt: prTs(i.prId, i.openedAt), acknowledged,
-    repoId: repoIdOf(i.repoFullName), repoFullName: i.repoFullName,
-    prId: i.prId, prNumber: i.number, prTitle: i.title, prState: i.state,
-    actorId: i.authorId, content: null, threadId: null, path: null, line: null,
-    reasonTag: 'awaiting_your_review', reviewState: null, githubUrl: i.githubUrl,
-    mergedById: null, reviewers: null,
-    dismiss: { kind: 'review_request', refId: i.prId },
-    affectedThreads: null, commitCount: null, changeSummary: null,
-  });
-  const mtApproved = (i: MyTurnPr, acknowledged: boolean): ConsolidatedFeedItem => ({
-    id: `mt:pr_approved:${i.prId}`, source: 'my_turn', kind: 'approved',
-    occurredAt: prTs(i.prId, i.openedAt), acknowledged,
-    repoId: repoIdOf(i.repoFullName), repoFullName: i.repoFullName,
-    prId: i.prId, prNumber: i.number, prTitle: i.title, prState: i.state,
-    actorId: i.authorId, content: null, threadId: null, path: null, line: null,
-    reasonTag: 'approved_ready', reviewState: null, githubUrl: i.githubUrl,
-    mergedById: null, reviewers: null,
-    dismiss: { kind: 'pr_approved', refId: i.prId },
-    affectedThreads: null, commitCount: null, changeSummary: null,
-  });
-  const mtWatched = (i: MyTurnPr, acknowledged: boolean): ConsolidatedFeedItem => ({
-    id: `mt:watched_repo_pr:${i.prId}`, source: 'my_turn', kind: 'watched_repo_pr',
-    occurredAt: prTs(i.prId, i.openedAt), acknowledged,
-    repoId: repoIdOf(i.repoFullName), repoFullName: i.repoFullName,
-    prId: i.prId, prNumber: i.number, prTitle: i.title, prState: i.state,
-    actorId: i.authorId, content: null, threadId: null, path: null, line: null,
-    reasonTag: null, reviewState: null, githubUrl: i.githubUrl,
-    mergedById: null, reviewers: null,
-    dismiss: { kind: 'watched_repo_pr', refId: i.prId },
-    affectedThreads: null, commitCount: null, changeSummary: null,
-  });
-  const mtThread = (ta: ThreadAwaitingItem, acknowledged: boolean): ConsolidatedFeedItem => ({
-    id: `thread:${ta.threadId}`, source: 'my_turn', kind: 'thread',
-    occurredAt: ta.lastReplyAt, acknowledged,
-    repoId: repoIdOf(ta.repoFullName), repoFullName: ta.repoFullName,
-    prId: ta.prId, prNumber: ta.prNumber, prTitle: null, prState: null,
-    actorId: ta.lastReplyAuthorId, content: ta.lastReplyBody ?? ta.lastReplyExcerpt ?? null,
-    threadId: ta.threadId, path: ta.path, line: ta.line,
-    reasonTag: null, reviewState: null, githubUrl: ta.githubUrl,
-    mergedById: null, reviewers: null,
-    dismiss: { kind: 'thread', refId: ta.threadId },
-    affectedThreads: null, commitCount: null, changeSummary: null,
-  });
-  const mtClaude = (
-    c: { reviewId: number; prId: number; prNumber: number; prTitle: string; repoFullName: string; githubUrl: string },
-    occurredAt: string,
-    acknowledged: boolean,
-  ): ConsolidatedFeedItem => ({
-    id: `mt:claude_review:${c.reviewId}`, source: 'my_turn', kind: 'claude_review',
-    occurredAt, acknowledged,
-    repoId: repoIdOf(c.repoFullName), repoFullName: c.repoFullName,
-    prId: c.prId, prNumber: c.prNumber, prTitle: c.prTitle, prState: null,
-    actorId: null, content: null, threadId: null, path: null, line: null,
-    reasonTag: null, reviewState: null, githubUrl: c.githubUrl,
-    mergedById: null, reviewers: null,
-    dismiss: { kind: 'claude_review', refId: c.reviewId },
-    affectedThreads: null, commitCount: null, changeSummary: null,
-  });
-
-  // Merge active + acknowledged My Turn items + the activity feed into one flat stream.
-  // `push` dedupes by id so an item that reverted to unseen (active, because its
-  // dismissal was superseded by newer activity) wins over its acknowledged Done copy.
   const items: ConsolidatedFeedItem[] = [];
   const byId = new Map<string, ConsolidatedFeedItem>();
   const push = (it: ConsolidatedFeedItem): void => {
@@ -1875,56 +1851,19 @@ export async function getConsolidatedFeed(
     byId.set(it.id, it);
     items.push(it);
   };
-  // Populated from BOTH active + acknowledged My Turn items so a My Turn representation
-  // suppresses its redundant activity-feed twin (watched PR ↔ pr_opened; awaited thread ↔
-  // its reply's review_comment).
-  const awaitedThreadIds = new Set<number>();
-  const watchedPrIds = new Set<number>();
 
-  // --- My Turn actionables (active = unacknowledged); scoped by repo + member filter,
-  //     and (when excludeBots) dropping bot-authored rows (e.g. a Dependabot PR). ---
-  for (const i of myTurn.awaitingReview)
-    if (inScope(i.repoFullName) && actorOk(i.authorId) && notBot(i.authorId))
-      push(mtReview(i, false));
-  for (const i of myTurn.approvedPrs)
-    if (inScope(i.repoFullName) && actorOk(i.authorId) && notBot(i.authorId))
-      push(mtApproved(i, false));
-  for (const i of myTurn.watchedRepoPrs) {
-    if (!(inScope(i.repoFullName) && actorOk(i.authorId) && notBot(i.authorId))) continue;
-    watchedPrIds.add(i.prId);
-    push(mtWatched(i, false));
-  }
-  for (const c of myTurn.claudeReviewsToAction) {
-    // Claude runs have no member author, so they aren't member- or bot-filtered.
-    if (inScope(c.repoFullName)) push(mtClaude(c, c.finishedAt ?? nowIso, false));
-  }
-  for (const ta of myTurn.threadsAwaiting) {
-    if (!(inScope(ta.repoFullName) && actorOk(ta.lastReplyAuthorId) && notBot(ta.lastReplyAuthorId)))
-      continue;
-    awaitedThreadIds.add(ta.threadId);
-    push(mtThread(ta, false));
-  }
-  // "Your PRs with new activity" is intentionally dropped — its individual comment /
-  // review events already appear in the activity feed below (dedup).
-  //
-  // NOTE: the feed no longer surfaces "acknowledged/done" copies. The seen concept was
-  // removed from the feed UI, so an item handled elsewhere (e.g. a thread marked done in
-  // the PR detail) simply leaves the My Turn set; its underlying activity events still
-  // appear as normal feed rows below.
-
-  // --- activity feed. Drop the events a My Turn row already represents (a watched PR's
-  //     pr_opened; an awaited thread's reply review_comment) — the clearest duplicates. ---
+  // Activity events → one row each, flagged isMyTurn by participation. There is no longer a
+  // synthesized "My Turn" layer (nor its dedup) — the flag on the real event carries it,
+  // so every underlying event is exactly one row.
   for (const f of feed.events) {
-    if (f.type === 'pr_opened' && f.prId != null && watchedPrIds.has(f.prId)) continue;
-    if (f.type === 'review_comment' && f.refId != null && awaitedThreadIds.has(f.refId)) continue;
     // excludeBots: drop bot-authored activity (getFeed doesn't filter bots).
     if (!notBot(f.actorId)) continue;
+    const mine = isMine(f.prId, f.actorId);
     push({
       id: `feed:${f.id}`,
-      source: 'feed',
+      isMyTurn: mine,
       kind: f.type,
       occurredAt: f.occurredAt,
-      acknowledged: false,
       repoId: f.repoId,
       repoFullName: f.repoFullName,
       prId: f.prId,
@@ -1937,13 +1876,12 @@ export async function getConsolidatedFeed(
       threadId: f.type === 'review_comment' ? f.refId : null,
       path: null,
       line: null,
-      reasonTag: null,
+      reasonTag: mine ? myTurnReason(f.prId) : null,
       reviewState: f.reviewState,
       githubUrl:
         f.prNumber != null ? `https://github.com/${f.repoFullName}/pull/${f.prNumber}` : null,
       mergedById: null,
       reviewers: null,
-      dismiss: null,
       affectedThreads: null,
       commitCount: null,
       changeSummary: null,
@@ -1951,13 +1889,18 @@ export async function getConsolidatedFeed(
   }
 
   // Commit-push items (already repo/member/bot-scoped + thread-enriched in the SQL helper).
-  // They're `source:'feed'`, so the sort + cap below treats them like any activity row.
-  for (const it of commitItems) push(it);
+  // Flag them the same way, then append.
+  for (const it of commitItems) {
+    it.isMyTurn = isMine(it.prId, it.actorId);
+    if (it.isMyTurn) it.reasonTag = myTurnReason(it.prId);
+    push(it);
+  }
 
-  // Pure chronological — newest first. Keep all My Turn items; cap activity events.
-  const myTurnRows = items.filter((i) => i.source === 'my_turn');
+  // Pure chronological — newest first. Keep every My Turn item; cap the plain activity rows
+  // so a busy multi-repo account doesn't render thousands of them.
+  const myTurnRows = items.filter((i) => i.isMyTurn);
   const feedRows = items
-    .filter((i) => i.source === 'feed')
+    .filter((i) => !i.isMyTurn)
     .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
     .slice(0, FEED_EVENT_CAP);
   const ordered = [...myTurnRows, ...feedRows].sort((a, b) =>
@@ -2231,7 +2174,7 @@ export async function getCompletedDismissals(
   // whether each Done entry can actually be restored. An entry whose ref is no longer
   // in the matching set (PR merged/closed, thread resolved, Claude run superseded)
   // can't return to the inbox, so the UI shows a static reason instead of "To do".
-  const actionable = await getActionableInboxIds(accountId);
+  const actionable = await getActionableActivityIds(accountId);
   const prClosedReason = (state: PrState): string | null =>
     state === 'merged' ? 'PR merged' : state === 'closed' ? 'PR closed' : null;
 
@@ -2516,7 +2459,7 @@ function summariseNew(n: NewSinceLastViewed): string {
 // the set of open-PR ids that qualify for the "New PRs in watched repos" section
 // (repo watched, opened on/after the watch began, authored by a non-bot human other
 // than you, non-draft). Shared by getMyTurn (which then layers dismissals + dedupe)
-// and getActionableInboxIds (restorability of a Done entry).
+// and getActionableActivityIds (restorability of a Done entry).
 async function getWatchedActionablePrIds(
   accountId: number,
   localUserId: number,
@@ -2564,7 +2507,7 @@ async function getWatchedActionablePrIds(
 // to the inbox iff its ref is still in the matching set here. Reuses the same
 // building blocks getMyTurn does (reviewRequestedFromMe, getWatchedActionablePrIds,
 // getThreadsAwaiting, getUnactionedClaudeReviews) so the two never drift.
-async function getActionableInboxIds(accountId: number): Promise<{
+async function getActionableActivityIds(accountId: number): Promise<{
   reviewRequestPrIds: Set<number>;
   watchedPrIds: Set<number>;
   approvedPrIds: Set<number>;
@@ -3457,7 +3400,7 @@ export async function listClaudeReviewHistory(
   }));
 }
 
-// Repo-oriented Claude-review retrieval for the Inbox single-repo console: ALL runs
+// Repo-oriented Claude-review retrieval for the Activity single-repo console: ALL runs
 // for a repo's PRs, grouped by PR (newest run first within each), PRs ordered by
 // most-recent run desc. Richer than listAllClaudeReviews (which keeps only one
 // latest-succeeded run per PR). IDOR-sensitive id getter: scoped by accountId, and

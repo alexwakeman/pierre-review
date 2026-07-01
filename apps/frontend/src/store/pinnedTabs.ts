@@ -19,54 +19,60 @@ export type PinnedPr = TabMeta;
 // The kinds of persistent tab the main area can show:
 //  - pr-detail: a PR rendered full-screen (PrDetail) over the warm board (today's "pinned PR")
 //  - pr-focus:  a PR's OWN isolated Timeline instance (replaces the old overlay focus mode)
-//  - my-turn:   the My Turn triage set as its OWN isolated Timeline instance
-export type TabKind = 'pr-detail' | 'pr-focus' | 'my-turn';
+export type TabKind = 'pr-detail' | 'pr-focus';
 
 export interface Tab {
-  key: string; // stable: 'pr-detail:123' | 'pr-focus:123' | 'my-turn'
+  key: string; // stable: 'pr-detail:123' | 'pr-focus:123'
   kind: TabKind;
-  prId: number | null; // PR id for pr-detail/pr-focus; null for my-turn
-  meta: TabMeta | null; // label meta for PR tabs; null for my-turn
+  prId: number; // PR id for pr-detail / pr-focus
+  meta: TabMeta | null; // label meta for PR tabs
 }
 
-// Which "tab" the main area is showing: the standard timeline board, the Inbox
+// Which "tab" the main area is showing: the standard timeline board, the Activity
 // triage console, or one of the persistent tabs identified by its `Tab.key`.
 // These are ONE axis — only one renders at a time.
-export type ActiveTab = 'timeline' | 'inbox' | string;
+export type ActiveTab = 'timeline' | 'activity' | string;
 
 // Contract with the Timeline component: the board slot passes this to
 // `<Timeline mode={…}/>`. Absent = today's full shared board.
-export type TimelineMode = { kind: 'isolate'; prId: number } | { kind: 'my-turn' };
+export type TimelineMode = { kind: 'isolate'; prId: number };
 
-export const MY_TURN_KEY = 'my-turn';
 export const prDetailKey = (id: number): string => `pr-detail:${id}`;
 export const prFocusKey = (id: number): string => `pr-focus:${id}`;
 
-/** Parse a Tab.key back into its kind + PR id (null for unknown / my-turn). */
-export function parseTabKey(key: string): { kind: TabKind; prId: number | null } | null {
-  if (key === MY_TURN_KEY) return { kind: 'my-turn', prId: null };
+/** Parse a Tab.key back into its kind + PR id (null for unknown). */
+export function parseTabKey(key: string): { kind: TabKind; prId: number } | null {
   const m = /^(pr-detail|pr-focus):(\d+)$/.exec(key);
   return m ? { kind: m[1] as TabKind, prId: Number(m[2]) } : null;
 }
 
 interface OpenOpts {
-  // Force the Back-to-Inbox history entry. When omitted it is inferred from the
-  // active tab at open time (opening any tab while the Inbox is showing arms it).
-  fromInbox?: boolean;
+  // Force the Back-to-Activity history entry. When omitted it is inferred from the
+  // active tab at open time (opening any tab while the Activity console is showing arms it).
+  fromActivity?: boolean;
+  // The consolidated-feed item id this open was launched from (if any). Stashed so a
+  // browser Back can scroll it into view + flash it on return to the feed.
+  returnItemId?: string | null;
 }
 
 interface TabsState {
-  tabs: Tab[]; // ordered; pr-detail + pr-focus persisted (my-turn is transient)
-  activeTab: ActiveTab; // NOT persisted (fresh load 'timeline'; useUrlState → 'inbox')
-  // True while an Inbox-launched navigation session has ONE pushed {pierreTab} history
-  // entry outstanding, so a browser Back returns to the Inbox (item 4). Deduped: opening
-  // further tabs from the Inbox reuses the single entry rather than stacking orphans.
-  inboxReturnArmed: boolean;
+  tabs: Tab[]; // ordered; persisted
+  activeTab: ActiveTab; // NOT persisted (fresh load 'timeline'; useUrlState → 'activity')
+  // True while an Activity-launched navigation session has ONE pushed {pierreTab} history
+  // entry outstanding, so a browser Back returns to the Activity console. Deduped: opening
+  // further tabs from Activity reuses the single entry rather than stacking orphans.
+  activityReturnArmed: boolean;
+  // The feed item id a browser-Back should scroll-to + flash. Two fields so the flash fires
+  // ONLY on a real Back, never on an ordinary return to Activity (e.g. clicking the Activity
+  // tab chip): `activityReturnItemId` is the PENDING target (set on an Activity-launched
+  // open); `consumeActivityReturn` promotes it into the one-shot `activityFlashItemId` (the
+  // signal the feed view consumes) only when the {pierreTab} entry is actually popped.
+  activityReturnItemId: string | null;
+  activityFlashItemId: string | null;
 
   pin: (meta: TabMeta) => void; // ensure a pr-detail tab, do NOT activate
   openPrDetailTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-detail + activate
   openPrFocusTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-focus + activate
-  openMyTurnTab: (opts?: OpenOpts) => void; // ensure my-turn + activate
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
   closeTab: (key: string) => void; // remove; fall back to 'timeline' if it was active
@@ -74,8 +80,9 @@ interface TabsState {
 
   setActiveTab: (tab: ActiveTab) => void;
   showTimeline: () => void; // idempotent → 'timeline'
-  showInbox: () => void; // idempotent → 'inbox'
-  consumeInboxReturn: () => void; // browser popped our {pierreTab} entry → return to Inbox
+  showActivity: () => void; // idempotent → 'activity'
+  consumeActivityReturn: () => void; // browser popped our {pierreTab} entry → return to Activity
+  clearActivityFlashItem: () => void; // feed flashed the returned item → forget it
   clear: () => void; // sign-out reset
 }
 
@@ -107,8 +114,8 @@ function loadTabs(): Tab[] {
           )
           .map((t): Tab | null => {
             const parsedKey = parseTabKey(t.key as string);
-            // my-turn is transient and never persisted; drop anything unrecognised.
-            if (!parsedKey || parsedKey.kind === 'my-turn') return null;
+            // Drop anything unrecognised (e.g. a legacy transient 'my-turn' key).
+            if (!parsedKey) return null;
             return {
               key: t.key as string,
               kind: parsedKey.kind,
@@ -144,10 +151,9 @@ function loadTabs(): Tab[] {
   return [];
 }
 
-// my-turn is transient → never persisted.
 function persist(tabs: Tab[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs.filter((t) => t.kind !== 'my-turn')));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
   } catch {
     /* quota / private mode — non-fatal, the tabs just won't persist */
   }
@@ -165,18 +171,18 @@ function sameMeta(a: TabMeta, b: TabMeta): boolean {
 }
 
 export const usePinnedTabs = create<TabsState>((set, get) => {
-  // Ensure `tab` exists, activate it, and (if opened from the Inbox) push a single
-  // browser-history entry so Back returns to the Inbox (item 4). Deduped: if an
-  // Inbox-return entry is already outstanding, reuse it instead of stacking a second
+  // Ensure `tab` exists, activate it, and (if opened from Activity) push a single
+  // browser-history entry so Back returns to the Activity console. Deduped: if an
+  // Activity-return entry is already outstanding, reuse it instead of stacking a second
   // (which would leave an orphan that makes a later Back an inert no-op).
   const openTab = (tab: Tab, opts?: OpenOpts): void => {
     const s = get();
-    const fromInbox = opts?.fromInbox ?? s.activeTab === 'inbox';
+    const fromActivity = opts?.fromActivity ?? s.activeTab === 'activity';
     const exists = s.tabs.some((t) => t.key === tab.key);
     const tabs = exists
       ? s.tabs.map((t) => (t.key === tab.key && tab.meta != null ? { ...t, meta: tab.meta } : t))
       : [...s.tabs, tab];
-    if (fromInbox && !s.inboxReturnArmed) {
+    if (fromActivity && !s.activityReturnArmed) {
       try {
         history.pushState({ pierreTab: 1 }, '');
       } catch {
@@ -184,13 +190,22 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       }
     }
     if (!exists || tab.meta != null) persist(tabs);
-    set({ tabs, activeTab: tab.key, inboxReturnArmed: fromInbox || s.inboxReturnArmed });
+    set({
+      tabs,
+      activeTab: tab.key,
+      activityReturnArmed: fromActivity || s.activityReturnArmed,
+      // Remember which feed row launched this (latest wins) so Back can flash it; a
+      // non-feed Activity open (e.g. a digest #N ref) clears any stale target.
+      activityReturnItemId: fromActivity ? (opts?.returnItemId ?? null) : s.activityReturnItemId,
+    });
   };
 
   return {
     tabs: loadTabs(),
     activeTab: 'timeline',
-    inboxReturnArmed: false,
+    activityReturnArmed: false,
+    activityReturnItemId: null,
+    activityFlashItemId: null,
 
     pin: (meta) =>
       set((s) => {
@@ -205,8 +220,6 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       openTab({ key: prDetailKey(meta.id), kind: 'pr-detail', prId: meta.id, meta }, opts),
     openPrFocusTab: (meta, opts) =>
       openTab({ key: prFocusKey(meta.id), kind: 'pr-focus', prId: meta.id, meta }, opts),
-    openMyTurnTab: (opts) =>
-      openTab({ key: MY_TURN_KEY, kind: 'my-turn', prId: null, meta: null }, opts),
 
     syncMeta: (meta) =>
       set((s) => {
@@ -249,13 +262,26 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     showTimeline: () => {
       if (get().activeTab !== 'timeline') set({ activeTab: 'timeline' });
     },
-    showInbox: () => {
-      if (get().activeTab !== 'inbox') set({ activeTab: 'inbox' });
+    showActivity: () => {
+      if (get().activeTab !== 'activity') set({ activeTab: 'activity' });
     },
-    // The browser popped the {pierreTab} entry we pushed on an Inbox-launched open →
-    // return to the Inbox and disarm. A no-op if no entry was outstanding.
-    consumeInboxReturn: () => {
-      if (get().inboxReturnArmed) set({ activeTab: 'inbox', inboxReturnArmed: false });
+    // The browser popped the {pierreTab} entry we pushed on an Activity-launched open →
+    // return to the Activity console and disarm. A no-op if no entry was outstanding.
+    // PROMOTE the pending return-item into the one-shot flash signal (and clear the pending
+    // one) so the feed flashes it EXACTLY on this Back — never on an ordinary return to
+    // Activity (e.g. clicking the Activity tab chip, which doesn't call this).
+    consumeActivityReturn: () => {
+      const s = get();
+      if (!s.activityReturnArmed) return;
+      set({
+        activeTab: 'activity',
+        activityReturnArmed: false,
+        activityFlashItemId: s.activityReturnItemId,
+        activityReturnItemId: null,
+      });
+    },
+    clearActivityFlashItem: () => {
+      if (get().activityFlashItemId != null) set({ activityFlashItemId: null });
     },
 
     clear: () => {
@@ -265,7 +291,13 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       } catch {
         /* non-fatal */
       }
-      set({ tabs: [], activeTab: 'timeline', inboxReturnArmed: false });
+      set({
+        tabs: [],
+        activeTab: 'timeline',
+        activityReturnArmed: false,
+        activityReturnItemId: null,
+        activityFlashItemId: null,
+      });
     },
   };
 });

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMe } from '../hooks/useTriage.js';
-import { MY_TURN_KEY, usePinnedTabs } from '../store/pinnedTabs.js';
+import { usePinnedTabs } from '../store/pinnedTabs.js';
+import { useFilters } from '../store/filters.js';
 import { relativeTime } from '../lib/ui.js';
 
 // A dismissible "welcome back" digest shown once per page load when you've been away
@@ -41,7 +42,9 @@ export function WelcomeBackBanner(): JSX.Element | null {
   const prev = readPrevVisitOnce();
   const { data: me } = useMe();
   const activeTab = usePinnedTabs((s) => s.activeTab);
-  const openMyTurnTab = usePinnedTabs((s) => s.openMyTurnTab);
+  const showActivity = usePinnedTabs((s) => s.showActivity);
+  const setActivityRepo = useFilters((s) => s.setActivityRepo);
+  const setFeedMyTurnOnly = useFilters((s) => s.setFeedMyTurnOnly);
   const [dismissed, setDismissed] = useState(false);
 
   // Heartbeat the last-active timestamp. Runs regardless of whether the banner shows;
@@ -63,8 +66,8 @@ export function WelcomeBackBanner(): JSX.Element | null {
   }, []);
 
   if (dismissed || prev == null || !me?.user) return null;
-  // Already looking at the My Turn tab → no nag.
-  if (activeTab === MY_TURN_KEY) return null;
+  // Already in the Activity console → no nag.
+  if (activeTab === 'activity') return null;
   const gap = Date.now() - Date.parse(prev);
   if (Number.isNaN(gap) || gap < MIN_GAP_MS) return null;
 
@@ -94,10 +97,12 @@ export function WelcomeBackBanner(): JSX.Element | null {
       `${c.claudeReviewsToAction} Claude review${c.claudeReviewsToAction === 1 ? '' : 's'} to action`,
     );
 
-  // Open the My Turn tab (its own isolated Timeline). The whole digest is clickable,
-  // plus the button.
+  // Open the Activity console's Feed, filtered to My Turn (the yellow-bordered items that
+  // need you). The whole digest is clickable, plus the button.
   const showMyTurn = (): void => {
-    openMyTurnTab();
+    setActivityRepo('feed');
+    setFeedMyTurnOnly(true);
+    showActivity();
     setDismissed(true);
   };
 

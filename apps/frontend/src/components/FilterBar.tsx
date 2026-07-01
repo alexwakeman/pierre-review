@@ -140,7 +140,7 @@ export function FilterBar(): JSX.Element {
     },
   });
 
-  // Toggle "Watch for inbox" on a repo. Inbox-only (doesn't touch timeline
+  // Toggle "Watch for inbox" on a repo. Activity-only (doesn't touch timeline
   // visibility). Optimistically flip the flag in the shared ['repos'] cache so the
   // toggle reflects instantly; invalidate the inbox feeds so the watched section +
   // counts refresh.

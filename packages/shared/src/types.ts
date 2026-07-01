@@ -297,7 +297,7 @@ export interface MyTurnCounts {
 // plugin populates at boot. All-false in OSS mode (plugin absent). Flows to the
 // frontend through /api/me exactly like claudeReviewEnabled.
 export interface ProCapabilities {
-  inboxDigest: boolean; // per-repo LLM headlines digest (Inbox)
+  activityDigest: boolean; // per-repo LLM headlines digest (Activity)
   reviewMemory: boolean; // Claude Review learnings
 }
 
@@ -1430,11 +1430,11 @@ export interface PrFilesResponse {
   truncated: boolean;
 }
 
-// ---- Inbox tab (Workstream 1; CORE, always-on, no AI) ----
+// ---- Activity tab (Workstream 1; CORE, always-on, no AI) ----
 
-// Per-repo current-state stats for an Inbox repo card. A RepoInsights subset
+// Per-repo current-state stats for an Activity repo card. A RepoInsights subset
 // (reuses getInsights internals) plus the oldest still-unreviewed open PR.
-export interface InboxRepoStats {
+export interface ActivityRepoStats {
   openPrs: number;
   draftPrs: number;
   mergedLast7d: number;
@@ -1449,10 +1449,10 @@ export interface InboxRepoStats {
   } | null;
 }
 
-export interface InboxRepo {
+export interface ActivityRepo {
   repoId: number;
   repoFullName: string; // `${owner}/${name}`
-  stats: InboxRepoStats;
+  stats: ActivityRepoStats;
   // Sum of buildThreadCounts over the repo's open-PR ids (the one new aggregation).
   threadTotals: ThreadStateCounts;
   maintainerIds: number[]; // from getMergers
@@ -1461,8 +1461,8 @@ export interface InboxRepo {
   prs: TimelinePr[]; // caller groups by authorId
 }
 
-export interface InboxResponse {
-  repos: InboxRepo[];
+export interface ActivityResponse {
+  repos: ActivityRepo[];
   generatedAt: string; // ISO-8601
 }
 
@@ -1519,43 +1519,18 @@ export interface RepoDigestsResponse {
   budgetReached?: boolean;
 }
 
-// ---- Pro cross-repo Feed digest (the AI panel atop the Inbox "Feed" entry) ----
-// One bulleted change-report per watched repo, across ALL repos, chained from the
-// prior digest. Same shape/clickable-PR-ref pattern as the per-repo digest. Pro-only
-// (gated on the inboxDigest capability); the consolidated Feed list below it is core.
+// NOTE: the old cross-repo "Feed digest" (FeedDigest*) was removed. The Activity "Feed"
+// entry now renders the COLLECTION of per-repo RepoDigests directly (scoped to the
+// watched repos), each in a collapsible card — one source of truth, no aggregate LLM pass.
 
-export interface FeedDigestRepoSection {
-  repoId: number;
-  repoFullName: string;
-  // Markdown bullets (one "- …" per line); may contain "#123" PR tokens.
-  markdown: string;
-  prRefs: DigestPrRef[];
-}
-
-export interface FeedDigest {
-  sections: FeedDigestRepoSection[];
-  model: string;
-  generatedAt: string; // ISO-8601
-  costUsd: number | null;
-  stale: boolean;
-}
-
-export interface FeedDigestResponse {
-  enabled: boolean;
-  model: string;
-  // null until first generated for this account.
-  digest: FeedDigest | null;
-  generatedAt: string; // ISO-8601
-  budgetReached?: boolean;
-}
-
-// ---- Consolidated Feed (CORE, no AI; the Inbox "Feed" entry's main list) ----
-// A single relevance-ranked stream across all repos that merges "My Turn" actionables
-// and activity-feed events (opens / merges / reviews / comments, plus commit pushes that
-// addressed a review thread), deduped and ordered purely chronologically (newest first).
-// Click nav: 'my_turn' → My Turn Focus (the inbox-scoped timeline); 'feed' → PR Focus
-// (isolate that one PR on the timeline).
-export type FeedItemSource = 'my_turn' | 'feed';
+// ---- Consolidated Feed (CORE, no AI; the Activity "Feed" entry's main list) ----
+// One flat, purely-chronological (newest-first) stream of real activity events (opens /
+// merges / reviews / comments, plus commit pushes that addressed a review thread). Each
+// item carries an `isMyTurn` flag — true when the event is on a PR the viewer participates
+// in (authored / requested reviewer / previously reviewed or commented) AND the actor is
+// someone other than the viewer. That flag replaces the old two-source (my_turn vs feed)
+// synthesis + dedup, so there is now exactly ONE row per underlying event. Click nav: any
+// item → the PR detail tab (its Show/Focus links then drive the timeline).
 
 // One review thread that a feed item's change likely addressed — a commit touched the
 // thread's file AFTER its last comment, so the thread flipped to 'likely_addressed'.
@@ -1573,18 +1548,15 @@ export interface FeedAffectedThread {
 }
 
 export interface ConsolidatedFeedItem {
-  // Stable unique id, e.g. "mt:review_request:99", "feed:1234".
+  // Stable unique id, e.g. "feed:1234", "feed:commitrun:99:1234".
   id: string;
-  source: FeedItemSource;
-  // Finer-grained kind for row chrome: a my-turn section key
-  // ('awaiting_review' | 'approved' | 'watched_repo_pr' | 'claude_review' | 'thread'),
-  // or an activity EventType.
+  // True when this event is "my turn": it's on a PR the viewer participates in and the
+  // actor isn't the viewer. Drives the yellow card + the "My Turn only" filter.
+  isMyTurn: boolean;
+  // An activity EventType ('pr_opened' | 'pr_merged' | 'pr_closed' | 'review_submitted' |
+  // 'review_comment' | 'pr_comment' | 'commit_pushed').
   kind: string;
   occurredAt: string; // ISO-8601 — the item's relevant timestamp (sort + display)
-  // A "My Turn" item the user marked seen/handled. It STAYS in the feed (rendered
-  // muted); reverts to false when newer activity supersedes the acknowledgement. Always
-  // false for pure activity events.
-  acknowledged: boolean;
   repoId: number;
   repoFullName: string;
   prId: number | null;
@@ -1599,7 +1571,9 @@ export interface ConsolidatedFeedItem {
   threadId: number | null;
   path: string | null;
   line: number | null;
-  // Row-chrome extras:
+  // A coarse reason for the My Turn badge ('awaiting_your_review' when a review is
+  // requested of you; 'your_pr_new_comments' for activity on a PR you authored); null for
+  // non-My-Turn rows.
   reasonTag: ReasonTag | null;
   reviewState: ReviewState | null;
   githubUrl: string | null;
@@ -1610,9 +1584,6 @@ export interface ConsolidatedFeedItem {
   // state (for merge/review-credit cards); null when not loaded / no reviews. User ids
   // are backfilled into `users`.
   reviewers: { userId: number; state: ReviewState }[] | null;
-  // Dismissal coordinates for a "My Turn" item (the seen/unseen toggle); null for pure
-  // activity events. Mirrors MyTurnDismissBody so the existing dismiss plumbing is reused.
-  dismiss: { kind: MyTurnDismissKind; refId: number } | null;
   // Context — review threads this item's change likely addressed. Populated for
   // 'commit_pushed' feed items (a push that touched a thread's file after its last
   // comment). Rendered inline so the reader sees WHAT changed. null/empty otherwise.

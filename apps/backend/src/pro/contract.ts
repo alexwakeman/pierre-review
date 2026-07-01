@@ -13,7 +13,7 @@ import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
 // behind this one versioned surface.
 
 export interface ProCapabilities {
-  inboxDigest: boolean; // WS2 per-repo LLM headlines digest
+  activityDigest: boolean; // WS2 per-repo LLM headlines digest
   reviewMemory: boolean; // WS3 Claude Review learnings
 }
 
@@ -29,7 +29,7 @@ export interface ProHostQueries {
     accountId: number;
     repoIds?: number[] | null;
   }): Promise<unknown>;
-  getInbox(accountId: number, repoIds?: number[] | null): Promise<unknown>; // WS2 aggregate (lands in a later phase)
+  getActivity(accountId: number, repoIds?: number[] | null): Promise<unknown>; // WS2 aggregate (lands in a later phase)
 }
 
 export interface ProContext {
@@ -71,7 +71,7 @@ export interface ProPlugin {
 // The live capability singleton, mirrored to the frontend via /api/me exactly
 // like claudeReviewEnabled. All-false in OSS mode (no plugin ever calls the
 // setter).
-const EMPTY: ProCapabilities = { inboxDigest: false, reviewMemory: false };
+const EMPTY: ProCapabilities = { activityDigest: false, reviewMemory: false };
 let active: ProCapabilities = EMPTY;
 export function setProCapabilities(c: ProCapabilities): void {
   active = c;

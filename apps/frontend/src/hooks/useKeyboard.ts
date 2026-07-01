@@ -9,9 +9,9 @@ function isTypingTarget(el: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
 }
 
-// Global shortcuts: `/` focus filter, `j`/`k` cycle PRs (board only), `m` open the
-// My Turn tab, `i` open Insights, `esc` leave the current tab/overlay → the board (or
-// clear the selection when already on the board).
+// Global shortcuts: `/` focus filter, `j`/`k` cycle PRs (board only), `i` open Insights,
+// `esc` leave the current tab/overlay → the board (or clear the selection when already on
+// the board).
 export function useKeyboard(): void {
   const { data } = useTimeline();
 
@@ -26,8 +26,8 @@ export function useKeyboard(): void {
         if (isTypingTarget(e.target)) {
           (e.target as HTMLElement).blur();
         } else if (!onBoard) {
-          // Any tab/overlay (Inbox, pr-detail, pr-focus, my-turn) → the plain board.
-          // The tab stays open; this just re-shows the shared timeline.
+          // Any tab/overlay (Activity, pr-detail, pr-focus) → the plain board. The tab
+          // stays open; this just re-shows the shared timeline.
           tabsApi.showTimeline();
         } else {
           clearSelection();
@@ -42,12 +42,6 @@ export function useKeyboard(): void {
         return;
       }
 
-      // Open (or switch to) the My Turn tab — its own isolated triage timeline.
-      if (e.key === 'm') {
-        tabsApi.openMyTurnTab();
-        return;
-      }
-
       // Open the Insights panel.
       if (e.key === 'i') {
         setInsightsOpen(true);
@@ -55,7 +49,7 @@ export function useKeyboard(): void {
       }
 
       // j/k cycle the board's PRs only when the shared board is showing (they mutate
-      // its selection; an isolated focus/my-turn tab owns its own board).
+      // its selection; an isolated focus tab owns its own board).
       if (!onBoard) return;
       if (e.key === 'j' || e.key === 'k') {
         const prs = [...(data?.prs ?? [])].sort((a, b) =>

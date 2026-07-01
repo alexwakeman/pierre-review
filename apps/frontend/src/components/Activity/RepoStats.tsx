@@ -1,10 +1,10 @@
-import type { InboxRepoStats } from '@pierre-review/shared';
+import type { ActivityRepoStats } from '@pierre-review/shared';
 import { relativeTime } from '../../lib/ui.js';
 
 // The one-line repo stat summary (open / draft / merged-7d / stalled / TTFR / oldest
 // unreviewed). Rendered by the single-repo RepoFeedHeader. (Formerly also used by an
-// all-repos RepoSection card, which was removed with the "All repos" Inbox entry.)
-export function RepoStatsLine({ stats: s }: { stats: InboxRepoStats }): JSX.Element {
+// all-repos RepoSection card, which was removed with the "All repos" Activity entry.)
+export function RepoStatsLine({ stats: s }: { stats: ActivityRepoStats }): JSX.Element {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
       <span>

@@ -149,20 +149,20 @@ check(
 );
 check("getFeed(A) excludes B's events", !feedA.events.some((e) => e.repoId === B.repoId));
 
-// Inbox aggregate: each account's inbox must contain only its own repos.
-const inboxB = await q.getInbox(2, null);
+// Activity aggregate: each account's activity console must contain only its own repos.
+const activityB = await q.getActivity(2, null);
 check(
-  "getInbox(B) returns only B's repo",
-  inboxB.repos.length === 1 && inboxB.repos[0]!.repoId === B.repoId,
+  "getActivity(B) returns only B's repo",
+  activityB.repos.length === 1 && activityB.repos[0]!.repoId === B.repoId,
 );
 check(
-  "getInbox(B) excludes A's repo",
-  !inboxB.repos.some((r) => r.repoId === A.repoId),
+  "getActivity(B) excludes A's repo",
+  !activityB.repos.some((r) => r.repoId === A.repoId),
 );
-const inboxCross = await q.getInbox(2, [A.repoId]);
+const activityCross = await q.getActivity(2, [A.repoId]);
 check(
-  "getInbox(B, repoIds=[A.repo]) leaks nothing",
-  !inboxCross.repos.some((r) => r.repoId === A.repoId),
+  "getActivity(B, repoIds=[A.repo]) leaks nothing",
+  !activityCross.repos.some((r) => r.repoId === A.repoId),
 );
 
 // Consolidated Feed: A's stream must reference only A's repos/PRs (it composes

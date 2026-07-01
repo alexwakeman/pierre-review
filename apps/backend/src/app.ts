@@ -22,7 +22,7 @@ import { openPrsRoutes } from './api/routes/open-prs.js';
 import { feedRoutes } from './api/routes/feed.js';
 import { mergersRoutes } from './api/routes/mergers.js';
 import { insightsRoutes } from './api/routes/insights.js';
-import { inboxRoutes } from './api/routes/inbox.js';
+import { activityRoutes } from './api/routes/activity.js';
 import { claudeReviewRoutes } from './api/routes/claude-review.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -150,7 +150,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(feedRoutes);
   await app.register(mergersRoutes);
   await app.register(insightsRoutes);
-  await app.register(inboxRoutes);
+  await app.register(activityRoutes);
   // Claude Review is local-only + opt-in. Only register its routes when enabled,
   // so the clone-manager / gh-CLI dependency is unreachable in cloud mode.
   if (config.claudeReviewEnabled) await app.register(claudeReviewRoutes);

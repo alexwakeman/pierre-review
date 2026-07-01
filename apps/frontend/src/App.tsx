@@ -4,7 +4,7 @@ import { OpenPrsStrip } from './components/OpenPrsStrip/index.js';
 import { PinnedTabsBar } from './components/PinnedTabsBar.js';
 import { PrDetail } from './components/PrDetail.js';
 import { Timeline } from './components/Timeline/index.js';
-import { InboxView } from './components/Inbox/index.js';
+import { ActivityView } from './components/Activity/index.js';
 import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
@@ -89,32 +89,31 @@ export default function App(): JSX.Element {
   // Item 7: the detail pane exists only once a PR is selected on the board; no
   // selection → the Timeline takes the full height.
   const selectedPrId = useFilters((s) => s.selectedPrId);
+  const selectedThreadId = useFilters((s) => s.selectedThreadId);
 
-  // The main area is ONE axis (`activeTab`): the shared board, the Inbox, or one of
-  // the persistent tabs (pr-detail / pr-focus / my-turn). Exactly one <Timeline> is
-  // ever mounted — the "board slot" below — whose `mode` is derived from the active
-  // tab. pr-detail + Inbox are overlays OVER the warm full board; pr-focus / my-turn
-  // REPLACE the board slot with their own isolated Timeline instance (keyed remount).
+  // The main area is ONE axis (`activeTab`): the shared board, the Activity console, or
+  // one of the persistent tabs (pr-detail / pr-focus). Exactly one <Timeline> is ever
+  // mounted — the "board slot" below — whose `mode` is derived from the active tab.
+  // pr-detail + Activity are overlays OVER the warm full board; pr-focus REPLACES the
+  // board slot with its own isolated Timeline instance (keyed remount).
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const tabs = usePinnedTabs((s) => s.tabs);
   const activeTabObj =
-    activeTab !== 'timeline' && activeTab !== 'inbox'
+    activeTab !== 'timeline' && activeTab !== 'activity'
       ? tabs.find((t) => t.key === activeTab) ?? null // stale/closed key → full board
       : null;
-  const inboxActive = activeTab === 'inbox';
+  const inboxActive = activeTab === 'activity';
   const prDetailId = activeTabObj?.kind === 'pr-detail' ? activeTabObj.prId : null;
   const boardMode: TimelineMode | null =
-    activeTabObj?.kind === 'pr-focus' && activeTabObj.prId != null
+    activeTabObj?.kind === 'pr-focus'
       ? { kind: 'isolate', prId: activeTabObj.prId }
-      : activeTabObj?.kind === 'my-turn'
-        ? { kind: 'my-turn' }
-        : null; // full board
-  // A full-main overlay (a pr-detail PR or the Inbox) covers the warm full board.
-  // Drives the `inert` a11y treatment. pr-focus / my-turn are NOT overlays — they
-  // replace the board slot, so they don't set this.
+      : null; // full board
+  // A full-main overlay (a pr-detail PR or the Activity console) covers the warm full
+  // board. Drives the `inert` a11y treatment. pr-focus is NOT an overlay — it replaces
+  // the board slot, so it doesn't set this.
   const overlayActive = prDetailId != null || inboxActive;
-  // The detail pane is shown at the bottom of any board-slot Timeline (shared,
-  // pr-focus, or my-turn) once a PR is selected there.
+  // The detail pane is shown at the bottom of any board-slot Timeline (shared or
+  // pr-focus) once a PR is selected there.
   const paneVisible = selectedPrId != null && !overlayActive;
 
   // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
@@ -139,13 +138,13 @@ export default function App(): JSX.Element {
     }
   }, [overlayActive]);
 
-  // Item 4: the single browser-Back handler. Opening a tab from the Inbox pushes one
+  // Item 4: the single browser-Back handler. Opening a tab from the Activity pushes one
   // {pierreTab} history entry (see store/pinnedTabs.ts openTab). {pierreTab} is now the
   // ONLY pushState in the app, so any popstate while armed means the browser popped that
-  // entry → return to the Inbox. Mounted once; reads only our own store, so it survives
+  // entry → return to the Activity. Mounted once; reads only our own store, so it survives
   // every tab remount.
   useEffect(() => {
-    const onPop = (): void => usePinnedTabs.getState().consumeInboxReturn();
+    const onPop = (): void => usePinnedTabs.getState().consumeActivityReturn();
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -408,18 +407,16 @@ export default function App(): JSX.Element {
       <OpenPrsStrip />
       <PinnedTabsBar />
 
-      {/* `relative` anchors the full-main overlays (pr-detail / Inbox) below. */}
+      {/* `relative` anchors the full-main overlays (pr-detail / Activity) below. */}
       <main className="relative flex min-h-0 flex-1 flex-col">
         {/* The one board-slot Timeline. `mode` absent = the shared board; an isolate
-            mode = a PR's own timeline; my-turn = the triage board — each a keyed
-            remount so vis tears down cleanly (never reconfigured in place). */}
+            mode = a PR's own timeline — each a keyed remount so vis tears down cleanly
+            (never reconfigured in place). */}
         <section ref={timelineSectionRef} className="min-h-0 flex-1 overflow-hidden">
           {boardMode == null ? (
             <Timeline key="board" />
-          ) : boardMode.kind === 'isolate' ? (
-            <Timeline key={`focus:${boardMode.prId}`} mode={boardMode} />
           ) : (
-            <Timeline key="my-turn" mode={boardMode} />
+            <Timeline key={`focus:${boardMode.prId}`} mode={boardMode} />
           )}
         </section>
 
@@ -455,19 +452,25 @@ export default function App(): JSX.Element {
             data-testid="pinned-pr-overlay"
             className="absolute inset-0 z-20 bg-white dark:bg-gray-950"
           >
-            <PrDetail key={prDetailId} prId={prDetailId} selectedThreadId={null} />
+            <PrDetail
+              key={prDetailId}
+              prId={prDetailId}
+              // A feed thread click opens this tab AND selects the thread — deep-link the
+              // Threads tab to it (only when the selection is for THIS PR).
+              selectedThreadId={selectedPrId === prDetailId ? selectedThreadId : null}
+            />
           </div>
         )}
 
-        {/* The Inbox triage console — a sibling full-main overlay over the board (which
+        {/* The Activity triage console — a sibling full-main overlay over the board (which
             stays mounted underneath, like the pr-detail overlay). Never co-renders with
             a pr-detail PR. */}
         {inboxActive && (
           <div
-            data-testid="inbox-overlay"
+            data-testid="activity-overlay"
             className="absolute inset-0 z-20 overflow-hidden bg-white dark:bg-gray-950"
           >
-            <InboxView />
+            <ActivityView />
           </div>
         )}
       </main>

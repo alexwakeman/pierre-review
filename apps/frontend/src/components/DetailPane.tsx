@@ -6,7 +6,7 @@ import { PrDetail } from './PrDetail.js';
 // The bottom pane's content:
 //  • a PR is selected → its detail (PrDetail)
 //  • else             → a hint to pick a PR
-// The old My Turn / Feed panels are gone: that state-of-play now lives in the Inbox
+// The old My Turn / Feed panels are gone: that state-of-play now lives in the Activity
 // tab's consolidated Feed, so the detail pane only opens when you click a PR.
 export function DetailPane(): JSX.Element {
   const selectedPrId = useFilters((s) => s.selectedPrId);
@@ -55,7 +55,7 @@ export function DetailPane(): JSX.Element {
       ) : (
         <div className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-400">
           Select a PR on the timeline to see its details — your relevance-ranked state
-          of play lives in the Inbox.
+          of play lives in the Activity.
         </div>
       )}
     </div>

@@ -8,7 +8,7 @@ function digestSearch(repoIds: number[] | null): string {
 }
 
 // Bulk per-repo digests for the watched repos. Only fetched when `enabled`
-// (pro.inboxDigest) — absent the @pierre/pro plugin the route 404s. Cached snapshot;
+// (pro.activityDigest) — absent the @pierre/pro plugin the route 404s. Cached snapshot;
 // regeneration is explicit (the refresh mutation / per-banner regenerate).
 export function useRepoDigests(repoIds: number[] | null, enabled: boolean) {
   const search = digestSearch(repoIds);
@@ -31,17 +31,28 @@ export function useRepoDigest(repoId: number | null, enabled: boolean) {
   });
 }
 
-// Trigger (re)generation of one or more repos' digests, then invalidate so the
-// banner refetches the fresh summary. Pass a repo id to regenerate just that repo.
+// Trigger (re)generation of one or more repos' digests, then invalidate so the banners
+// refetch the fresh summaries. Pass a single repo id to regenerate just that repo, or an
+// array to regenerate a set (the Feed collection's "Regenerate all" over the watched repos);
+// omit to let the backend pick (its watched-only default).
 export function useRefreshRepoDigests() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (repoId?: number) =>
-      api.refreshRepoDigests(repoId != null ? `repoIds=${repoId}` : undefined),
-    onSuccess: (_data, repoId) => {
-      if (repoId != null) {
-        void qc.invalidateQueries({ queryKey: ['repo-digest', repoId] });
-      }
+    mutationFn: (arg?: number | number[]) => {
+      const search =
+        arg == null
+          ? undefined
+          : Array.isArray(arg)
+            ? arg.length > 0
+              ? `repoIds=${arg.join(',')}`
+              : undefined
+            : `repoIds=${arg}`;
+      return api.refreshRepoDigests(search);
+    },
+    onSuccess: (_data, arg) => {
+      if (typeof arg === 'number') void qc.invalidateQueries({ queryKey: ['repo-digest', arg] });
+      // A bulk/unscoped refresh may have touched any repo — invalidate all single caches.
+      else void qc.invalidateQueries({ queryKey: ['repo-digest'] });
       void qc.invalidateQueries({ queryKey: ['repo-digests'] });
     },
   });

@@ -143,16 +143,16 @@ pierre-review/
 │  │  │  ├─ pro/                open-core seam (no premium logic): contract.ts (ProContext/ProPlugin + capability singleton),
 │  │  │  │                      bind.ts (guarded runtime import of @pierre/pro), migrate.ts (plugin-owned dual-dialect migrator)
 │  │  │  └─ api/
-│  │  │     ├─ routes/          one file per resource (timeline, prs, repos, users, me, threads, inbox, claude-review, auth[cloud], …)
+│  │  │     ├─ routes/          one file per resource (timeline, prs, repos, users, me, threads, activity, claude-review, auth[cloud], …)
 │  │  │     └─ plugins/         error-handler (notFoundHandler / SPA+landing router), auth (context + session + gate)
 │  │  └─ data/                 the local SQLite DB (gitignored)
 │  ├─ frontend/                @pierre-review/frontend — the timeline SPA (base `/app/`)
 │  │  └─ src/
-│  │     ├─ App.tsx            useMe() 401 → SignInGate; FilterBar / OpenPrsStrip / PinnedTabsBar (Inbox|Timeline + dynamic tabs) / Timeline / DetailPane / Inbox+pinned overlays
-│  │     ├─ store/filters.ts   Zustand: all filter + selection + timeline-hint state (+ transient inboxRepoId/inboxThreadFilter)
-│  │     ├─ hooks/             useUrlState, useTimeline, usePr, useTriage, useMe (+ useProCapabilities), useInbox, useReviewLearnings, …
+│  │     ├─ App.tsx            useMe() 401 → SignInGate; FilterBar / OpenPrsStrip / PinnedTabsBar (Activity|Timeline + dynamic tabs) / Timeline / DetailPane / Activity+pinned overlays
+│  │     ├─ store/filters.ts   Zustand: all filter + selection + timeline-hint state (+ transient activityRepoId/activityThreadFilter)
+│  │     ├─ hooks/             useUrlState, useTimeline, usePr, useTriage, useMe (+ useProCapabilities), useActivity, useReviewLearnings, …
 │  │     ├─ api/client.ts      typed fetch wrapper (credentialed; throws ApiError)
-│  │     ├─ components/        Timeline/, Inbox/ (rail + FeedView + digest panels), PrDetail, ChecksTab, ThreadList/, ThreadView/, PinnedTabsBar, …
+│  │     ├─ components/        Timeline/, Activity/ (rail + FeedView + open-PR list + collapsible digest cards), PrDetail, ChecksTab, ThreadList/, ThreadView/, PinnedTabsBar, …
 │  │     └─ lib/ui.ts          shared UI metadata (state colors/labels/shapes) + helpers
 │  └─ landing/                 @pierre-review/landing — public marketing page (cloud, served at `/`); no shared runtime code
 └─ packages/
@@ -331,11 +331,11 @@ file maps to a `client.ts` method.
 | `POST /api/repos/:id/sync?full=true` | trigger sync → `202 {status:'started'}`, or `409` if already running |
 | `GET /api/users` (+ isBot updates) | user list / bot flagging |
 | `GET /api/mergers` | per-repo merge-rights map (who's merged there) → the maintainer shield |
-| `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{inboxDigest,reviewMemory}`; cloud: 401 signed out) |
-| `GET /api/inbox?repoIds&userIds` | **Inbox tab** (core, no AI): per repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getInbox`; scoped by the FilterBar repo + member selection (see Inbox) |
-| `GET /api/inbox/feed?repoIds&userIds&limit&offset&excludeBots` | **Consolidated Feed** (core, no AI; the Inbox "Feed" entry): one flat, chronological (newest-first) stream of TWO item sources — **My Turn** actionables + the **activity** feed — deduped, scoped by the FilterBar repos/members (`getConsolidatedFeed`). Activity now also includes **commit-push items that ADDRESSED a review thread** (only those; coalesced per author/PR into runs, carrying the affected threads inline via `affectedThreads`/`commitCount`/`changeSummary` — plain pushes stay excluded). `excludeBots=true` drops bot-authored My Turn + activity items (Claude-review items are exempt — no member author). **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, generatedAt}` where `users` are only those the page references. No "seen"/acknowledged concept (removed with the feed's Done control). |
+| `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{activityDigest,reviewMemory}`; cloud: 401 signed out) |
+| `GET /api/activity?repoIds&userIds` | **Activity tab** (core, no AI): per repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getActivity`; scoped by the FilterBar repo + member selection (see Activity) |
+| `GET /api/activity/feed?repoIds&userIds&limit&offset&excludeBots` | **Consolidated Feed** (core, no AI; the Activity "Feed" entry): ONE flat, chronological (newest-first) stream of REAL activity events (opens / merges / reviews / comments, plus **commit-push items that ADDRESSED a review thread** — coalesced per author/PR into runs, affected threads inline via `affectedThreads`/`commitCount`/`changeSummary`; plain pushes excluded). Each item carries **`isMyTurn`** (participation: you authored the PR / are a requested reviewer / previously reviewed-or-commented, AND the actor isn't you) — that flag REPLACES the old two-source (`my_turn` vs `feed`) synthesis + dedup, so there's exactly one row per event (`getConsolidatedFeed` + `getParticipatingPrIds`). `isMyTurn` rows are uncapped; plain activity is capped (`FEED_EVENT_CAP`). `excludeBots=true` drops bot-authored activity. **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, generatedAt}`. No "seen"/acknowledged concept. |
 | `GET /api/repos/:id/claude-reviews` | repo-scoped Claude-review history (retrieval only; `enabled:false` when the flag is off) → `{prs:[{runs[]}]}` |
-| `GET·POST /api/pro/inbox/digests*` · `GET·POST /api/pro/feed/digest*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest + the cross-repo Feed digest (aggregates the per-repo digests; no new table) + review-memory data. See "Open-core Pro plugin" |
+| `GET·POST /api/pro/activity/digests*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest (the Activity Feed renders the COLLECTION of these, scoped to WATCHED repos — no separate cross-repo route/pass) + review-memory data. See "Open-core Pro plugin" |
 | `GET /api/auth/login` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub-App OAuth: authorize / exchange+upsert+session→`/app` / clear session |
 | `GET /api/prs/:id/claude-review` | latest run + findings + history + auth status + `enabled` |
 | `POST /api/prs/:id/claude-review {model}` | start a run → `202 {reviewId}`; `400` no-auth/no-head, `409` busy, `404` disabled |
@@ -368,10 +368,11 @@ Three layers, deliberately separated:
    timeline hints (`timelineFocusPr/At/Event`, `timelineCenterAt`), and the `feedMyTurnOnly`
    feed filter. (The old overlay-focus signals `focusActive`/`myTurnOnly`/`timelineIsolate`/
    `exitFocusSignal` were **removed** — focus is now a tab, see below.)
-3. **Tab state** → `store/pinnedTabs.ts` (`usePinnedTabs`): `ActiveTab = 'timeline' | 'inbox'
-   | <Tab.key>`; a `Tab{key,kind:'pr-detail'|'pr-focus'|'my-turn'}` list. `openPrDetailTab` /
-   `openPrFocusTab` / `openMyTurnTab` / `closeTab`. Exactly one board mounts at a time (App
-   keys the board slot; see "focus tabs").
+3. **Tab state** → `store/pinnedTabs.ts` (`usePinnedTabs`): `ActiveTab = 'timeline' | 'activity'
+   | <Tab.key>`; a `Tab{key,kind:'pr-detail'|'pr-focus'}` list. `openPrDetailTab` /
+   `openPrFocusTab` / `closeTab`. Exactly one board mounts at a time (App keys the board slot;
+   see "focus tabs"). (The old My-Turn tab kind + `openMyTurnTab` + the `m` key were removed —
+   situational awareness is the Feed + its "My Turn only" toggle.)
 4. **URL** → `useUrlState.ts` mirrors the store to the query string both ways (shareable /
    reloadable); the serializer diffs against **defaults**, so the common case stays clean.
 
@@ -394,19 +395,18 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
 - **DetailPane** — resizable bottom pane (height persisted) under the board slot. **Hidden
   until a PR is selected** (`selectedPrId != null && !overlayActive`); no selection → the
   Timeline takes the full height (App fires a synthetic `resize` on the transition so vis
-  refits). Shows **PrDetail** for the selected PR. **App lands on the Inbox by default**
-  (Inbox-first; a bare load → `?view=inbox`, deep links keep timeline).
+  refits). Shows **PrDetail** for the selected PR. **App lands on the Activity console by
+  default** (Activity-first; a bare load → `?view=activity`, deep links keep timeline).
 - **Tabs / board slot** (`PinnedTabsBar` + `App.tsx`). `<main>` renders exactly ONE
   `<Timeline>` "board slot" whose `mode` derives from the active tab: absent = the shared
-  board; `{kind:'isolate',prId}` = a **pr-focus** tab's own isolated Timeline; `{kind:'my-turn'}`
-  = the My-Turn tab's. `inbox` + `pr-detail` render as overlays OVER the warm board; `pr-focus`
-  / `my-turn` REPLACE the slot (keyed remount → at most one vis instance live). `PinnedTabsBar`
-  is **always shown**: **Inbox** + **Timeline** are the first two chips — permanent,
-  **non-closable** tabs (the header segmented control was removed; the tab strip is now the
-  single place to switch views). The dynamic tabs (pr-detail / pr-focus / my-turn) follow as
-  closable PR-named chips. **Closing the active tab moves to the adjacent tab** (left, else
-  right, else the Timeline board) — it does NOT snap back to the board when other tabs remain
-  (`closeTab` in `store/pinnedTabs.ts`).
+  board; `{kind:'isolate',prId}` = a **pr-focus** tab's own isolated Timeline. `activity` +
+  `pr-detail` render as overlays OVER the warm board; `pr-focus` REPLACES the slot (keyed
+  remount → at most one vis instance live). `PinnedTabsBar` is **always shown**: **Activity**
+  + **Timeline** are the first two chips — permanent, **non-closable** tabs (the header
+  segmented control was removed; the tab strip is now the single place to switch views). The
+  dynamic tabs (pr-detail / pr-focus) follow as closable PR-named chips. **Closing the active
+  tab moves to the adjacent tab** (left, else right, else the Timeline board) — it does NOT
+  snap back to the board when other tabs remain (`closeTab` in `store/pinnedTabs.ts`).
 
 ### The timeline (`components/Timeline/`)
 
@@ -424,19 +424,21 @@ Key behaviors to know about:
   clicking empty canvas dismisses **one level at a time**: popover, else selected bar,
   else a lingering exit-anchor glow (`applyExitGlow(null)`).
 - **Focus is a TAB, not an overlay** (`mode?: TimelineMode` prop). The PR-detail **Focus**
-  link, **double-clicking a PR bar**, clicking a **cross-user marker / cluster**, and a feed
-  card all call `usePinnedTabs.openPrFocusTab(meta)` → a persistent, closable **pr-focus tab**
-  whose board slot mounts `<Timeline mode={{kind:'isolate',prId}}/>`. That instance **boots
-  directly into isolation** (a `bootedRef` effect reuses the internal `enterPrFocus`/
-  `isolatePrBars`/`rebuildMarkers`/`fitWindow` as the initial+only state — collapse to the PR's
-  contributor rows, show only its bar, fit the window to its span). There is **no exit/restore**
-  — leaving = switching/closing the tab (unmount). The isolation is purely component-LOCAL
-  (only one instance is ever mounted), so it does NOT drive shared store flags. The `m` key /
-  a feed My-Turn card open the **my-turn** tab (`mode:{kind:'my-turn'}`, scoped to the inbox
-  set, range widened). **Back button:** opening a tab from the Inbox pushes ONE deduped
+  link, **double-clicking a PR bar**, and clicking a **cross-user marker / cluster** call
+  `usePinnedTabs.openPrFocusTab(meta)` → a persistent, closable **pr-focus tab** whose board
+  slot mounts `<Timeline mode={{kind:'isolate',prId}}/>`. That instance **boots directly into
+  isolation** (a `bootedRef` effect reuses the internal `enterPrFocus`/`isolatePrBars`/
+  `rebuildMarkers`/`fitWindow` as the initial+only state — collapse to the PR's contributor
+  rows, show only its bar, fit the window to its span). There is **no exit/restore** — leaving =
+  switching/closing the tab (unmount). The isolation is purely component-LOCAL (only one instance
+  is ever mounted), so it does NOT drive shared store flags. **A feed card, by contrast, opens a
+  pr-DETAIL tab** (`openPrDetailTab`, not pr-focus) — full PrDetail, whose Show/Focus links then
+  drive the timeline. **Back button:** opening a tab from the Activity console pushes ONE deduped
   `{pierreTab}` history entry (the app's ONLY `pushState`); App's single `popstate` handler
-  (`consumeInboxReturn`) returns to the Inbox. **Landmine:** an isolate-tab range-preset/window
-  effect must be inert (`if (embeddedPrId != null) return`) or a date-preset click overrides the
+  (`consumeActivityReturn`) returns to the Activity console, and the feed scrolls + flashes the
+  exact item that was clicked (`activityReturnItemId`). **Landmine:** an isolate-tab
+  range-preset/window effect must be inert (`if (embeddedPrId != null) return`) or a date-preset
+  click overrides the
   boot fit. **Known gap:** a PR merged >90d ago is outside the isolate fetch window → can't
   isolate (the boot `selectPr`s it so the pane still shows).
 - **Vertical scroll is GATED — route every programmatic scroll through it.** vis
@@ -455,7 +457,7 @@ Key behaviors to know about:
   claim the gate (copy `centerShowTarget` / `restoreScrollAnchorIntentional`), or it WILL
   fight the live loops and jitter.** Position is preserved by CONTENT anchor (the row at the
   viewport top), not raw pixels, so rows growing/re-sorting above don't ride it upward.
-  **On unmount** (closing/leaving a focus / My-Turn tab) the vis cleanup bumps `scrollLoopRef`
+  **On unmount** (closing/leaving a focus tab) the vis cleanup bumps `scrollLoopRef`
   (+`intentionalScrollRef=false`) and `setVisScrollTop` no-ops when the instance is gone /
   detached — else a mid-settle `centerShowTarget` loop writes scroll on a torn-down vis and
   triggers its internal `_updateScrollTop`→null crash.
@@ -511,8 +513,8 @@ Header carries **Show** + **Focus** links (drive the timeline). Three tabs:
   the entry. The "Show" links share `ShowOnTimeline`.
 
 Keyboard (`useKeyboard.ts`): `/` focuses the filter, `j`/`k` cycle the board's PRs (board
-only), `m` opens the My-Turn tab, `i` opens Insights, `esc` leaves any tab/overlay → the
-board (else clears the selection).
+only), `i` opens Insights, `esc` leaves any tab/overlay → the board (else clears the
+selection).
 
 ---
 
@@ -560,7 +562,7 @@ posts **one** GitHub review (inline + body + verdict).
   are curated runtime deps in `build-release.mjs`; the inline prompt + `import type`-only
   shared usage keep the no-`.ts`-leak / no-shared-runtime guards passing.
 
-## Open-core Pro plugin (`@pierre/pro`) + the Inbox tab
+## Open-core Pro plugin (`@pierre/pro`) + the Activity tab
 
 Three workstreams sit behind one **open-core seam**: the public repo holds only the
 contract + a guarded import + inert hooks; **all premium logic lives in the private,
@@ -579,7 +581,7 @@ succeeds.
 plugin `db`/`schema`/`runTransaction`/`isPg`/`accountIdOf`/`llm.complete`/`queries`/
 `reviewEvents`/`registerLearningsProvider`/`registerMigrations`), `ProPlugin
 {apiVersion:1, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
-`/api/me` (`pro:{inboxDigest,reviewMemory}`) exactly like `claudeReviewEnabled`. `src/pro/bind.ts`
+`/api/me` (`pro:{activityDigest,reviewMemory}`) exactly like `claudeReviewEnabled`. `src/pro/bind.ts`
 runs in `index.ts` between `buildApp()` and `listen()`: gated on **`config.proEnabled` (`=!isCloud`)**.
 It is **NOT a declared dependency** — instead `bind.ts` resolves the plugin by **filesystem
 path** (`packages/pro/dist/index.js` then `packages/pro/src/index.ts`, relative to the repo
@@ -595,69 +597,62 @@ dual-dialect tables (`review_learnings`, `repo_digests`), migrations
 (`packages/pro/migrations{,-pg}/*.sql` run via `ctx.registerMigrations` → `src/pro/migrate.ts`,
 the one sanctioned raw-`$client` DDL site + `pro_migrations` bookkeeping), and isolation test.
 
-**Inbox tab — CORE, always-on, NO AI (not flagged); the DEFAULT landing view.** A peer of
-Timeline on the **tab axis** (`ActiveTab = 'timeline' | 'inbox' | <Tab.key>` in
-`store/pinnedTabs.ts`; the Inbox is a full-`<main>` overlay over the warm board; `?view=inbox&inboxRepo`).
-A "State of play" rail whose first entry is **Feed** (cross-repo), then each repo (the old
-"All repos" briefing pseudo-row was removed — redundant with the Feed + per-repo entries) —
-selecting a repo shows a **compact header** (Pro digest + stats + thread-state bar) atop
-that **repo's own feed** (`RepoFeedHeader` + `<FeedView repoId>`). The rail selection is
-`store/filters.ts` `inboxRepoId` (`'feed'` default | a repoId). Built **entirely on the
-read layer**: `getInbox` composes `getInsights`/`getOpenPrs`/`getMergers`; `listClaudeReviewsByRepo`
-is retrieval-only. **Scoped by the FilterBar** — the repo + member selection flows into `useInbox`
-/ `useConsolidatedFeed` query keys (watched-only is NOT the scoping mechanism), so a filter change
-re-scopes the whole Inbox and refetches (dim, never blank). Refresh re-queries the **DB only**.
+**Activity tab — CORE, always-on, NO AI (not flagged); the DEFAULT landing view.** A peer of
+Timeline on the **tab axis** (`ActiveTab = 'timeline' | 'activity' | <Tab.key>` in
+`store/pinnedTabs.ts`; the Activity console is a full-`<main>` overlay over the warm board;
+`?view=activity&activityRepo`). A "State of play" rail whose first entry is **Feed** (cross-repo),
+then each repo — selecting a repo shows a **compact header** (stats + thread-state bar +
+per-repo Pro digest) atop that repo's **open-PR list** (`RepoOpenPrList` — all its open PRs with
+at-a-glance CI / approval standing / thread counts) THEN that **repo's own feed** (`RepoFeedHeader`
++ `RepoOpenPrList` + `<FeedView repoId>`). The rail selection is `store/filters.ts` `activityRepoId`
+(`'feed'` default | a repoId). Built **entirely on the read layer**: `getActivity` composes
+`getInsights`/`getOpenPrs`/`getMergers`; `listClaudeReviewsByRepo` is retrieval-only. **Scoped by
+the FilterBar** — the repo + member selection flows into `useActivity` / `useConsolidatedFeed`
+query keys, so a filter change re-scopes the whole console and refetches (dim, never blank).
+Refresh re-queries the **DB only**.
 
-**Consolidated Feed — CORE, the Inbox "Feed" entry (`getConsolidatedFeed` → `FeedView`).** One
-flat, purely-**chronological** (newest-first) stream of **TWO item sources** distinguished by
-`item.source`:
-- **`my_turn`** — your actionables (review requests, approvals-ready, watched-repo PRs, threads
-  awaiting your reply, Claude reviews to action). Rendered as **content-rich, yellow-bordered
-  cards** with a "My Turn" badge, and filterable via a **"My Turn only"** toggle
-  (`feedMyTurnOnly`, transient). These are the more-relevant items — same shape as a feed event,
-  just highlighted.
-- **`feed`** — the plain activity stream (opens / merges / reviews / comments), capped to the
-  most recent (`FEED_EVENT_CAP`), plus **commit-push items that ADDRESSED a review thread**
-  (`getCommitThreadItems`): consecutive commits by one author on one PR are coalesced into a
-  run (a >6h gap splits runs), kept only if a commit touched a still-`likely_addressed`
-  thread's file after that thread's last comment, carrying the addressed threads inline
-  (`affectedThreads` + `commitCount` + `changeSummary` — "pushed N commits · addressed M
-  threads"). Plain (non-thread-touching) pushes stay excluded, like the timeline default.
-Cards render the **full comment/review body as markdown** (`components/Markdown.tsx`), the
-affected threads inline (each a clickable row → opens that thread in a PR-focus tab), + a
-merge/review credit line ("Merged by …", "Reviewed by …" from `mergedById`/`reviewers`). A
-**Claude-review** item (no member author) renders its actor as **"Claude"** (violet ✦ avatar),
-not 'unknown'. The **`excludeBots`** filter (shared with the timeline) drops bot-authored My
-Turn + activity items. Deduped (a watched PR's `pr_opened` / an awaited thread's reply are
-dropped in favour of their My Turn row). **PAGINATED** — `useConsolidatedFeed` is a `useInfiniteQuery`: page 0 loads
-`FEED_PAGE_SIZE` (50), "Load more" fetches the next page by `offset`; only loaded pages are
-fetched/rendered (bounded memory on large accounts). The response carries `total` so the client
-knows when to stop. **There is NO "seen"/Done concept** (removed): an item handled elsewhere
-(e.g. a thread marked done in the PR detail) simply leaves the My Turn set; the backend no longer
-emits acknowledged copies.
-**Focus-as-tab:** clicking ANY feed card → `usePinnedTabs.openPrFocusTab(meta)` opens a
-persistent, closable, PR-named **pr-focus tab** with its OWN isolated Timeline (the caller then
-selects the thread/PR), pushing a Back-to-Inbox history entry; the **`m` key** opens the My-Turn
-tab. A digest's `#N` PR ref opens the PR as a `pr-detail` tab. (Overlay focus + the old
-MyTurnPanel/FeedPanel/pills are gone — see "focus tabs" below.)
+**Consolidated Feed — CORE, the Activity "Feed" entry (`getConsolidatedFeed` → `FeedView`).** ONE
+flat, purely-**chronological** (newest-first) stream of **real activity events** (opens / merges /
+reviews / comments), plus **commit-push items that ADDRESSED a review thread**
+(`getCommitThreadItems`): consecutive commits by one author on one PR are coalesced into a run
+(a >6h gap splits runs), kept only if a commit touched a still-`likely_addressed` thread's file
+after that thread's last comment, carrying the addressed threads inline (`affectedThreads` +
+`commitCount` + `changeSummary` — "pushed N commits · addressed M threads"); plain
+(non-thread-touching) pushes stay excluded. **Each item carries `isMyTurn`** — true when it's an
+event on a PR the viewer PARTICIPATES in (authored / requested reviewer / previously reviewed or
+commented, via `getParticipatingPrIds`) AND the actor isn't the viewer. That flag **replaces the
+old two-source (`my_turn` vs `feed`) synthesis + its dedup** — there is now exactly one row per
+underlying event, which killed the duplication. `isMyTurn` rows are the **content-rich,
+yellow-bordered cards** with a "My Turn" badge + a `feedMyTurnOnly` "My Turn only" toggle; they're
+uncapped, plain activity is capped (`FEED_EVENT_CAP`). Cards render the **full comment/review body
+as markdown**, the affected threads inline, + a merge/review credit line
+(`mergedById`/`reviewers`). The **`excludeBots`** filter drops bot-authored activity. **PAGINATED**
+— `useConsolidatedFeed` is a `useInfiniteQuery` (page 0 loads `FEED_PAGE_SIZE`=50, "Load more" by
+`offset`; `total` tells the client when to stop). **No "seen"/Done concept.**
+**Click → pr-DETAIL tab:** clicking ANY feed card → `usePinnedTabs.openPrDetailTab(meta,
+{fromActivity, returnItemId: item.id})` opens the full-height PR detail tab (its Show/Focus links
+then drive the timeline), pushing a Back-to-Activity history entry; **Back returns to the feed and
+scrolls + flashes the clicked item** (`activityReturnItemId`). A digest's `#N` PR ref also opens a
+`pr-detail` tab. (The old pr-focus-on-click, the My-Turn tab, and the MyTurnPanel/FeedPanel/pills
+are all gone.)
 
-**Pro: Haiku digests — per-repo + cross-repo Feed** (`packages/pro/src/inbox-digest/` +
-`feed-digest/`). The flagged AI panels: a per-repo banner in each console, and the cross-repo
-panel atop the Inbox "Feed" entry. Each digest is a **bulleted markdown change-report** that
-references PRs as `#<number>` tokens (resolved to clickable PR refs via `inbox-digest/refs.ts`,
-scoped to `(accountId, repoId)`; the SPA linkifies them → open the PR as a new tab) and is
-**chained from the prior stored summary** so it reads as "what changed since last time".
-`metrics.ts` compacts `getInbox`+`getRepoAnalytics` into a bounded `RepoDigestPayload`; one
-non-agentic `ctx.llm.complete` (Haiku) → stored in `repo_digests`. The **cross-repo Feed digest
-AGGREGATES the per-repo digests** (`feed-digest/routes.ts`) — **no new table/migration**, one
-source of truth for the caps. **Scoped to the currently-visible Watched repos** (`?repoIds=` from
-the FilterBar selection, threaded through `loadRepoNames`/`cachedDigests` and the refresh loop) so
-the "all repos" panel only summarises what you're viewing — NOT every watched repo. **Cost-safe:**
-generation only on `POST /refresh` (which regenerates only the in-scope repos); a
-**payload-hash cache** (unchanged repo = $0 — the prior summary is fed to the LLM only on a
-cache MISS and is NOT in the hash; the hash MUST zero `Date.now()`-derived fields like
+**Pro: Haiku digests — per-repo, rendered as a COLLECTION** (`packages/pro/src/activity-digest/`).
+The flagged AI panel: a per-repo banner in each repo's console (`DigestBanner` → `RepoDigestCard`,
+collapsible) AND, atop the Activity "Feed" entry, the **COLLECTION of per-repo digest cards**
+(`FeedDigestList` → `useRepoDigests`) — one collapsible `RepoDigestCard` per repo. Each digest is a
+**bulleted markdown change-report** referencing PRs as `#<number>` tokens (resolved via
+`activity-digest/refs.ts`, scoped to `(accountId, repoId)`) **chained from the prior stored
+summary**. `metrics.ts` compacts `getActivity`+`getRepoAnalytics` into a bounded `RepoDigestPayload`;
+one non-agentic `ctx.llm.complete` (Haiku) → stored in `repo_digests`. **There is NO separate
+cross-repo "Feed digest" route/LLM pass** — the collection simply reads the same `repo_digests`
+rows (one source of truth for the caps; the old `feed-digest/` dir was removed). **Scoped to the
+WATCHED repos** (`inboxWatch=true`) intersected with the FilterBar-visible set — `FeedDigestList`
+passes `watched∩visible` ids, and `loadRepoNames` defaults an unscoped request to `inboxWatch=true`
+— so the Feed digest never fans out to every added repo. Per-repo collapse state persists via
+`store/digestCollapse.ts`. **Cost-safe:** generation only on `POST …/digests/refresh`; a
+**payload-hash cache** (unchanged repo = $0; the hash MUST zero `Date.now()`-derived fields like
 `age_hours` or a dormant repo re-bills hourly), per-account min-interval + in-flight guard,
-USD/repo caps. Capability `inboxDigest` tracks `PRO_DIGEST_ENABLED` (gates both panels).
+USD/repo caps. Capability `activityDigest` tracks `PRO_DIGEST_ENABLED`.
 
 **Pro: Claude Review learnings/memory** (`packages/pro/src/review-memory/`). Core seam =
 `src/review/events.ts`: an **inert** typed event-bus (5 emit sites in `claude-review.ts`,

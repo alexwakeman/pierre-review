@@ -100,13 +100,13 @@ function readFromUrl(): Partial<FilterState> {
     out.stripFilter = strip as StripFilter;
   }
 
-  // Inbox deep link: `?inboxRepo=<id>` selects that repo's console (the active TAB
-  // itself — `?view=inbox` — lives in the pinnedTabs store and is applied separately
-  // in useUrlState). `inboxThreadFilter` is intentionally URL-silent.
-  const inboxRepo = p.get('inboxRepo');
-  if (inboxRepo) {
-    const n = Number.parseInt(inboxRepo, 10);
-    if (Number.isFinite(n)) out.inboxRepoId = n;
+  // Activity deep link: `?activityRepo=<id>` selects that repo's console (the active TAB
+  // itself — `?view=activity` — lives in the pinnedTabs store and is applied separately
+  // in useUrlState). `activityThreadFilter` is intentionally URL-silent.
+  const activityRepo = p.get('activityRepo');
+  if (activityRepo) {
+    const n = Number.parseInt(activityRepo, 10);
+    if (Number.isFinite(n)) out.activityRepoId = n;
   }
 
   // `open=1` means the user expanded the Open-PRs strip (non-default; default is
@@ -145,16 +145,16 @@ function writeToUrl(s: FilterState): void {
   if (s.stripFilter !== 'all') p.set('strip', s.stripFilter);
   if (!s.stripCollapsed) p.set('open', '1');
 
-  // Inbox tab (the only overlay tab that's URL-deep-linkable; pinned-PR tabs stay
+  // Activity tab (the only overlay tab that's URL-deep-linkable; pinned-PR tabs stay
   // localStorage-only). Read the active tab from the pinnedTabs store — a different
-  // store than this subscriber's, so useUrlState also subscribes to it. `inboxRepo`
+  // store than this subscriber's, so useUrlState also subscribes to it. `activityRepo`
   // is emitted only for a single-repo console (the 'all' feed is the default).
-  if (usePinnedTabs.getState().activeTab === 'inbox') {
-    p.set('view', 'inbox');
+  if (usePinnedTabs.getState().activeTab === 'activity') {
+    p.set('view', 'activity');
     // Only a single-repo console is deep-linkable; the 'all' / 'feed' pseudo-rows are
     // defaults and stay out of the URL.
-    if (typeof s.inboxRepoId === 'number') {
-      p.set('inboxRepo', String(s.inboxRepoId));
+    if (typeof s.activityRepoId === 'number') {
+      p.set('activityRepo', String(s.activityRepoId));
     }
   }
 
@@ -210,10 +210,10 @@ export function useUrlState(): void {
       const hasUrlParams = window.location.search.length > 1;
       if (hasUrlParams) {
         useFilters.getState().hydrate(readFromUrl());
-        // The active tab lives in the pinnedTabs store, so apply `?view=inbox` here
-        // (after the filter hydrate that carries `?inboxRepo`).
-        if (new URLSearchParams(window.location.search).get('view') === 'inbox') {
-          usePinnedTabs.getState().setActiveTab('inbox');
+        // The active tab lives in the pinnedTabs store, so apply `?view=activity` here
+        // (after the filter hydrate that carries `?activityRepo`).
+        if (new URLSearchParams(window.location.search).get('view') === 'activity') {
+          usePinnedTabs.getState().setActiveTab('activity');
         }
       } else {
         const activeView = loadActiveSavedView();
@@ -221,10 +221,10 @@ export function useUrlState(): void {
           ? sanitizePersistedFilters(activeView.state)
           : loadPersistedFilters();
         if (persisted) useFilters.getState().hydrate(persisted);
-        // Inbox-first: a bare load (a fresh sign-in / "open the app") lands on the
-        // Inbox — the relevance-ranked state of play — with the timeline secondary.
-        // (A URL WITH params is a deep link: it keeps timeline unless `?view=inbox`.)
-        usePinnedTabs.getState().setActiveTab('inbox');
+        // Activity-first: a bare load (a fresh sign-in / "open the app") lands on the
+        // Activity — the relevance-ranked state of play — with the timeline secondary.
+        // (A URL WITH params is a deep link: it keeps timeline unless `?view=activity`.)
+        usePinnedTabs.getState().setActiveTab('activity');
       }
       hydrated.current = true;
     }
@@ -234,8 +234,8 @@ export function useUrlState(): void {
       persistFilters(s);
     });
     // The active tab (timeline / inbox / pinned PR) lives in a separate store, so
-    // mirror its changes into the URL too — switching to/from the Inbox tab toggles
-    // `?view=inbox`. Reads the current filter state for the rest of the query string.
+    // mirror its changes into the URL too — switching to/from the Activity tab toggles
+    // `?view=activity`. Reads the current filter state for the rest of the query string.
     const unsubTabs = usePinnedTabs.subscribe(() => {
       writeToUrl(useFilters.getState());
     });

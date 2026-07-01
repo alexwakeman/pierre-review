@@ -4,11 +4,11 @@ import type { ConsolidatedFeedItem, ConsolidatedFeedResponse, User } from '@pier
 import { api } from '../api/client.js';
 
 // How many feed items load initially and per "Load more" click. Only these are fetched
-// AND rendered — hidden items cost nothing (no transfer, no DOM), keeping the Inbox fast
+// AND rendered — hidden items cost nothing (no transfer, no DOM), keeping the Activity fast
 // and its memory bounded on large accounts.
 export const FEED_PAGE_SIZE = 50;
 
-/** Build the /api/inbox/feed query string from the active repo + member + bot scope. */
+/** Build the /api/activity/feed query string from the active repo + member + bot scope. */
 function feedSearch(
   repoIds: number[] | null,
   userIds: number[] | null,
@@ -22,7 +22,7 @@ function feedSearch(
   return p.toString();
 }
 
-// The consolidated Feed (the Inbox "Feed" entry): one chronological stream across the
+// The consolidated Feed (the Activity "Feed" entry): one chronological stream across the
 // scoped repos merging My Turn actionables + the activity feed. Paginated with
 // useInfiniteQuery: page 0 loads the first FEED_PAGE_SIZE; "Load more" fetches the next
 // page by offset (never re-fetching earlier pages). Repo/member scope is folded into the

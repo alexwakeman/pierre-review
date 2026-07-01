@@ -23,7 +23,7 @@ import {
   useRepos,
   useUsers,
 } from '../../hooks/useTimeline.js';
-import { useMyTurn, useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
+import { useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
 import { MAX_RANGE_DAYS, resolveRange, useFilters } from '../../store/filters.js';
 import {
   usePinnedTabs,
@@ -244,13 +244,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // `mode` turns this into an EMBEDDED per-tab instance (App keys the remount, so only
 // ONE Timeline is ever mounted — the isolation is purely component-LOCAL):
 //   • { kind: 'isolate', prId } — boots DIRECTLY into PR-isolation focus for prId, its
-//     initial + only state (exit = closing/switching the tab → unmount);
-//   • { kind: 'my-turn' }       — boots scoped to the "My Turn" inbox set.
+//     initial + only state (exit = closing/switching the tab → unmount).
 // Absent = the full shared board (the base timeline), behaving as before minus the
 // removed overlay entry paths.
 export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   const embeddedPrId = mode?.kind === 'isolate' ? mode.prId : null;
-  const myTurnScope = mode?.kind === 'my-turn';
   const containerRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<VisTimeline | null>(null);
   const itemsRef = useRef(new DataSet<DataItem>());
@@ -287,13 +285,6 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   const derivedPassRef = useRef<{ active: boolean; states: DerivedState[] }>({
     active: false,
     states: [],
-  });
-  // The "My Turn" isolate filter, mirrored into a ref so rebuildMarkers (which also
-  // runs standalone on a zoom recluster) can drop markers for PRs outside the inbox.
-  // `active` = the filter is on AND the inbox set has loaded; `ids` = its PR ids.
-  const myTurnPassRef = useRef<{ active: boolean; ids: Set<number> }>({
-    active: false,
-    ids: new Set<number>(),
   });
   // The PR bar currently glowing as the "linked" partner of an open marker
   // modal, so we can clear it when the modal closes or moves to another PR.
@@ -397,10 +388,6 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   // we're NOT in cross-user focus (focus uses the cross-link ring instead).
   const selectedGlowEventRef = useRef<number | null>(null);
   const selectedGlowItemRef = useRef<string | null>(null);
-  // Mirrors `myTurnScope` (a My-Turn tab) so the once-bound vis click/dblclick handlers
-  // can read it without re-binding — a bar/marker click SELECTS its PR (drives the tab's
-  // detail pane) instead of opening a popover / focus tab. Set during render below.
-  const myTurnOnlyRef = useRef(false);
 
   const [popover, setPopover] = useState<PopoverState | null>(null);
   // Latest popover state, readable from stable callbacks without re-binding.
@@ -424,23 +411,16 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   // out, so it must be visible the whole time the timeline is collapsed.
   const [focusActive, setFocusActive] = useState(false);
 
-  // Mirror the My-Turn tab scope into the ref the once-bound vis handlers read.
-  myTurnOnlyRef.current = myTurnScope;
-
-  // Embedded-tab range: an isolate / My-Turn tab widens `from` back ~90 days so its
-  // subject / inbox PRs are present regardless of the active date filter (captured once
-  // per mount → a stable query key, a separate cache entry). An isolate tab ALSO drops
-  // the member filter so a subject PR the member filter would hide is still fetched.
+  // Embedded-tab range: an isolate tab widens `from` back ~90 days so its subject PR is
+  // present regardless of the active date filter (captured once per mount → a stable query
+  // key, a separate cache entry) and drops the member filter so a subject PR the member
+  // filter would hide is still fetched.
   const embeddedFromMs = useMemo(
-    () => (embeddedPrId != null || myTurnScope ? Date.now() - MAX_RANGE_DAYS * DAY_MS : null),
-    [embeddedPrId, myTurnScope],
+    () => (embeddedPrId != null ? Date.now() - MAX_RANGE_DAYS * DAY_MS : null),
+    [embeddedPrId],
   );
   const { data, isLoading, error } = useTimeline(
-    embeddedPrId != null
-      ? { dropMembers: true, fromMs: embeddedFromMs }
-      : myTurnScope
-        ? { fromMs: embeddedFromMs }
-        : undefined,
+    embeddedPrId != null ? { dropMembers: true, fromMs: embeddedFromMs } : undefined,
   );
   const { data: openPrsData } = useOpenPrs();
   // Member-agnostic PR sets (shared cache with the PR-title search). They let a
@@ -455,29 +435,6 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   const { data: mergers } = useMergers();
   const queryClient = useQueryClient();
   const derivedStates = useFilters((s) => s.derivedStates);
-  // "My Turn" isolate scope: a My-Turn TAB restricts the board to PRs in the current My
-  // Turn inbox. The inbox set is fetched separately (deduped with the My Turn panel);
-  // null until it loads, so the filter stays a no-op until the ids are known rather
-  // than briefly blanking the board. Purely component-LOCAL (the tab's `mode`), not a
-  // shared store flag.
-  const { data: myTurnData } = useMyTurn();
-  const myTurnPrIds = useMemo<Set<number> | null>(() => {
-    if (!myTurnData) return null;
-    const ids = new Set<number>();
-    for (const it of myTurnData.awaitingReview) ids.add(it.prId);
-    for (const it of myTurnData.yourPrs) ids.add(it.prId);
-    // Approved PRs are deduped OUT of yourPrs server-side, so they live ONLY in this
-    // section — they MUST be added here or My Turn Focus filters an approved-only inbox
-    // off the board entirely. (?? [] tolerates an older backend without the field.)
-    for (const it of myTurnData.approvedPrs ?? []) ids.add(it.prId);
-    for (const it of myTurnData.threadsAwaiting) ids.add(it.prId);
-    // Watched-repo inbox PRs (new open PRs by others in your Watched repos) are a full
-    // inbox section too — they MUST be here, or My Turn Focus Mode filters them off the
-    // board (an inbox of only watched PRs renders empty until you click one). [[watched-repo-inbox]]
-    for (const it of myTurnData.watchedRepoPrs) ids.add(it.prId);
-    for (const it of myTurnData.claudeReviewsToAction) ids.add(it.prId);
-    return ids;
-  }, [myTurnData]);
 
   // Member filter: when set, the timeline collapses to just these contributors'
   // rows (see the PR filter in the rebuild effect). Events are already actor-
@@ -842,8 +799,7 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       // The sticky PR-isolation focus overrides the board filters: just this PR.
       events = cur.events.filter((e) => e.prId === prFocusPrIdRef.current);
     } else {
-      // Outside focus the board filters COMPOSE (AND): the "Threads" thread-state
-      // filter and the "My Turn" isolate filter can both be on.
+      // Outside focus the "Threads" thread-state filter narrows the markers.
       events = cur.events;
       if (derivedPassRef.current.active) {
         // A "Threads" filter is on. Restrict markers to review-thread comments only:
@@ -861,12 +817,6 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
             e.derivedState != null &&
             states.includes(e.derivedState),
         );
-      }
-      if (myTurnPassRef.current.active) {
-        // "My Turn" isolate: keep only markers on PRs in the inbox (their bars are
-        // the only ones the rebuild's `prs` filter renders, so markers stay in step).
-        const { ids } = myTurnPassRef.current;
-        events = events.filter((e) => e.prId != null && ids.has(e.prId));
       }
     }
     const { items, clusterMembers } = buildMarkerItems(
@@ -1437,7 +1387,7 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       // Bail if the instance is torn down or the scroll panel is detached: the
       // synthetic 'scroll' dispatch below would otherwise reach vis's own scroll
       // handler on destroyed internals (_updateScrollTop → null). Guards the rare
-      // race where a settle loop frame fires just as a focus/My-Turn tab unmounts.
+      // race where a settle loop frame fires just as a focus tab unmounts.
       if (!vs || timelineRef.current == null || !vs.isConnected) return;
       const max = Math.max(0, vs.scrollHeight - vs.clientHeight);
       vs.scrollTop = Math.max(0, Math.min(max, top));
@@ -1704,10 +1654,10 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     if (ev?.prId != null) useFilters.getState().selectPr(ev.prId);
   }, [popoverEventId]);
 
-  // An isolate/My-Turn tab's focus is the tab's whole state — it's left by closing /
-  // switching the tab (this Timeline unmounts), never torn down in place. So there's
+  // An isolate tab's focus is the tab's whole state — it's left by closing / switching
+  // the tab (this Timeline unmounts), never torn down in place. So there's
   // no in-Timeline exit signal or browser-history unwind any more (App owns the single
-  // popstate handler + the one Back-to-Inbox marker).
+  // popstate handler + the one Back-to-Activity marker).
 
   // Build a tab-label meta from a TimelinePr, for opening a PR-focus tab from a
   // double-click. Reads REFS (current repo/user metadata) so it stays stable and never
@@ -1796,13 +1746,6 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
           openPopover(x, y, [evId]);
           return;
         }
-        // My-Turn tab: a marker click SELECTS its PR (drives the tab's detail pane),
-        // leaving every inbox PR bar visible — no popover, no focus.
-        if (myTurnOnlyRef.current) {
-          const mev = eventsByIdRef.current.get(evId);
-          if (mev?.prId != null) useFilters.getState().selectPr(mev.prId);
-          return;
-        }
         // Base board: open the marker popover in place (read the event). Isolating a
         // PR is a DOUBLE-click (→ a PR-focus tab); a single click no longer collapses
         // the board into an overlay.
@@ -1817,12 +1760,6 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
           openPopover(x, y, members);
           return;
         }
-        // My-Turn tab: select the cluster's PR (drives the tab's detail pane).
-        if (myTurnOnlyRef.current) {
-          const mev = eventsByIdRef.current.get(firstId);
-          if (mev?.prId != null) useFilters.getState().selectPr(mev.prId);
-          return;
-        }
         // Base board: open the expanded popover in place.
         openPopover(x, y, members);
       }
@@ -1830,9 +1767,8 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
 
     // Double-click → open the PR as its OWN isolated PR-focus TAB (a fresh <Timeline
     // mode='isolate'> that boots into isolation). A PR bar opens its PR; an event
-    // marker / cluster opens the event's PR. In an isolate/My-Turn tab a double-click
-    // is a no-op — the isolate tab is already focused, and a My-Turn double-click would
-    // just re-open the same board; the single click already selected the PR.
+    // marker / cluster opens the event's PR. In an isolate tab a double-click is a no-op —
+    // the isolate tab is already focused.
     timeline.on('doubleClick', (props: {
       item: string | number | null;
       event?: { srcEvent?: MouseEvent } & Partial<MouseEvent>;
@@ -1841,7 +1777,7 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     }) => {
       const id = props.item;
       if (id == null) return;
-      if (prFocusActiveRef.current || myTurnOnlyRef.current) return;
+      if (prFocusActiveRef.current) return;
       const key = String(id);
 
       if (key.startsWith('pr:')) {
@@ -2188,24 +2124,10 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     // materialized and then scrolled-to + glowed. Seed it into the rendered PR
     // set; cleared once consumed below so it doesn't linger past this rebuild.
     const extra = forceShowOpenPrRef.current;
-    let basePrs: TimelinePr[] =
+    const basePrs: TimelinePr[] =
       extra && !data.prs.some((p) => p.id === extra.id)
         ? [...data.prs, extra]
         : data.prs;
-
-    // When the "My Turn" isolate filter is on, surface inbox PRs that have NO
-    // in-window timeline activity — so they're absent from the lean payload — most
-    // notably Claude-review PRs (a completed review isn't itself a timeline event)
-    // and stale "awaiting review" PRs. Pull their full records from the open-PRs
-    // feed so their bars render in the isolated board instead of silently dropping
-    // out of it. They still flow through the same member/derived/My-Turn filter below.
-    if (myTurnScope && myTurnPrIds != null && openPrsData) {
-      const present = new Set(basePrs.map((p) => p.id));
-      const missingInbox = openPrsData.prs.filter(
-        (p) => myTurnPrIds.has(p.id) && !present.has(p.id),
-      );
-      if (missingInbox.length > 0) basePrs = [...basePrs, ...missingInbox];
-    }
 
     // Member filter: when set, only render bars for PRs the selected members
     // authored, so the timeline collapses to just those contributors' rows
@@ -2242,13 +2164,6 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     const passesDerived = (pr: TimelinePr): boolean =>
       !derivedActive || matchingThreadPrIds.has(pr.id);
 
-    // The "My Turn" isolate filter: a PR's bar shows only when it's in the current
-    // inbox. Stays a no-op until the inbox set has loaded (myTurnPrIds null) so the
-    // board isn't briefly blanked; once loaded it filters (an empty inbox → empty).
-    const myTurnActive = myTurnScope && myTurnPrIds != null;
-    const passesMyTurn = (pr: TimelinePr): boolean =>
-      !myTurnActive || myTurnPrIds!.has(pr.id);
-
     const prs: TimelinePr[] = basePrs.filter(
       (pr) =>
         // Always render the selected PR's bar so event→PR navigation (and the global
@@ -2257,7 +2172,7 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
         // out-of-payload PR materializes regardless of the active filters.
         pr.id === selectedPrIdRef.current ||
         pr.id === extra?.id ||
-        (authoredByMember(pr) && passesDerived(pr) && passesMyTurn(pr)),
+        (authoredByMember(pr) && passesDerived(pr)),
     );
 
     // Mirror the thread-state filter into a ref so rebuildMarkers (which also runs
@@ -2267,12 +2182,6 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     derivedPassRef.current = {
       active: derivedActive,
       states: derivedStates,
-    };
-    // Same for the My Turn isolate filter, so a standalone recluster keeps the
-    // markers in step with the bars above.
-    myTurnPassRef.current = {
-      active: myTurnActive,
-      ids: myTurnPrIds ?? new Set<number>(),
     };
 
     const evMap = new Map<number, TimelineEvent>();
@@ -2317,28 +2226,22 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     const userStats = computeUserStats(data.events, basePrs);
     userStatsRef.current = userStats;
 
-    // Which events drive the contributor ROWS. When a client-side filter (Threads /
-    // My Turn) is active we collapse the board to just the people in the surviving
-    // events — otherwise every actor in the payload keeps an (empty) row, which
-    // defeats an isolate filter. Mirrors rebuildMarkers' non-focus filtering so rows
-    // and markers agree. Left as the full set under PR-isolation focus, which owns its
-    // own row collapse and must keep every contributor row available to re-show.
+    // Which events drive the contributor ROWS. When the client-side Threads filter is
+    // active we collapse the board to just the people in the surviving events — otherwise
+    // every actor in the payload keeps an (empty) row, which defeats the filter. Mirrors
+    // rebuildMarkers' non-focus filtering so rows and markers agree. Left as the full set
+    // under PR-isolation focus, which owns its own row collapse and must keep every
+    // contributor row available to re-show.
     let rowEvents = data.events;
-    if (!prFocusActiveRef.current && (derivedActive || myTurnActive)) {
-      const sel = derivedActive ? new Set(derivedStates) : null;
-      rowEvents = data.events.filter((e) => {
-        if (
-          sel &&
-          (e.type !== 'review_comment' ||
-            e.prId == null ||
-            e.derivedState == null ||
-            !sel.has(e.derivedState))
-        ) {
-          return false;
-        }
-        if (myTurnActive && (e.prId == null || !myTurnPrIds!.has(e.prId))) return false;
-        return true;
-      });
+    if (!prFocusActiveRef.current && derivedActive) {
+      const sel = new Set(derivedStates);
+      rowEvents = data.events.filter(
+        (e) =>
+          e.type === 'review_comment' &&
+          e.prId != null &&
+          e.derivedState != null &&
+          sel.has(e.derivedState),
+      );
     }
 
     // Render the repos GROUPED BY OWNER so a multi-repo board keeps each org's repos
@@ -2626,8 +2529,6 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   }, [
     data,
     derivedStates,
-    myTurnScope,
-    myTurnPrIds,
     openPrsData,
     userIds,
     reposById,
@@ -2712,59 +2613,17 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
 
   // Move the visible window when the range preset changes — and re-apply it on
   // every preset click via rangeResetSignal, so re-selecting the already-active
-  // preset snaps the view back to that range after panning/zooming away. Skips in a
-  // My-Turn tab: the dedicated fit effect below OWNS the window there (it zooms tight
-  // to the inbox PRs' span). This whole effect is inert in an isolate tab (the boot
-  // effect / enterPrFocus own the window there).
+  // preset snaps the view back to that range after panning/zooming away. This whole
+  // effect is inert in an isolate tab (the boot effect / enterPrFocus own the window
+  // there).
   useEffect(() => {
     const tl = timelineRef.current;
     if (!tl) return;
-    if (myTurnScope) return; // the My Turn fit effect owns the window in a My-Turn tab
     if (embeddedPrId != null) return; // an isolate tab: the boot effect / enterPrFocus own the window
     const { from, to } = resolveRange(useFilters.getState());
     const { start, end } = paddedViewport(from, to);
     tl.setWindow(start, end, { animation: false });
-  }, [preset, customFrom, customTo, rangeResetSignal, myTurnScope, embeddedPrId]);
-
-  // (C) My Turn Focus Mode "zoom to the inbox". resolveRange only EXTENDS the fetched
-  // range backward (to load inbox PRs older than the date filter) — it never narrows the
-  // VISIBLE window, so a recent inbox left the PRs squished into a corner of the 14-day
-  // view. Here we fit the window tight to the inbox PRs' own span ([earliest open, latest
-  // bar end / now] + padding), so they fill the available width. Fits ONCE per focus entry
-  // (myTurnFitDoneRef) — never re-zooming while the user pans, or on a background refetch —
-  // retrying across dep changes only until the inbox records are loaded. Animated so it
-  // reads as a zoom-in. Cleared on exit; the effect above then restores the date filter.
-  const myTurnFitDoneRef = useRef(false);
-  useEffect(() => {
-    const tl = timelineRef.current;
-    if (!myTurnScope) {
-      myTurnFitDoneRef.current = false;
-      return;
-    }
-    if (myTurnFitDoneRef.current || myTurnPrIds == null || myTurnPrIds.size === 0 || !tl) {
-      return;
-    }
-    let minStart = Infinity;
-    let maxEnd = -Infinity;
-    let found = false;
-    for (const id of myTurnPrIds) {
-      const rec =
-        prsByIdRef.current.get(id) ??
-        data?.prs.find((p) => p.id === id) ??
-        openPrsData?.prs.find((p) => p.id === id);
-      if (!rec) continue;
-      const s = new Date(rec.openedAt).getTime();
-      if (Number.isFinite(s)) {
-        minStart = Math.min(minStart, s);
-        found = true;
-      }
-      maxEnd = Math.max(maxEnd, prBarEndMs(rec));
-    }
-    if (!found || !Number.isFinite(maxEnd)) return; // inbox records not loaded yet — retry
-    const pad = Math.max((maxEnd - minStart) * 0.08, 12 * 60 * 60 * 1000);
-    tl.setWindow(minStart - pad, maxEnd + pad, { animation: true });
-    myTurnFitDoneRef.current = true;
-  }, [myTurnScope, myTurnPrIds, data, openPrsData]);
+  }, [preset, customFrom, customTo, rangeResetSignal, embeddedPrId]);
 
   // "Now" button: recenter the window on the current instant, keeping the
   // current zoom width. A transient store signal (epoch ms) the button bumps and
@@ -2784,8 +2643,8 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
 
   // Scroll the SHARED board to a PR opened from the strip / j-k cycle / a PrDetail
   // "Show" link. BASE-BOARD navigation only: centre on the PR (or a clicked event's
-  // instant), select it, and glow the matching marker. PR isolation / My-Turn scope are
-  // now separate TABS (a fresh keyed <Timeline mode>), never entered from here — so this
+  // instant), select it, and glow the matching marker. PR isolation is now a separate TAB
+  // (a fresh keyed <Timeline mode>), never entered from here — so this
   // effect no longer has any focus / overlay / history branches. (These setters call
   // showTimeline() first, so this runs on the base board.)
   const timelineFocusPr = useFilters((s) => s.timelineFocusPr);

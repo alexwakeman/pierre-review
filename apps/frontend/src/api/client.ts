@@ -17,13 +17,12 @@ import type {
   CreatePrCommentResult,
   CreateRepoBody,
   ConsolidatedFeedResponse,
-  FeedDigestResponse,
   MeResponse,
   MergersResponse,
   DismissedMyTurnResponse,
   MyTurnDismissKind,
   MyTurnResponse,
-  InboxResponse,
+  ActivityResponse,
   InsightsResponse,
   RepoAnalytics,
   RepoClaudeReviewsResponse,
@@ -172,17 +171,17 @@ export const api = {
       handle<AddReviewCommentResult>(r),
     ),
 
-  // ---- Inbox (Workstream 1; CORE, no AI) ----
+  // ---- Activity (Workstream 1; CORE, no AI) ----
   // The multi-repo triage aggregate (per watched repo: stats, thread totals,
   // grouped PRs). Respects the active repo filter via the query string. A pure DB
   // read — "Refresh" re-queries this, it never triggers a GitHub sync.
   inbox: (search: string) =>
-    get<InboxResponse>(`/api/inbox${search ? `?${search}` : ''}`),
-  // The consolidated Feed (the Inbox "Feed" entry): one chronological stream across
+    get<ActivityResponse>(`/api/activity${search ? `?${search}` : ''}`),
+  // The consolidated Feed (the Activity "Feed" entry): one chronological stream across
   // the watched repos (My Turn actionables + the activity feed). Pure DB read. The
   // `search` string carries the active repo/member scope (repoIds/userIds).
   consolidatedFeed: (search: string) =>
-    get<ConsolidatedFeedResponse>(`/api/inbox/feed${search ? `?${search}` : ''}`),
+    get<ConsolidatedFeedResponse>(`/api/activity/feed${search ? `?${search}` : ''}`),
   // Repo-scoped Claude review history (all runs per PR, newest-first). Gated on
   // config.claudeReviewEnabled; the response's `enabled` flag reflects that.
   repoClaudeReviews: (repoId: number) =>
@@ -190,26 +189,17 @@ export const api = {
 
   // ---- Pro per-repo digest (Workstream 2; @pierre/pro, flagged) ----
   // Cached per-repo LLM headline digests for the watched repos. Only fetched when
-  // pro.inboxDigest is true (absent plugin → 404 / enabled:false).
+  // pro.activityDigest is true (absent plugin → 404 / enabled:false).
   repoDigests: (search: string) =>
-    get<RepoDigestsResponse>(`/api/pro/inbox/digests${search ? `?${search}` : ''}`),
+    get<RepoDigestsResponse>(`/api/pro/activity/digests${search ? `?${search}` : ''}`),
   refreshRepoDigests: (search?: string) =>
     fetch(
-      `/api/pro/inbox/digests/refresh${search ? `?${search}` : ''}`,
+      `/api/pro/activity/digests/refresh${search ? `?${search}` : ''}`,
       jsonBody('POST'),
     ).then((r) => handle<{ status: string }>(r)),
   // A single repo's digest (lazy per-repo so a slow Haiku call never blocks the grid).
   repoDigest: (repoId: number) =>
-    get<RepoDigest>(`/api/pro/inbox/digests/${repoId}`),
-  // The cross-repo Feed digest (the AI panel atop the Inbox "Feed" entry): a per-repo
-  // bulleted change-report, assembled from the per-repo digests. Pro-only. Scoped to the
-  // currently-visible Watched repos via `search` (?repoIds=…).
-  feedDigest: (search: string) =>
-    get<FeedDigestResponse>(`/api/pro/feed/digest${search ? `?${search}` : ''}`),
-  refreshFeedDigest: (search: string) =>
-    fetch(`/api/pro/feed/digest/refresh${search ? `?${search}` : ''}`, jsonBody('POST')).then((r) =>
-      handle<FeedDigestResponse>(r),
-    ),
+    get<RepoDigest>(`/api/pro/activity/digests/${repoId}`),
 
   // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----
   // Aggregated retrieval signals shown BEFORE a run (Surface 1). Only fetched when

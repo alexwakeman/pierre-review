@@ -4,7 +4,7 @@ import type {
   ConsolidatedFeedItem,
   ConsolidatedFeedResponse,
   FeedEvent,
-  InboxResponse,
+  ActivityResponse,
   MeResponse,
   MyTurnPr,
   MyTurnResponse,
@@ -166,7 +166,7 @@ const ME_RESPONSE: MeResponse = {
   claudeReviewEnabled: false,
   deploymentMode: 'local',
   // Pro off in e2e — the consolidated Feed (core) renders without the AI digest panel.
-  pro: { inboxDigest: false, reviewMemory: false },
+  pro: { activityDigest: false, reviewMemory: false },
 };
 
 function myTurnPr(id: number): MyTurnPr {
@@ -245,7 +245,7 @@ const FEED: { events: FeedEvent[]; users: User[] } = {
 };
 
 // The Inbox aggregate (the rail) — one watched repo with the 5 open PRs.
-const INBOX: InboxResponse = {
+const ACTIVITY: ActivityResponse = {
   repos: [
     {
       repoId: REPO.id,
@@ -268,87 +268,31 @@ const INBOX: InboxResponse = {
   generatedAt: iso(0),
 };
 
-// The consolidated Feed (the Inbox "Feed" entry): a flat, newest-first stream of My Turn
-// items + feed events. Covers the click-to-focus paths (a My Turn item #102 → My Turn
-// Focus; a feed event #105 → PR Focus), an awaited-thread My Turn row (#101), and an
-// acknowledged (seen) row (#104) so the muted/seen state is checkable.
+// The consolidated Feed (the Activity "Feed" entry): a flat, newest-first stream of real
+// activity events, each flagged isMyTurn by participation. Covers the click paths (any item
+// → the PR detail tab), a My-Turn review_comment on a thread you started (#101, yellow
+// card + inline thread), and plain non-My-Turn activity events (#105).
 const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
   items: [
     {
-      id: 'mt:review_request:102',
-      source: 'my_turn',
-      kind: 'awaiting_review',
+      id: 'feed:6001',
+      isMyTurn: true,
+      kind: 'review_comment',
       occurredAt: iso(1),
-      acknowledged: false,
-      repoId: REPO.id,
-      repoFullName: REPO.fullName,
-      prId: 102,
-      prNumber: 102,
-      prTitle: 'Inbox: fix auth race',
-      prState: 'open',
-      actorId: ALICE.id,
-      content: null,
-      threadId: null,
-      path: null,
-      line: null,
-      reasonTag: 'awaiting_your_review',
-      reviewState: null,
-      githubUrl: `https://github.com/${REPO.fullName}/pull/102`,
-      dismiss: { kind: 'review_request', refId: 102 },
-      mergedById: null,
-      reviewers: null,
-      affectedThreads: null,
-      commitCount: null,
-      changeSummary: null,
-    },
-    {
-      id: 'thread:5001',
-      source: 'my_turn',
-      kind: 'thread',
-      occurredAt: iso(2),
-      acknowledged: false,
       repoId: REPO.id,
       repoFullName: REPO.fullName,
       prId: 101,
       prNumber: 101,
-      prTitle: null,
-      prState: null,
+      prTitle: 'Activity: fix auth race',
+      prState: 'open',
       actorId: BOB.id,
       content: 'Can you take another look at this?',
       threadId: 5001,
       path: 'src/login.ts',
       line: 10,
-      reasonTag: null,
+      reasonTag: 'your_pr_new_comments',
       reviewState: null,
       githubUrl: `https://github.com/${REPO.fullName}/pull/101`,
-      dismiss: { kind: 'thread', refId: 5001 },
-      mergedById: null,
-      reviewers: null,
-      affectedThreads: null,
-      commitCount: null,
-      changeSummary: null,
-    },
-    {
-      id: 'mt:watched_repo_pr:104',
-      source: 'my_turn',
-      kind: 'watched_repo_pr',
-      occurredAt: iso(3),
-      acknowledged: true, // already marked seen — rendered muted
-      repoId: REPO.id,
-      repoFullName: REPO.fullName,
-      prId: 104,
-      prNumber: 104,
-      prTitle: 'Watched repo PR by bob',
-      prState: 'open',
-      actorId: BOB.id,
-      content: null,
-      threadId: null,
-      path: null,
-      line: null,
-      reasonTag: null,
-      reviewState: null,
-      githubUrl: `https://github.com/${REPO.fullName}/pull/104`,
-      dismiss: { kind: 'watched_repo_pr', refId: 104 },
       mergedById: null,
       reviewers: null,
       affectedThreads: null,
@@ -357,10 +301,9 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
     },
     {
       id: 'feed:7000',
-      source: 'feed',
+      isMyTurn: false,
       kind: 'pr_opened',
       occurredAt: iso(4),
-      acknowledged: false,
       repoId: REPO.id,
       repoFullName: REPO.fullName,
       prId: 105,
@@ -375,8 +318,32 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
       reasonTag: null,
       reviewState: null,
       githubUrl: `https://github.com/${REPO.fullName}/pull/105`,
-      dismiss: null,
       mergedById: null,
+      reviewers: null,
+      affectedThreads: null,
+      commitCount: null,
+      changeSummary: null,
+    },
+    {
+      id: 'feed:7001',
+      isMyTurn: false,
+      kind: 'pr_merged',
+      occurredAt: iso(5),
+      repoId: REPO.id,
+      repoFullName: REPO.fullName,
+      prId: 105,
+      prNumber: 105,
+      prTitle: 'Other: docs pass',
+      prState: 'merged',
+      actorId: ALICE.id,
+      content: null,
+      threadId: null,
+      path: null,
+      line: null,
+      reasonTag: null,
+      reviewState: null,
+      githubUrl: `https://github.com/${REPO.fullName}/pull/105`,
+      mergedById: ALICE.id,
       reviewers: null,
       affectedThreads: null,
       commitCount: null,
@@ -384,7 +351,7 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
     },
   ] satisfies ConsolidatedFeedItem[],
   users: USERS,
-  total: 4, // all mock items fit in one page (< FEED_PAGE_SIZE) → no "Load more"
+  total: 3, // all mock items fit in one page (< FEED_PAGE_SIZE) → no "Load more"
   generatedAt: iso(0),
 };
 
@@ -457,15 +424,15 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.endsWith('/api/me')) return json(route, ME_RESPONSE);
       if (path.endsWith('/api/my-turn')) return json(route, MY_TURN);
       // The consolidated Feed (new) — MUST precede the generic `/api/feed` check below,
-      // since `/api/inbox/feed` also contains the substring `/api/feed`.
-      if (path.endsWith('/api/inbox/feed')) return json(route, CONSOLIDATED_FEED);
-      if (path.endsWith('/api/inbox')) return json(route, INBOX);
+      // since `/api/activity/feed` also contains the substring `/api/feed`.
+      if (path.endsWith('/api/activity/feed')) return json(route, CONSOLIDATED_FEED);
+      if (path.endsWith('/api/activity')) return json(route, ACTIVITY);
       if (path.includes('/api/timeline')) return json(route, TIMELINE);
       if (path.includes('/api/open-prs')) return json(route, OPEN_PRS);
       if (path.endsWith('/api/users')) return json(route, USERS);
       if (path.endsWith('/api/repos')) return json(route, [REPO]);
       if (path.endsWith('/api/mergers')) return json(route, []);
-      // Pro digest endpoints — disabled in e2e (pro:{inboxDigest:false}); harmless stub.
+      // Pro digest endpoints — disabled in e2e (pro:{activityDigest:false}); harmless stub.
       if (path.includes('/api/pro/')) {
         return json(route, { enabled: false, model: 'claude-haiku-4-5', digests: [], digest: null, generatedAt: iso(0) });
       }
@@ -480,4 +447,4 @@ export async function installMockApi(page: Page): Promise<void> {
   );
 }
 
-export const fixtures = { PRS, INBOX_IDS, REPO, USERS, FEED, CONSOLIDATED_FEED, INBOX };
+export const fixtures = { PRS, INBOX_IDS, REPO, USERS, FEED, CONSOLIDATED_FEED, ACTIVITY };

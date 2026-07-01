@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { InboxRepo, ThreadStateCounts } from '@pierre-review/shared';
-import { useInbox } from '../../hooks/useInbox.js';
+import type { ActivityRepo, ThreadStateCounts } from '@pierre-review/shared';
+import { useActivity } from '../../hooks/useActivity.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { RepoFeedHeader } from './RepoFeedHeader.js';
+import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
 
 // Rail sort: attention desc → unread → alphabetical. Computed once per data load so
 // the rail is stable (not jumpy) as the user interacts.
-function sortRepos(repos: InboxRepo[]): InboxRepo[] {
+function sortRepos(repos: ActivityRepo[]): ActivityRepo[] {
   return [...repos].sort((a, b) => {
     if (b.attentionCount !== a.attentionCount) return b.attentionCount - a.attentionCount;
     if (a.hasUnread !== b.hasUnread) return a.hasUnread ? -1 : 1;
@@ -98,17 +99,17 @@ function RailRow({
   );
 }
 
-// The Inbox "Triage Console with a Briefing Feed": a fixed left rail of repos (the
+// The Activity "Triage Console with a Briefing Feed": a fixed left rail of repos (the
 // cross-repo glance) + a right detail that defaults to the cross-repo consolidated Feed
 // and narrows to a single-repo console on selection. Entirely on the core query layer —
 // no AI (the only Pro surface is the per-repo digest banner inside RepoFeedHeader).
-export function InboxView(): JSX.Element {
+export function ActivityView(): JSX.Element {
   useStalenessTick();
   const repoIds = useFilters((s) => s.repoIds);
   const userIds = useFilters((s) => s.userIds);
-  const inboxRepoId = useFilters((s) => s.inboxRepoId);
-  const setInboxRepo = useFilters((s) => s.setInboxRepo);
-  const { data, isFetching, isLoading, refetch } = useInbox(repoIds, userIds);
+  const activityRepoId = useFilters((s) => s.activityRepoId);
+  const setActivityRepo = useFilters((s) => s.setActivityRepo);
+  const { data, isFetching, isLoading, refetch } = useActivity(repoIds, userIds);
   const { data: allRepos } = useRepos();
   const qc = useQueryClient();
 
@@ -116,11 +117,11 @@ export function InboxView(): JSX.Element {
 
   // The selected repo (single-repo console). null ⇒ the Feed pseudo-row.
   const selectedRepo =
-    typeof inboxRepoId === 'number'
-      ? sorted.find((r) => r.repoId === inboxRepoId) ?? null
+    typeof activityRepoId === 'number'
+      ? sorted.find((r) => r.repoId === activityRepoId) ?? null
       : null;
   // The cross-repo consolidated Feed is the default detail (also when nothing's set).
-  const showingFeed = inboxRepoId === 'feed' || inboxRepoId == null;
+  const showingFeed = activityRepoId === 'feed' || activityRepoId == null;
 
   // Staleness: amber past ~10 minutes.
   const generatedAt = data?.generatedAt ?? null;
@@ -214,7 +215,7 @@ export function InboxView(): JSX.Element {
               the Feed + the per-repo entries below). */}
           <button
             type="button"
-            onClick={() => setInboxRepo('feed')}
+            onClick={() => setActivityRepo('feed')}
             aria-pressed={showingFeed}
             className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
               showingFeed
@@ -240,8 +241,8 @@ export function InboxView(): JSX.Element {
               attentionCount={r.attentionCount}
               openPrs={r.openPrs}
               threadTotals={r.threadTotals}
-              selected={inboxRepoId === r.repoId}
-              onSelect={() => setInboxRepo(r.repoId)}
+              selected={activityRepoId === r.repoId}
+              onSelect={() => setActivityRepo(r.repoId)}
             />
           ))}
 
@@ -270,7 +271,7 @@ export function InboxView(): JSX.Element {
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {noRepos ? (
           <div className="flex h-full items-center justify-center text-sm text-gray-400">
-            No watched repos yet. Add a repo from the filter bar to populate the Inbox.
+            No watched repos yet. Add a repo from the filter bar to populate the Activity.
           </div>
         ) : showingFeed ? (
           <FeedView />
@@ -286,6 +287,8 @@ export function InboxView(): JSX.Element {
         ) : selectedRepo != null ? (
           <div className="space-y-3">
             <RepoFeedHeader repo={selectedRepo} />
+            {/* All the repo's open PRs (at-a-glance metrics) BEFORE its activity feed. */}
+            <RepoOpenPrList prs={selectedRepo.prs} repoFullName={selectedRepo.repoFullName} />
             <FeedView repoId={selectedRepo.repoId} />
           </div>
         ) : (

@@ -1,4 +1,4 @@
-import type { InboxRepo } from '@pierre-review/shared';
+import type { ActivityRepo } from '@pierre-review/shared';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { DigestBanner } from './DigestBanner.js';
@@ -7,13 +7,10 @@ import { RepoStatsLine } from './RepoStats.js';
 // The compact console header shown above a single repo's feed (when a repo is selected
 // in the rail): the Pro digest banner (null in OSS), the repo name + maintainer / open
 // counts, the one-line stats summary, and a display-only thread-state bar.
-export function RepoFeedHeader({ repo }: { repo: InboxRepo }): JSX.Element {
+export function RepoFeedHeader({ repo }: { repo: ActivityRepo }): JSX.Element {
   const maintainerCount = repo.maintainerIds.length;
   return (
     <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-      {/* Pro per-repo digest (renders nothing in OSS mode). */}
-      <DigestBanner repoId={repo.repoId} />
-
       <div className="flex items-center gap-2">
         <span className="min-w-0 truncate text-base font-semibold text-gray-800 dark:text-gray-100">
           {repo.repoFullName}
@@ -45,6 +42,10 @@ export function RepoFeedHeader({ repo }: { repo: InboxRepo }): JSX.Element {
       {/* Display-only thread-state bar (no click-to-filter — the PRs-by-author list it
           used to filter isn't in this view). */}
       <ThreadStateBar counts={repo.threadTotals} />
+
+      {/* Pro per-repo digest — BELOW the name + stats, within the same card (renders
+          nothing in OSS mode; collapsible when present). */}
+      <DigestBanner repoId={repo.repoId} />
     </div>
   );
 }

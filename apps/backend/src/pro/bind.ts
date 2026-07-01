@@ -74,8 +74,8 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
           repoIds: args.repoIds ?? null,
           userIds: null,
         }),
-      getInbox: (accountId, repoIds) =>
-        hostQueries.getInbox(accountId, repoIds ?? null),
+      getActivity: (accountId, repoIds) =>
+        hostQueries.getActivity(accountId, repoIds ?? null),
     },
     reviewEvents,
     registerLearningsProvider,

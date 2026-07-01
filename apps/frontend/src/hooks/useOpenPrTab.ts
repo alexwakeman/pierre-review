@@ -3,8 +3,8 @@ import type { DigestPrRef } from '@pierre-review/shared';
 
 // Open a digest's referenced PR as a full-screen pr-detail tab. Author chrome
 // backfills when PrDetail loads and calls syncMeta. A no-op for an unresolved ref
-// (prId == null). Digest refs are clicked from the Inbox, so opening from there
-// arms Back → Inbox (item 4); `fromInbox: true` makes that explicit.
+// (prId == null). Digest refs are clicked from the Activity, so opening from there
+// arms Back → Activity (item 4); `fromActivity: true` makes that explicit.
 export function useOpenPrTab(): (ref: DigestPrRef) => void {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   return (ref: DigestPrRef) => {
@@ -19,7 +19,7 @@ export function useOpenPrTab(): (ref: DigestPrRef) => void {
         authorDisplayName: null,
         authorAvatarUrl: null,
       },
-      { fromInbox: true },
+      { fromActivity: true },
     );
   };
 }

@@ -1,26 +1,21 @@
 import { usePinnedTabs, type Tab } from '../store/pinnedTabs.js';
 
-// A single closable tab chip (pr-detail / pr-focus / my-turn): fixed width, closable (✕).
-// Clicking the body activates the tab (App.tsx renders the matching content). PR tabs
-// show the PR title + author; the My-Turn tab is glyph + label.
+// A single closable tab chip (pr-detail / pr-focus): fixed width, closable (✕). Clicking
+// the body activates the tab (App.tsx renders the matching content). PR tabs show the PR
+// title + author; a focus tab is marked with a ◎ glyph + "PR focus" subtitle.
 function TabChip({ tab }: { tab: Tab }): JSX.Element {
   const active = usePinnedTabs((s) => s.activeTab === tab.key);
   const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
   const closeTab = usePinnedTabs((s) => s.closeTab);
 
   const isFocus = tab.kind === 'pr-focus';
-  const isMyTurn = tab.kind === 'my-turn';
   const meta = tab.meta;
   const author = meta?.authorDisplayName ?? meta?.authorLogin ?? 'unknown';
 
-  const title = isMyTurn
-    ? 'My Turn — your triage inbox, isolated on the timeline'
-    : `${meta?.repoFullName ?? ''} #${meta?.number ?? ''} · ${meta?.title ?? ''}${
-        isFocus ? ' (focus)' : ''
-      }`;
-  const closeAria = isMyTurn
-    ? 'Close My Turn tab'
-    : `Close ${isFocus ? 'focus' : 'detail'} tab for PR #${meta?.number ?? ''}`;
+  const title = `${meta?.repoFullName ?? ''} #${meta?.number ?? ''} · ${meta?.title ?? ''}${
+    isFocus ? ' (focus)' : ''
+  }`;
+  const closeAria = `Close ${isFocus ? 'focus' : 'detail'} tab for PR #${meta?.number ?? ''}`;
 
   return (
     <div
@@ -39,11 +34,7 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
         className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
         title={title}
       >
-        {isMyTurn ? (
-          <span aria-hidden="true" className="shrink-0 text-amber-500">
-            ✓
-          </span>
-        ) : isFocus ? (
+        {isFocus ? (
           <span aria-hidden="true" className="shrink-0 text-sky-500">
             ◎
           </span>
@@ -70,16 +61,10 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
               active ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300'
             }`}
           >
-            {isMyTurn ? (
-              'My Turn'
-            ) : (
-              <>
-                <span className="text-gray-400">#{meta?.number}</span> {meta?.title}
-              </>
-            )}
+            <span className="text-gray-400">#{meta?.number}</span> {meta?.title}
           </span>
           <span className="truncate text-[10px] text-gray-500">
-            {isMyTurn ? 'Your triage inbox' : isFocus ? 'PR focus' : author}
+            {isFocus ? 'PR focus' : author}
           </span>
         </span>
       </button>
@@ -96,7 +81,7 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
   );
 }
 
-// A permanent, NON-closable tab (Inbox / Timeline). These live at the head of the strip
+// A permanent, NON-closable tab (Activity / Timeline). These live at the head of the strip
 // as first-class tabs so the two core views read the same as the dynamic PR tabs — one
 // clear place to switch, no separate header toggle (reduces confusion).
 function FixedChip({
@@ -133,7 +118,7 @@ function FixedChip({
   );
 }
 
-const InboxIcon = (
+const ActivityIcon = (
   <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
     <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
@@ -147,9 +132,9 @@ const TimelineIcon = (
   </svg>
 );
 
-// The tab strip: Inbox + Timeline are permanent, non-closable tabs at the head (the two
-// core views — no separate header toggle); the dynamic pinned tabs (pr-detail / pr-focus /
-// my-turn) follow and are closable. Always shown, so switching views has one home.
+// The tab strip: Activity + Timeline are permanent, non-closable tabs at the head (the two
+// core views — no separate header toggle); the dynamic pinned tabs (pr-detail / pr-focus)
+// follow and are closable. Always shown, so switching views has one home.
 export function PinnedTabsBar(): JSX.Element {
   const tabs = usePinnedTabs((s) => s.tabs);
   const activeTab = usePinnedTabs((s) => s.activeTab);
@@ -163,11 +148,11 @@ export function PinnedTabsBar(): JSX.Element {
       className="flex shrink-0 items-end gap-1 overflow-x-auto bg-gray-100 px-2 pt-1 dark:bg-gray-900"
     >
       <FixedChip
-        active={activeTab === 'inbox'}
-        onClick={() => setActiveTab('inbox')}
-        icon={InboxIcon}
-        label="Inbox"
-        title="Inbox — per-repo triage console"
+        active={activeTab === 'activity'}
+        onClick={() => setActiveTab('activity')}
+        icon={ActivityIcon}
+        label="Activity"
+        title="Activity — per-repo triage console"
       />
       <FixedChip
         active={activeTab === 'timeline'}

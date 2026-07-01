@@ -80,8 +80,8 @@ export interface FilterState {
   // default; an empty set hides every review marker. Only affects review markers.
   reviewStates: ReviewState[];
   derivedStates: DerivedState[]; // empty = no derived-state filtering
-  // Inbox "Feed" scope toggle: when true, the consolidated Feed shows only "My Turn"
-  // actionables. A TRANSIENT flag owned by the Inbox lane (not a persisted filter, not
+  // Activity "Feed" scope toggle: when true, the consolidated Feed shows only "My Turn"
+  // actionables. A TRANSIENT flag owned by the Activity lane (not a persisted filter, not
   // URL-synced) — present in freshDefaults() but NOT in FilterDefaults /
   // pickFilterBarState / sanitizePersistedFilters, so a fresh load starts false.
   feedMyTurnOnly: boolean;
@@ -118,19 +118,19 @@ export interface FilterState {
   // Insights panel (header button / `i`): transient UI flag, not URL-synced.
   insightsOpen: boolean;
 
-  // Inbox tab (the master-detail triage console). Which detail is shown:
+  // Activity tab (the master-detail triage console). Which detail is shown:
   // 'feed' = the cross-repo consolidated Feed (the default landing detail), a number =
   // that single repo's console, null = nothing selected yet (treated as 'feed'). Client-
   // side narrow, no refetch. (The old 'all' briefing-feed pseudo-row was removed — it was
   // redundant with the Feed + per-repo entries.) Transient (mirrors myTurnOnly/
   // insightsOpen): in freshDefaults() but NOT in pickFilterBarState /
-  // sanitizePersistedFilters. `?inboxRepo=<id>` is the only URL mirror (see useUrlState);
+  // sanitizePersistedFilters. `?activityRepo=<id>` is the only URL mirror (see useUrlState);
   // the active TAB lives in the pinnedTabs store.
-  inboxRepoId: number | 'feed' | null;
-  // Soft thread-state filter inside an Inbox repo console: clicking a thread-state
+  activityRepoId: number | 'feed' | null;
+  // Soft thread-state filter inside an Activity repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
-  inboxThreadFilter: DerivedState | null;
+  activityThreadFilter: DerivedState | null;
 
   // PR-title search box (App.tsx). Sticky: persists across input blur and PR
   // selection so re-focusing re-shows the same results. Store-only (NOT URL-synced
@@ -197,8 +197,9 @@ export interface FilterState {
   setReviewStates: (s: ReviewState[]) => void;
   toggleDerivedState: (s: DerivedState) => void;
   setDerivedStates: (s: DerivedState[]) => void;
-  // Toggle the Inbox "Feed" My-Turn-only scope (see feedMyTurnOnly).
+  // Toggle / set the Activity "Feed" My-Turn-only scope (see feedMyTurnOnly).
   toggleFeedMyTurnOnly: () => void;
+  setFeedMyTurnOnly: (v: boolean) => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
   clearSelection: () => void;
@@ -249,12 +250,12 @@ export interface FilterState {
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
   setInsightsOpen: (v: boolean) => void;
-  // Select an Inbox detail target (a repo id, or 'feed' for the cross-repo consolidated
+  // Select an Activity detail target (a repo id, or 'feed' for the cross-repo consolidated
   // Feed).
-  setInboxRepo: (id: number | 'feed') => void;
-  // Set/clear the Inbox repo console's soft thread-state filter (toggles off when
+  setActivityRepo: (id: number | 'feed') => void;
+  // Set/clear the Activity repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
-  setInboxThreadFilter: (s: DerivedState | null) => void;
+  setActivityThreadFilter: (s: DerivedState | null) => void;
   setSearchQuery: (q: string) => void;
   toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
@@ -423,7 +424,7 @@ export function savedViewMatchesCurrent(
 function freshDefaults(): FilterData {
   return {
     ...freshFilterDefaults(),
-    // Transient Inbox "Feed" scope toggle (not a persisted filter): fresh load = false.
+    // Transient Activity "Feed" scope toggle (not a persisted filter): fresh load = false.
     feedMyTurnOnly: false,
     selectedPrId: null,
     selectedThreadId: null,
@@ -433,11 +434,11 @@ function freshDefaults(): FilterData {
     claudeTabFocus: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     insightsOpen: false,
-    // Inbox detail state — transient (like myTurnOnly / insightsOpen). A fresh open
+    // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
     // with no thread-state filter.
-    inboxRepoId: 'feed',
-    inboxThreadFilter: null,
+    activityRepoId: 'feed',
+    activityThreadFilter: null,
     expandedFileGroups: [],
     collapsedFileGroups: [],
     expandedDiffHunks: [],
@@ -484,6 +485,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   setDerivedStates: (st) => set({ derivedStates: st }),
   toggleFeedMyTurnOnly: () =>
     set((s) => ({ feedMyTurnOnly: !s.feedMyTurnOnly })),
+  setFeedMyTurnOnly: (v) => set({ feedMyTurnOnly: v }),
   selectPr: (id) =>
     set({
       selectedPrId: id,
@@ -570,10 +572,10 @@ export const useFilters = create<FilterState>((set, get) => ({
   setInsightsOpen: (v) => set({ insightsOpen: v }),
   // Selecting a different repo console drops any lingering thread-state filter so a
   // narrow from one repo doesn't carry over to the next.
-  setInboxRepo: (id) =>
-    set((s) => (s.inboxRepoId === id ? {} : { inboxRepoId: id, inboxThreadFilter: null })),
-  setInboxThreadFilter: (st) =>
-    set((s) => ({ inboxThreadFilter: s.inboxThreadFilter === st ? null : st })),
+  setActivityRepo: (id) =>
+    set((s) => (s.activityRepoId === id ? {} : { activityRepoId: id, activityThreadFilter: null })),
+  setActivityThreadFilter: (st) =>
+    set((s) => ({ activityThreadFilter: s.activityThreadFilter === st ? null : st })),
   setSearchQuery: (q) => set({ searchQuery: q }),
   toggleFileGroup: (path, defaultExpanded) =>
     set((s) => {

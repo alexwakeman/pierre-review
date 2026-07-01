@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import type {
   ConsolidatedFeedItem,
@@ -20,20 +20,14 @@ import {
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { Markdown } from '../Markdown.js';
-import { FeedDigestPanel } from './FeedDigestPanel.js';
+import { FeedDigestList } from './FeedDigestList.js';
 
-// A coloured chip + label describing what an item is — reused vocabulary from lib/ui.ts
-// (my-turn reason tags / event types) plus the my-turn "special" kinds.
+// A coloured chip + label describing what an item is. A "My Turn" (participated) item with
+// a reason tag shows that reason; otherwise the plain event-kind chip.
 function itemGlyph(item: ConsolidatedFeedItem): { color: string; label: string } {
-  if (item.source === 'my_turn') {
-    if (item.reasonTag != null) {
-      const meta = REASON_META[item.reasonTag];
-      return { color: meta.color, label: meta.label };
-    }
-    if (item.kind === 'claude_review') return { color: '#a78bfa', label: 'Claude review' };
-    if (item.kind === 'watched_repo_pr') return { color: '#0ea5e9', label: 'New in watched repo' };
-    if (item.kind === 'thread') return { color: '#f59e0b', label: 'Reply awaiting you' };
-    return { color: '#3b82f6', label: 'Your turn' };
+  if (item.isMyTurn && item.reasonTag != null) {
+    const meta = REASON_META[item.reasonTag];
+    return { color: meta.color, label: meta.label };
   }
   const meta = EVENT_META[item.kind as EventType];
   return { color: meta?.color ?? '#6b7280', label: meta?.label ?? item.kind };
@@ -49,38 +43,58 @@ const REVIEW_STATE_META: Record<ReviewState, { label: string; color: string }> =
   pending: { label: 'pending', color: '#eab308' },
 };
 
-// The consolidated Feed — a flat, chronological, social-style stream. Cross-repo when
-// `repoId` is absent (scoped by the active FilterBar repos/members); scoped to a single
-// repo when a rail repo is selected (`repoId` set). "My Turn" items get a yellow border
-// and an always-on badge, plus an optional client-side "My Turn only" filter.
+// The consolidated Feed — a flat, chronological, social-style stream of activity events.
+// Cross-repo when `repoId` is absent (scoped by the active FilterBar repos/members); scoped
+// to a single repo when a rail repo is selected. Each item is flagged `isMyTurn` (a PR you
+// participate in, acted on by someone else) → a yellow border + badge, plus an optional
+// client-side "My Turn only" filter. Clicking any item opens the full PR detail tab.
 export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const storeRepoIds = useFilters((s) => s.repoIds);
   const userIds = useFilters((s) => s.userIds);
   const excludeBots = useFilters((s) => s.excludeBots);
   const feedMyTurnOnly = useFilters((s) => s.feedMyTurnOnly);
   const toggleFeedMyTurnOnly = useFilters((s) => s.toggleFeedMyTurnOnly);
-  const openClaudeReview = useFilters((s) => s.openClaudeReview);
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
-  const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
+  const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
+  // The one-shot flash signal — set ONLY by a real browser Back (consumeActivityReturn), so
+  // an ordinary return to Activity (e.g. clicking the Activity tab chip) never flashes.
+  const flashTarget = usePinnedTabs((s) => s.activityFlashItemId);
+  const clearFlash = usePinnedTabs((s) => s.clearActivityFlashItem);
 
   // A selected rail repo scopes the feed to just that repo; otherwise follow the store's
   // active repo filter (a FilterBar change refetches via the query key). The bots toggle
   // flows in too, so hiding bots on the timeline also hides them here.
   const effectiveRepoIds = repoId != null ? [repoId] : storeRepoIds;
-  const { items: loaded, users, hasMore, loadMore, isFetchingMore } = useConsolidatedFeed({
+  const { items, users, hasMore, loadMore, isFetchingMore } = useConsolidatedFeed({
     repoIds: effectiveRepoIds,
     userIds,
     excludeBots,
   });
 
   const usersById = useMemo(() => indexUsers(users), [users]);
-  // The feed has no "seen" concept anymore (the Done/acknowledge control was removed):
-  // defensively drop any `acknowledged` copy so a handled item never lingers as a
-  // full-prominence "My Turn" card (the backend no longer emits them).
-  const items = loaded.filter((i) => !i.acknowledged);
-  const myTurnCount = items.filter((i) => i.source === 'my_turn').length;
-  const visible = feedMyTurnOnly ? items.filter((i) => i.source === 'my_turn') : items;
+  const myTurnCount = items.filter((i) => i.isMyTurn).length;
+  const visible = feedMyTurnOnly ? items.filter((i) => i.isMyTurn) : items;
+
+  // Back-from-a-click highlight: when a browser Back returns us to the feed
+  // (consumeActivityReturn set the one-shot flashTarget), scroll the exact row we clicked
+  // into view and flash it once, then consume the signal. Only fires on a real Back.
+  const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+  const [flashId, setFlashId] = useState<string | null>(null);
+  useEffect(() => {
+    if (flashTarget == null) return;
+    const id = flashTarget;
+    const raf = requestAnimationFrame(() => {
+      const el = rowRefs.current.get(id);
+      if (el) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        setFlashId(id);
+        window.setTimeout(() => setFlashId((c) => (c === id ? null : c)), 1800);
+      }
+      clearFlash();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [flashTarget, clearFlash]);
 
   const metaOf = (item: ConsolidatedFeedItem, prId: number): TabMeta => ({
     id: prId,
@@ -92,32 +106,30 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
     authorAvatarUrl: null,
   });
 
-  // Open an item: tab management (activate a PR-focus tab + auto-push a Back-to-Inbox
-  // history entry, since the Inbox is active at click time) is `openPrFocusTab`; it does
-  // NOT drive selection, so we drive it ourselves (Claude tab / thread / PR).
+  // Open an item → the full-height PR DETAIL tab (Show/Focus there drive the timeline).
+  // `fromActivity` arms Back-to-Activity + stashes this row's id so Back scrolls it back into
+  // view. We also drive selection so the detail lands on the right thread/PR.
   function open(item: ConsolidatedFeedItem): void {
     const prId = item.prId;
     if (prId == null) return;
-    openPrFocusTab(metaOf(item, prId));
-    if (item.kind === 'claude_review') openClaudeReview(prId);
-    else if (item.threadId != null) selectThread(prId, item.threadId);
+    openPrDetailTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
+    if (item.threadId != null) selectThread(prId, item.threadId);
     else selectPr(prId);
   }
 
-  // Open a specific affected review thread inline on a commit item — jump straight to that
-  // addressed thread in the PR-focus tab rather than the PR's first thread.
+  // Open a specific affected thread inline on a commit item — jump straight to that thread.
   function openThread(item: ConsolidatedFeedItem, threadId: number): void {
     const prId = item.prId;
     if (prId == null) return;
-    openPrFocusTab(metaOf(item, prId));
+    openPrDetailTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
     selectThread(prId, threadId);
   }
 
   return (
     <div className="space-y-3">
-      {/* The cross-repo Pro digest sits atop the cross-repo feed only (the per-repo Pro
-          digest lives in RepoFeedHeader for the single-repo view). */}
-      {repoId == null && <FeedDigestPanel />}
+      {/* The cross-repo Pro digest collection sits atop the cross-repo feed only (a single
+          repo's digest lives in its RepoFeedHeader). */}
+      {repoId == null && <FeedDigestList />}
 
       {/* My Turn filter toggle + a "showing X of Y" hint. */}
       <div className="flex items-center gap-2 px-0.5">
@@ -133,9 +145,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
           title="Show only items that need your attention (My Turn)"
         >
           <span aria-hidden="true">★</span> My Turn
-          {myTurnCount > 0 && (
-            <span className="tabular-nums opacity-70">{myTurnCount}</span>
-          )}
+          {myTurnCount > 0 && <span className="tabular-nums opacity-70">{myTurnCount}</span>}
         </button>
         {items.length > 0 && (
           <span className="text-[11px] text-gray-400">
@@ -155,10 +165,8 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
       ) : (
         <ul className="space-y-2">
           {visible.map((item) => {
-            const actorUser =
-              item.actorId != null ? usersById.get(item.actorId) : undefined;
-            const mergedBy =
-              item.mergedById != null ? usersById.get(item.mergedById) : undefined;
+            const actorUser = item.actorId != null ? usersById.get(item.actorId) : undefined;
+            const mergedBy = item.mergedById != null ? usersById.get(item.mergedById) : undefined;
             const mergedByLabel =
               mergedBy != null || item.mergedById != null
                 ? userLabel(mergedBy, item.mergedById)
@@ -174,6 +182,11 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
                 mergedByLabel={mergedByLabel}
                 reviewerLabels={reviewerLabels}
                 usersById={usersById}
+                flash={flashId === item.id}
+                innerRef={(el) => {
+                  if (el) rowRefs.current.set(item.id, el);
+                  else rowRefs.current.delete(item.id);
+                }}
                 onOpen={() => open(item)}
                 onOpenThread={(tid) => openThread(item, tid)}
               />
@@ -201,7 +214,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
 }
 
 // One review thread that a commit item likely addressed — a clickable row (opens that
-// thread in the PR-focus tab) showing the file/line, the thread's new derived state, and
+// thread in the PR detail tab) showing the file/line, the thread's new derived state, and
 // a preview of what the reviewer originally asked.
 function AffectedThreadRow({
   thread,
@@ -249,6 +262,8 @@ function FeedRow({
   mergedByLabel,
   reviewerLabels,
   usersById,
+  flash,
+  innerRef,
   onOpen,
   onOpenThread,
 }: {
@@ -257,18 +272,17 @@ function FeedRow({
   mergedByLabel: string | null;
   reviewerLabels: string[];
   usersById: Map<number, User>;
+  flash: boolean;
+  innerRef: (el: HTMLLIElement | null) => void;
   onOpen: () => void;
   onOpenThread: (threadId: number) => void;
 }): JSX.Element {
   const glyph = itemGlyph(item);
-  const isMyTurn = item.source === 'my_turn';
-  // Claude runs have no GitHub actor (actorId null) — render them as "Claude" with a
-  // distinct badge rather than the generic 'unknown' user. A commit push whose author
-  // didn't resolve to a GitHub login shows a neutral label instead of the bare 'unknown'.
-  const isClaude = item.source === 'my_turn' && item.kind === 'claude_review';
-  const actorName = isClaude
-    ? 'Claude'
-    : item.actorId == null && item.kind === 'commit_pushed'
+  const isMyTurn = item.isMyTurn;
+  // A commit push whose author didn't resolve to a GitHub login shows a neutral label
+  // instead of the bare 'unknown'.
+  const actorName =
+    item.actorId == null && item.kind === 'commit_pushed'
       ? 'A contributor'
       : userLabel(actorUser, item.actorId);
   const prLabel =
@@ -286,31 +300,21 @@ function FeedRow({
   };
 
   return (
-    <li>
+    <li ref={innerRef}>
       <article
         onClick={onCardClick}
         className={`cursor-pointer rounded-md border p-2.5 text-sm transition-colors ${
-          isMyTurn
-            ? 'border-yellow-400 bg-yellow-50/40 dark:border-yellow-500/50 dark:bg-yellow-950/15'
-            : 'border-gray-200 hover:border-sky-300 dark:border-gray-800 dark:hover:border-sky-700'
+          flash
+            ? 'border-sky-400 ring-2 ring-sky-400/60 dark:border-sky-500'
+            : isMyTurn
+              ? 'border-yellow-400 bg-yellow-50/40 dark:border-yellow-500/50 dark:bg-yellow-950/15'
+              : 'border-gray-200 hover:border-sky-300 dark:border-gray-800 dark:hover:border-sky-700'
         }`}
       >
         {/* header: avatar + actor + action chip + (My Turn badge) + time */}
         <div className="flex items-center gap-2">
-          {isClaude ? (
-            <span
-              aria-hidden="true"
-              title="Claude"
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-[11px] text-violet-600 dark:text-violet-300"
-            >
-              ✦
-            </span>
-          ) : (
-            <Avatar user={actorUser} size={20} />
-          )}
-          <span className="truncate font-medium text-gray-800 dark:text-gray-100">
-            {actorName}
-          </span>
+          <Avatar user={actorUser} size={20} />
+          <span className="truncate font-medium text-gray-800 dark:text-gray-100">{actorName}</span>
           <span
             className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
             style={{ color: glyph.color, background: glyph.color + '1a' }}
@@ -388,8 +392,7 @@ function FeedRow({
             )}
             {reviewerLabels.length > 0 && (
               <span>
-                Reviewed by{' '}
-                <span className="font-medium">{reviewerLabels.join(', ')}</span>
+                Reviewed by <span className="font-medium">{reviewerLabels.join(', ')}</span>
               </span>
             )}
           </div>

@@ -8,7 +8,7 @@ import { accountIdOf } from '../plugins/auth.js';
 // append-only IndexedDB store (see lib/feedStore.ts). Account-scoped.
 export async function feedRoutes(app: FastifyInstance): Promise<void> {
   // getFeed's default is now all-repos; preserve this legacy mirror's watched-repo-only
-  // semantics explicitly (the consolidated Inbox Feed supersedes this endpoint).
+  // semantics explicitly (the consolidated Activity Feed supersedes this endpoint).
   app.get(
     '/api/feed',
     async (req): Promise<FeedResponse> =>
