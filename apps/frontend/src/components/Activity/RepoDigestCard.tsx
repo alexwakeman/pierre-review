@@ -26,6 +26,8 @@ export function RepoDigestCard({
   onRegenerate,
   regenerating = false,
   onOpenPr,
+  onFocusPr,
+  showProBadge = true,
 }: {
   digest: RepoDigest | undefined;
   isLoading: boolean;
@@ -35,6 +37,10 @@ export function RepoDigestCard({
   onRegenerate?: () => void;
   regenerating?: boolean;
   onOpenPr: (ref: DigestPrRef) => void;
+  onFocusPr: (ref: DigestPrRef) => void;
+  // The "Pro" chip on the card. Hidden in the Feed collection (which shows one shared
+  // "Pro" marker at the top); shown on a standalone single-repo card (its own top).
+  showProBadge?: boolean;
 }): JSX.Element {
   return (
     <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-900/50 dark:bg-violet-950/20">
@@ -52,9 +58,11 @@ export function RepoDigestCard({
           <span aria-hidden="true">✨</span>
           <span className="truncate normal-case">{title}</span>
         </button>
-        <span className="shrink-0 rounded bg-violet-500/15 px-1 text-[10px] font-semibold text-violet-600 dark:text-violet-300">
-          Pro
-        </span>
+        {showProBadge && (
+          <span className="shrink-0 rounded bg-violet-500/15 px-1 text-[10px] font-semibold text-violet-600 dark:text-violet-300">
+            Pro
+          </span>
+        )}
         <span className="ml-auto flex items-center gap-2 text-[10px] text-gray-400">
           {digest != null && (
             <span title={digest.model}>
@@ -87,7 +95,12 @@ export function RepoDigestCard({
             <div className="h-3 w-2/3 animate-pulse rounded bg-violet-200/60 dark:bg-violet-900/40" />
           ) : digest != null && digest.summary.trim() !== '' ? (
             <div key={digest.generatedAt} className="digest-fade-in">
-              <DigestMarkdown markdown={digest.summary} prRefs={digest.prRefs} onOpenPr={onOpenPr} />
+              <DigestMarkdown
+                markdown={digest.summary}
+                prRefs={digest.prRefs}
+                onOpenPr={onOpenPr}
+                onFocusPr={onFocusPr}
+              />
             </div>
           ) : (
             <p className="text-xs text-gray-400">

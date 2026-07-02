@@ -2,13 +2,14 @@ import type { ReactNode } from 'react';
 import type { DigestPrRef } from '@pierre-review/shared';
 
 // Linkify "#<number>" tokens in one line against the resolved PR refs. A resolved PR
-// renders as its clickable "#<number>" link followed by the PR's title and "· by
-// <author>" (both from resolved data, never the model), so every concrete PR mention
-// carries its title + author. Unresolved numbers stay plain text.
+// renders as its "#<number>" link (opens the PR detail tab) followed by the PR's title
+// as a clickable inline-`code` chip that enters Focus mode, then "· by <author>". Title
+// + author come from resolved data (never the model). Unresolved numbers stay plain text.
 function renderTokens(
   line: string,
   byNumber: Map<number, DigestPrRef>,
   onOpenPr: (ref: DigestPrRef) => void,
+  onFocusPr: (ref: DigestPrRef) => void,
 ): ReactNode[] {
   const out: ReactNode[] = [];
   const re = /#(\d+)/g;
@@ -32,11 +33,17 @@ function renderTokens(
         </button>,
       );
       if (ref.title != null && ref.title.trim() !== '') {
+        // The whole title is a clickable inline-`code` chip → Focus PR tab mode.
         out.push(
-          <span key={`t${key++}`} className="text-gray-700 dark:text-gray-200">
-            {' '}
+          <button
+            key={`t${key++}`}
+            type="button"
+            onClick={() => onFocusPr(ref)}
+            className="mx-0.5 rounded bg-gray-100 px-1 font-mono text-[12px] text-gray-700 hover:bg-sky-100 hover:text-sky-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-sky-950/50 dark:hover:text-sky-300"
+            title={`Focus PR #${num} in its own timeline tab`}
+          >
             {ref.title}
-          </span>,
+          </button>,
         );
       }
       if (ref.authorLogin != null && ref.authorLogin.trim() !== '') {
@@ -67,10 +74,12 @@ export function DigestMarkdown({
   markdown,
   prRefs,
   onOpenPr,
+  onFocusPr,
 }: {
   markdown: string;
   prRefs: DigestPrRef[];
   onOpenPr: (ref: DigestPrRef) => void;
+  onFocusPr: (ref: DigestPrRef) => void;
 }): JSX.Element {
   const byNumber = new Map<number, DigestPrRef>();
   for (const r of prRefs) if (r.prId != null) byNumber.set(r.prNumber, r);
@@ -112,7 +121,7 @@ export function DigestMarkdown({
           <span aria-hidden="true" className="select-none text-gray-400">
             •
           </span>
-          <span className="min-w-0">{renderTokens(line, byNumber, onOpenPr)}</span>
+          <span className="min-w-0">{renderTokens(line, byNumber, onOpenPr, onFocusPr)}</span>
         </li>
       ))}
     </ul>

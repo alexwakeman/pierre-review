@@ -1,6 +1,6 @@
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useRepoDigest, useRefreshRepoDigests } from '../../hooks/useRepoDigest.js';
-import { useOpenPrTab } from '../../hooks/useOpenPrTab.js';
+import { useOpenPrTab, useFocusPrTab } from '../../hooks/useOpenPrTab.js';
 import { useDigestCollapse } from '../../store/digestCollapse.js';
 import { RepoDigestCard } from './RepoDigestCard.js';
 import { RegenProgressBar } from './RegenProgressBar.js';
@@ -15,6 +15,7 @@ export function DigestBanner({ repoId }: { repoId: number }): JSX.Element | null
   const { data: digest, isLoading } = useRepoDigest(repoId, activityDigest);
   const refresh = useRefreshRepoDigests();
   const openPr = useOpenPrTab();
+  const focusPr = useFocusPrTab();
   const collapsed = useDigestCollapse((s) => s.collapsed.has(repoId));
   const toggle = useDigestCollapse((s) => s.toggle);
   const regenerating = refresh.isPending && refresh.variables === repoId;
@@ -33,6 +34,7 @@ export function DigestBanner({ repoId }: { repoId: number }): JSX.Element | null
         onRegenerate={() => refresh.mutate(repoId)}
         regenerating={regenerating}
         onOpenPr={openPr}
+        onFocusPr={focusPr}
       />
       {/* Progress while THIS repo's own Regenerate runs (hides itself when done). */}
       <RegenProgressBar active={regenerating} />
