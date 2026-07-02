@@ -269,6 +269,21 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
   const { data: thread, isLoading } = useThread(item.threadId);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
+  // The feed item carries the THREAD id but not the specific comment id, so resolve
+  // the comment this card represents by matching its author + timestamp (mirrors the
+  // timeline MarkerPopover). That one comment is highlighted "new"; the rest of the
+  // conversation renders as plain context.
+  const highlightCommentId = useMemo(() => {
+    if (!thread || item.actorId == null) return null;
+    const target = new Date(item.occurredAt).getTime();
+    let best: { id: number; dist: number } | null = null;
+    for (const c of thread.comments) {
+      if (c.authorId !== item.actorId) continue;
+      const dist = Math.abs(new Date(c.createdAt).getTime() - target);
+      if (best == null || dist < best.dist) best = { id: c.id, dist };
+    }
+    return best?.id ?? null;
+  }, [thread, item.actorId, item.occurredAt]);
   const prUrl =
     item.prNumber != null ? `https://github.com/${item.repoFullName}/pull/${item.prNumber}` : '';
   if (isLoading) {
@@ -279,7 +294,15 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
       <div className="px-1 py-2 text-xs text-gray-400">Couldn’t load this conversation.</div>
     );
   }
-  return <ThreadCard thread={thread} usersById={usersById} prUrl={prUrl} repoId={item.repoId} />;
+  return (
+    <ThreadCard
+      thread={thread}
+      usersById={usersById}
+      prUrl={prUrl}
+      repoId={item.repoId}
+      highlightCommentId={highlightCommentId}
+    />
+  );
 }
 
 // One review thread that a commit item likely addressed — a clickable row (opens that
@@ -369,11 +392,11 @@ function FeedRow({
   const affected = item.affectedThreads ?? [];
   const primaryReason = item.myTurnReasons[0];
 
-  // Expand-in-place affordances: a review-thread card can show its full conversation
-  // (reply + resolve inline); a PR-comment card can open a quote+@mention reply.
+  // A review-thread card shows its FULL conversation inline (reply + resolve, with
+  // the specific comment highlighted new); a PR-comment card can open a quote+@mention
+  // reply.
   const isThreadCard = item.kind === 'review_comment' && item.threadId != null;
   const isPrCommentCard = item.kind === 'pr_comment' && item.prId != null;
-  const [threadOpen, setThreadOpen] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
 
   // Item 8 — only show credit that's meaningful for THIS card's context: "Merged by" +
@@ -480,9 +503,11 @@ function FeedRow({
           )}
         </div>
 
-        {/* markdown body (comment / review / Claude summary) — collapsed with a "Show more"
-            toggle once it overflows (item 2). */}
-        {hasBody && (
+        {/* markdown body (review / PR comment / Claude summary) — collapsed with a
+            "Show more" toggle once it overflows. Review-thread cards SKIP this: they
+            render the whole conversation inline below (with this comment highlighted),
+            so a standalone preview would just duplicate it. */}
+        {hasBody && !isThreadCard && (
           <div className="mt-1.5 rounded bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50">
             <div
               ref={bodyRef}
@@ -548,26 +573,12 @@ function FeedRow({
           </div>
         )}
 
-        {/* A review-thread card expands to the full conversation (reply + resolve
-            inline, exactly like the Threads tab). */}
+        {/* A review-thread card shows the full conversation inline (reply + resolve,
+            exactly like the Threads tab), with the comment this card represents
+            highlighted new. Stop propagation so interacting never opens the tab. */}
         {isThreadCard && (
-          <div className="mt-1.5">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setThreadOpen((o) => !o);
-              }}
-              className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
-            >
-              {threadOpen ? 'Hide conversation' : 'View conversation'}
-            </button>
-            {threadOpen && (
-              // Stop propagation so interacting with the thread never opens the tab.
-              <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
-                <InlineThread item={item} />
-              </div>
-            )}
+          <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
+            <InlineThread item={item} />
           </div>
         )}
 

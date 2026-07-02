@@ -18,6 +18,7 @@ export function ThreadCard({
   selected,
   viewedSince,
   inMyTurn = false,
+  highlightCommentId,
 }: {
   thread: ThreadDetail;
   usersById: Map<number, User>;
@@ -28,6 +29,10 @@ export function ThreadCard({
   // True when this thread is in the user's My Turn set (awaiting their response);
   // shows a "Done" affordance to clear it from the queue.
   inMyTurn?: boolean;
+  // When set, ONLY this comment is marked "new" (the Activity feed highlights the
+  // specific comment a card represents). When null/undefined, fall back to the
+  // viewedSince heuristic (the PR-detail Threads tab).
+  highlightCommentId?: number | null;
 }): JSX.Element {
   const anchorHunk = thread.comments[0]?.diffHunk ?? null;
 
@@ -67,7 +72,11 @@ export function ThreadCard({
             comment={c}
             usersById={usersById}
             repoId={repoId}
-            isNew={isNewComment(c.createdAt, viewedSince)}
+            isNew={
+              highlightCommentId != null
+                ? c.id === highlightCommentId
+                : isNewComment(c.createdAt, viewedSince)
+            }
             anchor={
               i === 0 ? (
                 <CodeAnchor diffHunk={anchorHunk} threadId={thread.id} />
