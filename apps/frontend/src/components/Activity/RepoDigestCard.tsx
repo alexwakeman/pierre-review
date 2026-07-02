@@ -26,7 +26,6 @@ export function RepoDigestCard({
   onRegenerate,
   regenerating = false,
   onOpenPr,
-  onFocusPr,
   showProBadge = true,
 }: {
   digest: RepoDigest | undefined;
@@ -37,7 +36,6 @@ export function RepoDigestCard({
   onRegenerate?: () => void;
   regenerating?: boolean;
   onOpenPr: (ref: DigestPrRef) => void;
-  onFocusPr: (ref: DigestPrRef) => void;
   // The "Pro" chip on the card. Hidden in the Feed collection (which shows one shared
   // "Pro" marker at the top); shown on a standalone single-repo card (its own top).
   showProBadge?: boolean;
@@ -112,7 +110,6 @@ export function RepoDigestCard({
                 markdown={digest.summary}
                 prRefs={digest.prRefs}
                 onOpenPr={onOpenPr}
-                onFocusPr={onFocusPr}
               />
             </div>
           ) : (

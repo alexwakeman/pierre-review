@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useRepoDigests, useRefreshRepoDigests } from '../../hooks/useRepoDigest.js';
-import { useOpenPrTab, useFocusPrTab } from '../../hooks/useOpenPrTab.js';
+import { useOpenPrTab } from '../../hooks/useOpenPrTab.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { useDigestCollapse } from '../../store/digestCollapse.js';
@@ -19,7 +19,6 @@ export function FeedDigestList(): JSX.Element | null {
   const { data: repos } = useRepos();
   const storeRepoIds = useFilters((s) => s.repoIds);
   const openPr = useOpenPrTab();
-  const focusPr = useFocusPrTab();
   const refresh = useRefreshRepoDigests();
   const collapsedSet = useDigestCollapse((s) => s.collapsed);
   const toggle = useDigestCollapse((s) => s.toggle);
@@ -93,7 +92,6 @@ export function FeedDigestList(): JSX.Element | null {
               onToggle={() => toggle(d.repoId)}
               regenerating={refresh.isPending}
               onOpenPr={openPr}
-              onFocusPr={focusPr}
               showProBadge={false}
             />
           ))}

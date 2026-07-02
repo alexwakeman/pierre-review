@@ -2,14 +2,13 @@ import type { ReactNode } from 'react';
 import type { DigestPrRef } from '@pierre-review/shared';
 
 // Linkify "#<number>" tokens in one line against the resolved PR refs. A resolved PR
-// renders as its "#<number>" link (opens the PR detail tab) followed by the PR's title
-// as a clickable inline-`code` chip that enters Focus mode, then "· by <author>". Title
-// + author come from resolved data (never the model). Unresolved numbers stay plain text.
+// renders as ONE link unifying the number and the PR title ("#123 Fix the thing") — bold,
+// no code/chip styling — that opens the PR detail tab. The title comes from resolved data
+// (never the model); no author is shown. Unresolved numbers stay plain text.
 function renderTokens(
   line: string,
   byNumber: Map<number, DigestPrRef>,
   onOpenPr: (ref: DigestPrRef) => void,
-  onFocusPr: (ref: DigestPrRef) => void,
 ): ReactNode[] {
   const out: ReactNode[] = [];
   const re = /#(\d+)/g;
@@ -21,39 +20,19 @@ function renderTokens(
     const num = Number(m[1]);
     const ref = byNumber.get(num);
     if (ref != null) {
+      const title = ref.title?.trim();
+      const label = title != null && title !== '' ? `#${num} ${title}` : `#${num}`;
       out.push(
         <button
           key={`r${key++}`}
           type="button"
           onClick={() => onOpenPr(ref)}
-          className="font-medium text-sky-600 hover:underline dark:text-sky-400"
-          title={ref.title ?? `Open PR #${num}`}
+          className="font-semibold text-sky-600 hover:underline dark:text-sky-400"
+          title={title ?? `Open PR #${num}`}
         >
-          #{num}
+          {label}
         </button>,
       );
-      if (ref.title != null && ref.title.trim() !== '') {
-        // The whole title is a clickable inline-`code` chip → Focus PR tab mode.
-        out.push(
-          <button
-            key={`t${key++}`}
-            type="button"
-            onClick={() => onFocusPr(ref)}
-            className="mx-0.5 rounded bg-gray-100 px-1 font-mono text-[12px] text-gray-700 hover:bg-sky-100 hover:text-sky-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-sky-950/50 dark:hover:text-sky-300"
-            title={`Focus PR #${num} in its own timeline tab`}
-          >
-            {ref.title}
-          </button>,
-        );
-      }
-      if (ref.authorLogin != null && ref.authorLogin.trim() !== '') {
-        out.push(
-          <span key={`a${key++}`} className="text-gray-400">
-            {' · by '}
-            {ref.authorLogin}
-          </span>,
-        );
-      }
     } else {
       out.push(`#${num}`);
     }
@@ -68,18 +47,17 @@ function renderTokens(
 //   1. the text-only throughput bullet (no PR references) first,
 //   2. then bullets mentioning MORE THAN ONE PR,
 //   3. then the single-PR bullets.
-// "#<number>" tokens linkify to clickable PR refs carrying their title + author. No
-// full markdown engine — the digests are a plain "- " bullet list.
+// "#<number>" tokens linkify to a single clickable PR ref (number + title). No full
+// markdown engine — the digests are a plain "- " bullet list. The first line reads as a
+// subtle headline (semibold + a violet accent bar, no bullet); the rest keep their bullets.
 export function DigestMarkdown({
   markdown,
   prRefs,
   onOpenPr,
-  onFocusPr,
 }: {
   markdown: string;
   prRefs: DigestPrRef[];
   onOpenPr: (ref: DigestPrRef) => void;
-  onFocusPr: (ref: DigestPrRef) => void;
 }): JSX.Element {
   const byNumber = new Map<number, DigestPrRef>();
   for (const r of prRefs) if (r.prId != null) byNumber.set(r.prNumber, r);
@@ -113,17 +91,28 @@ export function DigestMarkdown({
 
   return (
     <ul className="space-y-1">
-      {bullets.map((line, i) => (
-        <li
-          key={i}
-          className="flex gap-1.5 text-[13px] leading-relaxed text-gray-700 dark:text-gray-200"
-        >
-          <span aria-hidden="true" className="select-none text-gray-400">
-            •
-          </span>
-          <span className="min-w-0">{renderTokens(line, byNumber, onOpenPr, onFocusPr)}</span>
-        </li>
-      ))}
+      {bullets.map((line, i) =>
+        // First line = the overview headline: semibold + a thin violet accent bar, no
+        // bullet. It ties to the card's amethyst theme and draws the eye without a size bump.
+        i === 0 ? (
+          <li
+            key={i}
+            className="border-l-2 border-violet-400 pl-2 text-[13px] font-semibold leading-relaxed text-gray-800 dark:border-violet-500 dark:text-gray-100"
+          >
+            {renderTokens(line, byNumber, onOpenPr)}
+          </li>
+        ) : (
+          <li
+            key={i}
+            className="flex gap-1.5 text-[13px] leading-relaxed text-gray-700 dark:text-gray-200"
+          >
+            <span aria-hidden="true" className="select-none text-gray-400">
+              •
+            </span>
+            <span className="min-w-0">{renderTokens(line, byNumber, onOpenPr)}</span>
+          </li>
+        ),
+      )}
     </ul>
   );
 }
