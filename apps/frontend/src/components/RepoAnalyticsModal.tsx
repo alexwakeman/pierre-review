@@ -116,7 +116,7 @@ function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
           {Math.max(0, ...data.backlog.open) === 0 ? (
             <ChartEmpty />
           ) : (
-            <LineChart labels={weeks} series={backlog} />
+            <LineChart labels={weeks} series={backlog} curved />
           )}
         </ChartCard>
       </Section>
@@ -126,7 +126,7 @@ function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
           {data.reviewLatencyTrend.medianHours.every((v) => v == null) ? (
             <ChartEmpty />
           ) : (
-            <LineChart labels={weeks} series={latencyTrend} area formatY={fmtDuration} />
+            <LineChart labels={weeks} series={latencyTrend} area formatY={fmtDuration} curved />
           )}
         </ChartCard>
         <ChartCard title="Cycle-time breakdown" note="by close week">

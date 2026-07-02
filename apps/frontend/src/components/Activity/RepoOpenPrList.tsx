@@ -89,6 +89,12 @@ export function RepoOpenPrList({
                   </span>
                 )}
                 <Avatar user={author} size={16} />
+                <span
+                  className="min-w-0 max-w-[7rem] shrink-0 truncate text-gray-500 dark:text-gray-400"
+                  title={userLabel(author, pr.authorId)}
+                >
+                  {userLabel(author, pr.authorId)}
+                </span>
                 <span className="min-w-0 flex-1 truncate">
                   <span className="text-gray-400">#{pr.number}</span>{' '}
                   <span className="font-medium text-gray-700 dark:text-gray-200">{pr.title}</span>
