@@ -44,10 +44,20 @@ export function RepoDigestCard({
 }): JSX.Element {
   return (
     <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-900/50 dark:bg-violet-950/20">
-      <div className="flex items-center gap-2">
+      {/* The whole header row toggles collapse (so a collapsed card expands from
+          anywhere on it, and the top collapses it again). The inner controls stop
+          propagation: the title stays a focusable button for keyboard, Regenerate
+          runs without also toggling. */}
+      <div
+        onClick={onToggle}
+        className="-mx-1 flex cursor-pointer select-none items-center gap-2 rounded px-1 hover:bg-violet-500/5"
+      >
         <button
           type="button"
-          onClick={onToggle}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
           aria-expanded={!collapsed}
           className="flex min-w-0 items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-violet-600 hover:text-violet-700 dark:text-violet-300 dark:hover:text-violet-200"
           title={collapsed ? 'Expand digest' : 'Collapse digest'}
@@ -75,7 +85,10 @@ export function RepoDigestCard({
           {onRegenerate != null && (
             <button
               type="button"
-              onClick={onRegenerate}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRegenerate?.();
+              }}
               disabled={regenerating}
               className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
               title="Regenerate this repo's digest (runs the cheap-tier model)"
