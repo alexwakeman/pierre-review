@@ -1498,6 +1498,9 @@ export interface DigestPrRef {
   repoId: number;
   repoFullName: string;
   title: string | null;
+  // GitHub login of the PR author, resolved alongside the ref so the digest can show
+  // "title #<number> · by <author>" for every concrete PR mention. Null when unknown.
+  authorLogin: string | null;
   state: PrState | null;
 }
 
