@@ -3,6 +3,7 @@ import { useRepoDigest, useRefreshRepoDigests } from '../../hooks/useRepoDigest.
 import { useOpenPrTab } from '../../hooks/useOpenPrTab.js';
 import { useDigestCollapse } from '../../store/digestCollapse.js';
 import { RepoDigestCard } from './RepoDigestCard.js';
+import { RegenProgressBar } from './RegenProgressBar.js';
 
 // The per-repo LLM "headlines" digest — the ONLY Pro/flagged surface inside a repo's own
 // Activity console. Renders nothing at all unless pro.activityDigest is true (no greyed stub,
@@ -22,15 +23,19 @@ export function DigestBanner({ repoId }: { repoId: number }): JSX.Element | null
   if (!activityDigest) return null;
 
   return (
-    <RepoDigestCard
-      digest={digest}
-      isLoading={isLoading}
-      title="Digest"
-      collapsed={collapsed}
-      onToggle={() => toggle(repoId)}
-      onRegenerate={() => refresh.mutate(repoId)}
-      regenerating={regenerating}
-      onOpenPr={openPr}
-    />
+    <div className="space-y-1.5">
+      <RepoDigestCard
+        digest={digest}
+        isLoading={isLoading}
+        title="Digest"
+        collapsed={collapsed}
+        onToggle={() => toggle(repoId)}
+        onRegenerate={() => refresh.mutate(repoId)}
+        regenerating={regenerating}
+        onOpenPr={openPr}
+      />
+      {/* Progress while THIS repo's own Regenerate runs (hides itself when done). */}
+      <RegenProgressBar active={regenerating} />
+    </div>
   );
 }

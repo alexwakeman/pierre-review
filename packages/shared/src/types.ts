@@ -968,6 +968,10 @@ export interface TimelineQuery {
   // Only affects review_submitted events; other event types are untouched.
   reviewStates?: string;
   excludeBots?: string; // "true" | "false"
+  // comma-separated user ids of bots to KEEP visible even when excludeBots is on — the
+  // per-repo "allowed bots" override (some bots are important to always see). Ignored
+  // when excludeBots is false. Absent = no allow-list (exclude every bot).
+  allowBotIds?: string;
   // "true" → drop "stale" open PRs: open PRs with no commit / comment / review
   // event inside [from, to]. They (and their events) are removed so the row can
   // disappear entirely. Absent/"false" = keep them.
@@ -1547,14 +1551,23 @@ export interface FeedAffectedThread {
   authorId: number | null;
 }
 
+// The relationship(s) that make a feed item "my turn" / FYI — surfaced as a reason
+// pill so the reader knows WHY the item concerns them. Ordered most-relevant first.
+export type MyTurnReason = 'requested' | 'authored' | 'merged' | 'reviewed' | 'commented';
+
 export interface ConsolidatedFeedItem {
-  // Stable unique id, e.g. "feed:1234", "feed:commitrun:99:1234".
+  // Stable unique id, e.g. "feed:1234", "feed:commitrun:99:1234", "feed:claude:42".
   id: string;
-  // True when this event is "my turn": it's on a PR the viewer participates in and the
-  // actor isn't the viewer. Drives the yellow card + the "My Turn only" filter.
+  // True when this event is "my turn" (FYI): it's on a PR the viewer participates in
+  // (authored / requested reviewer / reviewed / commented / merged) and the actor isn't
+  // the viewer. Drives the yellow card + the "FYI only" filter.
   isMyTurn: boolean;
+  // The relationships that make this item FYI (see MyTurnReason), most-relevant first;
+  // empty for non-my-turn rows. The UI renders the primary reason as a pill.
+  myTurnReasons: MyTurnReason[];
   // An activity EventType ('pr_opened' | 'pr_merged' | 'pr_closed' | 'review_submitted' |
-  // 'review_comment' | 'pr_comment' | 'commit_pushed').
+  // 'review_comment' | 'pr_comment' | 'commit_pushed'), or 'claude_review' for a
+  // Claude Review run surfaced in the stream.
   kind: string;
   occurredAt: string; // ISO-8601 — the item's relevant timestamp (sort + display)
   repoId: number;
@@ -1569,6 +1582,10 @@ export interface ConsolidatedFeedItem {
   content: string | null;
   // Thread ("awaiting your reply") items only — for code anchor + thread-scoped nav.
   threadId: number | null;
+  // Issue-level PR-comment items (kind 'pr_comment') only: the comment id, so a click can
+  // deep-link straight to + highlight that comment in the PR detail's Overview tab. null
+  // on every other kind.
+  commentId: number | null;
   path: string | null;
   line: number | null;
   // A coarse reason for the My Turn badge ('awaiting_your_review' when a review is
@@ -1594,6 +1611,11 @@ export interface ConsolidatedFeedItem {
   // Short human-readable "what changed" summary (e.g. "pushed 3 commits · addressed 2
   // threads"); null when the row chrome already says everything.
   changeSummary: string | null;
+  // Claude Review items (kind 'claude_review') only: the run id — so the card can
+  // deep-link into the PR's Claude Review tab — and Claude's verdict for the badge.
+  // null on every other kind.
+  claudeReviewId: number | null;
+  claudeVerdict: ClaudeReviewVerdict | null;
 }
 
 export interface ConsolidatedFeedResponse {

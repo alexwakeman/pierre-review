@@ -277,6 +277,10 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
     {
       id: 'feed:6001',
       isMyTurn: true,
+      myTurnReasons: ['authored'],
+      claudeReviewId: null,
+      claudeVerdict: null,
+      commentId: null,
       kind: 'review_comment',
       occurredAt: iso(1),
       repoId: REPO.id,
@@ -302,6 +306,10 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
     {
       id: 'feed:7000',
       isMyTurn: false,
+      myTurnReasons: [],
+      claudeReviewId: null,
+      claudeVerdict: null,
+      commentId: null,
       kind: 'pr_opened',
       occurredAt: iso(4),
       repoId: REPO.id,
@@ -327,6 +335,10 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
     {
       id: 'feed:7001',
       isMyTurn: false,
+      myTurnReasons: [],
+      claudeReviewId: null,
+      claudeVerdict: null,
+      commentId: null,
       kind: 'pr_merged',
       occurredAt: iso(5),
       repoId: REPO.id,

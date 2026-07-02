@@ -1,9 +1,10 @@
 import type { ActivityRepoStats } from '@pierre-review/shared';
 import { relativeTime } from '../../lib/ui.js';
 
-// The one-line repo stat summary (open / draft / merged-7d / stalled / TTFR / oldest
-// unreviewed). Rendered by the single-repo RepoFeedHeader. (Formerly also used by an
-// all-repos RepoSection card, which was removed with the "All repos" Activity entry.)
+// The one-line repo stat summary (open / draft / stalled / TTFR / oldest unreviewed).
+// Rendered by the single-repo RepoFeedHeader. "Merged" is deliberately NOT here — the
+// RepoInsightsCard's merge-rate graph directly beneath owns that metric (item 12: prefer
+// the chart over a duplicate scalar).
 export function RepoStatsLine({ stats: s }: { stats: ActivityRepoStats }): JSX.Element {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
@@ -15,9 +16,6 @@ export function RepoStatsLine({ stats: s }: { stats: ActivityRepoStats }): JSX.E
       </span>
       <span>
         <span className="tabular-nums">{s.draftPrs}</span> draft
-      </span>
-      <span>
-        <span className="tabular-nums">{s.mergedLast7d}</span> merged 7d
       </span>
       {s.stalledPrs > 0 && (
         <span className="text-amber-500">

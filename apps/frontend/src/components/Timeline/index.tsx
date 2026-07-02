@@ -2605,10 +2605,22 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     bootedRef.current = true;
     enterPrFocus(embeddedPrId, { fitWindow: true, pr: record });
     const token = groupClassToken(prGroupId(record));
+    // When the tab was opened to reveal a SPECIFIC event (item 11: a thread/comment
+    // magnifier sets timelineFocusPr/At/Event for this PR), let the timelineFocusPr consumer
+    // own the vertical centre — it scrolls to the event's marker row + glows it. Scheduling
+    // our own centre here would win the scrollLoopRef arbitration (later timer supersedes)
+    // and land on the PR bar instead. enterPrFocus already did the horizontal fit/isolate.
+    const fs = useFilters.getState();
+    const pendingEventFocus =
+      fs.timelineFocusPr === embeddedPrId && fs.timelineFocusEvent != null;
     // Cleared on unmount so a fast tab-close before the deferred centre can't start a
     // settle loop on a torn-down instance.
-    const t = window.setTimeout(() => centerShowTarget(token, false), 320);
-    return () => window.clearTimeout(t);
+    const t = pendingEventFocus
+      ? null
+      : window.setTimeout(() => centerShowTarget(token, false), 320);
+    return () => {
+      if (t != null) window.clearTimeout(t);
+    };
   }, [embeddedPrId, data, openPrsData, searchOpenPrsData, enterPrFocus, centerShowTarget]);
 
   // Move the visible window when the range preset changes — and re-apply it on

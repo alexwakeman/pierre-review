@@ -74,6 +74,7 @@ import type {
   RepoClaudeReviewPr,
   ConsolidatedFeedItem,
   ConsolidatedFeedResponse,
+  MyTurnReason,
   FeedAffectedThread,
   MyTurnPr,
 } from '@pierre-review/shared';
@@ -217,6 +218,9 @@ export interface TimelineFilters {
   // events — by the verdict of the review they reference.
   reviewStates: ReviewState[] | null;
   excludeBots: boolean;
+  // Bots to KEEP visible even when excludeBots is on (the per-repo allow-list override).
+  // null/empty → exclude every bot. Ignored when excludeBots is false.
+  allowBotIds?: number[] | null;
   // true → hide "stale" open PRs (no commit/comment/review in [from, to]).
   excludeStale: boolean;
 }
@@ -395,6 +399,7 @@ export async function getTimeline(
     statuses,
     reviewStates,
     excludeBots,
+    allowBotIds,
     excludeStale,
   } = filters;
 
@@ -434,8 +439,11 @@ export async function getTimeline(
       )!,
     );
   }
-  // Resolve the bot set once (used by both the PR and events branches below).
-  const bots = excludeBots ? await botUserIds() : [];
+  // Resolve the bot set once (used by both the PR and events branches below). The
+  // per-repo allow-list subtracts the "important" bots so their activity stays visible
+  // even under excludeBots — every downstream predicate keys off this trimmed set.
+  const allowBots = new Set(allowBotIds ?? []);
+  const bots = excludeBots ? (await botUserIds()).filter((id) => !allowBots.has(id)) : [];
   if (excludeBots && bots.length > 0) {
     prConds.push(
       or(
@@ -1474,6 +1482,9 @@ export interface ConsolidatedFeedFilters {
   // actor is a known bot (users.isBot). Claude-review items are never dropped (no member
   // author). Absent/false → bots shown.
   excludeBots?: boolean;
+  // Bots to KEEP visible even when excludeBots is on (the per-repo allow-list override).
+  // null/empty → exclude every bot. Ignored when excludeBots is false.
+  allowBotIds?: number[] | null;
   // Pagination over the merged, chronologically-sorted stream. `limit` omitted → the
   // whole stream (legacy). The response `total` is the full count so the client knows
   // when to stop "Load more". Only the returned page is enriched (merge/review credit)
@@ -1711,6 +1722,7 @@ async function getCommitThreadItems(
       id: `feed:commitrun:${run.prId}:${run.latestEventId}`,
       // Flagged by the caller (getConsolidatedFeed) once participation is resolved.
       isMyTurn: false,
+      myTurnReasons: [],
       kind: 'commit_pushed',
       occurredAt: run.latestOccurredAt.toISOString(),
       repoId: run.repoId,
@@ -1722,6 +1734,7 @@ async function getCommitThreadItems(
       actorId: run.actorId,
       content: null,
       threadId: null,
+      commentId: null,
       path: null,
       line: null,
       reasonTag: null,
@@ -1735,6 +1748,8 @@ async function getCommitThreadItems(
       affectedThreads: affected,
       commitCount: run.commitCount,
       changeSummary: `pushed ${run.commitCount} ${commitWord} · addressed ${affected.length} ${threadWord}`,
+      claudeReviewId: null,
+      claudeVerdict: null,
     });
   }
   return out;
@@ -1748,15 +1763,28 @@ async function getCommitThreadItems(
 // child tables (reviews/reviewRequests/prComments/reviewComments) need no accountId
 // predicate here. `authored`/`requested` are broken out so the caller can colour the badge.
 // Empty when the viewer is unknown (offline / not yet synced) → isMyTurn defaults false.
+interface Participation {
+  all: Set<number>;
+  authored: Set<number>;
+  requested: Set<number>;
+  reviewed: Set<number>;
+  commented: Set<number>;
+  merged: Set<number>;
+}
+
 async function getParticipatingPrIds(
   accountId: number,
   localUserId: number | null,
   prIds: number[],
-): Promise<{ all: Set<number>; authored: Set<number>; requested: Set<number> }> {
+): Promise<Participation> {
   const authored = new Set<number>();
   const requested = new Set<number>();
+  const reviewed = new Set<number>();
+  const commented = new Set<number>();
+  const merged = new Set<number>();
   const all = new Set<number>();
-  if (localUserId == null || prIds.length === 0) return { all, authored, requested };
+  const empty: Participation = { all, authored, requested, reviewed, commented, merged };
+  if (localUserId == null || prIds.length === 0) return empty;
   for (const row of await db
     .select({ id: pullRequests.id })
     .from(pullRequests)
@@ -1771,6 +1799,22 @@ async function getParticipatingPrIds(
     authored.add(row.id);
     all.add(row.id);
   }
+  // PRs the viewer merged (even if they never reviewed) count as participation too — a
+  // merge is a strong "I own the outcome of this" signal, so later activity is FYI.
+  for (const row of await db
+    .select({ id: pullRequests.id })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.mergedById, localUserId),
+        inArray(pullRequests.id, prIds),
+      ),
+    )
+    .execute()) {
+    merged.add(row.id);
+    all.add(row.id);
+  }
   for (const row of await db
     .select({ prId: reviewRequests.prId })
     .from(reviewRequests)
@@ -1783,41 +1827,153 @@ async function getParticipatingPrIds(
     .select({ prId: reviews.prId })
     .from(reviews)
     .where(and(eq(reviews.authorId, localUserId), inArray(reviews.prId, prIds)))
-    .execute())
+    .execute()) {
+    reviewed.add(row.prId);
     all.add(row.prId);
+  }
   for (const row of await db
     .select({ prId: prComments.prId })
     .from(prComments)
     .where(and(eq(prComments.authorId, localUserId), inArray(prComments.prId, prIds)))
-    .execute())
+    .execute()) {
+    commented.add(row.prId);
     all.add(row.prId);
+  }
   for (const row of await db
     .select({ prId: reviewComments.prId })
     .from(reviewComments)
     .where(and(eq(reviewComments.authorId, localUserId), inArray(reviewComments.prId, prIds)))
-    .execute())
+    .execute()) {
+    commented.add(row.prId);
     all.add(row.prId);
-  return { all, authored, requested };
+  }
+  return { all, authored, requested, reviewed, commented, merged };
+}
+
+// Map a viewer's participation in a PR to the ordered reason pills for its FYI card.
+// Most-relevant first; the UI shows the primary. Empty when the viewer doesn't
+// participate (non-my-turn row).
+function myTurnReasonsFor(participation: Participation, prId: number | null): MyTurnReason[] {
+  if (prId == null) return [];
+  const reasons: MyTurnReason[] = [];
+  if (participation.requested.has(prId)) reasons.push('requested');
+  if (participation.authored.has(prId)) reasons.push('authored');
+  if (participation.merged.has(prId)) reasons.push('merged');
+  if (participation.reviewed.has(prId)) reasons.push('reviewed');
+  if (participation.commented.has(prId)) reasons.push('commented');
+  return reasons;
+}
+
+// Claude Review runs surfaced in the consolidated feed as their own item kind. One item
+// per PR = that PR's most-recent SUCCEEDED run finished within the feed window, repo-scoped.
+// Gated on the feature flag (force-off in cloud) so no items appear where Claude Review
+// doesn't exist. Never member-/bot-filtered (a run has no member author).
+async function getClaudeReviewFeedItems(
+  accountId: number,
+  repoIds: number[] | null,
+  since: Date,
+): Promise<ConsolidatedFeedItem[]> {
+  if (!config.claudeReviewEnabled) return [];
+  const conds = [
+    eq(repos.accountId, accountId),
+    eq(claudeReviews.status, 'succeeded'),
+    gte(sql`coalesce(${claudeReviews.finishedAt}, ${claudeReviews.createdAt})`, tsBound(since)),
+  ];
+  if (repoIds) conds.push(inArray(pullRequests.repoId, repoIds));
+  const rows = await db
+    .select({
+      reviewId: claudeReviews.id,
+      prId: claudeReviews.prId,
+      repoId: pullRequests.repoId,
+      owner: repos.owner,
+      name: repos.name,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      prState: pullRequests.state,
+      summary: claudeReviews.summary,
+      verdict: claudeReviews.verdict,
+      userVerdict: claudeReviews.userVerdict,
+      finishedAt: claudeReviews.finishedAt,
+      createdAt: claudeReviews.createdAt,
+    })
+    .from(claudeReviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(and(...conds))
+    .orderBy(desc(claudeReviews.finishedAt), desc(claudeReviews.createdAt))
+    .execute();
+  // Keep the most-recent succeeded run per PR (rows are newest-first).
+  const seen = new Set<number>();
+  const out: ConsolidatedFeedItem[] = [];
+  for (const r of rows) {
+    if (seen.has(r.prId)) continue;
+    seen.add(r.prId);
+    out.push({
+      id: `feed:claude:${r.reviewId}`,
+      isMyTurn: false,
+      myTurnReasons: [],
+      kind: 'claude_review',
+      occurredAt: (r.finishedAt ?? r.createdAt).toISOString(),
+      repoId: r.repoId,
+      repoFullName: `${r.owner}/${r.name}`,
+      prId: r.prId,
+      prNumber: r.prNumber,
+      prTitle: r.prTitle,
+      prState: r.prState,
+      actorId: null,
+      content: r.summary,
+      threadId: null,
+      commentId: null,
+      path: null,
+      line: null,
+      reasonTag: null,
+      reviewState: null,
+      githubUrl:
+        r.prNumber != null ? `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}` : null,
+      mergedById: null,
+      reviewers: null,
+      affectedThreads: null,
+      commitCount: null,
+      changeSummary: null,
+      claudeReviewId: r.reviewId,
+      // Prefer the user's decision when they've set one, else Claude's read-only verdict.
+      claudeVerdict: r.userVerdict ?? r.verdict,
+    });
+  }
+  return out;
 }
 
 export async function getConsolidatedFeed(
   accountId: number,
   opts: ConsolidatedFeedFilters = {},
 ): Promise<ConsolidatedFeedResponse> {
-  const { repoIds = null, userIds = null, limit = null, offset = 0, excludeBots = false } = opts;
+  const {
+    repoIds = null,
+    userIds = null,
+    limit = null,
+    offset = 0,
+    excludeBots = false,
+    allowBotIds = null,
+  } = opts;
   // Bot set (only loaded when the filter is on) — drops bot-authored activity, mirroring
-  // the timeline's excludeBots. getFeed doesn't filter bots, so we do it here; the commit
+  // the timeline's excludeBots. The per-repo allow-list subtracts the "important" bots so
+  // their activity stays visible. getFeed doesn't filter bots, so we do it here; the commit
   // helper filters in its own SQL.
-  const botIds = excludeBots ? new Set(await botUserIds()) : new Set<number>();
+  const allowBots = new Set(allowBotIds ?? []);
+  const botIds = excludeBots
+    ? new Set((await botUserIds()).filter((id) => !allowBots.has(id)))
+    : new Set<number>();
   const notBot = (id: number | null): boolean =>
     !excludeBots || id == null || !botIds.has(id);
 
   const feedSince = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-  const [feed, commitItems, localUserId] = await Promise.all([
+  const [feed, commitItems, claudeItems, localUserId] = await Promise.all([
     getFeed(accountId, { daysBefore: 14, repoIds, userIds }),
     // Commit-push activity that ADDRESSED a review thread (the only commit rows we surface
     // — plain pushes are noise). Each carries the affected threads inline.
     getCommitThreadItems(accountId, { repoIds, userIds, botIds, since: feedSince }),
+    // Claude Review runs surfaced as their own feed item kind (local-only; empty in cloud).
+    getClaudeReviewFeedItems(accountId, repoIds, feedSince),
     getAccountUserId(accountId),
   ]);
 
@@ -1862,6 +2018,7 @@ export async function getConsolidatedFeed(
     push({
       id: `feed:${f.id}`,
       isMyTurn: mine,
+      myTurnReasons: mine ? myTurnReasonsFor(participation, f.prId) : [],
       kind: f.type,
       occurredAt: f.occurredAt,
       repoId: f.repoId,
@@ -1874,6 +2031,7 @@ export async function getConsolidatedFeed(
       // Full markdown body (fallback to the short preview on pre-persistence lean rows).
       content: f.content ?? f.excerpt,
       threadId: f.type === 'review_comment' ? f.refId : null,
+      commentId: f.type === 'pr_comment' ? f.refId : null,
       path: null,
       line: null,
       reasonTag: mine ? myTurnReason(f.prId) : null,
@@ -1885,6 +2043,8 @@ export async function getConsolidatedFeed(
       affectedThreads: null,
       commitCount: null,
       changeSummary: null,
+      claudeReviewId: null,
+      claudeVerdict: null,
     });
   }
 
@@ -1892,18 +2052,26 @@ export async function getConsolidatedFeed(
   // Flag them the same way, then append.
   for (const it of commitItems) {
     it.isMyTurn = isMine(it.prId, it.actorId);
-    if (it.isMyTurn) it.reasonTag = myTurnReason(it.prId);
+    if (it.isMyTurn) {
+      it.reasonTag = myTurnReason(it.prId);
+      it.myTurnReasons = myTurnReasonsFor(participation, it.prId);
+    }
     push(it);
   }
 
-  // Pure chronological — newest first. Keep every My Turn item; cap the plain activity rows
-  // so a busy multi-repo account doesn't render thousands of them.
-  const myTurnRows = items.filter((i) => i.isMyTurn);
+  // Claude Review items — a distinct kind (never bot/member-scoped). Kept out of the FYI
+  // flow but always retained (see the caps below) so the "Claude Reviews" pill finds them.
+  for (const it of claudeItems) push(it);
+
+  // Pure chronological — newest first. Keep every My Turn item AND every Claude-review item
+  // (both are always relevant); cap the plain activity rows so a busy multi-repo account
+  // doesn't render thousands of them.
+  const alwaysRows = items.filter((i) => i.isMyTurn || i.kind === 'claude_review');
   const feedRows = items
-    .filter((i) => !i.isMyTurn)
+    .filter((i) => !i.isMyTurn && i.kind !== 'claude_review')
     .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
     .slice(0, FEED_EVENT_CAP);
-  const ordered = [...myTurnRows, ...feedRows].sort((a, b) =>
+  const ordered = [...alwaysRows, ...feedRows].sort((a, b) =>
     b.occurredAt.localeCompare(a.occurredAt),
   );
 

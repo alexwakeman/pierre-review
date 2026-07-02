@@ -5,8 +5,10 @@ import type {
   EventType,
   Mergeable,
   MergeStateStatus,
+  MyTurnReason,
   PrState,
   ReasonTag,
+  ThreadStateCounts,
   User,
 } from '@pierre-review/shared';
 
@@ -77,6 +79,40 @@ export const REASON_META: Record<
   untouched_threads: { label: 'Untouched threads', color: '#f59e0b', myTurn: false },
   in_progress: { label: 'In progress', color: '#9ca3af', myTurn: false },
 };
+
+// Why a feed item is "FYI" (was "My Turn") — the reason pill on the card. `label` is the
+// short pill text, `title` the hover explanation. See MyTurnReason (most-relevant first).
+export const FYI_REASON_META: Record<MyTurnReason, { label: string; title: string }> = {
+  requested: {
+    label: 'Review requested',
+    title: 'A review was requested from you on this PR',
+  },
+  authored: { label: 'You authored', title: 'You opened this PR' },
+  merged: { label: 'You merged', title: 'You merged this PR' },
+  reviewed: { label: 'You reviewed', title: 'You previously reviewed this PR' },
+  commented: { label: 'You commented', title: 'You previously commented on this PR' },
+};
+
+// The reason tags that make a PR "need attention" — mirrors the backend's
+// ACTIVITY_ATTENTION_REASONS (db/queries.ts) so the per-PR ⚠ badge and the repo-level
+// attentionCount agree exactly.
+const ATTENTION_REASONS = new Set<ReasonTag>([
+  'awaiting_your_review',
+  'your_pr_new_comments',
+  'ci_failing',
+  'merge_conflicts',
+  'untouched_threads',
+]);
+
+// Whether an open PR needs attention (your turn · stalled · untouched threads / CI /
+// conflicts). Keep in lockstep with getActivity's attentionCount predicate.
+export function prNeedsAttention(pr: {
+  isStalled: boolean;
+  threadCounts: ThreadStateCounts;
+  reasonTag: ReasonTag;
+}): boolean {
+  return pr.isStalled || pr.threadCounts.untouched > 0 || ATTENTION_REASONS.has(pr.reasonTag);
+}
 
 // CI rollup → dot colour + label. `null` when there are no checks at all.
 export const CI_META: Record<

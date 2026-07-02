@@ -9,11 +9,10 @@ import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
 import { TimelineSearch } from './components/TimelineSearch.js';
-import { InsightsModal } from './components/InsightsModal.js';
 import { WelcomeBackBanner } from './components/WelcomeBackBanner.js';
 import { HelpModal } from './components/HelpModal.js';
-import { ClaudeReviewsModal } from './components/ClaudeReviewsModal.js';
 import { SignInGate } from './components/SignInGate.js';
+import { UserMenu } from './components/UserMenu.js';
 import { useUrlState } from './hooks/useUrlState.js';
 import { useLocalStorage } from './hooks/useLocalStorage.js';
 import { useKeyboard } from './hooks/useKeyboard.js';
@@ -24,7 +23,6 @@ import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
 import { usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
 import { ApiError, api } from './api/client.js';
-import { profileUrl } from './lib/ui.js';
 import { initAnalytics, trackPageView } from './lib/analytics.js';
 
 function useDarkMode(): [boolean, () => void] {
@@ -52,7 +50,6 @@ export default function App(): JSX.Element {
   useDetailCacheReconciler();
   const [dark, toggleDark] = useDarkMode();
   const [helpOpen, setHelpOpen] = useState(false);
-  const [reviewsOpen, setReviewsOpen] = useState(false);
 
   // Opt-in browser notifications for new My Turn items + completed Claude reviews.
   // Shared pref (the Claude-review banner reads it too); the watcher fires only
@@ -78,14 +75,11 @@ export default function App(): JSX.Element {
   // OAuth user). Can be null even when authenticated (e.g. local + offline), so
   // every read below is guarded.
   const meUser = me.data?.user ?? null;
-  const claudeReviewEnabled = me.data?.claudeReviewEnabled ?? false;
   const onSignOut = (): void => {
     // Drop pinned tabs so they don't leak to the next user on a shared browser.
     usePinnedTabs.getState().clear();
     void api.logout().finally(() => window.location.assign('/'));
   };
-  const insightsOpen = useFilters((s) => s.insightsOpen);
-  const setInsightsOpen = useFilters((s) => s.setInsightsOpen);
   // Item 7: the detail pane exists only once a PR is selected on the board; no
   // selection → the Timeline takes the full height.
   const selectedPrId = useFilters((s) => s.selectedPrId);
@@ -144,7 +138,7 @@ export default function App(): JSX.Element {
   // entry → return to the Activity. Mounted once; reads only our own store, so it survives
   // every tab remount.
   useEffect(() => {
-    const onPop = (): void => usePinnedTabs.getState().consumeActivityReturn();
+    const onPop = (): void => usePinnedTabs.getState().navigateBack();
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -226,65 +220,9 @@ export default function App(): JSX.Element {
         <h1 className="brand-title" title="Pierre — a play on “PR”">
           Pierre
         </h1>
-        {meUser != null && (
-          <a
-            href={profileUrl(meUser.login)}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:underline dark:text-gray-300"
-            title={
-              meUser.displayName != null
-                ? `Signed in as ${meUser.displayName} (@${meUser.login})`
-                : `Signed in as ${meUser.login}`
-            }
-          >
-            {meUser.avatarUrl != null ? (
-              <img
-                src={meUser.avatarUrl}
-                alt={meUser.displayName ?? meUser.login}
-                width={20}
-                height={20}
-                className="shrink-0 rounded-full"
-                style={{ width: 20, height: 20 }}
-              />
-            ) : (
-              <span
-                className="flex shrink-0 items-center justify-center rounded-full bg-gray-300 text-[9px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200"
-                style={{ width: 20, height: 20 }}
-              >
-                {(meUser.displayName ?? meUser.login).slice(0, 2).toUpperCase()}
-              </span>
-            )}
-            <span>{meUser.displayName ?? meUser.login}</span>
-          </a>
-        )}
         <div className="ml-auto flex items-center gap-3">
           <TimelineSearch />
           <SyncStatus />
-          <button
-            type="button"
-            onClick={() => setInsightsOpen(true)}
-            className="flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs font-semibold hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
-            title="Insights — per-repo PR stats (open / merged / stalled / review load)"
-            aria-label="Insights"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              width="13"
-              height="13"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <line x1="18" y1="20" x2="18" y2="10" />
-              <line x1="12" y1="20" x2="12" y2="4" />
-              <line x1="6" y1="20" x2="6" y2="14" />
-            </svg>
-            Insights
-          </button>
           {notifSupported && (
             <button
               type="button"
@@ -318,33 +256,6 @@ export default function App(): JSX.Element {
               </svg>
             </button>
           )}
-          {claudeReviewEnabled && (
-            <button
-              type="button"
-              onClick={() => setReviewsOpen(true)}
-              className="flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs font-semibold hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
-              title="Claude reviews — history of agentic PR reviews"
-              aria-label="Claude reviews"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="13"
-                height="13"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M9 2h6a1 1 0 0 1 1 1v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1z" />
-                <path d="M9 4h6" />
-                <path d="M9 11h6" />
-                <path d="M9 15h4" />
-              </svg>
-              Claude Reviews
-            </button>
-          )}
           <button
             type="button"
             onClick={() => setHelpOpen(true)}
@@ -362,45 +273,16 @@ export default function App(): JSX.Element {
           >
             {dark ? '☀' : '☾'}
           </button>
-          {isCloud && (
-            <button
-              type="button"
-              onClick={onSignOut}
-              className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
-              title="Sign out"
-              aria-label="Sign out"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="14"
-                height="14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                <polyline points="16 17 21 12 16 7" />
-                <line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
-            </button>
+          {/* Signed-in user — a subtle button at the far right opening an account menu
+              (Open Profile on GitHub · Sign Out). Sign Out is cloud-only (local has no
+              session), so the standalone header sign-out button is gone. */}
+          {meUser != null && (
+            <UserMenu user={meUser} canSignOut={isCloud} onSignOut={onSignOut} />
           )}
         </div>
       </header>
 
-      <InsightsModal open={insightsOpen} onClose={() => setInsightsOpen(false)} />
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
-      {/* Only mount when the feature is enabled — the trigger button is already
-          gated, and this ensures the modal never fetches /api/claude-reviews
-          (which doesn't exist when the feature is off, e.g. cloud). */}
-      {claudeReviewEnabled && (
-        <ClaudeReviewsModal
-          open={reviewsOpen}
-          onClose={() => setReviewsOpen(false)}
-        />
-      )}
 
       <WelcomeBackBanner />
       <FilterBar />

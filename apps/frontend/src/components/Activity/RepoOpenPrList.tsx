@@ -2,7 +2,15 @@ import { useMemo } from 'react';
 import type { TimelinePr } from '@pierre-review/shared';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
-import { CI_META, REASON_META, indexUsers, mergeWarning, relativeTime, userLabel } from '../../lib/ui.js';
+import {
+  CI_META,
+  REASON_META,
+  indexUsers,
+  mergeWarning,
+  prNeedsAttention,
+  relativeTime,
+  userLabel,
+} from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 
@@ -69,6 +77,17 @@ export function RepoOpenPrList({
                       : { boxShadow: 'inset 0 0 0 1px #9ca3af' }
                   }
                 />
+                {/* Item 1: the same ⚠ the rail shows next to attention-needing repos, now
+                    per-PR — flags the exact PRs driving that repo's attention count. */}
+                {prNeedsAttention(pr) && (
+                  <span
+                    aria-hidden="true"
+                    title="Needs attention (your turn · stalled · untouched threads · CI / conflicts)"
+                    className="shrink-0 text-xs leading-none text-amber-500 dark:text-amber-400"
+                  >
+                    ⚠
+                  </span>
+                )}
                 <Avatar user={author} size={16} />
                 <span className="min-w-0 flex-1 truncate">
                   <span className="text-gray-400">#{pr.number}</span>{' '}

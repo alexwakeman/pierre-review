@@ -6,6 +6,7 @@ import { useRepos } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { useDigestCollapse } from '../../store/digestCollapse.js';
 import { RepoDigestCard } from './RepoDigestCard.js';
+import { RegenProgressBar } from './RegenProgressBar.js';
 
 // The cross-repo digest atop the Activity "Feed" — the ONLY Pro/flagged surface in the Feed
 // (the consolidated list below it is core). Renders nothing unless pro.activityDigest is true.
@@ -52,17 +53,21 @@ export function FeedDigestList(): JSX.Element | null {
         <span className="rounded bg-violet-500/15 px-1 text-[10px] font-semibold text-violet-600 dark:text-violet-300">
           Pro
         </span>
+        {/* The ONE Regenerate control for the whole Feed digest — covers every watched repo
+            (the per-card buttons live only in each repo's own console now). */}
         <button
           type="button"
           onClick={() => refresh.mutate(watchedVisibleIds)}
           disabled={refresh.isPending || !anyWatched}
           className="ml-auto flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
-          title="Regenerate digests for your watched repos (unchanged repos are free)"
+          title="Regenerate the digests for all your watched repos (unchanged repos are free)"
         >
           <span aria-hidden="true">↻</span>
-          {refresh.isPending ? 'Regenerating…' : 'Regenerate all'}
+          {refresh.isPending ? 'Regenerating…' : 'Regenerate'}
         </button>
       </div>
+      {/* Progress while the (single, bulk) refresh is in flight; hides itself when done. */}
+      <RegenProgressBar active={refresh.isPending} />
       {!anyWatched ? (
         <p className="px-0.5 text-xs text-gray-400">
           No watched repos in view — Watch a repo (the eye toggle) to get a digest here.
@@ -71,11 +76,13 @@ export function FeedDigestList(): JSX.Element | null {
         <div className="h-12 animate-pulse rounded-md border border-violet-200 bg-violet-50/40 dark:border-violet-900/40 dark:bg-violet-950/10" />
       ) : digests.length === 0 ? (
         <p className="px-0.5 text-xs text-gray-400">
-          No digests yet — click Regenerate all to summarise your watched repos.
+          No digests yet — click Regenerate to summarise your watched repos.
         </p>
       ) : (
         <div className="space-y-2">
           {digests.map((d) => (
+            // No per-card Regenerate here — the single top button covers all. Cards dim
+            // (keeping the old text readable) while the bulk refresh runs, then fade in.
             <RepoDigestCard
               key={d.repoId}
               digest={d}
@@ -83,8 +90,7 @@ export function FeedDigestList(): JSX.Element | null {
               title={d.repoFullName}
               collapsed={collapsedSet.has(d.repoId)}
               onToggle={() => toggle(d.repoId)}
-              onRegenerate={() => refresh.mutate(d.repoId)}
-              regenerating={refresh.isPending && refresh.variables === d.repoId}
+              regenerating={refresh.isPending}
               onOpenPr={openPr}
             />
           ))}

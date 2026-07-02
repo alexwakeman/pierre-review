@@ -13,12 +13,17 @@ function feedSearch(
   repoIds: number[] | null,
   userIds: number[] | null,
   excludeBots: boolean,
+  allowedBotIds: number[],
 ): string {
   const p = new URLSearchParams();
   if (repoIds && repoIds.length > 0) p.set('repoIds', repoIds.join(','));
   if (userIds && userIds.length > 0) p.set('userIds', userIds.join(','));
   // Mirror the timeline: only emit when hiding bots (default false keeps the key clean).
-  if (excludeBots) p.set('excludeBots', 'true');
+  if (excludeBots) {
+    p.set('excludeBots', 'true');
+    // The allow-list only bites under excludeBots — keep those bots visible.
+    if (allowedBotIds.length > 0) p.set('allowBotIds', allowedBotIds.join(','));
+  }
   return p.toString();
 }
 
@@ -35,9 +40,15 @@ export function useConsolidatedFeed(opts: {
   repoIds: number[] | null;
   userIds: number[] | null;
   excludeBots?: boolean;
+  allowedBotIds?: number[];
   enabled?: boolean;
 }) {
-  const search = feedSearch(opts.repoIds, opts.userIds, opts.excludeBots ?? false);
+  const search = feedSearch(
+    opts.repoIds,
+    opts.userIds,
+    opts.excludeBots ?? false,
+    opts.allowedBotIds ?? [],
+  );
   const query = useInfiniteQuery<ConsolidatedFeedResponse>({
     queryKey: ['consolidated-feed', search],
     initialPageParam: 0,

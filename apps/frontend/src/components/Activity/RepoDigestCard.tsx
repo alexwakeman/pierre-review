@@ -79,11 +79,16 @@ export function RepoDigestCard({
         </span>
       </div>
       {!collapsed && (
+        // While regenerating, the OLD summary stays readable (just dimmed) — the query isn't
+        // invalidated until the refresh resolves. When the new summary arrives its
+        // generatedAt changes, remounting the keyed wrapper so `digest-fade-in` replays.
         <div className={`mt-1 ${regenerating ? 'opacity-50 transition-opacity' : ''}`}>
           {isLoading ? (
             <div className="h-3 w-2/3 animate-pulse rounded bg-violet-200/60 dark:bg-violet-900/40" />
           ) : digest != null && digest.summary.trim() !== '' ? (
-            <DigestMarkdown markdown={digest.summary} prRefs={digest.prRefs} onOpenPr={onOpenPr} />
+            <div key={digest.generatedAt} className="digest-fade-in">
+              <DigestMarkdown markdown={digest.summary} prRefs={digest.prRefs} onOpenPr={onOpenPr} />
+            </div>
           ) : (
             <p className="text-xs text-gray-400">
               No digest yet — click Regenerate to summarise this repo's recent activity.

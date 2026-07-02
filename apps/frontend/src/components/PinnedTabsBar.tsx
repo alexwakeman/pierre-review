@@ -1,8 +1,9 @@
 import { usePinnedTabs, type Tab } from '../store/pinnedTabs.js';
+import { MagnifierIcon } from './Icons.js';
 
 // A single closable tab chip (pr-detail / pr-focus): fixed width, closable (✕). Clicking
 // the body activates the tab (App.tsx renders the matching content). PR tabs show the PR
-// title + author; a focus tab is marked with a ◎ glyph + "PR focus" subtitle.
+// title + author; a focus tab is marked with a magnifier icon + "PR focus" subtitle.
 function TabChip({ tab }: { tab: Tab }): JSX.Element {
   const active = usePinnedTabs((s) => s.activeTab === tab.key);
   const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
@@ -36,7 +37,7 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
       >
         {isFocus ? (
           <span aria-hidden="true" className="shrink-0 text-sky-500">
-            ◎
+            <MagnifierIcon size={14} />
           </span>
         ) : meta?.authorAvatarUrl != null ? (
           <img

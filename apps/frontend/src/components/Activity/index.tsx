@@ -8,8 +8,10 @@ import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { RepoFeedHeader } from './RepoFeedHeader.js';
+import { RepoInsightsCard } from './RepoInsightsCard.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
+import { RepoAnalyticsModal } from '../RepoAnalyticsModal.js';
 
 // Rail sort: attention desc → unread → alphabetical. Computed once per data load so
 // the rail is stable (not jumpy) as the user interacts.
@@ -112,6 +114,11 @@ export function ActivityView(): JSX.Element {
   const { data, isFetching, isLoading, refetch } = useActivity(repoIds, userIds);
   const { data: allRepos } = useRepos();
   const qc = useQueryClient();
+  // The per-repo analytics drill-down (item 12): the rail's "Charts" button opens the full
+  // RepoAnalyticsModal for that repo.
+  const [analyticsRepo, setAnalyticsRepo] = useState<{ repoId: number; name: string } | null>(
+    null,
+  );
 
   const sorted = useMemo(() => sortRepos(data?.repos ?? []), [data?.repos]);
 
@@ -287,6 +294,17 @@ export function ActivityView(): JSX.Element {
         ) : selectedRepo != null ? (
           <div className="space-y-3">
             <RepoFeedHeader repo={selectedRepo} />
+            {/* Item 12: per-repo Insights — the merge-rate graph (+ Charts drill-down) sits
+                under the AI digest (in the header) and above the open-PR list. */}
+            <RepoInsightsCard
+              repoId={selectedRepo.repoId}
+              onOpenCharts={() =>
+                setAnalyticsRepo({
+                  repoId: selectedRepo.repoId,
+                  name: selectedRepo.repoFullName,
+                })
+              }
+            />
             {/* All the repo's open PRs (at-a-glance metrics) BEFORE its activity feed. */}
             <RepoOpenPrList prs={selectedRepo.prs} repoFullName={selectedRepo.repoFullName} />
             <FeedView repoId={selectedRepo.repoId} />
@@ -296,6 +314,12 @@ export function ActivityView(): JSX.Element {
           <FeedView />
         )}
       </div>
+
+      <RepoAnalyticsModal
+        repoId={analyticsRepo?.repoId ?? null}
+        repoName={analyticsRepo?.name ?? null}
+        onClose={() => setAnalyticsRepo(null)}
+      />
     </div>
   );
 }

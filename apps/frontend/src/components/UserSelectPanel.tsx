@@ -35,18 +35,24 @@ function MaintainerShield(): JSX.Element {
 
 export function UserSelectPanel({
   sections,
+  botSections,
   userIds,
   maintainerIds,
   onApply,
   excludeBots,
   onExcludeBotsChange,
+  allowedBotIds,
+  onToggleAllowedBot,
 }: {
   sections: MemberSection[]; // grouped picker options (maintainers, per-repo, other)
+  botSections: MemberSection[]; // per-repo bot contributors (item 3)
   userIds: number[] | null; // committed selection (null = all)
   maintainerIds: Set<number>; // members with merge rights in the relevant repo(s)
   onApply: (ids: number[] | null) => void; // empty => null (show all)
   excludeBots: boolean; // hide bot actors from the timeline (committed, immediate)
   onExcludeBotsChange: (v: boolean) => void; // immediate — NOT staged behind Apply
+  allowedBotIds: number[]; // bots kept visible under excludeBots (committed, immediate)
+  onToggleAllowedBot: (id: number) => void; // immediate — like excludeBots, not staged
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   // Staged selection lives here, NOT in the store — nothing filters/refetches
@@ -77,6 +83,13 @@ export function UserSelectPanel({
     .map((s) => ({ ...s, members: s.members.filter(matches) }))
     .filter((s) => s.members.length > 0);
   const totalMembers = sections.reduce((n, s) => n + s.members.length, 0);
+
+  // Per-repo Bots (item 3): allow-list is IMMEDIATE (like excludeBots) — a ticked bot stays
+  // visible even when bots are excluded. Narrowed by the same search box.
+  const allowedSet = new Set(allowedBotIds);
+  const visibleBotSections = botSections
+    .map((s) => ({ ...s, members: s.members.filter(matches) }))
+    .filter((s) => s.members.length > 0);
 
   // Outside-click dismiss via the shared hook; both it and Escape discard staged
   // edits (no commit) — closing without Apply just drops `staged`, which is
@@ -257,6 +270,53 @@ export function UserSelectPanel({
             />
             Exclude bots
           </label>
+
+          {/* Per-repo Bots (item 3): allow-list the important bots so they stay visible even
+              while "Exclude bots" hides the rest. IMMEDIATE like the exclude toggle. */}
+          {visibleBotSections.length > 0 && (
+            <div className="mt-2 border-t border-gray-200 pt-2 dark:border-gray-700">
+              <div className="mb-1 flex items-center gap-1.5 px-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                  Bots
+                </span>
+                <span className="text-[10px] text-gray-400">
+                  {excludeBots ? '· ticked stay visible' : '· all shown (bots not excluded)'}
+                </span>
+              </div>
+              <div className="max-h-40 overflow-y-auto">
+                {visibleBotSections.map((sec) => (
+                  <div key={sec.key} className="mb-1 last:mb-0">
+                    <div className="sticky top-0 bg-white px-1 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:bg-gray-900">
+                      {sec.label}
+                    </div>
+                    {sec.members.map((u) => (
+                      <label
+                        key={`${sec.key}:${u.id}`}
+                        className={`flex items-center gap-2 rounded px-1 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                          excludeBots ? 'cursor-pointer' : 'cursor-pointer opacity-60'
+                        }`}
+                        title={
+                          excludeBots
+                            ? 'Keep this bot visible even though bots are excluded'
+                            : 'Bots are currently shown; enable "Exclude bots" for this to take effect'
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          checked={allowedSet.has(u.id)}
+                          onChange={() => onToggleAllowedBot(u.id)}
+                        />
+                        <Avatar user={u} size={16} />
+                        <span className="min-w-0 truncate" title={u.githubLogin}>
+                          {userLabel(u, u.id)}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="mt-2 flex items-center justify-between">
             <button
               type="button"

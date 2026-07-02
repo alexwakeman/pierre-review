@@ -41,14 +41,13 @@ export function useTimeline(override?: { dropMembers?: boolean; fromMs?: number 
   });
 }
 
-// PR/event set for the PR-title search index. Same window / repos / bot rule as
-// the main timeline but ALWAYS ignoring the member filter, so search is a global
-// "jump to any PR" tool (picking a result force-shows its bar even when the
-// member filter would hide its row). When no member filter is active this builds
-// the identical query string to useTimeline, so React Query serves it from the
-// same cache entry — no extra fetch; only an active member filter incurs a second.
+// PR/event set for the PR-title search index AND the Members dropdown's per-repo
+// membership derivation. Always ignores the member filter (a global "jump to any PR"
+// tool) AND always includes bots (so the Bots sections can list every bot even while the
+// board hides them). Because it always emits bot activity, its query string differs from
+// useTimeline whenever excludeBots is on — one extra fetch in that case; otherwise shared.
 export function useSearchTimeline() {
-  const search = useFilters((s) => buildTimelineSearch(s, false, false, false, false));
+  const search = useFilters((s) => buildTimelineSearch(s, false, false, false, false, null, false));
   return useQuery<TimelineResponse>({
     queryKey: ['timeline', search],
     queryFn: () => api.timeline(search),

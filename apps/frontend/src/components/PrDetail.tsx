@@ -11,7 +11,8 @@ import { usePinnedTabs, type PinnedPr } from '../store/pinnedTabs.js';
 import { dateTime, indexUsers, PR_STATE_META, relativeTime } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
-import { ShowOnTimeline } from './ShowOnTimeline.js';
+import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
+import { ExternalLinkIcon, MagnifierIcon } from './Icons.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
 import { ChangesTab } from './ChangesTab.js';
@@ -482,6 +483,7 @@ export function PrDetail({
   const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
 
   return (
+    <PrFocusMetaContext.Provider value={pinnedMetaOf(pr, usersById)}>
     <div className="flex h-full flex-col">
       <div className="border-b border-gray-200 px-4 py-2 pr-28 dark:border-gray-800">
         <div className="flex items-center gap-2">
@@ -491,15 +493,37 @@ export function PrDetail({
           >
             {pr.isDraft ? 'Draft' : stateMeta.label}
           </span>
+          {/* Item 5: the title now acts as "Show" (centre + glow this PR on the shared
+              board); a separate ↗ opens GitHub. */}
+          <button
+            type="button"
+            onClick={() => openPrFocused(pr.id)}
+            className="min-w-0 truncate text-left text-sm font-semibold hover:underline"
+            title="Show this PR on the timeline"
+          >
+            <span className="text-gray-400">#{pr.number}</span> {pr.title}
+          </button>
           <a
             href={pr.githubUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="truncate text-sm font-semibold hover:underline"
-            title={pr.title}
+            className="shrink-0 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            title="Open this PR on GitHub"
+            aria-label="Open this PR on GitHub"
           >
-            <span className="text-gray-400">#{pr.number}</span> {pr.title}
+            <ExternalLinkIcon size={13} />
           </a>
+          {/* Focus — between the title and the Pin (item 5); a blue magnifier that opens
+              this PR's own isolated timeline tab. */}
+          <button
+            type="button"
+            onClick={() => openPrFocusTab(pinnedMetaOf(pr, usersById))}
+            className="shrink-0 rounded p-0.5 text-blue-500 hover:text-blue-600"
+            title="Focus — open this PR in its own isolated timeline tab (✕ on the tab to close)"
+            aria-label="Focus this PR in its own timeline tab"
+          >
+            <MagnifierIcon size={15} />
+          </button>
           <button
             type="button"
             onClick={() => (isPinned ? unpinPr(pr.id) : pinPr(pinnedMetaOf(pr, usersById)))}
@@ -557,23 +581,6 @@ export function PrDetail({
           })()}
         </div>
         <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
-          <button
-            type="button"
-            onClick={() => openPrFocused(pr.id)}
-            className="shrink-0 font-medium text-blue-500 hover:underline"
-            title="Centre and highlight this PR on the timeline"
-          >
-            Show
-          </button>
-          <button
-            type="button"
-            onClick={() => openPrFocusTab(pinnedMetaOf(pr, usersById))}
-            className="shrink-0 font-medium text-blue-500 hover:underline"
-            title="Open this PR in its own focus tab — an isolated timeline of it and its contributors (✕ on the tab to close)"
-          >
-            Focus
-          </button>
-          <span className="text-gray-300 dark:text-gray-600">·</span>
           <Avatar user={author} size={16} />
           <UserName user={author} fallbackId={pr.authorId} repoId={pr.repoId} />
           <span>·</span>
@@ -699,5 +706,6 @@ export function PrDetail({
         )}
       </div>
     </div>
+    </PrFocusMetaContext.Provider>
   );
 }

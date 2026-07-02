@@ -68,6 +68,11 @@ export interface FilterState {
   repoIds: number[] | null;
   userIds: number[] | null;
   excludeBots: boolean;
+  // Bots to KEEP visible even when excludeBots is on — the per-repo "important bots"
+  // allow-list (checked in the Members dropdown's Bots sections). A persisted filter:
+  // round-trips through the URL (allowBots=…) and saved views, and only bites when
+  // excludeBots is true. Empty → exclude every bot (the historical behaviour).
+  allowedBotIds: number[];
   // Hide "stale" open PRs: open PRs with no commits/comments/reviews inside the
   // active range. A server-side timeline filter (drops the PRs and their events).
   excludeStale: boolean;
@@ -85,6 +90,10 @@ export interface FilterState {
   // URL-synced) — present in freshDefaults() but NOT in FilterDefaults /
   // pickFilterBarState / sanitizePersistedFilters, so a fresh load starts false.
   feedMyTurnOnly: boolean;
+  // Activity "Feed" scope toggle: when true, the consolidated Feed shows only Claude
+  // Review items. Transient (like feedMyTurnOnly) — owned by the Activity lane, not a
+  // persisted filter, not URL-synced. Mutually exclusive with feedMyTurnOnly.
+  feedClaudeOnly: boolean;
 
   // selection
   selectedPrId: number | null;
@@ -114,9 +123,6 @@ export interface FilterState {
   // open PRs strip
   stripCollapsed: boolean;
   stripFilter: StripFilter;
-
-  // Insights panel (header button / `i`): transient UI flag, not URL-synced.
-  insightsOpen: boolean;
 
   // Activity tab (the master-detail triage console). Which detail is shown:
   // 'feed' = the cross-repo consolidated Feed (the default landing detail), a number =
@@ -186,6 +192,9 @@ export interface FilterState {
   showRepo: (id: number) => void;
   setUserIds: (ids: number[] | null) => void;
   setExcludeBots: (v: boolean) => void;
+  // Set/toggle the per-repo "allowed bots" list (bots kept visible under excludeBots).
+  setAllowedBotIds: (ids: number[]) => void;
+  toggleAllowedBot: (id: number) => void;
   setExcludeStale: (v: boolean) => void;
   setPreset: (p: RangePreset) => void;
   setCustomRange: (from: string | null, to: string | null) => void;
@@ -197,9 +206,14 @@ export interface FilterState {
   setReviewStates: (s: ReviewState[]) => void;
   toggleDerivedState: (s: DerivedState) => void;
   setDerivedStates: (s: DerivedState[]) => void;
-  // Toggle / set the Activity "Feed" My-Turn-only scope (see feedMyTurnOnly).
+  // Toggle / set the Activity "Feed" My-Turn-only scope (see feedMyTurnOnly). Toggling
+  // it on clears feedClaudeOnly (the two pills are mutually exclusive).
   toggleFeedMyTurnOnly: () => void;
   setFeedMyTurnOnly: (v: boolean) => void;
+  // Toggle / set the Activity "Feed" Claude-Reviews-only scope (see feedClaudeOnly).
+  // Toggling it on clears feedMyTurnOnly.
+  toggleFeedClaudeOnly: () => void;
+  setFeedClaudeOnly: (v: boolean) => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
   clearSelection: () => void;
@@ -220,6 +234,17 @@ export interface FilterState {
     prId: number,
     focusAt: string,
     event: { type: EventType; refId: number | null },
+  ) => void;
+  // Highlight a specific event WITHIN a PR-focus tab (the thread/comment magnifier flow):
+  // set the PR (and optional thread) selection + the timeline focus signals so the
+  // just-opened isolate tab centres + glows the event's marker after it boots. Unlike
+  // showEventOnTimeline it does NOT touch the active tab — the caller opens the pr-focus
+  // tab first (openPrFocusTab), and this drives the isolate instance's focus consumer.
+  focusEventInTab: (
+    prId: number,
+    focusAt: string,
+    event: { type: EventType; refId: number | null },
+    threadId?: number | null,
   ) => void;
   consumeTimelineFocus: () => void;
   // Recenter the timeline window on the current instant ("Now"); the Timeline
@@ -249,7 +274,6 @@ export interface FilterState {
   bumpClaudeReviewKickoff: () => void;
   setStripCollapsed: (v: boolean) => void;
   setStripFilter: (f: StripFilter) => void;
-  setInsightsOpen: (v: boolean) => void;
   // Select an Activity detail target (a repo id, or 'feed' for the cross-repo consolidated
   // Feed).
   setActivityRepo: (id: number | 'feed') => void;
@@ -293,6 +317,7 @@ type FilterDefaults = Pick<
   | 'repoIds'
   | 'userIds'
   | 'excludeBots'
+  | 'allowedBotIds'
   | 'excludeStale'
   | 'preset'
   | 'customFrom'
@@ -315,6 +340,8 @@ function freshFilterDefaults(): FilterDefaults {
     // Members dropdown, and that non-default choice round-trips as bots=1 (see
     // useUrlState). This is the baseline the URL serializer diffs against.
     excludeBots: false,
+    // No bots allow-listed on a fresh load — round-trips as allowBots=… when non-empty.
+    allowedBotIds: [],
     // Stale open PRs (no commit/comment/review in the active range) are clutter for
     // situational awareness, so they're HIDDEN on a fresh load. This is the baseline
     // the URL serializer diffs against; turning the filter off round-trips as stale=0.
@@ -341,6 +368,7 @@ export function pickFilterBarState(s: FilterState): FilterDefaults {
     repoIds: s.repoIds,
     userIds: s.userIds,
     excludeBots: s.excludeBots,
+    allowedBotIds: s.allowedBotIds,
     excludeStale: s.excludeStale,
     preset: s.preset,
     customFrom: s.customFrom,
@@ -401,6 +429,7 @@ export function savedViewMatchesCurrent(
     setEqual(a.repoIds, current.repoIds) &&
     setEqual(a.userIds, current.userIds) &&
     a.excludeBots === current.excludeBots &&
+    setEqual(a.allowedBotIds, current.allowedBotIds) &&
     a.excludeStale === current.excludeStale &&
     a.preset === current.preset &&
     // customFrom/customTo only affect the board when preset === 'custom'; a non-custom
@@ -424,8 +453,9 @@ export function savedViewMatchesCurrent(
 function freshDefaults(): FilterData {
   return {
     ...freshFilterDefaults(),
-    // Transient Activity "Feed" scope toggle (not a persisted filter): fresh load = false.
+    // Transient Activity "Feed" scope toggles (not persisted filters): fresh load = false.
     feedMyTurnOnly: false,
+    feedClaudeOnly: false,
     selectedPrId: null,
     selectedThreadId: null,
     selectedCommentId: null,
@@ -433,7 +463,6 @@ function freshDefaults(): FilterData {
     commentFocus: null,
     claudeTabFocus: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
-    insightsOpen: false,
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
     // with no thread-state filter.
@@ -466,6 +495,8 @@ export const useFilters = create<FilterState>((set, get) => ({
   },
   setUserIds: (ids) => set({ userIds: ids }),
   setExcludeBots: (v) => set({ excludeBots: v }),
+  setAllowedBotIds: (ids) => set({ allowedBotIds: ids }),
+  toggleAllowedBot: (id) => set((s) => ({ allowedBotIds: toggle(s.allowedBotIds, id) })),
   setExcludeStale: (v) => set({ excludeStale: v }),
   setPreset: (p) =>
     // Bump rangeResetSignal so the Timeline re-applies the window even when the
@@ -484,8 +515,13 @@ export const useFilters = create<FilterState>((set, get) => ({
     set((s) => ({ derivedStates: toggle(s.derivedStates, st) })),
   setDerivedStates: (st) => set({ derivedStates: st }),
   toggleFeedMyTurnOnly: () =>
-    set((s) => ({ feedMyTurnOnly: !s.feedMyTurnOnly })),
-  setFeedMyTurnOnly: (v) => set({ feedMyTurnOnly: v }),
+    set((s) => ({ feedMyTurnOnly: !s.feedMyTurnOnly, feedClaudeOnly: false })),
+  setFeedMyTurnOnly: (v) =>
+    set(v ? { feedMyTurnOnly: true, feedClaudeOnly: false } : { feedMyTurnOnly: false }),
+  toggleFeedClaudeOnly: () =>
+    set((s) => ({ feedClaudeOnly: !s.feedClaudeOnly, feedMyTurnOnly: false })),
+  setFeedClaudeOnly: (v) =>
+    set(v ? { feedClaudeOnly: true, feedMyTurnOnly: false } : { feedClaudeOnly: false }),
   selectPr: (id) =>
     set({
       selectedPrId: id,
@@ -506,8 +542,10 @@ export const useFilters = create<FilterState>((set, get) => ({
     }),
   openPrFocused: (id, threadId = null, focusAt = null, event = null) => {
     // Any timeline navigation leaves an open focus/PR tab so the move is visible on the
-    // shared board (no-op when the board is already showing — the common case).
-    usePinnedTabs.getState().showTimeline();
+    // shared board (no-op when the board is already showing — the common case). When the
+    // move is launched FROM an Activity-opened detail tab (the repurposed PR-title "Show"),
+    // this pushes a back-step so browser Back returns to that detail tab first.
+    usePinnedTabs.getState().showBoardFromDetail();
     set({
       selectedPrId: id,
       selectedThreadId: threadId,
@@ -518,7 +556,7 @@ export const useFilters = create<FilterState>((set, get) => ({
     });
   },
   showEventOnTimeline: (prId, focusAt, event) => {
-    usePinnedTabs.getState().showTimeline();
+    usePinnedTabs.getState().showBoardFromDetail();
     set({
       selectedPrId: prId,
       timelineFocusPr: prId,
@@ -526,6 +564,15 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineFocusEvent: event,
     });
   },
+  focusEventInTab: (prId, focusAt, event, threadId = null) =>
+    set({
+      selectedPrId: prId,
+      selectedThreadId: threadId,
+      selectedCommentId: null,
+      timelineFocusPr: prId,
+      timelineFocusAt: focusAt,
+      timelineFocusEvent: event,
+    }),
   consumeTimelineFocus: () =>
     set({
       timelineFocusPr: null,
@@ -569,7 +616,6 @@ export const useFilters = create<FilterState>((set, get) => ({
     set((s) => ({ claudeReviewKickoff: s.claudeReviewKickoff + 1 })),
   setStripCollapsed: (v) => set({ stripCollapsed: v }),
   setStripFilter: (f) => set({ stripFilter: f }),
-  setInsightsOpen: (v) => set({ insightsOpen: v }),
   // Selecting a different repo console drops any lingering thread-state filter so a
   // narrow from one repo doesn't carry over to the next.
   setActivityRepo: (id) =>
@@ -679,6 +725,10 @@ export function buildTimelineSearch(
   // ~90 days so its subject/inbox PRs are present) WITHOUT touching the store or URL.
   // Floored to the minute like the base range so it yields a stable query string.
   fromOverrideMs?: number | null,
+  // `includeBots` defaults true (honour excludeBots + the allow-list). The member/PR
+  // search index passes false so it ALWAYS fetches bot activity — the Members dropdown's
+  // per-repo Bots sections need every bot even while the board hides them.
+  includeBots = true,
 ): string {
   const { from, to } = resolveRange(s);
   const effectiveFrom =
@@ -702,7 +752,19 @@ export function buildTimelineSearch(
   if (includeReviewStates && s.reviewStates.length < ALL_REVIEW_STATES.length) {
     params.set('reviewStates', s.reviewStates.join(','));
   }
-  params.set('excludeBots', String(s.excludeBots));
+  if (includeBots) {
+    params.set('excludeBots', String(s.excludeBots));
+    // The allow-list only bites under excludeBots; send it so the server keeps those
+    // "important" bots visible even while hiding the rest.
+    if (s.excludeBots && s.allowedBotIds.length > 0)
+      params.set('allowBotIds', s.allowedBotIds.join(','));
+  } else {
+    // The search / member-derivation index always wants bots visible. Emit an explicit
+    // `false` (rather than omitting the param) so its query string matches the board's in
+    // the common excludeBots-OFF case → React Query serves both from one cache entry; the
+    // strings only diverge (a second lean fetch) when the board is actually hiding bots.
+    params.set('excludeBots', 'false');
+  }
   if (includeStaleFilter && s.excludeStale) params.set('excludeStale', 'true');
   return params.toString();
 }

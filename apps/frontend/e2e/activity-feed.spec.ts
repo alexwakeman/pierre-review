@@ -45,18 +45,19 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(page.getByTestId('feed-pill')).toHaveCount(0);
   });
 
-  test('a My Turn item is marked with a yellow-bordered card', async ({ page }) => {
+  test('an FYI item is marked with a yellow-bordered card', async ({ page }) => {
     await gotoActivity(page);
     const row = overlay(page).locator('ul > li', {
       hasText: 'Can you take another look at this?',
     });
     await expect(row).toBeVisible();
-    // My Turn (participated) items render as a yellow-bordered card with a badge.
+    // FYI (participated) items render as a yellow-bordered card with a badge + why-pill.
     await expect(row.locator('article.border-yellow-400')).toBeVisible();
-    await expect(row.getByText('My Turn')).toBeVisible();
+    await expect(row.getByText('FYI', { exact: true })).toBeVisible();
+    await expect(row.getByText('You authored')).toBeVisible();
   });
 
-  test('clicking a My Turn item opens the PR detail tab', async ({ page }) => {
+  test('clicking an FYI item opens the PR detail tab', async ({ page }) => {
     await gotoActivity(page);
     await overlay(page).getByText('Can you take another look at this?').click();
     // Leaves the Activity overlay and shows the full-height PR detail overlay + a closable tab.

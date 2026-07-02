@@ -69,6 +69,12 @@ interface TabsState {
   // signal the feed view consumes) only when the {pierreTab} entry is actually popped.
   activityReturnItemId: string | null;
   activityFlashItemId: string | null;
+  // Second history level (the "Show" back-step): when a board-"Show" is launched FROM an
+  // Activity-opened pr-detail tab, we push an extra {pierreTab} entry and remember the tab
+  // here, so a browser Back returns to that detail tab (NOT all the way to the feed). A
+  // second Back then pops the outer entry → the Activity console. null when no back-step is
+  // outstanding. Deduped: reused rather than restacked.
+  boardReturnTabKey: string | null;
 
   pin: (meta: TabMeta) => void; // ensure a pr-detail tab, do NOT activate
   openPrDetailTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-detail + activate
@@ -80,8 +86,13 @@ interface TabsState {
 
   setActiveTab: (tab: ActiveTab) => void;
   showTimeline: () => void; // idempotent → 'timeline'
+  // Navigate to the board for a "Show", pushing a back-step to the current detail tab when
+  // it was Activity-launched (so Back returns here, not to the feed). Otherwise ≡ showTimeline.
+  showBoardFromDetail: () => void;
   showActivity: () => void; // idempotent → 'activity'
-  consumeActivityReturn: () => void; // browser popped our {pierreTab} entry → return to Activity
+  // Handle a browser Back: first the "Show" back-step (→ the remembered detail tab), then the
+  // Activity-return level (→ the feed, flashing the launching item). A no-op if neither armed.
+  navigateBack: () => void;
   clearActivityFlashItem: () => void; // feed flashed the returned item → forget it
   clear: () => void; // sign-out reset
 }
@@ -197,6 +208,13 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       // Remember which feed row launched this (latest wins) so Back can flash it; a
       // non-feed Activity open (e.g. a digest #N ref) clears any stale target.
       activityReturnItemId: fromActivity ? (opts?.returnItemId ?? null) : s.activityReturnItemId,
+      // A fresh Activity-launched open starts a NEW navigation session, so drop any
+      // dangling "Show" back-step from a previous one (e.g. returning to Activity via the
+      // tab chip after a Show, then opening another feed card). Leaving it set would make a
+      // browser Back detour through that stale detail tab instead of returning to the feed.
+      // navigateBack then falls straight through to the armed Activity-return level; the old
+      // pushed entry becomes a benign orphan.
+      boardReturnTabKey: fromActivity ? null : s.boardReturnTabKey,
     });
   };
 
@@ -206,6 +224,7 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     activityReturnArmed: false,
     activityReturnItemId: null,
     activityFlashItemId: null,
+    boardReturnTabKey: null,
 
     pin: (meta) =>
       set((s) => {
@@ -241,18 +260,21 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
         if (idx === -1) return s;
         const tabs = s.tabs.filter((t) => t.key !== key);
         persist(tabs);
+        // Forget a "Show" back-step that pointed at the tab just closed (navigateBack would
+        // otherwise fall back to the board — harmless, but clearer to drop it now).
+        const boardReturnTabKey = s.boardReturnTabKey === key ? null : s.boardReturnTabKey;
         // Closing a non-active tab leaves the active one alone. Closing the ACTIVE tab
         // moves to a logical neighbour rather than snapping back to the board: the tab
         // immediately to its LEFT (still present in `tabs` at idx-1), else the one to its
         // RIGHT (now the leftmost, tabs[0]), else — no dynamic tabs remain — the board.
-        if (s.activeTab !== key) return { tabs };
+        if (s.activeTab !== key) return { tabs, boardReturnTabKey };
         const nextActive: ActiveTab =
           idx - 1 >= 0
             ? (s.tabs[idx - 1] as Tab).key
             : tabs.length > 0
               ? (tabs[0] as Tab).key
               : 'timeline';
-        return { tabs, activeTab: nextActive };
+        return { tabs, activeTab: nextActive, boardReturnTabKey };
       }),
     unpin: (id) => get().closeTab(prDetailKey(id)),
 
@@ -262,6 +284,24 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     showTimeline: () => {
       if (get().activeTab !== 'timeline') set({ activeTab: 'timeline' });
     },
+    showBoardFromDetail: () => {
+      const s = get();
+      const parsed = parseTabKey(s.activeTab);
+      const onActivityDetail =
+        parsed?.kind === 'pr-detail' && s.activityReturnArmed && s.boardReturnTabKey == null;
+      if (onActivityDetail) {
+        // Push the inner back-step so a browser Back returns to THIS detail tab; the outer
+        // {pierreTab} entry (pushed when the feed opened it) then returns to the feed.
+        try {
+          history.pushState({ pierreTab: 1 }, '');
+        } catch {
+          /* non-fatal */
+        }
+        set({ activeTab: 'timeline', boardReturnTabKey: s.activeTab });
+        return;
+      }
+      if (s.activeTab !== 'timeline') set({ activeTab: 'timeline' });
+    },
     showActivity: () => {
       if (get().activeTab !== 'activity') set({ activeTab: 'activity' });
     },
@@ -270,8 +310,17 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     // PROMOTE the pending return-item into the one-shot flash signal (and clear the pending
     // one) so the feed flashes it EXACTLY on this Back — never on an ordinary return to
     // Activity (e.g. clicking the Activity tab chip, which doesn't call this).
-    consumeActivityReturn: () => {
+    navigateBack: () => {
       const s = get();
+      // Inner level first: the "Show" back-step → the remembered detail tab (or the board
+      // if it was closed meanwhile). Consumes only this level; a further Back handles the
+      // Activity-return entry below.
+      if (s.boardReturnTabKey != null) {
+        const exists = s.tabs.some((t) => t.key === s.boardReturnTabKey);
+        set({ activeTab: exists ? s.boardReturnTabKey : 'timeline', boardReturnTabKey: null });
+        return;
+      }
+      // Outer level: the Activity-launched entry → the feed, flashing the launching item.
       if (!s.activityReturnArmed) return;
       set({
         activeTab: 'activity',
@@ -297,6 +346,7 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
         activityReturnArmed: false,
         activityReturnItemId: null,
         activityFlashItemId: null,
+        boardReturnTabKey: null,
       });
     },
   };

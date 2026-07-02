@@ -9,16 +9,15 @@ function isTypingTarget(el: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
 }
 
-// Global shortcuts: `/` focus filter, `j`/`k` cycle PRs (board only), `i` open Insights,
-// `esc` leave the current tab/overlay → the board (or clear the selection when already on
-// the board).
+// Global shortcuts: `/` focus filter, `j`/`k` cycle PRs (board only), `i` open the Activity
+// console (per-repo insights now live there), `esc` leave the current tab/overlay → the
+// board (or clear the selection when already on the board).
 export function useKeyboard(): void {
   const { data } = useTimeline();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const { selectedPrId, selectPr, clearSelection, setInsightsOpen } =
-        useFilters.getState();
+      const { selectedPrId, selectPr, clearSelection } = useFilters.getState();
       const tabsApi = usePinnedTabs.getState();
       const onBoard = tabsApi.activeTab === 'timeline';
 
@@ -42,9 +41,9 @@ export function useKeyboard(): void {
         return;
       }
 
-      // Open the Insights panel.
+      // Open the Activity console (per-repo insights + charts now live in its rail).
       if (e.key === 'i') {
-        setInsightsOpen(true);
+        tabsApi.showActivity();
         return;
       }
 

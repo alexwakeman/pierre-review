@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import type {
+  ClaudeReviewVerdict,
   ConsolidatedFeedItem,
   EventType,
   FeedAffectedThread,
@@ -8,12 +9,13 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { useConsolidatedFeed } from '../../hooks/useConsolidatedFeed.js';
+import { useMe } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
   DERIVED_STATE_META,
   EVENT_META,
-  REASON_META,
+  FYI_REASON_META,
   indexUsers,
   relativeTime,
   userLabel,
@@ -22,13 +24,10 @@ import { Avatar } from '../CommentCard.js';
 import { Markdown } from '../Markdown.js';
 import { FeedDigestList } from './FeedDigestList.js';
 
-// A coloured chip + label describing what an item is. A "My Turn" (participated) item with
-// a reason tag shows that reason; otherwise the plain event-kind chip.
+// A coloured chip + label describing WHAT an item is (the event kind). The FYI reason is a
+// separate pill (see FYI_REASON_META); Claude runs get their own violet chip.
 function itemGlyph(item: ConsolidatedFeedItem): { color: string; label: string } {
-  if (item.isMyTurn && item.reasonTag != null) {
-    const meta = REASON_META[item.reasonTag];
-    return { color: meta.color, label: meta.label };
-  }
+  if (item.kind === 'claude_review') return { color: '#8957e5', label: 'Claude Review' };
   const meta = EVENT_META[item.kind as EventType];
   return { color: meta?.color ?? '#6b7280', label: meta?.label ?? item.kind };
 }
@@ -43,42 +42,64 @@ const REVIEW_STATE_META: Record<ReviewState, { label: string; color: string }> =
   pending: { label: 'pending', color: '#eab308' },
 };
 
+// Claude verdict → a small badge on a Claude Review card.
+const CLAUDE_VERDICT_META: Record<ClaudeReviewVerdict, { label: string; color: string }> = {
+  APPROVE: { label: 'approve', color: '#22c55e' },
+  REQUEST_CHANGES: { label: 'request changes', color: '#ef4444' },
+  COMMENT: { label: 'comment', color: '#9ca3af' },
+};
+
 // The consolidated Feed — a flat, chronological, social-style stream of activity events.
 // Cross-repo when `repoId` is absent (scoped by the active FilterBar repos/members); scoped
 // to a single repo when a rail repo is selected. Each item is flagged `isMyTurn` (a PR you
-// participate in, acted on by someone else) → a yellow border + badge, plus an optional
-// client-side "My Turn only" filter. Clicking any item opens the full PR detail tab.
+// participate in, acted on by someone else) → a yellow border + "FYI" badge + why-pill, plus
+// optional client-side "FYI only" / "Claude Reviews" filters. Clicking any item opens the
+// full PR detail tab (a Claude item lands on its Claude Review tab; a PR comment scrolls to
+// the comment).
 export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const storeRepoIds = useFilters((s) => s.repoIds);
   const userIds = useFilters((s) => s.userIds);
   const excludeBots = useFilters((s) => s.excludeBots);
+  const allowedBotIds = useFilters((s) => s.allowedBotIds);
   const feedMyTurnOnly = useFilters((s) => s.feedMyTurnOnly);
   const toggleFeedMyTurnOnly = useFilters((s) => s.toggleFeedMyTurnOnly);
+  const feedClaudeOnly = useFilters((s) => s.feedClaudeOnly);
+  const toggleFeedClaudeOnly = useFilters((s) => s.toggleFeedClaudeOnly);
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
+  const showPrComment = useFilters((s) => s.showPrComment);
+  const openClaudeReview = useFilters((s) => s.openClaudeReview);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  // The one-shot flash signal — set ONLY by a real browser Back (consumeActivityReturn), so
-  // an ordinary return to Activity (e.g. clicking the Activity tab chip) never flashes.
+  const me = useMe();
+  const claudeReviewEnabled = me.data?.claudeReviewEnabled ?? false;
+  // The one-shot flash signal — set ONLY by a real browser Back (navigateBack), so an
+  // ordinary return to Activity (e.g. clicking the Activity tab chip) never flashes.
   const flashTarget = usePinnedTabs((s) => s.activityFlashItemId);
   const clearFlash = usePinnedTabs((s) => s.clearActivityFlashItem);
 
   // A selected rail repo scopes the feed to just that repo; otherwise follow the store's
-  // active repo filter (a FilterBar change refetches via the query key). The bots toggle
-  // flows in too, so hiding bots on the timeline also hides them here.
+  // active repo filter (a FilterBar change refetches via the query key). The bots toggle +
+  // allow-list flow in too, so the feed hides/keeps the same bots the timeline does.
   const effectiveRepoIds = repoId != null ? [repoId] : storeRepoIds;
   const { items, users, hasMore, loadMore, isFetchingMore } = useConsolidatedFeed({
     repoIds: effectiveRepoIds,
     userIds,
     excludeBots,
+    allowedBotIds,
   });
 
   const usersById = useMemo(() => indexUsers(users), [users]);
   const myTurnCount = items.filter((i) => i.isMyTurn).length;
-  const visible = feedMyTurnOnly ? items.filter((i) => i.isMyTurn) : items;
+  const claudeCount = items.filter((i) => i.kind === 'claude_review').length;
+  const visible = feedMyTurnOnly
+    ? items.filter((i) => i.isMyTurn)
+    : feedClaudeOnly
+      ? items.filter((i) => i.kind === 'claude_review')
+      : items;
 
-  // Back-from-a-click highlight: when a browser Back returns us to the feed
-  // (consumeActivityReturn set the one-shot flashTarget), scroll the exact row we clicked
-  // into view and flash it once, then consume the signal. Only fires on a real Back.
+  // Back-from-a-click highlight: when a browser Back returns us to the feed (navigateBack
+  // set the one-shot flashTarget), scroll the exact row we clicked into view and flash it
+  // once, then consume the signal. Only fires on a real Back.
   const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map());
   const [flashId, setFlashId] = useState<string | null>(null);
   useEffect(() => {
@@ -106,14 +127,17 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
     authorAvatarUrl: null,
   });
 
-  // Open an item → the full-height PR DETAIL tab (Show/Focus there drive the timeline).
+  // Open an item → the full-height PR DETAIL tab (its Show/Focus drive the timeline).
   // `fromActivity` arms Back-to-Activity + stashes this row's id so Back scrolls it back into
-  // view. We also drive selection so the detail lands on the right thread/PR.
+  // view. We also drive the right in-detail deep link: a Claude run → its Claude Review tab;
+  // a thread → that thread; a PR comment → scroll to + highlight the comment; else the PR.
   function open(item: ConsolidatedFeedItem): void {
     const prId = item.prId;
     if (prId == null) return;
     openPrDetailTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
-    if (item.threadId != null) selectThread(prId, item.threadId);
+    if (item.kind === 'claude_review') openClaudeReview(prId);
+    else if (item.threadId != null) selectThread(prId, item.threadId);
+    else if (item.commentId != null) showPrComment(prId, item.commentId);
     else selectPr(prId);
   }
 
@@ -131,7 +155,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
           repo's digest lives in its RepoFeedHeader). */}
       {repoId == null && <FeedDigestList />}
 
-      {/* My Turn filter toggle + a "showing X of Y" hint. */}
+      {/* FYI / Claude filter toggles + a "showing X of Y" hint. */}
       <div className="flex items-center gap-2 px-0.5">
         <button
           type="button"
@@ -142,11 +166,27 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
               ? 'border-yellow-400 bg-yellow-50 text-yellow-700 dark:border-yellow-500/60 dark:bg-yellow-950/30 dark:text-yellow-300'
               : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
           }`}
-          title="Show only items that need your attention (My Turn)"
+          title="Show only items that concern you (FYI)"
         >
-          <span aria-hidden="true">★</span> My Turn
+          <span aria-hidden="true">★</span> FYI
           {myTurnCount > 0 && <span className="tabular-nums opacity-70">{myTurnCount}</span>}
         </button>
+        {claudeReviewEnabled && (
+          <button
+            type="button"
+            onClick={toggleFeedClaudeOnly}
+            aria-pressed={feedClaudeOnly}
+            className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+              feedClaudeOnly
+                ? 'border-violet-400 bg-violet-50 text-violet-700 dark:border-violet-500/60 dark:bg-violet-950/30 dark:text-violet-300'
+                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+            }`}
+            title="Show only Claude Reviews"
+          >
+            <span aria-hidden="true">✨</span> Claude Reviews
+            {claudeCount > 0 && <span className="tabular-nums opacity-70">{claudeCount}</span>}
+          </button>
+        )}
         {items.length > 0 && (
           <span className="text-[11px] text-gray-400">
             {visible.length} of {items.length}
@@ -160,7 +200,9 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
         </div>
       ) : visible.length === 0 ? (
         <div className="flex h-32 items-center justify-center text-sm text-gray-400">
-          Nothing needs your attention right now.
+          {feedClaudeOnly
+            ? 'No Claude Reviews in this window.'
+            : 'Nothing needs your attention right now.'}
         </div>
       ) : (
         <ul className="space-y-2">
@@ -256,6 +298,9 @@ function AffectedThreadRow({
   );
 }
 
+// The collapsed height of a comment/summary body before "Show more" appears (item 2).
+const BODY_COLLAPSED_MAX = 160;
+
 function FeedRow({
   item,
   actorUser,
@@ -279,10 +324,13 @@ function FeedRow({
 }): JSX.Element {
   const glyph = itemGlyph(item);
   const isMyTurn = item.isMyTurn;
-  // A commit push whose author didn't resolve to a GitHub login shows a neutral label
-  // instead of the bare 'unknown'.
-  const actorName =
-    item.actorId == null && item.kind === 'commit_pushed'
+  const isClaude = item.kind === 'claude_review';
+  const isMerge = item.kind === 'pr_merged';
+  // A commit push (or Claude run) whose actor didn't resolve to a GitHub login shows a
+  // neutral label instead of the bare 'unknown'.
+  const actorName = isClaude
+    ? 'Claude'
+    : item.actorId == null && item.kind === 'commit_pushed'
       ? 'A contributor'
       : userLabel(actorUser, item.actorId);
   const prLabel =
@@ -290,10 +338,42 @@ function FeedRow({
       ? `#${item.prNumber}${item.prTitle != null ? ` ${item.prTitle}` : ''}`
       : '';
   const reviewMeta = item.reviewState != null ? REVIEW_STATE_META[item.reviewState] : null;
+  const claudeVerdict = item.claudeVerdict != null ? CLAUDE_VERDICT_META[item.claudeVerdict] : null;
   const affected = item.affectedThreads ?? [];
+  const primaryReason = item.myTurnReasons[0];
 
-  // Convenience: a click anywhere on the card opens it, but let markdown links / the PR
-  // button win (they call their own handlers).
+  // Item 8 — only show credit that's meaningful for THIS card's context: "Merged by" +
+  // "Reviewed by" belong on a merge card (and never re-attribute the merge to its own
+  // actor); a comment / review card doesn't need them.
+  const showMergedBy = isMerge && mergedByLabel != null && item.mergedById !== item.actorId;
+  const showReviewers = isMerge && reviewerLabels.length > 0;
+
+  // Item 2 — expandable body: measure whether the collapsed body overflows so a "Show more"
+  // toggle only appears when there's more to see. A ResizeObserver on the UNCLAMPED inner
+  // content re-measures when its rendered height changes — crucially after late <img> loads
+  // (comment/review bodies are full of screenshots that contribute 0 height at first paint)
+  // and on width reflow — so the toggle isn't missing while the clamp silently truncates.
+  const bodyRef = useRef<HTMLDivElement>(null); // clamped wrapper
+  const bodyInnerRef = useRef<HTMLDivElement>(null); // unclamped content
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const hasBody = item.content != null && item.content.trim() !== '';
+  useEffect(() => {
+    const outer = bodyRef.current;
+    const inner = bodyInnerRef.current;
+    if (!outer || !inner) return;
+    const measure = (): void => {
+      if (expanded) return; // expanded shows everything — nothing to clamp/measure
+      setOverflows(outer.scrollHeight > outer.clientHeight + 4);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [item.content, expanded]);
+
+  // Convenience: a click anywhere on the card opens it, but let markdown links / buttons win
+  // (they call their own handlers).
   const onCardClick = (e: ReactMouseEvent<HTMLElement>): void => {
     if ((e.target as HTMLElement).closest('a,button')) return;
     onOpen();
@@ -308,10 +388,12 @@ function FeedRow({
             ? 'border-sky-400 ring-2 ring-sky-400/60 dark:border-sky-500'
             : isMyTurn
               ? 'border-yellow-400 bg-yellow-50/40 dark:border-yellow-500/50 dark:bg-yellow-950/15'
-              : 'border-gray-200 hover:border-sky-300 dark:border-gray-800 dark:hover:border-sky-700'
+              : isClaude
+                ? 'border-violet-300 bg-violet-50/30 dark:border-violet-500/40 dark:bg-violet-950/10'
+                : 'border-gray-200 hover:border-sky-300 dark:border-gray-800 dark:hover:border-sky-700'
         }`}
       >
-        {/* header: avatar + actor + action chip + (My Turn badge) + time */}
+        {/* header: avatar + actor + action chip + (FYI badge + why-pill) + time */}
         <div className="flex items-center gap-2">
           <Avatar user={actorUser} size={20} />
           <span className="truncate font-medium text-gray-800 dark:text-gray-100">{actorName}</span>
@@ -321,9 +403,25 @@ function FeedRow({
           >
             {glyph.label}
           </span>
+          {claudeVerdict != null && (
+            <span
+              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
+              style={{ color: claudeVerdict.color, background: claudeVerdict.color + '1a' }}
+            >
+              {claudeVerdict.label}
+            </span>
+          )}
           {isMyTurn && (
             <span className="shrink-0 rounded bg-yellow-400/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-700 dark:text-yellow-300">
-              My Turn
+              FYI
+            </span>
+          )}
+          {isMyTurn && primaryReason != null && (
+            <span
+              className="shrink-0 rounded border border-yellow-300 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:border-yellow-600/50 dark:text-yellow-300"
+              title={item.myTurnReasons.map((r) => FYI_REASON_META[r].title).join(' · ')}
+            >
+              {FYI_REASON_META[primaryReason].label}
             </span>
           )}
           <span className="ml-auto shrink-0 text-[11px] text-gray-400">
@@ -348,10 +446,28 @@ function FeedRow({
           )}
         </div>
 
-        {/* FULL markdown body (no clamp) for comment-based items */}
-        {item.content != null && item.content.trim() !== '' && (
+        {/* markdown body (comment / review / Claude summary) — collapsed with a "Show more"
+            toggle once it overflows (item 2). */}
+        {hasBody && (
           <div className="mt-1.5 rounded bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50">
-            <Markdown>{item.content}</Markdown>
+            <div
+              ref={bodyRef}
+              className={expanded ? '' : 'overflow-hidden'}
+              style={expanded ? undefined : { maxHeight: BODY_COLLAPSED_MAX }}
+            >
+              <div ref={bodyInnerRef}>
+                <Markdown>{item.content as string}</Markdown>
+              </div>
+            </div>
+            {(overflows || expanded) && (
+              <button
+                type="button"
+                onClick={() => setExpanded((e) => !e)}
+                className="mt-1 text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+              >
+                {expanded ? 'Show less' : 'Show more'}
+              </button>
+            )}
           </div>
         )}
 
@@ -377,20 +493,20 @@ function FeedRow({
           </div>
         )}
 
-        {/* review / merge credit line */}
-        {(reviewMeta != null || mergedByLabel != null || reviewerLabels.length > 0) && (
+        {/* review verdict / merge-credit line — only the parts meaningful for this card. */}
+        {(reviewMeta != null || showMergedBy || showReviewers) && (
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
             {reviewMeta != null && (
               <span className="font-medium" style={{ color: reviewMeta.color }}>
                 {reviewMeta.label}
               </span>
             )}
-            {mergedByLabel != null && (
+            {showMergedBy && (
               <span>
                 Merged by <span className="font-medium">{mergedByLabel}</span>
               </span>
             )}
-            {reviewerLabels.length > 0 && (
+            {showReviewers && (
               <span>
                 Reviewed by <span className="font-medium">{reviewerLabels.join(', ')}</span>
               </span>

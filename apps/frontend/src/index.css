@@ -1099,6 +1099,28 @@ div.vis-tooltip {
   animation: activity-flash 1.8s ease-out forwards;
 }
 
+/* A quick fade-in for freshly-regenerated Pro digest text (keyed by generatedAt so it
+   replays on each new summary). The old text stays readable — dimmed — until the new
+   text arrives, then this eases it in. */
+@keyframes digest-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.digest-fade-in {
+  animation: digest-fade-in 0.35s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .digest-fade-in {
+    animation: none;
+  }
+}
+
 /* ---- "my turn" ring (cards + timeline bars) ---- */
 /* A STATIC 3px ring in the my-turn blue — no animation. (Earlier versions pulsed
    box-shadow, then opacity; both were continuous compositor work. A static

@@ -206,7 +206,11 @@ export function FilterBar(): JSX.Element {
   // inactive members, so anyone stays pickable and selections stay visible.
   // maintainerIds (merge rights in the relevant repo(s)) drives both the per-row
   // shields and the panel's "Maintainers" quick-select — it is no longer a section.
-  const { sections: memberSections, maintainerIds } = useMemo(() => {
+  const {
+    sections: memberSections,
+    botSections,
+    maintainerIds,
+  } = useMemo(() => {
     const repoScoped = f.repoIds != null && f.repoIds.length > 0;
     const inScopeRepoIds = repoScoped ? new Set(f.repoIds) : null;
 
@@ -215,6 +219,11 @@ export function FilterBar(): JSX.Element {
       if (id == null) return null;
       const u = byId.get(id);
       return u && !u.isBot ? u : null;
+    };
+    const botOf = (id: number | null): User | null => {
+      if (id == null) return null;
+      const u = byId.get(id);
+      return u && u.isBot ? u : null;
     };
 
     // Per-repo membership, derived from the member-agnostic window activity.
@@ -291,8 +300,36 @@ export function FilterBar(): JSX.Element {
       });
     }
 
-    return { sections, maintainerIds: maintainers };
-  }, [users, searchTimeline, searchOpenPrs, mergers, repos, f.repoIds, f.userIds]);
+    // Per-repo Bots sections (item 3): the bot contributors active in each in-scope repo,
+    // so the user can allow-list the important ones. Derived from the same (bot-inclusive)
+    // window activity as members — repoMembers already holds bot ids (usable() filtered
+    // them out of the member sections). Any bot with no repo activity but already allow-
+    // listed still needs to be togglable, so it's floated into an "Other bots" section.
+    const botSections: MemberSection[] = [];
+    const placedBots = new Set<number>();
+    for (const r of repos ?? []) {
+      if (inScopeRepoIds && !inScopeRepoIds.has(r.id)) continue;
+      const ids = repoMembers.get(r.id);
+      if (!ids) continue;
+      const bots = [...ids]
+        .map(botOf)
+        .filter((u): u is User => u != null)
+        .sort(byName);
+      if (!bots.length) continue;
+      botSections.push({ key: `bot:${r.id}`, label: r.name, members: bots });
+      for (const u of bots) placedBots.add(u.id);
+    }
+    const allowedNotShown = (f.allowedBotIds ?? [])
+      .map(botOf)
+      .filter((u): u is User => u != null)
+      .filter((u) => !placedBots.has(u.id))
+      .sort(byName);
+    if (allowedNotShown.length) {
+      botSections.push({ key: 'bot:other', label: 'Other bots', members: allowedNotShown });
+    }
+
+    return { sections, botSections, maintainerIds: maintainers };
+  }, [users, searchTimeline, searchOpenPrs, mergers, repos, f.repoIds, f.userIds, f.allowedBotIds]);
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-800 dark:bg-gray-900">
@@ -345,11 +382,14 @@ export function FilterBar(): JSX.Element {
         <Section>
           <UserSelectPanel
             sections={memberSections}
+            botSections={botSections}
             userIds={f.userIds}
             maintainerIds={maintainerIds}
             onApply={(ids) => f.setUserIds(ids)}
             excludeBots={f.excludeBots}
             onExcludeBotsChange={f.setExcludeBots}
+            allowedBotIds={f.allowedBotIds}
+            onToggleAllowedBot={f.toggleAllowedBot}
           />
         </Section>
 
