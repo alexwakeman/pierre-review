@@ -10,7 +10,6 @@ import {
   CHECK_STATE_META,
   CI_META,
   dateTime,
-  formatDate,
   mergeWarning,
   relativeTime,
 } from '../lib/ui.js';
@@ -480,19 +479,23 @@ export function ChecksTab({
 
       {pr.mergedById != null && (
         <Row label="Merged by">
-          <span className="inline-flex items-center gap-1.5 text-xs">
-            <Avatar user={usersById.get(pr.mergedById)} size={14} />
-            <UserName
-              user={usersById.get(pr.mergedById)}
-              fallbackId={pr.mergedById}
-              repoId={pr.repoId}
-            />
+          <div className="text-xs">
+            <span className="inline-flex items-center gap-1.5">
+              <Avatar user={usersById.get(pr.mergedById)} size={14} />
+              <UserName
+                user={usersById.get(pr.mergedById)}
+                fallbackId={pr.mergedById}
+                repoId={pr.repoId}
+              />
+            </span>
             {pr.mergedAt != null && (
-              <span className="text-gray-400" title={dateTime(pr.mergedAt)}>
-                · {formatDate(pr.mergedAt)}
-              </span>
+              // The exact merge moment — date AND time of day — on its own line under the
+              // merger (`dateTime` carries the time; the title repeats it for hover parity).
+              <div className="mt-0.5 text-gray-400" title={dateTime(pr.mergedAt)}>
+                {dateTime(pr.mergedAt)}
+              </div>
             )}
-          </span>
+          </div>
         </Row>
       )}
 
