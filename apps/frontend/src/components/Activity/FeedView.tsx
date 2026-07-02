@@ -11,12 +11,13 @@ import type {
 import { useConsolidatedFeed } from '../../hooks/useConsolidatedFeed.js';
 import { useMe } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
-import { useUsers } from '../../hooks/useTimeline.js';
+import { useTimeline, useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
   buildQuotedReply,
   CI_META,
+  dateTime,
   DERIVED_STATE_META,
   EVENT_META,
   FYI_REASON_META,
@@ -98,6 +99,15 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   });
 
   const usersById = useMemo(() => indexUsers(users), [users]);
+  // The PRs currently on the board (filter + date-range scoped). A Focus that isn't in
+  // this set would open an empty isolated timeline, so we intercept it (below) with an
+  // explanatory modal instead. Shares the board's cached query — no extra fetch.
+  const timelinePrs = useTimeline().data?.prs;
+  const timelinePrIds = useMemo(
+    () => new Set((timelinePrs ?? []).map((p) => p.id)),
+    [timelinePrs],
+  );
+  const [focusUnavailable, setFocusUnavailable] = useState<ConsolidatedFeedItem | null>(null);
   const myTurnCount = items.filter((i) => i.isMyTurn).length;
   const claudeCount = items.filter((i) => i.kind === 'claude_review').length;
   const visible = feedMyTurnOnly
@@ -164,6 +174,12 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   function focus(item: ConsolidatedFeedItem): void {
     const prId = item.prId;
     if (prId == null) return;
+    // Focusing a PR that isn't on the current (filter/date-scoped) board would open an
+    // empty isolated timeline — surface a modal explaining why instead.
+    if (timelinePrs != null && !timelinePrIds.has(prId)) {
+      setFocusUnavailable(item);
+      return;
+    }
     openPrFocusTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
     if (item.kind !== 'claude_review') {
       const refId = item.threadId ?? item.commentId ?? null;
@@ -275,6 +291,107 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
           </button>
         </div>
       )}
+
+      {focusUnavailable != null && (
+        <FocusUnavailableModal
+          item={focusUnavailable}
+          onClose={() => setFocusUnavailable(null)}
+          onOpenDetails={() => {
+            const it = focusUnavailable;
+            setFocusUnavailable(null);
+            open(it);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Shown when the user asks to Focus a feed item whose PR isn't on the timeline with the
+// current filters (so the isolated-timeline tab would be empty). Mirrors HelpModal's
+// dismiss behaviour (backdrop / ✕ / Escape-in-capture so it doesn't reach the global
+// keyboard hook). Offers a way out: open the PR's detail tab (which works regardless of
+// the board filters).
+function FocusUnavailableModal({
+  item,
+  onClose,
+  onOpenDetails,
+}: {
+  item: ConsolidatedFeedItem;
+  onClose: () => void;
+  onOpenDetails: () => void;
+}): JSX.Element {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
+  const ref =
+    item.prNumber != null
+      ? `#${item.prNumber}${item.prTitle != null ? ` ${item.prTitle}` : ''}`
+      : 'This PR';
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="flex w-[26rem] max-w-[92vw] flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="PR not on the timeline"
+      >
+        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-2 dark:border-gray-800">
+          <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+            Not on the timeline
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            aria-label="Close (Esc)"
+            title="Close (Esc)"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="space-y-3 px-4 py-3 text-sm leading-relaxed text-gray-600 dark:text-gray-300">
+          <p>
+            <span className="font-medium text-gray-800 dark:text-gray-100">{ref}</span> isn’t
+            shown on the timeline with your current filters (date range, repositories,
+            members), so it can’t be focused there.
+          </p>
+          <p className="text-gray-500 dark:text-gray-400">
+            Widen the date range or clear the filters to bring it onto the board — or open
+            its details directly.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-2 dark:border-gray-800">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-gray-300 px-3 py-1 text-sm hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={onOpenDetails}
+            className="rounded border border-blue-400 bg-blue-500/10 px-3 py-1 text-sm font-medium text-blue-600 hover:bg-blue-500/20 dark:border-blue-600 dark:text-blue-400"
+          >
+            Open PR details
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -536,8 +653,29 @@ function FeedRow({
                 : 'border-gray-200 hover:border-sky-300 dark:border-gray-800 dark:hover:border-sky-700'
         }`}
       >
-        {/* header: avatar + actor + action chip + (FYI badge + why-pill) + time */}
+        {/* header: (Focus magnifier + event time on the left) then avatar + actor +
+            action chip + (FYI badge + why-pill) */}
         <div className="flex items-center gap-2">
+          {item.prId != null && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onFocus();
+              }}
+              className="shrink-0 rounded p-0.5 text-blue-500 hover:text-blue-600"
+              title="Focus — open this PR in its own isolated timeline tab"
+              aria-label="Focus this PR in its own timeline tab"
+            >
+              <MagnifierIcon size={13} />
+            </button>
+          )}
+          <span
+            className="shrink-0 text-[11px] text-gray-400"
+            title={dateTime(item.occurredAt)}
+          >
+            {relativeTime(item.occurredAt)}
+          </span>
           <Avatar user={actorUser} size={20} />
           <span className="truncate font-medium text-gray-800 dark:text-gray-100">{actorName}</span>
           <span
@@ -567,25 +705,6 @@ function FeedRow({
               {FYI_REASON_META[primaryReason].label}
             </span>
           )}
-          {item.prId != null && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onFocus();
-              }}
-              className="ml-auto shrink-0 rounded p-0.5 text-blue-500 hover:text-blue-600"
-              title="Focus — open this PR in its own isolated timeline tab"
-              aria-label="Focus this PR in its own timeline tab"
-            >
-              <MagnifierIcon size={13} />
-            </button>
-          )}
-          <span
-            className={`shrink-0 text-[11px] text-gray-400 ${item.prId == null ? 'ml-auto' : ''}`}
-          >
-            {relativeTime(item.occurredAt)}
-          </span>
         </div>
 
         {/* PR ref line — the keyboard-accessible open affordance */}
