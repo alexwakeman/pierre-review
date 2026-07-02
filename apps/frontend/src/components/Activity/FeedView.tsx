@@ -80,6 +80,22 @@ const CLAUDE_VERDICT_META: Record<ClaudeReviewVerdict, { label: string; color: s
 // optional client-side "FYI only" / "Claude Reviews" filters. Clicking any item opens the
 // full PR detail tab (a Claude item lands on its Claude Review tab; a PR comment scrolls to
 // the comment).
+
+// The feed lives inside the Activity console's own `overflow-y-auto` pane (not the page
+// viewport), so infinite-scroll must observe the sentinel against THAT scroll container —
+// only then does the rootMargin prefetch fire before the true bottom (a viewport root is
+// clipped by the pane and would only fire once the sentinel is actually visible). Walk up
+// to the nearest scrollable ancestor; null falls back to the viewport for any other host.
+function nearestScrollParent(el: HTMLElement | null): HTMLElement | null {
+  for (let node = el?.parentElement ?? null; node; node = node.parentElement) {
+    const oy = getComputedStyle(node).overflowY;
+    if ((oy === 'auto' || oy === 'scroll' || oy === 'overlay') && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+  }
+  return null;
+}
+
 export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const storeRepoIds = useFilters((s) => s.repoIds);
   const userIds = useFilters((s) => s.userIds);
@@ -151,6 +167,44 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
     });
     return () => cancelAnimationFrame(raf);
   }, [flashTarget, clearFlash]);
+
+  // Infinite scroll: auto-load the next page as the user nears the bottom of the feed, in
+  // every context (cross-repo Feed + each repo's own feed both render this component). A
+  // sentinel row sits at the end of the list; an IntersectionObserver rooted on the feed's
+  // scroll container fires ~a screenful early (rootMargin) so the next page is fetching
+  // before the user hits the true bottom. `loadNextRef` holds the latest guard so the
+  // observer callback stays stable (empty-dep effect) yet always sees fresh state.
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const sentinelVisibleRef = useRef(false);
+  const loadNextRef = useRef<() => void>(() => {});
+  loadNextRef.current = () => {
+    if (hasMore && !isFetchingMore && items.length > 0) void loadMore();
+  };
+  // Mount/unmount the observer with the sentinel (rendered only when there's more to load).
+  const showSentinel = hasMore && items.length > 0;
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        sentinelVisibleRef.current = entries[0]?.isIntersecting ?? false;
+        if (sentinelVisibleRef.current) loadNextRef.current();
+      },
+      // Root = the feed's own scroll pane; prefetch a screenful before the bottom.
+      { root: nearestScrollParent(el), rootMargin: '0px 0px 600px 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+    // showSentinel gates the sentinel's existence; re-run when it flips so the observer
+    // attaches once the node mounts (the ref is null on the initial, list-empty render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSentinel]);
+  // If a settled page leaves the sentinel STILL within range (tall viewport / short page),
+  // keep pulling until it scrolls out or nothing remains — the observer alone won't re-fire
+  // while `isIntersecting` stays true. The loadNext guard blocks re-entry while fetching.
+  useEffect(() => {
+    if (!isFetchingMore && sentinelVisibleRef.current) loadNextRef.current();
+  }, [isFetchingMore, items.length, hasMore]);
 
   const metaOf = (item: ConsolidatedFeedItem, prId: number): TabMeta => ({
     id: prId,
@@ -293,18 +347,25 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
         </ul>
       )}
 
-      {/* Pagination: only the loaded pages are fetched + rendered; "Load more" pulls the
-          next page by offset (never re-fetching earlier ones). */}
-      {hasMore && items.length > 0 && (
-        <div className="flex justify-center pt-1">
-          <button
-            type="button"
-            onClick={() => void loadMore()}
-            disabled={isFetchingMore}
-            className="rounded-full border border-gray-300 px-4 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-400 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:bg-gray-800/50"
-          >
-            {isFetchingMore ? 'Loading…' : 'Load more'}
-          </button>
+      {/* Pagination: only the loaded pages are fetched + rendered. The sentinel below
+          auto-loads the next page (by offset, never re-fetching earlier ones) as it nears
+          the bottom; the button remains a manual fallback for when the observer can't fire. */}
+      {showSentinel && (
+        <div ref={sentinelRef} className="flex justify-center pt-1">
+          {isFetchingMore ? (
+            <span className="flex items-center gap-2 py-1.5 text-xs text-gray-400">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-transparent dark:border-gray-600 dark:border-t-transparent" />
+              Loading more…
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void loadMore()}
+              className="rounded-full border border-gray-300 px-4 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:bg-gray-800/50"
+            >
+              Load more
+            </button>
+          )}
         </div>
       )}
 
