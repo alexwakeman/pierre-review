@@ -219,6 +219,14 @@ body {
 }
 .md-body img {
   max-width: 100%;
+  /* Restore the HTML/GitHub default of inline images. Tailwind's preflight
+     resets `img { display: block }`, which would drop every image onto its own
+     line — breaking icon-then-text runs (e.g. SonarCloud's "<icon> 0 New
+     issues") that GitHub keeps on one line. inline-block + vertical-align
+     (middle carried over from preflight, restated here for clarity) sits the
+     icon next to its text as authored. */
+  display: inline-block;
+  vertical-align: middle;
   /* Keep a single tall screenshot from blowing out the layout (and, in the
      clamped 3-line PR Summary preview, from dominating before Show more). */
   max-height: 24rem;
