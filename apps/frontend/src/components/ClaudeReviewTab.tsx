@@ -33,6 +33,7 @@ import {
 } from '../hooks/useClaudeReview.js';
 import { Markdown } from './Markdown.js';
 import { MentionTextarea } from './MentionTextarea.js';
+import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 
 // A label/body row matching ChecksTab's layout — a fixed-width uppercase caption
 // on the left, content on the right.
@@ -1378,7 +1379,12 @@ export function ClaudeReviewTab({
         </>
       )}
 
-      {/* Running progress. */}
+      {/* Running progress. The bar is mounted OUTSIDE the isRunning gate so it observes
+          the running→done transition and plays its 100%→fade-out completion (it renders
+          null when idle, so this adds no chrome otherwise). */}
+      <div className="px-4">
+        <RegenProgressBar active={isRunning} label="Running Claude review" timeConstantSec={30} />
+      </div>
       {isRunning && (
         <div className="px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 text-sm">

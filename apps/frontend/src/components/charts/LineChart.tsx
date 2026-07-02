@@ -16,12 +16,14 @@ export function LineChart({
   labels,
   series,
   area = false,
+  curved = false,
   formatY = fmtNum,
   height = 132,
 }: {
   labels: string[];
   series: Series[];
   area?: boolean;
+  curved?: boolean;
   formatY?: (n: number) => string;
   height?: number;
 }): JSX.Element {
@@ -65,6 +67,65 @@ export function LineChart({
     );
   };
 
+  // --- Smooth (Catmull-Rom → cubic-bezier, tension 1/6) variants, used only
+  // when `curved`. bezierSegments emits the `C …` commands for a contiguous
+  // point run (no leading `M`); endpoints are clamped (P−1=P0, Pn+1=Pn).
+  const bezierSegments = (pts: readonly (readonly [number, number])[]): string => {
+    let d = '';
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] ?? pts[i]!;
+      const p1 = pts[i]!;
+      const p2 = pts[i + 1]!;
+      const p3 = pts[i + 2] ?? p2;
+      const cp1x = p1[0] + (p2[0] - p0[0]) / 6;
+      const cp1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const cp2x = p2[0] - (p3[0] - p1[0]) / 6;
+      const cp2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ` C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${p2[0]} ${p2[1]}`;
+    }
+    return d;
+  };
+
+  // Each contiguous run of non-null points is its own smooth sub-path (breaks
+  // on gaps, mirroring linePath); a run of length 1 is just `M x y`.
+  const smoothLinePath = (s: Series): string => {
+    const runs: (readonly [number, number])[][] = [];
+    let cur: (readonly [number, number])[] = [];
+    s.values.forEach((v, i) => {
+      if (v == null) {
+        if (cur.length) runs.push(cur);
+        cur = [];
+      } else {
+        cur.push([x(i), y(v)] as const);
+      }
+    });
+    if (cur.length) runs.push(cur);
+    return runs
+      .map((r) => {
+        const head = `M ${r[0]![0]} ${r[0]![1]}`;
+        return r.length < 2 ? head : head + bezierSegments(r);
+      })
+      .join(' ');
+  };
+
+  // Smooth top edge (across-gap contiguous, mirroring areaPath) closed to baseY.
+  const smoothAreaPath = (s: Series): string => {
+    const pts = s.values
+      .map((v, i) => (v == null ? null : ([x(i), y(v)] as const)))
+      .filter((p): p is readonly [number, number] => p != null);
+    if (pts.length < 2) return '';
+    const first = pts[0]!;
+    const last = pts[pts.length - 1]!;
+    return (
+      `M ${first[0]} ${baseY} L ${first[0]} ${first[1]}` +
+      bezierSegments(pts) +
+      ` L ${last[0]} ${baseY} Z`
+    );
+  };
+
+  const linePathFor = curved ? smoothLinePath : linePath;
+  const areaPathFor = curved ? smoothAreaPath : areaPath;
+
   const onMove = (e: React.MouseEvent<SVGRectElement>): void => {
     const ox = e.nativeEvent.offsetX;
     const i = n <= 1 ? 0 : Math.round(((ox - PAD_L) / innerW) * (n - 1));
@@ -98,8 +159,8 @@ export function LineChart({
                 </text>
               </g>
             ))}
-            {area && series[0] && areaPath(series[0]) && (
-              <path d={areaPath(series[0])} fill={series[0].color} opacity={0.12} />
+            {area && series[0] && areaPathFor(series[0]) && (
+              <path d={areaPathFor(series[0])} fill={series[0].color} opacity={0.12} />
             )}
             {hover != null && (
               <line
@@ -115,7 +176,7 @@ export function LineChart({
             {series.map((s) => (
               <path
                 key={s.key}
-                d={linePath(s)}
+                d={linePathFor(s)}
                 fill="none"
                 stroke={s.color}
                 strokeWidth={1.5}

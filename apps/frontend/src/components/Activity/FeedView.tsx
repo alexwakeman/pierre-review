@@ -10,12 +10,13 @@ import type {
 } from '@pierre-review/shared';
 import { useConsolidatedFeed } from '../../hooks/useConsolidatedFeed.js';
 import { useMe } from '../../hooks/useTriage.js';
-import { useThread } from '../../hooks/usePr.js';
+import { useThread, usePr } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
   buildQuotedReply,
+  CI_META,
   DERIVED_STATE_META,
   EVENT_META,
   FYI_REASON_META,
@@ -24,6 +25,7 @@ import {
   userLabel,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
+import { MagnifierIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
 import { ThreadCard } from '../ThreadView/index.js';
@@ -74,7 +76,9 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const selectPr = useFilters((s) => s.selectPr);
   const showPrComment = useFilters((s) => s.showPrComment);
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
+  const focusEventInTab = useFilters((s) => s.focusEventInTab);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
+  const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
   const me = useMe();
   const claudeReviewEnabled = me.data?.claudeReviewEnabled ?? false;
   // The one-shot flash signal — set ONLY by a real browser Back (navigateBack), so an
@@ -152,6 +156,20 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
     if (prId == null) return;
     openPrDetailTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
     selectThread(prId, threadId);
+  }
+
+  // The magnifier → Focus Mode: open the PR's own isolated timeline tab and glow the
+  // marker for THIS event (a review_comment's refId is its thread id, so also pre-select
+  // that thread). Mirrors PrDetail's Focus link + the per-thread ShowOnTimeline flow.
+  function focus(item: ConsolidatedFeedItem): void {
+    const prId = item.prId;
+    if (prId == null) return;
+    openPrFocusTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
+    if (item.kind !== 'claude_review') {
+      const refId = item.threadId ?? item.commentId ?? null;
+      const threadId = item.kind === 'review_comment' ? item.threadId : null;
+      focusEventInTab(prId, item.occurredAt, { type: item.kind as EventType, refId }, threadId);
+    }
   }
 
   return (
@@ -236,6 +254,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
                 }}
                 onOpen={() => open(item)}
                 onOpenThread={(tid) => openThread(item, tid)}
+                onFocus={() => focus(item)}
               />
             );
           })}
@@ -305,6 +324,70 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
   );
 }
 
+// The PR description for a "PR opened" card, fetched on demand only when the reader
+// expands it (the body is lean-gated / hydrated, so we don't want to pull it for every
+// opened PR up front).
+function PrOpenedSummary({ prId }: { prId: number }): JSX.Element {
+  const { data: pr, isLoading } = usePr(prId);
+  if (isLoading) {
+    return <div className="mt-1 px-1 text-xs text-gray-400">Loading summary…</div>;
+  }
+  const body = pr?.body?.trim();
+  if (!body) {
+    return <div className="mt-1 px-1 text-xs text-gray-400">No description.</div>;
+  }
+  return (
+    <div className="mt-1 max-h-72 overflow-auto rounded bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50">
+      <Markdown>{body}</Markdown>
+    </div>
+  );
+}
+
+// Extra at-a-glance context on a "PR opened" card: CI rollup + changed-file count (both
+// enriched into the feed item) and a collapsible PR description (lazy, see above).
+function PrOpenedExtras({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
+  const [showSummary, setShowSummary] = useState(false);
+  const ci = item.ciStatus != null && item.ciStatus !== 'unknown' ? CI_META[item.ciStatus] : null;
+  const files = item.changedFilesCount;
+  const prId = item.prId;
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      {(ci != null || files != null) && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+          {ci != null && (
+            <span className="inline-flex items-center gap-1 font-medium" style={{ color: ci.color }}>
+              <span
+                aria-hidden="true"
+                className="inline-block h-2 w-2 rounded-full"
+                style={{ background: ci.color }}
+              />
+              {ci.label}
+            </span>
+          )}
+          {files != null && (
+            <span>
+              {files} {files === 1 ? 'file' : 'files'} changed
+            </span>
+          )}
+        </div>
+      )}
+      {prId != null && (
+        // Stop propagation so reading/expanding the summary never opens the tab.
+        <div onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => setShowSummary((s) => !s)}
+            className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+          >
+            {showSummary ? 'Hide summary' : 'Show summary'}
+          </button>
+          {showSummary && <PrOpenedSummary prId={prId} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // One review thread that a commit item likely addressed — a clickable row (opens that
 // thread in the PR detail tab) showing the file/line, the thread's new derived state, and
 // a preview of what the reviewer originally asked.
@@ -361,6 +444,7 @@ function FeedRow({
   innerRef,
   onOpen,
   onOpenThread,
+  onFocus,
 }: {
   item: ConsolidatedFeedItem;
   actorUser: User | undefined;
@@ -371,6 +455,7 @@ function FeedRow({
   innerRef: (el: HTMLLIElement | null) => void;
   onOpen: () => void;
   onOpenThread: (threadId: number) => void;
+  onFocus: () => void;
 }): JSX.Element {
   const glyph = itemGlyph(item);
   const isMyTurn = item.isMyTurn;
@@ -397,6 +482,7 @@ function FeedRow({
   // reply.
   const isThreadCard = item.kind === 'review_comment' && item.threadId != null;
   const isPrCommentCard = item.kind === 'pr_comment' && item.prId != null;
+  const isPrOpened = item.kind === 'pr_opened';
   const [replyOpen, setReplyOpen] = useState(false);
 
   // Item 8 — only show credit that's meaningful for THIS card's context: "Merged by" +
@@ -481,7 +567,23 @@ function FeedRow({
               {FYI_REASON_META[primaryReason].label}
             </span>
           )}
-          <span className="ml-auto shrink-0 text-[11px] text-gray-400">
+          {item.prId != null && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onFocus();
+              }}
+              className="ml-auto shrink-0 rounded p-0.5 text-blue-500 hover:text-blue-600"
+              title="Focus — open this PR in its own isolated timeline tab"
+              aria-label="Focus this PR in its own timeline tab"
+            >
+              <MagnifierIcon size={13} />
+            </button>
+          )}
+          <span
+            className={`shrink-0 text-[11px] text-gray-400 ${item.prId == null ? 'ml-auto' : ''}`}
+          >
             {relativeTime(item.occurredAt)}
           </span>
         </div>
@@ -502,6 +604,9 @@ function FeedRow({
             <span className="shrink-0 text-gray-400">· {item.path.split('/').pop()}</span>
           )}
         </div>
+
+        {/* PR-opened cards: CI + files-changed + a collapsible description (item 2). */}
+        {isPrOpened && <PrOpenedExtras item={item} />}
 
         {/* markdown body (review / PR comment / Claude summary) — collapsed with a
             "Show more" toggle once it overflows. Review-thread cards SKIP this: they

@@ -6,7 +6,15 @@ import { useEffect, useState } from 'react';
 // Instead this eases toward ~92% while the request is in flight (decelerating, so it never
 // stalls at a fixed number nor claims to be done early), then snaps to 100% and fades out
 // when `active` goes false. It reads as real progress without inventing a false reading.
-export function RegenProgressBar({ active }: { active: boolean }): JSX.Element | null {
+export function RegenProgressBar({
+  active,
+  label = 'Regenerating digests',
+  timeConstantSec = 5,
+}: {
+  active: boolean;
+  label?: string;
+  timeConstantSec?: number;
+}): JSX.Element | null {
   // null = hidden. A number 0–100 = shown at that fill.
   const [pct, setPct] = useState<number | null>(null);
 
@@ -16,8 +24,8 @@ export function RegenProgressBar({ active }: { active: boolean }): JSX.Element |
       setPct(8);
       const id = window.setInterval(() => {
         const t = (performance.now() - start) / 1000;
-        // 8% → ~92%, asymptotic with a ~5s time-constant (63% of the way by 5s).
-        setPct(Math.min(92, 8 + 84 * (1 - Math.exp(-t / 5))));
+        // 8% → ~92%, asymptotic with a `timeConstantSec` time-constant (63% of the way by then).
+        setPct(Math.min(92, 8 + 84 * (1 - Math.exp(-t / timeConstantSec))));
       }, 200);
       return () => window.clearInterval(id);
     }
@@ -26,7 +34,7 @@ export function RegenProgressBar({ active }: { active: boolean }): JSX.Element |
     setPct((p) => (p == null ? null : 100));
     const hideTimer = window.setTimeout(() => setPct(null), 500);
     return () => window.clearTimeout(hideTimer);
-  }, [active]);
+  }, [active, timeConstantSec]);
 
   if (pct == null) return null;
   const rounded = Math.round(pct);
@@ -38,7 +46,7 @@ export function RegenProgressBar({ active }: { active: boolean }): JSX.Element |
         aria-valuenow={rounded}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label="Regenerating digests"
+        aria-label={label}
       >
         <div
           className="h-full rounded-full bg-violet-500 transition-[width] duration-200 ease-out dark:bg-violet-400"

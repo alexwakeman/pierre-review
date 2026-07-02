@@ -1745,6 +1745,8 @@ async function getCommitThreadItems(
           : null,
       mergedById: null,
       reviewers: null,
+      ciStatus: null,
+      changedFilesCount: null,
       affectedThreads: affected,
       commitCount: run.commitCount,
       changeSummary: `pushed ${run.commitCount} ${commitWord} · addressed ${affected.length} ${threadWord}`,
@@ -1932,6 +1934,8 @@ async function getClaudeReviewFeedItems(
         r.prNumber != null ? `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}` : null,
       mergedById: null,
       reviewers: null,
+      ciStatus: null,
+      changedFilesCount: null,
       affectedThreads: null,
       commitCount: null,
       changeSummary: null,
@@ -2040,6 +2044,8 @@ export async function getConsolidatedFeed(
         f.prNumber != null ? `https://github.com/${f.repoFullName}/pull/${f.prNumber}` : null,
       mergedById: null,
       reviewers: null,
+      ciStatus: null,
+      changedFilesCount: null,
       affectedThreads: null,
       commitCount: null,
       changeSummary: null,
@@ -2086,16 +2092,27 @@ export async function getConsolidatedFeed(
   const prIdsForCtx = new Set<number>();
   for (const it of page) if (it.prId != null) prIdsForCtx.add(it.prId);
   const mergedByPr = new Map<number, number | null>();
+  const ciByPr = new Map<number, CiStatus>();
+  const filesByPr = new Map<number, number | null>();
   const reviewersByPr = new Map<number, { userId: number; state: ReviewState }[]>();
   if (prIdsForCtx.size > 0) {
     const prIdList = [...prIdsForCtx];
-    // mergedById — account-scoped via pullRequests.accountId.
+    // mergedById + CI rollup + changed-file count — account-scoped via
+    // pullRequests.accountId. CI/files surface on pr_opened cards (item 2).
     for (const row of await db
-      .select({ id: pullRequests.id, mergedById: pullRequests.mergedById })
+      .select({
+        id: pullRequests.id,
+        mergedById: pullRequests.mergedById,
+        ciStatus: pullRequests.ciStatus,
+        changedFiles: pullRequests.changedFiles,
+      })
       .from(pullRequests)
       .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, prIdList)))
-      .execute())
+      .execute()) {
       mergedByPr.set(row.id, row.mergedById);
+      ciByPr.set(row.id, (row.ciStatus ?? 'unknown') as CiStatus);
+      filesByPr.set(row.id, row.changedFiles);
+    }
 
     // reviewers — `reviews` has NO accountId, so isolation MUST come from the join to
     // pullRequests (eq accountId). Ascending order → the last write per (prId, userId)
@@ -2133,6 +2150,8 @@ export async function getConsolidatedFeed(
     if (it.prId == null) continue;
     it.mergedById = mergedByPr.get(it.prId) ?? null;
     it.reviewers = reviewersByPr.get(it.prId) ?? null;
+    it.ciStatus = ciByPr.get(it.prId) ?? null;
+    it.changedFilesCount = filesByPr.get(it.prId) ?? null;
   }
 
   // Backfill any referenced users on the page not already loaded by getMyTurn / getFeed —

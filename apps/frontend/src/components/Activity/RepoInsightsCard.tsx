@@ -39,7 +39,7 @@ export function RepoInsightsCard({
       {isLoading && data == null ? (
         <div className="h-[132px] animate-pulse rounded bg-gray-50 dark:bg-gray-900/40" />
       ) : hasData ? (
-        <LineChart labels={weeks} series={series} area />
+        <LineChart labels={weeks} series={series} area curved />
       ) : (
         <ChartEmpty />
       )}

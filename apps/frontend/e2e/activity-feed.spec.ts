@@ -59,7 +59,9 @@ test.describe('Activity Feed / click-to-detail flows', () => {
 
   test('clicking an FYI item opens the PR detail tab', async ({ page }) => {
     await gotoActivity(page);
-    await overlay(page).getByText('Can you take another look at this?').click();
+    // The review-thread card renders its conversation inline (interacting with it is
+    // stopPropagation'd), so open the tab via the card's PR-title affordance.
+    await overlay(page).getByRole('button', { name: /Activity: fix auth race/ }).first().click();
     // Leaves the Activity overlay and shows the full-height PR detail overlay + a closable tab.
     await expect(overlay(page)).toBeHidden();
     await expect(page.getByTestId('pinned-pr-overlay')).toBeVisible();

@@ -1601,6 +1601,11 @@ export interface ConsolidatedFeedItem {
   // state (for merge/review-credit cards); null when not loaded / no reviews. User ids
   // are backfilled into `users`.
   reviewers: { userId: number; state: ReviewState }[] | null;
+  // At-a-glance PR state, enriched for the page's PRs and surfaced on 'pr_opened'
+  // cards: the CI rollup ('unknown' when there are no checks) and the changed-file
+  // count. null when not enriched / unknown.
+  ciStatus: CiStatus | null;
+  changedFilesCount: number | null;
   // Context — review threads this item's change likely addressed. Populated for
   // 'commit_pushed' feed items (a push that touched a thread's file after its last
   // comment). Rendered inline so the reader sees WHAT changed. null/empty otherwise.

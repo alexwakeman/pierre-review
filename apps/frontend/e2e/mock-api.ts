@@ -11,6 +11,7 @@ import type {
   OpenPrsResponse,
   PrDetail,
   Repo,
+  ThreadDetail,
   TimelineEvent,
   TimelinePr,
   TimelineResponse,
@@ -299,6 +300,8 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
       githubUrl: `https://github.com/${REPO.fullName}/pull/101`,
       mergedById: null,
       reviewers: null,
+      ciStatus: null,
+      changedFilesCount: null,
       affectedThreads: null,
       commitCount: null,
       changeSummary: null,
@@ -328,6 +331,8 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
       githubUrl: `https://github.com/${REPO.fullName}/pull/105`,
       mergedById: null,
       reviewers: null,
+      ciStatus: null,
+      changedFilesCount: null,
       affectedThreads: null,
       commitCount: null,
       changeSummary: null,
@@ -357,6 +362,8 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
       githubUrl: `https://github.com/${REPO.fullName}/pull/105`,
       mergedById: ALICE.id,
       reviewers: null,
+      ciStatus: null,
+      changedFilesCount: null,
       affectedThreads: null,
       commitCount: null,
       changeSummary: null,
@@ -365,6 +372,33 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
   users: USERS,
   total: 3, // all mock items fit in one page (< FEED_PAGE_SIZE) → no "Load more"
   generatedAt: iso(0),
+};
+
+// The thread behind the #101 review_comment feed card. The Activity feed now renders
+// review-thread cards inline (full ThreadCard), so it fetches /api/threads/:id — this
+// fixture carries the comment the feed card represents so the conversation (and the
+// error-boundary-less app) renders.
+const THREAD_5001: ThreadDetail = {
+  id: 5001,
+  prId: 101,
+  path: 'src/login.ts',
+  line: 10,
+  isResolved: false,
+  isOutdated: false,
+  derivedState: 'replied_unresolved',
+  originalCommenterId: BOB.id,
+  createdAt: iso(1),
+  comments: [
+    {
+      id: 9001,
+      authorId: BOB.id,
+      body: 'Can you take another look at this?',
+      diffHunk: null,
+      createdAt: iso(1),
+      url: null,
+    },
+  ],
+  url: null,
 };
 
 // A complete-but-empty PR detail so opening a PR never crashes the (error-boundary-less)
@@ -432,6 +466,12 @@ export async function installMockApi(page: Page): Promise<void> {
     async (route) => {
       const path = new URL(route.request().url()).pathname;
       const prDetailMatch = path.match(/\/api\/prs\/(\d+)$/);
+
+      // Inline review-thread card fetch (Activity feed) + the @mention roster the
+      // reply/comment composers pull. Must precede the catch-all so ThreadCard gets a
+      // real ThreadDetail (a bare `{}` would crash `thread.comments.map`).
+      if (path.match(/\/api\/threads\/\d+$/)) return json(route, THREAD_5001);
+      if (path.match(/\/api\/prs\/\d+\/mention-candidates$/)) return json(route, USERS);
 
       if (path.endsWith('/api/me')) return json(route, ME_RESPONSE);
       if (path.endsWith('/api/my-turn')) return json(route, MY_TURN);
