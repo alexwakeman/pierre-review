@@ -38,38 +38,10 @@ function renderTokens(
   return out;
 }
 
-// Split a digest into its prominent LEAD (the one thing that most needs attention) and
-// the DETAIL bullets. The prompt emits a non-bullet lead line, a blank line, then "- "
-// bullets — but we degrade gracefully for older, all-bullet digests: any leading
-// non-bullet lines become the lead, and if there are none we promote the first bullet
-// (the prompt has always led with the most important item).
-function splitDigest(markdown: string): { lead: string; bullets: string[] } {
-  const lines = markdown
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l !== '');
-  const leadLines: string[] = [];
-  const bullets: string[] = [];
-  let seenBullet = false;
-  for (const l of lines) {
-    if (/^[-*]\s+/.test(l)) {
-      seenBullet = true;
-      bullets.push(l.replace(/^[-*]\s+/, ''));
-    } else if (!seenBullet) {
-      leadLines.push(l);
-    } else {
-      // A stray non-bullet line after the bullets started — keep it as a detail line.
-      bullets.push(l);
-    }
-  }
-  let lead = leadLines.join(' ').trim();
-  if (lead === '' && bullets.length > 0) lead = bullets.shift() as string;
-  return { lead, bullets };
-}
-
-// Render a digest change-report: a prominent accented LEAD followed by the DETAIL
-// bullets, linkifying "#<number>" PR tokens into clickable buttons (open the PR as a
-// new tab). Intentionally tiny — no full markdown engine.
+// Render a digest's bulleted markdown change-report, linkifying "#<number>" PR tokens
+// into clickable buttons (open the PR as a new tab). A flat, equal-priority "- " bullet
+// list (no promoted/highlighted lead), rendered a touch larger for legibility. No full
+// markdown engine.
 export function DigestMarkdown({
   markdown,
   prRefs,
@@ -82,31 +54,27 @@ export function DigestMarkdown({
   const byNumber = new Map<number, DigestPrRef>();
   for (const r of prRefs) if (r.prId != null) byNumber.set(r.prNumber, r);
 
-  const { lead, bullets } = splitDigest(markdown);
-  if (lead === '' && bullets.length === 0) return <></>;
+  const bullets = markdown
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '')
+    .map((l) => l.replace(/^[-*]\s+/, ''));
+
+  if (bullets.length === 0) return <></>;
 
   return (
-    <div className="space-y-1.5">
-      {lead !== '' && (
-        <p className="border-l-2 border-violet-400 pl-2 text-sm font-medium leading-snug text-gray-800 dark:border-violet-500/60 dark:text-gray-100">
-          {renderTokens(lead, byNumber, onOpenPr)}
-        </p>
-      )}
-      {bullets.length > 0 && (
-        <ul className="space-y-1">
-          {bullets.map((line, i) => (
-            <li
-              key={i}
-              className="flex gap-1.5 text-[13px] leading-relaxed text-gray-700 dark:text-gray-200"
-            >
-              <span aria-hidden="true" className="select-none text-gray-400">
-                •
-              </span>
-              <span className="min-w-0">{renderTokens(line, byNumber, onOpenPr)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <ul className="space-y-1">
+      {bullets.map((line, i) => (
+        <li
+          key={i}
+          className="flex gap-1.5 text-[13px] leading-relaxed text-gray-700 dark:text-gray-200"
+        >
+          <span aria-hidden="true" className="select-none text-gray-400">
+            •
+          </span>
+          <span className="min-w-0">{renderTokens(line, byNumber, onOpenPr)}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
