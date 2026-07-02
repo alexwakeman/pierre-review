@@ -36,6 +36,13 @@ import { FeedDigestList } from './FeedDigestList.js';
 // separate pill (see FYI_REASON_META); Claude runs get their own violet chip.
 function itemGlyph(item: ConsolidatedFeedItem): { color: string; label: string } {
   if (item.kind === 'claude_review') return { color: '#8957e5', label: 'Claude Review' };
+  // A submitted review is a first-class TYPED pill — the verdict is folded into the top
+  // line ("Review: Approved" / "Review: Comment" / …), coloured by the verdict, instead
+  // of a broad "Review" pill with the outcome in a footer.
+  if (item.kind === 'review_submitted' && item.reviewState != null) {
+    const m = REVIEW_STATE_META[item.reviewState];
+    return { color: m.color, label: `Review: ${REVIEW_VERDICT_LABEL[item.reviewState]}` };
+  }
   const meta = EVENT_META[item.kind as EventType];
   return { color: meta?.color ?? '#6b7280', label: meta?.label ?? item.kind };
 }
@@ -48,6 +55,15 @@ const REVIEW_STATE_META: Record<ReviewState, { label: string; color: string }> =
   commented: { label: 'commented', color: '#9ca3af' },
   dismissed: { label: 'dismissed', color: '#9ca3af' },
   pending: { label: 'pending', color: '#eab308' },
+};
+
+// Title-case verdict for the folded "Review: <verdict>" top pill.
+const REVIEW_VERDICT_LABEL: Record<ReviewState, string> = {
+  approved: 'Approved',
+  changes_requested: 'Request Changes',
+  commented: 'Comment',
+  dismissed: 'Dismissed',
+  pending: 'Pending',
 };
 
 // Claude verdict → a small badge on a Claude Review card.
@@ -589,7 +605,6 @@ function FeedRow({
     item.prNumber != null
       ? `#${item.prNumber}${item.prTitle != null ? ` ${item.prTitle}` : ''}`
       : '';
-  const reviewMeta = item.reviewState != null ? REVIEW_STATE_META[item.reviewState] : null;
   const claudeVerdict = item.claudeVerdict != null ? CLAUDE_VERDICT_META[item.claudeVerdict] : null;
   const affected = item.affectedThreads ?? [];
   const primaryReason = item.myTurnReasons[0];
@@ -776,14 +791,10 @@ function FeedRow({
           </div>
         )}
 
-        {/* review verdict / merge-credit line — only the parts meaningful for this card. */}
-        {(reviewMeta != null || showMergedBy || showReviewers) && (
+        {/* merge-credit line — only the parts meaningful for this card. The review
+            verdict now lives in the top pill (see itemGlyph), so it's no longer here. */}
+        {(showMergedBy || showReviewers) && (
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
-            {reviewMeta != null && (
-              <span className="font-medium" style={{ color: reviewMeta.color }}>
-                {reviewMeta.label}
-              </span>
-            )}
             {showMergedBy && (
               <span>
                 Merged by <span className="font-medium">{mergedByLabel}</span>
