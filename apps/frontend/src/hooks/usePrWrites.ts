@@ -18,6 +18,8 @@ export function useReplyToThread() {
       void qc.invalidateQueries({ queryKey: ['thread', vars.threadId] });
       void qc.invalidateQueries({ queryKey: ['my-turn'] });
       void qc.invalidateQueries({ queryKey: ['me'] });
+      // The Activity feed can be acted on inline (thread cards), so refresh it too.
+      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
     },
   });
 }
@@ -32,6 +34,7 @@ export function useResolveThread() {
       void qc.invalidateQueries({ queryKey: ['thread', vars.threadId] });
       void qc.invalidateQueries({ queryKey: ['my-turn'] });
       void qc.invalidateQueries({ queryKey: ['me'] });
+      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
     },
   });
 }
@@ -44,6 +47,7 @@ export function useCreatePrComment(prId: number) {
       void qc.invalidateQueries({ queryKey: ['pr', prId] });
       void qc.invalidateQueries({ queryKey: ['my-turn'] });
       void qc.invalidateQueries({ queryKey: ['me'] });
+      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
     },
   });
 }

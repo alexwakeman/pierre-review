@@ -142,6 +142,9 @@ export const api = {
     get<RepoAnalytics>(`/api/insights/${repoId}/analytics`),
   pr: (id: number) => get<PrDetail>(`/api/prs/${id}`),
   thread: (id: number) => get<ThreadDetail>(`/api/threads/${id}`),
+  // @mention candidates for a PR, pre-ranked by proximity (self + bots excluded).
+  mentionCandidates: (prId: number) =>
+    get<User[]>(`/api/prs/${prId}/mention-candidates`),
   prFiles: (id: number) => get<PrFilesResponse>(`/api/prs/${id}/files`),
   // Tail of a failed GitHub Actions check's logs (fetched live, never stored).
   checkLogs: (prId: number, jobId: number, tail?: number) =>

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { PrDetail, PrFilesResponse, ThreadDetail } from '@pierre-review/shared';
+import type { PrDetail, PrFilesResponse, ThreadDetail, User } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 
 // 45 minutes. Detail carries the bulky hydrated TEXT (bodies, diff hunks); a
@@ -35,6 +35,19 @@ export function useThread(id: number | null) {
     queryFn: () => api.thread(id as number),
     enabled: id != null,
     staleTime: Infinity,
+    gcTime: DETAIL_GC_TIME,
+  });
+}
+
+// @mention candidates for a PR, ranked by proximity (see getMentionCandidates).
+// Powers the MentionTextarea autocomplete; cached ~5 min per PR since the roster
+// changes slowly relative to a composing session.
+export function useMentionCandidates(prId: number | null) {
+  return useQuery<User[]>({
+    queryKey: ['mention-candidates', prId],
+    queryFn: () => api.mentionCandidates(prId as number),
+    enabled: prId != null,
+    staleTime: 1000 * 60 * 5,
     gcTime: DETAIL_GC_TIME,
   });
 }

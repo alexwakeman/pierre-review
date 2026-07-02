@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useReplyToThread } from '../../hooks/usePrWrites.js';
 import { ApiError } from '../../api/client.js';
+import { MentionTextarea } from '../MentionTextarea.js';
 
 // Inline composer for replying to a review thread. Opens from a "Reply"
 // affordance in the ThreadCard footer; on success it clears + closes, and the
@@ -51,12 +52,13 @@ export function ReplyComposer({
 
   return (
     <div className="space-y-1">
-      <textarea
+      <MentionTextarea
+        prId={prId}
         value={body}
-        onChange={(e) => setBody(e.target.value)}
+        onChange={setBody}
         rows={3}
         autoFocus
-        placeholder="Reply to this thread (markdown)…"
+        placeholder="Reply to this thread (markdown, @ to mention)…"
         className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-900"
       />
       <div className="flex flex-wrap items-center gap-2">

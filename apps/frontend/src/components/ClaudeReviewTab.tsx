@@ -32,6 +32,7 @@ import {
   useUpdateReview,
 } from '../hooks/useClaudeReview.js';
 import { Markdown } from './Markdown.js';
+import { MentionTextarea } from './MentionTextarea.js';
 
 // A label/body row matching ChecksTab's layout — a fixed-width uppercase caption
 // on the left, content on the right.
@@ -311,6 +312,7 @@ function FindingHunk({ hunk }: { hunk: string }): JSX.Element {
 // Findings are INCLUDED by default; "Ignore" sets one aside (collapsed + faded,
 // excluded from a submitted review) and it can be re-expanded and un-ignored.
 function FindingRow({
+  prId,
   finding,
   editable,
   prUrl,
@@ -322,6 +324,7 @@ function FindingRow({
   onReword,
   onPostComment,
 }: {
+  prId: number;
   finding: ClaudeFinding;
   editable: boolean;
   prUrl: string;
@@ -601,9 +604,10 @@ function FindingRow({
           {/* Reword editor (inline). The OPEN trigger lives in the action bar. */}
           {editable && rewording && (
             <div className="mt-2 space-y-1">
-              <textarea
+              <MentionTextarea
+                prId={prId}
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={setDraft}
                 rows={4}
                 placeholder="Reword this finding in your own words (markdown). This is what gets posted as the inline comment."
                 className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-gray-700 dark:bg-gray-900"
@@ -828,6 +832,7 @@ function ClaudesReview({
           {findings.map((f) => (
             <FindingRow
               key={f.id}
+              prId={review.prId}
               finding={f}
               editable={editable}
               prUrl={prUrl}
@@ -1496,14 +1501,13 @@ export function ClaudeReviewTab({
             <em>ignored</em>. Leave it short or empty if the inline comments say it
             all.
           </p>
-          <textarea
+          <MentionTextarea
+            prId={pr.id}
             value={userBody}
-            onChange={(e) => setUserBody(e.target.value)}
-            onBlur={() =>
-              updateReview.mutate({ reviewId: review.id, userBody })
-            }
+            onChange={setUserBody}
+            onBlur={() => updateReview.mutate({ reviewId: review.id, userBody })}
             rows={6}
-            placeholder="Overall summary for the PR (markdown). Posted as the review's top-level comment…"
+            placeholder="Overall summary for the PR (markdown, @ to mention). Posted as the review's top-level comment…"
             className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 font-mono text-sm dark:border-gray-700 dark:bg-gray-900"
           />
           <div className="flex flex-wrap items-center gap-2">

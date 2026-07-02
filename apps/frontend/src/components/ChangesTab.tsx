@@ -4,6 +4,7 @@ import { useAddReviewComment } from '../hooks/usePrWrites.js';
 import { usePrFiles } from '../hooks/usePr.js';
 import { ApiError } from '../api/client.js';
 import { parsePatch, patchLineCount, type DiffRow } from '../lib/diff.js';
+import { MentionTextarea } from './MentionTextarea.js';
 
 // ---- collapse-by-default heuristic ----
 // A file starts collapsed when it has no renderable patch (binary / too large) or
@@ -207,9 +208,10 @@ function InlineCommentBox({
       <div className="text-[10px] text-gray-400">
         Commenting on {side === 'LEFT' ? 'old' : 'new'} line {line}
       </div>
-      <textarea
+      <MentionTextarea
+        prId={prId}
         value={body}
-        onChange={(e) => setBody(e.target.value)}
+        onChange={setBody}
         rows={3}
         autoFocus
         placeholder="Add an inline review comment (markdown)…"

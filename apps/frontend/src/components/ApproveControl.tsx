@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useApprovePr } from '../hooks/usePrWrites.js';
 import { ApiError } from '../api/client.js';
+import { MentionTextarea } from './MentionTextarea.js';
 
 // Approve control for the Overview tab, rendered ONLY when the viewer has the
 // right to approve (pr.viewerCanApprove — the server re-checks and 403s
@@ -70,9 +71,10 @@ export function ApproveControl({
 
   return (
     <div className="space-y-1.5">
-      <textarea
+      <MentionTextarea
+        prId={prId}
         value={message}
-        onChange={(e) => setMessage(e.target.value)}
+        onChange={setMessage}
         rows={3}
         autoFocus
         placeholder="Optional approval message (markdown)…"

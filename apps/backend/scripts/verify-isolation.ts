@@ -123,6 +123,15 @@ check("getWatchedRepoNodeIds(A) excludes B's node", nodesA.has(A.nodeId) && !nod
 check('getPrDetail(A.pr, A) returns the PR', (await q.getPrDetail(A.prId, 1))?.id === A.prId);
 check('getPrDetail(B.pr, A) returns null (IDOR blocked)', (await q.getPrDetail(B.prId, 1)) === null);
 
+check(
+  'getMentionCandidates(A.pr, A) returns candidates',
+  Array.isArray(await q.getMentionCandidates(A.prId, 1)),
+);
+check(
+  'getMentionCandidates(B.pr, A) returns null (IDOR blocked)',
+  (await q.getMentionCandidates(B.prId, 1)) === null,
+);
+
 check('markPrViewed(A.pr, A) succeeds', (await q.markPrViewed(A.prId, 1)) === true);
 check('markPrViewed(B.pr, A) returns false (IDOR blocked)', (await q.markPrViewed(B.prId, 1)) === false);
 

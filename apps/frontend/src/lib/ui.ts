@@ -162,6 +162,21 @@ export function profileUrl(login: string): string {
   return `https://github.com/${encodeURIComponent(login)}`;
 }
 
+// Prefill for "replying" to a comment: GitHub issue comments are flat (no native
+// reply threading), so a reply is a new comment that quotes the original as a `> `
+// blockquote and @mentions its author. The user edits from there. Empty bodies
+// (e.g. lean mode before hydration) just yield the bare mention.
+export function buildQuotedReply(body: string | null, authorLogin: string | null): string {
+  const mention = authorLogin ? `@${authorLogin} ` : '';
+  const trimmed = (body ?? '').trim();
+  if (trimmed === '') return mention;
+  const quoted = trimmed
+    .split('\n')
+    .map((line) => `> ${line}`)
+    .join('\n');
+  return `${quoted}\n\n${mention}`;
+}
+
 export function indexUsers(users: User[] | undefined): Map<number, User> {
   const map = new Map<number, User>();
   for (const u of users ?? []) map.set(u.id, u);

@@ -8,7 +8,7 @@ import { WatchedBadge } from './WatchedBadge.js';
 import { api } from '../api/client.js';
 import { useFilters } from '../store/filters.js';
 import { usePinnedTabs, type PinnedPr } from '../store/pinnedTabs.js';
-import { dateTime, indexUsers, PR_STATE_META, relativeTime } from '../lib/ui.js';
+import { buildQuotedReply, dateTime, indexUsers, PR_STATE_META, relativeTime } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
 import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
@@ -277,6 +277,8 @@ function PrCommentsList({
 }): JSX.Element {
   const cardRefs = useRef(new Map<number, HTMLDivElement>());
   const [flashId, setFlashId] = useState<number | null>(null);
+  // The comment whose expand-in-place reply composer is open (only one at a time).
+  const [replyingTo, setReplyingTo] = useState<number | null>(null);
 
   // Scroll to + flash the deep-linked comment once it's rendered, then consume the
   // request (the flash lives on its own state so consuming can't cancel it early).
@@ -349,8 +351,17 @@ function PrCommentsList({
             <div className="mt-1 text-sm">
               <Markdown>{c.body}</Markdown>
             </div>
-            {c.url && (
-              <div className="mt-2 pl-2 text-[11px]">
+            <div className="mt-2 flex items-center gap-3 pl-2 text-[11px]">
+              {replyingTo !== c.id && (
+                <button
+                  type="button"
+                  onClick={() => setReplyingTo(c.id)}
+                  className="text-blue-500 hover:underline"
+                >
+                  Reply
+                </button>
+              )}
+              {c.url && (
                 <a
                   href={c.url}
                   target="_blank"
@@ -359,6 +370,20 @@ function PrCommentsList({
                 >
                   ↗ View comment on GitHub
                 </a>
+              )}
+            </div>
+            {replyingTo === c.id && (
+              <div className="mt-2">
+                <PrCommentComposer
+                  prId={pr.id}
+                  initialBody={buildQuotedReply(
+                    c.body,
+                    usersById.get(c.authorId ?? -1)?.githubLogin ?? null,
+                  )}
+                  autoFocus
+                  onCancel={() => setReplyingTo(null)}
+                  onDone={() => setReplyingTo(null)}
+                />
               </div>
             )}
           </div>

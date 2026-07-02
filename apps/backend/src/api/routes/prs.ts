@@ -16,6 +16,7 @@ import type {
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
 import { ghRestGetText } from '../../github/client.js';
 import {
+  getMentionCandidates,
   getPrDetail,
   getPrFilesContext,
   getPrWriteContext,
@@ -161,6 +162,19 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     // Cloud lean mode: fill in bulky text from GitHub (no-op in local). The client
     // caches the result in IndexedDB keyed by updatedAt so unchanged PRs don't refetch.
     return hydratePrDetail(pr, accountId);
+  });
+
+  // Candidates for an @mention autocomplete, ranked by proximity to this PR
+  // (participants first, then repo people), self + bots excluded. Account-scoped:
+  // 404 when the PR isn't the caller's.
+  app.get('/api/prs/:id/mention-candidates', { schema: idParamSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const candidates = await getMentionCandidates(id, accountIdOf(req));
+    if (!candidates) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    return candidates;
   });
 
   // Record that the local user has seen this PR up to `sha` (defaults to the

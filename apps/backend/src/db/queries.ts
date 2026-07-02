@@ -3289,6 +3289,108 @@ export async function getPrDetail(
   };
 }
 
+// Candidates for an "@mention" autocomplete on a PR, ranked by PROXIMITY to the PR
+// (closest first) and account-scoped. Excludes the viewer (they can't @ themselves)
+// and bots. Ownership is verified via the account-scoped PR/repo join → null (→ 404)
+// when the PR isn't the caller's. Ranks: author(0) > requested reviewer(1) >
+// reviewer(2) > comment/thread author(3) > commit author(4) > repo maintainer(5) >
+// other repo PR author(6). Repo-people (5/6) are a bounded proxy for "active in this
+// repo" (authors + those who've merged here) — cheap and never cross-tenant because a
+// repo row belongs to exactly one account.
+export async function getMentionCandidates(
+  prId: number,
+  accountId: number,
+): Promise<User[] | null> {
+  const prRows = await db
+    .select({ repoId: pullRequests.repoId, authorId: pullRequests.authorId })
+    .from(pullRequests)
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(and(eq(pullRequests.id, prId), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  const pr = prRows[0];
+  if (!pr) return null;
+  const repoId = pr.repoId;
+
+  // Best (lowest) rank wins if a user shows up in more than one bucket.
+  const rank = new Map<number, number>();
+  const bump = (id: number | null | undefined, r: number): void => {
+    if (id == null) return;
+    const cur = rank.get(id);
+    if (cur == null || r < cur) rank.set(id, r);
+  };
+
+  bump(pr.authorId, 0);
+
+  const [reqRows, revRows, rcRows, thRows, pcRows, cmRows] = await Promise.all([
+    db
+      .select({ userId: schema.reviewRequests.userId })
+      .from(schema.reviewRequests)
+      .where(eq(schema.reviewRequests.prId, prId))
+      .execute(),
+    db.select({ authorId: reviews.authorId }).from(reviews).where(eq(reviews.prId, prId)).execute(),
+    db
+      .select({ authorId: reviewComments.authorId })
+      .from(reviewComments)
+      .where(eq(reviewComments.prId, prId))
+      .execute(),
+    db
+      .select({ id: reviewThreads.originalCommenterId })
+      .from(reviewThreads)
+      .where(eq(reviewThreads.prId, prId))
+      .execute(),
+    db
+      .select({ authorId: prComments.authorId })
+      .from(prComments)
+      .where(eq(prComments.prId, prId))
+      .execute(),
+    db
+      .select({ authorId: commits.authorId, committerId: commits.committerId })
+      .from(commits)
+      .where(eq(commits.prId, prId))
+      .execute(),
+  ]);
+  for (const r of reqRows) bump(r.userId, 1);
+  for (const r of revRows) bump(r.authorId, 2);
+  for (const r of rcRows) bump(r.authorId, 3);
+  for (const r of thRows) bump(r.id, 3);
+  for (const r of pcRows) bump(r.authorId, 3);
+  for (const r of cmRows) {
+    bump(r.authorId, 4);
+    bump(r.committerId, 4);
+  }
+
+  // Repo people: whoever has MERGED here (maintainers, rank 5) + anyone who has
+  // OPENED a PR here (rank 6). Bounded to this repo's PR rows.
+  const [mergerRows, repoAuthorRows] = await Promise.all([
+    db
+      .selectDistinct({ userId: pullRequests.mergedById })
+      .from(pullRequests)
+      .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.state, 'merged')))
+      .execute(),
+    db
+      .selectDistinct({ authorId: pullRequests.authorId })
+      .from(pullRequests)
+      .where(eq(pullRequests.repoId, repoId))
+      .execute(),
+  ]);
+  for (const r of mergerRows) bump(r.userId, 5);
+  for (const r of repoAuthorRows) bump(r.authorId, 6);
+
+  // The viewer can't @ themselves.
+  const viewerUserId = await getAccountUserId(accountId);
+  if (viewerUserId != null) rank.delete(viewerUserId);
+
+  const ids = [...rank.keys()];
+  if (ids.length === 0) return [];
+  const rows = await db.select().from(users).where(inArray(users.id, ids)).execute();
+  return rows
+    .filter((u) => !u.isBot)
+    .map((u) => ({ user: mapUser(u), rank: rank.get(u.id) ?? 99 }))
+    .sort((a, b) => a.rank - b.rank || a.user.githubLogin.localeCompare(b.user.githubLogin))
+    .map((x) => x.user);
+}
+
 export async function getThreadDetail(
   id: number,
   accountId: number,

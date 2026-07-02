@@ -10,9 +10,12 @@ import type {
 } from '@pierre-review/shared';
 import { useConsolidatedFeed } from '../../hooks/useConsolidatedFeed.js';
 import { useMe } from '../../hooks/useTriage.js';
+import { useThread } from '../../hooks/usePr.js';
+import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
+  buildQuotedReply,
   DERIVED_STATE_META,
   EVENT_META,
   FYI_REASON_META,
@@ -22,6 +25,8 @@ import {
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { Markdown } from '../Markdown.js';
+import { PrCommentComposer } from '../PrCommentComposer.js';
+import { ThreadCard } from '../ThreadView/index.js';
 import { FeedDigestList } from './FeedDigestList.js';
 
 // A coloured chip + label describing WHAT an item is (the event kind). The FYI reason is a
@@ -255,6 +260,28 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   );
 }
 
+// The full threaded conversation for a review-thread feed card, rendered inline
+// (expand-in-place) exactly as the PR-detail Threads tab renders it — code anchor,
+// every reply, and the inline Reply composer + Resolve button (ThreadCard). Fetched
+// on demand by thread id; comment authors resolve from the global roster so every
+// avatar/name renders even when the author isn't on the current feed page.
+function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
+  const { data: thread, isLoading } = useThread(item.threadId);
+  const { data: users } = useUsers();
+  const usersById = useMemo(() => indexUsers(users), [users]);
+  const prUrl =
+    item.prNumber != null ? `https://github.com/${item.repoFullName}/pull/${item.prNumber}` : '';
+  if (isLoading) {
+    return <div className="px-1 py-2 text-xs text-gray-400">Loading conversation…</div>;
+  }
+  if (!thread) {
+    return (
+      <div className="px-1 py-2 text-xs text-gray-400">Couldn’t load this conversation.</div>
+    );
+  }
+  return <ThreadCard thread={thread} usersById={usersById} prUrl={prUrl} repoId={item.repoId} />;
+}
+
 // One review thread that a commit item likely addressed — a clickable row (opens that
 // thread in the PR detail tab) showing the file/line, the thread's new derived state, and
 // a preview of what the reviewer originally asked.
@@ -341,6 +368,13 @@ function FeedRow({
   const claudeVerdict = item.claudeVerdict != null ? CLAUDE_VERDICT_META[item.claudeVerdict] : null;
   const affected = item.affectedThreads ?? [];
   const primaryReason = item.myTurnReasons[0];
+
+  // Expand-in-place affordances: a review-thread card can show its full conversation
+  // (reply + resolve inline); a PR-comment card can open a quote+@mention reply.
+  const isThreadCard = item.kind === 'review_comment' && item.threadId != null;
+  const isPrCommentCard = item.kind === 'pr_comment' && item.prId != null;
+  const [threadOpen, setThreadOpen] = useState(false);
+  const [replyOpen, setReplyOpen] = useState(false);
 
   // Item 8 — only show credit that's meaningful for THIS card's context: "Merged by" +
   // "Reviewed by" belong on a merge card (and never re-attribute the merge to its own
@@ -510,6 +544,58 @@ function FeedRow({
               <span>
                 Reviewed by <span className="font-medium">{reviewerLabels.join(', ')}</span>
               </span>
+            )}
+          </div>
+        )}
+
+        {/* A review-thread card expands to the full conversation (reply + resolve
+            inline, exactly like the Threads tab). */}
+        {isThreadCard && (
+          <div className="mt-1.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setThreadOpen((o) => !o);
+              }}
+              className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+            >
+              {threadOpen ? 'Hide conversation' : 'View conversation'}
+            </button>
+            {threadOpen && (
+              // Stop propagation so interacting with the thread never opens the tab.
+              <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
+                <InlineThread item={item} />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* A PR (issue-level) comment card can be replied to — a new comment
+            prefilled with the original quoted + its author @mentioned. */}
+        {isPrCommentCard && item.prId != null && (
+          <div className="mt-1.5">
+            {!replyOpen ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setReplyOpen(true);
+                }}
+                className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+              >
+                Reply
+              </button>
+            ) : (
+              <div onClick={(e) => e.stopPropagation()}>
+                <PrCommentComposer
+                  prId={item.prId}
+                  initialBody={buildQuotedReply(item.content, actorUser?.githubLogin ?? null)}
+                  autoFocus
+                  onCancel={() => setReplyOpen(false)}
+                  onDone={() => setReplyOpen(false)}
+                />
+              </div>
             )}
           </div>
         )}
