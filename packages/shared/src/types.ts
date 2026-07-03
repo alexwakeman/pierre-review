@@ -1254,6 +1254,20 @@ export interface ClaudeReviewStatusResponse {
   progress: ClaudeReviewProgress | null;
 }
 
+// Server-Sent-Events payload streamed by GET /api/prs/:id/claude-review/stream.
+// A `snapshot` is sent once on connect (the current state), `progress` on every
+// phase/activity/usage change while the run is live, and a single terminal `done`
+// (carrying the persisted final status) right before the stream closes. This is
+// the real-time replacement for polling the /status endpoint.
+export type ClaudeReviewStreamEvent =
+  | {
+      type: 'snapshot' | 'progress';
+      status: ClaudeReviewStatus | 'idle';
+      reviewId: number | null;
+      progress: ClaudeReviewProgress | null;
+    }
+  | { type: 'done'; status: ClaudeReviewStatus | 'idle'; reviewId: number | null };
+
 // A finding whose file isn't part of the PR's diff (e.g. a deep review flagging an
 // unchanged file). It can't anchor to a diff line, so it posts as a standalone
 // PR-level (issue) comment, marked as outside the PR's diff.
@@ -1525,6 +1539,31 @@ export interface RepoDigestsResponse {
   generatedAt: string; // ISO-8601
   budgetReached?: boolean;
 }
+
+// Server-Sent-Events payload streamed by POST /api/pro/activity/digests/refresh/stream.
+// `start` announces the repo denominator; one `repo` event fires as EACH repo's digest
+// finishes (cache hits arrive instantly, regenerations as their Haiku call returns),
+// carrying the fresh digest so the client can drop it straight into the cache — this is
+// what makes the UI update live instead of only after a manual reload. `done` closes the
+// stream. `throttled` means the min-interval/in-flight guard served cache without billing.
+export type DigestRefreshEvent =
+  | { type: 'start'; throttled?: boolean }
+  // Sent once, after a cheap payload-hash pass, listing ONLY the repos whose content
+  // actually changed since their last digest — the repos that will really regenerate.
+  // Everything else is already up to date and is left untouched (no LLM, no skeleton).
+  // `toRegenerate.length` is the honest progress denominator.
+  | { type: 'plan'; toRegenerate: number[] }
+  | {
+      type: 'repo';
+      index: number; // 1-based position among the repos being regenerated
+      total: number; // == toRegenerate.length
+      digest: RepoDigest;
+      // true = served from the payload-hash cache (unchanged repo, $0, no LLM call);
+      // false = freshly regenerated.
+      cached: boolean;
+    }
+  | { type: 'error'; repoId: number; message: string }
+  | { type: 'done'; total: number; completed: number; budgetReached?: boolean };
 
 // NOTE: the old cross-repo "Feed digest" (FeedDigest*) was removed. The Activity "Feed"
 // entry now renders the COLLECTION of per-repo RepoDigests directly (scoped to the

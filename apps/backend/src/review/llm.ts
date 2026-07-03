@@ -1,18 +1,17 @@
-import { getUserAnthropicKey } from './local-settings.js';
-
 // The cheap-tier ("Haiku") completion seam. Core-owned so the optional @pierre/pro
 // plugin can do a single-shot LLM call (e.g. the per-repo digest) through ctx.llm
 // WITHOUT adding its own Anthropic dependency. Non-agentic: one completion, no
 // tools, no thinking.
 //
-// AUTH (load-bearing): this must accept EVERY credential Claude Review accepts —
-// an explicit API key, a CLAUDE_CODE_OAUTH_TOKEN, OR an ambient logged-in Claude
-// Code session (see review/auth.ts `detectClaudeAuth`). The raw `@anthropic-ai/sdk`
-// only understands an explicit key, so it's used ONLY when a real key is present;
-// otherwise we fall back to the Claude Agent SDK's `query()` — the SAME runtime
-// Claude Review uses — which resolves the OAuth token / ambient session itself. A
-// subscription/ambient user (no env key) is the common local case; using the raw
-// SDK there throws "No Claude auth" and the digest silently produces nothing.
+// AUTH is CALLER-OWNED (this is deliberate — it keeps each feature's auth discrete):
+//   • `opts.apiKey` given → the raw, metered `@anthropic-ai/sdk` with THAT key. The
+//     key is passed EXPLICITLY and this seam never reads/writes process.env, so a
+//     summary key can never leak into (or force metering on) Claude Review, which
+//     resolves auth separately and prefers the ambient subscription.
+//   • no `apiKey` → the Claude Agent SDK's `query()` (the SAME runtime Claude Review
+//     uses), which resolves a CLAUDE_CODE_OAUTH_TOKEN / ambient logged-in session.
+// So the Pro summary passes its own dedicated key (fast, metered) while an OSS/dev
+// caller with no key still works via the ambient session.
 //
 // Both SDK imports are LAZY (inside the function) so merely importing this module
 // needs nothing loaded — only an actual caller pays. In OSS mode nothing calls it.
@@ -22,6 +21,10 @@ export interface CheapCompleteOpts {
   system?: string;
   prompt: string;
   maxTokens?: number;
+  // Explicit Anthropic API key → the raw metered path. Omitted → the ambient
+  // Claude session (Agent SDK). The seam NEVER falls back to process.env or the
+  // Claude Review key on its own — the caller decides its credential.
+  apiKey?: string;
 }
 
 export interface CheapCompleteResult {
@@ -36,13 +39,9 @@ export async function cheapComplete(
 ): Promise<CheapCompleteResult> {
   const model = opts.model ?? DEFAULT_MODEL;
 
-  // A real API key (user-supplied local key wins, then ANTHROPIC_API_KEY) takes the
-  // cheap, metered, exact-cost raw path.
-  const apiKey = getUserAnthropicKey() ?? process.env.ANTHROPIC_API_KEY;
-  if (apiKey) return rawComplete(apiKey, model, opts);
-
-  // No explicit key → use the Agent SDK, which resolves a CLAUDE_CODE_OAUTH_TOKEN
-  // or an ambient logged-in Claude session exactly as Claude Review does.
+  // An explicit key → the cheap, metered, exact-cost raw path. No key → the ambient
+  // session via the Agent SDK. (No implicit env / Claude-Review-key fallback here.)
+  if (opts.apiKey) return rawComplete(opts.apiKey, model, opts);
   return agentComplete(model, opts);
 }
 

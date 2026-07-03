@@ -1129,6 +1129,43 @@ div.vis-tooltip {
   }
 }
 
+/* ---- Pro digest refresh: skeleton placeholder ---- */
+/* While a card's summary regenerates we drop the old text and show a faint placeholder
+   with a slow, gentle "shine swipe". Kept DELIBERATELY subtle (low-opacity fill, a
+   soft low-alpha sweep, a slow period) — it should read as "quietly working", not
+   demand attention. The sweep is a TRANSLATED pseudo-element (transform only, so it
+   animates on the compositor with no per-frame paint — never background-position or
+   box-shadow, the old timeline paint-storm trap). */
+.digest-skeleton-line {
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(139, 92, 246, 0.06); /* violet-500 @ 6% — barely there */
+}
+.digest-skeleton-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    rgba(167, 139, 250, 0) 0%,
+    rgba(167, 139, 250, 0.16) 50%,
+    rgba(167, 139, 250, 0) 100%
+  );
+  animation: digest-shimmer 2.4s ease-in-out infinite;
+}
+@keyframes digest-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .digest-skeleton-line::after {
+    animation: none;
+  }
+}
+
 /* ---- "my turn" ring (cards + timeline bars) ---- */
 /* A STATIC 3px ring in the my-turn blue — no animation. (Earlier versions pulsed
    box-shadow, then opacity; both were continuous compositor work. A static

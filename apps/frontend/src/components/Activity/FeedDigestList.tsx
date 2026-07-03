@@ -1,6 +1,10 @@
 import { useMemo } from 'react';
 import { useProCapabilities } from '../../hooks/useTriage.js';
-import { useRepoDigests, useRefreshRepoDigests } from '../../hooks/useRepoDigest.js';
+import {
+  useRepoDigests,
+  useRefreshRepoDigests,
+  digestProgressProps,
+} from '../../hooks/useRepoDigest.js';
 import { useOpenPrTab } from '../../hooks/useOpenPrTab.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
@@ -66,8 +70,19 @@ export function FeedDigestList(): JSX.Element | null {
           {refresh.isPending ? 'Regenerating…' : 'Regenerate'}
         </button>
       </div>
-      {/* Progress while the (single, bulk) refresh is in flight; hides itself when done. */}
-      <RegenProgressBar active={refresh.isPending} />
+      {/* Honest N-of-K progress across the repos that actually changed (from the
+          server's payload-hash plan) — real progress, not an animated guess. Only
+          shown once the plan reports real work (no bar for a no-op / up-to-date run). */}
+      <RegenProgressBar
+        active={refresh.isPending && (refresh.progress?.total ?? 0) > 0}
+        label="Regenerating digests"
+        {...digestProgressProps(refresh.progress)}
+      />
+      {refresh.notice != null && (
+        <p className="px-0.5 text-[11px] text-gray-400" aria-live="polite">
+          {refresh.notice}
+        </p>
+      )}
       {!anyWatched ? (
         <p className="px-0.5 text-xs text-gray-400">
           No watched repos in view — Watch a repo (the eye toggle) to get a digest here.
@@ -81,8 +96,9 @@ export function FeedDigestList(): JSX.Element | null {
       ) : (
         <div className="space-y-2">
           {digests.map((d) => (
-            // No per-card Regenerate here — the single top button covers all. Cards dim
-            // (keeping the old text readable) while the bulk refresh runs, then fade in.
+            // No per-card Regenerate here — the single top button covers all. Each card
+            // shows its OWN status bar + skeleton while the bulk refresh runs and un-dims
+            // independently the instant its fresh digest streams in.
             <RepoDigestCard
               key={d.repoId}
               digest={d}
@@ -90,7 +106,7 @@ export function FeedDigestList(): JSX.Element | null {
               title={d.repoFullName}
               collapsed={collapsedSet.has(d.repoId)}
               onToggle={() => toggle(d.repoId)}
-              regenerating={refresh.isPending}
+              regenerating={refresh.refreshingRepoIds.has(d.repoId)}
               onOpenPr={openPr}
               showProBadge={false}
             />

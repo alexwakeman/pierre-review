@@ -1,5 +1,9 @@
 import { useProCapabilities } from '../../hooks/useTriage.js';
-import { useRepoDigest, useRefreshRepoDigests } from '../../hooks/useRepoDigest.js';
+import {
+  useRepoDigest,
+  useRefreshRepoDigests,
+  digestProgressProps,
+} from '../../hooks/useRepoDigest.js';
 import { useOpenPrTab } from '../../hooks/useOpenPrTab.js';
 import { useDigestCollapse } from '../../store/digestCollapse.js';
 import { RepoDigestCard } from './RepoDigestCard.js';
@@ -17,7 +21,9 @@ export function DigestBanner({ repoId }: { repoId: number }): JSX.Element | null
   const openPr = useOpenPrTab();
   const collapsed = useDigestCollapse((s) => s.collapsed.has(repoId));
   const toggle = useDigestCollapse((s) => s.toggle);
-  const regenerating = refresh.isPending && refresh.variables === repoId;
+  // Refresh (below) streams ONLY this repo (`mutate(repoId)`), so the status bar +
+  // skeleton live inside the card and clear the moment its fresh digest lands.
+  const regenerating = refresh.refreshingRepoIds.has(repoId);
 
   // Absent Pro → render nothing. This is the load-bearing gate.
   if (!activityDigest) return null;
@@ -34,8 +40,17 @@ export function DigestBanner({ repoId }: { repoId: number }): JSX.Element | null
         regenerating={regenerating}
         onOpenPr={openPr}
       />
-      {/* Progress while THIS repo's own Regenerate runs (hides itself when done). */}
-      <RegenProgressBar active={regenerating} />
+      {/* Only shown once the plan confirms this repo actually changed. */}
+      <RegenProgressBar
+        active={refresh.isPending && (refresh.progress?.total ?? 0) > 0}
+        label="Regenerating digest"
+        {...digestProgressProps(refresh.progress)}
+      />
+      {refresh.notice != null && (
+        <p className="px-0.5 text-[11px] text-gray-400" aria-live="polite">
+          {refresh.notice}
+        </p>
+      )}
     </div>
   );
 }

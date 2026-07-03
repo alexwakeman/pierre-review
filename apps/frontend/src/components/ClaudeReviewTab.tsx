@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import type {
   ClaudeFinding,
   ClaudeFindingSeverity,
   ClaudeReview,
   ClaudeReviewModel,
+  ClaudeReviewStatusResponse,
   ClaudeReviewVerdict,
   PostReviewPreview,
   PostReviewResult,
@@ -23,7 +23,7 @@ import {
   useCancelReview,
   useClaudeReview,
   useClaudeReviewById,
-  useClaudeReviewStatus,
+  useClaudeReviewStream,
   useGenerateReview,
   usePostFinding,
   usePostReview,
@@ -151,6 +151,35 @@ const PHASE_LABEL: Record<string, string> = {
   reviewing: 'Reviewing',
   persisting: 'Saving findings',
 };
+
+// Map the live run status to a determinate 0–100 reading for the progress bar. The
+// discrete phases are honest checkpoints; 'reviewing' is the long tail, so it eases
+// from its base toward 90% as the agent's activity log grows (real motion, not a
+// timer guess). Returns null → the bar falls back to its indeterminate easing.
+function reviewProgressPct(
+  status: ClaudeReviewStatusResponse | null,
+): number | null {
+  if (status == null) return null;
+  if (status.status === 'queued') return 5;
+  const phase = status.progress?.phase;
+  if (phase == null) return 8; // running, first phase not yet reported
+  switch (phase) {
+    case 'fetching_diff':
+      return 15;
+    case 'deciding':
+      return 28;
+    case 'cloning':
+      return 42;
+    case 'reviewing': {
+      const n = status.progress?.recentActivity?.length ?? 0;
+      return Math.min(90, 55 + n * 3);
+    }
+    case 'persisting':
+      return 95;
+    default:
+      return null;
+  }
+}
 
 // Compact token count: 1234 → "1.2k", 1_200_000 → "1.2M".
 function fmtTokens(n: number): string {
@@ -1087,7 +1116,6 @@ export function ClaudeReviewTab({
   pr: PrDetail;
   usersById: Map<number, User>;
 }): JSX.Element {
-  const qc = useQueryClient();
   const { data, isLoading } = useClaudeReview(pr.id);
   const review = data?.review ?? null;
 
@@ -1154,24 +1182,10 @@ export function ClaudeReviewTab({
   }, [review]);
 
   const isRunning = review?.status === 'running' || review?.status === 'queued';
-  const { data: status } = useClaudeReviewStatus(pr.id, isRunning);
-
-  // When polling sees the run reach a terminal state, invalidate the full review
-  // so the finished result loads. Guard on the transition to avoid a loop.
-  const settledRef = useRef(false);
-  useEffect(() => {
-    if (!isRunning) {
-      settledRef.current = false;
-      return;
-    }
-    const s = status?.status;
-    const terminal =
-      s === 'succeeded' || s === 'failed' || s === 'cancelled' || s === 'idle';
-    if (terminal && !settledRef.current) {
-      settledRef.current = true;
-      void qc.invalidateQueries({ queryKey: ['claude-review', pr.id] });
-    }
-  }, [isRunning, status?.status, qc, pr.id]);
+  // Live progress over SSE — pushes each phase/activity/usage change in real time
+  // and self-invalidates the full review on the terminal `done` (so the finished
+  // result loads without a poll).
+  const { status } = useClaudeReviewStream(pr.id, isRunning);
 
   // Which run is shown in Section A: the latest unless the user picked an older
   // one from history. Both are hooks, so they MUST run unconditionally — before
@@ -1383,7 +1397,12 @@ export function ClaudeReviewTab({
           the running→done transition and plays its 100%→fade-out completion (it renders
           null when idle, so this adds no chrome otherwise). */}
       <div className="px-4">
-        <RegenProgressBar active={isRunning} label="Running Claude review" timeConstantSec={30} />
+        <RegenProgressBar
+          active={isRunning}
+          label="Running Claude review"
+          value={reviewProgressPct(status)}
+          timeConstantSec={30}
+        />
       </div>
       {isRunning && (
         <div className="px-4 py-3">

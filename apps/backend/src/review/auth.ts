@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { config } from '../config.js';
 import { getUserAnthropicKey } from './local-settings.js';
 
 // Best-effort detector for whether the Claude Agent SDK has usable credentials.
@@ -15,26 +16,12 @@ export type ClaudeAuthResult =
   | { status: 'ok'; method: 'api_key' | 'oauth_token' | 'ambient' }
   | { status: 'none'; message: string };
 
-export function detectClaudeAuth(): ClaudeAuthResult {
-  // A user-supplied key (stored locally) takes precedence — it overrides the
-  // ambient auth at run time (see local-settings.applyUserAnthropicKey).
-  if (getUserAnthropicKey()) {
-    return { status: 'ok', method: 'api_key' };
-  }
-
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (apiKey && apiKey.length > 0) {
-    return { status: 'ok', method: 'api_key' };
-  }
-
-  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  if (oauthToken && oauthToken.length > 0) {
-    return { status: 'ok', method: 'oauth_token' };
-  }
-
-  // Ambient logged-in Claude Code session: any of these on disk is good enough.
-  // The last two are weak signals (config dir present, but maybe not signed in) —
-  // a wrong guess just means the run fails with a clear SDK auth error.
+// Is an ambient Claude SUBSCRIPTION available (OAuth token or a logged-in Claude
+// Code session on disk)? Deliberately excludes API keys — this answers "can Claude
+// Review run on the subscription (no per-token billing)?", which drives the
+// prefer-ambient policy below.
+export function hasAmbientClaudeAuth(): boolean {
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return true;
   const home = homedir();
   const ambientCandidates = [
     join(home, '.claude', '.credentials.json'),
@@ -42,13 +29,72 @@ export function detectClaudeAuth(): ClaudeAuthResult {
     join(home, '.claude.json'),
     join(home, '.claude'),
   ];
-  if (ambientCandidates.some((path) => existsSync(path))) {
+  return ambientCandidates.some((path) => existsSync(path));
+}
+
+export function detectClaudeAuth(): ClaudeAuthResult {
+  // Claude Review PREFERS the ambient subscription (see applyClaudeReviewAuth), so
+  // report it first when present — even if an API key also exists.
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    return { status: 'ok', method: 'oauth_token' };
+  }
+  if (hasAmbientClaudeAuth()) {
     return { status: 'ok', method: 'ambient' };
+  }
+
+  // No ambient → fall back to an API key (the user's local key, then the env key).
+  if (getUserAnthropicKey() || process.env.ANTHROPIC_API_KEY) {
+    return { status: 'ok', method: 'api_key' };
   }
 
   return {
     status: 'none',
     message:
-      'No Claude authentication found. Set ANTHROPIC_API_KEY, or run `claude` once to sign in to an eligible Claude plan (Pro/Max/Team/Enterprise), then restart pierre-review.',
+      'No Claude authentication found. Run `claude` once to sign in to an eligible Claude plan (Pro/Max/Team/Enterprise), or set an Anthropic API key, then restart pierre-review.',
   };
+}
+
+/**
+ * Establish the auth for ONE Claude Review run by mutating process.env, returning a
+ * restore fn (always call it in a finally). Policy — Claude Review prefers the
+ * ambient subscription so the user's plan/usage credits cover it:
+ *
+ *   • ambient available → STRIP any ANTHROPIC_API_KEY for the run so the Agent SDK
+ *     authenticates via the subscription/OAuth (an API key would otherwise win and
+ *     silently meter the run).
+ *   • no ambient → fall back to an API key (the user's local key, else the env key).
+ *
+ * process.env is process-global, so this only mutates at reviewConcurrency === 1
+ * (the env-race guard); above that it no-ops and the raw ambient env is used. The
+ * Pro summary is unaffected either way — it passes its own key explicitly to the
+ * llm seam and never reads this env.
+ */
+export function applyClaudeReviewAuth(): () => void {
+  if (config.reviewConcurrency !== 1) return () => {};
+
+  const prevApiKey = process.env.ANTHROPIC_API_KEY;
+  const prevOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const restore = (): void => {
+    if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = prevApiKey;
+    if (prevOauth === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    else process.env.CLAUDE_CODE_OAUTH_TOKEN = prevOauth;
+  };
+
+  if (hasAmbientClaudeAuth()) {
+    // Prefer the subscription: hide any API key so the Agent SDK uses ambient auth.
+    if (process.env.ANTHROPIC_API_KEY === undefined) return () => {};
+    delete process.env.ANTHROPIC_API_KEY;
+    return restore;
+  }
+
+  // No ambient → use an API key. A user-supplied local key wins over the env key.
+  const key = getUserAnthropicKey();
+  if (key) {
+    process.env.ANTHROPIC_API_KEY = key;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    return restore;
+  }
+  // Nothing to change — leave any existing ANTHROPIC_API_KEY in place.
+  return () => {};
 }

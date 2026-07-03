@@ -53,6 +53,9 @@ export interface ProContext {
       system?: string;
       prompt: string;
       maxTokens?: number;
+      // Explicit API key → the raw metered path; omitted → the ambient Claude
+      // session. Lets the summary use its OWN discrete credential.
+      apiKey?: string;
     }): Promise<{
       text: string;
       usage?: { inputTokens: number; outputTokens: number };

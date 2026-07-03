@@ -33,6 +33,7 @@ import {
   listActiveReviews,
   requestReviewCancel,
   startReview,
+  subscribeReviewStream,
 } from '../../review/review-manager.js';
 import { detectClaudeAuth } from '../../review/auth.js';
 import {
@@ -242,7 +243,7 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // Live progress poll target.
+  // Live progress poll target (kept as a fallback + for the initial snapshot).
   app.get(
     '/api/prs/:id/claude-review/status',
     { schema: idParam },
@@ -252,6 +253,65 @@ export async function claudeReviewRoutes(app: FastifyInstance): Promise<void> {
         return { status: 'idle', reviewId: null, progress: null };
       }
       return await getReviewStatus(id);
+    },
+  );
+
+  // Live progress STREAM (SSE) — pushes each phase/activity/usage change in real
+  // time and one terminal `done`, so the UI progress bar tracks the run without
+  // polling. Local-only (Claude Review is gated off in cloud). We `hijack()` the
+  // reply and own the raw socket for the connection's lifetime.
+  app.get(
+    '/api/prs/:id/claude-review/stream',
+    { schema: idParam },
+    async (req, reply) => {
+      const { id } = req.params as { id: number };
+      reply.hijack();
+      const raw = reply.raw;
+      raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        // Disable proxy buffering (nginx) so frames flush immediately.
+        'X-Accel-Buffering': 'no',
+      });
+      const send = (data: unknown): void => {
+        if (!raw.writableEnded) raw.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      if (!config.claudeReviewEnabled) {
+        send({ type: 'done', status: 'idle', reviewId: null });
+        raw.end();
+        return;
+      }
+
+      let closed = false;
+      let unsubscribe: (() => void) | null = null;
+      const heartbeat = setInterval(() => {
+        if (!raw.writableEnded) raw.write(': hb\n\n');
+      }, 15000);
+      const cleanup = (): void => {
+        if (closed) return;
+        closed = true;
+        clearInterval(heartbeat);
+        unsubscribe?.();
+        if (!raw.writableEnded) raw.end();
+      };
+      // Subscribe BEFORE reading the snapshot so a terminal `done` emitted during
+      // setup can't slip through the gap (it'd be delivered to this callback). If
+      // the run already finished, the snapshot check below sends `done` itself.
+      unsubscribe = subscribeReviewStream(id, (e) => {
+        send(e);
+        if (e.type === 'done') cleanup();
+      });
+      req.raw.on('close', cleanup);
+
+      // Initial snapshot so a client that connects mid-run gets current state at once.
+      const snap = await getReviewStatus(id);
+      send({ type: 'snapshot', ...snap });
+      if (snap.status !== 'running' && snap.status !== 'queued') {
+        send({ type: 'done', status: snap.status, reviewId: snap.reviewId });
+        cleanup();
+      }
     },
   );
 

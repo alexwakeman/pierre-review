@@ -51,26 +51,6 @@ export function setUserAnthropicKey(key: string | null): void {
   write(settings);
 }
 
-/**
- * If the user supplied an Anthropic key, override the ambient Claude auth for the
- * duration of one review run by mutating process.env, returning a restore fn.
- *
- * process.env is process-global, so this is ONLY safe when at most one review
- * runs at a time — gated on reviewConcurrency === 1. With concurrency > 1 the
- * override is skipped (the ambient auth is used) to avoid a cross-run env race.
- * Always call the returned restore fn in a finally.
- */
-export function applyUserAnthropicKey(): () => void {
-  const key = getUserAnthropicKey();
-  if (!key || config.reviewConcurrency !== 1) return () => {};
-  const prevApiKey = process.env.ANTHROPIC_API_KEY;
-  const prevOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  process.env.ANTHROPIC_API_KEY = key;
-  delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  return () => {
-    if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
-    else process.env.ANTHROPIC_API_KEY = prevApiKey;
-    if (prevOauth === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    else process.env.CLAUDE_CODE_OAUTH_TOKEN = prevOauth;
-  };
-}
+// NOTE: the per-run env override for Claude Review now lives in review/auth.ts as
+// `applyClaudeReviewAuth` (it implements the prefer-ambient policy and needs the
+// ambient-session probe). This module stays a pure key store.

@@ -15,7 +15,7 @@ import type {
 } from '@pierre-review/shared';
 import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
-import { applyUserAnthropicKey } from './local-settings.js';
+import { applyClaudeReviewAuth } from './auth.js';
 import {
   cleanupCloneCache,
   prepWorktree,
@@ -252,9 +252,10 @@ export async function runReview(args: RunReviewArgs): Promise<void> {
       diffCapped = capped.capped;
     }
 
-    // If the user supplied an Anthropic API key, override ambient Claude auth for
-    // this run (restored in finally). Safe only at reviewConcurrency === 1.
-    restoreEnv = applyUserAnthropicKey();
+    // Establish this run's auth: prefer the ambient Claude subscription, falling
+    // back to an API key only when no ambient session exists (restored in finally).
+    // Safe only at reviewConcurrency === 1.
+    restoreEnv = applyClaudeReviewAuth();
 
     // ---- run the agent ----
     let captured: SubmitReviewPayload | null = null;

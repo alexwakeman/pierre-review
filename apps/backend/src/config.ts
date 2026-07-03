@@ -203,9 +203,10 @@ export const config = {
   reviewDiffOnlyEffort: effortFromEnv('REVIEW_DIFF_ONLY_EFFORT', 'low'),
   // At most one review per PR; this caps concurrent reviews across all PRs. Default
   // 4 so the user can bulk-review (extras queue, see review-manager). Raising this
-  // also DISABLES the pasted-key override (which mutates process.env and is only
-  // safe at concurrency 1 — see local-settings.applyUserAnthropicKey); ambient auth
-  // is used instead. Set REVIEW_CONCURRENCY=1 to restore the pasted-key path.
+  // also DISABLES the per-run env auth adjustment (which mutates process.env and is
+  // only safe at concurrency 1 — see auth.applyClaudeReviewAuth); the raw ambient
+  // env is used instead. Set REVIEW_CONCURRENCY=1 to restore prefer-ambient + the
+  // API-key fallback.
   reviewConcurrency: intFromEnv('REVIEW_CONCURRENCY', 4),
   // Hard ceiling on QUEUED (not-yet-started) reviews, a runaway guard for bulk
   // triggering; further starts return 'busy' until the queue drains.

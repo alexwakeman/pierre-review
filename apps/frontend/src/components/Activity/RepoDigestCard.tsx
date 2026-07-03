@@ -98,13 +98,16 @@ export function RepoDigestCard({
         </span>
       </div>
       {!collapsed && (
-        // While regenerating, the OLD summary stays readable (just dimmed) — the query isn't
-        // invalidated until the refresh resolves. When the new summary arrives its
-        // generatedAt changes, remounting the keyed wrapper so `digest-fade-in` replays.
-        <div className={`mt-1 ${regenerating ? 'opacity-50 transition-opacity' : ''}`}>
-          {isLoading ? (
+        <div className="mt-1">
+          {regenerating ? (
+            // Refreshing: drop the old text, show a skeleton "shine swipe". The card
+            // un-dims (skeleton → fresh content) the instant its digest streams in
+            // and `regenerating` flips false.
+            <DigestSkeleton />
+          ) : isLoading ? (
             <div className="h-3 w-2/3 animate-pulse rounded bg-violet-200/60 dark:bg-violet-900/40" />
           ) : digest != null && digest.summary.trim() !== '' ? (
+            // Keyed by generatedAt so `digest-fade-in` replays on each new summary.
             <div key={digest.generatedAt} className="digest-fade-in">
               <DigestMarkdown
                 markdown={digest.summary}
@@ -119,6 +122,18 @@ export function RepoDigestCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Placeholder lines with a sweeping shine, shown in place of the summary while it
+// regenerates (widths vary to mimic a bulleted change-report). Purely decorative.
+function DigestSkeleton(): JSX.Element {
+  return (
+    <div className="space-y-1.5 py-0.5" aria-hidden="true">
+      {['92%', '80%', '66%', '74%'].map((w, i) => (
+        <div key={i} className="digest-skeleton-line h-3" style={{ width: w }} />
+      ))}
     </div>
   );
 }
