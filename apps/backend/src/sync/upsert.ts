@@ -271,7 +271,7 @@ function parseActionsIds(url: string | null): { runId: number | null; jobId: num
 
 export function checkRunsFrom(head: GqlHeadCommit['commit'] | null | undefined): CheckRun[] {
   const nodes = head?.statusCheckRollup?.contexts?.nodes ?? [];
-  return nodes.map((c) => {
+  const mapped = nodes.map((c): CheckRun => {
     const url = c.__typename === 'CheckRun' ? c.detailsUrl : c.targetUrl;
     const { runId, jobId } =
       c.__typename === 'CheckRun' ? parseActionsIds(url) : { runId: null, jobId: null };
@@ -283,6 +283,22 @@ export function checkRunsFrom(head: GqlHeadCommit['commit'] | null | undefined):
       jobId,
     };
   });
+
+  // GitHub's `statusCheckRollup.contexts` returns EVERY check attached to the head
+  // commit's check suites — it does NOT collapse to "latest per check name" the way the
+  // PR UI does. When a head commit is covered by more than one workflow RUN (a re-run,
+  // or a workflow fired by both the `push` and `pull_request` events — classic for
+  // Dependabot), each run contributes its own same-named CheckRun, so the same check
+  // appears two+ times. Dedupe by display name, keeping the NEWEST run (Actions run ids
+  // increase monotonically, so the highest runId is the most recent — matching the PR
+  // UI); a real CheckRun (has a runId) beats a same-named StatusContext (runId null).
+  // Map preserves first-insertion order, so distinct checks keep their order.
+  const byName = new Map<string, CheckRun>();
+  for (const c of mapped) {
+    const prev = byName.get(c.name);
+    if (!prev || (c.runId ?? -1) > (prev.runId ?? -1)) byName.set(c.name, c);
+  }
+  return [...byName.values()];
 }
 
 const REVIEW_STATES = new Set([

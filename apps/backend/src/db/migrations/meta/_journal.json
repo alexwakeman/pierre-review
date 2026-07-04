@@ -148,6 +148,13 @@
       "when": 1780800000011,
       "tag": "0020_claude_review_cost_telemetry",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1780800000012,
+      "tag": "0021_account_feed_last_seen",
+      "breakpoints": true
     }
   ]
 }

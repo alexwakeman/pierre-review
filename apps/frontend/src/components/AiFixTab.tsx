@@ -11,11 +11,13 @@ import {
   type AiFixSeed,
   type AiFixStatus,
   type AiFixStatusResponse,
+  type AiFixSummary,
   type FailingCheckInput,
   type PrDetail,
   type PrHeadInfo,
 } from '@pierre-review/shared';
 import { ApiError } from '../api/client.js';
+import { relativeTime } from '../lib/ui.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import { useFilters } from '../store/filters.js';
 import {
@@ -27,10 +29,8 @@ import {
   useCancelRebase,
   useCiAnalysis,
   useMergePreview,
-  usePrSummary,
   usePushFix,
   useRefreshCiAnalysis,
-  useRefreshSummary,
   useStartFix,
   useStartRebase,
 } from '../hooks/useAiFix.js';
@@ -38,6 +38,8 @@ import { Markdown } from './Markdown.js';
 import { FileDiffView, type DiffFile } from './diff/FileDiffView.js';
 import { parseGitPatch } from '../lib/diff.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
+import { ChecksList, CiRerunControl } from './CheckList.js';
+import { AiSummary } from './AiSummary.js';
 
 const BTN_PRIMARY =
   'whitespace-nowrap rounded border border-blue-400 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
@@ -166,14 +168,19 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
   if (!aiAnalysis && !aiFix) {
     return (
       <div className="p-4 text-sm text-gray-500">
-        AI Fix is not enabled.
+        AI Analysis and Fix is not enabled.
       </div>
     );
   }
 
   return (
     <div className="pb-6">
-      {aiAnalysis && <SummarySection pr={pr} />}
+      {aiAnalysis && (
+        <div className="border-b border-gray-200 dark:border-gray-800">
+          <AiSummary pr={pr} />
+        </div>
+      )}
+      <CiStatusSection pr={pr} />
       {aiAnalysis && <CiAnalysisSection pr={pr} canFix={aiFix} />}
       {aiFix && (
         <FixerSection
@@ -186,50 +193,21 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
   );
 }
 
-// ---- PR summary ----
+// ---- CI status (the same checks list as the Overview tab, plus re-trigger) ----
 
-function SummarySection({ pr }: { pr: PrDetail }): JSX.Element {
-  const { data } = usePrSummary(pr.id, true);
-  const refresh = useRefreshSummary(pr.id);
-  const stale = data?.headSha != null && data.headSha !== pr.headSha;
-
+function CiStatusSection({ pr }: { pr: PrDetail }): JSX.Element | null {
+  const checks = pr.checkRuns;
+  if (checks.length === 0) return null;
   return (
     <div className="border-b border-gray-200 dark:border-gray-800">
-      <SectionTitle>PR summary</SectionTitle>
+      <SectionTitle>CI status</SectionTitle>
       <div className="px-4 pb-3">
-        {data?.summary ? (
-          <div className="prose prose-sm max-w-none dark:prose-invert">
-            <Markdown>{data.summary}</Markdown>
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">
-            Generate a plain-language overview of what this PR does.
-          </p>
-        )}
-        <div className="mt-2 flex items-center gap-2">
-          <button
-            type="button"
-            className={BTN_PRIMARY}
-            disabled={refresh.isPending}
-            onClick={() => refresh.mutate()}
-          >
-            {refresh.isPending
-              ? 'Generating…'
-              : data?.summary
-                ? 'Regenerate'
-                : 'Generate summary'}
-          </button>
-          {stale && (
-            <span className="text-[11px] text-amber-600 dark:text-amber-400">
-              PR has changed since this was generated
-            </span>
-          )}
-          {refresh.isError && (
-            <span className="text-[11px] text-red-500">
-              {errText(refresh.error)}
-            </span>
-          )}
-        </div>
+        <ChecksList prId={pr.id} checks={checks} />
+        <CiRerunControl
+          prId={pr.id}
+          checks={checks}
+          viewerCanPush={pr.viewerCanPush}
+        />
       </div>
     </div>
   );
@@ -268,8 +246,14 @@ function CiAnalysisSection({
     <div className="border-b border-gray-200 dark:border-gray-800">
       <SectionTitle>CI failure analysis</SectionTitle>
       <div className="px-4 pb-3">
-        {data?.analysis && (
+        {data?.analysis && (data.rootCauseConfidence || data.fixability) && (
           <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+            <span
+              className="text-[10px] font-semibold uppercase tracking-wide text-gray-400"
+              title="How confident the analysis is — not a severity rating"
+            >
+              Confidence
+            </span>
             <ConfidenceBadge label="Root cause" value={data.rootCauseConfidence} />
             <ConfidenceBadge label="Fixability" value={data.fixability} />
           </div>
@@ -458,6 +442,10 @@ function FixerSection({
             )}
           </>
         )}
+        <FixHistory
+          history={data?.history ?? []}
+          currentFixId={data?.fix?.id ?? null}
+        />
       </div>
     </div>
   );
@@ -527,21 +515,80 @@ function FixResult({
 
 function PushedCard({ fix }: { fix: AiFix }): JSX.Element {
   return (
-    <div className="mt-2 rounded border border-green-200 bg-green-50 p-2 text-xs text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-300">
-      Pushed to <span className="font-mono">{fix.pushedBranch}</span>
-      {fix.pushedPrUrl && (
-        <>
-          {' · '}
-          <a
-            href={fix.pushedPrUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="underline"
-          >
-            PR #{fix.pushedPrNumber}
-          </a>
-        </>
+    <div className="mb-2 rounded border border-green-200 bg-green-50 p-2 text-xs text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-300">
+      <div>
+        Pushed to <span className="font-mono">{fix.pushedBranch}</span>
+        {fix.pushedPrUrl && (
+          <>
+            {' · '}
+            <a
+              href={fix.pushedPrUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              PR #{fix.pushedPrNumber}
+            </a>
+          </>
+        )}
+        {fix.pushedAt && <> · {relativeTime(fix.pushedAt)}</>}
+      </div>
+      {fix.commitMessage && (
+        <div className="mt-1 font-mono text-[11px] text-green-800 dark:text-green-300">
+          {fix.commitMessage}
+        </div>
       )}
+    </div>
+  );
+}
+
+// The record of every EARLIER fix Pierre pushed for this PR (branch + commit message +
+// where it landed). Surfaced because multiple fixes on one PR are common. The current
+// fix (`currentFixId`) is excluded — it's already shown above as the result / PushedCard.
+function FixHistory({
+  history,
+  currentFixId,
+}: {
+  history: AiFixSummary[];
+  currentFixId: number | null;
+}): JSX.Element | null {
+  const pushed = history.filter(
+    (h) => h.pushedAt != null && h.id !== currentFixId,
+  );
+  if (pushed.length === 0) return null;
+  return (
+    <div className="mt-4 border-t border-gray-200 pt-3 dark:border-gray-800">
+      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+        Fixes pushed via Pierre
+      </div>
+      <ul className="space-y-2">
+        {pushed.map((h) => (
+          <li key={h.id} className="text-xs">
+            <div className="font-mono text-gray-700 dark:text-gray-200">
+              {h.commitMessage ?? '(no commit message)'}
+            </div>
+            <div className="mt-0.5 text-[11px] text-gray-400">
+              {h.pushedBranch && (
+                <span className="font-mono">{h.pushedBranch}</span>
+              )}
+              {h.pushedPrUrl && (
+                <>
+                  {' · '}
+                  <a
+                    href={h.pushedPrUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline"
+                  >
+                    PR #{h.pushedPrNumber}
+                  </a>
+                </>
+              )}
+              {h.pushedAt && <> · {relativeTime(h.pushedAt)}</>}
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -700,14 +747,25 @@ function PushControls({
     }
   }, [headInfo]);
 
-  // Auto-check the trunk once the push panel first renders.
+  const pushed = fix.pushedAt != null;
+  // A fix pushed to the PR's OWN head branch (no new PR opened) can be reconciled
+  // against a moved trunk in place — a rebase force-with-lease replaces the branch tip.
+  // A fix pushed to a NEW branch lives on its own PR; the merge-preview (bound to the
+  // original PR) wouldn't describe it and a non-force re-push would be rejected, so we
+  // don't offer reconciliation there — just the pushed record.
+  const pushedToOwnBranch = pushed && fix.pushedPrNumber == null;
+  const showReconcile = !pushed || pushedToOwnBranch;
+
+  // Auto-check the trunk once the push panel first renders — INCLUDING after a push to
+  // the PR's own branch, so a fix pushed a while ago is re-evaluated against a trunk
+  // that may have moved (the "do I need to rebase/merge again?" case). A manual
+  // Re-check button re-runs it.
   useEffect(() => {
-    if (!previewRef.current && viewerCanPush && !fix.pushedAt) {
+    if (!previewRef.current && viewerCanPush && showReconcile) {
       previewRef.current = true;
       previewM.mutate(fix.id);
     }
-
-  }, [viewerCanPush, fix.pushedAt, fix.id]);
+  }, [viewerCanPush, showReconcile, fix.id]);
   const preview = previewM.data ?? null;
 
   const { status: rebaseStatus } = useAiFixJobStream(
@@ -747,18 +805,25 @@ function PushControls({
     }
   }, [mode, pushStatus]);
 
-  if (fix.pushedAt) return <PushedCard fix={fix} />;
   if (!viewerCanPush) {
-    return (
+    return pushed ? (
+      <PushedCard fix={fix} />
+    ) : (
       <p className="mt-2 text-xs text-gray-500">
         You need write access to this repository to push this fix.
       </p>
     );
   }
 
+  // Pushed to a new branch → just the record; reconciliation doesn't apply (above).
+  if (pushed && !pushedToOwnBranch) return <PushedCard fix={fix} />;
+
   const branchInvalid = target === 'new' && branch.trim().length === 0;
   const busy = mode !== 'idle' || push.isPending || startRebase.isPending;
   const model = fix.model as AiFixModel;
+  // After a push, the trunk may be clean+current — nothing left to reconcile.
+  const nothingToReconcile =
+    pushed && !!preview && preview.available && preview.clean && preview.behindBy === 0;
 
   const doPush = (strategy: AiFixPushStrategy): void => {
     setJobError(null);
@@ -795,9 +860,21 @@ function PushControls({
 
   return (
     <div className="mt-3 rounded border border-gray-200 p-2 dark:border-gray-800">
+      {pushed && <PushedCard fix={fix} />}
       <div className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">
-        Push this fix
+        {pushed ? 'Reconcile with the trunk' : 'Push this fix'}
       </div>
+
+      {!pushed && fix.commitMessage && (
+        <div className="mb-2 rounded bg-gray-50 p-2 text-[11px] dark:bg-gray-900">
+          <span className="uppercase tracking-wide text-gray-400">
+            Commit message
+          </span>
+          <div className="mt-0.5 font-mono text-gray-700 dark:text-gray-200">
+            {fix.commitMessage}
+          </div>
+        </div>
+      )}
 
       <label
         className={`flex items-center gap-2 text-xs ${
@@ -840,8 +917,24 @@ function PushControls({
         />
       )}
 
-      <div className="mt-2">
-        <TrunkStatus preview={preview} loading={previewM.isPending} />
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <TrunkStatus preview={preview} loading={previewM.isPending} />
+        </div>
+        <button
+          type="button"
+          className={BTN_SECONDARY}
+          disabled={previewM.isPending || busy}
+          onClick={() => previewM.mutate(fix.id)}
+          title="Re-check this fix against the current trunk"
+        >
+          {previewM.isPending ? 'Checking…' : 'Re-check trunk'}
+        </button>
+        {previewM.isError && !previewM.isPending && (
+          <span className="text-[11px] text-red-500">
+            Couldn't check the trunk — try again.
+          </span>
+        )}
       </div>
 
       {mode !== 'idle' ? (
@@ -885,6 +978,11 @@ function PushControls({
           onPush={() => doPush('rebase')}
           onRedo={doRebase}
         />
+      ) : nothingToReconcile ? (
+        <p className="mt-2 text-[11px] text-gray-500">
+          No trunk changes to reconcile — the pushed fix is up to date with{' '}
+          <span className="font-mono">{preview?.trunk}</span>.
+        </p>
       ) : (
         <div className="mt-2 space-y-2">
           {preview && preview.available && !preview.clean && (
@@ -912,28 +1010,45 @@ function PushControls({
             >
               Rebase onto {preview?.trunk ?? 'trunk'}
             </button>
-            <button
-              type="button"
-              className={BTN_SECONDARY}
-              disabled={busy || branchInvalid}
-              onClick={() => doPush('merge')}
-              title="Merge the trunk into the fix branch (a merge commit; never force-pushes)"
-            >
-              Merge {preview?.trunk ?? 'trunk'} in
-            </button>
-            <button
-              type="button"
-              className={
-                !preview || preview.clean ? BTN_PRIMARY : BTN_SECONDARY
-              }
-              disabled={busy || branchInvalid}
-              onClick={() => doPush('plain')}
-              title="Push the fix as-is (never force-pushes). If it conflicts with the trunk, the PR will show as conflicted."
-            >
-              {target === 'new' ? 'Push + open PR' : 'Push'}
-              {preview && !preview.clean ? ' anyway' : ''}
-            </button>
+            {/* Merge + plain push rebuild history from baseSha and push WITHOUT force,
+                so they only make sense before the first push — after a push the branch
+                head already carries the fix commit and a non-force push would be
+                rejected as non-fast-forward. Post-push, only Rebase (force-with-lease)
+                can safely reconcile with a moved trunk. */}
+            {!pushed && (
+              <button
+                type="button"
+                className={BTN_SECONDARY}
+                disabled={busy || branchInvalid}
+                onClick={() => doPush('merge')}
+                title="Merge the trunk into the fix branch (a merge commit; never force-pushes)"
+              >
+                Merge {preview?.trunk ?? 'trunk'} in
+              </button>
+            )}
+            {!pushed && (
+              <button
+                type="button"
+                className={
+                  !preview || preview.clean ? BTN_PRIMARY : BTN_SECONDARY
+                }
+                disabled={busy || branchInvalid}
+                onClick={() => doPush('plain')}
+                title="Push the fix as-is (never force-pushes). If it conflicts with the trunk, the PR will show as conflicted."
+              >
+                {target === 'new' ? 'Push + open PR' : 'Push'}
+                {preview && !preview.clean ? ' anyway' : ''}
+              </button>
+            )}
           </div>
+          {pushed && (
+            <p className="text-[11px] text-gray-400">
+              Rebasing replays the fix onto{' '}
+              <span className="font-mono">{preview?.trunk ?? 'the trunk'}</span>{' '}
+              and force-pushes (with lease) onto the PR branch — the safe way to
+              reconcile an already-pushed fix.
+            </p>
+          )}
           {target === 'existing' && (
             <p className="text-[11px] text-gray-400">
               Rebase force-pushes (with lease) onto{' '}

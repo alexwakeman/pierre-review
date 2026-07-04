@@ -5,9 +5,12 @@ import { accountToLocalUser } from '../../auth/account.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { getProCapabilities } from '../../pro/contract.js';
 import {
+  countNewMyTurnFeedItems,
   dismissMyTurn,
   getCompletedDismissals,
+  getFeedLastSeenAt,
   getMyTurn,
+  markFeedSeen,
   undismissMyTurn,
 } from '../../db/queries.js';
 
@@ -28,8 +31,16 @@ const dismissSchema = {
 
 export async function meRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/me', async (req): Promise<MeResponse> => {
+    const accountId = accountIdOf(req);
     const user = accountToLocalUser(req.account);
-    const myTurn = await getMyTurn(accountIdOf(req));
+    const myTurn = await getMyTurn(accountId);
+    // Feed "seen" marker + how many FYI items are new since. Only counted once a
+    // baseline exists (feedLastSeenAt set by the first feed view) so a fresh account
+    // never sees a scary first-load number.
+    const feedLastSeen = await getFeedLastSeenAt(accountId);
+    const newFeedItems = feedLastSeen
+      ? await countNewMyTurnFeedItems(accountId, feedLastSeen)
+      : 0;
     return {
       user,
       counts: {
@@ -40,6 +51,8 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
         watchedRepoPrs: myTurn.watchedRepoPrs.length,
         claudeReviewsToAction: myTurn.claudeReviewsToAction.length,
       },
+      feedLastSeenAt: feedLastSeen ? feedLastSeen.toISOString() : null,
+      newFeedItems,
       claudeReviewEnabled: config.claudeReviewEnabled,
       deploymentMode: config.deploymentMode,
       pro: getProCapabilities(),

@@ -111,6 +111,16 @@ export const config = {
   // this entirely (one always-on account). SYNC_ACTIVE_WINDOW_MINUTES overrides.
   syncActiveWindowMinutes: intFromEnv('SYNC_ACTIVE_WINDOW_MINUTES', 15),
   stallThresholdDays: intFromEnv('STALL_THRESHOLD_DAYS', 3),
+  // ---- Retention / TTL ----
+  // Per-account server data doesn't grow forever: a periodic sweep prunes PRs (and their
+  // whole subtree) whose `updatedAt` is older than this many days. 0 disables it. The
+  // effective cutoff is clamped to at least `backfillDays`, so a forced full sync (which
+  // re-walks `now − backfillDays`) can never re-fetch (resurrect) a just-deleted PR.
+  // Runs in BOTH modes (local + cloud). RETENTION_DAYS overrides.
+  retentionDays: intFromEnv('RETENTION_DAYS', 180),
+  // When the retention sweep runs (node-cron). Daily at 03:00 by default; off-peak so a
+  // large delete doesn't contend with the 5-minute sync. RETENTION_CRON overrides.
+  retentionCron: process.env.RETENTION_CRON ?? '0 3 * * *',
   // Disable the periodic scheduler (used by scripts/tests).
   disableScheduler: process.env.DISABLE_SCHEDULER === 'true',
 

@@ -1,160 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import type {
-  CheckRun,
   PrDetail as PrDetailT,
   ReviewState,
   User,
 } from '@pierre-review/shared';
-import {
-  CHECK_STATE_META,
-  CI_META,
-  dateTime,
-  mergeWarning,
-  relativeTime,
-} from '../lib/ui.js';
-import { api } from '../api/client.js';
+import { CI_META, dateTime, mergeWarning, relativeTime } from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
 import { Markdown } from './Markdown.js';
 import { ApproveControl } from './ApproveControl.js';
-
-// A GitHub Actions check's detailsUrl is .../actions/runs/<runId>/job/<jobId>. The
-// backend parses jobId into the field, but we ALSO derive it from the url here so a
-// PR detail cached before this feature shipped (url present, jobId absent) still gets
-// the log viewer instead of degrading to a plain link.
-const ACTIONS_JOB_RE = /\/actions\/runs\/\d+\/job\/(\d+)/;
-function jobIdOf(check: CheckRun): number | null {
-  if (check.jobId != null) return check.jobId;
-  const m = check.url ? ACTIONS_JOB_RE.exec(check.url) : null;
-  return m ? Number(m[1]) : null;
-}
-
-// One check row. A FAILED GitHub Actions check (it resolves a jobId from its
-// detailsUrl) becomes a click-to-expand inline log viewer — the tail of the job's
-// logs, fetched on demand and auto-scrolled to the bottom (the failure is at the end).
-// Everything else keeps the original external-link/plain row.
-function CheckRow({ prId, check }: { prId: number; check: CheckRun }): JSX.Element {
-  const m = CHECK_STATE_META[check.state];
-  const jobId = jobIdOf(check);
-  const loggable =
-    jobId != null && (check.state === 'failure' || check.state === 'error');
-  const [expanded, setExpanded] = useState(false);
-  const logs = useQuery({
-    queryKey: ['check-logs', prId, jobId],
-    queryFn: () => api.checkLogs(prId, jobId!, 200),
-    enabled: expanded && loggable,
-    staleTime: Infinity, // a finished job's logs are immutable
-    gcTime: 5 * 60_000,
-  });
-  const preRef = useRef<HTMLPreElement>(null);
-  // Scroll to the bottom once the logs render — the failure is at the tail.
-  useLayoutEffect(() => {
-    if (expanded && logs.data?.available) {
-      const el = preRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
-    }
-  }, [expanded, logs.data]);
-
-  const dot = (
-    <span
-      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
-      style={{ backgroundColor: m.color }}
-      title={m.label}
-    >
-      {m.icon}
-    </span>
-  );
-  const gitHubLink = check.url ? (
-    <a
-      href={check.url}
-      target="_blank"
-      rel="noreferrer noopener"
-      onClick={(e) => e.stopPropagation()}
-      className="text-blue-500 hover:underline"
-    >
-      Open on GitHub ↗
-    </a>
-  ) : null;
-
-  if (!loggable) {
-    const inner = (
-      <span className="flex items-center gap-2">
-        {dot}
-        <span className="min-w-0 truncate" title={check.name}>
-          {check.name}
-        </span>
-        <span className="ml-auto shrink-0 text-xs text-gray-400">{m.label}</span>
-      </span>
-    );
-    return (
-      <li className="text-xs">
-        {check.url ? (
-          <a
-            href={check.url}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="block rounded px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800"
-          >
-            {inner}
-          </a>
-        ) : (
-          <div className="px-1 py-0.5">{inner}</div>
-        )}
-      </li>
-    );
-  }
-
-  return (
-    <li className="text-xs">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        className="block w-full rounded px-1 py-0.5 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
-      >
-        <span className="flex items-center gap-2">
-          {dot}
-          <span className="min-w-0 truncate" title={check.name}>
-            {check.name}
-          </span>
-          <span className="ml-auto flex shrink-0 items-center gap-1.5 text-gray-400">
-            <span className="text-xs">{m.label}</span>
-            <span className="text-[10px] font-medium text-blue-500">
-              {expanded ? '▾ hide logs' : '▸ logs'}
-            </span>
-          </span>
-        </span>
-      </button>
-      {expanded && (
-        <div className="mb-1 mt-1">
-          {logs.isLoading ? (
-            <div className="px-1 py-2 text-gray-400">Loading logs…</div>
-          ) : logs.data?.available ? (
-            <>
-              <div className="mb-1 flex items-center justify-between px-1 text-[10px] text-gray-400">
-                <span>
-                  last {logs.data.returnedLines} of {logs.data.totalLines} lines
-                </span>
-                {gitHubLink}
-              </div>
-              <pre
-                ref={preRef}
-                className="max-h-[40rem] overflow-auto whitespace-pre rounded bg-gray-900 p-2 font-mono text-[11px] leading-[1.45] text-gray-100"
-              >
-                {logs.data.text || '(empty log)'}
-              </pre>
-            </>
-          ) : (
-            <div className="px-1 py-2 text-gray-400">
-              {logs.data?.reason ?? "Couldn't load logs."} {gitHubLink}
-            </div>
-          )}
-        </div>
-      )}
-    </li>
-  );
-}
+import { ChecksList, CiRerunControl } from './CheckList.js';
+import { AiSummary } from './AiSummary.js';
 
 // Per-state styling for the "Reviewers" row badges (everyone who submitted a
 // review, not just approvers): the badge hue + leading glyph hint at each
@@ -501,13 +357,16 @@ export function ChecksTab({
 
       {pr.body != null && pr.body.trim() !== '' && <PrSummary body={pr.body} />}
 
+      <AiSummary pr={pr} />
+
       {checks.length > 0 && (
         <Row label="Checks">
-          <ul className="space-y-1">
-            {checks.map((c, i) => (
-              <CheckRow key={`${c.name}-${i}`} prId={pr.id} check={c} />
-            ))}
-          </ul>
+          <ChecksList prId={pr.id} checks={checks} />
+          <CiRerunControl
+            prId={pr.id}
+            checks={checks}
+            viewerCanPush={pr.viewerCanPush}
+          />
         </Row>
       )}
 

@@ -109,6 +109,7 @@ const tsBound = (d: Date): Date | number =>
   isPg ? d : Math.floor(d.getTime() / 1000);
 
 const {
+  accounts,
   repos,
   users,
   pullRequests,
@@ -1945,6 +1946,67 @@ async function getClaudeReviewFeedItems(
     });
   }
   return out;
+}
+
+// ---- Activity-Feed "seen" marker (server-side, per account) ----
+
+// The account's last feed-view timestamp (null until the first view).
+export async function getFeedLastSeenAt(accountId: number): Promise<Date | null> {
+  const rows = await db
+    .select({ at: accounts.feedLastSeenAt })
+    .from(accounts)
+    .where(eq(accounts.id, accountId))
+    .limit(1)
+    .execute();
+  return rows[0]?.at ?? null;
+}
+
+// Record that the account has now viewed the feed (bumps the "seen" marker to now).
+export async function markFeedSeen(accountId: number): Promise<Date> {
+  const now = new Date();
+  await db
+    .update(accounts)
+    .set({ feedLastSeenAt: now })
+    .where(eq(accounts.id, accountId))
+    .execute();
+  return now;
+}
+
+// How many FYI (My-Turn) feed items are NEW since `since` — i.e. activity events (all
+// feed types except plain commit pushes) that occurred after `since`, on a PR the viewer
+// PARTICIPATES in, by someone other than the viewer. Mirrors the feed's `isMyTurn` rule
+// (getConsolidatedFeed) as a bounded count for the Welcome-back banner; scoped to the
+// account and cheap because `since` is normally recent (few rows). Returns 0 when there's
+// no viewer identity or no baseline.
+export async function countNewMyTurnFeedItems(
+  accountId: number,
+  since: Date,
+): Promise<number> {
+  const localUserId = await getAccountUserId(accountId);
+  if (localUserId == null) return 0;
+  const rows = await db
+    .select({ prId: events.prId, actorId: events.actorId })
+    .from(events)
+    .where(
+      and(
+        eq(events.accountId, accountId),
+        gt(events.occurredAt, since),
+        ne(events.type, 'commit_pushed'),
+      ),
+    )
+    .execute();
+  const prIds = [
+    ...new Set(rows.map((r) => r.prId).filter((x): x is number => x != null)),
+  ];
+  if (prIds.length === 0) return 0;
+  const participation = await getParticipatingPrIds(accountId, localUserId, prIds);
+  let n = 0;
+  for (const r of rows) {
+    if (r.prId != null && r.actorId !== localUserId && participation.all.has(r.prId)) {
+      n++;
+    }
+  }
+  return n;
 }
 
 export async function getConsolidatedFeed(

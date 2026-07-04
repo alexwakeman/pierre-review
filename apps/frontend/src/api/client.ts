@@ -12,6 +12,8 @@ import type {
   ApprovePrResult,
   CheckLogsResponse,
   CiAnalysisResponse,
+  CiRerunBody,
+  CiRerunResult,
   FailingCheckInput,
   GenerateFixBody,
   PrSummaryResponse,
@@ -161,6 +163,11 @@ export const api = {
     get<CheckLogsResponse>(
       `/api/prs/${prId}/checks/${jobId}/logs${tail ? `?tail=${tail}` : ''}`,
     ),
+  // Re-trigger a GitHub Actions workflow run (needs repo write access).
+  rerunCi: (prId: number, body: CiRerunBody) =>
+    fetch(`/api/prs/${prId}/ci/rerun`, jsonBody('POST', body)).then((r) =>
+      handle<CiRerunResult>(r),
+    ),
 
   // ---- PR write actions ----
   replyToThread: (threadId: number, body: ReplyToThreadBody) =>
@@ -195,6 +202,11 @@ export const api = {
   // `search` string carries the active repo/member scope (repoIds/userIds).
   consolidatedFeed: (search: string) =>
     get<ConsolidatedFeedResponse>(`/api/activity/feed${search ? `?${search}` : ''}`),
+  // Mark the Activity Feed as seen (server-side "seen" marker → resets the new-FYI count).
+  markFeedSeen: () =>
+    fetch('/api/activity/feed/mark-seen', jsonBody('POST')).then((r) =>
+      handle<{ feedLastSeenAt: string }>(r),
+    ),
   // Repo-scoped Claude review history (all runs per PR, newest-first). Gated on
   // config.claudeReviewEnabled; the response's `enabled` flag reflects that.
   repoClaudeReviews: (repoId: number) =>

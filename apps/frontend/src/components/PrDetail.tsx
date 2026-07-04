@@ -12,7 +12,7 @@ import { buildQuotedReply, dateTime, indexUsers, PR_STATE_META, relativeTime } f
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
 import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
-import { ExternalLinkIcon, MagnifierIcon } from './Icons.js';
+import { ExternalLinkIcon, MagnifierIcon, OctocatIcon, TimelineIcon } from './Icons.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
 import { ChangesTab } from './ChangesTab.js';
@@ -61,7 +61,7 @@ const TAB_LABELS: Record<Tab, string> = {
   activity: 'Activity',
   changes: 'Changes',
   claude_review: 'Claude Review',
-  ai_fix: 'AI Fix',
+  ai_fix: 'AI Analysis and Fix',
 };
 
 interface ActivityRow {
@@ -418,6 +418,7 @@ export function PrDetail({
   const qc = useQueryClient();
   const openPrFocused = useFilters((s) => s.openPrFocused);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
+  const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const activityFocus = useFilters((s) => s.activityFocus);
   const consumeActivityFocus = useFilters((s) => s.consumeActivityFocus);
   const activityFocusForPr = useMemo(
@@ -436,13 +437,8 @@ export function PrDetail({
   const commentFocusForPr =
     commentFocus && pr && commentFocus.prId === pr.id ? commentFocus.commentId : null;
 
-  // Pinned-tabs (feature: pin a PR as a full-screen tab under the Open-PRs bar).
-  const pinPr = usePinnedTabs((s) => s.pin);
-  const unpinPr = usePinnedTabs((s) => s.unpin);
+  // Keep a full-screen pr-detail tab's label fresh if the PR (re)loads renamed.
   const syncPinnedMeta = usePinnedTabs((s) => s.syncMeta);
-  const isPinned = usePinnedTabs((s) =>
-    pr != null ? s.tabs.some((t) => t.kind === 'pr-detail' && t.prId === pr.id) : false,
-  );
 
   // Selecting a thread (e.g. via a timeline marker) forces the Threads tab,
   // where the thread list lives and auto-scrolls to the selected thread.
@@ -538,28 +534,36 @@ export function PrDetail({
           >
             {pr.isDraft ? 'Draft' : stateMeta.label}
           </span>
-          {/* Item 5: the title now acts as "Show" (centre + glow this PR on the shared
-              board); a separate ↗ opens GitHub. */}
+          {/* The title + the ↗ icon both open this PR full-screen as its own (focused)
+              tab. Opening a tab IS pinning it, so there's no separate pin control. */}
           <button
             type="button"
-            onClick={() => openPrFocused(pr.id)}
+            onClick={() => openPrDetailTab(pinnedMetaOf(pr, usersById))}
             className="min-w-0 truncate text-left text-sm font-semibold hover:underline"
-            title="Show this PR on the timeline"
+            title="Open full-screen in its own tab"
           >
             <span className="text-gray-400">#{pr.number}</span> {pr.title}
           </button>
-          <a
-            href={pr.githubUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="shrink-0 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-            title="Open this PR on GitHub"
-            aria-label="Open this PR on GitHub"
+          <button
+            type="button"
+            onClick={() => openPrDetailTab(pinnedMetaOf(pr, usersById))}
+            className="shrink-0 rounded p-0.5 text-blue-500 hover:text-blue-600"
+            title="Open full-screen — this PR in its own tab"
+            aria-label="Open this PR full-screen in its own tab"
           >
             <ExternalLinkIcon size={13} />
-          </a>
-          {/* Focus — between the title and the Pin (item 5); a blue magnifier that opens
-              this PR's own isolated timeline tab. */}
+          </button>
+          {/* Show on the shared timeline (centre + glow; distinct from Focus Mode). */}
+          <button
+            type="button"
+            onClick={() => openPrFocused(pr.id)}
+            className="shrink-0 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            title="Show this PR on the timeline"
+            aria-label="Show this PR on the timeline"
+          >
+            <TimelineIcon size={15} />
+          </button>
+          {/* Focus — a blue magnifier that opens this PR's own isolated timeline tab. */}
           <button
             type="button"
             onClick={() => openPrFocusTab(pinnedMetaOf(pr, usersById))}
@@ -569,37 +573,17 @@ export function PrDetail({
           >
             <MagnifierIcon size={15} />
           </button>
-          <button
-            type="button"
-            onClick={() => (isPinned ? unpinPr(pr.id) : pinPr(pinnedMetaOf(pr, usersById)))}
-            aria-pressed={isPinned}
-            className={`shrink-0 rounded p-0.5 ${
-              isPinned
-                ? 'text-blue-500 hover:text-blue-600'
-                : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-            }`}
-            title={
-              isPinned
-                ? 'Unpin this PR (remove its tab)'
-                : 'Pin this PR as a tab above the timeline'
-            }
-            aria-label={isPinned ? 'Unpin this PR' : 'Pin this PR as a tab'}
+          {/* Open on GitHub (Octocat). */}
+          <a
+            href={pr.githubUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="shrink-0 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            title="Open this PR on GitHub"
+            aria-label="Open this PR on GitHub"
           >
-            <svg
-              viewBox="0 0 24 24"
-              width="15"
-              height="15"
-              fill={isPinned ? 'currentColor' : 'none'}
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <line x1="12" y1="17" x2="12" y2="22" />
-              <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
-            </svg>
-          </button>
+            <OctocatIcon size={15} />
+          </a>
           {pr.isStalled && (
             <span
               className="rounded bg-orange-500/15 px-1.5 py-0.5 text-xs font-medium text-orange-500"

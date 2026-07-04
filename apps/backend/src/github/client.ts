@@ -95,6 +95,33 @@ export function ghRestPostFor<T>(
   return ghRest<T>(token, 'POST', path, body);
 }
 
+// REST POST to an endpoint that returns NO body (201/204 No Content) — e.g. the Actions
+// "rerun" / "rerun-failed-jobs" endpoints. Same auth + fail-loud-on-non-2xx as ghRest,
+// but does NOT call res.json() (which would throw `Unexpected end of JSON input` on the
+// empty success body). Returns nothing.
+export async function ghRestPostNoContent(
+  token: string,
+  path: string,
+  body?: unknown,
+): Promise<void> {
+  const res = await fetch(`https://api.github.com${path}`, {
+    method: 'POST',
+    headers: {
+      authorization: `token ${token}`,
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': '2022-11-28',
+      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(
+      `GitHub REST POST ${path} -> ${res.status}: ${text.slice(0, 300)}`,
+    );
+  }
+}
+
 // ---- Local-only convenience wrappers ----
 // Use the gh CLI token. ONLY for code paths that run in local mode — the Claude
 // Review posting path (post-review.ts) and clone-manager.ts, both force-disabled

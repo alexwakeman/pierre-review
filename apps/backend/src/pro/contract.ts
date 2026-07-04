@@ -301,6 +301,13 @@ export interface ProContext {
   // Plugin-owned dual-dialect migrator hook (CREATE TABLE IF NOT EXISTS + its own
   // pro_migrations bookkeeping; see pro/migrate.ts).
   registerMigrations(sqliteFolder: string, pgFolder: string): Promise<void>;
+  // Retention hook: the core TTL sweep (db/retention.ts) deletes core PR subtrees; the
+  // plugin registers a handler here to prune ITS OWN tables (ai_fixes / ai_pr_analyses /
+  // review_learnings) for the same PR ids — core can't name plugin tables (open-core
+  // boundary). Called once per delete batch. Inert in OSS (no plugin → never registered).
+  registerRetention(
+    handler: (args: { prIds: number[] }) => Promise<void> | void,
+  ): void;
   // The cheap-tier completion seam (review/llm.ts) — so the plugin adds no new
   // Anthropic dependency.
   llm: {
@@ -329,7 +336,7 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  apiVersion: 3; // contract handshake; host warns on mismatch
+  apiVersion: 4; // contract handshake; host warns on mismatch
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 

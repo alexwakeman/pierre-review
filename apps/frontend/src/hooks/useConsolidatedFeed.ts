@@ -1,7 +1,22 @@
-import { useInfiniteQuery } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useMemo } from 'react';
 import type { ConsolidatedFeedItem, ConsolidatedFeedResponse, User } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+
+// Record that the cross-repo Activity Feed has been viewed (server-side "seen" marker).
+// On success, refresh /api/me so the Welcome-back banner's "new since last seen" count
+// resets to 0. Fire-and-forget from the feed view.
+export function useMarkFeedSeen() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.markFeedSeen(),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['me'] }),
+  });
+}
 
 // How many feed items load initially and per "Load more" click. Only these are fetched
 // AND rendered — hidden items cost nothing (no transfer, no DOM), keeping the Activity fast

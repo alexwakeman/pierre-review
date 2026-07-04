@@ -8,7 +8,7 @@ import type {
   ReviewState,
   User,
 } from '@pierre-review/shared';
-import { useConsolidatedFeed } from '../../hooks/useConsolidatedFeed.js';
+import { useConsolidatedFeed, useMarkFeedSeen } from '../../hooks/useConsolidatedFeed.js';
 import { useMe } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
 import { useTimeline, useUsers } from '../../hooks/useTimeline.js';
@@ -123,6 +123,19 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   // active repo filter (a FilterBar change refetches via the query key). The bots toggle +
   // allow-list flow in too, so the feed hides/keeps the same bots the timeline does.
   const effectiveRepoIds = repoId != null ? [repoId] : storeRepoIds;
+
+  // Viewing the CROSS-REPO feed marks it seen server-side (once per mount), resetting the
+  // "new FYI since you were last here" count that drives the Welcome-back banner. A
+  // per-repo feed (repoId set) doesn't touch the global marker.
+  const markFeedSeen = useMarkFeedSeen();
+  const markedSeenRef = useRef(false);
+  useEffect(() => {
+    if (repoId == null && !markedSeenRef.current) {
+      markedSeenRef.current = true;
+      markFeedSeen.mutate();
+    }
+  }, [repoId, markFeedSeen]);
+
   const { items, users, hasMore, loadMore, isFetchingMore } = useConsolidatedFeed({
     repoIds: effectiveRepoIds,
     userIds,

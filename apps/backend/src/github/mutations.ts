@@ -12,6 +12,7 @@ import {
   ghRestGetDiff,
   ghRestGetFor,
   ghRestPostFor,
+  ghRestPostNoContent,
 } from './client.js';
 
 // ---- Review-thread reply (GraphQL) ----
@@ -502,4 +503,27 @@ export async function createPullRequest(
     },
   );
   return { number: res.number, url: res.html_url };
+}
+
+// ---- Re-trigger a GitHub Actions workflow run ----
+
+// Re-run a workflow run (per-account). `mode: 'failed'` reruns only the failed jobs
+// (POST .../runs/:runId/rerun-failed-jobs); `mode: 'all'` reruns the whole run
+// (POST .../runs/:runId/rerun). GitHub returns 201 with an EMPTY body and queues the
+// run asynchronously; the caller has no run id to poll (the refreshed status arrives
+// on the next sync). Uses the no-content POST helper so the empty success body isn't
+// JSON-parsed. Needs a token with actions:write — fails loud (throws) otherwise,
+// matching the other write helpers.
+export async function rerunWorkflowRun(
+  token: string,
+  owner: string,
+  name: string,
+  runId: number,
+  mode: 'failed' | 'all',
+): Promise<void> {
+  const suffix = mode === 'failed' ? 'rerun-failed-jobs' : 'rerun';
+  await ghRestPostNoContent(
+    token,
+    `/repos/${owner}/${name}/actions/runs/${runId}/${suffix}`,
+  );
 }

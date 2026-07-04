@@ -31,8 +31,12 @@ body {
   font-size: 1.75rem;
   line-height: 1;
   letter-spacing: 0.3px;
-  /* Nudge the baseline so the script sits optically centred next to the meta text. */
-  padding-bottom: 2px;
+  /* Great Vibes reserves a large descent (~11px) for flourishes that "Pierre" doesn't
+     use (actual ink descent ~1px), so the baseline sits low and the wordmark's ink
+     rides high in its line box — leaving the flex-centred box optically top-heavy in
+     the header. Nudge the glyphs DOWN so the INK (not the metrics box) is centred.
+     translateY keeps layout/header height untouched (unlike padding). */
+  transform: translateY(5px);
   /* Brand mark, not selectable text — show the default arrow, not the I-beam caret. */
   cursor: default;
   user-select: none;

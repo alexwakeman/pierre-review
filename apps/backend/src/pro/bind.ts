@@ -17,6 +17,7 @@ import {
 } from '../github/mutations.js';
 import { fetchActionsJobLog } from '../github/actions-logs.js';
 import { applyAndPush } from '../coding/git-ops.js';
+import { registerRetentionHandler } from '../db/retention.js';
 import { runPluginMigrations } from './migrate.js';
 import { setProCapabilities } from './contract.js';
 import type { ProContext, ProPlugin } from './contract.js';
@@ -49,7 +50,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   if (!mod) return;
 
   const plugin = (mod.default ?? mod) as ProPlugin;
-  if (plugin?.apiVersion !== 3 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 4 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -71,6 +72,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
     isPg,
     registerMigrations: (sqliteFolder, pgFolder) =>
       runPluginMigrations(sqliteFolder, pgFolder),
+    registerRetention: (handler) => registerRetentionHandler(handler),
     llm: {
       complete: cheapComplete,
       detectAuth: () => {

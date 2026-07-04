@@ -52,6 +52,9 @@ export const accounts = pgTable('accounts', {
   // syncs only accounts active within config.syncActiveWindowMinutes, so a tenant
   // with no open tab stops being re-synced. Null until first activity.
   lastActiveAt: timestamp('last_active_at', { withTimezone: true, mode: 'date' }),
+  // Last time this account viewed the Activity Feed — server-side "seen" marker (see the
+  // sqlite twin). Drives "new FYI since you were last here"; null until the first view.
+  feedLastSeenAt: timestamp('feed_last_seen_at', { withTimezone: true, mode: 'date' }),
 });
 
 export const repos = pgTable(

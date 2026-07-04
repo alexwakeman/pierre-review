@@ -203,6 +203,24 @@ export interface CheckLogsResponse {
   returnedLines: number;
 }
 
+// Re-trigger a GitHub Actions workflow run for a PR (POST /api/prs/:id/ci/rerun).
+// 'failed' reruns only the failed jobs of the run (/rerun-failed-jobs); 'all' reruns
+// the whole run from scratch (/rerun). Requires repo write access (re-checked
+// server-side); works local + cloud via the per-account token.
+export type CiRerunMode = 'failed' | 'all';
+
+export interface CiRerunBody {
+  // The Actions run id to rerun (CheckRun.runId; null-runId checks aren't rerunnable).
+  runId: number;
+  mode: CiRerunMode;
+}
+
+export interface CiRerunResult {
+  status: 'queued';
+  runId: number;
+  mode: CiRerunMode;
+}
+
 // An outstanding review request on a PR (user resolved via the users array;
 // team requests carry only a name).
 export interface RequestedReviewer {
@@ -308,6 +326,11 @@ export interface ProCapabilities {
 export interface MeResponse {
   user: LocalUser | null;
   counts: MyTurnCounts;
+  // Server-side Activity-Feed "seen" marker: when the account last viewed the feed
+  // (ISO, null until the first view), and how many FYI (My-Turn) feed items are new
+  // since then. Drives the Welcome-back banner (server-truth, consistent across devices).
+  feedLastSeenAt: string | null;
+  newFeedItems: number;
   // Whether the Claude Review feature is enabled (ENABLE_CLAUDE_REVIEW). The
   // frontend hides the Claude Review tab when false.
   claudeReviewEnabled: boolean;
@@ -1504,15 +1527,19 @@ export interface AiFix {
   finishedAt: string | null;
 }
 
-// A lighter shape for the run history list.
+// A lighter shape for the run history list — enough to show every fix Pierre made
+// for a PR with its commit message + where it landed (branch / PR / when).
 export interface AiFixSummary {
   id: number;
   status: AiFixStatus;
   model: string;
   seed: AiFixSeed;
+  commitMessage: string | null;
   filesChanged: string[];
   pushedBranch: string | null;
+  pushedPrNumber: number | null;
   pushedPrUrl: string | null;
+  pushedAt: string | null;
   createdAt: string;
   finishedAt: string | null;
 }

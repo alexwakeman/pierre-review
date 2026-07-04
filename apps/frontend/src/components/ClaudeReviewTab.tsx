@@ -1110,12 +1110,20 @@ function ReviewLearningsPanel({ prId }: { prId: number }): JSX.Element | null {
 }
 
 // Build the seed prompt for the AI fixer from a completed review: the reviewer's own
-// draft body when present, else Claude's summary, plus each included finding.
+// draft body when present, else Claude's summary, plus each ACTIONABLE finding. We
+// only hand the fixer real issues — findings the user IGNORED (included === false) are
+// skipped, and non-actionable severities (praise and open questions) are dropped so
+// the agent doesn't try to "fix" a compliment or a question. blocker/warning/nit stay.
 function buildReviewSeed(review: ClaudeReview): string {
   const parts: string[] = [];
   const head = review.userBody?.trim() || review.summary?.trim();
   if (head) parts.push(head);
-  const findings = (review.findings ?? []).filter((f) => f.included !== false);
+  const findings = (review.findings ?? []).filter(
+    (f) =>
+      f.included !== false &&
+      f.severity !== 'praise' &&
+      f.severity !== 'question',
+  );
   for (const f of findings) {
     const loc = f.line != null ? `${f.path}:${f.line}` : f.path;
     const body = (f.editedBody ?? f.body ?? '').trim();

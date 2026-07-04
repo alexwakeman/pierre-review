@@ -4,7 +4,12 @@ import type {
   RepoClaudeReviewsResponse,
   ConsolidatedFeedResponse,
 } from '@pierre-review/shared';
-import { getActivity, getConsolidatedFeed, listClaudeReviewsByRepo } from '../../db/queries.js';
+import {
+  getActivity,
+  getConsolidatedFeed,
+  listClaudeReviewsByRepo,
+  markFeedSeen,
+} from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 function parseIntList(raw: string | undefined): number[] | null {
@@ -49,6 +54,14 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       excludeBots: q.excludeBots === 'true',
       allowBotIds: parseIntList(q.allowBotIds),
     });
+  });
+
+  // Mark the Activity Feed as seen (bumps the account's server-side "seen" marker to
+  // now). Called when the user views the feed; resets the "new FYI since last here"
+  // count that drives the Welcome-back banner. Account-scoped; no body.
+  app.post('/api/activity/feed/mark-seen', async (req) => {
+    const at = await markFeedSeen(accountIdOf(req));
+    return { feedLastSeenAt: at.toISOString() };
   });
 
   // Repo-scoped Claude-review history for the Activity single-repo console. Ownership +

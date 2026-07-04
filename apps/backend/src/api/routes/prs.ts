@@ -6,6 +6,8 @@ import type {
   ApprovePrBody,
   ApprovePrResult,
   CheckLogsResponse,
+  CiRerunBody,
+  CiRerunResult,
   CreatePrCommentBody,
   CreatePrCommentResult,
   MarkViewedBody,
@@ -35,6 +37,7 @@ import {
   fetchHeadShaFor,
   fetchPrFilesWithPatch,
   postInlineComment,
+  rerunWorkflowRun,
   submitPrReview,
 } from '../../github/mutations.js';
 import { hydratePrDetail } from '../../sync/hydrate-detail.js';
@@ -93,6 +96,19 @@ const markViewedSchema = {
     type: 'object',
     additionalProperties: false,
     properties: { sha: { type: 'string' } },
+  },
+};
+
+const ciRerunSchema = {
+  ...idParamSchema,
+  body: {
+    type: 'object',
+    required: ['runId', 'mode'],
+    additionalProperties: false,
+    properties: {
+      runId: { type: 'integer', minimum: 1 },
+      mode: { type: 'string', enum: ['failed', 'all'] },
+    },
   },
 };
 
@@ -481,6 +497,51 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         tail ?? 200,
       );
       return result;
+    },
+  );
+
+  // Re-trigger a GitHub Actions workflow run for this PR. The `runId` comes from
+  // CheckRun.runId (Actions checks only). Server re-checks write access (WRITE/
+  // MAINTAIN/ADMIN, matching viewerCanPush — no author exclusion, unlike approve),
+  // then queues the rerun via the per-account token (local + cloud). GitHub runs it
+  // asynchronously; the refreshed check states arrive on the next sync.
+  app.post(
+    '/api/prs/:id/ci/rerun',
+    { schema: ciRerunSchema },
+    async (req, reply) => {
+      const { id } = req.params as { id: number };
+      const { runId, mode } = req.body as CiRerunBody;
+      const accountId = accountIdOf(req);
+
+      const ctx = await getPrWriteContext(id, accountId);
+      if (!ctx) {
+        reply.status(404);
+        return { error: 'NotFound', message: `PR ${id} not found` };
+      }
+
+      const canRerun = ['WRITE', 'MAINTAIN', 'ADMIN'].includes(
+        ctx.viewerPermission ?? '',
+      );
+      if (!canRerun) {
+        reply.status(403);
+        return {
+          error: 'NotPermitted',
+          message: 'You need write access to this repo to re-run CI.',
+        };
+      }
+
+      try {
+        const token = await getAccessToken(accountId);
+        await rerunWorkflowRun(token, ctx.owner, ctx.name, runId, mode);
+        const result: CiRerunResult = { status: 'queued', runId, mode };
+        return result;
+      } catch (err) {
+        reply.status(502);
+        return {
+          error: 'GitHubError',
+          message: err instanceof Error ? err.message : String(err),
+        };
+      }
     },
   );
 }
