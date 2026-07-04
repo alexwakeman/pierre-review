@@ -7,7 +7,12 @@
 // GraphQL note: @octokit/graphql RESERVES the variable name `query`. The
 // operation-variable here is named `input` / etc., never `query`.
 
-import { getGraphqlClientFor, ghRestGetFor, ghRestPostFor } from './client.js';
+import {
+  getGraphqlClientFor,
+  ghRestGetDiff,
+  ghRestGetFor,
+  ghRestPostFor,
+} from './client.js';
 
 // ---- Review-thread reply (GraphQL) ----
 
@@ -342,4 +347,159 @@ export async function fetchHeadShaFor(
     `/repos/${owner}/${name}/pulls/${number}`,
   );
   return pull.head.sha;
+}
+
+// ---- AI Fix: PR head/fork info, unified diff, open PR (all per-account) ----
+
+interface RestPullFull {
+  head: {
+    sha: string;
+    ref: string;
+    repo: { full_name: string } | null;
+  };
+  base: { ref: string; repo: { full_name: string } };
+  maintainer_can_modify: boolean;
+}
+
+// Full head/fork metadata for a PR. `isFork` is true when the head repo differs from
+// the base repo; combined with `maintainer_can_modify` it tells the fixer whether the
+// PR's own head branch can be pushed to (else it must open a new branch in the base
+// repo). head.repo can be null when a fork was deleted — treated as a fork.
+export async function fetchPrHeadInfo(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+): Promise<{
+  headSha: string;
+  headRef: string;
+  headRepoFullName: string;
+  isFork: boolean;
+  maintainerCanModify: boolean;
+  baseRef: string;
+}> {
+  const pull = await ghRestGetFor<RestPullFull>(
+    token,
+    `/repos/${owner}/${name}/pulls/${number}`,
+  );
+  const baseRepoFullName = pull.base.repo.full_name;
+  const headRepoFullName = pull.head.repo?.full_name ?? baseRepoFullName;
+  return {
+    headSha: pull.head.sha,
+    headRef: pull.head.ref,
+    headRepoFullName,
+    isFork: pull.head.repo == null || headRepoFullName !== baseRepoFullName,
+    maintainerCanModify: pull.maintainer_can_modify,
+    baseRef: pull.base.ref,
+  };
+}
+
+interface RestPullMergeable {
+  mergeable: boolean | null;
+  mergeable_state: string;
+  base: { ref: string; sha: string };
+  head: { ref: string; label: string; sha: string; repo: { full_name: string } | null };
+}
+
+// GitHub's OWN mergeability for a PR — a NEAR-INSTANT trunk-conflict signal (one, or
+// two, REST calls) used to offer the rebase/merge/push options without cloning. GitHub
+// computes `mergeable` asynchronously and can briefly return null; we retry once. The
+// `compare` call adds behind/ahead counts + the trunk tip. This reflects the PR as it
+// stands on GitHub (not the not-yet-pushed fix) — a fast approximation; the actual
+// rebase/merge job does the authoritative, with-fix resolution.
+export async function fetchMergeability(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+): Promise<{
+  mergeable: boolean | null;
+  mergeableState: string;
+  baseRef: string;
+  baseSha: string;
+  behindBy: number;
+  aheadBy: number;
+}> {
+  let pull = await ghRestGetFor<RestPullMergeable>(
+    token,
+    `/repos/${owner}/${name}/pulls/${number}`,
+  );
+  if (pull.mergeable === null) {
+    await new Promise((r) => setTimeout(r, 600));
+    pull = await ghRestGetFor<RestPullMergeable>(
+      token,
+      `/repos/${owner}/${name}/pulls/${number}`,
+    );
+  }
+
+  let behindBy = 0;
+  let aheadBy = 0;
+  let baseSha = pull.base.sha;
+  try {
+    // For a fork the head must be qualified `owner:branch` (head.label); same-repo uses
+    // the plain ref. Branch names with slashes are fine literal in the compare path.
+    const headRef = pull.head.repo ? pull.head.label : pull.head.ref;
+    const cmp = await ghRestGetFor<{
+      behind_by: number;
+      ahead_by: number;
+      base_commit: { sha: string };
+    }>(token, `/repos/${owner}/${name}/compare/${pull.base.ref}...${headRef}`);
+    behindBy = cmp.behind_by ?? 0;
+    aheadBy = cmp.ahead_by ?? 0;
+    baseSha = cmp.base_commit?.sha ?? baseSha;
+  } catch {
+    /* compare is best-effort — the mergeable flag is the load-bearing part */
+  }
+
+  return {
+    mergeable: pull.mergeable,
+    mergeableState: pull.mergeable_state,
+    baseRef: pull.base.ref,
+    baseSha,
+    behindBy,
+    aheadBy,
+  };
+}
+
+// The PR's unified diff via the REST API (Accept: application/vnd.github.diff) —
+// cloud-ready, per-account. Bounded implicitly by GitHub's own diff-size limit.
+export async function fetchPrUnifiedDiff(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+): Promise<string> {
+  return ghRestGetDiff(token, `/repos/${owner}/${name}/pulls/${number}`);
+}
+
+interface RestCreatedPull {
+  number: number;
+  html_url: string;
+}
+
+// Open a pull request (per-account). `head` is the branch to merge FROM (in the base
+// repo — the fixer only ever creates branches in the base repo, so no `owner:branch`
+// cross-fork form is needed); `base` the branch to merge INTO.
+export async function createPullRequest(
+  token: string,
+  args: {
+    owner: string;
+    name: string;
+    head: string;
+    base: string;
+    title: string;
+    body: string;
+  },
+): Promise<{ number: number; url: string }> {
+  const res = await ghRestPostFor<RestCreatedPull>(
+    token,
+    `/repos/${args.owner}/${args.name}/pulls`,
+    {
+      title: args.title,
+      head: args.head,
+      base: args.base,
+      body: args.body,
+    },
+  );
+  return { number: res.number, url: res.html_url };
 }

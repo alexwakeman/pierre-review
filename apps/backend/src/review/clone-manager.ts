@@ -53,26 +53,54 @@ function repoCloneDir(owner: string, name: string): string {
   return join(config.cloneDir, `${owner}__${name}`);
 }
 
+/** A tokenized https URL for a repo (used per git op — NEVER persisted to disk). */
+function tokenizedUrl(owner: string, name: string, token: string): string {
+  return `https://x-access-token:${token}@github.com/${owner}/${name}.git`;
+}
+
+/** The token-less https URL a clone's `origin` remote is set to on disk. */
+function plainUrl(owner: string, name: string): string {
+  return `https://github.com/${owner}/${name}.git`;
+}
+
 /**
  * Ensure a long-lived partial clone for `owner/name` exists and return its
  * absolute path. Reused across runs — only the first call actually clones.
  *
  * The clone is blobless (`--filter=blob:none`) and has no working tree
  * (`--no-checkout`); ephemeral per-run worktrees provide the actual checkouts.
- * The remote uses a tokenized https URL so private repos work without extra
- * auth wiring. That token persists only in this user's own ~/.pierre-review
- * clone config — acceptable for a local, single-user tool.
+ *
+ * The clone cache is keyed `owner__name` and SHARED across accounts (in cloud two
+ * tenants can watch the same repo). So the account token is used ONLY for the clone
+ * fetch itself, then the on-disk `origin` remote is rewritten to a token-LESS URL —
+ * no credential is left in `.git/config` for another account to reuse. Every later
+ * fetch/push passes the caller's own tokenized URL explicitly (see fetchPrHead /
+ * git-write.pushBranch). `token` defaults to the local gh token (the Claude Review
+ * path); the Pro fixer passes a per-account token.
  */
-export async function ensureClone(owner: string, name: string): Promise<string> {
+export async function ensureClone(
+  owner: string,
+  name: string,
+  token: string = getGithubToken(),
+): Promise<string> {
   mkdirSync(config.cloneDir, { recursive: true });
   const dir = repoCloneDir(owner, name);
 
   // Reuse an existing clone (presence of .git is our "already cloned" marker).
   if (existsSync(join(dir, '.git'))) return dir;
 
-  const token = getGithubToken();
-  const url = `https://x-access-token:${token}@github.com/${owner}/${name}.git`;
-  await git(['clone', '--filter=blob:none', '--no-checkout', url, dir]);
+  await git([
+    'clone',
+    '--filter=blob:none',
+    '--no-checkout',
+    tokenizedUrl(owner, name, token),
+    dir,
+  ]);
+  // Strip the token from the persisted remote so a different account reusing this
+  // shared clone can't fetch with it.
+  await git(['-C', dir, 'remote', 'set-url', 'origin', plainUrl(owner, name)]).catch(
+    () => {},
+  );
   return dir;
 }
 
@@ -88,17 +116,22 @@ export async function ensureClone(owner: string, name: string): Promise<string> 
  */
 export async function fetchPrHead(
   repoCloneDir: string,
+  owner: string,
+  name: string,
   prNumber: number,
   sha: string,
+  token: string = getGithubToken(),
 ): Promise<void> {
   if (await hasCommit(repoCloneDir, sha)) return;
+  // Fetch via an explicit tokenized URL (not the token-less `origin`) so no
+  // credential is read from / written to the shared clone's config.
   await git([
     '-C',
     repoCloneDir,
     'fetch',
     '--no-tags',
     '--force',
-    'origin',
+    tokenizedUrl(owner, name, token),
     `pull/${prNumber}/head`,
   ]);
 }
@@ -183,12 +216,49 @@ export async function prepWorktree(
   name: string,
   prNumber: number,
   sha: string,
+  token: string = getGithubToken(),
 ): Promise<{ repoCloneDir: string; worktreePath: string }> {
   return withRepoLock(`${owner}/${name}`, async () => {
-    const dir = await ensureClone(owner, name);
-    await fetchPrHead(dir, prNumber, sha);
+    const dir = await ensureClone(owner, name, token);
+    await fetchPrHead(dir, owner, name, prNumber, sha, token);
     const worktreePath = await addWorktree(dir, sha);
     return { repoCloneDir: dir, worktreePath };
+  });
+}
+
+/**
+ * Prepare a worktree checked out at the tip of an arbitrary REF (e.g. the trunk
+ * branch), under the per-repo lock. Fetches `ref` via an explicit tokenized URL (never
+ * the token-less origin), resolves FETCH_HEAD, and adds a detached worktree there.
+ * Used by the AI-Fix trunk-reconciliation path (coding/merge.ts pushResolved) which
+ * needs a checkout at the trunk tip rather than the PR head. Returns the resolved sha
+ * too. Throws if the ref can't be fetched.
+ */
+export async function prepWorktreeAtRef(
+  owner: string,
+  name: string,
+  ref: string,
+  token: string = getGithubToken(),
+): Promise<{ repoCloneDir: string; worktreePath: string; sha: string }> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await ensureClone(owner, name, token);
+    await git([
+      '-C',
+      dir,
+      'fetch',
+      '--no-tags',
+      '--force',
+      tokenizedUrl(owner, name, token),
+      ref,
+    ]);
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', dir, 'rev-parse', 'FETCH_HEAD'],
+      { timeout: 10_000, maxBuffer: 1024 * 1024 },
+    );
+    const sha = stdout.trim();
+    const worktreePath = await addWorktree(dir, sha);
+    return { repoCloneDir: dir, worktreePath, sha };
   });
 }
 

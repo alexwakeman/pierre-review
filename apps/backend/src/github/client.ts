@@ -64,6 +64,27 @@ export async function ghRestGetText(
   return { status: res.status, ok: res.ok, text };
 }
 
+// REST GET returning a resource in GitHub's raw `diff` media type (Accept:
+// application/vnd.github.diff) — the per-account, cloud-ready way to fetch a PR's
+// unified diff (vs the local-only `gh pr diff`). Throws on a non-2xx status.
+export async function ghRestGetDiff(token: string, path: string): Promise<string> {
+  const res = await fetch(`https://api.github.com${path}`, {
+    method: 'GET',
+    headers: {
+      authorization: `token ${token}`,
+      accept: 'application/vnd.github.diff',
+      'x-github-api-version': '2022-11-28',
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(
+      `GitHub REST GET(diff) ${path} -> ${res.status}: ${text.slice(0, 300)}`,
+    );
+  }
+  return res.text();
+}
+
 // REST POST (submitting a PR review — inline line comments require the REST
 // reviews endpoint) for a specific account's token.
 export function ghRestPostFor<T>(

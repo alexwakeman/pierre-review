@@ -212,6 +212,23 @@ export const config = {
   // triggering; further starts return 'busy' until the queue drains.
   reviewMaxQueued: intFromEnv('REVIEW_MAX_QUEUED', 50),
 
+  // ---- AI Fix (Pro: agentic code fixer) — core infra knobs ----
+  // The write-capable fixer (packages/pro/ai-fix) reuses the review clone/agent
+  // machinery. A runaway fixer is pricier than a review (it edits + re-reads files),
+  // so the caps are a touch higher on turns but the USD ceiling is the real guard.
+  // Concurrency is 1: the fixer relies on ambient Claude auth WITHOUT mutating
+  // process.env (which would race the review manager), so only one fix runs at once.
+  aiFixMaxTurns: intFromEnv('AI_FIX_MAX_TURNS', 40),
+  aiFixBudgetUsd: floatFromEnv('AI_FIX_BUDGET_USD', 3),
+  aiFixConcurrency: intFromEnv('AI_FIX_CONCURRENCY', 1),
+  // Refuse a fix whose captured patch exceeds this (a runaway diff shouldn't bloat a
+  // DB row). ~1 MiB of unified diff is already a very large change.
+  aiFixPatchMaxBytes: intFromEnv('AI_FIX_PATCH_MAX_BYTES', 1024 * 1024),
+  // Cap the per-commit conflict-resolution loop during a rebase onto the trunk: each
+  // rebased commit that conflicts gets one resolver pass, up to this many steps, then
+  // we abort the rebase rather than loop forever on a pathological history.
+  aiFixRebaseMaxSteps: intFromEnv('AI_FIX_REBASE_MAX_STEPS', 10),
+
   // ---- Claude Review routing (diff-only vs worktree) — THE THRESHOLDS ----
   // The deterministic pre-check (review/routing.ts) decides, BEFORE the agent runs,
   // whether a PR can be reviewed from its diff alone (fast, tool-less, no worktree)

@@ -120,6 +120,10 @@ export interface FilterState {
   // Matched against the loaded PR by `prId`; cleared by PrDetail once it switches.
   claudeTabFocus: { prId: number } | null;
 
+  // transient: "Generate fix from this review" → open the PR's AI Fix tab, seeded
+  // with the review text. Matched by `prId`; cleared by PrDetail once it switches.
+  aiFixTabFocus: { prId: number; reviewText?: string } | null;
+
   // open PRs strip
   stripCollapsed: boolean;
   stripFilter: StripFilter;
@@ -267,6 +271,10 @@ export interface FilterState {
   // review). PrDetail consumes it once it has switched tabs.
   openClaudeReview: (prId: number) => void;
   consumeClaudeTabFocus: () => void;
+  // Open a PR's AI Fix tab, optionally seeded with a review to fix. PrDetail consumes
+  // it once it has switched tabs.
+  openAiFixFromReview: (prId: number, reviewText?: string) => void;
+  consumeAiFixTabFocus: () => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
   // records the added repo id so the modal can scope to just that repo.
@@ -462,6 +470,7 @@ function freshDefaults(): FilterData {
     activityFocus: null,
     commentFocus: null,
     claudeTabFocus: null,
+    aiFixTabFocus: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
@@ -610,6 +619,14 @@ export const useFilters = create<FilterState>((set, get) => ({
       claudeTabFocus: { prId },
     }),
   consumeClaudeTabFocus: () => set({ claudeTabFocus: null }),
+  openAiFixFromReview: (prId, reviewText) =>
+    set({
+      selectedPrId: prId,
+      selectedThreadId: null,
+      selectedCommentId: null,
+      aiFixTabFocus: { prId, reviewText },
+    }),
+  consumeAiFixTabFocus: () => set({ aiFixTabFocus: null }),
   requestSyncModal: (repoId: number) =>
     set((s) => ({ syncModalSignal: s.syncModalSignal + 1, syncModalRepoId: repoId })),
   bumpClaudeReviewKickoff: () =>

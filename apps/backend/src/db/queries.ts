@@ -3245,6 +3245,12 @@ export async function getPrDetail(
     viewerUserId != null &&
     viewerUserId !== pr.authorId &&
     ['WRITE', 'MAINTAIN', 'ADMIN'].includes(repo.viewerPermission ?? '');
+  // Whether the viewer may PUSH (WRITE+ on the repo) — like viewerCanApprove but
+  // WITHOUT the author exclusion (an author can push to their own PR branch). Gates
+  // the Pro AI-Fix push controls; the push route re-checks server-side.
+  const viewerCanPush = ['WRITE', 'MAINTAIN', 'ADMIN'].includes(
+    repo.viewerPermission ?? '',
+  );
 
   // The viewer's STANDING review: their LATEST decisive review (approved /
   // changes_requested / dismissed; 'commented'/'pending' don't count). reviewRows is
@@ -3297,6 +3303,7 @@ export async function getPrDetail(
     files: filesOut,
     requestedReviewers,
     viewerCanApprove,
+    viewerCanPush,
     viewerHasApprovedStanding,
     threads,
     reviews: reviewsOut,

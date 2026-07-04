@@ -3,6 +3,7 @@ import type {
   FastifyRequest,
   FastifyBaseLogger,
 } from 'fastify';
+import type { CheckLogsResponse } from '@pierre-review/shared';
 import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
 
 // The typed boundary between OSS core and the optional, dynamically-imported
@@ -15,6 +16,261 @@ import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
 export interface ProCapabilities {
   activityDigest: boolean; // WS2 per-repo LLM headlines digest
   reviewMemory: boolean; // WS3 Claude Review learnings
+  aiAnalysis: boolean; // AI Fix: PR summary + CI failure analysis (Haiku, read-only)
+  aiFix: boolean; // AI Fix: agentic inline code fix + push (Agent SDK, needs write)
+}
+
+// ---- AI Fix seams (github + coding) -------------------------------------------
+// The generic, security-sensitive infrastructure for the Pro "AI Fix" feature lives
+// in CORE (per-account tokens, the write-capable agent, git push) and is exposed to
+// the plugin through these two seams; the plugin supplies only prompts + model and
+// owns the product workflow. Inert in OSS (nothing calls it), exactly like llm.
+
+// Progress emitted while the fixer / resolver / push jobs run (mirrors
+// ClaudeReviewProgress). A superset covering the fix run and the merge/rebase/push
+// jobs; the plugin maps it to AiFixProgress / AiFixResolveProgress on the wire.
+export interface CodingProgress {
+  phase:
+    | 'fetching_diff'
+    | 'cloning'
+    | 'fixing'
+    | 'capturing'
+    | 'persisting'
+    | 'applying_fix'
+    | 'fetching_trunk'
+    | 'rebasing'
+    | 'merging'
+    | 'resolving_conflicts'
+    | 'verifying'
+    | 'pushing';
+  message?: string;
+  recentActivity?: string[];
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    estCostUsd: number;
+  };
+}
+
+// Live PR head/fork metadata (fetched per-account from the GitHub API).
+export interface GithubPrHeadInfo {
+  headSha: string;
+  headRef: string;
+  headRepoFullName: string;
+  isFork: boolean;
+  maintainerCanModify: boolean;
+  baseRef: string;
+}
+
+export interface GenerateFixArgs {
+  accountId: number;
+  owner: string;
+  name: string;
+  prNumber: number;
+  // The commit the agent works from (the live PR head at generate time).
+  baseSha: string;
+  model: string;
+  systemPrompt?: string;
+  prompt: string;
+  maxTurns?: number;
+  maxBudgetUsd?: number;
+  abortController: AbortController;
+  onProgress: (p: CodingProgress) => void;
+}
+
+export interface GenerateFixResult {
+  summary: string;
+  commitMessage: string;
+  // Unified-diff patch (git add -A + git diff --cached --binary — includes new files).
+  patch: string;
+  filesChanged: string[];
+  baseSha: string;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+  };
+  costUsd: number | null;
+  numTurns: number | null;
+  aborted: boolean;
+}
+
+// Where a completed fix is pushed. 'existing' pushes onto the PR's own head branch
+// (hard-guarded on the head not having moved); 'new' creates a branch off baseSha and
+// opens a PR against the base.
+export type ApplyAndPushTarget =
+  | { kind: 'existing'; headRef: string }
+  | { kind: 'new'; branch: string; base: string; title: string; body: string };
+
+export interface ApplyAndPushArgs {
+  accountId: number;
+  owner: string;
+  name: string;
+  prNumber: number;
+  baseSha: string;
+  patch: string;
+  commitMessage: string;
+  target: ApplyAndPushTarget;
+}
+
+export interface ApplyAndPushResult {
+  pushedBranch: string;
+  commitSha: string;
+  prNumber?: number;
+  prUrl?: string;
+}
+
+// ---- trunk-conflict handling (mergePreview / rebaseResolve / merge / pushResolved) ----
+
+// How a completed fix is reconciled with the trunk before pushing.
+export type CodingStrategy = 'plain' | 'merge' | 'rebase';
+
+// A completed push that may have reconciled with the trunk (merge/rebase). Extends
+// the plain push result with what actually happened.
+export interface ApplyResolveResult extends ApplyAndPushResult {
+  strategy: CodingStrategy;
+  resolvedConflicts: boolean;
+  conflictFilesResolved: string[];
+  forcePushed: boolean; // only ever true for rebase onto the PR's own branch
+}
+
+export interface MergePreviewArgs {
+  accountId: number;
+  owner: string;
+  name: string;
+  prNumber: number;
+  baseSha: string;
+  patch: string;
+  trunk: string; // the base branch to compare against
+}
+
+export interface MergePreviewResult {
+  trunk: string;
+  trunkSha: string | null; // null if the trunk fetch failed
+  behindBy: number;
+  aheadBy: number;
+  clean: boolean;
+  conflictFiles: string[];
+}
+
+// Shared knobs for the two agentic-resolution seams.
+interface ResolveCommonArgs {
+  accountId: number;
+  owner: string;
+  name: string;
+  prNumber: number;
+  baseSha: string;
+  patch: string;
+  commitMessage: string;
+  trunk: string;
+  autoResolve: boolean; // run the conflict-resolution agent
+  model: string;
+  resolverSystemPrompt?: string; // plugin-supplied static guidance
+  maxTurns?: number;
+  maxBudgetUsd?: number;
+  abortController: AbortController;
+  onProgress: (p: CodingProgress) => void;
+}
+
+// rebaseResolve: apply the fix, rebase onto the trunk (agentically resolving), and
+// capture a reviewable diff + a `git am` mbox — WITHOUT pushing.
+export type RebaseResolveArgs = ResolveCommonArgs;
+
+export interface RebaseResolveResult {
+  diff: string; // unified `git diff <trunk>..HEAD` for review
+  mbox: string; // `git format-patch` mbox for a deterministic replay at push
+  filesChanged: string[];
+  conflictFiles: string[];
+  resolvedConflicts: boolean;
+  trunkSha: string;
+  aborted: boolean;
+}
+
+// mergeResolveAndPush: apply the fix, merge the trunk in (agentically resolving),
+// verify, and push the merge commit (never force-pushes). One step.
+export interface MergeResolveAndPushArgs extends ResolveCommonArgs {
+  target: ApplyAndPushTarget;
+}
+
+// pushResolved: replay a previously-resolved rebase mbox onto the CURRENT trunk tip and
+// push (force-with-lease on the existing branch; plain for a new branch). Re-fetches
+// `trunk` fresh; `resolvedBaseSha` is the tip it was reviewed against (moved-detection).
+export interface PushResolvedArgs {
+  accountId: number;
+  owner: string;
+  name: string;
+  prNumber: number;
+  trunk: string; // the base branch to replay onto (re-fetched fresh)
+  resolvedBaseSha: string; // the trunk tip the mbox was generated against
+  resolvedConflicts: boolean; // whether the stored resolution involved conflicts
+  mbox: string;
+  target: ApplyAndPushTarget;
+  onProgress?: (p: CodingProgress) => void;
+}
+
+// applyAndPush / the resolve seams throw an Error carrying `.code` on the expected
+// failures, so the plugin's routes can map them to HTTP status without importing a
+// host class:
+//   'HEAD_MOVED'           — existing-branch push and the live head !== baseSha (→ 409)
+//   'PUSH_DENIED'          — the account lacks write / an un-pushable fork (→ 422)
+//   'APPLY_FAILED'         — a stored patch/mbox didn't apply cleanly (→ 422)
+//   'CONFLICTS_UNRESOLVED' — merge/rebase left conflicts we won't push (→ 422)
+//   'MERGE_FAILED'         — the merge failed for a non-conflict reason (→ 422)
+//   'REBASE_FAILED'        — the rebase failed for a non-conflict reason (→ 422)
+//   'TRUNK_FETCH_FAILED'   — the trunk ref couldn't be fetched (→ 422)
+export type CodingErrorCode =
+  | 'HEAD_MOVED'
+  | 'PUSH_DENIED'
+  | 'APPLY_FAILED'
+  | 'CONFLICTS_UNRESOLVED'
+  | 'MERGE_FAILED'
+  | 'REBASE_FAILED'
+  | 'TRUNK_FETCH_FAILED';
+
+export interface GithubSeam {
+  fetchPrDiff(
+    accountId: number,
+    owner: string,
+    name: string,
+    prNumber: number,
+  ): Promise<string>;
+  fetchPrHeadInfo(
+    accountId: number,
+    owner: string,
+    name: string,
+    prNumber: number,
+  ): Promise<GithubPrHeadInfo>;
+  fetchCheckLogs(
+    accountId: number,
+    owner: string,
+    name: string,
+    jobId: number,
+    tail?: number,
+  ): Promise<CheckLogsResponse>;
+  openPullRequest(
+    accountId: number,
+    args: {
+      owner: string;
+      name: string;
+      head: string;
+      base: string;
+      title: string;
+      body: string;
+    },
+  ): Promise<{ number: number; url: string }>;
+}
+
+export interface CodingSeam {
+  generateFix(args: GenerateFixArgs): Promise<GenerateFixResult>;
+  applyAndPush(args: ApplyAndPushArgs): Promise<ApplyAndPushResult>;
+  // Trunk-conflict handling (all per-account, cloud-ready; inert in OSS).
+  mergePreview(args: MergePreviewArgs): Promise<MergePreviewResult>;
+  rebaseResolve(args: RebaseResolveArgs): Promise<RebaseResolveResult>;
+  mergeResolveAndPush(args: MergeResolveAndPushArgs): Promise<ApplyResolveResult>;
+  pushResolved(args: PushResolvedArgs): Promise<ApplyResolveResult>;
 }
 
 // A curated, stable slice of the read layer, handed to the plugin via ctx.queries
@@ -60,21 +316,32 @@ export interface ProContext {
       text: string;
       usage?: { inputTokens: number; outputTokens: number };
     }>;
+    // Best-effort detection of whether Claude auth is available (for a pre-flight
+    // before an LLM/agent run). Mirrors Claude Review's detectClaudeAuth.
+    detectAuth(): { status: 'ok' | 'none'; message?: string };
   };
   queries: ProHostQueries;
   reviewEvents: ReviewEventBus; // WS3 capture seam
   registerLearningsProvider(p: LearningsProvider): void; // WS3 injection seam
+  // AI Fix infra (per-account, cloud-ready). Inert in OSS.
+  github: GithubSeam;
+  coding: CodingSeam;
 }
 
 export interface ProPlugin {
-  apiVersion: 1; // contract handshake; host warns on mismatch
+  apiVersion: 3; // contract handshake; host warns on mismatch
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
 // The live capability singleton, mirrored to the frontend via /api/me exactly
 // like claudeReviewEnabled. All-false in OSS mode (no plugin ever calls the
 // setter).
-const EMPTY: ProCapabilities = { activityDigest: false, reviewMemory: false };
+const EMPTY: ProCapabilities = {
+  activityDigest: false,
+  reviewMemory: false,
+  aiAnalysis: false,
+  aiFix: false,
+};
 let active: ProCapabilities = EMPTY;
 export function setProCapabilities(c: ProCapabilities): void {
   active = c;

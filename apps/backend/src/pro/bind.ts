@@ -8,6 +8,15 @@ import { db, schema, runTransaction, isPg } from '../db/client.js';
 import * as hostQueries from '../db/queries.js';
 import { reviewEvents, registerLearningsProvider } from '../review/events.js';
 import { cheapComplete } from '../review/llm.js';
+import { detectClaudeAuth } from '../review/auth.js';
+import { getAccessToken } from '../auth/account.js';
+import {
+  createPullRequest,
+  fetchPrHeadInfo,
+  fetchPrUnifiedDiff,
+} from '../github/mutations.js';
+import { fetchActionsJobLog } from '../github/actions-logs.js';
+import { applyAndPush } from '../coding/git-ops.js';
 import { runPluginMigrations } from './migrate.js';
 import { setProCapabilities } from './contract.js';
 import type { ProContext, ProPlugin } from './contract.js';
@@ -40,7 +49,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   if (!mod) return;
 
   const plugin = (mod.default ?? mod) as ProPlugin;
-  if (plugin?.apiVersion !== 1 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 3 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -62,7 +71,15 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
     isPg,
     registerMigrations: (sqliteFolder, pgFolder) =>
       runPluginMigrations(sqliteFolder, pgFolder),
-    llm: { complete: cheapComplete },
+    llm: {
+      complete: cheapComplete,
+      detectAuth: () => {
+        const r = detectClaudeAuth();
+        return r.status === 'ok'
+          ? { status: 'ok' }
+          : { status: 'none', message: r.message };
+      },
+    },
     queries: {
       getInsights: (accountId, repoIds) =>
         hostQueries.getInsights({ accountId, repoIds: repoIds ?? null }),
@@ -79,6 +96,41 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
     },
     reviewEvents,
     registerLearningsProvider,
+    // AI Fix infra (per-account, cloud-ready). The host owns the security-sensitive
+    // clone/agent/push machinery; the plugin only drives it with prompts/model.
+    github: {
+      fetchPrDiff: async (accountId, owner, name, number) =>
+        fetchPrUnifiedDiff(await getAccessToken(accountId), owner, name, number),
+      fetchPrHeadInfo: async (accountId, owner, name, number) =>
+        fetchPrHeadInfo(await getAccessToken(accountId), owner, name, number),
+      fetchCheckLogs: async (accountId, owner, name, jobId, tail) =>
+        fetchActionsJobLog(
+          await getAccessToken(accountId),
+          owner,
+          name,
+          jobId,
+          tail,
+        ),
+      openPullRequest: async (accountId, prArgs) =>
+        createPullRequest(await getAccessToken(accountId), prArgs),
+    },
+    coding: {
+      // Lazy-import the agent module (it pulls in the Claude Agent SDK) so the SDK
+      // only loads when a fix actually runs, not at every backend boot.
+      generateFix: async (fixArgs) =>
+        (await import('../coding/agent.js')).runCodingAgent(fixArgs),
+      applyAndPush: (pushArgs) => applyAndPush(pushArgs),
+      // Trunk-conflict handling lives in coding/merge.ts; also lazy so the SDK loads
+      // only when a resolution actually runs.
+      mergePreview: async (a) =>
+        (await import('../coding/merge.js')).mergePreview(a),
+      rebaseResolve: async (a) =>
+        (await import('../coding/merge.js')).rebaseResolve(a),
+      mergeResolveAndPush: async (a) =>
+        (await import('../coding/merge.js')).mergeResolveAndPush(a),
+      pushResolved: async (a) =>
+        (await import('../coding/merge.js')).pushResolved(a),
+    },
   };
 
   try {

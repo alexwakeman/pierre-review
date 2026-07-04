@@ -19,6 +19,7 @@ import { formatDate } from '../lib/ui.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import { useReviewLearnings } from '../hooks/useReviewLearnings.js';
+import { useFilters } from '../store/filters.js';
 import {
   useCancelReview,
   useClaudeReview,
@@ -1108,6 +1109,48 @@ function ReviewLearningsPanel({ prId }: { prId: number }): JSX.Element | null {
   );
 }
 
+// Build the seed prompt for the AI fixer from a completed review: the reviewer's own
+// draft body when present, else Claude's summary, plus each included finding.
+function buildReviewSeed(review: ClaudeReview): string {
+  const parts: string[] = [];
+  const head = review.userBody?.trim() || review.summary?.trim();
+  if (head) parts.push(head);
+  const findings = (review.findings ?? []).filter((f) => f.included !== false);
+  for (const f of findings) {
+    const loc = f.line != null ? `${f.path}:${f.line}` : f.path;
+    const body = (f.editedBody ?? f.body ?? '').trim();
+    parts.push(`- [${f.severity}] ${loc} — ${f.title}${body ? `\n  ${body}` : ''}`);
+  }
+  return parts.join('\n\n');
+}
+
+// Surface (Pro, aiFix): hand a completed review to the agentic fixer. Opens the AI
+// Fix tab seeded with the review text. Gated on the aiFix capability; renders nothing
+// otherwise or until a review has succeeded.
+function GenerateFixFromReview({
+  prId,
+  review,
+}: {
+  prId: number;
+  review: ClaudeReview | null;
+}): JSX.Element | null {
+  const { aiFix } = useProCapabilities();
+  const openAiFixFromReview = useFilters((s) => s.openAiFixFromReview);
+  if (!aiFix || review?.status !== 'succeeded') return null;
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        onClick={() => openAiFixFromReview(prId, buildReviewSeed(review))}
+        className="whitespace-nowrap rounded border border-violet-400 px-2.5 py-1 text-xs text-violet-700 hover:bg-violet-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
+        title="Launch an agent to apply this review as a fix"
+      >
+        Generate fix from this review →
+      </button>
+    </div>
+  );
+}
+
 export function ClaudeReviewTab({
   pr,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1286,6 +1329,8 @@ export function ClaudeReviewTab({
         <div className="px-4 py-3">
           {/* Surface 1 (Pro): matches from past reviews, injected into this run. */}
           <ReviewLearningsPanel prId={pr.id} />
+          {/* Pro (aiFix): hand this completed review to the agentic fixer. */}
+          <GenerateFixFromReview prId={pr.id} review={review} />
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-xs uppercase tracking-wide text-gray-400">
               Model

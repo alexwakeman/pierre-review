@@ -2,9 +2,19 @@ import type {
   ActiveReviewsResponse,
   AddReviewCommentBody,
   AddReviewCommentResult,
+  AiFixMergePreview,
+  AiFixPushBody,
+  AiFixPushResult,
+  AiFixRebaseBody,
+  AiFixResponse,
+  AiFixStatusResponse,
   ApprovePrBody,
   ApprovePrResult,
   CheckLogsResponse,
+  CiAnalysisResponse,
+  FailingCheckInput,
+  GenerateFixBody,
+  PrSummaryResponse,
   ClaudeKeyResponse,
   ClaudeReview,
   ClaudeReviewListResponse,
@@ -300,5 +310,56 @@ export const api = {
       jsonBody('POST', { userVerdict }),
     ).then((r) =>
       handle<PostReviewPreview | PostReviewResult>(r),
+    ),
+
+  // ---- AI Fix (Pro) ----
+  aiFixSummary: (prId: number) =>
+    get<PrSummaryResponse>(`/api/pro/prs/${prId}/summary`),
+  refreshAiFixSummary: (prId: number) =>
+    fetch(`/api/pro/prs/${prId}/summary/refresh`, jsonBody('POST')).then((r) =>
+      handle<PrSummaryResponse>(r),
+    ),
+  aiFixCiAnalysis: (prId: number) =>
+    get<CiAnalysisResponse>(`/api/pro/prs/${prId}/ci-analysis`),
+  refreshAiFixCiAnalysis: (prId: number, checks: FailingCheckInput[]) =>
+    fetch(`/api/pro/prs/${prId}/ci-analysis`, jsonBody('POST', { checks })).then(
+      (r) => handle<CiAnalysisResponse>(r),
+    ),
+  aiFix: (prId: number) => get<AiFixResponse>(`/api/pro/prs/${prId}/ai-fix`),
+  aiFixStatus: (prId: number) =>
+    get<AiFixStatusResponse>(`/api/pro/prs/${prId}/ai-fix/status`),
+  startAiFix: (prId: number, body: GenerateFixBody) =>
+    fetch(`/api/pro/prs/${prId}/ai-fix`, jsonBody('POST', body)).then((r) =>
+      handle<{ fixId: number; status: string }>(r),
+    ),
+  cancelAiFix: (prId: number) =>
+    fetch(`/api/pro/prs/${prId}/ai-fix/cancel`, jsonBody('POST')).then((r) =>
+      handle<{ status: string }>(r),
+    ),
+  // Push a fix. `plain` resolves to the full result (200); `merge`/`rebase` resolve to
+  // a `{ fixId, status:'queued' }` 202 — the caller then subscribes to …/push/stream.
+  pushAiFix: (fixId: number, body: AiFixPushBody) =>
+    fetch(`/api/pro/ai-fixes/${fixId}/push`, jsonBody('POST', body)).then((r) =>
+      handle<AiFixPushResult | { fixId: number; status: string; strategy: string }>(
+        r,
+      ),
+    ),
+  // Preview the fix branch vs the trunk (behind/ahead + conflicts).
+  aiFixMergePreview: (fixId: number) =>
+    fetch(`/api/pro/ai-fixes/${fixId}/merge-preview`, jsonBody('POST')).then((r) =>
+      handle<AiFixMergePreview>(r),
+    ),
+  // Start a rebase-resolve job (stores a reviewable artifact) → { fixId }.
+  startAiFixRebase: (fixId: number, body: AiFixRebaseBody) =>
+    fetch(`/api/pro/ai-fixes/${fixId}/rebase`, jsonBody('POST', body)).then((r) =>
+      handle<{ fixId: number; status: string }>(r),
+    ),
+  cancelAiFixRebase: (fixId: number) =>
+    fetch(`/api/pro/ai-fixes/${fixId}/rebase/cancel`, jsonBody('POST')).then((r) =>
+      handle<{ status: string }>(r),
+    ),
+  cancelAiFixPush: (fixId: number) =>
+    fetch(`/api/pro/ai-fixes/${fixId}/push/cancel`, jsonBody('POST')).then((r) =>
+      handle<{ status: string }>(r),
     ),
 };

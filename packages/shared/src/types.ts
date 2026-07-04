@@ -299,6 +299,10 @@ export interface MyTurnCounts {
 export interface ProCapabilities {
   activityDigest: boolean; // per-repo LLM headlines digest (Activity)
   reviewMemory: boolean; // Claude Review learnings
+  // AI Fix (packages/pro/ai-fix). Two independent gates so the cheap, read-only
+  // analysis can ship without the expensive, write-capable fixer:
+  aiAnalysis: boolean; // PR summary + CI failure analysis (Haiku, read-only)
+  aiFix: boolean; // agentic inline code fix + push (Agent SDK, needs write access)
 }
 
 export interface MeResponse {
@@ -665,6 +669,12 @@ export interface PrDetail {
   // synced repos.viewerPermission + the account's user id. The approve route
   // re-checks this server-side.
   viewerCanApprove: boolean;
+  // Whether the viewer may PUSH to the repo: they have GitHub WRITE/MAINTAIN/ADMIN
+  // permission on the repo. Unlike viewerCanApprove this does NOT exclude the author
+  // (an author can push to their own PR branch). Gates the Pro "AI Fix" push
+  // controls; the push route re-checks server-side. Computed on read from the synced
+  // repos.viewerPermission.
+  viewerCanPush: boolean;
   // Whether the viewer's STANDING review on this PR (their latest decisive review:
   // approved / changes_requested / dismissed) is 'approved'. When true the Approve
   // control renders disabled ("Approved") — you've already approved and it still
@@ -1351,6 +1361,314 @@ export interface ActiveReviewsResponse {
 
 export interface PostReviewBody {
   userVerdict: ClaudeReviewVerdict;
+}
+
+// ---- AI Fix (Pro: PR summary + CI failure analysis + agentic inline fix) ----
+// A Pro-only suite (packages/pro/ai-fix). Two cheap read-only tools (PR summary, CI
+// failure analysis via Haiku) plus an Agent-SDK run that MODIFIES files in a cloned
+// worktree, captures a unified-diff patch, and — with repo write access — pushes to
+// the PR's head branch or a new branch (opening a PR). All wire types mirror the
+// Claude Review shapes above; the backend keeps local `import type`s (shared isn't
+// shipped at runtime).
+
+// The fixer reuses the Claude Review model set.
+export type AiFixModel = ClaudeReviewModel;
+
+// ---- read-only analyses (aiAnalysis capability) ----
+
+export interface PrSummaryResponse {
+  enabled: boolean;
+  // The generated overview (markdown), or null if never generated.
+  summary: string | null;
+  model: string | null;
+  // The head SHA the summary was generated against; lets the UI flag staleness.
+  headSha: string | null;
+  generatedAt: string | null;
+}
+
+// An honesty score: how confident the analysis is (in the root cause, and in whether
+// Pierre's agentic fixer could actually fix it). Drives how much the report elaborates.
+export type AiConfidence = 'high' | 'medium' | 'low';
+
+export interface CiAnalysisResponse {
+  enabled: boolean;
+  // The root-cause + potential-fixes report (markdown), or null if never generated.
+  analysis: string | null;
+  model: string | null;
+  headSha: string | null;
+  generatedAt: string | null;
+  // Whether the PR currently has failing CI (drives whether the tool is offered).
+  hasFailures: boolean;
+  // How sure the analysis is about the root cause.
+  rootCauseConfidence: AiConfidence | null;
+  // How likely Pierre's agentic fixer (edit repo files + push) could fix it, given the
+  // available context. Low for external/quality-gate/unknown causes.
+  fixability: AiConfidence | null;
+}
+
+// One failing check the client asks the analyzer to consider. `jobId` is the GitHub
+// Actions job id (null for external checks like SonarCloud, which carry no Actions
+// log). Passing the NAME too lets the analyzer reason about failing checks it can't
+// fetch logs for (a code-analysis gate) instead of treating them as "no output".
+export interface FailingCheckInput {
+  name: string;
+  jobId: number | null;
+  state: string;
+}
+
+// Body for POST …/ci-analysis — the full set of failing checks from the client
+// (pr.checkRuns), since the checkRuns JSON is lean-gated in the DB.
+export interface GenerateCiAnalysisBody {
+  checks: FailingCheckInput[];
+}
+
+// ---- the agentic fixer (aiFix capability) ----
+
+export type AiFixStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+
+// What seeded the fix prompt: the stored CI analysis, the latest Claude review, or a
+// plain request (summary/description only).
+export type AiFixSeed = 'ci_analysis' | 'review' | 'plain';
+
+export type AiFixPhase =
+  | 'fetching_diff'
+  | 'cloning'
+  | 'fixing'
+  | 'capturing'
+  | 'persisting';
+
+export interface AiFixProgress {
+  phase: AiFixPhase;
+  message?: string;
+  // Newest-last rolling log of short lines describing the agent's tool calls / text.
+  // Live-only; not persisted.
+  recentActivity?: string[];
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    estCostUsd: number;
+  };
+}
+
+// Live PR head + fork info, so the UI can gate the branch picker. `canPushSameBranch`
+// is false when the head is a fork we can't write to (or the viewer lacks write).
+export interface PrHeadInfo {
+  headSha: string;
+  headRef: string;
+  headRepoFullName: string;
+  isFork: boolean;
+  maintainerCanModify: boolean;
+  baseRef: string;
+  canPushSameBranch: boolean;
+  // Suggested name for a new branch, pre-derived from the head ref (e.g. `${ref}-ai-fix`).
+  suggestedBranch: string;
+}
+
+// One fix run (history kept; a re-run is a new row).
+export interface AiFix {
+  id: number;
+  prId: number;
+  status: AiFixStatus;
+  model: string;
+  seed: AiFixSeed;
+  // Set once the run succeeds:
+  summary: string | null;
+  commitMessage: string | null;
+  // The captured unified-diff patch (includes new files; binary-safe). Null until
+  // the run succeeds.
+  patch: string | null;
+  filesChanged: string[];
+  // The base commit the patch applies onto (the live PR head at generate time).
+  baseSha: string | null;
+  // A stored, reviewable rebase resolution (the fix replayed onto the trunk with
+  // conflicts resolved), or null. Only rebase produces this reviewable artifact.
+  resolved: AiFixResolved | null;
+  // The Claude review this fix was seeded from, if any.
+  sourceReviewId: number | null;
+  costUsd: number | null;
+  numTurns: number | null;
+  error: string | null;
+  // Set once pushed:
+  pushedBranch: string | null;
+  pushedPrNumber: number | null;
+  pushedPrUrl: string | null;
+  pushedAt: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+// A lighter shape for the run history list.
+export interface AiFixSummary {
+  id: number;
+  status: AiFixStatus;
+  model: string;
+  seed: AiFixSeed;
+  filesChanged: string[];
+  pushedBranch: string | null;
+  pushedPrUrl: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface AiFixResponse {
+  enabled: boolean;
+  auth: ClaudeAuthStatus;
+  authMessage?: string;
+  // Whether the viewer may push (mirrors PrDetail.viewerCanPush; also re-checked
+  // server-side on push).
+  viewerCanPush: boolean;
+  // Live head/fork info for the branch picker (null when it can't be fetched).
+  headInfo: PrHeadInfo | null;
+  // The latest run, or null if never run.
+  fix: AiFix | null;
+  history: AiFixSummary[];
+}
+
+export interface AiFixStatusResponse {
+  status: AiFixStatus | 'idle';
+  fixId: number | null;
+  progress: AiFixProgress | null;
+}
+
+export type AiFixStreamEvent =
+  | {
+      type: 'snapshot' | 'progress';
+      status: AiFixStatus | 'idle';
+      fixId: number | null;
+      progress: AiFixProgress | null;
+    }
+  | { type: 'done'; status: AiFixStatus | 'idle'; fixId: number | null };
+
+// Start a fix run.
+export interface GenerateFixBody {
+  model: AiFixModel;
+  seed?: AiFixSeed;
+  // When seed === 'review', the review text to seed the prompt with.
+  reviewText?: string;
+}
+
+// Push a completed fix. `target` is which branch to push onto; a 'new' branch also
+// opens a PR against the base branch.
+export interface AiFixPushBody {
+  target: 'existing' | 'new';
+  // Required when target === 'new' — the branch name to create.
+  branch?: string;
+  // How to reconcile with the trunk before pushing. 'plain' (default) pushes the
+  // fix as-is (never force-pushes; may leave the PR conflicted). 'merge' merges the
+  // trunk in as a merge commit (never force-pushes). 'rebase' pushes the previously
+  // resolved+reviewed rebase artifact (force-with-lease on the existing branch).
+  strategy?: AiFixPushStrategy;
+  // For 'merge': let Claude resolve any conflicts as part of the push job.
+  autoResolve?: boolean;
+  // Model for the conflict-resolution agent (defaults like the fixer).
+  model?: AiFixModel;
+}
+
+export interface AiFixPushResult {
+  pushedBranch: string;
+  commitSha: string;
+  // Set when target === 'new' (a PR was opened).
+  prNumber?: number;
+  prUrl?: string;
+  strategy: AiFixPushStrategy;
+  // Whether any conflict resolution happened during this push.
+  resolvedConflicts: boolean;
+  // Whether the push rewrote history (force-with-lease). Only ever true for a rebase
+  // onto the PR's own existing branch.
+  forcePushed: boolean;
+}
+
+// ---- trunk-conflict handling (rebase / merge before push) ----
+
+export type AiFixPushStrategy = 'plain' | 'merge' | 'rebase';
+
+// The state of the fix branch (baseSha + patch) relative to the PR's trunk (its base
+// branch), computed by a local trial merge before offering resolution options.
+export interface AiFixMergePreview {
+  // True when the tool is available (aiFix on + a stored, pushable fix).
+  available: boolean;
+  trunk: string; // the base branch name compared against
+  trunkSha: string | null; // its current tip (null if the fetch failed)
+  behindBy: number; // commits on trunk not in the fix branch
+  aheadBy: number; // commits on the fix branch not in trunk
+  clean: boolean; // merges cleanly (no conflicts)
+  conflictFiles: string[];
+}
+
+// Progress phases for the async resolve / merge / push jobs. Shared with the fixer's
+// CodingProgress on the backend; a superset covering both.
+export type AiFixResolvePhase =
+  | 'cloning'
+  | 'applying_fix'
+  | 'fetching_trunk'
+  | 'rebasing'
+  | 'merging'
+  | 'resolving_conflicts'
+  | 'verifying'
+  | 'pushing';
+
+export interface AiFixResolveProgress {
+  phase: AiFixResolvePhase;
+  message?: string;
+  // Newest-last rolling log of the resolver agent's tool calls / text (live-only).
+  recentActivity?: string[];
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    estCostUsd: number;
+  };
+}
+
+export interface AiFixResolveStatusResponse {
+  status: AiFixStatus | 'idle';
+  fixId: number | null;
+  progress: AiFixResolveProgress | null;
+  // Set on a terminal failure (e.g. unresolved conflicts).
+  error?: string | null;
+}
+
+export type AiFixResolveStreamEvent =
+  | {
+      type: 'snapshot' | 'progress';
+      status: AiFixStatus | 'idle';
+      fixId: number | null;
+      progress: AiFixResolveProgress | null;
+    }
+  | {
+      type: 'done';
+      status: AiFixStatus | 'idle';
+      fixId: number | null;
+      error?: string | null;
+    };
+
+// The stored, reviewable result of a rebase resolution (the fix replayed onto the
+// trunk with conflicts resolved). The `git am` mbox that reproduces it is kept
+// server-side; the client sees only the reviewable unified diff + metadata.
+export interface AiFixResolved {
+  strategy: AiFixPushStrategy; // 'rebase' — the only strategy with a reviewable artifact
+  diff: string; // unified `git diff <trunk>..HEAD` for FileDiffView
+  filesChanged: string[];
+  conflictFiles: string[]; // files whose conflicts Claude resolved
+  resolvedConflicts: boolean; // whether any conflict resolution happened
+  trunk: string;
+  trunkSha: string;
+  at: string; // ISO timestamp
+}
+
+// Start a rebase-resolve job (rebase the fix onto the trunk, agentically resolving
+// conflicts, and store a reviewable artifact — no push yet).
+export interface AiFixRebaseBody {
+  autoResolve?: boolean;
+  model?: AiFixModel;
 }
 
 // ---- PR write actions (review threads, comments, approve, inline review comments) ----

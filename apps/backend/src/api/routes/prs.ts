@@ -14,7 +14,7 @@ import type {
   PrFilesResponse,
 } from '@pierre-review/shared';
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
-import { ghRestGetText } from '../../github/client.js';
+import { fetchActionsJobLog } from '../../github/actions-logs.js';
 import {
   getMentionCandidates,
   getPrDetail,
@@ -472,46 +472,15 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         return { error: 'NotFound', message: `PR ${id} not found` };
       }
 
-      const tailLines = Math.min(Math.max(tail ?? 200, 1), 1000);
-      const unavailable = (reason: string): CheckLogsResponse => ({
-        available: false,
-        reason,
-        text: '',
-        totalLines: 0,
-        returnedLines: 0,
-      });
-
-      try {
-        const token = await getAccessToken(accountId);
-        const res = await ghRestGetText(
-          token,
-          `/repos/${ctx.owner}/${ctx.name}/actions/jobs/${jobId}/logs`,
-        );
-        if (!res.ok) {
-          const reason =
-            res.status === 404 || res.status === 410
-              ? 'Logs are no longer available (expired, or the job was re-run).'
-              : res.status === 403
-                ? 'No permission to read GitHub Actions logs for this repo.'
-                : `Couldn't fetch logs (GitHub returned ${res.status}).`;
-          return unavailable(reason);
-        }
-        // A job log can be many MB — normalise line endings, drop a trailing blank,
-        // and tail server-side so only the last N lines reach the browser. Guard the
-        // empty/blank body so it reports 0 lines (not [''] → a misleading "1 of 1").
-        const trimmed = res.text.replace(/\r\n/g, '\n').replace(/\n+$/, '');
-        const lines = trimmed === '' ? [] : trimmed.split('\n');
-        const tailed = lines.slice(-tailLines);
-        const result: CheckLogsResponse = {
-          available: true,
-          text: tailed.join('\n'),
-          totalLines: lines.length,
-          returnedLines: tailed.length,
-        };
-        return result;
-      } catch {
-        return unavailable("Couldn't reach GitHub to fetch the logs.");
-      }
+      const token = await getAccessToken(accountId);
+      const result: CheckLogsResponse = await fetchActionsJobLog(
+        token,
+        ctx.owner,
+        ctx.name,
+        jobId,
+        tail ?? 200,
+      );
+      return result;
     },
   );
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { EventType, PrDetail as PrDetailT, User } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
-import { useMe } from '../hooks/useTriage.js';
+import { useMe, useProCapabilities } from '../hooks/useTriage.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { WatchedBadge } from './WatchedBadge.js';
 import { api } from '../api/client.js';
@@ -18,6 +18,7 @@ import { ChecksTab } from './ChecksTab.js';
 import { ChangesTab } from './ChangesTab.js';
 import { PrCommentComposer } from './PrCommentComposer.js';
 import { ClaudeReviewTab } from './ClaudeReviewTab.js';
+import { AiFixTab } from './AiFixTab.js';
 import { Markdown } from './Markdown.js';
 import { isNewComment, NewTag } from './ThreadView/index.js';
 
@@ -30,7 +31,13 @@ function newSummary(n: PrDetailT['newSinceLastViewed']): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
-type Tab = 'overview' | 'threads' | 'activity' | 'changes' | 'claude_review';
+type Tab =
+  | 'overview'
+  | 'threads'
+  | 'activity'
+  | 'changes'
+  | 'claude_review'
+  | 'ai_fix';
 
 // The lightweight metadata a pinned tab renders from (see store/pinnedTabs.ts).
 function pinnedMetaOf(pr: PrDetailT, usersById: Map<number, User>): PinnedPr {
@@ -54,6 +61,7 @@ const TAB_LABELS: Record<Tab, string> = {
   activity: 'Activity',
   changes: 'Changes',
   claude_review: 'Claude Review',
+  ai_fix: 'AI Fix',
 };
 
 interface ActivityRow {
@@ -403,6 +411,8 @@ export function PrDetail({
   const { data: pr, isLoading, error } = usePr(prId);
   const { data: repos } = useRepos();
   const claudeReviewEnabled = useMe().data?.claudeReviewEnabled ?? false;
+  const { aiAnalysis, aiFix } = useProCapabilities();
+  const aiFixTabEnabled = aiAnalysis || aiFix;
   const [tab, setTab] = useState<Tab>('overview');
   const [activitySince, setActivitySince] = useState<string | null>(null);
   const qc = useQueryClient();
@@ -422,6 +432,7 @@ export function PrDetail({
   const selectedCommentId = useFilters((s) => s.selectedCommentId);
   const claudeTabFocus = useFilters((s) => s.claudeTabFocus);
   const consumeClaudeTabFocus = useFilters((s) => s.consumeClaudeTabFocus);
+  const aiFixTabFocus = useFilters((s) => s.aiFixTabFocus);
   const commentFocusForPr =
     commentFocus && pr && commentFocus.prId === pr.id ? commentFocus.commentId : null;
 
@@ -457,6 +468,15 @@ export function PrDetail({
       consumeClaudeTabFocus();
     }
   }, [claudeTabFocus, pr, claudeReviewEnabled, consumeClaudeTabFocus]);
+
+  // "Generate fix from this review" (or any deep link) → open the AI Fix tab for the
+  // matching PR. The signal is NOT consumed here — AiFixTab reads its `reviewText` to
+  // seed the prompt, then consumes it.
+  useEffect(() => {
+    if (aiFixTabEnabled && aiFixTabFocus && pr && aiFixTabFocus.prId === pr.id) {
+      setTab('ai_fix');
+    }
+  }, [aiFixTabFocus, pr, aiFixTabEnabled]);
 
   // A timeline deep link to a PR comment (the pr_comment popover's "Open in detail
   // pane") forces the Overview tab, where PrCommentsList then scrolls to + flashes
@@ -642,9 +662,15 @@ export function PrDetail({
       </div>
 
       <div className="flex gap-1 border-b border-gray-200 px-3 dark:border-gray-800">
-        {(claudeReviewEnabled
-          ? (['overview', 'threads', 'activity', 'changes', 'claude_review'] as Tab[])
-          : (['overview', 'threads', 'activity', 'changes'] as Tab[])
+        {(
+          [
+            'overview',
+            'threads',
+            'activity',
+            'changes',
+            ...(claudeReviewEnabled ? (['claude_review'] as Tab[]) : []),
+            ...(aiFixTabEnabled ? (['ai_fix'] as Tab[]) : []),
+          ] as Tab[]
         ).map((t) => {
           const failing = pr.checkRuns.filter(
             (c) => c.state === 'failure' || c.state === 'error',
@@ -726,6 +752,8 @@ export function PrDetail({
           />
         ) : tab === 'changes' ? (
           <ChangesTab pr={pr} />
+        ) : tab === 'ai_fix' ? (
+          <AiFixTab pr={pr} />
         ) : (
           <ClaudeReviewTab pr={pr} usersById={usersById} />
         )}

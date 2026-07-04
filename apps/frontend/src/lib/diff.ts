@@ -1,3 +1,5 @@
+import type { PrFileDiffStatus } from '@pierre-review/shared';
+
 // A tiny pure parser for a single file's unified-diff `patch` string (as GitHub
 // returns it on the REST `files` endpoint): header-less, starting at the first
 // `@@ … @@` hunk header. It turns that into renderable rows, tracking old/new
@@ -65,4 +67,116 @@ export function parsePatch(patch: string | null | undefined): DiffRow[] {
 export function patchLineCount(patch: string | null | undefined): number {
   if (!patch) return 0;
   return patch.replace(/\n$/, '').split('\n').length;
+}
+
+// ---- full `git diff` splitter (for the AI Fix changeset) ----
+// The AI-Fix agent's captured patch is a WHOLE `git diff --cached --binary` blob (many
+// files, with `diff --git`/`index`/`---`/`+++` headers). This splits it into per-file
+// units whose header-less `patch` starts at the first `@@` — the exact shape parsePatch
+// and the shared FileDiffView already consume — so the fix diff renders like the
+// Changes tab. `patch` is null for binary files.
+
+export interface ParsedGitFile {
+  path: string;
+  previousPath: string | null;
+  status: PrFileDiffStatus;
+  additions: number;
+  deletions: number;
+  patch: string | null;
+}
+
+function stripDiffPath(raw: string): string | null {
+  let p = raw.trim();
+  if (p === '/dev/null') return null;
+  if (p.startsWith('"') && p.endsWith('"')) p = p.slice(1, -1);
+  if (p.startsWith('a/') || p.startsWith('b/')) p = p.slice(2);
+  return p;
+}
+
+function parseDiffGitLine(line: string): { oldPath: string | null; newPath: string | null } {
+  const m = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+  if (!m) return { oldPath: null, newPath: null };
+  return { oldPath: m[1] ?? null, newPath: m[2] ?? null };
+}
+
+export function parseGitPatch(patch: string | null | undefined): ParsedGitFile[] {
+  if (!patch) return [];
+  const all = patch.replace(/\n$/, '').split('\n');
+  const n = all.length;
+  const files: ParsedGitFile[] = [];
+
+  let i = 0;
+  while (i < n && !(all[i] ?? '').startsWith('diff --git ')) i++;
+
+  while (i < n) {
+    const header = parseDiffGitLine(all[i] ?? '');
+    i++;
+    let status: PrFileDiffStatus = 'modified';
+    let oldPath: string | null = null;
+    let newPath: string | null = null;
+    let renameFrom: string | null = null;
+    let renameTo: string | null = null;
+    let binary = false;
+    const hunkLines: string[] = [];
+    let inHunks = false;
+
+    for (; i < n; i++) {
+      const line = all[i] ?? '';
+      if (line.startsWith('diff --git ')) break; // next file section
+      if (inHunks) {
+        hunkLines.push(line);
+        continue;
+      }
+      if (line.startsWith('@@')) {
+        inHunks = true;
+        hunkLines.push(line);
+      } else if (line.startsWith('new file mode')) {
+        status = 'added';
+      } else if (line.startsWith('deleted file mode')) {
+        status = 'removed';
+      } else if (line.startsWith('rename from ')) {
+        status = 'renamed';
+        renameFrom = line.slice('rename from '.length);
+      } else if (line.startsWith('rename to ')) {
+        status = 'renamed';
+        renameTo = line.slice('rename to '.length);
+      } else if (line.startsWith('copy from ')) {
+        status = 'copied';
+        renameFrom = line.slice('copy from '.length);
+      } else if (line.startsWith('copy to ')) {
+        status = 'copied';
+        renameTo = line.slice('copy to '.length);
+      } else if (line.startsWith('Binary files ') || line.startsWith('GIT binary patch')) {
+        binary = true;
+      } else if (line.startsWith('--- ')) {
+        oldPath = stripDiffPath(line.slice(4));
+      } else if (line.startsWith('+++ ')) {
+        newPath = stripDiffPath(line.slice(4));
+      }
+    }
+
+    const path =
+      newPath || renameTo || header.newPath || header.oldPath || oldPath || '(unknown)';
+    const previousPath =
+      status === 'renamed' || status === 'copied'
+        ? renameFrom || oldPath || header.oldPath
+        : null;
+
+    let additions = 0;
+    let deletions = 0;
+    for (const l of hunkLines) {
+      if (l.startsWith('+') && !l.startsWith('+++')) additions++;
+      else if (l.startsWith('-') && !l.startsWith('---')) deletions++;
+    }
+
+    files.push({
+      path,
+      previousPath,
+      status,
+      additions,
+      deletions,
+      patch: binary ? null : hunkLines.join('\n'),
+    });
+  }
+  return files;
 }

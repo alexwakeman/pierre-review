@@ -41,7 +41,14 @@ export function useMe() {
 // Premium capability flags (mirrors claudeReviewEnabled). All-false until /api/me
 // loads and in OSS mode (no @pierre/pro plugin).
 export function useProCapabilities(): ProCapabilities {
-  return useMe().data?.pro ?? { activityDigest: false, reviewMemory: false };
+  return (
+    useMe().data?.pro ?? {
+      activityDigest: false,
+      reviewMemory: false,
+      aiAnalysis: false,
+      aiFix: false,
+    }
+  );
 }
 
 export function useMyTurn() {
