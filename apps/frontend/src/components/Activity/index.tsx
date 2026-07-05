@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { ActivityRepo, ThreadStateCounts } from '@pierre-review/shared';
 import { useActivity } from '../../hooks/useActivity.js';
 import { useRepos } from '../../hooks/useTimeline.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
@@ -11,6 +12,7 @@ import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { RepoInsightsCard } from './RepoInsightsCard.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
+import { InsightsView } from './InsightsView.js';
 import { RepoAnalyticsModal } from '../RepoAnalyticsModal.js';
 
 // Rail sort: attention desc → unread → alphabetical. Computed once per data load so
@@ -111,6 +113,7 @@ export function ActivityView(): JSX.Element {
   const userIds = useFilters((s) => s.userIds);
   const activityRepoId = useFilters((s) => s.activityRepoId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
+  const { teamInsights } = useProCapabilities();
   const { data, isFetching, isLoading, refetch } = useActivity(repoIds, userIds);
   const { data: allRepos } = useRepos();
   const qc = useQueryClient();
@@ -129,6 +132,7 @@ export function ActivityView(): JSX.Element {
       : null;
   // The cross-repo consolidated Feed is the default detail (also when nothing's set).
   const showingFeed = activityRepoId === 'feed' || activityRepoId == null;
+  const showingInsights = activityRepoId === 'insights';
 
   // Staleness: amber past ~10 minutes.
   const generatedAt = data?.generatedAt ?? null;
@@ -239,6 +243,32 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
+          {/* INSIGHTS pseudo-row — team review-intelligence (Pro; teamInsights). Hidden
+              in OSS / when Pro is off. Sits between the Feed and the per-repo rows. */}
+          {teamInsights && (
+            <button
+              type="button"
+              onClick={() => setActivityRepo('insights')}
+              aria-pressed={showingInsights}
+              className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+                showingInsights
+                  ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                  : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+              }`}
+              title="Team review-intelligence across your watched repos (Pro)"
+            >
+              <span aria-hidden="true" className="shrink-0 text-violet-500">
+                ◈
+              </span>
+              <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+                Insights
+              </span>
+              <span className="shrink-0 rounded bg-violet-500/10 px-1 text-[9px] font-semibold uppercase text-violet-600 dark:text-violet-300">
+                Pro
+              </span>
+            </button>
+          )}
+
           {railItems.map((r) => (
             <RailRow
               key={r.repoId}
@@ -276,7 +306,9 @@ export function ActivityView(): JSX.Element {
 
       {/* RIGHT DETAIL */}
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {noRepos ? (
+        {showingInsights ? (
+          <InsightsView />
+        ) : noRepos ? (
           <div className="flex h-full items-center justify-center text-sm text-gray-400">
             No watched repos yet. Add a repo from the filter bar to populate the Activity.
           </div>

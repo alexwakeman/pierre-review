@@ -14,6 +14,8 @@ import type {
   PrFileDiff,
   PrFileDiffStatus,
   PrFilesResponse,
+  RequestReviewersBody,
+  RequestReviewersResult,
 } from '@pierre-review/shared';
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
 import { fetchActionsJobLog } from '../../github/actions-logs.js';
@@ -22,6 +24,7 @@ import {
   getPrDetail,
   getPrFilesContext,
   getPrWriteContext,
+  getReviewerLogins,
   markAllViewed,
   markPrViewed,
   upsertLocalPrComment,
@@ -37,6 +40,7 @@ import {
   fetchHeadShaFor,
   fetchPrFilesWithPatch,
   postInlineComment,
+  requestReviewers,
   rerunWorkflowRun,
   submitPrReview,
 } from '../../github/mutations.js';
@@ -150,6 +154,23 @@ const reviewCommentSchema = {
       line: { type: 'integer' },
       side: { type: 'string', enum: ['LEFT', 'RIGHT'] },
       body: { type: 'string' },
+    },
+  },
+};
+
+const requestReviewersSchema = {
+  ...idParamSchema,
+  body: {
+    type: 'object',
+    required: ['userIds'],
+    additionalProperties: false,
+    properties: {
+      userIds: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 15,
+        items: { type: 'integer' },
+      },
     },
   },
 };
@@ -534,6 +555,67 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         const token = await getAccessToken(accountId);
         await rerunWorkflowRun(token, ctx.owner, ctx.name, runId, mode);
         const result: CiRerunResult = { status: 'queued', runId, mode };
+        return result;
+      } catch (err) {
+        reply.status(502);
+        return {
+          error: 'GitHubError',
+          message: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+  );
+
+  // Request reviewers on a PR (powers the Insights "Assign reviewers" action). Server
+  // re-checks write access (WRITE/MAINTAIN/ADMIN — push-style, no author exclusion:
+  // an author may request reviewers on their own PR). The given user ids are resolved
+  // to GitHub logins (the PR author + bots + unknown ids dropped); GitHub itself gates
+  // that each login is a repo collaborator. The refreshed request state arrives on the
+  // next sync (reviewRequests are re-derived each pass).
+  app.post(
+    '/api/prs/:id/request-reviewers',
+    { schema: requestReviewersSchema },
+    async (req, reply) => {
+      const { id } = req.params as { id: number };
+      const { userIds } = req.body as RequestReviewersBody;
+      const accountId = accountIdOf(req);
+
+      const ctx = await getPrWriteContext(id, accountId);
+      if (!ctx) {
+        reply.status(404);
+        return { error: 'NotFound', message: `PR ${id} not found` };
+      }
+
+      const canRequest = ['WRITE', 'MAINTAIN', 'ADMIN'].includes(
+        ctx.viewerPermission ?? '',
+      );
+      if (!canRequest) {
+        reply.status(403);
+        return {
+          error: 'NotPermitted',
+          message: 'You need write access to this repo to request reviewers.',
+        };
+      }
+
+      // Drop the PR author (GitHub rejects self-review requests), then resolve to
+      // logins (also drops bots + unknown ids).
+      const wanted = userIds.filter((uid) => uid !== ctx.authorId);
+      const logins = (await getReviewerLogins(wanted)).map((r) => r.login);
+      if (logins.length === 0) {
+        reply.status(400);
+        return {
+          error: 'NoReviewers',
+          message: 'None of the selected users can be requested as reviewers.',
+        };
+      }
+
+      try {
+        const token = await getAccessToken(accountId);
+        await requestReviewers(token, ctx.owner, ctx.name, ctx.number, logins);
+        const result: RequestReviewersResult = {
+          status: 'ok',
+          requestedLogins: logins,
+        };
         return result;
       } catch (err) {
         reply.status(502);

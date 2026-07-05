@@ -77,3 +77,18 @@ export function useAddReviewComment(prId: number) {
     },
   });
 }
+
+// Request reviewers on a PR (the Insights "Assign reviewers" action). GitHub drops the
+// request once a review lands, and reviewRequests are re-derived each sync, so the
+// routing card that prompted this leaves the board on the next refresh — invalidate
+// ['team-insights'] (+ the PR detail, whose Requested list changes) to reflect it.
+export function useRequestReviewers(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userIds: number[]) => api.requestReviewers(prId, { userIds }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['team-insights'] });
+      void qc.invalidateQueries({ queryKey: ['pr', prId] });
+    },
+  });
+}

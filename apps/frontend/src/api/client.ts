@@ -2,6 +2,8 @@ import type {
   ActiveReviewsResponse,
   AddReviewCommentBody,
   AddReviewCommentResult,
+  RequestReviewersBody,
+  RequestReviewersResult,
   AiFixMergePreview,
   AiFixPushBody,
   AiFixPushResult,
@@ -29,6 +31,7 @@ import type {
   CreatePrCommentResult,
   CreateRepoBody,
   ConsolidatedFeedResponse,
+  TeamInsightsResponse,
   MeResponse,
   MergersResponse,
   DismissedMyTurnResponse,
@@ -190,6 +193,10 @@ export const api = {
     fetch(`/api/prs/${prId}/review-comment`, jsonBody('POST', body)).then((r) =>
       handle<AddReviewCommentResult>(r),
     ),
+  requestReviewers: (prId: number, body: RequestReviewersBody) =>
+    fetch(`/api/prs/${prId}/request-reviewers`, jsonBody('POST', body)).then((r) =>
+      handle<RequestReviewersResult>(r),
+    ),
 
   // ---- Activity (Workstream 1; CORE, no AI) ----
   // The multi-repo triage aggregate (per watched repo: stats, thread totals,
@@ -207,6 +214,8 @@ export const api = {
     fetch('/api/activity/feed/mark-seen', jsonBody('POST')).then((r) =>
       handle<{ feedLastSeenAt: string }>(r),
     ),
+  // Team review-intelligence "Insights" (Pro; teamInsights capability).
+  teamInsights: () => get<TeamInsightsResponse>('/api/pro/insights'),
   // Repo-scoped Claude review history (all runs per PR, newest-first). Gated on
   // config.claudeReviewEnabled; the response's `enabled` flag reflects that.
   repoClaudeReviews: (repoId: number) =>

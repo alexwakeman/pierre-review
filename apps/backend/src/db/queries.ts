@@ -11,6 +11,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
   lte,
   ne,
   notInArray,
@@ -27,6 +28,11 @@ import type {
   DismissedItem,
   DismissedMyTurnResponse,
   EventType,
+  InsightCard,
+  InsightKind,
+  InsightSeverity,
+  SuggestedReviewer,
+  TeamInsightsResponse,
   FeedEvent,
   FeedResponse,
   Label,
@@ -2007,6 +2013,407 @@ export async function countNewMyTurnFeedItems(
     }
   }
   return n;
+}
+
+// ---- Team review-intelligence "Insights" (Pro; teamInsights) ----
+
+const INSIGHT_STALLED_REVIEW_HOURS = 24;
+const INSIGHT_UNTOUCHED_THREAD_HOURS = 24; // "> 1 day"
+const INSIGHT_SPRINT_DAYS = 14; // trailing 2 weeks
+const INSIGHT_ROUTING_MIN_AGE_HOURS = 4; // ignore brand-new PRs
+const INSIGHT_CARD_CAP = 15; // per-kind cap so the board stays digestible
+
+function topLevelDir(path: string): string {
+  const i = path.indexOf('/');
+  return i === -1 ? '.' : path.slice(0, i);
+}
+
+// Compute the team review-intelligence cards from already-synced data — NO AI. WATCHED
+// repos (`inboxWatch`) are the team; "sprint" is the trailing 2 weeks. Runs on read (the
+// client refetches on the sync cadence); every query is account-scoped + bounded (watched
+// repos, open PRs, the sprint window, per-kind caps).
+export async function getTeamInsights(accountId: number): Promise<TeamInsightsResponse> {
+  const now = Date.now();
+  const generatedAt = new Date(now);
+  const sprintFrom = new Date(now - INSIGHT_SPRINT_DAYS * 86_400_000);
+  const sprint = { from: sprintFrom.toISOString(), to: generatedAt.toISOString() };
+  const cards: InsightCard[] = [];
+  const userIdSet = new Set<number>();
+  const addUser = (id: number | null): void => {
+    if (id != null) userIdSet.add(id);
+  };
+
+  const watched = await db
+    .select({ id: repos.id, owner: repos.owner, name: repos.name })
+    .from(repos)
+    .where(and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)))
+    .execute();
+  const repoName = new Map(watched.map((r) => [r.id, `${r.owner}/${r.name}`]));
+  const repoIds = watched.map((r) => r.id);
+  const finish = async (): Promise<TeamInsightsResponse> => {
+    const kindRank: Record<InsightKind, number> = {
+      stalled_review: 0,
+      untouched_thread: 1,
+      reviewer_load: 2,
+      reviewer_routing: 3,
+    };
+    const sevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
+    cards.sort(
+      (a, b) => sevRank[a.severity] - sevRank[b.severity] || kindRank[a.kind] - kindRank[b.kind],
+    );
+    const userRows =
+      userIdSet.size > 0
+        ? await db.select().from(users).where(inArray(users.id, [...userIdSet])).execute()
+        : [];
+    return {
+      enabled: true,
+      generatedAt: generatedAt.toISOString(),
+      sprint,
+      cards,
+      users: userRows.map(mapUser),
+    };
+  };
+  if (repoIds.length === 0) return finish();
+
+  const ghUrl = (repoId: number, number: number): string =>
+    `https://github.com/${repoName.get(repoId)}/pull/${number}`;
+
+  // Open, non-draft PRs in the team's repos.
+  const openPrs = await db
+    .select({
+      id: pullRequests.id,
+      repoId: pullRequests.repoId,
+      number: pullRequests.number,
+      title: pullRequests.title,
+      authorId: pullRequests.authorId,
+      openedAt: pullRequests.openedAt,
+      ciStatus: pullRequests.ciStatus,
+      changedFiles: pullRequests.changedFiles,
+      additions: pullRequests.additions,
+      deletions: pullRequests.deletions,
+    })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.repoId, repoIds),
+        eq(pullRequests.state, 'open'),
+        eq(pullRequests.isDraft, false),
+      ),
+    )
+    .execute();
+  const openPrIds = openPrs.map((p) => p.id);
+  const prById = new Map(openPrs.map((p) => [p.id, p]));
+  if (openPrIds.length === 0) return finish();
+
+  // Pending review requests (GitHub drops the request once a review lands → still-pending).
+  const reqRows = await db
+    .select({ prId: reviewRequests.prId, userId: reviewRequests.userId })
+    .from(reviewRequests)
+    .where(and(inArray(reviewRequests.prId, openPrIds), isNotNull(reviewRequests.userId)))
+    .execute();
+  const pendingByPr = new Map<number, number[]>();
+  const pendingByReviewer = new Map<number, number[]>();
+  for (const r of reqRows) {
+    if (r.userId == null) continue;
+    const a = pendingByPr.get(r.prId) ?? [];
+    a.push(r.userId);
+    pendingByPr.set(r.prId, a);
+    const b = pendingByReviewer.get(r.userId) ?? [];
+    b.push(r.prId);
+    pendingByReviewer.set(r.userId, b);
+  }
+
+  // PRs that already have a submitted review (used by the routing "orphan" test).
+  const reviewedPrIds = new Set<number>();
+  for (const r of await db
+    .select({ prId: reviews.prId })
+    .from(reviews)
+    .where(inArray(reviews.prId, openPrIds))
+    .execute())
+    reviewedPrIds.add(r.prId);
+
+  // Sprint review load per reviewer (reviews submitted on team PRs in the window).
+  const reviewsThisSprint = new Map<number, number>();
+  for (const r of await db
+    .select({ authorId: reviews.authorId })
+    .from(reviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.repoId, repoIds),
+        gte(reviews.submittedAt, sprintFrom),
+        isNotNull(reviews.authorId),
+      ),
+    )
+    .execute()) {
+    if (r.authorId != null)
+      reviewsThisSprint.set(r.authorId, (reviewsThisSprint.get(r.authorId) ?? 0) + 1);
+  }
+
+  // (1) STALLED REVIEWS — open PRs with a still-pending reviewer, open past the threshold.
+  const stalled = openPrs
+    .filter(
+      (p) =>
+        (pendingByPr.get(p.id)?.length ?? 0) > 0 &&
+        p.openedAt != null &&
+        (now - p.openedAt.getTime()) / 3_600_000 > INSIGHT_STALLED_REVIEW_HOURS,
+    )
+    .map((p) => ({ p, ageHours: Math.round((now - p.openedAt!.getTime()) / 3_600_000) }))
+    .sort((a, b) => b.ageHours - a.ageHours)
+    .slice(0, INSIGHT_CARD_CAP);
+  for (const { p, ageHours } of stalled) {
+    const reviewers = pendingByPr.get(p.id) ?? [];
+    addUser(p.authorId);
+    reviewers.forEach(addUser);
+    cards.push({
+      id: `stalled:${p.id}`,
+      kind: 'stalled_review',
+      severity: ageHours >= 72 ? 'high' : ageHours >= 48 ? 'warn' : 'info',
+      prId: p.id,
+      repoId: p.repoId,
+      repoFullName: repoName.get(p.repoId) ?? '',
+      prNumber: p.number,
+      prTitle: p.title,
+      authorId: p.authorId,
+      githubUrl: ghUrl(p.repoId, p.number),
+      ciStatus: p.ciStatus,
+      changedFiles: p.changedFiles,
+      additions: p.additions,
+      deletions: p.deletions,
+      ageHours,
+      requestedReviewerIds: reviewers,
+    });
+  }
+
+  // (2) UNTOUCHED THREADS — derivedState 'untouched', older than a day, on open PRs.
+  const threadRows = await db
+    .select({
+      threadId: reviewThreads.id,
+      path: reviewThreads.path,
+      createdAt: reviewThreads.createdAt,
+      originalCommenterId: reviewThreads.originalCommenterId,
+      prId: pullRequests.id,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      repoId: pullRequests.repoId,
+      authorId: pullRequests.authorId,
+      ciStatus: pullRequests.ciStatus,
+      changedFiles: pullRequests.changedFiles,
+      additions: pullRequests.additions,
+      deletions: pullRequests.deletions,
+    })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.repoId, repoIds),
+        eq(pullRequests.state, 'open'),
+        eq(reviewThreads.derivedState, 'untouched'),
+        lt(reviewThreads.createdAt, new Date(now - INSIGHT_UNTOUCHED_THREAD_HOURS * 3_600_000)),
+      ),
+    )
+    .execute();
+  const threads = threadRows
+    .map((t) => ({ t, ageHours: Math.round((now - t.createdAt.getTime()) / 3_600_000) }))
+    .sort((a, b) => b.ageHours - a.ageHours)
+    .slice(0, INSIGHT_CARD_CAP);
+  for (const { t, ageHours } of threads) {
+    addUser(t.originalCommenterId);
+    addUser(t.authorId);
+    cards.push({
+      id: `thread:${t.threadId}`,
+      kind: 'untouched_thread',
+      severity: ageHours >= 96 ? 'high' : ageHours >= 48 ? 'warn' : 'info',
+      prId: t.prId,
+      repoId: t.repoId,
+      repoFullName: repoName.get(t.repoId) ?? '',
+      prNumber: t.prNumber,
+      prTitle: t.prTitle,
+      authorId: t.authorId,
+      githubUrl: ghUrl(t.repoId, t.prNumber),
+      ciStatus: t.ciStatus,
+      changedFiles: t.changedFiles,
+      additions: t.additions,
+      deletions: t.deletions,
+      threadId: t.threadId,
+      path: t.path,
+      ageHours,
+      originalCommenterId: t.originalCommenterId,
+    });
+  }
+
+  // (3) REVIEWER LOAD — ranked by pending-queue depth, with sprint load alongside.
+  const loadCards = [...pendingByReviewer.keys()]
+    .map((rid) => ({
+      rid,
+      pending: pendingByReviewer.get(rid)?.length ?? 0,
+      sprint: reviewsThisSprint.get(rid) ?? 0,
+    }))
+    .filter((x) => x.pending >= 1)
+    .sort((a, b) => b.pending - a.pending || b.sprint - a.sprint)
+    .slice(0, 8);
+  for (const x of loadCards) {
+    addUser(x.rid);
+    const pendingPrs = (pendingByReviewer.get(x.rid) ?? [])
+      .map((id) => prById.get(id))
+      .filter((p): p is NonNullable<typeof p> => p != null)
+      .slice(0, 8)
+      .map((p) => ({
+        prId: p.id,
+        repoFullName: repoName.get(p.repoId) ?? '',
+        prNumber: p.number,
+        prTitle: p.title,
+      }));
+    cards.push({
+      id: `load:${x.rid}`,
+      kind: 'reviewer_load',
+      severity: x.pending >= 4 ? 'high' : x.pending >= 2 ? 'warn' : 'info',
+      reviewerId: x.rid,
+      pendingCount: x.pending,
+      reviewsThisSprint: x.sprint,
+      pendingPrs,
+    });
+  }
+
+  // (4) REVIEWER ROUTING — orphan PRs (nobody requested, nobody reviewed) + who should review.
+  const orphans = openPrs
+    .filter(
+      (p) =>
+        (pendingByPr.get(p.id)?.length ?? 0) === 0 &&
+        !reviewedPrIds.has(p.id) &&
+        p.openedAt != null &&
+        (now - p.openedAt.getTime()) / 3_600_000 > INSIGHT_ROUTING_MIN_AGE_HOURS,
+    )
+    .slice(0, INSIGHT_CARD_CAP);
+  if (orphans.length > 0) {
+    const orphanIds = orphans.map((p) => p.id);
+    // The orphan PRs' changed paths (their commits → files).
+    const shasByPr = new Map<number, string[]>();
+    const orphanShas = new Set<string>();
+    for (const c of await db
+      .select({ prId: commits.prId, sha: commits.sha })
+      .from(commits)
+      .where(inArray(commits.prId, orphanIds))
+      .execute()) {
+      if (c.prId == null) continue;
+      const a = shasByPr.get(c.prId) ?? [];
+      a.push(c.sha);
+      shasByPr.set(c.prId, a);
+      orphanShas.add(c.sha);
+    }
+    const pathsBySha = new Map<string, string[]>();
+    if (orphanShas.size > 0)
+      for (const f of await db
+        .select({ sha: commitFiles.sha, paths: commitFiles.paths })
+        .from(commitFiles)
+        .where(inArray(commitFiles.sha, [...orphanShas]))
+        .execute())
+        pathsBySha.set(f.sha, f.paths);
+
+    // Repo-wide "who commits where" over the sprint → (repo, top-level dir) → author counts.
+    const sprintShaAuthor = new Map<string, { repoId: number; authorId: number }>();
+    for (const c of await db
+      .select({ repoId: pullRequests.repoId, authorId: commits.authorId, sha: commits.sha })
+      .from(commits)
+      .innerJoin(pullRequests, eq(pullRequests.id, commits.prId))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(pullRequests.repoId, repoIds),
+          gte(commits.committedAt, sprintFrom),
+          isNotNull(commits.authorId),
+        ),
+      )
+      .execute()) {
+      if (c.authorId != null) sprintShaAuthor.set(c.sha, { repoId: c.repoId, authorId: c.authorId });
+    }
+    const dirAuthors = new Map<string, Map<number, number>>();
+    if (sprintShaAuthor.size > 0)
+      for (const f of await db
+        .select({ sha: commitFiles.sha, paths: commitFiles.paths })
+        .from(commitFiles)
+        .where(inArray(commitFiles.sha, [...sprintShaAuthor.keys()]))
+        .execute()) {
+        const meta = sprintShaAuthor.get(f.sha);
+        if (!meta) continue;
+        for (const d of new Set(f.paths.map(topLevelDir))) {
+          const key = `${meta.repoId} ${d}`;
+          const m = dirAuthors.get(key) ?? new Map<number, number>();
+          m.set(meta.authorId, (m.get(meta.authorId) ?? 0) + 1);
+          dirAuthors.set(key, m);
+        }
+      }
+
+    const mergers = new Map(
+      (await getMergers(accountId)).map((m) => [m.repoId, new Set(m.userIds)]),
+    );
+
+    for (const p of orphans) {
+      const shas = shasByPr.get(p.id) ?? [];
+      const paths = [...new Set(shas.flatMap((s) => pathsBySha.get(s) ?? []))];
+      const dirs = [...new Set(paths.map(topLevelDir))];
+      const repoMergers = mergers.get(p.repoId) ?? new Set<number>();
+      // Candidates: authors who touched the same dirs this sprint AND have merge rights.
+      // Track the single dir each candidate touched most, to phrase the rationale.
+      const score = new Map<number, number>();
+      const topDir = new Map<number, { dir: string; cnt: number }>();
+      for (const d of dirs) {
+        const m = dirAuthors.get(`${p.repoId} ${d}`);
+        if (!m) continue;
+        for (const [uid, cnt] of m) {
+          if (uid === p.authorId || !repoMergers.has(uid)) continue;
+          score.set(uid, (score.get(uid) ?? 0) + cnt);
+          const cur = topDir.get(uid);
+          if (!cur || cnt > cur.cnt) topDir.set(uid, { dir: d, cnt });
+        }
+      }
+      const dirLabel = (d: string): string => (d === '.' ? 'the repo root' : `${d}/`);
+      let suggested: SuggestedReviewer[] = [...score.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([uid]) => {
+          const top = topDir.get(uid);
+          return {
+            userId: uid,
+            reason: top
+              ? `committed to ${dirLabel(top.dir)} this sprint`
+              : 'has merge rights here',
+          };
+        });
+      // Fallback: any repo merger who isn't the author.
+      if (suggested.length === 0)
+        suggested = [...repoMergers]
+          .filter((uid) => uid !== p.authorId)
+          .slice(0, 3)
+          .map((uid) => ({ userId: uid, reason: 'has merge rights here' }));
+      if (suggested.length === 0) continue; // nothing useful to suggest
+      addUser(p.authorId);
+      suggested.forEach((s) => addUser(s.userId));
+      cards.push({
+        id: `route:${p.id}`,
+        kind: 'reviewer_routing',
+        severity: 'info',
+        prId: p.id,
+        repoId: p.repoId,
+        repoFullName: repoName.get(p.repoId) ?? '',
+        prNumber: p.number,
+        prTitle: p.title,
+        authorId: p.authorId,
+        githubUrl: ghUrl(p.repoId, p.number),
+        ciStatus: p.ciStatus,
+        changedFiles: p.changedFiles,
+        additions: p.additions,
+        deletions: p.deletions,
+        topPaths: paths.slice(0, 5),
+        suggestedReviewers: suggested,
+      });
+    }
+  }
+
+  return finish();
 }
 
 export async function getConsolidatedFeed(
@@ -4169,6 +4576,23 @@ export async function getPrWriteContext(
     viewerPermission: row.viewerPermission,
     prUrl: `https://github.com/${row.owner}/${row.name}/pull/${row.number}`,
   };
+}
+
+// Resolve a set of user ids to their GitHub logins for a reviewer request. Bots are
+// dropped (GitHub 422s on bot reviewers); the `users` table is global so no account
+// scope is needed (the caller already gated the PR by ownership + write access).
+export async function getReviewerLogins(
+  userIds: number[],
+): Promise<{ userId: number; login: string }[]> {
+  if (userIds.length === 0) return [];
+  const rows = await db
+    .select({ id: users.id, login: users.githubLogin, isBot: users.isBot })
+    .from(users)
+    .where(inArray(users.id, userIds))
+    .execute();
+  return rows
+    .filter((r) => !r.isBot && r.login)
+    .map((r) => ({ userId: r.id, login: r.login }));
 }
 
 export interface PrFilesContext {

@@ -18,6 +18,7 @@ export interface ProCapabilities {
   reviewMemory: boolean; // WS3 Claude Review learnings
   aiAnalysis: boolean; // AI Fix: PR summary + CI failure analysis (Haiku, read-only)
   aiFix: boolean; // AI Fix: agentic inline code fix + push (Agent SDK, needs write)
+  teamInsights: boolean; // team review-intelligence "Insights" (no AI; pure reads)
 }
 
 // ---- AI Fix seams (github + coding) -------------------------------------------
@@ -286,6 +287,9 @@ export interface ProHostQueries {
     repoIds?: number[] | null;
   }): Promise<unknown>;
   getActivity(accountId: number, repoIds?: number[] | null): Promise<unknown>; // WS2 aggregate (lands in a later phase)
+  // Team review-intelligence cards (stalled reviews / untouched threads / reviewer load /
+  // routing), computed over the account's WATCHED repos. Returns InsightsResponse.
+  getTeamInsights(accountId: number): Promise<unknown>;
 }
 
 export interface ProContext {
@@ -336,7 +340,7 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  apiVersion: 4; // contract handshake; host warns on mismatch
+  apiVersion: 5; // contract handshake; host warns on mismatch
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
@@ -348,6 +352,7 @@ const EMPTY: ProCapabilities = {
   reviewMemory: false,
   aiAnalysis: false,
   aiFix: false,
+  teamInsights: false,
 };
 let active: ProCapabilities = EMPTY;
 export function setProCapabilities(c: ProCapabilities): void {

@@ -505,6 +505,27 @@ export async function createPullRequest(
   return { number: res.number, url: res.html_url };
 }
 
+// ---- Request reviewers on a PR (REST) ----
+
+// Request one or more reviewers on a PR (POST .../pulls/:n/requested_reviewers with
+// { reviewers: [login…] }). Needs a token with write/triage access; GitHub 422s if a
+// login isn't a collaborator or is the PR author (the caller filters the author out).
+// Returns 201 with the updated PR body, which we don't need — the refreshed request
+// state arrives on the next sync (reviewRequests are re-derived each sync).
+export async function requestReviewers(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+  logins: string[],
+): Promise<void> {
+  await ghRestPostFor<unknown>(
+    token,
+    `/repos/${owner}/${name}/pulls/${number}/requested_reviewers`,
+    { reviewers: logins },
+  );
+}
+
 // ---- Re-trigger a GitHub Actions workflow run ----
 
 // Re-run a workflow run (per-account). `mode: 'failed'` reruns only the failed jobs

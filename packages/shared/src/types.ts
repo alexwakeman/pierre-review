@@ -221,6 +221,18 @@ export interface CiRerunResult {
   mode: CiRerunMode;
 }
 
+// Request reviewers on a PR (POST /api/prs/:id/request-reviewers). userIds are
+// resolved to GitHub logins server-side (bots + the PR author dropped); requires repo
+// write access (re-checked server-side). Powers the Insights "Assign reviewers" action.
+export interface RequestReviewersBody {
+  userIds: number[];
+}
+
+export interface RequestReviewersResult {
+  status: 'ok';
+  requestedLogins: string[]; // logins actually sent to GitHub (after filtering)
+}
+
 // An outstanding review request on a PR (user resolved via the users array;
 // team requests carry only a name).
 export interface RequestedReviewer {
@@ -321,6 +333,7 @@ export interface ProCapabilities {
   // analysis can ship without the expensive, write-capable fixer:
   aiAnalysis: boolean; // PR summary + CI failure analysis (Haiku, read-only)
   aiFix: boolean; // agentic inline code fix + push (Agent SDK, needs write access)
+  teamInsights: boolean; // team review-intelligence "Insights" (no AI; pure reads)
 }
 
 export interface MeResponse {
@@ -2019,6 +2032,95 @@ export interface ConsolidatedFeedResponse {
   users: User[];
   total: number;
   generatedAt: string; // ISO-8601
+}
+
+// ---- Team review-intelligence "Insights" (Pro; `teamInsights` capability) ----
+// Discrete, Feed-style cards computed on the sync cadence from data already synced (NO
+// AI): PRs stalled on review, review threads left untouched, reviewer load/queue depth,
+// and reviewer-routing suggestions. Scoped to WATCHED repos (= the team). "Sprint" is
+// the trailing 2 weeks. Each card is a self-contained work item, ranked most-urgent first.
+export type InsightKind =
+  | 'stalled_review' // an open PR awaiting review too long
+  | 'untouched_thread' // a review thread nobody has responded to
+  | 'reviewer_load' // a reviewer's pending-queue depth (+ sprint load)
+  | 'reviewer_routing'; // a PR with no reviewer + who should review it
+
+export type InsightSeverity = 'info' | 'warn' | 'high';
+
+interface InsightCardBase {
+  id: string; // stable-ish key (e.g. `stalled:<prId>`)
+  kind: InsightKind;
+  severity: InsightSeverity; // drives the card's accent (info/warn/high)
+}
+
+// Shared PR context carried by every PR-bearing insight card — enough to render the
+// at-a-glance CI / size indicators and open the PR without a second fetch.
+export interface InsightPrRef {
+  prId: number;
+  repoId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  authorId: number | null;
+  githubUrl: string;
+  ciStatus: CiStatus | null; // head-commit CI rollup (null = no checks)
+  changedFiles: number; // files touched
+  additions: number; // LOC added
+  deletions: number; // LOC removed
+}
+
+// A suggested reviewer + the human-readable rationale for the suggestion
+// (e.g. "committed to auth/ this sprint" / "has merge rights here").
+export interface SuggestedReviewer {
+  userId: number;
+  reason: string;
+}
+
+export interface StalledReviewCard extends InsightCardBase, InsightPrRef {
+  kind: 'stalled_review';
+  ageHours: number; // hours the PR has been open awaiting review
+  requestedReviewerIds: number[]; // reviewers still on the hook (GitHub-pending)
+}
+
+export interface UntouchedThreadCard extends InsightCardBase, InsightPrRef {
+  kind: 'untouched_thread';
+  threadId: number;
+  path: string;
+  ageHours: number;
+  originalCommenterId: number | null;
+}
+
+export interface ReviewerLoadCard extends InsightCardBase {
+  kind: 'reviewer_load';
+  reviewerId: number;
+  pendingCount: number; // open PRs where they're requested & haven't reviewed
+  reviewsThisSprint: number; // reviews they submitted in the sprint window
+  pendingPrs: {
+    prId: number;
+    repoFullName: string;
+    prNumber: number;
+    prTitle: string;
+  }[];
+}
+
+export interface ReviewerRoutingCard extends InsightCardBase, InsightPrRef {
+  kind: 'reviewer_routing';
+  topPaths: string[]; // representative changed paths (e.g. "auth/login.ts")
+  suggestedReviewers: SuggestedReviewer[]; // who + why (merge rights + recent commits)
+}
+
+export type InsightCard =
+  | StalledReviewCard
+  | UntouchedThreadCard
+  | ReviewerLoadCard
+  | ReviewerRoutingCard;
+
+export interface TeamInsightsResponse {
+  enabled: boolean; // false when the capability is off (plugin absent)
+  generatedAt: string; // ISO-8601
+  sprint: { from: string; to: string };
+  cards: InsightCard[];
+  users: User[]; // actors referenced by the cards (avatar/login lookup)
 }
 
 // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----
