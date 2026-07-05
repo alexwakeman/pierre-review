@@ -15,7 +15,7 @@ import type {
 } from '@pierre-review/shared';
 import type { LearningMatch } from '@pierre-review/shared';
 import { CLAUDE_REVIEW_MODELS } from '@pierre-review/shared';
-import { formatDate } from '../lib/ui.js';
+import { formatDate, usdToCredits } from '../lib/ui.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import { useReviewLearnings } from '../hooks/useReviewLearnings.js';
@@ -137,7 +137,7 @@ const SEVERITY_CLASS: Record<ClaudeFindingSeverity, string> = {
 
 function metaLine(review: ClaudeReview): string {
   const parts: string[] = [review.model];
-  if (review.costUsd != null) parts.push(`$${review.costUsd.toFixed(4)}`);
+  if (review.costUsd != null) parts.push(`${usdToCredits(review.costUsd)} cr`);
   if (review.numTurns != null) parts.push(`${review.numTurns} turns`);
   if (review.excludedFiles.length > 0) {
     parts.push(`${review.excludedFiles.length} noise files excluded`);
@@ -1498,9 +1498,9 @@ export function ClaudeReviewTab({
               </span>
               <span
                 className="font-semibold text-gray-600 dark:text-gray-300"
-                title="Estimated cost so far. The cost recorded when the run finishes is the authoritative figure."
+                title="Estimated usage so far, in credits. The figure recorded when the run finishes is authoritative."
               >
-                ~${status.progress.usage.estCostUsd.toFixed(2)}
+                ~{usdToCredits(status.progress.usage.estCostUsd)} cr
               </span>
             </div>
           )}

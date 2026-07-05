@@ -11,6 +11,15 @@ import type {
   ThreadStateCounts,
   User,
 } from '@pierre-review/shared';
+import { AI_CREDITS_PER_USD } from '@pierre-review/shared';
+
+// AI cost is conveyed in CREDITS, never dollars (1¢ = 5 credits ⇒ $1 = 500 credits), to
+// decouple the app's price from its underlying running cost. Raw USD stays in the data;
+// format it as credits at the display edge. Used everywhere AI spend surfaces (Track usage,
+// Claude Review) so the whole app is non-currency + consistent.
+export function usdToCredits(usd: number): number {
+  return Math.max(0, Math.round(usd * AI_CREDITS_PER_USD));
+}
 
 export interface StateMeta {
   label: string;
