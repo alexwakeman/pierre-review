@@ -2115,10 +2115,43 @@ export type InsightCard =
   | ReviewerLoadCard
   | ReviewerRoutingCard;
 
+// ---- Team DORA-ish flow metrics (Insights header; no AI) ----
+// Best-effort DORA mapping from synced PR/CI data (there is NO stored CI-state history,
+// so recovery is a current-state proxy — see fields). Each stat carries the current
+// sprint value + the prior sprint's (for a Δ trend arrow). Weekly series align to
+// `weekBuckets` (a shared x-axis, oldest first) and reuse the repo-analytics chart format.
+export interface TeamMetricStat {
+  value: number | null; // this sprint (null = no sample)
+  previous: number | null; // prior sprint, for the delta
+}
+
+export interface TeamMetrics {
+  sprintDays: number; // the stat-tile window (14)
+  weekBuckets: string[]; // ISO bucket-start per week, oldest first (chart x-axis)
+
+  // Deployment frequency → PRs merged to a base branch.
+  merges: TeamMetricStat;
+  // Lead time for changes → median hours open → merge.
+  leadTimeHours: TeamMetricStat;
+  // Review responsiveness → median hours open → first review.
+  timeToFirstReviewHours: TeamMetricStat;
+  // Change failure rate (inverted) → % of merged PRs whose head CI was green.
+  mergeCiSuccessPct: TeamMetricStat;
+  // Time to restore (proxy) → open PRs currently red on CI + how long they've sat.
+  ciFailingNow: number;
+  ciFailingMedianAgeHours: number | null;
+
+  // Weekly series (length === weekBuckets.length).
+  throughput: { opened: number[]; merged: number[] }; // flow + deploy frequency
+  leadTimeTrend: (number | null)[]; // median open→merge hours, by merge week
+  ciSuccessTrend: (number | null)[]; // % merged PRs green, by merge week
+}
+
 export interface TeamInsightsResponse {
   enabled: boolean; // false when the capability is off (plugin absent)
   generatedAt: string; // ISO-8601
   sprint: { from: string; to: string };
+  metrics: TeamMetrics | null; // team flow metrics header (null = no repos)
   cards: InsightCard[];
   users: User[]; // actors referenced by the cards (avatar/login lookup)
 }

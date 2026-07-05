@@ -33,6 +33,7 @@ import type {
   InsightSeverity,
   SuggestedReviewer,
   TeamInsightsResponse,
+  TeamMetrics,
   FeedEvent,
   FeedResponse,
   Label,
@@ -2029,6 +2030,150 @@ function topLevelDir(path: string): string {
   return i === -1 ? '.' : path.slice(0, i);
 }
 
+const TEAM_METRICS_WINDOW_DAYS = 84; // 12 weeks of weekly chart history
+const TEAM_METRICS_WEEK_MS = 7 * 86_400_000;
+
+function medianOf(xs: number[]): number | null {
+  if (xs.length === 0) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
+}
+
+// Team-wide DORA-ish flow metrics across the watched repos (NO AI). Best-effort DORA
+// mapping from synced PR/CI data: deploy frequency = merges; lead time = open→merge;
+// change-failure (inverted) = merged-PR CI success; time-to-restore is a PROXY off the
+// current snapshot (open PRs red on CI + how long they've sat) since no CI-state history
+// is stored. Stat tiles compare the current 14-day sprint to the prior one; weekly series
+// (aligned to `weekBuckets`) feed the same chart toolkit the per-repo analytics use.
+export async function getTeamMetrics(
+  accountId: number,
+  repoIds: number[],
+  nowMs: number,
+): Promise<TeamMetrics | null> {
+  if (repoIds.length === 0) return null;
+  const windowStartMs = nowMs - TEAM_METRICS_WINDOW_DAYS * 86_400_000;
+  const windowStart = new Date(windowStartMs);
+
+  const prs = await db
+    .select({
+      state: pullRequests.state,
+      isDraft: pullRequests.isDraft,
+      openedAt: pullRequests.openedAt,
+      firstReviewAt: pullRequests.firstReviewAt,
+      mergedAt: pullRequests.mergedAt,
+      lastCommitAt: pullRequests.lastCommitAt,
+      ciStatus: pullRequests.ciStatus,
+    })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.repoId, repoIds),
+        // Everything currently open, plus anything opened or merged within the window.
+        or(
+          eq(pullRequests.state, 'open'),
+          gte(pullRequests.openedAt, windowStart),
+          gte(pullRequests.mergedAt, windowStart),
+        ),
+      ),
+    )
+    .execute();
+
+  const nBuckets = Math.max(1, Math.round((nowMs - windowStartMs) / TEAM_METRICS_WEEK_MS));
+  const weekBuckets: string[] = [];
+  for (let i = 0; i < nBuckets; i++)
+    weekBuckets.push(new Date(windowStartMs + i * TEAM_METRICS_WEEK_MS).toISOString());
+  const bi = (ms: number): number =>
+    Math.max(0, Math.min(nBuckets - 1, Math.floor((ms - windowStartMs) / TEAM_METRICS_WEEK_MS)));
+  const zeros = (): number[] => new Array<number>(nBuckets).fill(0);
+
+  const openedSeries = zeros();
+  const mergedSeries = zeros();
+  const leadByBucket: number[][] = Array.from({ length: nBuckets }, () => []);
+  const ciByBucket = Array.from({ length: nBuckets }, () => ({ succ: 0, total: 0 }));
+
+  const SPRINT_MS = 14 * 86_400_000;
+  const curLo = nowMs - SPRINT_MS;
+  const prevLo = nowMs - 2 * SPRINT_MS;
+  const inWin = (ms: number, lo: number, hi: number): boolean => ms >= lo && ms < hi;
+
+  const leadCur: number[] = [];
+  const leadPrev: number[] = [];
+  const ttfrCur: number[] = [];
+  const ttfrPrev: number[] = [];
+  let mergesCur = 0;
+  let mergesPrev = 0;
+  const ciMergedCur = { succ: 0, total: 0 };
+  const ciMergedPrev = { succ: 0, total: 0 };
+  const failingAges: number[] = [];
+  let ciFailingNow = 0;
+
+  for (const p of prs) {
+    const openedMs = p.openedAt.getTime();
+    if (openedMs >= windowStartMs) openedSeries[bi(openedMs)]! += 1;
+
+    if (p.firstReviewAt != null) {
+      const ttfr = (p.firstReviewAt.getTime() - openedMs) / 3_600_000;
+      if (ttfr >= 0) {
+        if (inWin(openedMs, curLo, nowMs)) ttfrCur.push(ttfr);
+        else if (inWin(openedMs, prevLo, curLo)) ttfrPrev.push(ttfr);
+      }
+    }
+
+    if (p.state === 'merged' && p.mergedAt != null) {
+      const mergedMs = p.mergedAt.getTime();
+      if (mergedMs >= windowStartMs) {
+        mergedSeries[bi(mergedMs)]! += 1;
+        const lead = (mergedMs - openedMs) / 3_600_000;
+        if (lead >= 0) leadByBucket[bi(mergedMs)]!.push(lead);
+        const green = p.ciStatus === 'success';
+        const cb = ciByBucket[bi(mergedMs)]!;
+        cb.total += 1;
+        if (green) cb.succ += 1;
+        if (inWin(mergedMs, curLo, nowMs)) {
+          mergesCur += 1;
+          if (lead >= 0) leadCur.push(lead);
+          ciMergedCur.total += 1;
+          if (green) ciMergedCur.succ += 1;
+        } else if (inWin(mergedMs, prevLo, curLo)) {
+          mergesPrev += 1;
+          if (lead >= 0) leadPrev.push(lead);
+          ciMergedPrev.total += 1;
+          if (green) ciMergedPrev.succ += 1;
+        }
+      }
+    }
+
+    if (
+      p.state === 'open' &&
+      !p.isDraft &&
+      (p.ciStatus === 'failure' || p.ciStatus === 'error')
+    ) {
+      ciFailingNow += 1;
+      const since = (p.lastCommitAt ?? p.openedAt).getTime();
+      failingAges.push((nowMs - since) / 3_600_000);
+    }
+  }
+
+  const pct = (s: { succ: number; total: number }): number | null =>
+    s.total === 0 ? null : Math.round((s.succ / s.total) * 100);
+
+  return {
+    sprintDays: 14,
+    weekBuckets,
+    merges: { value: mergesCur, previous: mergesPrev },
+    leadTimeHours: { value: medianOf(leadCur), previous: medianOf(leadPrev) },
+    timeToFirstReviewHours: { value: medianOf(ttfrCur), previous: medianOf(ttfrPrev) },
+    mergeCiSuccessPct: { value: pct(ciMergedCur), previous: pct(ciMergedPrev) },
+    ciFailingNow,
+    ciFailingMedianAgeHours: medianOf(failingAges),
+    throughput: { opened: openedSeries, merged: mergedSeries },
+    leadTimeTrend: leadByBucket.map(medianOf),
+    ciSuccessTrend: ciByBucket.map(pct),
+  };
+}
+
 // Compute the team review-intelligence cards from already-synced data — NO AI. WATCHED
 // repos (`inboxWatch`) are the team; "sprint" is the trailing 2 weeks. Runs on read (the
 // client refetches on the sync cadence); every query is account-scoped + bounded (watched
@@ -2066,10 +2211,12 @@ export async function getTeamInsights(accountId: number): Promise<TeamInsightsRe
       userIdSet.size > 0
         ? await db.select().from(users).where(inArray(users.id, [...userIdSet])).execute()
         : [];
+    const metrics = await getTeamMetrics(accountId, repoIds, now);
     return {
       enabled: true,
       generatedAt: generatedAt.toISOString(),
       sprint,
+      metrics,
       cards,
       users: userRows.map(mapUser),
     };

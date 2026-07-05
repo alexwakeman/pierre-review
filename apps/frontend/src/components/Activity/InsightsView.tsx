@@ -22,6 +22,7 @@ import { Markdown } from '../Markdown.js';
 import { AiSummary } from '../AiSummary.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { SprintReportCard } from './SprintReportCard.js';
+import { TeamMetricsPanel } from './TeamMetricsPanel.js';
 
 // Left-accent + label per severity — the same visual grammar as the Feed's cards.
 const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
@@ -232,7 +233,7 @@ function CardShell({
     <li
       onClick={onClick}
       className={`rounded-lg border border-l-4 border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900/40 ${sev.border}${
-        onActivate ? ' cursor-pointer hover:border-gray-300 dark:hover:border-gray-700' : ''
+        onActivate ? ' cursor-pointer hover:bg-gray-50/70 dark:hover:bg-gray-900/60' : ''
       }`}
     >
       <div className="mb-1.5 flex items-center gap-2 text-[11px]">
@@ -327,6 +328,8 @@ export function InsightsView(): JSX.Element {
         </button>
       </div>
 
+      {data?.metrics && <TeamMetricsPanel metrics={data.metrics} />}
+
       <SprintReportCard />
 
       {isLoading ? (
@@ -377,28 +380,30 @@ export function InsightsView(): JSX.Element {
                 );
               case 'untouched_thread':
                 return (
-                  <CardShell
-                    key={card.id}
-                    card={card}
-                    right={`${ageLabel(card.ageHours)} old`}
-                    onActivate={() => openThreadInChanges(card)}
-                  >
-                    <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-                    <PrMetaRow pr={card} />
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
-                      <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-mono">
-                        {card.path}
-                      </span>
-                      <span>· no reply since</span>
-                      {card.originalCommenterId != null && (
-                        <UserChip id={card.originalCommenterId} usersById={usersById} />
-                      )}
-                    </div>
+                  <CardShell key={card.id} card={card} right={`${ageLabel(card.ageHours)} old`}>
+                    {/* Only this header chrome navigates (→ the thread in the Changes tab).
+                        The embedded conversation + PR summary below are for reading/replying
+                        in place, NOT a click target — so the thread never feels clickable. */}
                     <div
-                      className="mt-2"
-                      data-noactivate
-                      onClick={(e) => e.stopPropagation()}
+                      className="-m-1 cursor-pointer rounded p-1 hover:bg-gray-50/70 dark:hover:bg-gray-900/60"
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest('a,button')) return;
+                        openThreadInChanges(card);
+                      }}
                     >
+                      <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
+                      <PrMetaRow pr={card} />
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
+                        <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-mono">
+                          {card.path}
+                        </span>
+                        <span>· no reply since</span>
+                        {card.originalCommenterId != null && (
+                          <UserChip id={card.originalCommenterId} usersById={usersById} />
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-2">
                       <InsightThread card={card} />
                     </div>
                     <InsightPrSummary prId={card.prId} />
