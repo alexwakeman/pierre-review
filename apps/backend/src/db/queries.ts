@@ -107,6 +107,7 @@ import {
   type TriageResult,
 } from './triage.js';
 import { getAccountUserId } from '../auth/account.js';
+import { ensureRoutingPrFiles } from '../sync/routing-files.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
 // timestamptz (drizzle binds the Date through the codec), whereas SQLite columns
@@ -2091,6 +2092,7 @@ export async function getTeamInsights(accountId: number): Promise<TeamInsightsRe
       changedFiles: pullRequests.changedFiles,
       additions: pullRequests.additions,
       deletions: pullRequests.deletions,
+      files: pullRequests.files,
     })
     .from(pullRequests)
     .where(
@@ -2289,79 +2291,63 @@ export async function getTeamInsights(accountId: number): Promise<TeamInsightsRe
     )
     .slice(0, INSIGHT_CARD_CAP);
   if (orphans.length > 0) {
-    const orphanIds = orphans.map((p) => p.id);
-    // The orphan PRs' changed paths (their commits → files).
-    const shasByPr = new Map<number, string[]>();
-    const orphanShas = new Set<string>();
-    for (const c of await db
-      .select({ prId: commits.prId, sha: commits.sha })
-      .from(commits)
-      .where(inArray(commits.prId, orphanIds))
-      .execute()) {
-      if (c.prId == null) continue;
-      const a = shasByPr.get(c.prId) ?? [];
-      a.push(c.sha);
-      shasByPr.set(c.prId, a);
-      orphanShas.add(c.sha);
-    }
-    const pathsBySha = new Map<string, string[]>();
-    if (orphanShas.size > 0)
-      for (const f of await db
-        .select({ sha: commitFiles.sha, paths: commitFiles.paths })
-        .from(commitFiles)
-        .where(inArray(commitFiles.sha, [...orphanShas]))
-        .execute())
-        pathsBySha.set(f.sha, f.paths);
+    // Orphan PRs' changed paths come from the always-synced pull_requests.files. A few
+    // stale orphans (old PRs predating the files column) are backfilled once via a
+    // bounded GitHub fetch (cached onto the row), so routing works without depending on
+    // the sparse per-commit commit_files cache.
+    const orphanFiles = new Map<number, string[]>(
+      orphans.map((p) => [p.id, (p.files ?? []).map((f) => f.path)]),
+    );
+    const missing = orphans.filter((p) => p.files == null).map((p) => p.id);
+    if (missing.length > 0)
+      for (const [prId, paths] of await ensureRoutingPrFiles(accountId, missing))
+        orphanFiles.set(prId, paths);
 
-    // Repo-wide "who commits where" over the sprint → (repo, top-level dir) → author counts.
-    const sprintShaAuthor = new Map<string, { repoId: number; authorId: number }>();
-    for (const c of await db
-      .select({ repoId: pullRequests.repoId, authorId: commits.authorId, sha: commits.sha })
-      .from(commits)
-      .innerJoin(pullRequests, eq(pullRequests.id, commits.prId))
+    // Repo-wide "who recently worked where": every PR touched in the sprint → its author
+    // × the top-level dirs its files span. Sourced from the always-stored
+    // pull_requests.files (no commit-file dependency), so it reflects real recent
+    // activity in each area of the codebase.
+    const dirAuthors = new Map<string, Map<number, number>>();
+    for (const pr of await db
+      .select({
+        repoId: pullRequests.repoId,
+        authorId: pullRequests.authorId,
+        files: pullRequests.files,
+      })
+      .from(pullRequests)
       .where(
         and(
           eq(pullRequests.accountId, accountId),
           inArray(pullRequests.repoId, repoIds),
-          gte(commits.committedAt, sprintFrom),
-          isNotNull(commits.authorId),
+          isNotNull(pullRequests.authorId),
+          isNotNull(pullRequests.files),
+          gte(pullRequests.updatedAt, sprintFrom),
         ),
       )
       .execute()) {
-      if (c.authorId != null) sprintShaAuthor.set(c.sha, { repoId: c.repoId, authorId: c.authorId });
-    }
-    const dirAuthors = new Map<string, Map<number, number>>();
-    if (sprintShaAuthor.size > 0)
-      for (const f of await db
-        .select({ sha: commitFiles.sha, paths: commitFiles.paths })
-        .from(commitFiles)
-        .where(inArray(commitFiles.sha, [...sprintShaAuthor.keys()]))
-        .execute()) {
-        const meta = sprintShaAuthor.get(f.sha);
-        if (!meta) continue;
-        for (const d of new Set(f.paths.map(topLevelDir))) {
-          const key = `${meta.repoId} ${d}`;
-          const m = dirAuthors.get(key) ?? new Map<number, number>();
-          m.set(meta.authorId, (m.get(meta.authorId) ?? 0) + 1);
-          dirAuthors.set(key, m);
-        }
+      if (pr.authorId == null || pr.files == null) continue;
+      for (const d of new Set(pr.files.map((f) => topLevelDir(f.path)))) {
+        const key = `${pr.repoId} ${d}`;
+        const m = dirAuthors.get(key) ?? new Map<number, number>();
+        m.set(pr.authorId, (m.get(pr.authorId) ?? 0) + 1);
+        dirAuthors.set(key, m);
       }
+    }
 
     const mergers = new Map(
       (await getMergers(accountId)).map((m) => [m.repoId, new Set(m.userIds)]),
     );
 
     for (const p of orphans) {
-      const shas = shasByPr.get(p.id) ?? [];
-      const paths = [...new Set(shas.flatMap((s) => pathsBySha.get(s) ?? []))];
+      const paths = orphanFiles.get(p.id) ?? [];
       const dirs = [...new Set(paths.map(topLevelDir))];
       const repoMergers = mergers.get(p.repoId) ?? new Set<number>();
-      // Candidates: authors who touched the same dirs this sprint AND have merge rights.
-      // Track the single dir each candidate touched most, to phrase the rationale.
+      // Candidates: mergers who recently worked in the same dirs. Track each one's
+      // most-touched dir to phrase the rationale.
       const score = new Map<number, number>();
       const topDir = new Map<number, { dir: string; cnt: number }>();
       for (const d of dirs) {
-        const m = dirAuthors.get(`${p.repoId} ${d}`);
+        const m = dirAuthors.get(`${p.repoId} ${d}`);
         if (!m) continue;
         for (const [uid, cnt] of m) {
           if (uid === p.authorId || !repoMergers.has(uid)) continue;
@@ -2378,9 +2364,7 @@ export async function getTeamInsights(accountId: number): Promise<TeamInsightsRe
           const top = topDir.get(uid);
           return {
             userId: uid,
-            reason: top
-              ? `committed to ${dirLabel(top.dir)} this sprint`
-              : 'has merge rights here',
+            reason: top ? `recently changed ${dirLabel(top.dir)}` : 'has merge rights here',
           };
         });
       // Fallback: any repo merger who isn't the author.

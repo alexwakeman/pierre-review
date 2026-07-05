@@ -1,6 +1,9 @@
+import { useMemo } from 'react';
 import type { PrDetail, PrFileChange } from '@pierre-review/shared';
 import { usePrFiles } from '../hooks/usePr.js';
-import { FileDiffView } from './diff/FileDiffView.js';
+import { useUsers } from '../hooks/useTimeline.js';
+import { indexUsers } from '../lib/ui.js';
+import { FileDiffView, type DiffThreadContext } from './diff/FileDiffView.js';
 
 // The "Changes" tab: every file the PR touches with its inline diff hunks and per-line
 // review-comment affordances. The per-file rendering lives in the shared FileDiffView
@@ -62,8 +65,27 @@ function Header({ pr, extra }: { pr: PrDetail; extra?: JSX.Element }): JSX.Eleme
   );
 }
 
-export function ChangesTab({ pr }: { pr: PrDetail }): JSX.Element {
+export function ChangesTab({
+  pr,
+  focusThreadId,
+  onThreadShown,
+}: {
+  pr: PrDetail;
+  focusThreadId?: number | null;
+  onThreadShown?: () => void;
+}): JSX.Element {
   const { data, isLoading, isError } = usePrFiles(pr.id);
+  const { data: users } = useUsers();
+  const usersById = useMemo(() => indexUsers(users), [users]);
+  // Unresolved review threads render inline at their diff line. The deep-link target is
+  // kept even if it's since resolved, so the link never dead-ends.
+  const threadCtx: DiffThreadContext = {
+    threads: pr.threads.filter((t) => !t.isResolved || t.id === focusThreadId),
+    usersById,
+    prUrl: pr.githubUrl,
+    focusThreadId: focusThreadId ?? null,
+    onThreadShown,
+  };
 
   // No changes at all on this PR — same empty state as before.
   if (pr.files.length === 0 && pr.changedFilesCount === 0 && !isLoading) {
@@ -120,9 +142,19 @@ export function ChangesTab({ pr }: { pr: PrDetail }): JSX.Element {
 
   return (
     <div>
-      <Header pr={pr} />
+      <Header
+        pr={pr}
+        extra={
+          threadCtx.threads.length > 0 ? (
+            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+              {threadCtx.threads.length} inline thread
+              {threadCtx.threads.length === 1 ? '' : 's'}
+            </span>
+          ) : undefined
+        }
+      />
       {/* No divide-y: each file's (sticky) header carries its own bottom border. */}
-      <FileDiffView files={files} commenting={{ prId: pr.id }} />
+      <FileDiffView files={files} commenting={{ prId: pr.id }} threadCtx={threadCtx} />
       {data?.truncated && (
         <div className="px-4 py-2 text-xs text-gray-400">
           Large diff — not all files are shown.{' '}

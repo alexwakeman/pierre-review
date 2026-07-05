@@ -120,6 +120,10 @@ export interface FilterState {
   // Matched against the loaded PR by `prId`; cleared by PrDetail once it switches.
   claudeTabFocus: { prId: number } | null;
 
+  // transient: a Feed/Insights thread card → open the PR's Changes tab and scroll to
+  // that thread, rendered inline in the diff. Matched by `prId`; cleared by PrDetail.
+  changesThreadFocus: { prId: number; threadId: number } | null;
+
   // transient: "Generate fix from this review" → open the PR's AI Fix tab, seeded
   // with the review text. Matched by `prId`; cleared by PrDetail once it switches.
   aiFixTabFocus: { prId: number; reviewText?: string } | null;
@@ -220,6 +224,10 @@ export interface FilterState {
   setFeedClaudeOnly: (v: boolean) => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
+  // Deep-link a thread into the PR's Changes tab (Feed/Insights thread cards): open
+  // the PR-detail tab, switch to Changes, scroll to the thread rendered inline there.
+  showThreadInChanges: (prId: number, threadId: number) => void;
+  consumeChangesThreadFocus: () => void;
   clearSelection: () => void;
   // Open a PR from the strip / my-turn / a timeline event: select it AND ask
   // the timeline to scroll to it (optionally recentering on `focusAt`). Pass `event`
@@ -470,6 +478,7 @@ function freshDefaults(): FilterData {
     activityFocus: null,
     commentFocus: null,
     claudeTabFocus: null,
+    changesThreadFocus: null,
     aiFixTabFocus: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
@@ -619,6 +628,9 @@ export const useFilters = create<FilterState>((set, get) => ({
       claudeTabFocus: { prId },
     }),
   consumeClaudeTabFocus: () => set({ claudeTabFocus: null }),
+  showThreadInChanges: (prId, threadId) =>
+    set({ changesThreadFocus: { prId, threadId } }),
+  consumeChangesThreadFocus: () => set({ changesThreadFocus: null }),
   openAiFixFromReview: (prId, reviewText) =>
     set({
       selectedPrId: prId,

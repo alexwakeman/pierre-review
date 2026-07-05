@@ -105,7 +105,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const toggleFeedMyTurnOnly = useFilters((s) => s.toggleFeedMyTurnOnly);
   const feedClaudeOnly = useFilters((s) => s.feedClaudeOnly);
   const toggleFeedClaudeOnly = useFilters((s) => s.toggleFeedClaudeOnly);
-  const selectThread = useFilters((s) => s.selectThread);
+  const showThreadInChanges = useFilters((s) => s.showThreadInChanges);
   const selectPr = useFilters((s) => s.selectPr);
   const showPrComment = useFilters((s) => s.showPrComment);
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
@@ -238,7 +238,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
     if (prId == null) return;
     openPrDetailTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
     if (item.kind === 'claude_review') openClaudeReview(prId);
-    else if (item.threadId != null) selectThread(prId, item.threadId);
+    else if (item.threadId != null) showThreadInChanges(prId, item.threadId);
     else if (item.commentId != null) showPrComment(prId, item.commentId);
     else selectPr(prId);
   }
@@ -248,7 +248,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
     const prId = item.prId;
     if (prId == null) return;
     openPrDetailTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
-    selectThread(prId, threadId);
+    showThreadInChanges(prId, threadId);
   }
 
   // The magnifier → Focus Mode: open the PR's own isolated timeline tab and glow the

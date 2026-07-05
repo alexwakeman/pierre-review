@@ -1,15 +1,17 @@
-import { useMemo, useState } from 'react';
-import type { PrFileDiffStatus } from '@pierre-review/shared';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import type { PrFileDiffStatus, ThreadDetail, User } from '@pierre-review/shared';
 import { useAddReviewComment } from '../../hooks/usePrWrites.js';
 import { ApiError } from '../../api/client.js';
 import { parsePatch, patchLineCount, type DiffRow } from '../../lib/diff.js';
 import { MentionTextarea } from '../MentionTextarea.js';
+import { ThreadCard } from '../ThreadView/index.js';
 
 // The shared per-file diff renderer used by BOTH the Changes tab (with inline
 // commenting) and the AI Fix tab (read-only, pre-push). Per-file collapsible blocks
 // with a sticky header, line-number gutters, and the >400-line auto-collapse. Inline
 // commenting + the GitHub links are OPTIONAL: the AI-Fix changeset's files don't exist
-// on GitHub yet, so it passes neither.
+// on GitHub yet, so it passes neither. The Changes tab additionally threads unresolved
+// review threads (`threadCtx`) so they render inline at their diff line, like GitHub.
 
 // One changed file with its unified-diff patch. A superset of the Changes tab's
 // PrFileDiff and the AI-Fix `parseGitPatch` output (githubUrl optional).
@@ -21,6 +23,18 @@ export interface DiffFile {
   deletions: number;
   patch: string | null;
   githubUrl?: string | null;
+}
+
+// Unresolved review threads to render inline in the diff (Changes tab only). Threads
+// carry (path, line) but no side, so we anchor to the row whose new-side (else old-side)
+// line matches; a thread that matches no visible line renders as "outdated" atop its
+// file. `focusThreadId` scrolls to + highlights one thread (deep-link from a card).
+export interface DiffThreadContext {
+  threads: ThreadDetail[];
+  usersById: Map<number, User>;
+  prUrl: string;
+  focusThreadId?: number | null;
+  onThreadShown?: () => void;
 }
 
 // ---- collapse-by-default heuristic (GitHub-style: big files start collapsed) ----
@@ -53,6 +67,21 @@ function commentTarget(row: DiffRow): { line: number; side: 'LEFT' | 'RIGHT' } |
   if (row.kind === 'context' && row.newLine != null) return { line: row.newLine, side: 'RIGHT' };
   if (row.kind === 'del' && row.oldLine != null) return { line: row.oldLine, side: 'LEFT' };
   return null;
+}
+
+// A thread carries (path, line) but no side. Anchor it to the LAST row whose target line
+// matches, preferring the new (RIGHT) side — that's where GitHub pins an inline thread.
+function anchorIndexFor(rows: DiffRow[], line: number | null): number | null {
+  if (line == null) return null;
+  let right: number | null = null;
+  let left: number | null = null;
+  rows.forEach((row, i) => {
+    const t = commentTarget(row);
+    if (!t || t.line !== line) return;
+    if (t.side === 'RIGHT') right = i;
+    else left = i;
+  });
+  return right ?? left;
 }
 
 const ROW_BG: Record<DiffRow['kind'], string> = {
@@ -136,6 +165,45 @@ function DiffLine({
         </tr>
       )}
     </>
+  );
+}
+
+// One inline review thread rendered inside the diff table (a full-width row). Scrolls
+// itself into view + shows a persistent highlight when it's the deep-link target.
+function InlineThreadRow({
+  thread,
+  ctx,
+}: {
+  thread: ThreadDetail;
+  ctx: DiffThreadContext;
+}): JSX.Element {
+  const ref = useRef<HTMLTableRowElement>(null);
+  const focused = ctx.focusThreadId != null && ctx.focusThreadId === thread.id;
+  useEffect(() => {
+    if (focused && ref.current) {
+      ref.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      ctx.onThreadShown?.();
+    }
+    // Only re-run when this row becomes the focus target.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focused]);
+  return (
+    <tr ref={ref}>
+      <td colSpan={4} className="bg-gray-50 px-2 py-2 dark:bg-gray-900/40">
+        <div
+          className={`rounded font-sans ${
+            focused ? 'ring-2 ring-amber-400/70' : ''
+          }`}
+        >
+          <ThreadCard
+            thread={thread}
+            usersById={ctx.usersById}
+            prUrl={ctx.prUrl}
+            selected={focused}
+          />
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -275,13 +343,43 @@ function InlineCommentBox({
 function FileDiffBlock({
   file,
   commenting,
+  threads,
+  threadCtx,
 }: {
   file: DiffFile;
   commenting: { prId: number } | null;
+  threads: ThreadDetail[];
+  threadCtx: DiffThreadContext | null;
 }): JSX.Element {
-  const [expanded, setExpanded] = useState(() => !startsCollapsed(file));
-  const [openRow, setOpenRow] = useState<number | null>(null);
   const rows = useMemo(() => parsePatch(file.patch), [file.patch]);
+  // Anchor each thread to a diff row; those with no matching visible line (outdated /
+  // line-less) render above the diff so they're never lost.
+  const { byRow, unanchored } = useMemo(() => {
+    const byRow = new Map<number, ThreadDetail[]>();
+    const unanchored: ThreadDetail[] = [];
+    for (const t of threads) {
+      const idx = anchorIndexFor(rows, t.line);
+      if (idx == null) unanchored.push(t);
+      else {
+        const a = byRow.get(idx) ?? [];
+        a.push(t);
+        byRow.set(idx, a);
+      }
+    }
+    return { byRow, unanchored };
+  }, [rows, threads]);
+
+  const hasFocus =
+    threadCtx?.focusThreadId != null && threads.some((t) => t.id === threadCtx.focusThreadId);
+  // Files with threads (or the deep-link target) start expanded, mirroring GitHub.
+  const [expanded, setExpanded] = useState(
+    () => !startsCollapsed(file) || threads.length > 0,
+  );
+  useEffect(() => {
+    if (hasFocus) setExpanded(true);
+  }, [hasFocus]);
+
+  const [openRow, setOpenRow] = useState<number | null>(null);
   const meta = STATUS_META[file.status];
   const path = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
   const githubUrl = file.githubUrl ?? null;
@@ -309,6 +407,14 @@ function FileDiffBlock({
           </span>
           <code className="min-w-0 flex-1 truncate font-mono">{path}</code>
         </button>
+        {threads.length > 0 && (
+          <span
+            className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+            title={`${threads.length} unresolved thread${threads.length === 1 ? '' : 's'} on this file`}
+          >
+            {threads.length} 💬
+          </span>
+        )}
         <span className="shrink-0 font-mono tabular-nums">
           <span className="text-green-600 dark:text-green-400">+{file.additions}</span>{' '}
           <span className="text-red-500 dark:text-red-400">−{file.deletions}</span>
@@ -345,6 +451,21 @@ function FileDiffBlock({
               ) : (
                 'Binary file — no textual diff.'
               )}
+              {/* Even without a textual diff, surface any threads so they aren't lost. */}
+              {threadCtx && threads.length > 0 && (
+                <div className="mt-2 space-y-2 text-left">
+                  {threads.map((t) => (
+                    <div key={t.id} className="font-sans">
+                      <ThreadCard
+                        thread={t}
+                        usersById={threadCtx.usersById}
+                        prUrl={threadCtx.prUrl}
+                        selected={threadCtx.focusThreadId === t.id}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : rows.length === 0 ? (
             <div className="px-3 py-3 text-center text-xs text-gray-500">
@@ -353,17 +474,26 @@ function FileDiffBlock({
           ) : (
             <table className="w-full border-collapse font-mono text-[12px] leading-[1.45]">
               <tbody>
+                {threadCtx &&
+                  unanchored.map((t) => (
+                    <InlineThreadRow key={`u-${t.id}`} thread={t} ctx={threadCtx} />
+                  ))}
                 {rows.map((row, i) => (
-                  <DiffLine
-                    key={i}
-                    row={row}
-                    filePath={file.path}
-                    fileUrl={githubUrl}
-                    commenting={commenting}
-                    open={openRow === i}
-                    onOpen={() => setOpenRow(i)}
-                    onClose={() => setOpenRow(null)}
-                  />
+                  <Fragment key={i}>
+                    <DiffLine
+                      row={row}
+                      filePath={file.path}
+                      fileUrl={githubUrl}
+                      commenting={commenting}
+                      open={openRow === i}
+                      onOpen={() => setOpenRow(i)}
+                      onClose={() => setOpenRow(null)}
+                    />
+                    {threadCtx &&
+                      byRow.get(i)?.map((t) => (
+                        <InlineThreadRow key={t.id} thread={t} ctx={threadCtx} />
+                      ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -375,18 +505,37 @@ function FileDiffBlock({
 }
 
 // Render a list of changed files. Pass `commenting:{prId}` to enable the Changes-tab
-// inline-comment affordances; omit it (AI Fix) for a read-only view.
+// inline-comment affordances (omit it — AI Fix — for a read-only view), and `threadCtx`
+// to render unresolved review threads inline at their diff line.
 export function FileDiffView({
   files,
   commenting,
+  threadCtx,
 }: {
   files: DiffFile[];
   commenting?: { prId: number } | null;
+  threadCtx?: DiffThreadContext | null;
 }): JSX.Element {
+  const threadsByPath = useMemo(() => {
+    const m = new Map<string, ThreadDetail[]>();
+    for (const t of threadCtx?.threads ?? []) {
+      const a = m.get(t.path) ?? [];
+      a.push(t);
+      m.set(t.path, a);
+    }
+    return m;
+  }, [threadCtx?.threads]);
+
   return (
     <div>
       {files.map((f) => (
-        <FileDiffBlock key={f.path} file={f} commenting={commenting ?? null} />
+        <FileDiffBlock
+          key={f.path}
+          file={f}
+          commenting={commenting ?? null}
+          threads={threadsByPath.get(f.path) ?? []}
+          threadCtx={threadCtx ?? null}
+        />
       ))}
     </div>
   );

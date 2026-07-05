@@ -433,6 +433,9 @@ export function PrDetail({
   const selectedCommentId = useFilters((s) => s.selectedCommentId);
   const claudeTabFocus = useFilters((s) => s.claudeTabFocus);
   const consumeClaudeTabFocus = useFilters((s) => s.consumeClaudeTabFocus);
+  const changesThreadFocus = useFilters((s) => s.changesThreadFocus);
+  const consumeChangesThreadFocus = useFilters((s) => s.consumeChangesThreadFocus);
+  const [changesFocusThreadId, setChangesFocusThreadId] = useState<number | null>(null);
   const aiFixTabFocus = useFilters((s) => s.aiFixTabFocus);
   const commentFocusForPr =
     commentFocus && pr && commentFocus.prId === pr.id ? commentFocus.commentId : null;
@@ -464,6 +467,17 @@ export function PrDetail({
       consumeClaudeTabFocus();
     }
   }, [claudeTabFocus, pr, claudeReviewEnabled, consumeClaudeTabFocus]);
+
+  // A Feed/Insights thread card deep-links here: open the Changes tab and scroll to the
+  // thread rendered inline in the diff. Capture the target locally, then consume; the
+  // ChangesTab clears it (onThreadShown) once it has scrolled.
+  useEffect(() => {
+    if (changesThreadFocus && pr && changesThreadFocus.prId === pr.id) {
+      setTab('changes');
+      setChangesFocusThreadId(changesThreadFocus.threadId);
+      consumeChangesThreadFocus();
+    }
+  }, [changesThreadFocus, pr, consumeChangesThreadFocus]);
 
   // "Generate fix from this review" (or any deep link) → open the AI Fix tab for the
   // matching PR. The signal is NOT consumed here — AiFixTab reads its `reviewText` to
@@ -735,7 +749,11 @@ export function PrDetail({
             onConsumed={consumeActivityFocus}
           />
         ) : tab === 'changes' ? (
-          <ChangesTab pr={pr} />
+          <ChangesTab
+            pr={pr}
+            focusThreadId={changesFocusThreadId}
+            onThreadShown={() => setChangesFocusThreadId(null)}
+          />
         ) : tab === 'ai_fix' ? (
           <AiFixTab pr={pr} />
         ) : (

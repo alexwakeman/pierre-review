@@ -32,6 +32,7 @@ import type {
   CreateRepoBody,
   ConsolidatedFeedResponse,
   TeamInsightsResponse,
+  SprintReportResponse,
   MeResponse,
   MergersResponse,
   DismissedMyTurnResponse,
@@ -216,6 +217,12 @@ export const api = {
     ),
   // Team review-intelligence "Insights" (Pro; teamInsights capability).
   teamInsights: () => get<TeamInsightsResponse>('/api/pro/insights'),
+  // The Insights "Sprint report" (Pro Haiku summary; activityDigest capability).
+  sprintReport: () => get<SprintReportResponse>('/api/pro/sprint-report'),
+  refreshSprintReport: () =>
+    fetch('/api/pro/sprint-report/refresh', jsonBody('POST')).then((r) =>
+      handle<SprintReportResponse>(r),
+    ),
   // Repo-scoped Claude review history (all runs per PR, newest-first). Gated on
   // config.claudeReviewEnabled; the response's `enabled` flag reflects that.
   repoClaudeReviews: (repoId: number) =>

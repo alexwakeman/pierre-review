@@ -14,12 +14,14 @@ import { usePr, useThread } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useRequestReviewers } from '../../hooks/usePrWrites.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
+import { useFilters } from '../../store/filters.js';
 import { CI_META, indexUsers } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
 import { AiSummary } from '../AiSummary.js';
 import { ThreadCard } from '../ThreadView/index.js';
+import { SprintReportCard } from './SprintReportCard.js';
 
 // Left-accent + label per severity — the same visual grammar as the Feed's cards.
 const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
@@ -209,16 +211,29 @@ function RoutingReviewers({
 function CardShell({
   card,
   right,
+  onActivate,
   children,
 }: {
   card: InsightCard;
   right?: React.ReactNode;
+  onActivate?: () => void;
   children: React.ReactNode;
 }): JSX.Element {
   const sev = SEV[card.severity];
+  // The whole card is clickable to open "the event in question" (like a Feed card).
+  // Inner links/buttons/inputs + the inline thread (data-noactivate) win the click.
+  const onClick = onActivate
+    ? (e: React.MouseEvent): void => {
+        if ((e.target as HTMLElement).closest('a,button,textarea,input,[data-noactivate]')) return;
+        onActivate();
+      }
+    : undefined;
   return (
     <li
-      className={`rounded-lg border border-l-4 border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900/40 ${sev.border}`}
+      onClick={onClick}
+      className={`rounded-lg border border-l-4 border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900/40 ${sev.border}${
+        onActivate ? ' cursor-pointer hover:border-gray-300 dark:hover:border-gray-700' : ''
+      }`}
     >
       <div className="mb-1.5 flex items-center gap-2 text-[11px]">
         <span className={`inline-block h-1.5 w-1.5 rounded-full ${sev.dot}`} aria-hidden />
@@ -234,20 +249,18 @@ function CardShell({
 
 function PrLine({
   card,
-  usersById,
   onOpen,
 }: {
   card: StalledReviewCard | UntouchedThreadCard | ReviewerRoutingCard;
-  usersById: Map<number, User>;
-  onOpen: (meta: PinnedPr) => void;
+  onOpen: () => void;
 }): JSX.Element {
   return (
     <div className="flex min-w-0 items-baseline gap-1.5 text-sm">
       <button
         type="button"
-        onClick={() => onOpen(metaFor(card, usersById))}
+        onClick={onOpen}
         className="min-w-0 truncate text-left font-medium text-gray-800 hover:underline dark:text-gray-100"
-        title="Open this PR"
+        title="Open this PR on its Overview tab"
       >
         <span className="text-gray-400">
           {card.repoFullName} #{card.prNumber}
@@ -270,9 +283,19 @@ function PrLine({
 
 export function InsightsView(): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
+  const showThreadInChanges = useFilters((s) => s.showThreadInChanges);
   const { data, isLoading, isError, refetch, isFetching } = useTeamInsights(true);
   const usersById = useMemo(() => indexUsers(data?.users), [data?.users]);
-  const open = (meta: PinnedPr): void => openPrDetailTab(meta);
+
+  // Match the Feed's interaction model: the PR title opens the PR detail on its Overview
+  // tab; the card body opens "the event in question". For a thread that event is the
+  // thread itself — deep-linked into the Changes tab, where it renders inline in context.
+  const open = (meta: PinnedPr, returnItemId?: string): void =>
+    openPrDetailTab(meta, { fromActivity: true, returnItemId });
+  const openThreadInChanges = (card: UntouchedThreadCard): void => {
+    openPrDetailTab(metaFor(card, usersById), { fromActivity: true, returnItemId: card.id });
+    showThreadInChanges(card.prId, card.threadId);
+  };
 
   const cards = data?.cards ?? [];
 
@@ -304,6 +327,8 @@ export function InsightsView(): JSX.Element {
         </button>
       </div>
 
+      <SprintReportCard />
+
       {isLoading ? (
         <div className="space-y-3">
           {[0, 1, 2].map((i) => (
@@ -329,8 +354,13 @@ export function InsightsView(): JSX.Element {
             switch (card.kind) {
               case 'stalled_review':
                 return (
-                  <CardShell key={card.id} card={card} right={`waiting ${ageLabel(card.ageHours)}`}>
-                    <PrLine card={card} usersById={usersById} onOpen={open} />
+                  <CardShell
+                    key={card.id}
+                    card={card}
+                    right={`waiting ${ageLabel(card.ageHours)}`}
+                    onActivate={() => open(metaFor(card, usersById), card.id)}
+                  >
+                    <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
                     <PrMetaRow pr={card} />
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
                       <span>waiting on</span>
@@ -347,8 +377,13 @@ export function InsightsView(): JSX.Element {
                 );
               case 'untouched_thread':
                 return (
-                  <CardShell key={card.id} card={card} right={`${ageLabel(card.ageHours)} old`}>
-                    <PrLine card={card} usersById={usersById} onOpen={open} />
+                  <CardShell
+                    key={card.id}
+                    card={card}
+                    right={`${ageLabel(card.ageHours)} old`}
+                    onActivate={() => openThreadInChanges(card)}
+                  >
+                    <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
                     <PrMetaRow pr={card} />
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
                       <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-mono">
@@ -359,7 +394,11 @@ export function InsightsView(): JSX.Element {
                         <UserChip id={card.originalCommenterId} usersById={usersById} />
                       )}
                     </div>
-                    <div className="mt-2">
+                    <div
+                      className="mt-2"
+                      data-noactivate
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <InsightThread card={card} />
                     </div>
                     <InsightPrSummary prId={card.prId} />
@@ -367,8 +406,13 @@ export function InsightsView(): JSX.Element {
                 );
               case 'reviewer_routing':
                 return (
-                  <CardShell key={card.id} card={card} right="unassigned">
-                    <PrLine card={card} usersById={usersById} onOpen={open} />
+                  <CardShell
+                    key={card.id}
+                    card={card}
+                    right="unassigned"
+                    onActivate={() => open(metaFor(card, usersById), card.id)}
+                  >
+                    <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
                     <PrMetaRow pr={card} />
                     {card.topPaths.length > 0 && (
                       <div className="mt-1 truncate text-[11px] text-gray-400">
@@ -402,15 +446,18 @@ export function InsightsView(): JSX.Element {
                             <button
                               type="button"
                               onClick={() =>
-                                open({
-                                  id: p.prId,
-                                  number: p.prNumber,
-                                  title: p.prTitle,
-                                  repoFullName: p.repoFullName,
-                                  authorLogin: null,
-                                  authorDisplayName: null,
-                                  authorAvatarUrl: null,
-                                })
+                                open(
+                                  {
+                                    id: p.prId,
+                                    number: p.prNumber,
+                                    title: p.prTitle,
+                                    repoFullName: p.repoFullName,
+                                    authorLogin: null,
+                                    authorDisplayName: null,
+                                    authorAvatarUrl: null,
+                                  },
+                                  card.id,
+                                )
                               }
                               className="text-left text-gray-500 hover:underline dark:text-gray-400"
                             >

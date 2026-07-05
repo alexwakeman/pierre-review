@@ -2123,6 +2123,27 @@ export interface TeamInsightsResponse {
   users: User[]; // actors referenced by the cards (avatar/login lookup)
 }
 
+// ---- Sprint report (Pro; Haiku summary of the Insights, gated on activityDigest) ----
+// A single cross-repo report generated from the current Insights state: headline
+// metrics + prioritised, PR-linked issues, with repos ranked by activity + code volume.
+// Tied to the Insights via `stale` (the Insights changed since it was generated →
+// regenerate). PRs are referenced as `owner/name#N` and resolved via `prRefs`.
+export interface SprintReport {
+  summary: string; // markdown: headline metrics then bulleted, prioritised issues
+  prRefs: DigestPrRef[]; // PRs referenced in the summary (cross-repo `owner/name#N`)
+  model: string;
+  generatedAt: string; // ISO-8601
+  costUsd: number | null;
+  stale: boolean; // the Insights changed since this was generated
+  sprint: { from: string; to: string };
+}
+
+export interface SprintReportResponse {
+  enabled: boolean; // false when the AI digest capability is off
+  model: string;
+  report: SprintReport | null; // null = not generated yet
+}
+
 // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----
 
 // The 9 captured action kinds (see PRO-PLATFORM.md §5.2).

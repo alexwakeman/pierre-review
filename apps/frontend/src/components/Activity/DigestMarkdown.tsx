@@ -1,46 +1,9 @@
-import type { ReactNode } from 'react';
 import type { DigestPrRef } from '@pierre-review/shared';
+import { buildPrRefIndex, renderRefTokens } from './prRefLinks.js';
 
-// Linkify "#<number>" tokens in one line against the resolved PR refs. A resolved PR
-// renders as ONE link unifying the number and the PR title ("#123 Fix the thing") — bold,
-// no code/chip styling — that opens the PR detail tab. The title comes from resolved data
-// (never the model); no author is shown. Unresolved numbers stay plain text.
-function renderTokens(
-  line: string,
-  byNumber: Map<number, DigestPrRef>,
-  onOpenPr: (ref: DigestPrRef) => void,
-): ReactNode[] {
-  const out: ReactNode[] = [];
-  const re = /#(\d+)/g;
-  let last = 0;
-  let key = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(line)) != null) {
-    if (m.index > last) out.push(line.slice(last, m.index));
-    const num = Number(m[1]);
-    const ref = byNumber.get(num);
-    if (ref != null) {
-      const title = ref.title?.trim();
-      const label = title != null && title !== '' ? `#${num} ${title}` : `#${num}`;
-      out.push(
-        <button
-          key={`r${key++}`}
-          type="button"
-          onClick={() => onOpenPr(ref)}
-          className="font-semibold text-sky-600 hover:underline dark:text-sky-400"
-          title={title ?? `Open PR #${num}`}
-        >
-          {label}
-        </button>,
-      );
-    } else {
-      out.push(`#${num}`);
-    }
-    last = m.index + m[0].length;
-  }
-  if (last < line.length) out.push(line.slice(last));
-  return out;
-}
+// PR references render in the shared canonical `owner/name#N` format (from prRefLinks),
+// so the Feed digest and the Insights sprint report present PRs identically. The PR
+// title rides in the hover tooltip; a click opens the PR detail tab.
 
 // Render a digest's bulleted markdown change-report as a flat, equal-priority list,
 // but in a FIXED information order regardless of how the model emitted the bullets:
@@ -59,15 +22,14 @@ export function DigestMarkdown({
   prRefs: DigestPrRef[];
   onOpenPr: (ref: DigestPrRef) => void;
 }): JSX.Element {
-  const byNumber = new Map<number, DigestPrRef>();
-  for (const r of prRefs) if (r.prId != null) byNumber.set(r.prNumber, r);
+  const index = buildPrRefIndex(prRefs);
 
   // Count the DISTINCT resolved PRs a bullet references (unresolved "#N" don't count).
   const resolvedPrCount = (line: string): number => {
     const nums = new Set<number>();
     for (const t of line.matchAll(/#(\d+)/g)) {
       const n = Number(t[1]);
-      if (byNumber.has(n)) nums.add(n);
+      if (index.byNumber.has(n)) nums.add(n);
     }
     return nums.size;
   };
@@ -99,7 +61,7 @@ export function DigestMarkdown({
             key={i}
             className="border-l-2 border-violet-400 pl-2 text-[13px] font-semibold leading-relaxed text-gray-800 dark:border-violet-500 dark:text-gray-100"
           >
-            {renderTokens(line, byNumber, onOpenPr)}
+            {renderRefTokens(line, index, onOpenPr, `${i}-`)}
           </li>
         ) : (
           <li
@@ -109,7 +71,7 @@ export function DigestMarkdown({
             <span aria-hidden="true" className="select-none text-gray-400">
               •
             </span>
-            <span className="min-w-0">{renderTokens(line, byNumber, onOpenPr)}</span>
+            <span className="min-w-0">{renderRefTokens(line, index, onOpenPr, `${i}-`)}</span>
           </li>
         ),
       )}
