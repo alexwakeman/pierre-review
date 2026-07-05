@@ -423,6 +423,48 @@ export const events = sqliteTable(
   }),
 );
 
+// ---- CI status history (DORA-ish CI metrics) ----
+// Append-only log of a PR head's CI-state TRANSITIONS, recorded during sync when a PR's
+// CI rollup / failing-check set / head SHA changes vs the last row. The current
+// pull_requests.ciStatus is only a snapshot (and checkRuns is lean-gated), so this table
+// is what makes real CI failure-RESOLUTION time + failure-reason-by-stage-over-time
+// computable. `failingChecks` = the names of the checks failing at that observation (the
+// stage-level reasons). `observedAt` is when WE saw it (may lag the actual CI event by up
+// to a sync interval).
+export const ciStatusEvents = sqliteTable(
+  'ci_status_events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id),
+    headSha: text('head_sha').notNull(),
+    status: text('status', {
+      enum: ['success', 'failure', 'pending', 'error', 'expected', 'unknown'],
+    }).notNull(),
+    failingChecks: text('failing_checks', { mode: 'json' }).$type<string[]>(),
+    observedAt: integer('observed_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    accountPrObservedIdx: index('cse_account_pr_observed').on(
+      t.accountId,
+      t.prId,
+      t.observedAt,
+    ),
+    accountRepoObservedIdx: index('cse_account_repo_observed').on(
+      t.accountId,
+      t.repoId,
+      t.observedAt,
+    ),
+  }),
+);
+
 export const syncState = sqliteTable('sync_state', {
   repoId: integer('repo_id')
     .primaryKey()

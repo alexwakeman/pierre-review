@@ -2137,14 +2137,23 @@ export interface TeamMetrics {
   timeToFirstReviewHours: TeamMetricStat;
   // Change failure rate (inverted) → % of merged PRs whose head CI was green.
   mergeCiSuccessPct: TeamMetricStat;
-  // Time to restore (proxy) → open PRs currently red on CI + how long they've sat.
+  // Time to restore (snapshot proxy) → open PRs currently red on CI + how long sat.
   ciFailingNow: number;
   ciFailingMedianAgeHours: number | null;
+
+  // Time to restore (REAL, from the ci_status_events transition log) → median hours a
+  // PR head spends red before CI goes green again. Null until enough history accrues.
+  ciRecoveryHours: TeamMetricStat;
 
   // Weekly series (length === weekBuckets.length).
   throughput: { opened: number[]; merged: number[] }; // flow + deploy frequency
   leadTimeTrend: (number | null)[]; // median open→merge hours, by merge week
   ciSuccessTrend: (number | null)[]; // % merged PRs green, by merge week
+  ciRecoveryTrend: (number | null)[]; // median CI recovery hours, by resolution week
+
+  // CI failure reasons over the window, by check/stage name (top stages, desc). The
+  // dimension that tells you WHY CI is failing over time.
+  ciFailureReasons: { stage: string; count: number }[];
 }
 
 export interface TeamInsightsResponse {

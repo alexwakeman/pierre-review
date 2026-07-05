@@ -395,6 +395,42 @@ export const events = pgTable(
   }),
 );
 
+// CI status transition history — the pg twin of schema.sqlite.ts ciStatusEvents. See
+// there for the rationale (real CI failure-resolution + failure-reason metrics).
+export const ciStatusEvents = pgTable(
+  'ci_status_events',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id),
+    headSha: text('head_sha').notNull(),
+    status: text('status', {
+      enum: ['success', 'failure', 'pending', 'error', 'expected', 'unknown'],
+    }).notNull(),
+    failingChecks: jsonb('failing_checks').$type<string[]>(),
+    observedAt: timestamp('observed_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => ({
+    accountPrObservedIdx: index('cse_account_pr_observed').on(
+      t.accountId,
+      t.prId,
+      t.observedAt,
+    ),
+    accountRepoObservedIdx: index('cse_account_repo_observed').on(
+      t.accountId,
+      t.repoId,
+      t.observedAt,
+    ),
+  }),
+);
+
 export const syncState = pgTable('sync_state', {
   repoId: integer('repo_id')
     .primaryKey()

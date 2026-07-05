@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, schema, runTransaction, type Executor } from '../db/client.js';
 import { config } from '../config.js';
 import { isLikelyBot } from './bot-detection.js';
@@ -25,6 +25,7 @@ const {
   commits,
   events,
   reviewRequests,
+  ciStatusEvents,
 } = schema;
 
 function toDate(iso: string | null | undefined): Date | null {
@@ -509,6 +510,53 @@ export async function persistPr(
       .execute()
     )[0]!;
     const prId = prRow.id;
+
+    // ---- CI status transition log (DORA-ish CI metrics) ----
+    // Record a row whenever this PR head's CI rollup / failing-check set / head SHA
+    // differs from the last snapshot — an append-only transition log (not a per-tick
+    // dump). Uses the fresh GraphQL checkRuns (populated even in lean mode, unlike the
+    // stored column), so the failing check NAMES are the stage-level failure reasons.
+    if (headSha != null && ciStatus !== 'unknown') {
+      const failing = [
+        ...new Set(
+          checkRuns
+            .filter((c) => c.state === 'failure' || c.state === 'error')
+            .map((c) => c.name),
+        ),
+      ].sort();
+      const lastCi = (
+        await tx
+          .select({
+            status: ciStatusEvents.status,
+            headSha: ciStatusEvents.headSha,
+            failingChecks: ciStatusEvents.failingChecks,
+          })
+          .from(ciStatusEvents)
+          .where(and(eq(ciStatusEvents.accountId, accountId), eq(ciStatusEvents.prId, prId)))
+          .orderBy(desc(ciStatusEvents.observedAt))
+          .limit(1)
+          .execute()
+      )[0];
+      const changed =
+        lastCi == null ||
+        lastCi.status !== ciStatus ||
+        lastCi.headSha !== headSha ||
+        JSON.stringify([...(lastCi.failingChecks ?? [])].sort()) !== JSON.stringify(failing);
+      if (changed) {
+        await tx
+          .insert(ciStatusEvents)
+          .values({
+            accountId,
+            repoId,
+            prId,
+            headSha,
+            status: ciStatus,
+            failingChecks: failing,
+            observedAt: new Date(),
+          })
+          .execute();
+      }
+    }
 
     // ---- review requests (outstanding) — reconcile by delete + reinsert ----
     await tx.delete(reviewRequests).where(eq(reviewRequests.prId, prId)).execute();

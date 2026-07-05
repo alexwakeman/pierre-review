@@ -134,6 +134,7 @@ const {
   myTurnDismissals,
   claudeReviews,
   claudeReviewFindings,
+  ciStatusEvents,
 } = schema;
 
 function iso(d: Date | null): string | null {
@@ -2159,6 +2160,62 @@ export async function getTeamMetrics(
   const pct = (s: { succ: number; total: number }): number | null =>
     s.total === 0 ? null : Math.round((s.succ / s.total) * 100);
 
+  // ---- CI recovery + failure reasons (from the ci_status_events transition log) ----
+  // Walk each PR's events in time order: a red streak opens on the first failure and
+  // closes on the next success → a resolution duration. Failing-check names tally into
+  // the by-stage reason breakdown. A red streak spanning multiple commits stays "one"
+  // until it goes green (total time-broken).
+  const ciEvents = await db
+    .select({
+      prId: ciStatusEvents.prId,
+      status: ciStatusEvents.status,
+      failingChecks: ciStatusEvents.failingChecks,
+      observedAt: ciStatusEvents.observedAt,
+    })
+    .from(ciStatusEvents)
+    .where(
+      and(
+        eq(ciStatusEvents.accountId, accountId),
+        inArray(ciStatusEvents.repoId, repoIds),
+        gte(ciStatusEvents.observedAt, windowStart),
+      ),
+    )
+    .orderBy(ciStatusEvents.prId, ciStatusEvents.observedAt)
+    .execute();
+
+  const recoveries: { atMs: number; hours: number }[] = [];
+  const reasonCounts = new Map<string, number>();
+  let curPr: number | null = null;
+  let failStartMs: number | null = null;
+  for (const e of ciEvents) {
+    if (e.prId !== curPr) {
+      curPr = e.prId;
+      failStartMs = null;
+    }
+    const obsMs = e.observedAt.getTime();
+    if (e.status === 'failure' || e.status === 'error') {
+      if (failStartMs == null) failStartMs = obsMs;
+      for (const name of e.failingChecks ?? [])
+        reasonCounts.set(name, (reasonCounts.get(name) ?? 0) + 1);
+    } else if (e.status === 'success' && failStartMs != null) {
+      recoveries.push({ atMs: obsMs, hours: (obsMs - failStartMs) / 3_600_000 });
+      failStartMs = null;
+    }
+  }
+
+  const recoveryByBucket: number[][] = Array.from({ length: nBuckets }, () => []);
+  const recCur: number[] = [];
+  const recPrev: number[] = [];
+  for (const r of recoveries) {
+    if (r.atMs >= windowStartMs) recoveryByBucket[bi(r.atMs)]!.push(r.hours);
+    if (inWin(r.atMs, curLo, nowMs)) recCur.push(r.hours);
+    else if (inWin(r.atMs, prevLo, curLo)) recPrev.push(r.hours);
+  }
+  const ciFailureReasons = [...reasonCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([stage, count]) => ({ stage, count }));
+
   return {
     sprintDays: 14,
     weekBuckets,
@@ -2168,9 +2225,12 @@ export async function getTeamMetrics(
     mergeCiSuccessPct: { value: pct(ciMergedCur), previous: pct(ciMergedPrev) },
     ciFailingNow,
     ciFailingMedianAgeHours: medianOf(failingAges),
+    ciRecoveryHours: { value: medianOf(recCur), previous: medianOf(recPrev) },
     throughput: { opened: openedSeries, merged: mergedSeries },
     leadTimeTrend: leadByBucket.map(medianOf),
     ciSuccessTrend: ciByBucket.map(pct),
+    ciRecoveryTrend: recoveryByBucket.map(medianOf),
+    ciFailureReasons,
   };
 }
 

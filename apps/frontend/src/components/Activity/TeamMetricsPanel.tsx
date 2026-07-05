@@ -71,6 +71,18 @@ export function TeamMetricsPanel({ metrics }: { metrics: TeamMetrics }): JSX.Ele
   const ciSeries: Series[] = [
     { key: 'ci', label: 'Merge CI success', color: PALETTE.green, values: metrics.ciSuccessTrend },
   ];
+  const recoverySeries: Series[] = [
+    { key: 'recovery', label: 'CI recovery', color: PALETTE.orange, values: metrics.ciRecoveryTrend },
+  ];
+  const reasonSeries: Series[] = [
+    {
+      key: 'failures',
+      label: 'Failures',
+      color: PALETTE.red,
+      values: metrics.ciFailureReasons.map((r) => r.count),
+    },
+  ];
+  const reasonLabels = metrics.ciFailureReasons.map((r) => r.stage);
 
   return (
     <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-800 dark:bg-gray-900/20">
@@ -83,7 +95,7 @@ export function TeamMetricsPanel({ metrics }: { metrics: TeamMetrics }): JSX.Ele
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
         <Stat
           label="Merges"
           stat={metrics.merges}
@@ -111,6 +123,13 @@ export function TeamMetricsPanel({ metrics }: { metrics: TeamMetrics }): JSX.Ele
           format={pctFmt}
           betterWhen="up"
           sub="green at merge"
+        />
+        <Stat
+          label="CI recovery"
+          stat={metrics.ciRecoveryHours}
+          format={fmtDuration}
+          betterWhen="down"
+          sub="red → green"
         />
         <div className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-800 dark:bg-gray-900/40">
           <div className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
@@ -154,6 +173,20 @@ export function TeamMetricsPanel({ metrics }: { metrics: TeamMetrics }): JSX.Ele
             <ChartEmpty />
           ) : (
             <LineChart labels={labels} series={ciSeries} curved formatY={pctFmt} />
+          )}
+        </ChartCard>
+        <ChartCard title="CI recovery time" note="median red→green · weekly">
+          {metrics.ciRecoveryTrend.every((v) => v == null) ? (
+            <ChartEmpty label="No CI recoveries yet — accrues from sync" />
+          ) : (
+            <LineChart labels={labels} series={recoverySeries} area curved formatY={fmtDuration} />
+          )}
+        </ChartCard>
+        <ChartCard title="CI failures by stage" note="which checks fail · window">
+          {reasonLabels.length === 0 ? (
+            <ChartEmpty label="No CI failures recorded yet" />
+          ) : (
+            <BarChart labels={reasonLabels} series={reasonSeries} />
           )}
         </ChartCard>
       </div>
