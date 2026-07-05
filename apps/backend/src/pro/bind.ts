@@ -10,6 +10,10 @@ import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
 import { reviewEvents, registerLearningsProvider } from '../review/events.js';
 import { cheapComplete } from '../review/llm.js';
 import { detectClaudeAuth } from '../review/auth.js';
+import {
+  hasUserAnthropicKey,
+  setUserAnthropicKey,
+} from '../review/local-settings.js';
 import { getAccessToken } from '../auth/account.js';
 import {
   createPullRequest,
@@ -51,7 +55,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   if (!mod) return;
 
   const plugin = (mod.default ?? mod) as ProPlugin;
-  if (plugin?.apiVersion !== 6 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 7 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -138,6 +142,19 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         (await import('../coding/merge.js')).mergeResolveAndPush(a),
       pushResolved: async (a) =>
         (await import('../coding/merge.js')).pushResolved(a),
+    },
+    // Claude Review infra: diff prep + the SDK run + the GitHub review POST. Lazy so the
+    // Agent SDK (agent.js) loads only when a review actually runs, not at every boot.
+    review: {
+      prepareReview: async (a) => (await import('../review/prepare.js')).prepareReview(a),
+      runReview: async (a) => (await import('../review/agent.js')).runReview(a),
+      postReview: async (a) => (await import('../review/post-seam.js')).postReview(a),
+      postFinding: async (a) => (await import('../review/post-seam.js')).postFinding(a),
+      getLocalKeyStatus: () => ({ hasUserKey: hasUserAnthropicKey() }),
+      setLocalKey: (k) => {
+        setUserAnthropicKey(k ?? '');
+        return { hasUserKey: hasUserAnthropicKey(), auth: detectClaudeAuth().status };
+      },
     },
   };
 

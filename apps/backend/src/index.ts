@@ -31,14 +31,8 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
 
   const app = await buildApp();
 
-  // Heal any Claude review runs left mid-flight by a crash (their 'running'
-  // status is persisted). Only relevant when the feature is enabled.
-  if (config.claudeReviewEnabled) {
-    const { reconcileReviewsOnStartup } = await import(
-      './review/review-manager.js'
-    );
-    await reconcileReviewsOnStartup(app.log);
-  }
+  // (Claude Review moved into @pierre/pro — its crash-orphan reconcile now runs inside
+  // plugin.register during bindProPlugin below, alongside the AI-Fix reconcile.)
 
   // Bind the optional Pro plugin (dynamic import; no-ops in OSS mode). Same
   // "optional subsystem, degrade gracefully" posture as the scheduler below.

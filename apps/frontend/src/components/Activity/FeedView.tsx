@@ -9,7 +9,7 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { useConsolidatedFeed, useMarkFeedSeen } from '../../hooks/useConsolidatedFeed.js';
-import { useMe } from '../../hooks/useTriage.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
 import { useTimeline, useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
@@ -111,8 +111,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const focusEventInTab = useFilters((s) => s.focusEventInTab);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
-  const me = useMe();
-  const claudeReviewEnabled = me.data?.claudeReviewEnabled ?? false;
+  const claudeReviewEnabled = useProCapabilities().claudeReview;
   // The one-shot flash signal — set ONLY by a real browser Back (navigateBack), so an
   // ordinary return to Activity (e.g. clicking the Activity tab chip) never flashes.
   const flashTarget = usePinnedTabs((s) => s.activityFlashItemId);

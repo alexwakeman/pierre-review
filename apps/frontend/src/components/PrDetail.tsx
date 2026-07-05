@@ -410,8 +410,7 @@ export function PrDetail({
 }): JSX.Element {
   const { data: pr, isLoading, error } = usePr(prId);
   const { data: repos } = useRepos();
-  const claudeReviewEnabled = useMe().data?.claudeReviewEnabled ?? false;
-  const { aiAnalysis, aiFix } = useProCapabilities();
+  const { aiAnalysis, aiFix, claudeReview: claudeReviewEnabled } = useProCapabilities();
   const aiFixTabEnabled = aiAnalysis || aiFix;
   const [tab, setTab] = useState<Tab>('overview');
   const [activitySince, setActivitySince] = useState<string | null>(null);

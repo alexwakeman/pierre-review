@@ -206,7 +206,6 @@ const mustExist = [
   'dist/auth/crypto.js',
   'dist/api/routes/auth.js',
   'dist/review/agent.js',
-  'dist/api/routes/claude-review.js',
   'public/index.html',
   'public-landing/index.html',
 ];

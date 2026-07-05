@@ -3,7 +3,14 @@ import type {
   FastifyRequest,
   FastifyBaseLogger,
 } from 'fastify';
-import type { CheckLogsResponse } from '@pierre-review/shared';
+import type {
+  CheckLogsResponse,
+  ClaudeFindingSeverity,
+  ClaudeFindingSide,
+  ClaudeReviewModel,
+  ClaudeReviewVerdict,
+  PostReviewPreview,
+} from '@pierre-review/shared';
 import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
 import type { AiUsageRecord } from '../db/usage.js';
 
@@ -20,6 +27,7 @@ export interface ProCapabilities {
   aiAnalysis: boolean; // AI Fix: PR summary + CI failure analysis (Haiku, read-only)
   aiFix: boolean; // AI Fix: agentic inline code fix + push (Agent SDK, needs write)
   teamInsights: boolean; // team review-intelligence "Insights" (no AI; pure reads)
+  claudeReview: boolean; // agentic Claude Review (Agent SDK; the product lives in the plugin)
 }
 
 // ---- AI Fix seams (github + coding) -------------------------------------------
@@ -275,6 +283,165 @@ export interface CodingSeam {
   pushResolved(args: PushResolvedArgs): Promise<ApplyResolveResult>;
 }
 
+// ---- Claude Review seam (agentic PR review) -----------------------------------
+// Like ctx.coding, the security-sensitive review INFRA lives in CORE: the Agent-SDK run
+// (clone/worktree, the in-process submit_review MCP tool, the auth env policy, cost), the
+// diff prep (gh pr diff + noise-strip + per-file metrics + cap), and the GitHub review
+// POST (line-anchoring, per-account token). The plugin owns the PRODUCT: mode routing, the
+// reviewer prompts, the queue/manager, persistence, the routes. The claudeReviews /
+// claudeReviewFindings tables stay core-defined; the plugin writes them via ctx.db/schema.
+
+// Live progress from the SDK run (mirrors CodingProgress). The plugin maps this to the wire
+// ClaudeReviewProgress and emits its own fetching_diff/deciding/persisting phases around it.
+export interface ReviewRunProgress {
+  phase: 'cloning' | 'reviewing';
+  reviewMode?: 'diff_only' | 'worktree';
+  recentActivity?: string[];
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    estCostUsd: number;
+  };
+}
+
+// One changed file's metrics (core computes apiTouch); feeds the plugin's decideReviewMode.
+export interface ReviewFileMetric {
+  path: string;
+  additions: number;
+  deletions: number;
+  isNew: boolean;
+  apiTouch: boolean;
+}
+
+// The result of core's diff prep — everything the plugin needs to route + build the prompt,
+// WITHOUT any diff primitive leaving core (so run-time + post-time anchoring stay consistent).
+export interface PreparedReview {
+  strippedDiff: string; // full noise-stripped head diff (core anchors against this)
+  promptDiff: string; // capped version for the prompt body
+  changedFiles: string[];
+  excludedFiles: string[];
+  omittedFiles: string[]; // files dropped by the diff cap
+  fileMetrics: ReviewFileMetric[];
+  diffBytes: number;
+  diffCapped: boolean;
+}
+
+// One anchored finding returned by runReview (anchored/fileInDiff/diffHunk computed by core
+// against the stripped diff). The plugin persists these to the core tables verbatim.
+export interface ReviewFinding {
+  path: string;
+  line: number | null;
+  side: ClaudeFindingSide;
+  severity: ClaudeFindingSeverity;
+  title: string;
+  body: string;
+  suggestion: string | null;
+  diffHunk: string | null;
+  anchored: boolean;
+  fileInDiff: boolean;
+}
+
+export interface RunReviewArgs {
+  owner: string;
+  name: string;
+  prNumber: number;
+  headSha: string;
+  model: ClaudeReviewModel;
+  mode: 'diff_only' | 'worktree'; // resolved by the plugin ('skip' never reaches here)
+  systemPrompt: string; // plugin-built reviewer "skill"
+  prompt: string; // plugin-built user prompt (diff already inlined)
+  strippedDiff: string; // for core's post-run anchoring (from prepareReview)
+  // Apply the env auth policy (prefer ambient, strip an explicit key for the run). The
+  // plugin sets this true ONLY when its review concurrency is 1 (else a mutated
+  // process.env would race a concurrent run).
+  applyAuthEnv: boolean;
+  abortController: AbortController;
+  onProgress: (p: ReviewRunProgress) => void;
+}
+
+export interface RunReviewResult {
+  submitted: boolean; // false ⇒ the agent never called submit_review → plugin marks failed
+  failureReason?: string;
+  scope: 'diff_only' | 'worktree' | null; // the agent's self-report
+  summary: string;
+  verdict: ClaudeReviewVerdict;
+  findings: ReviewFinding[];
+  costUsd: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  numTurns: number | null;
+  aborted: boolean;
+}
+
+// The ticked findings the plugin hands to postReview (the plugin read them from the core
+// tables; core never reads the product tables here). `body` is pre-resolved (editedBody ?? body).
+export interface PostReviewFinding {
+  id: number;
+  path: string;
+  line: number | null;
+  side: ClaudeFindingSide;
+  anchored: boolean;
+  fileInDiff: boolean;
+  body: string;
+  suggestion: string | null;
+}
+
+export interface PostReviewArgs {
+  owner: string;
+  name: string;
+  prNumber: number;
+  reviewHeadSha: string; // pins commit_id; the seam 409s if the live head moved
+  body: string;
+  verdict: ClaudeReviewVerdict;
+  includedFindings: PostReviewFinding[];
+  dryRun: boolean;
+}
+
+export type PostReviewOutcome =
+  | { headMoved: true }
+  | { headMoved?: false; preview: PostReviewPreview } // dryRun
+  | {
+      headMoved?: false;
+      postedReviewId: string;
+      inlineFindingIds: number[];
+      prComments: { findingId: number; commentId: string }[];
+      commentCount: number;
+      prCommentCount: number;
+    };
+
+export interface PostFindingArgs {
+  owner: string;
+  name: string;
+  prNumber: number;
+  reviewHeadSha: string;
+  finding: PostReviewFinding;
+}
+
+export type PostFindingOutcome =
+  | { headMoved: true }
+  | { headMoved?: false; commentId: string; postedCommentKind: 'inline' | 'pr_comment' };
+
+export interface ReviewSeam {
+  // Fetch (gh pr diff) + noise-strip + per-file metrics + cap — everything the plugin needs
+  // to route + build the prompt, keeping every diff primitive in core so anchoring is stable.
+  prepareReview(args: { owner: string; name: string; prNumber: number }): Promise<PreparedReview>;
+  // Run the SDK review (clone/worktree, submit_review MCP, auth policy, cost); returns anchored
+  // findings. Streams progress via onProgress; abortable via the AbortController.
+  runReview(args: RunReviewArgs): Promise<RunReviewResult>;
+  // Post ONE GitHub review (inline + body + verdict), pinned to reviewHeadSha (409 on
+  // head-moved). dryRun returns the preview instead of posting.
+  postReview(args: PostReviewArgs): Promise<PostReviewOutcome>;
+  // Post ONE finding as a standalone inline / PR-level comment.
+  postFinding(args: PostFindingArgs): Promise<PostFindingOutcome>;
+  // Local Anthropic key (local-only credential store) — applied inside runReview.
+  getLocalKeyStatus(): { hasUserKey: boolean };
+  setLocalKey(key: string | null): { hasUserKey: boolean; auth: 'ok' | 'none' };
+}
+
 // A curated, stable slice of the read layer, handed to the plugin via ctx.queries
 // (the plugin never imports the host's query module). Returns are `unknown` to
 // keep the contract decoupled from the host's concrete result types; the plugin
@@ -348,10 +515,12 @@ export interface ProContext {
   // AI Fix infra (per-account, cloud-ready). Inert in OSS.
   github: GithubSeam;
   coding: CodingSeam;
+  // Claude Review infra (the SDK run + diff prep + GitHub post). Inert in OSS.
+  review: ReviewSeam;
 }
 
 export interface ProPlugin {
-  apiVersion: 6; // contract handshake; host warns on mismatch
+  apiVersion: 7; // contract handshake; host warns on mismatch
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
@@ -364,6 +533,7 @@ const EMPTY: ProCapabilities = {
   aiAnalysis: false,
   aiFix: false,
   teamInsights: false,
+  claudeReview: false,
 };
 let active: ProCapabilities = EMPTY;
 export function setProCapabilities(c: ProCapabilities): void {

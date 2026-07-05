@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { config } from '../config.js';
 import { getUserAnthropicKey } from './local-settings.js';
 
 // Best-effort detector for whether the Claude Agent SDK has usable credentials.
@@ -64,13 +63,13 @@ export function detectClaudeAuth(): ClaudeAuthResult {
  *     silently meter the run).
  *   • no ambient → fall back to an API key (the user's local key, else the env key).
  *
- * process.env is process-global, so this only mutates at reviewConcurrency === 1
- * (the env-race guard); above that it no-ops and the raw ambient env is used. The
- * Pro summary is unaffected either way — it passes its own key explicitly to the
- * llm seam and never reads this env.
+ * process.env is process-global, so the caller passes `mutate` — the plugin sets it
+ * true ONLY when its review concurrency is 1 (the env-race guard); false → no-op and the
+ * raw ambient env is used. The Pro summary is unaffected either way — it passes its own
+ * key explicitly to the llm seam and never reads this env.
  */
-export function applyClaudeReviewAuth(): () => void {
-  if (config.reviewConcurrency !== 1) return () => {};
+export function applyClaudeReviewAuth(mutate: boolean): () => void {
+  if (!mutate) return () => {};
 
   const prevApiKey = process.env.ANTHROPIC_API_KEY;
   const prevOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;

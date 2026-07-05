@@ -334,6 +334,11 @@ export interface ProCapabilities {
   aiAnalysis: boolean; // PR summary + CI failure analysis (Haiku, read-only)
   aiFix: boolean; // agentic inline code fix + push (Agent SDK, needs write access)
   teamInsights: boolean; // team review-intelligence "Insights" (no AI; pure reads)
+  // Agentic Claude Review (Agent SDK). The product lives in the plugin (routes/manager/
+  // prompts); the SDK-run infra + tables stay in core behind the ctx.review seam. Gated
+  // by PRO_CLAUDE_REVIEW_ENABLED; all-false in cloud / OSS (replaces the old core
+  // ENABLE_CLAUDE_REVIEW env flag). The frontend hides the tab/banner when false.
+  claudeReview: boolean;
 }
 
 export interface MeResponse {
@@ -344,9 +349,8 @@ export interface MeResponse {
   // since then. Drives the Welcome-back banner (server-truth, consistent across devices).
   feedLastSeenAt: string | null;
   newFeedItems: number;
-  // Whether the Claude Review feature is enabled (ENABLE_CLAUDE_REVIEW). The
-  // frontend hides the Claude Review tab when false.
-  claudeReviewEnabled: boolean;
+  // (Claude Review is now the Pro `pro.claudeReview` capability — the old top-level
+  // `claudeReviewEnabled` flag was removed; read it off `pro` instead.)
   // Deployment mode. 'cloud' tells the SPA to show a sign-out control and treat a
   // 401 from /api/me as "signed out" (vs local, where /api/me never 401s).
   deploymentMode: 'local' | 'cloud';

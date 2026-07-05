@@ -1,6 +1,5 @@
 import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
-import type { ClaudeReviewModel } from '@pierre-review/shared';
 
 // apps/backend as the base for relative paths regardless of cwd.
 const backendRoot = resolve(import.meta.dirname, '..');
@@ -157,21 +156,16 @@ export const config = {
     digestMinIntervalSec: intFromEnv('PRO_DIGEST_MIN_INTERVAL_SEC', 60),
   },
 
-  // ---- Claude Review (agentic PR review; opt-in, LOCAL-ONLY) ----
-  // OFF by default: the feature spends real money / Agent-SDK credits per run.
-  // Enable with ENABLE_CLAUDE_REVIEW=true. FORCE-DISABLED in cloud mode (it
-  // shells out to a local gh + writable clone dir that don't exist on Railway).
-  claudeReviewEnabled:
-    !isCloud && process.env.ENABLE_CLAUDE_REVIEW === 'true',
+  // ---- Claude Review — CORE infra knobs (the product moved to @pierre/pro) ----
+  // The SDK-run / diff-prep infra behind the ctx.review seam reads these. The old
+  // `claudeReviewEnabled` env flag was removed — Claude Review is now the Pro
+  // `claudeReview` capability (PRO_CLAUDE_REVIEW_ENABLED); the routing thresholds,
+  // concurrency + queue caps, and the default-model picker moved to PRO_REVIEW_* env.
   // Partial clones + ephemeral worktrees live here (a user-writable home path,
   // never the read-only install dir). CLONE_DIR overrides.
   cloneDir: process.env.CLONE_DIR ?? resolve(homedir(), '.pierre-review', 'clones'),
   // Soft cap on the clone cache before LRU cleanup evicts idle repos (default 2 GiB).
   cloneCacheMaxBytes: intFromEnv('CLONE_CACHE_MAX_BYTES', 2 * 1024 * 1024 * 1024),
-  // Default model for the picker; per-run model still overrides on the request.
-  defaultReviewModel: (process.env.DEFAULT_REVIEW_MODEL as
-    | ClaudeReviewModel
-    | undefined) ?? 'claude-sonnet-4-6',
   // Per-run caps (cost/disk/time runaway guards). The diff is inlined in full, so
   // reviews need far fewer turns than the old default; 30 is still generous.
   reviewMaxTurns: intFromEnv('REVIEW_MAX_TURNS', 30),
@@ -211,16 +205,8 @@ export const config = {
   // Applied only to effort-capable models (Sonnet/Opus); Haiku ignores it.
   reviewEffort: effortFromEnv('REVIEW_EFFORT', 'medium'),
   reviewDiffOnlyEffort: effortFromEnv('REVIEW_DIFF_ONLY_EFFORT', 'low'),
-  // At most one review per PR; this caps concurrent reviews across all PRs. Default
-  // 4 so the user can bulk-review (extras queue, see review-manager). Raising this
-  // also DISABLES the per-run env auth adjustment (which mutates process.env and is
-  // only safe at concurrency 1 — see auth.applyClaudeReviewAuth); the raw ambient
-  // env is used instead. Set REVIEW_CONCURRENCY=1 to restore prefer-ambient + the
-  // API-key fallback.
-  reviewConcurrency: intFromEnv('REVIEW_CONCURRENCY', 4),
-  // Hard ceiling on QUEUED (not-yet-started) reviews, a runaway guard for bulk
-  // triggering; further starts return 'busy' until the queue drains.
-  reviewMaxQueued: intFromEnv('REVIEW_MAX_QUEUED', 50),
+  // (Review concurrency + queue caps + the routing thresholds moved to the plugin's
+  // PRO_REVIEW_* env — the plugin owns the queue/manager + the mode-routing decision.)
 
   // ---- AI Fix (Pro: agentic code fixer) — core infra knobs ----
   // The write-capable fixer (packages/pro/ai-fix) reuses the review clone/agent
@@ -238,27 +224,6 @@ export const config = {
   // rebased commit that conflicts gets one resolver pass, up to this many steps, then
   // we abort the rebase rather than loop forever on a pathological history.
   aiFixRebaseMaxSteps: intFromEnv('AI_FIX_REBASE_MAX_STEPS', 10),
-
-  // ---- Claude Review routing (diff-only vs worktree) — THE THRESHOLDS ----
-  // The deterministic pre-check (review/routing.ts) decides, BEFORE the agent runs,
-  // whether a PR can be reviewed from its diff alone (fast, tool-less, no worktree)
-  // or needs the full cloned worktree as explorable context. A change stays
-  // 'diff_only' only if it is within EVERY ceiling below AND touches no exported/
-  // public API; otherwise it routes to 'worktree'. The numbers are deliberately
-  // CONSERVATIVE — any tie routes to worktree, since over-reviewing is safe but
-  // under-reviewing a risky change is not. Every decision input is logged on the
-  // run (claude_reviews.route_reason) so these can be tuned against the agent's own
-  // scopeUsed self-report. This is the single place to review/adjust the thresholds.
-  reviewRouting: {
-    // Max (non-noise) files changed for a diff-only review.
-    maxFiles: intFromEnv('REVIEW_ROUTE_MAX_FILES', 5),
-    // Max added + deleted lines (non-noise files) for a diff-only review.
-    maxLines: intFromEnv('REVIEW_ROUTE_MAX_LINES', 150),
-    // Max distinct directories touched for a diff-only review.
-    maxDirs: intFromEnv('REVIEW_ROUTE_MAX_DIRS', 2),
-    // Max distinct top-level subsystems (first path segment) for a diff-only review.
-    maxSubsystems: intFromEnv('REVIEW_ROUTE_MAX_SUBSYSTEMS', 1),
-  },
 } as const;
 
 export type Config = typeof config;

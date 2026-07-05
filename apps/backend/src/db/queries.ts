@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import {
   and,
   asc,
@@ -104,6 +103,8 @@ const REASON_PRIORITY: ReasonTag[] = [
 import { db, schema, isPg } from './client.js';
 import { runTransaction } from './client.js';
 import { config } from '../config.js';
+import { getProCapabilities } from '../pro/contract.js';
+import { createHash } from 'node:crypto';
 import {
   computeApprovalInfoByPr,
   computeTriage,
@@ -145,6 +146,12 @@ function iso(d: Date | null): string | null {
 
 function emptyCounts(): ThreadStateCounts {
   return { resolved: 0, likely_addressed: 0, replied_unresolved: 0, untouched: 0 };
+}
+
+// GitHub anchors a file in a PR's "Files changed" diff by the SHA-256 of its path; used to
+// deep-link the Changes tab's per-file rows (getPrDetail).
+function diffAnchorId(path: string): string {
+  return createHash('sha256').update(path, 'utf8').digest('hex');
 }
 
 function mapUser(u: typeof users.$inferSelect): User {
@@ -1887,7 +1894,7 @@ async function getClaudeReviewFeedItems(
   repoIds: number[] | null,
   since: Date,
 ): Promise<ConsolidatedFeedItem[]> {
-  if (!config.claudeReviewEnabled) return [];
+  if (!getProCapabilities().claudeReview) return [];
   const conds = [
     eq(repos.accountId, accountId),
     eq(claudeReviews.status, 'succeeded'),
@@ -3674,7 +3681,7 @@ async function getActionableActivityIds(accountId: number): Promise<{
     ),
   );
 
-  const claudeReviewIds = config.claudeReviewEnabled
+  const claudeReviewIds = getProCapabilities().claudeReview
     ? new Set((await getUnactionedClaudeReviews(accountId)).map((c) => c.reviewId))
     : new Set<number>();
 
@@ -3855,7 +3862,7 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
 
   // Completed-but-unactioned Claude reviews (local-only feature; empty otherwise).
   // A manual "Done" hides the run until a newer run finishes (see claudeDismissedIds).
-  const claudeReviewsToAction = config.claudeReviewEnabled
+  const claudeReviewsToAction = getProCapabilities().claudeReview
     ? (await getUnactionedClaudeReviews(accountId)).filter(
         (c) => !claudeDismissedIds.has(c.reviewId),
       )
@@ -4486,157 +4493,26 @@ export async function setRepoInboxWatch(
   return updated.length > 0;
 }
 
-// ---- Claude Review reads ----
-
-type ClaudeReviewRow = typeof claudeReviews.$inferSelect;
-type ClaudeFindingRow = typeof claudeReviewFindings.$inferSelect;
-
-// GitHub anchors a file in the PR "Files changed" diff by the SHA-256 of its
-// path; we expose it so a finding can deep-link into the PR diff.
-function diffAnchorId(path: string): string {
-  return createHash('sha256').update(path, 'utf8').digest('hex');
-}
-
-function mapFinding(r: ClaudeFindingRow): ClaudeFinding {
-  return {
-    id: r.id,
-    reviewId: r.reviewId,
-    path: r.path,
-    line: r.line,
-    side: r.side,
-    diffAnchorId: diffAnchorId(r.path),
-    severity: r.severity,
-    title: r.title,
-    body: r.body,
-    editedBody: r.editedBody,
-    suggestion: r.suggestion,
-    diffHunk: r.diffHunk,
-    anchored: r.anchored,
-    fileInDiff: r.fileInDiff,
-    included: r.included,
-    postedAt: iso(r.postedAt),
-    githubCommentId: r.githubCommentId,
-    postedCommentKind: r.postedCommentKind,
-    createdAt: r.createdAt.toISOString(),
-  };
-}
-
-function mapReview(r: ClaudeReviewRow, findings: ClaudeFindingRow[]): ClaudeReview {
-  return {
-    id: r.id,
-    prId: r.prId,
-    headSha: r.headSha,
-    status: r.status,
-    model: r.model,
-    scope: r.scope,
-    reviewMode: r.reviewMode,
-    routeReason: r.routeReason,
-    summary: r.summary,
-    verdict: r.verdict,
-    userBody: r.userBody,
-    userVerdict: r.userVerdict,
-    costUsd: r.costUsd,
-    inputTokens: r.inputTokens,
-    outputTokens: r.outputTokens,
-    cacheReadTokens: r.cacheReadTokens,
-    cacheCreationTokens: r.cacheCreationTokens,
-    numTurns: r.numTurns,
-    diffBytes: r.diffBytes,
-    diffCapped: r.diffCapped,
-    error: r.error,
-    excludedFiles: r.excludedFiles ?? [],
-    postedReviewId: r.postedReviewId,
-    postedAt: iso(r.postedAt),
-    createdAt: r.createdAt.toISOString(),
-    finishedAt: iso(r.finishedAt),
-    findings: findings.map(mapFinding),
-  };
-}
-
-export async function getClaudeReviewById(
-  reviewId: number,
-  accountId: number,
-): Promise<ClaudeReview | null> {
-  const rows = await db
-    .select({ review: claudeReviews })
-    .from(claudeReviews)
-    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(and(eq(claudeReviews.id, reviewId), eq(repos.accountId, accountId)))
-    .limit(1)
-    .execute();
-  const row = rows[0]?.review ?? null;
-  if (!row) return null;
-  const findings = await db
-    .select()
-    .from(claudeReviewFindings)
-    .where(eq(claudeReviewFindings.reviewId, reviewId))
-    .orderBy(asc(claudeReviewFindings.id))
-    .execute();
-  return mapReview(row, findings);
-}
-
-// The most recent run for a PR (with findings), or null if never run.
-export async function getLatestClaudeReview(
-  prId: number,
-  accountId: number,
-): Promise<ClaudeReview | null> {
-  const rows = await db
-    .select({ id: claudeReviews.id })
-    .from(claudeReviews)
-    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(and(eq(claudeReviews.prId, prId), eq(repos.accountId, accountId)))
-    .orderBy(desc(claudeReviews.id))
-    .limit(1)
-    .execute();
-  const row = rows[0] ?? null;
-  if (!row) return null;
-  return getClaudeReviewById(row.id, accountId);
-}
-
-// All runs for a PR (newest first), lighter shape for the history selector.
-export async function listClaudeReviewHistory(
-  prId: number,
-  accountId: number,
-): Promise<ClaudeReviewSummary[]> {
-  const rows = await db
-    .select({ review: claudeReviews })
-    .from(claudeReviews)
-    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(and(eq(claudeReviews.prId, prId), eq(repos.accountId, accountId)))
-    .orderBy(desc(claudeReviews.id))
-    .execute();
-  return rows.map(({ review: r }) => ({
-    id: r.id,
-    headSha: r.headSha,
-    status: r.status,
-    model: r.model,
-    scope: r.scope,
-    reviewMode: r.reviewMode,
-    verdict: r.verdict,
-    userVerdict: r.userVerdict,
-    costUsd: r.costUsd,
-    postedAt: iso(r.postedAt),
-    createdAt: r.createdAt.toISOString(),
-    finishedAt: iso(r.finishedAt),
-  }));
-}
+// ---- Claude Review reads (CORE-owned surfaces only) ----
+// The FEATURE-only reads (getClaudeReviewById/Latest/History/listAll + the post/PR
+// contexts + mapReview/mapFinding) MOVED to packages/pro/src/claude-review/persist.ts
+// when Claude Review became a Pro capability. The two readers below stay CORE because
+// CORE surfaces consume them: listClaudeReviewsByRepo (Activity console) +
+// getUnactionedClaudeReviews (My-Turn inbox). Both read the still-core tables.
 
 // Repo-oriented Claude-review retrieval for the Activity single-repo console: ALL runs
 // for a repo's PRs, grouped by PR (newest run first within each), PRs ordered by
 // most-recent run desc. Richer than listAllClaudeReviews (which keeps only one
 // latest-succeeded run per PR). IDOR-sensitive id getter: scoped by accountId, and
-// gated on config.claudeReviewEnabled. An unowned repo (cross-account) → empty list.
+// gated on getProCapabilities().claudeReview. An unowned repo (cross-account) → empty list.
 export async function listClaudeReviewsByRepo(
   repoId: number,
   accountId: number,
 ): Promise<RepoClaudeReviewsResponse> {
-  if (!config.claudeReviewEnabled) return { enabled: false, prs: [] };
+  if (!getProCapabilities().claudeReview) return { enabled: false, prs: [] };
   // Ownership: a repo not owned by this account leaks nothing (404-equivalent).
   const owned = await getRepo(repoId, accountId);
-  if (!owned) return { enabled: config.claudeReviewEnabled, prs: [] };
+  if (!owned) return { enabled: getProCapabilities().claudeReview, prs: [] };
 
   const rows = await db
     .select({
@@ -4684,76 +4560,6 @@ export async function listClaudeReviewsByRepo(
       });
   }
   return { enabled: true, prs: [...byPr.values()] };
-}
-
-// Cross-PR list of prior Claude reviews: ONE entry per PR = that PR's most-recent
-// SUCCEEDED run, accountId-scoped, restricted to PRs still within the timeline
-// window (open, or last touched within `backfillDays`), newest-first by finish
-// time. Used by GET /api/claude-reviews to populate the "prior reviews" view.
-export async function listAllClaudeReviews(
-  accountId: number,
-): Promise<ClaudeReviewListItem[]> {
-  // Same window cutoff getTimeline uses for its overlap predicate (now − backfillDays).
-  const cutoff = new Date(Date.now() - config.backfillDays * 24 * 60 * 60 * 1000);
-
-  const rows = await db
-    .select({
-      reviewId: claudeReviews.id,
-      prId: claudeReviews.prId,
-      owner: repos.owner,
-      name: repos.name,
-      prNumber: pullRequests.number,
-      prTitle: pullRequests.title,
-      prState: pullRequests.state,
-      summary: claudeReviews.summary,
-      verdict: claudeReviews.verdict,
-      headSha: claudeReviews.headSha,
-      status: claudeReviews.status,
-      createdAt: claudeReviews.createdAt,
-      finishedAt: claudeReviews.finishedAt,
-    })
-    .from(claudeReviews)
-    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(
-      and(
-        eq(repos.accountId, accountId),
-        eq(claudeReviews.status, 'succeeded'),
-        or(
-          eq(pullRequests.state, 'open'),
-          gte(
-            sql`coalesce(${pullRequests.mergedAt}, ${pullRequests.closedAt}, ${pullRequests.openedAt})`,
-            tsBound(cutoff),
-          ),
-        ),
-      ),
-    )
-    .orderBy(desc(claudeReviews.finishedAt), desc(claudeReviews.createdAt))
-    .execute();
-
-  // Keep the first (most-recent) succeeded run per PR. N is small (single local
-  // user), so a JS pass is simpler and portable across both dialects.
-  const seen = new Set<number>();
-  const items: ClaudeReviewListItem[] = [];
-  for (const r of rows) {
-    if (seen.has(r.prId)) continue;
-    seen.add(r.prId);
-    items.push({
-      reviewId: r.reviewId,
-      prId: r.prId,
-      repoFullName: `${r.owner}/${r.name}`,
-      prNumber: r.prNumber,
-      prTitle: r.prTitle,
-      prState: r.prState,
-      summary: r.summary,
-      verdict: r.verdict,
-      headSha: r.headSha,
-      status: r.status,
-      createdAt: r.createdAt.toISOString(),
-      finishedAt: iso(r.finishedAt),
-    });
-  }
-  return items;
 }
 
 // Completed Claude reviews on OPEN PRs that haven't been actioned: each PR's
@@ -4809,134 +4615,6 @@ export async function getUnactionedClaudeReviews(
     });
   }
   return out;
-}
-
-// Resolve a run to its repo/PR coordinates for posting. Returns the raw run row
-// (with the un-serialized fields the post flow needs: headSha, status, userBody,
-// userVerdict).
-export interface ClaudeReviewContext {
-  review: ClaudeReviewRow;
-  owner: string;
-  name: string;
-  prNumber: number;
-}
-
-// A single finding plus its review's head SHA and PR coordinates, for posting it
-// as a standalone inline comment.
-export interface FindingPostContext {
-  finding: ClaudeFindingRow;
-  reviewId: number;
-  reviewHeadSha: string;
-  owner: string;
-  name: string;
-  prNumber: number;
-}
-
-export async function getFindingPostContext(
-  findingId: number,
-  accountId: number,
-): Promise<FindingPostContext | null> {
-  const rows = await db
-    .select({
-      finding: claudeReviewFindings,
-      reviewId: claudeReviews.id,
-      reviewHeadSha: claudeReviews.headSha,
-      owner: repos.owner,
-      name: repos.name,
-      prNumber: pullRequests.number,
-    })
-    .from(claudeReviewFindings)
-    .innerJoin(claudeReviews, eq(claudeReviews.id, claudeReviewFindings.reviewId))
-    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(and(eq(claudeReviewFindings.id, findingId), eq(repos.accountId, accountId)))
-    .limit(1)
-    .execute();
-  const row = rows[0] ?? null;
-  if (!row) return null;
-  return {
-    finding: row.finding,
-    reviewId: row.reviewId,
-    reviewHeadSha: row.reviewHeadSha,
-    owner: row.owner,
-    name: row.name,
-    prNumber: row.prNumber,
-  };
-}
-
-export async function getClaudeReviewContext(
-  reviewId: number,
-  accountId: number,
-): Promise<ClaudeReviewContext | null> {
-  const rows = await db
-    .select({
-      review: claudeReviews,
-      owner: repos.owner,
-      name: repos.name,
-      prNumber: pullRequests.number,
-    })
-    .from(claudeReviews)
-    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(and(eq(claudeReviews.id, reviewId), eq(repos.accountId, accountId)))
-    .limit(1)
-    .execute();
-  const row = rows[0] ?? null;
-  if (!row) return null;
-  return {
-    review: row.review,
-    owner: row.owner,
-    name: row.name,
-    prNumber: row.prNumber,
-  };
-}
-
-// PR coordinates needed to run a review (owner/name/number/headSha/title/body).
-export interface ReviewPrContext {
-  prId: number;
-  owner: string;
-  name: string;
-  repoFullName: string;
-  number: number;
-  title: string;
-  body: string | null;
-  baseRefName: string | null;
-  headSha: string | null;
-}
-
-export async function getReviewPrContext(
-  prId: number,
-  accountId: number,
-): Promise<ReviewPrContext | null> {
-  const rows = await db
-    .select({
-      prId: pullRequests.id,
-      owner: repos.owner,
-      name: repos.name,
-      number: pullRequests.number,
-      title: pullRequests.title,
-      body: pullRequests.body,
-      baseRefName: pullRequests.baseRefName,
-      headSha: pullRequests.headSha,
-    })
-    .from(pullRequests)
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(and(eq(pullRequests.id, prId), eq(repos.accountId, accountId)))
-    .limit(1)
-    .execute();
-  const row = rows[0] ?? null;
-  if (!row) return null;
-  return {
-    prId: row.prId,
-    owner: row.owner,
-    name: row.name,
-    repoFullName: `${row.owner}/${row.name}`,
-    number: row.number,
-    title: row.title,
-    body: row.body,
-    baseRefName: row.baseRefName,
-    headSha: row.headSha,
-  };
 }
 
 // ---- PR write-action contexts (reply / resolve / comment / approve / inline) ----

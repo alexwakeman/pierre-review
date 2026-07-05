@@ -164,10 +164,10 @@ const ME_RESPONSE: MeResponse = {
     watchedRepoPrs: WATCHED_IDS.length,
     claudeReviewsToAction: 0,
   },
-  claudeReviewEnabled: false,
   deploymentMode: 'local',
   // Pro off in e2e — the consolidated Feed (core) renders without the AI digest panel.
-  pro: { activityDigest: false, reviewMemory: false },
+  // Claude Review is now a Pro capability (claudeReview) rather than a top-level flag.
+  pro: { activityDigest: false, reviewMemory: false, claudeReview: false },
 };
 
 function myTurnPr(id: number): MyTurnPr {

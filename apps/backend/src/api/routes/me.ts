@@ -53,7 +53,7 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       },
       feedLastSeenAt: feedLastSeen ? feedLastSeen.toISOString() : null,
       newFeedItems,
-      claudeReviewEnabled: config.claudeReviewEnabled,
+      // Claude Review is now the Pro `claudeReview` capability (in `pro` below).
       deploymentMode: config.deploymentMode,
       pro: getProCapabilities(),
     };
