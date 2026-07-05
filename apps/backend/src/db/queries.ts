@@ -34,6 +34,8 @@ import type {
   SuggestedReviewer,
   TeamInsightsResponse,
   TeamMetrics,
+  TeamMetricsDetail,
+  MetricPr,
   FeedEvent,
   FeedResponse,
   Label,
@@ -2231,6 +2233,272 @@ export async function getTeamMetrics(
     ciSuccessTrend: ciByBucket.map(pct),
     ciRecoveryTrend: recoveryByBucket.map(medianOf),
     ciFailureReasons,
+  };
+}
+
+const METRIC_DETAIL_CAP = 100; // per-list cap for the drill-down
+
+// The per-metric PR lists behind the 6 flow-metric tiles (the drill-down). A heavier,
+// on-demand read than getTeamMetrics — loaded only when a tile is clicked — over the
+// WATCHED repos + the current sprint. Returns the PRs behind each tile with the
+// metric-specific figures, so the user can see WHERE issues cluster.
+export async function getTeamMetricsDetail(
+  accountId: number,
+): Promise<TeamMetricsDetail> {
+  const now = Date.now();
+  const sprintFromMs = now - INSIGHT_SPRINT_DAYS * 86_400_000;
+  const sprintFrom = new Date(sprintFromMs);
+  const sprint = { from: sprintFrom.toISOString(), to: new Date(now).toISOString() };
+  const empty: TeamMetricsDetail = {
+    sprint,
+    merges: [],
+    leadTime: [],
+    reviewLatency: [],
+    mergeCi: [],
+    ciRecovery: [],
+    ciRed: [],
+    users: [],
+  };
+
+  const watched = await db
+    .select({ id: repos.id, owner: repos.owner, name: repos.name })
+    .from(repos)
+    .where(and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)))
+    .execute();
+  const repoIds = watched.map((r) => r.id);
+  if (repoIds.length === 0) return empty;
+  const repoName = new Map(watched.map((r) => [r.id, `${r.owner}/${r.name}`]));
+  const ghUrl = (repoId: number, number: number): string =>
+    `https://github.com/${repoName.get(repoId)}/pull/${number}`;
+
+  // (0) CI recoveries (red→green) from the transition log — walked over a slightly wider
+  // window than the sprint so a red streak that STARTED before the sprint but resolved
+  // inside it is still measured. We keep, per PR, the LONGEST recovery resolved in-sprint.
+  const recoveryWindow = new Date(now - 30 * 86_400_000);
+  const ciEvents = await db
+    .select({
+      prId: ciStatusEvents.prId,
+      status: ciStatusEvents.status,
+      observedAt: ciStatusEvents.observedAt,
+    })
+    .from(ciStatusEvents)
+    .where(
+      and(
+        eq(ciStatusEvents.accountId, accountId),
+        inArray(ciStatusEvents.repoId, repoIds),
+        gte(ciStatusEvents.observedAt, recoveryWindow),
+      ),
+    )
+    .orderBy(ciStatusEvents.prId, ciStatusEvents.observedAt)
+    .execute();
+  const recoveryByPr = new Map<number, number>(); // prId -> longest in-sprint recovery hours
+  {
+    let curPr: number | null = null;
+    let failStartMs: number | null = null;
+    for (const e of ciEvents) {
+      if (e.prId !== curPr) {
+        curPr = e.prId;
+        failStartMs = null;
+      }
+      const obsMs = e.observedAt.getTime();
+      if (e.status === 'failure' || e.status === 'error') {
+        if (failStartMs == null) failStartMs = obsMs;
+      } else if (e.status === 'success' && failStartMs != null) {
+        if (obsMs >= sprintFromMs) {
+          const hours = (obsMs - failStartMs) / 3_600_000;
+          recoveryByPr.set(e.prId, Math.max(recoveryByPr.get(e.prId) ?? 0, hours));
+        }
+        failStartMs = null;
+      }
+    }
+  }
+  const recoveryPrIds = [...recoveryByPr.keys()];
+
+  // The candidate PR set: everything currently open, plus merged / first-reviewed inside
+  // the sprint, plus any PR that recovered in-sprint (so its row has metadata).
+  const prs = await db
+    .select({
+      id: pullRequests.id,
+      repoId: pullRequests.repoId,
+      number: pullRequests.number,
+      title: pullRequests.title,
+      authorId: pullRequests.authorId,
+      mergedById: pullRequests.mergedById,
+      state: pullRequests.state,
+      isDraft: pullRequests.isDraft,
+      openedAt: pullRequests.openedAt,
+      firstReviewAt: pullRequests.firstReviewAt,
+      mergedAt: pullRequests.mergedAt,
+      lastCommitAt: pullRequests.lastCommitAt,
+      ciStatus: pullRequests.ciStatus,
+      additions: pullRequests.additions,
+      deletions: pullRequests.deletions,
+      changedFiles: pullRequests.changedFiles,
+    })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.repoId, repoIds),
+        or(
+          eq(pullRequests.state, 'open'),
+          gte(pullRequests.mergedAt, sprintFrom),
+          gte(pullRequests.firstReviewAt, sprintFrom),
+          recoveryPrIds.length > 0
+            ? inArray(pullRequests.id, recoveryPrIds)
+            : undefined,
+        ),
+      ),
+    )
+    .execute();
+
+  const userIds = new Set<number>();
+  type Row = (typeof prs)[number];
+  const base = (p: Row): MetricPr => {
+    if (p.authorId != null) userIds.add(p.authorId);
+    return {
+      prId: p.id,
+      repoId: p.repoId,
+      repoFullName: repoName.get(p.repoId) ?? '',
+      prNumber: p.number,
+      prTitle: p.title,
+      authorId: p.authorId,
+      state: p.state,
+      githubUrl: ghUrl(p.repoId, p.number),
+      ciStatus: p.ciStatus,
+      additions: p.additions,
+      deletions: p.deletions,
+      changedFiles: p.changedFiles,
+      openedAt: p.openedAt.toISOString(),
+      mergedAt: p.mergedAt ? p.mergedAt.toISOString() : null,
+      leadTimeHours: null,
+      reviewLatencyHours: null,
+      recoveryHours: null,
+      redAgeHours: null,
+      mergedById: null,
+      reviewerIds: [],
+    };
+  };
+
+  const mergedInSprint = prs.filter(
+    (p) => p.state === 'merged' && p.mergedAt != null && p.mergedAt.getTime() >= sprintFromMs,
+  );
+  const openNonDraft = prs.filter((p) => p.state === 'open' && !p.isDraft);
+  const isRed = (ci: Row['ciStatus']): boolean => ci === 'failure' || ci === 'error';
+
+  // (1) MERGES — merged in the sprint, newest first (client groups per repo).
+  const merges = mergedInSprint
+    .slice()
+    .sort((a, b) => b.mergedAt!.getTime() - a.mergedAt!.getTime())
+    .slice(0, METRIC_DETAIL_CAP)
+    .map((p) => {
+      if (p.mergedById != null) userIds.add(p.mergedById);
+      return {
+        ...base(p),
+        leadTimeHours: (p.mergedAt!.getTime() - p.openedAt.getTime()) / 3_600_000,
+        mergedById: p.mergedById,
+      };
+    });
+
+  // (2) LEAD TIME — merged-in-sprint (open→merge) + currently-open (open→now), longest first.
+  const leadTime = [
+    ...mergedInSprint.map((p) => ({
+      ...base(p),
+      leadTimeHours: (p.mergedAt!.getTime() - p.openedAt.getTime()) / 3_600_000,
+    })),
+    ...openNonDraft.map((p) => ({
+      ...base(p),
+      leadTimeHours: (now - p.openedAt.getTime()) / 3_600_000,
+    })),
+  ]
+    .sort((a, b) => (b.leadTimeHours ?? 0) - (a.leadTimeHours ?? 0))
+    .slice(0, METRIC_DETAIL_CAP);
+
+  // (3) REVIEW LATENCY — PRs opened in the sprint that received a review, longest open→
+  // first-review first. Reviewer ids attached below.
+  const reviewLatency = prs
+    .filter((p) => p.firstReviewAt != null && p.openedAt.getTime() >= sprintFromMs)
+    .map((p) => ({
+      ...base(p),
+      reviewLatencyHours: (p.firstReviewAt!.getTime() - p.openedAt.getTime()) / 3_600_000,
+    }))
+    .filter((r) => (r.reviewLatencyHours ?? -1) >= 0)
+    .sort((a, b) => (b.reviewLatencyHours ?? 0) - (a.reviewLatencyHours ?? 0))
+    .slice(0, METRIC_DETAIL_CAP);
+  if (reviewLatency.length > 0) {
+    const reviewerRows = await db
+      .select({ prId: reviews.prId, authorId: reviews.authorId })
+      .from(reviews)
+      .where(
+        and(
+          inArray(
+            reviews.prId,
+            reviewLatency.map((r) => r.prId),
+          ),
+          isNotNull(reviews.authorId),
+        ),
+      )
+      .execute();
+    const byPr = new Map<number, Set<number>>();
+    for (const r of reviewerRows) {
+      if (r.authorId == null) continue;
+      userIds.add(r.authorId);
+      const s = byPr.get(r.prId) ?? new Set<number>();
+      s.add(r.authorId);
+      byPr.set(r.prId, s);
+    }
+    for (const r of reviewLatency) r.reviewerIds = [...(byPr.get(r.prId) ?? [])];
+  }
+
+  // (4) MERGE CI — merged-in-sprint PRs, the ones that merged with red/failing CI first.
+  const mergeCi = mergedInSprint
+    .slice()
+    .map((p) => {
+      if (p.mergedById != null) userIds.add(p.mergedById);
+      return {
+        ...base(p),
+        leadTimeHours: (p.mergedAt!.getTime() - p.openedAt.getTime()) / 3_600_000,
+        mergedById: p.mergedById,
+      };
+    })
+    .sort((a, b) => {
+      const ra = isRed(a.ciStatus) ? 0 : a.ciStatus === 'success' ? 2 : 1;
+      const rb = isRed(b.ciStatus) ? 0 : b.ciStatus === 'success' ? 2 : 1;
+      return ra - rb || (b.mergedAt ?? '').localeCompare(a.mergedAt ?? '');
+    })
+    .slice(0, METRIC_DETAIL_CAP);
+
+  // (5) CI RECOVERY — PRs with a red→green recovery in-sprint, slowest first.
+  const ciRecovery = prs
+    .filter((p) => recoveryByPr.has(p.id))
+    .map((p) => ({ ...base(p), recoveryHours: recoveryByPr.get(p.id) ?? null }))
+    .sort((a, b) => (b.recoveryHours ?? 0) - (a.recoveryHours ?? 0))
+    .slice(0, METRIC_DETAIL_CAP);
+
+  // (6) CI RED NOW — open, non-draft PRs currently failing CI, longest red first.
+  const ciRed = openNonDraft
+    .filter((p) => isRed(p.ciStatus))
+    .map((p) => ({
+      ...base(p),
+      redAgeHours: (now - (p.lastCommitAt ?? p.openedAt).getTime()) / 3_600_000,
+    }))
+    .sort((a, b) => (b.redAgeHours ?? 0) - (a.redAgeHours ?? 0))
+    .slice(0, METRIC_DETAIL_CAP);
+
+  const userRows =
+    userIds.size > 0
+      ? await db.select().from(users).where(inArray(users.id, [...userIds])).execute()
+      : [];
+
+  return {
+    sprint,
+    merges,
+    leadTime,
+    reviewLatency,
+    mergeCi,
+    ciRecovery,
+    ciRed,
+    users: userRows.map(mapUser),
   };
 }
 

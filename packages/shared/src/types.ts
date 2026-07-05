@@ -1873,7 +1873,20 @@ export interface DigestPrRef {
   // GitHub login of the PR author, resolved alongside the ref so the digest can show
   // "title #<number> · by <author>" for every concrete PR mention. Null when unknown.
   authorLogin: string | null;
+  // The PR author's user id (resolves against a `users` roster for avatar/display).
+  // Null when unknown / unresolved. Enrichment for the tabular digest view.
+  authorId: number | null;
   state: PrState | null;
+  // At-a-glance enrichment for the TABULAR digest/sprint rendering (a PR-referencing
+  // bullet becomes a table row: PR | CI | age | author | diff | summary). All are
+  // 0/null for an unresolved "#N" token (prId null). ciStatus is the head-commit rollup
+  // ('unknown'/null = no checks); additions/deletions/changedFiles are the diff size;
+  // openedAt drives the "age" column.
+  ciStatus: CiStatus | null;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  openedAt: string | null; // ISO-8601
 }
 
 export interface RepoDigest {
@@ -2163,6 +2176,90 @@ export interface TeamInsightsResponse {
   metrics: TeamMetrics | null; // team flow metrics header (null = no repos)
   cards: InsightCard[];
   users: User[]; // actors referenced by the cards (avatar/login lookup)
+}
+
+// ---- Team flow-metric DRILL-DOWN (Insights; clicking a metric tile) ----
+// Each of the 6 flow-metric tiles opens a drill-down tab; this is the per-metric PR
+// list behind each. Loaded on demand (a separate, heavier read than the always-loaded
+// TeamMetrics), scoped to the WATCHED repos + the current sprint. Lets the user see
+// WHERE issues cluster (which PRs/repos drag a metric).
+export type TeamMetricKey =
+  | 'merges' // deploy frequency → all merged PRs (per repo)
+  | 'lead_time' // open → merge, merged + open, longest first
+  | 'review_latency' // open → first review, longest first
+  | 'merge_ci' // merged PRs by CI-at-merge (failures first)
+  | 'ci_recovery' // red → green recovery, slowest first
+  | 'ci_red'; // currently CI-failing open branches
+
+export const TEAM_METRIC_KEYS: TeamMetricKey[] = [
+  'merges',
+  'lead_time',
+  'review_latency',
+  'merge_ci',
+  'ci_recovery',
+  'ci_red',
+];
+
+// One PR row in a metric drill-down list. Carries the shared PR context plus the
+// metric-specific figures (only the fields relevant to the list it appears in are
+// populated; the rest are null). Users referenced by authorId / mergedById /
+// reviewerIds resolve against TeamMetricsDetail.users.
+export interface MetricPr {
+  prId: number;
+  repoId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  authorId: number | null;
+  state: PrState;
+  githubUrl: string;
+  ciStatus: CiStatus | null;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  openedAt: string; // ISO-8601
+  mergedAt: string | null; // ISO-8601 (merged PRs)
+  // Metric-specific figures (null unless relevant to this row's list):
+  leadTimeHours: number | null; // open→merge (merged) / open→now (open) — merges + lead_time
+  reviewLatencyHours: number | null; // open→first review — review_latency
+  recoveryHours: number | null; // red→green — ci_recovery
+  redAgeHours: number | null; // how long currently red — ci_red
+  mergedById: number | null; // who merged — merges
+  reviewerIds: number[]; // distinct reviewers — review_latency
+}
+
+export interface TeamMetricsDetail {
+  sprint: { from: string; to: string };
+  merges: MetricPr[]; // merged in the sprint (per repo on the client)
+  leadTime: MetricPr[]; // merged-in-sprint + currently-open, longest lead first
+  reviewLatency: MetricPr[]; // reviewed PRs, longest open→first-review first
+  mergeCi: MetricPr[]; // merged-in-sprint PRs, CI-failed-at-merge first
+  ciRecovery: MetricPr[]; // PRs with a red→green recovery, slowest first
+  ciRed: MetricPr[]; // currently CI-failing open PRs, longest red first
+  users: User[]; // actors referenced by any list
+}
+
+export interface TeamMetricsDetailResponse {
+  enabled: boolean; // false when the capability is off (plugin absent)
+  detail: TeamMetricsDetail | null; // null when there are no watched repos
+}
+
+// ---- AI usage tracking (Pro; credits, transparency) ----
+// A non-currency view of AI spend. Cost is tracked in USD server-side (needed for the
+// per-run budget caps) but NEVER surfaced to the client as dollars — only as CREDITS,
+// to decouple the app's price from its underlying running cost. Conversion: 1 cent = 5
+// credits ⇒ $1 = 500 credits. Split by the two seams that spend: the SUMMARY seam (cheap
+// one-shot LLM completions — digests, sprint report, PR summary, CI analysis) and the
+// AGENTIC seam (Agent-SDK runs — Claude Review, AI Fix). Covers ALL usage on the account,
+// including work outside the Watched repos.
+export const AI_CREDITS_PER_USD = 500; // 1 cent = 5 credits
+
+export interface AiUsageResponse {
+  enabled: boolean;
+  monthStart: string; // ISO-8601 — start of the current calendar month (the MTD window)
+  summaryCredits: number; // the summary / LLM-completion seam, month-to-date
+  agentCredits: number; // the agentic-tooling seam, month-to-date
+  totalCredits: number; // summary + agent
 }
 
 // ---- Sprint report (Pro; Haiku summary of the Insights, gated on activityDigest) ----

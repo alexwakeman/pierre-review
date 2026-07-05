@@ -25,7 +25,20 @@ export function buildPrRefIndex(prRefs: DigestPrRef[]): PrRefIndex {
 }
 
 // Matches a fully-qualified `owner/name#N` (a slash before the #) OR a bare `#N`.
-const REF_SOURCE = /([A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*)#(\d+)|#(\d+)/.source;
+export const REF_SOURCE = /([A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*)#(\d+)|#(\d+)/.source;
+
+// Resolve which capture of a REF_SOURCE match points at (a repo-qualified key or a bare
+// number), returning the ref (or undefined). Shared by the linkifier + the table renderer.
+export function resolveMatch(
+  m: RegExpExecArray | RegExpMatchArray,
+  index: PrRefIndex,
+): DigestPrRef | undefined {
+  const qualified = m[1] != null;
+  const num = Number(qualified ? m[2] : m[3]);
+  return qualified
+    ? (index.byKey.get(`${m[1]}#${num}`) ?? index.byNumber.get(num))
+    : index.byNumber.get(num);
+}
 
 // Linkify the PR references in one line of text.
 export function renderRefTokens(

@@ -30,7 +30,6 @@ import { MagnifierIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
 import { ThreadCard } from '../ThreadView/index.js';
-import { FeedDigestList } from './FeedDigestList.js';
 
 // A coloured chip + label describing WHAT an item is (the event kind). The FYI reason is a
 // separate pill (see FYI_REASON_META); Claude runs get their own violet chip.
@@ -273,9 +272,8 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
 
   return (
     <div className="space-y-3">
-      {/* The cross-repo Pro digest collection sits atop the cross-repo feed only (a single
-          repo's digest lives in its RepoFeedHeader). */}
-      {repoId == null && <FeedDigestList />}
+      {/* The AI repo-summary (digest) collection now lives in the Insights panel — one home
+          for every AI summary, with a single unified Refresh. It's no longer atop the Feed. */}
 
       {/* FYI / Claude filter toggles + a "showing X of Y" hint. */}
       <div className="flex items-center gap-2 px-0.5">

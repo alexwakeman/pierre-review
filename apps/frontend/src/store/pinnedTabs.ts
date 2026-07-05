@@ -19,7 +19,8 @@ export type PinnedPr = TabMeta;
 // The kinds of persistent tab the main area can show:
 //  - pr-detail: a PR rendered full-screen (PrDetail) over the warm board (today's "pinned PR")
 //  - pr-focus:  a PR's OWN isolated Timeline instance (replaces the old overlay focus mode)
-export type TabKind = 'pr-detail' | 'pr-focus';
+//  - metrics-detail: the flow-metric drill-down (a singleton, non-PR, EPHEMERAL tab)
+export type TabKind = 'pr-detail' | 'pr-focus' | 'metrics-detail';
 
 export interface Tab {
   key: string; // stable: 'pr-detail:123' | 'pr-focus:123'
@@ -39,6 +40,10 @@ export type TimelineMode = { kind: 'isolate'; prId: number };
 
 export const prDetailKey = (id: number): string => `pr-detail:${id}`;
 export const prFocusKey = (id: number): string => `pr-focus:${id}`;
+// The metric drill-down is a SINGLETON, non-PR tab. Which metric it shows is driven by the
+// transient `metricsFocus` signal (store/filters.ts), not the key. EPHEMERAL: excluded from
+// persistence (see `persist`) + not matched by parseTabKey, so a reload drops it.
+export const METRICS_TAB_KEY = 'metrics-detail';
 
 /** Parse a Tab.key back into its kind + PR id (null for unknown). */
 export function parseTabKey(key: string): { kind: TabKind; prId: number } | null {
@@ -79,6 +84,7 @@ interface TabsState {
   pin: (meta: TabMeta) => void; // ensure a pr-detail tab, do NOT activate
   openPrDetailTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-detail + activate
   openPrFocusTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-focus + activate
+  openMetricsTab: (opts?: OpenOpts) => void; // ensure the singleton metrics drill-down + activate
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
   closeTab: (key: string) => void; // remove; fall back to 'timeline' if it was active
@@ -164,7 +170,11 @@ function loadTabs(): Tab[] {
 
 function persist(tabs: Tab[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
+    // Only PR-backed tabs persist; the singleton metrics drill-down is ephemeral.
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(tabs.filter((t) => t.kind === 'pr-detail' || t.kind === 'pr-focus')),
+    );
   } catch {
     /* quota / private mode — non-fatal, the tabs just won't persist */
   }
@@ -239,6 +249,8 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       openTab({ key: prDetailKey(meta.id), kind: 'pr-detail', prId: meta.id, meta }, opts),
     openPrFocusTab: (meta, opts) =>
       openTab({ key: prFocusKey(meta.id), kind: 'pr-focus', prId: meta.id, meta }, opts),
+    openMetricsTab: (opts) =>
+      openTab({ key: METRICS_TAB_KEY, kind: 'metrics-detail', prId: 0, meta: null }, opts),
 
     syncMeta: (meta) =>
       set((s) => {

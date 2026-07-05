@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import { accountIdOf } from '../api/plugins/auth.js';
 import { db, schema, runTransaction, isPg } from '../db/client.js';
 import * as hostQueries from '../db/queries.js';
+import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
 import { reviewEvents, registerLearningsProvider } from '../review/events.js';
 import { cheapComplete } from '../review/llm.js';
 import { detectClaudeAuth } from '../review/auth.js';
@@ -50,7 +51,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   if (!mod) return;
 
   const plugin = (mod.default ?? mod) as ProPlugin;
-  if (plugin?.apiVersion !== 5 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 6 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -96,7 +97,11 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       getActivity: (accountId, repoIds) =>
         hostQueries.getActivity(accountId, repoIds ?? null),
       getTeamInsights: (accountId) => hostQueries.getTeamInsights(accountId),
+      getTeamMetricsDetail: (accountId) =>
+        hostQueries.getTeamMetricsDetail(accountId),
+      getAiUsage: (accountId, sinceMs) => getAiUsageSummary(accountId, sinceMs),
     },
+    recordAiUsage: (row) => recordAiUsage(row),
     reviewEvents,
     registerLearningsProvider,
     // AI Fix infra (per-account, cloud-ready). The host owns the security-sensitive

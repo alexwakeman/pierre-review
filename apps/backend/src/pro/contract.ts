@@ -5,6 +5,7 @@ import type {
 } from 'fastify';
 import type { CheckLogsResponse } from '@pierre-review/shared';
 import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
+import type { AiUsageRecord } from '../db/usage.js';
 
 // The typed boundary between OSS core and the optional, dynamically-imported
 // @pierre/pro plugin. This file has NO dependency on @pierre/pro — it only
@@ -290,6 +291,12 @@ export interface ProHostQueries {
   // Team review-intelligence cards (stalled reviews / untouched threads / reviewer load /
   // routing), computed over the account's WATCHED repos. Returns InsightsResponse.
   getTeamInsights(accountId: number): Promise<unknown>;
+  // The per-metric PR drill-down behind the flow-metric tiles (watched repos + sprint).
+  // Returns TeamMetricsDetail. Heavier than getTeamInsights — loaded on demand.
+  getTeamMetricsDetail(accountId: number): Promise<unknown>;
+  // Month-to-date-style AI-spend rollup for an account, split by seam (summary / agent).
+  // Returns { summaryUsd, agentUsd, totalUsd } — the plugin converts to credits.
+  getAiUsage(accountId: number, sinceMs: number): Promise<unknown>;
 }
 
 export interface ProContext {
@@ -332,6 +339,10 @@ export interface ProContext {
     detectAuth(): { status: 'ok' | 'none'; message?: string };
   };
   queries: ProHostQueries;
+  // Append one billable AI operation to the core AI-usage ledger. Lets the plugin record
+  // its own summary/agent spend (digests, sprint report, AI Fix) into the SAME ledger the
+  // core Claude Review path writes, so month-to-date usage is summable across features.
+  recordAiUsage(row: AiUsageRecord): Promise<void>;
   reviewEvents: ReviewEventBus; // WS3 capture seam
   registerLearningsProvider(p: LearningsProvider): void; // WS3 injection seam
   // AI Fix infra (per-account, cloud-ready). Inert in OSS.
@@ -340,7 +351,7 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  apiVersion: 5; // contract handshake; host warns on mismatch
+  apiVersion: 6; // contract handshake; host warns on mismatch
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 

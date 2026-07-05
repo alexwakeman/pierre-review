@@ -9,6 +9,7 @@ import {
   type EventType,
   type PrStatus,
   type ReviewState,
+  type TeamMetricKey,
 } from '@pierre-review/shared';
 
 export type RangePreset = '7d' | '14d' | '30d' | '90d' | 'custom';
@@ -127,6 +128,10 @@ export interface FilterState {
   // transient: "Generate fix from this review" → open the PR's AI Fix tab, seeded
   // with the review text. Matched by `prId`; cleared by PrDetail once it switches.
   aiFixTabFocus: { prId: number; reviewText?: string } | null;
+
+  // transient: a clicked flow-metric tile → which metric the drill-down tab should show.
+  // Seeds/re-jumps the MetricsDetail sub-tab (the tab itself is a singleton). null = none.
+  metricsFocus: TeamMetricKey | null;
 
   // open PRs strip
   stripCollapsed: boolean;
@@ -283,6 +288,10 @@ export interface FilterState {
   // it once it has switched tabs.
   openAiFixFromReview: (prId: number, reviewText?: string) => void;
   consumeAiFixTabFocus: () => void;
+  // Open (or re-focus) the flow-metric drill-down tab on a specific metric. Sets the
+  // metricsFocus signal + opens the singleton metrics tab; MetricsDetail consumes it.
+  openMetricsDetail: (metric: TeamMetricKey) => void;
+  consumeMetricsFocus: () => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
   // records the added repo id so the modal can scope to just that repo.
@@ -480,6 +489,7 @@ function freshDefaults(): FilterData {
     claudeTabFocus: null,
     changesThreadFocus: null,
     aiFixTabFocus: null,
+    metricsFocus: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
@@ -639,6 +649,11 @@ export const useFilters = create<FilterState>((set, get) => ({
       aiFixTabFocus: { prId, reviewText },
     }),
   consumeAiFixTabFocus: () => set({ aiFixTabFocus: null }),
+  openMetricsDetail: (metric) => {
+    set({ metricsFocus: metric });
+    usePinnedTabs.getState().openMetricsTab({ fromActivity: true });
+  },
+  consumeMetricsFocus: () => set({ metricsFocus: null }),
   requestSyncModal: (repoId: number) =>
     set((s) => ({ syncModalSignal: s.syncModalSignal + 1, syncModalRepoId: repoId })),
   bumpClaudeReviewKickoff: () =>

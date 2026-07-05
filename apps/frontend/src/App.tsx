@@ -5,6 +5,7 @@ import { PinnedTabsBar } from './components/PinnedTabsBar.js';
 import { PrDetail } from './components/PrDetail.js';
 import { Timeline } from './components/Timeline/index.js';
 import { ActivityView } from './components/Activity/index.js';
+import { MetricsDetail } from './components/Activity/MetricsDetail.js';
 import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
@@ -98,14 +99,15 @@ export default function App(): JSX.Element {
       : null;
   const inboxActive = activeTab === 'activity';
   const prDetailId = activeTabObj?.kind === 'pr-detail' ? activeTabObj.prId : null;
+  const metricsActive = activeTabObj?.kind === 'metrics-detail';
   const boardMode: TimelineMode | null =
     activeTabObj?.kind === 'pr-focus'
       ? { kind: 'isolate', prId: activeTabObj.prId }
       : null; // full board
-  // A full-main overlay (a pr-detail PR or the Activity console) covers the warm full
-  // board. Drives the `inert` a11y treatment. pr-focus is NOT an overlay — it replaces
-  // the board slot, so it doesn't set this.
-  const overlayActive = prDetailId != null || inboxActive;
+  // A full-main overlay (a pr-detail PR, the Activity console, or the metrics drill-down)
+  // covers the warm full board. Drives the `inert` a11y treatment. pr-focus is NOT an
+  // overlay — it replaces the board slot, so it doesn't set this.
+  const overlayActive = prDetailId != null || inboxActive || metricsActive;
   // The detail pane is shown at the bottom of any board-slot Timeline (shared or
   // pr-focus) once a PR is selected there.
   const paneVisible = selectedPrId != null && !overlayActive;
@@ -353,6 +355,16 @@ export default function App(): JSX.Element {
             className="absolute inset-0 z-20 overflow-hidden bg-white dark:bg-gray-950"
           >
             <ActivityView />
+          </div>
+        )}
+
+        {/* The flow-metric drill-down — a sibling full-main overlay over the board. */}
+        {metricsActive && (
+          <div
+            data-testid="metrics-overlay"
+            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
+          >
+            <MetricsDetail />
           </div>
         )}
       </main>

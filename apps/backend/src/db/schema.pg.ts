@@ -431,6 +431,31 @@ export const ciStatusEvents = pgTable(
   }),
 );
 
+// Append-only AI-spend ledger (pg twin of the sqlite table). See schema.sqlite.ts.
+export const aiUsage = pgTable(
+  'ai_usage',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    seam: text('seam', { enum: ['summary', 'agent'] }).notNull(),
+    feature: text('feature').notNull(),
+    model: text('model').notNull(),
+    costUsd: doublePrecision('cost_usd').notNull(),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    prId: integer('pr_id'),
+    repoId: integer('repo_id'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountOccurredIdx: index('au_account_occurred').on(t.accountId, t.occurredAt),
+  }),
+);
+
 export const syncState = pgTable('sync_state', {
   repoId: integer('repo_id')
     .primaryKey()

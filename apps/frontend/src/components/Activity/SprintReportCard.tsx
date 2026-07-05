@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import type { DigestPrRef } from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useSprintReport, useRefreshSprintReport } from '../../hooks/useSprintReport.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
-import { buildPrRefIndex, renderInlineMarkdown } from './prRefLinks.js';
+import { SummaryMarkdown } from './prRefTable.js';
 
 // A Pro Haiku summary OF the Insights, pinned atop the Insights rail: headline metrics +
 // prioritised, PR-linked issues, repos ranked by activity + code volume. Cost-safe: it
@@ -23,64 +23,13 @@ function refMeta(ref: DigestPrRef): PinnedPr {
   };
 }
 
-// The report body rendered with inline `owner/name#N` PR links — the SAME presentation
-// the Feed digest uses (shared prRefLinks) — plus a light markdown pass for the report's
-// headers / bold headline / bullets.
-function SprintReportBody({
-  summary,
-  prRefs,
-  onOpenPr,
+// `showRefresh` is false when the card is embedded in the unified Insights panel, whose
+// single header "Refresh" regenerates all summaries (sprint report + digests) at once.
+export function SprintReportCard({
+  showRefresh = true,
 }: {
-  summary: string;
-  prRefs: DigestPrRef[];
-  onOpenPr: (ref: DigestPrRef) => void;
-}): JSX.Element {
-  const index = useMemo(() => buildPrRefIndex(prRefs), [prRefs]);
-  const lines = summary
-    .split('\n')
-    // Strip code-span backticks — the model sometimes wraps the PR token in them, which
-    // would otherwise render as literal `…` around the inline link.
-    .map((l) => l.replace(/`/g, '').replace(/\s+$/, ''))
-    .filter((l) => l.trim() !== '');
-  return (
-    <div className="space-y-1">
-      {lines.map((line, i) => {
-        const header = /^#{1,6}\s+(.*)$/.exec(line);
-        if (header != null)
-          return (
-            <div
-              key={i}
-              className="mt-2 text-[13px] font-semibold text-gray-800 dark:text-gray-100"
-            >
-              {renderInlineMarkdown(header[1] ?? '', index, onOpenPr)}
-            </div>
-          );
-        const bullet = /^[-*]\s+(.*)$/.exec(line.trim());
-        if (bullet != null)
-          return (
-            <div key={i} className="flex gap-1.5 text-[13px] text-gray-700 dark:text-gray-200">
-              <span aria-hidden className="select-none text-gray-400">
-                •
-              </span>
-              <span className="min-w-0">
-                {renderInlineMarkdown(bullet[1] ?? '', index, onOpenPr)}
-              </span>
-            </div>
-          );
-        return (
-          <div
-            key={i}
-            className="text-[13px] leading-relaxed text-gray-700 dark:text-gray-200"
-          >
-            {renderInlineMarkdown(line, index, onOpenPr)}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-export function SprintReportCard(): JSX.Element | null {
+  showRefresh?: boolean;
+}): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const { data, isLoading } = useSprintReport(activityDigest);
@@ -118,18 +67,20 @@ export function SprintReportCard(): JSX.Element | null {
             {report.model}
           </span>
         )}
-        <button
-          type="button"
-          onClick={() => refresh.mutate()}
-          disabled={busy}
-          className="ml-auto rounded border border-violet-300 px-1.5 py-0.5 text-[11px] font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30"
-          title="Generate a fresh sprint report from the current Insights (uses the Haiku model)"
-        >
-          {busy ? 'Generating…' : report ? '↻ Regenerate' : 'Generate'}
-        </button>
+        {showRefresh && (
+          <button
+            type="button"
+            onClick={() => refresh.mutate()}
+            disabled={busy}
+            className="ml-auto rounded border border-violet-300 px-1.5 py-0.5 text-[11px] font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30"
+            title="Generate a fresh sprint report from the current Insights (uses the Haiku model)"
+          >
+            {busy ? 'Generating…' : report ? '↻ Regenerate' : 'Generate'}
+          </button>
+        )}
       </div>
 
-      {refresh.isError && (
+      {showRefresh && refresh.isError && (
         <div className="mt-2 text-[11px] text-red-500">
           {(refresh.error as Error)?.message ?? 'Couldn’t generate the report.'}
         </div>
@@ -141,22 +92,28 @@ export function SprintReportCard(): JSX.Element | null {
             <div className="h-16 animate-pulse rounded bg-violet-500/5" />
           ) : report ? (
             <>
-              <SprintReportBody
-                summary={report.summary}
+              <SummaryMarkdown
+                markdown={report.summary}
                 prRefs={report.prRefs}
                 onOpenPr={(r) => openPrDetailTab(refMeta(r), { fromActivity: true })}
               />
               <div className="mt-1.5 text-[10px] text-gray-400">
                 Generated {new Date(report.generatedAt).toLocaleString()}
-                {report.costUsd != null && report.costUsd > 0
-                  ? ` · $${report.costUsd.toFixed(4)}`
-                  : ''}
               </div>
             </>
           ) : (
             <div className="text-[11px] text-gray-500 dark:text-gray-400">
               A prioritised, PR-linked summary of what needs attention this sprint —
-              generated from the Insights below. Click <span className="font-medium">Generate</span>.
+              generated from the Insights below.{' '}
+              {showRefresh ? (
+                <>
+                  Click <span className="font-medium">Generate</span>.
+                </>
+              ) : (
+                <>
+                  Use <span className="font-medium">Refresh</span> above to generate it.
+                </>
+              )}
             </div>
           )}
         </div>

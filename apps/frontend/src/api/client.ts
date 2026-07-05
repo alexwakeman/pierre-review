@@ -32,6 +32,8 @@ import type {
   CreateRepoBody,
   ConsolidatedFeedResponse,
   TeamInsightsResponse,
+  TeamMetricsDetailResponse,
+  AiUsageResponse,
   SprintReportResponse,
   MeResponse,
   MergersResponse,
@@ -217,6 +219,11 @@ export const api = {
     ),
   // Team review-intelligence "Insights" (Pro; teamInsights capability).
   teamInsights: () => get<TeamInsightsResponse>('/api/pro/insights'),
+  // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click).
+  teamMetricsDetail: () =>
+    get<TeamMetricsDetailResponse>('/api/pro/insights/metrics-detail'),
+  // Month-to-date AI-usage rollup (credits, split by seam). Covers all account AI spend.
+  aiUsage: () => get<AiUsageResponse>('/api/pro/ai-usage'),
   // The Insights "Sprint report" (Pro Haiku summary; activityDigest capability).
   sprintReport: () => get<SprintReportResponse>('/api/pro/sprint-report'),
   refreshSprintReport: () =>

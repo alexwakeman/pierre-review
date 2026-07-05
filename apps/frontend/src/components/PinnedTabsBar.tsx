@@ -4,10 +4,62 @@ import { MagnifierIcon } from './Icons.js';
 // A single closable tab chip (pr-detail / pr-focus): fixed width, closable (✕). Clicking
 // the body activates the tab (App.tsx renders the matching content). PR tabs show the PR
 // title + author; a focus tab is marked with a magnifier icon + "PR focus" subtitle.
+const MetricsIcon = (
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="4" y1="20" x2="4" y2="12" />
+    <line x1="10" y1="20" x2="10" y2="6" />
+    <line x1="16" y1="20" x2="16" y2="14" />
+    <line x1="20" y1="20" x2="20" y2="9" />
+  </svg>
+);
+
 function TabChip({ tab }: { tab: Tab }): JSX.Element {
   const active = usePinnedTabs((s) => s.activeTab === tab.key);
   const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
   const closeTab = usePinnedTabs((s) => s.closeTab);
+
+  // The metrics drill-down is a non-PR, singleton tab — render a compact chip (no PR meta).
+  if (tab.kind === 'metrics-detail') {
+    return (
+      <div
+        role="presentation"
+        className={`group flex shrink-0 items-center gap-1 rounded-t-md border border-b-0 pl-2 pr-1 ${
+          active
+            ? 'border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950'
+            : 'border-transparent bg-transparent hover:bg-gray-200/60 dark:hover:bg-gray-800/60'
+        }`}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={active}
+          onClick={() => setActiveTab(tab.key)}
+          className="flex items-center gap-1.5 py-1.5 text-left"
+          title="Flow metrics — drill-down"
+        >
+          <span aria-hidden="true" className="shrink-0 text-violet-500">
+            {MetricsIcon}
+          </span>
+          <span
+            className={`text-xs font-medium ${
+              active ? 'text-violet-600 dark:text-violet-400' : 'text-gray-600 dark:text-gray-300'
+            }`}
+          >
+            Flow metrics
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => closeTab(tab.key)}
+          className="shrink-0 self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+          title="Close this tab"
+          aria-label="Close flow-metrics tab"
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
 
   const isFocus = tab.kind === 'pr-focus';
   const meta = tab.meta;

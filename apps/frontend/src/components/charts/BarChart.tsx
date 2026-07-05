@@ -19,6 +19,7 @@ export function BarChart({
   formatY = fmtNum,
   formatValue = formatY,
   height = 132,
+  rotateLabels = false,
 }: {
   labels: string[];
   series: Series[];
@@ -26,6 +27,11 @@ export function BarChart({
   formatY?: (n: number) => string;
   formatValue?: (n: number) => string;
   height?: number;
+  // Render the x-axis labels diagonally (−35°) instead of horizontal — for crowded
+  // categorical labels (e.g. CI stage names) that would overlap. The chart's overall
+  // footprint (`height`) is UNCHANGED: a larger bottom band is reserved for the labels,
+  // so the plot area shrinks slightly rather than the card growing.
+  rotateLabels?: boolean;
 }): JSX.Element {
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
@@ -33,7 +39,7 @@ export function BarChart({
   const PAD_L = 30;
   const PAD_R = 8;
   const PAD_T = 8;
-  const PAD_B = 16;
+  const PAD_B = rotateLabels ? 40 : 16;
   const n = labels.length;
   const innerW = Math.max(w - PAD_L - PAD_R, 1);
   const innerH = height - PAD_T - PAD_B;
@@ -130,19 +136,38 @@ export function BarChart({
                 );
               });
             })}
-            {labels.map((_, i) =>
-              showEveryLabel || i === 0 || i === n - 1 ? (
+            {labels.map((_, i) => {
+              if (!(showEveryLabel || i === 0 || i === n - 1)) return null;
+              const cx = PAD_L + i * bandW + bandW / 2;
+              if (rotateLabels) {
+                // Anchor the label's END just below the axis at the bar centre, then
+                // rotate −35° so it reads diagonally up-left without overlapping neighbours.
+                const ly = baseY + 9;
+                return (
+                  <text
+                    key={`lbl-${i}`}
+                    x={cx}
+                    y={ly}
+                    textAnchor="end"
+                    transform={`rotate(-35 ${cx} ${ly})`}
+                    className="fill-gray-400 text-[8px]"
+                  >
+                    {labelFor(i)}
+                  </text>
+                );
+              }
+              return (
                 <text
                   key={`lbl-${i}`}
-                  x={PAD_L + i * bandW + bandW / 2}
+                  x={cx}
                   y={height - 4}
                   textAnchor="middle"
                   className="fill-gray-400 text-[8px]"
                 >
                   {labelFor(i)}
                 </text>
-              ) : null,
-            )}
+              );
+            })}
             <rect
               x={0}
               y={0}

@@ -465,6 +465,38 @@ export const ciStatusEvents = sqliteTable(
   }),
 );
 
+// Append-only AI-spend ledger. Every billable AI operation (LLM completion or Agent-SDK
+// run) records ONE row here, so month-to-date usage can be summed across features — the
+// per-feature cost columns (claude_reviews / repo_digests / sprint_reports / ai_* in the
+// Pro submodule) upsert-overwrite and can't be summed. Surfaced ONLY as credits (never
+// dollars) via /api/pro/ai-usage. `seam` splits summary (cheap completions) vs agent
+// (Agent-SDK runs). No FK on pr_id/repo_id — the ledger must survive PR/repo pruning.
+export const aiUsage = sqliteTable(
+  'ai_usage',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    seam: text('seam', { enum: ['summary', 'agent'] }).notNull(),
+    // Which feature spent it: digest / sprint_report / ai_analysis / ci_analysis /
+    // claude_review / ai_fix. Free-text so a new feature needs no migration.
+    feature: text('feature').notNull(),
+    model: text('model').notNull(),
+    costUsd: real('cost_usd').notNull(),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    prId: integer('pr_id'),
+    repoId: integer('repo_id'),
+    occurredAt: integer('occurred_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountOccurredIdx: index('au_account_occurred').on(t.accountId, t.occurredAt),
+  }),
+);
+
 export const syncState = sqliteTable('sync_state', {
   repoId: integer('repo_id')
     .primaryKey()

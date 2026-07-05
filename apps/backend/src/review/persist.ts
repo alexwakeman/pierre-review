@@ -9,8 +9,45 @@ import type {
   ReviewRouteReason,
 } from '@pierre-review/shared';
 import { db, runTransaction, schema } from '../db/client.js';
+import { recordAiUsage } from '../db/usage.js';
 
 const { claudeReviewFindings, claudeReviews } = schema;
+
+// Append a Claude Review run's cost to the AI-usage ledger (the AGENTIC seam). Reads the
+// run's accountId/model/prId back off the row (they were stamped at insert). Best-effort:
+// a ledger write must never break the review save. A run with no real cost (a 'skip', or
+// an ambient-session run that reported nothing) records nothing.
+async function recordReviewUsage(
+  id: number,
+  costUsd: number | null | undefined,
+  inputTokens: number | null | undefined,
+  outputTokens: number | null | undefined,
+): Promise<void> {
+  if (costUsd == null || !Number.isFinite(costUsd) || costUsd <= 0) return;
+  const row = (
+    await db
+      .select({
+        accountId: claudeReviews.accountId,
+        model: claudeReviews.model,
+        prId: claudeReviews.prId,
+      })
+      .from(claudeReviews)
+      .where(eq(claudeReviews.id, id))
+      .limit(1)
+      .execute()
+  )[0];
+  if (!row) return;
+  await recordAiUsage({
+    accountId: row.accountId,
+    seam: 'agent',
+    feature: 'claude_review',
+    model: row.model,
+    costUsd,
+    inputTokens: inputTokens ?? null,
+    outputTokens: outputTokens ?? null,
+    prId: row.prId,
+  });
+}
 
 // One finding as produced by a run, ready to persist. `anchored` is decided by
 // the line-anchoring pass against the (noise-stripped) head diff.
@@ -153,6 +190,9 @@ export async function saveReviewSuccess(
         .execute();
     }
   });
+  await recordReviewUsage(id, data.costUsd, data.inputTokens, data.outputTokens).catch(
+    () => {},
+  );
 }
 
 export async function markReviewFailed(
@@ -179,6 +219,13 @@ export async function markReviewFailed(
     })
     .where(eq(claudeReviews.id, id))
     .execute();
+  // A failed run (e.g. budget-exceeded) can still have billed cost — record it.
+  await recordReviewUsage(
+    id,
+    telemetry.costUsd,
+    telemetry.inputTokens,
+    telemetry.outputTokens,
+  ).catch(() => {});
 }
 
 export async function markReviewCancelled(id: number): Promise<void> {

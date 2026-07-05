@@ -11,8 +11,15 @@ import type {
 } from '@pierre-review/shared';
 import { useTeamInsights } from '../../hooks/useTeamInsights.js';
 import { usePr, useThread } from '../../hooks/usePr.js';
-import { useUsers } from '../../hooks/useTimeline.js';
+import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useRequestReviewers } from '../../hooks/usePrWrites.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
+import {
+  useRepoDigests,
+  useRefreshRepoDigests,
+  digestProgressProps,
+} from '../../hooks/useRepoDigest.js';
+import { useSprintReport, useRefreshSprintReport } from '../../hooks/useSprintReport.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
 import { CI_META, indexUsers } from '../../lib/ui.js';
@@ -23,6 +30,9 @@ import { AiSummary } from '../AiSummary.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { SprintReportCard } from './SprintReportCard.js';
 import { TeamMetricsPanel } from './TeamMetricsPanel.js';
+import { InsightsDigests } from './InsightsDigests.js';
+import { TrackUsage } from './TrackUsage.js';
+import { RegenProgressBar } from './RegenProgressBar.js';
 
 // Left-accent + label per severity — the same visual grammar as the Feed's cards.
 const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
@@ -285,8 +295,44 @@ function PrLine({
 export function InsightsView(): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const showThreadInChanges = useFilters((s) => s.showThreadInChanges);
+  const openMetricsDetail = useFilters((s) => s.openMetricsDetail);
   const { data, isLoading, isError, refetch, isFetching } = useTeamInsights(true);
   const usersById = useMemo(() => indexUsers(data?.users), [data?.users]);
+
+  // ---- Unified summaries (Req: one Refresh drives Insights + sprint report + digests) ----
+  const { activityDigest } = useProCapabilities();
+  const { data: repos } = useRepos();
+  const storeRepoIds = useFilters((s) => s.repoIds);
+  // The digest set = watched repos ∩ the FilterBar-visible selection (null = all visible).
+  const watchedVisibleIds = useMemo(
+    () =>
+      (repos ?? [])
+        .filter((r) => r.inboxWatch && (storeRepoIds == null || storeRepoIds.includes(r.id)))
+        .map((r) => r.id),
+    [repos, storeRepoIds],
+  );
+  const digestsQuery = useRepoDigests(
+    watchedVisibleIds,
+    activityDigest && watchedVisibleIds.length > 0,
+  );
+  const refreshDigests = useRefreshRepoDigests();
+  const refreshSprint = useRefreshSprintReport();
+  const sprintQuery = useSprintReport(activityDigest);
+  const [showUsage, setShowUsage] = useState(false);
+
+  // The diff check is unchanged (the payload-hash cache still prevents re-summarising
+  // unchanged content); we just surface staleness so the user knows a Refresh is worth it.
+  const anyDigestStale = (digestsQuery.data?.digests ?? []).some((d) => d.stale);
+  const contentMoved = anyDigestStale || (sprintQuery.data?.report?.stale ?? false);
+  const refreshingAll = isFetching || refreshDigests.isPending || refreshSprint.isPending;
+  // ONE control regenerates everything (unchanged content stays free via the payload-hash).
+  const refreshAll = (): void => {
+    void refetch();
+    if (activityDigest) {
+      refreshSprint.mutate();
+      if (watchedVisibleIds.length > 0) refreshDigests.mutate(watchedVisibleIds);
+    }
+  };
 
   // Match the Feed's interaction model: the PR title opens the PR detail on its Overview
   // tab; the card body opens "the event in question". For a thread that event is the
@@ -314,23 +360,70 @@ export function InsightsView(): JSX.Element {
             sprint: last 2 weeks · {cards.length} item{cards.length === 1 ? '' : 's'}
           </span>
         )}
-        <button
-          type="button"
-          onClick={() => void refetch()}
-          disabled={isFetching}
-          className="ml-auto rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
-          title="Re-query (auto-refreshes on the sync cadence)"
-        >
-          <span aria-hidden className={isFetching ? 'animate-spin' : ''}>
-            ↻
-          </span>{' '}
-          Refresh
-        </button>
+        <div className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setShowUsage((s) => !s)}
+            className={`rounded border px-1.5 py-0.5 text-[11px] font-medium ${
+              showUsage
+                ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/30 dark:text-violet-300'
+                : 'border-gray-300 hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500'
+            }`}
+            title="Show your month-to-date AI usage (in credits)"
+          >
+            {showUsage ? '▾' : '▸'} Track usage
+          </button>
+          {/* ONE Refresh for ALL summaries — Insights cards + sprint report + repo digests.
+              The diff check still skips unchanged content, so a re-run is cheap. */}
+          <button
+            type="button"
+            onClick={refreshAll}
+            disabled={refreshingAll}
+            className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+            title="Refresh every summary — Insights, sprint report and repo summaries (unchanged content is free)"
+          >
+            <span aria-hidden className={refreshingAll ? 'animate-spin' : ''}>
+              ↻
+            </span>{' '}
+            Refresh
+          </button>
+        </div>
       </div>
 
-      {data?.metrics && <TeamMetricsPanel metrics={data.metrics} />}
+      {/* Content-moved notice: when a summary is stale (underlying data changed since it
+          was written), prompt the user to Refresh — the summaries won't auto-regenerate. */}
+      {contentMoved && (
+        <button
+          type="button"
+          onClick={refreshAll}
+          disabled={refreshingAll}
+          className="flex w-full items-center gap-2 rounded-lg border border-amber-300 bg-amber-50/60 px-3 py-1.5 text-left text-[12px] text-amber-800 hover:bg-amber-100/60 disabled:opacity-60 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200"
+        >
+          <span aria-hidden>⟳</span>
+          Repo content has moved on since these summaries were written — Refresh to update them.
+        </button>
+      )}
 
-      <SprintReportCard />
+      {showUsage && <TrackUsage />}
+
+      {data?.metrics && (
+        <TeamMetricsPanel metrics={data.metrics} onOpenMetric={openMetricsDetail} />
+      )}
+
+      <SprintReportCard showRefresh={false} />
+
+      {/* Branch/repo summaries, collapsed by default, sitting UNDER the sprint report. */}
+      <InsightsDigests
+        digests={digestsQuery.data?.digests ?? []}
+        isLoading={digestsQuery.isLoading}
+        anyWatched={watchedVisibleIds.length > 0}
+        refreshingRepoIds={refreshDigests.refreshingRepoIds}
+      />
+      <RegenProgressBar
+        active={refreshDigests.isPending && (refreshDigests.progress?.total ?? 0) > 0}
+        label="Regenerating summaries"
+        {...digestProgressProps(refreshDigests.progress)}
+      />
 
       {isLoading ? (
         <div className="space-y-3">

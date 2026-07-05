@@ -15,6 +15,12 @@ import { FeedView } from './FeedView.js';
 import { InsightsView } from './InsightsView.js';
 import { RepoAnalyticsModal } from '../RepoAnalyticsModal.js';
 
+// One-shot per page load: when Pro Insights is available, it becomes the DEFAULT landing
+// rail entry (and it's rendered first). Module-scoped so it survives ActivityView
+// remounts (switching tabs) within a session — we only ever auto-select once, so a user's
+// later choice of Feed/a repo is never overridden; a full reload re-applies the default.
+let insightsDefaultApplied = false;
+
 // Rail sort: attention desc → unread → alphabetical. Computed once per data load so
 // the rail is stable (not jumpy) as the user interacts.
 function sortRepos(repos: ActivityRepo[]): ActivityRepo[] {
@@ -134,6 +140,16 @@ export function ActivityView(): JSX.Element {
   const showingFeed = activityRepoId === 'feed' || activityRepoId == null;
   const showingInsights = activityRepoId === 'insights';
 
+  // Make Insights the default view when Pro is available — but only once per page load, and
+  // only from the pristine 'feed' default (never overriding a deep-linked repo or a choice
+  // the user has already made this session).
+  useEffect(() => {
+    if (!insightsDefaultApplied && teamInsights) {
+      insightsDefaultApplied = true;
+      if (useFilters.getState().activityRepoId === 'feed') setActivityRepo('insights');
+    }
+  }, [teamInsights, setActivityRepo]);
+
   // Staleness: amber past ~10 minutes.
   const generatedAt = data?.generatedAt ?? null;
   const stale =
@@ -221,30 +237,9 @@ export function ActivityView(): JSX.Element {
             isFetching && data != null ? 'opacity-60 transition-opacity' : ''
           }`}
         >
-          {/* FEED pseudo-row — the cross-repo consolidated state of play (the default
-              landing detail). The old "All repos" pseudo-row was removed (redundant with
-              the Feed + the per-repo entries below). */}
-          <button
-            type="button"
-            onClick={() => setActivityRepo('feed')}
-            aria-pressed={showingFeed}
-            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
-              showingFeed
-                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
-                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
-            }`}
-            title="A relevance-ranked stream across all your repos"
-          >
-            <span aria-hidden="true" className="shrink-0 text-sky-500">
-              ✦
-            </span>
-            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
-              Feed
-            </span>
-          </button>
-
-          {/* INSIGHTS pseudo-row — team review-intelligence (Pro; teamInsights). Hidden
-              in OSS / when Pro is off. Sits between the Feed and the per-repo rows. */}
+          {/* INSIGHTS pseudo-row — team review-intelligence (Pro; teamInsights). When Pro is
+              on it is the FIRST entry AND the default landing view (see the effect above);
+              hidden entirely in OSS / when Pro is off. */}
           {teamInsights && (
             <button
               type="button"
@@ -268,6 +263,27 @@ export function ActivityView(): JSX.Element {
               </span>
             </button>
           )}
+
+          {/* FEED pseudo-row — the cross-repo consolidated state of play. The old "All repos"
+              pseudo-row was removed (redundant with the Feed + the per-repo entries below). */}
+          <button
+            type="button"
+            onClick={() => setActivityRepo('feed')}
+            aria-pressed={showingFeed}
+            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+              showingFeed
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            title="A relevance-ranked stream across all your repos"
+          >
+            <span aria-hidden="true" className="shrink-0 text-sky-500">
+              ✦
+            </span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+              Feed
+            </span>
+          </button>
 
           {railItems.map((r) => (
             <RailRow
