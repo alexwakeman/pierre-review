@@ -102,6 +102,7 @@ const REASON_PRIORITY: ReasonTag[] = [
 import { db, schema, isPg } from './client.js';
 import { runTransaction } from './client.js';
 import { getFyiProvider } from '../feed/fyi-provider.js';
+import { resolvePrTickets } from '../pr/detail-enricher.js';
 import { config } from '../config.js';
 import { getProCapabilities } from '../pro/contract.js';
 import { createHash } from 'node:crypto';
@@ -1914,9 +1915,16 @@ export async function getTeamMetrics(
   accountId: number,
   repoIds: number[],
   nowMs: number,
+  // Optional configured SPRINT window (epoch millis). When present, the series/lead/CI window
+  // starts at `window.fromMs` instead of the legacy fixed lookback. Undefined → identical to the
+  // prior behavior. (The current-vs-previous sprint delta below is generalized in the sprint
+  // feature; it stays the fixed 14d comparison here.)
+  window?: { fromMs: number; toMs: number },
 ): Promise<TeamMetrics | null> {
   if (repoIds.length === 0) return null;
-  const windowStartMs = nowMs - TEAM_METRICS_WINDOW_DAYS * 86_400_000;
+  const windowStartMs = window
+    ? window.fromMs
+    : nowMs - TEAM_METRICS_WINDOW_DAYS * 86_400_000;
   const windowStart = new Date(windowStartMs);
 
   const prs = await db
@@ -2113,11 +2121,17 @@ const METRIC_DETAIL_CAP = 500;
 // metric-specific figures, so the user can see WHERE issues cluster.
 export async function getTeamMetricsDetail(
   accountId: number,
+  // Optional configured SPRINT window (epoch millis); undefined → legacy default lookback.
+  // The lower bound uses window.fromMs; `now` remains the upper bound for time-based facts.
+  window?: { fromMs: number; toMs: number },
 ): Promise<TeamMetricsDetail> {
   const now = Date.now();
-  const sprintFromMs = now - INSIGHT_SPRINT_DAYS * 86_400_000;
+  const sprintFromMs = window?.fromMs ?? now - INSIGHT_SPRINT_DAYS * 86_400_000;
   const sprintFrom = new Date(sprintFromMs);
-  const sprint = { from: sprintFrom.toISOString(), to: new Date(now).toISOString() };
+  const sprint = {
+    from: sprintFrom.toISOString(),
+    to: new Date(window?.toMs ?? now).toISOString(),
+  };
   const empty: TeamMetricsDetail = {
     sprint,
     openPrs: [],
@@ -2387,11 +2401,19 @@ export async function getTeamMetricsDetail(
 // repos (`inboxWatch`) are the team; "sprint" is the trailing 2 weeks. Runs on read (the
 // client refetches on the sync cadence); every query is account-scoped + bounded (watched
 // repos, open PRs, the sprint window, per-kind caps).
-export async function getTeamInsights(accountId: number): Promise<TeamInsightsResponse> {
+export async function getTeamInsights(
+  accountId: number,
+  window?: { fromMs: number; toMs: number },
+): Promise<TeamInsightsResponse> {
   const now = Date.now();
   const generatedAt = new Date(now);
-  const sprintFrom = new Date(now - INSIGHT_SPRINT_DAYS * 86_400_000);
-  const sprint = { from: sprintFrom.toISOString(), to: generatedAt.toISOString() };
+  // The Insights window: the configured SPRINT when provided (its `to` may be in the future for
+  // the in-progress sprint — metrics facts only exist up to `now`), else the legacy default.
+  // Insight CARDS iterate currently-open PRs regardless of age, so "open PRs always count for the
+  // sprint" holds independently of this window; the window only bounds the time-based flow metrics.
+  const sprintFrom = new Date(window?.fromMs ?? now - INSIGHT_SPRINT_DAYS * 86_400_000);
+  const sprintTo = new Date(window?.toMs ?? now);
+  const sprint = { from: sprintFrom.toISOString(), to: sprintTo.toISOString() };
   const cards: InsightCard[] = [];
   const userIdSet = new Set<number>();
   const addUser = (id: number | null): void => {
@@ -2420,7 +2442,7 @@ export async function getTeamInsights(accountId: number): Promise<TeamInsightsRe
       userIdSet.size > 0
         ? await db.select().from(users).where(inArray(users.id, [...userIdSet])).execute()
         : [];
-    const metrics = await getTeamMetrics(accountId, repoIds, now);
+    const metrics = await getTeamMetrics(accountId, repoIds, now, window);
     return {
       enabled: true,
       generatedAt: generatedAt.toISOString(),
@@ -4067,6 +4089,16 @@ export async function getPrDetail(
     viewerHasApprovedStanding = standing === 'approved';
   }
 
+  // Jira/Linear ticket links — compute-on-read via the Pro enricher (inert in OSS → null).
+  const tickets = await resolvePrTickets({
+    accountId,
+    prId: pr.id,
+    repoId: pr.repoId,
+    repoFullName: `${repo.owner}/${repo.name}`,
+    title: pr.title,
+    headRefName: pr.headRefName,
+  });
+
   return {
     id: pr.id,
     repoId: pr.repoId,
@@ -4074,6 +4106,7 @@ export async function getPrDetail(
     number: pr.number,
     title: pr.title,
     body: pr.body,
+    tickets,
     authorId: pr.authorId,
     state: pr.state,
     isDraft: pr.isDraft,

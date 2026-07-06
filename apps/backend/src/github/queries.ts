@@ -54,6 +54,7 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
           updatedAt
           url
           baseRefName
+          headRefName
           mergeable
           mergeStateStatus
           author {
@@ -495,6 +496,7 @@ export interface GqlPullRequest {
   updatedAt: string;
   url: string;
   baseRefName: string;
+  headRefName: string;
   mergeable: string | null;
   mergeStateStatus: string | null;
   author: GqlActor | null;

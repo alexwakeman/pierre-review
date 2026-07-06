@@ -176,6 +176,8 @@ const ME_RESPONSE: MeResponse = {
     teamInsights: false,
     claudeReview: false,
     feedMyTurn: true,
+    slackDigest: false,
+    issueLinks: false,
   },
 };
 

@@ -50,6 +50,8 @@ export function useProCapabilities(): ProCapabilities {
       teamInsights: false,
       claudeReview: false,
       feedMyTurn: false,
+      slackDigest: false,
+      issueLinks: false,
     }
   );
 }

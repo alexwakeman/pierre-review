@@ -13,6 +13,7 @@ import type {
 } from '@pierre-review/shared';
 import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
 import type { FyiProvider } from '../feed/fyi-provider.js';
+import type { PrDetailEnricher } from '../pr/detail-enricher.js';
 import type { AiUsageRecord } from '../db/usage.js';
 
 // The typed boundary between OSS core and the optional, dynamically-imported
@@ -30,6 +31,8 @@ export interface ProCapabilities {
   teamInsights: boolean; // team review-intelligence "Insights" (no AI; pure reads)
   claudeReview: boolean; // agentic Claude Review (Agent SDK; the product lives in the plugin)
   feedMyTurn: boolean; // Activity Feed FYI / "My Turn" participation flagging (Pro; no AI)
+  slackDigest: boolean; // Slack webhook delivery of the sprint + repo digest (Pro; mirrors activityDigest)
+  issueLinks: boolean; // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI)
 }
 
 // ---- AI Fix seams (github + coding) -------------------------------------------
@@ -444,6 +447,15 @@ export interface ReviewSeam {
   setLocalKey(key: string | null): { hasUserKey: boolean; auth: 'ok' | 'none' };
 }
 
+// An explicit Insights metrics window (epoch millis, inclusive) used to override the default
+// window with a configured SPRINT. Open PRs always count regardless of age — the window only
+// bounds time-based facts (merges, review latency, throughput). Passed across the boundary as
+// plain numbers to avoid Date/ISO ambiguity.
+export interface SprintWindow {
+  fromMs: number;
+  toMs: number;
+}
+
 // A curated, stable slice of the read layer, handed to the plugin via ctx.queries
 // (the plugin never imports the host's query module). Returns are `unknown` to
 // keep the contract decoupled from the host's concrete result types; the plugin
@@ -458,11 +470,21 @@ export interface ProHostQueries {
   }): Promise<unknown>;
   getActivity(accountId: number, repoIds?: number[] | null): Promise<unknown>; // WS2 aggregate (lands in a later phase)
   // Team review-intelligence cards (stalled reviews / untouched threads / reviewer load /
-  // routing), computed over the account's WATCHED repos. Returns InsightsResponse.
-  getTeamInsights(accountId: number): Promise<unknown>;
+  // routing), computed over the account's WATCHED repos. Returns InsightsResponse. The optional
+  // `window` (epoch-millis) overrides the default metrics window with the account's configured
+  // SPRINT (see the Pro sprint config); open PRs always count regardless of age. Omitted → the
+  // built-in default window (unchanged legacy behavior).
+  getTeamInsights(
+    accountId: number,
+    window?: SprintWindow,
+  ): Promise<unknown>;
   // The per-metric PR drill-down behind the flow-metric tiles (watched repos + sprint).
-  // Returns TeamMetricsDetail. Heavier than getTeamInsights — loaded on demand.
-  getTeamMetricsDetail(accountId: number): Promise<unknown>;
+  // Returns TeamMetricsDetail. Heavier than getTeamInsights — loaded on demand. Same optional
+  // sprint `window` override.
+  getTeamMetricsDetail(
+    accountId: number,
+    window?: SprintWindow,
+  ): Promise<unknown>;
   // Month-to-date-style AI-spend rollup for an account, split by seam (summary / agent).
   // Returns { summaryUsd, agentUsd, totalUsd } — the plugin converts to credits.
   getAiUsage(accountId: number, sinceMs: number): Promise<unknown>;
@@ -517,6 +539,19 @@ export interface ProContext {
   // Activity Feed FYI/"My Turn" enrichment seam. The plugin registers a provider that flags
   // each feed item `isMyTurn` by participation; inert (feed stays plain) without the plugin.
   registerFyiProvider(p: FyiProvider): void;
+  // Background-job seam (host owns process/scheduler infra). The plugin registers node-cron
+  // jobs here during register(); the core scheduler cron.schedule()s them AFTER bind, so they
+  // ride the config.disableScheduler gate and are torn down with the app. Used by the Slack
+  // digest cron + the AI-summary update policy. Inert in OSS. `label` is for logs.
+  registerScheduledJob(
+    cron: string,
+    handler: () => Promise<void> | void,
+    label?: string,
+  ): void;
+  // PR-detail enrichment seam. The plugin registers an enricher that computes Jira/Linear
+  // ticket links (compute-on-read) from a PR's title + head branch; core getPrDetail calls it
+  // and sets PrDetail.tickets. Inert in OSS (tickets stays null).
+  registerPrDetailEnricher(e: PrDetailEnricher): void;
   // AI Fix infra (per-account, cloud-ready). Inert in OSS.
   github: GithubSeam;
   coding: CodingSeam;
@@ -525,7 +560,7 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  apiVersion: 8; // contract handshake; host warns on mismatch
+  apiVersion: 9; // contract handshake; host warns on mismatch
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
@@ -540,6 +575,8 @@ const EMPTY: ProCapabilities = {
   teamInsights: false,
   claudeReview: false,
   feedMyTurn: false,
+  slackDigest: false,
+  issueLinks: false,
 };
 let active: ProCapabilities = EMPTY;
 export function setProCapabilities(c: ProCapabilities): void {

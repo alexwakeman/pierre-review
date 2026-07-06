@@ -54,6 +54,8 @@ import type {
   PostReviewResult,
   PrDetail,
   PrFilesResponse,
+  ProSettings,
+  ProSettingsUpdate,
   Repo,
   RepoSearchResponse,
   ReplyResult,
@@ -257,6 +259,21 @@ export const api = {
   // The raw captured action log for one review run (Surface 2).
   reviewActions: (reviewId: number) =>
     get<ReviewActionsResponse>(`/api/pro/claude-reviews/${reviewId}/actions`),
+
+  // ---- Pro per-account settings (packages/pro `pro_settings`; the config modal) ----
+  // Sprint window + Slack webhook + AI-update policy + Jira/Linear provider. The Slack
+  // webhook URL is write-only (never returned; `slack.configured` reflects storage). Absent
+  // plugin → 404. Only fetched when at least one Pro capability is on.
+  proSettings: () => get<ProSettings>('/api/pro/settings'),
+  updateProSettings: (patch: ProSettingsUpdate) =>
+    fetch('/api/pro/settings', jsonBody('PUT', patch)).then((r) =>
+      handle<ProSettings>(r),
+    ),
+  // Send a one-off Slack digest to the account's configured webhook now (the modal's "Send test").
+  testSlackDigest: () =>
+    fetch('/api/pro/slack/test', jsonBody('POST')).then((r) =>
+      handle<{ sent: boolean; message?: string }>(r),
+    ),
 
   me: () => get<MeResponse>('/api/me'),
   // Cloud-mode sign-out. 204 No Content; resolves once the session is cleared.

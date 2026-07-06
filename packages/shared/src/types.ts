@@ -344,6 +344,12 @@ export interface ProCapabilities {
   // the plugin is active locally). When false the Feed renders a plain chronological stream with
   // no FYI cards/toggle/badge and no Welcome-back banner. Populated by the plugin's FYI enricher.
   feedMyTurn: boolean;
+  // Slack digest delivery (Pro): a per-account webhook receives the freshly-generated sprint +
+  // repo digest on a cadence. The report is AI-generated (Haiku), so this mirrors activityDigest.
+  slackDigest: boolean;
+  // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI, no env flag — on whenever the
+  // plugin is active locally, like feedMyTurn). Config (provider + base URL) lives in pro_settings.
+  issueLinks: boolean;
 }
 
 export interface MeResponse {
@@ -361,6 +367,43 @@ export interface MeResponse {
   deploymentMode: 'local' | 'cloud';
   // Premium capability flags (all-false in OSS mode).
   pro: ProCapabilities;
+}
+
+// ---- Pro per-account settings (packages/pro `pro_settings`; via GET/PUT /api/pro/settings) ----
+export type SlackDigestCadence = 'off' | 'daily' | 'twice_daily';
+export type AiUpdateMode = 'manual' | 'interval' | 'on_change';
+export type IssueProvider = 'jira' | 'linear';
+
+// Read shape (GET /api/pro/settings). The Slack webhook URL is WRITE-ONLY — never returned;
+// `slack.configured` reflects only whether one is stored.
+export interface ProSettings {
+  // Sprint that defines the Insights metrics window. cadenceDays = sprint length; the current
+  // sprint auto-rolls (start + N whole cadence-lengths up to today). Open PRs always count.
+  sprint: { cadenceDays: number | null; startDate: string | null }; // startDate ISO (date @ midnight)
+  slack: {
+    configured: boolean;
+    cadence: SlackDigestCadence;
+    hour1: number; // 0-23, local to `timezone`
+    hour2: number; // second daily send, used only for 'twice_daily'
+    timezone: string | null; // IANA tz; null = server tz
+  };
+  aiUpdate: { mode: AiUpdateMode; intervalMinutes: number };
+  issue: { provider: IssueProvider | null; baseUrl: string | null };
+}
+
+// Write shape (PUT /api/pro/settings) — a partial patch; only present sections/fields change.
+// `slack.webhookUrl` is write-only ('' clears it).
+export interface ProSettingsUpdate {
+  sprint?: { cadenceDays?: number | null; startDate?: string | null };
+  slack?: {
+    webhookUrl?: string;
+    cadence?: SlackDigestCadence;
+    hour1?: number;
+    hour2?: number;
+    timezone?: string | null;
+  };
+  aiUpdate?: { mode?: AiUpdateMode; intervalMinutes?: number };
+  issue?: { provider?: IssueProvider | null; baseUrl?: string | null };
 }
 
 // Lean PR shape for the timeline. No bodies, no diff hunks.
@@ -668,6 +711,14 @@ export interface CommitDetail {
   committedAt: string;
 }
 
+// A Jira/Linear ticket reference detected in a PR (compute-on-read by the Pro enricher, from
+// the PR title + head branch). Rendered as a link chip in the PR-detail Overview.
+export interface TicketRef {
+  key: string; // e.g. "PROJ-123"
+  url: string; // deep link into the configured Jira/Linear workspace
+  provider: IssueProvider;
+}
+
 export interface PrDetail {
   id: number;
   repoId: number;
@@ -675,6 +726,11 @@ export interface PrDetail {
   number: number;
   title: string;
   body: string | null;
+  // Jira/Linear ticket links (Pro, compute-on-read via registerPrDetailEnricher). Tri-state:
+  //   null → feature off or no provider configured (render nothing)
+  //   []   → provider configured but no ticket key found (render a muted "No ticket found")
+  //   [..] → render a link chip per detected ticket
+  tickets: TicketRef[] | null;
   authorId: number | null;
   state: PrState;
   isDraft: boolean;

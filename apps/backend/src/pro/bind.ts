@@ -9,6 +9,8 @@ import * as hostQueries from '../db/queries.js';
 import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
 import { reviewEvents, registerLearningsProvider } from '../review/events.js';
 import { registerFyiProvider } from '../feed/fyi-provider.js';
+import { registerScheduledJob } from '../sync/scheduled-jobs.js';
+import { registerPrDetailEnricher } from '../pr/detail-enricher.js';
 import { cheapComplete } from '../review/llm.js';
 import { detectClaudeAuth } from '../review/auth.js';
 import {
@@ -56,7 +58,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   if (!mod) return;
 
   const plugin = (mod.default ?? mod) as ProPlugin;
-  if (plugin?.apiVersion !== 8 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 9 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -101,15 +103,18 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         }),
       getActivity: (accountId, repoIds) =>
         hostQueries.getActivity(accountId, repoIds ?? null),
-      getTeamInsights: (accountId) => hostQueries.getTeamInsights(accountId),
-      getTeamMetricsDetail: (accountId) =>
-        hostQueries.getTeamMetricsDetail(accountId),
+      getTeamInsights: (accountId, window) =>
+        hostQueries.getTeamInsights(accountId, window),
+      getTeamMetricsDetail: (accountId, window) =>
+        hostQueries.getTeamMetricsDetail(accountId, window),
       getAiUsage: (accountId, sinceMs) => getAiUsageSummary(accountId, sinceMs),
     },
     recordAiUsage: (row) => recordAiUsage(row),
     reviewEvents,
     registerLearningsProvider,
     registerFyiProvider,
+    registerScheduledJob,
+    registerPrDetailEnricher,
     // AI Fix infra (per-account, cloud-ready). The host owns the security-sensitive
     // clone/agent/push machinery; the plugin only drives it with prompts/model.
     github: {

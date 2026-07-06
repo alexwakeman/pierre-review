@@ -12,6 +12,8 @@ import { SyncStatus } from './components/SyncStatus.js';
 import { TimelineSearch } from './components/TimelineSearch.js';
 import { WelcomeBackBanner } from './components/WelcomeBackBanner.js';
 import { HelpModal } from './components/HelpModal.js';
+import { SettingsModal } from './components/settings/SettingsModal.js';
+import { useHasProSettings } from './hooks/useProSettings.js';
 import { SignInGate } from './components/SignInGate.js';
 import { UserMenu } from './components/UserMenu.js';
 import { useUrlState } from './hooks/useUrlState.js';
@@ -51,6 +53,9 @@ export default function App(): JSX.Element {
   useDetailCacheReconciler();
   const [dark, toggleDark] = useDarkMode();
   const [helpOpen, setHelpOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // The config modal (and its avatar-menu entry) only exist when there's a Pro setting to show.
+  const hasProSettings = useHasProSettings();
 
   // Opt-in browser notifications for new My Turn items + completed Claude reviews.
   // Shared pref (the Claude-review banner reads it too); the watcher fires only
@@ -279,12 +284,18 @@ export default function App(): JSX.Element {
               (Open Profile on GitHub · Sign Out). Sign Out is cloud-only (local has no
               session), so the standalone header sign-out button is gone. */}
           {meUser != null && (
-            <UserMenu user={meUser} canSignOut={isCloud} onSignOut={onSignOut} />
+            <UserMenu
+              user={meUser}
+              canSignOut={isCloud}
+              onSignOut={onSignOut}
+              onOpenSettings={hasProSettings ? () => setSettingsOpen(true) : null}
+            />
           )}
         </div>
       </header>
 
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 
       <WelcomeBackBanner />
       <FilterBar />

@@ -125,6 +125,9 @@ export const pullRequests = pgTable(
     authorId: integer('author_id').references(() => users.id),
     mergedById: integer('merged_by_id').references(() => users.id),
     baseRefName: text('base_ref_name'),
+    // The PR's SOURCE branch (GraphQL `headRefName`); carrier of a Jira/Linear ticket key,
+    // read by the Pro ticket-link enricher. Null until a sync backfills it.
+    headRefName: text('head_ref_name'),
     state: text('state', { enum: ['open', 'merged', 'closed'] }).notNull(),
     isDraft: boolean('is_draft').notNull().default(false),
     openedAt: timestamp('opened_at', { withTimezone: true, mode: 'date' }).notNull(),

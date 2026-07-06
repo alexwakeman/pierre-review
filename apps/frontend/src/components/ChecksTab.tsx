@@ -355,6 +355,31 @@ export function ChecksTab({
         </Row>
       )}
 
+      {/* Jira/Linear ticket links (Pro, compute-on-read). tri-state: null → hidden; [] → a muted
+          "No ticket found"; non-empty → one link chip per detected ticket. */}
+      {pr.tickets != null && (
+        <Row label="Ticket">
+          {pr.tickets.length === 0 ? (
+            <span className="text-xs text-gray-400">No ticket found</span>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {pr.tickets.map((t) => (
+                <a
+                  key={t.key}
+                  href={t.url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300"
+                  title={`Open ${t.key} in ${t.provider === 'jira' ? 'Jira' : 'Linear'}`}
+                >
+                  {t.key}
+                </a>
+              ))}
+            </div>
+          )}
+        </Row>
+      )}
+
       {pr.body != null && pr.body.trim() !== '' && <PrSummary body={pr.body} />}
 
       <AiSummary pr={pr} />

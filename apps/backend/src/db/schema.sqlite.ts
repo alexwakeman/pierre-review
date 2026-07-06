@@ -146,6 +146,10 @@ export const pullRequests = sqliteTable(
     // into a feature/integration branch doesn't elevate the merger. Null until a
     // (deep) sync backfills it on already-synced PRs.
     baseRefName: text('base_ref_name'),
+    // The PR's SOURCE branch (GraphQL `headRefName`), e.g. `feature/PROJ-123-foo`. The standard
+    // carrier of a Jira/Linear ticket key — read by the Pro ticket-link enricher (compute-on-read).
+    // Null until a sync backfills it on already-synced PRs.
+    headRefName: text('head_ref_name'),
     state: text('state', { enum: ['open', 'merged', 'closed'] }).notNull(),
     isDraft: integer('is_draft', { mode: 'boolean' }).notNull().default(false),
     openedAt: integer('opened_at', { mode: 'timestamp' }).notNull(),
