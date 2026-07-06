@@ -133,7 +133,17 @@ export function TeamMetricsPanel({
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
+        <TileShell onActivate={open('open_prs')}>
+          <div className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
+            Open PRs
+          </div>
+          <div className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+            {metrics.openPrs}
+          </div>
+          <div className="text-[11px] text-gray-400">across all repos</div>
+          <div className="mt-0.5 text-[10px] text-gray-400">currently open</div>
+        </TileShell>
         <Stat
           label="Merges"
           stat={metrics.merges}

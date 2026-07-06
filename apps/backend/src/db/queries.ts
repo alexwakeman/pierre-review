@@ -2118,10 +2118,12 @@ export async function getTeamMetrics(
   const ciMergedPrev = { succ: 0, total: 0 };
   const failingAges: number[] = [];
   let ciFailingNow = 0;
+  let openPrsNow = 0;
 
   for (const p of prs) {
     const openedMs = p.openedAt.getTime();
     if (openedMs >= windowStartMs) openedSeries[bi(openedMs)]! += 1;
+    if (p.state === 'open' && !p.isDraft) openPrsNow += 1;
 
     if (p.firstReviewAt != null) {
       const ttfr = (p.firstReviewAt.getTime() - openedMs) / 3_600_000;
@@ -2228,6 +2230,7 @@ export async function getTeamMetrics(
   return {
     sprintDays: 14,
     weekBuckets,
+    openPrs: openPrsNow,
     merges: { value: mergesCur, previous: mergesPrev },
     leadTimeHours: { value: medianOf(leadCur), previous: medianOf(leadPrev) },
     timeToFirstReviewHours: { value: medianOf(ttfrCur), previous: medianOf(ttfrPrev) },
@@ -2243,7 +2246,12 @@ export async function getTeamMetrics(
   };
 }
 
-const METRIC_DETAIL_CAP = 100; // per-list cap for the drill-down
+// Per-list safety cap for the drill-down. Deliberately GENEROUS: the lists are already
+// bounded (the 2-week sprint window for merges / review-latency / recovery; the open-PR
+// backlog for lead-time / red-now), so 500 shows every entry for any realistic sprint —
+// it's a guard against a pathological payload, not a display limit (a low cap like 100
+// looked like a rounded "real" count in the tab badges).
+const METRIC_DETAIL_CAP = 500;
 
 // The per-metric PR lists behind the 6 flow-metric tiles (the drill-down). A heavier,
 // on-demand read than getTeamMetrics — loaded only when a tile is clicked — over the
@@ -2258,6 +2266,7 @@ export async function getTeamMetricsDetail(
   const sprint = { from: sprintFrom.toISOString(), to: new Date(now).toISOString() };
   const empty: TeamMetricsDetail = {
     sprint,
+    openPrs: [],
     merges: [],
     leadTime: [],
     reviewLatency: [],
@@ -2393,6 +2402,16 @@ export async function getTeamMetricsDetail(
   const openNonDraft = prs.filter((p) => p.state === 'open' && !p.isDraft);
   const isRed = (ci: Row['ciStatus']): boolean => ci === 'failure' || ci === 'error';
 
+  // (0) OPEN PRS — every currently-open, non-draft PR, longest-open first. The metric-
+  // specific figure is the open age (open→now), shown in the same "lead time"-style column.
+  const openPrs = openNonDraft
+    .map((p) => ({
+      ...base(p),
+      leadTimeHours: (now - p.openedAt.getTime()) / 3_600_000,
+    }))
+    .sort((a, b) => (b.leadTimeHours ?? 0) - (a.leadTimeHours ?? 0))
+    .slice(0, METRIC_DETAIL_CAP);
+
   // (1) MERGES — merged in the sprint, newest first (client groups per repo).
   const merges = mergedInSprint
     .slice()
@@ -2499,6 +2518,7 @@ export async function getTeamMetricsDetail(
 
   return {
     sprint,
+    openPrs,
     merges,
     leadTime,
     reviewLatency,
@@ -2666,6 +2686,7 @@ export async function getTeamInsights(accountId: number): Promise<TeamInsightsRe
       changedFiles: p.changedFiles,
       additions: p.additions,
       deletions: p.deletions,
+      openedAt: p.openedAt!.toISOString(),
       ageHours,
       requestedReviewerIds: reviewers,
     });
@@ -2683,6 +2704,7 @@ export async function getTeamInsights(accountId: number): Promise<TeamInsightsRe
       prTitle: pullRequests.title,
       repoId: pullRequests.repoId,
       authorId: pullRequests.authorId,
+      openedAt: pullRequests.openedAt,
       ciStatus: pullRequests.ciStatus,
       changedFiles: pullRequests.changedFiles,
       additions: pullRequests.additions,
@@ -2722,6 +2744,7 @@ export async function getTeamInsights(accountId: number): Promise<TeamInsightsRe
       changedFiles: t.changedFiles,
       additions: t.additions,
       deletions: t.deletions,
+      openedAt: t.openedAt.toISOString(),
       threadId: t.threadId,
       path: t.path,
       ageHours,
@@ -2873,6 +2896,7 @@ export async function getTeamInsights(accountId: number): Promise<TeamInsightsRe
         changedFiles: p.changedFiles,
         additions: p.additions,
         deletions: p.deletions,
+        openedAt: p.openedAt!.toISOString(),
         topPaths: paths.slice(0, 5),
         suggestedReviewers: suggested,
       });

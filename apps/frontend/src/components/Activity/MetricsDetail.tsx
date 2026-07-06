@@ -9,6 +9,7 @@ import { CI_META, indexUsers, relativeTime } from '../../lib/ui.js';
 import { fmtDuration } from '../charts/common.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
+import { MetricRepoFilter } from './MetricRepoFilter.js';
 
 // The flow-metric DRILL-DOWN — a persistent tab opened by clicking a metric tile in
 // Insights. One sub-tab per metric, each listing the PRs behind that number (with the
@@ -16,7 +17,8 @@ import { UserName } from '../UserName.js';
 // single lazy read (useTeamMetricsDetail); clicking any PR opens its detail tab.
 
 const METRIC_META: Record<TeamMetricKey, { label: string; blurb: string }> = {
-  merges: { label: 'Merges', blurb: 'Merged this sprint · grouped by repo' },
+  open_prs: { label: 'Open PRs', blurb: 'All currently-open PRs · longest-open first' },
+  merges: { label: 'Merges', blurb: 'Merged this sprint · newest first' },
   lead_time: { label: 'Lead time', blurb: 'Open → merge (merged + open) · longest first' },
   review_latency: { label: 'Review latency', blurb: 'Open → first review · longest first' },
   merge_ci: { label: 'Merge CI', blurb: 'Merged PRs · CI-failed-at-merge first' },
@@ -30,6 +32,8 @@ function listFor(
 ): MetricPr[] {
   if (!detail) return [];
   switch (m) {
+    case 'open_prs':
+      return detail.openPrs;
     case 'merges':
       return detail.merges;
     case 'lead_time':
@@ -114,6 +118,8 @@ function Reviewers({
 // The metric-specific "value" cell for a row (and its column header text).
 function valueHeader(m: TeamMetricKey): string {
   switch (m) {
+    case 'open_prs':
+      return 'Open for';
     case 'merges':
     case 'lead_time':
       return 'Lead time';
@@ -131,6 +137,7 @@ function valueHeader(m: TeamMetricKey): string {
 function ValueCell({ m, pr }: { m: TeamMetricKey; pr: MetricPr }): JSX.Element {
   const dur = (h: number | null): string => (h == null ? '—' : fmtDuration(h));
   switch (m) {
+    case 'open_prs':
     case 'merges':
     case 'lead_time':
       return <span className="font-medium">{dur(pr.leadTimeHours)}</span>;
@@ -167,16 +174,20 @@ function Row({
   return (
     <tr className="border-t border-gray-100 align-top hover:bg-gray-50/70 dark:border-gray-800/60 dark:hover:bg-gray-900/40">
       <td className="py-1.5 pr-3">
+        {/* Two lines per PR: the repo/number pointer, then the title — easier to scan than
+            one long truncated line. */}
         <button
           type="button"
           onClick={() => onOpen(pr)}
-          className="max-w-md truncate text-left text-sm font-medium text-gray-800 hover:underline dark:text-gray-100"
-          title="Open this PR"
+          className="block max-w-md text-left hover:underline"
+          title={`${pr.repoFullName} #${pr.prNumber} — ${pr.prTitle}`}
         >
-          <span className="text-gray-400">
+          <span className="block truncate font-mono text-[11px] text-gray-400">
             {pr.repoFullName} #{pr.prNumber}
-          </span>{' '}
-          {pr.prTitle}
+          </span>
+          <span className="block truncate text-sm font-medium text-gray-800 dark:text-gray-100">
+            {pr.prTitle}
+          </span>
         </button>
       </td>
       <td className="py-1.5 pr-3">
@@ -257,7 +268,29 @@ export function MetricsDetail(): JSX.Element {
   }, [metricsFocus, consumeMetricsFocus]);
 
   const detail = data?.detail ?? null;
-  const rows = listFor(detail, active);
+
+  // Per-metric-tab repo filter — each tab owns its own selection (null = all team repos),
+  // so filtering CI-red doesn't disturb Merges. Independent across tabs, as requested.
+  const [repoSel, setRepoSel] = useState<Partial<Record<TeamMetricKey, number[] | null>>>({});
+  const activeSel = repoSel[active] ?? null;
+  const setActiveSel = (sel: number[] | null): void =>
+    setRepoSel((prev) => ({ ...prev, [active]: sel }));
+
+  // The repos that appear anywhere in the drill-down — a STABLE option set for the dropdown
+  // (switching tabs changes the per-tab selection, not the menu itself).
+  const repoOptions = useMemo(() => {
+    const byId = new Map<number, string>();
+    if (detail)
+      for (const k of TEAM_METRIC_KEYS)
+        for (const r of listFor(detail, k)) byId.set(r.repoId, r.repoFullName);
+    return [...byId.entries()]
+      .map(([id, fullName]) => ({ id, fullName }))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }, [detail]);
+
+  // Flat list ordered by the metric, filtered to the selected repos (null = all, across repos).
+  const allRows = listFor(detail, active);
+  const rows = activeSel == null ? allRows : allRows.filter((r) => activeSel.includes(r.repoId));
   const openPr = (pr: MetricPr): void => {
     const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
     const meta: PinnedPr = {
@@ -271,18 +304,6 @@ export function MetricsDetail(): JSX.Element {
     };
     openPrDetailTab(meta);
   };
-
-  // Merges are grouped by repo (the "per repo" ask); every other metric is a flat table.
-  const mergesByRepo = useMemo(() => {
-    if (active !== 'merges') return [];
-    const byRepo = new Map<string, MetricPr[]>();
-    for (const r of rows) {
-      const a = byRepo.get(r.repoFullName) ?? [];
-      a.push(r);
-      byRepo.set(r.repoFullName, a);
-    }
-    return [...byRepo.entries()].sort((a, b) => b[1].length - a[1].length);
-  }, [active, rows]);
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-4">
@@ -334,7 +355,17 @@ export function MetricsDetail(): JSX.Element {
         })}
       </div>
 
-      <div className="text-[11px] text-gray-400">{METRIC_META[active].blurb}</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="text-[11px] text-gray-400">{METRIC_META[active].blurb}</div>
+        {rows.length !== allRows.length && (
+          <span className="text-[11px] text-gray-400">
+            · {rows.length} of {allRows.length}
+          </span>
+        )}
+        <div className="ml-auto">
+          <MetricRepoFilter repos={repoOptions} selected={activeSel} onChange={setActiveSel} />
+        </div>
+      </div>
 
       {isLoading ? (
         <div className="space-y-2">
@@ -349,18 +380,9 @@ export function MetricsDetail(): JSX.Element {
         <div className="text-sm text-red-500">Couldn’t load the metric detail.</div>
       ) : rows.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          Nothing to show for this metric in the current sprint. 🎉
-        </div>
-      ) : active === 'merges' ? (
-        <div className="space-y-4">
-          {mergesByRepo.map(([repo, repoRows]) => (
-            <div key={repo}>
-              <div className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">
-                {repo} <span className="text-gray-400">· {repoRows.length} merged</span>
-              </div>
-              <Table m={active} rows={repoRows} usersById={usersById} onOpen={openPr} />
-            </div>
-          ))}
+          {allRows.length === 0
+            ? 'Nothing to show for this metric in the current sprint. 🎉'
+            : 'No PRs for the selected repos — adjust the repo filter.'}
         </div>
       ) : (
         <Table m={active} rows={rows} usersById={usersById} onOpen={openPr} />

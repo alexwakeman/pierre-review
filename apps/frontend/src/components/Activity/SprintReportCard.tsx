@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import type { DigestPrRef } from '@pierre-review/shared';
+import type { DigestPrRef, RepoDigest } from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useSprintReport, useRefreshSprintReport } from '../../hooks/useSprintReport.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { SummaryMarkdown } from './prRefTable.js';
+import { InsightsDigests } from './InsightsDigests.js';
 
 // A Pro Haiku summary OF the Insights, pinned atop the Insights rail: headline metrics +
 // prioritised, PR-linked issues, repos ranked by activity + code volume. Cost-safe: it
@@ -25,16 +26,30 @@ function refMeta(ref: DigestPrRef): PinnedPr {
 
 // `showRefresh` is false when the card is embedded in the unified Insights panel, whose
 // single header "Refresh" regenerates all summaries (sprint report + digests) at once.
+// The per-repo digest cards are nested INSIDE this card (collapsed by default) to keep the
+// Insights tab compact — the parent passes the digest data down.
 export function SprintReportCard({
   showRefresh = true,
+  digests,
+  digestsLoading = false,
+  anyWatched = false,
+  refreshingRepoIds,
 }: {
   showRefresh?: boolean;
+  digests?: RepoDigest[];
+  digestsLoading?: boolean;
+  anyWatched?: boolean;
+  refreshingRepoIds?: Set<number>;
 }): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const { data, isLoading } = useSprintReport(activityDigest);
   const refresh = useRefreshSprintReport();
   const [collapsed, setCollapsed] = useState(false);
+  // The nested per-repo "Repo summaries" section is collapsed by default (the length win).
+  const [reposOpen, setReposOpen] = useState(false);
+  const showRepos = digests !== undefined && anyWatched;
+  const repoCount = digests?.length ?? 0;
 
   // The AI digest capability is the gate (the report shares the digest's Haiku seam +
   // cost throttle). Absent → render nothing, exactly like the digest banner.
@@ -114,6 +129,33 @@ export function SprintReportCard({
                   Use <span className="font-medium">Refresh</span> above to generate it.
                 </>
               )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Per-repo digest cards, nested + collapsed by default so the Insights tab stays
+          compact. Each repo card inside is itself collapsible (collapsed by default). */}
+      {!collapsed && showRepos && (
+        <div className="mt-3 border-t border-violet-200/60 pt-2 dark:border-violet-900/40">
+          <button
+            type="button"
+            onClick={() => setReposOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300"
+          >
+            <span className="w-3 select-none text-gray-400">{reposOpen ? '▾' : '▸'}</span>
+            <span aria-hidden="true">✨</span> Repo summaries
+            <span className="font-normal text-gray-400">· {repoCount}</span>
+          </button>
+          {reposOpen && (
+            <div className="mt-2">
+              <InsightsDigests
+                embedded
+                digests={digests ?? []}
+                isLoading={digestsLoading}
+                anyWatched={anyWatched}
+                refreshingRepoIds={refreshingRepoIds ?? new Set()}
+              />
             </div>
           )}
         </div>

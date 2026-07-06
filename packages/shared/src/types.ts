@@ -2084,6 +2084,7 @@ export interface InsightPrRef {
   changedFiles: number; // files touched
   additions: number; // LOC added
   deletions: number; // LOC removed
+  openedAt: string; // ISO-8601 PR open time — drives the deterministic LOC×age priority + the age column
 }
 
 // A suggested reviewer + the human-readable rationale for the suggestion
@@ -2146,6 +2147,9 @@ export interface TeamMetrics {
   sprintDays: number; // the stat-tile window (14)
   weekBuckets: string[]; // ISO bucket-start per week, oldest first (chart x-axis)
 
+  // Currently-open PRs (non-draft) across the repos — a snapshot count (no trend).
+  openPrs: number;
+
   // Deployment frequency → PRs merged to a base branch.
   merges: TeamMetricStat;
   // Lead time for changes → median hours open → merge.
@@ -2188,6 +2192,7 @@ export interface TeamInsightsResponse {
 // TeamMetrics), scoped to the WATCHED repos + the current sprint. Lets the user see
 // WHERE issues cluster (which PRs/repos drag a metric).
 export type TeamMetricKey =
+  | 'open_prs' // ALL currently-open PRs across the repos, oldest first
   | 'merges' // deploy frequency → all merged PRs (per repo)
   | 'lead_time' // open → merge, merged + open, longest first
   | 'review_latency' // open → first review, longest first
@@ -2196,6 +2201,7 @@ export type TeamMetricKey =
   | 'ci_red'; // currently CI-failing open branches
 
 export const TEAM_METRIC_KEYS: TeamMetricKey[] = [
+  'open_prs',
   'merges',
   'lead_time',
   'review_latency',
@@ -2234,6 +2240,7 @@ export interface MetricPr {
 
 export interface TeamMetricsDetail {
   sprint: { from: string; to: string };
+  openPrs: MetricPr[]; // ALL currently-open non-draft PRs, longest-open first
   merges: MetricPr[]; // merged in the sprint (per repo on the client)
   leadTime: MetricPr[]; // merged-in-sprint + currently-open, longest lead first
   reviewLatency: MetricPr[]; // reviewed PRs, longest open→first-review first

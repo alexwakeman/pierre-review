@@ -30,7 +30,6 @@ import { AiSummary } from '../AiSummary.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { SprintReportCard } from './SprintReportCard.js';
 import { TeamMetricsPanel } from './TeamMetricsPanel.js';
-import { InsightsDigests } from './InsightsDigests.js';
 import { TrackUsage } from './TrackUsage.js';
 import { RegenProgressBar } from './RegenProgressBar.js';
 
@@ -410,12 +409,12 @@ export function InsightsView(): JSX.Element {
         <TeamMetricsPanel metrics={data.metrics} onOpenMetric={openMetricsDetail} />
       )}
 
-      <SprintReportCard showRefresh={false} />
-
-      {/* Branch/repo summaries, collapsed by default, sitting UNDER the sprint report. */}
-      <InsightsDigests
+      {/* Repo digests are nested INSIDE the sprint report card (collapsed by default) to
+          keep the Insights tab compact — pass the digest data down. */}
+      <SprintReportCard
+        showRefresh={false}
         digests={digestsQuery.data?.digests ?? []}
-        isLoading={digestsQuery.isLoading}
+        digestsLoading={digestsQuery.isLoading}
         anyWatched={watchedVisibleIds.length > 0}
         refreshingRepoIds={refreshDigests.refreshingRepoIds}
       />

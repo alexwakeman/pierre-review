@@ -19,20 +19,24 @@ import {
 // with NO PR reference (the throughput headline, metric lines) stay as prose. Shared by
 // DigestMarkdown (per-repo) and the sprint report so both present PRs identically.
 
-const isRed = (ci: DigestPrRef['ciStatus']): boolean =>
-  ci === 'failure' || ci === 'error';
-const openedTs = (r: DigestPrRef): number =>
-  r.openedAt ? Date.parse(r.openedAt) : Number.POSITIVE_INFINITY;
-const loc = (r: DigestPrRef): number => r.additions + r.deletions;
-// More severe = red CI, then older, then larger. Returns <0 when `a` is more severe.
-const bySeverity = (a: DigestPrRef, b: DigestPrRef): number =>
-  (isRed(b.ciStatus) ? 1 : 0) - (isRed(a.ciStatus) ? 1 : 0) ||
-  openedTs(a) - openedTs(b) ||
-  loc(b) - loc(a);
+// DETERMINISTIC priority = LOC (additions + deletions) × hours-since-opened. Higher =
+// more urgent (a big change that's been open a long time). The AI only narrates; the
+// renderer orders every PR list (sprint report + repo digests) by this score, so ordering
+// never depends on the prompt. A PR with no known open time sorts to the bottom (score 0).
+const priorityOf = (r: DigestPrRef): number => {
+  const loc = r.additions + r.deletions;
+  const ageHours = r.openedAt
+    ? Math.max(0, (Date.now() - Date.parse(r.openedAt)) / 3_600_000)
+    : 0;
+  return loc * ageHours;
+};
+// Highest priority first. Returns <0 when `a` outranks `b`.
+const byPriority = (a: DigestPrRef, b: DigestPrRef): number =>
+  priorityOf(b) - priorityOf(a);
 
 interface Block {
-  kind: 'headline' | 'header' | 'prose' | 'prtable';
-  text?: string; // headline / header / prose
+  kind: 'headline' | 'header' | 'subhead' | 'prose' | 'prtable';
+  text?: string; // headline / header / subhead / prose
   groups?: { prs: DigestPrRef[]; summary: string }[]; // prtable
 }
 
@@ -56,11 +60,12 @@ function refsIn(text: string, index: PrRefIndex): DigestPrRef[] {
 }
 
 // The bullet text with the resolved PR tokens removed (they get their own column), tidied
-// of the leading punctuation the reference usually sat behind.
+// of the leading punctuation the reference usually sat behind. Because the PR reference is
+// often the sentence's grammatical subject, stripping it leaves a predicate fragment — so we
+// capitalise the first letter, otherwise the summary reads as if it starts mid-sentence.
 function stripRefs(text: string, index: PrRefIndex): string {
-  const re = new RegExp(REF_SOURCE, 'g');
-  return text
-    .replace(re, (full, ...rest) => {
+  const stripped = text
+    .replace(new RegExp(REF_SOURCE, 'g'), (full, ...rest) => {
       // Reconstruct a match-like array for resolveMatch: [full, g1, g2, g3, ...].
       const groups = rest.slice(0, 3);
       const ref = resolveMatch(
@@ -72,6 +77,9 @@ function stripRefs(text: string, index: PrRefIndex): string {
     .replace(/\s{2,}/g, ' ')
     .replace(/^[\s:,.\-–—·•]+/, '')
     .trim();
+  // Capitalise a leading lowercase letter so the remaining clause reads as a sentence
+  // (leave @mentions, #refs and already-capitalised text untouched).
+  return /^[a-z]/.test(stripped) ? stripped[0]!.toUpperCase() + stripped.slice(1) : stripped;
 }
 
 // Parse the summary markdown into an ordered list of blocks, coalescing consecutive
@@ -82,14 +90,16 @@ function parseBlocks(markdown: string, index: PrRefIndex): Block[] {
     // Strip code-span backticks — the model sometimes wraps a PR token in them, which would
     // otherwise defeat the ref regex / render literal `…` around the link.
     .map((l) => l.replace(/`/g, '').trim())
-    .filter((l) => l !== '');
+    // Drop blanks and markdown horizontal rules (`---` / `***` / `___`) — the model uses one
+    // to divide the metrics from the action items, which would otherwise render as a stray bullet.
+    .filter((l) => l !== '' && !/^[-–—*_]{3,}$/.test(l));
   const blocks: Block[] = [];
   let pending: { prs: DigestPrRef[]; summary: string }[] = [];
   let headlineDone = false;
   const flush = (): void => {
     if (pending.length === 0) return;
-    // Order groups by their most-severe PR.
-    pending.sort((a, b) => bySeverity(a.prs[0]!, b.prs[0]!));
+    // Order groups by their highest-priority PR (LOC × hours-open, deterministic).
+    pending.sort((a, b) => byPriority(a.prs[0]!, b.prs[0]!));
     blocks.push({ kind: 'prtable', groups: pending });
     pending = [];
   };
@@ -107,13 +117,17 @@ function parseBlocks(markdown: string, index: PrRefIndex): Block[] {
     }
     const refs = refsIn(raw, index);
     if (refs.length > 0) {
-      // A PR bullet → a table group (severity-ordered rows). Buffer consecutive ones.
-      refs.sort(bySeverity);
+      // A PR bullet → a table group (priority-ordered rows). Buffer consecutive ones.
+      refs.sort(byPriority);
       pending.push({ prs: refs, summary: stripRefs(bullet, index) });
       continue;
     }
+    // A wholly-bold line (e.g. the model's per-repo "**owner/name**" section labels that
+    // precede each repo's action items) → a section subheading, not a bulleted prose line.
+    const boldOnly = /^\*\*(.+)\*\*$/.exec(bullet);
     flush();
     if (header) blocks.push({ kind: 'header', text: header[1] });
+    else if (boldOnly) blocks.push({ kind: 'subhead', text: boldOnly[1] });
     else blocks.push({ kind: 'prose', text: bullet });
   }
   flush();
@@ -133,10 +147,22 @@ function PrTable({
 }): JSX.Element {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[560px] border-collapse text-[12px]">
+      {/* Fixed layout + a SHARED colgroup so every table renders identical column geometry.
+          The sprint report emits one table per repo (separated by repo-name lines), so
+          without this each repo's columns sized to its own content and the tables didn't
+          line up — this makes them all align. */}
+      <table className="w-full min-w-[820px] table-fixed border-collapse text-[12px]">
+        <colgroup>
+          <col style={{ width: '320px' }} />
+          <col style={{ width: '24px' }} />
+          <col style={{ width: '84px' }} />
+          <col style={{ width: '110px' }} />
+          <col style={{ width: '72px' }} />
+          <col />
+        </colgroup>
         <thead>
           <tr className="text-left text-[9px] font-semibold uppercase tracking-wide text-gray-400">
-            <th className="pb-1 pr-2 font-semibold">PR</th>
+            <th className="pb-1 pr-2 font-semibold">Pull request</th>
             <th className="pb-1 pr-2 font-semibold">CI</th>
             <th className="pb-1 pr-2 font-semibold">Age</th>
             <th className="pb-1 pr-2 font-semibold">Author</th>
@@ -155,13 +181,19 @@ function PrTable({
                   className="border-t border-gray-100 align-top dark:border-gray-800/60"
                 >
                   <td className="py-1 pr-2">
+                    {/* The repo is already known from the section subheading, so show
+                        #<number> + the PR TITLE (not owner/name#n) — far more legible. The
+                        title wraps within the widened column rather than truncating. */}
                     <button
                       type="button"
                       onClick={() => onOpenPr(pr)}
-                      className="whitespace-nowrap font-semibold text-sky-600 hover:underline dark:text-sky-400"
-                      title={pr.title ?? undefined}
+                      className="block text-left leading-snug hover:underline"
+                      title={`${pr.repoFullName}#${pr.prNumber}${pr.title ? ` — ${pr.title}` : ''}`}
                     >
-                      {pr.repoFullName}#{pr.prNumber}
+                      <span className="font-semibold text-sky-600 dark:text-sky-400">
+                        #{pr.prNumber}
+                      </span>{' '}
+                      <span className="text-gray-700 dark:text-gray-200">{pr.title ?? ''}</span>
                     </button>
                   </td>
                   <td className="py-1 pr-2">
@@ -179,14 +211,18 @@ function PrTable({
                   <td className="whitespace-nowrap py-1 pr-2 text-[11px] text-gray-500 dark:text-gray-400">
                     {pr.openedAt ? relativeTime(pr.openedAt) : '—'}
                   </td>
-                  <td className="py-1 pr-2">
-                    <span className="inline-flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
-                      <Avatar user={u} size={13} />
-                      {u ? (
-                        <UserName user={u} fallbackId={pr.authorId ?? 0} />
-                      ) : (
-                        (pr.authorLogin ?? '—')
-                      )}
+                  <td className="overflow-hidden py-1 pr-2">
+                    <span className="flex min-w-0 items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+                      <span className="shrink-0">
+                        <Avatar user={u} size={13} />
+                      </span>
+                      <span className="min-w-0 truncate">
+                        {u ? (
+                          <UserName user={u} fallbackId={pr.authorId ?? 0} />
+                        ) : (
+                          (pr.authorLogin ?? '—')
+                        )}
+                      </span>
                     </span>
                   </td>
                   <td className="whitespace-nowrap py-1 pr-2 text-[11px]">
@@ -259,6 +295,16 @@ export function SummaryMarkdown({
             <div
               key={i}
               className="pt-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
+            >
+              {render(renderInlineMarkdown(b.text ?? '', index, onOpenPr))}
+            </div>
+          );
+        }
+        if (b.kind === 'subhead') {
+          return (
+            <div
+              key={i}
+              className="pt-1.5 text-[12px] font-semibold text-gray-700 dark:text-gray-200"
             >
               {render(renderInlineMarkdown(b.text ?? '', index, onOpenPr))}
             </div>

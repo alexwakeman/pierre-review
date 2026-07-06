@@ -13,11 +13,15 @@ export function InsightsDigests({
   isLoading,
   anyWatched,
   refreshingRepoIds,
+  embedded = false,
 }: {
   digests: RepoDigest[];
   isLoading: boolean;
   anyWatched: boolean;
   refreshingRepoIds: Set<number>;
+  // When nested inside the sprint report card, the card's collapsible section header is the
+  // label, so suppress this component's own "Repo summaries" header to avoid a double title.
+  embedded?: boolean;
 }): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const expanded = useInsightsDigestExpand((s) => s.expanded);
@@ -30,11 +34,13 @@ export function InsightsDigests({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 px-0.5">
-        <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
-          <span aria-hidden="true">✨</span> Repo summaries · watched repos
-        </span>
-      </div>
+      {!embedded && (
+        <div className="flex items-center gap-2 px-0.5">
+          <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
+            <span aria-hidden="true">✨</span> Repo summaries · watched repos
+          </span>
+        </div>
+      )}
       {!anyWatched ? (
         <p className="px-0.5 text-xs text-gray-400">
           No watched repos in view — Watch a repo (the eye toggle) to get a summary here.
