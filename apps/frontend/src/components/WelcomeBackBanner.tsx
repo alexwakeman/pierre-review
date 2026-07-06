@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMe } from '../hooks/useTriage.js';
+import { useMe, useProCapabilities } from '../hooks/useTriage.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { useFilters } from '../store/filters.js';
 import { relativeTime } from '../lib/ui.js';
@@ -13,12 +13,15 @@ import { relativeTime } from '../lib/ui.js';
 // Hidden while you're already on the Activity console.
 export function WelcomeBackBanner(): JSX.Element | null {
   const { data: me } = useMe();
+  const proMyTurn = useProCapabilities().feedMyTurn;
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const showActivity = usePinnedTabs((s) => s.showActivity);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
   const setFeedMyTurnOnly = useFilters((s) => s.setFeedMyTurnOnly);
   const [dismissed, setDismissed] = useState(false);
 
+  // FYI is a Pro capability — no banner off-tier (the count is already 0 there anyway).
+  if (!proMyTurn) return null;
   if (dismissed || !me?.user) return null;
   // Already in the Activity console → no nag (and it's being marked seen there anyway).
   if (activeTab === 'activity') return null;

@@ -4,8 +4,8 @@ import { config } from '../../config.js';
 import { accountToLocalUser } from '../../auth/account.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { getProCapabilities } from '../../pro/contract.js';
+import { getFyiProvider } from '../../feed/fyi-provider.js';
 import {
-  countNewMyTurnFeedItems,
   dismissMyTurn,
   getCompletedDismissals,
   getFeedLastSeenAt,
@@ -36,11 +36,11 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     const myTurn = await getMyTurn(accountId);
     // Feed "seen" marker + how many FYI items are new since. Only counted once a
     // baseline exists (feedLastSeenAt set by the first feed view) so a fresh account
-    // never sees a scary first-load number.
+    // never sees a scary first-load number. FYI is a Pro capability — the count comes
+    // from the plugin's enricher (0 on the free tier, where there's no provider).
     const feedLastSeen = await getFeedLastSeenAt(accountId);
-    const newFeedItems = feedLastSeen
-      ? await countNewMyTurnFeedItems(accountId, feedLastSeen)
-      : 0;
+    const fyi = getFyiProvider();
+    const newFeedItems = feedLastSeen && fyi ? await fyi.countNewSince(accountId, feedLastSeen) : 0;
     return {
       user,
       counts: {

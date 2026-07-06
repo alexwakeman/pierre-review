@@ -49,6 +49,7 @@ export function useProCapabilities(): ProCapabilities {
       aiFix: false,
       teamInsights: false,
       claudeReview: false,
+      feedMyTurn: false,
     }
   );
 }

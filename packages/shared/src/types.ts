@@ -336,9 +336,14 @@ export interface ProCapabilities {
   teamInsights: boolean; // team review-intelligence "Insights" (no AI; pure reads)
   // Agentic Claude Review (Agent SDK). The product lives in the plugin (routes/manager/
   // prompts); the SDK-run infra + tables stay in core behind the ctx.review seam. Gated
-  // by PRO_CLAUDE_REVIEW_ENABLED; all-false in cloud / OSS (replaces the old core
-  // ENABLE_CLAUDE_REVIEW env flag). The frontend hides the tab/banner when false.
+  // by PRO_ADVANCED_AI_ENABLED (formerly PRO_CLAUDE_REVIEW_ENABLED, kept as an alias); all-false
+  // in cloud / OSS. The frontend hides the tab/banner when false. This flag now gates the whole
+  // "pro+" AI tier — aiAnalysis + aiFix + claudeReview flip together.
   claudeReview: boolean;
+  // Activity Feed FYI / "My Turn" participation flagging (Pro; no AI, no env flag — on whenever
+  // the plugin is active locally). When false the Feed renders a plain chronological stream with
+  // no FYI cards/toggle/badge and no Welcome-back banner. Populated by the plugin's FYI enricher.
+  feedMyTurn: boolean;
 }
 
 export interface MeResponse {

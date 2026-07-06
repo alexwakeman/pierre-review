@@ -165,9 +165,18 @@ const ME_RESPONSE: MeResponse = {
     claudeReviewsToAction: 0,
   },
   deploymentMode: 'local',
-  // Pro off in e2e — the consolidated Feed (core) renders without the AI digest panel.
-  // Claude Review is now a Pro capability (claudeReview) rather than a top-level flag.
-  pro: { activityDigest: false, reviewMemory: false, claudeReview: false },
+  // Pro tier for e2e: FYI / "My Turn" is on (feedMyTurn) so the Feed's isMyTurn cards/toggle
+  // render — the AI features (digests, Claude Review, AI Fix) stay off so the console renders
+  // without the AI panels/tabs. FYI is now a Pro capability, not a core one.
+  pro: {
+    activityDigest: false,
+    reviewMemory: false,
+    aiAnalysis: false,
+    aiFix: false,
+    teamInsights: false,
+    claudeReview: false,
+    feedMyTurn: true,
+  },
 };
 
 function myTurnPr(id: number): MyTurnPr {

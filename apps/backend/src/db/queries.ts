@@ -82,7 +82,6 @@ import type {
   RepoClaudeReviewPr,
   ConsolidatedFeedItem,
   ConsolidatedFeedResponse,
-  MyTurnReason,
   FeedAffectedThread,
   MyTurnPr,
 } from '@pierre-review/shared';
@@ -102,6 +101,7 @@ const REASON_PRIORITY: ReasonTag[] = [
 ];
 import { db, schema, isPg } from './client.js';
 import { runTransaction } from './client.js';
+import { getFyiProvider } from '../feed/fyi-provider.js';
 import { config } from '../config.js';
 import { getProCapabilities } from '../pro/contract.js';
 import { createHash } from 'node:crypto';
@@ -1776,115 +1776,6 @@ async function getCommitThreadItems(
   return out;
 }
 
-// Participation ("is this PR mine?") for the consolidated feed's isMyTurn flag. Given a
-// candidate set of PR ids (all account-owned — they come from the account-scoped feed),
-// returns the subset the viewer participates in: PRs they authored, are a requested
-// reviewer on, or previously reviewed / commented on (issue comment OR inline review
-// comment). Isolation rides on prId ∈ the account-owned candidate set, so the un-scoped
-// child tables (reviews/reviewRequests/prComments/reviewComments) need no accountId
-// predicate here. `authored`/`requested` are broken out so the caller can colour the badge.
-// Empty when the viewer is unknown (offline / not yet synced) → isMyTurn defaults false.
-interface Participation {
-  all: Set<number>;
-  authored: Set<number>;
-  requested: Set<number>;
-  reviewed: Set<number>;
-  commented: Set<number>;
-  merged: Set<number>;
-}
-
-async function getParticipatingPrIds(
-  accountId: number,
-  localUserId: number | null,
-  prIds: number[],
-): Promise<Participation> {
-  const authored = new Set<number>();
-  const requested = new Set<number>();
-  const reviewed = new Set<number>();
-  const commented = new Set<number>();
-  const merged = new Set<number>();
-  const all = new Set<number>();
-  const empty: Participation = { all, authored, requested, reviewed, commented, merged };
-  if (localUserId == null || prIds.length === 0) return empty;
-  for (const row of await db
-    .select({ id: pullRequests.id })
-    .from(pullRequests)
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        eq(pullRequests.authorId, localUserId),
-        inArray(pullRequests.id, prIds),
-      ),
-    )
-    .execute()) {
-    authored.add(row.id);
-    all.add(row.id);
-  }
-  // PRs the viewer merged (even if they never reviewed) count as participation too — a
-  // merge is a strong "I own the outcome of this" signal, so later activity is FYI.
-  for (const row of await db
-    .select({ id: pullRequests.id })
-    .from(pullRequests)
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        eq(pullRequests.mergedById, localUserId),
-        inArray(pullRequests.id, prIds),
-      ),
-    )
-    .execute()) {
-    merged.add(row.id);
-    all.add(row.id);
-  }
-  for (const row of await db
-    .select({ prId: reviewRequests.prId })
-    .from(reviewRequests)
-    .where(and(eq(reviewRequests.userId, localUserId), inArray(reviewRequests.prId, prIds)))
-    .execute()) {
-    requested.add(row.prId);
-    all.add(row.prId);
-  }
-  for (const row of await db
-    .select({ prId: reviews.prId })
-    .from(reviews)
-    .where(and(eq(reviews.authorId, localUserId), inArray(reviews.prId, prIds)))
-    .execute()) {
-    reviewed.add(row.prId);
-    all.add(row.prId);
-  }
-  for (const row of await db
-    .select({ prId: prComments.prId })
-    .from(prComments)
-    .where(and(eq(prComments.authorId, localUserId), inArray(prComments.prId, prIds)))
-    .execute()) {
-    commented.add(row.prId);
-    all.add(row.prId);
-  }
-  for (const row of await db
-    .select({ prId: reviewComments.prId })
-    .from(reviewComments)
-    .where(and(eq(reviewComments.authorId, localUserId), inArray(reviewComments.prId, prIds)))
-    .execute()) {
-    commented.add(row.prId);
-    all.add(row.prId);
-  }
-  return { all, authored, requested, reviewed, commented, merged };
-}
-
-// Map a viewer's participation in a PR to the ordered reason pills for its FYI card.
-// Most-relevant first; the UI shows the primary. Empty when the viewer doesn't
-// participate (non-my-turn row).
-function myTurnReasonsFor(participation: Participation, prId: number | null): MyTurnReason[] {
-  if (prId == null) return [];
-  const reasons: MyTurnReason[] = [];
-  if (participation.requested.has(prId)) reasons.push('requested');
-  if (participation.authored.has(prId)) reasons.push('authored');
-  if (participation.merged.has(prId)) reasons.push('merged');
-  if (participation.reviewed.has(prId)) reasons.push('reviewed');
-  if (participation.commented.has(prId)) reasons.push('commented');
-  return reasons;
-}
-
 // Claude Review runs surfaced in the consolidated feed as their own item kind. One item
 // per PR = that PR's most-recent SUCCEEDED run finished within the feed window, repo-scoped.
 // Gated on the feature flag (force-off in cloud) so no items appear where Claude Review
@@ -1988,43 +1879,6 @@ export async function markFeedSeen(accountId: number): Promise<Date> {
     .where(eq(accounts.id, accountId))
     .execute();
   return now;
-}
-
-// How many FYI (My-Turn) feed items are NEW since `since` — i.e. activity events (all
-// feed types except plain commit pushes) that occurred after `since`, on a PR the viewer
-// PARTICIPATES in, by someone other than the viewer. Mirrors the feed's `isMyTurn` rule
-// (getConsolidatedFeed) as a bounded count for the Welcome-back banner; scoped to the
-// account and cheap because `since` is normally recent (few rows). Returns 0 when there's
-// no viewer identity or no baseline.
-export async function countNewMyTurnFeedItems(
-  accountId: number,
-  since: Date,
-): Promise<number> {
-  const localUserId = await getAccountUserId(accountId);
-  if (localUserId == null) return 0;
-  const rows = await db
-    .select({ prId: events.prId, actorId: events.actorId })
-    .from(events)
-    .where(
-      and(
-        eq(events.accountId, accountId),
-        gt(events.occurredAt, since),
-        ne(events.type, 'commit_pushed'),
-      ),
-    )
-    .execute();
-  const prIds = [
-    ...new Set(rows.map((r) => r.prId).filter((x): x is number => x != null)),
-  ];
-  if (prIds.length === 0) return 0;
-  const participation = await getParticipatingPrIds(accountId, localUserId, prIds);
-  let n = 0;
-  for (const r of rows) {
-    if (r.prId != null && r.actorId !== localUserId && participation.all.has(r.prId)) {
-      n++;
-    }
-  }
-  return n;
 }
 
 // ---- Team review-intelligence "Insights" (Pro; teamInsights) ----
@@ -2930,35 +2784,20 @@ export async function getConsolidatedFeed(
     !excludeBots || id == null || !botIds.has(id);
 
   const feedSince = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-  const [feed, commitItems, claudeItems, localUserId] = await Promise.all([
+  const [feed, commitItems, claudeItems] = await Promise.all([
     getFeed(accountId, { daysBefore: 14, repoIds, userIds }),
     // Commit-push activity that ADDRESSED a review thread (the only commit rows we surface
     // — plain pushes are noise). Each carries the affected threads inline.
     getCommitThreadItems(accountId, { repoIds, userIds, botIds, since: feedSince }),
     // Claude Review runs surfaced as their own feed item kind (local-only; empty in cloud).
     getClaudeReviewFeedItems(accountId, repoIds, feedSince),
-    getAccountUserId(accountId),
   ]);
 
-  // Participation ("is this PR mine?") drives the isMyTurn flag: which of the PRs the feed
-  // references does the viewer participate in — a direct linkage to their account based on
-  // past activity. Resolved once for every PR on the (uncapped) stream.
-  const candidatePrIds = new Set<number>();
-  for (const f of feed.events) if (f.prId != null) candidatePrIds.add(f.prId);
-  for (const it of commitItems) if (it.prId != null) candidatePrIds.add(it.prId);
-  const participation = await getParticipatingPrIds(accountId, localUserId, [...candidatePrIds]);
-  // An event is "my turn" when it's on a PR I participate in AND the actor isn't me (my own
-  // actions don't need my attention). The reason tag colours the badge.
-  const isMine = (prId: number | null, actorId: number | null): boolean =>
-    localUserId != null && prId != null && actorId !== localUserId && participation.all.has(prId);
-  const myTurnReason = (prId: number | null): ReasonTag | null =>
-    prId == null
-      ? null
-      : participation.requested.has(prId)
-        ? 'awaiting_your_review'
-        : participation.authored.has(prId)
-          ? 'your_pr_new_comments'
-          : null;
+  // The FYI / "My Turn" participation flag (isMyTurn / myTurnReasons / reasonTag) is a PAID
+  // capability computed by the @pierre/pro plugin's registered enricher (see fyi-provider.ts).
+  // Core builds every item as a PLAIN row (isMyTurn:false); the enricher, if present, flags
+  // them below — BEFORE the cap, so uncapped My-Turn rows survive. Without the plugin the feed
+  // stays a plain chronological stream.
 
   const usersById = new Map<number, User>();
   for (const u of feed.users) usersById.set(u.id, u);
@@ -2971,17 +2810,16 @@ export async function getConsolidatedFeed(
     items.push(it);
   };
 
-  // Activity events → one row each, flagged isMyTurn by participation. There is no longer a
-  // synthesized "My Turn" layer (nor its dedup) — the flag on the real event carries it,
-  // so every underlying event is exactly one row.
+  // Activity events → one row each, as PLAIN rows (isMyTurn:false). The Pro enricher flags
+  // participation below; without it every row stays plain. Exactly one row per underlying
+  // event (no synthesized "My Turn" layer / dedup).
   for (const f of feed.events) {
     // excludeBots: drop bot-authored activity (getFeed doesn't filter bots).
     if (!notBot(f.actorId)) continue;
-    const mine = isMine(f.prId, f.actorId);
     push({
       id: `feed:${f.id}`,
-      isMyTurn: mine,
-      myTurnReasons: mine ? myTurnReasonsFor(participation, f.prId) : [],
+      isMyTurn: false,
+      myTurnReasons: [],
       kind: f.type,
       occurredAt: f.occurredAt,
       repoId: f.repoId,
@@ -2997,7 +2835,7 @@ export async function getConsolidatedFeed(
       commentId: f.type === 'pr_comment' ? f.refId : null,
       path: null,
       line: null,
-      reasonTag: mine ? myTurnReason(f.prId) : null,
+      reasonTag: null,
       reviewState: f.reviewState,
       githubUrl:
         f.prNumber != null ? `https://github.com/${f.repoFullName}/pull/${f.prNumber}` : null,
@@ -3014,19 +2852,17 @@ export async function getConsolidatedFeed(
   }
 
   // Commit-push items (already repo/member/bot-scoped + thread-enriched in the SQL helper).
-  // Flag them the same way, then append.
-  for (const it of commitItems) {
-    it.isMyTurn = isMine(it.prId, it.actorId);
-    if (it.isMyTurn) {
-      it.reasonTag = myTurnReason(it.prId);
-      it.myTurnReasons = myTurnReasonsFor(participation, it.prId);
-    }
-    push(it);
-  }
+  // Pushed as plain rows; the Pro enricher flags participation below.
+  for (const it of commitItems) push(it);
 
   // Claude Review items — a distinct kind (never bot/member-scoped). Kept out of the FYI
   // flow but always retained (see the caps below) so the "Claude Reviews" pill finds them.
   for (const it of claudeItems) push(it);
+
+  // FYI / "My Turn" enrichment (Pro): flag each item `isMyTurn` by the viewer's participation
+  // in its PR. Runs BEFORE the cap so uncapped My-Turn rows survive. No-op (feed stays plain)
+  // when the plugin isn't loaded — the free tier.
+  await getFyiProvider()?.enrich(accountId, items);
 
   // Pure chronological — newest first. Keep every My Turn item AND every Claude-review item
   // (both are always relevant); cap the plain activity rows so a busy multi-repo account

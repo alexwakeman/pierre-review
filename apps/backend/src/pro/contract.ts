@@ -12,6 +12,7 @@ import type {
   PostReviewPreview,
 } from '@pierre-review/shared';
 import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
+import type { FyiProvider } from '../feed/fyi-provider.js';
 import type { AiUsageRecord } from '../db/usage.js';
 
 // The typed boundary between OSS core and the optional, dynamically-imported
@@ -28,6 +29,7 @@ export interface ProCapabilities {
   aiFix: boolean; // AI Fix: agentic inline code fix + push (Agent SDK, needs write)
   teamInsights: boolean; // team review-intelligence "Insights" (no AI; pure reads)
   claudeReview: boolean; // agentic Claude Review (Agent SDK; the product lives in the plugin)
+  feedMyTurn: boolean; // Activity Feed FYI / "My Turn" participation flagging (Pro; no AI)
 }
 
 // ---- AI Fix seams (github + coding) -------------------------------------------
@@ -512,6 +514,9 @@ export interface ProContext {
   recordAiUsage(row: AiUsageRecord): Promise<void>;
   reviewEvents: ReviewEventBus; // WS3 capture seam
   registerLearningsProvider(p: LearningsProvider): void; // WS3 injection seam
+  // Activity Feed FYI/"My Turn" enrichment seam. The plugin registers a provider that flags
+  // each feed item `isMyTurn` by participation; inert (feed stays plain) without the plugin.
+  registerFyiProvider(p: FyiProvider): void;
   // AI Fix infra (per-account, cloud-ready). Inert in OSS.
   github: GithubSeam;
   coding: CodingSeam;
@@ -520,7 +525,7 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  apiVersion: 7; // contract handshake; host warns on mismatch
+  apiVersion: 8; // contract handshake; host warns on mismatch
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
@@ -534,6 +539,7 @@ const EMPTY: ProCapabilities = {
   aiFix: false,
   teamInsights: false,
   claudeReview: false,
+  feedMyTurn: false,
 };
 let active: ProCapabilities = EMPTY;
 export function setProCapabilities(c: ProCapabilities): void {
