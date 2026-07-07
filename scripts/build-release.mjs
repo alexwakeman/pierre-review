@@ -147,16 +147,21 @@ const manifest = {
   },
   files: ['dist', 'public', 'public-landing', 'README.md', 'LICENSE'],
   engines: { node: '>=20' },
+  // NO AI runtime deps ship in the npm package. Every module that pulls an
+  // Anthropic/MCP SDK (@anthropic-ai/claude-agent-sdk, @anthropic-ai/sdk,
+  // @modelcontextprotocol/sdk, and zod — used only by the AI tools' submit-review
+  // schemas) is reached ONLY through a dynamic `await import()` in the private
+  // @pierre/pro plugin's seams (review/agent, coding/agent, coding/merge,
+  // review/prepare, review/post-seam) or lazily inside review/llm.ts. The plugin
+  // is never in this release (author/dev checkout only), so those imports never
+  // execute from npm and their deps are not required. The compiled-but-inert AI
+  // .js files still ship as dead code — that's fine; nothing loads them. See the
+  // AI_DEPS guardrail assert below and CLAUDE.md "Packaging & publishing".
   dependencies: {
-    '@anthropic-ai/claude-agent-sdk':
-      backendPkg.dependencies['@anthropic-ai/claude-agent-sdk'],
-    '@anthropic-ai/sdk': backendPkg.dependencies['@anthropic-ai/sdk'],
     '@fastify/cookie': backendPkg.dependencies['@fastify/cookie'],
     '@fastify/cors': backendPkg.dependencies['@fastify/cors'],
     '@fastify/secure-session': backendPkg.dependencies['@fastify/secure-session'],
     '@fastify/static': staticVersion,
-    '@modelcontextprotocol/sdk':
-      backendPkg.dependencies['@modelcontextprotocol/sdk'],
     '@octokit/graphql': backendPkg.dependencies['@octokit/graphql'],
     'better-sqlite3': backendPkg.dependencies['better-sqlite3'],
     'drizzle-orm': backendPkg.dependencies['drizzle-orm'],
@@ -164,7 +169,6 @@ const manifest = {
     'node-cron': backendPkg.dependencies['node-cron'],
     // Postgres driver — only loaded in cloud mode (dynamic import in client.ts).
     pg: backendPkg.dependencies['pg'],
-    zod: backendPkg.dependencies['zod'],
   },
   keywords: [
     'github',
@@ -252,6 +256,20 @@ if (sharedHits.length > 0) {
   console.error('Runtime import of @pierre-review/shared found in release/dist:');
   for (const h of sharedHits) console.error(`  ${h}`);
   fail('shared package would be required at runtime but is not shipped');
+}
+
+// No AI runtime dep in the generated manifest. The npm package must ship zero
+// Anthropic/MCP SDK deps — AI loads only when the private @pierre/pro plugin is
+// present (author/dev checkout), never from npm. Locks in the de-bundling.
+const AI_DEPS = [
+  '@anthropic-ai/claude-agent-sdk',
+  '@anthropic-ai/sdk',
+  '@modelcontextprotocol/sdk',
+  'zod',
+];
+const leakedAiDeps = AI_DEPS.filter((d) => d in manifest.dependencies);
+if (leakedAiDeps.length > 0) {
+  fail(`AI runtime dep(s) leaked into release/package.json: ${leakedAiDeps.join(', ')}`);
 }
 
 log(`release assembled at ${releaseDir}`);
