@@ -60,6 +60,13 @@ export const accounts = sqliteTable('accounts', {
   // heuristic). Bumped by POST /api/activity/feed/mark-seen; null until the first view,
   // so nothing counts as "new" until a baseline exists. One column, O(1) — no growth.
   feedLastSeenAt: integer('feed_last_seen_at', { mode: 'timestamp' }),
+  // Billing plan: 'free' (default) or 'pro'. Set ONLY by the Stripe webhook
+  // (api/routes/billing.ts) — never by the OAuth upsert, so re-login can't reset
+  // a paid plan. Local accounts ignore it (isLocal is always fully entitled).
+  plan: text('plan').notNull().default('free'),
+  // Stripe customer id (cus_…), captured from checkout.session.completed so later
+  // subscription webhooks can resolve the account. Null until first checkout.
+  stripeCustomerId: text('stripe_customer_id'),
 });
 
 export const repos = sqliteTable(
@@ -534,7 +541,7 @@ export const claudeReviews = sqliteTable(
       enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
     }).notNull(),
     model: text('model', {
-      enum: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+      enum: ['claude-sonnet-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
     }).notNull(),
     // Null until the agent decides whether it explored the worktree.
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),

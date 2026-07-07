@@ -23,6 +23,7 @@ import { feedRoutes } from './api/routes/feed.js';
 import { mergersRoutes } from './api/routes/mergers.js';
 import { insightsRoutes } from './api/routes/insights.js';
 import { activityRoutes } from './api/routes/activity.js';
+import { billingRoutes } from './api/routes/billing.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -150,6 +151,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(mergersRoutes);
   await app.register(insightsRoutes);
   await app.register(activityRoutes);
+  // Stripe billing seam (checkout redirect + webhook). Registered in both modes;
+  // inert until the STRIPE_* env vars are set (webhook 501s unconfigured).
+  await app.register(billingRoutes);
   // Claude Review moved into the @pierre/pro plugin (its routes register there, gated on the
   // `claudeReview` capability). The SDK-run / diff-prep / GitHub-post infra + the tables stay
   // in core behind the ctx.review seam; nothing to register here.

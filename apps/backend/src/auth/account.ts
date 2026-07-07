@@ -15,7 +15,14 @@ export interface Account {
   displayName: string | null;
   avatarUrl: string | null;
   isLocal: boolean;
+  // Billing plan, set only by the Stripe webhook (never by the OAuth upsert).
+  // Local accounts are always fully entitled regardless of this value.
+  plan: AccountPlan;
+  // Stripe customer id (cus_…) from checkout; the join key for subscription webhooks.
+  stripeCustomerId: string | null;
 }
+
+export type AccountPlan = 'free' | 'pro';
 
 const STALE_MS = 24 * 60 * 60 * 1000; // re-fetch the local identity once a day
 
@@ -54,6 +61,8 @@ function rowToAccount(row: typeof schema.accounts.$inferSelect): Account {
     displayName: row.displayName,
     avatarUrl: row.avatarUrl,
     isLocal: row.isLocal,
+    plan: row.plan === 'pro' ? 'pro' : 'free',
+    stripeCustomerId: row.stripeCustomerId,
   };
 }
 
@@ -212,6 +221,35 @@ export async function getAccountById(id: number): Promise<Account | null> {
     .select()
     .from(accounts)
     .where(eq(accounts.id, id))
+    .limit(1)
+    .execute();
+  return rows[0] ? rowToAccount(rows[0]) : null;
+}
+
+/**
+ * Set an account's billing plan (and, when known, its Stripe customer id).
+ * Called only by the Stripe webhook handler (api/routes/billing.ts).
+ */
+export async function setAccountPlan(
+  accountId: number,
+  plan: AccountPlan,
+  stripeCustomerId?: string | null,
+): Promise<void> {
+  const { accounts } = schema;
+  const set: { plan: AccountPlan; stripeCustomerId?: string } = { plan };
+  if (stripeCustomerId != null) set.stripeCustomerId = stripeCustomerId;
+  await db.update(accounts).set(set).where(eq(accounts.id, accountId)).execute();
+}
+
+/** Resolve an account by its Stripe customer id (subscription webhooks). */
+export async function getAccountByStripeCustomerId(
+  customerId: string,
+): Promise<Account | null> {
+  const { accounts } = schema;
+  const rows = await db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.stripeCustomerId, customerId))
     .limit(1)
     .execute();
   return rows[0] ? rowToAccount(rows[0]) : null;

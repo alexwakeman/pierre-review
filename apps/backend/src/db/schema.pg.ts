@@ -55,6 +55,10 @@ export const accounts = pgTable('accounts', {
   // Last time this account viewed the Activity Feed — server-side "seen" marker (see the
   // sqlite twin). Drives "new FYI since you were last here"; null until the first view.
   feedLastSeenAt: timestamp('feed_last_seen_at', { withTimezone: true, mode: 'date' }),
+  // Billing plan ('free' | 'pro') — set only by the Stripe webhook. See the
+  // sqlite twin. Kept in sync by hand (schema-parity.test.ts).
+  plan: text('plan').notNull().default('free'),
+  stripeCustomerId: text('stripe_customer_id'),
 });
 
 export const repos = pgTable(
@@ -490,7 +494,7 @@ export const claudeReviews = pgTable(
       enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
     }).notNull(),
     model: text('model', {
-      enum: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+      enum: ['claude-sonnet-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
     }).notNull(),
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),
     // Deterministic router decision + inputs, recorded before the agent runs. See

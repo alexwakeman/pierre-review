@@ -142,9 +142,18 @@ export const config = {
   // hard to undo; opt in manually once the domain is proven.
   hstsMaxAge: intFromEnv('HSTS_MAX_AGE', 31536000),
 
+  // ---- Stripe billing (optional; NOT required by assertCloudConfig) ----
+  // Payment Link URL for the Pro plan — GET /api/billing/checkout 302s to it with
+  // client_reference_id=<accountId> appended. Empty = checkout unavailable.
+  stripePaymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_URL ?? '',
+  // Webhook signing secret (whsec_…) for POST /api/billing/webhook. Empty = the
+  // webhook replies 501 and no billing state ever changes.
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
+
   // Pro plugin master gate. Pro is local-only for now; bind.ts skips the dynamic
-  // import entirely when false.
-  proEnabled: !isCloud,
+  // import entirely when false. PRO_DISABLED=true forces pure-OSS mode even when
+  // the submodule is checked out (used to exercise/capture the free tier).
+  proEnabled: !isCloud && process.env.PRO_DISABLED !== 'true',
   // Per-repo digest (Pro, Workstream 2) config — consumed by @pierre/pro, kept in
   // core so the model id / budgets live in one place and aren't hardcoded at call
   // sites. Inert until the plugin is present AND digestEnabled.

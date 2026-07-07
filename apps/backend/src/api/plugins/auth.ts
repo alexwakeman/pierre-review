@@ -46,6 +46,8 @@ export function registerAccountContext(app: FastifyInstance): void {
           displayName: null,
           avatarUrl: null,
           isLocal: true,
+          plan: 'free',
+          stripeCustomerId: null,
         };
     }
   });
@@ -83,21 +85,38 @@ export async function registerSession(app: FastifyInstance): Promise<void> {
   });
 }
 
-// Cloud only: 401 any unauthenticated /api data route. Skips /api/health and
-// /api/auth/* (sign-in itself) and all non-/api requests (the SPA + landing are
-// served openly; the frontend gate handles the signed-out UI). MUST be registered
-// AFTER registerAccountContext so req.account is already resolved.
+// Cloud only: 401 any unauthenticated /api data route. Skips /api/health,
+// /api/auth/* (sign-in itself), /api/billing/webhook (Stripe posts
+// unauthenticated — verified by signature instead) and all non-/api requests
+// (the SPA + landing are served openly; the frontend gate handles the signed-out
+// UI). MUST be registered AFTER registerAccountContext so req.account is already
+// resolved. Also the cloud-only ENTITLEMENT gate: an authenticated free-plan
+// account gets 402 on the Pro plugin's /api/pro/* routes (local accounts are
+// always entitled — isLocal never reaches the cloud gate anyway).
 export function registerAuthGate(app: FastifyInstance): void {
   app.addHook('onRequest', async (req, reply) => {
     const path = req.url.split('?')[0] ?? req.url;
     if (!path.startsWith('/api/')) return;
     if (path === '/api/health') return;
     if (path.startsWith('/api/auth/')) return;
+    if (path === '/api/billing/webhook') return;
+    // The pricing page's "Get Pro" is a plain browser navigation from the public
+    // landing; the route itself bounces anonymous visitors to sign-in instead of
+    // dead-ending them on a JSON 401.
+    if (path === '/api/billing/checkout') return;
     if (!req.account) {
       await reply.code(401).send({
         error: 'Unauthorized',
         message: 'Sign in with GitHub to continue.',
       });
+      return;
+    }
+    if (
+      path.startsWith('/api/pro/') &&
+      !req.account.isLocal &&
+      req.account.plan === 'free'
+    ) {
+      await reply.code(402).send({ error: 'pro required' });
     }
   });
 }

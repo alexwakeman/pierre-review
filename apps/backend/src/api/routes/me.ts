@@ -3,7 +3,10 @@ import type { MeResponse, MyTurnDismissBody } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { accountToLocalUser } from '../../auth/account.js';
 import { accountIdOf } from '../plugins/auth.js';
-import { getProCapabilities } from '../../pro/contract.js';
+import {
+  EMPTY_CAPABILITIES,
+  entitledProCapabilities,
+} from '../../pro/contract.js';
 import { getFyiProvider } from '../../feed/fyi-provider.js';
 import {
   dismissMyTurn,
@@ -55,7 +58,9 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       newFeedItems,
       // Claude Review is now the Pro `claudeReview` capability (in `pro` below).
       deploymentMode: config.deploymentMode,
-      pro: getProCapabilities(),
+      // Per-account entitlement: local = full capabilities (unchanged); cloud =
+      // full only when the account's plan isn't 'free' (Stripe billing seam).
+      pro: req.account ? entitledProCapabilities(req.account) : EMPTY_CAPABILITIES,
     };
   });
 

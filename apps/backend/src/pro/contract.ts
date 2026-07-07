@@ -567,7 +567,7 @@ export interface ProPlugin {
 // The live capability singleton, mirrored to the frontend via /api/me exactly
 // like claudeReviewEnabled. All-false in OSS mode (no plugin ever calls the
 // setter).
-const EMPTY: ProCapabilities = {
+export const EMPTY_CAPABILITIES: ProCapabilities = {
   activityDigest: false,
   reviewMemory: false,
   aiAnalysis: false,
@@ -578,10 +578,28 @@ const EMPTY: ProCapabilities = {
   slackDigest: false,
   issueLinks: false,
 };
-let active: ProCapabilities = EMPTY;
+let active: ProCapabilities = EMPTY_CAPABILITIES;
 export function setProCapabilities(c: ProCapabilities): void {
   active = c;
 }
 export function getProCapabilities(): ProCapabilities {
   return active;
+}
+
+/**
+ * The per-account ENTITLEMENT view of the capability singleton (the billing
+ * seam). The singleton says what the loaded plugin CAN do; this intersects it
+ * with what the account has PAID for: local accounts are always fully entitled
+ * (today's behavior, exactly), a cloud account is entitled once its plan is
+ * anything but 'free' (set by the Stripe webhook). Used by /api/me (the SPA
+ * honors the all-false shape as the plain OSS render path) and mirrored by the
+ * /api/pro/* 402 gate in api/plugins/auth.ts.
+ */
+export function entitledProCapabilities(account: {
+  isLocal: boolean;
+  plan: string;
+}): ProCapabilities {
+  return account.isLocal || account.plan !== 'free'
+    ? getProCapabilities()
+    : EMPTY_CAPABILITIES;
 }
