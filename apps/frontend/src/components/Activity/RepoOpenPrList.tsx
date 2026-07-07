@@ -30,10 +30,22 @@ export function RepoOpenPrList({
 
   if (prs.length === 0) return null;
 
+  // "Open PRs" counts NON-DRAFT opens, matching the rail's [N] stat (repo.stats.openPrs =
+  // non-draft), and drafts are called out separately — so the header reconciles with the rail
+  // instead of contradicting it (the list itself still shows every open PR, drafts included).
+  const draftCount = prs.reduce((n, p) => n + (p.isDraft ? 1 : 0), 0);
+  const openCount = prs.length - draftCount;
+
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-800">
       <div className="border-b border-gray-200 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
-        Open PRs · {prs.length}
+        Open PRs · {openCount}
+        {draftCount > 0 && (
+          <span className="font-normal normal-case text-gray-400">
+            {' '}
+            · {draftCount} draft{draftCount === 1 ? '' : 's'}
+          </span>
+        )}
       </div>
       <ul className="divide-y divide-gray-100 dark:divide-gray-800/70">
         {prs.map((pr) => {

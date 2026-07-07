@@ -5,12 +5,14 @@ import { api, ApiError } from '../api/client.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
 import { useRepos } from '../hooks/useTimeline.js';
+import { ACTIVITY_QUERY_KEYS } from '../hooks/useActivity.js';
 import { SUGGESTED_REPOS } from '../lib/suggestedRepos.js';
 import { useFilters } from '../store/filters.js';
 
 // Don't fire a search until there's something to match on.
 const MIN_QUERY = 2;
-// The same cache cascade AddRepo used to run on success.
+// The same cache cascade AddRepo used to run on success. Includes the Activity/Insights
+// surface so a newly-added (auto-watched) repo shows up in the rail/feed/Insights live.
 const INVALIDATE_KEYS = [
   'repos',
   'timeline',
@@ -18,6 +20,7 @@ const INVALIDATE_KEYS = [
   'users',
   'my-turn',
   'me',
+  ...ACTIVITY_QUERY_KEYS,
 ];
 
 function compactNumber(n: number): string {

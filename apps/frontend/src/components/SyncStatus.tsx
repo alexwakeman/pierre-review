@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Repo, SyncStatus as SyncStatusT } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { ACTIVITY_QUERY_KEYS } from '../hooks/useActivity.js';
 import { relativeTime } from '../lib/ui.js';
 import { useFilters } from '../store/filters.js';
 import { SyncProgressModal } from './SyncProgressModal.js';
@@ -138,6 +139,11 @@ export function SyncStatus(): JSX.Element | null {
     void qc.invalidateQueries({ queryKey: ['mergers'] });
     void qc.invalidateQueries({ queryKey: ['my-turn'] });
     void qc.invalidateQueries({ queryKey: ['me'] });
+    // Keep the Activity console (rail aggregate + feed + Insights) fresh on new synced data,
+    // so it stays current without a manual Refresh.
+    for (const key of ACTIVITY_QUERY_KEYS) {
+      void qc.invalidateQueries({ queryKey: [key] });
+    }
   };
 
   // When a sync lands (the latest timestamp advances), refresh timeline data.

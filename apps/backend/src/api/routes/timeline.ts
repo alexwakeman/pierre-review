@@ -86,6 +86,7 @@ export async function timelineRoutes(app: FastifyInstance): Promise<void> {
       from: parseDate(q.from, new Date(now.getTime() - 14 * DAY_MS)),
       to: parseDate(q.to, now),
       repoIds: parseIntList(q.repoIds),
+      prIds: parseIntList(q.prIds),
       userIds: parseIntList(q.userIds),
       types: parseTypes(q.types),
       statuses: parseStatuses(q.statuses),

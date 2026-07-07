@@ -24,7 +24,7 @@ import {
   useUsers,
 } from '../../hooks/useTimeline.js';
 import { useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
-import { MAX_RANGE_DAYS, resolveRange, useFilters } from '../../store/filters.js';
+import { resolveRange, useFilters } from '../../store/filters.js';
 import {
   usePinnedTabs,
   type TabMeta,
@@ -239,8 +239,6 @@ function prBarEndMs(pr: TimelinePr): number {
 // gone after a sync. Used both across a rebuild and across a focus enter→exit.
 type ScrollAnchor = { token: string | null; offset: number; scrollTop: number };
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 // `mode` turns this into an EMBEDDED per-tab instance (App keys the remount, so only
 // ONE Timeline is ever mounted — the isolation is purely component-LOCAL):
 //   • { kind: 'isolate', prId } — boots DIRECTLY into PR-isolation focus for prId, its
@@ -411,16 +409,11 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   // out, so it must be visible the whole time the timeline is collapsed.
   const [focusActive, setFocusActive] = useState(false);
 
-  // Embedded-tab range: an isolate tab widens `from` back ~90 days so its subject PR is
-  // present regardless of the active date filter (captured once per mount → a stable query
-  // key, a separate cache entry) and drops the member filter so a subject PR the member
-  // filter would hide is still fetched.
-  const embeddedFromMs = useMemo(
-    () => (embeddedPrId != null ? Date.now() - MAX_RANGE_DAYS * DAY_MS : null),
-    [embeddedPrId],
-  );
   const { data, isLoading, error } = useTimeline(
-    embeddedPrId != null ? { dropMembers: true, fromMs: embeddedFromMs } : undefined,
+    // A pr-focus tab fetches EXACTLY its subject PR (+ all its events) by id, so the PR loads +
+    // highlights regardless of the board's repo/date/status filters — and cheaply (one PR, not
+    // its whole repo's 90-day window). The isolate boot then collapses to just this PR.
+    embeddedPrId != null ? { prIds: [embeddedPrId] } : undefined,
   );
   const { data: openPrsData } = useOpenPrs();
   // Member-agnostic PR sets (shared cache with the PR-title search). They let a
@@ -2166,6 +2159,10 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
 
     const prs: TimelinePr[] = basePrs.filter(
       (pr) =>
+        // An isolate (pr-focus) tab ALWAYS keeps its subject PR: the board's member/thread
+        // filters must never hide it (the isolate fetch already returns only that PR), and it
+        // must survive the very first rebuild — before the boot marks focus active.
+        pr.id === embeddedPrId ||
         // Always render the selected PR's bar so event→PR navigation (and the global
         // PR-title search) has a target even when a filter would otherwise hide it,
         // and the bar a search/strip navigation force-staged (`extra`) so an
@@ -2233,7 +2230,9 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     // under PR-isolation focus, which owns its own row collapse and must keep every
     // contributor row available to re-show.
     let rowEvents = data.events;
-    if (!prFocusActiveRef.current && derivedActive) {
+    // An isolate tab keeps ALL its subject PR's events driving the rows — never narrowed by the
+    // board's Threads filter (and it must hold on the FIRST rebuild, before focus is marked active).
+    if (embeddedPrId == null && !prFocusActiveRef.current && derivedActive) {
       const sel = new Set(derivedStates);
       rowEvents = data.events.filter(
         (e) =>

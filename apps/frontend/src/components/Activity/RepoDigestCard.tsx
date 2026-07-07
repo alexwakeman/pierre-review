@@ -80,6 +80,9 @@ export function RepoDigestCard({
               {digest.stale ? ' · stale' : ''}
             </span>
           )}
+          {/* "Generate" when this repo has no digest yet (first run), "Regenerate" once one
+              exists — so the button matches the empty-state copy below and never mislabels a
+              first-time seed as a regeneration. */}
           {onRegenerate != null && (
             <button
               type="button"
@@ -89,10 +92,20 @@ export function RepoDigestCard({
               }}
               disabled={regenerating}
               className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
-              title="Regenerate this repo's digest (runs the cheap-tier model)"
+              title={
+                digest == null
+                  ? "Generate this repo's digest (runs the cheap-tier model)"
+                  : "Regenerate this repo's digest (runs the cheap-tier model)"
+              }
             >
               <span aria-hidden="true">↻</span>
-              {regenerating ? 'Regenerating…' : 'Regenerate'}
+              {regenerating
+                ? digest == null
+                  ? 'Generating…'
+                  : 'Regenerating…'
+                : digest == null
+                  ? 'Generate'
+                  : 'Regenerate'}
             </button>
           )}
         </span>
@@ -117,7 +130,7 @@ export function RepoDigestCard({
             </div>
           ) : (
             <p className="text-xs text-gray-400">
-              No digest yet — click Regenerate to summarise this repo's recent activity.
+              No digest yet — click Generate to summarise this repo's recent activity.
             </p>
           )}
         </div>

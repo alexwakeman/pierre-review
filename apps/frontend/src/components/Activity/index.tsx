@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import type { ActivityRepo, ThreadStateCounts } from '@pierre-review/shared';
 import { useActivity } from '../../hooks/useActivity.js';
 import { useRepos } from '../../hooks/useTimeline.js';
@@ -115,14 +114,15 @@ function RailRow({
 // no AI (the only Pro surface is the per-repo digest banner inside RepoFeedHeader).
 export function ActivityView(): JSX.Element {
   useStalenessTick();
-  const repoIds = useFilters((s) => s.repoIds);
   const userIds = useFilters((s) => s.userIds);
   const activityRepoId = useFilters((s) => s.activityRepoId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
   const { teamInsights } = useProCapabilities();
-  const { data, isFetching, isLoading, refetch } = useActivity(repoIds, userIds);
+  // The cross-repo Activity aggregate is scoped to ALL watched repos ∩ Members — it IGNORES
+  // the FilterBar repo-visibility selection (null → the backend resolves all-watched), so the
+  // rail + "new activity" check reflect the whole team, not just the visible-on-timeline repos.
+  const { data, isFetching, isLoading } = useActivity(null, userIds);
   const { data: allRepos } = useRepos();
-  const qc = useQueryClient();
   // The per-repo analytics drill-down (item 12): the rail's "Charts" button opens the full
   // RepoAnalyticsModal for that repo.
   const [analyticsRepo, setAnalyticsRepo] = useState<{ repoId: number; name: string } | null>(
@@ -150,10 +150,7 @@ export function ActivityView(): JSX.Element {
     }
   }, [teamInsights, setActivityRepo]);
 
-  // Staleness: amber past ~10 minutes.
   const generatedAt = data?.generatedAt ?? null;
-  const stale =
-    generatedAt != null && Date.now() - new Date(generatedAt).getTime() > 10 * 60_000;
 
   // Rail items: the loaded inbox repos, or a name-only fallback from useRepos while
   // the first aggregate is loading (so names paint instantly).
@@ -186,42 +183,30 @@ export function ActivityView(): JSX.Element {
           threadTotals: null,
         }));
 
+  // The Activity console is scoped to WATCHED repos, so an empty console has two distinct
+  // causes: no repos added at all, vs. repos added but none watched. The remedy differs
+  // (add a repo vs. toggle Watch), so distinguish them in the empty state below.
   const noRepos = data != null && sorted.length === 0;
+  const hasAnyRepo = (allRepos ?? []).length > 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col md:flex-row">
       {/* LEFT RAIL */}
       <div className="flex flex-col border-b border-gray-200 md:w-72 md:shrink-0 md:border-b-0 md:border-r dark:border-gray-800">
+        {/* No manual Refresh: the console tracks the WATCHED set live — watch/add/sync all
+            invalidate the Activity/Insights queries (ACTIVITY_QUERY_KEYS), and the feed has its
+            own "new activity" banner — so there's nothing to refresh by hand. */}
         <div className="flex items-center gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             State of play
           </span>
-          <button
-            type="button"
-            onClick={() => {
-              void refetch();
-              // The Feed entry reads a separate query — refresh it too (pure DB read).
-              void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
-            }}
-            disabled={isFetching}
-            className="ml-auto flex items-center gap-1 rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
-            title="Re-query the local database (does not trigger a GitHub sync)"
-          >
-            <span aria-hidden="true" className={isFetching ? 'animate-spin' : ''}>
-              ↻
-            </span>
-            Refresh
-          </button>
         </div>
         {generatedAt != null && (
           <div
-            className={`px-3 py-1 text-[10px] ${
-              stale ? 'text-amber-500' : 'text-gray-400'
-            }`}
+            className="px-3 py-1 text-[10px] text-gray-400"
             title={new Date(generatedAt).toLocaleString()}
           >
             {relativeTime(generatedAt)}
-            {stale ? ' · stale' : ''}
           </div>
         )}
 
@@ -325,8 +310,10 @@ export function ActivityView(): JSX.Element {
         {showingInsights ? (
           <InsightsView />
         ) : noRepos ? (
-          <div className="flex h-full items-center justify-center text-sm text-gray-400">
-            No watched repos yet. Add a repo from the filter bar to populate the Activity.
+          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-400">
+            {hasAnyRepo
+              ? 'No watched repos yet. Open the repos dropdown in the filter bar and toggle Watch on a repo to populate the Activity console.'
+              : 'No repos yet. Add a repo from the filter bar to populate the Activity console.'}
           </div>
         ) : showingFeed ? (
           <FeedView />

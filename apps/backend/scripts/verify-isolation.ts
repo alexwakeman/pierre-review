@@ -110,6 +110,19 @@ check("getTimeline(A) returns only A's events", tlA.events.every((e) => e.prId =
 check("getTimeline(B) returns only B's PR", tlB.prs.length === 1 && tlB.prs[0]!.id === B.prId);
 check("getTimeline(A) excludes B's PR", !tlA.prs.some((p) => p.id === B.prId));
 
+// pr-focus tab path: prIds returns exactly the requested PR (+ its events) for the owner,
+// and leaks nothing when the id belongs to another account (the accountId scope still binds).
+const tlAown = await q.getTimeline({ accountId: 1, ...win, prIds: [A.prId] });
+check(
+  'getTimeline(A, prIds=[A.pr]) returns exactly A.pr',
+  tlAown.prs.length === 1 && tlAown.prs[0]!.id === A.prId,
+);
+const tlAcross = await q.getTimeline({ accountId: 1, ...win, prIds: [B.prId] });
+check(
+  'getTimeline(A, prIds=[B.pr]) leaks nothing (IDOR blocked)',
+  tlAcross.prs.length === 0 && tlAcross.events.length === 0,
+);
+
 const opA = await q.getOpenPrs({ accountId: 1, repoIds: null, userIds: null });
 check("getOpenPrs(A) returns only A's open PR", opA.length === 1 && opA[0]!.id === A.prId);
 const opCross = await q.getOpenPrs({ accountId: 1, repoIds: [B.repoId], userIds: null });

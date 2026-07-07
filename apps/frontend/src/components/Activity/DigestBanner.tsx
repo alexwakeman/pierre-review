@@ -36,7 +36,11 @@ export function DigestBanner({ repoId }: { repoId: number }): JSX.Element | null
         title="Digest"
         collapsed={collapsed}
         onToggle={() => toggle(repoId)}
-        onRegenerate={() => refresh.mutate(repoId)}
+        // Offer the action whenever it's generatable: "Generate" when this repo has no
+        // digest yet, "Regenerate" once one exists AND it's stale (a real delta). Hidden
+        // only when a fresh digest is already current — so a never-generated repo is never
+        // stranded (RepoDigestCard's empty state points at this very button).
+        onRegenerate={digest == null || digest.stale ? () => refresh.mutate(repoId) : undefined}
         regenerating={regenerating}
         onOpenPr={openPr}
       />

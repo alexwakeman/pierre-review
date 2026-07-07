@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   CiStatus,
   InsightCard,
@@ -19,7 +19,6 @@ import {
   useRefreshRepoDigests,
   digestProgressProps,
 } from '../../hooks/useRepoDigest.js';
-import { useSprintReport, useRefreshSprintReport } from '../../hooks/useSprintReport.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
 import { CI_META, indexUsers } from '../../lib/ui.js';
@@ -223,11 +222,17 @@ function CardShell({
   right,
   onActivate,
   children,
+  innerRef,
+  flash = false,
 }: {
   card: InsightCard;
   right?: React.ReactNode;
   onActivate?: () => void;
   children: React.ReactNode;
+  // Registers this card's <li> by card.id so the back-from-a-click flash can scroll to it
+  // (parity with the Feed's rows).
+  innerRef?: (el: HTMLLIElement | null) => void;
+  flash?: boolean;
 }): JSX.Element {
   const sev = SEV[card.severity];
   // The whole card is clickable to open "the event in question" (like a Feed card).
@@ -240,10 +245,11 @@ function CardShell({
     : undefined;
   return (
     <li
+      ref={innerRef}
       onClick={onClick}
       className={`rounded-lg border border-l-4 border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900/40 ${sev.border}${
-        onActivate ? ' cursor-pointer hover:bg-gray-50/70 dark:hover:bg-gray-900/60' : ''
-      }`}
+        flash ? ' ring-2 ring-sky-400/70' : ''
+      }${onActivate ? ' cursor-pointer hover:bg-gray-50/70 dark:hover:bg-gray-900/60' : ''}`}
     >
       <div className="mb-1.5 flex items-center gap-2 text-[11px]">
         <span className={`inline-block h-1.5 w-1.5 rounded-full ${sev.dot}`} aria-hidden />
@@ -295,43 +301,50 @@ export function InsightsView(): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const showThreadInChanges = useFilters((s) => s.showThreadInChanges);
   const openMetricsDetail = useFilters((s) => s.openMetricsDetail);
-  const { data, isLoading, isError, refetch, isFetching } = useTeamInsights(true);
+  const { data, isLoading, isError } = useTeamInsights(true);
   const usersById = useMemo(() => indexUsers(data?.users), [data?.users]);
 
-  // ---- Unified summaries (Req: one Refresh drives Insights + sprint report + digests) ----
+  // Back-from-a-click flash — EXACT parity with the Feed (FeedView): a real browser Back
+  // (navigateBack) sets a one-shot activityFlashItemId (the returnItemId we stamped when
+  // opening the PR = the card's id); on return we scroll that card into view and flash it,
+  // so returning from a PR tab lands you back on the card you clicked instead of scroll-top.
+  const flashTarget = usePinnedTabs((s) => s.activityFlashItemId);
+  const clearFlash = usePinnedTabs((s) => s.clearActivityFlashItem);
+  const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+  const [flashId, setFlashId] = useState<string | null>(null);
+  useEffect(() => {
+    if (flashTarget == null) return;
+    const id = flashTarget;
+    const raf = requestAnimationFrame(() => {
+      const el = rowRefs.current.get(id);
+      if (el) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        setFlashId(id);
+        window.setTimeout(() => setFlashId((c) => (c === id ? null : c)), 1800);
+      }
+      clearFlash();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [flashTarget, clearFlash]);
+  const setCardRef = (id: string, el: HTMLLIElement | null): void => {
+    if (el) rowRefs.current.set(id, el);
+    else rowRefs.current.delete(id);
+  };
+
+  // ---- AI summaries: each card owns its OWN delta-gated regenerate (no unified Refresh) ----
   const { activityDigest } = useProCapabilities();
   const { data: repos } = useRepos();
-  const storeRepoIds = useFilters((s) => s.repoIds);
-  // The digest set = watched repos ∩ the FilterBar-visible selection (null = all visible).
-  const watchedVisibleIds = useMemo(
-    () =>
-      (repos ?? [])
-        .filter((r) => r.inboxWatch && (storeRepoIds == null || storeRepoIds.includes(r.id)))
-        .map((r) => r.id),
-    [repos, storeRepoIds],
+  // Activity is scoped to ALL watched repos (the digest set ignores the FilterBar-visible
+  // selection — the console is a whole-team view, not the timeline's filtered slice).
+  const watchedIds = useMemo(
+    () => (repos ?? []).filter((r) => r.inboxWatch).map((r) => r.id),
+    [repos],
   );
-  const digestsQuery = useRepoDigests(
-    watchedVisibleIds,
-    activityDigest && watchedVisibleIds.length > 0,
-  );
+  const digestsQuery = useRepoDigests(watchedIds, activityDigest && watchedIds.length > 0);
+  // Still needed — now drives the PER-CARD (per-repo) regenerate, only offered when that
+  // specific repo's digest is stale (delta-gated inside the card).
   const refreshDigests = useRefreshRepoDigests();
-  const refreshSprint = useRefreshSprintReport();
-  const sprintQuery = useSprintReport(activityDigest);
   const [showUsage, setShowUsage] = useState(false);
-
-  // The diff check is unchanged (the payload-hash cache still prevents re-summarising
-  // unchanged content); we just surface staleness so the user knows a Refresh is worth it.
-  const anyDigestStale = (digestsQuery.data?.digests ?? []).some((d) => d.stale);
-  const contentMoved = anyDigestStale || (sprintQuery.data?.report?.stale ?? false);
-  const refreshingAll = isFetching || refreshDigests.isPending || refreshSprint.isPending;
-  // ONE control regenerates everything (unchanged content stays free via the payload-hash).
-  const refreshAll = (): void => {
-    void refetch();
-    if (activityDigest) {
-      refreshSprint.mutate();
-      if (watchedVisibleIds.length > 0) refreshDigests.mutate(watchedVisibleIds);
-    }
-  };
 
   // Match the Feed's interaction model: the PR title opens the PR detail on its Overview
   // tab; the card body opens "the event in question". For a thread that event is the
@@ -356,7 +369,10 @@ export function InsightsView(): JSX.Element {
         </span>
         {data?.sprint && (
           <span className="text-[11px] text-gray-400">
-            sprint: last 2 weeks · {cards.length} item{cards.length === 1 ? '' : 's'}
+            {/* Cadence-aware (matches the Flow-metrics caption below); default 14d when the
+                metrics window isn't available. */}
+            sprint: last {data.metrics?.sprintDays ?? 14}d · {cards.length} item
+            {cards.length === 1 ? '' : 's'}
           </span>
         )}
         <div className="ml-auto flex items-center gap-1.5">
@@ -372,36 +388,8 @@ export function InsightsView(): JSX.Element {
           >
             {showUsage ? '▾' : '▸'} Track usage
           </button>
-          {/* ONE Refresh for ALL summaries — Insights cards + sprint report + repo digests.
-              The diff check still skips unchanged content, so a re-run is cheap. */}
-          <button
-            type="button"
-            onClick={refreshAll}
-            disabled={refreshingAll}
-            className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
-            title="Refresh every summary — Insights, sprint report and repo summaries (unchanged content is free)"
-          >
-            <span aria-hidden className={refreshingAll ? 'animate-spin' : ''}>
-              ↻
-            </span>{' '}
-            Refresh
-          </button>
         </div>
       </div>
-
-      {/* Content-moved notice: when a summary is stale (underlying data changed since it
-          was written), prompt the user to Refresh — the summaries won't auto-regenerate. */}
-      {contentMoved && (
-        <button
-          type="button"
-          onClick={refreshAll}
-          disabled={refreshingAll}
-          className="flex w-full items-center gap-2 rounded-lg border border-amber-300 bg-amber-50/60 px-3 py-1.5 text-left text-[12px] text-amber-800 hover:bg-amber-100/60 disabled:opacity-60 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200"
-        >
-          <span aria-hidden>⟳</span>
-          Repo content has moved on since these summaries were written — Refresh to update them.
-        </button>
-      )}
 
       {showUsage && <TrackUsage />}
 
@@ -412,12 +400,11 @@ export function InsightsView(): JSX.Element {
       {/* Repo digests are nested INSIDE the sprint report card (collapsed by default) to
           keep the Insights tab compact — pass the digest data down. */}
       <SprintReportCard
-        showRefresh={false}
         digests={digestsQuery.data?.digests ?? []}
         digestsLoading={digestsQuery.isLoading}
-        anyWatched={watchedVisibleIds.length > 0}
+        anyWatched={watchedIds.length > 0}
         refreshingRepoIds={refreshDigests.refreshingRepoIds}
-        regenerating={refreshSprint.isPending}
+        onRegenerateRepo={(id) => refreshDigests.mutate(id)}
       />
       <RegenProgressBar
         active={refreshDigests.isPending && (refreshDigests.progress?.total ?? 0) > 0}
@@ -453,6 +440,8 @@ export function InsightsView(): JSX.Element {
                   <CardShell
                     key={card.id}
                     card={card}
+                    innerRef={(el) => setCardRef(card.id, el)}
+                    flash={flashId === card.id}
                     right={`waiting ${ageLabel(card.ageHours)}`}
                     onActivate={() => open(metaFor(card, usersById), card.id)}
                   >
@@ -473,7 +462,13 @@ export function InsightsView(): JSX.Element {
                 );
               case 'untouched_thread':
                 return (
-                  <CardShell key={card.id} card={card} right={`${ageLabel(card.ageHours)} old`}>
+                  <CardShell
+                    key={card.id}
+                    card={card}
+                    innerRef={(el) => setCardRef(card.id, el)}
+                    flash={flashId === card.id}
+                    right={`${ageLabel(card.ageHours)} old`}
+                  >
                     {/* Only this header chrome navigates (→ the thread in the Changes tab).
                         The embedded conversation + PR summary below are for reading/replying
                         in place, NOT a click target — so the thread never feels clickable. */}
@@ -507,6 +502,8 @@ export function InsightsView(): JSX.Element {
                   <CardShell
                     key={card.id}
                     card={card}
+                    innerRef={(el) => setCardRef(card.id, el)}
+                    flash={flashId === card.id}
                     right="unassigned"
                     onActivate={() => open(metaFor(card, usersById), card.id)}
                   >
@@ -527,6 +524,8 @@ export function InsightsView(): JSX.Element {
                   <CardShell
                     key={card.id}
                     card={card}
+                    innerRef={(el) => setCardRef(card.id, el)}
+                    flash={flashId === card.id}
                     right={`${card.reviewsThisSprint} review${
                       card.reviewsThisSprint === 1 ? '' : 's'
                     } this sprint`}

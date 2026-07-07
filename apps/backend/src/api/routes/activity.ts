@@ -23,18 +23,18 @@ function parseIntList(raw: string | undefined): number[] | null {
 
 export async function activityRoutes(app: FastifyInstance): Promise<void> {
   // The Activity aggregate: per repo, current-state stats + thread totals +
-  // attention/unread flags + open PRs. Scoped to the account; `repoIds` + `userIds`
-  // narrow to the active FilterBar repo + member selection (across ALL the account's
-  // repos — watched-only was dropped). Pure DB read — no GitHub sync, no AI.
+  // attention/unread flags + open PRs. Scoped to the account's WATCHED repos (inboxWatch);
+  // `repoIds` + `userIds` narrow to the active FilterBar repo + member selection WITHIN
+  // watched. Pure DB read — no GitHub sync, no AI.
   app.get('/api/activity', async (req): Promise<ActivityResponse> => {
     const q = req.query as { repoIds?: string; userIds?: string };
     return getActivity(accountIdOf(req), parseIntList(q.repoIds), parseIntList(q.userIds));
   });
 
   // The consolidated Feed (the Activity "Feed" entry): one flat, chronological stream
-  // merging My Turn actionables + the activity feed, deduped. Scoped by the FilterBar
-  // repo + member selection across ALL the account's repos (watched-only dropped).
-  // Pure DB read — no GitHub sync, no AI.
+  // merging My Turn actionables + the activity feed, deduped. Scoped to the account's
+  // WATCHED repos (inboxWatch); the FilterBar repo + member selection narrow WITHIN
+  // watched. Pure DB read — no GitHub sync, no AI.
   app.get('/api/activity/feed', async (req): Promise<ConsolidatedFeedResponse> => {
     const q = req.query as {
       repoIds?: string;

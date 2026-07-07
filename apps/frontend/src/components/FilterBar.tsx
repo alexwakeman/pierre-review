@@ -5,6 +5,8 @@ import { api, ApiError } from '../api/client.js';
 import { useMergers, useRepos, useSearchTimeline, useUsers } from '../hooks/useTimeline.js';
 import { useSearchOpenPrs } from '../hooks/useTriage.js';
 import { useFilters, type RangePreset } from '../store/filters.js';
+import { ACTIVITY_QUERY_KEYS } from '../hooks/useActivity.js';
+import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { EventSelectPanel } from './EventSelectPanel.js';
 import { RepoSearch } from './RepoSearch.js';
 import { RepoSelectPanel } from './RepoSelectPanel.js';
@@ -106,6 +108,12 @@ export function FilterBar(): JSX.Element {
 
   const f = useFilters();
 
+  // The Activity console only honours the repos selector + Members — Range / Status /
+  // Events / Threads are timeline-only, so on the Activity tab they (and the right-hand
+  // Saved-Views / Clear-filters cluster) are hidden.
+  const activeTab = usePinnedTabs((s) => s.activeTab);
+  const isActivity = activeTab === 'activity';
+
   // The FilterBar is always fully live now — PR-isolation / My-Turn focus is a separate
   // TAB (its own keyed <Timeline>), so it no longer disables or fades the board filters.
 
@@ -159,7 +167,10 @@ export function FilterBar(): JSX.Element {
       if (ctx?.previous) qc.setQueryData(['repos'], ctx.previous);
     },
     onSettled: () => {
-      for (const key of ['repos', 'my-turn', 'my-turn-done', 'me']) {
+      // Watching/unwatching changes the WATCHED set the whole Activity console is scoped to —
+      // invalidate every Activity/Insights surface so the rail, feed and Insights track it live
+      // (no manual Refresh needed).
+      for (const key of ['repos', 'my-turn', 'my-turn-done', 'me', ...ACTIVITY_QUERY_KEYS]) {
         void qc.invalidateQueries({ queryKey: [key] });
       }
     },
@@ -363,22 +374,6 @@ export function FilterBar(): JSX.Element {
           <RepoSearch />
         </Section>
 
-        <Section label="Range">
-          {PRESETS.map((p) => (
-            <Chip key={p} active={f.preset === p} onClick={() => f.setPreset(p)}>
-              {p}
-            </Chip>
-          ))}
-          <button
-            type="button"
-            onClick={() => f.centerTimelineNow()}
-            title="Recenter the timeline on the current time (keeps the zoom)"
-            className="whitespace-nowrap rounded-full border border-sky-300 px-2.5 py-0.5 text-xs text-sky-600 transition hover:border-sky-400 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-400 dark:hover:bg-sky-900/30"
-          >
-            Now
-          </button>
-        </Section>
-
         <Section>
           <UserSelectPanel
             sections={memberSections}
@@ -393,51 +388,81 @@ export function FilterBar(): JSX.Element {
           />
         </Section>
 
-        <Section>
-          <StatusSelectPanel
-            statuses={f.prStatuses}
-            onToggle={f.togglePrStatus}
-            onSet={f.setPrStatuses}
-            excludeStale={f.excludeStale}
-            onExcludeStaleChange={f.setExcludeStale}
-          />
-        </Section>
+        {/* Status / Events / Threads / Range are timeline-only — hidden on Activity,
+            where only the repos selector + Members apply. */}
+        {!isActivity && (
+          <Section>
+            <StatusSelectPanel
+              statuses={f.prStatuses}
+              onToggle={f.togglePrStatus}
+              onSet={f.setPrStatuses}
+              excludeStale={f.excludeStale}
+              onExcludeStaleChange={f.setExcludeStale}
+            />
+          </Section>
+        )}
 
-        <Section>
-          <EventSelectPanel
-            categories={f.categories}
-            onToggleCategory={(c) => f.toggleCategory(c)}
-            onSetCategories={(c) => f.setCategories(c)}
-            reviewStates={f.reviewStates}
-            onToggleReviewState={(s) => f.toggleReviewState(s)}
-            onSetReviewStates={(s) => f.setReviewStates(s)}
-          />
-        </Section>
+        {!isActivity && (
+          <Section>
+            <EventSelectPanel
+              categories={f.categories}
+              onToggleCategory={(c) => f.toggleCategory(c)}
+              onSetCategories={(c) => f.setCategories(c)}
+              reviewStates={f.reviewStates}
+              onToggleReviewState={(s) => f.toggleReviewState(s)}
+              onSetReviewStates={(s) => f.setReviewStates(s)}
+            />
+          </Section>
+        )}
 
-        <Section>
-          <ThreadStateSelectPanel
-            derivedStates={f.derivedStates}
-            onToggle={(s) => f.toggleDerivedState(s)}
-            onClear={() => f.setDerivedStates([])}
-          />
-        </Section>
+        {!isActivity && (
+          <Section>
+            <ThreadStateSelectPanel
+              derivedStates={f.derivedStates}
+              onToggle={(s) => f.toggleDerivedState(s)}
+              onClear={() => f.setDerivedStates([])}
+            />
+          </Section>
+        )}
+
+        {/* Range (+ Now) sits at the END of the board-filters cluster. */}
+        {!isActivity && (
+          <Section label="Range">
+            {PRESETS.map((p) => (
+              <Chip key={p} active={f.preset === p} onClick={() => f.setPreset(p)}>
+                {p}
+              </Chip>
+            ))}
+            <button
+              type="button"
+              onClick={() => f.centerTimelineNow()}
+              title="Recenter the timeline on the current time (keeps the zoom)"
+              className="whitespace-nowrap rounded-full border border-sky-300 px-2.5 py-0.5 text-xs text-sky-600 transition hover:border-sky-400 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-400 dark:hover:bg-sky-900/30"
+            >
+              Now
+            </button>
+          </Section>
+        )}
 
       </div>
 
-      {/* Right cluster, pinned next to the timeline. Always live — Saved Views + Clear
-          filters stay usable even while a focus/PR tab is open (that's a separate tab,
-          not a lock on the shared board). */}
-      <div className="ml-auto flex items-center gap-2">
-        <SavedViews disabled={false} />
-        <button
-          type="button"
-          onClick={() => f.resetAllFilters()}
-          title="Reset all filters to their defaults"
-          className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 transition hover:border-gray-400 hover:text-gray-800 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:text-gray-100"
-        >
-          Clear filters
-        </button>
-      </div>
+      {/* Right cluster, pinned next to the timeline. Timeline-only filter management —
+          hidden on Activity (only repos + Members apply there). Always live otherwise:
+          Saved Views + Clear filters stay usable even while a focus/PR tab is open (that's
+          a separate tab, not a lock on the shared board). */}
+      {!isActivity && (
+        <div className="ml-auto flex items-center gap-2">
+          <SavedViews disabled={false} />
+          <button
+            type="button"
+            onClick={() => f.resetAllFilters()}
+            title="Reset all filters to their defaults"
+            className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 transition hover:border-gray-400 hover:text-gray-800 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:text-gray-100"
+          >
+            Clear filters
+          </button>
+        </div>
+      )}
     </div>
   );
 }

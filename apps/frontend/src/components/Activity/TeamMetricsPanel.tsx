@@ -132,7 +132,8 @@ export function TeamMetricsPanel({
           Flow metrics
         </h3>
         <span className="text-[11px] text-gray-400">
-          DORA-ish · last 2 weeks vs prior · 12-week trend{onOpenMetric ? ' · tap a tile to drill in' : ''}
+          DORA-ish · this sprint vs last ({metrics.sprintDays}d) · 12-week trend
+          {onOpenMetric ? ' · tap a tile to drill in' : ''}
         </span>
       </div>
 
