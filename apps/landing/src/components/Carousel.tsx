@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLightbox } from './Lightbox';
+import { ExpandIcon } from './ui';
 
 // Auto-advancing product-screenshot carousel for the hero. One macOS-style
 // window frame with cross-fading slides inside, a per-slide caption, clickable
@@ -37,6 +39,8 @@ export default function Carousel({
   const [paused, setPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const touchX = useRef<number | null>(null);
+  const swiped = useRef(false); // a swipe just fired → swallow the synthetic click
+  const { open } = useLightbox();
   const n = slides.length;
 
   const go = useCallback(
@@ -84,7 +88,10 @@ export default function Carousel({
         setPaused(false);
         if (start == null) return;
         const dx = (e.changedTouches[0]?.clientX ?? start) - start;
-        if (Math.abs(dx) > 40) go(index + (dx < 0 ? 1 : -1));
+        if (Math.abs(dx) > 40) {
+          swiped.current = true; // suppress the tap-to-enlarge that follows a swipe
+          go(index + (dx < 0 ? 1 : -1));
+        }
       }}
     >
       {/* window frame */}
@@ -111,14 +118,23 @@ export default function Carousel({
         {/* stage — fixed 16/10 so mixed-aspect shots never resize the page */}
         <div className="relative aspect-[16/10] bg-gray-950">
           {slides.map((s, i) => (
-            <div
+            <button
               key={s.src}
-              role="group"
-              aria-roledescription="slide"
-              aria-label={`${i + 1} of ${n}: ${s.label}`}
+              type="button"
+              // Only the visible slide is interactive; the stacked-but-hidden ones
+              // sit on top otherwise and would steal the click.
               aria-hidden={i !== index}
-              className={`absolute inset-0 transition-opacity duration-700 ${
-                i === index ? 'opacity-100' : 'opacity-0'
+              tabIndex={i === index ? 0 : -1}
+              aria-label={`Enlarge ${s.label} (${i + 1} of ${n})`}
+              onClick={() => {
+                if (swiped.current) {
+                  swiped.current = false; // this click came from a swipe — ignore it
+                  return;
+                }
+                open({ src: s.src, alt: s.alt, title: `pierre · ${s.label}` });
+              }}
+              className={`absolute inset-0 block cursor-zoom-in transition-opacity duration-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-skySoft ${
+                i === index ? 'opacity-100' : 'pointer-events-none opacity-0'
               }`}
             >
               <img
@@ -130,8 +146,14 @@ export default function Carousel({
                   s.fit === 'contain' ? 'object-contain' : 'object-cover object-top'
                 }`}
               />
-            </div>
+            </button>
           ))}
+
+          {/* enlarge affordance (decorative — the whole slide is the button) */}
+          <span className="pointer-events-none absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded-md border border-white/10 bg-gray-950/70 px-2 py-1 text-[11px] text-gray-300 backdrop-blur">
+            <ExpandIcon className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Enlarge</span>
+          </span>
 
           {/* dwell progress */}
           {!reducedMotion && !paused && (

@@ -4,6 +4,7 @@ import { trackPageView } from './lib/analytics';
 import { useSeo } from './lib/seo';
 import Nav from './components/Nav';
 import Footer from './components/Footer';
+import { LightboxProvider } from './components/Lightbox';
 import Home from './pages/Home';
 import Features from './pages/Features';
 import Pro from './pages/Pro';
@@ -53,12 +54,14 @@ export default function App(): JSX.Element {
   }, [path]);
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 antialiased">
-      <Nav />
-      <main>
-        <Page />
-      </main>
-      <Footer />
-    </div>
+    <LightboxProvider>
+      <div className="min-h-screen bg-gray-950 text-gray-100 antialiased">
+        <Nav />
+        <main>
+          <Page />
+        </main>
+        <Footer />
+      </div>
+    </LightboxProvider>
   );
 }

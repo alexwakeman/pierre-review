@@ -1,11 +1,14 @@
 import type { ReactNode } from 'react';
+import { useLightbox } from './Lightbox';
 
 // Shared, mobile-first building blocks for the marketing pages: a macOS-style
 // window frame for screenshots, section/heading primitives, stat tiles, pills and
 // accent glows. Everything scales down cleanly on small screens (the frame chrome
 // shrinks, images stay w-full h-auto so nothing forces horizontal scroll).
 
-/** A macOS-style window frame around a product screenshot. Fully responsive. */
+/** A macOS-style window frame around a product screenshot. Fully responsive, and
+ *  clickable — tapping it opens the shot in the full-screen Lightbox (unless
+ *  `zoomable={false}`). */
 export function Shot({
   src,
   alt,
@@ -15,6 +18,7 @@ export function Shot({
   priority,
   width,
   height,
+  zoomable = true,
 }: {
   src: string;
   alt: string;
@@ -26,10 +30,15 @@ export function Shot({
   /** Intrinsic pixel dimensions — set on above-the-fold shots to reserve space (no CLS). */
   width?: number;
   height?: number;
+  /** Set false to render a plain, non-interactive frame. */
+  zoomable?: boolean;
 }): JSX.Element {
+  const { open } = useLightbox();
+  const enlarge = (): void => open({ src, alt, title });
+
   return (
     <figure
-      className={`overflow-hidden rounded-lg border border-white/10 bg-gray-900/60 shadow-2xl shadow-black/50 ring-1 ring-white/5 sm:rounded-xl ${className}`}
+      className={`group/shot overflow-hidden rounded-lg border border-white/10 bg-gray-900/60 shadow-2xl shadow-black/50 ring-1 ring-white/5 sm:rounded-xl ${className}`}
     >
       {/* window chrome — traffic lights shrink on mobile */}
       <div className="flex items-center gap-1.5 border-b border-white/10 bg-gray-900/80 px-3 py-2 sm:gap-2 sm:px-4 sm:py-2.5">
@@ -39,18 +48,62 @@ export function Shot({
         <span className="ml-2 hidden truncate text-xs text-gray-500 sm:ml-3 sm:inline">
           {title}
         </span>
+        {zoomable && (
+          <span className="ml-auto hidden items-center gap-1 text-[11px] text-gray-500 transition group-hover/shot:text-gray-300 sm:inline-flex">
+            <ExpandIcon className="h-3.5 w-3.5" />
+            Enlarge
+          </span>
+        )}
       </div>
-      <img
-        src={src}
-        alt={alt}
-        width={width}
-        height={height}
-        loading={eager ? 'eager' : 'lazy'}
-        fetchPriority={priority ? 'high' : undefined}
-        decoding="async"
-        className="block h-auto w-full"
-      />
+      {zoomable ? (
+        <button
+          type="button"
+          onClick={enlarge}
+          aria-label={`Enlarge screenshot: ${alt}`}
+          className="block w-full cursor-zoom-in focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-skySoft"
+        >
+          <img
+            src={src}
+            alt={alt}
+            width={width}
+            height={height}
+            loading={eager ? 'eager' : 'lazy'}
+            fetchPriority={priority ? 'high' : undefined}
+            decoding="async"
+            className="block h-auto w-full"
+          />
+        </button>
+      ) : (
+        <img
+          src={src}
+          alt={alt}
+          width={width}
+          height={height}
+          loading={eager ? 'eager' : 'lazy'}
+          fetchPriority={priority ? 'high' : undefined}
+          decoding="async"
+          className="block h-auto w-full"
+        />
+      )}
     </figure>
+  );
+}
+
+/** Corner-arrows expand glyph (used on interactive Shots + the carousel). */
+export function ExpandIcon({ className }: { className?: string }): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M9 3H3v6M21 9V3h-6M3 15v6h6M15 21h6v-6" />
+    </svg>
   );
 }
 

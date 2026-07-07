@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 import { Link } from '../router';
 import { useSeo } from '../lib/seo';
-import { Section, SectionHeading, Shot, Eyebrow, Pill, Glow, FeatureRow } from '../components/ui';
+import { Section, SectionHeading, Shot, Eyebrow, Pill, Glow, FeatureRow, ExpandIcon } from '../components/ui';
+import { useLightbox } from '../components/Lightbox';
 import {
   SparkleIcon,
   InsightsIcon,
@@ -148,6 +149,7 @@ function WalkStep({
   last?: boolean;
   children: ReactNode;
 }): JSX.Element {
+  const { open } = useLightbox();
   const chip =
     accent === 'amber'
       ? 'border-brand-amber/40 bg-brand-amber/10 text-amber-200'
@@ -174,14 +176,13 @@ function WalkStep({
         <div className="mt-2 max-w-3xl space-y-2 text-pretty text-sm leading-relaxed text-gray-400">
           {children}
         </div>
-        {/* Tap/click opens the full-resolution capture — the crops are 2x, so
-            small screens can zoom into every label. */}
-        <a
-          href={shot}
-          target="_blank"
-          rel="noopener"
-          aria-label={`Open the full-size screenshot: ${alt}`}
-          className="mt-4 block max-w-3xl overflow-hidden rounded-xl border border-white/10 bg-gray-950 shadow-xl shadow-black/40 ring-1 ring-white/5 transition hover:border-white/25"
+        {/* Tap/click opens the full-screen Lightbox — the crops are 2x, so small
+            screens can zoom into every label there. */}
+        <button
+          type="button"
+          onClick={() => open({ src: shot, alt, title })}
+          aria-label={`Enlarge screenshot: ${title}`}
+          className="group/step relative mt-4 block max-w-3xl cursor-zoom-in overflow-hidden rounded-xl border border-white/10 bg-gray-950 shadow-xl shadow-black/40 ring-1 ring-white/5 transition hover:border-white/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-skySoft"
         >
           <img
             src={shot}
@@ -190,7 +191,11 @@ function WalkStep({
             decoding="async"
             className="block h-auto w-full"
           />
-        </a>
+          <span className="pointer-events-none absolute right-2 top-2 inline-flex items-center gap-1 rounded-md border border-white/10 bg-gray-950/70 px-2 py-1 text-[11px] text-gray-300 opacity-0 backdrop-blur transition group-hover/step:opacity-100">
+            <ExpandIcon className="h-3.5 w-3.5" />
+            Enlarge
+          </span>
+        </button>
       </div>
     </div>
   );
