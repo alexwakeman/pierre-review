@@ -21,6 +21,8 @@ interface Rate {
 const RATES: Record<ClaudeReviewModel, Rate> = {
   'claude-haiku-4-5': { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 },
   'claude-sonnet-4-6': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
+  // Sonnet 5 (≤200K tier) — Sonnet pricing, near-Opus quality. The default model.
+  'claude-sonnet-5': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
   // Opus 4.8 (≤200K tier). Estimate-only — the run's recorded cost is authoritative.
   'claude-opus-4-8': { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
 };
@@ -30,7 +32,7 @@ export function estimateCostUsd(
   model: ClaudeReviewModel,
   u: UsageTokens,
 ): number {
-  const r = RATES[model] ?? RATES['claude-sonnet-4-6'];
+  const r = RATES[model] ?? RATES['claude-sonnet-5'];
   return (
     (u.inputTokens * r.input +
       u.outputTokens * r.output +

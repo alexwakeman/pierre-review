@@ -46,6 +46,7 @@ const DIFF_ONLY_TOOLS = ['mcp__review__submit_review'];
 // Models that accept the `effort` option. Haiku 4.5 rejects it (the API 400s), so it runs
 // without an effort hint — its low per-token price is its cost lever instead.
 const EFFORT_CAPABLE_MODELS: ReadonlySet<string> = new Set([
+  'claude-sonnet-5',
   'claude-opus-4-8',
   'claude-sonnet-4-6',
 ]);

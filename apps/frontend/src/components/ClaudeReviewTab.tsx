@@ -14,7 +14,7 @@ import type {
   User,
 } from '@pierre-review/shared';
 import type { LearningMatch } from '@pierre-review/shared';
-import { CLAUDE_REVIEW_MODELS } from '@pierre-review/shared';
+import { CLAUDE_REVIEW_MODELS, CLAUDE_REVIEW_MODEL_LABELS } from '@pierre-review/shared';
 import { formatDate, usdToCredits } from '../lib/ui.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
@@ -1170,9 +1170,9 @@ export function ClaudeReviewTab({
   const { data, isLoading } = useClaudeReview(pr.id);
   const review = data?.review ?? null;
 
-  // Model picker (defaults to the last run's model, else sonnet).
+  // Model picker (defaults to the last run's model, else the best-value default).
   const [model, setModel] = useState<ClaudeReviewModel>(
-    review?.model ?? 'claude-sonnet-4-6',
+    review?.model ?? 'claude-sonnet-5',
   );
 
   // Review depth. 'auto' lets the deterministic router decide from the diff; the
@@ -1351,7 +1351,7 @@ export function ClaudeReviewTab({
             >
               {CLAUDE_REVIEW_MODELS.map((m) => (
                 <option key={m} value={m}>
-                  {m}
+                  {CLAUDE_REVIEW_MODEL_LABELS[m]}
                 </option>
               ))}
             </select>

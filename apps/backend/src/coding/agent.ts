@@ -71,6 +71,7 @@ const RESOLVE_DISALLOWED_TOOLS = ['Bash', 'NotebookEdit'];
 
 // Models that accept the `effort` option (Haiku 4.5 rejects it — the API 400s).
 const EFFORT_CAPABLE_MODELS: ReadonlySet<string> = new Set([
+  'claude-sonnet-5',
   'claude-opus-4-8',
   'claude-sonnet-4-6',
 ]);

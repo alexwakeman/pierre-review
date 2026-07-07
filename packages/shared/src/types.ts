@@ -1095,20 +1095,32 @@ export interface TimelineQuery {
 // user authors their own review body/verdict and ticks which findings to post.
 
 export type ClaudeReviewModel =
+  | 'claude-sonnet-5'
   | 'claude-opus-4-8'
   | 'claude-sonnet-4-6'
   | 'claude-haiku-4-5';
 
 // Runtime list for the model picker (frontend bundles shared; the backend keeps a
 // local copy and only `import type`s from here — shared isn't shipped at runtime).
-// Ordered most→least capable (and most→least expensive). Haiku 4.5 is the cheap
-// fast option — ideal for a quick pass on a small/bounded diff; it does not accept
-// the `effort` knob, so it runs at the model's own default thinking depth.
+// Ordered by recommendation (the DEFAULT first): Sonnet 5 is near-Opus quality at
+// Sonnet cost — the best-value default; Opus 4.8 stays for the hardest runs; Sonnet
+// 4.6 for continuity; Haiku 4.5 is the cheap fast option — ideal for a quick pass on
+// a small/bounded diff; it does not accept the `effort` knob, so it runs at the
+// model's own default thinking depth.
 export const CLAUDE_REVIEW_MODELS: ClaudeReviewModel[] = [
+  'claude-sonnet-5',
   'claude-opus-4-8',
   'claude-sonnet-4-6',
   'claude-haiku-4-5',
 ];
+
+// Friendly labels (with a short cost/quality hint) for the model picker.
+export const CLAUDE_REVIEW_MODEL_LABELS: Record<ClaudeReviewModel, string> = {
+  'claude-sonnet-5': 'Claude Sonnet 5 (best value)',
+  'claude-opus-4-8': 'Claude Opus 4.8 (most thorough)',
+  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
+  'claude-haiku-4-5': 'Claude Haiku 4.5 (fast, cheap)',
+};
 
 export type ClaudeReviewStatus =
   | 'queued'

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CLAUDE_REVIEW_MODELS,
+  CLAUDE_REVIEW_MODEL_LABELS,
   type AiConfidence,
   type AiFix,
   type AiFixMergePreview,
@@ -287,7 +288,7 @@ function CiAnalysisSection({
               className={BTN_PRIMARY}
               disabled={startFix.isPending}
               onClick={() =>
-                startFix.mutate({ model: 'claude-opus-4-8', seed: 'ci_analysis' })
+                startFix.mutate({ model: 'claude-sonnet-5', seed: 'ci_analysis' })
               }
               title="Launch an agent to fix the CI failure"
             >
@@ -322,7 +323,7 @@ function FixerSection({
   onSeedConsumed: () => void;
 }): JSX.Element {
   const { data, isLoading } = useAiFix(pr.id, true);
-  const [model, setModel] = useState<AiFixModel>('claude-opus-4-8');
+  const [model, setModel] = useState<AiFixModel>('claude-sonnet-5');
   const startFix = useStartFix(pr.id);
   const cancelFix = useCancelFix(pr.id);
 
@@ -380,7 +381,7 @@ function FixerSection({
               >
                 {CLAUDE_REVIEW_MODELS.map((m) => (
                   <option key={m} value={m}>
-                    {m}
+                    {CLAUDE_REVIEW_MODEL_LABELS[m]}
                   </option>
                 ))}
               </select>
