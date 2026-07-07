@@ -203,7 +203,17 @@ export function ClaudeReviewBanner(): JSX.Element | null {
             <li key={e.reviewId} className="px-3 py-2 text-xs">
               <button
                 type="button"
-                onClick={() => openClaudeReview(e.prId)}
+                onClick={() =>
+                  openClaudeReview({
+                    id: e.prId,
+                    number: e.prNumber,
+                    title: e.prTitle,
+                    repoFullName: e.repoFullName,
+                    authorLogin: null,
+                    authorDisplayName: null,
+                    authorAvatarUrl: null,
+                  })
+                }
                 className="block w-full text-left"
                 title="Open this review"
               >

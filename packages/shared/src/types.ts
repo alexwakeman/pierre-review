@@ -233,6 +233,51 @@ export interface RequestReviewersResult {
   requestedLogins: string[]; // logins actually sent to GitHub (after filtering)
 }
 
+// ---- PR merge (CORE / free tier) — a merge control next to Approve ----
+// GitHub's three merge methods. 'squash' is squash-and-merge; 'rebase' is rebase-and-merge.
+export type MergeMethod = 'merge' | 'squash' | 'rebase';
+
+// What the merge control needs, fetched lazily (GET /api/prs/:id/merge-options) so the hot
+// PR-detail path isn't slowed by a live GitHub call. allowedMethods/defaultMethod come from
+// the repo's own settings; the rest is GitHub's live mergeability.
+export interface PrMergeOptions {
+  allowedMethods: MergeMethod[]; // the repo's enabled merge methods (GitHub order)
+  defaultMethod: MergeMethod; // the first allowed method — the pre-selected default
+  mergeable: boolean | null; // GitHub's async mergeable flag (null = still computing)
+  mergeStateStatus: string; // clean / dirty / behind / blocked / unstable / unknown / …
+  conflicts: boolean; // mergeable===false or dirty → conflicts with the base
+  behind: boolean; // the head branch is behind the base (an "Update branch" is available)
+  blocked: boolean; // branch protection unmet (required reviews/checks) → merge disabled
+  behindBy: number; // commits the head is behind the base
+  baseRef: string; // the base (trunk) branch name
+  // Whether an "Update branch from trunk" is offerable now (behind AND not conflicting).
+  canUpdateBranch: boolean;
+  // Whether a REBASE-from-trunk is available (local mode only — GitHub's native update-branch
+  // can only merge trunk in). When false the update-from-trunk is merge-only.
+  canRebaseUpdate: boolean;
+}
+
+export interface MergePrBody {
+  method: MergeMethod;
+}
+export interface MergePrResult {
+  merged: boolean;
+  sha: string | null; // the merge commit SHA GitHub created
+  state: 'merged';
+}
+
+// Update the PR's branch from the base/trunk before merging. strategy 'rebase' is local-only
+// (clone-based); 'merge' works everywhere (native GitHub update-branch in cloud). No conflict
+// resolution in the free tier — a conflicting PR returns 409 with { conflicts: true }.
+export interface UpdateBranchBody {
+  strategy?: 'rebase' | 'merge';
+}
+export interface UpdateBranchResult {
+  ok: true;
+  headSha: string | null; // the new head SHA after the update (null when GitHub-native)
+  strategy: 'rebase' | 'merge';
+}
+
 // An outstanding review request on a PR (user resolved via the users array;
 // team requests carry only a name).
 export interface RequestedReviewer {
@@ -388,7 +433,10 @@ export interface ProSettings {
     timezone: string | null; // IANA tz; null = server tz
   };
   aiUpdate: { mode: AiUpdateMode; intervalMinutes: number };
-  issue: { provider: IssueProvider | null; baseUrl: string | null };
+  // provider/baseUrl configure the deep-link target; projectKeys is an optional allowlist of
+  // project prefixes (e.g. ['ENG','PROJ']) — when non-empty, ONLY keys with a listed prefix are
+  // detected (near-zero false positives). Empty → heuristic detection.
+  issue: { provider: IssueProvider | null; baseUrl: string | null; projectKeys: string[] };
 }
 
 // Write shape (PUT /api/pro/settings) — a partial patch; only present sections/fields change.
@@ -403,7 +451,8 @@ export interface ProSettingsUpdate {
     timezone?: string | null;
   };
   aiUpdate?: { mode?: AiUpdateMode; intervalMinutes?: number };
-  issue?: { provider?: IssueProvider | null; baseUrl?: string | null };
+  // projectKeys: an allowlist of project prefixes; [] / null clears it (→ heuristic detection).
+  issue?: { provider?: IssueProvider | null; baseUrl?: string | null; projectKeys?: string[] | null };
 }
 
 // Lean PR shape for the timeline. No bodies, no diff hunks.
@@ -2111,6 +2160,12 @@ export interface ConsolidatedFeedItem {
   // null on every other kind.
   claudeReviewId: number | null;
   claudeVerdict: ClaudeReviewVerdict | null;
+  // Consolidated top-level PR comment(s) folded INTO a review_submitted item — the actor's
+  // issue-level comments posted within a short window of the review. When non-empty the
+  // review card is the headline (its verdict pill) and these render below as an "Also
+  // commented" block, INSTEAD of separate pr_comment rows. Chronological. Empty for every
+  // other kind / an un-coalesced review.
+  mergedComments: { commentId: number; content: string; occurredAt: string }[];
 }
 
 export interface ConsolidatedFeedResponse {

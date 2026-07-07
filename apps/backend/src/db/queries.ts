@@ -1493,6 +1493,78 @@ export async function getActivity(
 // the most recent, so a busy multi-repo account doesn't render thousands of them.
 const FEED_EVENT_CAP = 250;
 
+// A submitted review and the same actor's top-level PR comment(s) on the same PR are folded
+// into ONE card when they land within this window of each other (issue comments carry no head
+// SHA, so time is the only proxy for "posted together"). Symmetric around the review's time.
+const REVIEW_COMMENT_MERGE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+
+// Fold each actor's near-in-time top-level PR comment(s) INTO their review on the same PR
+// (appending to the review's `mergedComments`) and remove those comment rows from `items` +
+// `byId`, IN PLACE. A comment with no review within the window keeps its own row; a comment
+// is claimed by its NEAREST review, so two reviews in one window don't both grab it. This is
+// what collapses "submit a review, then drop a summary comment" into a single feed card.
+// Exported for unit tests (pure over the item arrays).
+export function coalesceReviewComments(
+  items: ConsolidatedFeedItem[],
+  byId: Map<string, ConsolidatedFeedItem>,
+): void {
+  const reviewsByKey = new Map<string, ConsolidatedFeedItem[]>();
+  const commentsByKey = new Map<string, ConsolidatedFeedItem[]>();
+  const bucketPush = (
+    m: Map<string, ConsolidatedFeedItem[]>,
+    key: string,
+    it: ConsolidatedFeedItem,
+  ): void => {
+    const arr = m.get(key);
+    if (arr) arr.push(it);
+    else m.set(key, [it]);
+  };
+  for (const it of items) {
+    if (it.actorId == null || it.prId == null) continue;
+    const key = `${it.actorId}:${it.prId}`;
+    if (it.kind === 'review_submitted') bucketPush(reviewsByKey, key, it);
+    else if (it.kind === 'pr_comment' && it.commentId != null) bucketPush(commentsByKey, key, it);
+  }
+  if (reviewsByKey.size === 0 || commentsByKey.size === 0) return;
+
+  const foldedIds = new Set<string>();
+  for (const [key, comments] of commentsByKey) {
+    const reviews = reviewsByKey.get(key);
+    if (reviews == null) continue;
+    for (const comment of comments) {
+      const ct = Date.parse(comment.occurredAt);
+      let best: ConsolidatedFeedItem | null = null;
+      let bestDist = Infinity;
+      for (const rev of reviews) {
+        const dist = Math.abs(Date.parse(rev.occurredAt) - ct);
+        if (dist <= REVIEW_COMMENT_MERGE_WINDOW_MS && dist < bestDist) {
+          best = rev;
+          bestDist = dist;
+        }
+      }
+      if (best == null) continue;
+      best.mergedComments.push({
+        commentId: comment.commentId as number,
+        content: comment.content ?? '',
+        occurredAt: comment.occurredAt,
+      });
+      foldedIds.add(comment.id);
+    }
+  }
+  if (foldedIds.size === 0) return;
+
+  // Chronological within each review (a review can fold more than one comment).
+  for (const reviews of reviewsByKey.values())
+    for (const rev of reviews)
+      if (rev.mergedComments.length > 1)
+        rev.mergedComments.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+
+  for (const id of foldedIds) byId.delete(id);
+  const kept = items.filter((it) => !foldedIds.has(it.id));
+  items.length = 0;
+  items.push(...kept);
+}
+
 export interface ConsolidatedFeedFilters {
   // null / omitted → ALL the account's repos; a list → scope to those repo ids.
   repoIds?: number[] | null;
@@ -1772,6 +1844,7 @@ async function getCommitThreadItems(
       changeSummary: `pushed ${run.commitCount} ${commitWord} · addressed ${affected.length} ${threadWord}`,
       claudeReviewId: null,
       claudeVerdict: null,
+      mergedComments: [],
     });
   }
   return out;
@@ -1853,6 +1926,7 @@ async function getClaudeReviewFeedItems(
       claudeReviewId: r.reviewId,
       // Prefer the user's decision when they've set one, else Claude's read-only verdict.
       claudeVerdict: r.userVerdict ?? r.verdict,
+      mergedComments: [],
     });
   }
   return out;
@@ -2870,6 +2944,7 @@ export async function getConsolidatedFeed(
       changeSummary: null,
       claudeReviewId: null,
       claudeVerdict: null,
+      mergedComments: [],
     });
   }
 
@@ -2880,6 +2955,14 @@ export async function getConsolidatedFeed(
   // Claude Review items — a distinct kind (never bot/member-scoped). Kept out of the FYI
   // flow but always retained (see the caps below) so the "Claude Reviews" pill finds them.
   for (const it of claudeItems) push(it);
+
+  // Consolidate a submitted review + the SAME actor's top-level PR comment(s) on the SAME PR
+  // posted within a short window (issue comments carry no head SHA, so time is the proxy):
+  // fold the comment(s) into the review's `mergedComments` and drop their standalone rows, so
+  // "review, then a summary comment" reads as one card everywhere (including FYI) instead of
+  // two. Runs BEFORE the FYI enrich/cap/paginate so `total`, participation and page bounds
+  // reflect the collapsed set (a comment folded here is never separately flagged or capped).
+  coalesceReviewComments(items, byId);
 
   // FYI / "My Turn" enrichment (Pro): flag each item `isMyTurn` by the viewer's participation
   // in its PR. Runs BEFORE the cap so uncapped My-Turn rows survive. No-op (feed stays plain)
@@ -4606,6 +4689,27 @@ export async function getPrWriteContext(
     viewerPermission: row.viewerPermission,
     prUrl: `https://github.com/${row.owner}/${row.name}/pull/${row.number}`,
   };
+}
+
+// Optimistically stamp a PR as merged after a successful GitHub merge, so the UI reflects it
+// immediately (the ['pr',id] query is staleTime:Infinity + IndexedDB-persisted, so the mutation
+// MUST invalidate it — but stamping first avoids a flash of the stale 'open' state). Account-
+// scoped. The next sync reconciles the authoritative merge metadata.
+export async function markPrMergedLocally(
+  prId: number,
+  accountId: number,
+  mergedById: number | null,
+): Promise<void> {
+  await db
+    .update(pullRequests)
+    .set({
+      state: 'merged',
+      mergedAt: new Date(),
+      mergedById,
+      mergeStateStatus: 'unknown',
+    })
+    .where(and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)))
+    .execute();
 }
 
 // Resolve a set of user ids to their GitHub logins for a reviewer request. Bots are

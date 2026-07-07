@@ -1,8 +1,8 @@
-import { useState } from 'react';
 import type { DigestPrRef, RepoDigest } from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useSprintReport, useRefreshSprintReport } from '../../hooks/useSprintReport.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
+import { useSprintReportUi } from '../../store/digestCollapse.js';
 import { SummaryMarkdown } from './prRefTable.js';
 import { InsightsDigests } from './InsightsDigests.js';
 
@@ -34,20 +34,30 @@ export function SprintReportCard({
   digestsLoading = false,
   anyWatched = false,
   refreshingRepoIds,
+  regenerating = false,
 }: {
   showRefresh?: boolean;
   digests?: RepoDigest[];
   digestsLoading?: boolean;
   anyWatched?: boolean;
   refreshingRepoIds?: Set<number>;
+  // Set by the embedding Insights panel (whose unified Refresh drives a SEPARATE
+  // refreshSprintReport mutation this card can't see) so the report shows the shimmer while
+  // it regenerates — matching the per-repo digest cards. The standalone card falls back to
+  // its own mutation's pending state.
+  regenerating?: boolean;
 }): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const { data, isLoading } = useSprintReport(activityDigest);
   const refresh = useRefreshSprintReport();
-  const [collapsed, setCollapsed] = useState(false);
-  // The nested per-repo "Repo summaries" section is collapsed by default (the length win).
-  const [reposOpen, setReposOpen] = useState(false);
+  // Collapse state persists across Insights-tab switches / reloads (was ephemeral useState,
+  // which reset the container closed every visit). Per-repo cards inside persist separately
+  // via useInsightsDigestExpand.
+  const collapsed = useSprintReportUi((s) => s.collapsed);
+  const setCollapsed = useSprintReportUi((s) => s.setCollapsed);
+  const reposOpen = useSprintReportUi((s) => s.reposOpen);
+  const setReposOpen = useSprintReportUi((s) => s.setReposOpen);
   const showRepos = digests !== undefined && anyWatched;
   const repoCount = digests?.length ?? 0;
 
@@ -56,7 +66,7 @@ export function SprintReportCard({
   if (!activityDigest) return null;
 
   const report = data?.report ?? null;
-  const busy = refresh.isPending;
+  const busy = regenerating || refresh.isPending;
 
   return (
     <div
@@ -66,7 +76,7 @@ export function SprintReportCard({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={() => setCollapsed(!collapsed)}
           className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 dark:text-gray-200"
         >
           <span className="w-3 select-none text-gray-400">{collapsed ? '▸' : '▾'}</span>
@@ -106,10 +116,15 @@ export function SprintReportCard({
 
       {!collapsed && (
         <div className="mt-2">
-          {isLoading ? (
+          {busy ? (
+            // Regenerating: drop the old text and show the same "shine swipe" skeleton the
+            // per-repo digest cards use, so every AI summary shimmers consistently.
+            <SprintReportSkeleton />
+          ) : isLoading ? (
             <div className="h-16 animate-pulse rounded bg-violet-500/5" />
           ) : report ? (
-            <>
+            // Keyed by generatedAt so `digest-fade-in` replays each time a fresh report arrives.
+            <div key={report.generatedAt} className="digest-fade-in">
               <SummaryMarkdown
                 markdown={report.summary}
                 prRefs={report.prRefs}
@@ -118,7 +133,7 @@ export function SprintReportCard({
               <div className="mt-1.5 text-[10px] text-gray-400">
                 Generated {new Date(report.generatedAt).toLocaleString()}
               </div>
-            </>
+            </div>
           ) : (
             <div className="text-[11px] text-gray-500 dark:text-gray-400">
               A prioritised, PR-linked summary of what needs attention this sprint —
@@ -143,7 +158,7 @@ export function SprintReportCard({
         <div className="mt-3 border-t border-violet-200/60 pt-2 dark:border-violet-900/40">
           <button
             type="button"
-            onClick={() => setReposOpen((o) => !o)}
+            onClick={() => setReposOpen(!reposOpen)}
             className="flex w-full items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300"
           >
             <span className="w-3 select-none text-gray-400">{reposOpen ? '▾' : '▸'}</span>
@@ -163,6 +178,20 @@ export function SprintReportCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Placeholder lines with a sweeping shine, shown in place of the sprint summary while it
+// regenerates — the same treatment as the per-repo digest cards (DigestSkeleton), sized for
+// the longer report (a headline + a few bulleted lines). Purely decorative.
+function SprintReportSkeleton(): JSX.Element {
+  return (
+    <div className="space-y-1.5 py-0.5" aria-hidden="true">
+      <div className="digest-skeleton-line h-3.5" style={{ width: '58%' }} />
+      {['94%', '88%', '72%', '80%', '64%'].map((w, i) => (
+        <div key={i} className="digest-skeleton-line h-3" style={{ width: w }} />
+      ))}
     </div>
   );
 }

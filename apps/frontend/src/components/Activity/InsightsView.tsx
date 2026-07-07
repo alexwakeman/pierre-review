@@ -417,6 +417,7 @@ export function InsightsView(): JSX.Element {
         digestsLoading={digestsQuery.isLoading}
         anyWatched={watchedVisibleIds.length > 0}
         refreshingRepoIds={refreshDigests.refreshingRepoIds}
+        regenerating={refreshSprint.isPending}
       />
       <RegenProgressBar
         active={refreshDigests.isPending && (refreshDigests.progress?.total ?? 0) > 0}

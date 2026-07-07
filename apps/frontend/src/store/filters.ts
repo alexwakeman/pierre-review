@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { usePinnedTabs } from './pinnedTabs.js';
+import { usePinnedTabs, type TabMeta } from './pinnedTabs.js';
 import {
   EVENT_CATEGORY_BY_TYPE,
   PR_STATUSES,
@@ -282,7 +282,10 @@ export interface FilterState {
   consumeCommentFocus: () => void;
   // Open a PR's Claude Review tab (the global progress banner → a running/finished
   // review). PrDetail consumes it once it has switched tabs.
-  openClaudeReview: (prId: number) => void;
+  openClaudeReview: (
+    meta: TabMeta,
+    opts?: { fromActivity?: boolean; returnItemId?: string | null },
+  ) => void;
   consumeClaudeTabFocus: () => void;
   // Open a PR's AI Fix tab, optionally seeded with a review to fix. PrDetail consumes
   // it once it has switched tabs.
@@ -630,13 +633,19 @@ export const useFilters = create<FilterState>((set, get) => ({
       commentFocus: { prId, commentId },
     }),
   consumeCommentFocus: () => set({ commentFocus: null }),
-  openClaudeReview: (prId) =>
+  // Open the PR's Claude Review pane. Crucially, ensure a pr-detail TAB is mounted first
+  // (like the Feed path does) — the `claudeTabFocus` signal is consumed only by an effect
+  // inside a mounted PrDetail, so setting it alone is a silent no-op whenever a full-screen
+  // overlay (Flow metrics / Activity console) is up and no PrDetail is rendered.
+  openClaudeReview: (meta, opts) => {
+    usePinnedTabs.getState().openPrDetailTab(meta, opts);
     set({
-      selectedPrId: prId,
+      selectedPrId: meta.id,
       selectedThreadId: null,
       selectedCommentId: null,
-      claudeTabFocus: { prId },
-    }),
+      claudeTabFocus: { prId: meta.id },
+    });
+  },
   consumeClaudeTabFocus: () => set({ claudeTabFocus: null }),
   showThreadInChanges: (prId, threadId) =>
     set({ changesThreadFocus: { prId, threadId } }),

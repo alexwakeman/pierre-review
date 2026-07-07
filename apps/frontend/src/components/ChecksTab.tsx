@@ -9,6 +9,7 @@ import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
 import { Markdown } from './Markdown.js';
 import { ApproveControl } from './ApproveControl.js';
+import { MergeControl } from './MergeControl.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
 import { AiSummary } from './AiSummary.js';
 
@@ -330,6 +331,15 @@ export function ChecksTab({
             prId={pr.id}
             alreadyApproved={pr.viewerHasApprovedStanding}
           />
+        </Row>
+      )}
+
+      {/* Merge control (CORE / free tier): anyone with push access can merge an open,
+          non-draft PR — an addition to Approve. Allowed methods + mergeability are fetched
+          lazily when it's expanded. */}
+      {pr.viewerCanPush && pr.state === 'open' && !pr.isDraft && (
+        <Row label="Merge">
+          <MergeControl prId={pr.id} githubUrl={pr.githubUrl} />
         </Row>
       )}
 

@@ -1,6 +1,7 @@
 import {
   useInfiniteQuery,
   useMutation,
+  useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
 import { useMemo } from 'react';
@@ -98,10 +99,81 @@ export function useConsolidatedFeed(opts: {
     users,
     total: query.data?.pages[0]?.total ?? 0,
     generatedAt: query.data?.pages[0]?.generatedAt ?? null,
+    // The newest LOADED item's id (items are newest-first) — the baseline useFeedHasNew
+    // compares the server head against.
+    latestId: items[0]?.id ?? null,
     hasMore: query.hasNextPage,
     loadMore: query.fetchNextPage,
     isFetchingMore: query.isFetchingNextPage,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
+  };
+}
+
+// Detect that the server has NEWER feed activity than what's currently loaded, to drive the
+// "New activity — Refresh" banner. Polls just the HEAD of the feed (limit=1) for the SAME
+// scope every 60s — deliberately reusing the real feed builder so the head's inclusion logic
+// (coalescing, caps, thread-addressing commits) matches the loaded feed EXACTLY, avoiding
+// false positives from a divergent cheap query. Visibility-gated (react-query pauses interval
+// refetches while the tab is unfocused via refetchIntervalInBackground:false), so it's idle
+// when nobody's looking; new data only lands on the 5-min sync anyway. Returns `hasNew` +
+// `refresh` (invalidate the loaded feed → the banner clears as items[0]/total catch up).
+export function useFeedHasNew(opts: {
+  repoIds: number[] | null;
+  userIds: number[] | null;
+  excludeBots?: boolean;
+  allowedBotIds?: number[];
+  loadedLatestId: string | null;
+  loadedTotal: number;
+  // True once the loaded feed has finished its initial load, so we can distinguish "empty
+  // because still loading" (suppress) from "empty because truly empty" (a later arrival should
+  // surface the banner). Also avoids a spurious flash when the head query resolves first.
+  feedSettled: boolean;
+  enabled?: boolean;
+}): { hasNew: boolean; refresh: () => void } {
+  const qc = useQueryClient();
+  const search = feedSearch(
+    opts.repoIds,
+    opts.userIds,
+    opts.excludeBots ?? false,
+    opts.allowedBotIds ?? [],
+  );
+  const head = useQuery<ConsolidatedFeedResponse>({
+    queryKey: ['feed-head', search],
+    queryFn: () => {
+      const p = new URLSearchParams(search);
+      p.set('limit', '1');
+      p.set('offset', '0');
+      return api.consolidatedFeed(p.toString());
+    },
+    enabled: opts.enabled ?? true,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    staleTime: 30_000,
+  });
+
+  const serverLatestId = head.data?.items[0]?.id ?? null;
+  const serverTotal = head.data?.total ?? 0;
+  // New activity = the loaded scope was empty and now has some (loadedLatestId == null), OR a
+  // different newest item landed at the top, OR strictly more items than we've loaded (backfill
+  // in the middle). A decrease (items aging out of the 14-day window) never prompts a refresh.
+  // Gated on feedSettled so the initial load never flashes (and an empty scope isn't judged
+  // "new" while still loading).
+  const hasNew =
+    opts.feedSettled &&
+    serverLatestId != null &&
+    (opts.loadedLatestId == null ||
+      serverLatestId !== opts.loadedLatestId ||
+      serverTotal > opts.loadedTotal);
+
+  return {
+    hasNew,
+    // Refresh BOTH the loaded feed and the head poll, so the banner clears immediately even when
+    // the feed refetches to a state newer than the last-cached head snapshot (else the stale
+    // head keeps hasNew true until the next 60s poll).
+    refresh: () => {
+      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
+      void qc.invalidateQueries({ queryKey: ['feed-head'] });
+    },
   };
 }

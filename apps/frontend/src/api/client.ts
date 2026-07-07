@@ -37,6 +37,11 @@ import type {
   SprintReportResponse,
   MeResponse,
   MergersResponse,
+  MergePrBody,
+  MergePrResult,
+  PrMergeOptions,
+  UpdateBranchBody,
+  UpdateBranchResult,
   DismissedMyTurnResponse,
   MyTurnDismissKind,
   MyTurnResponse,
@@ -193,6 +198,15 @@ export const api = {
   approvePr: (prId: number, body?: ApprovePrBody) =>
     fetch(`/api/prs/${prId}/approve`, jsonBody('POST', body ?? {})).then((r) =>
       handle<ApprovePrResult>(r),
+    ),
+  // Merge control (CORE / free tier): the repo's allowed methods + live mergeability, the
+  // merge itself, and the update-branch-from-trunk.
+  mergeOptions: (prId: number) => get<PrMergeOptions>(`/api/prs/${prId}/merge-options`),
+  mergePr: (prId: number, body: MergePrBody) =>
+    fetch(`/api/prs/${prId}/merge`, jsonBody('POST', body)).then((r) => handle<MergePrResult>(r)),
+  updatePrBranch: (prId: number, body?: UpdateBranchBody) =>
+    fetch(`/api/prs/${prId}/update-branch`, jsonBody('POST', body ?? {})).then((r) =>
+      handle<UpdateBranchResult>(r),
     ),
   addReviewComment: (prId: number, body: AddReviewCommentBody) =>
     fetch(`/api/prs/${prId}/review-comment`, jsonBody('POST', body)).then((r) =>

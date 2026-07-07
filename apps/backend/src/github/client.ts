@@ -85,6 +85,34 @@ export async function ghRestGetDiff(token: string, path: string): Promise<string
   return res.text();
 }
 
+// REST PUT returning the parsed STATUS + body WITHOUT throwing on a non-2xx, so the caller can
+// map GitHub's meaningful merge / update-branch statuses to structured results (405 not
+// mergeable, 409 head-sha mismatch, 422 method disallowed / can't update). Per-account token.
+export async function ghRestPutStatus(
+  token: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; ok: boolean; json: unknown; text: string }> {
+  const res = await fetch(`https://api.github.com${path}`, {
+    method: 'PUT',
+    headers: {
+      authorization: `token ${token}`,
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': '2022-11-28',
+      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text().catch(() => '');
+  let json: unknown = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    /* non-JSON body (rare on these endpoints) */
+  }
+  return { status: res.status, ok: res.ok, json, text };
+}
+
 // REST POST (submitting a PR review — inline line comments require the REST
 // reviews endpoint) for a specific account's token.
 export function ghRestPostFor<T>(

@@ -316,6 +316,7 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
       affectedThreads: null,
       commitCount: null,
       changeSummary: null,
+      mergedComments: [],
     },
     {
       id: 'feed:7000',
@@ -347,6 +348,7 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
       affectedThreads: null,
       commitCount: null,
       changeSummary: null,
+      mergedComments: [],
     },
     {
       id: 'feed:7001',
@@ -378,6 +380,7 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
       affectedThreads: null,
       commitCount: null,
       changeSummary: null,
+      mergedComments: [],
     },
   ] satisfies ConsolidatedFeedItem[],
   users: USERS,

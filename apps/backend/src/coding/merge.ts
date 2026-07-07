@@ -718,6 +718,86 @@ export async function mergeResolveAndPush(
   }
 }
 
+// ---- CORE (free tier): update a PR's OWN branch from its base/trunk ----
+// Rebase (default) or merge the trunk into the PR's head branch and push. This is the local,
+// clone-based path for the free-tier "Update branch from trunk" — reusing runRebase/runMerge
+// with autoResolve:false, so on ANY conflict the op is aborted and CONFLICTS_UNRESOLVED is
+// thrown (never the SDK resolver — conflict resolution is a Pro feature). No stored patch is
+// involved (unlike the AI-Fix paths above): we check the PR head out as-is and reconcile it.
+export async function updatePrBranchFromTrunk(args: {
+  accountId: number;
+  owner: string;
+  name: string;
+  prNumber: number;
+  headRef: string;
+  headSha: string;
+  trunk: string;
+  strategy: 'rebase' | 'merge';
+}): Promise<{ headSha: string; strategy: 'rebase' | 'merge' }> {
+  const { accountId, owner, name, prNumber, headRef, headSha, trunk, strategy } = args;
+  const token = await getAccessToken(accountId);
+  const ident = await identFor(accountId);
+
+  // The head must not have moved out from under us, and a fork head must be pushable.
+  const info = await fetchPrHeadInfo(token, owner, name, prNumber);
+  if (info.headSha !== headSha) {
+    throw codedError(
+      'HEAD_MOVED',
+      `the PR head advanced (now ${info.headSha.slice(0, 7)}, expected ${headSha.slice(0, 7)})`,
+    );
+  }
+  if (info.isFork && !info.maintainerCanModify) {
+    throw codedError(
+      'PUSH_DENIED',
+      'the PR head is a fork this account cannot push to — update it on GitHub instead',
+    );
+  }
+  // The PR head branch lives in the HEAD repo, which for a fork PR is NOT the base (watched)
+  // repo — push there, or a merge would create a stray branch on the base and a rebase's lease
+  // would target the wrong ref. The clone/fetch still uses the base repo below (pull/N/head
+  // resolves there); only the PUSH target is the head repo. full_name is always `owner/name`.
+  const slash = info.headRepoFullName.indexOf('/');
+  const headOwner = slash > 0 ? info.headRepoFullName.slice(0, slash) : owner;
+  const headName = slash > 0 ? info.headRepoFullName.slice(slash + 1) : name;
+
+  // autoResolve:false → runRebase/runMerge abort on the first conflict and throw
+  // CONFLICTS_UNRESOLVED; the model/resolver fields are never touched (no SDK import).
+  const opts: ResolveOpts = {
+    autoResolve: false,
+    model: '',
+    abortController: new AbortController(),
+    onProgress: () => {},
+  };
+
+  let repoCloneDir: string | null = null;
+  let worktreePath: string | null = null;
+  try {
+    // Check out the PR head branch (prepWorktree checks out at the given sha).
+    ({ repoCloneDir, worktreePath } = await prepWorktree(owner, name, prNumber, headSha, token));
+    const trunkSha = await fetchTrunk(worktreePath, owner, name, token, trunk);
+
+    if (strategy === 'rebase') {
+      await runRebase(worktreePath, trunkSha, ident, opts); // throws CONFLICTS_UNRESOLVED on conflict
+      const newSha = (await git(['rev-parse', 'HEAD'], worktreePath)).stdout.trim();
+      // Rewriting history requires a force push; the lease pins to the sha we cloned so a
+      // concurrent push aborts it (never blows away someone else's work).
+      await pushForceWithLease(worktreePath, headOwner, headName, token, 'HEAD', headRef, headSha);
+      return { headSha: newSha, strategy };
+    }
+
+    await runMerge(worktreePath, trunkSha, trunk, headRef, ident, opts); // throws on conflict
+    const newSha = (await git(['rev-parse', 'HEAD'], worktreePath)).stdout.trim();
+    // A merge only adds a commit (the old head is its ancestor) → a plain push. Already
+    // up-to-date (runMerge no-op) leaves HEAD unchanged → nothing to push.
+    if (newSha !== headSha) {
+      await pushRef(worktreePath, headOwner, headName, token, 'HEAD', headRef);
+    }
+    return { headSha: newSha, strategy };
+  } finally {
+    await teardown(owner, name, repoCloneDir, worktreePath);
+  }
+}
+
 export async function pushResolved(
   args: PushResolvedArgs,
 ): Promise<ApplyResolveResult> {

@@ -11,12 +11,18 @@ import type {
   CreatePrCommentBody,
   CreatePrCommentResult,
   MarkViewedBody,
+  MergePrBody,
+  MergePrResult,
   PrFileDiff,
   PrFileDiffStatus,
   PrFilesResponse,
+  PrMergeOptions,
   RequestReviewersBody,
   RequestReviewersResult,
+  UpdateBranchBody,
+  UpdateBranchResult,
 } from '@pierre-review/shared';
+import { config } from '../../config.js';
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
 import { fetchActionsJobLog } from '../../github/actions-logs.js';
 import {
@@ -26,6 +32,7 @@ import {
   getPrWriteContext,
   getReviewerLogins,
   markAllViewed,
+  markPrMergedLocally,
   markPrViewed,
   upsertLocalPrComment,
   upsertLocalReview,
@@ -38,11 +45,16 @@ import {
 import {
   addIssueComment,
   fetchHeadShaFor,
+  fetchMergeability,
   fetchPrFilesWithPatch,
+  fetchPrHeadInfo,
+  fetchRepoMergeConfig,
+  mergePullRequest,
   postInlineComment,
   requestReviewers,
   rerunWorkflowRun,
   submitPrReview,
+  updatePullRequestBranch,
 } from '../../github/mutations.js';
 import { hydratePrDetail } from '../../sync/hydrate-detail.js';
 import { accountIdOf } from '../plugins/auth.js';
@@ -140,6 +152,25 @@ const approveSchema = {
     type: 'object',
     additionalProperties: false,
     properties: { body: { type: 'string' } },
+  },
+};
+
+const mergeSchema = {
+  ...idParamSchema,
+  body: {
+    type: 'object',
+    required: ['method'],
+    additionalProperties: false,
+    properties: { method: { type: 'string', enum: ['merge', 'squash', 'rebase'] } },
+  },
+};
+
+const updateBranchSchema = {
+  ...idParamSchema,
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { strategy: { type: 'string', enum: ['rebase', 'merge'] } },
   },
 };
 
@@ -348,6 +379,205 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       }
     },
   );
+
+  // ---- Merge (CORE / free tier) ----
+
+  // The merge control's options — the repo's enabled merge methods + GitHub's live mergeability.
+  // Fetched lazily (only when the control opens) so the hot PR-detail path isn't slowed by a
+  // live GitHub call. Ownership-scoped via getPrWriteContext (→ 404).
+  app.get('/api/prs/:id/merge-options', async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const accountId = accountIdOf(req);
+    const ctx = await getPrWriteContext(id, accountId);
+    if (!ctx) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    try {
+      const token = await getAccessToken(accountId);
+      const [cfg, m] = await Promise.all([
+        fetchRepoMergeConfig(token, ctx.owner, ctx.name),
+        fetchMergeability(token, ctx.owner, ctx.name, ctx.number),
+      ]);
+      const allowedMethods = (['merge', 'squash', 'rebase'] as const).filter((meth) =>
+        meth === 'merge'
+          ? cfg.allowMergeCommit
+          : meth === 'squash'
+            ? cfg.allowSquashMerge
+            : cfg.allowRebaseMerge,
+      );
+      const conflicts = m.mergeable === false || m.mergeableState === 'dirty';
+      const behind = m.mergeableState === 'behind' || m.behindBy > 0;
+      const result: PrMergeOptions = {
+        allowedMethods: [...allowedMethods],
+        defaultMethod: allowedMethods[0] ?? 'merge',
+        mergeable: m.mergeable,
+        mergeStateStatus: m.mergeableState,
+        conflicts,
+        behind,
+        blocked: m.mergeableState === 'blocked',
+        behindBy: m.behindBy,
+        baseRef: m.baseRef,
+        canUpdateBranch: behind && !conflicts,
+        canRebaseUpdate: !config.isCloud,
+      };
+      return result;
+    } catch (err) {
+      reply.status(502);
+      return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Merge the PR (native GitHub merge; merge/squash/rebase). Re-checks write+ permission
+  // (author allowed — GitHub lets an author merge their own PR) and pre-checks conflicts, then
+  // pins the merge to the current head SHA (409 if it moved). Optimistically stamps merged.
+  app.post('/api/prs/:id/merge', { schema: mergeSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const { method } = req.body as MergePrBody;
+    const accountId = accountIdOf(req);
+
+    const ctx = await getPrWriteContext(id, accountId);
+    if (!ctx) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    if (!['WRITE', 'MAINTAIN', 'ADMIN'].includes(ctx.viewerPermission ?? '')) {
+      reply.status(403);
+      return { error: 'NotPermitted', message: 'You need write access to merge this PR.' };
+    }
+
+    try {
+      const token = await getAccessToken(accountId);
+      // Live conflict pre-check — never attempt a merge on a conflicting PR (no free-tier
+      // resolution). GitHub would 405 anyway; a 409 here is clearer.
+      const m = await fetchMergeability(token, ctx.owner, ctx.name, ctx.number);
+      if (m.mergeable === false || m.mergeableState === 'dirty') {
+        reply.status(409);
+        return {
+          error: 'Conflicts',
+          conflicts: true,
+          message: 'This PR conflicts with the base branch — resolve the conflicts on GitHub.',
+        };
+      }
+      const info = await fetchPrHeadInfo(token, ctx.owner, ctx.name, ctx.number);
+      const out = await mergePullRequest(token, ctx.owner, ctx.name, ctx.number, {
+        method,
+        expectedHeadSha: info.headSha,
+      });
+      if (!out.ok) {
+        const status = out.reason === 'method_disallowed' ? 422 : 409;
+        reply.status(status);
+        return {
+          error:
+            out.reason === 'head_moved'
+              ? 'HeadMoved'
+              : out.reason === 'method_disallowed'
+                ? 'MethodNotAllowed'
+                : 'NotMergeable',
+          message: out.message,
+        };
+      }
+      const viewerUserId = await getAccountUserId(accountId);
+      await markPrMergedLocally(id, accountId, viewerUserId);
+      const result: MergePrResult = { merged: true, sha: out.sha, state: 'merged' };
+      return result;
+    } catch (err) {
+      reply.status(502);
+      return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Update the PR's branch from the base/trunk before merging. Local: clone-based rebase
+  // (default) or merge, aborting on ANY conflict (no free-tier resolution → 409). Cloud: GitHub's
+  // native update-branch (merge-only, clone-free). Gated on write+ permission.
+  app.post('/api/prs/:id/update-branch', { schema: updateBranchSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const { strategy } = (req.body ?? {}) as UpdateBranchBody;
+    const accountId = accountIdOf(req);
+
+    const ctx = await getPrWriteContext(id, accountId);
+    if (!ctx) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    if (!['WRITE', 'MAINTAIN', 'ADMIN'].includes(ctx.viewerPermission ?? '')) {
+      reply.status(403);
+      return { error: 'NotPermitted', message: 'You need write access to update this branch.' };
+    }
+
+    try {
+      const token = await getAccessToken(accountId);
+      // Never attempt an update on a conflicting PR — conflict resolution is a Pro feature.
+      const m = await fetchMergeability(token, ctx.owner, ctx.name, ctx.number);
+      if (m.mergeable === false || m.mergeableState === 'dirty') {
+        reply.status(409);
+        return {
+          error: 'Conflicts',
+          conflicts: true,
+          message:
+            'This PR conflicts with the base branch. Resolving conflicts isn’t available on the free tier — resolve them on GitHub.',
+        };
+      }
+      const info = await fetchPrHeadInfo(token, ctx.owner, ctx.name, ctx.number);
+
+      if (config.isCloud) {
+        // Cloud: native update-branch (merge trunk in). No clone/git on the host.
+        const out = await updatePullRequestBranch(
+          token,
+          ctx.owner,
+          ctx.name,
+          ctx.number,
+          info.headSha,
+        );
+        if (!out.ok) {
+          reply.status(409);
+          return out.reason === 'head_moved'
+            ? { error: 'HeadMoved', headMoved: true, message: out.message }
+            : { error: 'Conflicts', conflicts: true, message: out.message };
+        }
+        const result: UpdateBranchResult = { ok: true, headSha: null, strategy: 'merge' };
+        return result;
+      }
+
+      // Local: clone-based rebase (default) or merge from trunk, autoResolve:false. Dynamic
+      // import so the clone/git machinery is only loaded on this path (never in cloud).
+      const strat = strategy === 'merge' ? 'merge' : 'rebase';
+      const { updatePrBranchFromTrunk } = await import('../../coding/merge.js');
+      const out = await updatePrBranchFromTrunk({
+        accountId,
+        owner: ctx.owner,
+        name: ctx.name,
+        prNumber: ctx.number,
+        headRef: info.headRef,
+        headSha: info.headSha,
+        trunk: info.baseRef,
+        strategy: strat,
+      });
+      const result: UpdateBranchResult = { ok: true, headSha: out.headSha, strategy: out.strategy };
+      return result;
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code;
+      if (code === 'CONFLICTS_UNRESOLVED') {
+        reply.status(409);
+        return {
+          error: 'Conflicts',
+          conflicts: true,
+          message:
+            'This PR conflicts with the base branch. Resolving conflicts isn’t available on the free tier — resolve them on GitHub.',
+        };
+      }
+      if (code === 'HEAD_MOVED') {
+        reply.status(409);
+        return { error: 'HeadMoved', headMoved: true, message: (err as Error).message };
+      }
+      if (code === 'PUSH_DENIED') {
+        reply.status(403);
+        return { error: 'NotPermitted', message: (err as Error).message };
+      }
+      reply.status(502);
+      return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
   // Add ONE inline review comment, posted immediately. Validates the requested
   // (path, line, side) lands on an addable diff line; if not, re-anchors to the

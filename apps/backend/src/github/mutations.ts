@@ -7,12 +7,14 @@
 // GraphQL note: @octokit/graphql RESERVES the variable name `query`. The
 // operation-variable here is named `input` / etc., never `query`.
 
+import type { MergeMethod } from '@pierre-review/shared';
 import {
   getGraphqlClientFor,
   ghRestGetDiff,
   ghRestGetFor,
   ghRestPostFor,
   ghRestPostNoContent,
+  ghRestPutStatus,
 } from './client.js';
 
 // ---- Review-thread reply (GraphQL) ----
@@ -460,6 +462,101 @@ export async function fetchMergeability(
     behindBy,
     aheadBy,
   };
+}
+
+// ---- PR merge + update-from-trunk (CORE / free tier) ----
+
+// The repo's enabled merge methods + default branch (GET /repos/{o}/{n}). Not synced — a
+// rarely-changing repo setting, fetched live only when the merge control opens. Missing flags
+// default true (GitHub's own default for a new repo).
+export async function fetchRepoMergeConfig(
+  token: string,
+  owner: string,
+  name: string,
+): Promise<{
+  allowMergeCommit: boolean;
+  allowSquashMerge: boolean;
+  allowRebaseMerge: boolean;
+  defaultBranch: string;
+}> {
+  const repo = await ghRestGetFor<{
+    allow_merge_commit?: boolean;
+    allow_squash_merge?: boolean;
+    allow_rebase_merge?: boolean;
+    default_branch: string;
+  }>(token, `/repos/${owner}/${name}`);
+  return {
+    allowMergeCommit: repo.allow_merge_commit ?? true,
+    allowSquashMerge: repo.allow_squash_merge ?? true,
+    allowRebaseMerge: repo.allow_rebase_merge ?? true,
+    defaultBranch: repo.default_branch,
+  };
+}
+
+export type MergePrOutcome =
+  | { ok: true; sha: string }
+  | {
+      ok: false;
+      // head_moved (409 sha mismatch), method_disallowed (422), not_mergeable (405: protection /
+      // failing checks / conflicts), error (anything else).
+      reason: 'head_moved' | 'method_disallowed' | 'not_mergeable' | 'error';
+      message: string;
+    };
+
+// Merge the PR via GitHub's native endpoint (PUT .../merge). Pins `sha` to the expected head so
+// GitHub 409s if the branch moved. Cloud-safe, clone-free. The caller pre-checks conflicts.
+export async function mergePullRequest(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+  opts: { method: MergeMethod; expectedHeadSha?: string },
+): Promise<MergePrOutcome> {
+  const body: Record<string, unknown> = { merge_method: opts.method };
+  if (opts.expectedHeadSha) body.sha = opts.expectedHeadSha;
+  const res = await ghRestPutStatus(token, `/repos/${owner}/${name}/pulls/${number}/merge`, body);
+  const j = (res.json ?? {}) as { merged?: boolean; sha?: string; message?: string };
+  if (res.ok && j.merged) return { ok: true, sha: j.sha ?? '' };
+  const message = j.message ?? res.text.slice(0, 300);
+  const reason =
+    res.status === 409
+      ? 'head_moved'
+      : res.status === 422
+        ? 'method_disallowed'
+        : res.status === 405
+          ? 'not_mergeable'
+          : 'error';
+  return { ok: false, reason, message };
+}
+
+export type UpdateBranchOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'head_moved' | 'conflicts' | 'error'; message: string };
+
+// GitHub's NATIVE "update branch from base" (PUT .../update-branch) — a merge commit of the base
+// into the head. Cloud-safe, clone-free (the cloud path for update-from-trunk). Merge-only: there
+// is no native rebase. 202 = accepted; 422 = can't update — which GitHub uses BOTH for a stale
+// expected_head_sha (a head-moved race — its message mentions the expected head sha) AND for a
+// genuine can't-merge, so we disambiguate on the message.
+export async function updatePullRequestBranch(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+  expectedHeadSha?: string,
+): Promise<UpdateBranchOutcome> {
+  const body = expectedHeadSha ? { expected_head_sha: expectedHeadSha } : undefined;
+  const res = await ghRestPutStatus(
+    token,
+    `/repos/${owner}/${name}/pulls/${number}/update-branch`,
+    body,
+  );
+  if (res.status === 202) return { ok: true };
+  const j = (res.json ?? {}) as { message?: string };
+  const message = j.message ?? res.text.slice(0, 300);
+  const headMoved = res.status === 409 || /expected head sha/i.test(message);
+  const reason = headMoved ? 'head_moved' : res.status === 422 ? 'conflicts' : 'error';
+  return { ok: false, reason, message };
 }
 
 // The PR's unified diff via the REST API (Accept: application/vnd.github.diff) —

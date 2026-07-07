@@ -8,7 +8,11 @@ import type {
   ReviewState,
   User,
 } from '@pierre-review/shared';
-import { useConsolidatedFeed, useMarkFeedSeen } from '../../hooks/useConsolidatedFeed.js';
+import {
+  useConsolidatedFeed,
+  useFeedHasNew,
+  useMarkFeedSeen,
+} from '../../hooks/useConsolidatedFeed.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
 import { useTimeline, useUsers } from '../../hooks/useTimeline.js';
@@ -134,12 +138,31 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
     }
   }, [repoId, markFeedSeen]);
 
-  const { items, users, hasMore, loadMore, isFetchingMore } = useConsolidatedFeed({
+  const { items, users, total, latestId, isLoading, hasMore, loadMore, isFetchingMore } =
+    useConsolidatedFeed({
+      repoIds: effectiveRepoIds,
+      userIds,
+      excludeBots,
+      allowedBotIds,
+    });
+
+  // "New activity" detector: poll the server head for this exact scope and compare to what's
+  // loaded, driving the manual refresh banner (below). Clicking it invalidates the feed → the
+  // fresh page's items[0]/total catch up → the banner clears.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const { hasNew, refresh: refreshFeed } = useFeedHasNew({
     repoIds: effectiveRepoIds,
     userIds,
     excludeBots,
     allowedBotIds,
+    loadedLatestId: latestId,
+    loadedTotal: total,
+    feedSettled: !isLoading,
   });
+  const onRefreshClick = (): void => {
+    refreshFeed();
+    nearestScrollParent(rootRef.current)?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const usersById = useMemo(() => indexUsers(users), [users]);
   // The PRs currently on the board (filter + date-range scoped). A Focus that isn't in
@@ -238,9 +261,16 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   function open(item: ConsolidatedFeedItem): void {
     const prId = item.prId;
     if (prId == null) return;
-    openPrDetailTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
-    if (item.kind === 'claude_review') openClaudeReview(prId);
-    else if (item.threadId != null) showThreadInChanges(prId, item.threadId);
+    const meta = metaOf(item, prId);
+    const opts = { fromActivity: true, returnItemId: item.id };
+    // A Claude run lands on its Claude Review tab — openClaudeReview opens the pr-detail tab
+    // itself (so it works from any overlay), so don't also open it here (avoids a double open).
+    if (item.kind === 'claude_review') {
+      openClaudeReview(meta, opts);
+      return;
+    }
+    openPrDetailTab(meta, opts);
+    if (item.threadId != null) showThreadInChanges(prId, item.threadId);
     else if (item.commentId != null) showPrComment(prId, item.commentId);
     else selectPr(prId);
   }
@@ -274,7 +304,23 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   }
 
   return (
-    <div className="space-y-3" data-testid="feed-view">
+    <div className="space-y-3" data-testid="feed-view" ref={rootRef}>
+      {/* Feed-wide "new activity" banner — sticks to the top of the feed pane while there's
+          newer server activity than what's loaded. Manual by design (never yanks content
+          while you're reading); clicking it refreshes the feed + scrolls to the top. */}
+      {hasNew && (
+        <div className="sticky top-0 z-10">
+          <button
+            type="button"
+            onClick={onRefreshClick}
+            data-testid="feed-new-activity"
+            className="flex w-full items-center justify-center gap-2 rounded-full border border-sky-400 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 shadow-sm transition-colors hover:bg-sky-100 dark:border-sky-500/60 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/60"
+          >
+            <span aria-hidden="true">↑</span> New activity — Refresh
+          </button>
+        </div>
+      )}
+
       {/* The AI repo-summary (digest) collection now lives in the Insights panel — one home
           for every AI summary, with a single unified Refresh. It's no longer atop the Feed. */}
 
@@ -846,6 +892,27 @@ function FeedRow({
                 {expanded ? 'Show less' : 'Show more'}
               </button>
             )}
+          </div>
+        )}
+
+        {/* Consolidated top-level PR comment(s) folded into this review (posted by the same
+            person around the same time) — shown as "Also commented" instead of separate feed
+            rows. Independent of the review body so a bare approval + comment still shows it. */}
+        {item.mergedComments.length > 0 && (
+          <div className="mt-1.5 space-y-1.5">
+            {item.mergedComments.map((c) => (
+              <div
+                key={c.commentId}
+                className="rounded bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50"
+              >
+                <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                  Also commented
+                </div>
+                <div className="max-h-72 overflow-auto">
+                  <Markdown>{c.content}</Markdown>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
