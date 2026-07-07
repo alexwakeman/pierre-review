@@ -6,16 +6,19 @@ import Nav from './components/Nav';
 import Footer from './components/Footer';
 import Home from './pages/Home';
 import Features from './pages/Features';
-import Insights from './pages/Insights';
-import Reviews from './pages/Reviews';
+import Pro from './pages/Pro';
+import Pricing from './pages/Pricing';
 import HowItWorks from './pages/HowItWorks';
 
 const ROUTES: Record<string, () => JSX.Element> = {
   '/': Home,
   '/features': Features,
-  '/insights': Insights,
-  '/reviews': Reviews,
+  '/pro': Pro,
+  '/pricing': Pricing,
   '/how-it-works': HowItWorks,
+  // Legacy routes from the pre-Pro site — same page, old links keep working.
+  '/insights': Pro,
+  '/reviews': Pro,
 };
 
 function NotFound(): JSX.Element {

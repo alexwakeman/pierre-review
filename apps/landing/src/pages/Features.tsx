@@ -1,19 +1,35 @@
 import type { ReactNode } from 'react';
 import { Link } from '../router';
 import { useSeo } from '../lib/seo';
-import { Section, SectionHeading, Shot, Eyebrow, Pill, Glow, FeatureRow } from '../components/ui';
+import { Section, Shot, Eyebrow, Pill, Glow, FeatureRow } from '../components/ui';
 import {
   TimelineIcon,
-  FocusIcon,
-  MyTurnIcon,
   FeedIcon,
   ThreadIcon,
   StripIcon,
-  FilterIcon,
-  KeyboardIcon,
+  BoltIcon,
   ShieldIcon,
   ArrowRightIcon,
 } from '../components/icons';
+
+/** Locally-owned icon (repo console) — shared icons.tsx is owned elsewhere. */
+function ConsoleIcon({ className }: { className?: string }): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 9h18M7 13h4M7 16.5h7" />
+    </svg>
+  );
+}
 
 function Why({ children }: { children: ReactNode }): JSX.Element {
   return (
@@ -74,17 +90,16 @@ const DERIVED_STATES = [
 const SHORTCUTS = [
   { keys: ['/'], label: 'Jump to the repo search' },
   { keys: ['j', 'k'], label: 'Cycle through PRs' },
-  { keys: ['m'], label: 'Enter My Turn Focus' },
-  { keys: ['i'], label: 'Open Insights' },
-  { keys: ['Esc'], label: 'Step back out — focus, then selection' },
+  { keys: ['i'], label: 'Open the Activity console' },
+  { keys: ['Esc'], label: 'Step back out — tab, then selection' },
 ];
 
 export default function Features(): JSX.Element {
   useSeo({
     path: '/features',
-    title: 'Pierre features — GitHub timeline, PR triage & Focus mode',
+    title: 'Open Core — the free multi-repo GitHub dashboard',
     description:
-      'A tour of Pierre: the repo→contributor timeline, Focus mode, My Turn triage, the watched-repo Feed, derived thread state, the PR detail pane, and URL-shareable filters.',
+      'The free, open-core tier in full: the cross-repo Activity feed, the repo→contributor timeline, per-repo consoles, derived thread states, PR detail with real write actions, and the open-PR strip. Free, forever.',
   });
 
   return (
@@ -93,17 +108,59 @@ export default function Features(): JSX.Element {
       <header className="relative overflow-hidden">
         <Glow className="absolute -top-24 left-1/2 h-96 w-[40rem] max-w-full -translate-x-1/2 rounded-full bg-brand-blue/15 blur-[130px]" />
         <Section width="default" className="pb-12 pt-16 text-center sm:pt-20">
-          <Eyebrow>The product tour</Eyebrow>
+          <Eyebrow>Open core — free forever</Eyebrow>
           <h1 className="mx-auto mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight tracking-tight text-gray-50 sm:text-5xl">
             Every part of the board, and why it’s there.
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-pretty text-lg leading-relaxed text-gray-400">
             Pierre is opinionated about one thing: the fastest way to understand a team is
-            to <em>see</em> it. Here’s the whole surface — built so the answer to “what’s
-            going on?” is a glance, not an investigation.
+            to <em>see</em> it. Everything on this page is free and open-core — not a trial,
+            not a taster. The core is the product.
           </p>
         </Section>
       </header>
+
+      {/* activity feed */}
+      <Section id="activity" width="wide" className="scroll-mt-24 py-12 sm:py-16">
+        <FeatureRow
+          flip
+          shot={
+            <Shot
+              src="/shots/activity-feed.png"
+              alt="The Activity feed: one chronological cross-repo stream of PR opens, merges, reviews, comments and thread-addressing pushes."
+              title="pierre · Activity"
+              eager
+              priority
+              width={3200}
+              height={2000}
+            />
+          }
+        >
+          <FeatureHeading
+            icon={FeedIcon}
+            accent="text-brand-green"
+            eyebrow="The Activity feed"
+            title="A feed that reads like a changelog, not a firehose."
+          />
+          <p className="mt-5 text-pretty leading-relaxed text-gray-400">
+            The view Pierre opens on: one consolidated, cross-repo stream of what actually
+            happened — opens, merges, reviews, comments — and the commits that{' '}
+            <span className="text-gray-200">addressed a review thread</span>, coalesced into
+            runs per author so “pushed 4 commits · addressed 2 threads” is one line, not
+            four. Chronological, bot-filterable, full markdown bodies inline.
+          </p>
+          <p className="mt-4 text-pretty leading-relaxed text-gray-400">
+            Click any card and the full PR detail opens in its own tab; browser{' '}
+            <span className="font-medium text-gray-200">Back</span> returns you to the exact
+            feed item you left, scrolled into place. Reply to and resolve threads without
+            leaving the feed.
+          </p>
+          <Why>
+            It’s the “what did I miss overnight?” view — answerable in ten seconds, instead
+            of by reconstructing the day from Slack, GitHub, email and Jira.
+          </Why>
+        </FeatureRow>
+      </Section>
 
       {/* timeline */}
       <Section id="timeline" width="wide" className="scroll-mt-24 py-12 sm:py-16">
@@ -117,8 +174,7 @@ export default function Features(): JSX.Element {
           <Shot
             src="/shots/timeline.png"
             alt="The Pierre timeline grouped repo → contributor, with PR bars packed into lanes and shaped event markers."
-            eager
-            priority
+            title="pierre · Timeline"
             width={3200}
             height={2000}
           />
@@ -126,26 +182,32 @@ export default function Features(): JSX.Element {
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
           <div className="space-y-4 text-pretty leading-relaxed text-gray-400">
             <p>
-              The board is a <code className="font-mono text-gray-300">vis-timeline</code>{' '}
-              nested two levels deep: each repo holds a row per contributor. PR bars pack
-              into lanes so nothing overlaps; opens, reviews, comments and commits render as
-              distinct <span className="text-gray-200">shaped markers</span> that cluster
-              into counts as you zoom out and expand again as you zoom in.
+              When the feed answers “what happened?” and you want “what’s the shape of it?”,
+              switch to the board. It’s nested two levels deep: each repo holds a row per
+              contributor. PR bars pack into lanes so nothing overlaps; opens, reviews,
+              comments and commits render as distinct{' '}
+              <span className="text-gray-200">shaped markers</span> that cluster into counts
+              as you zoom out and expand again as you zoom in.
             </p>
             <p>
-              Repos get alternating zebra tints by stable rank (not <code className="font-mono text-gray-300">id % 2</code>,
-              so colours don’t reshuffle as you toggle repos), contributors with merge
-              rights wear a <span className="inline-flex items-center gap-1 text-gray-200"><ShieldIcon className="h-4 w-4 text-brand-green" />maintainer shield</span>,
-              and every name links to its GitHub profile. Collapse a noisy contributor to a
-              single line; it’s remembered across reloads.
+              Contributors with merge rights wear a{' '}
+              <span className="inline-flex items-center gap-1 text-gray-200">
+                <ShieldIcon className="h-4 w-4 text-brand-green" />
+                maintainer shield
+              </span>
+              , every name links to its GitHub profile, and a noisy contributor collapses to
+              a single line — remembered across reloads. Click a marker to read the actual
+              review or comment in a popover; click a bar to load the PR into the detail
+              pane.
             </p>
           </div>
           <div className="space-y-4 text-pretty leading-relaxed text-gray-400">
             <p>
-              Click a marker to read the actual review or comment in a popover, without
-              leaving the board. Click a bar to load the PR into the detail pane below.
-              Clicking empty canvas dismisses one layer at a time — popover, then selection
-              — so you never lose your place by accident.
+              And it’s fast in a way GitHub structurally isn’t. GitHub makes you click
+              through repo → pull requests → files → back, once per repo, per PR. Pierre
+              renders your whole org’s activity in one scan — and because everything is{' '}
+              <span className="text-gray-200">synced locally first</span>, navigation is
+              instant. No spinners between you and the answer.
             </p>
             <Why>
               A list tells you a PR exists. A timeline tells you it’s been open eleven days,
@@ -172,146 +234,37 @@ export default function Features(): JSX.Element {
         </div>
       </Section>
 
-      {/* focus */}
-      <Section id="focus" width="wide" className="scroll-mt-24 py-12 sm:py-16">
+      {/* repo console */}
+      <Section id="repo-console" width="wide" className="scroll-mt-24 py-12 sm:py-16">
         <FeatureRow
-          flip
           shot={
             <Shot
-              src="/shots/focus-mode.png"
-              alt="Focus mode: a single PR isolated on the timeline with every contributor who touched it, sibling work hidden and cross-person connectors drawn."
-              title="pierre · Focus mode"
+              src="/shots/repo-console-free.png"
+              alt="A per-repo console: stats header, thread-state bar, and the repo’s open PRs with CI and approval standing."
+              title="pierre · Repo console"
             />
           }
         >
           <FeatureHeading
-            icon={FocusIcon}
-            accent="text-brand-skySoft"
-            eyebrow="Focus mode"
-            title="One thread of work, the rest of the world muted."
+            icon={ConsoleIcon}
+            accent="text-brand-sky"
+            eyebrow="Repo consoles"
+            title="Each repo gets a console. State of play at a glance."
           />
           <p className="mt-5 text-pretty leading-relaxed text-gray-400">
-            Double-click a PR bar, click a cross-person marker, or hit “Focus” in the detail
-            pane and the timeline collapses to a single PR and everyone touching it. Sibling
-            bars and unrelated markers vanish; the window fits the PR’s full span; connector
-            lines join each person’s contribution back to the bar.
+            Pick a repo in the Activity rail and you get its state of play: a compact stats
+            header, a <span className="text-gray-200">thread-state bar</span> showing how
+            much review feedback is resolved versus sitting, and every open PR with its CI
+            status, approval standing and thread counts — then that repo’s own feed
+            underneath.
           </p>
           <p className="mt-4 text-pretty leading-relaxed text-gray-400">
-            It’s sticky — clicks explore rather than exit — and it exits the way it entered.{' '}
-            <span className="font-medium text-gray-200">Esc</span>, the Focus mode pill, or
-            the browser <span className="font-medium text-gray-200">Back</span> button all
-            drop you out and restore the exact scroll position you left from, not a jarring
-            jump to the top.
+            The whole console re-scopes live with your repo and member filters, so “how’s
+            the payments repo doing this sprint?” is one click, not a query.
           </p>
           <Why>
-            When a release is blocked on “that one PR,” you want the conversation, not the
-            haystack around it. Focus is the difference between scrolling and reading.
-          </Why>
-        </FeatureRow>
-      </Section>
-
-      {/* open-pr strip */}
-      <Section id="open-prs" width="wide" className="scroll-mt-24 py-12 sm:py-16">
-        <FeatureRow
-          shot={
-            <Shot
-              src="/shots/open-pr-strip.png"
-              alt="The open-PR strip: a collapsible row of every open PR with all / my-turn / needs-attention filters and reason tags."
-              title="pierre · Open PRs"
-            />
-          }
-        >
-          <FeatureHeading
-            icon={StripIcon}
-            accent="text-brand-blue"
-            eyebrow="Open-PR strip"
-            title="Every open PR, with a reason it’s on the list."
-          />
-          <p className="mt-5 text-pretty leading-relaxed text-gray-400">
-            A collapsible strip across the top holds every open PR in your watched repos.
-            Filter to <span className="font-mono text-gray-300">all</span>,{' '}
-            <span className="font-mono text-gray-300">my&nbsp;turn</span>, or{' '}
-            <span className="font-mono text-gray-300">needs&nbsp;attention</span>, and each
-            card carries a reason tag — awaiting your review, CI failing, merge conflicts,
-            approved &amp; ready, stalled — computed from the PR’s real state.
-          </p>
-          <Why>
-            “Stalled” isn’t a guess — it’s an open PR with unresolved threads and no commits
-            for days. Naming the reason is what turns a list into a worklist.
-          </Why>
-        </FeatureRow>
-      </Section>
-
-      {/* my turn */}
-      <Section id="my-turn" width="wide" className="scroll-mt-24 py-12 sm:py-16">
-        <FeatureRow
-          flip
-          shot={
-            <Shot
-              src="/shots/my-turn.png"
-              alt="The My Turn panel grouping reviews awaiting you, your PRs with new activity, and threads awaiting your response."
-              title="pierre · My Turn"
-            />
-          }
-        >
-          <FeatureHeading
-            icon={MyTurnIcon}
-            accent="text-brand-amber"
-            eyebrow="My Turn"
-            title="The queue of things actually waiting on you."
-          />
-          <p className="mt-5 text-pretty leading-relaxed text-gray-400">
-            Triage is computed on read — never stored stale — from your real identity and
-            the synced activity: PRs where you’re a requested reviewer, your own PRs with
-            new commits/comments/reviews since you last looked, and review threads you
-            started that someone else has since replied to. Dismiss one and it’s gone until
-            genuinely new activity resurfaces it.
-          </p>
-          <p className="mt-4 text-pretty leading-relaxed text-gray-400">
-            <span className="font-medium text-gray-200">My Turn Focus</span> is its own mode:
-            the board isolates to just your inbox PRs, and — because something awaiting you
-            might be older than your date filter — Pierre quietly widens the fetched range
-            (up to 90 days) so nothing in your court hides off-screen. A two-level Back stack
-            steps you out the way you came in.
-          </p>
-          <Why>
-            Notifications optimise for <em>completeness</em>. My Turn optimises for{' '}
-            <em>your next action</em>.
-          </Why>
-        </FeatureRow>
-      </Section>
-
-      {/* feed */}
-      <Section id="feed" width="wide" className="scroll-mt-24 py-12 sm:py-16">
-        <FeatureRow
-          shot={
-            <Shot
-              src="/shots/feed.png"
-              alt="The Feed panel: a chronological stream of opens, reviews, comments and merges across watched repos, with click-to-show-on-timeline."
-              title="pierre · Feed"
-            />
-          }
-        >
-          <FeatureHeading
-            icon={FeedIcon}
-            accent="text-brand-green"
-            eyebrow="Feed"
-            title="A calm changelog of the repos you care about."
-          />
-          <p className="mt-5 text-pretty leading-relaxed text-gray-400">
-            The Feed is a reverse-chronological stream of what happened across your watched
-            repos — opens, ready-for-review, reviews, comments, merges and reopens.{' '}
-            <span className="text-gray-200">Commits are deliberately excluded</span> so it
-            stays signal, not log spam. Click any entry to light it up on the timeline.
-          </p>
-          <p className="mt-4 text-pretty leading-relaxed text-gray-400">
-            It lives in your browser’s IndexedDB, deduped and pruned to a rolling window, so
-            it survives reloads and tells you what’s new since you last looked — and the
-            browser Back button always returns you straight to the Feed home.
-          </p>
-          <Why>
-            It’s the “what did I miss overnight?” view — answerable in ten seconds, instead
-            of by scrolling three Slack channels and your email.
+            Standups ask the same question per repo every day. The console is that answer,
+            pre-assembled, before anyone shares a screen.
           </Why>
         </FeatureRow>
       </Section>
@@ -357,7 +310,7 @@ export default function Features(): JSX.Element {
           shot={
             <Shot
               src="/shots/pr-detail.png"
-              alt="The PR detail pane: Overview with checks, reviewers and approvers; Threads grouped by file; and an Activity feed."
+              alt="The PR detail pane: Overview with checks, reviewers and approvers; Threads grouped by file; inline diffs; and an Activity feed."
               title="pierre · PR detail"
             />
           }
@@ -369,54 +322,101 @@ export default function Features(): JSX.Element {
             title="Drill in without leaving the dashboard."
           />
           <p className="mt-5 text-pretty leading-relaxed text-gray-400">
-            Select a PR and a resizable pane opens with three tabs:{' '}
-            <span className="text-gray-200">Overview</span> (CI checks, reviewers vs
-            approvers vs merged-by, requested reviewers, labels, summary and PR comments),{' '}
-            <span className="text-gray-200">Threads</span> (grouped by file, newest first,
-            with code anchors and new-comment highlights), and{' '}
-            <span className="text-gray-200">Activity</span> (a chronological feed, each entry
-            with a “Show on timeline” deep-link).
+            Select a PR and the full detail opens in place:{' '}
+            <span className="text-gray-200">Overview</span> (CI checks with failing-job
+            logs, reviewers vs approvers vs merged-by, requested reviewers, labels, summary
+            and comments), <span className="text-gray-200">Threads</span> (grouped by file,
+            newest first, with code anchors), inline file{' '}
+            <span className="text-gray-200">diffs</span> with unresolved threads pinned to
+            their lines, and a per-PR activity feed — each entry with a “Show on timeline”
+            deep-link.
           </p>
           <p className="mt-4 text-pretty leading-relaxed text-gray-400">
-            It’s not read-only. Reply to and resolve threads, leave a PR comment, and approve
-            — the approve control is gated on your real{' '}
+            It’s not read-only. Reply to and resolve threads, leave PR comments with{' '}
+            <span className="font-mono text-gray-300">@mention</span> autocomplete, request
+            reviewers, and approve — real GitHub writes, and the approve control is gated on
+            your real{' '}
             <code className="font-mono text-gray-300">viewer_permission</code>, so it only
-            appears when you can actually merge there.
+            appears when you genuinely can.
           </p>
+          <Why>
+            Every context switch back to github.com is a chance to get lost in the tabs. If
+            the answer <em>and</em> the action live in the dashboard, the loop stays closed.
+          </Why>
         </FeatureRow>
       </Section>
 
-      {/* filters + keyboard */}
-      <Section width="wide" className="py-12 sm:py-16">
+      {/* open-pr strip */}
+      <Section id="open-prs" width="wide" className="scroll-mt-24 py-12 sm:py-16">
+        <FeatureRow
+          shot={
+            <Shot
+              src="/shots/open-pr-strip.png"
+              alt="The open-PR strip: a collapsible row of every open PR with all / my-turn / needs-attention filters and reason tags."
+              title="pierre · Open PRs"
+            />
+          }
+        >
+          <FeatureHeading
+            icon={StripIcon}
+            accent="text-brand-blue"
+            eyebrow="Open-PR strip"
+            title="Every open PR, with a reason it’s on the list."
+          />
+          <p className="mt-5 text-pretty leading-relaxed text-gray-400">
+            A collapsible strip across the top holds every open PR in your watched repos.
+            Filter to <span className="font-mono text-gray-300">all</span>,{' '}
+            <span className="font-mono text-gray-300">my&nbsp;turn</span>, or{' '}
+            <span className="font-mono text-gray-300">needs&nbsp;attention</span>, and each
+            card carries a reason tag — awaiting your review, CI failing, merge conflicts,
+            approved &amp; ready, stalled — computed from the PR’s real state. The strip even
+            keeps a running <span className="text-gray-200">stalled count</span>, so a
+            growing backlog of quiet PRs is a number you can’t miss.
+          </p>
+          <Why>
+            Stale PRs are where work silently dies. Pierre flags any open PR that’s gone
+            quiet — unresolved threads, no commits for days — so it never slips past a
+            sprint boundary unnoticed. And on the timeline they’re impossible to miss: a
+            long bar with no recent markers <em>is</em> a stall, at a glance.
+          </Why>
+        </FeatureRow>
+      </Section>
+
+      {/* fast */}
+      <Section id="fast" width="wide" className="scroll-mt-24 py-12 sm:py-16">
         <div className="grid gap-8 lg:grid-cols-2 lg:gap-12">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-7">
-            <div className="flex items-center gap-2">
-              <FilterIcon className="h-5 w-5 text-brand-sky" />
-              <Eyebrow>Filters &amp; URL state</Eyebrow>
-            </div>
-            <h2 className="mt-3 text-xl font-bold tracking-tight text-gray-50 sm:text-2xl">
-              Every view is a link.
-            </h2>
+          <div>
+            <FeatureHeading
+              icon={BoltIcon}
+              accent="text-brand-amber"
+              eyebrow="Speed"
+              title="Fast is a feature."
+            />
+            <p className="mt-5 text-pretty leading-relaxed text-gray-400">
+              Everything is synced into a local database and served through a deliberately
+              lean read layer — the board never waits on GitHub to render. Filters compose
+              instantly: repos, members, date presets, event categories, thread states,
+              review verdicts. The whole thing feels like a native app because,
+              architecturally, it nearly is one.
+            </p>
             <p className="mt-4 text-pretty leading-relaxed text-gray-400">
-              Repos, members, date range, event categories, PR statuses, review verdicts and
-              derived thread states all compose — and mirror into the query string both ways.
-              The serializer diffs against defaults, so the common view stays a clean URL and
-              a custom one is shareable and reloadable.
+              And <span className="text-gray-200">every view is a URL</span>. The filter
+              state mirrors into the query string both ways, diffed against defaults — so
+              the common view stays a clean link and a custom one is shareable, reloadable
+              and bookmarkable.
             </p>
-            <p className="mt-3 text-sm text-gray-500">
-              Auto-scoped members, an exclude-bots toggle, range presets (7/14/30/90d) and a
-              “Now” jump are all one tap away.
-            </p>
+            <Why>
+              A dashboard you wait for is a dashboard you stop opening. Speed isn’t polish
+              here — it’s the difference between a habit and a bookmark you feel guilty
+              about.
+            </Why>
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-7">
-            <div className="flex items-center gap-2">
-              <KeyboardIcon className="h-5 w-5 text-brand-sky" />
-              <Eyebrow>Keyboard</Eyebrow>
-            </div>
-            <h2 className="mt-3 text-xl font-bold tracking-tight text-gray-50 sm:text-2xl">
+            <Eyebrow>Keyboard</Eyebrow>
+            <h3 className="mt-3 text-xl font-bold tracking-tight text-gray-50 sm:text-2xl">
               Hands on the keys.
-            </h2>
+            </h3>
             <ul className="mt-5 space-y-3">
               {SHORTCUTS.map((s) => (
                 <li key={s.label} className="flex items-center gap-3">
@@ -434,27 +434,31 @@ export default function Features(): JSX.Element {
                 </li>
               ))}
             </ul>
+            <p className="mt-6 border-t border-white/5 pt-4 text-sm text-gray-500">
+              Deep links work everywhere too — a PR, a thread, a filtered view are all
+              addresses you can paste into a standup note.
+            </p>
           </div>
         </div>
       </Section>
 
       {/* next */}
       <Section width="narrow" className="py-20 text-center">
-        <Pill className="bg-brand-sky/10 text-brand-skySoft ring-brand-sky/30">
+        <Pill className="bg-brand-purple/15 text-brand-purpleSoft ring-brand-purple/30">
           Keep going
         </Pill>
         <h2 className="mt-4 text-pretty text-2xl font-bold tracking-tight text-gray-50 sm:text-3xl">
-          See the numbers behind the board.
+          The intelligence layer lives in Pro.
         </h2>
         <p className="mx-auto mt-3 max-w-lg text-gray-400">
-          Insights turns the same synced data into per-repo throughput, latency and
-          cycle-time analytics.
+          AI summaries, team Insights, flow metrics, My-Turn triage, Slack digests, and
+          agentic review &amp; fix — everything that turns activity into decisions.
         </p>
         <Link
-          to="/insights"
+          to="/pro"
           className="group mt-7 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-gray-100 transition hover:bg-white/10"
         >
-          Explore Insights
+          Explore Pro
           <ArrowRightIcon className="h-4 w-4 transition group-hover:translate-x-0.5" />
         </Link>
       </Section>

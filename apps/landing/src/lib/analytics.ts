@@ -36,8 +36,13 @@ export function initAnalytics(): void {
   document.head.appendChild(s);
 
   window.dataLayer = window.dataLayer || [];
-  window.gtag = function gtag(...args: unknown[]) {
-    window.dataLayer!.push(args);
+  // MUST push the genuine `arguments` object, exactly like Google's snippet
+  // (`function gtag(){dataLayer.push(arguments)}`): gtag.js silently ignores
+  // commands pushed as plain arrays, so a rest-param version loads the script
+  // but never executes `config` and never sends a single hit.
+  window.gtag = function gtag() {
+    // eslint-disable-next-line prefer-rest-params
+    window.dataLayer!.push(arguments);
   };
   window.gtag('js', new Date());
   // We send page_view ourselves on each client-side route change (below), so the

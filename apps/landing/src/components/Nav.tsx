@@ -3,13 +3,15 @@ import { Link, useRoute } from '../router';
 import { GitHubMark, MenuIcon, CloseIcon } from './icons';
 
 const NAV_LINKS = [
-  { to: '/features', label: 'Features' },
-  { to: '/insights', label: 'Insights' },
-  { to: '/reviews', label: 'Claude Review' },
+  { to: '/features', label: 'Open Core' },
+  { to: '/pro', label: 'Pro' },
+  { to: '/pricing', label: 'Pricing' },
   { to: '/how-it-works', label: 'How it works' },
 ];
 
 function isActive(path: string, to: string): boolean {
+  // Legacy /insights and /reviews render the Pro page — light the Pro link up.
+  if (to === '/pro' && (path === '/insights' || path === '/reviews')) return true;
   return path === to;
 }
 

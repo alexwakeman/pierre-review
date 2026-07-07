@@ -274,7 +274,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-testid="feed-view">
       {/* The AI repo-summary (digest) collection now lives in the Insights panel — one home
           for every AI summary, with a single unified Refresh. It's no longer atop the Feed. */}
 

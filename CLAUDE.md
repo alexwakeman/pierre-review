@@ -184,6 +184,8 @@ All from the repo root unless noted.
 | `pnpm sync:once owner/repo` | one-off sync of one repo without starting the server |
 | `pnpm --filter @pierre-review/backend verify:isolation` | query-layer cross-account IDOR check (throwaway DB) |
 | `pnpm --filter @pierre/pro typecheck` | typecheck the private Pro plugin (present only when the submodule is checked out) |
+| `pnpm demo` | seed the fictional `acme/*` demo data + boot the ISOLATED demo stack (`:4100`/`:5273`, gh off PATH) for browsing; `--free` = OSS mode, `--no-seed` reuses the DB |
+| `pnpm shots` | the whole landing-screenshot pipeline: seed → Pro shots → restart in OSS mode → free shots → teardown (`scripts/demo-stack.mjs` + `capture-shots.mjs`) |
 | `pnpm package` | assemble `./release` for publishing |
 
 `DEPLOYMENT_MODE=local` (default) vs `cloud` selects the whole stack (SQLite vs Postgres,
@@ -559,9 +561,17 @@ posts **one** GitHub review (inline + body + verdict).
 - **Frontend:** `ClaudeReviewTab.tsx` + `useClaudeReview.ts` (polls `…/status` while
   running). Claude's output is **read-only** (Copy buttons); a separate "Your review"
   textarea + verdict is what posts. Re-reviewing the same head SHA **warns but is allowed**.
-- **Packaging:** the SDK + its peers (`@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`, `zod`)
-  are curated runtime deps in `build-release.mjs`; the inline prompt + `import type`-only
-  shared usage keep the no-`.ts`-leak / no-shared-runtime guards passing.
+- **Packaging (NO AI in npm):** the AI SDKs (`@anthropic-ai/claude-agent-sdk`,
+  `@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`, and `zod` — used only by the AI tools'
+  submit-review schemas) are **NOT** curated runtime deps in `build-release.mjs`; a guardrail
+  assert fails the build if any leak into `release/package.json`. Every module that pulls one
+  is reached **only** through a dynamic `await import()` — from the private `@pierre/pro`
+  plugin's seams (`review/agent`, `coding/agent`, `coding/merge`, `review/prepare`,
+  `review/post-seam`) or lazily inside `review/llm.ts` — so the SDKs load **only when the
+  plugin is present** (author/dev checkout), **never from npm** and **never in cloud** (`bind.ts`
+  returns before any AI import when `!config.proEnabled`). The compiled-but-inert AI `.js`
+  files still ship as dead code (harmless — nothing loads them). The inline prompt + `import
+  type`-only shared usage keep the no-`.ts`-leak / no-shared-runtime guards passing.
 
 ## Open-core Pro plugin (`@pierre/pro`) + the Activity tab
 
@@ -777,9 +787,13 @@ browser (built-in, no dep) unless `--no-open`.
 **`pnpm package`** (`scripts/build-release.mjs`) assembles `./release/`: builds
 frontend(`/app`)+landing+backend, copies compiled JS + both migration folders +
 SPA→`public/` + landing→`public-landing/`, generates `package.json` (curated deps:
-**drop** shared, **add** `@fastify/static|cookie|secure-session`, `pg`). Sanity asserts
-fail on a missing key file, a leaked `.ts`, or a shared runtime import. `better-sqlite3`
-is a native runtime dep; `pg` loads only in cloud.
+**drop** shared **and all AI SDKs** (`@anthropic-ai/*`, `@modelcontextprotocol/sdk`, `zod`),
+**add** `@fastify/static|cookie|secure-session`, `pg`). Sanity asserts fail on a missing key
+file, a leaked `.ts`, a shared runtime import, or **any AI SDK dep leaking into the manifest**.
+`better-sqlite3` is a native runtime dep; `pg` loads only in cloud. **No AI ships in npm** —
+the AI SDKs load only when the private `@pierre/pro` plugin is present (dev/author checkout),
+via dynamic `await import()`; an npm-local user (`proEnabled` true, plugin absent) never
+touches them, and cloud never registers AI routes (`bind.ts` returns before any AI import).
 
 ---
 
@@ -792,4 +806,5 @@ storage; `0013` Claude-review routing (`reviewMode`/`routeReason`); `0014`
 starts empty (synced data is regenerable; no SQLite→Postgres migration). **Docs:**
 `docs/SYNC.md`, `docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-APP-SETUP.md`,
 `docs/LOCAL-CLOUD-TESTING.md`, `docs/DOMAIN-REPUTATION.md` (Safe Browsing + Search Console),
+`docs/BILLING-STRIPE.md` (Stripe Payment Link + webhook → `accounts.plan` entitlement),
 `docs/RELEASE.md`.

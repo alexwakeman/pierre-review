@@ -9,20 +9,20 @@
          per-route <title>/description/canonical/og:url are set at runtime by the
          useSeo() hook (src/lib/seo.ts) — so canonical is NOT hard-coded here (a
          non-JS crawl of a sub-page would otherwise canonicalise it to home). -->
-    <title>Pierre — see your team’s GitHub activity at a glance</title>
+    <title>Pierre — your team’s GitHub on one fast timeline</title>
     <meta
       name="description"
-      content="Pierre turns GitHub’s firehose of emails, pings and pulls into one calm, timeline-first dashboard — who’s doing what, what’s stalled, and what needs your review."
+      content="A single pane of glass for all your team’s GitHub activity — every PR, review thread and CI run across every repo. See what’s stalled, what’s yours, and what the AI slipped past everyone."
     />
     <meta name="robots" content="index, follow" />
 
     <!-- Open Graph / Twitter (home defaults; useSeo() sets per-route title/desc/url). -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Pierre" />
-    <meta property="og:title" content="Pierre — see your team’s GitHub activity at a glance" />
+    <meta property="og:title" content="Pierre — your team’s GitHub on one fast timeline" />
     <meta
       property="og:description"
-      content="One calm, timeline-first dashboard for the whole team’s GitHub activity — persistent Claude code reviews, always there to refer back to."
+      content="One fast timeline for the whole team’s GitHub activity — every PR, review thread and CI run across every repo, with an AI layer that answers to you."
     />
     <meta property="og:image" content="https://pierre-review.com/og-image.png" />
     <meta property="og:image:width" content="1200" />
@@ -32,10 +32,10 @@
       content="The Pierre timeline dashboard showing pull-request activity across a team’s repositories."
     />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Pierre — see your team’s GitHub activity at a glance" />
+    <meta name="twitter:title" content="Pierre — your team’s GitHub on one fast timeline" />
     <meta
       name="twitter:description"
-      content="One calm, timeline-first dashboard for the whole team’s GitHub activity — persistent Claude code reviews, always there to refer back to."
+      content="One fast timeline for the whole team’s GitHub activity — every PR, review thread and CI run across every repo, with an AI layer that answers to you."
     />
     <meta name="twitter:image" content="https://pierre-review.com/og-image.png" />
     <meta
@@ -75,10 +75,39 @@
             "name": "Pierre",
             "applicationCategory": "DeveloperApplication",
             "operatingSystem": "Web, macOS, Linux, Windows",
-            "description": "A timeline-first dashboard for tracking a team’s GitHub activity across repositories — sprint situational awareness, PR triage, engineering insights, and persistent Claude code reviews.",
+            "description": "A timeline-first dashboard for tracking a team’s GitHub activity across repositories — sprint situational awareness, PR triage, team insights, flow metrics, and human-in-the-loop AI review.",
             "url": "https://pierre-review.com/",
             "publisher": { "@id": "https://pierre-review.com/#org" },
-            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+            "offers": {
+              "@type": "AggregateOffer",
+              "priceCurrency": "USD",
+              "lowPrice": "0",
+              "highPrice": "5",
+              "offerCount": "2",
+              "offers": [
+                {
+                  "@type": "Offer",
+                  "name": "Free",
+                  "description": "The open-core dashboard: timeline, Activity feed, PR detail and write actions. Free forever.",
+                  "price": "0",
+                  "priceCurrency": "USD"
+                },
+                {
+                  "@type": "Offer",
+                  "name": "Pro",
+                  "description": "The intelligence layer: AI summaries, team Insights, flow metrics, Slack digests and My Turn. $5 per month.",
+                  "price": "5",
+                  "priceCurrency": "USD",
+                  "priceSpecification": {
+                    "@type": "UnitPriceSpecification",
+                    "price": "5",
+                    "priceCurrency": "USD",
+                    "billingIncrement": 1,
+                    "unitText": "MONTH"
+                  }
+                }
+              ]
+            },
             "softwareHelp": "https://github.com/alexwakeman/pierre-review"
           }
         ]

@@ -90,9 +90,9 @@ const SYNC_CARDS: { icon: (p: { className?: string }) => ReactNode; accent: stri
     title: 'Lean storage',
     body: (
       <>
-        By default Pierre skips the bulky, regenerable text — comment and PR bodies, diff
-        hunks, commit messages — keeping the DB small. It’s hydrated on demand when you open a
-        PR and cached in your browser’s IndexedDB, so an unchanged PR never re-downloads. Flip
+        By default Pierre skips the bulky, regenerable text — PR descriptions, diff hunks,
+        commit messages — keeping the DB small. It’s hydrated on demand when you open a PR
+        and cached in your browser’s IndexedDB, so an unchanged PR never re-downloads. Flip
         one flag to store everything for fully-offline detail.
       </>
     ),
@@ -107,40 +107,40 @@ const SECURITY = [
 
 const ROADMAP: { tag: string; tagCls: string; title: string; body: string }[] = [
   {
+    tag: 'AI',
+    tagCls: 'bg-brand-purple/15 text-brand-purpleSoft ring-brand-purple/30',
+    title: 'Metered advanced AI',
+    body: 'Pay-as-you-go for Claude Review, AI Analysis and AI Fix at API list price — no key of your own required, usage tracked in the same in-app credits.',
+  },
+  {
+    tag: 'AI',
+    tagCls: 'bg-brand-purple/15 text-brand-purpleSoft ring-brand-purple/30',
+    title: 'BYO AI endpoints',
+    body: 'OpenAI-compatible endpoints — Bedrock, self-hosted, open models — so you choose the model and where your code goes, for cost and privacy control.',
+  },
+  {
     tag: 'Integrations',
     tagCls: 'bg-brand-sky/10 text-brand-skySoft ring-brand-sky/30',
-    title: 'Slack',
-    body: 'Push “My Turn” and stalled-PR nudges to Slack, so what needs you reaches you where you already are — without another tab to keep open.',
+    title: 'Deeper Jira/Linear integration',
+    body: 'Ticket links on PRs ship today. Next: pulling ticket status and titles into the board, so a stalled PR is visibly a stalled ticket.',
   },
   {
     tag: 'Integrations',
     tagCls: 'bg-brand-sky/10 text-brand-skySoft ring-brand-sky/30',
-    title: 'Jira',
-    body: 'Tie PRs back to the Jira issues they close, so the board reflects the work — not just the code — and a stalled PR is visibly a stalled ticket.',
+    title: 'Email digests',
+    body: 'The same sprint report and repo digests that reach Slack today, delivered to an inbox — for the teams whose “one place” isn’t Slack.',
   },
   {
-    tag: 'Reviews',
-    tagCls: 'bg-brand-purple/15 text-brand-purpleSoft ring-brand-purple/30',
-    title: 'Automated AI code reviews',
-    body: 'Opt a repo into a review the moment a PR opens or updates, so a structured first pass is waiting before a human even looks.',
-  },
-  {
-    tag: 'Reviews',
-    tagCls: 'bg-brand-purple/15 text-brand-purpleSoft ring-brand-purple/30',
-    title: 'OpenAI option for reviews',
-    body: 'A provider choice alongside Claude — pick the model per run, with the same routing and curate-then-post flow. Bring your own key; no lock-in.',
-  },
-  {
-    tag: 'Reporting',
+    tag: 'Platform',
     tagCls: 'bg-brand-green/10 text-green-200 ring-brand-green/30',
-    title: 'Status reports',
-    body: 'Daily, weekly and bi-weekly digests — what merged, what stalled, where review time went — generated from the same synced data, ready to paste into a standup or a stakeholder update.',
+    title: 'Hosted cloud Pro rollout',
+    body: 'Pro runs in the local and self-hosted deployment today; the hosted cloud tier is rolling out, same features, zero setup.',
   },
   {
     tag: 'Platform',
     tagCls: 'bg-brand-amber/10 text-amber-200 ring-brand-amber/30',
     title: 'A phone-friendly build',
-    body: 'Pierre is a dense, desktop-first tool today. A responsive build for triaging “My Turn” and skimming the Feed from your phone is planned.',
+    body: 'Pierre is a dense, desktop-first tool today. A responsive build for skimming the feed and triaging “My Turn” from your phone is planned.',
   },
 ];
 
@@ -166,7 +166,7 @@ export default function HowItWorks(): JSX.Element {
     path: '/how-it-works',
     title: 'How it works — sync, architecture & roadmap',
     description:
-      'The engineering behind Pierre: an idempotent five-minute sync pipeline with two-phase backfill and lean storage, a dual-dialect SQLite/Postgres data layer, the local-vs-cloud split, the security model — and what’s next (Slack, Jira, automated AI reviews, OpenAI, status reports).',
+      'The engineering behind Pierre: an idempotent five-minute sync pipeline with two-phase backfill and lean storage, a dual-dialect SQLite/Postgres data layer, the local-vs-cloud split, the security model — and what’s next (metered advanced AI, BYO endpoints, deeper Jira/Linear, email digests).',
   });
 
   return (
@@ -240,8 +240,8 @@ export default function HowItWorks(): JSX.Element {
               <ul className="mt-5 space-y-3 text-sm leading-relaxed text-gray-400">
                 <li>• Runs entirely on your machine — SQLite, no hosted backend.</li>
                 <li>• Authenticates with your logged-in <code className="font-mono text-gray-300">gh</code> CLI; stores no credentials.</li>
-                <li>• One synthesized account; opens straight to the timeline.</li>
-                <li>• Claude Review available (opt-in).</li>
+                <li>• One synthesized account; opens straight to the Activity console.</li>
+                <li>• Runs the Pro intelligence layer, including agentic review &amp; fix (opt-in).</li>
                 <li>• <code className="font-mono text-gray-300">npx pierre-review</code> and you’re in.</li>
               </ul>
             </div>
@@ -302,7 +302,7 @@ export default function HowItWorks(): JSX.Element {
           <li>
             <span className="font-medium text-gray-200">3.</span> A single Fastify process
             serves the API and the SPA, the scheduler starts, and your browser opens to the
-            timeline.
+            Activity console.
           </li>
         </ol>
         <p className="mt-5 text-sm text-gray-500">

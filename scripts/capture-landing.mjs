@@ -16,8 +16,8 @@ const ONLY = process.argv[2]; // 'mobile' | 'desktop' | undefined
 const PAGES = [
   ['home', '/'],
   ['features', '/features'],
-  ['insights', '/insights'],
-  ['reviews', '/reviews'],
+  ['pro', '/pro'],
+  ['pricing', '/pricing'],
   ['how-it-works', '/how-it-works'],
 ];
 const DEVICES = [
@@ -43,6 +43,17 @@ for (const [dev, viewport, scale, isMobile] of DEVICES) {
     page.on('pageerror', (e) => consoleErrors.push(`${name}/${dev}: ${String(e)}`));
     await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' });
     await page.waitForTimeout(1500);
+    // Scroll through the page so native lazy-loaded images fire before the
+    // fullPage screenshot (which doesn't scroll on its own).
+    await page.evaluate(async () => {
+      const step = window.innerHeight;
+      for (let y = 0; y < document.body.scrollHeight; y += step) {
+        window.scrollTo(0, y);
+        await new Promise((r) => setTimeout(r, 120));
+      }
+      window.scrollTo(0, 0);
+    });
+    await page.waitForTimeout(800);
     // Detect horizontal overflow (the classic mobile bug).
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

@@ -346,7 +346,7 @@ export function InsightsView(): JSX.Element {
   const cards = data?.cards ?? [];
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-testid="insights-view">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
           Insights

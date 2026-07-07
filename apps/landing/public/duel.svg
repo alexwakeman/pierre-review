@@ -1,0 +1,206 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" fill="none" role="img" aria-label="A tiny knight named Pierre faces a giant friendly cat-faced kraken whose tentacles brandish notification badges.">
+  <defs>
+    <filter id="wobble" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="2" seed="7" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="4.5" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="wobble2" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="2" seed="31" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="3" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+
+  <!-- ink: chalk-white; accent: brand sky #38bdf8 -->
+  <g stroke="#e7e5e4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" filter="url(#wobble)">
+
+    <!-- ============ KRAKEN (right two-thirds, looming) ============ -->
+    <g>
+      <!-- cat ears -->
+      <path d="M676 148 C 664 108, 656 78, 662 52 C 690 66, 712 88, 726 112" stroke-width="3.5"/>
+      <path d="M930 138 C 940 100, 952 72, 950 44 C 922 58, 898 80, 886 104" stroke-width="3.5"/>
+      <!-- inner ear scribble -->
+      <path d="M681 116 C 678 100, 678 88, 682 74" stroke-width="2"/>
+      <path d="M925 108 C 930 92, 934 78, 934 66" stroke-width="2"/>
+
+      <!-- big round head, slightly lumpy, with a sketchy second pass -->
+      <path d="M672 150 C 636 190, 616 246, 622 300 C 628 356, 664 398, 726 416 C 790 434, 866 428, 918 396 C 966 366, 990 312, 982 254 C 974 198, 942 152, 888 128 C 830 102, 718 104, 672 150 Z" stroke-width="4"/>
+      <path d="M678 158 C 648 196, 632 244, 638 292" stroke-width="1.6" opacity="0.55"/>
+      <path d="M900 136 C 946 162, 972 206, 976 252" stroke-width="1.6" opacity="0.55"/>
+
+      <!-- big innocent eyes: wide circles, giant pupils glancing down-left at the knight -->
+      <circle cx="742" cy="252" r="34" stroke-width="3.5"/>
+      <circle cx="878" cy="248" r="34" stroke-width="3.5"/>
+      <circle cx="731" cy="262" r="14" fill="#e7e5e4" stroke="none"/>
+      <circle cx="867" cy="258" r="14" fill="#e7e5e4" stroke="none"/>
+      <circle cx="736" cy="256" r="4" fill="#0a0a0a" stroke="none" opacity="0.9"/>
+      <circle cx="872" cy="252" r="4" fill="#0a0a0a" stroke="none" opacity="0.9"/>
+      <!-- shy little eyebrows -->
+      <path d="M706 206 C 720 198, 740 196, 756 200" stroke-width="2.5"/>
+      <path d="M856 198 C 872 192, 892 194, 906 202" stroke-width="2.5"/>
+
+      <!-- tiny cat w-mouth + nose -->
+      <path d="M800 292 C 804 298, 810 298, 814 292" stroke-width="3"/>
+      <path d="M786 316 C 794 328, 804 330, 808 320 C 812 330, 824 328, 832 316" stroke-width="3"/>
+      <!-- whiskers -->
+      <path d="M700 300 C 674 298, 652 300, 630 306" stroke-width="2"/>
+      <path d="M702 318 C 678 322, 658 328, 640 336" stroke-width="2"/>
+      <path d="M914 296 C 940 292, 962 292, 984 296" stroke-width="2"/>
+      <path d="M912 314 C 938 316, 960 322, 978 330" stroke-width="2"/>
+
+      <!-- underside / mantle skirt where tentacles sprout -->
+      <path d="M648 372 C 668 420, 700 448, 742 462 C 700 470, 668 466, 640 452" stroke-width="3.5"/>
+      <path d="M958 360 C 946 408, 918 442, 878 458 C 918 468, 950 462, 976 446" stroke-width="3.5"/>
+
+      <!-- crosshatch scribble shading on the underside -->
+      <g stroke-width="1.6" opacity="0.6">
+        <path d="M700 420 l 26 -18"/>
+        <path d="M718 434 l 26 -18"/>
+        <path d="M738 446 l 26 -18"/>
+        <path d="M760 454 l 26 -16"/>
+        <path d="M788 458 l 24 -14"/>
+        <path d="M816 458 l 24 -14"/>
+        <path d="M844 456 l 24 -16"/>
+        <path d="M870 448 l 24 -18"/>
+        <path d="M894 438 l 24 -18"/>
+        <path d="M712 418 l 18 20"/>
+        <path d="M744 424 l 16 22"/>
+        <path d="M778 430 l 14 22"/>
+        <path d="M812 434 l 12 22"/>
+        <path d="M846 430 l 10 22"/>
+        <path d="M876 424 l 10 20"/>
+      </g>
+
+      <!-- ============ TENTACLES ============ -->
+      <!-- T1: big one looming left toward the knight, holding a 99+ badge -->
+      <path d="M660 430 C 590 470, 520 470, 466 434 C 414 400, 388 348, 396 300 C 402 264, 428 244, 456 252 C 480 260, 488 286, 476 304" stroke-width="4"/>
+      <path d="M664 448 C 596 486, 526 484, 472 448 C 430 418, 410 374, 416 334" stroke-width="3.5"/>
+      <!-- suckers -->
+      <path d="M600 470 c 4 6 12 6 16 0" stroke-width="2"/>
+      <path d="M548 474 c 4 6 12 6 16 0" stroke-width="2"/>
+      <path d="M498 462 c 4 6 12 6 16 0" stroke-width="2"/>
+
+      <!-- badge 99+ at T1 tip -->
+      <circle cx="452" cy="278" r="30" stroke-width="3.5"/>
+      <text x="452" y="288" font-family="Comic Sans MS, 'Segoe Print', 'Bradley Hand', cursive" font-size="24" fill="#e7e5e4" stroke="none" text-anchor="middle">99+</text>
+
+      <!-- T3: straight up between the ears, waving a PR tag -->
+      <path d="M790 124 C 778 100, 776 80, 786 64" stroke-width="4"/>
+      <rect x="756" y="12" width="76" height="44" rx="10" stroke-width="3"/>
+      <text x="794" y="44" font-family="Comic Sans MS, 'Segoe Print', 'Bradley Hand', cursive" font-size="26" fill="#e7e5e4" stroke="none" text-anchor="middle">PR</text>
+
+      <!-- T4: up-right, holding CI x -->
+      <path d="M902 132 C 928 100, 960 82, 996 84 C 1024 86, 1040 104, 1036 124" stroke-width="4"/>
+      <rect x="1010" y="120" width="102" height="46" rx="8" stroke-width="3"/>
+      <text x="1046" y="153" font-family="Comic Sans MS, 'Segoe Print', 'Bradley Hand', cursive" font-size="24" fill="#e7e5e4" stroke="none" text-anchor="middle">CI</text>
+      <path d="M1076 132 l 20 22 M 1096 132 l -20 22" stroke-width="3.5"/>
+
+      <!-- T5: right side, envelope -->
+      <path d="M972 330 C 1024 340, 1068 364, 1094 402 C 1114 432, 1114 462, 1096 476" stroke-width="4"/>
+      <rect x="1042" y="472" width="108" height="70" rx="6" stroke-width="3"/>
+      <path d="M1044 478 L 1096 516 L 1148 478" stroke-width="2.5"/>
+      <path d="M980 352 c 4 6 12 6 16 0" stroke-width="2"/>
+      <path d="M1024 372 c 4 6 12 6 16 0" stroke-width="2"/>
+
+      <!-- T6: down-right curl, dangling a speech bubble -->
+      <path d="M912 452 C 946 494, 956 540, 938 578 C 926 602, 902 612, 886 600" stroke-width="4"/>
+      <path d="M920 566 c 4 6 12 6 16 0" stroke-width="2"/>
+      <path d="M906 656 C 898 640, 906 624, 926 618 C 954 608, 996 612, 1016 630 C 1032 644, 1028 666, 1006 674 C 982 682, 944 680, 928 668 L 902 684 L 913 662" stroke-width="3"/>
+      <circle cx="944" cy="646" r="2.8" fill="#e7e5e4" stroke="none"/>
+      <circle cx="966" cy="646" r="2.8" fill="#e7e5e4" stroke="none"/>
+      <circle cx="988" cy="646" r="2.8" fill="#e7e5e4" stroke="none"/>
+
+      <!-- T7: dangling middle tentacle, empty-handed but menacing-ish -->
+      <path d="M742 462 C 732 510, 706 550, 662 572 C 626 590, 590 588, 568 570" stroke-width="4"/>
+      <path d="M686 562 c 4 6 12 6 16 0" stroke-width="2"/>
+      <path d="M638 582 c 4 6 12 6 16 0" stroke-width="2"/>
+
+      <!-- T8: low ground sweep creeping toward the knight, hoisting a bell -->
+      <path d="M700 480 C 668 536, 616 580, 550 606 C 498 626, 452 628, 424 616 C 408 608, 406 594, 418 586 C 428 580, 440 584, 442 594" stroke-width="4"/>
+      <path d="M588 594 c 4 6 12 6 16 0" stroke-width="2"/>
+      <path d="M526 616 c 4 6 12 6 16 0" stroke-width="2"/>
+      <path d="M476 624 c 4 6 12 6 16 0" stroke-width="2"/>
+      <!-- bell hoisted above the curled tip -->
+      <path d="M420 582 C 420 574, 421 566, 424 558" stroke-width="2.5"/>
+      <path d="M392 550 C 392 514, 402 492, 426 484 C 450 492, 460 514, 460 550" stroke-width="3"/>
+      <path d="M380 552 L 472 550" stroke-width="3"/>
+      <path d="M418 558 c 3 9 13 9 16 0" stroke-width="2.5"/>
+      <!-- top knob -->
+      <path d="M420 484 c -2 -8, 4 -14, 10 -12 c 6 2, 8 10, 2 14" stroke-width="2.5"/>
+      <!-- ring lines -->
+      <path d="M372 520 c -10 -4, -16 -10, -20 -18 M 366 540 c -12 -2, -20 -6, -26 -12" stroke-width="2.2"/>
+      <path d="M482 516 c 10 -4, 16 -10, 20 -18 M 486 536 c 12 -2, 20 -6, 26 -12" stroke-width="2.2"/>
+
+      <!-- T9: far low sweep to bottom-right -->
+      <path d="M840 460 C 866 520, 918 566, 990 588 C 1052 606, 1108 600, 1140 576" stroke-width="4"/>
+      <path d="M986 586 c 4 6 12 6 16 0" stroke-width="2"/>
+      <path d="M1052 598 c 4 6 12 6 16 0" stroke-width="2"/>
+    </g>
+
+    <!-- ============ KNIGHT (Pierre, bottom-left, unbothered) ============ -->
+    <g>
+      <!-- ground squiggle -->
+      <path d="M96 648 C 140 640, 196 652, 246 646 C 292 640, 330 648, 358 644" stroke-width="2.5"/>
+
+      <!-- legs -->
+      <path d="M196 596 C 194 612, 192 626, 192 638" stroke-width="3.5"/>
+      <path d="M222 596 C 226 612, 228 626, 228 638" stroke-width="3.5"/>
+      <path d="M184 640 L 202 640 M 220 640 L 240 640" stroke-width="3"/>
+
+      <!-- body: little rounded tunic -->
+      <path d="M186 540 C 180 566, 182 588, 192 600 C 206 606, 220 606, 230 598 C 238 584, 238 562, 232 540 Z" stroke-width="3.5"/>
+      <!-- belt -->
+      <path d="M186 572 C 202 578, 220 578, 234 572" stroke-width="2"/>
+
+      <!-- helmet: round with visor slit -->
+      <path d="M184 512 C 182 486, 196 468, 212 468 C 228 468, 240 486, 238 512 C 238 526, 228 538, 210 538 C 194 538, 184 526, 184 512 Z" stroke-width="3.5"/>
+      <path d="M186 502 L 236 500" stroke-width="2.5"/>
+      <path d="M198 512 L 206 512 M 216 512 L 224 512" stroke-width="2.5"/>
+      <!-- jaunty plume (accent) -->
+      <path d="M214 466 C 212 448, 220 430, 238 420 C 232 436, 234 448, 244 452 C 252 456, 262 450, 264 440" stroke="#38bdf8" stroke-width="3.5"/>
+      <path d="M212 462 C 208 448, 210 436, 218 426" stroke="#38bdf8" stroke-width="2" opacity="0.7"/>
+
+      <!-- sword arm raised up-right -->
+      <path d="M232 548 C 248 540, 262 528, 272 514" stroke-width="3.5"/>
+      <!-- crossguard + blade -->
+      <path d="M262 508 L 286 522" stroke-width="3"/>
+      <path d="M274 514 L 312 448" stroke-width="3.5"/>
+      <path d="M277 512 L 314 450" stroke-width="1.4" opacity="0.5"/>
+      <!-- sword glint (accent) -->
+      <path d="M320 436 l 10 -12 M 326 448 l 14 -4" stroke="#38bdf8" stroke-width="2.5"/>
+
+      <!-- shield arm + kite shield -->
+      <path d="M188 548 C 176 552, 166 558, 160 566" stroke-width="3.5"/>
+      <path d="M126 548 C 126 534, 138 526, 154 526 C 170 526, 182 534, 182 548 C 182 574, 168 598, 154 610 C 140 598, 126 574, 126 548 Z" stroke-width="3.5"/>
+      <!-- cursive-ish P on the shield -->
+      <path d="M146 542 C 148 556, 148 572, 146 586 M 146 544 C 154 536, 164 538, 166 546 C 168 556, 158 562, 148 560" stroke-width="2.5"/>
+      <!-- shield crosshatch -->
+      <g stroke-width="1.4" opacity="0.55">
+        <path d="M132 556 l 14 -12"/>
+        <path d="M134 570 l 14 -12"/>
+        <path d="M138 584 l 12 -12"/>
+        <path d="M162 556 l 12 -10"/>
+        <path d="M162 572 l 12 -12"/>
+      </g>
+    </g>
+
+    <!-- little motion/uh-oh marks between them -->
+    <path d="M330 520 c 6 -4 12 -4 18 0 M 336 540 c 6 -4 12 -4 18 0" stroke-width="2" opacity="0.6"/>
+  </g>
+
+  <!-- ============ HANDWRITTEN LABELS ============ -->
+  <g font-family="Comic Sans MS, 'Segoe Print', 'Bradley Hand', cursive" fill="#e7e5e4" stroke="none" filter="url(#wobble2)">
+    <g transform="rotate(-2 120 420)">
+      <text x="64" y="418" font-size="30">pierre</text>
+    </g>
+    <path d="M136 428 C 152 446, 168 462, 184 476 M 184 476 l -14 -4 M 184 476 l -2 -14" stroke="#e7e5e4" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+
+    <g transform="rotate(-2 330 96)">
+      <text x="238" y="100" font-size="30">your notifications</text>
+    </g>
+    <path d="M470 110 C 518 132, 566 158, 608 188 M 608 188 l -18 -4 M 608 188 l -6 -16" stroke="#e7e5e4" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+
+    <g transform="rotate(-2 210 676)">
+      <text x="150" y="680" font-size="20" opacity="0.85">(actual size)</text>
+    </g>
+  </g>
+</svg>

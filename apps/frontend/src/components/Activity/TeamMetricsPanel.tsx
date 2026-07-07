@@ -123,7 +123,10 @@ export function TeamMetricsPanel({
   const reasonLabels = metrics.ciFailureReasons.map((r) => r.stage);
 
   return (
-    <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-800 dark:bg-gray-900/20">
+    <div
+      className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-800 dark:bg-gray-900/20"
+      data-testid="flow-metrics"
+    >
       <div className="flex flex-wrap items-baseline gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-300">
           Flow metrics

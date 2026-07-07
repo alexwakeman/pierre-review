@@ -282,6 +282,14 @@ export function RouteIcon({ className }: IconProps) {
   );
 }
 
+export function CheckIcon({ className }: IconProps) {
+  return (
+    <Stroke className={className}>
+      <path d="M4 12.5l5 5L20 6.5" />
+    </Stroke>
+  );
+}
+
 export function DocIcon({ className }: IconProps) {
   return (
     <Stroke className={className}>

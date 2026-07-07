@@ -340,7 +340,7 @@ export function ActivityView(): JSX.Element {
             ))}
           </div>
         ) : selectedRepo != null ? (
-          <div className="space-y-3">
+          <div className="space-y-3" data-testid="repo-console">
             <RepoFeedHeader repo={selectedRepo} />
             {/* Item 12: per-repo Insights — the merge-rate graph (+ Charts drill-down) sits
                 under the AI digest (in the header) and above the open-PR list. */}

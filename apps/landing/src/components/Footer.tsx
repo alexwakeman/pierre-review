@@ -5,16 +5,28 @@ const COLUMNS: { heading: string; links: { label: string; to: string }[] }[] = [
   {
     heading: 'Product',
     links: [
-      { label: 'Features', to: '/features' },
-      { label: 'Insights', to: '/insights' },
-      { label: 'Claude Review', to: '/reviews' },
+      { label: 'Open Core', to: '/features' },
+      { label: 'Pro', to: '/pro' },
+      { label: 'Pricing', to: '/pricing' },
       { label: 'How it works', to: '/how-it-works' },
+    ],
+  },
+  {
+    heading: 'Explore',
+    links: [
+      { label: 'Activity feed', to: '/features#activity' },
+      { label: 'The timeline', to: '/features#timeline' },
+      { label: 'Sprint reports', to: '/pro#sprint' },
+      { label: 'Flow metrics', to: '/pro#metrics' },
+      { label: 'Claude Review', to: '/pro#claude-review' },
+      { label: 'AI Fix', to: '/pro#ai-fix' },
     ],
   },
   {
     heading: 'Get started',
     links: [
       { label: 'Sign in with GitHub', to: '/api/auth/login' },
+      { label: 'Get Pro', to: '/pricing' },
       { label: 'Run it locally', to: '/how-it-works#run-locally' },
       { label: 'Roadmap', to: '/how-it-works#roadmap' },
     ],
@@ -32,7 +44,7 @@ export default function Footer(): JSX.Element {
   return (
     <footer className="mt-24 border-t border-white/5 bg-white/[0.015]">
       <div className="mx-auto max-w-6xl px-5 py-14 sm:px-6">
-        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-5">
           <div>
             <Link to="/" className="brand-title text-3xl text-gray-200">
               Pierre

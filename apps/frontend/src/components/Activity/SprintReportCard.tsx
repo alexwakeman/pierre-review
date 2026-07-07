@@ -59,7 +59,10 @@ export function SprintReportCard({
   const busy = refresh.isPending;
 
   return (
-    <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900/60 dark:bg-violet-950/20">
+    <div
+      className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900/60 dark:bg-violet-950/20"
+      data-testid="sprint-report"
+    >
       <div className="flex items-center gap-2">
         <button
           type="button"
