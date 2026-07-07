@@ -1,4 +1,5 @@
 import type { DigestPrRef, RepoDigest } from '@pierre-review/shared';
+import { relativeTime } from '../../lib/ui.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useSprintReport, useRefreshSprintReport } from '../../hooks/useSprintReport.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
@@ -24,28 +25,25 @@ function refMeta(ref: DigestPrRef): PinnedPr {
   };
 }
 
-// `showRefresh` is false when the card is embedded in the unified Insights panel, whose
-// single header "Refresh" regenerates all summaries (sprint report + digests) at once.
-// The per-repo digest cards are nested INSIDE this card (collapsed by default) to keep the
-// Insights tab compact — the parent passes the digest data down.
+// The card ALWAYS owns its own delta-gated Regenerate (Haiku seam via useRefreshSprintReport):
+// the button appears only when a report exists AND `report.stale` (real delta), matching the
+// per-repo digest cards. The per-repo digest cards are nested INSIDE this card (collapsed by
+// default) to keep the Insights tab compact — the parent passes the digest data down, plus a
+// per-repo regenerate callback threaded through to InsightsDigests.
 export function SprintReportCard({
-  showRefresh = true,
   digests,
   digestsLoading = false,
   anyWatched = false,
   refreshingRepoIds,
-  regenerating = false,
+  onRegenerateRepo,
 }: {
-  showRefresh?: boolean;
   digests?: RepoDigest[];
   digestsLoading?: boolean;
   anyWatched?: boolean;
   refreshingRepoIds?: Set<number>;
-  // Set by the embedding Insights panel (whose unified Refresh drives a SEPARATE
-  // refreshSprintReport mutation this card can't see) so the report shows the shimmer while
-  // it regenerates — matching the per-repo digest cards. The standalone card falls back to
-  // its own mutation's pending state.
-  regenerating?: boolean;
+  // Per-repo regenerate for the nested digest cards; each card offers it only when that
+  // repo's own digest is stale (delta-gated inside InsightsDigests).
+  onRegenerateRepo?: (repoId: number) => void;
 }): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
@@ -66,49 +64,79 @@ export function SprintReportCard({
   if (!activityDigest) return null;
 
   const report = data?.report ?? null;
-  const busy = regenerating || refresh.isPending;
+  const busy = refresh.isPending;
 
   return (
     <div
       className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900/60 dark:bg-violet-950/20"
       data-testid="sprint-report"
     >
-      <div className="flex items-center gap-2">
+      {/* Header mirrors RepoDigestCard's grammar: the whole row toggles collapse; the inner
+          controls stop propagation. Left = caret + ✨ + title (button) + Pro badge; right
+          (ml-auto) = a gray "Haiku · <time> · stale" line then the delta-gated Regenerate. */}
+      <div
+        onClick={() => setCollapsed(!collapsed)}
+        className="-mx-1 flex cursor-pointer select-none items-center gap-2 rounded px-1 hover:bg-violet-500/5"
+      >
         <button
           type="button"
-          onClick={() => setCollapsed(!collapsed)}
-          className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 dark:text-gray-200"
+          onClick={(e) => {
+            e.stopPropagation();
+            setCollapsed(!collapsed);
+          }}
+          aria-expanded={!collapsed}
+          className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-200 dark:hover:text-white"
         >
           <span className="w-3 select-none text-gray-400">{collapsed ? '▸' : '▾'}</span>
-          Sprint report
+          <span aria-hidden="true">✨</span> Sprint report
         </button>
-        <span className="rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
-          Pro · AI
+        <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
+          Pro
         </span>
-        {report?.stale && (
-          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
-            Insights changed — regenerate
-          </span>
-        )}
-        {report && (
-          <span className="hidden text-[11px] text-gray-400 sm:inline">
-            {report.model}
-          </span>
-        )}
-        {showRefresh && (
-          <button
-            type="button"
-            onClick={() => refresh.mutate()}
-            disabled={busy}
-            className="ml-auto rounded border border-violet-300 px-1.5 py-0.5 text-[11px] font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30"
-            title="Generate a fresh sprint report from the current Insights (uses the Haiku model)"
-          >
-            {busy ? 'Generating…' : report ? '↻ Regenerate' : 'Generate'}
-          </button>
-        )}
+        <span className="ml-auto flex items-center gap-2 text-[10px] text-gray-400">
+          {report != null && (
+            <span title={report.model}>
+              Haiku {' · '}
+              {relativeTime(report.generatedAt)}
+              {report.stale ? ' · stale' : ''}
+            </span>
+          )}
+          {/* Regenerate ONLY when a report exists AND it's stale (a real delta). No report yet
+              → a "Generate" button to create the first one. */}
+          {report == null ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                refresh.mutate();
+              }}
+              disabled={busy}
+              className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
+              title="Generate the first sprint report from the current Insights (runs the Haiku model)"
+            >
+              {busy ? 'Generating…' : 'Generate'}
+            </button>
+          ) : (
+            report.stale && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  refresh.mutate();
+                }}
+                disabled={busy}
+                className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
+                title="Regenerate the sprint report — the Insights changed since it was written (runs the Haiku model)"
+              >
+                <span aria-hidden="true">↻</span>
+                {busy ? 'Regenerating…' : 'Regenerate'}
+              </button>
+            )
+          )}
+        </span>
       </div>
 
-      {showRefresh && refresh.isError && (
+      {refresh.isError && (
         <div className="mt-2 text-[11px] text-red-500">
           {(refresh.error as Error)?.message ?? 'Couldn’t generate the report.'}
         </div>
@@ -137,16 +165,8 @@ export function SprintReportCard({
           ) : (
             <div className="text-[11px] text-gray-500 dark:text-gray-400">
               A prioritised, PR-linked summary of what needs attention this sprint —
-              generated from the Insights below.{' '}
-              {showRefresh ? (
-                <>
-                  Click <span className="font-medium">Generate</span>.
-                </>
-              ) : (
-                <>
-                  Use <span className="font-medium">Refresh</span> above to generate it.
-                </>
-              )}
+              generated from the Insights below. Click{' '}
+              <span className="font-medium">Generate</span> above.
             </div>
           )}
         </div>
@@ -173,6 +193,7 @@ export function SprintReportCard({
                 isLoading={digestsLoading}
                 anyWatched={anyWatched}
                 refreshingRepoIds={refreshingRepoIds ?? new Set()}
+                onRegenerateRepo={onRegenerateRepo}
               />
             </div>
           )}

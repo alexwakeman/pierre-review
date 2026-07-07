@@ -29,10 +29,26 @@ export function useMergers() {
 //    is fetched. Both feed a SEPARATE query key → a separate cache entry, so they never
 //    touch the store/URL and the base board's query (override omitted → identical string)
 //    is unchanged. Base call: `useTimeline()`.
-export function useTimeline(override?: { dropMembers?: boolean; fromMs?: number | null }) {
+export function useTimeline(override?: {
+  dropMembers?: boolean;
+  fromMs?: number | null;
+  // A pr-focus tab passes its subject PR's id so the isolated fetch returns exactly that PR
+  // (+ its events), bypassing the board filters — the PR loads even when its repo/date isn't
+  // on the board.
+  prIds?: number[];
+}) {
   // Selector returns a stable query string; re-runs the query only when it changes.
   const search = useFilters((s) =>
-    buildTimelineSearch(s, !override?.dropMembers, true, true, true, override?.fromMs ?? null),
+    buildTimelineSearch(
+      s,
+      !override?.dropMembers,
+      true,
+      true,
+      true,
+      override?.fromMs ?? null,
+      true,
+      override?.prIds,
+    ),
   );
   return useQuery<TimelineResponse>({
     queryKey: ['timeline', search],

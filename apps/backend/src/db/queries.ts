@@ -243,6 +243,12 @@ export interface TimelineFilters {
   allowBotIds?: number[] | null;
   // true → hide "stale" open PRs (no commit/comment/review in [from, to]).
   excludeStale: boolean;
+  // When set (non-empty), fetch EXACTLY these PRs + ALL their events, ignoring every other
+  // filter (date/repo/member/status/review/stale/bots). Used by a pr-focus tab's isolated
+  // timeline so it loads a single PR (+ its markers) cheaply and regardless of the board's
+  // filters — the subject PR may be in a repo/date the board excludes. Still accountId-scoped
+  // (an id from another tenant simply matches nothing).
+  prIds?: number[] | null;
 }
 
 // Event types that count as "touching" a PR for the stale filter: code pushes and
@@ -423,48 +429,58 @@ export async function getTimeline(
     excludeStale,
   } = filters;
 
-  // ---- PRs that overlap the window ----
-  const prConds = [
-    eq(pullRequests.accountId, accountId),
-    lte(pullRequests.openedAt, to),
-    or(
-      eq(pullRequests.state, 'open'),
-      gte(
-        sql`coalesce(${pullRequests.mergedAt}, ${pullRequests.closedAt}, ${pullRequests.openedAt})`,
-        tsBound(from),
-      ),
-    ),
-  ];
-  if (repoIds) prConds.push(inArray(pullRequests.repoId, repoIds));
+  // A pr-focus tab's isolated timeline: fetch EXACTLY these PRs + all their events, bypassing
+  // every board filter (the subject PR may be in a repo/date the board excludes). Always
+  // accountId-scoped.
+  const prIds = filters.prIds ?? null;
+  const prScoped = prIds != null && prIds.length > 0;
 
-  // PR-status filter: keep only PRs whose (state, isDraft) is a selected status.
-  if (statuses) prConds.push(prStatusWhere(statuses));
-
-  // Member filter: PRs the user authored OR acted on within the window.
-  if (userIds && userIds.length > 0) {
+  // ---- PRs that overlap the window (or, when pr-scoped, exactly the requested PRs) ----
+  const prConds = [eq(pullRequests.accountId, accountId)];
+  if (prScoped) {
+    prConds.push(inArray(pullRequests.id, prIds!));
+  } else {
     prConds.push(
+      lte(pullRequests.openedAt, to),
       or(
-        inArray(pullRequests.authorId, userIds),
-        exists(
-          db
-            .select({ x: sql`1` })
-            .from(events)
-            .where(
-              and(
-                eq(events.prId, pullRequests.id),
-                inArray(events.actorId, userIds),
-              ),
-            ),
+        eq(pullRequests.state, 'open'),
+        gte(
+          sql`coalesce(${pullRequests.mergedAt}, ${pullRequests.closedAt}, ${pullRequests.openedAt})`,
+          tsBound(from),
         ),
       )!,
     );
+    if (repoIds) prConds.push(inArray(pullRequests.repoId, repoIds));
+    // PR-status filter: keep only PRs whose (state, isDraft) is a selected status.
+    if (statuses) prConds.push(prStatusWhere(statuses));
+    // Member filter: PRs the user authored OR acted on within the window.
+    if (userIds && userIds.length > 0) {
+      prConds.push(
+        or(
+          inArray(pullRequests.authorId, userIds),
+          exists(
+            db
+              .select({ x: sql`1` })
+              .from(events)
+              .where(
+                and(
+                  eq(events.prId, pullRequests.id),
+                  inArray(events.actorId, userIds),
+                ),
+              ),
+          ),
+        )!,
+      );
+    }
   }
   // Resolve the bot set once (used by both the PR and events branches below). The
   // per-repo allow-list subtracts the "important" bots so their activity stays visible
-  // even under excludeBots — every downstream predicate keys off this trimmed set.
+  // even under excludeBots — every downstream predicate keys off this trimmed set. Skipped
+  // entirely when pr-scoped (no bot filtering there).
   const allowBots = new Set(allowBotIds ?? []);
-  const bots = excludeBots ? (await botUserIds()).filter((id) => !allowBots.has(id)) : [];
-  if (excludeBots && bots.length > 0) {
+  const bots =
+    !prScoped && excludeBots ? (await botUserIds()).filter((id) => !allowBots.has(id)) : [];
+  if (!prScoped && excludeBots && bots.length > 0) {
     prConds.push(
       or(
         sql`${pullRequests.authorId} is null`,
@@ -480,28 +496,31 @@ export async function getTimeline(
     .execute();
 
   // Stale filter: drop open PRs with no activity in the window. Computed before
-  // building the lean PRs so their events can be dropped too (below).
-  const staleIds = excludeStale
-    ? await staleOpenPrIds(prRows, from, to)
-    : new Set<number>();
+  // building the lean PRs so their events can be dropped too (below). Skipped when pr-scoped.
+  const staleIds =
+    !prScoped && excludeStale
+      ? await staleOpenPrIds(prRows, from, to)
+      : new Set<number>();
   if (staleIds.size > 0) prRows = prRows.filter((p) => !staleIds.has(p.id));
 
   const prs: TimelinePr[] = await buildTimelinePrs(prRows, accountId);
 
-  // ---- events in the window ----
-  const evConds = [
-    eq(events.accountId, accountId),
-    gte(events.occurredAt, from),
-    lte(events.occurredAt, to),
-  ];
-  if (repoIds) evConds.push(inArray(events.repoId, repoIds));
-  if (types) evConds.push(inArray(events.type, types));
-  if (userIds && userIds.length > 0) {
-    evConds.push(inArray(events.actorId, userIds));
+  // ---- events (in the window, or — when pr-scoped — ALL events for the requested PRs) ----
+  const evConds = [eq(events.accountId, accountId)];
+  if (prScoped) {
+    evConds.push(inArray(events.prId, prIds!));
+  } else {
+    evConds.push(gte(events.occurredAt, from), lte(events.occurredAt, to));
+    if (repoIds) evConds.push(inArray(events.repoId, repoIds));
+    if (types) evConds.push(inArray(events.type, types));
+    if (userIds && userIds.length > 0) {
+      evConds.push(inArray(events.actorId, userIds));
+    }
   }
   // Drop events whose PR is filtered out by status — so a contributor with only
   // a (e.g.) closed PR keeps neither a bar nor any markers, and loses their row.
-  if (statuses) {
+  // (All remaining event filters are bypassed when pr-scoped.)
+  if (!prScoped && statuses) {
     evConds.push(
       exists(
         db
@@ -516,7 +535,7 @@ export async function getTimeline(
   // drops all review markers (the review row exists but no verdict matches). null =
   // no filter. Pure-reviewer rows vanish when their verdict is deselected because the
   // event is removed here (not just hidden client-side), so no empty row lingers.
-  if (reviewStates) {
+  if (!prScoped && reviewStates) {
     evConds.push(
       reviewStates.length === 0
         ? ne(events.type, 'review_submitted')
@@ -1399,11 +1418,12 @@ const ACTIVITY_ATTENTION_REASONS = new Set<ReasonTag>([
   'untouched_threads',
 ]);
 
-// The Activity aggregate: per watched repo, current-state stats + a per-repo thread
+// The Activity aggregate: per WATCHED repo, current-state stats + a per-repo thread
 // total + maintainer ids + attention/unread flags + the open PRs (caller groups by
-// author). Composes EXISTING accountId-scoped readers — getInsights / getOpenPrs /
-// getMergers / listRepos — so isolation + triage logic stay single-sourced. The
-// one genuinely new aggregation is `threadTotals` (sum each open PR's threadCounts
+// author). Scoped to the account's WATCHED repos (inboxWatch); a passed `repoIds` further
+// narrows WITHIN watched. Composes EXISTING accountId-scoped readers — getInsights /
+// getOpenPrs / getMergers / listRepos — so isolation + triage logic stay single-sourced.
+// The one genuinely new aggregation is `threadTotals` (sum each open PR's threadCounts
 // per repo). Every watched repo is included (a quiet repo → empty prs, zeroed stats).
 export async function getActivity(
   accountId: number,
@@ -1411,14 +1431,20 @@ export async function getActivity(
   userIds: number[] | null = null,
 ): Promise<ActivityResponse> {
   const reposAll = await listRepos(accountId);
-  const reposScoped = repoIds ? reposAll.filter((r) => repoIds.includes(r.id)) : reposAll;
+  const watched = reposAll.filter((r) => r.inboxWatch);
+  const reposScoped = repoIds ? watched.filter((r) => repoIds.includes(r.id)) : watched;
+  const scopedIds = reposScoped.map((r) => r.id);
+
+  // No watched repos in scope → a valid empty response (also avoids an inArray([]) below).
+  if (scopedIds.length === 0) return { repos: [], generatedAt: new Date().toISOString() };
 
   // The compact-header `stats` stay REPO-scoped (repo health: open/draft/merged/stalled/
   // median-first-review) — filtering them by member would misreport repo throughput. The
-  // PR cards + thread bar reflect the member filter via getOpenPrs' userIds.
+  // PR cards + thread bar reflect the member filter via getOpenPrs' userIds. Pass the
+  // watched-scoped ids (never the raw repoIds) so downstream readers stay watched-only.
   const [insights, openPrs, mergers] = await Promise.all([
-    getInsights({ accountId, repoIds }),
-    getOpenPrs({ accountId, repoIds, userIds }),
+    getInsights({ accountId, repoIds: scopedIds }),
+    getOpenPrs({ accountId, repoIds: scopedIds, userIds }),
     getMergers(accountId),
   ]);
 
@@ -1962,6 +1988,11 @@ const INSIGHT_STALLED_REVIEW_HOURS = 24;
 const INSIGHT_UNTOUCHED_THREAD_HOURS = 24; // "> 1 day"
 const INSIGHT_SPRINT_DAYS = 14; // trailing 2 weeks
 const INSIGHT_ROUTING_MIN_AGE_HOURS = 4; // ignore brand-new PRs
+// A PR with NO activity (GitHub updatedAt) in this many days is "ultra-stale": effectively
+// abandoned-but-unclosed, no longer being looked at. Insight cards (and, downstream, the AI
+// sprint report) exclude them so they don't clutter "what needs attention". 90d = the board's
+// max range — beyond it, a PR is off everyone's radar.
+const INSIGHT_MAX_STALE_DAYS = 90;
 const INSIGHT_CARD_CAP = 15; // per-kind cap so the board stays digestible
 
 function topLevelDir(path: string): string {
@@ -1983,23 +2014,37 @@ function medianOf(xs: number[]): number | null {
 // mapping from synced PR/CI data: deploy frequency = merges; lead time = open→merge;
 // change-failure (inverted) = merged-PR CI success; time-to-restore is a PROXY off the
 // current snapshot (open PRs red on CI + how long they've sat) since no CI-state history
-// is stored. Stat tiles compare the current 14-day sprint to the prior one; weekly series
-// (aligned to `weekBuckets`) feed the same chart toolkit the per-repo analytics use.
+// is stored. The weekly CHART series are ALWAYS a fixed 12 weeks ending now (independent of
+// any sprint window); the stat TILES compare THIS sprint to the immediately-preceding
+// equal-length one, aligned to the configured sprint `window` (default trailing 14d). The
+// DB fetch spans max(12 weeks, both sprints) so the "previous" tiles aren't starved. Weekly
+// series (aligned to `weekBuckets`) feed the same chart toolkit the per-repo analytics use.
 export async function getTeamMetrics(
   accountId: number,
   repoIds: number[],
   nowMs: number,
-  // Optional configured SPRINT window (epoch millis). When present, the series/lead/CI window
-  // starts at `window.fromMs` instead of the legacy fixed lookback. Undefined → identical to the
-  // prior behavior. (The current-vs-previous sprint delta below is generalized in the sprint
-  // feature; it stays the fixed 14d comparison here.)
+  // Optional configured SPRINT window (epoch millis) for the stat TILES: THIS sprint vs the
+  // immediately-preceding equal-length one. Undefined → the legacy trailing-14d sprint. The
+  // CHART window is a fixed 12 weeks regardless.
   window?: { fromMs: number; toMs: number },
 ): Promise<TeamMetrics | null> {
   if (repoIds.length === 0) return null;
-  const windowStartMs = window
-    ? window.fromMs
-    : nowMs - TEAM_METRICS_WINDOW_DAYS * 86_400_000;
-  const windowStart = new Date(windowStartMs);
+
+  // Charts: a fixed 12-week window ending now, INDEPENDENT of the sprint window.
+  const chartWindowStartMs = nowMs - TEAM_METRICS_WINDOW_DAYS * 86_400_000;
+
+  // Sprint tiles: this sprint (curLo..curHi, never counting the future) vs the immediately-
+  // preceding equal-length sprint (prevLo..prevHi), aligned to the configured window.
+  const curLo = window ? window.fromMs : nowMs - INSIGHT_SPRINT_DAYS * 86_400_000;
+  const curHi = Math.min(window ? window.toMs : nowMs, nowMs);
+  const sprintLenMs = window ? window.toMs - window.fromMs : INSIGHT_SPRINT_DAYS * 86_400_000;
+  const prevLo = curLo - sprintLenMs;
+  const prevHi = curLo;
+
+  // Fetch must cover BOTH the chart window AND the previous sprint (which can predate it) —
+  // this is what actually feeds the cur-vs-prev "previous" tiles (else they come back 0).
+  const fetchStartMs = Math.min(chartWindowStartMs, prevLo);
+  const fetchStart = new Date(fetchStartMs);
 
   const prs = await db
     .select({
@@ -2016,22 +2061,26 @@ export async function getTeamMetrics(
       and(
         eq(pullRequests.accountId, accountId),
         inArray(pullRequests.repoId, repoIds),
-        // Everything currently open, plus anything opened or merged within the window.
+        // Everything currently open, plus anything opened or merged within the fetch window
+        // (max of the 12-week chart span and the previous sprint).
         or(
           eq(pullRequests.state, 'open'),
-          gte(pullRequests.openedAt, windowStart),
-          gte(pullRequests.mergedAt, windowStart),
+          gte(pullRequests.openedAt, fetchStart),
+          gte(pullRequests.mergedAt, fetchStart),
         ),
       ),
     )
     .execute();
 
-  const nBuckets = Math.max(1, Math.round((nowMs - windowStartMs) / TEAM_METRICS_WEEK_MS));
+  const nBuckets = Math.max(1, Math.round((nowMs - chartWindowStartMs) / TEAM_METRICS_WEEK_MS));
   const weekBuckets: string[] = [];
   for (let i = 0; i < nBuckets; i++)
-    weekBuckets.push(new Date(windowStartMs + i * TEAM_METRICS_WEEK_MS).toISOString());
+    weekBuckets.push(new Date(chartWindowStartMs + i * TEAM_METRICS_WEEK_MS).toISOString());
   const bi = (ms: number): number =>
-    Math.max(0, Math.min(nBuckets - 1, Math.floor((ms - windowStartMs) / TEAM_METRICS_WEEK_MS)));
+    Math.max(
+      0,
+      Math.min(nBuckets - 1, Math.floor((ms - chartWindowStartMs) / TEAM_METRICS_WEEK_MS)),
+    );
   const zeros = (): number[] => new Array<number>(nBuckets).fill(0);
 
   const openedSeries = zeros();
@@ -2039,9 +2088,6 @@ export async function getTeamMetrics(
   const leadByBucket: number[][] = Array.from({ length: nBuckets }, () => []);
   const ciByBucket = Array.from({ length: nBuckets }, () => ({ succ: 0, total: 0 }));
 
-  const SPRINT_MS = 14 * 86_400_000;
-  const curLo = nowMs - SPRINT_MS;
-  const prevLo = nowMs - 2 * SPRINT_MS;
   const inWin = (ms: number, lo: number, hi: number): boolean => ms >= lo && ms < hi;
 
   const leadCur: number[] = [];
@@ -2058,20 +2104,20 @@ export async function getTeamMetrics(
 
   for (const p of prs) {
     const openedMs = p.openedAt.getTime();
-    if (openedMs >= windowStartMs) openedSeries[bi(openedMs)]! += 1;
+    if (openedMs >= chartWindowStartMs) openedSeries[bi(openedMs)]! += 1;
     if (p.state === 'open' && !p.isDraft) openPrsNow += 1;
 
     if (p.firstReviewAt != null) {
       const ttfr = (p.firstReviewAt.getTime() - openedMs) / 3_600_000;
       if (ttfr >= 0) {
-        if (inWin(openedMs, curLo, nowMs)) ttfrCur.push(ttfr);
-        else if (inWin(openedMs, prevLo, curLo)) ttfrPrev.push(ttfr);
+        if (inWin(openedMs, curLo, curHi)) ttfrCur.push(ttfr);
+        else if (inWin(openedMs, prevLo, prevHi)) ttfrPrev.push(ttfr);
       }
     }
 
     if (p.state === 'merged' && p.mergedAt != null) {
       const mergedMs = p.mergedAt.getTime();
-      if (mergedMs >= windowStartMs) {
+      if (mergedMs >= chartWindowStartMs) {
         mergedSeries[bi(mergedMs)]! += 1;
         const lead = (mergedMs - openedMs) / 3_600_000;
         if (lead >= 0) leadByBucket[bi(mergedMs)]!.push(lead);
@@ -2079,17 +2125,21 @@ export async function getTeamMetrics(
         const cb = ciByBucket[bi(mergedMs)]!;
         cb.total += 1;
         if (green) cb.succ += 1;
-        if (inWin(mergedMs, curLo, nowMs)) {
-          mergesCur += 1;
-          if (lead >= 0) leadCur.push(lead);
-          ciMergedCur.total += 1;
-          if (green) ciMergedCur.succ += 1;
-        } else if (inWin(mergedMs, prevLo, curLo)) {
-          mergesPrev += 1;
-          if (lead >= 0) leadPrev.push(lead);
-          ciMergedPrev.total += 1;
-          if (green) ciMergedPrev.succ += 1;
-        }
+      }
+      // Sprint tiles are independent of the chart window (a merge in the prev sprint but
+      // before the 12-week chart still counts toward the "previous" tile).
+      if (inWin(mergedMs, curLo, curHi)) {
+        mergesCur += 1;
+        const lead = (mergedMs - openedMs) / 3_600_000;
+        if (lead >= 0) leadCur.push(lead);
+        ciMergedCur.total += 1;
+        if (p.ciStatus === 'success') ciMergedCur.succ += 1;
+      } else if (inWin(mergedMs, prevLo, prevHi)) {
+        mergesPrev += 1;
+        const lead = (mergedMs - openedMs) / 3_600_000;
+        if (lead >= 0) leadPrev.push(lead);
+        ciMergedPrev.total += 1;
+        if (p.ciStatus === 'success') ciMergedPrev.succ += 1;
       }
     }
 
@@ -2124,7 +2174,7 @@ export async function getTeamMetrics(
       and(
         eq(ciStatusEvents.accountId, accountId),
         inArray(ciStatusEvents.repoId, repoIds),
-        gte(ciStatusEvents.observedAt, windowStart),
+        gte(ciStatusEvents.observedAt, fetchStart),
       ),
     )
     .orderBy(ciStatusEvents.prId, ciStatusEvents.observedAt)
@@ -2154,9 +2204,9 @@ export async function getTeamMetrics(
   const recCur: number[] = [];
   const recPrev: number[] = [];
   for (const r of recoveries) {
-    if (r.atMs >= windowStartMs) recoveryByBucket[bi(r.atMs)]!.push(r.hours);
-    if (inWin(r.atMs, curLo, nowMs)) recCur.push(r.hours);
-    else if (inWin(r.atMs, prevLo, curLo)) recPrev.push(r.hours);
+    if (r.atMs >= chartWindowStartMs) recoveryByBucket[bi(r.atMs)]!.push(r.hours);
+    if (inWin(r.atMs, curLo, curHi)) recCur.push(r.hours);
+    else if (inWin(r.atMs, prevLo, prevHi)) recPrev.push(r.hours);
   }
   const ciFailureReasons = [...reasonCounts.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -2164,7 +2214,7 @@ export async function getTeamMetrics(
     .map(([stage, count]) => ({ stage, count }));
 
   return {
-    sprintDays: 14,
+    sprintDays: Math.round(sprintLenMs / 86_400_000),
     weekBuckets,
     openPrs: openPrsNow,
     merges: { value: mergesCur, previous: mergesPrev },
@@ -2483,8 +2533,9 @@ export async function getTeamInsights(
   const generatedAt = new Date(now);
   // The Insights window: the configured SPRINT when provided (its `to` may be in the future for
   // the in-progress sprint — metrics facts only exist up to `now`), else the legacy default.
-  // Insight CARDS iterate currently-open PRs regardless of age, so "open PRs always count for the
-  // sprint" holds independently of this window; the window only bounds the time-based flow metrics.
+  // Insight CARDS iterate currently-open PRs that have had activity within the last
+  // INSIGHT_MAX_STALE_DAYS (ultra-stale = abandoned, excluded), independently of this window;
+  // the window only bounds the time-based flow metrics.
   const sprintFrom = new Date(window?.fromMs ?? now - INSIGHT_SPRINT_DAYS * 86_400_000);
   const sprintTo = new Date(window?.toMs ?? now);
   const sprint = { from: sprintFrom.toISOString(), to: sprintTo.toISOString() };
@@ -2531,7 +2582,13 @@ export async function getTeamInsights(
   const ghUrl = (repoId: number, number: number): string =>
     `https://github.com/${repoName.get(repoId)}/pull/${number}`;
 
-  // Open, non-draft PRs in the team's repos.
+  // Open, non-draft PRs in the team's repos that are NOT ultra-stale — i.e. have a real ACTIVITY
+  // EVENT (open/commit/comment/review) within the last INSIGHT_MAX_STALE_DAYS. We key off the
+  // events feed, NOT pullRequests.updatedAt: GitHub bumps updatedAt on non-substantive base/label
+  // syncs, so an abandoned PR can still show a "today" updatedAt — the events feed is the honest
+  // "is anyone actually working on this" signal. A PR with no event in-window is abandoned-but-
+  // unclosed; it shouldn't surface as a stalled review / untouched thread (nor feed the sprint report).
+  const staleCutoff = new Date(now - INSIGHT_MAX_STALE_DAYS * 86_400_000);
   const openPrs = await db
     .select({
       id: pullRequests.id,
@@ -2553,6 +2610,18 @@ export async function getTeamInsights(
         inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, 'open'),
         eq(pullRequests.isDraft, false),
+        exists(
+          db
+            .select({ x: sql`1` })
+            .from(events)
+            .where(
+              and(
+                eq(events.prId, pullRequests.id),
+                eq(events.accountId, accountId),
+                gte(events.occurredAt, staleCutoff),
+              ),
+            ),
+        ),
       ),
     )
     .execute();
@@ -2642,7 +2711,9 @@ export async function getTeamInsights(
     });
   }
 
-  // (2) UNTOUCHED THREADS — derivedState 'untouched', older than a day, on open PRs.
+  // (2) UNTOUCHED THREADS — derivedState 'untouched', older than a day, on open PRs. Scoped to
+  // `openPrIds` (the active, non-ultra-stale set built above) so an untouched thread on an
+  // abandoned PR (no activity in 90d) doesn't resurrect it as "needs attention".
   const threadRows = await db
     .select({
       threadId: reviewThreads.id,
@@ -2664,9 +2735,7 @@ export async function getTeamInsights(
     .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
     .where(
       and(
-        eq(pullRequests.accountId, accountId),
-        inArray(pullRequests.repoId, repoIds),
-        eq(pullRequests.state, 'open'),
+        inArray(pullRequests.id, openPrIds),
         eq(reviewThreads.derivedState, 'untouched'),
         lt(reviewThreads.createdAt, new Date(now - INSIGHT_UNTOUCHED_THREAD_HOURS * 3_600_000)),
       ),
@@ -2856,6 +2925,9 @@ export async function getTeamInsights(
   return finish();
 }
 
+// The consolidated Feed. Scoped to the account's WATCHED repos (inboxWatch); a passed
+// `repoIds` further narrows WITHIN watched (null → all watched). One flat, newest-first
+// stream of real activity, each row flagged isMyTurn by participation (Pro enricher).
 export async function getConsolidatedFeed(
   accountId: number,
   opts: ConsolidatedFeedFilters = {},
@@ -2868,6 +2940,15 @@ export async function getConsolidatedFeed(
     excludeBots = false,
     allowBotIds = null,
   } = opts;
+
+  // Restrict to the account's WATCHED repos; a passed repoIds narrows within them. An
+  // out-of-scope / empty selection → a valid empty page (also avoids an inArray([]) below).
+  const watchedIds = (await listRepos(accountId)).filter((r) => r.inboxWatch).map((r) => r.id);
+  const effectiveRepoIds = repoIds
+    ? repoIds.filter((id) => watchedIds.includes(id))
+    : watchedIds;
+  if (effectiveRepoIds.length === 0)
+    return { items: [], users: [], total: 0, generatedAt: new Date().toISOString() };
   // Bot set (only loaded when the filter is on) — drops bot-authored activity, mirroring
   // the timeline's excludeBots. The per-repo allow-list subtracts the "important" bots so
   // their activity stays visible. getFeed doesn't filter bots, so we do it here; the commit
@@ -2881,12 +2962,12 @@ export async function getConsolidatedFeed(
 
   const feedSince = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
   const [feed, commitItems, claudeItems] = await Promise.all([
-    getFeed(accountId, { daysBefore: 14, repoIds, userIds }),
+    getFeed(accountId, { daysBefore: 14, repoIds: effectiveRepoIds, userIds }),
     // Commit-push activity that ADDRESSED a review thread (the only commit rows we surface
     // — plain pushes are noise). Each carries the affected threads inline.
-    getCommitThreadItems(accountId, { repoIds, userIds, botIds, since: feedSince }),
+    getCommitThreadItems(accountId, { repoIds: effectiveRepoIds, userIds, botIds, since: feedSince }),
     // Claude Review runs surfaced as their own feed item kind (local-only; empty in cloud).
-    getClaudeReviewFeedItems(accountId, repoIds, feedSince),
+    getClaudeReviewFeedItems(accountId, effectiveRepoIds, feedSince),
   ]);
 
   // The FYI / "My Turn" participation flag (isMyTurn / myTurnReasons / reasonTag) is a PAID

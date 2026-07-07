@@ -782,7 +782,17 @@ export function buildTimelineSearch(
   // search index passes false so it ALWAYS fetches bot activity — the Members dropdown's
   // per-repo Bots sections need every bot even while the board hides them.
   includeBots = true,
+  // When provided (non-empty), fetch EXACTLY these PRs (+ all their events), bypassing the
+  // date/repo/status/member filters entirely — a pr-focus tab passes its subject PR's id so the
+  // PR loads + highlights even when its repo/date isn't on the board. Undefined → normal filtering.
+  prIdsOverride?: number[],
 ): string {
+  // A pr-focus tab: fetch exactly the subject PR + its events, ignoring the board filters.
+  // Emit ONLY `prIds` (no from/to) so the query key is STABLE per mount — the board's live
+  // `to` (=now) would otherwise churn every minute, refetching + resetting the isolate boot.
+  if (prIdsOverride && prIdsOverride.length > 0) {
+    return `prIds=${prIdsOverride.join(',')}`;
+  }
   const { from, to } = resolveRange(s);
   const effectiveFrom =
     fromOverrideMs != null && fromOverrideMs < from.getTime()

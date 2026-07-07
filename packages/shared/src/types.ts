@@ -1117,6 +1117,10 @@ export interface TimelineQuery {
   from?: string;
   to?: string;
   repoIds?: string; // comma-separated
+  // comma-separated PR ids. When present (non-empty), returns EXACTLY those PRs + all their
+  // events, bypassing every other filter — a pr-focus tab uses this so its subject PR loads
+  // regardless of the board's repo/date/status filters. Account-scoped server-side.
+  prIds?: string;
   userIds?: string; // comma-separated
   types?: string; // comma-separated EventType
   // comma-separated PrStatus. Absent = no status filter (all). Present (even
