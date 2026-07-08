@@ -10,6 +10,7 @@ import {
   OWNER_TYPE_QUERY,
   REPO_ID_QUERY,
   REPO_SEARCH_QUERY,
+  type GqlSearchRepo,
   type OwnerTypeResponse,
   type RepoIdResponse,
   type RepoSearchGqlResponse,
@@ -171,13 +172,17 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     const watched = await getWatchedRepoNodeIds(accountId);
     const me = resp.viewer.login.toLowerCase();
     const orgLogins = new Set(
-      resp.viewer.organizations.nodes.map((o) => o.login.toLowerCase()),
+      resp.viewer.organizations.nodes
+        .filter((o): o is { login: string } => o != null)
+        .map((o) => o.login.toLowerCase()),
     );
 
     const results: RepoSearchResult[] = resp.search.nodes
-      // Guard the union: type:REPOSITORY yields repositories, but a non-repo node
-      // would serialise as {} (no id) — drop those, then drop already-watched.
-      .filter((n) => typeof n.id === 'string')
+      // GitHub returns a NULL node for any hit the token can't fully resolve (a scoped
+      // GitHub-App token in cloud hits this; the local `gh` PAT sees them all), and {} for
+      // a (theoretical) non-repo node. Drop both null-safely BEFORE reading `id`/`owner`,
+      // then drop already-watched. (This null node is the cloud-only crash source.)
+      .filter((n): n is GqlSearchRepo => n != null && typeof n.id === 'string')
       .filter((n) => !watched.has(n.id))
       .map((n) => {
         const ownerLogin = n.owner.login;

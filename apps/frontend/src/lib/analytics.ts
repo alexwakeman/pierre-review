@@ -41,8 +41,13 @@ export function initAnalytics(): void {
   document.head.appendChild(s);
 
   window.dataLayer = window.dataLayer || [];
-  window.gtag = function gtag(...args: unknown[]) {
-    window.dataLayer!.push(args);
+  // MUST push the genuine `arguments` object, exactly like Google's snippet
+  // (`function gtag(){dataLayer.push(arguments)}`): gtag.js silently ignores commands
+  // pushed as plain arrays, so a rest-param version loads the script but never executes
+  // `config` and never sends a single hit. (Mirrors the landing's analytics.ts fix.)
+  window.gtag = function gtag() {
+    // eslint-disable-next-line prefer-rest-params
+    window.dataLayer!.push(arguments);
   };
   window.gtag('js', new Date());
   // Suppress the automatic page_view; we send one ourselves (the SPA's "page" is

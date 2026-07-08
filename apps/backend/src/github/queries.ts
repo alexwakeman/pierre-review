@@ -592,13 +592,16 @@ export interface RepoSearchGqlResponse {
   search: {
     repositoryCount: number;
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
-    // type: REPOSITORY → every node is a Repository; the inline fragment leaves
-    // {} for any (theoretical) non-repo node, so guard on `id` before reading it.
-    nodes: GqlSearchRepo[];
+    // type: REPOSITORY → each node is a Repository, BUT GitHub returns a NULL node for any
+    // search hit the current token can't fully resolve — common with a scoped GitHub-App
+    // user token in cloud; a broad local `gh` PAT sees them all — and {} for a (theoretical)
+    // non-repo node. Both are null-safe-dropped in the route before any field is read.
+    nodes: Array<GqlSearchRepo | null>;
   };
   viewer: {
     login: string;
-    organizations: { nodes: Array<{ login: string }> };
+    // Org nodes can likewise come back null under a scoped token (missing read:org).
+    organizations: { nodes: Array<{ login: string } | null> };
   };
   rateLimit: { remaining: number; resetAt: string; cost: number };
 }
