@@ -11,9 +11,17 @@ import {
 // A single, app-wide screenshot lightbox. Any image surface (the macOS-framed
 // <Shot>, the hero carousel, the Pro walkthrough steps) calls `useLightbox().open`
 // to blow a screenshot up to effectively full-screen on a dark scrim, framed with a
-// dark border. Two view modes toggle on tap:
-//   • fit  (default) — the whole image contained in the viewport
-//   • zoom          — scaled up + scrollable, so dense UI text is readable on a phone
+// dark border.
+//
+// Two ways to open:
+//   • open(item)                 — a single image. Tapping it toggles fit ⇄ zoom
+//                                  (scaled up + scrollable so dense UI text is
+//                                  readable on a phone).
+//   • openGallery(items, index)  — a browsable set (the hero carousel). Tapping the
+//                                  image advances to the NEXT one (wrapping); ‹ ›
+//                                  buttons + ← → arrow keys also step through it, and
+//                                  a counter shows the position. (No tap-to-zoom in
+//                                  gallery mode — tap is reserved for "next".)
 // Closes on the ✕, a backdrop tap, or Esc; locks body scroll while open.
 
 export interface LightboxItem {
@@ -24,7 +32,10 @@ export interface LightboxItem {
 }
 
 interface LightboxApi {
+  /** Open a single image (tap toggles zoom). */
   open: (item: LightboxItem) => void;
+  /** Open a browsable set starting at `index` (tap / arrows step to the next). */
+  openGallery: (items: LightboxItem[], index: number) => void;
 }
 
 const LightboxContext = createContext<LightboxApi | null>(null);
@@ -37,22 +48,52 @@ export function useLightbox(): LightboxApi {
 }
 
 export function LightboxProvider({ children }: { children: ReactNode }): JSX.Element {
-  const [item, setItem] = useState<LightboxItem | null>(null);
+  const [items, setItems] = useState<LightboxItem[] | null>(null);
+  const [index, setIndex] = useState(0);
   const [zoomed, setZoomed] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   const open = useCallback((next: LightboxItem) => {
-    setItem(next);
+    setItems([next]);
+    setIndex(0);
     setZoomed(false);
   }, []);
-  const close = useCallback(() => setItem(null), []);
+  const openGallery = useCallback((list: LightboxItem[], start: number) => {
+    if (list.length === 0) return;
+    setItems(list);
+    setIndex(((start % list.length) + list.length) % list.length);
+    setZoomed(false);
+  }, []);
+  const close = useCallback(() => setItems(null), []);
 
-  // Esc to close, lock body scroll, and move focus to the close button so the
-  // dialog is keyboard-dismissable and the page underneath can't scroll away.
+  const count = items?.length ?? 0;
+  const isGallery = count > 1;
+  const current = items?.[index] ?? null;
+
+  // Step through a gallery (wraps). Always resets to the fit view so the next shot
+  // starts framed rather than mid-zoom.
+  const go = useCallback(
+    (delta: number) => {
+      setZoomed(false);
+      setIndex((i) => (count <= 1 ? i : ((i + delta) % count + count) % count));
+    },
+    [count],
+  );
+
+  // Esc to close (← / → to browse a gallery), lock body scroll, and move focus to the
+  // close button so the dialog is keyboard-dismissable and the page underneath can't
+  // scroll away.
   useEffect(() => {
-    if (!item) return;
+    if (!items) return;
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') close();
+      else if (isGallery && e.key === 'ArrowRight') {
+        e.preventDefault();
+        go(1);
+      } else if (isGallery && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        go(-1);
+      }
     };
     window.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
@@ -62,24 +103,29 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [item, close]);
+  }, [items, close, isGallery, go]);
 
   return (
-    <LightboxContext.Provider value={{ open }}>
+    <LightboxContext.Provider value={{ open, openGallery }}>
       {children}
-      {item && (
+      {current && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label={item.title ?? item.alt}
+          aria-label={current.title ?? current.alt}
           onClick={close}
           className="fixed inset-0 z-[100] flex flex-col bg-gray-950/95 backdrop-blur-md"
         >
-          {/* top bar — title + close. Clicks here fall through to the scrim and
-              dismiss too (only the image swallows its click, to toggle zoom). */}
+          {/* top bar — title (+ gallery position) + close. Clicks here fall through to
+              the scrim and dismiss too (only the image swallows its click). */}
           <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
-            <span className="min-w-0 truncate text-xs text-gray-400 sm:text-sm">
-              {item.title ?? 'pierre'}
+            <span className="flex min-w-0 items-center gap-2 text-xs text-gray-400 sm:text-sm">
+              <span className="min-w-0 truncate">{current.title ?? 'pierre'}</span>
+              {isGallery && (
+                <span className="shrink-0 tabular-nums text-gray-500" aria-live="polite">
+                  {index + 1} / {count}
+                </span>
+              )}
             </span>
             <button
               ref={closeRef}
@@ -96,30 +142,64 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
 
           {/* stage — the backdrop click here also closes; the image swallows its own */}
           <div
-            className={`min-h-0 flex-1 overflow-auto px-3 pb-2 sm:px-6 ${
+            className={`relative min-h-0 flex-1 overflow-auto px-3 pb-2 sm:px-6 ${
               zoomed ? '' : 'flex items-center justify-center'
             }`}
           >
             <img
-              src={item.src}
-              alt={item.alt}
+              src={current.src}
+              alt={current.alt}
               onClick={(e) => {
                 e.stopPropagation();
-                setZoomed((z) => !z);
+                // Gallery → tap advances to the next shot; single image → toggle zoom.
+                if (isGallery) go(1);
+                else setZoomed((z) => !z);
               }}
               style={zoomed ? { width: 'min(1600px, 240vw)' } : undefined}
               className={
                 zoomed
                   ? 'mx-auto block h-auto max-w-none cursor-zoom-out rounded-lg border-2 border-gray-800 shadow-2xl shadow-black/60 ring-1 ring-black/40'
-                  : 'block max-h-full max-w-full cursor-zoom-in rounded-lg border-2 border-gray-800 shadow-2xl shadow-black/60 ring-1 ring-black/40'
+                  : `block max-h-full max-w-full rounded-lg border-2 border-gray-800 shadow-2xl shadow-black/60 ring-1 ring-black/40 ${
+                      isGallery ? 'cursor-pointer' : 'cursor-zoom-in'
+                    }`
               }
             />
+
+            {/* prev / next — only for a gallery. Fixed to the viewport edges so they
+                don't scroll with a zoomed image (gallery mode never zooms anyway). */}
+            {isGallery && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Previous screenshot"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    go(-1);
+                  }}
+                  className="fixed left-2 top-1/2 z-[101] -translate-y-1/2 rounded-full border border-white/10 bg-gray-950/70 p-2.5 text-gray-200 backdrop-blur transition hover:bg-gray-900 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-skySoft sm:left-4"
+                >
+                  <Chevron className="h-5 w-5 rotate-180" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Next screenshot"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    go(1);
+                  }}
+                  className="fixed right-2 top-1/2 z-[101] -translate-y-1/2 rounded-full border border-white/10 bg-gray-950/70 p-2.5 text-gray-200 backdrop-blur transition hover:bg-gray-900 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-skySoft sm:right-4"
+                >
+                  <Chevron className="h-5 w-5" />
+                </button>
+              </>
+            )}
           </div>
 
           {/* hint */}
           <p className="pointer-events-none px-4 pb-3 pt-1 text-center text-[11px] text-gray-500">
-            Tap the image to {zoomed ? 'fit it to the screen' : 'zoom in'} · tap outside or
-            press Esc to close
+            {isGallery
+              ? 'Tap the image or use ‹ › / arrow keys for the next shot · tap outside or press Esc to close'
+              : `Tap the image to ${zoomed ? 'fit it to the screen' : 'zoom in'} · tap outside or press Esc to close`}
           </p>
         </div>
       )}
@@ -140,6 +220,23 @@ function CloseIcon({ className }: { className?: string }): JSX.Element {
       className={className}
     >
       <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  );
+}
+
+function Chevron({ className }: { className?: string }): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="m9 6 6 6-6 6" />
     </svg>
   );
 }

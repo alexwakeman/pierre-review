@@ -155,7 +155,7 @@ export function TeamMetricsPanel({
           Flow metrics
         </h3>
         <span className="text-[11px] text-gray-400">
-          DORA-ish · {windowLabel} · 12-week trend
+          DORA-ish · {windowLabel}
           {onOpenMetric ? ' · tap a tile to drill in' : ''}
         </span>
       </div>
@@ -233,7 +233,13 @@ export function TeamMetricsPanel({
         </TileShell>
       </div>
 
-      {/* Primary trends — throughput + the two operationally-urgent CI views up front. */}
+      {/* Primary trends — throughput + the two operationally-urgent CI views up front. The
+          "12-week trend" label sits HERE, over the charts, rather than up in the tiles' caption
+          where it read as part of the comparison-window scope — the tiles compare over the
+          window, but these weekly series span 12 weeks (per-chart notes say "weekly"/"window"). */}
+      <h4 className="pt-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        12-week trend
+      </h4>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <ChartCard title="Throughput" note="opened vs merged · weekly">
           {sum(metrics.throughput.opened) + sum(metrics.throughput.merged) === 0 ? (

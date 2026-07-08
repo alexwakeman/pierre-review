@@ -40,7 +40,7 @@ export default function Carousel({
   const [reducedMotion, setReducedMotion] = useState(false);
   const touchX = useRef<number | null>(null);
   const swiped = useRef(false); // a swipe just fired → swallow the synthetic click
-  const { open } = useLightbox();
+  const { openGallery } = useLightbox();
   const n = slides.length;
 
   const go = useCallback(
@@ -131,7 +131,16 @@ export default function Carousel({
                   swiped.current = false; // this click came from a swipe — ignore it
                   return;
                 }
-                open({ src: s.src, alt: s.alt, title: `pierre · ${s.label}` });
+                // Open the WHOLE tour as a browsable gallery, starting on this slide — so
+                // full-screen the viewer can tap / arrow through every shot, not just this one.
+                openGallery(
+                  slides.map((sl) => ({
+                    src: sl.src,
+                    alt: sl.alt,
+                    title: `pierre · ${sl.label}`,
+                  })),
+                  i,
+                );
               }}
               className={`absolute inset-0 block cursor-zoom-in transition-opacity duration-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-skySoft ${
                 i === index ? 'opacity-100' : 'pointer-events-none opacity-0'

@@ -88,17 +88,39 @@ export function MetricRepoFilter({
             {total === 0 ? (
               <div className="px-1 py-2 text-xs text-gray-500">No repos with data.</div>
             ) : (
-              repos.map((r) => (
-                <label
-                  key={r.id}
-                  className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
-                >
-                  <input type="checkbox" checked={isChecked(r.id)} onChange={() => toggle(r.id)} />
-                  <span className="min-w-0 truncate text-gray-800 dark:text-gray-100" title={r.fullName}>
-                    {r.fullName}
-                  </span>
-                </label>
-              ))
+              repos.map((r) => {
+                // "only" is a no-op / hidden when this repo is already the sole selection
+                // (or there's just one repo) — mirrors the header FilterBar's RepoSelectPanel.
+                const soleSelected =
+                  selected != null && selected.length === 1 && selected[0] === r.id;
+                return (
+                  <div
+                    key={r.id}
+                    className="group flex items-center gap-2 rounded px-1 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                      <input type="checkbox" checked={isChecked(r.id)} onChange={() => toggle(r.id)} />
+                      <span className="min-w-0 truncate text-gray-800 dark:text-gray-100" title={r.fullName}>
+                        {r.fullName}
+                      </span>
+                    </label>
+                    {/* Quick-isolate: scope this drill-down to just this one repo (deselect the
+                        rest) — the same affordance as the header Repos dropdown. Hidden when it's
+                        already the sole repo shown. */}
+                    {total > 1 && !soleSelected && (
+                      <button
+                        type="button"
+                        onClick={() => onChange([r.id])}
+                        title={`Show only ${r.fullName}`}
+                        aria-label={`Show only ${r.fullName}`}
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-400 opacity-0 hover:bg-gray-200 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                      >
+                        only
+                      </button>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
