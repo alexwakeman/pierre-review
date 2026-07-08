@@ -183,6 +183,13 @@
       "when": 1783296000000,
       "tag": "0025_account_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1783382400000,
+      "tag": "0026_ai_credit_allowance",
+      "breakpoints": true
     }
   ]
 }

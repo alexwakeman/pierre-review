@@ -59,6 +59,10 @@ export const accounts = pgTable('accounts', {
   // sqlite twin. Kept in sync by hand (schema-parity.test.ts).
   plan: text('plan').notNull().default('free'),
   stripeCustomerId: text('stripe_customer_id'),
+  // Per-account monthly SUMMARY-AI credit allowance override (metered cloud plan). null =
+  // plan default (2,500 for paid cloud); local/unlimited accounts ignore it. See the sqlite
+  // twin. Kept in sync by hand (schema-parity.test.ts).
+  aiCreditAllowance: integer('ai_credit_allowance'),
 });
 
 export const repos = pgTable(

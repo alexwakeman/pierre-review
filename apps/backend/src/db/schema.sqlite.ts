@@ -67,6 +67,10 @@ export const accounts = sqliteTable('accounts', {
   // Stripe customer id (cus_…), captured from checkout.session.completed so later
   // subscription webhooks can resolve the account. Null until first checkout.
   stripeCustomerId: text('stripe_customer_id'),
+  // Per-account monthly SUMMARY-AI credit allowance override (metered cloud plan). null =
+  // use the plan default (2,500 for a paid cloud account); local/unlimited accounts ignore
+  // it entirely. A forward hook for top-ups / alternate plans without another migration.
+  aiCreditAllowance: integer('ai_credit_allowance'),
 });
 
 export const repos = sqliteTable(

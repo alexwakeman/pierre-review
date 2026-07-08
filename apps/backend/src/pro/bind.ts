@@ -7,6 +7,7 @@ import { accountIdOf } from '../api/plugins/auth.js';
 import { db, schema, runTransaction, isPg } from '../db/client.js';
 import * as hostQueries from '../db/queries.js';
 import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
+import { aiCreditStatus } from '../db/credits.js';
 import { reviewEvents, registerLearningsProvider } from '../review/events.js';
 import { registerFyiProvider } from '../feed/fyi-provider.js';
 import { registerScheduledJob } from '../sync/scheduled-jobs.js';
@@ -17,7 +18,7 @@ import {
   hasUserAnthropicKey,
   setUserAnthropicKey,
 } from '../review/local-settings.js';
-import { getAccessToken } from '../auth/account.js';
+import { getAccessToken, getAccountById } from '../auth/account.js';
 import {
   createPullRequest,
   fetchPrHeadInfo,
@@ -42,10 +43,17 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   // here = apps/backend/{src|dist}/pro/bind.{ts|js} → repo root is four levels up.
   const here = fileURLToPath(import.meta.url);
   const repoRoot = resolve(dirname(here), '../../../..');
+  // PRO_PLUGIN_PATH is an explicit entry-file override, tried FIRST. The cloud Docker image
+  // flattens the release layout (backend runs from /app/dist/…), so the repo-relative
+  // packages/pro paths below don't exist there — the image sets PRO_PLUGIN_PATH=/app/pro/index.js
+  // to point straight at the copied-in built plugin. It reveals nothing about Pro (just a path).
   const entry = [
+    process.env.PRO_PLUGIN_PATH, // explicit override (cloud/Docker image)
     join(repoRoot, 'packages/pro/dist/index.js'), // built plugin (node)
     join(repoRoot, 'packages/pro/src/index.ts'), // source (tsx dev)
-  ].find(existsSync);
+  ]
+    .filter((p): p is string => Boolean(p))
+    .find(existsSync);
   if (!entry) {
     app.log.debug('pro plugin submodule absent — OSS mode');
     return;
@@ -58,7 +66,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   if (!mod) return;
 
   const plugin = (mod.default ?? mod) as ProPlugin;
-  if (plugin?.apiVersion !== 9 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 10 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -110,6 +118,16 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       getAiUsage: (accountId, sinceMs) => getAiUsageSummary(accountId, sinceMs),
     },
     recordAiUsage: (row) => recordAiUsage(row),
+    aiCredits: {
+      check: async (accountId) => {
+        const account = await getAccountById(accountId);
+        // Fail closed on a missing account (should never happen for a live request): block
+        // spend rather than risk unmetered generation.
+        if (!account)
+          return { allowanceCredits: 0, usedCredits: 0, remainingCredits: 0, blocked: true };
+        return aiCreditStatus(account, Date.now());
+      },
+    },
     reviewEvents,
     registerLearningsProvider,
     registerFyiProvider,

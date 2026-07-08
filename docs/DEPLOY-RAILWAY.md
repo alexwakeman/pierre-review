@@ -153,6 +153,75 @@ automatically — there's no external registrar or manual `CNAME` step.
 
 ---
 
+## Optional — the paid Pro tier (summary AI)
+
+The base cloud deploy above ships the **free** tier (timeline + activity feed, no AI). To
+offer **paid Pro** — the **summary-AI** features (per-repo Haiku digests, the sprint report,
+team Insights, FYI / "My Turn", Jira/Linear issue links, Slack digest) at **$5/mo**, metered
+by a **2,500-credit monthly allowance** — you deploy a **private image** that bundles the
+`@pierre/pro` plugin. The expensive **agentic** AI (Claude Review / AI Fix) stays **off** in
+cloud; the meter still tracks it for a future tier.
+
+Everything is opt-in behind env flags, so the default Dockerfile build stays OSS-only.
+
+### 1 — Build & push the private image (GitHub Actions → GHCR)
+
+The public Dockerfile takes `--build-arg WITH_PRO=true`, which compiles the private
+`packages/pro` submodule into the image and adds `@anthropic-ai/sdk` (the only extra runtime
+dep the summary seam needs). The `.github/workflows/deploy-cloud.yml` workflow does this and
+pushes to **private GHCR** — nothing about Pro appears in the logs.
+
+Add these **repo secrets** (Settings → Secrets → Actions):
+
+| Secret | What |
+|---|---|
+| `PRO_DEPLOY_KEY` | an **SSH read-only deploy key** on `alexwakeman/pierre-pro` — lets the workflow fetch the private submodule. Generate with `ssh-keygen -t ed25519`, add the **public** half as a deploy key on the pro repo, paste the **private** half here. |
+| `RAILWAY_TOKEN` | *(optional)* a Railway token to auto-redeploy after each push; else configure Railway to auto-pull the new `:latest` image. |
+| `VITE_GA_ID` | *(optional)* build-time GA id, same as the base deploy. |
+
+Run it from **Actions → Deploy cloud image → Run workflow**. It publishes
+`ghcr.io/<owner>/pierre-review-cloud:latest` (+ a `:<sha>` tag).
+
+### 2 — Point Railway at the image
+
+In the app service settings, change the **source** from the Dockerfile build to
+**deploy from the GHCR image** `ghcr.io/<owner>/pierre-review-cloud:latest`, and add a
+**GHCR pull credential** (a PAT with `read:packages`, since the package is private).
+
+### 3 — Set the Pro variables
+
+On top of the base cloud vars, add:
+
+| Var | Value | Notes |
+|---|---|---|
+| `PRO_CLOUD_ENABLED` | `true` | flips `config.proEnabled` on in cloud (the master gate). Without it, the plugin never loads. |
+| `PRO_DIGEST_ENABLED` | `true` | turns on the digest + sprint-report generation (the `activityDigest` capability). |
+| `SUMMARY_ANTHROPIC_API_KEY` | `sk-ant-…` | **required.** The metered Anthropic key the summary seam spends against — there is no ambient Claude session in cloud, so **the app fails loud at boot without it** (`assertCloudConfig`). |
+| `STRIPE_PAYMENT_LINK_URL` | your Payment Link | the "Get Pro" checkout (see [BILLING-STRIPE.md](./BILLING-STRIPE.md)). |
+| `STRIPE_WEBHOOK_SECRET` | `whsec_…` | verifies the webhook that flips `accounts.plan` to `pro`. |
+
+**Leave `PRO_ADVANCED_AI_ENABLED` UNSET** — that keeps the agentic tier (Claude Review /
+AI Fix) off in cloud.
+
+`PRO_PLUGIN_PATH` is baked into the image (`/app/pro/dist/index.js`) — you don't set it.
+
+### 4 — Entitlement & the credit meter
+
+- **Who gets Pro:** per-account. A cloud account sees Pro only when its `accounts.plan` is
+  `pro` (set by the Stripe webhook on checkout); free accounts get `402` on every `/api/pro/*`
+  route and the plain free UI. Until the onboarding flow lands, flip your first testers by
+  hand: `UPDATE accounts SET plan = 'pro' WHERE github_login = '…';`.
+- **The allowance:** each paid account gets **2,500 credits/month** (≈ $2.00 of Haiku spend;
+  `$1 = 1,250 credits`). Usage is summed from the `ai_usage` ledger since the UTC month start,
+  so it **resets automatically** on the 1st. The **Track usage** panel shows a used/2,500 bar;
+  once spent, digest + sprint **Generate/Regenerate** disable with an "out of AI credits"
+  message and cached summaries still render. Override per account with
+  `accounts.ai_credit_allowance` (null = the 2,500 default).
+- The **default `WITH_PRO=false` image is byte-identical** to today's OSS build, so a plain
+  Railway-builds-the-Dockerfile deploy still works free-tier-only.
+
+---
+
 ## Operational notes
 
 - **No SQLite→Postgres data migration.** Cloud starts empty; synced data is

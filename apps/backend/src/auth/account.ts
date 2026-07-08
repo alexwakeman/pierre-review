@@ -20,6 +20,9 @@ export interface Account {
   plan: AccountPlan;
   // Stripe customer id (cus_…) from checkout; the join key for subscription webhooks.
   stripeCustomerId: string | null;
+  // Per-account monthly SUMMARY-AI credit-allowance override (metered cloud plan). null =
+  // plan default (2,500 for paid cloud); local accounts are unmetered regardless.
+  aiCreditAllowance: number | null;
 }
 
 export type AccountPlan = 'free' | 'pro';
@@ -63,6 +66,7 @@ function rowToAccount(row: typeof schema.accounts.$inferSelect): Account {
     isLocal: row.isLocal,
     plan: row.plan === 'pro' ? 'pro' : 'free',
     stripeCustomerId: row.stripeCustomerId,
+    aiCreditAllowance: row.aiCreditAllowance ?? null,
   };
 }
 

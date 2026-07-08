@@ -27,6 +27,7 @@ export function RepoDigestCard({
   regenerating = false,
   onOpenPr,
   showProBadge = true,
+  outOfCredits = false,
 }: {
   digest: RepoDigest | undefined;
   isLoading: boolean;
@@ -39,6 +40,9 @@ export function RepoDigestCard({
   // The "Pro" chip on the card. Hidden in the Feed collection (which shows one shared
   // "Pro" marker at the top); shown on a standalone single-repo card (its own top).
   showProBadge?: boolean;
+  // The account's metered AI allowance is spent → the Generate/Regenerate button renders
+  // disabled with an "out of credits" label (any already-stored digest still shows).
+  outOfCredits?: boolean;
 }): JSX.Element {
   return (
     <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-900/50 dark:bg-violet-950/20">
@@ -90,22 +94,26 @@ export function RepoDigestCard({
                 e.stopPropagation();
                 onRegenerate?.();
               }}
-              disabled={regenerating}
+              disabled={regenerating || outOfCredits}
               className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
               title={
-                digest == null
-                  ? "Generate this repo's digest (runs the cheap-tier model)"
-                  : "Regenerate this repo's digest (runs the cheap-tier model)"
+                outOfCredits
+                  ? 'Out of AI credits — resets next month'
+                  : digest == null
+                    ? "Generate this repo's digest (runs the cheap-tier model)"
+                    : "Regenerate this repo's digest (runs the cheap-tier model)"
               }
             >
               <span aria-hidden="true">↻</span>
-              {regenerating
-                ? digest == null
-                  ? 'Generating…'
-                  : 'Regenerating…'
-                : digest == null
-                  ? 'Generate'
-                  : 'Regenerate'}
+              {outOfCredits
+                ? 'Out of credits'
+                : regenerating
+                  ? digest == null
+                    ? 'Generating…'
+                    : 'Regenerating…'
+                  : digest == null
+                    ? 'Generate'
+                    : 'Regenerate'}
             </button>
           )}
         </span>

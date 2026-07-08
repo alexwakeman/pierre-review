@@ -599,14 +599,17 @@ remain distinct but flip together.
 
 **The plugin boundary.** `src/pro/contract.ts` defines `ProContext` (the host hands the
 plugin `db`/`schema`/`runTransaction`/`isPg`/`accountIdOf`/`llm.complete`/`queries`/
-`reviewEvents`/`registerLearningsProvider`/`registerFyiProvider`/`registerMigrations`), `ProPlugin
-{apiVersion:8, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
+`reviewEvents`/`registerLearningsProvider`/`registerFyiProvider`/`registerMigrations`/`aiCredits`), `ProPlugin
+{apiVersion:10, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
 `/api/me` (`pro:{activityDigest,reviewMemory,aiAnalysis,aiFix,teamInsights,claudeReview,feedMyTurn}`)
 exactly like `claudeReviewEnabled`. `src/pro/bind.ts`
-runs in `index.ts` between `buildApp()` and `listen()`: gated on **`config.proEnabled` (`=!isCloud`)**.
-It is **NOT a declared dependency** — instead `bind.ts` resolves the plugin by **filesystem
-path** (`packages/pro/dist/index.js` then `packages/pro/src/index.ts`, relative to the repo
-root via `import.meta.url`) and `await import(...)`s it. **Absent submodule ⇒ no entry file ⇒
+runs in `index.ts` between `buildApp()` and `listen()`: gated on **`config.proEnabled`** — now
+`PRO_DISABLED!=='true' && (!isCloud || PRO_CLOUD_ENABLED==='true')`, so Pro is on locally by default
+AND can run the **paid summary-AI tier in cloud** behind `PRO_CLOUD_ENABLED=true` (agentic AI stays
+off via unset `PRO_ADVANCED_AI_ENABLED`; per-account entitlement via `plan!=='free'` + the
+`/api/pro/* 402` gate). It is **NOT a declared dependency** — instead `bind.ts` resolves the plugin by
+**filesystem path** (`PRO_PLUGIN_PATH` override → `packages/pro/dist/index.js` → `packages/pro/src/index.ts`,
+relative to the repo root via `import.meta.url`) and `await import(...)`s it. **Absent submodule ⇒ no entry file ⇒
 clean OSS no-op, and `pnpm install` never fails** (the public-CI path). The path-based loader
 (not a bare `@pierre/pro` specifier / workspace dep) is what keeps install working without the
 submodule — don't reintroduce a `package.json` dependency on it. The plugin imports **no host
@@ -793,7 +796,31 @@ file, a leaked `.ts`, a shared runtime import, or **any AI SDK dep leaking into 
 `better-sqlite3` is a native runtime dep; `pg` loads only in cloud. **No AI ships in npm** —
 the AI SDKs load only when the private `@pierre/pro` plugin is present (dev/author checkout),
 via dynamic `await import()`; an npm-local user (`proEnabled` true, plugin absent) never
-touches them, and cloud never registers AI routes (`bind.ts` returns before any AI import).
+touches them, and the public npm publish never registers AI routes.
+
+**`--with-pro` (the PAID cloud image ONLY).** `build-release.mjs --with-pro` additionally: builds
+`@pierre/pro` to `packages/pro/dist` (via the new `tsconfig.build.json` + `pnpm --filter @pierre/pro
+build`), copies `packages/pro/{dist,migrations,migrations-pg}`→`release/pro/` (preserving the
+dist↔migrations sibling layout so the plugin's `../migrations` URL resolves), adds **only**
+`@anthropic-ai/sdk` to the manifest (core's `review/llm.ts` raw metered path — the agentic SDKs +
+`zod` stay forbidden even here), and extends the shared-import grep to `release/pro`. The `Dockerfile`
+gates this on `ARG WITH_PRO=` (empty default = byte-identical OSS image): non-empty ⇒ build the plugin
++ `pnpm package --with-pro` + `ENV PRO_PLUGIN_PATH=/app/pro/dist/index.js`. `.github/workflows/deploy-cloud.yml`
+(workflow_dispatch) checks out the private submodule via `PRO_DEPLOY_KEY`, `docker build --build-arg
+WITH_PRO=true`, pushes to private GHCR; Railway deploys that image. The public `release.yml` NEVER
+passes `--with-pro`, so its zero-AI-deps guarantee is intact. See `docs/DEPLOY-RAILWAY.md` §"the paid
+Pro tier".
+
+**Credit metering (paid cloud).** `AI_CREDITS_PER_USD` is **1250** ($1 model cost = 1250 credits;
+also inlined in `pro/insights/routes.ts` + `db/credits.ts` — keep the three in lockstep). Core owns
+the allowance math: `db/credits.ts` `aiCreditStatus(account,now)` → `{allowanceCredits,usedCredits,
+remainingCredits,blocked}` (local `isLocal` = null/unmetered; paid cloud = `accounts.aiCreditAllowance
+?? 2500`; free cloud = 0), summed from the `ai_usage` ledger since the UTC month start (auto-resets on
+the 1st; migration `0026` added the nullable column). Exposed as **`ctx.aiCredits.check`**; the plugin
+gates the digest (`runRefresh`) + sprint (`refreshSprintReport`) generators on `blocked`, returning a
+`creditsExhausted` state (the SPA disables Generate/Regenerate + shows the used/2500 meter in
+`TrackUsage`). Agentic entry points aren't gated yet — dead code while agentic is off in cloud +
+unmetered locally; wire them when a metered agentic tier ships.
 
 ---
 

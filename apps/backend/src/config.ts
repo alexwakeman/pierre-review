@@ -150,10 +150,16 @@ export const config = {
   // webhook replies 501 and no billing state ever changes.
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
 
-  // Pro plugin master gate. Pro is local-only for now; bind.ts skips the dynamic
-  // import entirely when false. PRO_DISABLED=true forces pure-OSS mode even when
-  // the submodule is checked out (used to exercise/capture the free tier).
-  proEnabled: !isCloud && process.env.PRO_DISABLED !== 'true',
+  // Pro plugin master gate. bind.ts skips the dynamic import entirely when false.
+  // PRO_DISABLED=true forces pure-OSS mode even when the submodule is checked out (used to
+  // exercise/capture the free tier). Local defaults ON. In CLOUD it stays OFF unless
+  // PRO_CLOUD_ENABLED=true (the paid summary-AI tier — set on the Railway image), so the
+  // public Dockerfile / OSS npm path is byte-identical to before. Even when true in cloud,
+  // per-account entitlement (plan !== 'free') + the /api/pro/* 402 gate decide who actually
+  // gets Pro; agentic AI stays independently gated by PRO_ADVANCED_AI_ENABLED (unset → off).
+  proEnabled:
+    process.env.PRO_DISABLED !== 'true' &&
+    (!isCloud || process.env.PRO_CLOUD_ENABLED === 'true'),
   // Per-repo digest (Pro, Workstream 2) config — consumed by @pierre/pro, kept in
   // core so the model id / budgets live in one place and aren't hardcoded at call
   // sites. Inert until the plugin is present AND digestEnabled.
@@ -260,6 +266,16 @@ export function assertCloudConfig(): void {
   if (Buffer.from(config.encryptionKey, 'hex').length !== 32) {
     throw new Error(
       'ENCRYPTION_KEY must be 32 bytes as 64 hex chars (generate with `openssl rand -hex 32`).',
+    );
+  }
+  // When Pro is cloud-enabled the SUMMARY seam needs its OWN metered credential: there is no
+  // ambient logged-in `claude` session on Railway, so without SUMMARY_ANTHROPIC_API_KEY every
+  // summary completion has no credential and silently fails. Fail loud instead.
+  if (config.proEnabled && !process.env.SUMMARY_ANTHROPIC_API_KEY) {
+    throw new Error(
+      'Cloud Pro (PRO_CLOUD_ENABLED=true) requires SUMMARY_ANTHROPIC_API_KEY — the metered ' +
+        'Anthropic key the summary seam spends against (no ambient Claude session exists in cloud). ' +
+        'Set it or unset PRO_CLOUD_ENABLED. See docs/DEPLOY-RAILWAY.md.',
     );
   }
 }

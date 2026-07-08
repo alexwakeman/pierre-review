@@ -34,12 +34,15 @@ export function useRefreshSprintReport() {
     mutationFn: api.refreshSprintReport,
     onSuccess: (data) => {
       qc.setQueryData(['sprint-report'], data);
-      // Only nag when the click genuinely did nothing: throttled AND still stale. A throttled
-      // call on an already-fresh report needs no notice.
+      // A generation may have spent credits → refresh the meter + the out-of-credits gate.
+      void qc.invalidateQueries({ queryKey: ['ai-usage'] });
+      // Nag when the click genuinely did nothing: out of credits, or throttled AND still stale.
       setNotice(
-        data.throttled && data.report?.stale
-          ? 'Refreshed moments ago — showing the latest. Try again shortly.'
-          : null,
+        data.creditsExhausted
+          ? 'Out of AI credits this month — summaries resume on the 1st.'
+          : data.throttled && data.report?.stale
+            ? 'Refreshed moments ago — showing the latest. Try again shortly.'
+            : null,
       );
     },
   });

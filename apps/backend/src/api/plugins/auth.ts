@@ -48,6 +48,7 @@ export function registerAccountContext(app: FastifyInstance): void {
           isLocal: true,
           plan: 'free',
           stripeCustomerId: null,
+          aiCreditAllowance: null,
         };
     }
   });

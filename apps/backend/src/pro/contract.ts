@@ -15,6 +15,7 @@ import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
 import type { FyiProvider } from '../feed/fyi-provider.js';
 import type { PrDetailEnricher } from '../pr/detail-enricher.js';
 import type { AiUsageRecord } from '../db/usage.js';
+import type { AiCreditStatus } from '../db/credits.js';
 
 // The typed boundary between OSS core and the optional, dynamically-imported
 // @pierre/pro plugin. This file has NO dependency on @pierre/pro — it only
@@ -534,6 +535,15 @@ export interface ProContext {
   // its own summary/agent spend (digests, sprint report, AI Fix) into the SAME ledger the
   // core Claude Review path writes, so month-to-date usage is summable across features.
   recordAiUsage(row: AiUsageRecord): Promise<void>;
+  // Metered-plan credit gate. The accounts table + billing plan + allowance rules all live
+  // in core, so the allowance math is core-owned and the plugin stays oblivious to the plan:
+  // it just asks "may I spend?" before a paid generation. `check` returns the account's
+  // month-to-date credit status (allowance / used / remaining / blocked); the plugin skips
+  // the LLM call and surfaces a creditsExhausted state when `blocked`. Local accounts are
+  // unmetered (allowanceCredits null → never blocked), preserving today's behavior.
+  aiCredits: {
+    check(accountId: number): Promise<AiCreditStatus>;
+  };
   reviewEvents: ReviewEventBus; // WS3 capture seam
   registerLearningsProvider(p: LearningsProvider): void; // WS3 injection seam
   // Activity Feed FYI/"My Turn" enrichment seam. The plugin registers a provider that flags
@@ -560,7 +570,7 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  apiVersion: 9; // contract handshake; host warns on mismatch
+  apiVersion: 10; // contract handshake; host warns on mismatch
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 

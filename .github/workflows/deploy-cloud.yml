@@ -1,0 +1,92 @@
+name: Deploy cloud image
+
+# Builds the PRIVATE cloud image (the OSS app + the @pierre/pro summary-AI plugin) and pushes it
+# to GitHub Container Registry, from where Railway deploys it. This workflow is deliberately
+# GENERIC — it checks out the private `packages/pro` submodule via a read-only deploy key and runs
+# a standard docker build/push. It never prints Pro source; only dependency names (already public)
+# ever surface. The PUBLIC npm publish (release.yml) does NOT check out the submodule and never
+# passes --with-pro, so its zero-AI-deps guarantee is untouched.
+#
+# Required repo secrets:
+#   PRO_DEPLOY_KEY  — an SSH read-only deploy key on alexwakeman/pierre-pro (fetches the submodule)
+#   (optional) VITE_GA_ID     — build-time Google Analytics id inlined into the SPA/landing
+#   (optional) RAILWAY_TOKEN  — a Railway project/account token to trigger a redeploy after push
+#                               (else configure Railway to auto-pull the :latest GHCR tag)
+#
+# Railway service (configured once, in the dashboard — see docs/DEPLOY-RAILWAY.md):
+#   - Source: deploy from the GHCR image ghcr.io/<owner>/pierre-review-cloud:latest (+ a GHCR
+#     pull credential), NOT the Dockerfile.
+#   - Variables: PRO_CLOUD_ENABLED=true, PRO_DIGEST_ENABLED=true, SUMMARY_ANTHROPIC_API_KEY=...,
+#     STRIPE_PAYMENT_LINK_URL, STRIPE_WEBHOOK_SECRET, plus the existing cloud vars (DATABASE_URL,
+#     APP_BASE_URL, GITHUB_APP_*, SESSION_SECRET, ENCRYPTION_KEY). Leave PRO_ADVANCED_AI_ENABLED
+#     UNSET so agentic AI (Claude Review / AI Fix) stays off in cloud.
+
+on:
+  workflow_dispatch: {}
+  # Enable once the deploy is proven stable:
+  # push:
+  #   branches: [main]
+
+concurrency:
+  group: deploy-cloud
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/pierre-review-cloud
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      # Check out the public repo AND the private packages/pro submodule (SSH via the read-only
+      # deploy key). The submodule MUST be on disk before `docker build` — .dockerignore strips
+      # .git, so it cannot self-init inside the image.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ssh-key: ${{ secrets.PRO_DEPLOY_KEY }}
+
+      # Fail loud early if the submodule didn't check out (wrong/absent deploy key), rather than
+      # silently building the OSS variant.
+      - name: Verify @pierre/pro submodule is present
+        run: test -f packages/pro/src/index.ts || (echo "packages/pro not checked out — is PRO_DEPLOY_KEY set?" && exit 1)
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the cloud image (WITH_PRO=true)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            WITH_PRO=true
+            VITE_GA_ID=${{ secrets.VITE_GA_ID }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Optional: nudge Railway to pull the new :latest tag. No-op when no token is configured
+      # (Railway can instead auto-redeploy on a new image tag). Best-effort — never fails the build.
+      - name: Trigger Railway redeploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: |
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            npx -y @railway/cli@latest redeploy --yes || echo "Railway redeploy failed — check the service is set to pull the GHCR image"
+          else
+            echo "No RAILWAY_TOKEN — skipping (configure Railway to auto-pull the :latest GHCR tag)."
+          fi

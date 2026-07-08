@@ -41,9 +41,21 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     // baseline exists (feedLastSeenAt set by the first feed view) so a fresh account
     // never sees a scary first-load number. FYI is a Pro capability — the count comes
     // from the plugin's enricher (0 on the free tier, where there's no provider).
+    // Per-account entitlement: local = full capabilities (unchanged); cloud = full only when
+    // the account's plan isn't 'free' (Stripe billing seam). Computed once and reused for both
+    // the FYI gate and the `pro` passthrough below.
+    const entitled = req.account
+      ? entitledProCapabilities(req.account)
+      : EMPTY_CAPABILITIES;
     const feedLastSeen = await getFeedLastSeenAt(accountId);
     const fyi = getFyiProvider();
-    const newFeedItems = feedLastSeen && fyi ? await fyi.countNewSince(accountId, feedLastSeen) : 0;
+    // FYI is the Pro `feedMyTurn` capability. Gate the count on ENTITLEMENT, not just provider
+    // presence: once Pro loads in cloud the provider is registered process-globally for every
+    // account, so a free cloud account would otherwise leak an FYI count it hasn't paid for.
+    const newFeedItems =
+      feedLastSeen && fyi && entitled.feedMyTurn
+        ? await fyi.countNewSince(accountId, feedLastSeen)
+        : 0;
     return {
       user,
       counts: {
@@ -58,9 +70,7 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       newFeedItems,
       // Claude Review is now the Pro `claudeReview` capability (in `pro` below).
       deploymentMode: config.deploymentMode,
-      // Per-account entitlement: local = full capabilities (unchanged); cloud =
-      // full only when the account's plan isn't 'free' (Stripe billing seam).
-      pro: req.account ? entitledProCapabilities(req.account) : EMPTY_CAPABILITIES,
+      pro: entitled,
     };
   });
 

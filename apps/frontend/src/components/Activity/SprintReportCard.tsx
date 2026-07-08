@@ -1,6 +1,7 @@
 import type { DigestPrRef, RepoDigest } from '@pierre-review/shared';
 import { relativeTime } from '../../lib/ui.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useSprintReport, useRefreshSprintReport } from '../../hooks/useSprintReport.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useSprintReportUi } from '../../store/digestCollapse.js';
@@ -59,6 +60,13 @@ export function SprintReportCard({
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const { data, isLoading } = useSprintReport(activityDigest);
   const refresh = useRefreshSprintReport();
+  // Metered-plan credit status (paid cloud): drives disabling Generate/Regenerate here AND on
+  // the nested per-repo digest cards. Fetched eagerly (the card doesn't wait for the Track-usage
+  // panel to open); shares the ['ai-usage'] cache. Unmetered (local) → allowanceCredits null →
+  // never out of credits.
+  const usage = useAiUsage(activityDigest);
+  const outOfCredits =
+    usage.data?.allowanceCredits != null && (usage.data.remainingCredits ?? 0) <= 0;
   // Collapse state persists across Insights-tab switches / reloads (was ephemeral useState,
   // which reset the container closed every visit). Per-repo cards inside persist separately
   // via useInsightsDigestExpand.
@@ -130,11 +138,15 @@ export function SprintReportCard({
                 e.stopPropagation();
                 regenerate();
               }}
-              disabled={busy}
+              disabled={busy || outOfCredits}
               className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
-              title="Generate the first sprint report from the current Insights, and every watched repo's summary (runs the Haiku model)"
+              title={
+                outOfCredits
+                  ? 'Out of AI credits — resets next month'
+                  : 'Generate the first sprint report from the current Insights, and every watched repo’s summary (runs the Haiku model)'
+              }
             >
-              {busy ? 'Generating…' : 'Generate'}
+              {outOfCredits ? 'Out of credits' : busy ? 'Generating…' : 'Generate'}
             </button>
           ) : (
             report.stale && (
@@ -144,12 +156,16 @@ export function SprintReportCard({
                   e.stopPropagation();
                   regenerate();
                 }}
-                disabled={busy}
+                disabled={busy || outOfCredits}
                 className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
-                title="Regenerate the sprint report and every changed repo summary — the Insights changed since it was written (runs the Haiku model)"
+                title={
+                  outOfCredits
+                    ? 'Out of AI credits — resets next month'
+                    : 'Regenerate the sprint report and every changed repo summary — the Insights changed since it was written (runs the Haiku model)'
+                }
               >
                 <span aria-hidden="true">↻</span>
-                {busy ? 'Regenerating…' : 'Regenerate'}
+                {outOfCredits ? 'Out of credits' : busy ? 'Regenerating…' : 'Regenerate'}
               </button>
             )
           )}
@@ -163,6 +179,11 @@ export function SprintReportCard({
       )}
       {!refresh.isError && refresh.notice && (
         <div className="mt-2 text-[11px] text-gray-400">{refresh.notice}</div>
+      )}
+      {outOfCredits && (
+        <div className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
+          Out of AI credits this month — summaries resume on the 1st. Existing reports still show.
+        </div>
       )}
 
       {!collapsed && (
@@ -217,6 +238,7 @@ export function SprintReportCard({
                 anyWatched={anyWatched}
                 refreshingRepoIds={refreshingRepoIds ?? new Set()}
                 onRegenerateRepo={onRegenerateRepo}
+                outOfCredits={outOfCredits}
               />
             </div>
           )}

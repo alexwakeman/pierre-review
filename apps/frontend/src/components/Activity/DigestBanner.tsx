@@ -1,4 +1,5 @@
 import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useAiUsage } from '../../hooks/useAiUsage.js';
 import {
   useRepoDigest,
   useRefreshRepoDigests,
@@ -19,6 +20,11 @@ export function DigestBanner({ repoId }: { repoId: number }): JSX.Element | null
   const { data: digest, isLoading } = useRepoDigest(repoId, activityDigest);
   const refresh = useRefreshRepoDigests();
   const openPr = useOpenPrTab();
+  // Metered-plan credit status (paid cloud) → disable the Generate/Regenerate button when
+  // spent. Unmetered (local) → allowanceCredits null → never out of credits.
+  const usage = useAiUsage(activityDigest);
+  const outOfCredits =
+    usage.data?.allowanceCredits != null && (usage.data.remainingCredits ?? 0) <= 0;
   const collapsed = useDigestCollapse((s) => s.collapsed.has(repoId));
   const toggle = useDigestCollapse((s) => s.toggle);
   // Refresh (below) streams ONLY this repo (`mutate(repoId)`), so the status bar +
@@ -43,6 +49,7 @@ export function DigestBanner({ repoId }: { repoId: number }): JSX.Element | null
         onRegenerate={digest == null || digest.stale ? () => refresh.mutate(repoId) : undefined}
         regenerating={regenerating}
         onOpenPr={openPr}
+        outOfCredits={outOfCredits}
       />
       {/* Only shown once the plan confirms this repo actually changed. */}
       <RegenProgressBar

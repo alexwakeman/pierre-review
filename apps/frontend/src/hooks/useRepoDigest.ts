@@ -135,6 +135,7 @@ export function useRefreshRepoDigests() {
       const url = `/api/pro/activity/digests/refresh/stream${search ? `?${search}` : ''}`;
 
       let throttled = false;
+      let creditsExhausted = false;
       let planIds: number[] = [];
       let total = 0;
       let completed = 0;
@@ -145,6 +146,7 @@ export function useRefreshRepoDigests() {
           switch (e.type) {
             case 'start':
               if (e.throttled) throttled = true;
+              if (e.creditsExhausted) creditsExhausted = true;
               break;
             case 'plan':
               // The repos that genuinely changed — skeleton + progress cover only these.
@@ -186,13 +188,17 @@ export function useRefreshRepoDigests() {
           setRefreshingRepoIds(new Set());
           setProgress(null);
           // Explain a no-op refresh so it doesn't read as broken.
-          if (throttled) {
+          if (creditsExhausted) {
+            setNotice('Out of AI credits this month — summaries resume on the 1st.');
+          } else if (throttled) {
             setNotice('Refreshed moments ago — showing the latest. Try again shortly.');
           } else if (total === 0) {
             setNotice('Already up to date — no new activity since the last digest.');
           } else {
             setNotice(null);
           }
+          // A generation may have spent credits → refresh the meter + the out-of-credits gate.
+          void qc.invalidateQueries({ queryKey: ['ai-usage'] });
           // Reconcile ONLY the repos that actually regenerated — leave every other
           // card's cached digest untouched.
           for (const id of planIds) {

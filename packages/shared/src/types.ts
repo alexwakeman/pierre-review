@@ -2058,6 +2058,10 @@ export interface RepoDigestsResponse {
   digests: RepoDigest[];
   generatedAt: string; // ISO-8601
   budgetReached?: boolean;
+  // The account's month-to-date credit allowance is spent (metered cloud plan). Set when a
+  // refresh was skipped without billing; the already-stored `digests` still render, and the
+  // Generate/Regenerate controls disable with an "out of AI credits" message.
+  creditsExhausted?: boolean;
 }
 
 // Server-Sent-Events payload streamed by POST /api/pro/activity/digests/refresh/stream.
@@ -2067,7 +2071,9 @@ export interface RepoDigestsResponse {
 // what makes the UI update live instead of only after a manual reload. `done` closes the
 // stream. `throttled` means the min-interval/in-flight guard served cache without billing.
 export type DigestRefreshEvent =
-  | { type: 'start'; throttled?: boolean }
+  // `creditsExhausted` closes the stream immediately (metered cloud plan out of credits) —
+  // nothing regenerates and the stored digests are left intact.
+  | { type: 'start'; throttled?: boolean; creditsExhausted?: boolean }
   // Sent once, after a cheap payload-hash pass, listing ONLY the repos whose content
   // actually changed since their last digest — the repos that will really regenerate.
   // Everything else is already up to date and is left untouched (no LLM, no skeleton).
@@ -2428,12 +2434,13 @@ export interface TeamMetricsDetailResponse {
 // ---- AI usage tracking (Pro; credits, transparency) ----
 // A non-currency view of AI spend. Cost is tracked in USD server-side (needed for the
 // per-run budget caps) but NEVER surfaced to the client as dollars — only as CREDITS,
-// to decouple the app's price from its underlying running cost. Conversion: 1 cent = 5
-// credits ⇒ $1 = 500 credits. Split by the two seams that spend: the SUMMARY seam (cheap
-// one-shot LLM completions — digests, sprint report, PR summary, CI analysis) and the
-// AGENTIC seam (Agent-SDK runs — Claude Review, AI Fix). Covers ALL usage on the account,
-// including work outside the Watched repos.
-export const AI_CREDITS_PER_USD = 500; // 1 cent = 5 credits
+// to decouple the app's price from its underlying running cost. Conversion: $1 of model
+// cost = 1250 credits (1 credit ≈ $0.0008), so the paid cloud plan's 2,500-credit monthly
+// allowance ≈ $2.00 of Haiku spend. Split by the two seams that spend: the SUMMARY seam
+// (cheap one-shot LLM completions — digests, sprint report, PR summary, CI analysis) and
+// the AGENTIC seam (Agent-SDK runs — Claude Review, AI Fix). Covers ALL usage on the
+// account, including work outside the Watched repos.
+export const AI_CREDITS_PER_USD = 1250; // $1 of model cost = 1250 credits
 
 export interface AiUsageResponse {
   enabled: boolean;
@@ -2441,6 +2448,12 @@ export interface AiUsageResponse {
   summaryCredits: number; // the summary / LLM-completion seam, month-to-date
   agentCredits: number; // the agentic-tooling seam, month-to-date
   totalCredits: number; // summary + agent
+  // The monthly credit allowance for this account. null = unmetered (local mode / an
+  // unlimited account) → the UI shows no bar. A finite number (e.g. 2500 for paid cloud)
+  // → the UI renders a used/allowance meter and blocks generation once it's exhausted.
+  allowanceCredits: number | null;
+  // allowanceCredits − totalCredits, floored at 0. null when allowanceCredits is null.
+  remainingCredits: number | null;
 }
 
 // ---- Sprint report (Pro; Haiku summary of the Insights, gated on activityDigest) ----
@@ -2466,6 +2479,10 @@ export interface SprintReportResponse {
   // throttle / in-flight guard (a regeneration ran < MIN_INTERVAL_SEC ago). Lets the client
   // explain a no-op "Regenerate" ("refreshed moments ago") instead of it reading as broken.
   throttled?: boolean;
+  // True when the account's month-to-date credit allowance is spent (metered cloud plan): the
+  // refresh was skipped without billing, any cached `report` still renders, and the client
+  // disables Generate/Regenerate with an "out of AI credits" message.
+  creditsExhausted?: boolean;
 }
 
 // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----

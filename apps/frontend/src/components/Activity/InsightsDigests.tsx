@@ -18,6 +18,7 @@ export function InsightsDigests({
   anyWatched,
   refreshingRepoIds,
   onRegenerateRepo,
+  outOfCredits = false,
   embedded = false,
 }: {
   digests: RepoDigest[];
@@ -27,6 +28,8 @@ export function InsightsDigests({
   // Per-repo (re)generate, delta-gated per card (offered when the repo has no digest, or its
   // digest is stale).
   onRegenerateRepo?: (repoId: number) => void;
+  // The account's metered AI allowance is spent → each card's Generate/Regenerate disables.
+  outOfCredits?: boolean;
   // When nested inside the sprint report card, the card's collapsible section header is the
   // label, so suppress this component's own "Repo summaries" header to avoid a double title.
   embedded?: boolean;
@@ -89,6 +92,7 @@ export function InsightsDigests({
                 regenerating={refreshingRepoIds.has(repo.id)}
                 onOpenPr={openPr}
                 showProBadge={false}
+                outOfCredits={outOfCredits}
               />
             );
           })}

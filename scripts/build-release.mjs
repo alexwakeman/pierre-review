@@ -36,6 +36,13 @@ const migrationsSrc = join(backendDir, 'src', 'db', 'migrations');
 const migrationsPgSrc = join(backendDir, 'src', 'db', 'migrations-pg');
 const releaseDir = join(repoRoot, 'release');
 
+// --with-pro (cloud image ONLY): additionally build the private @pierre/pro plugin into the
+// release + ship the SUMMARY-AI runtime deps the OSS npm package deliberately omits. The public
+// npm publish (release.yml) NEVER passes this, so its zero-AI-deps guarantee is unchanged.
+const withPro = process.argv.includes('--with-pro');
+const proDir = join(repoRoot, 'packages', 'pro');
+const proDist = join(proDir, 'dist');
+
 const log = (msg) => console.log(`\x1b[36m▸\x1b[0m ${msg}`);
 const fail = (msg) => {
   console.error(`\x1b[31m✗ ${msg}\x1b[0m`);
@@ -121,6 +128,26 @@ cpSync(frontendDist, join(releaseDir, 'public'), { recursive: true });
 log('copying landing → release/public-landing');
 cpSync(landingDist, join(releaseDir, 'public-landing'), { recursive: true });
 
+// 6c. (cloud image only) Copy the built @pierre/pro plugin + its migrations → release/pro,
+//     PRESERVING the dist↔migrations sibling layout so the plugin's `new URL('../migrations',
+//     import.meta.url)` resolves to /app/pro/migrations at runtime. The image sets
+//     PRO_PLUGIN_PATH=/app/pro/dist/index.js so bind.ts loads it directly (the repo-relative
+//     fallback paths don't exist in the flattened release layout).
+if (withPro) {
+  if (!existsSync(proDist)) {
+    fail(
+      '--with-pro: packages/pro/dist missing — run `pnpm --filter @pierre/pro build` first ' +
+        '(and check the submodule is initialized: `git submodule update --init`).',
+    );
+  }
+  log('copying @pierre/pro (dist + migrations) → release/pro');
+  cpSync(proDist, join(releaseDir, 'pro', 'dist'), { recursive: true });
+  for (const sub of ['migrations', 'migrations-pg']) {
+    const src = join(proDir, sub);
+    if (existsSync(src)) cpSync(src, join(releaseDir, 'pro', sub), { recursive: true });
+  }
+}
+
 // 7. Generate release/package.json (version copied from backend; curated deps).
 log('generating release/package.json');
 const backendPkg = JSON.parse(
@@ -180,6 +207,27 @@ const manifest = {
   ],
   license: 'MIT',
 };
+
+// --with-pro: the cloud image runs the @pierre/pro summary-AI plugin, so it needs the runtime
+// deps the OSS package omits. The plugin itself only imports drizzle-orm (already present); the
+// ONE genuinely-new dep is @anthropic-ai/sdk — CORE's review/llm.ts uses it on the raw metered
+// path (SUMMARY_ANTHROPIC_API_KEY, always set in cloud). The AGENTIC SDKs stay out (agentic AI
+// is off in cloud). Pro's declared `dependencies` are merged dynamically (no Pro internals are
+// hardcoded here), minus any unpublishable workspace specifier.
+if (withPro) {
+  const proPkg = JSON.parse(readFileSync(join(proDir, 'package.json'), 'utf8'));
+  const anthropicVersion =
+    proPkg.devDependencies?.['@anthropic-ai/sdk'] ??
+    proPkg.dependencies?.['@anthropic-ai/sdk'] ??
+    '>=0.93.0';
+  manifest.dependencies['@anthropic-ai/sdk'] = anthropicVersion;
+  for (const [name, version] of Object.entries(proPkg.dependencies ?? {})) {
+    if (String(version).startsWith('workspace:')) continue; // @pierre-review/shared etc.
+    manifest.dependencies[name] = version;
+  }
+  manifest.files = [...manifest.files, 'pro'];
+}
+
 writeFileSync(
   join(releaseDir, 'package.json'),
   JSON.stringify(manifest, null, 2) + '\n',
@@ -213,6 +261,8 @@ const mustExist = [
   'public/index.html',
   'public-landing/index.html',
 ];
+// The cloud image must actually contain the plugin entry it points PRO_PLUGIN_PATH at.
+if (withPro) mustExist.push('pro/dist/index.js');
 for (const rel of mustExist) {
   if (!existsSync(join(releaseDir, rel))) fail(`missing required file: ${rel}`);
 }
@@ -252,21 +302,24 @@ function grepSharedImports(dir) {
   return hits;
 }
 const sharedHits = grepSharedImports(join(releaseDir, 'dist'));
+// The plugin imports @pierre-review/shared as `import type` only (stripped at emit), but guard
+// the copied-in plugin too so a future value-import can't ship a broken runtime require.
+if (withPro) sharedHits.push(...grepSharedImports(join(releaseDir, 'pro')));
 if (sharedHits.length > 0) {
   console.error('Runtime import of @pierre-review/shared found in release/dist:');
   for (const h of sharedHits) console.error(`  ${h}`);
   fail('shared package would be required at runtime but is not shipped');
 }
 
-// No AI runtime dep in the generated manifest. The npm package must ship zero
-// Anthropic/MCP SDK deps — AI loads only when the private @pierre/pro plugin is
-// present (author/dev checkout), never from npm. Locks in the de-bundling.
-const AI_DEPS = [
-  '@anthropic-ai/claude-agent-sdk',
-  '@anthropic-ai/sdk',
-  '@modelcontextprotocol/sdk',
-  'zod',
-];
+// No AI runtime dep in the OSS manifest. The npm package must ship zero Anthropic/MCP SDK
+// deps — AI loads only when the private @pierre/pro plugin is present, never from npm. Under
+// --with-pro (cloud image ONLY) we DELIBERATELY ship @anthropic-ai/sdk for the summary raw-
+// metered path, so it's removed from the forbidden list there — but the AGENTIC SDKs
+// (@anthropic-ai/claude-agent-sdk, @modelcontextprotocol/sdk) and zod stay forbidden even in
+// cloud, since agentic AI is off there and shipping them would be dead bloat.
+const AI_DEPS = withPro
+  ? ['@anthropic-ai/claude-agent-sdk', '@modelcontextprotocol/sdk', 'zod']
+  : ['@anthropic-ai/claude-agent-sdk', '@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'zod'];
 const leakedAiDeps = AI_DEPS.filter((d) => d in manifest.dependencies);
 if (leakedAiDeps.length > 0) {
   fail(`AI runtime dep(s) leaked into release/package.json: ${leakedAiDeps.join(', ')}`);
