@@ -176,11 +176,14 @@ Add these **repo secrets** (Settings → Secrets → Actions):
 | Secret | What |
 |---|---|
 | `PRO_DEPLOY_KEY` | an **SSH read-only deploy key** on `alexwakeman/pierre-pro` — lets the workflow fetch the private submodule. Generate with `ssh-keygen -t ed25519`, add the **public** half as a deploy key on the pro repo, paste the **private** half here. |
-| `RAILWAY_TOKEN` | *(optional)* a Railway token to auto-redeploy after each push; else configure Railway to auto-pull the new `:latest` image. |
-| `VITE_GA_ID` | *(optional)* build-time GA id, same as the base deploy. |
+| `RAILWAY_TOKEN` | *(optional)* a Railway token so the workflow redeploys after pushing the image; else enable Railway's own "redeploy on image change". |
+| `RAILWAY_SERVICE` | *(optional)* the Railway service name — set it when `RAILWAY_TOKEN` is a **project** token, so `railway redeploy` targets the right service. |
+| `VITE_GA_ID` | *(optional)* build-time GA id, same as the base deploy — **required here for GA on the app**, since the image is prebuilt (a Railway runtime var won't reach it). |
 
-Run it from **Actions → Deploy cloud image → Run workflow**. It publishes
-`ghcr.io/<owner>/pierre-review-cloud:latest` (+ a `:<sha>` tag).
+The workflow runs **automatically on every push to `main`** (doc/CI-only pushes and the release
+bump commit are skipped) **and** on manual dispatch (**Actions → Deploy cloud image → Run
+workflow** — use this for the first run to confirm the secrets). It publishes
+`ghcr.io/<owner>/pierre-review-cloud:latest` (+ a `:<sha>` tag), then redeploys Railway.
 
 ### 2 — Point Railway at the image
 

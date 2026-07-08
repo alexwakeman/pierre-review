@@ -7,11 +7,16 @@ name: Deploy cloud image
 # ever surface. The PUBLIC npm publish (release.yml) does NOT check out the submodule and never
 # passes --with-pro, so its zero-AI-deps guarantee is untouched.
 #
+# Runs on every push to main (skipping doc/CI-only pushes and the release bump commit) AND on
+# manual dispatch. It builds the image + pushes to GHCR; the last step redeploys Railway.
+#
 # Required repo secrets:
 #   PRO_DEPLOY_KEY  — an SSH read-only deploy key on alexwakeman/pierre-pro (fetches the submodule)
-#   (optional) VITE_GA_ID     — build-time Google Analytics id inlined into the SPA/landing
-#   (optional) RAILWAY_TOKEN  — a Railway project/account token to trigger a redeploy after push
-#                               (else configure Railway to auto-pull the :latest GHCR tag)
+#   (optional) VITE_GA_ID       — build-time Google Analytics id inlined into the SPA/landing
+#   (optional) RAILWAY_TOKEN    — a Railway token to redeploy after the image is pushed
+#                                 (else enable Railway's own "redeploy on image change")
+#   (optional) RAILWAY_SERVICE  — service name; set alongside a PROJECT-scoped RAILWAY_TOKEN so
+#                                 `railway redeploy` targets the right service
 #
 # Railway service (configured once, in the dashboard — see docs/DEPLOY-RAILWAY.md):
 #   - Source: deploy from the GHCR image ghcr.io/<owner>/pierre-review-cloud:latest (+ a GHCR
@@ -23,13 +28,23 @@ name: Deploy cloud image
 
 on:
   workflow_dispatch: {}
-  # Enable once the deploy is proven stable:
-  # push:
-  #   branches: [main]
+  push:
+    branches: [main]
+    # Doc/CI-only pushes don't change the image — skip them (mirrors the Railway
+    # Watch Paths list). A mixed push (docs + code) still deploys, since paths-ignore
+    # only skips when EVERY changed file matches.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/**'
+      - '.claude/**'
+      - 'docker-compose.yml'
 
 concurrency:
+  # One deploy at a time; a newer push cancels an in-flight build (don't waste minutes
+  # shipping a superseded commit).
   group: deploy-cloud
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -41,6 +56,10 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    # The release workflow auto-commits `chore(release): bump … [skip ci]` on every main
+    # push; `[skip ci]` already skips this run, but guard explicitly too so a bump can never
+    # rebuild the image (a manual dispatch always runs).
+    if: ${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):') }}
     steps:
       # Check out the public repo AND the private packages/pro submodule (SSH via the read-only
       # deploy key). The submodule MUST be on disk before `docker build` — .dockerignore strips
@@ -78,15 +97,24 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Optional: nudge Railway to pull the new :latest tag. No-op when no token is configured
-      # (Railway can instead auto-redeploy on a new image tag). Best-effort — never fails the build.
+      # Nudge Railway to pull the freshly-pushed :latest image. No-op when no token is set
+      # (alternatively, turn on Railway's own "redeploy on image change"). Best-effort — a
+      # failed redeploy never fails the build. If your RAILWAY_TOKEN is a PROJECT token, also
+      # set RAILWAY_SERVICE to the service name so `redeploy` targets the right one.
       - name: Trigger Railway redeploy
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE }}
         continue-on-error: true
         run: |
-          if [ -n "$RAILWAY_TOKEN" ]; then
-            npx -y @railway/cli@latest redeploy --yes || echo "Railway redeploy failed — check the service is set to pull the GHCR image"
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "No RAILWAY_TOKEN — skipping (or enable Railway's redeploy-on-image-change)."
+            exit 0
+          fi
+          if [ -n "$RAILWAY_SERVICE" ]; then
+            npx -y @railway/cli@latest redeploy --service "$RAILWAY_SERVICE" --yes \
+              || echo "Railway redeploy failed — check the token/service and that it pulls the GHCR image"
           else
-            echo "No RAILWAY_TOKEN — skipping (configure Railway to auto-pull the :latest GHCR tag)."
+            npx -y @railway/cli@latest redeploy --yes \
+              || echo "Railway redeploy failed — a PROJECT token may need RAILWAY_SERVICE set"
           fi
