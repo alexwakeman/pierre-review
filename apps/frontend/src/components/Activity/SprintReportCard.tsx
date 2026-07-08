@@ -36,6 +36,8 @@ export function SprintReportCard({
   anyWatched = false,
   refreshingRepoIds,
   onRegenerateRepo,
+  onRegenerateAllDigests,
+  cascadeBusy = false,
 }: {
   digests?: RepoDigest[];
   digestsLoading?: boolean;
@@ -44,6 +46,14 @@ export function SprintReportCard({
   // Per-repo regenerate for the nested digest cards; each card offers it only when that
   // repo's own digest is stale (delta-gated inside InsightsDigests).
   onRegenerateRepo?: (repoId: number) => void;
+  // Cascade: (re)generating the sprint report ALSO refreshes every watched repo's digest —
+  // itself delta-gated server-side (only repos whose content actually changed regenerate), so
+  // "State of play" and the per-repo summaries move together. Fired alongside the sprint refresh.
+  onRegenerateAllDigests?: () => void;
+  // True while the cascaded digest sweep is streaming. Folded into the button's disabled state
+  // so a second click can't abort the in-flight sweep (the sprint refresh itself may resolve in
+  // ~200ms when throttled, which would otherwise re-enable the button mid-cascade).
+  cascadeBusy?: boolean;
 }): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
@@ -64,7 +74,17 @@ export function SprintReportCard({
   if (!activityDigest) return null;
 
   const report = data?.report ?? null;
-  const busy = refresh.isPending;
+  // Disabled through BOTH the sprint refresh AND the cascaded digest sweep — clicking again
+  // mid-cascade would abort the SSE sweep and drop its cache reconciliation (see cascadeBusy).
+  const busy = refresh.isPending || cascadeBusy;
+
+  // (Re)generate the sprint report AND cascade a delta-gated refresh across every watched
+  // repo's digest. The two run on independent throttles/guards, so neither starves the other;
+  // the digest side only re-bills repos whose content actually changed (payload-hash gate).
+  const regenerate = (): void => {
+    refresh.mutate();
+    onRegenerateAllDigests?.();
+  };
 
   return (
     <div
@@ -108,11 +128,11 @@ export function SprintReportCard({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                refresh.mutate();
+                regenerate();
               }}
               disabled={busy}
               className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
-              title="Generate the first sprint report from the current Insights (runs the Haiku model)"
+              title="Generate the first sprint report from the current Insights, and every watched repo's summary (runs the Haiku model)"
             >
               {busy ? 'Generating…' : 'Generate'}
             </button>
@@ -122,11 +142,11 @@ export function SprintReportCard({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  refresh.mutate();
+                  regenerate();
                 }}
                 disabled={busy}
                 className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
-                title="Regenerate the sprint report — the Insights changed since it was written (runs the Haiku model)"
+                title="Regenerate the sprint report and every changed repo summary — the Insights changed since it was written (runs the Haiku model)"
               >
                 <span aria-hidden="true">↻</span>
                 {busy ? 'Regenerating…' : 'Regenerate'}
@@ -140,6 +160,9 @@ export function SprintReportCard({
         <div className="mt-2 text-[11px] text-red-500">
           {(refresh.error as Error)?.message ?? 'Couldn’t generate the report.'}
         </div>
+      )}
+      {!refresh.isError && refresh.notice && (
+        <div className="mt-2 text-[11px] text-gray-400">{refresh.notice}</div>
       )}
 
       {!collapsed && (

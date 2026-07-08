@@ -38,22 +38,33 @@ function Stat({
   sub: string;
   onActivate?: () => void;
 }): JSX.Element {
-  const { value: v, previous: p } = stat;
+  const { value: v, previous: p, lowConfidence } = stat;
   const delta = v != null && p != null ? v - p : null;
   const improved = delta != null && delta !== 0 && (delta > 0) === (betterWhen === 'up');
+  // Early in a sprint the elapsed-matched samples are often too thin to trust a delta (a single
+  // carryover PR can define a median) — server flags those `lowConfidence`. Drop the ▲/▼ and
+  // show a muted "at this point last sprint" reference instead of a misleading trend arrow.
+  const showDelta = delta != null && delta !== 0 && !lowConfidence;
   return (
     <TileShell onActivate={onActivate}>
       <div className="text-[10px] font-medium uppercase tracking-wide text-gray-400">{label}</div>
       <div className="text-lg font-semibold text-gray-800 dark:text-gray-100">
         {v == null ? '—' : format(v)}
       </div>
-      {delta != null && delta !== 0 ? (
+      {showDelta ? (
         <div
           className={`text-[11px] ${
             improved ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'
           }`}
         >
           {delta > 0 ? '▲' : '▼'} {format(Math.abs(delta))} <span className="text-gray-400">vs last</span>
+        </div>
+      ) : lowConfidence ? (
+        <div
+          className="text-[11px] text-gray-400"
+          title="Too few data points to read a trend yet (small sample)"
+        >
+          {p == null ? 'building baseline' : `was ${format(p)}`}
         </div>
       ) : (
         <div className="text-[11px] text-gray-400">{p == null ? sub : 'no change'}</div>
@@ -95,6 +106,18 @@ export function TeamMetricsPanel({
 }): JSX.Element {
   const [showMore, setShowMore] = useState(false);
   const labels = metrics.weekBuckets;
+  // The caption reflects the comparison-window MODE: 'sprint' → "day N of M · vs same point last
+  // sprint" (elapsed-matched); 'rolling_*' → "rolling N days · vs prior N days" (always a full
+  // window). Default rolling_14 when the field is absent (stale cache).
+  const cmp = metrics.comparisonMode ?? 'rolling_14';
+  const dayN = Math.max(
+    1,
+    Math.min(metrics.sprintDays, Math.ceil(metrics.elapsedDays ?? metrics.sprintDays)),
+  );
+  const windowLabel =
+    cmp === 'sprint'
+      ? `day ${dayN} of ${metrics.sprintDays} · vs same point last sprint`
+      : `rolling ${metrics.sprintDays} days · vs prior ${metrics.sprintDays} days`;
   const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
   const open = (m: TeamMetricKey): (() => void) | undefined =>
     onOpenMetric ? () => onOpenMetric(m) : undefined;
@@ -132,7 +155,7 @@ export function TeamMetricsPanel({
           Flow metrics
         </h3>
         <span className="text-[11px] text-gray-400">
-          DORA-ish · this sprint vs last ({metrics.sprintDays}d) · 12-week trend
+          DORA-ish · {windowLabel} · 12-week trend
           {onOpenMetric ? ' · tap a tile to drill in' : ''}
         </span>
       </div>

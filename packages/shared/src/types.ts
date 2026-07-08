@@ -421,10 +421,23 @@ export type IssueProvider = 'jira' | 'linear';
 
 // Read shape (GET /api/pro/settings). The Slack webhook URL is WRITE-ONLY — never returned;
 // `slack.configured` reflects only whether one is stored.
+// How the Insights flow-metrics + sprint report frame their comparison window:
+//  - 'rolling_7' / 'rolling_14': the trailing N days vs the immediately-preceding N days. No sprint
+//    needed; always a full window (no "day-1 cliff"), good for teams that don't run sprints.
+//  - 'sprint': like-for-like by SPRINT POSITION — this sprint SO FAR vs the SAME elapsed slice of
+//    the previous sprint. Requires a configured sprint (start + cadence); with none it falls back
+//    to 'rolling_14'.
+export type SprintComparisonMode = 'rolling_7' | 'rolling_14' | 'sprint';
+
 export interface ProSettings {
   // Sprint that defines the Insights metrics window. cadenceDays = sprint length; the current
   // sprint auto-rolls (start + N whole cadence-lengths up to today). Open PRs always count.
-  sprint: { cadenceDays: number | null; startDate: string | null }; // startDate ISO (date @ midnight)
+  // `comparisonMode` picks the window model (default 'rolling_14'); 'sprint' uses cadence+start.
+  sprint: {
+    cadenceDays: number | null;
+    startDate: string | null; // ISO (date @ midnight); null = no sprint configured
+    comparisonMode: SprintComparisonMode;
+  };
   slack: {
     configured: boolean;
     cadence: SlackDigestCadence;
@@ -442,7 +455,13 @@ export interface ProSettings {
 // Write shape (PUT /api/pro/settings) — a partial patch; only present sections/fields change.
 // `slack.webhookUrl` is write-only ('' clears it).
 export interface ProSettingsUpdate {
-  sprint?: { cadenceDays?: number | null; startDate?: string | null };
+  // Pass startDate:null + cadenceDays:null to CLEAR the sprint (disable sprints entirely → the
+  // metrics fall back to a rolling window). comparisonMode switches the window model.
+  sprint?: {
+    cadenceDays?: number | null;
+    startDate?: string | null;
+    comparisonMode?: SprintComparisonMode;
+  };
   slack?: {
     webhookUrl?: string;
     cadence?: SlackDigestCadence;
@@ -2271,12 +2290,31 @@ export type InsightCard =
 // sprint value + the prior sprint's (for a Δ trend arrow). Weekly series align to
 // `weekBuckets` (a shared x-axis, oldest first) and reuse the repo-analytics chart format.
 export interface TeamMetricStat {
-  value: number | null; // this sprint (null = no sample)
-  previous: number | null; // prior sprint, for the delta
+  value: number | null; // this sprint SO FAR (null = no sample)
+  previous: number | null; // the SAME elapsed slice of the prior sprint (apples-to-apples)
+  // How many items fed each figure (for counts this equals the value; for medians/percentages
+  // it's the sample behind the statistic). Drives the low-confidence guard.
+  sampleSize?: number;
+  previousSampleSize?: number;
+  // True when the comparison is too thin to state a trend (either side below the sample floor,
+  // typical early in a sprint). The tile hides the delta arrow and the AI report must state the
+  // raw "so far" figure WITHOUT a percentage / "cliff" / "spike" — it's noise, not a signal.
+  lowConfidence?: boolean;
 }
 
 export interface TeamMetrics {
-  sprintDays: number; // the stat-tile window (14)
+  // Which window model produced value/previous — the panel + AI report label accordingly
+  // ("day N of M · vs same point last sprint" for 'sprint'; "rolling N days · vs prior N days" for
+  // 'rolling_*'). Optional for back-compat with cached responses predating the setting.
+  comparisonMode?: SprintComparisonMode;
+  sprintDays: number; // FULL length of the sprint/rolling window in days (e.g. 14)
+  // How far into the sprint we are. The stat tiles compare "this sprint so far" against the
+  // SAME elapsed slice of the previous sprint (elapsed-matched), so on day 1 you compare day-1
+  // vs day-1 — not a few hours against a complete prior sprint (which read as a false "cliff").
+  // At sprint end elapsedDays === sprintDays and it's the full-vs-full comparison. Optional for
+  // back-compat with cached responses predating this field.
+  elapsedDays?: number; // days elapsed so far (may be fractional early in the sprint)
+  elapsedFraction?: number; // elapsedDays / sprintDays, clamped 0..1
   weekBuckets: string[]; // ISO bucket-start per week, oldest first (chart x-axis)
 
   // Currently-open PRs (non-draft) across the repos — a snapshot count (no trend).
@@ -2423,7 +2461,11 @@ export interface SprintReport {
 export interface SprintReportResponse {
   enabled: boolean; // false when the AI digest capability is off
   model: string;
-  report: SprintReport | null; // null = not generated yet
+  report: SprintReport | null; // null = not generated yet (or nothing to report right now)
+  // True when a refresh request was served from cache because it hit the per-account
+  // throttle / in-flight guard (a regeneration ran < MIN_INTERVAL_SEC ago). Lets the client
+  // explain a no-op "Regenerate" ("refreshed moments ago") instead of it reading as broken.
+  throttled?: boolean;
 }
 
 // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----

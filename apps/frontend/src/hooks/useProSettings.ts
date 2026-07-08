@@ -39,6 +39,17 @@ export function useUpdateProSettings() {
         void qc.invalidateQueries({ queryKey: ['pr'] });
         void qc.invalidateQueries({ queryKey: ['thread'] });
       }
+      // The sprint / comparison-window setting is resolved fresh on every /api/pro/insights read
+      // (getComparisonWindow → resolveComparisonWindow), so changing it re-frames the flow-metrics
+      // + sprint report — but those queries otherwise only refetch on the 5-min sync cadence. Push
+      // the new window through immediately so the Insights UI reflects Save without waiting for a
+      // sync. The sprint report refetch is a cheap CACHED read (no regeneration/billing); when the
+      // window moved it comes back flagged `stale`, surfacing the Regenerate prompt.
+      if (patch.sprint) {
+        void qc.invalidateQueries({ queryKey: ['team-insights'] });
+        void qc.invalidateQueries({ queryKey: ['team-metrics-detail'] });
+        void qc.invalidateQueries({ queryKey: ['sprint-report'] });
+      }
     },
   });
 }

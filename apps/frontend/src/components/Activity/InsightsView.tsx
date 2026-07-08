@@ -405,6 +405,15 @@ export function InsightsView(): JSX.Element {
         anyWatched={watchedIds.length > 0}
         refreshingRepoIds={refreshDigests.refreshingRepoIds}
         onRegenerateRepo={(id) => refreshDigests.mutate(id)}
+        // Cascade: a sprint-report (re)generate also refreshes every watched repo's digest
+        // (server-side delta-gated → only changed repos re-bill). Reuses the same SSE refresh
+        // that drives the RegenProgressBar below, so progress is shown for the whole sweep.
+        onRegenerateAllDigests={
+          watchedIds.length > 0 ? () => refreshDigests.mutate(watchedIds) : undefined
+        }
+        // Keep the sprint Generate/Regenerate button disabled until the cascaded sweep finishes,
+        // so a second click can't abort it mid-stream.
+        cascadeBusy={refreshDigests.isPending}
       />
       <RegenProgressBar
         active={refreshDigests.isPending && (refreshDigests.progress?.total ?? 0) > 0}

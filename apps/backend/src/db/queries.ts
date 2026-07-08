@@ -33,7 +33,9 @@ import type {
   SuggestedReviewer,
   TeamInsightsResponse,
   TeamMetrics,
+  TeamMetricStat,
   TeamMetricsDetail,
+  SprintComparisonMode,
   MetricPr,
   FeedEvent,
   FeedResponse,
@@ -2002,6 +2004,18 @@ function topLevelDir(path: string): string {
 
 const TEAM_METRICS_WINDOW_DAYS = 84; // 12 weeks of weekly chart history
 const TEAM_METRICS_WEEK_MS = 7 * 86_400_000;
+// A cur-vs-prev stat comparison needs at least this many items on BOTH sides to be worth a
+// trend read. Below it (typical early in a sprint — often a single carryover PR) the stat is
+// flagged low-confidence: the tile drops the delta arrow and the AI report states the raw "so
+// far" figure without a percentage / "cliff" / "spike". This is what stops a day-1 report from
+// claiming "merges collapsed 99%" off a 1-vs-N sample.
+const TEAM_METRIC_MIN_SAMPLE = 3;
+
+// The comparison window handed in by the Pro layer (getComparisonWindow). fromMs/toMs drive the
+// cur/prev math; `mode` is passed straight through onto TeamMetrics.comparisonMode so the UI + AI
+// report label value/previous correctly. A rolling_N window has toMs === now (elapsed === full →
+// "previous" is the immediately-preceding N days); a sprint window has toMs in the future.
+type MetricsWindow = { fromMs: number; toMs: number; mode?: SprintComparisonMode };
 
 function medianOf(xs: number[]): number | null {
   if (xs.length === 0) return null;
@@ -2023,23 +2037,29 @@ export async function getTeamMetrics(
   accountId: number,
   repoIds: number[],
   nowMs: number,
-  // Optional configured SPRINT window (epoch millis) for the stat TILES: THIS sprint vs the
-  // immediately-preceding equal-length one. Undefined → the legacy trailing-14d sprint. The
-  // CHART window is a fixed 12 weeks regardless.
-  window?: { fromMs: number; toMs: number },
+  // The comparison window (epoch millis) + mode for the stat TILES: THIS window's elapsed slice vs
+  // the SAME slice of the immediately-preceding one. Undefined → the legacy trailing-14d default.
+  // The CHART window is a fixed 12 weeks regardless.
+  window?: MetricsWindow,
 ): Promise<TeamMetrics | null> {
   if (repoIds.length === 0) return null;
 
   // Charts: a fixed 12-week window ending now, INDEPENDENT of the sprint window.
   const chartWindowStartMs = nowMs - TEAM_METRICS_WINDOW_DAYS * 86_400_000;
 
-  // Sprint tiles: this sprint (curLo..curHi, never counting the future) vs the immediately-
-  // preceding equal-length sprint (prevLo..prevHi), aligned to the configured window.
+  // Sprint tiles: this sprint SO FAR (curLo..curHi, never counting the future) vs the SAME
+  // elapsed slice of the immediately-preceding sprint. ELAPSED-MATCHED: `prevHi` tracks how far
+  // into the sprint we are (prevLo + elapsed), NOT the full prior sprint (prevLo..curLo). On day
+  // 1 this compares day-1-so-far vs the previous sprint's first day — a fair, apples-to-apples
+  // read — instead of a few hours against a complete 14-day sprint (which surfaced as merges
+  // "down 99%" and lead time "spiked 37×" the moment a sprint rolled over). At sprint end
+  // elapsedMs === sprintLenMs → prevHi === curLo, i.e. it degrades to the full-vs-full compare.
   const curLo = window ? window.fromMs : nowMs - INSIGHT_SPRINT_DAYS * 86_400_000;
   const curHi = Math.min(window ? window.toMs : nowMs, nowMs);
   const sprintLenMs = window ? window.toMs - window.fromMs : INSIGHT_SPRINT_DAYS * 86_400_000;
+  const elapsedMs = Math.max(0, curHi - curLo);
   const prevLo = curLo - sprintLenMs;
-  const prevHi = curLo;
+  const prevHi = prevLo + elapsedMs;
 
   // Fetch must cover BOTH the chart window AND the previous sprint (which can predate it) —
   // this is what actually feeds the cur-vs-prev "previous" tiles (else they come back 0).
@@ -2213,17 +2233,49 @@ export async function getTeamMetrics(
     .slice(0, 8)
     .map(([stage, count]) => ({ stage, count }));
 
+  // Wrap each cur/prev pair with its sample sizes + a low-confidence flag (either side below
+  // TEAM_METRIC_MIN_SAMPLE). For counts the sample IS the value; for medians/percentages it's
+  // the number of items that fed the statistic.
+  const stat = (
+    value: number | null,
+    previous: number | null,
+    curN: number,
+    prevN: number,
+  ): TeamMetricStat => ({
+    value,
+    previous,
+    sampleSize: curN,
+    previousSampleSize: prevN,
+    lowConfidence: curN < TEAM_METRIC_MIN_SAMPLE || prevN < TEAM_METRIC_MIN_SAMPLE,
+  });
+
+  const elapsedDays = elapsedMs / 86_400_000;
+  const elapsedFraction = sprintLenMs > 0 ? Math.min(1, elapsedMs / sprintLenMs) : 1;
+
   return {
+    comparisonMode: window?.mode ?? 'rolling_14',
     sprintDays: Math.round(sprintLenMs / 86_400_000),
+    elapsedDays: Math.round(elapsedDays * 10) / 10,
+    elapsedFraction,
     weekBuckets,
     openPrs: openPrsNow,
-    merges: { value: mergesCur, previous: mergesPrev },
-    leadTimeHours: { value: medianOf(leadCur), previous: medianOf(leadPrev) },
-    timeToFirstReviewHours: { value: medianOf(ttfrCur), previous: medianOf(ttfrPrev) },
-    mergeCiSuccessPct: { value: pct(ciMergedCur), previous: pct(ciMergedPrev) },
+    merges: stat(mergesCur, mergesPrev, mergesCur, mergesPrev),
+    leadTimeHours: stat(medianOf(leadCur), medianOf(leadPrev), leadCur.length, leadPrev.length),
+    timeToFirstReviewHours: stat(
+      medianOf(ttfrCur),
+      medianOf(ttfrPrev),
+      ttfrCur.length,
+      ttfrPrev.length,
+    ),
+    mergeCiSuccessPct: stat(
+      pct(ciMergedCur),
+      pct(ciMergedPrev),
+      ciMergedCur.total,
+      ciMergedPrev.total,
+    ),
     ciFailingNow,
     ciFailingMedianAgeHours: medianOf(failingAges),
-    ciRecoveryHours: { value: medianOf(recCur), previous: medianOf(recPrev) },
+    ciRecoveryHours: stat(medianOf(recCur), medianOf(recPrev), recCur.length, recPrev.length),
     throughput: { opened: openedSeries, merged: mergedSeries },
     leadTimeTrend: leadByBucket.map(medianOf),
     ciSuccessTrend: ciByBucket.map(pct),
@@ -2245,9 +2297,10 @@ const METRIC_DETAIL_CAP = 500;
 // metric-specific figures, so the user can see WHERE issues cluster.
 export async function getTeamMetricsDetail(
   accountId: number,
-  // Optional configured SPRINT window (epoch millis); undefined → legacy default lookback.
-  // The lower bound uses window.fromMs; `now` remains the upper bound for time-based facts.
-  window?: { fromMs: number; toMs: number },
+  // The comparison window (epoch millis); undefined → legacy default lookback. The lower bound
+  // uses window.fromMs; `now` remains the upper bound. `mode` is unused here (a current-window PR
+  // list, no cur/prev split) but accepted so callers pass the same object as getTeamMetrics.
+  window?: MetricsWindow,
 ): Promise<TeamMetricsDetail> {
   const now = Date.now();
   const sprintFromMs = window?.fromMs ?? now - INSIGHT_SPRINT_DAYS * 86_400_000;
@@ -2527,7 +2580,7 @@ export async function getTeamMetricsDetail(
 // repos, open PRs, the sprint window, per-kind caps).
 export async function getTeamInsights(
   accountId: number,
-  window?: { fromMs: number; toMs: number },
+  window?: MetricsWindow,
 ): Promise<TeamInsightsResponse> {
   const now = Date.now();
   const generatedAt = new Date(now);
