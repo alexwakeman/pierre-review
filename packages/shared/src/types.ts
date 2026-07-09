@@ -863,6 +863,18 @@ export interface PrDetail {
   // happened since (null when never viewed or the PR is closed/merged).
   lastViewedAt: string | null;
   newSinceLastViewed: NewSinceLastViewed | null;
+  // Set (cloud) when on-demand hydration was BLOCKED by the repo owner's org policy — the
+  // GitHub token authenticates but isn't authorized for that org, so the description, CI
+  // jobs, comment bodies etc. couldn't be fetched. The SPA renders a "why is this blank +
+  // how to fix" banner. null when hydration succeeded (the normal case).
+  authNotice?: AuthNotice | null;
+}
+
+// Why a PR's on-demand detail couldn't be fully hydrated in cloud (an org authorization
+// wall, not a bug). `org` is the repo owner whose policy blocked the token.
+export interface AuthNotice {
+  kind: 'saml_sso';
+  org: string;
 }
 
 // ---- my turn ----

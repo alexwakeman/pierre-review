@@ -97,10 +97,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // Back-compat bare login (landing/billing CTAs) → the default provider.
-  app.get('/api/auth/login', async (_req, reply) =>
-    startLogin(defaultProvider, reply),
-  );
+  // Bare login (landing / billing CTAs). When BOTH providers are configured, don't silently
+  // pick one — bounce to the in-app sign-in gate so the user explicitly chooses OAuth App vs
+  // GitHub App. When only one is configured there's no choice to make, so go straight to it.
+  app.get('/api/auth/login', async (_req, reply) => {
+    if (config.oauthProviderEnabled && config.appProviderEnabled) {
+      return reply.redirect('/app');
+    }
+    return startLogin(defaultProvider, reply);
+  });
 
   // Verify state → exchange code for a token (against the state's provider) → fetch the user →
   // upsert account → set session → 302 to the app.

@@ -15,6 +15,7 @@
 import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import type {
+  AuthNotice,
   CheckRun,
   CommentDetail,
   PrCommentDetail,
@@ -30,6 +31,7 @@ import {
   getGraphqlClientFor,
   graphqlChecksHint,
   graphqlTolerant,
+  isSamlBlock,
   summarizeGraphqlErrors,
 } from '../github/client.js';
 import { PR_DETAIL_QUERY, type PrDetailResponse } from '../github/queries.js';
@@ -67,39 +69,45 @@ function splitRepoFullName(fullName: string): { owner: string; name: string } {
   return { owner: fullName.slice(0, slash), name: fullName.slice(slash + 1) };
 }
 
-// Fetch the single PR's text from GitHub. Returns null on any failure (deleted PR,
-// lost access, network) so callers degrade gracefully to the stored metadata.
+// Fetch the single PR's text from GitHub. `data` is null on any failure (deleted PR, lost
+// access, network) so callers degrade gracefully to the stored metadata. `samlBlocked` is true
+// when the failure was GitHub's SAML-SSO wall — the token isn't authorized for the repo owner's
+// org — which the callers surface to the SPA (it's an authorization gap, not a bug).
 async function fetchGhPrText(
   owner: string,
   name: string,
   number: number,
   accountId: number,
-): Promise<GhPrText | null> {
+): Promise<{ data: GhPrText | null; samlBlocked: boolean }> {
   let resp: PrDetailResponse;
+  let samlBlocked = false;
   try {
     const token = await getAccessToken(accountId);
     const client = getGraphqlClientFor(token);
     // Tolerate partial errors: if the token is FORBIDDEN one sub-field (e.g. `statusCheckRollup`
     // check runs on a private repo it can't reach), that used to throw away the ENTIRE hydration
     // (PR body, comments, diff hunks, commit messages) even though all of those came back fine.
-    // Now we keep them; only the forbidden field (CI checks) stays empty (and we log why).
+    // Now we keep them; only the forbidden field (CI checks) stays empty (and we log why). A SAML
+    // block forbids the whole `repository` node, so `data` ends up null but we flag it.
     resp = await graphqlTolerant<PrDetailResponse>(
       client,
       PR_DETAIL_QUERY,
       { owner, name, number },
-      (errors) =>
+      (errors) => {
+        if (isSamlBlock(errors)) samlBlocked = true;
         console.warn(
           `[hydrate] partial GraphQL for ${owner}/${name}#${number} — continuing with available fields${graphqlChecksHint(errors)}. ${summarizeGraphqlErrors(errors)}`,
-        ),
+        );
+      },
     );
   } catch (err) {
     console.error(
       `[hydrate] PR detail fetch failed for ${owner}/${name}#${number}; returning stored metadata. ${err instanceof Error ? err.message : String(err)}`,
     );
-    return null;
+    return { data: null, samlBlocked: false };
   }
   const pr = resp.repository?.pullRequest;
-  if (!pr) return null;
+  if (!pr) return { data: null, samlBlocked };
 
   const reviewBodyByNode = new Map<string, string | null>();
   for (const r of pr.reviews.nodes) reviewBodyByNode.set(r.id, r.body);
@@ -121,20 +129,23 @@ async function fetchGhPrText(
   for (const c of pr.commits.nodes) commitMessageBySha.set(c.commit.oid, c.commit.message);
 
   return {
-    prBody: pr.body,
-    checkRuns: checkRunsFrom(pr.headCommit?.nodes[0]?.commit),
-    reviewBodyByNode,
-    reviewCommentByNode,
-    prCommentBodyByNode,
-    commitMessageBySha,
-    additions: pr.additions ?? 0,
-    deletions: pr.deletions ?? 0,
-    changedFiles: pr.changedFiles ?? 0,
-    files: (pr.files?.nodes ?? []).map((f) => ({
-      path: f.path,
-      additions: f.additions ?? 0,
-      deletions: f.deletions ?? 0,
-    })),
+    data: {
+      prBody: pr.body,
+      checkRuns: checkRunsFrom(pr.headCommit?.nodes[0]?.commit),
+      reviewBodyByNode,
+      reviewCommentByNode,
+      prCommentBodyByNode,
+      commitMessageBySha,
+      additions: pr.additions ?? 0,
+      deletions: pr.deletions ?? 0,
+      changedFiles: pr.changedFiles ?? 0,
+      files: (pr.files?.nodes ?? []).map((f) => ({
+        path: f.path,
+        additions: f.additions ?? 0,
+        deletions: f.deletions ?? 0,
+      })),
+    },
+    samlBlocked,
   };
 }
 
@@ -163,8 +174,18 @@ export async function hydratePrDetail(
   if (config.persistBodies) return detail;
 
   const { owner, name } = splitRepoFullName(detail.repoFullName);
-  const gh = await fetchGhPrText(owner, name, detail.number, accountId);
-  if (!gh) return detail;
+  const { data: gh, samlBlocked } = await fetchGhPrText(
+    owner,
+    name,
+    detail.number,
+    accountId,
+  );
+  const authNotice: AuthNotice | null = samlBlocked
+    ? { kind: 'saml_sso', org: owner }
+    : null;
+  // Blocked or otherwise unfetchable → keep the stored metadata, but tell the SPA WHY the
+  // description/checks are blank when it was an org authorization wall (so it can guide the fix).
+  if (!gh) return authNotice ? { ...detail, authNotice } : detail;
 
   const [reviewNodes, reviewCommentNodes, prCommentNodes] = await Promise.all([
     nodeIdMap(reviews, detail.id),
@@ -222,6 +243,7 @@ export async function hydratePrDetail(
     deletions: gh.deletions,
     changedFilesCount: gh.changedFiles,
     files: filesOut,
+    authNotice,
   };
 }
 
@@ -253,7 +275,7 @@ export async function hydrateThreadDetail(
   )[0];
   if (!ctx) return thread;
 
-  const gh = await fetchGhPrText(ctx.owner, ctx.name, ctx.number, accountId);
+  const { data: gh } = await fetchGhPrText(ctx.owner, ctx.name, ctx.number, accountId);
   if (!gh) return thread;
 
   const commentNodes = await nodeIdMap(reviewComments, thread.prId);

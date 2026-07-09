@@ -245,8 +245,37 @@ export function ChecksTab({
   const reviewerIds = [...latestReviewState.keys()];
 
   return (
-    <div className="divide-y divide-gray-100 py-1 dark:divide-gray-800">
-      <Row label="CI">
+    <>
+      {pr.authNotice?.kind === 'saml_sso' && (
+        <div className="mx-4 mt-2 rounded-md border border-amber-400/50 bg-amber-400/10 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+          <strong className="font-semibold">
+            Some data from {pr.authNotice.org} is hidden.
+          </strong>{' '}
+          Your GitHub sign-in isn&rsquo;t authorized for {pr.authNotice.org}&rsquo;s SAML
+          SSO, so the description, CI jobs and comment bodies couldn&rsquo;t be loaded. Fix:{' '}
+          <a
+            className="underline underline-offset-2"
+            href={`https://github.com/orgs/${pr.authNotice.org}/sso`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            start an SSO session for {pr.authNotice.org}
+          </a>
+          , then revoke the app at{' '}
+          <a
+            className="underline underline-offset-2"
+            href="https://github.com/settings/applications"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Authorized OAuth Apps
+          </a>{' '}
+          and sign in again. (If GitHub only offers &ldquo;Request&rdquo;, an org owner must
+          approve the app.)
+        </div>
+      )}
+      <div className="divide-y divide-gray-100 py-1 dark:divide-gray-800">
+        <Row label="CI">
         {ci ? (
           <span className="inline-flex items-center gap-1.5">
             <span
@@ -452,6 +481,7 @@ export function ChecksTab({
           <div>updated {relativeTime(pr.updatedAt)}</div>
         </div>
       </Row>
-    </div>
+      </div>
+    </>
   );
 }

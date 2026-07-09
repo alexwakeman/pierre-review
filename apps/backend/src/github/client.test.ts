@@ -3,6 +3,7 @@ import { GraphqlResponseError } from '@octokit/graphql';
 import {
   graphqlChecksHint,
   graphqlTolerant,
+  isSamlBlock,
   summarizeGraphqlErrors,
   type GraphqlClient,
 } from './client.js';
@@ -104,5 +105,33 @@ describe('graphqlChecksHint', () => {
       { type: 'NOT_FOUND', path: ['repository', 'pullRequest'], message: 'Could not resolve to a node' },
     ]);
     expect(hint).toBe('');
+  });
+
+  it('gives the SAML re-auth hint (which wins over the checks hint)', () => {
+    const hint = graphqlChecksHint([
+      {
+        type: 'FORBIDDEN',
+        path: ['repository'],
+        message:
+          'Resource protected by organization SAML enforcement. You must grant your OAuth token access to this organization.',
+      },
+    ]);
+    expect(hint).toContain('SAML');
+    expect(hint).toContain('re-authorize');
+  });
+});
+
+describe('isSamlBlock', () => {
+  it('detects the SAML enforcement error', () => {
+    expect(
+      isSamlBlock([
+        { type: 'FORBIDDEN', message: 'Resource protected by organization SAML enforcement.' },
+      ]),
+    ).toBe(true);
+  });
+  it('is false for an ordinary forbidden/checks error', () => {
+    expect(
+      isSamlBlock([{ type: 'FORBIDDEN', message: 'Resource not accessible by integration' }]),
+    ).toBe(false);
   });
 });

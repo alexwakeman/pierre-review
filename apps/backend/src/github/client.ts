@@ -3,12 +3,28 @@ import { getGithubToken } from './auth.js';
 
 export type GraphqlClient = typeof graphql;
 
-// A parenthetical hint appended to a partial-GraphQL log, ONLY when the forbidden field is
-// actually a CI-checks field — so a NOT_FOUND (deleted/inaccessible PR) isn't mislabelled as a
-// checks-access problem. Empty otherwise (the raw errors still get logged). Cloud sign-in is an
-// OAuth App (needs the `public_repo` scope for checks) and/or a GitHub App (needs installing on
-// the repo's org with "Checks" read); either way public-repo checks read once that's in place.
+// True when the partial errors are GitHub's SAML-SSO wall: the token authenticates but isn't
+// authorized for the repo owner's org, so the whole `repository` node is forbidden. GitHub's
+// message is "Resource protected by organization SAML enforcement. You must grant your OAuth
+// token access to this organization." This gates PRs/checks even on PUBLIC repos of a SAML org.
+export function isSamlBlock(errors: unknown): boolean {
+  return (
+    Array.isArray(errors) &&
+    errors.some((e) =>
+      /saml enforcement|grant your oauth token access/i.test(
+        (e as { message?: string }).message ?? '',
+      ),
+    )
+  );
+}
+
+// A parenthetical hint appended to a partial-GraphQL log. SAML enforcement gets the actionable
+// re-auth hint; otherwise, ONLY when the forbidden field is a CI-checks field (so a NOT_FOUND —
+// deleted/inaccessible PR — isn't mislabelled). Empty otherwise (the raw errors still get logged).
 export function graphqlChecksHint(errors: unknown): string {
+  if (isSamlBlock(errors)) {
+    return " — the sign-in token isn't authorized for this org's SAML SSO; re-authorize it inside an active SAML session for the org (see docs/GITHUB-AUTH-SETUP.md)";
+  }
   const mentionsChecks =
     Array.isArray(errors) &&
     errors.some((e) => {
