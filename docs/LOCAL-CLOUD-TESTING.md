@@ -1,7 +1,7 @@
 # Testing the cloud (deployed) experience locally
 
 The local runner has a `--cloud` flag that boots the **full deployed experience**
-on your laptop: the landing page at `/`, GitHub-App OAuth, Postgres, and the
+on your laptop: the landing page at `/`, GitHub OAuth App sign-in, Postgres, and the
 timeline app at `/app` — without touching your normal local SQLite setup.
 
 This is for verifying the cloud build before (or instead of) deploying to Railway.
@@ -17,17 +17,17 @@ This is for verifying the cloud build before (or instead of) deploying to Railwa
    (DB `pierre_review`, user/pw `pierre`/`pierre`.) Stop with `docker compose down`;
    wipe with `docker compose down -v`.
 
-2. **A GitHub App** with a callback for localhost — see
-   [GITHUB-APP-SETUP.md](./GITHUB-APP-SETUP.md). Add
-   `http://localhost:4000/api/auth/callback` as a callback URL on the App.
+2. **A GitHub OAuth App and/or GitHub App** with a callback for localhost — see
+   [GITHUB-AUTH-SETUP.md](./GITHUB-AUTH-SETUP.md). Add
+   `http://localhost:4000/api/auth/callback` as a callback URL on whichever you set up.
 
 3. **Cloud env vars.** Copy the template and fill it in:
    ```bash
    cp .env.cloud.example .env       # at the repo root
    ```
    Set `DATABASE_URL=postgres://pierre:pierre@localhost:5432/pierre_review`,
-   `APP_BASE_URL=http://localhost:4000`, the three `GITHUB_APP_*` values, and
-   generate the two secrets:
+   `APP_BASE_URL=http://localhost:4000`, the `GITHUB_OAUTH_CLIENT_ID` /
+   `GITHUB_OAUTH_CLIENT_SECRET` values, and generate the two secrets:
    ```bash
    openssl rand -hex 32   # SESSION_SECRET
    openssl rand -hex 32   # ENCRYPTION_KEY (64 hex chars)
@@ -58,7 +58,7 @@ cd release
 DEPLOYMENT_MODE=cloud \
 DATABASE_URL=postgres://pierre:pierre@localhost:5432/pierre_review \
 APP_BASE_URL=http://localhost:4000 \
-GITHUB_APP_CLIENT_ID=... GITHUB_APP_CLIENT_SECRET=... GITHUB_APP_SLUG=... \
+GITHUB_OAUTH_CLIENT_ID=... GITHUB_OAUTH_CLIENT_SECRET=... \
 SESSION_SECRET=... ENCRYPTION_KEY=... \
 node dist/index.js
 ```
@@ -71,7 +71,7 @@ the mode and skips the local `gh` pre-check (cloud uses OAuth):
 ```bash
 DATABASE_URL=postgres://pierre:pierre@localhost:5432/pierre_review \
 APP_BASE_URL=http://localhost:4000 \
-GITHUB_APP_CLIENT_ID=... GITHUB_APP_CLIENT_SECRET=... GITHUB_APP_SLUG=... \
+GITHUB_OAUTH_CLIENT_ID=... GITHUB_OAUTH_CLIENT_SECRET=... \
 SESSION_SECRET=... ENCRYPTION_KEY=... \
 pierre --cloud --port 4000
 ```

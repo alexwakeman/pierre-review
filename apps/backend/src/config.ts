@@ -47,7 +47,7 @@ function effortFromEnv(key: string, fallback: ReviewEffort): ReviewEffort {
 // ---- Deployment mode (the master switch) ----
 // `local` (default): SQLite via better-sqlite3, `gh auth token` auth, one
 // implicit account, no landing page — the unchanged zero-config experience.
-// `cloud`: Postgres, GitHub App OAuth, many accounts, public landing page.
+// `cloud`: Postgres, GitHub sign-in (OAuth App and/or GitHub App), many accounts, landing page.
 // Everything dialect/tenancy-specific branches off `deploymentMode`.
 const deploymentMode: 'local' | 'cloud' =
   process.env.DEPLOYMENT_MODE === 'cloud' ? 'cloud' : 'local';
@@ -123,15 +123,39 @@ export const config = {
   // Disable the periodic scheduler (used by scripts/tests).
   disableScheduler: process.env.DISABLE_SCHEDULER === 'true',
 
-  // ---- Cloud (Railway) — GitHub App OAuth + sessions + token encryption ----
+  // ---- Cloud (Railway) — GitHub sign-in + sessions + token encryption ----
   // Public base URL of the deployment (no trailing slash); used to build the
   // OAuth redirect_uri and absolute links. Locally http://localhost:<port>.
   appBaseUrl:
     process.env.APP_BASE_URL?.replace(/\/$/, '') ??
     `http://localhost:${intFromEnv('PORT', 4000)}`,
+  // Cloud supports TWO sign-in providers side by side; a deployment configures either or both
+  // and the SignInGate offers whatever's set. They are SEPARATE GitHub registrations (distinct
+  // client id/secret) but share the same authorize/token endpoints — the flow only differs in
+  // which credential it uses and whether it requests `oauthScope` (see api/routes/auth.ts).
+  //
+  //  • OAuth App  — user-scoped token, NO installation. `public_repo` reads public repos incl.
+  //    CI checks/statuses (what an unscoped token can't) + enables the interactive PR actions.
+  //  • GitHub App — user-to-server token; for PRIVATE repos the App must be INSTALLED where they
+  //    live (public repos work without install, but reading CI Checks/Actions needs install).
+  githubOAuthClientId: process.env.GITHUB_OAUTH_CLIENT_ID ?? '',
+  githubOAuthClientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET ?? '',
+  // Scopes requested by the OAuth App at authorize time. Default = public repos only (widen to
+  // `repo read:org` for private-repo access via OAuth).
+  oauthScope: process.env.GITHUB_OAUTH_SCOPE ?? 'public_repo read:org',
   githubAppClientId: process.env.GITHUB_APP_CLIENT_ID ?? '',
   githubAppClientSecret: process.env.GITHUB_APP_CLIENT_SECRET ?? '',
+  // The GitHub App's URL slug — builds the private-repo install link
+  // (github.com/apps/<slug>/installations/new), shown on the sign-in gate.
   githubAppSlug: process.env.GITHUB_APP_SLUG ?? '',
+  // Derived: is each provider fully configured? (Both are optional; assertCloudConfig requires
+  // at least one.) The auth routes + SignInGate gate on these.
+  oauthProviderEnabled: !!(
+    process.env.GITHUB_OAUTH_CLIENT_ID && process.env.GITHUB_OAUTH_CLIENT_SECRET
+  ),
+  appProviderEnabled: !!(
+    process.env.GITHUB_APP_CLIENT_ID && process.env.GITHUB_APP_CLIENT_SECRET
+  ),
   // Seals the session cookie ({accountId}). Rotate to invalidate all sessions.
   sessionSecret: process.env.SESSION_SECRET ?? '',
   // 32-byte (64-hex) key for AES-256-GCM encryption of stored access tokens.
@@ -249,12 +273,19 @@ export function assertCloudConfig(): void {
   const required: Array<[string, string]> = [
     ['DATABASE_URL', config.databaseUrl],
     ['APP_BASE_URL', process.env.APP_BASE_URL ?? ''],
-    ['GITHUB_APP_CLIENT_ID', config.githubAppClientId],
-    ['GITHUB_APP_CLIENT_SECRET', config.githubAppClientSecret],
-    ['GITHUB_APP_SLUG', config.githubAppSlug],
     ['SESSION_SECRET', config.sessionSecret],
     ['ENCRYPTION_KEY', config.encryptionKey],
   ];
+  // At least ONE sign-in provider must be fully configured; a deployment may enable either or
+  // both. A GitHub App with no OAuth App (or vice-versa) is fine.
+  if (!config.oauthProviderEnabled && !config.appProviderEnabled) {
+    throw new Error(
+      'Cloud mode needs at least one GitHub sign-in method configured: set ' +
+        'GITHUB_OAUTH_CLIENT_ID + GITHUB_OAUTH_CLIENT_SECRET (OAuth App, public repos) and/or ' +
+        'GITHUB_APP_CLIENT_ID + GITHUB_APP_CLIENT_SECRET (GitHub App, adds private org repos via ' +
+        'install). See docs/GITHUB-AUTH-SETUP.md.',
+    );
+  }
   const missing = required.filter(([, v]) => !v).map(([k]) => k);
   if (missing.length > 0) {
     throw new Error(

@@ -9,7 +9,7 @@ Runs two ways from one codebase (the `DEPLOYMENT_MODE` env var selects):
 - **Local** (default): zero-config, SQLite, authenticates via your `gh` CLI.
   `npx pierre-review` opens straight to the timeline — no landing page, no
   accounts, no hosted backend.
-- **Cloud** (multi-tenant): a public dark landing page, GitHub-App sign-in,
+- **Cloud** (multi-tenant): a public dark landing page, GitHub OAuth App sign-in,
   per-user encrypted accounts, and Postgres. Self-host on Railway. See
   [docs/DEPLOY-RAILWAY.md](docs/DEPLOY-RAILWAY.md).
 
@@ -37,7 +37,7 @@ untouched), alongside CI, approvers, and the full activity feed:
 - pnpm ≥ 9
 - GitHub CLI (`gh`) authenticated: `gh auth login`. For org repos behind SSO you
   may need `gh auth refresh -h github.com -s read:org`. *(Local mode only — cloud
-  mode uses GitHub-App OAuth instead.)*
+  mode uses a GitHub OAuth App instead.)*
 
 ## Quick start (local)
 
@@ -116,19 +116,19 @@ writable clone directory, so it only runs in local mode.
 
 ## Cloud mode (multi-tenant)
 
-The cloud deployment is Postgres-backed with GitHub-App sign-in. Local mode is
+The cloud deployment is Postgres-backed with GitHub OAuth App sign-in. Local mode is
 untouched. To run the full deployed experience on your laptop:
 
 ```bash
 docker compose up -d db                 # local Postgres (see docker-compose.yml)
-cp .env.cloud.example .env              # fill in GITHUB_APP_*, secrets, DATABASE_URL
+cp .env.cloud.example .env              # fill in GITHUB_OAUTH_*, secrets, DATABASE_URL
 DEPLOYMENT_MODE=cloud pnpm dev          # landing at /, app at /app, OAuth gate
 ```
 
 Docs:
 
 - [docs/DEPLOY-RAILWAY.md](docs/DEPLOY-RAILWAY.md) — deploy to Railway step by step.
-- [docs/GITHUB-APP-SETUP.md](docs/GITHUB-APP-SETUP.md) — create the GitHub App.
+- [docs/GITHUB-AUTH-SETUP.md](docs/GITHUB-AUTH-SETUP.md) — set up sign-in (OAuth App and/or GitHub App).
 - [docs/LOCAL-CLOUD-TESTING.md](docs/LOCAL-CLOUD-TESTING.md) — test cloud locally.
 
 Verify cross-account isolation (query-layer IDOR check):

@@ -94,8 +94,10 @@ Prerequisite (local mode):
   \`gh auth login\`. The dashboard reads your activity using your gh token.
 
 Prerequisite (--cloud):
-  Postgres + a GitHub App. See docs/LOCAL-CLOUD-TESTING.md. Provide
-  DATABASE_URL, APP_BASE_URL, GITHUB_APP_*, SESSION_SECRET, ENCRYPTION_KEY.
+  Postgres + a GitHub sign-in method (an OAuth App and/or a GitHub App). See
+  docs/GITHUB-AUTH-SETUP.md. Provide DATABASE_URL, APP_BASE_URL, SESSION_SECRET,
+  ENCRYPTION_KEY, and at least one of GITHUB_OAUTH_CLIENT_ID+SECRET or
+  GITHUB_APP_CLIENT_ID+SECRET.
 `);
 }
 

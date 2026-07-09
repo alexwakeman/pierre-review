@@ -10,7 +10,7 @@
 import type { MergeMethod } from '@pierre-review/shared';
 import {
   getGraphqlClientFor,
-  ghRestGetDiff,
+  ghRestGetDiffStatus,
   ghRestGetFor,
   ghRestPostFor,
   ghRestPostNoContent,
@@ -560,14 +560,72 @@ export async function updatePullRequestBranch(
 }
 
 // The PR's unified diff via the REST API (Accept: application/vnd.github.diff) —
-// cloud-ready, per-account. Bounded implicitly by GitHub's own diff-size limit.
+// cloud-ready, per-account. GitHub caps this media type at 20,000 lines and returns 406
+// past it (a large PR — e.g. bulk data/generated files). In that case we fall back to the
+// per-file endpoint, which has no total-lines cap, and synthesise a unified diff from each
+// file's `patch`. Without this fallback the diff came back empty and the AI summary / CI
+// analysis / fixer would (correctly, but uselessly) report "the diff is empty".
 export async function fetchPrUnifiedDiff(
   token: string,
   owner: string,
   name: string,
   number: number,
 ): Promise<string> {
-  return ghRestGetDiff(token, `/repos/${owner}/${name}/pulls/${number}`);
+  const path = `/repos/${owner}/${name}/pulls/${number}`;
+  const res = await ghRestGetDiffStatus(token, path);
+  if (res.ok) return res.text;
+  if (res.status === 406) {
+    return reconstructUnifiedDiffFromFiles(token, owner, name, number);
+  }
+  throw new Error(
+    `GitHub REST GET(diff) ${path} -> ${res.status}: ${res.text.slice(0, 300)}`,
+  );
+}
+
+// Synthesise a unified diff from GitHub's per-file `patch`es — the fallback when the
+// whole-PR .diff 406s (too large). The /files endpoint has no total-lines cap (up to 3000
+// files); a file's `patch` is omitted when it's binary or a single file's own diff is too
+// large, so we name those with their churn/status. The synthetic `diff --git a/… b/…`
+// headers keep the result splittable by capDiff's per-file budgeter (so a summary still
+// stays within the prompt's char budget, grounded in the files that DO have patches).
+export function filesToUnifiedDiff(
+  files: Array<{
+    filename: string;
+    previous_filename?: string;
+    status: string;
+    additions: number;
+    deletions: number;
+    patch?: string;
+  }>,
+): string {
+  const parts: string[] = [];
+  for (const f of files) {
+    const aPath = f.previous_filename ?? f.filename;
+    parts.push(`diff --git a/${aPath} b/${f.filename}`);
+    if (f.patch) {
+      parts.push(`--- a/${aPath}`, `+++ b/${f.filename}`, f.patch);
+    } else {
+      // GitHub omits `patch` for binary files, a single file whose own diff is too large,
+      // and some no-content changes (pure rename / mode-only). Lead with the authoritative
+      // status + churn (the real signal) and hedge the reason so a rename isn't mislabelled.
+      parts.push(
+        `(diff not shown — status=${f.status}, +${f.additions}/-${f.deletions}; likely binary or too large)`,
+      );
+    }
+  }
+  return parts.join('\n');
+}
+
+async function reconstructUnifiedDiffFromFiles(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+): Promise<string> {
+  // 300 files is plenty for a grounded summary and bounds the paging to ~3 requests; the
+  // downstream capDiff trims further to the prompt's char budget.
+  const { files } = await fetchPrFilesWithPatch(token, owner, name, number, 300);
+  return filesToUnifiedDiff(files);
 }
 
 interface RestCreatedPull {

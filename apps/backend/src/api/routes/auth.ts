@@ -1,12 +1,20 @@
 import { randomBytes } from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { config } from '../../config.js';
 import { encryptToken } from '../../auth/crypto.js';
 import { upsertCloudAccount } from '../../auth/account.js';
 
-// GitHub App OAuth (user-to-server) sign-in routes. Registered only in cloud
-// mode. The state cookie is a short-lived signed cookie (CSRF); the session is a
-// sealed cookie holding { accountId }.
+// GitHub sign-in routes (cloud only). TWO providers are supported side by side; a deployment
+// enables either or both (config.oauthProviderEnabled / appProviderEnabled) and the SignInGate
+// offers whatever's set:
+//   • 'oauth' — a traditional OAuth App: user-scoped token, NO install, `config.oauthScope`
+//     (public repos incl. CI checks). A GitHub App IGNORES a scope param; an OAuth App honours it.
+//   • 'app'   — a GitHub App user token: private repos need the App INSTALLED where they live.
+// Both share GitHub's authorize/token endpoints; only the credential (and whether a scope is
+// sent) differs. The chosen provider is folded into the CSRF `state` (`<provider>.<nonce>`) so
+// the single callback exchanges the code against the MATCHING client id/secret.
+
+type Provider = 'oauth' | 'app';
 
 interface OAuthTokenResponse {
   access_token?: string;
@@ -21,13 +29,46 @@ interface GhUserResponse {
   avatar_url: string | null;
 }
 
+// Per-provider credential + the scope to request (empty for the GitHub App).
+function providerCredentials(
+  provider: Provider,
+): { clientId: string; clientSecret: string; scope: string; enabled: boolean } {
+  return provider === 'app'
+    ? {
+        clientId: config.githubAppClientId,
+        clientSecret: config.githubAppClientSecret,
+        scope: '',
+        enabled: config.appProviderEnabled,
+      }
+    : {
+        clientId: config.githubOAuthClientId,
+        clientSecret: config.githubOAuthClientSecret,
+        scope: config.oauthScope,
+        enabled: config.oauthProviderEnabled,
+      };
+}
+
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   const redirectUri = `${config.appBaseUrl}/api/auth/callback`;
   const secureCookie = config.appBaseUrl.startsWith('https://');
+  // The default provider for the bare /api/auth/login link (landing/billing CTAs): prefer the
+  // frictionless OAuth App; fall back to the GitHub App if that's the only one configured.
+  const defaultProvider: Provider = config.oauthProviderEnabled ? 'oauth' : 'app';
 
-  // 302 → GitHub authorize, with a CSRF state in a short-lived signed cookie.
-  app.get('/api/auth/login', async (_req, reply) => {
-    const state = randomBytes(16).toString('hex');
+  // Which sign-in methods this deployment offers — read by the (signed-out) SignInGate to render
+  // the right button(s). Unauthenticated: it sits under the /api/auth/* auth-gate exemption.
+  app.get('/api/auth/providers', async () => ({
+    oauth: config.oauthProviderEnabled,
+    app: config.appProviderEnabled,
+    // Slug drives the private-repo install link on the gate; only meaningful with the App.
+    appSlug: config.appProviderEnabled ? config.githubAppSlug : '',
+  }));
+
+  const startLogin = (provider: Provider, reply: FastifyReply): FastifyReply => {
+    const cred = providerCredentials(provider);
+    if (!cred.enabled) return reply.redirect('/app?auth=unavailable');
+    // Fold the provider into the state so the callback knows which credential to exchange with.
+    const state = `${provider}.${randomBytes(16).toString('hex')}`;
     reply.setCookie('pierre_oauth_state', state, {
       path: '/',
       httpOnly: true,
@@ -37,23 +78,37 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       maxAge: 600,
     });
     const params = new URLSearchParams({
-      client_id: config.githubAppClientId,
+      client_id: cred.clientId,
       redirect_uri: redirectUri,
       state,
     });
+    if (cred.scope) params.set('scope', cred.scope);
     return reply.redirect(
       `https://github.com/login/oauth/authorize?${params.toString()}`,
     );
-  });
+  };
 
-  // Verify state → exchange code for a token → fetch the user → upsert account →
-  // set session → 302 to the app.
+  // Explicit provider choice (the SignInGate's two buttons).
+  app.get<{ Params: { provider: string } }>(
+    '/api/auth/login/:provider',
+    async (req, reply) => {
+      const provider: Provider = req.params.provider === 'app' ? 'app' : 'oauth';
+      return startLogin(provider, reply);
+    },
+  );
+
+  // Back-compat bare login (landing/billing CTAs) → the default provider.
+  app.get('/api/auth/login', async (_req, reply) =>
+    startLogin(defaultProvider, reply),
+  );
+
+  // Verify state → exchange code for a token (against the state's provider) → fetch the user →
+  // upsert account → set session → 302 to the app.
   app.get('/api/auth/callback', async (req, reply) => {
-    // Already signed in? The callback URL carries a one-time ?code= that GitHub
-    // expires in ~10 min and invalidates on first use. A back-button, a restored
-    // tab, or a Chrome profile switch can re-request this exact URL; re-running the
-    // exchange would then fail on the already-consumed code ("code incorrect or
-    // expired"). Short-circuit a valid session straight to the app instead.
+    // Already signed in? The callback URL carries a one-time ?code= that GitHub expires in
+    // ~10 min and invalidates on first use. A back-button, a restored tab, or a Chrome profile
+    // switch can re-request this exact URL; re-running the exchange would then fail on the
+    // already-consumed code. Short-circuit a valid session straight to the app instead.
     if (req.session.get('accountId') != null) {
       return reply.redirect('/app');
     }
@@ -66,10 +121,14 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     reply.clearCookie('pierre_oauth_state', { path: '/' });
 
     if (!code || !state || !unsigned.valid || unsigned.value !== state) {
-      // Stale/replayed callback (state cookie expired or CSRF mismatch). Bounce
-      // back so the user starts a fresh sign-in — never render raw JSON to a human.
+      // Stale/replayed callback (state cookie expired or CSRF mismatch). Bounce back so the
+      // user starts a fresh sign-in — never render raw JSON to a human.
       return reply.redirect('/app?auth=expired');
     }
+
+    // The provider chosen at /login is encoded in the state; pick the matching credential.
+    const provider: Provider = state.startsWith('app.') ? 'app' : 'oauth';
+    const cred = providerCredentials(provider);
 
     // Exchange the code for a user access token.
     let token: string;
@@ -78,8 +137,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         method: 'POST',
         headers: { accept: 'application/json', 'content-type': 'application/json' },
         body: JSON.stringify({
-          client_id: config.githubAppClientId,
-          client_secret: config.githubAppClientSecret,
+          client_id: cred.clientId,
+          client_secret: cred.clientSecret,
           code,
           redirect_uri: redirectUri,
         }),
@@ -87,14 +146,14 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const json = (await res.json()) as OAuthTokenResponse;
       if (!json.access_token) {
         req.log.warn(
-          { err: json.error_description ?? json.error },
+          { err: json.error_description ?? json.error, provider },
           'oauth token exchange returned no token',
         );
         return reply.redirect('/app?auth=failed');
       }
       token = json.access_token;
     } catch (err) {
-      req.log.error({ err }, 'oauth token exchange request failed');
+      req.log.error({ err, provider }, 'oauth token exchange request failed');
       return reply.redirect('/app?auth=error');
     }
 

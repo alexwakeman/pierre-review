@@ -1,7 +1,12 @@
 import { performance } from 'node:perf_hooks';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/client.js';
-import { getGraphqlClientFor } from '../github/client.js';
+import {
+  getGraphqlClientFor,
+  graphqlChecksHint,
+  graphqlTolerant,
+  summarizeGraphqlErrors,
+} from '../github/client.js';
 import { REPO_ACTIVITY_QUERY, type RepoActivityResponse } from '../github/queries.js';
 import { ensureCommitFiles } from './commit-files.js';
 import { createUserResolver, persistPr, upsertRepo } from './upsert.js';
@@ -126,15 +131,27 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       }
       pageStartCursor = cursor;
       const tPage = performance.now();
-      const resp: RepoActivityResponse = await client(REPO_ACTIVITY_QUERY, {
-        owner,
-        name,
-        cursor,
-      });
+      // Tolerate partial errors so a forbidden sub-field (e.g. `statusCheckRollup` check runs on
+      // a private repo the token can't reach, or a token minted before its scope covered checks)
+      // doesn't abort the whole sync — the PRs, reviews, comments and review REQUESTS still
+      // persist; only CI check detail is dropped (the `ciStatus` rollup, when readable, is kept).
+      const resp: RepoActivityResponse = await graphqlTolerant<RepoActivityResponse>(
+        client,
+        REPO_ACTIVITY_QUERY,
+        { owner, name, cursor },
+        (errors) =>
+          log.warn(
+            `sync ${owner}/${name}: partial GraphQL — continuing without forbidden fields${graphqlChecksHint(errors)}. ${summarizeGraphqlErrors(errors)}`,
+          ),
+      );
       graphqlMs += performance.now() - tPage;
       pages += 1;
-      totalCost += resp.rateLimit.cost;
-      lastRemaining = resp.rateLimit.remaining;
+      // `rateLimit` is a top-level sibling of `repository`, so it survives a partial
+      // (forbidden-subfield) response — but guard it so a genuinely rateLimit-less partial
+      // (e.g. a NOT_FOUND payload salvaged by graphqlTolerant) can't NPE before the
+      // `!resp.repository` 404 below gets to fire.
+      totalCost += resp.rateLimit?.cost ?? 0;
+      lastRemaining = resp.rateLimit?.remaining ?? lastRemaining;
 
       if (!resp.repository) {
         const err = new Error(`Repository ${owner}/${name} not found or inaccessible`);

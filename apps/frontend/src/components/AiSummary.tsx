@@ -4,18 +4,20 @@ import { useProCapabilities } from '../hooks/useTriage.js';
 import { usePrSummary, useRefreshSummary } from '../hooks/useAiFix.js';
 import { Markdown } from './Markdown.js';
 
-// The Pro AI-generated PR summary (Haiku), gated on the `aiAnalysis` capability.
-// Rendered on BOTH the Overview tab and the AI Analysis and Fix tab — the shared
-// React-Query key (`['ai-fix-summary', prId]`) means generating in one place shows
-// the result in the other with no extra wiring. Titled "AI summary" to disambiguate
-// from the Overview's human-written PR description "Summary".
+// The Pro AI-generated PR summary (Haiku), gated on the `prSummary` capability — the cheap
+// SUMMARY tier (on in paid cloud, credit-metered), NOT the pro+ advanced-AI `aiAnalysis` tier.
+// Rendered on BOTH the Overview tab and the AI Analysis and Fix tab — the shared React-Query
+// key (`['ai-fix-summary', prId]`) means generating in one place shows the result in the other
+// with no extra wiring. Titled "AI summary" to disambiguate from the Overview's human-written
+// PR description "Summary".
 export function AiSummary({ pr }: { pr: PrDetail }): JSX.Element | null {
-  const { aiAnalysis } = useProCapabilities();
-  const { data } = usePrSummary(pr.id, aiAnalysis);
+  const { prSummary } = useProCapabilities();
+  const { data } = usePrSummary(pr.id, prSummary);
   const refresh = useRefreshSummary(pr.id);
   const stale = data?.headSha != null && data.headSha !== pr.headSha;
+  const outOfCredits = data?.creditsExhausted === true;
 
-  if (!aiAnalysis) return null;
+  if (!prSummary) return null;
 
   return (
     <div>
@@ -36,7 +38,7 @@ export function AiSummary({ pr }: { pr: PrDetail }): JSX.Element | null {
           <button
             type="button"
             className="whitespace-nowrap rounded border border-blue-400 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
-            disabled={refresh.isPending}
+            disabled={refresh.isPending || outOfCredits}
             onClick={() => refresh.mutate()}
           >
             {refresh.isPending
@@ -45,6 +47,11 @@ export function AiSummary({ pr }: { pr: PrDetail }): JSX.Element | null {
                 ? 'Regenerate'
                 : 'Generate summary'}
           </button>
+          {outOfCredits && (
+            <span className="text-[11px] text-amber-600 dark:text-amber-400">
+              Out of AI credits this month
+            </span>
+          )}
           {stale && (
             <span className="text-[11px] text-amber-600 dark:text-amber-400">
               PR has changed since this was generated

@@ -27,7 +27,8 @@ import type { AiCreditStatus } from '../db/credits.js';
 export interface ProCapabilities {
   activityDigest: boolean; // WS2 per-repo LLM headlines digest
   reviewMemory: boolean; // WS3 Claude Review learnings
-  aiAnalysis: boolean; // AI Fix: PR summary + CI failure analysis (Haiku, read-only)
+  aiAnalysis: boolean; // AI Fix: CI failure analysis (Haiku, read-only) + the Analysis tab
+  prSummary: boolean; // per-PR AI summary (Haiku, read-only) — cheap SUMMARY tier, on in cloud
   aiFix: boolean; // AI Fix: agentic inline code fix + push (Agent SDK, needs write)
   teamInsights: boolean; // team review-intelligence "Insights" (no AI; pure reads)
   claudeReview: boolean; // agentic Claude Review (Agent SDK; the product lives in the plugin)
@@ -581,6 +582,7 @@ export const EMPTY_CAPABILITIES: ProCapabilities = {
   activityDigest: false,
   reviewMemory: false,
   aiAnalysis: false,
+  prSummary: false,
   aiFix: false,
   teamInsights: false,
   claudeReview: false,

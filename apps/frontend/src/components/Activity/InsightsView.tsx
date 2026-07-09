@@ -110,7 +110,7 @@ function PrMetaRow({ pr }: { pr: InsightPrRef }): JSX.Element {
 }
 
 // Collapsible PR summary: the plain description (markdown) + the Pro AI summary with
-// its own inline Generate/Regenerate action (AiSummary self-gates on the aiAnalysis
+// its own inline Generate/Regenerate action (AiSummary self-gates on the prSummary
 // capability + shares the ['ai-fix-summary', prId] cache with the Overview/AI tabs).
 // Lazy: the PR detail is fetched only when expanded.
 function InsightPrSummary({ prId }: { prId: number }): JSX.Element {

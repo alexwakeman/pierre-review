@@ -12,6 +12,7 @@ const FULL: ProCapabilities = {
   activityDigest: true,
   reviewMemory: true,
   aiAnalysis: true,
+  prSummary: true,
   aiFix: true,
   teamInsights: true,
   claudeReview: true,

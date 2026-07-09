@@ -4,8 +4,8 @@ This deploys the **public, multi-tenant** build: a dark landing page at `/`,
 GitHub-App sign-in, per-user accounts, and Postgres. Local mode (SQLite +
 `gh auth token` + `npx pierre-review`) is unaffected and needs none of this.
 
-> Prerequisite: create the GitHub App first — see
-> [GITHUB-APP-SETUP.md](./GITHUB-APP-SETUP.md).
+> Prerequisite: set up sign-in (a GitHub OAuth App and/or GitHub App) first — see
+> [GITHUB-AUTH-SETUP.md](./GITHUB-AUTH-SETUP.md).
 
 ---
 
@@ -48,9 +48,12 @@ On the **app service → Variables**:
 | `DEPLOYMENT_MODE` | `cloud` | the master switch (Postgres + landing + OAuth) |
 | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | from the Postgres plugin |
 | `APP_BASE_URL` | `https://pierre-review.com` | no trailing slash; the canonical origin — OAuth redirect, CORS, and the session cookie all derive from it |
-| `GITHUB_APP_CLIENT_ID` | from the GitHub App | |
+| `GITHUB_OAUTH_CLIENT_ID` | from the OAuth App | **OAuth App** (public repos, no install) — set both to enable it |
+| `GITHUB_OAUTH_CLIENT_SECRET` | from the OAuth App | |
+| `GITHUB_OAUTH_SCOPE` | *(optional)* `public_repo read:org` | scopes requested at sign-in; default targets public repos |
+| `GITHUB_APP_CLIENT_ID` | from the GitHub App | **GitHub App** (adds private org repos via install) — set all three to enable it |
 | `GITHUB_APP_CLIENT_SECRET` | from the GitHub App | |
-| `GITHUB_APP_SLUG` | the app slug | for the install link |
+| `GITHUB_APP_SLUG` | the GitHub App slug | for the private-repo install link on the sign-in gate |
 | `SESSION_SECRET` | `openssl rand -hex 32` | seals the session cookie |
 | `ENCRYPTION_KEY` | `openssl rand -hex 32` | **must be 64 hex chars (32 bytes)** — AES-256-GCM key for stored tokens |
 | `PORT` | (Railway sets this) | the app reads it; `HOST` defaults to `0.0.0.0` in cloud |
@@ -128,28 +131,25 @@ automatically — there's no external registrar or manual `CNAME` step.
    derived from it — so it must match the domain users actually land on. Use the
    **apex**, and redirect `www` → apex (step 1) so the OAuth round-trip and cookie
    stay on one host.
-3. **Point the GitHub App at it.** In the App's settings, set the **Callback URL**
-   to **`https://pierre-review.com/api/auth/callback`** and the **Homepage URL** to
-   `https://pierre-review.com`. The callback must match `APP_BASE_URL` exactly, or
-   the OAuth exchange fails.
+3. **Point your app(s) at it.** In each app you configured (OAuth App and/or GitHub App),
+   set the **callback URL** to **`https://pierre-review.com/api/auth/callback`** and the
+   **Homepage URL** to `https://pierre-review.com`. The callback must match `APP_BASE_URL`
+   exactly, or the exchange fails.
 4. **Redeploy** so the new `APP_BASE_URL` takes effect.
 
 ## Step 5 — First sign-in
 
-1. Visit `https://pierre-review.com/` → the landing page → **Sign in with GitHub**.
-2. Authorize the App; you're redirected to `/app`.
-3. Add any **public** repo from the picker and watch the first sync run — no
-   installation needed (sign-in alone grants read access to public repos).
-4. To watch **private** repos, install the App where they live
-   (`https://github.com/apps/<slug>/installations/new`, "All repositories" or a
-   selection); for orgs you don't own, GitHub's "Request" flow notifies an owner.
-   See [GITHUB-APP-SETUP.md §5](./GITHUB-APP-SETUP.md).
+1. Visit `https://pierre-review.com/` → the landing page → **Sign in with GitHub**. The
+   sign-in gate offers whichever methods you configured (OAuth App / GitHub App).
+2. Authorize; you're redirected to `/app`.
+3. Add any **public** repo from the picker and watch the first sync run — public repos
+   (PRs, reviews, comments, **and CI checks**) work with **no install** on either method.
 
-> **Other users get a 404 on github.com when signing in (but you don't)?** The
-> GitHub App is still **private** ("Only on this account"), so only the owner can
-> authorize it — everyone else 404s on the authorize page. Make the App public:
-> **GitHub App → Advanced → Danger zone → Make public**. This is the most common
-> cloud-deploy snag — see [GITHUB-APP-SETUP.md §3](./GITHUB-APP-SETUP.md).
+> **Watching private repos?** Sign in with the **GitHub App** and **install** it on the org
+> that owns them (`github.com/apps/<GITHUB_APP_SLUG>/installations/new`; an org owner may need
+> to approve). Alternatively the OAuth App can reach private repos with
+> `GITHUB_OAUTH_SCOPE=repo read:org`, but a private repo in an org with OAuth App restrictions
+> still needs a one-time org-owner approval. See [GITHUB-AUTH-SETUP.md](./GITHUB-AUTH-SETUP.md).
 
 ---
 

@@ -172,6 +172,7 @@ const ME_RESPONSE: MeResponse = {
     activityDigest: false,
     reviewMemory: false,
     aiAnalysis: false,
+    prSummary: false,
     aiFix: false,
     teamInsights: false,
     claudeReview: false,

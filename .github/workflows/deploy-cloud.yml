@@ -23,7 +23,8 @@ name: Deploy cloud image
 #     pull credential), NOT the Dockerfile.
 #   - Variables: PRO_CLOUD_ENABLED=true, PRO_DIGEST_ENABLED=true, SUMMARY_ANTHROPIC_API_KEY=...,
 #     STRIPE_PAYMENT_LINK_URL, STRIPE_WEBHOOK_SECRET, plus the existing cloud vars (DATABASE_URL,
-#     APP_BASE_URL, GITHUB_APP_*, SESSION_SECRET, ENCRYPTION_KEY). Leave PRO_ADVANCED_AI_ENABLED
+#     APP_BASE_URL, GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET, SESSION_SECRET,
+#     ENCRYPTION_KEY). Leave PRO_ADVANCED_AI_ENABLED
 #     UNSET so agentic AI (Claude Review / AI Fix) stays off in cloud.
 
 on:

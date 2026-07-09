@@ -9,7 +9,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 - **local** (default): entirely on your machine — SQLite, no hosted backend, no stored
   credentials. Authenticates via your logged-in `gh` CLI, syncs into a local SQLite file,
   opens straight to the timeline. The original, unchanged experience.
-- **cloud** (multi-tenant): a public landing page, GitHub-App OAuth, per-user encrypted
+- **cloud** (multi-tenant): a public landing page, GitHub sign-in (OAuth App and/or GitHub App), per-user encrypted
   accounts, Postgres — self-hostable on Railway.
 
 See **[Deployment modes](#deployment-modes-local-vs-cloud)** below for the full split.
@@ -49,7 +49,7 @@ One env var — **`DEPLOYMENT_MODE` = `local` (default) | `cloud`** — drives
 |---|---|---|
 | DB | SQLite (`better-sqlite3`) | Postgres (`pg`) |
 | Schema | `db/schema.sqlite.ts` | `db/schema.pg.ts` (identical names) |
-| GitHub auth | `gh auth token` (one account) | GitHub-App OAuth, per-user tokens |
+| GitHub auth | `gh auth token` (one account) | OAuth App and/or GitHub App, per-user tokens |
 | Accounts | 1 synthesized `isLocal` (id 1) | one per signed-in user |
 | Landing | never served (`/` → 302 `/app`) | served at `/` |
 | Timeline SPA | `/app` | `/app`, behind the auth gate |
@@ -101,7 +101,7 @@ registers two `@fastify/static` roots + the single `setNotFoundHandler` that rou
 (full routing under **Packaging**). **Running cloud:** `cli.ts --cloud`/`--mode` set
 `DEPLOYMENT_MODE=cloud`; `docker-compose.yml` is a local Postgres, `Dockerfile` + `railway.json`
 deploy to Railway, `assertCloudConfig` fails loud on missing env. Docs: `docs/DEPLOY-RAILWAY.md`,
-`docs/GITHUB-APP-SETUP.md`, `docs/LOCAL-CLOUD-TESTING.md`.
+`docs/GITHUB-AUTH-SETUP.md`, `docs/LOCAL-CLOUD-TESTING.md`.
 
 ---
 
@@ -209,7 +209,11 @@ modes**):
   `gh api user` at startup, caches the identity on the `accounts` row (refreshed ~daily;
   non-fatal offline — you lose "my turn" triage). API calls use `gh auth token`; SQLite
   opens `journal_mode=WAL` + `foreign_keys=ON`.
-- **Cloud:** no `gh`; accounts are per-user via GitHub-App OAuth (encrypted token).
+- **Cloud:** no `gh`; accounts are per-user via one of two GitHub sign-in providers,
+  side by side (configure either/both; SignInGate offers what's set): an **OAuth App**
+  (`public_repo` scope, no install) and/or a **GitHub App** (private org repos need the App
+  installed there). Both mint a user token, encrypted at rest. The chosen provider is folded
+  into the OAuth `state` so the single callback exchanges against the right client id/secret.
   `assertCloudConfig()` fails loud at boot on a missing cloud env var; DB is a node-postgres
   `Pool`.
 
@@ -339,7 +343,7 @@ file maps to a `client.ts` method.
 | `GET /api/activity/feed?repoIds&userIds&limit&offset&excludeBots` | **Consolidated Feed** (core, no AI; the Activity "Feed" entry): ONE flat, chronological (newest-first) stream of REAL activity events (opens / merges / reviews / comments, plus **commit-push items that ADDRESSED a review thread** — coalesced per author/PR into runs, affected threads inline via `affectedThreads`/`commitCount`/`changeSummary`; plain pushes excluded). Each item carries **`isMyTurn`** (participation: you authored the PR / are a requested reviewer / previously reviewed-or-commented, AND the actor isn't you) — that flag REPLACES the old two-source (`my_turn` vs `feed`) synthesis + dedup, so there's exactly one row per event. **FYI is a Pro capability (`feedMyTurn`):** core (`getConsolidatedFeed`) builds plain rows; the `@pierre/pro` FYI provider (registered on the `registerFyiProvider` seam) sets `isMyTurn`. `isMyTurn` rows are uncapped; plain activity is capped (`FEED_EVENT_CAP`). `excludeBots=true` drops bot-authored activity. **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, generatedAt}`. No "seen"/acknowledged concept. |
 | `GET /api/repos/:id/claude-reviews` | repo-scoped Claude-review history (retrieval only; `enabled:false` when the flag is off) → `{prs:[{runs[]}]}` |
 | `GET·POST /api/pro/activity/digests*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest (the Activity Feed renders the COLLECTION of these, scoped to WATCHED repos — no separate cross-repo route/pass) + review-memory data. See "Open-core Pro plugin" |
-| `GET /api/auth/login` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub-App OAuth: authorize / exchange+upsert+session→`/app` / clear session |
+| `GET /api/auth/providers` · `/login[/​:provider]` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub sign-in: which providers are enabled (for SignInGate) / authorize via `oauth`\|`app` (folds provider into `state`; OAuth adds `config.oauthScope`) / exchange+upsert+session→`/app` / clear session |
 | `GET /api/prs/:id/claude-review` | latest run + findings + history + auth status + `enabled` |
 | `POST /api/prs/:id/claude-review {model}` | start a run → `202 {reviewId}`; `400` no-auth/no-head, `409` busy, `404` disabled |
 | `GET …/claude-review/status`, `POST …/cancel` | poll live progress / abort the SDK run |
@@ -736,7 +740,7 @@ broke the digest. Any new core LLM seam must follow this dual-auth pattern.
   produce a deterministic `dedupeKey`.
 - **TypeScript is strict** (`noUncheckedIndexedAccess`, `verbatimModuleSyntax`).
 - The local DB + `.env` files are gitignored. Cloud secrets (`ENCRYPTION_KEY`,
-  `SESSION_SECRET`, GitHub-App creds) live only in env (`.env.cloud.example` template);
+  `SESSION_SECRET`, the OAuth App client id/secret) live only in env (`.env.cloud.example` template);
   stored OAuth tokens are AES-256-GCM-sealed.
 
 ---
@@ -831,7 +835,7 @@ added the `accounts` table + `accountId` + composite uniques; `0009`/`0010` adde
 storage; `0013` Claude-review routing (`reviewMode`/`routeReason`); `0014`
 `accounts.lastActiveAt`. The Postgres baseline (`migrations-pg/`) is a squash — cloud
 starts empty (synced data is regenerable; no SQLite→Postgres migration). **Docs:**
-`docs/SYNC.md`, `docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-APP-SETUP.md`,
+`docs/SYNC.md`, `docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-AUTH-SETUP.md`,
 `docs/LOCAL-CLOUD-TESTING.md`, `docs/DOMAIN-REPUTATION.md` (Safe Browsing + Search Console),
 `docs/BILLING-STRIPE.md` (Stripe Payment Link + webhook → `accounts.plan` entitlement),
 `docs/RELEASE.md`.

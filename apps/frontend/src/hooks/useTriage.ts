@@ -46,6 +46,7 @@ export function useProCapabilities(): ProCapabilities {
       activityDigest: false,
       reviewMemory: false,
       aiAnalysis: false,
+      prSummary: false,
       aiFix: false,
       teamInsights: false,
       claudeReview: false,

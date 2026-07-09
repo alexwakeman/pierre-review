@@ -26,7 +26,12 @@ import type {
 import { db, schema } from '../db/client.js';
 import { config } from '../config.js';
 import { getAccessToken } from '../auth/account.js';
-import { getGraphqlClientFor } from '../github/client.js';
+import {
+  getGraphqlClientFor,
+  graphqlChecksHint,
+  graphqlTolerant,
+  summarizeGraphqlErrors,
+} from '../github/client.js';
 import { PR_DETAIL_QUERY, type PrDetailResponse } from '../github/queries.js';
 import { checkRunsFrom } from './upsert.js';
 
@@ -74,8 +79,23 @@ async function fetchGhPrText(
   try {
     const token = await getAccessToken(accountId);
     const client = getGraphqlClientFor(token);
-    resp = await client<PrDetailResponse>(PR_DETAIL_QUERY, { owner, name, number });
-  } catch {
+    // Tolerate partial errors: if the token is FORBIDDEN one sub-field (e.g. `statusCheckRollup`
+    // check runs on a private repo it can't reach), that used to throw away the ENTIRE hydration
+    // (PR body, comments, diff hunks, commit messages) even though all of those came back fine.
+    // Now we keep them; only the forbidden field (CI checks) stays empty (and we log why).
+    resp = await graphqlTolerant<PrDetailResponse>(
+      client,
+      PR_DETAIL_QUERY,
+      { owner, name, number },
+      (errors) =>
+        console.warn(
+          `[hydrate] partial GraphQL for ${owner}/${name}#${number} — continuing with available fields${graphqlChecksHint(errors)}. ${summarizeGraphqlErrors(errors)}`,
+        ),
+    );
+  } catch (err) {
+    console.error(
+      `[hydrate] PR detail fetch failed for ${owner}/${name}#${number}; returning stored metadata. ${err instanceof Error ? err.message : String(err)}`,
+    );
     return null;
   }
   const pr = resp.repository?.pullRequest;

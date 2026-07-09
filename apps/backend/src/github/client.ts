@@ -1,7 +1,66 @@
-import { graphql } from '@octokit/graphql';
+import { graphql, GraphqlResponseError } from '@octokit/graphql';
 import { getGithubToken } from './auth.js';
 
 export type GraphqlClient = typeof graphql;
+
+// A parenthetical hint appended to a partial-GraphQL log, ONLY when the forbidden field is
+// actually a CI-checks field — so a NOT_FOUND (deleted/inaccessible PR) isn't mislabelled as a
+// checks-access problem. Empty otherwise (the raw errors still get logged). Cloud sign-in is an
+// OAuth App (needs the `public_repo` scope for checks) and/or a GitHub App (needs installing on
+// the repo's org with "Checks" read); either way public-repo checks read once that's in place.
+export function graphqlChecksHint(errors: unknown): string {
+  const mentionsChecks =
+    Array.isArray(errors) &&
+    errors.some((e) => {
+      const path = (e as { path?: unknown[] }).path;
+      const inPath =
+        Array.isArray(path) && path.some((p) => /statuscheckrollup|check/i.test(String(p)));
+      const inMsg = /check\b|statuscheckrollup/i.test((e as { message?: string }).message ?? '');
+      return inPath || inMsg;
+    });
+  return mentionsChecks
+    ? " — the sign-in token can't read CI checks here (GitHub App: install on this org with Checks read; OAuth App: re-authorize; or it's a private repo)"
+    : '';
+}
+
+// Compact one-line summary of a GraphQL `errors` array for logging.
+export function summarizeGraphqlErrors(errors: unknown): string {
+  if (!Array.isArray(errors)) return String(errors);
+  return errors
+    .slice(0, 5)
+    .map((e) => {
+      const type = (e as { type?: string }).type ?? 'ERROR';
+      const path = (e as { path?: unknown[] }).path?.join('.') ?? '?';
+      const message = (e as { message?: string }).message ?? '';
+      return `${type}@${path}: ${message}`;
+    })
+    .join(' | ');
+}
+
+// Run a GraphQL query, TOLERATING GitHub's *partial* errors. GitHub answers HTTP 200 with a
+// non-empty `errors` array AND partial `data` when the token may read most of a query but is
+// FORBIDDEN one sub-field — e.g. CI check runs (`statusCheckRollup.contexts`) on a private repo
+// the token can't reach, or on a token minted before it was granted the scope to read them. By
+// default `@octokit/graphql` THROWS on any such response, throwing away the usable partial data
+// — so one un-permitted field would wipe the PR body/comments/reviewers. This returns the
+// partial data instead (the forbidden fields arrive as null) and reports the errors via
+// `onPartial`. A response with NO usable data (auth failure, rate limit, network) still throws.
+export async function graphqlTolerant<T>(
+  client: GraphqlClient,
+  query: string,
+  variables: Record<string, unknown>,
+  onPartial?: (errors: unknown) => void,
+): Promise<T> {
+  try {
+    return await client<T>(query, variables);
+  } catch (err) {
+    if (err instanceof GraphqlResponseError && err.data != null) {
+      onPartial?.(err.errors);
+      return err.data as T;
+    }
+    throw err;
+  }
+}
 
 // Per-account GitHub clients. There is deliberately NO module-level token /
 // client cache: in a multi-tenant (cloud) process a cached token would leak one
@@ -64,10 +123,15 @@ export async function ghRestGetText(
   return { status: res.status, ok: res.ok, text };
 }
 
-// REST GET returning a resource in GitHub's raw `diff` media type (Accept:
-// application/vnd.github.diff) — the per-account, cloud-ready way to fetch a PR's
-// unified diff (vs the local-only `gh pr diff`). Throws on a non-2xx status.
-export async function ghRestGetDiff(token: string, path: string): Promise<string> {
+// REST GET in GitHub's raw `diff` media type (Accept: application/vnd.github.diff),
+// NOT throwing on a non-2xx — returns the status + body so the caller can branch. GitHub
+// caps this media type at 20,000 lines and 406s past it (a huge PR), which the caller
+// handles by falling back to the per-file endpoint. Mirrors ghRestGetText's non-throwing
+// contract.
+export async function ghRestGetDiffStatus(
+  token: string,
+  path: string,
+): Promise<{ status: number; ok: boolean; text: string }> {
   const res = await fetch(`https://api.github.com${path}`, {
     method: 'GET',
     headers: {
@@ -76,13 +140,20 @@ export async function ghRestGetDiff(token: string, path: string): Promise<string
       'x-github-api-version': '2022-11-28',
     },
   });
+  const text = await res.text().catch(() => '');
+  return { status: res.status, ok: res.ok, text };
+}
+
+// Throwing variant of the above — the per-account, cloud-ready way to fetch a PR's
+// unified diff (vs the local-only `gh pr diff`). Throws on a non-2xx status.
+export async function ghRestGetDiff(token: string, path: string): Promise<string> {
+  const res = await ghRestGetDiffStatus(token, path);
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
     throw new Error(
-      `GitHub REST GET(diff) ${path} -> ${res.status}: ${text.slice(0, 300)}`,
+      `GitHub REST GET(diff) ${path} -> ${res.status}: ${res.text.slice(0, 300)}`,
     );
   }
-  return res.text();
+  return res.text;
 }
 
 // REST PUT returning the parsed STATUS + body WITHOUT throwing on a non-2xx, so the caller can

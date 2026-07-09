@@ -376,7 +376,11 @@ export interface ProCapabilities {
   reviewMemory: boolean; // Claude Review learnings
   // AI Fix (packages/pro/ai-fix). Two independent gates so the cheap, read-only
   // analysis can ship without the expensive, write-capable fixer:
-  aiAnalysis: boolean; // PR summary + CI failure analysis (Haiku, read-only)
+  aiAnalysis: boolean; // CI failure analysis (Haiku, read-only) + the AI-Fix Analysis tab
+  // Per-PR AI summary (cheap Haiku, read-only). Split OUT of aiAnalysis so it can ship on the
+  // cheap SUMMARY tier (on in cloud, credit-metered) while CI-analysis + the fixer stay on the
+  // pro+ advanced-AI tier. On whenever the digest/summary tier is on (or advanced AI is).
+  prSummary: boolean;
   aiFix: boolean; // agentic inline code fix + push (Agent SDK, needs write access)
   teamInsights: boolean; // team review-intelligence "Insights" (no AI; pure reads)
   // Agentic Claude Review (Agent SDK). The product lives in the plugin (routes/manager/
@@ -1569,6 +1573,10 @@ export interface PrSummaryResponse {
   // The head SHA the summary was generated against; lets the UI flag staleness.
   headSha: string | null;
   generatedAt: string | null;
+  // Metered (paid cloud) plan out of credits: generation is refused and the last summary is
+  // served unchanged. Absent (undefined) for unmetered/local accounts. Drives the disabled
+  // Generate button + "out of credits" note (mirrors the digest/sprint report).
+  creditsExhausted?: boolean;
 }
 
 // An honesty score: how confident the analysis is (in the root cause, and in whether
