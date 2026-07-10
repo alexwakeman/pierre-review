@@ -16,11 +16,14 @@ import type {
   PrFileDiff,
   PrFileDiffStatus,
   PrFilesResponse,
+  PrDetail,
   PrMergeOptions,
   RequestReviewersBody,
   RequestReviewersResult,
+  ReviewerSuggestion,
   UpdateBranchBody,
   UpdateBranchResult,
+  User,
 } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
@@ -31,12 +34,14 @@ import {
   getPrFilesContext,
   getPrWriteContext,
   getReviewerLogins,
+  getUsersByLogins,
   markAllViewed,
   markPrMergedLocally,
   markPrViewed,
   upsertLocalPrComment,
   upsertLocalReview,
 } from '../../db/queries.js';
+import { getCodeownersMatch } from '../../github/codeowners.js';
 import {
   buildFileAnchors,
   fallbackAnchor,
@@ -193,18 +198,100 @@ const requestReviewersSchema = {
   ...idParamSchema,
   body: {
     type: 'object',
-    required: ['userIds'],
     additionalProperties: false,
+    // All three are optional; the handler 400s if the combined set is empty. `userIds`
+    // are resolved to logins; `logins` pass through (suggested reviewers we haven't synced);
+    // `teamSlugs` become team review requests (CODEOWNERS @org/team).
     properties: {
-      userIds: {
-        type: 'array',
-        minItems: 1,
-        maxItems: 15,
-        items: { type: 'integer' },
-      },
+      userIds: { type: 'array', maxItems: 15, items: { type: 'integer' } },
+      logins: { type: 'array', maxItems: 15, items: { type: 'string' } },
+      teamSlugs: { type: 'array', maxItems: 15, items: { type: 'string' } },
     },
   },
 };
+
+// Layer CODEOWNERS-derived suggestions on top of the history-based ones getPrDetail already
+// computed. Runs ONLY when the PR still warrants suggestions (same trigger getPrDetail used).
+// Best-effort: any failure (no CODEOWNERS, org wall, parse error) leaves the history
+// suggestions untouched. CODEOWNERS owners (declared ownership) take precedence, then history
+// fills up to a small cap. Mutates + returns the detail.
+async function enrichSuggestionsWithCodeowners(
+  detail: PrDetail,
+  accountId: number,
+): Promise<PrDetail> {
+  const wants =
+    detail.state === 'open' &&
+    !detail.isDraft &&
+    detail.requestedReviewers.length === 0 &&
+    detail.reviews.length === 0;
+  if (!wants) return detail;
+
+  const [owner, name] = detail.repoFullName.split('/');
+  if (!owner || !name) return detail;
+  const paths = detail.files.map((f) => f.path);
+  if (paths.length === 0) return detail;
+
+  try {
+    const token = await getAccessToken(accountId);
+    const match = await getCodeownersMatch(token, owner, name, accountId, paths);
+    if (match.logins.length === 0 && match.teams.length === 0) return detail;
+
+    const authorLogin =
+      detail.authorId != null
+        ? detail.users.find((u) => u.id === detail.authorId)?.githubLogin ?? null
+        : null;
+
+    // Resolve @user owners to synced users (avatar/link); unsynced owners show login-only.
+    // Exclude the PR author (GitHub rejects self-review requests).
+    const uniqueLogins = [...new Set(match.logins)].filter((l) => l !== authorLogin);
+    const resolved = await getUsersByLogins(uniqueLogins);
+    const byLogin = new Map(resolved.map((u) => [u.githubLogin, u]));
+
+    const codeownerUsers: ReviewerSuggestion[] = uniqueLogins.map((login) => ({
+      kind: 'user',
+      login,
+      userId: byLogin.get(login)?.id ?? null,
+      teamSlug: null,
+      teamName: null,
+      reason: 'owns this path (CODEOWNERS)',
+      source: 'codeowners',
+    }));
+    const codeownerTeams: ReviewerSuggestion[] = match.teams.map((t) => ({
+      kind: 'team',
+      login: null,
+      userId: null,
+      teamSlug: t.slug,
+      teamName: t.name,
+      reason: 'owns this path (CODEOWNERS)',
+      source: 'codeowners',
+    }));
+
+    // Merge: CODEOWNERS users, then teams, then the history suggestions — dedup users by
+    // login and teams by slug, capped so the row stays digestible.
+    const seenLogins = new Set<string>();
+    const seenTeams = new Set<string>();
+    const merged: ReviewerSuggestion[] = [];
+    for (const s of [...codeownerUsers, ...codeownerTeams, ...detail.suggestedReviewers]) {
+      if (s.kind === 'team') {
+        if (s.teamSlug && !seenTeams.has(s.teamSlug)) {
+          seenTeams.add(s.teamSlug);
+          merged.push(s);
+        }
+      } else if (s.login && !seenLogins.has(s.login)) {
+        seenLogins.add(s.login);
+        merged.push(s);
+      }
+    }
+    detail.suggestedReviewers = merged.slice(0, 5);
+
+    // Surface any newly-resolved codeowner users so the client can render avatars/links.
+    const known = new Set(detail.users.map((u) => u.id));
+    for (const u of resolved) if (!known.has(u.id)) detail.users.push(u);
+  } catch {
+    /* best-effort: keep the history suggestions */
+  }
+  return detail;
+}
 
 export async function prRoutes(app: FastifyInstance): Promise<void> {
   // Bulk "mark all seen": stamp every open PR (optionally scoped to repoIds) viewed
@@ -229,7 +316,10 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     }
     // Cloud lean mode: fill in bulky text from GitHub (no-op in local). The client
     // caches the result in IndexedDB keyed by updatedAt so unchanged PRs don't refetch.
-    return hydratePrDetail(pr, accountId);
+    const detail = await hydratePrDetail(pr, accountId);
+    // Layer CODEOWNERS ownership onto the history-based suggestions (best-effort; never
+    // blocks the response). getPrDetail already gated the history part on the same trigger.
+    return enrichSuggestionsWithCodeowners(detail, accountId);
   });
 
   // Candidates for an @mention autocomplete, ranked by proximity to this PR
@@ -807,7 +897,11 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     { schema: requestReviewersSchema },
     async (req, reply) => {
       const { id } = req.params as { id: number };
-      const { userIds } = req.body as RequestReviewersBody;
+      const {
+        userIds = [],
+        logins: directLogins = [],
+        teamSlugs = [],
+      } = req.body as RequestReviewersBody;
       const accountId = accountIdOf(req);
 
       const ctx = await getPrWriteContext(id, accountId);
@@ -827,21 +921,24 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         };
       }
 
-      // Drop the PR author (GitHub rejects self-review requests), then resolve to
-      // logins (also drops bots + unknown ids).
+      // Drop the PR author from the id set (GitHub rejects self-review requests), then
+      // resolve to logins (also drops bots + unknown ids). Union with any direct logins
+      // (suggested reviewers we haven't synced as users), deduped.
       const wanted = userIds.filter((uid) => uid !== ctx.authorId);
-      const logins = (await getReviewerLogins(wanted)).map((r) => r.login);
-      if (logins.length === 0) {
+      const resolvedLogins = (await getReviewerLogins(wanted)).map((r) => r.login);
+      const logins = [...new Set([...resolvedLogins, ...directLogins])];
+      const teams = [...new Set(teamSlugs)];
+      if (logins.length === 0 && teams.length === 0) {
         reply.status(400);
         return {
           error: 'NoReviewers',
-          message: 'None of the selected users can be requested as reviewers.',
+          message: 'None of the selected users or teams can be requested as reviewers.',
         };
       }
 
       try {
         const token = await getAccessToken(accountId);
-        await requestReviewers(token, ctx.owner, ctx.name, ctx.number, logins);
+        await requestReviewers(token, ctx.owner, ctx.name, ctx.number, logins, teams);
         const result: RequestReviewersResult = {
           status: 'ok',
           requestedLogins: logins,

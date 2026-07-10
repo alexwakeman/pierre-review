@@ -143,6 +143,26 @@ export async function ghRestGetText(
   return { status: res.status, ok: res.ok, text };
 }
 
+// REST GET a repo file's RAW contents (Accept: application/vnd.github.raw), NOT throwing
+// on a non-2xx — returns the status + body so the caller can branch. Used to fetch a
+// repo's CODEOWNERS file (404 when absent → degrade to no CODEOWNERS suggestions). The
+// raw media type returns the file bytes directly (no base64/JSON envelope to decode).
+export async function ghRestGetContentRaw(
+  token: string,
+  path: string,
+): Promise<{ status: number; ok: boolean; text: string }> {
+  const res = await fetch(`https://api.github.com${path}`, {
+    method: 'GET',
+    headers: {
+      authorization: `token ${token}`,
+      accept: 'application/vnd.github.raw',
+      'x-github-api-version': '2022-11-28',
+    },
+  });
+  const text = await res.text().catch(() => '');
+  return { status: res.status, ok: res.ok, text };
+}
+
 // REST GET in GitHub's raw `diff` media type (Accept: application/vnd.github.diff),
 // NOT throwing on a non-2xx — returns the status + body so the caller can branch. GitHub
 // caps this media type at 20,000 lines and 406s past it (a huge PR), which the caller

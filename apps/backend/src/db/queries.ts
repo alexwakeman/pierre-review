@@ -31,6 +31,7 @@ import type {
   InsightKind,
   InsightSeverity,
   SuggestedReviewer,
+  ReviewerSuggestion,
   TeamInsightsResponse,
   TeamMetrics,
   TeamMetricStat,
@@ -4087,6 +4088,131 @@ async function getThreadsAwaiting(
   return out;
 }
 
+// Recent-activity window for the CORE reviewer suggester (both the dir-overlap authorship
+// signal and the "reviews here often" pool). 90d = the board's max range; beyond it a
+// contributor is off the radar.
+const REVIEWER_SUGGEST_WINDOW_MS = 90 * 86_400_000;
+
+// Suggest reviewers for a PR that has NONE assigned, from ALREADY-SYNCED data only (no
+// GitHub calls). Candidate pool = people with merge rights in the repo ∪ people who review
+// it often; ranked by how much they've recently worked in the top-level dirs this PR
+// touches. The PR author + bots are excluded. Returns up to 3 user suggestions
+// (source 'history'). CODEOWNERS suggestions are layered on top in the route (they need a
+// token + network); this is the always-available core signal.
+async function suggestReviewersFromHistory(
+  accountId: number,
+  repoId: number,
+  authorId: number | null,
+  changedPaths: string[],
+): Promise<ReviewerSuggestion[]> {
+  const since = new Date(Date.now() - REVIEWER_SUGGEST_WINDOW_MS);
+  const dirs = [...new Set(changedPaths.map(topLevelDir))];
+
+  // Repo-wide "who recently worked where" (author × top-level dir), from the always-stored
+  // pull_requests.files — real recent activity per area, no commit-file dependency.
+  const dirCount = new Map<string, Map<number, number>>(); // dir -> uid -> #PRs
+  for (const pr of await db
+    .select({ authorId: pullRequests.authorId, files: pullRequests.files })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.repoId, repoId),
+        isNotNull(pullRequests.authorId),
+        isNotNull(pullRequests.files),
+        gte(pullRequests.updatedAt, since),
+      ),
+    )
+    .execute()) {
+    if (pr.authorId == null || pr.files == null) continue;
+    for (const d of new Set(pr.files.map((f) => topLevelDir(f.path)))) {
+      const m = dirCount.get(d) ?? new Map<number, number>();
+      m.set(pr.authorId, (m.get(pr.authorId) ?? 0) + 1);
+      dirCount.set(d, m);
+    }
+  }
+
+  // Merge-rights set for this repo.
+  const repoMergers = new Set(
+    (await getMergers(accountId)).find((m) => m.repoId === repoId)?.userIds ?? [],
+  );
+
+  // Frequent reviewers of this repo (review count per author, recent window).
+  const reviewCount = new Map<number, number>();
+  for (const r of await db
+    .select({ authorId: reviews.authorId })
+    .from(reviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.repoId, repoId),
+        isNotNull(reviews.authorId),
+        gte(reviews.submittedAt, since),
+      ),
+    )
+    .execute()) {
+    if (r.authorId == null) continue;
+    reviewCount.set(r.authorId, (reviewCount.get(r.authorId) ?? 0) + 1);
+  }
+
+  // Candidate pool = mergers ∪ frequent reviewers, minus the author.
+  const pool = new Set<number>([...repoMergers, ...reviewCount.keys()]);
+  if (authorId != null) pool.delete(authorId);
+  if (pool.size === 0) return [];
+
+  // Score by dir-overlap; track each candidate's most-touched matching dir for the reason.
+  const overlap = new Map<number, number>();
+  const topDir = new Map<number, { dir: string; cnt: number }>();
+  for (const d of dirs) {
+    const m = dirCount.get(d);
+    if (!m) continue;
+    for (const [uid, cnt] of m) {
+      if (!pool.has(uid)) continue;
+      overlap.set(uid, (overlap.get(uid) ?? 0) + cnt);
+      const cur = topDir.get(uid);
+      if (!cur || cnt > cur.cnt) topDir.set(uid, { dir: d, cnt });
+    }
+  }
+
+  // Resolve to logins (drops bots + null logins), then rank.
+  const resolved = await getReviewerLogins([...pool]);
+  const dirLabel = (d: string): string => (d === '.' ? 'the repo root' : `${d}/`);
+  const ranked = resolved
+    .sort((a, b) => {
+      const ov = (overlap.get(b.userId) ?? 0) - (overlap.get(a.userId) ?? 0);
+      if (ov !== 0) return ov;
+      const rv = (reviewCount.get(b.userId) ?? 0) - (reviewCount.get(a.userId) ?? 0);
+      if (rv !== 0) return rv;
+      return (repoMergers.has(b.userId) ? 1 : 0) - (repoMergers.has(a.userId) ? 1 : 0);
+    })
+    .slice(0, 3);
+
+  return ranked.map(({ userId, login }): ReviewerSuggestion => {
+    const top = topDir.get(userId);
+    const reason =
+      top && (overlap.get(userId) ?? 0) > 0
+        ? `recently changed ${dirLabel(top.dir)}`
+        : (reviewCount.get(userId) ?? 0) > 0
+          ? 'reviews here often'
+          : 'has merge rights here';
+    return { kind: 'user', login, userId, teamSlug: null, teamName: null, reason, source: 'history' };
+  });
+}
+
+// Resolve GitHub logins to synced User rows (for CODEOWNERS suggestion enrichment in the
+// route — an @user owner may or may not be someone we've synced). Case-insensitive on
+// login is unnecessary: GitHub logins in CODEOWNERS match the stored githubLogin exactly.
+export async function getUsersByLogins(logins: string[]): Promise<User[]> {
+  if (logins.length === 0) return [];
+  const rows = await db
+    .select()
+    .from(users)
+    .where(inArray(users.githubLogin, logins))
+    .execute();
+  return rows.map(mapUser);
+}
+
 export async function getPrDetail(
   id: number,
   accountId: number,
@@ -4218,6 +4344,24 @@ export async function getPrDetail(
     teamName: r.teamName,
   }));
 
+  // Suggested reviewers (CORE) — only when the PR warrants them: open, non-draft, and
+  // nobody's been requested OR has reviewed yet. The route layers CODEOWNERS suggestions
+  // on top (they need a token + network); this is the history-based signal from synced
+  // data alone. Keep this trigger in lockstep with the route's CODEOWNERS gate.
+  const wantsSuggestions =
+    pr.state === 'open' &&
+    !pr.isDraft &&
+    requestedReviewers.length === 0 &&
+    reviewsOut.length === 0;
+  const suggestedReviewers: ReviewerSuggestion[] = wantsSuggestions
+    ? await suggestReviewersFromHistory(
+        accountId,
+        pr.repoId,
+        pr.authorId,
+        (pr.files ?? []).map((f) => f.path),
+      )
+    : [];
+
   // Gather referenced users for client-side lookup.
   const userIds = new Set<number>();
   if (pr.authorId) userIds.add(pr.authorId);
@@ -4230,6 +4374,7 @@ export async function getPrDetail(
     if (c.committerId) userIds.add(c.committerId);
   }
   for (const r of reviewerRows) if (r.userId) userIds.add(r.userId);
+  for (const s of suggestedReviewers) if (s.userId != null) userIds.add(s.userId);
   // A maintainer who only merged the PR (never authored/reviewed/commented) is
   // otherwise absent from userList, leaving "Merged by" unresolved.
   if (pr.mergedById) userIds.add(pr.mergedById);
@@ -4347,6 +4492,7 @@ export async function getPrDetail(
     changedFilesCount: pr.changedFiles,
     files: filesOut,
     requestedReviewers,
+    suggestedReviewers,
     viewerCanApprove,
     viewerCanPush,
     viewerHasApprovedStanding,

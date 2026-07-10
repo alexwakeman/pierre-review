@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
   PrDetail as PrDetailT,
+  RequestReviewersBody,
+  ReviewerSuggestion,
   ReviewState,
   User,
 } from '@pierre-review/shared';
@@ -12,6 +14,7 @@ import { ApproveControl } from './ApproveControl.js';
 import { MergeControl } from './MergeControl.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
 import { AiSummary } from './AiSummary.js';
+import { useRequestReviewers } from '../hooks/usePrWrites.js';
 
 // Per-state styling for the "Reviewers" row badges (everyone who submitted a
 // review, not just approvers): the badge hue + leading glyph hint at each
@@ -64,6 +67,84 @@ function Row({
       </span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
+  );
+}
+
+// Suggested reviewers (CORE) for a PR that has none assigned — each with its rationale and,
+// for someone with push access, a one-click "Assign" that requests them on GitHub. Shown
+// only when the server returned suggestions (it gates on open + non-draft + no reviewers/
+// reviews). Combines CODEOWNERS ownership (users + @org/team) with history-based picks.
+function SuggestedReviewersRow({
+  pr,
+  usersById,
+}: {
+  pr: PrDetailT;
+  usersById: Map<number, User>;
+}): JSX.Element {
+  const request = useRequestReviewers(pr.id);
+  const [requested, setRequested] = useState<Set<string>>(new Set());
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const keyOf = (s: ReviewerSuggestion): string =>
+    s.kind === 'team' ? `team:${s.teamSlug}` : `user:${s.login}`;
+
+  const assign = (s: ReviewerSuggestion): void => {
+    const body: RequestReviewersBody =
+      s.kind === 'team'
+        ? { teamSlugs: s.teamSlug ? [s.teamSlug] : [] }
+        : s.userId != null
+          ? { userIds: [s.userId] }
+          : { logins: s.login ? [s.login] : [] };
+    const k = keyOf(s);
+    setPendingKey(k);
+    request.mutate(body, {
+      onSuccess: () => setRequested((prev) => new Set(prev).add(k)),
+      onSettled: () => setPendingKey(null),
+    });
+  };
+
+  return (
+    <Row label="Suggested">
+      <div className="flex flex-col gap-1.5 text-xs">
+        {(pr.suggestedReviewers ?? []).map((s) => {
+          const k = keyOf(s);
+          const done = requested.has(k);
+          const u = s.userId != null ? usersById.get(s.userId) : undefined;
+          return (
+            <div key={k} className="flex flex-wrap items-center gap-1.5">
+              <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5">
+                {s.kind === 'team' ? (
+                  <span className="font-medium">@{s.teamName}</span>
+                ) : u ? (
+                  <>
+                    <Avatar user={u} size={14} />
+                    <UserName user={u} fallbackId={s.userId} repoId={pr.repoId} />
+                  </>
+                ) : (
+                  <span>@{s.login}</span>
+                )}
+              </span>
+              <span className="text-gray-400">{s.reason}</span>
+              {pr.viewerCanPush && (
+                <button
+                  type="button"
+                  onClick={() => assign(s)}
+                  disabled={pendingKey !== null || done}
+                  className="rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
+                  title="Request this reviewer on GitHub"
+                >
+                  {done ? '✓ Requested' : pendingKey === k ? 'Assigning…' : 'Assign'}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {request.isError && (
+        <div className="mt-1 text-[11px] text-red-500">
+          {(request.error as Error)?.message ?? 'Couldn’t request the reviewer.'}
+        </div>
+      )}
+    </Row>
   );
 }
 
@@ -472,6 +553,10 @@ export function ChecksTab({
             ))}
           </div>
         </Row>
+      )}
+
+      {(pr.suggestedReviewers?.length ?? 0) > 0 && (
+        <SuggestedReviewersRow pr={pr} usersById={usersById} />
       )}
 
       <Row label="Meta">

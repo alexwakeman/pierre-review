@@ -10,6 +10,7 @@ import {
 import 'vis-timeline/styles/vis-timeline-graph2d.css';
 import type {
   DerivedState,
+  EventCategory,
   Repo,
   TimelineEvent,
   TimelinePr,
@@ -24,7 +25,7 @@ import {
   useUsers,
 } from '../../hooks/useTimeline.js';
 import { useOpenPrs, useSearchOpenPrs } from '../../hooks/useTriage.js';
-import { resolveRange, useFilters } from '../../store/filters.js';
+import { categoriesToTypes, resolveRange, useFilters } from '../../store/filters.js';
 import {
   usePinnedTabs,
   type TabMeta,
@@ -284,6 +285,13 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     active: false,
     states: [],
   });
+  // The active event-category selection, mirrored into a ref so rebuildMarkers (which
+  // also runs standalone on a zoom recluster, and in an isolate tab where the fetch
+  // bypasses the server-side `types` filter) can drop markers for toggled-off
+  // categories. On the shared board this is a redundant no-op (the server already
+  // filters via the `types` query param); it's load-bearing ONLY on the prIds-scoped
+  // focus/isolate path, which fetches every event type regardless of the header toggles.
+  const categoriesRef = useRef<EventCategory[]>([]);
   // The PR bar currently glowing as the "linked" partner of an open marker
   // modal, so we can clear it when the modal closes or moves to another PR.
   const highlightedPrRef = useRef<number | null>(null);
@@ -428,6 +436,10 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   const { data: mergers } = useMergers();
   const queryClient = useQueryClient();
   const derivedStates = useFilters((s) => s.derivedStates);
+  // Event-category toggles (Commits is off by default). Drives the client-side marker
+  // gate in rebuildMarkers so a focus/isolate tab — whose prIds fetch has no server
+  // `types` filter — still honours the header toggles (was: commits always showed there).
+  const categories = useFilters((s) => s.categories);
 
   // Member filter: when set, the timeline collapses to just these contributors'
   // rows (see the PR filter in the rebuild effect). Events are already actor-
@@ -812,6 +824,14 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
         );
       }
     }
+    // Category gate: drop markers for toggled-off categories (Commits is off by
+    // default). On the shared board the server already filtered via `types`, so this
+    // is a no-op there; on a prIds-scoped focus/isolate tab — which fetches EVERY
+    // event type — this is what actually enforces the header toggles (the fix for
+    // commits, and any other category, always showing on a focused PR). Reuses the
+    // same category→type mapping the server uses (lifecycle + reviews always included).
+    const allowedTypes = new Set(categoriesToTypes(categoriesRef.current));
+    events = events.filter((e) => allowedTypes.has(e.type));
     const { items, clusterMembers } = buildMarkerItems(
       events,
       groupOf,
@@ -2180,6 +2200,10 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       active: derivedActive,
       states: derivedStates,
     };
+    // Keep the category gate current whenever a full rebuild runs (e.g. on a data
+    // refetch). A pure category toggle is handled by the dedicated marker-only effect
+    // below — `categories` is deliberately NOT a dep of this heavy effect.
+    categoriesRef.current = categories;
 
     const evMap = new Map<number, TimelineEvent>();
     for (const ev of data.events) evMap.set(ev.id, ev);
@@ -2544,6 +2568,19 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     restoreScrollAnchor,
     applyBarFit,
   ]);
+
+  // Category toggles re-apply the marker gate WITHOUT a full groups+bars rebuild. Kept
+  // out of the heavy rebuild effect above (which is why `categories` isn't a dep there):
+  // on the SHARED board a toggle changes the timeline query key → a refetch, and the heavy
+  // effect runs once when new `data` lands; running it here too would double the rebuild on
+  // a large board. This lightweight pass gives instant marker feedback (esp. a "hide"
+  // toggle, which the stale placeholder data can satisfy immediately) and — crucially — is
+  // the ONLY re-apply path on an isolate/focus tab, whose `prIds` fetch never refetches on
+  // a category change.
+  useEffect(() => {
+    categoriesRef.current = categories;
+    if (timelineRef.current && dataRef.current) rebuildMarkers();
+  }, [categories, rebuildMarkers]);
 
   // Reflect the active PR selection without disturbing the view. Selecting a PR
   // — clicking its bar, j/k cycling, a marker's "open in detail" — is a purely

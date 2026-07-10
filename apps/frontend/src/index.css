@@ -840,8 +840,19 @@ body {
 /* Hover tooltip for a PR bar. vis renders the item `title` as HTML (the timeline
    runs with xss disabled); prTooltip builds the markup. Override vis's default
    pale-yellow single-line box into a dark, multi-line card that reads on either
-   theme — it floats above the board, so a dark card is legible regardless. */
-div.vis-tooltip {
+   theme — it floats above the board, so a dark card is legible regardless.
+
+   The selector is SCOPED to `.vis-timeline` (where vis always appends the tooltip
+   frame) purely to out-specify vis's own `div.vis-tooltip` default: at equal
+   specificity the winner is decided by CSS source order — which holds in dev but
+   FLIPS in the Vite production bundle (same trap documented for `.pr-bar.pr-open`
+   above). Un-scoped, the cloud/release bundle let vis's cream box + black text win
+   at the container while `.pr-tt-title` (uncontested) stayed near-white → an
+   invisible title on a pale card. The extra `.vis-timeline` ancestor makes our
+   rule win regardless of bundle order. `z-index` lifts it above adjacent bars/chrome
+   inside the board slot (vis's default is only 5, so a neighbouring bar could paint
+   over it). */
+.vis-timeline div.vis-tooltip {
   white-space: normal;
   max-width: 22rem;
   padding: 7px 9px;
@@ -853,6 +864,17 @@ div.vis-tooltip {
   border: 1px solid #374151;
   border-radius: 7px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  z-index: 60;
+}
+/* Let the floating tooltip escape a SHORT (content-height) timeline: vis appends it
+   inside `.vis-timeline`, which defaults to overflow:hidden, so on a few-row board a
+   downward-flipped tooltip is clipped by the bottom edge. The doubled class raises
+   specificity to beat vis's `.vis-timeline { overflow: hidden }` regardless of bundle
+   order. Safe: every inner `.vis-panel.*` carries its own overflow:hidden, so row
+   virtualization / content scrolling is unaffected — only the root stops clipping the
+   overlay. */
+.vis-timeline.vis-timeline {
+  overflow: visible;
 }
 .pr-tt-title {
   font-weight: 600;

@@ -188,7 +188,7 @@ function RoutingReviewers({
         <span className="font-medium">Suggested reviewers</span>
         <button
           type="button"
-          onClick={() => request.mutate(ids)}
+          onClick={() => request.mutate({ userIds: ids })}
           disabled={request.isPending || done || ids.length === 0}
           className="rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
           title="Request these reviewers on GitHub"

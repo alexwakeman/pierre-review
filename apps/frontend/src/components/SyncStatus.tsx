@@ -5,7 +5,57 @@ import { api } from '../api/client.js';
 import { ACTIVITY_QUERY_KEYS } from '../hooks/useActivity.js';
 import { relativeTime } from '../lib/ui.js';
 import { useFilters } from '../store/filters.js';
+import { useClickOutside } from '../hooks/useClickOutside.js';
 import { SyncProgressModal } from './SyncProgressModal.js';
+
+// Circular-arrows glyph for the sync trigger + "Sync now" item; spins while a sync runs.
+function RefreshIcon({
+  spinning = false,
+  size = 14,
+}: {
+  spinning?: boolean;
+  size?: number;
+}): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={spinning ? 'animate-spin' : undefined}
+    >
+      <polyline points="23 4 23 10 17 10" />
+      <polyline points="1 20 1 14 7 14" />
+      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
+  );
+}
+
+// Download-to-tray glyph for "Deep re-sync" — visually distinguishes the heavier action.
+function DeepSyncIcon({ size = 14 }: { size?: number }): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 3v12" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="5" y1="21" x2="19" y2="21" />
+    </svg>
+  );
+}
 
 function mostRecentSync(repos: Repo[]): string | null {
   let latest: string | null = null;
@@ -65,6 +115,11 @@ export function SyncStatus(): JSX.Element | null {
   // sync) — the same null-sentinel semantics the single id used to carry. Adds in
   // quick succession accumulate into this set so each new repo gets its own row.
   const [modalScopeIds, setModalScopeIds] = useState<number[]>([]);
+  // The header sync control is now a dropdown menu (mirrors UserMenu): a compact
+  // trigger that shows freshness at a glance (spinning icon while syncing, a red dot
+  // on error) and opens a menu with the status line + Sync now / Deep re-sync actions.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // Dedicated observer on the shared ['repos'] cache that polls for fresh
   // sync timestamps.
@@ -128,6 +183,22 @@ export function SyncStatus(): JSX.Element | null {
     cancelAutoClose();
   };
   useEffect(() => cancelAutoClose, []);
+
+  // Dropdown dismissal, matching UserMenu: click-outside + Escape. stopPropagation on
+  // Escape so it doesn't bubble to the global `esc` handler (useKeyboard), which would
+  // otherwise leave the current tab/overlay too.
+  useClickOutside(rootRef, () => setMenuOpen(false), menuOpen);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
 
   const invalidateData = (): void => {
     void qc.invalidateQueries({ queryKey: ['timeline'] });
@@ -278,46 +349,99 @@ export function SyncStatus(): JSX.Element | null {
           onCancel={() => void cancelSync()}
         />
       )}
-      <div className="flex items-center gap-2 text-xs text-gray-500">
-      {erroredRepo ? (
-        <span className="text-red-500" title={erroredRepo.lastSyncError ?? ''}>
-          sync error: {erroredRepo.fullName}
-        </span>
-      ) : (
-        <span className="cursor-help" title={syncTooltip(lastSync)}>
-          {syncing
-            ? progress
-            : lastSync
-              ? `synced ${relativeTime(lastSync)}`
-              : 'not synced yet'}
-        </span>
-      )}
-      <button
-        type="button"
-        onClick={() => void syncNow(false)}
-        disabled={syncing}
-        className="rounded border border-gray-300 px-2 py-0.5 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
-      >
-        Sync now
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          if (
-            window.confirm(
-              'Deep re-sync re-fetches the full backfill window for every repo. ' +
-                'Slower, but catches CI/thread changes the incremental sync can lag. Continue?',
-            )
-          ) {
-            void syncNow(true);
+      <div ref={rootRef} className="relative">
+        <button
+          type="button"
+          onClick={() => setMenuOpen((o) => !o)}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          title={
+            erroredRepo
+              ? `Sync error: ${erroredRepo.fullName}${
+                  erroredRepo.lastSyncError ? ` — ${erroredRepo.lastSyncError}` : ''
+                }`
+              : syncTooltip(lastSync)
           }
-        }}
-        disabled={syncing}
-        className="rounded px-1.5 py-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-50"
-        title="Force a full backfill for all repos"
-      >
-        deep
-      </button>
+          className={`relative flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 ${
+            menuOpen ? 'bg-gray-100 dark:bg-gray-800' : ''
+          }`}
+        >
+          <RefreshIcon spinning={syncing} />
+          <span className="hidden sm:inline">Sync</span>
+          {erroredRepo && !syncing && (
+            <span
+              aria-hidden
+              className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white dark:ring-gray-900"
+            />
+          )}
+          <span aria-hidden className="text-[9px] text-gray-400">
+            ▾
+          </span>
+        </button>
+
+        {menuOpen && (
+          <div
+            role="menu"
+            aria-label="Sync menu"
+            className="absolute right-0 top-full z-[60] mt-1 w-64 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          >
+            <div className="px-3 py-1.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+              {erroredRepo ? (
+                <span className="text-red-500">Sync error: {erroredRepo.fullName}</span>
+              ) : syncing ? (
+                <span>{progress}</span>
+              ) : lastSync ? (
+                <>
+                  <span className="text-gray-600 dark:text-gray-300">
+                    Synced {relativeTime(lastSync)}
+                  </span>
+                  <br />
+                  <span>
+                    Auto-syncs every {SYNC_INTERVAL_MIN} min · next ~
+                    {hhmm(nextSyncAt(SYNC_INTERVAL_MIN))}
+                  </span>
+                </>
+              ) : (
+                'Not synced yet'
+              )}
+            </div>
+            <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+            <button
+              role="menuitem"
+              type="button"
+              disabled={syncing}
+              onClick={() => {
+                setMenuOpen(false);
+                void syncNow(false);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              <RefreshIcon spinning={syncing} />
+              Sync now
+            </button>
+            <button
+              role="menuitem"
+              type="button"
+              disabled={syncing}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    'Deep re-sync re-fetches the full backfill window for every repo. ' +
+                      'Slower, but catches CI/thread changes the incremental sync can lag. Continue?',
+                  )
+                ) {
+                  setMenuOpen(false);
+                  void syncNow(true);
+                }
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-200 dark:hover:bg-gray-800"
+              title="Force a full backfill for all repos"
+            >
+              <DeepSyncIcon />
+              Deep re-sync…
+            </button>
+          </div>
+        )}
       </div>
     </>
   );

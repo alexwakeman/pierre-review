@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AddReviewCommentBody, MergeMethod, UpdateBranchBody } from '@pierre-review/shared';
+import type {
+  AddReviewCommentBody,
+  MergeMethod,
+  RequestReviewersBody,
+  UpdateBranchBody,
+} from '@pierre-review/shared';
 import { api } from '../api/client.js';
 
 // PR write mutations. The PR-detail query is staleTime:Infinity +
@@ -132,7 +137,7 @@ export function useAddReviewComment(prId: number) {
 export function useRequestReviewers(prId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (userIds: number[]) => api.requestReviewers(prId, { userIds }),
+    mutationFn: (body: RequestReviewersBody) => api.requestReviewers(prId, body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['team-insights'] });
       void qc.invalidateQueries({ queryKey: ['pr', prId] });

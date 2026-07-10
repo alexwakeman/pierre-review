@@ -13,12 +13,13 @@ import type {
   ReviewMode,
   User,
 } from '@pierre-review/shared';
-import type { LearningMatch } from '@pierre-review/shared';
+import type { LearningMatch, ReviewAction } from '@pierre-review/shared';
 import { CLAUDE_REVIEW_MODELS, CLAUDE_REVIEW_MODEL_LABELS } from '@pierre-review/shared';
 import { formatDate, usdToCredits } from '../lib/ui.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import { useReviewLearnings } from '../hooks/useReviewLearnings.js';
+import { useReviewActions } from '../hooks/useReviewActions.js';
 import { useFilters } from '../store/filters.js';
 import {
   useCancelReview,
@@ -1012,6 +1013,141 @@ const CONFIDENCE_CLASS: Record<LearningMatch['confidence'], string> = {
   low: 'text-gray-400',
 };
 
+// Human labels for the raw learning kinds (what each captured action represents).
+const LEARNING_KIND_LABELS: Record<string, string> = {
+  finding_dismissed: 'dismissed',
+  finding_kept: 'kept',
+  finding_reworded: 'reworded',
+  finding_reword_cleared: 'reword cleared',
+  finding_posted: 'posted',
+  review_body_rewritten: 'body rewritten',
+  verdict_overridden: 'verdict changed',
+  review_posted: 'review posted',
+  run_requested: 'run requested',
+};
+
+function clipText(s: string, max = 240): string {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+// The VERBATIM markdown block that gets injected into the next review's prompt. Lets the
+// reviewer see exactly what past-review context feeds the next run (not just the aggregated
+// summaries above). Collapsed by default.
+function ContextBlockDisclosure({ block }: { block: string }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="px-2 py-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="text-[10px] font-medium text-violet-600 hover:underline dark:text-violet-300"
+        aria-expanded={open}
+      >
+        {open ? '▾ Hide' : '▸ Show'} the exact context sent to Claude
+      </button>
+      {open && (
+        <>
+          <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-gray-900 px-2 py-1.5 font-mono text-[10px] leading-snug text-gray-100 dark:bg-black/40">
+            {block}
+          </pre>
+          <div className="mt-0.5 text-[10px] text-gray-400">
+            Injected verbatim as “Reviewer preferences from past reviews” (capped at ~600
+            tokens).
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// One raw captured action in the per-run "what this review taught the memory" log.
+function ReviewActionRow({ action }: { action: ReviewAction }): JSX.Element {
+  const label = LEARNING_KIND_LABELS[action.kind] ?? action.kind;
+  const verdictChanged =
+    (action.claudeVerdict != null || action.userVerdict != null) &&
+    action.claudeVerdict !== action.userVerdict;
+  return (
+    <li className="py-1 text-[11px]">
+      <div className="flex flex-wrap items-center gap-1.5 text-gray-500">
+        <span className="rounded bg-violet-500/10 px-1 py-0.5 font-medium text-violet-600 dark:text-violet-300">
+          {label}
+        </span>
+        {action.glob != null && (
+          <span className="truncate font-mono text-gray-400">{action.glob}</span>
+        )}
+        {action.category != null && <span className="text-gray-400">· {action.category}</span>}
+        <span className="ml-auto shrink-0 text-[10px] text-gray-400">
+          {formatDate(action.createdAt)}
+        </span>
+      </div>
+      {verdictChanged && (
+        <div className="mt-0.5 text-gray-500">
+          verdict: {action.claudeVerdict ?? '—'} →{' '}
+          <span className="text-gray-700 dark:text-gray-200">{action.userVerdict ?? '—'}</span>
+        </div>
+      )}
+      {action.claudeText != null && action.claudeText !== '' && (
+        <div className="mt-0.5">
+          <span className="font-medium text-gray-400">Claude: </span>
+          <span className="text-gray-600 dark:text-gray-300">{clipText(action.claudeText)}</span>
+        </div>
+      )}
+      {action.userText != null && action.userText !== '' && (
+        <div className="mt-0.5">
+          <span className="font-medium text-gray-400">You: </span>
+          <span className="text-gray-600 dark:text-gray-300">{clipText(action.userText)}</span>
+        </div>
+      )}
+    </li>
+  );
+}
+
+// Per-run provenance (Pro): the raw actions THIS review contributed to the reviewer's
+// memory — the drill-down behind the aggregated signals. Feeds future reviews of PRs
+// touching the same files. Lazily fetched only when expanded. Gated on pro.reviewMemory.
+function ReviewActionsLog({ reviewId }: { reviewId: number }): JSX.Element | null {
+  const { reviewMemory } = useProCapabilities();
+  const [open, setOpen] = useState(false);
+  const { data } = useReviewActions(reviewId, reviewMemory && open);
+  if (!reviewMemory) return null;
+  const actions = data?.actions ?? [];
+  return (
+    <div className="mx-4 my-2 rounded border border-gray-200 dark:border-gray-800">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-gray-600 dark:text-gray-300"
+        aria-expanded={open}
+      >
+        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+        What this review taught the memory
+        <span className="ml-auto text-[10px] font-normal text-gray-400">
+          {open ? 'hide' : 'show'}
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-gray-200 px-2 py-1 dark:border-gray-800">
+          <div className="pb-1 text-[10px] text-gray-500 dark:text-gray-400">
+            ⓘ Captured from this run — these feed future reviews of PRs touching the same
+            files.
+          </div>
+          {actions.length === 0 ? (
+            <div className="py-1 text-[11px] text-gray-400">
+              No actions captured from this run yet.
+            </div>
+          ) : (
+            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+              {actions.map((a) => (
+                <ReviewActionRow key={a.id} action={a} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LearningMatchRow({ match }: { match: LearningMatch }): JSX.Element {
   const [open, setOpen] = useState(false);
   const hasExample =
@@ -1030,6 +1166,25 @@ function LearningMatchRow({ match }: { match: LearningMatch }): JSX.Element {
             )}
           </div>
           <div className="text-xs text-gray-700 dark:text-gray-200">{match.summary}</div>
+          {(match.count != null || (match.kinds != null && match.kinds.length > 0)) && (
+            <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-gray-400">
+              {match.count != null && (
+                <span>
+                  {match.count} action{match.count === 1 ? '' : 's'}
+                  {match.lastActionAt != null ? ` · last ${formatDate(match.lastActionAt)}` : ''}
+                </span>
+              )}
+              {match.kinds?.map((k) => (
+                <span
+                  key={k.kind}
+                  className="rounded bg-violet-500/10 px-1 py-0.5 text-violet-600 dark:text-violet-300"
+                >
+                  {LEARNING_KIND_LABELS[k.kind] ?? k.kind}
+                  {k.count > 1 ? ` ×${k.count}` : ''}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <span className={`shrink-0 text-[10px] ${CONFIDENCE_CLASS[match.confidence]}`}>
           {match.confidence}
@@ -1098,6 +1253,9 @@ function ReviewLearningsPanel({ prId }: { prId: number }): JSX.Element | null {
           <div className="px-2 py-1 text-[10px] text-gray-500 dark:text-gray-400">
             ⓘ These are given to Claude as context for this run.
           </div>
+          {data?.contextBlock != null && data.contextBlock !== '' && (
+            <ContextBlockDisclosure block={data.contextBlock} />
+          )}
           <ul className="divide-y divide-violet-100 dark:divide-violet-900/40">
             {matches.map((m, i) => (
               <LearningMatchRow key={i} match={m} />
@@ -1563,6 +1721,12 @@ export function ClaudeReviewTab({
           }
           onPostFinding={(findingId) => postFinding.mutateAsync({ findingId })}
         />
+      )}
+
+      {/* Provenance drill-down (Pro): the raw actions this run fed into the reviewer's
+          memory — what will inform future reviews of PRs touching the same files. */}
+      {shownReview != null && shownReview.status === 'succeeded' && (
+        <ReviewActionsLog reviewId={shownReview.id} />
       )}
 
       {/* Section B — the authored review that gets posted (latest run only). */}

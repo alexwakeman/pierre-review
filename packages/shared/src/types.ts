@@ -223,9 +223,16 @@ export interface CiRerunResult {
 
 // Request reviewers on a PR (POST /api/prs/:id/request-reviewers). userIds are
 // resolved to GitHub logins server-side (bots + the PR author dropped); requires repo
-// write access (re-checked server-side). Powers the Insights "Assign reviewers" action.
+// write access (re-checked server-side). Powers the Insights "Assign reviewers" action
+// AND the CORE PR-detail "Suggested reviewers" assign. At least one of the three arrays
+// must be non-empty. `userIds` are resolved to logins; `logins` are sent through as-is
+// (for suggested reviewers we haven't synced as users); `teamSlugs` become team review
+// requests (`team_reviewers`) — a CODEOWNERS `@org/team` requestable without expanding
+// its membership.
 export interface RequestReviewersBody {
-  userIds: number[];
+  userIds?: number[];
+  logins?: string[];
+  teamSlugs?: string[];
 }
 
 export interface RequestReviewersResult {
@@ -841,6 +848,13 @@ export interface PrDetail {
   // GitHub returns them). Empty until a sync has populated it.
   files: PrFileChange[];
   requestedReviewers: RequestedReviewer[];
+  // Suggested reviewers (CORE) — populated ONLY when the PR warrants them (open,
+  // non-draft, no requested reviewers AND no submitted reviews); otherwise empty.
+  // Combines CODEOWNERS ownership (users + `@org/team` handles) with a history-based
+  // score (people who recently changed the touched dirs AND have merge rights / review
+  // here often). Rendered as an assignable "Suggested" row in ChecksTab. See
+  // ReviewerSuggestion.
+  suggestedReviewers: ReviewerSuggestion[];
   // Whether the viewer may approve this PR: they have GitHub WRITE/MAINTAIN/ADMIN
   // permission on the repo AND are not the PR's author. Computed on read from the
   // synced repos.viewerPermission + the account's user id. The approve route
@@ -2275,6 +2289,24 @@ export interface SuggestedReviewer {
   reason: string;
 }
 
+// A CORE PR-detail suggested reviewer (a peer of SuggestedReviewer, but richer so it
+// can carry BOTH GitHub users and CODEOWNERS teams, and users we haven't synced).
+// `kind` discriminates:
+//   'user' → `login` is always set (the assign key); `userId` is set when we've synced
+//            that user (drives the avatar / profile link) and null otherwise.
+//   'team' → `teamSlug` is the assign key (sent as `team_reviewers`); `teamName` is the
+//            'org/team' display label. userId/login are null.
+// `reason` is the human rationale; `source` records where the suggestion came from.
+export interface ReviewerSuggestion {
+  kind: 'user' | 'team';
+  login: string | null;
+  userId: number | null;
+  teamSlug: string | null;
+  teamName: string | null;
+  reason: string;
+  source: 'codeowners' | 'history';
+}
+
 export interface StalledReviewCard extends InsightCardBase, InsightPrRef {
   kind: 'stalled_review';
   ageHours: number; // hours the PR has been open awaiting review
@@ -2531,11 +2563,21 @@ export interface LearningMatch {
   summary: string;
   confidence: 'low' | 'medium' | 'high';
   example?: { claude?: string | null; you?: string | null };
+  // Provenance/transparency (for the "what feeds the next review" surface): how many raw
+  // captured actions this signal aggregates, when the most recent one landed, and the
+  // per-kind breakdown. Optional so an older plugin build still satisfies the type.
+  count?: number;
+  lastActionAt?: string | null; // ISO-8601
+  kinds?: { kind: string; count: number }[];
 }
 
 export interface ReviewLearningsResponse {
   enabled: boolean;
   matches: LearningMatch[];
+  // The VERBATIM markdown block that will be injected into the next review's prompt as
+  // `priorReviewContext` — byte-identical to what the plugin sends to Claude, so the UI can
+  // show "exactly what feeds the next review". null when there's nothing to inject.
+  contextBlock?: string | null;
 }
 
 // One raw captured action, for the per-review action log (Surface 2).

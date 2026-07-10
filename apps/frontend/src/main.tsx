@@ -43,7 +43,7 @@ createRoot(rootEl).render(
       persistOptions={{
         persister: queryPersister,
         maxAge: PERSIST_MAX_AGE,
-        buster: 'pierre-detail-v2',
+        buster: 'pierre-detail-v3',
         // Persist ONLY the on-demand detail queries (the bulky hydrated text), not
         // the lean timeline/triage feeds which should always come fresh from the API.
         dehydrateOptions: {

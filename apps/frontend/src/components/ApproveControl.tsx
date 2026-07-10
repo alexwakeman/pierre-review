@@ -23,7 +23,14 @@ export function ApproveControl({
   const [message, setMessage] = useState('');
   const approve = useApprovePr(prId);
 
-  if (alreadyApproved) {
+  // Render the disabled "Approved" state the instant the POST resolves — not just
+  // once the server-derived `alreadyApproved` flips true. useApprovePr is
+  // invalidate-only (no optimistic update), so between the POST resolving and the
+  // ['pr', id] refetch landing there's a window where the control would otherwise
+  // collapse back to a clickable green "Approve" — the momentary flicker users read
+  // as lag. `approve.isSuccess` bridges that gap (the branch never calls
+  // approve.reset(), so it persists), and `alreadyApproved` holds it thereafter.
+  if (alreadyApproved || approve.isSuccess) {
     return (
       <button
         type="button"

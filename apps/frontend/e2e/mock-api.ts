@@ -451,6 +451,7 @@ function prDetailFor(id: number): PrDetail {
     changedFilesCount: 1,
     files: [],
     requestedReviewers: [],
+    suggestedReviewers: [],
     viewerCanApprove: false,
     viewerHasApprovedStanding: false,
     threads: [],

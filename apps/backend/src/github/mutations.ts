@@ -663,8 +663,10 @@ export async function createPullRequest(
 // ---- Request reviewers on a PR (REST) ----
 
 // Request one or more reviewers on a PR (POST .../pulls/:n/requested_reviewers with
-// { reviewers: [login…] }). Needs a token with write/triage access; GitHub 422s if a
-// login isn't a collaborator or is the PR author (the caller filters the author out).
+// { reviewers: [login…], team_reviewers: [slug…] }). Needs a token with write/triage
+// access; GitHub 422s if a login isn't a collaborator or is the PR author (the caller
+// filters the author out). `teamSlugs` requests a whole team (a CODEOWNERS `@org/team`)
+// WITHOUT expanding its membership — GitHub resolves the slug against the repo's org.
 // Returns 201 with the updated PR body, which we don't need — the refreshed request
 // state arrives on the next sync (reviewRequests are re-derived each sync).
 export async function requestReviewers(
@@ -673,11 +675,14 @@ export async function requestReviewers(
   name: string,
   number: number,
   logins: string[],
+  teamSlugs: string[] = [],
 ): Promise<void> {
+  const body: { reviewers: string[]; team_reviewers?: string[] } = { reviewers: logins };
+  if (teamSlugs.length > 0) body.team_reviewers = teamSlugs;
   await ghRestPostFor<unknown>(
     token,
     `/repos/${owner}/${name}/pulls/${number}/requested_reviewers`,
-    { reviewers: logins },
+    body,
   );
 }
 
