@@ -180,6 +180,7 @@ const ME_RESPONSE: MeResponse = {
     slackDigest: false,
     issueLinks: false,
   },
+  authNotices: [],
 };
 
 function myTurnPr(id: number): MyTurnPr {

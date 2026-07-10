@@ -122,11 +122,16 @@ describe('graphqlChecksHint', () => {
 });
 
 describe('isSamlBlock', () => {
-  it('detects the SAML enforcement error', () => {
+  it('detects the SAML enforcement error by message', () => {
     expect(
       isSamlBlock([
         { type: 'FORBIDDEN', message: 'Resource protected by organization SAML enforcement.' },
       ]),
+    ).toBe(true);
+  });
+  it('detects the machine-readable saml_failure extension (even with a bland message)', () => {
+    expect(
+      isSamlBlock([{ type: 'FORBIDDEN', extensions: { saml_failure: true }, message: 'Forbidden' }]),
     ).toBe(true);
   });
   it('is false for an ordinary forbidden/checks error', () => {

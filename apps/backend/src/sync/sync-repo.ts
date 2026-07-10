@@ -5,8 +5,10 @@ import {
   getGraphqlClientFor,
   graphqlChecksHint,
   graphqlTolerant,
+  isSamlBlock,
   summarizeGraphqlErrors,
 } from '../github/client.js';
+import { clearSamlBlock, recordSamlBlock } from './auth-notices.js';
 import { REPO_ACTIVITY_QUERY, type RepoActivityResponse } from '../github/queries.js';
 import { ensureCommitFiles } from './commit-files.js';
 import { createUserResolver, persistPr, upsertRepo } from './upsert.js';
@@ -87,6 +89,9 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
   const log = opts.log ?? consoleLogger;
   const client = getGraphqlClientFor(opts.token);
   const resolver = createUserResolver();
+  // Set if any page's fetch is SAML-forbidden (token not authorized for the owner's org) — the
+  // owner org is then flagged for the "Reconnect GitHub" banner (see sync/auth-notices.ts).
+  let samlBlocked = false;
 
   let cursor: string | null = opts.startCursor ?? null;
   // The `after` value used to fetch the page currently being processed. When we
@@ -139,10 +144,12 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
         client,
         REPO_ACTIVITY_QUERY,
         { owner, name, cursor },
-        (errors) =>
+        (errors) => {
+          if (isSamlBlock(errors)) samlBlocked = true;
           log.warn(
             `sync ${owner}/${name}: partial GraphQL — continuing without forbidden fields${graphqlChecksHint(errors)}. ${summarizeGraphqlErrors(errors)}`,
-          ),
+          );
+        },
       );
       graphqlMs += performance.now() - tPage;
       pages += 1;
@@ -154,10 +161,19 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       lastRemaining = resp.rateLimit?.remaining ?? lastRemaining;
 
       if (!resp.repository) {
+        // A SAML wall forbids the whole `repository` node → flag the owner's org for the
+        // "Reconnect GitHub" banner (an authorization gap the user can self-fix), then fail
+        // this repo's sync as usual.
+        if (samlBlocked) recordSamlBlock(accountId, owner);
         const err = new Error(`Repository ${owner}/${name} not found or inaccessible`);
         (err as { statusCode?: number }).statusCode = 404;
         throw err;
       }
+      // Repository read cleanly (no SAML error anywhere in this response) → the token IS
+      // authorized for this owner's org; clear any prior flag so the "Reconnect" banner
+      // self-dismisses on recovery. Guard on !samlBlocked so a partial SAML error can't
+      // erroneously self-dismiss. Idempotent per page.
+      if (!samlBlocked) clearSamlBlock(accountId, owner);
 
       if (repoId == null) {
         repoId = await upsertRepo(

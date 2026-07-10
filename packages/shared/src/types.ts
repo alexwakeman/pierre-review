@@ -416,6 +416,10 @@ export interface MeResponse {
   deploymentMode: 'local' | 'cloud';
   // Premium capability flags (all-false in OSS mode).
   pro: ProCapabilities;
+  // Orgs whose sync is currently BLOCKED because the sign-in token isn't authorized for their
+  // SAML SSO (cloud). Populated by the sync when it hits the SAML wall; drives the global
+  // "Reconnect GitHub for <org>" banner. Empty in the normal case + always empty in local mode.
+  authNotices: AuthNotice[];
 }
 
 // ---- Pro per-account settings (packages/pro `pro_settings`; via GET/PUT /api/pro/settings) ----

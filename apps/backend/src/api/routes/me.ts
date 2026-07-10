@@ -8,6 +8,7 @@ import {
   entitledProCapabilities,
 } from '../../pro/contract.js';
 import { getFyiProvider } from '../../feed/fyi-provider.js';
+import { getAuthNotices } from '../../sync/auth-notices.js';
 import {
   dismissMyTurn,
   getCompletedDismissals,
@@ -71,6 +72,8 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // Claude Review is now the Pro `claudeReview` capability (in `pro` below).
       deploymentMode: config.deploymentMode,
       pro: entitled,
+      // Orgs currently SAML-blocked for this account (empty in the normal case + in local).
+      authNotices: getAuthNotices(accountId),
     };
   });
 

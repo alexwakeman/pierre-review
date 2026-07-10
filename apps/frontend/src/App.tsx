@@ -15,6 +15,7 @@ import { HelpModal } from './components/HelpModal.js';
 import { SettingsModal } from './components/settings/SettingsModal.js';
 import { useHasProSettings } from './hooks/useProSettings.js';
 import { SignInGate } from './components/SignInGate.js';
+import { AuthNoticeBanner } from './components/AuthNoticeBanner.js';
 import { UserMenu } from './components/UserMenu.js';
 import { useUrlState } from './hooks/useUrlState.js';
 import { useLocalStorage } from './hooks/useLocalStorage.js';
@@ -223,6 +224,7 @@ export default function App(): JSX.Element {
 
   return (
     <div className="flex h-full flex-col">
+      <AuthNoticeBanner notices={me.data?.authNotices ?? []} />
       <header className="flex items-center gap-3 border-b border-gray-200 px-4 py-2 dark:border-gray-800">
         <h1 className="brand-title" title="Pierre — a play on “PR”">
           Pierre

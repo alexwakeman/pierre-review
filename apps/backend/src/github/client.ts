@@ -10,11 +10,15 @@ export type GraphqlClient = typeof graphql;
 export function isSamlBlock(errors: unknown): boolean {
   return (
     Array.isArray(errors) &&
-    errors.some((e) =>
-      /saml enforcement|grant your oauth token access/i.test(
+    errors.some((e) => {
+      // GraphQL exposes a machine-readable flag on the error — the most reliable signal
+      // (docs: FORBIDDEN + extensions.saml_failure === true). Fall back to the message text.
+      if ((e as { extensions?: { saml_failure?: boolean } }).extensions?.saml_failure === true)
+        return true;
+      return /saml enforcement|grant your oauth token access/i.test(
         (e as { message?: string }).message ?? '',
-      ),
-    )
+      );
+    })
   );
 }
 

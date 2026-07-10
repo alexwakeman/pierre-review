@@ -2,7 +2,31 @@ import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { config } from '../../config.js';
 import { encryptToken } from '../../auth/crypto.js';
-import { upsertCloudAccount } from '../../auth/account.js';
+import { getAccessToken, upsertCloudAccount } from '../../auth/account.js';
+
+// Revoke the OAuth App's grant for a user's token (Basic auth = the app's own id/secret). This
+// forces the NEXT authorize to re-show consent — which is what re-injects the SAML SSO step; a
+// silent re-issue would skip it and re-mint a still-de-authorized token. 404 = already gone.
+async function revokeOAuthGrant(token: string): Promise<void> {
+  const basic = Buffer.from(
+    `${config.githubOAuthClientId}:${config.githubOAuthClientSecret}`,
+  ).toString('base64');
+  const res = await fetch(
+    `https://api.github.com/applications/${config.githubOAuthClientId}/grant`,
+    {
+      method: 'DELETE',
+      headers: {
+        authorization: `Basic ${basic}`,
+        accept: 'application/vnd.github+json',
+        'x-github-api-version': '2022-11-28',
+      },
+      body: JSON.stringify({ access_token: token }),
+    },
+  );
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`revoke grant -> ${res.status}`);
+  }
+}
 
 // GitHub sign-in routes (cloud only). TWO providers are supported side by side; a deployment
 // enables either or both (config.oauthProviderEnabled / appProviderEnabled) and the SignInGate
@@ -105,6 +129,24 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.redirect('/app');
     }
     return startLogin(defaultProvider, reply);
+  });
+
+  // "Reconnect GitHub" (the SAML-block banner action): revoke this app's grant so the re-auth
+  // shows FRESH consent — forcing the SAML SSO step that a silent re-issue would skip — then
+  // clear our session (so the callback re-runs the code exchange, not the already-signed-in
+  // short-circuit) and start a fresh OAuth login. Best-effort revoke: even if it fails, the
+  // re-login can still succeed if the user's SAML session is active.
+  app.get('/api/auth/reconnect', async (req, reply) => {
+    const accountId = req.session.get('accountId');
+    if (accountId != null) {
+      try {
+        await revokeOAuthGrant(await getAccessToken(accountId));
+      } catch (err) {
+        req.log.warn({ err }, 'reconnect: grant revoke failed, continuing to re-auth');
+      }
+      req.session.delete();
+    }
+    return startLogin('oauth', reply);
   });
 
   // Verify state → exchange code for a token (against the state's provider) → fetch the user →
