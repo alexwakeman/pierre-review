@@ -35,6 +35,7 @@ import type {
   TeamMetricsDetailResponse,
   AiUsageResponse,
   SprintReportResponse,
+  RetroReportResponse,
   MeResponse,
   MergersResponse,
   MergePrBody,
@@ -245,6 +246,12 @@ export const api = {
   refreshSprintReport: () =>
     fetch('/api/pro/sprint-report/refresh', jsonBody('POST')).then((r) =>
       handle<SprintReportResponse>(r),
+    ),
+  // The Insights "Retro" (Pro Haiku retrospective narrative of the window; activityDigest cap).
+  retroReport: () => get<RetroReportResponse>('/api/pro/retro'),
+  refreshRetroReport: () =>
+    fetch('/api/pro/retro/refresh', jsonBody('POST')).then((r) =>
+      handle<RetroReportResponse>(r),
     ),
   // Repo-scoped Claude review history (all runs per PR, newest-first). Gated on
   // config.claudeReviewEnabled; the response's `enabled` flag reflects that.

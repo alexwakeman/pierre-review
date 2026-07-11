@@ -12,6 +12,7 @@ import { RepoInsightsCard } from './RepoInsightsCard.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
 import { InsightsView } from './InsightsView.js';
+import { RetroView } from './RetroView.js';
 import { RepoAnalyticsModal } from '../RepoAnalyticsModal.js';
 
 // One-shot per page load: when Pro Insights is available, it becomes the DEFAULT landing
@@ -117,7 +118,7 @@ export function ActivityView(): JSX.Element {
   const userIds = useFilters((s) => s.userIds);
   const activityRepoId = useFilters((s) => s.activityRepoId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
-  const { teamInsights } = useProCapabilities();
+  const { teamInsights, activityDigest } = useProCapabilities();
   // The cross-repo Activity aggregate is scoped to ALL watched repos ∩ Members — it IGNORES
   // the FilterBar repo-visibility selection (null → the backend resolves all-watched), so the
   // rail + "new activity" check reflect the whole team, not just the visible-on-timeline repos.
@@ -139,6 +140,7 @@ export function ActivityView(): JSX.Element {
   // The cross-repo consolidated Feed is the default detail (also when nothing's set).
   const showingFeed = activityRepoId === 'feed' || activityRepoId == null;
   const showingInsights = activityRepoId === 'insights';
+  const showingRetro = activityRepoId === 'retro';
 
   // Make Insights the default view when Pro is available — but only once per page load, and
   // only from the pristine 'feed' default (never overriding a deep-linked repo or a choice
@@ -249,6 +251,32 @@ export function ActivityView(): JSX.Element {
             </button>
           )}
 
+          {/* RETRO pseudo-row — the retrospective narrative of the sprint window (Pro AI;
+              activityDigest). Sits under Insights: "state of play" then "what just happened". */}
+          {activityDigest && (
+            <button
+              type="button"
+              onClick={() => setActivityRepo('retro')}
+              aria-pressed={showingRetro}
+              className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+                showingRetro
+                  ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                  : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+              }`}
+              title="A retrospective of the past sprint window: what shipped, why CI failed, themes + follow-ups (Pro)"
+            >
+              <span aria-hidden="true" className="shrink-0 text-violet-500">
+                ⟲
+              </span>
+              <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+                Retro
+              </span>
+              <span className="shrink-0 rounded bg-violet-500/10 px-1 text-[9px] font-semibold uppercase text-violet-600 dark:text-violet-300">
+                Pro
+              </span>
+            </button>
+          )}
+
           {/* FEED pseudo-row — the cross-repo consolidated state of play. The old "All repos"
               pseudo-row was removed (redundant with the Feed + the per-repo entries below). */}
           <button
@@ -309,6 +337,8 @@ export function ActivityView(): JSX.Element {
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {showingInsights ? (
           <InsightsView />
+        ) : showingRetro ? (
+          <RetroView />
         ) : noRepos ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-400">
             {hasAnyRepo

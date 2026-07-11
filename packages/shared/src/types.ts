@@ -2523,6 +2523,33 @@ export interface SprintReport {
   sprint: { from: string; to: string };
 }
 
+// The Sprint "Retro" — a retrospective NARRATIVE over the sprint window (Pro Insights AI,
+// Haiku): the story of what happened in the period — what merged and what it did, resolved-
+// thread highlights + time-to-resolve, CI failures + root causes + rates, recurring themes, a
+// light sentiment read, and follow-ups. A peer of SprintReport: where the sprint report is the
+// "state of play" (what needs attention NOW), the retro is the retrograde "what just happened"
+// over the same window setting (sprint-to-date / rolling 7 / 14). One per account (regenerated
+// for the current window; no history in v1).
+export interface RetroReport {
+  summary: string; // markdown narrative, sectioned
+  prRefs: DigestPrRef[]; // notable PRs referenced (merged in-window), cross-repo `owner/name#N`
+  model: string;
+  generatedAt: string; // ISO-8601
+  costUsd: number | null;
+  stale: boolean; // the window's activity changed since this was generated
+  window: { from: string; to: string };
+}
+
+export interface RetroReportResponse {
+  enabled: boolean; // false when the AI digest capability is off
+  model: string;
+  report: RetroReport | null; // null = not generated yet (or nothing happened in the window)
+  // Served from cache due to the per-account throttle / in-flight guard (see SprintReportResponse).
+  throttled?: boolean;
+  // Metered plan out of month-to-date credits: refresh skipped without billing; cache still renders.
+  creditsExhausted?: boolean;
+}
+
 export interface SprintReportResponse {
   enabled: boolean; // false when the AI digest capability is off
   model: string;
