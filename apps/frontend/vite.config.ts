@@ -24,6 +24,26 @@ export default defineConfig({
       'idb-keyval',
     ],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split the heaviest third-party libs into their own long-cacheable chunks so
+        // (a) they aren't re-downloaded when app code changes, and (b) they load in
+        // parallel. vis-timeline (the board), highlight.js/lowlight (code highlighting),
+        // and the react-markdown/remark/rehype stack are the three big ones. Behaviour is
+        // unchanged — this only regroups chunks.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (/vis-timeline|vis-data|vis-util|keycharm/.test(id)) return 'vis';
+          if (/highlight\.js|lowlight|rehype-highlight/.test(id)) return 'highlight';
+          if (/react-markdown|remark|rehype|micromark|mdast|hast|unist|property-information|hastscript|vfile/.test(id))
+            return 'markdown';
+          if (id.includes('@tanstack')) return 'tanstack';
+          return undefined;
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

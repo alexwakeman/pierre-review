@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { EventType, PrDetail as PrDetailT, User } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
@@ -17,8 +17,14 @@ import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
 import { ChangesTab } from './ChangesTab.js';
 import { PrCommentComposer } from './PrCommentComposer.js';
-import { ClaudeReviewTab } from './ClaudeReviewTab.js';
-import { AiFixTab } from './AiFixTab.js';
+// The two Pro-only agentic tabs are the heaviest components in the app (~3k LOC combined,
+// pulling their own deep imports) and are gated behind Pro capabilities most sessions never
+// open. Lazy-load them so they leave the initial bundle and fetch on first open. (Named
+// exports → mapped to `default` for React.lazy.)
+const ClaudeReviewTab = lazy(() =>
+  import('./ClaudeReviewTab.js').then((m) => ({ default: m.ClaudeReviewTab })),
+);
+const AiFixTab = lazy(() => import('./AiFixTab.js').then((m) => ({ default: m.AiFixTab })));
 import { Markdown } from './Markdown.js';
 import { isNewComment, NewTag } from './ThreadView/index.js';
 
@@ -708,6 +714,9 @@ export function PrDetail({
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
+        <Suspense
+          fallback={<div className="px-4 py-6 text-sm text-gray-400">Loading…</div>}
+        >
         {tab === 'overview' ? (
           <div>
             <ChecksTab pr={pr} usersById={usersById} />
@@ -758,6 +767,7 @@ export function PrDetail({
         ) : (
           <ClaudeReviewTab pr={pr} usersById={usersById} />
         )}
+        </Suspense>
       </div>
     </div>
     </PrFocusMetaContext.Provider>

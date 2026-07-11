@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -22,7 +23,15 @@ const sanitizeSchema = {
 // is parsed by rehype-raw, then allowlisted by rehype-sanitize BEFORE
 // rehype-highlight runs — so highlight's hljs/code classNames survive the
 // sanitizer. Plugin order is load-bearing: raw → sanitize → highlight.
-export function Markdown({ children }: { children: string }): JSX.Element {
+// Memoized on its single string child: markdown+syntax-highlight parsing is expensive,
+// and this component renders in hot, frequently-re-rendering places (the Feed's rows, PR
+// comments, thread bodies, Insights). With a stable body string, a parent re-render (e.g. a
+// Back-flash highlight on the Feed) no longer re-parses every visible markdown body.
+export const Markdown = memo(function Markdown({
+  children,
+}: {
+  children: string;
+}): JSX.Element {
   return (
     <div className="md-body">
       <ReactMarkdown
@@ -45,4 +54,4 @@ export function Markdown({ children }: { children: string }): JSX.Element {
       </ReactMarkdown>
     </div>
   );
-}
+});

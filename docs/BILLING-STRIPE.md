@@ -7,15 +7,18 @@ Everything is inert until the two env vars below are set (the webhook replies
 `501` unconfigured), and **local mode is unaffected** — a local account is always
 fully entitled regardless of plan.
 
-> **⚠️ Do not set `STRIPE_PAYMENT_LINK_URL` in a cloud deployment until Pro is
-> actually cloud-enabled.** Today `config.proEnabled = !isCloud`: the `@pierre/pro`
-> plugin never loads in cloud, so the capability singleton stays all-false and no
-> `/api/pro/*` routes exist. The billing seam will happily take payment and flip
-> `accounts.plan='pro'` — but `/api/me` intersects the plan with the loaded
-> capabilities, so a paying customer would receive **zero Pro features**. The seam
-> is safe to configure the moment Pro ships in the cloud image (relax
-> `proEnabled` + include `packages/pro` in the deployment); until then, leave the
-> env var unset and the pricing CTA degrades to `/pricing?checkout=unavailable`.
+> **⚠️ Only set `STRIPE_PAYMENT_LINK_URL` on a cloud deployment that actually ships
+> Pro.** Pro is now cloud-enablable —
+> `config.proEnabled = PRO_DISABLED!=='true' && (!isCloud || PRO_CLOUD_ENABLED==='true')` —
+> so a cloud image built `--with-pro` and run with `PRO_CLOUD_ENABLED=true` loads
+> `@pierre/pro` and serves the SUMMARY tier (`/api/pro/*` routes + capabilities). The
+> hazard is a MISMATCH: if the payment link is live on a deployment that does NOT include
+> Pro (a plain OSS image, or `PRO_CLOUD_ENABLED` unset), the billing seam still takes
+> payment and flips `accounts.plan='pro'`, but `/api/me` intersects the plan with the
+> (empty) loaded capabilities — so a paying customer receives **zero Pro features**. Only
+> turn the pricing CTA on once the deployed image ships Pro AND `PRO_CLOUD_ENABLED=true`;
+> until then leave the env var unset and the CTA degrades to
+> `/pricing?checkout=unavailable`.
 
 ## How it works
 

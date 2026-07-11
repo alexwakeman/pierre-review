@@ -239,8 +239,10 @@ AI Fix) off in cloud.
   `PERSIST_BODIES=true` only if you want that text stored server-side.
 - **Scheduled sync** runs every 5 minutes per account (`SYNC_CRON`), the same as
   local. One bad token doesn't abort the loop.
-- **Claude Review is force-disabled in cloud** regardless of `ENABLE_CLAUDE_REVIEW`
-  (it needs a local `gh` + writable clone dir). Its routes 404 and the tab hides.
+- **The agentic AI tier (Claude Review / AI Fix) stays off in cloud** by leaving
+  `PRO_ADVANCED_AI_ENABLED` unset (the retired `ENABLE_CLAUDE_REVIEW` flag no longer
+  applies; `PRO_CLAUDE_REVIEW_ENABLED` remains only as a back-compat alias). It needs a
+  local `gh` + a writable clone dir, so its routes 404 and the tab hides in cloud.
 - **Rotating secrets:** rotating `SESSION_SECRET` invalidates all sessions
   (everyone re-signs-in). Do **not** rotate `ENCRYPTION_KEY` without re-encrypting
   stored tokens — a new key can't decrypt old tokens (users would need to re-auth).
