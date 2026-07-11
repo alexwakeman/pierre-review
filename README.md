@@ -1,8 +1,17 @@
 # pierre-review
 
-A single-page dashboard for tracking team GitHub activity across multiple repos.
-Horizontal timeline per repo, member sub-lanes, drill-down into PRs and review
-threads — including reading review threads in-app.
+**The calm layer above your review bot.** Bring your own reviewer — CodeRabbit,
+Greptile, Copilot, whatever you run — and Pierre becomes the cross-repo triage
+layer *above* it: what's stalled, whose turn it is, and which of the bot's comments
+a human still needs to read. A single-page dashboard for a whole team's GitHub
+activity across many repos: a horizontal timeline per repo, member sub-lanes, and
+drill-down into PRs and review threads (read them in-app).
+
+Third-party review-bot output (CodeRabbit · Greptile · Copilot · Qodo · Sourcery)
+is a **first-class, triaged signal**, not generic noise: bot threads a later commit
+has likely addressed vs the ones still needing a human, a per-vendor signal-to-noise
+rate, and one-click bulk-resolve of the stale ones. Pierre's own agentic **Claude
+Review** is just *one* optional reviewer you can plug in (BYO key) — never the point.
 
 Runs two ways from one codebase (the `DEPLOYMENT_MODE` env var selects):
 
@@ -30,6 +39,12 @@ each tagged with its derived state (resolved · replied · likely-addressed ·
 untouched), alongside CI, approvers, and the full activity feed:
 
 ![pierre-review PR detail](apps/landing/public/shots/pr-detail.png)
+
+Triage your review bot's firehose: a per-vendor chip counts its comments and how
+many still need a human, and one click resolves the threads a later commit already
+addressed:
+
+![pierre-review bot triage](apps/landing/public/shots/bot-review.png)
 
 ## Prerequisites
 

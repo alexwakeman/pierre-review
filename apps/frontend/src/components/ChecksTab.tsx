@@ -2,11 +2,13 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
   PrDetail as PrDetailT,
   RequestReviewersBody,
+  ReviewBotKind,
   ReviewerSuggestion,
   ReviewState,
   User,
 } from '@pierre-review/shared';
-import { CI_META, dateTime, mergeWarning, relativeTime } from '../lib/ui.js';
+import { BOT_VENDOR_META, botVendorMeta, CI_META, dateTime, mergeWarning, relativeTime } from '../lib/ui.js';
+import { useFilters } from '../store/filters.js';
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
 import { Markdown } from './Markdown.js';
@@ -325,6 +327,30 @@ export function ChecksTab({
   }
   const reviewerIds = [...latestReviewState.keys()];
 
+  // Review-BOT thread rollup — "the calm layer above your review bot." Group this PR's
+  // threads by the vendor that opened them (originalCommenter → reviewBotKind), counting
+  // total + still-unresolved (untouched | replied_unresolved). Drives the "CodeRabbit · 12 ·
+  // 3 unresolved" chips; clicking one filters the Threads tab to that vendor's threads.
+  const setThreadBotFilter = useFilters((s) => s.setThreadBotFilter);
+  const botGroups = (() => {
+    const byKind = new Map<ReviewBotKind, { threads: number; unresolved: number }>();
+    for (const t of pr.threads) {
+      const authorId = t.originalCommenterId ?? t.comments[0]?.authorId ?? null;
+      if (authorId == null) continue;
+      const meta = botVendorMeta(usersById.get(authorId));
+      if (!meta) continue;
+      const g = byKind.get(meta.kind) ?? { threads: 0, unresolved: 0 };
+      g.threads += 1;
+      if (t.derivedState === 'untouched' || t.derivedState === 'replied_unresolved') {
+        g.unresolved += 1;
+      }
+      byKind.set(meta.kind, g);
+    }
+    return [...byKind.entries()]
+      .map(([kind, g]) => ({ kind, ...BOT_VENDOR_META[kind], ...g }))
+      .sort((a, b) => b.threads - a.threads);
+  })();
+
   return (
     <>
       {pr.authNotice?.kind === 'saml_sso' && (
@@ -410,6 +436,34 @@ export function ChecksTab({
                 </span>
               );
             })}
+          </div>
+        </Row>
+      )}
+
+      {botGroups.length > 0 && (
+        <Row label="Bots">
+          <div className="flex flex-wrap gap-2 text-xs">
+            {botGroups.map((g) => (
+              <button
+                key={g.kind}
+                type="button"
+                onClick={() => setThreadBotFilter(g.kind)}
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium transition-opacity hover:opacity-80"
+                style={{ color: g.color, background: `${g.color}1a` }}
+                title={`${g.label} opened ${g.threads} review thread${
+                  g.threads === 1 ? '' : 's'
+                } on this PR${
+                  g.unresolved > 0 ? ` · ${g.unresolved} still need a look` : ' · all acted on'
+                } — click to filter the Threads tab`}
+              >
+                <span aria-hidden>🤖</span>
+                {g.label}
+                <span className="tabular-nums opacity-70">· {g.threads}</span>
+                {g.unresolved > 0 && (
+                  <span className="tabular-nums font-semibold">· {g.unresolved} unresolved</span>
+                )}
+              </button>
+            ))}
           </div>
         </Row>
       )}

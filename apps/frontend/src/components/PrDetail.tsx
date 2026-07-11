@@ -454,6 +454,13 @@ export function PrDetail({
     if (selectedThreadId != null) setTab('threads');
   }, [selectedThreadId]);
 
+  // Clicking a review-bot chip in Overview (ChecksTab) sets threadBotFilter → jump to the
+  // Threads tab, which then shows only that vendor's threads.
+  const threadBotFilter = useFilters((s) => s.threadBotFilter);
+  useEffect(() => {
+    if (threadBotFilter != null) setTab('threads');
+  }, [threadBotFilter]);
+
   // A timeline deep link to an Activity entry (e.g. the commit popover) forces the
   // Activity tab and clears the "since" filter so the target is visible; the list
   // then scrolls to + flashes it.
@@ -743,9 +750,11 @@ export function PrDetail({
             threads={pr.threads}
             usersById={usersById}
             prUrl={pr.githubUrl}
+            prId={pr.id}
             repoId={pr.repoId}
             selectedThreadId={selectedThreadId}
             viewedSince={pr.lastViewedAt}
+            botFilter={threadBotFilter}
           />
         ) : tab === 'activity' ? (
           <ActivityList

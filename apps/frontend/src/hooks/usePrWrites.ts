@@ -44,6 +44,23 @@ export function useResolveThread() {
   });
 }
 
+// Bulk-resolve the likely-addressed review-bot threads on a PR (Phase 3 "clear the bot
+// backlog in one click"). The server re-derives eligibility; we send the reviewed thread ids.
+export function useResolveBotThreads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { prId: number; threadIds: number[] }) =>
+      api.resolveBotThreads(vars.prId, { threadIds: vars.threadIds }),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: ['pr', vars.prId] });
+      void qc.invalidateQueries({ queryKey: ['my-turn'] });
+      void qc.invalidateQueries({ queryKey: ['me'] });
+      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
+      void qc.invalidateQueries({ queryKey: ['activity'] });
+    },
+  });
+}
+
 export function useCreatePrComment(prId: number) {
   const qc = useQueryClient();
   return useMutation({

@@ -87,6 +87,9 @@ import type {
   ConsolidatedFeedResponse,
   FeedAffectedThread,
   MyTurnPr,
+  ReviewBotKind,
+  BotSignalCard,
+  BotSignalVendorStat,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -116,6 +119,7 @@ import {
 } from './triage.js';
 import { getAccountUserId } from '../auth/account.js';
 import { ensureRoutingPrFiles } from '../sync/routing-files.js';
+import { reviewBotKind, reviewBotLogins } from '../sync/bot-detection.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
 // timestamptz (drizzle binds the Date through the codec), whereas SQLite columns
@@ -339,6 +343,67 @@ async function buildThreadCounts(
     map.set(r.prId, entry);
   }
   return map;
+}
+
+// The user ids of every KNOWN AI review bot (CodeRabbit/Greptile/Copilot/Qodo/…). Matched
+// by LOGIN (not the coarse `users.isBot` flag) so it catches review-bot rows synced before
+// the login joined the known set — their `isBot` may still be false until the next sync.
+// Includes both the bare slug and the `slug[bot]` form (GraphQL vs REST author strings).
+async function reviewBotUserIds(): Promise<number[]> {
+  const logins = reviewBotLogins();
+  if (logins.length === 0) return [];
+  const candidates = [...logins, ...logins.map((l) => `${l}[bot]`)];
+  const inList = sql.join(
+    candidates.map((c) => sql`${c}`),
+    sql`, `,
+  );
+  const rows = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(sql`lower(${users.githubLogin}) in (${inList})`)
+    .execute();
+  return rows.map((r) => r.id);
+}
+
+// Per-PR review-thread counts RESTRICTED to threads a review bot opened (by
+// `originalCommenterId`), split by derived state. Same GROUP BY shape as
+// buildThreadCounts; feeds the deterministic per-repo "acted-on rate" headline stat.
+async function buildBotThreadCounts(
+  prIds: number[],
+  botUserIds: number[],
+): Promise<Map<number, ThreadStateCounts>> {
+  const map = new Map<number, ThreadStateCounts>();
+  if (prIds.length === 0 || botUserIds.length === 0) return map;
+  const rows = await db
+    .select({
+      prId: reviewThreads.prId,
+      state: reviewThreads.derivedState,
+      c: count(),
+    })
+    .from(reviewThreads)
+    .where(
+      and(
+        inArray(reviewThreads.prId, prIds),
+        inArray(reviewThreads.originalCommenterId, botUserIds),
+      ),
+    )
+    .groupBy(reviewThreads.prId, reviewThreads.derivedState)
+    .execute();
+  for (const r of rows) {
+    const entry = map.get(r.prId) ?? emptyCounts();
+    entry[r.state] = r.c;
+    map.set(r.prId, entry);
+  }
+  return map;
+}
+
+// "Acted-on" heuristic over a bag of bot threads: resolved + likely_addressed (a commit
+// touched the file after the bot's comment) vs the untouched/replied backlog.
+function botActedOn(c: ThreadStateCounts): number {
+  return c.resolved + c.likely_addressed;
+}
+function botThreadTotal(c: ThreadStateCounts): number {
+  return c.resolved + c.likely_addressed + c.replied_unresolved + c.untouched;
 }
 
 function isStalled(pr: { state: PrState; lastCommitAt: Date | null }, counts: ThreadStateCounts): boolean {
@@ -1460,10 +1525,31 @@ export async function getActivity(
     else prsByRepo.set(pr.repoId, [pr]);
   }
 
+  // Deterministic per-repo review-bot signal over these open PRs (no AI): threads a known
+  // AI review bot opened, split by whether a later commit has acted on them. Empty map (0)
+  // when the account runs no review bot — the headline stat then simply doesn't render.
+  const botThreadCountsByPr = await buildBotThreadCounts(
+    openPrs.map((pr) => pr.id),
+    await reviewBotUserIds(),
+  );
+
   // Preserve listRepos order (stable, not jumpy across loads).
   const activityRepos: ActivityRepo[] = reposScoped.map((repo) => {
     const repoPrs = prsByRepo.get(repo.id) ?? [];
     const ins = insightsByRepo.get(repo.id);
+
+    const botTotals = emptyCounts();
+    for (const pr of repoPrs) {
+      const bc = botThreadCountsByPr.get(pr.id);
+      if (!bc) continue;
+      botTotals.untouched += bc.untouched;
+      botTotals.replied_unresolved += bc.replied_unresolved;
+      botTotals.likely_addressed += bc.likely_addressed;
+      botTotals.resolved += bc.resolved;
+    }
+    const botThreads = botThreadTotal(botTotals);
+    const botThreadsActedOn = botActedOn(botTotals);
+
     const stats: ActivityRepoStats = ins
       ? {
           openPrs: ins.openPrs,
@@ -1472,6 +1558,8 @@ export async function getActivity(
           stalledPrs: ins.stalledPrs,
           medianHoursToFirstReview: ins.medianHoursToFirstReview,
           oldestUnreviewed: ins.oldestUnreviewed,
+          botThreads,
+          botThreadsActedOn,
         }
       : {
           openPrs: 0,
@@ -1480,6 +1568,8 @@ export async function getActivity(
           stalledPrs: 0,
           medianHoursToFirstReview: null,
           oldestUnreviewed: null,
+          botThreads,
+          botThreadsActedOn,
         };
 
     const threadTotals = emptyCounts();
@@ -2608,10 +2698,11 @@ export async function getTeamInsights(
   const repoIds = watched.map((r) => r.id);
   const finish = async (): Promise<TeamInsightsResponse> => {
     const kindRank: Record<InsightKind, number> = {
-      stalled_review: 0,
-      untouched_thread: 1,
-      reviewer_load: 2,
-      reviewer_routing: 3,
+      bot_signal: 0, // the flagship "layer above your review bot" summary, leads its severity tier
+      stalled_review: 1,
+      untouched_thread: 2,
+      reviewer_load: 3,
+      reviewer_routing: 4,
     };
     const sevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
     cards.sort(
@@ -2632,6 +2723,87 @@ export async function getTeamInsights(
     };
   };
   if (repoIds.length === 0) return finish();
+
+  // ── bot_signal card (deterministic, no AI) ──────────────────────────────────
+  // The un-copyable cross-repo, cross-bot "signal-to-noise" view: over the sprint window,
+  // how many review threads each AI review bot opened, what share a later commit acted on,
+  // and how much untouched backlog is piling up. Computed here (BEFORE the open-PR guard)
+  // so it counts bot threads on merged PRs too — "this sprint's" volume, not just open work.
+  {
+    const botIds = await reviewBotUserIds();
+    if (botIds.length > 0) {
+      const rows = await db
+        .select({
+          login: users.githubLogin,
+          state: reviewThreads.derivedState,
+          createdAt: reviewThreads.createdAt,
+        })
+        .from(reviewThreads)
+        .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+        .innerJoin(users, eq(users.id, reviewThreads.originalCommenterId))
+        .where(
+          and(
+            eq(pullRequests.accountId, accountId),
+            inArray(pullRequests.repoId, repoIds),
+            inArray(reviewThreads.originalCommenterId, botIds),
+            gte(reviewThreads.createdAt, sprintFrom),
+            lte(reviewThreads.createdAt, sprintTo),
+          ),
+        )
+        .execute();
+
+      type Agg = { threads: number; actedOn: number; untouched: number; oldestUntouchedMs: number | null };
+      const byVendor = new Map<ReviewBotKind, Agg>();
+      for (const r of rows) {
+        const kind = reviewBotKind(r.login);
+        if (!kind) continue; // login matched by id but not a review vendor — skip defensively
+        const v = byVendor.get(kind) ?? { threads: 0, actedOn: 0, untouched: 0, oldestUntouchedMs: null };
+        v.threads += 1;
+        if (r.state === 'resolved' || r.state === 'likely_addressed') v.actedOn += 1;
+        if (r.state === 'untouched') {
+          v.untouched += 1;
+          const t = r.createdAt.getTime();
+          if (v.oldestUntouchedMs == null || t < v.oldestUntouchedMs) v.oldestUntouchedMs = t;
+        }
+        byVendor.set(kind, v);
+      }
+
+      const vendors: BotSignalVendorStat[] = [...byVendor.entries()]
+        .map(([kind, v]) => ({
+          kind,
+          threads: v.threads,
+          actedOn: v.actedOn,
+          untouched: v.untouched,
+          oldestUntouchedDays:
+            v.oldestUntouchedMs == null ? null : Math.floor((now - v.oldestUntouchedMs) / 86_400_000),
+        }))
+        .sort((a, b) => b.threads - a.threads);
+
+      const totalThreads = vendors.reduce((s, v) => s + v.threads, 0);
+      if (totalThreads > 0) {
+        const totalActedOn = vendors.reduce((s, v) => s + v.actedOn, 0);
+        const totalUntouched = vendors.reduce((s, v) => s + v.untouched, 0);
+        const oldestUntouchedDays = vendors.reduce<number | null>(
+          (m, v) => (v.oldestUntouchedDays == null ? m : m == null ? v.oldestUntouchedDays : Math.max(m, v.oldestUntouchedDays)),
+          null,
+        );
+        const severity: InsightSeverity =
+          totalUntouched === 0 ? 'info' : oldestUntouchedDays != null && oldestUntouchedDays >= 7 ? 'high' : 'warn';
+        const card: BotSignalCard = {
+          id: 'bot_signal',
+          kind: 'bot_signal',
+          severity,
+          totalThreads,
+          totalActedOn,
+          totalUntouched,
+          actedOnPct: Math.round((totalActedOn / totalThreads) * 100),
+          oldestUntouchedDays,
+          vendors,
+        };
+        cards.push(card);
+      }
+    }
+  }
 
   const ghUrl = (repoId: number, number: number): string =>
     `https://github.com/${repoName.get(repoId)}/pull/${number}`;
@@ -4888,6 +5060,43 @@ export interface ThreadWriteContext {
 // Resolve a review thread to its GitHub node id + parent-PR coordinates, for a
 // reply (addPullRequestReviewThreadReply) or resolve/unresolve mutation. The
 // thread's GitHub node id is the GraphQL `pullRequestReviewThreadId` / `threadId`.
+// The review-BOT threads on a PR that a later commit has LIKELY ADDRESSED — the set the
+// "clear the bot backlog" bulk action may safely resolve. Ownership-scoped (join to the PR's
+// account), restricted to review-bot-originated threads currently in `likely_addressed` that
+// are still unresolved and carry a GitHub node id (needed to resolve on GitHub). When
+// `threadIds` is non-empty it further narrows to the exact reviewed list the client confirmed
+// — defence-in-depth so a stale client can never resolve a thread the server wouldn't offer.
+export async function getResolvableBotThreads(
+  prId: number,
+  accountId: number,
+  threadIds: number[] | null = null,
+): Promise<{ id: number; threadNodeId: string }[]> {
+  const botIds = await reviewBotUserIds();
+  if (botIds.length === 0) return [];
+  const preds = [
+    eq(reviewThreads.prId, prId),
+    eq(pullRequests.accountId, accountId),
+    inArray(reviewThreads.originalCommenterId, botIds),
+    eq(reviewThreads.derivedState, 'likely_addressed'),
+    eq(reviewThreads.isResolved, false),
+    isNotNull(reviewThreads.githubNodeId),
+  ];
+  // Distinguish an explicit empty selection from the null default: `[]` means "the client
+  // reviewed nothing" → resolve nothing (NOT resolve-all). Only `null` (no caller today) is
+  // the unfiltered resolve-every-eligible path.
+  if (threadIds) {
+    if (threadIds.length === 0) return [];
+    preds.push(inArray(reviewThreads.id, threadIds));
+  }
+  const rows = await db
+    .select({ id: reviewThreads.id, threadNodeId: reviewThreads.githubNodeId })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(and(...preds))
+    .execute();
+  return rows.flatMap((r) => (r.threadNodeId != null ? [{ id: r.id, threadNodeId: r.threadNodeId }] : []));
+}
+
 export async function getThreadWriteContext(
   threadId: number,
   accountId: number,

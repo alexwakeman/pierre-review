@@ -179,6 +179,22 @@ async function proShots() {
     await ctx.close();
   });
 
+  // 7b. Bot triage — "the calm layer above your review bot." Open #113, click the CodeRabbit
+  // chip in Overview → the Threads tab filtered to CodeRabbit's threads, with the one-click
+  // "Resolve N addressed" backlog action visible. The hero of the bot-aware positioning.
+  await shot('bot-review.png', async () => {
+    const ctx = await newCtx({ width: 1600, height: 1200 }, 2, 920);
+    const page = await ctx.newPage();
+    await openApp(page, '?pr=113');
+    const pane = page.getByTestId('detail-pane');
+    await pane.waitFor({ timeout: 8000 });
+    // The "Bots" row chip in Overview — "🤖 CodeRabbit · 6 · 3 unresolved".
+    await pane.getByRole('button', { name: /CodeRabbit/ }).first().click({ timeout: 4000 });
+    await page.waitForTimeout(1500); // Threads tab + vendor filter banner render
+    await pane.screenshot({ path: out('bot-review.png') });
+    await ctx.close();
+  });
+
   // 8. Claude Review — the findings tab of #113, focused on the (taller) detail pane.
   await shot('claude-review.png', async () => {
     const ctx = await newCtx({ width: 1600, height: 1200 }, 2, 920);

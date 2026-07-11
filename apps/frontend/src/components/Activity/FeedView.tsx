@@ -19,6 +19,7 @@ import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
+  botVendorMeta,
   buildQuotedReply,
   CI_META,
   dateTime,
@@ -107,6 +108,8 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const toggleFeedMyTurnOnly = useFilters((s) => s.toggleFeedMyTurnOnly);
   const feedClaudeOnly = useFilters((s) => s.feedClaudeOnly);
   const toggleFeedClaudeOnly = useFilters((s) => s.toggleFeedClaudeOnly);
+  const feedBotLens = useFilters((s) => s.feedBotLens);
+  const cycleFeedBotLens = useFilters((s) => s.cycleFeedBotLens);
   const showThreadInChanges = useFilters((s) => s.showThreadInChanges);
   const selectPr = useFilters((s) => s.selectPr);
   const showPrComment = useFilters((s) => s.showPrComment);
@@ -167,13 +170,24 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const usersById = useMemo(() => indexUsers(users), [users]);
   const myTurnCount = items.filter((i) => i.isMyTurn).length;
   const claudeCount = items.filter((i) => i.kind === 'claude_review').length;
+  // Bot lens: an actor is a "bot" for the lens if it's ANY bot (dependabot/CI/review bots),
+  // so "Hide bots" gives the clean human-only view; the per-row vendor TAG is review-bot-only.
+  const isBotActor = (i: ConsolidatedFeedItem): boolean =>
+    i.actorId != null && (usersById.get(i.actorId)?.isBot ?? false);
+  const botCount = items.filter(isBotActor).length;
   // "My Turn only" and "Claude Reviews only" are mutually-exclusive client-side filters (My
-  // Turn is CORE / free, so it's always available).
-  const visible = feedMyTurnOnly
+  // Turn is CORE / free, so it's always available). The bot lens composes ON TOP of them.
+  const base = feedMyTurnOnly
     ? items.filter((i) => i.isMyTurn)
     : feedClaudeOnly
       ? items.filter((i) => i.kind === 'claude_review')
       : items;
+  const visible =
+    feedBotLens === 'hide'
+      ? base.filter((i) => !isBotActor(i))
+      : feedBotLens === 'only'
+        ? base.filter(isBotActor)
+        : base;
 
   // Back-from-a-click highlight: when a browser Back returns us to the feed (navigateBack
   // set the one-shot flashTarget), scroll the exact row we clicked into view and flash it
@@ -342,6 +356,24 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
             {claudeCount > 0 && <span className="tabular-nums opacity-70">{claudeCount}</span>}
           </button>
         )}
+        {/* Bot lens — Pierre as the calm layer above your review bot. Cycles all → hide → only. */}
+        {botCount > 0 && (
+          <button
+            type="button"
+            onClick={cycleFeedBotLens}
+            aria-pressed={feedBotLens !== 'all'}
+            className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+              feedBotLens !== 'all'
+                ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
+                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+            }`}
+            title="Tame the bot firehose: click to cycle all activity → hide bot noise → bot activity only"
+          >
+            <span aria-hidden="true">🤖</span>
+            {feedBotLens === 'hide' ? 'Bots hidden' : feedBotLens === 'only' ? 'Bots only' : 'Bots'}
+            {feedBotLens === 'all' && <span className="tabular-nums opacity-70">{botCount}</span>}
+          </button>
+        )}
         {items.length > 0 && (
           <span className="text-[11px] text-gray-400">
             {visible.length} of {items.length}
@@ -357,7 +389,11 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
         <div className="flex h-32 items-center justify-center text-sm text-gray-400">
           {feedClaudeOnly
             ? 'No Claude Reviews in this window.'
-            : 'Nothing needs your attention right now.'}
+            : feedBotLens === 'only'
+              ? 'No bot activity in this window.'
+              : feedBotLens === 'hide'
+                ? 'Only bot activity here — nothing from humans in this window.'
+                : 'Nothing needs your attention right now.'}
         </div>
       ) : (
         <ul className="space-y-2">
@@ -618,6 +654,8 @@ function FeedRow({
   const claudeVerdict = item.claudeVerdict != null ? CLAUDE_VERDICT_META[item.claudeVerdict] : null;
   const affected = item.affectedThreads ?? [];
   const primaryReason = item.myTurnReasons[0];
+  // Known AI review bot? Tag the row with its vendor so it reads "CodeRabbit flagged…".
+  const botVendor = botVendorMeta(actorUser);
 
   // A review-thread card shows its FULL conversation inline (reply + resolve, with
   // the specific comment highlighted new); a PR-comment card can open a quote+@mention
@@ -703,6 +741,16 @@ function FeedRow({
           </span>
           <Avatar user={actorUser} size={20} />
           <span className="truncate font-medium text-gray-800 dark:text-gray-100">{actorName}</span>
+          {botVendor && (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
+              style={{ color: botVendor.color, background: `${botVendor.color}1a` }}
+              title={`${botVendor.label} is an AI review bot — Pierre triages its output`}
+            >
+              <span aria-hidden>🤖</span>
+              {botVendor.label}
+            </span>
+          )}
           <span
             className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
             style={{ color: glyph.color, background: glyph.color + '1a' }}

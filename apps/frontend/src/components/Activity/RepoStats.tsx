@@ -44,6 +44,21 @@ export function RepoStatsLine({ stats: s }: { stats: ActivityRepoStats }): JSX.E
           {relativeTime(s.oldestUnreviewed.openedAt)}
         </a>
       )}
+      {/* Review-bot signal-to-noise (deterministic, no AI) — only when a review bot is active
+          here. "42% acted on" = threads a later commit touched vs the untouched backlog. */}
+      {s.botThreads > 0 && (
+        <span
+          className="text-sky-600 dark:text-sky-400"
+          title="Review-bot threads on open PRs, and the share a later commit has likely addressed (resolved or likely_addressed). An approximate signal — likely_addressed is a heuristic."
+        >
+          🤖 <span className="tabular-nums">{s.botThreads}</span> bot thread
+          {s.botThreads === 1 ? '' : 's'} ·{' '}
+          <span className="tabular-nums">
+            {Math.round((s.botThreadsActedOn / s.botThreads) * 100)}%
+          </span>{' '}
+          acted on
+        </span>
+      )}
     </div>
   );
 }

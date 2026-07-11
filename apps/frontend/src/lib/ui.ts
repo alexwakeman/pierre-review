@@ -8,10 +8,11 @@ import type {
   MyTurnReason,
   PrState,
   ReasonTag,
+  ReviewBotKind,
   ThreadStateCounts,
   User,
 } from '@pierre-review/shared';
-import { AI_CREDITS_PER_USD } from '@pierre-review/shared';
+import { AI_CREDITS_PER_USD, reviewBotKind } from '@pierre-review/shared';
 
 // AI cost is conveyed in CREDITS, never dollars (1¢ = 5 credits ⇒ $1 = 500 credits), to
 // decouple the app's price from its underlying running cost. Raw USD stays in the data;
@@ -101,6 +102,35 @@ export const MY_TURN_REASON_META: Record<MyTurnReason, { label: string; title: s
   reviewed: { label: 'You reviewed', title: 'You previously reviewed this PR' },
   commented: { label: 'You commented', title: 'You previously commented on this PR' },
 };
+
+// Third-party AI review-bot vendors: display label + accent colour. Keyed by the shared
+// ReviewBotKind (classification lives in @pierre-review/shared reviewBotKind; presentation
+// lives here). Drives the PrDetail "Bots" chip + the feed vendor tag, so a review-comment
+// card reads "CodeRabbit flagged…" not a bare bot login.
+export const BOT_VENDOR_META: Record<ReviewBotKind, { label: string; color: string }> = {
+  coderabbit: { label: 'CodeRabbit', color: '#ff7a45' },
+  greptile: { label: 'Greptile', color: '#16a34a' },
+  copilot: { label: 'Copilot', color: '#8957e5' },
+  qodo: { label: 'Qodo', color: '#7c3aed' },
+  sourcery: { label: 'Sourcery', color: '#0d9488' },
+  bito: { label: 'Bito', color: '#e11d48' },
+  ellipsis: { label: 'Ellipsis', color: '#64748b' },
+  korbit: { label: 'Korbit', color: '#2563eb' },
+  baz: { label: 'Baz', color: '#db2777' },
+  graphite: { label: 'Graphite', color: '#475569' },
+  cursor: { label: 'Cursor', color: '#334155' },
+  devin: { label: 'Devin', color: '#0891b2' },
+  entelligence: { label: 'Entelligence', color: '#ca8a04' },
+};
+
+// Classify a user (by login) as a known AI review bot → its vendor kind + display meta, or
+// null for humans / non-review bots. The one call site for "is this actor a review bot".
+export function botVendorMeta(
+  user: Pick<User, 'githubLogin'> | null | undefined,
+): { kind: ReviewBotKind; label: string; color: string } | null {
+  const kind = reviewBotKind(user?.githubLogin);
+  return kind ? { kind, ...BOT_VENDOR_META[kind] } : null;
+}
 
 // The reason tags that make a PR "need attention" — mirrors the backend's
 // ACTIVITY_ATTENTION_REASONS (db/queries.ts) so the per-PR ⚠ badge and the repo-level

@@ -100,8 +100,14 @@ await db
     { id: 5, githubLogin: 'sam-carter', githubNodeId: 'U_sam', displayName: 'Sam Carter', isBot: false },
     { id: 6, githubLogin: 'wei-zhang', githubNodeId: 'U_wei', displayName: 'Wei Zhang', isBot: false },
     { id: 7, githubLogin: 'dependabot', githubNodeId: 'U_dep', displayName: 'dependabot', isBot: true },
+    // A third-party AI review bot (login classified by reviewBotKind → vendor 'coderabbit'),
+    // so the demo shows "the calm layer above your review bot": the PrDetail bot chip, the
+    // feed bot lens + vendor tag, and the Insights bot signal-to-noise card.
+    { id: 8, githubLogin: 'coderabbitai', githubNodeId: 'U_coderabbit', displayName: 'CodeRabbit', isBot: true },
   ])
   .execute();
+
+const CODERABBIT = 8;
 
 // ---- repos -----------------------------------------------------------------
 const WEB = 1;
@@ -321,6 +327,47 @@ const THREADS: ThreadSeed[] = [
       { author: 2, body: 'Done — extracted SYNC_INTERVAL_MS.', daysAgo: 2.1 },
     ],
   },
+  // CodeRabbit (a third-party AI review bot) left 6 inline comments on this PR — the exact
+  // firehose Pierre triages. Mix of states so the demo shows the chip ("CodeRabbit · 6 · 3
+  // unresolved"), the acted-on rate (50%), and the bulk-resolve of the 2 likely-addressed.
+  {
+    id: 6, path: 'src/db/queries.ts', line: 318, resolved: false, derived: 'untouched', opener: CODERABBIT, createdDaysAgo: 2.3,
+    comments: [
+      { author: CODERABBIT, body: '_⚠️ Potential issue_ — `botUserIds()` runs a full-table scan on every feed request. Consider caching the id set or gating it behind `excludeBots`.', daysAgo: 2.3 },
+    ],
+  },
+  {
+    id: 7, path: 'src/sync/upsert.ts', line: 91, resolved: false, derived: 'untouched', opener: CODERABBIT, createdDaysAgo: 2.3,
+    comments: [
+      { author: CODERABBIT, body: '_🛠️ Refactor suggestion_ — the `case when` for `is_bot` duplicates the override logic already in `setUserBot`. Extract a shared helper to avoid drift.', daysAgo: 2.3 },
+    ],
+  },
+  {
+    id: 8, path: 'src/db/queries.ts', line: 341, resolved: false, derived: 'replied_unresolved', opener: CODERABBIT, createdDaysAgo: 2.3,
+    comments: [
+      { author: CODERABBIT, body: '_🧹 Nitpick_ — `emptyCounts()` allocates a new object per PR in the loop; hoist a frozen zero-count and clone only when writing.', daysAgo: 2.3 },
+      { author: ME, body: 'Micro-opt — leaving as-is for readability; the loop is bounded by open PRs.', daysAgo: 1.9 },
+    ],
+  },
+  {
+    id: 9, path: 'src/sync/derive-thread-state.ts', line: 52, resolved: false, derived: 'likely_addressed', opener: CODERABBIT, createdDaysAgo: 2.4,
+    comments: [
+      { author: CODERABBIT, body: '_⚠️ Potential issue_ — a renamed file will read as `untouched` because the commit-file match is path-exact. Worth a comment noting the known false-negative.', daysAgo: 2.4 },
+    ],
+  },
+  {
+    id: 10, path: 'src/sync/upsert.ts', line: 60, resolved: false, derived: 'likely_addressed', opener: CODERABBIT, createdDaysAgo: 2.4,
+    comments: [
+      { author: CODERABBIT, body: '_🛠️ Refactor suggestion_ — prefer `onConflictDoUpdate` here over the read-modify-write; it removes a round-trip and the race window.', daysAgo: 2.4 },
+    ],
+  },
+  {
+    id: 11, path: 'src/db/schema.sqlite.ts', line: 127, resolved: true, derived: 'resolved', opener: CODERABBIT, createdDaysAgo: 2.5,
+    comments: [
+      { author: CODERABBIT, body: '_🧹 Nitpick_ — `is_bot_overridden` has no index but is filtered in the upsert. Negligible at this scale; flagging for completeness.', daysAgo: 2.5 },
+      { author: 2, body: 'Acknowledged — not worth an index here.', daysAgo: 2.2 },
+    ],
+  },
 ];
 
 await db
@@ -462,6 +509,9 @@ const REVIEWS: ReviewSeed[] = [
   { id: 20, prId: 132, author: 1, state: 'approved', daysAgo: 19.5, body: 'Dashboards are useful. Merging.' },
   { id: 21, prId: 133, author: 1, state: 'approved', daysAgo: 23.5, body: 'Routine SDK bump, CI green.' },
   { id: 22, prId: 134, author: 5, state: 'commented', daysAgo: 28, body: 'Flow logs got folded into the VPC module rewrite — closing this one.' },
+  // CodeRabbit's top-level review on #113 (it posts a COMMENTED review + inline threads) —
+  // gives the feed a "CodeRabbit reviewed" row with the vendor tag.
+  { id: 23, prId: 113, author: CODERABBIT, state: 'commented', daysAgo: 2.3, body: '**CodeRabbit summary** — 6 comments across 4 files. 2 potential issues, 2 refactor suggestions, 2 nitpicks. See the inline threads.' },
 ];
 await db
   .insert(schema.reviews)

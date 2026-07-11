@@ -21,7 +21,7 @@ import {
 } from '../../hooks/useRepoDigest.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
-import { CI_META, indexUsers } from '../../lib/ui.js';
+import { BOT_VENDOR_META, CI_META, indexUsers } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
@@ -40,6 +40,7 @@ const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
 };
 
 const KIND_LABEL: Record<InsightCard['kind'], string> = {
+  bot_signal: 'Review-bot signal',
   stalled_review: 'Stalled review',
   untouched_thread: 'Untouched thread',
   reviewer_load: 'Review load',
@@ -576,6 +577,58 @@ export function InsightsView(): JSX.Element {
                         ))}
                       </ul>
                     )}
+                  </CardShell>
+                );
+              case 'bot_signal':
+                return (
+                  <CardShell
+                    key={card.id}
+                    card={card}
+                    innerRef={(el) => setCardRef(card.id, el)}
+                    flash={flashId === card.id}
+                    right={card.actedOnPct != null ? `${card.actedOnPct}% acted on` : undefined}
+                  >
+                    <div className="text-sm text-gray-800 dark:text-gray-100">
+                      <span className="font-semibold tabular-nums">{card.totalThreads}</span>{' '}
+                      review-bot thread{card.totalThreads === 1 ? '' : 's'} this sprint ·{' '}
+                      <span className="tabular-nums">{card.totalUntouched}</span> untouched
+                      {card.oldestUntouchedDays != null && card.totalUntouched > 0 && (
+                        <>
+                          , oldest{' '}
+                          <span className="tabular-nums">{card.oldestUntouchedDays}</span>d
+                        </>
+                      )}
+                    </div>
+                    <ul className="mt-2 space-y-1">
+                      {card.vendors.map((v) => {
+                        const meta = BOT_VENDOR_META[v.kind];
+                        const pct = v.threads > 0 ? Math.round((v.actedOn / v.threads) * 100) : 0;
+                        return (
+                          <li key={v.kind} className="flex flex-wrap items-center gap-x-2 text-[11px]">
+                            <span
+                              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium"
+                              style={{ color: meta.color, background: `${meta.color}1a` }}
+                            >
+                              🤖 {meta.label}
+                            </span>
+                            <span className="tabular-nums text-gray-500">
+                              {v.threads} thread{v.threads === 1 ? '' : 's'}
+                            </span>
+                            <span className="text-gray-400">·</span>
+                            <span className="tabular-nums text-gray-500">{pct}% acted on</span>
+                            {v.untouched > 0 && (
+                              <span className="tabular-nums text-amber-600 dark:text-amber-400">
+                                · {v.untouched} untouched
+                              </span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <div className="mt-2 text-[11px] text-gray-400">
+                      “Acted on” = a later commit touched the flagged file (approximate).
+                      Deterministic across every repo + bot — no AI.
+                    </div>
                   </CardShell>
                 );
               default:

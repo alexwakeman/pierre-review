@@ -8,9 +8,14 @@ import {
   type EventCategory,
   type EventType,
   type PrStatus,
+  type ReviewBotKind,
   type ReviewState,
   type TeamMetricKey,
 } from '@pierre-review/shared';
+
+// Feed bot lens (the Activity "Feed" bot-vs-human view): show everything, hide bot noise,
+// or bot activity only. Transient, URL-silent — like feedMyTurnOnly.
+export type FeedBotLens = 'all' | 'hide' | 'only';
 
 export type RangePreset = '7d' | '14d' | '30d' | '90d' | 'custom';
 
@@ -95,10 +100,19 @@ export interface FilterState {
   // Review items. Transient (like feedMyTurnOnly) — owned by the Activity lane, not a
   // persisted filter, not URL-synced. Mutually exclusive with feedMyTurnOnly.
   feedClaudeOnly: boolean;
+  // Activity "Feed" bot lens (Pierre as the layer above your review bot): 'all' (default),
+  // 'hide' (drop bot-authored rows — the anti-fatigue view), or 'only' (bot activity only).
+  // Client-side view over the loaded page, ORTHOGONAL to feedMyTurnOnly/feedClaudeOnly (they
+  // compose). Transient, URL-silent.
+  feedBotLens: FeedBotLens;
 
   // selection
   selectedPrId: number | null;
   selectedThreadId: number | null;
+  // PR-detail Threads-tab bot filter: when set, the Threads tab shows ONLY that review
+  // vendor's threads (set by clicking a "CodeRabbit · 12 · 3 unresolved" chip in Overview).
+  // null = no filter. Transient; cleared when the PR changes / selection clears.
+  threadBotFilter: ReviewBotKind | null;
   // A specific issue-level PR comment selected from the timeline popover's "Open in
   // detail pane". Drives a PERMANENT amber highlight on that comment card (mirroring
   // selectedThreadId's thread highlight); cleared when another thread/comment/PR is
@@ -227,6 +241,12 @@ export interface FilterState {
   // Toggling it on clears feedMyTurnOnly.
   toggleFeedClaudeOnly: () => void;
   setFeedClaudeOnly: (v: boolean) => void;
+  // Feed bot lens: cycle all → hide → only → all, or set directly.
+  cycleFeedBotLens: () => void;
+  setFeedBotLens: (v: FeedBotLens) => void;
+  // Set/clear the PR-detail Threads-tab bot filter (a ChecksTab bot chip → filter Threads to
+  // that vendor). Re-selecting the same vendor toggles it off.
+  setThreadBotFilter: (kind: ReviewBotKind | null) => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
   // Deep-link a thread into the PR's Changes tab (Feed/Insights thread cards): open
@@ -484,8 +504,10 @@ function freshDefaults(): FilterData {
     // Transient Activity "Feed" scope toggles (not persisted filters): fresh load = false.
     feedMyTurnOnly: false,
     feedClaudeOnly: false,
+    feedBotLens: 'all',
     selectedPrId: null,
     selectedThreadId: null,
+    threadBotFilter: null,
     selectedCommentId: null,
     activityFocus: null,
     commentFocus: null,
@@ -553,11 +575,19 @@ export const useFilters = create<FilterState>((set, get) => ({
     set((s) => ({ feedClaudeOnly: !s.feedClaudeOnly, feedMyTurnOnly: false })),
   setFeedClaudeOnly: (v) =>
     set(v ? { feedClaudeOnly: true, feedMyTurnOnly: false } : { feedClaudeOnly: false }),
+  cycleFeedBotLens: () =>
+    set((s) => ({
+      feedBotLens: s.feedBotLens === 'all' ? 'hide' : s.feedBotLens === 'hide' ? 'only' : 'all',
+    })),
+  setFeedBotLens: (v) => set({ feedBotLens: v }),
+  setThreadBotFilter: (kind) =>
+    set((s) => ({ threadBotFilter: s.threadBotFilter === kind ? null : kind })),
   selectPr: (id) =>
     set({
       selectedPrId: id,
       selectedThreadId: null,
       selectedCommentId: null,
+      threadBotFilter: null,
     }),
   selectThread: (prId, threadId) =>
     set((s) => ({
@@ -570,6 +600,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedPrId: null,
       selectedThreadId: null,
       selectedCommentId: null,
+      threadBotFilter: null,
     }),
   openPrFocused: (id, threadId = null, focusAt = null, event = null) => {
     // Any timeline navigation leaves an open focus/PR tab so the move is visible on the

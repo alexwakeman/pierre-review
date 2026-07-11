@@ -31,6 +31,15 @@ function PrimaryCta({ className = '' }: { className?: string }): JSX.Element {
 // → digests → fix → review → feed → board.
 const TOUR: CarouselSlide[] = [
   {
+    src: '/shots/bot-review.png',
+    alt: 'A pull request with CodeRabbit’s review threads triaged: a per-vendor chip counting comments and unresolved threads, and a one-click action to resolve the ones a later commit already addressed.',
+    label: 'Bot triage',
+    tier: 'Free',
+    fit: 'contain',
+    caption:
+      'Your review bot’s output, triaged: what a commit already addressed vs what still needs a human — and clear the stale ones in one click.',
+  },
+  {
     src: '/shots/sprint-report.png',
     alt: 'The Pierre sprint report: an AI-written summary of the sprint window, leading with flow metrics and naming blockers with PR links.',
     label: 'Sprint reports',
@@ -167,9 +176,9 @@ function FlowArrow(): JSX.Element {
 export default function Home(): JSX.Element {
   useSeo({
     path: '/',
-    title: 'Pierre — your team’s GitHub on one fast timeline',
+    title: 'Pierre — the calm layer above your review bot',
     description:
-      'A single pane of glass for all your team’s GitHub activity — every PR, review thread and CI run across every repo. See what’s stalled, what’s yours, and what the AI slipped past everyone.',
+      'Bring your own reviewer. Pierre is the cross-repo layer above CodeRabbit, Greptile and Copilot — what’s stalled, whose turn it is, and which of the bot’s comments a human still needs to read.',
   });
 
   return (
@@ -184,16 +193,18 @@ export default function Home(): JSX.Element {
           <HeroWordmark />
 
           <h1 className="mx-auto max-w-3xl text-balance text-4xl font-bold leading-[1.08] tracking-tight text-gray-50 sm:text-6xl">
-            Your team ships from ten repos.{' '}
+            Your review bot flags 40 things.{' '}
             <span className="bg-gradient-to-r from-brand-sky via-brand-blue to-brand-purpleSoft bg-clip-text text-transparent">
-              You have two eyes.
+              Pierre shows you the 3 that matter.
             </span>
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-gray-400">
-            Pierre is a single pane of glass for all your team’s GitHub activity — every
-            PR, review thread, and CI run across every repo, in one fast place. See
-            what’s stalled, what’s yours, and what the AI slipped past everyone.
+            Bring your own reviewer — CodeRabbit, Greptile, Copilot, whatever you run.
+            Pierre is the calm, cross-repo layer <em className="not-italic text-gray-300">above</em>{' '}
+            it: what’s stalled, whose turn it is, and which of the bot’s comments a human
+            still needs to read. One fast timeline across every repo — and the AI spend
+            stays yours to control.
           </p>
 
           <div className="mt-9 flex flex-col items-center justify-center gap-4 sm:flex-row">
@@ -211,6 +222,23 @@ export default function Home(): JSX.Element {
             Sign in with GitHub, or run it entirely on your machine — local mode keeps
             no stored credentials.
           </p>
+
+          {/* Works-with trust row — Pierre coexists with the review bots, it doesn't replace them. */}
+          <div className="mt-10 flex flex-col items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wider text-gray-600">
+              Works with your review bot
+            </span>
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm font-medium text-gray-500">
+              {['CodeRabbit', 'Greptile', 'Copilot', 'Qodo', 'Sourcery'].map((name) => (
+                <span key={name} className="flex items-center gap-1.5">
+                  <span aria-hidden className="text-gray-600">
+                    🤖
+                  </span>
+                  {name}
+                </span>
+              ))}
+            </div>
+          </div>
         </Section>
 
         {/* ---------- 2 · the product tour carousel (Pro-first) ---------- */}
@@ -224,23 +252,25 @@ export default function Home(): JSX.Element {
       <Section width="narrow" className="py-20 sm:py-28">
         <Eyebrow className="text-brand-amber">The problem</Eyebrow>
         <h2 className="mt-3 text-pretty text-3xl font-bold tracking-tight text-gray-50 sm:text-4xl">
-          Everyone says AI makes engineers 10× faster.{' '}
-          <span className="text-brand-amber">Nobody says how to keep up with the reviewing.</span>
+          AI writes the code. A bot reviews the code.{' '}
+          <span className="text-brand-amber">Who’s reading 300 bot comments a week?</span>
         </h2>
         <div className="mt-6 space-y-4 text-pretty text-base leading-relaxed text-gray-400 sm:text-lg">
           <p>
-            AI multiplied the code, not the attention. More PRs, more bot comments, more
-            CI runs, more notifications — across more repos than any one person can keep
-            in their head. The bottleneck quietly moved from writing the change to
-            noticing it.
+            Review bots are genuinely useful — and they never stop. A busy team fields
+            hundreds of AI review comments a week, and most go unread. The firehose buries
+            the handful that actually needed a human, across more repos than anyone can
+            hold in their head. The bottleneck moved from writing the change to{' '}
+            <span className="font-medium text-gray-200">noticing what matters.</span>
           </p>
           <p>
-            And nobody tells you how to review AI-written code, how to measure its
-            impact, or how to stop AI slop creeping into production. Engineering leaders
-            are figuring this out right now — mostly by drowning.
+            Pierre doesn’t add another bot. It sits <em className="not-italic text-gray-200">above</em>{' '}
+            the ones you already run: every review thread — human or bot — becomes a
+            triaged signal. See which of CodeRabbit’s comments a commit already addressed,
+            which still need a look, and clear the stale ones in a click.
           </p>
           <p>
-            Pierre is built for exactly this:{' '}
+            One calm, cross-repo layer for exactly this:{' '}
             <span className="font-medium text-gray-200">
               human-in-the-loop triage for the high-throughput era.
             </span>

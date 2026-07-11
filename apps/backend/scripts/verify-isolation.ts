@@ -202,6 +202,35 @@ check('listClaudeReviewsByRepo(A.repo, B) leaks no PRs', crCross.prs.length === 
 check('deleteRepo(B.repo, A) returns false (IDOR blocked)', (await q.deleteRepo(B.repoId, 1)) === false);
 check("B's repo survives A's delete attempt", (await q.listRepos(2)).length === 1);
 
+// Bulk-resolve bot threads (Phase 3 write path): a review-bot thread on A's PR is resolvable
+// by A but INVISIBLE to B — getResolvableBotThreads scopes via the PR→account join.
+const [botUser] = await db
+  .insert(schema.users)
+  .values({ githubLogin: 'coderabbitai', githubNodeId: 'U_cr', isBot: true })
+  .returning()
+  .execute();
+await db
+  .insert(schema.reviewThreads)
+  .values({
+    githubNodeId: 'RT_iso_A',
+    prId: A.prId,
+    path: 'x.ts',
+    line: 1,
+    isResolved: false,
+    isOutdated: false,
+    derivedState: 'likely_addressed',
+    originalCommenterId: botUser!.id,
+    createdAt: now,
+  })
+  .execute();
+const rbtOwn = await q.getResolvableBotThreads(A.prId, 1);
+check(
+  'getResolvableBotThreads(A.pr, A) returns the addressed bot thread',
+  rbtOwn.length === 1 && rbtOwn[0]!.threadNodeId === 'RT_iso_A',
+);
+const rbtCross = await q.getResolvableBotThreads(A.prId, 2);
+check('getResolvableBotThreads(A.pr, B) leaks nothing (IDOR blocked)', rbtCross.length === 0);
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

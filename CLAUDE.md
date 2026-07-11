@@ -331,6 +331,7 @@ file maps to a `client.ts` method.
 | `GET /api/timeline?from&to&repoIds&userIds&types&statuses&reviewStates&excludeBots` | **lean** feed `{prs[],events[]}` — no bodies/diffs. Defaults: 14d, bots shown (toggle in Members). `reviewStates` filters `review_submitted` markers by verdict (approved/changes_requested/commented/dismissed); absent = all, empty = none |
 | `GET /api/prs/:id` | full PR detail (threads, reviews, comments, commits, checks, labels) |
 | `POST /api/prs/:id/mark-viewed` (alias `/dismiss`) | record a view (`sha?` defaults to head) → clears new-since badges |
+| `POST /api/prs/:id/resolve-bot-threads {threadIds}` | **bulk-resolve** the review-bot threads a later commit likely addressed → `{resolved,failed,results[]}`. Server RE-DERIVES eligibility (owned + review-bot-originated + `likely_addressed`) ∩ the client's reviewed list, then GitHub-resolves each; never auto/blind. Core |
 | `GET /api/open-prs?repoIds&userIds` | currently-open PRs (ignores date range) |
 | `GET /api/threads/:id` | single thread detail |
 | `GET/POST /api/repos`, `DELETE /api/repos/:id` | manage watched repos (delete → 409 if syncing, else 204) |
@@ -638,6 +639,24 @@ at-a-glance CI / approval standing / thread counts) THEN that **repo's own feed*
 the FilterBar** — the repo + member selection flows into `useActivity` / `useConsolidatedFeed`
 query keys, so a filter change re-scopes the whole console and refetches (dim, never blank).
 Refresh re-queries the **DB only**.
+
+**Review-bot triage — "the calm layer above your review bot" (CORE, deterministic, NO AI).**
+Third-party AI review bots (CodeRabbit/Greptile/Copilot/Qodo/…) are a **first-class, triaged
+signal**, not generic excluded noise. **Classifier:** `REVIEW_BOTS` (login → vendor `ReviewBotKind`)
++ `reviewBotKind()` in `@pierre-review/shared` (bundled by the frontend); the backend can't import
+shared at runtime so `sync/bot-detection.ts` keeps a **LOCAL copy** (folded into `isLikelyBot`),
+kept in lockstep by `bot-detection.test.ts`. Verified logins (2026-07); coding agents (`sweep-ai`,
+`copilot-swe-agent`) + dependency bots (`dependabot`/`renovate`/`snyk`) are deliberately EXCLUDED —
+still `isBot`, just not *review* bots. **Surfaces:** a PrDetail "Bots" chip ("CodeRabbit · 12 · 3
+unresolved", `ChecksTab`) that filters the Threads tab to that vendor (`store.threadBotFilter`); a
+feed **bot lens** (all/hide/only, `store.feedBotLens`) + per-row vendor tag (`FeedView`); a **core
+per-repo acted-on stat** (`ActivityRepoStats.botThreads/botThreadsActedOn` computed in `getActivity`
+→ `RepoStats`, free); a **Pro-gated deterministic `bot_signal` Insights card** (per-vendor volume /
+acted-on % / oldest-untouched backlog, computed in core `getTeamInsights`, rides `/api/pro/insights`
++ `teamInsights` — no new cap, no `apiVersion` bump); and confirm-gated **bulk-resolve** of
+`likely_addressed` bot threads (`ThreadList` → `resolve-bot-threads`). "Acted-on" = the existing
+`derivedState ∈ {resolved, likely_addressed}` heuristic (approximate — the UI says so). No migration,
+no new AI/credit surface.
 
 **Consolidated Feed — CORE, the Activity "Feed" entry (`getConsolidatedFeed` → `FeedView`).** ONE
 flat, purely-**chronological** (newest-first) stream of **real activity events** (opens / merges /

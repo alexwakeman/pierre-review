@@ -68,6 +68,8 @@ import type {
   ReplyToThreadBody,
   ResolveThreadBody,
   ResolveThreadResult,
+  ResolveBotThreadsBody,
+  ResolveBotThreadsResult,
   SyncStatus,
   ThreadDetail,
   TimelineResponse,
@@ -191,6 +193,12 @@ export const api = {
   resolveThread: (threadId: number, body: ResolveThreadBody) =>
     fetch(`/api/threads/${threadId}/resolve`, jsonBody('POST', body)).then((r) =>
       handle<ResolveThreadResult>(r),
+    ),
+  // Bulk-resolve the likely-addressed review-bot threads on a PR (Phase 3 "clear the bot
+  // backlog"). The server re-derives eligibility; we send the reviewed thread-id list.
+  resolveBotThreads: (prId: number, body: ResolveBotThreadsBody) =>
+    fetch(`/api/prs/${prId}/resolve-bot-threads`, jsonBody('POST', body)).then((r) =>
+      handle<ResolveBotThreadsResult>(r),
     ),
   createPrComment: (prId: number, body: CreatePrCommentBody) =>
     fetch(`/api/prs/${prId}/comment`, jsonBody('POST', body)).then((r) =>

@@ -90,6 +90,68 @@ export interface User {
   isBot: boolean;
 }
 
+// ── Third-party AI review bots ────────────────────────────────────────────────
+// Pierre is "the calm layer above your review bot": it classifies which vendor an
+// AI reviewer belongs to so its firehose can be triaged, not just excluded as noise.
+// The kind is the vendor; display label/colour live in the frontend (lib/ui.ts
+// BOT_VENDOR_META) so shared stays presentation-free.
+//
+// The backend cannot import this map at runtime (shared isn't shipped server-side —
+// see the `REASON_PRIORITY` note in db/queries.ts), so it keeps a LOCAL copy in
+// sync/bot-detection.ts; `bot-detection.test.ts` asserts the two stay in lockstep.
+export type ReviewBotKind =
+  | 'coderabbit'
+  | 'greptile'
+  | 'copilot'
+  | 'qodo'
+  | 'sourcery'
+  | 'bito'
+  | 'ellipsis'
+  | 'korbit'
+  | 'baz'
+  | 'graphite'
+  | 'cursor'
+  | 'devin'
+  | 'entelligence';
+
+// Bare GitHub login (lowercased, `[bot]` suffix stripped) → vendor. Verified 2026-07
+// against each vendor's GitHub Marketplace listing / a live PR (App slugs, not mention
+// handles). Login churn is covered by keeping every historical variant.
+//
+// Deliberately EXCLUDED (verified, not oversights): coding agents that AUTHOR PRs
+// rather than review them — `sweep-ai`, `copilot-swe-agent` — and dependency/CI
+// automation — `dependabot`, `renovate`, `snyk-bot`, `github-actions`. Those are still
+// `isBot`, just not *review* bots, so they never carry a vendor triage badge.
+export const REVIEW_BOTS: Record<string, ReviewBotKind> = {
+  coderabbitai: 'coderabbit',
+  'greptile-apps': 'greptile',
+  'copilot-pull-request-reviewer': 'copilot',
+  // Qodo (formerly CodiumAI): current + historical hosted logins.
+  'qodo-ai': 'qodo',
+  'qodo-merge': 'qodo',
+  'qodo-merge-pro': 'qodo',
+  'qodo-merge-for-open-source': 'qodo',
+  'codiumai-pr-agent-free': 'qodo',
+  'sourcery-ai': 'sourcery',
+  'bito-code-review': 'bito',
+  'ellipsis-dev': 'ellipsis',
+  'korbit-ai': 'korbit',
+  'baz-reviewer': 'baz',
+  'graphite-app': 'graphite', // Diamond posts under the shared graphite-app account
+  cursor: 'cursor', // Cursor Bugbot (app slug 'cursor', NOT 'bugbot')
+  'devin-ai-integration': 'devin',
+  'entelligence-ai-pr-reviews': 'entelligence',
+};
+
+// Classify a login as a known AI review bot's vendor, or null. Normalises case + the
+// `[bot]` suffix so it matches whether the login arrived via GraphQL (bare slug) or
+// REST (`slug[bot]`).
+export function reviewBotKind(login: string | null | undefined): ReviewBotKind | null {
+  if (!login) return null;
+  const slug = login.toLowerCase().replace(/\[bot\]$/, '');
+  return REVIEW_BOTS[slug] ?? null;
+}
+
 export interface Repo {
   id: number;
   owner: string;
@@ -1911,6 +1973,24 @@ export interface ResolveThreadBody {
   resolved: boolean;
 }
 
+// Bulk-resolve review-bot threads that a later commit has likely addressed — Pierre's
+// "clear the bot backlog in one click." The client sends the explicit reviewed list of
+// thread ids (never automatic); the server re-validates each belongs to the PR/account,
+// is bot-originated AND in state `likely_addressed`, then resolves it on GitHub.
+export interface ResolveBotThreadsBody {
+  threadIds: number[];
+}
+
+export interface ResolveBotThreadsResult {
+  resolved: number; // threads successfully resolved on GitHub
+  failed: number; // threads that errored or were rejected by the server guardrail
+  results: {
+    threadId: number;
+    ok: boolean;
+    derivedState: DerivedState | null; // the new stored state (null on failure)
+  }[];
+}
+
 // Post a new issue-level (PR) comment.
 export interface CreatePrCommentBody {
   body: string;
@@ -2006,6 +2086,12 @@ export interface ActivityRepoStats {
     openedAt: string;
     githubUrl: string;
   } | null;
+  // Review-bot signal-to-noise over this repo's open PRs — Pierre as the calm layer
+  // above CodeRabbit/Greptile/Copilot/Qodo. Deterministic, no AI: `botThreads` = review
+  // threads originated by a known AI review bot; `botThreadsActedOn` = those in state
+  // resolved|likely_addressed (the "acted-on" heuristic). 0 when no review bot is active.
+  botThreads: number;
+  botThreadsActedOn: number;
 }
 
 export interface ActivityRepo {
@@ -2251,7 +2337,8 @@ export type InsightKind =
   | 'stalled_review' // an open PR awaiting review too long
   | 'untouched_thread' // a review thread nobody has responded to
   | 'reviewer_load' // a reviewer's pending-queue depth (+ sprint load)
-  | 'reviewer_routing'; // a PR with no reviewer + who should review it
+  | 'reviewer_routing' // a PR with no reviewer + who should review it
+  | 'bot_signal'; // AI-review-bot signal-to-noise across the sprint (deterministic)
 
 export type InsightSeverity = 'info' | 'warn' | 'high';
 
@@ -2336,11 +2423,34 @@ export interface ReviewerRoutingCard extends InsightCardBase, InsightPrRef {
   suggestedReviewers: SuggestedReviewer[]; // who + why (merge rights + recent commits)
 }
 
+// Per-vendor rollup carried by the bot_signal card.
+export interface BotSignalVendorStat {
+  kind: ReviewBotKind;
+  threads: number; // review threads this bot opened in the sprint window
+  actedOn: number; // of those, in state resolved|likely_addressed (the acted-on heuristic)
+  untouched: number; // in state untouched (the pure backlog/noise)
+  oldestUntouchedDays: number | null; // age of the oldest still-untouched thread
+}
+
+// A cross-repo, cross-bot "signal-to-noise" summary — the un-copyable view no single
+// review bot can produce ("CodeRabbit left 214 comments this sprint; 38% acted on; 46
+// untouched, oldest 9 days"). Deterministic (no AI); aggregate (no single PR ref).
+export interface BotSignalCard extends InsightCardBase {
+  kind: 'bot_signal';
+  totalThreads: number;
+  totalActedOn: number;
+  totalUntouched: number;
+  actedOnPct: number | null; // totalActedOn / totalThreads, 0-100 (null when no threads)
+  oldestUntouchedDays: number | null;
+  vendors: BotSignalVendorStat[]; // most-threads-first
+}
+
 export type InsightCard =
   | StalledReviewCard
   | UntouchedThreadCard
   | ReviewerLoadCard
-  | ReviewerRoutingCard;
+  | ReviewerRoutingCard
+  | BotSignalCard;
 
 // ---- Team DORA-ish flow metrics (Insights header; no AI) ----
 // Best-effort DORA mapping from synced PR/CI data (there is NO stored CI-state history,
