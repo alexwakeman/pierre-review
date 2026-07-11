@@ -45,19 +45,19 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(page.getByTestId('feed-pill')).toHaveCount(0);
   });
 
-  test('an FYI item is marked with a yellow-bordered card', async ({ page }) => {
+  test('a My Turn item is marked with a yellow-bordered card', async ({ page }) => {
     await gotoActivity(page);
     const row = overlay(page).locator('ul > li', {
       hasText: 'Can you take another look at this?',
     });
     await expect(row).toBeVisible();
-    // FYI (participated) items render as a yellow-bordered card with a badge + why-pill.
+    // My Turn (participated) items render as a yellow-bordered card with a badge + why-pill.
     await expect(row.locator('article.border-yellow-400')).toBeVisible();
-    await expect(row.getByText('FYI', { exact: true })).toBeVisible();
+    await expect(row.getByText('My Turn', { exact: true })).toBeVisible();
     await expect(row.getByText('You authored')).toBeVisible();
   });
 
-  test('clicking an FYI item opens the PR detail tab', async ({ page }) => {
+  test('clicking a My Turn item opens the PR detail tab', async ({ page }) => {
     await gotoActivity(page);
     // The review-thread card renders its conversation inline (interacting with it is
     // stopPropagation'd), so open the tab via the card's PR-title affordance.

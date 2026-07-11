@@ -165,9 +165,9 @@ const ME_RESPONSE: MeResponse = {
     claudeReviewsToAction: 0,
   },
   deploymentMode: 'local',
-  // Pro tier for e2e: FYI / "My Turn" is on (feedMyTurn) so the Feed's isMyTurn cards/toggle
-  // render — the AI features (digests, Claude Review, AI Fix) stay off so the console renders
-  // without the AI panels/tabs. FYI is now a Pro capability, not a core one.
+  // Pro tier for e2e: all AI features (digests, Claude Review, AI Fix) stay off so the console
+  // renders without the AI panels/tabs. "My Turn" is CORE / free now (not a Pro capability), so
+  // the Feed's isMyTurn cards/toggle render regardless of these flags.
   pro: {
     activityDigest: false,
     reviewMemory: false,
@@ -176,7 +176,6 @@ const ME_RESPONSE: MeResponse = {
     aiFix: false,
     teamInsights: false,
     claudeReview: false,
-    feedMyTurn: true,
     slackDigest: false,
     issueLinks: false,
   },

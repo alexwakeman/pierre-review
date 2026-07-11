@@ -104,7 +104,7 @@ const REASON_PRIORITY: ReasonTag[] = [
 ];
 import { db, schema, isPg } from './client.js';
 import { runTransaction } from './client.js';
-import { getFyiProvider } from '../feed/fyi-provider.js';
+import { enrichMyTurn } from '../feed/my-turn.js';
 import { resolvePrTickets } from '../pr/detail-enricher.js';
 import { config } from '../config.js';
 import { getProCapabilities } from '../pro/contract.js';
@@ -2981,7 +2981,7 @@ export async function getTeamInsights(
 
 // The consolidated Feed. Scoped to the account's WATCHED repos (inboxWatch); a passed
 // `repoIds` further narrows WITHIN watched (null → all watched). One flat, newest-first
-// stream of real activity, each row flagged isMyTurn by participation (Pro enricher).
+// stream of real activity, each row flagged isMyTurn by participation (CORE; feed/my-turn.ts).
 export async function getConsolidatedFeed(
   accountId: number,
   opts: ConsolidatedFeedFilters = {},
@@ -3024,11 +3024,9 @@ export async function getConsolidatedFeed(
     getClaudeReviewFeedItems(accountId, effectiveRepoIds, feedSince),
   ]);
 
-  // The FYI / "My Turn" participation flag (isMyTurn / myTurnReasons / reasonTag) is a PAID
-  // capability computed by the @pierre/pro plugin's registered enricher (see fyi-provider.ts).
-  // Core builds every item as a PLAIN row (isMyTurn:false); the enricher, if present, flags
-  // them below — BEFORE the cap, so uncapped My-Turn rows survive. Without the plugin the feed
-  // stays a plain chronological stream.
+  // The "My Turn" participation flag (isMyTurn / myTurnReasons / reasonTag) is CORE / free
+  // (see feed/my-turn.ts). Core builds every item as a PLAIN row (isMyTurn:false), then
+  // enrichMyTurn flags participation below — BEFORE the cap, so uncapped My-Turn rows survive.
 
   const usersById = new Map<number, User>();
   for (const u of feed.users) usersById.set(u.id, u);
@@ -3087,22 +3085,21 @@ export async function getConsolidatedFeed(
   // Pushed as plain rows; the Pro enricher flags participation below.
   for (const it of commitItems) push(it);
 
-  // Claude Review items — a distinct kind (never bot/member-scoped). Kept out of the FYI
+  // Claude Review items — a distinct kind (never bot/member-scoped). Kept out of the My-Turn
   // flow but always retained (see the caps below) so the "Claude Reviews" pill finds them.
   for (const it of claudeItems) push(it);
 
   // Consolidate a submitted review + the SAME actor's top-level PR comment(s) on the SAME PR
   // posted within a short window (issue comments carry no head SHA, so time is the proxy):
   // fold the comment(s) into the review's `mergedComments` and drop their standalone rows, so
-  // "review, then a summary comment" reads as one card everywhere (including FYI) instead of
-  // two. Runs BEFORE the FYI enrich/cap/paginate so `total`, participation and page bounds
-  // reflect the collapsed set (a comment folded here is never separately flagged or capped).
+  // "review, then a summary comment" reads as one card everywhere (including My Turn) instead
+  // of two. Runs BEFORE the my-turn enrich/cap/paginate so `total`, participation and page
+  // bounds reflect the collapsed set (a comment folded here is never separately flagged/capped).
   coalesceReviewComments(items, byId);
 
-  // FYI / "My Turn" enrichment (Pro): flag each item `isMyTurn` by the viewer's participation
-  // in its PR. Runs BEFORE the cap so uncapped My-Turn rows survive. No-op (feed stays plain)
-  // when the plugin isn't loaded — the free tier.
-  await getFyiProvider()?.enrich(accountId, items);
+  // "My Turn" enrichment (CORE / free): flag each item `isMyTurn` by the viewer's participation
+  // in its PR. Runs BEFORE the cap so uncapped My-Turn rows survive.
+  await enrichMyTurn(accountId, items);
 
   // Pure chronological — newest first. Keep every My Turn item AND every Claude-review item
   // (both are always relevant); cap the plain activity rows so a busy multi-repo account

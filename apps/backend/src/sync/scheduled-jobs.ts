@@ -4,7 +4,7 @@
 // calls ctx.registerScheduledJob(cron, handler, label) during register(); the core scheduler
 // (startScheduler) reads this registry AFTER bind and cron.schedule()s each job, so registered
 // jobs ride the same config.disableScheduler gate and are torn down with the app. Inert in OSS
-// (no plugin → nothing registered → nothing scheduled). Mirrors feed/fyi-provider.ts.
+// (no plugin → nothing registered → nothing scheduled). Mirrors review/events.ts.
 export interface ScheduledJob {
   cron: string; // a node-cron expression (validated by the scheduler; invalid → skipped + warn)
   label: string; // human label for logs

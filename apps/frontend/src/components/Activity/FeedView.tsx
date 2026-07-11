@@ -24,7 +24,7 @@ import {
   dateTime,
   DERIVED_STATE_META,
   EVENT_META,
-  FYI_REASON_META,
+  MY_TURN_REASON_META,
   indexUsers,
   relativeTime,
   userLabel,
@@ -35,8 +35,8 @@ import { Markdown } from '../Markdown.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
 import { ThreadCard } from '../ThreadView/index.js';
 
-// A coloured chip + label describing WHAT an item is (the event kind). The FYI reason is a
-// separate pill (see FYI_REASON_META); Claude runs get their own violet chip.
+// A coloured chip + label describing WHAT an item is (the event kind). The My-Turn reason is
+// a separate pill (see MY_TURN_REASON_META); Claude runs get their own violet chip.
 function itemGlyph(item: ConsolidatedFeedItem): { color: string; label: string } {
   if (item.kind === 'claude_review') return { color: '#8957e5', label: 'Claude Review' };
   // A submitted review is a first-class TYPED pill — the verdict is folded into the top
@@ -79,8 +79,8 @@ const CLAUDE_VERDICT_META: Record<ClaudeReviewVerdict, { label: string; color: s
 // The consolidated Feed — a flat, chronological, social-style stream of activity events.
 // Cross-repo when `repoId` is absent (scoped by the active FilterBar repos/members); scoped
 // to a single repo when a rail repo is selected. Each item is flagged `isMyTurn` (a PR you
-// participate in, acted on by someone else) → a yellow border + "FYI" badge + why-pill, plus
-// optional client-side "FYI only" / "Claude Reviews" filters. Clicking any item opens the
+// participate in, acted on by someone else) → a yellow border + "My Turn" badge + why-pill,
+// plus optional client-side "My Turn only" / "Claude Reviews" filters. Clicking any item opens
 // full PR detail tab (a Claude item lands on its Claude Review tab; a PR comment scrolls to
 // the comment).
 
@@ -114,7 +114,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const focusEventInTab = useFilters((s) => s.focusEventInTab);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
-  const { claudeReview: claudeReviewEnabled, feedMyTurn: proMyTurn } = useProCapabilities();
+  const { claudeReview: claudeReviewEnabled } = useProCapabilities();
   // The one-shot flash signal — set ONLY by a real browser Back (navigateBack), so an
   // ordinary return to Activity (e.g. clicking the Activity tab chip) never flashes.
   const flashTarget = usePinnedTabs((s) => s.activityFlashItemId);
@@ -127,7 +127,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const effectiveRepoIds = repoId != null ? [repoId] : null;
 
   // Viewing the CROSS-REPO feed marks it seen server-side (once per mount), resetting the
-  // "new FYI since you were last here" count that drives the Welcome-back banner. A
+  // "new My Turn since you were last here" count that drives the Welcome-back banner. A
   // per-repo feed (repoId set) doesn't touch the global marker.
   const markFeedSeen = useMarkFeedSeen();
   const markedSeenRef = useRef(false);
@@ -167,15 +167,13 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const usersById = useMemo(() => indexUsers(users), [users]);
   const myTurnCount = items.filter((i) => i.isMyTurn).length;
   const claudeCount = items.filter((i) => i.kind === 'claude_review').length;
-  // Gate the EFFECTIVE filter on proMyTurn, not just the toggle button — feedMyTurnOnly is a
-  // transient store flag settable elsewhere (WelcomeBackBanner), so an off-tier user must never
-  // be left filtering to an empty FYI set with no way out.
-  const visible =
-    proMyTurn && feedMyTurnOnly
-      ? items.filter((i) => i.isMyTurn)
-      : feedClaudeOnly
-        ? items.filter((i) => i.kind === 'claude_review')
-        : items;
+  // "My Turn only" and "Claude Reviews only" are mutually-exclusive client-side filters (My
+  // Turn is CORE / free, so it's always available).
+  const visible = feedMyTurnOnly
+    ? items.filter((i) => i.isMyTurn)
+    : feedClaudeOnly
+      ? items.filter((i) => i.kind === 'claude_review')
+      : items;
 
   // Back-from-a-click highlight: when a browser Back returns us to the feed (navigateBack
   // set the one-shot flashTarget), scroll the exact row we clicked into view and flash it
@@ -312,24 +310,22 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
       {/* The AI repo-summary (digest) collection now lives in the Insights panel — one home
           for every AI summary, with a single unified Refresh. It's no longer atop the Feed. */}
 
-      {/* FYI / Claude filter toggles + a "showing X of Y" hint. FYI is a Pro capability. */}
+      {/* My Turn / Claude filter toggles + a "showing X of Y" hint. My Turn is CORE / free. */}
       <div className="flex items-center gap-2 px-0.5">
-        {proMyTurn && (
-          <button
-            type="button"
-            onClick={toggleFeedMyTurnOnly}
-            aria-pressed={feedMyTurnOnly}
-            className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-              feedMyTurnOnly
-                ? 'border-yellow-400 bg-yellow-50 text-yellow-700 dark:border-yellow-500/60 dark:bg-yellow-950/30 dark:text-yellow-300'
-                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-            }`}
-            title="Show only items that concern you (FYI)"
-          >
-            <span aria-hidden="true">★</span> FYI
-            {myTurnCount > 0 && <span className="tabular-nums opacity-70">{myTurnCount}</span>}
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={toggleFeedMyTurnOnly}
+          aria-pressed={feedMyTurnOnly}
+          className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+            feedMyTurnOnly
+              ? 'border-yellow-400 bg-yellow-50 text-yellow-700 dark:border-yellow-500/60 dark:bg-yellow-950/30 dark:text-yellow-300'
+              : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+          }`}
+          title="Show only items that concern you (My Turn)"
+        >
+          <span aria-hidden="true">★</span> My Turn
+          {myTurnCount > 0 && <span className="tabular-nums opacity-70">{myTurnCount}</span>}
+        </button>
         {claudeReviewEnabled && (
           <button
             type="button"
@@ -604,10 +600,8 @@ function FeedRow({
   onFocus: () => void;
 }): JSX.Element {
   const glyph = itemGlyph(item);
-  // FYI is a Pro capability — never render the yellow card / badge / why-pill off-tier (the
-  // backend already sends isMyTurn:false there; this is belt-and-suspenders).
-  const proMyTurn = useProCapabilities().feedMyTurn;
-  const isMyTurn = proMyTurn && item.isMyTurn;
+  // My Turn is CORE / free — the backend flags isMyTurn for every tier.
+  const isMyTurn = item.isMyTurn;
   const isClaude = item.kind === 'claude_review';
   const isMerge = item.kind === 'pr_merged';
   // A commit push (or Claude run) whose actor didn't resolve to a GitHub login shows a
@@ -685,7 +679,7 @@ function FeedRow({
         }`}
       >
         {/* header: (Focus magnifier + event time on the left) then avatar + actor +
-            action chip + (FYI badge + why-pill) */}
+            action chip + (My Turn badge + why-pill) */}
         <div className="flex items-center gap-2">
           {item.prId != null && (
             <button
@@ -725,15 +719,15 @@ function FeedRow({
           )}
           {isMyTurn && (
             <span className="shrink-0 rounded bg-yellow-400/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-700 dark:text-yellow-300">
-              FYI
+              My Turn
             </span>
           )}
           {isMyTurn && primaryReason != null && (
             <span
               className="shrink-0 rounded border border-yellow-300 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:border-yellow-600/50 dark:text-yellow-300"
-              title={item.myTurnReasons.map((r) => FYI_REASON_META[r].title).join(' · ')}
+              title={item.myTurnReasons.map((r) => MY_TURN_REASON_META[r].title).join(' · ')}
             >
-              {FYI_REASON_META[primaryReason].label}
+              {MY_TURN_REASON_META[primaryReason].label}
             </span>
           )}
         </div>

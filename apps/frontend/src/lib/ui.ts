@@ -89,9 +89,9 @@ export const REASON_META: Record<
   in_progress: { label: 'In progress', color: '#9ca3af', myTurn: false },
 };
 
-// Why a feed item is "FYI" (was "My Turn") — the reason pill on the card. `label` is the
-// short pill text, `title` the hover explanation. See MyTurnReason (most-relevant first).
-export const FYI_REASON_META: Record<MyTurnReason, { label: string; title: string }> = {
+// Why a feed item is "My Turn" — the reason pill on the card. `label` is the short pill
+// text, `title` the hover explanation. See MyTurnReason (most-relevant first).
+export const MY_TURN_REASON_META: Record<MyTurnReason, { label: string; title: string }> = {
   requested: {
     label: 'Review requested',
     title: 'A review was requested from you on this PR',

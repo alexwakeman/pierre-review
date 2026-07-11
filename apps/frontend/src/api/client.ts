@@ -228,7 +228,7 @@ export const api = {
   // `search` string carries the active repo/member scope (repoIds/userIds).
   consolidatedFeed: (search: string) =>
     get<ConsolidatedFeedResponse>(`/api/activity/feed${search ? `?${search}` : ''}`),
-  // Mark the Activity Feed as seen (server-side "seen" marker → resets the new-FYI count).
+  // Mark the Activity Feed as seen (server-side "seen" marker → resets the new-My-Turn count).
   markFeedSeen: () =>
     fetch('/api/activity/feed/mark-seen', jsonBody('POST')).then((r) =>
       handle<{ feedLastSeenAt: string }>(r),

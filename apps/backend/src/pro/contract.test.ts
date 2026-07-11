@@ -16,7 +16,6 @@ const FULL: ProCapabilities = {
   aiFix: true,
   teamInsights: true,
   claudeReview: true,
-  feedMyTurn: true,
   slackDigest: true,
   issueLinks: true,
 };

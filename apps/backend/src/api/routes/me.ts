@@ -7,7 +7,7 @@ import {
   EMPTY_CAPABILITIES,
   entitledProCapabilities,
 } from '../../pro/contract.js';
-import { getFyiProvider } from '../../feed/fyi-provider.js';
+import { countNewMyTurnFeedItems } from '../../feed/my-turn.js';
 import { getAuthNotices } from '../../sync/auth-notices.js';
 import {
   dismissMyTurn,
@@ -38,25 +38,19 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     const accountId = accountIdOf(req);
     const user = accountToLocalUser(req.account);
     const myTurn = await getMyTurn(accountId);
-    // Feed "seen" marker + how many FYI items are new since. Only counted once a
-    // baseline exists (feedLastSeenAt set by the first feed view) so a fresh account
-    // never sees a scary first-load number. FYI is a Pro capability — the count comes
-    // from the plugin's enricher (0 on the free tier, where there's no provider).
-    // Per-account entitlement: local = full capabilities (unchanged); cloud = full only when
-    // the account's plan isn't 'free' (Stripe billing seam). Computed once and reused for both
-    // the FYI gate and the `pro` passthrough below.
+    // Feed "seen" marker + how many "My Turn" items are new since. Only counted once a
+    // baseline exists (feedLastSeenAt set by the first feed view) so a fresh account never
+    // sees a scary first-load number. "My Turn" is CORE / free now, so the count is computed
+    // directly (no capability gate) — every tier gets the Welcome-back banner.
+    // Per-account entitlement (below): local = full capabilities; cloud = full only when the
+    // account's plan isn't 'free' (Stripe billing seam) — used for the `pro` passthrough.
     const entitled = req.account
       ? entitledProCapabilities(req.account)
       : EMPTY_CAPABILITIES;
     const feedLastSeen = await getFeedLastSeenAt(accountId);
-    const fyi = getFyiProvider();
-    // FYI is the Pro `feedMyTurn` capability. Gate the count on ENTITLEMENT, not just provider
-    // presence: once Pro loads in cloud the provider is registered process-globally for every
-    // account, so a free cloud account would otherwise leak an FYI count it hasn't paid for.
-    const newFeedItems =
-      feedLastSeen && fyi && entitled.feedMyTurn
-        ? await fyi.countNewSince(accountId, feedLastSeen)
-        : 0;
+    const newFeedItems = feedLastSeen
+      ? await countNewMyTurnFeedItems(accountId, feedLastSeen)
+      : 0;
     return {
       user,
       counts: {

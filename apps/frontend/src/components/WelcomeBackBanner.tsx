@@ -1,27 +1,24 @@
 import { useState } from 'react';
-import { useMe, useProCapabilities } from '../hooks/useTriage.js';
+import { useMe } from '../hooks/useTriage.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { useFilters } from '../store/filters.js';
 import { relativeTime } from '../lib/ui.js';
 
-// A dismissible "welcome back" banner shown when there are FYI (My-Turn) feed items you
-// haven't seen yet. "Seen" is now a SERVER-SIDE marker (accounts.feedLastSeenAt, bumped
-// when you view the Activity Feed), surfaced via /api/me as `newFeedItems` — the
-// successor to the removed per-item "Done". This makes the count consistent across
-// devices/sessions (vs the old client-only localStorage heuristic), and it self-resets:
-// viewing the feed marks it seen → newFeedItems drops to 0 → the banner disappears.
-// Hidden while you're already on the Activity console.
+// A dismissible "welcome back" banner shown when there are "My Turn" feed items you haven't
+// seen yet. "Seen" is a SERVER-SIDE marker (accounts.feedLastSeenAt, bumped when you view the
+// Activity Feed), surfaced via /api/me as `newFeedItems` — the successor to the removed
+// per-item "Done". This makes the count consistent across devices/sessions (vs the old
+// client-only localStorage heuristic), and it self-resets: viewing the feed marks it seen →
+// newFeedItems drops to 0 → the banner disappears. My Turn is CORE / free, so this shows on
+// every tier. Hidden while you're already on the Activity console.
 export function WelcomeBackBanner(): JSX.Element | null {
   const { data: me } = useMe();
-  const proMyTurn = useProCapabilities().feedMyTurn;
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const showActivity = usePinnedTabs((s) => s.showActivity);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
   const setFeedMyTurnOnly = useFilters((s) => s.setFeedMyTurnOnly);
   const [dismissed, setDismissed] = useState(false);
 
-  // FYI is a Pro capability — no banner off-tier (the count is already 0 there anyway).
-  if (!proMyTurn) return null;
   if (dismissed || !me?.user) return null;
   // Already in the Activity console → no nag (and it's being marked seen there anyway).
   if (activeTab === 'activity') return null;

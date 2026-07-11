@@ -12,7 +12,6 @@ import type {
   PostReviewPreview,
 } from '@pierre-review/shared';
 import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
-import type { FyiProvider } from '../feed/fyi-provider.js';
 import type { PrDetailEnricher } from '../pr/detail-enricher.js';
 import type { AiUsageRecord } from '../db/usage.js';
 import type { AiCreditStatus } from '../db/credits.js';
@@ -32,7 +31,6 @@ export interface ProCapabilities {
   aiFix: boolean; // AI Fix: agentic inline code fix + push (Agent SDK, needs write)
   teamInsights: boolean; // team review-intelligence "Insights" (no AI; pure reads)
   claudeReview: boolean; // agentic Claude Review (Agent SDK; the product lives in the plugin)
-  feedMyTurn: boolean; // Activity Feed FYI / "My Turn" participation flagging (Pro; no AI)
   slackDigest: boolean; // Slack webhook delivery of the sprint + repo digest (Pro; mirrors activityDigest)
   issueLinks: boolean; // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI)
 }
@@ -547,9 +545,6 @@ export interface ProContext {
   };
   reviewEvents: ReviewEventBus; // WS3 capture seam
   registerLearningsProvider(p: LearningsProvider): void; // WS3 injection seam
-  // Activity Feed FYI/"My Turn" enrichment seam. The plugin registers a provider that flags
-  // each feed item `isMyTurn` by participation; inert (feed stays plain) without the plugin.
-  registerFyiProvider(p: FyiProvider): void;
   // Background-job seam (host owns process/scheduler infra). The plugin registers node-cron
   // jobs here during register(); the core scheduler cron.schedule()s them AFTER bind, so they
   // ride the config.disableScheduler gate and are torn down with the app. Used by the Slack
@@ -571,7 +566,7 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  apiVersion: 10; // contract handshake; host warns on mismatch
+  apiVersion: 11; // contract handshake; host warns on mismatch
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
@@ -586,7 +581,6 @@ export const EMPTY_CAPABILITIES: ProCapabilities = {
   aiFix: false,
   teamInsights: false,
   claudeReview: false,
-  feedMyTurn: false,
   slackDigest: false,
   issueLinks: false,
 };

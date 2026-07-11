@@ -9,7 +9,6 @@ import * as hostQueries from '../db/queries.js';
 import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
 import { aiCreditStatus } from '../db/credits.js';
 import { reviewEvents, registerLearningsProvider } from '../review/events.js';
-import { registerFyiProvider } from '../feed/fyi-provider.js';
 import { registerScheduledJob } from '../sync/scheduled-jobs.js';
 import { registerPrDetailEnricher } from '../pr/detail-enricher.js';
 import { cheapComplete } from '../review/llm.js';
@@ -66,7 +65,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   if (!mod) return;
 
   const plugin = (mod.default ?? mod) as ProPlugin;
-  if (plugin?.apiVersion !== 10 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 11 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -130,7 +129,6 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
     },
     reviewEvents,
     registerLearningsProvider,
-    registerFyiProvider,
     registerScheduledJob,
     registerPrDetailEnricher,
     // AI Fix infra (per-account, cloud-ready). The host owns the security-sensitive

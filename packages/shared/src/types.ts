@@ -396,15 +396,11 @@ export interface ProCapabilities {
   // in cloud / OSS. The frontend hides the tab/banner when false. This flag now gates the whole
   // "pro+" AI tier — aiAnalysis + aiFix + claudeReview flip together.
   claudeReview: boolean;
-  // Activity Feed FYI / "My Turn" participation flagging (Pro; no AI, no env flag — on whenever
-  // the plugin is active locally). When false the Feed renders a plain chronological stream with
-  // no FYI cards/toggle/badge and no Welcome-back banner. Populated by the plugin's FYI enricher.
-  feedMyTurn: boolean;
   // Slack digest delivery (Pro): a per-account webhook receives the freshly-generated sprint +
   // repo digest on a cadence. The report is AI-generated (Haiku), so this mirrors activityDigest.
   slackDigest: boolean;
   // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI, no env flag — on whenever the
-  // plugin is active locally, like feedMyTurn). Config (provider + base URL) lives in pro_settings.
+  // plugin is active locally, like activityDigest). Config (provider + base URL) lives in pro_settings.
   issueLinks: boolean;
 }
 
@@ -412,7 +408,7 @@ export interface MeResponse {
   user: LocalUser | null;
   counts: MyTurnCounts;
   // Server-side Activity-Feed "seen" marker: when the account last viewed the feed
-  // (ISO, null until the first view), and how many FYI (My-Turn) feed items are new
+  // (ISO, null until the first view), and how many "My Turn" feed items are new
   // since then. Drives the Welcome-back banner (server-truth, consistent across devices).
   feedLastSeenAt: string | null;
   newFeedItems: number;
@@ -2157,18 +2153,18 @@ export interface FeedAffectedThread {
   authorId: number | null;
 }
 
-// The relationship(s) that make a feed item "my turn" / FYI — surfaced as a reason
-// pill so the reader knows WHY the item concerns them. Ordered most-relevant first.
+// The relationship(s) that make a feed item "my turn" — surfaced as a reason pill so the
+// reader knows WHY the item concerns them. Ordered most-relevant first.
 export type MyTurnReason = 'requested' | 'authored' | 'merged' | 'reviewed' | 'commented';
 
 export interface ConsolidatedFeedItem {
   // Stable unique id, e.g. "feed:1234", "feed:commitrun:99:1234", "feed:claude:42".
   id: string;
-  // True when this event is "my turn" (FYI): it's on a PR the viewer participates in
+  // True when this event is "my turn": it's on a PR the viewer participates in
   // (authored / requested reviewer / reviewed / commented / merged) and the actor isn't
-  // the viewer. Drives the yellow card + the "FYI only" filter.
+  // the viewer. Drives the yellow card + the "My Turn only" filter.
   isMyTurn: boolean;
-  // The relationships that make this item FYI (see MyTurnReason), most-relevant first;
+  // The relationships that make this item "my turn" (see MyTurnReason), most-relevant first;
   // empty for non-my-turn rows. The UI renders the primary reason as a pill.
   myTurnReasons: MyTurnReason[];
   // An activity EventType ('pr_opened' | 'pr_merged' | 'pr_closed' | 'review_submitted' |

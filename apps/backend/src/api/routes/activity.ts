@@ -57,7 +57,7 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Mark the Activity Feed as seen (bumps the account's server-side "seen" marker to
-  // now). Called when the user views the feed; resets the "new FYI since last here"
+  // now). Called when the user views the feed; resets the "new My Turn since last here"
   // count that drives the Welcome-back banner. Account-scoped; no body.
   app.post('/api/activity/feed/mark-seen', async (req) => {
     const at = await markFeedSeen(accountIdOf(req));

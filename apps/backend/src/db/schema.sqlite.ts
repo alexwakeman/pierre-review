@@ -55,7 +55,7 @@ export const accounts = sqliteTable('accounts', {
   // with no open tab stops being re-synced. Null until first activity.
   lastActiveAt: integer('last_active_at', { mode: 'timestamp' }),
   // Last time this account VIEWED the Activity Feed — a server-side "seen" marker (the
-  // successor to the removed per-item "Done"). Makes "new FYI since you were last here"
+  // successor to the removed per-item "Done"). Makes "new My Turn since you were last here"
   // server-truth, consistent across devices/sessions (vs the old client-only localStorage
   // heuristic). Bumped by POST /api/activity/feed/mark-seen; null until the first view,
   // so nothing counts as "new" until a baseline exists. One column, O(1) — no growth.
