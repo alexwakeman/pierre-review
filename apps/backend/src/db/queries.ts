@@ -100,6 +100,8 @@ import type {
   BotVendorTrendPoint,
   BotVendorAnalytics,
   BotAnalyticsResponse,
+  BotVendorPr,
+  BotVendorPrsResponse,
   BotDedupMember,
   BotDedupCluster,
   BotDedupResponse,
@@ -3031,9 +3033,14 @@ export async function getTeamInsights(
     .map((t) => ({ t, ageHours: Math.round((now - t.createdAt.getTime()) / 3_600_000) }))
     .sort((a, b) => b.ageHours - a.ageHours)
     .slice(0, INSIGHT_CARD_CAP);
+  // Item 5 — tag an untouched thread whose originating commenter is an automated reviewer so the
+  // card can show a vendor pill (the thread came from a bot, not a human). Resolved once here.
+  const untouchedKindMap = await classificationKindForUser(accountId);
   for (const { t, ageHours } of threads) {
     addUser(t.originalCommenterId);
     addUser(t.authorId);
+    const botKind =
+      t.originalCommenterId != null ? untouchedKindMap.get(t.originalCommenterId) ?? null : null;
     cards.push({
       id: `thread:${t.threadId}`,
       kind: 'untouched_thread',
@@ -3054,6 +3061,8 @@ export async function getTeamInsights(
       path: t.path,
       ageHours,
       originalCommenterId: t.originalCommenterId,
+      botKind,
+      botLabel: botKind ? labelForKind(botKind) : null,
     });
   }
 
@@ -6088,6 +6097,26 @@ export async function getBotOnlyReviewPrs(
     revsByPr.set(r.prId, arr);
   }
 
+  // Item 4a — a PR's comments count as touch too: a bot review-thread/issue comment is automated
+  // touch, and a NON-AUTHOR human comment disqualifies "bot-only" (the author's own comments never
+  // count as human input). Gather review-thread + issue-comment authors for the candidate PRs.
+  const rcAuthorRows = await db
+    .select({ prId: reviewComments.prId, authorId: reviewComments.authorId })
+    .from(reviewComments)
+    .where(inArray(reviewComments.prId, prIds))
+    .execute();
+  const pcAuthorRows = await db
+    .select({ prId: prComments.prId, authorId: prComments.authorId })
+    .from(prComments)
+    .where(inArray(prComments.prId, prIds))
+    .execute();
+  const commentAuthorsByPr = new Map<number, (number | null)[]>();
+  for (const r of [...rcAuthorRows, ...pcAuthorRows]) {
+    const arr = commentAuthorsByPr.get(r.prId) ?? [];
+    arr.push(r.authorId);
+    commentAuthorsByPr.set(r.prId, arr);
+  }
+
   const repoRows = await db
     .select({ id: repos.id, owner: repos.owner, name: repos.name })
     .from(repos)
@@ -6101,22 +6130,30 @@ export async function getBotOnlyReviewPrs(
       (rv) =>
         rv.state === 'approved' || rv.state === 'changes_requested' || rv.state === 'commented',
     );
-    if (revs.length === 0) continue;
     let anyAutomated = false;
     let anyHuman = false;
     let botLabel: string | null = null;
+    const noteAuto = (authorId: number | null, isPierre: boolean): void => {
+      anyAutomated = true;
+      if (botLabel == null) {
+        const kind = authorId != null ? kindMap.get(authorId) : undefined;
+        botLabel = kind ? labelForKind(kind) : isPierre ? labelForKind('pierre') : 'Automated';
+      }
+    };
+    // Reviews: automated (incl. Pierre-verbatim) → automated touch; a NON-AUTHOR human review
+    // disqualifies (a review by the PR author — rare — never counts as human input).
     for (const rv of revs) {
       const isPierre = rv.databaseId != null && pierreVerbatim.has(rv.databaseId);
       const isAuto = (rv.authorId != null && automatedIds.has(rv.authorId)) || isPierre;
-      if (isAuto) {
-        anyAutomated = true;
-        if (botLabel == null) {
-          const kind = rv.authorId != null ? kindMap.get(rv.authorId) : undefined;
-          botLabel = kind ? labelForKind(kind) : isPierre ? labelForKind('pierre') : 'Automated';
-        }
-      } else {
-        anyHuman = true;
-      }
+      if (isAuto) noteAuto(rv.authorId, isPierre);
+      else if (rv.authorId != null && rv.authorId !== pr.authorId) anyHuman = true;
+    }
+    // Comments (review-thread + issue): a bot comment is automated touch; a non-author human
+    // comment disqualifies. Null-author (unknown/deleted) comments count as neither.
+    for (const cid of commentAuthorsByPr.get(pr.id) ?? []) {
+      if (cid == null) continue;
+      if (automatedIds.has(cid)) noteAuto(cid, false);
+      else if (cid !== pr.authorId) anyHuman = true;
     }
     if (anyAutomated && !anyHuman) {
       const full = repoFullName.get(pr.repoId) ?? '';
@@ -6155,7 +6192,7 @@ export async function getBotAnalytics(
   const generatedAt = to.toISOString();
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
 
-  const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0 };
+  const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0, botOnlyPrs: 0 };
   const automatedIds = await automatedReviewerUserIds(accountId);
   if (automatedIds.length === 0) {
     return { enabled: true, generatedAt, window: win, vendors: [], totals: emptyTotals, suggestions: [] };
@@ -6261,11 +6298,12 @@ export async function getBotAnalytics(
     const bucket = acc.weekly[wk]!;
     bucket.threads += 1;
     if (acted) bucket.actedOn += 1;
-    // Headline metrics use only the selected window.
+    // Headline metrics use only the selected window. NOTE: acc.actedOn is accumulated LATER
+    // (after the human-follow-up pass) under the merged "acted-on" definition (item 6) —
+    // resolved | likely_addressed | a human replied after the bot's last comment.
     if (t.createdAt >= from) {
       acc.reviewers.add(t.userId);
       acc.threads += 1;
-      if (acted) acc.actedOn += 1;
       if (t.state === 'untouched') {
         acc.untouched += 1;
         const ms = t.createdAt.getTime();
@@ -6280,8 +6318,10 @@ export async function getBotAnalytics(
     }
   }
 
-  // Human follow-through: of the bot's window threads, the share where a human commented
-  // after the bot's last comment on that thread.
+  // Human follow-through: of the bot's window threads, the ones where a human commented after
+  // the bot's last comment on that thread. Feeds BOTH the human-only humanFollowThroughPct
+  // sub-figure (acc.humanFollow) AND the merged acted-on definition (humanFollowSet, item 6).
+  const humanFollowSet = new Set<number>();
   const wtIds = windowThreads.map((t) => t.id);
   if (wtIds.length > 0) {
     const ftRows = await db
@@ -6310,8 +6350,18 @@ export async function getBotAnalytics(
       const humanAfter = comments.some(
         (c) => c.authorId != null && !automatedIds.includes(c.authorId) && c.at > botLastAt,
       );
-      if (humanAfter) accFor(kind).humanFollow += 1;
+      if (humanAfter) {
+        humanFollowSet.add(threadId);
+        accFor(kind).humanFollow += 1;
+      }
     }
+  }
+
+  // Item 6 — merged "acted-on": a window thread counts as acted-on when it's resolved or
+  // likely_addressed (the commit heuristic) OR a human followed up after the bot (humanFollowSet).
+  for (const t of windowThreads) {
+    const baseActed = t.state === 'resolved' || t.state === 'likely_addressed';
+    if (baseActed || humanFollowSet.has(t.id)) accFor(t.kind).actedOn += 1;
   }
 
   // Comments volume per kind (bot-authored review comments in the window).
@@ -6389,6 +6439,22 @@ export async function getBotAnalytics(
   vendors.sort((a, b) => b.threads - a.threads || b.comments - a.comments);
   suggestions.sort((a, b) => b.volume - a.volume);
 
+  // Item 4b — bot-only PR count across ALL the account's repos in the window, using the same
+  // broadened rule as getBotOnlyReviewPrs (item 4a): automated touch (review OR comment, incl.
+  // Pierre-verbatim) with no human review AND no human comment.
+  const allRepoRows = await db
+    .select({ id: repos.id })
+    .from(repos)
+    .where(eq(repos.accountId, accountId))
+    .execute();
+  const botOnlyPrs = (
+    await getBotOnlyReviewPrs(
+      accountId,
+      allRepoRows.map((r) => r.id),
+      { from, to },
+    )
+  ).length;
+
   const totalThreads = vendors.reduce((s, v) => s + v.threads, 0);
   const totalActedOn = vendors.reduce((s, v) => s + v.actedOn, 0);
   const totals = {
@@ -6397,8 +6463,245 @@ export async function getBotAnalytics(
     actedOn: totalActedOn,
     actedOnPct: totalThreads > 0 ? Math.round((totalActedOn / totalThreads) * 100) : null,
     untouched: vendors.reduce((s, v) => s + v.untouched, 0),
+    botOnlyPrs,
   };
   return { enabled: true, generatedAt, window: win, vendors, totals, suggestions };
+}
+
+// Item 7 — the per-PR drill-down behind a vendor's Bot-ROI row (GET /api/bot-analytics/:kind/prs).
+// Lists the PRs one automated reviewer KIND touched in the window (its review threads + comments),
+// with per-PR volume, the merged "acted-on" count (item 6: resolved | likely_addressed | a human
+// followed up after the bot), the untouched backlog, last-activity, and the broadened bot-only flag
+// (item 4a). Ordered most-recent-bot-activity first (nulls last). Deterministic, NO AI, account-
+// scoped. For kind==='pierre' the PRs are those with a Pierre-verbatim posted review in-window —
+// per-review provenance means Pierre has no attributable threads/comments (the human who posted is
+// never reclassified), so its rows carry the review timestamp as lastBotActivityAt and 0 thread/
+// comment counts. When the account has no automated reviewers of that kind, returns prs:[].
+export async function getBotVendorPrs(
+  accountId: number,
+  kind: string,
+  window: BotWindowKind,
+): Promise<BotVendorPrsResponse> {
+  const nowMs = Date.now();
+  const to = new Date(nowMs);
+  // Same window→days mapping as getBotAnalytics (rolling_7=7, rolling_30=30, else — incl. sprint — 14).
+  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
+  const from = new Date(nowMs - windowDays * 86_400_000);
+  const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
+  const kindTyped = kind as AutomatedReviewerKind;
+  const label = labelForKind(kindTyped);
+  const generatedAt = new Date(nowMs).toISOString();
+  const empty: BotVendorPrsResponse = {
+    enabled: true, kind: kindTyped, label, window: win, prs: [], generatedAt,
+  };
+
+  const kindMap = await classificationKindForUser(accountId);
+  // The account's user ids classified as the requested kind. Empty for 'pierre' (per-review, not
+  // per-user) — that kind is resolved from verbatim posted reviews instead.
+  const vendorIds = [...kindMap.entries()].filter(([, k]) => k === kind).map(([id]) => id);
+
+  // Per-PR vendor-activity accumulator.
+  type PrAcc = {
+    threadIds: number[];
+    threadStates: DerivedState[];
+    botThreads: number;
+    botComments: number;
+    lastAtMs: number | null;
+  };
+  const perPr = new Map<number, PrAcc>();
+  const accForPr = (prId: number): PrAcc => {
+    let a = perPr.get(prId);
+    if (!a) {
+      a = { threadIds: [], threadStates: [], botThreads: 0, botComments: 0, lastAtMs: null };
+      perPr.set(prId, a);
+    }
+    return a;
+  };
+  const bump = (a: PrAcc, atMs: number): void => {
+    if (a.lastAtMs == null || atMs > a.lastAtMs) a.lastAtMs = atMs;
+  };
+
+  if (kind === 'pierre') {
+    // Pierre PRs via Pierre-verbatim posted reviews in-window (postedReviewId == reviews.databaseId).
+    const crRows = await db
+      .select({
+        prId: reviews.prId,
+        submittedAt: reviews.submittedAt,
+        userBody: claudeReviews.userBody,
+        summary: claudeReviews.summary,
+      })
+      .from(claudeReviews)
+      .innerJoin(reviews, eq(reviews.databaseId, claudeReviews.postedReviewId))
+      .where(
+        and(
+          eq(claudeReviews.accountId, accountId),
+          isNotNull(claudeReviews.postedReviewId),
+          gte(reviews.submittedAt, from),
+          lte(reviews.submittedAt, to),
+        ),
+      )
+      .execute();
+    for (const r of crRows) {
+      const ub = normalizeBody(r.userBody);
+      if (ub.length === 0 || ub !== normalizeBody(r.summary)) continue; // verbatim only
+      bump(accForPr(r.prId), r.submittedAt.getTime());
+    }
+  } else {
+    if (vendorIds.length === 0) return empty;
+    // Vendor review threads in-window (account-scoped via the PR join).
+    const threadRows = await db
+      .select({
+        id: reviewThreads.id,
+        prId: reviewThreads.prId,
+        state: reviewThreads.derivedState,
+        createdAt: reviewThreads.createdAt,
+      })
+      .from(reviewThreads)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(reviewThreads.originalCommenterId, vendorIds),
+          gte(reviewThreads.createdAt, from),
+          lte(reviewThreads.createdAt, to),
+        ),
+      )
+      .execute();
+    for (const t of threadRows) {
+      const a = accForPr(t.prId);
+      a.threadIds.push(t.id);
+      a.threadStates.push(t.state);
+      a.botThreads += 1;
+      bump(a, t.createdAt.getTime());
+    }
+    // Vendor review comments in-window.
+    const commentRows = await db
+      .select({ prId: reviewComments.prId, createdAt: reviewComments.createdAt })
+      .from(reviewComments)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(reviewComments.authorId, vendorIds),
+          gte(reviewComments.createdAt, from),
+          lte(reviewComments.createdAt, to),
+        ),
+      )
+      .execute();
+    for (const c of commentRows) {
+      const a = accForPr(c.prId);
+      a.botComments += 1;
+      bump(a, c.createdAt.getTime());
+    }
+  }
+
+  const prIds = [...perPr.keys()];
+  if (prIds.length === 0) return empty;
+
+  // Human follow-up per vendor thread → the merged acted-on rule (item 6). Fetch ALL comments on
+  // the vendor threads (not just in-window) to detect a human reply after the bot's last comment.
+  const allThreadIds = [...perPr.values()].flatMap((a) => a.threadIds);
+  const humanFollowSet = new Set<number>();
+  if (allThreadIds.length > 0) {
+    const autoSet = new Set(await automatedReviewerUserIds(accountId));
+    const fcRows = await db
+      .select({
+        threadId: reviewComments.threadId,
+        authorId: reviewComments.authorId,
+        createdAt: reviewComments.createdAt,
+      })
+      .from(reviewComments)
+      .where(inArray(reviewComments.threadId, allThreadIds))
+      .execute();
+    const byThread = new Map<number, { authorId: number | null; at: number }[]>();
+    for (const r of fcRows) {
+      const arr = byThread.get(r.threadId) ?? [];
+      arr.push({ authorId: r.authorId, at: r.createdAt.getTime() });
+      byThread.set(r.threadId, arr);
+    }
+    for (const [threadId, comments] of byThread) {
+      let botLastAt = -Infinity;
+      for (const c of comments) {
+        if (c.authorId != null && autoSet.has(c.authorId) && c.at > botLastAt) botLastAt = c.at;
+      }
+      const humanAfter = comments.some(
+        (c) => c.authorId != null && !autoSet.has(c.authorId) && c.at > botLastAt,
+      );
+      if (humanAfter) humanFollowSet.add(threadId);
+    }
+  }
+
+  // PR metadata (account-scoped) + repo name.
+  const metaRows = await db
+    .select({
+      id: pullRequests.id,
+      repoId: pullRequests.repoId,
+      number: pullRequests.number,
+      title: pullRequests.title,
+      authorId: pullRequests.authorId,
+      state: pullRequests.state,
+      ciStatus: pullRequests.ciStatus,
+      additions: pullRequests.additions,
+      deletions: pullRequests.deletions,
+      changedFiles: pullRequests.changedFiles,
+      openedAt: pullRequests.openedAt,
+      owner: repos.owner,
+      name: repos.name,
+    })
+    .from(pullRequests)
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, prIds)))
+    .execute();
+
+  // Bot-only flag: reuse the broadened rule (item 4a) over the candidate PRs' repos.
+  const repoIdSet = [...new Set(metaRows.map((m) => m.repoId))];
+  const botOnlyIds = new Set(
+    (await getBotOnlyReviewPrs(accountId, repoIdSet, { from, to })).map((p) => p.prId),
+  );
+
+  const prs: BotVendorPr[] = [];
+  for (const m of metaRows) {
+    const a = perPr.get(m.id)!;
+    let botActedOn = 0;
+    let botUntouched = 0;
+    for (let i = 0; i < a.threadIds.length; i++) {
+      const st = a.threadStates[i]!;
+      if (st === 'resolved' || st === 'likely_addressed' || humanFollowSet.has(a.threadIds[i]!)) {
+        botActedOn += 1;
+      }
+      if (st === 'untouched') botUntouched += 1;
+    }
+    const full = `${m.owner}/${m.name}`;
+    prs.push({
+      prId: m.id,
+      repoId: m.repoId,
+      repoFullName: full,
+      prNumber: m.number,
+      prTitle: m.title,
+      authorId: m.authorId,
+      state: m.state,
+      githubUrl: `https://github.com/${full}/pull/${m.number}`,
+      ciStatus: m.ciStatus,
+      additions: m.additions,
+      deletions: m.deletions,
+      changedFiles: m.changedFiles,
+      openedAt: m.openedAt.toISOString(),
+      botThreads: a.botThreads,
+      botComments: a.botComments,
+      botActedOn,
+      botUntouched,
+      lastBotActivityAt: a.lastAtMs == null ? null : new Date(a.lastAtMs).toISOString(),
+      botOnly: botOnlyIds.has(m.id),
+    });
+  }
+  // Most-recent-bot-activity first (nulls last).
+  prs.sort((x, y) => {
+    const xa = x.lastBotActivityAt == null ? -Infinity : Date.parse(x.lastBotActivityAt);
+    const ya = y.lastBotActivityAt == null ? -Infinity : Date.parse(y.lastBotActivityAt);
+    return ya - xa;
+  });
+
+  return { enabled: true, kind: kindTyped, label, window: win, prs, generatedAt };
 }
 
 // WS4 — cross-bot dedup + consensus for one PR. Groups the PR's automated-reviewer

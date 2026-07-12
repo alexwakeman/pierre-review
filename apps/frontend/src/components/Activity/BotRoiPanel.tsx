@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type {
+  AutomatedReviewerKind,
   BotTuningSuggestion,
   BotVendorAnalytics,
   BotVerdict,
@@ -94,7 +95,7 @@ function TrendChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Element
   if (labels.length < 2 || series.length === 0) {
     return <ChartEmpty label="Not enough weekly history yet" />;
   }
-  return <LineChart labels={labels} series={series} height={140} />;
+  return <LineChart labels={labels} series={series} height={140} curved />;
 }
 
 function TuningSuggestions({
@@ -154,16 +155,25 @@ function TuningSuggestions({
   );
 }
 
-function VendorTable({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Element {
+function VendorTable({
+  vendors,
+  onOpenVendor,
+}: {
+  vendors: BotVendorAnalytics[];
+  onOpenVendor: (kind: AutomatedReviewerKind) => void;
+}): JSX.Element {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
-      <table className="w-full min-w-[720px] border-collapse text-[11px]">
+      <table className="w-full min-w-[680px] border-collapse text-[11px]">
         <thead>
           <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-800 dark:text-gray-400">
             <th className="px-2 py-1.5 font-medium">Vendor</th>
             <th className="px-2 py-1.5 text-right font-medium">Threads</th>
             <th className="px-2 py-1.5 text-right font-medium">Comments</th>
-            <th className="px-2 py-1.5 text-right font-medium" title="Threads a later commit likely addressed (approximate)">
+            <th
+              className="px-2 py-1.5 text-right font-medium"
+              title="A later commit likely addressed the thread, it was resolved, or a human replied/resolved after the bot"
+            >
               Acted on
             </th>
             <th className="px-2 py-1.5 text-right font-medium" title="Threads with no reply and no follow-up commit">
@@ -171,9 +181,6 @@ function VendorTable({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Elemen
             </th>
             <th className="px-2 py-1.5 text-right font-medium" title="Untouched threads' oldest age">
               Oldest
-            </th>
-            <th className="px-2 py-1.5 text-right font-medium" title="A human replied or resolved after the bot's last comment">
-              Human f/up
             </th>
             <th className="px-2 py-1.5 text-right font-medium" title="Low-value / untouched share — the noise floor">
               Noise
@@ -194,12 +201,15 @@ function VendorTable({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Elemen
                 className="border-b border-gray-100 last:border-0 dark:border-gray-800/60"
               >
                 <td className="px-2 py-1.5">
-                  <span
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium"
+                  <button
+                    type="button"
+                    onClick={() => onOpenVendor(v.kind)}
+                    title="View this bot's PRs"
+                    className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:underline"
                     style={{ color: meta.color, background: `${meta.color}1a` }}
                   >
                     🤖 {v.label}
-                  </span>
+                  </button>
                   {v.reviewers > 1 && (
                     <span className="ml-1 text-gray-400">×{v.reviewers}</span>
                   )}
@@ -223,9 +233,6 @@ function VendorTable({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Elemen
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
                   {v.oldestUntouchedDays != null ? `${v.oldestUntouchedDays}d` : '—'}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
-                  {pct(v.humanFollowThroughPct)}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
                   {pct(v.noiseRatioPct)}
@@ -253,6 +260,7 @@ function VendorTable({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Elemen
 export function BotRoiPanel(): JSX.Element | null {
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
+  const openBotPrsDetail = useFilters((s) => s.openBotPrsDetail);
   const { data, isLoading, isError } = useBotAnalytics(window);
   const { data: settings } = useProSettings(true);
 
@@ -321,17 +329,24 @@ export function BotRoiPanel(): JSX.Element | null {
           <span className="tabular-nums text-amber-600 dark:text-amber-400">
             {t.untouched}
           </span>{' '}
-          untouched
+          untouched ·{' '}
+          <span
+            title="PRs whose only reviews/comments came from bots — no human review or comment since they opened"
+            className="cursor-help"
+          >
+            <b className="tabular-nums text-gray-700 dark:text-gray-200">{t.botOnlyPrs}</b>{' '}
+            bot-only PR{t.botOnlyPrs === 1 ? '' : 's'}
+          </span>
         </div>
-        <VendorTable vendors={vendors} />
+        <VendorTable vendors={vendors} onOpenVendor={openBotPrsDetail} />
         <ChartCard title="Weekly thread volume" note="last 12 weeks">
           <TrendChart vendors={vendors} />
         </ChartCard>
         <TuningSuggestions suggestions={data.suggestions} />
         <div className="text-[11px] text-gray-400">
-          “Acted on” = a later commit touched the flagged file (approximate). Verdicts + cost
-          are deterministic — no AI. Set per-vendor monthly cost in Settings → Review bots to
-          see $/acted-on.
+          “Acted on” = a later commit likely addressed the thread, it was resolved, or a human
+          replied/resolved after the bot (approximate). Verdicts + cost are deterministic — no
+          AI. Set per-vendor monthly cost in Settings → Review bots to see $/acted-on.
         </div>
       </div>
     );

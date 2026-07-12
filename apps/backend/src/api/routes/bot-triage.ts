@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type {
   BotAnalyticsResponse,
+  BotVendorPrsResponse,
   BotMuteRule,
   BotMuteRuleInput,
   BotMuteRulesResponse,
@@ -12,6 +13,7 @@ import {
   addBotMuteRule,
   deleteBotMuteRule,
   getBotAnalytics,
+  getBotVendorPrs,
   getBotDedupClusters,
   listBotMuteRules,
   listDetectedReviewers,
@@ -43,6 +45,28 @@ const overrideSchema = {
 
 // GET /api/bot-analytics?window= — the window is a closed 4-value set, safe to enum + default.
 const analyticsSchema = {
+  querystring: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      window: {
+        type: 'string',
+        enum: ['rolling_7', 'rolling_14', 'rolling_30', 'sprint'],
+        default: 'rolling_14',
+      },
+    },
+  },
+};
+
+// GET /api/bot-analytics/:kind/prs?window= — per-vendor PR drill-down. `kind` is left an open
+// string (AutomatedReviewerKind is types-only shared, unimportable at runtime; the query layer
+// coerces an unknown kind); the window reuses the same closed enum/default as /api/bot-analytics.
+const vendorPrsSchema = {
+  params: {
+    type: 'object',
+    required: ['kind'],
+    properties: { kind: { type: 'string' } },
+  },
   querystring: {
     type: 'object',
     additionalProperties: false,
@@ -120,6 +144,15 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/bot-analytics', { schema: analyticsSchema }, async (req) => {
     const { window } = req.query as { window: BotWindowKind };
     const resp: BotAnalyticsResponse = await getBotAnalytics(accountIdOf(req), window);
+    return resp;
+  });
+
+  // The per-vendor PR drill-down behind one Bot-ROI row: the PRs that automated reviewer kind
+  // touched in the window (threads/comments/acted-on/untouched/bot-only), newest-activity first.
+  app.get('/api/bot-analytics/:kind/prs', { schema: vendorPrsSchema }, async (req) => {
+    const { kind } = req.params as { kind: string };
+    const { window } = req.query as { window: BotWindowKind };
+    const resp: BotVendorPrsResponse = await getBotVendorPrs(accountIdOf(req), kind, window);
     return resp;
   });
 

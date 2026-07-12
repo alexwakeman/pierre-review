@@ -38,6 +38,7 @@ import type {
   RetroReportResponse,
   BotWindowKind,
   BotAnalyticsResponse,
+  BotVendorPrsResponse,
   BotDedupResponse,
   BotMuteRule,
   BotMuteRuleInput,
@@ -470,6 +471,12 @@ export const api = {
   botAnalytics: (window: BotWindowKind) =>
     get<BotAnalyticsResponse>(
       `/api/bot-analytics?window=${encodeURIComponent(window)}`,
+    ),
+  // The per-PR drill-down behind one vendor's Bot-ROI row: the PRs that automated reviewer kind
+  // touched in the window (threads/comments/acted-on/untouched/bot-only), most-recent-activity first.
+  botVendorPrs: (kind: string, window: BotWindowKind) =>
+    get<BotVendorPrsResponse>(
+      `/api/bot-analytics/${encodeURIComponent(kind)}/prs?window=${encodeURIComponent(window)}`,
     ),
   // Cross-bot dedup + consensus/conflict clusters for a PR (≥2 automated reviewers of
   // distinct kinds on the same path/line window).

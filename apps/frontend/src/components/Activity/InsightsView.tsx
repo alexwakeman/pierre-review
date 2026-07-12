@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  AutomatedReviewerKind,
   BotOnlyReviewCard,
   CiStatus,
   InsightCard,
@@ -29,6 +30,7 @@ import { Markdown } from '../Markdown.js';
 import { AiSummary } from '../AiSummary.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { BotRoiPanel } from './BotRoiPanel.js';
+import { RetroView } from './RetroView.js';
 import { SprintReportCard } from './SprintReportCard.js';
 import { TeamMetricsPanel } from './TeamMetricsPanel.js';
 import { TrackUsage } from './TrackUsage.js';
@@ -49,6 +51,16 @@ const KIND_LABEL: Record<InsightCard['kind'], string> = {
   reviewer_load: 'Review load',
   reviewer_routing: 'Needs a reviewer',
 };
+
+// The insight-card kinds that belong to the Bots sub-tab (everything else is Overview).
+const BOT_CARD_KINDS = new Set<InsightCard['kind']>(['bot_signal', 'bot_only_review']);
+
+type InsightsSubTab = 'overview' | 'bots' | 'retro';
+const SUB_TABS: { key: InsightsSubTab; label: string }[] = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'bots', label: 'Bots' },
+  { key: 'retro', label: 'Retro' },
+];
 
 function ageLabel(hours: number): string {
   if (hours < 48) return `${hours}h`;
@@ -83,6 +95,22 @@ function UserChip({
     <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px]">
       <Avatar user={u} size={13} />
       <UserName user={u} fallbackId={id} />
+    </span>
+  );
+}
+
+// A small vendor pill for an automated reviewer — the same 🤖 chip grammar the bot-signal
+// card + provenance badges use (color from automatedReviewerMeta). Rendered on an untouched
+// thread whose original commenter is a classified review bot.
+function BotVendorPill({ kind }: { kind: AutomatedReviewerKind }): JSX.Element {
+  const meta = automatedReviewerMeta(kind);
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium"
+      style={{ color: meta.color, background: `${meta.color}1a` }}
+      title="This thread was opened by an automated reviewer"
+    >
+      🤖 {meta.label}
     </span>
   );
 }
@@ -384,12 +412,26 @@ function BotOnlyReviewCardView({
   );
 }
 
-export function InsightsView(): JSX.Element {
+export function InsightsView({
+  initialSubTab,
+}: {
+  initialSubTab?: InsightsSubTab;
+} = {}): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const showThreadInChanges = useFilters((s) => s.showThreadInChanges);
   const openMetricsDetail = useFilters((s) => s.openMetricsDetail);
+  const openBotPrsDetail = useFilters((s) => s.openBotPrsDetail);
   const { data, isLoading, isError } = useTeamInsights(true);
   const usersById = useMemo(() => indexUsers(data?.users), [data?.users]);
+
+  // Internal sub-tab bar (Overview | Bots | Retro). The header (Insights + Pro + sprint
+  // caption + Track usage) sits ABOVE it and is shared across sub-tabs. A deep-linked
+  // initialSubTab (e.g. the legacy 'retro' rail value → the Retro sub-tab) is honoured,
+  // including a later change to it.
+  const [subTab, setSubTab] = useState<InsightsSubTab>(initialSubTab ?? 'overview');
+  useEffect(() => {
+    if (initialSubTab) setSubTab(initialSubTab);
+  }, [initialSubTab]);
 
   // Back-from-a-click flash — EXACT parity with the Feed (FeedView): a real browser Back
   // (navigateBack) sets a one-shot activityFlashItemId (the returnItemId we stamped when
@@ -444,6 +486,224 @@ export function InsightsView(): JSX.Element {
   };
 
   const cards = data?.cards ?? [];
+  // Partition by kind: the Bots sub-tab owns bot_signal + bot_only_review; Overview owns
+  // the rest (stalled_review / untouched_thread / reviewer_load / reviewer_routing).
+  const nonBotCards = cards.filter((c) => !BOT_CARD_KINDS.has(c.kind));
+  const botCards = cards.filter((c) => BOT_CARD_KINDS.has(c.kind));
+
+  // The shared card-rendering switch — the same JSX for a card wherever it appears. A card
+  // that isn't in the active sub-tab simply isn't in the DOM (and its ref is dropped), which
+  // the flash effect already tolerates (it guards on the ref existing).
+  const renderCard = (card: InsightCard): JSX.Element | null => {
+    switch (card.kind) {
+      case 'stalled_review':
+        return (
+          <CardShell
+            key={card.id}
+            card={card}
+            innerRef={(el) => setCardRef(card.id, el)}
+            flash={flashId === card.id}
+            right={`waiting ${ageLabel(card.ageHours)}`}
+            onActivate={() => open(metaFor(card, usersById), card.id)}
+          >
+            <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
+            <PrMetaRow pr={card} />
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
+              <span>waiting on</span>
+              {card.requestedReviewerIds.length > 0 ? (
+                card.requestedReviewerIds.map((id) => (
+                  <UserChip key={id} id={id} usersById={usersById} />
+                ))
+              ) : (
+                <span className="italic">no reviewer requested</span>
+              )}
+            </div>
+            <InsightPrSummary prId={card.prId} />
+          </CardShell>
+        );
+      case 'untouched_thread':
+        return (
+          <CardShell
+            key={card.id}
+            card={card}
+            innerRef={(el) => setCardRef(card.id, el)}
+            flash={flashId === card.id}
+            right={`${ageLabel(card.ageHours)} old`}
+          >
+            {/* Only this header chrome navigates (→ the thread in the Changes tab).
+                The embedded conversation + PR summary below are for reading/replying
+                in place, NOT a click target — so the thread never feels clickable. */}
+            <div
+              className="-m-1 cursor-pointer rounded p-1 hover:bg-gray-50/70 dark:hover:bg-gray-900/60"
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest('a,button')) return;
+                openThreadInChanges(card);
+              }}
+            >
+              <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
+              <PrMetaRow pr={card} />
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
+                <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-mono">
+                  {card.path}
+                </span>
+                <span>· no reply since</span>
+                {card.originalCommenterId != null && (
+                  <UserChip id={card.originalCommenterId} usersById={usersById} />
+                )}
+                {card.botKind != null && <BotVendorPill kind={card.botKind} />}
+              </div>
+            </div>
+            <div className="mt-2">
+              <InsightThread card={card} />
+            </div>
+            <InsightPrSummary prId={card.prId} />
+          </CardShell>
+        );
+      case 'reviewer_routing':
+        return (
+          <CardShell
+            key={card.id}
+            card={card}
+            innerRef={(el) => setCardRef(card.id, el)}
+            flash={flashId === card.id}
+            right="unassigned"
+            onActivate={() => open(metaFor(card, usersById), card.id)}
+          >
+            <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
+            <PrMetaRow pr={card} />
+            {card.topPaths.length > 0 && (
+              <div className="mt-1 truncate text-[11px] text-gray-400">
+                touches{' '}
+                <span className="font-mono">{card.topPaths.slice(0, 3).join(', ')}</span>
+              </div>
+            )}
+            <RoutingReviewers card={card} usersById={usersById} />
+            <InsightPrSummary prId={card.prId} />
+          </CardShell>
+        );
+      case 'reviewer_load':
+        return (
+          <CardShell
+            key={card.id}
+            card={card}
+            innerRef={(el) => setCardRef(card.id, el)}
+            flash={flashId === card.id}
+            right={`${card.reviewsThisSprint} review${
+              card.reviewsThisSprint === 1 ? '' : 's'
+            } this sprint`}
+          >
+            <div className="flex items-center gap-2 text-sm">
+              <UserChip id={card.reviewerId} usersById={usersById} />
+              <span className="font-semibold text-gray-800 dark:text-gray-100">
+                {card.pendingCount} pending review{card.pendingCount === 1 ? '' : 's'}
+              </span>
+            </div>
+            {card.pendingPrs.length > 0 && (
+              <ul className="mt-1.5 space-y-0.5">
+                {card.pendingPrs.map((p) => (
+                  <li key={p.prId} className="truncate text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        open(
+                          {
+                            id: p.prId,
+                            number: p.prNumber,
+                            title: p.prTitle,
+                            repoFullName: p.repoFullName,
+                            authorLogin: null,
+                            authorDisplayName: null,
+                            authorAvatarUrl: null,
+                          },
+                          card.id,
+                        )
+                      }
+                      className="text-left text-gray-500 hover:underline dark:text-gray-400"
+                    >
+                      <span className="text-gray-400">
+                        {p.repoFullName} #{p.prNumber}
+                      </span>{' '}
+                      {p.prTitle}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardShell>
+        );
+      case 'bot_signal':
+        return (
+          <CardShell
+            key={card.id}
+            card={card}
+            innerRef={(el) => setCardRef(card.id, el)}
+            flash={flashId === card.id}
+            right={card.actedOnPct != null ? `${card.actedOnPct}% acted on` : undefined}
+          >
+            <div className="text-sm text-gray-800 dark:text-gray-100">
+              <span className="font-semibold tabular-nums">{card.totalThreads}</span>{' '}
+              review-bot thread{card.totalThreads === 1 ? '' : 's'} this sprint ·{' '}
+              <span className="tabular-nums">{card.totalUntouched}</span> untouched
+              {card.oldestUntouchedDays != null && card.totalUntouched > 0 && (
+                <>
+                  , oldest{' '}
+                  <span className="tabular-nums">{card.oldestUntouchedDays}</span>d
+                </>
+              )}
+            </div>
+            <ul className="mt-2 space-y-1">
+              {card.vendors.map((v) => {
+                // v.kind is AutomatedReviewerKind (vendor / in_house / pierre) — the
+                // kind-in-hand lookup handles all three.
+                const meta = automatedReviewerMeta(v.kind);
+                const pct = v.threads > 0 ? Math.round((v.actedOn / v.threads) * 100) : 0;
+                return (
+                  <li key={v.kind} className="flex flex-wrap items-center gap-x-2 text-[11px]">
+                    {/* Click a vendor → its Bot-PRs tab (the drill-down of every PR this
+                        automated reviewer touched in the window). */}
+                    <button
+                      type="button"
+                      onClick={() => openBotPrsDetail(v.kind)}
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:underline"
+                      style={{ color: meta.color, background: `${meta.color}1a` }}
+                      title="View this bot's PRs"
+                    >
+                      🤖 {meta.label}
+                    </button>
+                    <span className="tabular-nums text-gray-500">
+                      {v.threads} thread{v.threads === 1 ? '' : 's'}
+                    </span>
+                    <span className="text-gray-400">·</span>
+                    <span className="tabular-nums text-gray-500">{pct}% acted on</span>
+                    {v.untouched > 0 && (
+                      <span className="tabular-nums text-amber-600 dark:text-amber-400">
+                        · {v.untouched} untouched
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="mt-2 text-[11px] text-gray-400">
+              “Acted on” = a later commit touched the flagged file (approximate).
+              Deterministic across every repo + bot — no AI.
+            </div>
+          </CardShell>
+        );
+      case 'bot_only_review':
+        return (
+          <BotOnlyReviewCardView
+            key={card.id}
+            card={card}
+            innerRef={(el) => setCardRef(card.id, el)}
+            flash={flashId === card.id}
+            onOpen={open}
+          />
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="space-y-3" data-testid="insights-view">
@@ -480,264 +740,98 @@ export function InsightsView(): JSX.Element {
 
       {showUsage && <TrackUsage />}
 
-      {data?.metrics && (
-        <TeamMetricsPanel metrics={data.metrics} onOpenMetric={openMetricsDetail} />
-      )}
+      {/* Internal sub-tab bar — Overview / Bots / Retro (styled like the Flow-metrics
+          drill-down bar). Retro is the retrospective narrative, now nested here. */}
+      <div role="tablist" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
+        {SUB_TABS.map(({ key, label }) => {
+          const on = key === subTab;
+          return (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              onClick={() => setSubTab(key)}
+              className={`-mb-px rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
+                on
+                  ? 'border-gray-300 bg-white text-violet-600 dark:border-gray-700 dark:bg-gray-950 dark:text-violet-300'
+                  : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
 
-      {/* Repo digests are nested INSIDE the sprint report card (collapsed by default) to
-          keep the Insights tab compact — pass the digest data down. */}
-      <SprintReportCard
-        digests={digestsQuery.data?.digests ?? []}
-        digestsLoading={digestsQuery.isLoading}
-        anyWatched={watchedIds.length > 0}
-        refreshingRepoIds={refreshDigests.refreshingRepoIds}
-        onRegenerateRepo={(id) => refreshDigests.mutate(id)}
-        // Cascade: a sprint-report (re)generate also refreshes every watched repo's digest
-        // (server-side delta-gated → only changed repos re-bill). Reuses the same SSE refresh
-        // that drives the RegenProgressBar below, so progress is shown for the whole sweep.
-        onRegenerateAllDigests={
-          watchedIds.length > 0 ? () => refreshDigests.mutate(watchedIds) : undefined
-        }
-        // Keep the sprint Generate/Regenerate button disabled until the cascaded sweep finishes,
-        // so a second click can't abort it mid-stream.
-        cascadeBusy={refreshDigests.isPending}
-      />
-      <RegenProgressBar
-        active={refreshDigests.isPending && (refreshDigests.progress?.total ?? 0) > 0}
-        label="Regenerating summaries"
-        {...digestProgressProps(refreshDigests.progress)}
-      />
-
-      {/* Review-bot ROI / utilisation — a Pro drill-down atop the (core) bot_signal card.
-          The analytics route is core+deterministic; the panel is UI-gated on teamInsights. */}
-      {teamInsights && <BotRoiPanel />}
-
-      {isLoading ? (
+      {subTab === 'overview' ? (
         <div className="space-y-3">
-          {[0, 1, 2].map((i) => (
-            <div
-              key={i}
-              className="h-20 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40"
-            />
-          ))}
+          {data?.metrics && (
+            <TeamMetricsPanel metrics={data.metrics} onOpenMetric={openMetricsDetail} />
+          )}
+
+          {/* Repo digests are nested INSIDE the sprint report card (collapsed by default) to
+              keep the Insights tab compact — pass the digest data down. */}
+          <SprintReportCard
+            digests={digestsQuery.data?.digests ?? []}
+            digestsLoading={digestsQuery.isLoading}
+            anyWatched={watchedIds.length > 0}
+            refreshingRepoIds={refreshDigests.refreshingRepoIds}
+            onRegenerateRepo={(id) => refreshDigests.mutate(id)}
+            // Cascade: a sprint-report (re)generate also refreshes every watched repo's digest
+            // (server-side delta-gated → only changed repos re-bill). Reuses the same SSE refresh
+            // that drives the RegenProgressBar below, so progress is shown for the whole sweep.
+            onRegenerateAllDigests={
+              watchedIds.length > 0 ? () => refreshDigests.mutate(watchedIds) : undefined
+            }
+            // Keep the sprint Generate/Regenerate button disabled until the cascaded sweep finishes,
+            // so a second click can't abort it mid-stream.
+            cascadeBusy={refreshDigests.isPending}
+          />
+          <RegenProgressBar
+            active={refreshDigests.isPending && (refreshDigests.progress?.total ?? 0) > 0}
+            label="Regenerating summaries"
+            {...digestProgressProps(refreshDigests.progress)}
+          />
+
+          {isLoading ? (
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="h-20 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40"
+                />
+              ))}
+            </div>
+          ) : isError ? (
+            <div className="text-sm text-red-500">Couldn’t load insights.</div>
+          ) : nonBotCards.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+              Nothing needs attention across your watched repos right now. 🎉
+              <div className="mt-1 text-[11px]">
+                Stalled reviews, untouched threads, reviewer load and un-assigned PRs will
+                surface here.
+              </div>
+            </div>
+          ) : (
+            <ul className="space-y-2">{nonBotCards.map((card) => renderCard(card))}</ul>
+          )}
         </div>
-      ) : isError ? (
-        <div className="text-sm text-red-500">Couldn’t load insights.</div>
-      ) : cards.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          Nothing needs attention across your watched repos right now. 🎉
-          <div className="mt-1 text-[11px]">
-            Stalled reviews, untouched threads, reviewer load and un-assigned PRs will
-            surface here.
-          </div>
+      ) : subTab === 'bots' ? (
+        <div className="space-y-3">
+          {/* Review-bot ROI / utilisation — a Pro drill-down atop the (core) bot cards.
+              The analytics route is core+deterministic; the panel is UI-gated on teamInsights.
+              It carries its own empty state, so the Bots tab never shows the generic
+              "nothing needs attention" block. */}
+          {teamInsights && <BotRoiPanel />}
+          {isError ? (
+            <div className="text-sm text-red-500">Couldn’t load insights.</div>
+          ) : botCards.length > 0 ? (
+            <ul className="space-y-2">{botCards.map((card) => renderCard(card))}</ul>
+          ) : null}
         </div>
       ) : (
-        <ul className="space-y-2">
-          {cards.map((card) => {
-            switch (card.kind) {
-              case 'stalled_review':
-                return (
-                  <CardShell
-                    key={card.id}
-                    card={card}
-                    innerRef={(el) => setCardRef(card.id, el)}
-                    flash={flashId === card.id}
-                    right={`waiting ${ageLabel(card.ageHours)}`}
-                    onActivate={() => open(metaFor(card, usersById), card.id)}
-                  >
-                    <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-                    <PrMetaRow pr={card} />
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
-                      <span>waiting on</span>
-                      {card.requestedReviewerIds.length > 0 ? (
-                        card.requestedReviewerIds.map((id) => (
-                          <UserChip key={id} id={id} usersById={usersById} />
-                        ))
-                      ) : (
-                        <span className="italic">no reviewer requested</span>
-                      )}
-                    </div>
-                    <InsightPrSummary prId={card.prId} />
-                  </CardShell>
-                );
-              case 'untouched_thread':
-                return (
-                  <CardShell
-                    key={card.id}
-                    card={card}
-                    innerRef={(el) => setCardRef(card.id, el)}
-                    flash={flashId === card.id}
-                    right={`${ageLabel(card.ageHours)} old`}
-                  >
-                    {/* Only this header chrome navigates (→ the thread in the Changes tab).
-                        The embedded conversation + PR summary below are for reading/replying
-                        in place, NOT a click target — so the thread never feels clickable. */}
-                    <div
-                      className="-m-1 cursor-pointer rounded p-1 hover:bg-gray-50/70 dark:hover:bg-gray-900/60"
-                      onClick={(e) => {
-                        if ((e.target as HTMLElement).closest('a,button')) return;
-                        openThreadInChanges(card);
-                      }}
-                    >
-                      <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-                      <PrMetaRow pr={card} />
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
-                        <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-mono">
-                          {card.path}
-                        </span>
-                        <span>· no reply since</span>
-                        {card.originalCommenterId != null && (
-                          <UserChip id={card.originalCommenterId} usersById={usersById} />
-                        )}
-                      </div>
-                    </div>
-                    <div className="mt-2">
-                      <InsightThread card={card} />
-                    </div>
-                    <InsightPrSummary prId={card.prId} />
-                  </CardShell>
-                );
-              case 'reviewer_routing':
-                return (
-                  <CardShell
-                    key={card.id}
-                    card={card}
-                    innerRef={(el) => setCardRef(card.id, el)}
-                    flash={flashId === card.id}
-                    right="unassigned"
-                    onActivate={() => open(metaFor(card, usersById), card.id)}
-                  >
-                    <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-                    <PrMetaRow pr={card} />
-                    {card.topPaths.length > 0 && (
-                      <div className="mt-1 truncate text-[11px] text-gray-400">
-                        touches{' '}
-                        <span className="font-mono">{card.topPaths.slice(0, 3).join(', ')}</span>
-                      </div>
-                    )}
-                    <RoutingReviewers card={card} usersById={usersById} />
-                    <InsightPrSummary prId={card.prId} />
-                  </CardShell>
-                );
-              case 'reviewer_load':
-                return (
-                  <CardShell
-                    key={card.id}
-                    card={card}
-                    innerRef={(el) => setCardRef(card.id, el)}
-                    flash={flashId === card.id}
-                    right={`${card.reviewsThisSprint} review${
-                      card.reviewsThisSprint === 1 ? '' : 's'
-                    } this sprint`}
-                  >
-                    <div className="flex items-center gap-2 text-sm">
-                      <UserChip id={card.reviewerId} usersById={usersById} />
-                      <span className="font-semibold text-gray-800 dark:text-gray-100">
-                        {card.pendingCount} pending review{card.pendingCount === 1 ? '' : 's'}
-                      </span>
-                    </div>
-                    {card.pendingPrs.length > 0 && (
-                      <ul className="mt-1.5 space-y-0.5">
-                        {card.pendingPrs.map((p) => (
-                          <li key={p.prId} className="truncate text-[11px]">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                open(
-                                  {
-                                    id: p.prId,
-                                    number: p.prNumber,
-                                    title: p.prTitle,
-                                    repoFullName: p.repoFullName,
-                                    authorLogin: null,
-                                    authorDisplayName: null,
-                                    authorAvatarUrl: null,
-                                  },
-                                  card.id,
-                                )
-                              }
-                              className="text-left text-gray-500 hover:underline dark:text-gray-400"
-                            >
-                              <span className="text-gray-400">
-                                {p.repoFullName} #{p.prNumber}
-                              </span>{' '}
-                              {p.prTitle}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </CardShell>
-                );
-              case 'bot_signal':
-                return (
-                  <CardShell
-                    key={card.id}
-                    card={card}
-                    innerRef={(el) => setCardRef(card.id, el)}
-                    flash={flashId === card.id}
-                    right={card.actedOnPct != null ? `${card.actedOnPct}% acted on` : undefined}
-                  >
-                    <div className="text-sm text-gray-800 dark:text-gray-100">
-                      <span className="font-semibold tabular-nums">{card.totalThreads}</span>{' '}
-                      review-bot thread{card.totalThreads === 1 ? '' : 's'} this sprint ·{' '}
-                      <span className="tabular-nums">{card.totalUntouched}</span> untouched
-                      {card.oldestUntouchedDays != null && card.totalUntouched > 0 && (
-                        <>
-                          , oldest{' '}
-                          <span className="tabular-nums">{card.oldestUntouchedDays}</span>d
-                        </>
-                      )}
-                    </div>
-                    <ul className="mt-2 space-y-1">
-                      {card.vendors.map((v) => {
-                        // v.kind is AutomatedReviewerKind (vendor / in_house / pierre) — the
-                        // kind-in-hand lookup handles all three.
-                        const meta = automatedReviewerMeta(v.kind);
-                        const pct = v.threads > 0 ? Math.round((v.actedOn / v.threads) * 100) : 0;
-                        return (
-                          <li key={v.kind} className="flex flex-wrap items-center gap-x-2 text-[11px]">
-                            <span
-                              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium"
-                              style={{ color: meta.color, background: `${meta.color}1a` }}
-                            >
-                              🤖 {meta.label}
-                            </span>
-                            <span className="tabular-nums text-gray-500">
-                              {v.threads} thread{v.threads === 1 ? '' : 's'}
-                            </span>
-                            <span className="text-gray-400">·</span>
-                            <span className="tabular-nums text-gray-500">{pct}% acted on</span>
-                            {v.untouched > 0 && (
-                              <span className="tabular-nums text-amber-600 dark:text-amber-400">
-                                · {v.untouched} untouched
-                              </span>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    <div className="mt-2 text-[11px] text-gray-400">
-                      “Acted on” = a later commit touched the flagged file (approximate).
-                      Deterministic across every repo + bot — no AI.
-                    </div>
-                  </CardShell>
-                );
-              case 'bot_only_review':
-                return (
-                  <BotOnlyReviewCardView
-                    key={card.id}
-                    card={card}
-                    innerRef={(el) => setCardRef(card.id, el)}
-                    flash={flashId === card.id}
-                    onOpen={open}
-                  />
-                );
-              default:
-                return null;
-            }
-          })}
-        </ul>
+        <RetroView />
       )}
     </div>
   );

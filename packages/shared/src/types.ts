@@ -220,8 +220,45 @@ export interface BotAnalyticsResponse {
   generatedAt: string;
   window: { kind: BotWindowKind; from: string; to: string };
   vendors: BotVendorAnalytics[];  // most-threads-first
-  totals: { threads: number; comments: number; actedOn: number; actedOnPct: number | null; untouched: number };
+  // `botOnlyPrs` = PRs in the account's repos in the window whose only review/comment touch was
+  // automated (incl. Pierre-verbatim) — no human review AND no human comment. See getBotVendorPrs.
+  totals: { threads: number; comments: number; actedOn: number; actedOnPct: number | null; untouched: number; botOnlyPrs: number };
   suggestions: BotTuningSuggestion[];  // WS6c, deterministic
+}
+
+// One PR row behind a vendor's Bot-ROI panel — the drill-down list of PRs an automated reviewer
+// KIND touched in the window (GET /api/bot-analytics/:kind/prs). Deterministic, no AI, account-
+// scoped; ordered most-recent-bot-activity first.
+export interface BotVendorPr {
+  prId: number;
+  repoId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  authorId: number | null;
+  state: PrState;
+  githubUrl: string;
+  ciStatus: CiStatus | null;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  openedAt: string; // ISO-8601
+  botThreads: number;   // review threads this vendor opened on the PR (in window)
+  botComments: number;  // review comments this vendor authored on the PR (in window)
+  botActedOn: number;   // of botThreads, acted-on (resolved | likely_addressed | human follow-up)
+  botUntouched: number; // of botThreads, still `untouched`
+  lastBotActivityAt: string | null; // ISO-8601 — max createdAt across this vendor's threads+comments
+  // This PR has automated touch and NO human review AND NO human comment since it opened.
+  botOnly: boolean;
+}
+
+export interface BotVendorPrsResponse {
+  enabled: boolean;
+  kind: AutomatedReviewerKind;
+  label: string;
+  window: { kind: BotWindowKind; from: string; to: string };
+  prs: BotVendorPr[]; // most-recent-bot-activity first
+  generatedAt: string;
 }
 
 // ── WS4 cross-bot dedup + consensus ─────────────────────────────────
@@ -2541,6 +2578,10 @@ export interface UntouchedThreadCard extends InsightCardBase, InsightPrRef {
   path: string;
   ageHours: number;
   originalCommenterId: number | null;
+  // When the thread's originalCommenter is an automated reviewer, the vendor kind + display label
+  // (so the card can show a bot pill). Undefined/null when a human opened the thread.
+  botKind?: AutomatedReviewerKind | null;
+  botLabel?: string | null;
 }
 
 export interface ReviewerLoadCard extends InsightCardBase {

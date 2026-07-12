@@ -4,6 +4,7 @@ import {
   EVENT_CATEGORY_BY_TYPE,
   PR_STATUSES,
   REVIEW_FILTER_STATES,
+  type AutomatedReviewerKind,
   type BotWindowKind,
   type DerivedState,
   type EventCategory,
@@ -150,6 +151,11 @@ export interface FilterState {
   // transient: a clicked flow-metric tile → which metric the drill-down tab should show.
   // Seeds/re-jumps the MetricsDetail sub-tab (the tab itself is a singleton). null = none.
   metricsFocus: TeamMetricKey | null;
+
+  // transient: a clicked Bot-ROI vendor row → which automated-reviewer kind the bot-PR
+  // drill-down tab should show. Seeds/re-jumps the BotPrsDetail sub-tab (the tab itself is a
+  // singleton). null = none.
+  botPrsFocus: AutomatedReviewerKind | null;
 
   // open PRs strip
   stripCollapsed: boolean;
@@ -321,6 +327,11 @@ export interface FilterState {
   // metricsFocus signal + opens the singleton metrics tab; MetricsDetail consumes it.
   openMetricsDetail: (metric: TeamMetricKey) => void;
   consumeMetricsFocus: () => void;
+  // Open (or re-focus) the bot-vendor PR drill-down tab on a specific automated-reviewer
+  // kind. Sets the botPrsFocus signal + opens the singleton bot-PRs tab; BotPrsDetail
+  // consumes it.
+  openBotPrsDetail: (kind: AutomatedReviewerKind) => void;
+  consumeBotPrsFocus: () => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
   // records the added repo id so the modal can scope to just that repo.
@@ -522,6 +533,7 @@ function freshDefaults(): FilterData {
     changesThreadFocus: null,
     aiFixTabFocus: null,
     metricsFocus: null,
+    botPrsFocus: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
@@ -702,6 +714,11 @@ export const useFilters = create<FilterState>((set, get) => ({
     usePinnedTabs.getState().openMetricsTab({ fromActivity: true });
   },
   consumeMetricsFocus: () => set({ metricsFocus: null }),
+  openBotPrsDetail: (kind) => {
+    set({ botPrsFocus: kind });
+    usePinnedTabs.getState().openBotPrsTab({ fromActivity: true });
+  },
+  consumeBotPrsFocus: () => set({ botPrsFocus: null }),
   requestSyncModal: (repoId: number) =>
     set((s) => ({ syncModalSignal: s.syncModalSignal + 1, syncModalRepoId: repoId })),
   bumpClaudeReviewKickoff: () =>

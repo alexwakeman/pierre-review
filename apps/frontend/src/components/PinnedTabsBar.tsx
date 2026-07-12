@@ -61,6 +61,49 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
     );
   }
 
+  // The bot-vendor PR drill-down is a non-PR, singleton tab — a compact chip (no PR meta).
+  if (tab.kind === 'bot-prs') {
+    return (
+      <div
+        role="presentation"
+        className={`group flex shrink-0 items-center gap-1 rounded-t-md border border-b-0 pl-2 pr-1 ${
+          active
+            ? 'border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950'
+            : 'border-transparent bg-transparent hover:bg-gray-200/60 dark:hover:bg-gray-800/60'
+        }`}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={active}
+          onClick={() => setActiveTab(tab.key)}
+          className="flex items-center gap-1.5 py-1.5 text-left"
+          title="Bot PRs — the PRs a review bot touched"
+        >
+          <span aria-hidden="true" className="shrink-0">
+            🤖
+          </span>
+          <span
+            className={`text-xs font-medium ${
+              active ? 'text-violet-600 dark:text-violet-400' : 'text-gray-600 dark:text-gray-300'
+            }`}
+          >
+            Bot PRs
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => closeTab(tab.key)}
+          className="shrink-0 self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+          title="Close this tab"
+          aria-label="Close bot-PRs tab"
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
+
   const isFocus = tab.kind === 'pr-focus';
   const meta = tab.meta;
   const author = meta?.authorDisplayName ?? meta?.authorLogin ?? 'unknown';

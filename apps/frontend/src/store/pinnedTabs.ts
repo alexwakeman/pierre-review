@@ -20,7 +20,8 @@ export type PinnedPr = TabMeta;
 //  - pr-detail: a PR rendered full-screen (PrDetail) over the warm board (today's "pinned PR")
 //  - pr-focus:  a PR's OWN isolated Timeline instance (replaces the old overlay focus mode)
 //  - metrics-detail: the flow-metric drill-down (a singleton, non-PR, EPHEMERAL tab)
-export type TabKind = 'pr-detail' | 'pr-focus' | 'metrics-detail';
+//  - bot-prs: the bot-vendor PR drill-down (a singleton, non-PR, EPHEMERAL tab)
+export type TabKind = 'pr-detail' | 'pr-focus' | 'metrics-detail' | 'bot-prs';
 
 export interface Tab {
   key: string; // stable: 'pr-detail:123' | 'pr-focus:123'
@@ -44,6 +45,10 @@ export const prFocusKey = (id: number): string => `pr-focus:${id}`;
 // transient `metricsFocus` signal (store/filters.ts), not the key. EPHEMERAL: excluded from
 // persistence (see `persist`) + not matched by parseTabKey, so a reload drops it.
 export const METRICS_TAB_KEY = 'metrics-detail';
+// The bot-vendor PR drill-down is likewise a SINGLETON, non-PR tab. Which vendor it shows is
+// driven by the transient `botPrsFocus` signal (store/filters.ts), not the key. EPHEMERAL:
+// excluded from persistence (see `persist`) + not matched by parseTabKey, so a reload drops it.
+export const BOT_PRS_TAB_KEY = 'bot-prs';
 
 /** Parse a Tab.key back into its kind + PR id (null for unknown). */
 export function parseTabKey(key: string): { kind: TabKind; prId: number } | null {
@@ -85,6 +90,7 @@ interface TabsState {
   openPrDetailTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-detail + activate
   openPrFocusTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-focus + activate
   openMetricsTab: (opts?: OpenOpts) => void; // ensure the singleton metrics drill-down + activate
+  openBotPrsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-vendor PR drill-down + activate
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
   closeTab: (key: string) => void; // remove; fall back to 'timeline' if it was active
@@ -170,7 +176,7 @@ function loadTabs(): Tab[] {
 
 function persist(tabs: Tab[]): void {
   try {
-    // Only PR-backed tabs persist; the singleton metrics drill-down is ephemeral.
+    // Only PR-backed tabs persist; the singleton metrics + bot-PRs drill-downs are ephemeral.
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify(tabs.filter((t) => t.kind === 'pr-detail' || t.kind === 'pr-focus')),
@@ -251,6 +257,8 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       openTab({ key: prFocusKey(meta.id), kind: 'pr-focus', prId: meta.id, meta }, opts),
     openMetricsTab: (opts) =>
       openTab({ key: METRICS_TAB_KEY, kind: 'metrics-detail', prId: 0, meta: null }, opts),
+    openBotPrsTab: (opts) =>
+      openTab({ key: BOT_PRS_TAB_KEY, kind: 'bot-prs', prId: 0, meta: null }, opts),
 
     syncMeta: (meta) =>
       set((s) => {

@@ -34,6 +34,12 @@ const priorityOf = (r: DigestPrRef): number => {
 const byPriority = (a: DigestPrRef, b: DigestPrRef): number =>
   priorityOf(b) - priorityOf(a);
 
+// Compact a diff count so a huge PR ("+30033 −6428") stays on one line inside the narrow Diff
+// column instead of overflowing into the Summary cell: 10k+ collapses to "30k", everything
+// smaller keeps its exact number. Defensive against non-finite input.
+const fmtDelta = (n: number): string =>
+  Number.isFinite(n) && n >= 10_000 ? `${Math.round(n / 1000)}k` : String(n ?? 0);
+
 interface Block {
   kind: 'headline' | 'header' | 'subhead' | 'prose' | 'prtable';
   text?: string; // headline / header / subhead / prose
@@ -75,7 +81,25 @@ function stripRefs(text: string, index: PrRefIndex): string {
       return ref?.prId != null ? '' : full; // strip resolved, keep unknown "#N"
     })
     .replace(/\s{2,}/g, ' ')
-    .replace(/^[\s:,.\-–—·•]+/, '')
+    // --- Dangling-list cleanup -----------------------------------------------------------
+    // Removing the resolved "#N" tokens can strand the list punctuation that joined them:
+    // "Three bumps in progress: #1, #2, and #3, all awaiting review" first becomes
+    // "Three bumps in progress: , , and , all awaiting review". These defensive passes repair
+    // that leftover punctuation so the narrative reads as a sentence again. They only touch
+    // separators / orphaned conjunctions, NEVER the unknown "#N" tokens we deliberately KEPT
+    // above (a kept ref still has real text around it — "#5, #6 both pending" — so no comma
+    // run collapses onto it). Order matters; each pass is idempotent and can't throw on odd input.
+    .replace(/\s*[,;](?:\s*[,;])+\s*/g, ', ') // collapse runs of commas/semicolons from adjacent removed refs
+    .replace(/,\s*(?:and|or)\s*,/gi, ',') // orphaned conjunction between two separators: ", and ," -> ","
+    .replace(/(^|[:,])\s*(?:and|or)\b\s*/gi, '$1 ') // stranded leading conjunction after start / ":" / ","
+    .replace(/\s+(?:and|or)\s*([,.;:])/gi, '$1') // stranded trailing conjunction before punctuation
+    .replace(/:\s*,/g, ':') // dangling ": ," left right after a colon
+    .replace(/\s+([,.;:])/g, '$1') // no space before punctuation
+    .replace(/,(?:\s*,)+/g, ',') // re-collapse any comma runs the passes above created
+    .replace(/[\s,;:]+([.!?])/g, '$1') // trailing ", ." / stray separators before a sentence-ender
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s:,.\-–—·•]+/, '') // strip the leading punctuation the ref usually sat behind
+    .replace(/[\s,;:]+$/, '') // strip a stray leading/trailing lone comma the removal left behind
     .trim();
   // Capitalise a leading lowercase letter so the remaining clause reads as a sentence
   // (leave @mentions, #refs and already-capitalised text untouched).
@@ -151,13 +175,15 @@ function PrTable({
           The sprint report emits one table per repo (separated by repo-name lines), so
           without this each repo's columns sized to its own content and the tables didn't
           line up — this makes them all align. */}
-      <table className="w-full min-w-[820px] table-fixed border-collapse text-[12px]">
+      <table className="w-full min-w-[852px] table-fixed border-collapse text-[12px]">
         <colgroup>
           <col style={{ width: '320px' }} />
           <col style={{ width: '24px' }} />
           <col style={{ width: '84px' }} />
           <col style={{ width: '110px' }} />
-          <col style={{ width: '72px' }} />
+          {/* Diff column: wide enough for "+30k −6428" (or a full 5-digit +/− pair) on one
+              nowrap line so a huge diff never overflows into the Summary cell. */}
+          <col style={{ width: '104px' }} />
           <col />
         </colgroup>
         <thead>
@@ -226,8 +252,8 @@ function PrTable({
                     </span>
                   </td>
                   <td className="whitespace-nowrap py-1 pr-2 text-[11px]">
-                    <span className="font-mono text-green-600 dark:text-green-400">+{pr.additions}</span>{' '}
-                    <span className="font-mono text-red-500 dark:text-red-400">−{pr.deletions}</span>
+                    <span className="font-mono text-green-600 dark:text-green-400">+{fmtDelta(pr.additions)}</span>{' '}
+                    <span className="font-mono text-red-500 dark:text-red-400">−{fmtDelta(pr.deletions)}</span>
                   </td>
                   {ri === 0 && (
                     <td
