@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReviewBotKind, ThreadDetail, User } from '@pierre-review/shared';
 import { reviewBotKind } from '@pierre-review/shared';
 import { useMyTurn } from '../../hooks/useTriage.js';
 import { useResolveBotThreads } from '../../hooks/usePrWrites.js';
+import { usePrBotDedup } from '../../hooks/useBotTriage.js';
 import { useFilters } from '../../store/filters.js';
-import { BOT_VENDOR_META } from '../../lib/ui.js';
+import { automatedReviewerMeta, BOT_VENDOR_META } from '../../lib/ui.js';
 import { FileGroup } from './FileGroup.js';
 
 interface FileBucket {
@@ -71,6 +72,18 @@ export function ThreadList({
     () => new Set((myTurn?.threadsAwaiting ?? []).map((t) => t.threadId)),
     [myTurn],
   );
+
+  // Cross-bot dedup: (path,line) spots where ≥2 automated reviewers of DISTINCT vendors
+  // both left a thread — the backend clusters + flags consensus/conflict; we surface a
+  // compact rollup so the reader sees "CodeRabbit + Copilot both flagged line 42" without
+  // scanning the whole file for the overlap. Account-scoped, deterministic (no AI).
+  const { data: dedup } = usePrBotDedup(prId ?? null);
+  const dedupClusters = dedup?.clusters ?? [];
+
+  // Jump to a clustered thread's row (rowRefs is populated by FileGroup, keyed by thread id).
+  const scrollToThread = (threadId: number): void => {
+    rowRefs.current.get(threadId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
 
   // Apply the vendor filter (Overview "Bots" chip → Threads tab scoped to that vendor).
   const shown = useMemo(
@@ -180,6 +193,71 @@ export function ThreadList({
         <div className="px-3 py-1.5 text-xs text-gray-500">
           Resolved {resolveBotThreads.data.resolved}
           {resolveBotThreads.data.failed > 0 && ` · ${resolveBotThreads.data.failed} failed`}.
+        </div>
+      )}
+
+      {/* Cross-bot dedup rollup — where ≥2 automated reviewers flagged the same spot. A PR-wide
+          signal (independent of the vendor filter): consensus (they agree) vs conflict (they
+          disagree). Each vendor chip jumps to its thread. */}
+      {dedupClusters.length > 0 && (
+        <div
+          data-testid="bot-dedup"
+          className="mx-3 my-2 rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2 text-xs dark:border-sky-800 dark:bg-sky-950/30"
+        >
+          <div className="mb-1.5 flex items-center gap-1.5 font-medium text-sky-800 dark:text-sky-200">
+            <span aria-hidden="true">🤖</span>
+            Multiple bots flagged the same {dedupClusters.length === 1 ? 'line' : 'lines'}
+          </div>
+          <ul className="space-y-1.5">
+            {dedupClusters.map((cluster, i) => {
+              const file = cluster.path.split('/').pop() ?? cluster.path;
+              const verb = cluster.members.length === 2 ? 'both flagged' : 'all flagged';
+              return (
+                <li
+                  key={`${cluster.path}:${cluster.line ?? 'x'}:${i}`}
+                  className="flex flex-wrap items-center gap-x-1.5 gap-y-1"
+                >
+                  {cluster.members.map((m, idx) => {
+                    const meta = automatedReviewerMeta(m.kind);
+                    return (
+                      <Fragment key={m.threadId}>
+                        {idx > 0 && <span className="text-gray-400">+</span>}
+                        <button
+                          type="button"
+                          onClick={() => scrollToThread(m.threadId)}
+                          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium hover:opacity-80"
+                          style={{ color: meta.color, background: `${meta.color}1a` }}
+                          title={`Jump to ${m.label}'s thread`}
+                        >
+                          {m.label}
+                        </button>
+                      </Fragment>
+                    );
+                  })}
+                  <span className="text-gray-600 dark:text-gray-300">
+                    {verb}{' '}
+                    <code className="font-mono">{file}</code>
+                    {cluster.line != null ? `:${cluster.line}` : ''}
+                  </span>
+                  {cluster.conflict ? (
+                    <span
+                      className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                      title="The bots disagree on severity/verdict here — worth a human look."
+                    >
+                      bots disagree here
+                    </span>
+                  ) : cluster.consensus ? (
+                    <span
+                      className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300"
+                      title="The bots agree here — one fix likely clears both."
+                    >
+                      consensus
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
 

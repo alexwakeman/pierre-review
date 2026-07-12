@@ -36,6 +36,15 @@ import type {
   AiUsageResponse,
   SprintReportResponse,
   RetroReportResponse,
+  BotWindowKind,
+  BotAnalyticsResponse,
+  BotDedupResponse,
+  BotMuteRule,
+  BotMuteRuleInput,
+  BotMuteRulesResponse,
+  DetectedReviewersResponse,
+  ReviewerClassification,
+  ReviewerOverrideBody,
   MeResponse,
   MergersResponse,
   MergePrBody,
@@ -442,5 +451,38 @@ export const api = {
   cancelAiFixPush: (fixId: number) =>
     fetch(`/api/pro/ai-fixes/${fixId}/push/cancel`, jsonBody('POST')).then((r) =>
       handle<{ status: string }>(r),
+    ),
+
+  // ---- Bot triage (CORE, deterministic, no AI) ----
+  // Every distinct reviewer in the account joined with its automated/human classification
+  // (manual override + auto), volume, and a sample review body — the Settings "Review bots"
+  // detected-reviewers table.
+  botReviewers: () => get<DetectedReviewersResponse>('/api/bot-reviewers'),
+  // Two-way manual override of a reviewer's classification (mark automated / not-a-bot).
+  // Returns the new classification.
+  setReviewerOverride: (userId: number, body: ReviewerOverrideBody) =>
+    fetch(`/api/bot-reviewers/${userId}`, jsonBody('PATCH', body)).then((r) =>
+      handle<ReviewerClassification>(r),
+    ),
+  // Per-vendor bot ROI / utilisation analytics over the chosen window (threads / acted-on %
+  // / untouched / verdict / trend). Cost fields come back null — the client overlays cost
+  // from /api/pro/settings `bots.cost`.
+  botAnalytics: (window: BotWindowKind) =>
+    get<BotAnalyticsResponse>(
+      `/api/bot-analytics?window=${encodeURIComponent(window)}`,
+    ),
+  // Cross-bot dedup + consensus/conflict clusters for a PR (≥2 automated reviewers of
+  // distinct kinds on the same path/line window).
+  prBotDedup: (prId: number) => get<BotDedupResponse>(`/api/prs/${prId}/bot-dedup`),
+  // Mute / auto-triage rules (hide or auto-resolve automated-bot threads by vendor / path /
+  // severity).
+  botMuteRules: () => get<BotMuteRulesResponse>('/api/bot-mute-rules'),
+  addBotMuteRule: (input: BotMuteRuleInput) =>
+    fetch('/api/bot-mute-rules', jsonBody('POST', input)).then((r) =>
+      handle<BotMuteRule>(r),
+    ),
+  deleteBotMuteRule: (id: number) =>
+    fetch(`/api/bot-mute-rules/${id}`, jsonBody('DELETE')).then((r) =>
+      handle<void>(r),
     ),
 };

@@ -195,6 +195,111 @@ async function proShots() {
     await ctx.close();
   });
 
+  // 7c. Bot ROI — the Pro "Review-bot ROI" panel in Insights: per-vendor signal-to-noise
+  // (threads · acted-on % · untouched), the keep/tune/kill verdict, the weekly-volume
+  // sparkline, and the deterministic tuning suggestions. Widen the window to 30d so the full
+  // seeded bot activity (CodeRabbit / Copilot / in-house acme-ci) lands in-frame.
+  await shot('bot-roi.png', async () => {
+    const ctx = await newCtx({ width: 1600, height: 1400 });
+    const page = await ctx.newPage();
+    await openApp(page, '?view=activity');
+    const panel = page.getByTestId('bot-roi-panel');
+    await panel.waitFor({ timeout: 8000 });
+    // Default window is 14d; widen to 30d so every seeded vendor's threads are in-window.
+    await panel
+      .getByRole('button', { name: '30d', exact: true })
+      .click({ timeout: 4000 })
+      .catch(() => {});
+    await page.waitForTimeout(1800); // analytics refetch + trend chart render
+    await panel.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    await panel.screenshot({ path: out('bot-roi.png') });
+    await ctx.close();
+  });
+
+  // 7d. Bot settings — Settings → the "Review bots" section: the detected-reviewers table,
+  // the in-house detection toggles + login allowlist, Pierre attribution, and the mute /
+  // auto-triage rules editor. Element shot of the whole control surface.
+  await shot('bot-settings.png', async () => {
+    const ctx = await newCtx({ width: 1600, height: 1400 });
+    const page = await ctx.newPage();
+    await openApp(page, '?view=activity');
+    await page.locator('button[aria-haspopup="menu"][title^="Signed in as"]').click();
+    await page.getByRole('menuitem', { name: 'Settings' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Settings' });
+    await dialog.waitFor({ timeout: 8000 });
+    const section = page.getByTestId('bot-settings-section');
+    await section.waitFor({ timeout: 8000 });
+    await page.waitForTimeout(1200); // detected-reviewers query + settings load
+    await section.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    await section.screenshot({ path: out('bot-settings.png') });
+    await ctx.close();
+  });
+
+  // 7e. Bot dedup — where ≥2 automated reviewers flagged the SAME spot. Open #113, switch to
+  // the Threads tab: the sky-bordered "Multiple bots flagged the same lines" rollup
+  // (consensus vs conflict) sits above the grouped threads. CodeRabbit + Copilot overlap here.
+  await shot('bot-dedup.png', async () => {
+    const ctx = await newCtx({ width: 1600, height: 1200 }, 2, 920);
+    const page = await ctx.newPage();
+    await openApp(page, '?pr=113');
+    const pane = page.getByTestId('detail-pane');
+    await pane.waitFor({ timeout: 8000 });
+    // The Threads tab button carries a trailing count span, so match its accessible name by
+    // prefix rather than exact text.
+    await pane.getByRole('button', { name: /^Threads/ }).first().click({ timeout: 4000 });
+    await page.waitForTimeout(1500); // threads group + dedup rollup render
+    const dedup = pane.getByTestId('bot-dedup');
+    await dedup.waitFor({ timeout: 8000 });
+    await dedup.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    await pane.screenshot({ path: out('bot-dedup.png') });
+    await ctx.close();
+  });
+
+  // 7f. Only bots reviewed — a PR whose every review came from an automated reviewer, no human
+  // yet. #116 was approved only by the in-house `acme-ci` agent → the amber "🤖 only bots
+  // reviewed" coverage caution in the Overview. Screenshot the pane once the badge is present.
+  await shot('bot-only-review.png', async () => {
+    const ctx = await newCtx({ width: 1600, height: 1200 }, 2, 920);
+    const page = await ctx.newPage();
+    await openApp(page, '?pr=116');
+    const pane = page.getByTestId('detail-pane');
+    await pane.waitFor({ timeout: 8000 });
+    const badge = pane.getByTestId('only-bots-reviewed');
+    await badge.waitFor({ timeout: 8000 });
+    await badge.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(400);
+    await pane.screenshot({ path: out('bot-only-review.png') });
+    await ctx.close();
+  });
+
+  // 7g. In-house detection — the Settings "Detected reviewers" table with the plain-User
+  // `acme-ci` service account fingerprinted + tagged "In-house AI" (a manual override, so it
+  // shows the "manual" flag). Element shot of just that table section.
+  await shot('bot-inhouse.png', async () => {
+    const ctx = await newCtx({ width: 1600, height: 1400 });
+    const page = await ctx.newPage();
+    await openApp(page, '?view=activity');
+    await page.locator('button[aria-haspopup="menu"][title^="Signed in as"]').click();
+    await page.getByRole('menuitem', { name: 'Settings' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Settings' });
+    await dialog.waitFor({ timeout: 8000 });
+    // The detected-reviewers table is a <section> headed "Detected reviewers".
+    const table = dialog
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Detected reviewers' }) })
+      .first();
+    await table.waitFor({ timeout: 8000 });
+    await dialog.getByText('acme-ci', { exact: false }).first().waitFor({ timeout: 8000 });
+    await page.waitForTimeout(600);
+    await table.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    await table.screenshot({ path: out('bot-inhouse.png') });
+    await ctx.close();
+  });
+
   // 8. Claude Review — the findings tab of #113, focused on the (taller) detail pane.
   await shot('claude-review.png', async () => {
     const ctx = await newCtx({ width: 1600, height: 1200 }, 2, 920);

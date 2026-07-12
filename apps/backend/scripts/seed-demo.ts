@@ -104,10 +104,22 @@ await db
     // so the demo shows "the calm layer above your review bot": the PrDetail bot chip, the
     // feed bot lens + vendor tag, and the Insights bot signal-to-noise card.
     { id: 8, githubLogin: 'coderabbitai', githubNodeId: 'U_coderabbit', displayName: 'CodeRabbit', isBot: true },
+    // A SECOND vendor review bot (login classified by reviewBotKind → vendor 'copilot'),
+    // githubType 'Bot'. Drives the cross-bot DEDUP demo on #113 (Copilot + CodeRabbit both
+    // flag the same lines) and a distinct vendor slice in the Bot-ROI analytics.
+    { id: 9, githubLogin: 'copilot-pull-request-reviewer', githubNodeId: 'U_copilot', displayName: 'Copilot', isBot: true, githubType: 'Bot' },
+    // An IN-HOUSE review agent posing as a plain User (isBot:false, githubType 'User', NOT a
+    // known vendor login). It's detected as 'in_house' by the review-body FINGERPRINT (a
+    // "## Summary by Acme CI" banner + a uniform ⚠️/🛠️/🧹 severity taxonomy) and confirmed by
+    // a manual classification override — so the demo shows in-house / allowlist detection,
+    // not just vendor-login matching.
+    { id: 10, githubLogin: 'acme-ci', githubNodeId: 'U_acmeci', displayName: 'Acme CI', isBot: false, githubType: 'User' },
   ])
   .execute();
 
 const CODERABBIT = 8;
+const COPILOT = 9;
+const ACME_CI = 10;
 
 // ---- repos -----------------------------------------------------------------
 const WEB = 1;
@@ -368,6 +380,41 @@ const THREADS: ThreadSeed[] = [
       { author: 2, body: 'Acknowledged — not worth an index here.', daysAgo: 2.2 },
     ],
   },
+  // Copilot (a SECOND vendor review bot) left its own inline comments on #113 — the exact
+  // cross-bot overlap Pierre triages. TWO of them land on the SAME (path,line) as a
+  // CodeRabbit thread → the WS4 dedup rollup "2 bots flagged this line":
+  //   • thread 20 @ src/db/queries.ts:318 == CodeRabbit thread 6 (both "potential issue") →
+  //     a CONSENSUS cluster.
+  //   • thread 21 @ src/sync/upsert.ts:60 == CodeRabbit thread 10 (refactor vs nitpick) →
+  //     a CONFLICT cluster (the bots disagree on severity).
+  // The other two are standalone, with a mix of derivedState so Copilot's acted-on rate
+  // differs from CodeRabbit's in the Bot-ROI panel.
+  {
+    id: 20, path: 'src/db/queries.ts', line: 318, resolved: false, derived: 'likely_addressed', opener: COPILOT, createdDaysAgo: 2.2,
+    comments: [
+      { author: COPILOT, body: '**Potential issue** — `botUserIds()` scans the whole users table on every feed request. Consider caching the id set or gating it behind `excludeBots`.', daysAgo: 2.2 },
+    ],
+  },
+  {
+    id: 21, path: 'src/sync/upsert.ts', line: 60, resolved: false, derived: 'untouched', opener: COPILOT, createdDaysAgo: 2.2,
+    comments: [
+      { author: COPILOT, body: '🧹 Nitpick — this cast is redundant; the value is already typed as `BotId` at this point.', daysAgo: 2.2 },
+    ],
+  },
+  {
+    id: 22, path: 'src/api/routes/timeline.ts', line: 44, resolved: false, derived: 'replied_unresolved', opener: COPILOT, createdDaysAgo: 2.1,
+    comments: [
+      { author: COPILOT, body: '**Suggestion** — the `from`/`to` bounds are parsed twice; hoist the parse above the query builder.', daysAgo: 2.1 },
+      { author: ME, body: 'Fair — will fold that in with the next pass.', daysAgo: 1.8 },
+    ],
+  },
+  {
+    id: 23, path: 'src/db/queries.ts', line: 12, resolved: true, derived: 'resolved', opener: COPILOT, createdDaysAgo: 2.3,
+    comments: [
+      { author: COPILOT, body: '🛠️ Refactor — this import block can be collapsed now that `sql` is unused.', daysAgo: 2.3 },
+      { author: 2, body: 'Done — dropped the dead import.', daysAgo: 2.0 },
+    ],
+  },
 ];
 
 await db
@@ -480,8 +527,88 @@ const staleCommentRows = STALE_THREADS.flatMap((t) =>
 );
 await db.insert(schema.reviewComments).values(staleCommentRows).execute();
 
+// ---- cross-PR bot-triage threads (ids 30+) ---------------------------------
+// Two automated-reviewer surfaces that live on OTHER PRs than #113:
+//   • Acme CI (in-house, id 10) left 3 inline notes on #116 (acme/infrastructure) whose
+//     bodies carry a uniform ⚠️/🛠️/🧹 severity taxonomy → the review-body FINGERPRINT
+//     classifies it 'in_house'. Combined with its approval (REVIEWS #25, no human review)
+//     #116 becomes the "only a bot reviewed this" example.
+//   • CodeRabbit left one OLD (>7d) likely_addressed thread on the stale #141 (acme/api) →
+//     an auto-resolve CANDIDATE for the seeded 'auto_resolve' mute rule (7-day age gate).
+// Own id band (threads 30+, comments 400+) clear of the #113 (1–23), stale (300+) and
+// history (≥5000) ranges. Each row carries repoId so the review_comment events below
+// attribute to the right repo/PR (the #113 loop hardcodes prId 113).
+interface BotThreadSeed {
+  id: number; prId: number; repoId: number; path: string; line: number; resolved: boolean;
+  derived: 'resolved' | 'likely_addressed' | 'replied_unresolved' | 'untouched';
+  opener: number; createdDaysAgo: number;
+  comments: { author: number; body: string; daysAgo: number }[];
+}
+const BOT_THREADS: BotThreadSeed[] = [
+  {
+    id: 30, prId: 116, repoId: INFRA, path: 'terraform/eks/node-groups.tf', line: 22, resolved: false, derived: 'likely_addressed', opener: ACME_CI, createdDaysAgo: 3.2,
+    comments: [{ author: ACME_CI, body: '⚠️ Potential issue — `min_size` (6) exceeds `max_size` (4); Terraform rejects the inverted range before it can plan.', daysAgo: 3.2 }],
+  },
+  {
+    id: 31, prId: 116, repoId: INFRA, path: 'terraform/eks/node-groups.tf', line: 40, resolved: false, derived: 'untouched', opener: ACME_CI, createdDaysAgo: 3.2,
+    comments: [{ author: ACME_CI, body: '🛠️ Refactor — extract the repeated `scaling_config` block into a shared module so the bounds live in one place.', daysAgo: 3.2 }],
+  },
+  {
+    id: 32, prId: 116, repoId: INFRA, path: 'modules/monitoring/alarms.tf', line: 15, resolved: false, derived: 'replied_unresolved', opener: ACME_CI, createdDaysAgo: 3.3,
+    comments: [
+      { author: ACME_CI, body: '🧹 Nitpick — align the alarm-threshold constants for readability.', daysAgo: 3.3 },
+      { author: 5, body: 'Will tidy in a follow-up.', daysAgo: 2.9 },
+    ],
+  },
+  {
+    id: 40, prId: 141, repoId: API, path: 'src/sync/scheduler.ts', line: 120, resolved: false, derived: 'likely_addressed', opener: CODERABBIT, createdDaysAgo: 22,
+    comments: [{ author: CODERABBIT, body: '_🛠️ Refactor suggestion_ — the retry backoff duplicates the sync-loop helper; extract a shared `withBackoff` wrapper.', daysAgo: 22 }],
+  },
+];
+await db
+  .insert(schema.reviewThreads)
+  .values(
+    BOT_THREADS.map((t) => ({
+      id: t.id,
+      githubNodeId: `RT_${t.id}`,
+      prId: t.prId,
+      path: t.path,
+      line: t.line,
+      isResolved: t.resolved,
+      isOutdated: false,
+      derivedState: t.derived,
+      originalCommenterId: t.opener,
+      createdAt: day(t.createdDaysAgo),
+    })),
+  )
+  .execute();
+let botCommentId = 400;
+const botCommentRows = BOT_THREADS.flatMap((t) =>
+  t.comments.map((c) => ({
+    id: botCommentId,
+    githubNodeId: `RC_${botCommentId++}`,
+    threadId: t.id,
+    prId: t.prId,
+    repoId: t.repoId,
+    authorId: c.author,
+    body: c.body,
+    excerpt: c.body.length > 160 ? `${c.body.slice(0, 159)}…` : c.body,
+    diffHunk: `@@ -${t.line},3 +${t.line},4 @@`,
+    databaseId: `${1_300_000 + t.id * 10}`,
+    createdAt: day(c.daysAgo),
+  })),
+);
+await db
+  .insert(schema.reviewComments)
+  .values(botCommentRows.map(({ repoId: _repoId, ...rest }) => rest))
+  .execute();
+
 // ---- reviews (approvers + review markers) ----------------------------------
-interface ReviewSeed { id: number; prId: number; author: number; state: 'approved' | 'changes_requested' | 'commented'; daysAgo: number; body?: string }
+// Claude's #113 review summary — extracted so the SAME string is both the read-only
+// claudeReviews.summary AND the userBody Morgan posted (→ provenance 'ai_verbatim').
+const CLAUDE_113_SUMMARY =
+  'The transaction refactor is mostly solid. Two issues worth addressing before merge: the per-row inserts in `upsert.ts` should be batched, and a follow-up write escapes the transaction so a mid-run crash can half-persist a PR. The rest are nits and a question about indexing.';
+interface ReviewSeed { id: number; prId: number; author: number; state: 'approved' | 'changes_requested' | 'commented'; daysAgo: number; body?: string; databaseId?: string }
 const REVIEWS: ReviewSeed[] = [
   { id: 1, prId: 102, author: 4, state: 'approved', daysAgo: 3, body: 'LGTM — clean extraction.' },
   { id: 2, prId: 104, author: 1, state: 'approved', daysAgo: 4, body: 'Nice, the cache is a big win.' },
@@ -512,6 +639,22 @@ const REVIEWS: ReviewSeed[] = [
   // CodeRabbit's top-level review on #113 (it posts a COMMENTED review + inline threads) —
   // gives the feed a "CodeRabbit reviewed" row with the vendor tag.
   { id: 23, prId: 113, author: CODERABBIT, state: 'commented', daysAgo: 2.3, body: '**CodeRabbit summary** — 6 comments across 4 files. 2 potential issues, 2 refactor suggestions, 2 nitpicks. See the inline threads.' },
+  // Copilot's top-level review on #113 (COMMENTED; pairs with its inline dedup threads 20–23).
+  { id: 24, prId: 113, author: COPILOT, state: 'commented', daysAgo: 2.2, body: '**Copilot review** — a few suggestions inline on the query and upsert paths.' },
+  // Acme CI's review on #116 — an APPROVAL carrying a fingerprintable in-house banner
+  // (🤖 "generated by an AI review agent"). It is #116's ONLY review (no human), which
+  // drives the "only a bot reviewed this" governance card + the ChecksTab caution.
+  { id: 25, prId: 116, author: ACME_CI, state: 'approved', daysAgo: 3.1, body: [
+    '## Summary by Acme CI',
+    '',
+    '🤖 Automated review · generated by an AI review agent.',
+    '',
+    'Scanned 2 files · 3 findings (1 potential issue, 1 refactor, 1 nitpick). See the inline comments.',
+  ].join('\n') },
+  // Morgan POSTED Pierre's Claude review on #113 VERBATIM — its databaseId matches
+  // claudeReviews(id 1).postedReviewId, so getReviewerProvenanceForPr resolves this review
+  // to "Pierre · Claude · verbatim" on the ChecksTab Reviewers list (userBody===summary).
+  { id: 26, prId: 113, author: ME, state: 'commented', daysAgo: 0.012, databaseId: 'PRR_demo113', body: CLAUDE_113_SUMMARY },
 ];
 await db
   .insert(schema.reviews)
@@ -523,7 +666,7 @@ await db
       authorId: r.author,
       state: r.state,
       body: r.body ?? null,
-      databaseId: `${2_000_000 + r.id}`,
+      databaseId: r.databaseId ?? `${2_000_000 + r.id}`,
       submittedAt: day(r.daysAgo),
     })),
   )
@@ -586,6 +729,9 @@ for (const rc of staleCommentRows) {
   const pr = prRows.find((p) => p.id === rc.prId)!;
   ev(pr.repoId, rc.authorId, rc.prId, 'review_comment', rc.createdAt, 'review_threads', rc.threadId);
 }
+for (const rc of botCommentRows) {
+  ev(rc.repoId, rc.authorId, rc.prId, 'review_comment', rc.createdAt, 'review_threads', rc.threadId);
+}
 ev(API, 4, 113, 'pr_comment', day(1), 'pr_comments', 1);
 ev(API, 1, 105, 'pr_comment', day(1), 'pr_comments', 2);
 ev(INFRA, 1, 114, 'pr_comment', day(0.9), 'pr_comments', 3);
@@ -602,9 +748,15 @@ await db
     status: 'succeeded',
     model: 'claude-sonnet-5',
     scope: 'diff_only',
-    summary:
-      'The transaction refactor is mostly solid. Two issues worth addressing before merge: the per-row inserts in `upsert.ts` should be batched, and a follow-up write escapes the transaction so a mid-run crash can half-persist a PR. The rest are nits and a question about indexing.',
+    summary: CLAUDE_113_SUMMARY,
     verdict: 'COMMENT',
+    // Morgan POSTED this run to GitHub, keeping Claude's summary VERBATIM (userBody ===
+    // summary) → provenance 'ai_verbatim'. postedReviewId matches REVIEWS #26's databaseId,
+    // so getReviewerProvenanceForPr joins them and lights up the ChecksTab badge.
+    userBody: CLAUDE_113_SUMMARY,
+    userVerdict: 'COMMENT',
+    postedReviewId: 'PRR_demo113',
+    postedAt: min(17),
     costUsd: 0.0842,
     inputTokens: 48213,
     outputTokens: 3104,
@@ -623,6 +775,35 @@ await db
     { id: 3, reviewId: 1, path: 'src/db/queries.ts', line: 210, side: 'RIGHT', severity: 'nit', title: 'Name the magic interval', body: 'The literal `5 * 60 * 1000` appears here and in `scheduler.ts`. Extract a shared `SYNC_INTERVAL_MS` constant.', anchored: true, included: false },
     { id: 4, reviewId: 1, path: 'src/db/queries.ts', line: 224, side: 'RIGHT', severity: 'question', title: 'Is the correlated EXISTS indexed?', body: 'On large `events` tables this `EXISTS` could scan. Is `events(pr_id, actor_id)` covered by an index?', anchored: true, included: false },
     { id: 5, reviewId: 1, path: 'README.md', line: null, side: 'RIGHT', severity: 'praise', title: 'Good fixture coverage', body: 'Nice fixture-based tests for the new transaction path — they make the behaviour change easy to verify.', anchored: false, included: false },
+  ])
+  .execute();
+
+// ---- bot-triage: manual classification override + mute/auto-triage rules ----
+// A MANUAL override tags Acme CI (id 10) as an in-house AI reviewer, so it shows as a
+// confirmed manual row in the Settings "Review bots" table AND joins the account's
+// automated set (analytics / dedup / bot_only_review) even though its login is not a known
+// vendor. Two rules follow: a 'hide' rule muting Copilot nitpicks under tests/, and an
+// 'auto_resolve' rule (7-day age gate) the standing job uses to clear old likely_addressed
+// CodeRabbit threads (→ #141's thread 40, ~22d old, is a candidate). Both tables are CORE.
+await db
+  .insert(schema.botReviewClassification)
+  .values({
+    accountId: 1,
+    authorUserId: ACME_CI,
+    automated: true,
+    kind: 'in_house',
+    label: 'In-house AI',
+    confidence: 'high',
+    source: 'manual',
+    reasonsJson: ['manually confirmed as the in-house Acme CI review agent'],
+    updatedAt: now,
+  })
+  .execute();
+await db
+  .insert(schema.botMuteRules)
+  .values([
+    { accountId: 1, vendorKind: 'copilot', pathGlob: '**/tests/**', severity: 'nitpick', action: 'hide', autoResolveDays: null, createdAt: day(2) },
+    { accountId: 1, vendorKind: 'coderabbit', pathGlob: null, severity: null, action: 'auto_resolve', autoResolveDays: 7, createdAt: day(2) },
   ])
   .execute();
 
@@ -1287,14 +1468,23 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
       `INSERT INTO pro_settings (account_id, sprint_cadence_days, sprint_start_at,
          slack_webhook_url, slack_cadence, slack_hour1, slack_hour2, slack_timezone,
          ai_update_mode, ai_interval_minutes, issue_provider, issue_base_url,
+         bot_inhouse_detect, bot_auto_tag, bot_login_allowlist, bot_deep_detect,
+         bot_ai_tiebreak, bot_tag_pierre, bot_pierre_footer, bot_slack_digest,
+         bot_auto_resolve, bot_auto_resolve_days, bot_cost_json,
          created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       1, 14, sec(sprintStart),
       'https://hooks.slack.com/services/T0000000/B0000000/demoDemoDemoDemoDemoDemo',
       'daily', 9, 16, 'Europe/London',
       'manual', 30, 'jira', 'https://acme.atlassian.net',
+      // bots: in-house detection ON, auto-tag high-confidence ON, allowlist matches acme-ci,
+      // deep-detect + AI tie-break OFF, Pierre marker + footer ON, Slack bot digest ON,
+      // standing auto-resolve ON at a 7-day gate, per-vendor monthly cost for the ROI panel.
+      1, 1, 'acme-ci,*-ci', 0,
+      0, 1, 1, 1,
+      1, 7, '[{"kind":"coderabbit","monthlyUsd":30},{"kind":"copilot","monthlyUsd":19}]',
       hoursAgo(48), hoursAgo(2),
     );
 
@@ -1527,6 +1717,8 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
 console.log('Seeded demo data into', config.dbPath);
 console.log('  repos: acme/web-app (1), acme/api (2), acme/infrastructure (3)');
 console.log('  me: Morgan Diaz (account 1 → users.id 1)');
+console.log('  bot-triage: CodeRabbit(8) + Copilot(9) vendors, Acme CI(10) in-house (manual);');
+console.log('    #113 Copilot/CodeRabbit dedup, #116 bot-only review, mute + auto_resolve rules');
 console.log('  PR-detail / Claude shot: ?pr=113 · AI-fix shot: ?pr=114 (failing CI)');
 console.log('  curated PRs:', PRS.length, `(ids 101–116 recent + 120–134 mid-range + 140–142 stale)`);
 console.log('  open PRs:', prRows.filter((p) => p.state === 'open').map((p) => p.id).join(', '));

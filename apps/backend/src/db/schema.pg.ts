@@ -114,6 +114,10 @@ export const users = pgTable('users', {
   avatarUrl: text('avatar_url'),
   isBot: boolean('is_bot').notNull().default(false),
   isBotOverridden: boolean('is_bot_overridden').notNull().default(false),
+  // GitHub GraphQL __typename of the actor, captured during sync — the pg twin of
+  // schema.sqlite.ts. Plain text (no enum), nullable, GLOBAL. Feeds the bot-triage
+  // classifier. Kept in sync by hand (schema-parity.test.ts).
+  githubType: text('github_type'),
 });
 
 export const pullRequests = pgTable(
@@ -581,4 +585,55 @@ export const claudeReviewFindings = pgTable(
       .defaultNow(),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
+);
+
+// ---- Bot-Triage Platform (WS1 / WS6) ----
+// Account-scoped classification cache for automated reviewers — the pg twin of
+// schema.sqlite.ts botReviewClassification. Kept in sync by hand (schema-parity.test.ts).
+export const botReviewClassification = pgTable(
+  'bot_review_classification',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    authorUserId: integer('author_user_id')
+      .notNull()
+      .references(() => users.id),
+    automated: boolean('automated').notNull(),
+    kind: text('kind'), // AutomatedReviewerKind | null
+    label: text('label'),
+    confidence: text('confidence').notNull(), // 'high'|'medium'|'low'
+    source: text('source').notNull(), // ClassificationSource
+    reasonsJson: jsonb('reasons_json').$type<string[]>(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountUx: uniqueIndex('brc_account_author').on(t.accountId, t.authorUserId),
+  }),
+);
+
+// Account-scoped mute / auto-triage rules — the pg twin of schema.sqlite.ts
+// botMuteRules. Kept in sync by hand (schema-parity.test.ts).
+export const botMuteRules = pgTable(
+  'bot_mute_rules',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    vendorKind: text('vendor_kind'),
+    pathGlob: text('path_glob'),
+    severity: text('severity'),
+    action: text('action').notNull(), // 'hide'|'auto_resolve'
+    autoResolveDays: integer('auto_resolve_days'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountIdx: index('bmr_account_idx').on(t.accountId),
+  }),
 );

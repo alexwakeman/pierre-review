@@ -87,9 +87,27 @@ import type {
   ConsolidatedFeedResponse,
   FeedAffectedThread,
   MyTurnPr,
-  ReviewBotKind,
   BotSignalCard,
   BotSignalVendorStat,
+  AutomatedReviewerKind,
+  ReviewerClassification,
+  ReviewerOverrideBody,
+  DetectedReviewer,
+  DetectedReviewersResponse,
+  ReviewProvenance,
+  BotWindowKind,
+  BotVerdict,
+  BotVendorTrendPoint,
+  BotVendorAnalytics,
+  BotAnalyticsResponse,
+  BotDedupMember,
+  BotDedupCluster,
+  BotDedupResponse,
+  BotMuteRule,
+  BotMuteRuleInput,
+  BotMuteAction,
+  BotTuningSuggestion,
+  BotOnlyReviewCard,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -120,6 +138,14 @@ import {
 import { getAccountUserId } from '../auth/account.js';
 import { ensureRoutingPrFiles } from '../sync/routing-files.js';
 import { reviewBotKind, reviewBotLogins } from '../sync/bot-detection.js';
+import {
+  classifyReviewer,
+  labelFor as labelForKind,
+  rowToClassification,
+  type ReviewerEvidence,
+} from '../sync/reviewer-classify.js';
+import { computeBehavioralSignals } from '../sync/reviewer-behavior.js';
+import { fingerprintReview } from '../sync/review-fingerprint.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
 // timestamptz (drizzle binds the Date through the codec), whereas SQLite columns
@@ -146,6 +172,8 @@ const {
   claudeReviews,
   claudeReviewFindings,
   ciStatusEvents,
+  botReviewClassification,
+  botMuteRules,
 } = schema;
 
 function iso(d: Date | null): string | null {
@@ -1530,7 +1558,7 @@ export async function getActivity(
   // when the account runs no review bot — the headline stat then simply doesn't render.
   const botThreadCountsByPr = await buildBotThreadCounts(
     openPrs.map((pr) => pr.id),
-    await reviewBotUserIds(),
+    await automatedReviewerUserIds(accountId),
   );
 
   // Preserve listRepos order (stable, not jumpy across loads).
@@ -2699,10 +2727,11 @@ export async function getTeamInsights(
   const finish = async (): Promise<TeamInsightsResponse> => {
     const kindRank: Record<InsightKind, number> = {
       bot_signal: 0, // the flagship "layer above your review bot" summary, leads its severity tier
-      stalled_review: 1,
-      untouched_thread: 2,
-      reviewer_load: 3,
-      reviewer_routing: 4,
+      bot_only_review: 1, // the governance "only a bot reviewed this" risk, right after
+      stalled_review: 2,
+      untouched_thread: 3,
+      reviewer_load: 4,
+      reviewer_routing: 5,
     };
     const sevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
     cards.sort(
@@ -2726,21 +2755,22 @@ export async function getTeamInsights(
 
   // ── bot_signal card (deterministic, no AI) ──────────────────────────────────
   // The un-copyable cross-repo, cross-bot "signal-to-noise" view: over the sprint window,
-  // how many review threads each AI review bot opened, what share a later commit acted on,
-  // and how much untouched backlog is piling up. Computed here (BEFORE the open-PR guard)
+  // how many review threads each automated reviewer opened, what share a later commit acted
+  // on, and how much untouched backlog is piling up. Computed here (BEFORE the open-PR guard)
   // so it counts bot threads on merged PRs too — "this sprint's" volume, not just open work.
+  // Grouped by AutomatedReviewerKind (vendors AND in-house-classified reviewers).
   {
-    const botIds = await reviewBotUserIds();
+    const botIds = await automatedReviewerUserIds(accountId);
     if (botIds.length > 0) {
+      const kindMap = await classificationKindForUser(accountId);
       const rows = await db
         .select({
-          login: users.githubLogin,
+          userId: reviewThreads.originalCommenterId,
           state: reviewThreads.derivedState,
           createdAt: reviewThreads.createdAt,
         })
         .from(reviewThreads)
         .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
-        .innerJoin(users, eq(users.id, reviewThreads.originalCommenterId))
         .where(
           and(
             eq(pullRequests.accountId, accountId),
@@ -2753,10 +2783,10 @@ export async function getTeamInsights(
         .execute();
 
       type Agg = { threads: number; actedOn: number; untouched: number; oldestUntouchedMs: number | null };
-      const byVendor = new Map<ReviewBotKind, Agg>();
+      const byVendor = new Map<AutomatedReviewerKind, Agg>();
       for (const r of rows) {
-        const kind = reviewBotKind(r.login);
-        if (!kind) continue; // login matched by id but not a review vendor — skip defensively
+        const kind = r.userId == null ? undefined : kindMap.get(r.userId);
+        if (!kind) continue; // originator matched by id but unclassified — skip defensively
         const v = byVendor.get(kind) ?? { threads: 0, actedOn: 0, untouched: 0, oldestUntouchedMs: null };
         v.threads += 1;
         if (r.state === 'resolved' || r.state === 'likely_addressed') v.actedOn += 1;
@@ -2802,6 +2832,36 @@ export async function getTeamInsights(
         };
         cards.push(card);
       }
+    }
+  }
+
+  // ── bot_only_review card (WS7, deterministic, no AI) ────────────────────────
+  // "Only a bot reviewed this" — PRs (merged, or open-and-mergeable) in the team's repos
+  // whose ONLY reviews came from automated reviewers (incl. Pierre-verbatim) with no human
+  // review. Computed here (BEFORE the open-PR guard) like bot_signal so merged PRs count.
+  {
+    const botOnly = await getBotOnlyReviewPrs(accountId, repoIds, {
+      from: sprintFrom,
+      to: sprintTo,
+    });
+    if (botOnly.length > 0) {
+      for (const p of botOnly) addUser(p.authorId);
+      const card: BotOnlyReviewCard = {
+        id: 'bot_only_review',
+        kind: 'bot_only_review',
+        // Governance/trust hook — a rubber-stamping-fatigue caution, never "high".
+        severity: 'warn',
+        prs: botOnly.map((p) => ({
+          prId: p.prId,
+          number: p.number,
+          title: p.title,
+          repoFullName: p.repoFullName,
+          botLabel: p.botLabel,
+          state: p.state,
+          githubUrl: p.githubUrl,
+        })),
+      };
+      cards.push(card);
     }
   }
 
@@ -4466,14 +4526,33 @@ export async function getPrDetail(
     };
   });
 
-  const reviewsOut: ReviewDetail[] = reviewRows.map((r) => ({
-    id: r.id,
-    authorId: r.authorId,
-    state: r.state as ReviewState,
-    body: r.body,
-    submittedAt: r.submittedAt.toISOString(),
-    url: r.databaseId ? `${prUrl}#pullrequestreview-${r.databaseId}` : null,
-  }));
+  // Bot-triage provenance (compute-on-read): which reviews were posted by an automated
+  // reviewer. Pierre-posted reviews come from the claudeReviews join (§2f, keyed by
+  // reviews.id → {kind:'pierre', provenance}); other automated reviewers come from the
+  // per-account classification map (keyed by the review author's user id). Pierre wins
+  // when both apply. The human who posted a Pierre review is NEVER reclassified — the
+  // 'pierre' kind lives only on the review row.
+  const [provenanceByReview, prClassKind] = await Promise.all([
+    getReviewerProvenanceForPr(accountId, id),
+    classificationKindForUser(accountId),
+  ]);
+  const reviewsOut: ReviewDetail[] = reviewRows.map((r) => {
+    const pierre = provenanceByReview.get(r.id);
+    const authorKind = r.authorId == null ? undefined : prClassKind.get(r.authorId);
+    const automatedKind: AutomatedReviewerKind | null = pierre
+      ? 'pierre'
+      : (authorKind ?? null);
+    return {
+      id: r.id,
+      authorId: r.authorId,
+      state: r.state as ReviewState,
+      body: r.body,
+      submittedAt: r.submittedAt.toISOString(),
+      url: r.databaseId ? `${prUrl}#pullrequestreview-${r.databaseId}` : null,
+      automatedKind,
+      provenance: pierre ? pierre.provenance : null,
+    };
+  });
 
   const commentsOut: PrCommentDetail[] = prCommentRows.map((c) => ({
     id: c.id,
@@ -5071,7 +5150,7 @@ export async function getResolvableBotThreads(
   accountId: number,
   threadIds: number[] | null = null,
 ): Promise<{ id: number; threadNodeId: string }[]> {
-  const botIds = await reviewBotUserIds();
+  const botIds = await automatedReviewerUserIds(accountId);
   if (botIds.length === 0) return [];
   const preds = [
     eq(reviewThreads.prId, prId),
@@ -5453,4 +5532,1066 @@ export async function upsertLocalReview(
       .execute()
   )[0]!;
   return row.id;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Bot-Triage Platform — the CORE read layer (WS1–WS7; deterministic, NO AI here).
+// Every getter is account-scoped; id-addressed ones verify ownership → null/false.
+// Shared helpers below reuse the module-private emptyCounts/mapUser/reviewBotUserIds.
+// ════════════════════════════════════════════════════════════════════════════
+
+// The ACCOUNT-SCOPED set of automated-reviewer user ids = known vendor logins (the
+// global reviewBotUserIds set) ∪ this account's classification-store rows flagged
+// automated. getActivity / getTeamInsights' bot_signal / getResolvableBotThreads all
+// route through this so in-house-classified reviewers count alongside vendors.
+export async function automatedReviewerUserIds(accountId: number): Promise<number[]> {
+  const vendorIds = await reviewBotUserIds();
+  const rows = await db
+    .select({
+      id: botReviewClassification.authorUserId,
+      automated: botReviewClassification.automated,
+      source: botReviewClassification.source,
+    })
+    .from(botReviewClassification)
+    .where(eq(botReviewClassification.accountId, accountId))
+    .execute();
+  const set = new Set<number>(vendorIds);
+  for (const r of rows) {
+    if (r.automated) set.add(r.id);
+    // A manual "this is a human" override wins both directions — it removes even a
+    // known vendor login from this account's automated set.
+    else if (r.source === 'manual') set.delete(r.id);
+  }
+  return [...set];
+}
+
+// Map every automated reviewer (in this account) → its AutomatedReviewerKind, for
+// grouping analytics / bot_signal / dedup. A known vendor login wins; else the
+// classification-store kind; else 'in_house'.
+export async function classificationKindForUser(
+  accountId: number,
+): Promise<Map<number, AutomatedReviewerKind>> {
+  const map = new Map<number, AutomatedReviewerKind>();
+  // Known vendors (global users table) resolved from the login → vendor kind.
+  const logins = reviewBotLogins();
+  if (logins.length > 0) {
+    const candidates = [...logins, ...logins.map((l) => `${l}[bot]`)];
+    const inList = sql.join(
+      candidates.map((c) => sql`${c}`),
+      sql`, `,
+    );
+    const vrows = await db
+      .select({ id: users.id, login: users.githubLogin })
+      .from(users)
+      .where(sql`lower(${users.githubLogin}) in (${inList})`)
+      .execute();
+    for (const r of vrows) {
+      const kind = reviewBotKind(r.login);
+      if (kind) map.set(r.id, kind);
+    }
+  }
+  // Account classification store. A vendor login resolved above takes precedence for the
+  // kind; an automated row else contributes its stored kind (default in_house); a manual
+  // "this is a human" override removes the reviewer from the automated set entirely.
+  const crows = await db
+    .select({
+      id: botReviewClassification.authorUserId,
+      kind: botReviewClassification.kind,
+      automated: botReviewClassification.automated,
+      source: botReviewClassification.source,
+    })
+    .from(botReviewClassification)
+    .where(eq(botReviewClassification.accountId, accountId))
+    .execute();
+  for (const r of crows) {
+    if (!r.automated) {
+      if (r.source === 'manual') map.delete(r.id);
+      continue;
+    }
+    if (map.has(r.id)) continue;
+    map.set(r.id, (r.kind as AutomatedReviewerKind | null) ?? 'in_house');
+  }
+  return map;
+}
+
+// Best-effort review-body / comment severity inference from the account's fingerprint
+// vocabulary. Coarse buckets only (nitpick / issue / refactor); null when unknowable.
+// Used for the (optional) severity dimension of mute rules + the dedup conflict signal.
+function inferSeverity(text: string | null | undefined): string | null {
+  if (!text) return null;
+  if (/\bnit(?:pick|:)|🧹/i.test(text)) return 'nitpick';
+  if (/⚠️|potential issue|\bbug\b|security|vulnerab|\berror\b/i.test(text)) return 'issue';
+  if (/🛠️|refactor|\bsuggestion\b|\bconsider\b/i.test(text)) return 'refactor';
+  return null;
+}
+
+// Translate a simple path glob (supports `*` within a segment and `**` across
+// segments) to an anchored, case-insensitive RegExp. null/empty glob → matches any.
+function pathGlobMatch(glob: string | null, path: string): boolean {
+  if (glob == null) return true;
+  const g = glob.trim();
+  if (!g) return true;
+  let re = '';
+  for (let i = 0; i < g.length; i++) {
+    const ch = g[i]!;
+    if (ch === '*') {
+      if (g[i + 1] === '*') {
+        re += '.*';
+        i++;
+      } else {
+        re += '[^/]*';
+      }
+    } else if ('.+?^${}()|[]\\'.includes(ch)) {
+      re += `\\${ch}`;
+    } else {
+      re += ch;
+    }
+  }
+  try {
+    return new RegExp(`^${re}$`, 'i').test(path);
+  } catch {
+    return false;
+  }
+}
+
+// The path bucket a deterministic tuning suggestion groups by: the top-level dir as a
+// `<seg>/**` glob (matched by pathGlobMatch), or the file path itself when it's at root.
+function pathBucket(path: string): string {
+  const seg = path.split('/')[0];
+  return seg && seg !== path ? `${seg}/**` : path;
+}
+
+// keep / tune / kill verdict (deterministic rule-of-thumb, no AI): high volume + low
+// acted-on + high untouched → kill; moderate low acted-on → tune; else keep.
+function botVerdict(threads: number, actedOnPct: number | null, untouched: number): BotVerdict {
+  const untouchedRatio = threads > 0 ? untouched / threads : 0;
+  const highVolume = threads >= 10;
+  const lowActedOn = actedOnPct != null && actedOnPct < 30;
+  const highUntouched = untouchedRatio >= 0.5;
+  if (highVolume && lowActedOn && highUntouched) return 'kill';
+  if (threads >= 5 && actedOnPct != null && actedOnPct < 60) return 'tune';
+  return 'keep';
+}
+
+function normalizeBody(s: string | null | undefined): string {
+  return (s ?? '').replace(/\s+/g, ' ').trim();
+}
+
+// §2f — Pierre-posted-review provenance for a PR: LEFT-join claudeReviews on
+// postedReviewId = reviews.databaseId (both TEXT). Keyed by the local reviews.id →
+// { provenance }. ai_verbatim when the posted userBody equals Claude's summary
+// (whitespace-normalized), else human_curated. The 'pierre' kind lives ONLY on the
+// review row (the human who posted it is never reclassified). Account-scoped.
+export async function getReviewerProvenanceForPr(
+  accountId: number,
+  prId: number,
+): Promise<Map<number, { provenance: ReviewProvenance }>> {
+  const rows = await db
+    .select({
+      reviewId: reviews.id,
+      userBody: claudeReviews.userBody,
+      summary: claudeReviews.summary,
+    })
+    .from(claudeReviews)
+    .innerJoin(reviews, eq(reviews.databaseId, claudeReviews.postedReviewId))
+    .where(
+      and(
+        eq(claudeReviews.accountId, accountId),
+        eq(claudeReviews.prId, prId),
+        eq(reviews.prId, prId),
+        isNotNull(claudeReviews.postedReviewId),
+      ),
+    )
+    .execute();
+  const map = new Map<number, { provenance: ReviewProvenance }>();
+  for (const r of rows) {
+    const ub = normalizeBody(r.userBody);
+    const provenance: ReviewProvenance =
+      ub.length > 0 && ub === normalizeBody(r.summary) ? 'ai_verbatim' : 'human_curated';
+    map.set(r.reviewId, { provenance });
+  }
+  return map;
+}
+
+// Gather the deterministic evidence the classifier needs for a not-yet-cached reviewer:
+// the fingerprint (over their most-recent review body + a sample of inline comments)
+// and their behavioral signals. Account-scoped.
+async function reviewerEvidence(
+  accountId: number,
+  userId: number,
+): Promise<ReviewerEvidence> {
+  const revBodies = await db
+    .select({ body: reviews.body })
+    .from(reviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(reviews.authorId, userId),
+        isNotNull(reviews.body),
+      ),
+    )
+    .orderBy(desc(reviews.submittedAt))
+    .limit(1)
+    .execute();
+  const commentBodies = await db
+    .select({ body: reviewComments.body })
+    .from(reviewComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(reviewComments.authorId, userId),
+        isNotNull(reviewComments.body),
+      ),
+    )
+    .limit(20)
+    .execute();
+  const reviewBody = revBodies[0]?.body ?? null;
+  const comments = commentBodies
+    .map((c) => c.body)
+    .filter((b): b is string => typeof b === 'string' && b.length > 0);
+  return {
+    fingerprint: fingerprintReview(reviewBody, comments),
+    behavioral: await computeBehavioralSignals(accountId, userId),
+  };
+}
+
+// WS1/WS8 — every distinct reviewer seen in this account (authored a review OR
+// originated a thread), joined with its classification (manual + auto + vendor login
+// map), 90-day thread volume, and a sample review body. Runs the resolver for not-yet-
+// cached reviewers (which persists an auto row). Account-scoped.
+export async function listDetectedReviewers(
+  accountId: number,
+): Promise<DetectedReviewersResponse> {
+  const generatedAt = new Date().toISOString();
+
+  const [revAuthors, thAuthors] = await Promise.all([
+    db
+      .select({ id: reviews.authorId })
+      .from(reviews)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+      .where(eq(pullRequests.accountId, accountId))
+      .execute(),
+    db
+      .select({ id: reviewThreads.originalCommenterId })
+      .from(reviewThreads)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+      .where(eq(pullRequests.accountId, accountId))
+      .execute(),
+  ]);
+  const idSet = new Set<number>();
+  for (const r of revAuthors) if (r.id != null) idSet.add(r.id);
+  for (const r of thAuthors) if (r.id != null) idSet.add(r.id);
+  if (idSet.size === 0) return { reviewers: [], generatedAt };
+  const ids = [...idSet];
+
+  const userRows = await db
+    .select()
+    .from(users)
+    .where(inArray(users.id, ids))
+    .execute();
+  const userById = new Map(userRows.map((u) => [u.id, u]));
+
+  // Cached classification rows for these reviewers.
+  const clsRows = await db
+    .select()
+    .from(botReviewClassification)
+    .where(
+      and(
+        eq(botReviewClassification.accountId, accountId),
+        inArray(botReviewClassification.authorUserId, ids),
+      ),
+    )
+    .execute();
+  const clsById = new Map(clsRows.map((c) => [c.authorUserId, c]));
+
+  // 90-day thread volume per reviewer.
+  const since = new Date(Date.now() - 90 * 86_400_000);
+  const volRows = await db
+    .select({ id: reviewThreads.originalCommenterId, c: count() })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviewThreads.originalCommenterId, ids),
+        gte(reviewThreads.createdAt, since),
+      ),
+    )
+    .groupBy(reviewThreads.originalCommenterId)
+    .execute();
+  const volById = new Map<number, number>();
+  for (const r of volRows) if (r.id != null) volById.set(r.id, r.c);
+
+  // Most-recent non-empty review body per reviewer (a small sample for the UI).
+  const sampleRows = await db
+    .select({ authorId: reviews.authorId, body: reviews.body, submittedAt: reviews.submittedAt })
+    .from(reviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviews.authorId, ids),
+        isNotNull(reviews.body),
+      ),
+    )
+    .orderBy(desc(reviews.submittedAt))
+    .execute();
+  const sampleById = new Map<number, string>();
+  for (const r of sampleRows) {
+    if (r.authorId == null) continue;
+    if (sampleById.has(r.authorId)) continue;
+    const body = (r.body ?? '').trim();
+    if (body) sampleById.set(r.authorId, body.length > 400 ? `${body.slice(0, 399)}…` : body);
+  }
+
+  const reviewers: DetectedReviewer[] = [];
+  for (const id of ids) {
+    const u = userById.get(id);
+    if (!u) continue;
+    const cached = clsById.get(id);
+    let classification: ReviewerClassification;
+    let isManualOverride = false;
+    if (cached) {
+      classification = rowToClassification(cached, u.githubLogin);
+      isManualOverride = cached.source === 'manual';
+    } else {
+      const evidence = await reviewerEvidence(accountId, id);
+      classification = await classifyReviewer(
+        accountId,
+        {
+          id: u.id,
+          githubLogin: u.githubLogin,
+          githubType: u.githubType,
+          isBot: u.isBot,
+        },
+        evidence,
+      );
+    }
+    reviewers.push({
+      userId: id,
+      login: u.githubLogin,
+      displayName: u.displayName,
+      avatarUrl: u.avatarUrl,
+      classification,
+      isManualOverride,
+      threadsLast90d: volById.get(id) ?? 0,
+      sampleReviewBody: sampleById.get(id) ?? null,
+    });
+  }
+
+  // Automated first, then by 90-day volume desc, then login — a stable, useful order.
+  reviewers.sort(
+    (a, b) =>
+      Number(b.classification.automated) - Number(a.classification.automated) ||
+      b.threadsLast90d - a.threadsLast90d ||
+      a.login.localeCompare(b.login),
+  );
+  return { reviewers, generatedAt };
+}
+
+// WS1e — the two-way manual override. Upserts a source='manual' classification row for
+// (accountId, userId) that the auto resolver never overwrites. Returns the new
+// classification, or null when the user id is unknown (→ the route 404s). Account-scoped
+// (the upsert targets this account's row only; another account is never mutated).
+export async function setReviewerOverride(
+  accountId: number,
+  userId: number,
+  body: ReviewerOverrideBody,
+): Promise<ReviewerClassification | null> {
+  const u = (
+    await db
+      .select({ id: users.id, login: users.githubLogin })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+      .execute()
+  )[0];
+  if (!u) return null;
+  const kind: AutomatedReviewerKind | null = body.automated ? body.kind ?? 'in_house' : null;
+  const label = body.automated
+    ? body.label ?? (kind ? labelForKind(kind) : u.login)
+    : body.label ?? u.login;
+  const reasons = [
+    body.automated
+      ? 'manually tagged as an automated reviewer'
+      : 'manually confirmed as a human',
+  ];
+  const values = {
+    automated: body.automated,
+    kind,
+    label,
+    confidence: 'high' as const,
+    source: 'manual' as const,
+    reasonsJson: reasons,
+    updatedAt: new Date(),
+  };
+  await db
+    .insert(botReviewClassification)
+    .values({ accountId, authorUserId: userId, ...values })
+    .onConflictDoUpdate({
+      target: [botReviewClassification.accountId, botReviewClassification.authorUserId],
+      set: values,
+    })
+    .execute();
+  return {
+    userId,
+    login: u.login,
+    automated: body.automated,
+    kind,
+    label,
+    confidence: 'high',
+    source: 'manual',
+    reasons,
+  };
+}
+
+// ---- WS6 mute / auto-triage rules (account-scoped; ownership → false/null) ----
+
+function muteRuleToApi(r: typeof botMuteRules.$inferSelect): BotMuteRule {
+  return {
+    id: r.id,
+    vendorKind: (r.vendorKind as AutomatedReviewerKind | null) ?? null,
+    pathGlob: r.pathGlob,
+    severity: r.severity,
+    action: r.action as BotMuteAction,
+    autoResolveDays: r.autoResolveDays,
+    createdAt: r.createdAt.toISOString(),
+  };
+}
+
+export async function listBotMuteRules(accountId: number): Promise<BotMuteRule[]> {
+  const rows = await db
+    .select()
+    .from(botMuteRules)
+    .where(eq(botMuteRules.accountId, accountId))
+    .orderBy(desc(botMuteRules.createdAt))
+    .execute();
+  return rows.map(muteRuleToApi);
+}
+
+export async function addBotMuteRule(
+  accountId: number,
+  input: BotMuteRuleInput,
+): Promise<BotMuteRule> {
+  const rows = await db
+    .insert(botMuteRules)
+    .values({
+      accountId,
+      vendorKind: input.vendorKind ?? null,
+      pathGlob: input.pathGlob ?? null,
+      severity: input.severity ?? null,
+      action: input.action,
+      autoResolveDays: input.autoResolveDays ?? null,
+      createdAt: new Date(),
+    })
+    .returning()
+    .execute();
+  return muteRuleToApi(rows[0]!);
+}
+
+export async function deleteBotMuteRule(accountId: number, id: number): Promise<boolean> {
+  const rows = await db
+    .delete(botMuteRules)
+    .where(and(eq(botMuteRules.accountId, accountId), eq(botMuteRules.id, id)))
+    .returning({ id: botMuteRules.id })
+    .execute();
+  return rows.length > 0;
+}
+
+// WS7 — "only a bot reviewed this": PRs (merged in-window, or open-and-mergeable) in the
+// given repos whose ONLY counting reviews (approved/changes_requested/commented) are from
+// automated reviewers (incl. Pierre-verbatim via the claudeReviews join) with NO human
+// review. Account-scoped. Feeds the bot_only_review card in getTeamInsights.
+export interface BotOnlyReviewPr {
+  prId: number;
+  number: number;
+  title: string;
+  repoFullName: string;
+  botLabel: string;
+  state: string;
+  githubUrl: string;
+  authorId: number | null;
+}
+export async function getBotOnlyReviewPrs(
+  accountId: number,
+  repoIds: number[],
+  window: { from: Date; to: Date },
+): Promise<BotOnlyReviewPr[]> {
+  if (repoIds.length === 0) return [];
+  const automatedIds = new Set(await automatedReviewerUserIds(accountId));
+  const kindMap = await classificationKindForUser(accountId);
+
+  // Pierre-verbatim posted review ids (these count as automated reviews; a human-curated
+  // Pierre review counts as a human review). Keyed by reviews.databaseId == postedReviewId.
+  const crRows = await db
+    .select({
+      postedReviewId: claudeReviews.postedReviewId,
+      userBody: claudeReviews.userBody,
+      summary: claudeReviews.summary,
+    })
+    .from(claudeReviews)
+    .where(
+      and(eq(claudeReviews.accountId, accountId), isNotNull(claudeReviews.postedReviewId)),
+    )
+    .execute();
+  const pierreVerbatim = new Set<string>();
+  for (const r of crRows) {
+    if (!r.postedReviewId) continue;
+    const ub = normalizeBody(r.userBody);
+    if (ub.length > 0 && ub === normalizeBody(r.summary)) pierreVerbatim.add(r.postedReviewId);
+  }
+
+  const prRows = await db
+    .select({
+      id: pullRequests.id,
+      repoId: pullRequests.repoId,
+      number: pullRequests.number,
+      title: pullRequests.title,
+      authorId: pullRequests.authorId,
+      state: pullRequests.state,
+    })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.repoId, repoIds),
+        or(
+          and(
+            eq(pullRequests.state, 'merged'),
+            gte(pullRequests.mergedAt, window.from),
+            lte(pullRequests.mergedAt, window.to),
+          ),
+          and(eq(pullRequests.state, 'open'), eq(pullRequests.mergeable, 'mergeable')),
+        ),
+      ),
+    )
+    .execute();
+  if (prRows.length === 0) return [];
+  const prIds = prRows.map((p) => p.id);
+
+  const revRows = await db
+    .select({
+      prId: reviews.prId,
+      authorId: reviews.authorId,
+      databaseId: reviews.databaseId,
+      state: reviews.state,
+    })
+    .from(reviews)
+    .where(inArray(reviews.prId, prIds))
+    .execute();
+  const revsByPr = new Map<number, typeof revRows>();
+  for (const r of revRows) {
+    const arr = revsByPr.get(r.prId) ?? [];
+    arr.push(r);
+    revsByPr.set(r.prId, arr);
+  }
+
+  const repoRows = await db
+    .select({ id: repos.id, owner: repos.owner, name: repos.name })
+    .from(repos)
+    .where(inArray(repos.id, repoIds))
+    .execute();
+  const repoFullName = new Map(repoRows.map((r) => [r.id, `${r.owner}/${r.name}`]));
+
+  const out: BotOnlyReviewPr[] = [];
+  for (const pr of prRows) {
+    const revs = (revsByPr.get(pr.id) ?? []).filter(
+      (rv) =>
+        rv.state === 'approved' || rv.state === 'changes_requested' || rv.state === 'commented',
+    );
+    if (revs.length === 0) continue;
+    let anyAutomated = false;
+    let anyHuman = false;
+    let botLabel: string | null = null;
+    for (const rv of revs) {
+      const isPierre = rv.databaseId != null && pierreVerbatim.has(rv.databaseId);
+      const isAuto = (rv.authorId != null && automatedIds.has(rv.authorId)) || isPierre;
+      if (isAuto) {
+        anyAutomated = true;
+        if (botLabel == null) {
+          const kind = rv.authorId != null ? kindMap.get(rv.authorId) : undefined;
+          botLabel = kind ? labelForKind(kind) : isPierre ? labelForKind('pierre') : 'Automated';
+        }
+      } else {
+        anyHuman = true;
+      }
+    }
+    if (anyAutomated && !anyHuman) {
+      const full = repoFullName.get(pr.repoId) ?? '';
+      out.push({
+        prId: pr.id,
+        number: pr.number,
+        title: pr.title,
+        repoFullName: full,
+        botLabel: botLabel ?? 'Automated',
+        state: pr.state,
+        githubUrl: `https://github.com/${full}/pull/${pr.number}`,
+        authorId: pr.authorId,
+      });
+    }
+  }
+  return out;
+}
+
+// WS3 — the Bot-ROI analytics. Per AutomatedReviewerKind over the requested window:
+// volume (threads + comments), acted-on %, untouched backlog + oldest age, human
+// follow-through %, noise ratio (untouched-share proxy — severity is often unknowable),
+// a keep/tune/kill verdict, and a ≤12-week weekly trend. Cost fields stay null (the
+// frontend overlays per-vendor cost from Pro settings). 'hide' mute rules drop matching
+// threads from the counts. Deterministic, NO AI. Account-scoped.
+export async function getBotAnalytics(
+  accountId: number,
+  window: BotWindowKind,
+): Promise<BotAnalyticsResponse> {
+  const nowMs = Date.now();
+  const to = new Date(nowMs);
+  // rolling_14 and 'sprint' both use the 14-day trailing window (core can't read the
+  // account's configured sprint bounds — they live in Pro settings).
+  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
+  const from = new Date(nowMs - windowDays * 86_400_000);
+  const trendFrom = new Date(nowMs - 12 * 7 * 86_400_000); // 84 days ⊇ every window
+  const generatedAt = to.toISOString();
+  const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
+
+  const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0 };
+  const automatedIds = await automatedReviewerUserIds(accountId);
+  if (automatedIds.length === 0) {
+    return { enabled: true, generatedAt, window: win, vendors: [], totals: emptyTotals, suggestions: [] };
+  }
+  const kindMap = await classificationKindForUser(accountId);
+  const hideRules = (await listBotMuteRules(accountId)).filter((r) => r.action === 'hide');
+
+  // Automated-reviewer threads over the 12-week trend span (⊇ the selected window).
+  const threadRows = await db
+    .select({
+      id: reviewThreads.id,
+      userId: reviewThreads.originalCommenterId,
+      path: reviewThreads.path,
+      state: reviewThreads.derivedState,
+      createdAt: reviewThreads.createdAt,
+    })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviewThreads.originalCommenterId, automatedIds),
+        gte(reviewThreads.createdAt, trendFrom),
+      ),
+    )
+    .execute();
+
+  // Severity per thread is only needed if a hide rule filters on it (rare) — fetch the
+  // originating comment excerpts lazily then.
+  const needSeverity = hideRules.some((r) => r.severity != null);
+  const threadIds = threadRows.map((t) => t.id);
+  const severityByThread = new Map<number, string | null>();
+  if (needSeverity && threadIds.length > 0) {
+    const exRows = await db
+      .select({
+        threadId: reviewComments.threadId,
+        excerpt: reviewComments.excerpt,
+        createdAt: reviewComments.createdAt,
+      })
+      .from(reviewComments)
+      .where(inArray(reviewComments.threadId, threadIds))
+      .orderBy(asc(reviewComments.createdAt))
+      .execute();
+    for (const r of exRows) {
+      if (!severityByThread.has(r.threadId)) {
+        severityByThread.set(r.threadId, inferSeverity(r.excerpt));
+      }
+    }
+  }
+
+  const isHidden = (t: (typeof threadRows)[number], kind: AutomatedReviewerKind): boolean => {
+    for (const rule of hideRules) {
+      if (rule.vendorKind != null && rule.vendorKind !== kind) continue;
+      if (!pathGlobMatch(rule.pathGlob, t.path)) continue;
+      if (rule.severity != null && (severityByThread.get(t.id) ?? null) !== rule.severity) continue;
+      return true;
+    }
+    return false;
+  };
+
+  type Acc = {
+    reviewers: Set<number>;
+    threads: number;
+    actedOn: number;
+    untouched: number;
+    oldestUntouchedMs: number | null;
+    humanFollow: number;
+    // weekly buckets (12), each {threads, actedOn}
+    weekly: { threads: number; actedOn: number }[];
+    // (pathBucket → {volume, untouched}) for tuning suggestions.
+    buckets: Map<string, { volume: number; untouched: number }>;
+  };
+  const byKind = new Map<AutomatedReviewerKind, Acc>();
+  const accFor = (kind: AutomatedReviewerKind): Acc => {
+    let a = byKind.get(kind);
+    if (!a) {
+      a = {
+        reviewers: new Set(),
+        threads: 0,
+        actedOn: 0,
+        untouched: 0,
+        oldestUntouchedMs: null,
+        humanFollow: 0,
+        weekly: Array.from({ length: 12 }, () => ({ threads: 0, actedOn: 0 })),
+        buckets: new Map(),
+      };
+      byKind.set(kind, a);
+    }
+    return a;
+  };
+
+  // Trend (12 weekly buckets, oldest→newest) uses the full 12-week span.
+  const windowThreads: { id: number; kind: AutomatedReviewerKind; path: string; state: DerivedState; createdAt: Date }[] = [];
+  for (const t of threadRows) {
+    if (t.userId == null) continue;
+    const kind = kindMap.get(t.userId);
+    if (!kind) continue;
+    if (isHidden(t, kind)) continue;
+    const acc = accFor(kind);
+    const acted = t.state === 'resolved' || t.state === 'likely_addressed';
+    // Trend bucket by created week.
+    const wk = Math.min(11, Math.max(0, Math.floor((t.createdAt.getTime() - trendFrom.getTime()) / (7 * 86_400_000))));
+    const bucket = acc.weekly[wk]!;
+    bucket.threads += 1;
+    if (acted) bucket.actedOn += 1;
+    // Headline metrics use only the selected window.
+    if (t.createdAt >= from) {
+      acc.reviewers.add(t.userId);
+      acc.threads += 1;
+      if (acted) acc.actedOn += 1;
+      if (t.state === 'untouched') {
+        acc.untouched += 1;
+        const ms = t.createdAt.getTime();
+        if (acc.oldestUntouchedMs == null || ms < acc.oldestUntouchedMs) acc.oldestUntouchedMs = ms;
+      }
+      const pb = pathBucket(t.path);
+      const b = acc.buckets.get(pb) ?? { volume: 0, untouched: 0 };
+      b.volume += 1;
+      if (t.state === 'untouched') b.untouched += 1;
+      acc.buckets.set(pb, b);
+      windowThreads.push({ id: t.id, kind, path: t.path, state: t.state, createdAt: t.createdAt });
+    }
+  }
+
+  // Human follow-through: of the bot's window threads, the share where a human commented
+  // after the bot's last comment on that thread.
+  const wtIds = windowThreads.map((t) => t.id);
+  if (wtIds.length > 0) {
+    const ftRows = await db
+      .select({
+        threadId: reviewComments.threadId,
+        authorId: reviewComments.authorId,
+        createdAt: reviewComments.createdAt,
+      })
+      .from(reviewComments)
+      .where(inArray(reviewComments.threadId, wtIds))
+      .execute();
+    const byThread = new Map<number, { authorId: number | null; at: number }[]>();
+    for (const r of ftRows) {
+      const arr = byThread.get(r.threadId) ?? [];
+      arr.push({ authorId: r.authorId, at: r.createdAt.getTime() });
+      byThread.set(r.threadId, arr);
+    }
+    const kindByThread = new Map(windowThreads.map((t) => [t.id, t.kind]));
+    for (const [threadId, comments] of byThread) {
+      const kind = kindByThread.get(threadId);
+      if (!kind) continue;
+      let botLastAt = -Infinity;
+      for (const c of comments) {
+        if (c.authorId != null && automatedIds.includes(c.authorId) && c.at > botLastAt) botLastAt = c.at;
+      }
+      const humanAfter = comments.some(
+        (c) => c.authorId != null && !automatedIds.includes(c.authorId) && c.at > botLastAt,
+      );
+      if (humanAfter) accFor(kind).humanFollow += 1;
+    }
+  }
+
+  // Comments volume per kind (bot-authored review comments in the window).
+  const commentRows = await db
+    .select({ authorId: reviewComments.authorId })
+    .from(reviewComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviewComments.authorId, automatedIds),
+        gte(reviewComments.createdAt, from),
+        lte(reviewComments.createdAt, to),
+      ),
+    )
+    .execute();
+  const commentsByKind = new Map<AutomatedReviewerKind, number>();
+  for (const r of commentRows) {
+    if (r.authorId == null) continue;
+    const kind = kindMap.get(r.authorId);
+    if (!kind) continue;
+    commentsByKind.set(kind, (commentsByKind.get(kind) ?? 0) + 1);
+  }
+
+  const suggestions: BotTuningSuggestion[] = [];
+  const vendors: BotVendorAnalytics[] = [];
+  for (const [kind, acc] of byKind) {
+    if (acc.threads === 0 && (commentsByKind.get(kind) ?? 0) === 0) continue;
+    const actedOnPct = acc.threads > 0 ? Math.round((acc.actedOn / acc.threads) * 100) : null;
+    const comments = commentsByKind.get(kind) ?? 0;
+    const oldestUntouchedDays =
+      acc.oldestUntouchedMs == null ? null : Math.floor((nowMs - acc.oldestUntouchedMs) / 86_400_000);
+    const humanFollowThroughPct = acc.threads > 0 ? Math.round((acc.humanFollow / acc.threads) * 100) : null;
+    // Noise ratio: untouched-share proxy (see the header — true severity is often unknowable).
+    const noiseRatioPct = acc.threads > 0 ? Math.round((acc.untouched / acc.threads) * 100) : null;
+    const trend: BotVendorTrendPoint[] = acc.weekly.map((w, i) => ({
+      weekStart: new Date(trendFrom.getTime() + i * 7 * 86_400_000).toISOString(),
+      threads: w.threads,
+      actedOnPct: w.threads > 0 ? Math.round((w.actedOn / w.threads) * 100) : null,
+    }));
+    vendors.push({
+      kind,
+      label: labelForKind(kind),
+      reviewers: acc.reviewers.size,
+      threads: acc.threads,
+      comments,
+      actedOn: acc.actedOn,
+      actedOnPct,
+      untouched: acc.untouched,
+      oldestUntouchedDays,
+      humanFollowThroughPct,
+      noiseRatioPct,
+      verdict: botVerdict(acc.threads, actedOnPct, acc.untouched),
+      costMonthlyUsd: null,
+      costPerActedOnUsd: null,
+      trend,
+    });
+    // Deterministic tuning suggestions (§3h): a (kind, path-bucket) with volume ≥ 5 and
+    // untouchedPct ≥ 70 → "mute this".
+    for (const [pb, b] of acc.buckets) {
+      if (b.volume < 5) continue;
+      const untouchedPct = Math.round((b.untouched / b.volume) * 100);
+      if (untouchedPct < 70) continue;
+      suggestions.push({
+        vendorKind: kind,
+        label: labelForKind(kind),
+        pathGlob: pb,
+        severity: null,
+        untouchedPct,
+        volume: b.volume,
+        rationale: `${untouchedPct}% of ${labelForKind(kind)}'s ${b.volume} threads in ${pb} went untouched — mute them?`,
+      });
+    }
+  }
+  vendors.sort((a, b) => b.threads - a.threads || b.comments - a.comments);
+  suggestions.sort((a, b) => b.volume - a.volume);
+
+  const totalThreads = vendors.reduce((s, v) => s + v.threads, 0);
+  const totalActedOn = vendors.reduce((s, v) => s + v.actedOn, 0);
+  const totals = {
+    threads: totalThreads,
+    comments: vendors.reduce((s, v) => s + v.comments, 0),
+    actedOn: totalActedOn,
+    actedOnPct: totalThreads > 0 ? Math.round((totalActedOn / totalThreads) * 100) : null,
+    untouched: vendors.reduce((s, v) => s + v.untouched, 0),
+  };
+  return { enabled: true, generatedAt, window: win, vendors, totals, suggestions };
+}
+
+// WS4 — cross-bot dedup + consensus for one PR. Groups the PR's automated-reviewer
+// threads by (path, ±3-line window); a cluster with ≥2 DISTINCT kinds is a real dedup
+// hit. consensus = the members' inferred severities agree (or are unknowable); conflict
+// = they diverge. Ownership → null (→ the route 404s). Account-scoped.
+export async function getBotDedupClusters(
+  prId: number,
+  accountId: number,
+): Promise<BotDedupResponse | null> {
+  const owned = (
+    await db
+      .select({ id: pullRequests.id })
+      .from(pullRequests)
+      .where(and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)))
+      .limit(1)
+      .execute()
+  )[0];
+  if (!owned) return null;
+
+  const automatedIds = await automatedReviewerUserIds(accountId);
+  if (automatedIds.length === 0) return { prId, clusters: [] };
+  const kindMap = await classificationKindForUser(accountId);
+
+  const rows = await db
+    .select({
+      id: reviewThreads.id,
+      userId: reviewThreads.originalCommenterId,
+      path: reviewThreads.path,
+      line: reviewThreads.line,
+      state: reviewThreads.derivedState,
+      login: users.githubLogin,
+    })
+    .from(reviewThreads)
+    .innerJoin(users, eq(users.id, reviewThreads.originalCommenterId))
+    .where(
+      and(
+        eq(reviewThreads.prId, prId),
+        inArray(reviewThreads.originalCommenterId, automatedIds),
+      ),
+    )
+    .execute();
+  if (rows.length === 0) return { prId, clusters: [] };
+
+  // Originating-comment excerpt per thread (for the member preview + severity).
+  const excerptByThread = new Map<number, string | null>();
+  const exRows = await db
+    .select({
+      threadId: reviewComments.threadId,
+      excerpt: reviewComments.excerpt,
+      createdAt: reviewComments.createdAt,
+    })
+    .from(reviewComments)
+    .where(inArray(reviewComments.threadId, rows.map((r) => r.id)))
+    .orderBy(asc(reviewComments.createdAt))
+    .execute();
+  for (const r of exRows) {
+    if (!excerptByThread.has(r.threadId)) excerptByThread.set(r.threadId, r.excerpt);
+  }
+
+  interface Member extends BotDedupMember {
+    line: number | null;
+  }
+  const membersByPath = new Map<string, Member[]>();
+  for (const r of rows) {
+    if (r.userId == null) continue;
+    const kind = kindMap.get(r.userId);
+    if (!kind) continue;
+    const arr = membersByPath.get(r.path) ?? [];
+    arr.push({
+      threadId: r.id,
+      userId: r.userId,
+      kind,
+      login: r.login,
+      label: labelForKind(kind),
+      excerpt: excerptByThread.get(r.id) ?? null,
+      derivedState: r.state,
+      line: r.line,
+    });
+    membersByPath.set(r.path, arr);
+  }
+
+  const clusters: BotDedupCluster[] = [];
+  for (const [path, members] of membersByPath) {
+    // Cluster within a file by line proximity (±3). null-line threads group together.
+    const withLine = members.filter((m) => m.line != null).sort((a, b) => a.line! - b.line!);
+    const nullLine = members.filter((m) => m.line == null);
+    const groups: Member[][] = [];
+    let cur: Member[] = [];
+    let anchor: number | null = null;
+    for (const m of withLine) {
+      if (anchor != null && m.line! - anchor <= 3) {
+        cur.push(m);
+      } else {
+        if (cur.length > 0) groups.push(cur);
+        cur = [m];
+        anchor = m.line!;
+      }
+    }
+    if (cur.length > 0) groups.push(cur);
+    if (nullLine.length > 0) groups.push(nullLine);
+
+    for (const g of groups) {
+      const distinctKinds = new Set(g.map((m) => m.kind));
+      if (g.length < 2 || distinctKinds.size < 2) continue;
+      const sevs = new Set(g.map((m) => inferSeverity(m.excerpt)).filter((s): s is string => s != null));
+      const conflict = sevs.size >= 2;
+      clusters.push({
+        path,
+        line: g[0]!.line,
+        members: g.map(({ line: _line, ...rest }) => rest),
+        consensus: !conflict,
+        conflict,
+      });
+    }
+  }
+  clusters.sort((a, b) => b.members.length - a.members.length);
+  return { prId, clusters };
+}
+
+// WS6b — the auto-triage engine's candidate finder (used by the standing scheduled job).
+// For each account auto_resolve rule, the likely_addressed + unresolved automated-bot
+// threads (with a GitHub node id) matching the rule's vendor/path/severity AND older than
+// the rule's autoResolveDays. NEVER returns a non-likely_addressed thread. Account-scoped.
+export async function getAutoResolveCandidates(
+  accountId: number,
+): Promise<{ prId: number; threadIds: number[] }[]> {
+  const rules = (await listBotMuteRules(accountId)).filter(
+    (r) => r.action === 'auto_resolve' && r.autoResolveDays != null,
+  );
+  if (rules.length === 0) return [];
+  const automatedIds = await automatedReviewerUserIds(accountId);
+  if (automatedIds.length === 0) return [];
+  const kindMap = await classificationKindForUser(accountId);
+
+  const rows = await db
+    .select({
+      id: reviewThreads.id,
+      prId: reviewThreads.prId,
+      userId: reviewThreads.originalCommenterId,
+      path: reviewThreads.path,
+      createdAt: reviewThreads.createdAt,
+    })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviewThreads.originalCommenterId, automatedIds),
+        eq(reviewThreads.derivedState, 'likely_addressed'),
+        eq(reviewThreads.isResolved, false),
+        isNotNull(reviewThreads.githubNodeId),
+      ),
+    )
+    .execute();
+  if (rows.length === 0) return [];
+
+  const needSeverity = rules.some((r) => r.severity != null);
+  const severityByThread = new Map<number, string | null>();
+  if (needSeverity) {
+    const exRows = await db
+      .select({
+        threadId: reviewComments.threadId,
+        excerpt: reviewComments.excerpt,
+        createdAt: reviewComments.createdAt,
+      })
+      .from(reviewComments)
+      .where(inArray(reviewComments.threadId, rows.map((r) => r.id)))
+      .orderBy(asc(reviewComments.createdAt))
+      .execute();
+    for (const r of exRows) {
+      if (!severityByThread.has(r.threadId)) severityByThread.set(r.threadId, inferSeverity(r.excerpt));
+    }
+  }
+
+  const nowMs = Date.now();
+  const byPr = new Map<number, number[]>();
+  for (const t of rows) {
+    if (t.userId == null) continue;
+    const kind = kindMap.get(t.userId);
+    if (!kind) continue;
+    const ageMs = nowMs - t.createdAt.getTime();
+    const matched = rules.some((rule) => {
+      if (rule.vendorKind != null && rule.vendorKind !== kind) return false;
+      if (!pathGlobMatch(rule.pathGlob, t.path)) return false;
+      if (rule.severity != null && (severityByThread.get(t.id) ?? null) !== rule.severity) return false;
+      const days = rule.autoResolveDays!;
+      return ageMs > days * 86_400_000;
+    });
+    if (!matched) continue;
+    const arr = byPr.get(t.prId) ?? [];
+    arr.push(t.id);
+    byPr.set(t.prId, arr);
+  }
+  return [...byPr.entries()].map(([prId, threadIds]) => ({ prId, threadIds }));
 }

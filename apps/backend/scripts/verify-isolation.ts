@@ -231,6 +231,82 @@ check(
 const rbtCross = await q.getResolvableBotThreads(A.prId, 2);
 check('getResolvableBotThreads(A.pr, B) leaks nothing (IDOR blocked)', rbtCross.length === 0);
 
+// ── Bot-Triage Platform: classification + mute rules + the new getters ──────────
+// bot_review_classification + bot_mute_rules are account-scoped tables; setReviewerOverride
+// writes a MANUAL row for exactly one account, and every new getter filters accountId.
+
+// A manual override on account 1 for the bot reviewer (originator of RT_iso_A).
+const ovA = await q.setReviewerOverride(1, botUser!.id, {
+  automated: true,
+  kind: 'coderabbit',
+  label: 'CodeRabbit',
+});
+check(
+  'setReviewerOverride(A, botUser) writes a manual classification',
+  ovA?.source === 'manual' && ovA?.automated === true,
+);
+
+// listDetectedReviewers is account-scoped: A sees the bot (it originated a thread), B doesn't.
+const drA = await q.listDetectedReviewers(1);
+check(
+  'listDetectedReviewers(A) includes A’s bot reviewer',
+  drA.reviewers.some((r) => r.userId === botUser!.id),
+);
+const drB = await q.listDetectedReviewers(2);
+check(
+  "listDetectedReviewers(B) excludes A's reviewer (IDOR blocked)",
+  !drB.reviewers.some((r) => r.userId === botUser!.id),
+);
+
+// A manual override on account 2 must NOT mutate account 1's classification row.
+await q.setReviewerOverride(2, botUser!.id, { automated: false });
+const aStill = (await q.listDetectedReviewers(1)).reviewers.find((r) => r.userId === botUser!.id);
+check(
+  "account 2's override leaves account 1's classification intact",
+  aStill?.classification.automated === true,
+);
+
+// getBotAnalytics is account-scoped: A surfaces the bot's thread; B surfaces nothing.
+const anA = await q.getBotAnalytics(1, 'rolling_30');
+check(
+  'getBotAnalytics(A) surfaces the account-1 bot thread',
+  anA.vendors.some((v) => v.kind === 'coderabbit'),
+);
+const anB = await q.getBotAnalytics(2, 'rolling_30');
+check('getBotAnalytics(B) surfaces no vendors (IDOR blocked)', anB.vendors.length === 0);
+
+// getBotDedupClusters: A resolves its PR; B gets null (ownership → 404).
+check(
+  'getBotDedupClusters(A.pr, A) returns a response',
+  (await q.getBotDedupClusters(A.prId, 1)) !== null,
+);
+check(
+  'getBotDedupClusters(A.pr, B) returns null (IDOR blocked)',
+  (await q.getBotDedupClusters(A.prId, 2)) === null,
+);
+
+// bot_mute_rules: account-scoped list + ownership-checked delete.
+const ruleA = await q.addBotMuteRule(1, {
+  action: 'hide',
+  vendorKind: 'coderabbit',
+  pathGlob: 'tests/**',
+  severity: null,
+});
+check('listBotMuteRules(A) returns A’s rule', (await q.listBotMuteRules(1)).some((r) => r.id === ruleA.id));
+check(
+  'listBotMuteRules(B) excludes A’s rule (IDOR blocked)',
+  !(await q.listBotMuteRules(2)).some((r) => r.id === ruleA.id),
+);
+check(
+  'deleteBotMuteRule(A.rule, B) returns false (IDOR blocked)',
+  (await q.deleteBotMuteRule(2, ruleA.id)) === false,
+);
+check(
+  "A's mute rule survives B's delete attempt",
+  (await q.listBotMuteRules(1)).some((r) => r.id === ruleA.id),
+);
+check('deleteBotMuteRule(A.rule, A) returns true', (await q.deleteBotMuteRule(1, ruleA.id)) === true);
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

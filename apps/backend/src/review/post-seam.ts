@@ -79,9 +79,17 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
     }
   }
 
+  // Bot-Triage WS2c — Pierre provenance stamps. The visible footer (branding, default off) precedes
+  // the hidden HTML marker (invisible/idempotent; also what the fingerprint engine matches) so the
+  // marker trails the body. Both default false when the arg is absent → body unchanged.
+  const finalBody =
+    args.body +
+    (args.pierreFooter ? '\n\n---\n🤖 Reviewed with Pierre + Claude' : '') +
+    (args.pierreMarker ? '\n\n<!-- pierre:claude-review v=1 -->' : '');
+
   const preview: PostReviewPreview = {
     commitId: args.reviewHeadSha,
-    body: args.body,
+    body: finalBody,
     event: args.verdict,
     comments,
     prComments,
@@ -93,7 +101,7 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
     name: args.name,
     prNumber: args.prNumber,
     commitId: args.reviewHeadSha,
-    body: args.body,
+    body: finalBody,
     event: args.verdict,
     comments,
   });

@@ -4,6 +4,7 @@ import {
   EVENT_CATEGORY_BY_TYPE,
   PR_STATUSES,
   REVIEW_FILTER_STATES,
+  type BotWindowKind,
   type DerivedState,
   type EventCategory,
   type EventType,
@@ -105,6 +106,9 @@ export interface FilterState {
   // Client-side view over the loaded page, ORTHOGONAL to feedMyTurnOnly/feedClaudeOnly (they
   // compose). Transient, URL-silent.
   feedBotLens: FeedBotLens;
+  // The rolling window the Bot-ROI panel (Insights) reports over. Transient, URL-silent
+  // (like feedBotLens) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
+  botAnalyticsWindow: BotWindowKind;
 
   // selection
   selectedPrId: number | null;
@@ -244,6 +248,8 @@ export interface FilterState {
   // Feed bot lens: cycle all → hide → only → all, or set directly.
   cycleFeedBotLens: () => void;
   setFeedBotLens: (v: FeedBotLens) => void;
+  // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
+  setBotAnalyticsWindow: (v: BotWindowKind) => void;
   // Set/clear the PR-detail Threads-tab bot filter (a ChecksTab bot chip → filter Threads to
   // that vendor). Re-selecting the same vendor toggles it off.
   setThreadBotFilter: (kind: ReviewBotKind | null) => void;
@@ -505,6 +511,7 @@ function freshDefaults(): FilterData {
     feedMyTurnOnly: false,
     feedClaudeOnly: false,
     feedBotLens: 'all',
+    botAnalyticsWindow: 'rolling_14',
     selectedPrId: null,
     selectedThreadId: null,
     threadBotFilter: null,
@@ -580,6 +587,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       feedBotLens: s.feedBotLens === 'all' ? 'hide' : s.feedBotLens === 'hide' ? 'only' : 'all',
     })),
   setFeedBotLens: (v) => set({ feedBotLens: v }),
+  setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setThreadBotFilter: (kind) =>
     set((s) => ({ threadBotFilter: s.threadBotFilter === kind ? null : kind })),
   selectPr: (id) =>

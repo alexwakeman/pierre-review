@@ -1,13 +1,23 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
+  AutomatedReviewerKind,
   PrDetail as PrDetailT,
   RequestReviewersBody,
   ReviewBotKind,
   ReviewerSuggestion,
+  ReviewProvenance,
   ReviewState,
   User,
 } from '@pierre-review/shared';
-import { BOT_VENDOR_META, botVendorMeta, CI_META, dateTime, mergeWarning, relativeTime } from '../lib/ui.js';
+import {
+  automatedReviewerMeta,
+  BOT_VENDOR_META,
+  botVendorMeta,
+  CI_META,
+  dateTime,
+  mergeWarning,
+  relativeTime,
+} from '../lib/ui.js';
 import { useFilters } from '../store/filters.js';
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
@@ -69,6 +79,40 @@ function Row({
       </span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
+  );
+}
+
+// WS2 provenance badge — a small "🤖 {label}" tag next to a reviewer/approver whose review is
+// classified automated (compute-on-read via ReviewDetail.automatedKind on the PR-detail payload).
+// For the Pierre kind we additionally surface how the posted review was authored:
+// "Pierre · Claude · verbatim" (ai_verbatim, Claude's summary posted as-is) vs "· curated" (a
+// human materially edited it). The kind is in hand, so we look it up via automatedReviewerMeta
+// (which covers vendors + in_house + pierre — botVendorMeta only maps a login→ReviewBotKind).
+function AutomatedReviewerBadge({
+  kind,
+  provenance,
+}: {
+  kind: AutomatedReviewerKind;
+  provenance: ReviewProvenance | null;
+}): JSX.Element {
+  const meta = automatedReviewerMeta(kind);
+  const prov =
+    kind === 'pierre' && provenance
+      ? provenance === 'ai_verbatim'
+        ? ' · verbatim'
+        : ' · curated'
+      : '';
+  return (
+    <span
+      data-testid="reviewer-provenance"
+      className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium"
+      style={{ color: meta.color, background: `${meta.color}1a` }}
+      title={`Automated reviewer — ${meta.label}${prov}`}
+    >
+      <span aria-hidden>🤖</span>
+      {meta.label}
+      {prov}
+    </span>
   );
 }
 
@@ -327,6 +371,33 @@ export function ChecksTab({
   }
   const reviewerIds = [...latestReviewState.keys()];
 
+  // WS2 automated-reviewer provenance, folded per author. A ReviewDetail carries an
+  // `automatedKind` when its author is classified automated (vendor / in_house), and 'pierre'
+  // (with `provenance`) on a review POSTED via Pierre — note that Pierre review is authored by a
+  // human token, so the SAME author can have both a plain human review and a Pierre-stamped one.
+  // We therefore track, per author: their automated marker (latest wins) AND whether they ALSO
+  // filed a genuine human review. "Only bots reviewed" then means every reviewer is
+  // automated-only (has an automated review, no human one).
+  const automatedByAuthor = new Map<
+    number,
+    { kind: AutomatedReviewerKind; provenance: ReviewProvenance | null }
+  >();
+  const humanReviewAuthors = new Set<number>();
+  for (const r of pr.reviews) {
+    if (r.authorId == null || r.state === 'pending') continue;
+    if (r.automatedKind != null) {
+      automatedByAuthor.set(r.authorId, {
+        kind: r.automatedKind,
+        provenance: r.provenance ?? null,
+      });
+    } else {
+      humanReviewAuthors.add(r.authorId);
+    }
+  }
+  const onlyBotsReviewed =
+    reviewerIds.length > 0 &&
+    reviewerIds.every((uid) => automatedByAuthor.has(uid) && !humanReviewAuthors.has(uid));
+
   // Review-BOT thread rollup — "the calm layer above your review bot." Group this PR's
   // threads by the vendor that opened them (originalCommenter → reviewBotKind), counting
   // total + still-unresolved (untouched | replied_unresolved). Drives the "CodeRabbit · 12 ·
@@ -424,6 +495,7 @@ export function ChecksTab({
             {reviewerIds.map((uid) => {
               const u = usersById.get(uid);
               const meta = REVIEWER_STATE_META[latestReviewState.get(uid)!];
+              const auto = automatedByAuthor.get(uid);
               return (
                 <span
                   key={uid}
@@ -433,10 +505,26 @@ export function ChecksTab({
                   {meta.icon && <span aria-hidden>{meta.icon}</span>}
                   <Avatar user={u} size={14} />
                   <UserName user={u} fallbackId={uid} repoId={pr.repoId} />
+                  {auto && (
+                    <AutomatedReviewerBadge kind={auto.kind} provenance={auto.provenance} />
+                  )}
                 </span>
               );
             })}
           </div>
+        </Row>
+      )}
+
+      {onlyBotsReviewed && (
+        <Row label="Coverage">
+          <span
+            data-testid="only-bots-reviewed"
+            className="inline-flex items-center gap-1 rounded bg-amber-400/10 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300"
+            title="Every review on this PR came from an automated reviewer — no human has reviewed it yet."
+          >
+            <span aria-hidden>🤖</span>
+            only bots reviewed
+          </span>
         </Row>
       )}
 
@@ -473,6 +561,7 @@ export function ChecksTab({
           <div className="flex flex-wrap gap-2 text-xs">
             {approverIds.map((uid) => {
               const u = usersById.get(uid);
+              const auto = automatedByAuthor.get(uid);
               return (
                 <span
                   key={uid}
@@ -482,6 +571,9 @@ export function ChecksTab({
                   <span className="text-green-600 dark:text-green-500">✓</span>
                   <Avatar user={u} size={14} />
                   <UserName user={u} fallbackId={uid} repoId={pr.repoId} />
+                  {auto && (
+                    <AutomatedReviewerBadge kind={auto.kind} provenance={auto.provenance} />
+                  )}
                 </span>
               );
             })}

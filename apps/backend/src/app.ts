@@ -24,6 +24,7 @@ import { mergersRoutes } from './api/routes/mergers.js';
 import { insightsRoutes } from './api/routes/insights.js';
 import { activityRoutes } from './api/routes/activity.js';
 import { billingRoutes } from './api/routes/billing.js';
+import { botTriageRoutes } from './api/routes/bot-triage.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -151,6 +152,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(mergersRoutes);
   await app.register(insightsRoutes);
   await app.register(activityRoutes);
+  // Bot-triage platform (CORE, always registered): detection/override, ROI analytics,
+  // cross-bot dedup, mute / auto-triage rules. Account-scoped; no AI.
+  await app.register(botTriageRoutes);
   // Stripe billing seam (checkout redirect + webhook). Registered in both modes;
   // inert until the STRIPE_* env vars are set (webhook 501s unconfigured).
   await app.register(billingRoutes);

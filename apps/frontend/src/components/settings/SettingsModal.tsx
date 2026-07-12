@@ -6,6 +6,7 @@ import { SprintSection } from './SprintSection.js';
 import { SlackSection } from './SlackSection.js';
 import { AiPolicySection } from './AiPolicySection.js';
 import { IssueLinksSection } from './IssueLinksSection.js';
+import { BotSection } from './BotSection.js';
 
 // User configuration modal, opened from the header avatar menu. Mirrors HelpModal's shell
 // (fixed overlay + role=dialog card + capture-phase Escape so a dismiss doesn't reach the global
@@ -72,6 +73,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
             <>
               {caps.teamInsights && (
                 <SprintSection settings={settings} save={save} saving={mutation.isPending} />
+              )}
+              {caps.teamInsights && (
+                <BotSection settings={settings} save={save} saving={mutation.isPending} />
               )}
               {caps.slackDigest && (
                 <SlackSection settings={settings} save={save} saving={mutation.isPending} />

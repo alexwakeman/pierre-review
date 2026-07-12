@@ -404,6 +404,10 @@ export interface PostReviewArgs {
   verdict: ClaudeReviewVerdict;
   includedFindings: PostReviewFinding[];
   dryRun: boolean;
+  // Bot-Triage WS2c — stamp Pierre provenance onto the posted review body. Both ADDITIVE +
+  // OPTIONAL (default false → byte-identical behavior when absent, so apiVersion stays 11):
+  pierreMarker?: boolean; // append a hidden `<!-- pierre:claude-review v=1 -->` marker
+  pierreFooter?: boolean; // append a visible "🤖 Reviewed with Pierre + Claude" footer
 }
 
 export type PostReviewOutcome =

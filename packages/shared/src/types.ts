@@ -152,6 +152,116 @@ export function reviewBotKind(login: string | null | undefined): ReviewBotKind |
   return REVIEW_BOTS[slug] ?? null;
 }
 
+// ── Bot-Triage Platform (WS1–WS6) ──────────────────────────────────────────────
+// The neutral measurement + triage layer above ALL automated reviewers — the known
+// vendors (ReviewBotKind), a team's own in-house AI reviewer, and Pierre's own Claude
+// Review. See docs/PRO-PLATFORM.md / the bot-triage plan.
+
+// ── WS1 automated-reviewer classification ────────────────────────────
+export type AutomatedReviewerKind = ReviewBotKind | 'in_house' | 'pierre';
+export type ClassificationConfidence = 'high' | 'medium' | 'low';
+export type ClassificationSource =
+  | 'manual' | 'vendor_login' | 'github_type' | 'app_attribution'
+  | 'fingerprint' | 'behavioral' | 'ai_tiebreak';
+export interface ReviewerClassification {
+  userId: number;
+  login: string;
+  automated: boolean;
+  kind: AutomatedReviewerKind | null;   // null when human
+  label: string;                        // "CodeRabbit" | "In-house AI" | "acme-ci" | "Pierre · Claude"
+  confidence: ClassificationConfidence;
+  source: ClassificationSource;
+  reasons: string[];
+}
+export interface DetectedReviewer {
+  userId: number;
+  login: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  classification: ReviewerClassification;
+  isManualOverride: boolean;
+  threadsLast90d: number;
+  sampleReviewBody: string | null;
+}
+export interface DetectedReviewersResponse { reviewers: DetectedReviewer[]; generatedAt: string; }
+export interface ReviewerOverrideBody {
+  automated: boolean;
+  kind?: AutomatedReviewerKind | null;
+  label?: string | null;
+}
+
+// ── WS2 Pierre-own-review provenance ────────────────────────────────
+export type ReviewProvenance = 'ai_verbatim' | 'human_curated';
+// Surfaced per-review on PR detail; see ReviewDetail additions below.
+
+// ── WS3 Bot ROI / utilisation analytics ─────────────────────────────
+export type BotWindowKind = 'rolling_7' | 'rolling_14' | 'rolling_30' | 'sprint';
+export type BotVerdict = 'keep' | 'tune' | 'kill';
+export interface BotVendorTrendPoint { weekStart: string; threads: number; actedOnPct: number | null; }
+export interface BotVendorAnalytics {
+  kind: AutomatedReviewerKind;
+  label: string;
+  reviewers: number;
+  threads: number;
+  comments: number;
+  actedOn: number;
+  actedOnPct: number | null;
+  untouched: number;
+  oldestUntouchedDays: number | null;
+  humanFollowThroughPct: number | null;
+  noiseRatioPct: number | null;
+  verdict: BotVerdict;
+  costMonthlyUsd: number | null;
+  costPerActedOnUsd: number | null;
+  trend: BotVendorTrendPoint[];   // ≤12 weekly points, oldest→newest
+}
+export interface BotAnalyticsResponse {
+  enabled: boolean;
+  generatedAt: string;
+  window: { kind: BotWindowKind; from: string; to: string };
+  vendors: BotVendorAnalytics[];  // most-threads-first
+  totals: { threads: number; comments: number; actedOn: number; actedOnPct: number | null; untouched: number };
+  suggestions: BotTuningSuggestion[];  // WS6c, deterministic
+}
+
+// ── WS4 cross-bot dedup + consensus ─────────────────────────────────
+export interface BotDedupMember {
+  threadId: number; userId: number; kind: AutomatedReviewerKind;
+  login: string; label: string; excerpt: string | null; derivedState: DerivedState;
+}
+export interface BotDedupCluster {
+  path: string; line: number | null;
+  members: BotDedupMember[];   // ≥2 members of DISTINCT kinds
+  consensus: boolean;          // all same broad signal
+  conflict: boolean;           // divergent severity/verdict
+}
+export interface BotDedupResponse { prId: number; clusters: BotDedupCluster[]; }
+
+// ── WS6 mute / auto-triage rules + tuning ───────────────────────────
+export type BotMuteAction = 'hide' | 'auto_resolve';
+export interface BotMuteRule {
+  id: number;
+  vendorKind: AutomatedReviewerKind | null;  // null = any
+  pathGlob: string | null;                   // null = any
+  severity: string | null;                   // null = any
+  action: BotMuteAction;
+  autoResolveDays: number | null;            // only meaningful for 'auto_resolve'
+  createdAt: string;
+}
+export interface BotMuteRuleInput {
+  vendorKind?: AutomatedReviewerKind | null;
+  pathGlob?: string | null;
+  severity?: string | null;
+  action: BotMuteAction;
+  autoResolveDays?: number | null;
+}
+export interface BotMuteRulesResponse { rules: BotMuteRule[]; }
+export interface BotTuningSuggestion {
+  vendorKind: AutomatedReviewerKind; label: string;
+  pathGlob: string | null; severity: string | null;
+  untouchedPct: number; volume: number; rationale: string;
+}
+
 export interface Repo {
   id: number;
   owner: string;
@@ -523,6 +633,21 @@ export interface ProSettings {
   // project prefixes (e.g. ['ENG','PROJ']) — when non-empty, ONLY keys with a listed prefix are
   // detected (near-zero false positives). Empty → heuristic detection.
   issue: { provider: IssueProvider | null; baseUrl: string | null; projectKeys: string[] };
+  // Bot-Triage Platform (WS8 control surface). Toggles + scalars for detection, Pierre
+  // tagging, Slack bot digest, standing auto-resolve, and per-vendor cost.
+  bots: {
+    inhouseDetect: boolean;
+    autoTagHighConfidence: boolean;
+    loginAllowlist: string[];
+    deepDetect: boolean;        // WS1f app-attribution REST enrich
+    aiTiebreak: boolean;        // WS1.6 Haiku medium-band tie-break
+    tagPierreReviews: boolean;  // WS2a/b
+    pierreFooter: boolean;      // WS2c visible footer
+    slackDigest: boolean;       // WS5
+    autoResolve: boolean;       // WS6b master enable
+    autoResolveDays: number;
+    cost: { kind: AutomatedReviewerKind; monthlyUsd: number }[];  // WS3b
+  };
 }
 
 // Write shape (PUT /api/pro/settings) — a partial patch; only present sections/fields change.
@@ -545,6 +670,13 @@ export interface ProSettingsUpdate {
   aiUpdate?: { mode?: AiUpdateMode; intervalMinutes?: number };
   // projectKeys: an allowlist of project prefixes; [] / null clears it (→ heuristic detection).
   issue?: { provider?: IssueProvider | null; baseUrl?: string | null; projectKeys?: string[] | null };
+  // Bot-Triage settings patch (WS8). Only present fields change.
+  bots?: {
+    inhouseDetect?: boolean; autoTagHighConfidence?: boolean; loginAllowlist?: string[];
+    deepDetect?: boolean; aiTiebreak?: boolean; tagPierreReviews?: boolean; pierreFooter?: boolean;
+    slackDigest?: boolean; autoResolve?: boolean; autoResolveDays?: number;
+    cost?: { kind: AutomatedReviewerKind; monthlyUsd: number }[];
+  };
 }
 
 // Lean PR shape for the timeline. No bodies, no diff hunks.
@@ -832,6 +964,12 @@ export interface ReviewDetail {
   submittedAt: string;
   // Deep link to the review on GitHub (#pullrequestreview-<id>); null until synced.
   url: string | null;
+  // Bot-triage (compute-on-read in getPrDetail): when the review's author is classified
+  // automated, the vendor/in_house/pierre kind (else absent/null → a human review).
+  automatedKind?: AutomatedReviewerKind | null;
+  // Set ONLY for kind==='pierre' — whether the posted body was Claude's verbatim summary
+  // ('ai_verbatim') or a materially human-edited review ('human_curated').
+  provenance?: ReviewProvenance | null;
 }
 
 export interface PrCommentDetail {
@@ -2338,7 +2476,8 @@ export type InsightKind =
   | 'untouched_thread' // a review thread nobody has responded to
   | 'reviewer_load' // a reviewer's pending-queue depth (+ sprint load)
   | 'reviewer_routing' // a PR with no reviewer + who should review it
-  | 'bot_signal'; // AI-review-bot signal-to-noise across the sprint (deterministic)
+  | 'bot_signal' // AI-review-bot signal-to-noise across the sprint (deterministic)
+  | 'bot_only_review'; // PRs whose only review(s) came from an automated reviewer (WS7)
 
 export type InsightSeverity = 'info' | 'warn' | 'high';
 
@@ -2425,7 +2564,7 @@ export interface ReviewerRoutingCard extends InsightCardBase, InsightPrRef {
 
 // Per-vendor rollup carried by the bot_signal card.
 export interface BotSignalVendorStat {
-  kind: ReviewBotKind;
+  kind: AutomatedReviewerKind; // vendor, in-house, or Pierre (widened from ReviewBotKind for the bot-triage platform)
   threads: number; // review threads this bot opened in the sprint window
   actedOn: number; // of those, in state resolved|likely_addressed (the acted-on heuristic)
   untouched: number; // in state untouched (the pure backlog/noise)
@@ -2445,12 +2584,23 @@ export interface BotSignalCard extends InsightCardBase {
   vendors: BotSignalVendorStat[]; // most-threads-first
 }
 
+// "Only a bot reviewed this" governance risk (WS7): PRs merged (or open-and-mergeable)
+// whose ONLY reviews come from automated reviewers (incl. Pierre-verbatim) — no human
+// review. Deterministic; a rubber-stamping-fatigue trust/safety hook. Aggregate (a PR
+// list, no single ref).
+export interface BotOnlyReviewCard extends InsightCardBase {
+  kind: 'bot_only_review';
+  prs: { prId: number; number: number; title: string; repoFullName: string;
+         botLabel: string; state: string; githubUrl: string }[];
+}
+
 export type InsightCard =
   | StalledReviewCard
   | UntouchedThreadCard
   | ReviewerLoadCard
   | ReviewerRoutingCard
-  | BotSignalCard;
+  | BotSignalCard
+  | BotOnlyReviewCard;
 
 // ---- Team DORA-ish flow metrics (Insights header; no AI) ----
 // Best-effort DORA mapping from synced PR/CI data (there is NO stored CI-state history,

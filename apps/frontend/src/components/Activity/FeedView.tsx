@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import type {
+  AutomatedReviewerKind,
   ClaudeReviewVerdict,
   ConsolidatedFeedItem,
   EventType,
   FeedAffectedThread,
+  ReviewerClassification,
   ReviewState,
   User,
 } from '@pierre-review/shared';
@@ -13,12 +15,14 @@ import {
   useFeedHasNew,
   useMarkFeedSeen,
 } from '../../hooks/useConsolidatedFeed.js';
+import { useDetectedReviewers, useReviewerOverride } from '../../hooks/useBotTriage.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
+  automatedReviewerMeta,
   botVendorMeta,
   buildQuotedReply,
   CI_META,
@@ -77,6 +81,37 @@ const CLAUDE_VERDICT_META: Record<ClaudeReviewVerdict, { label: string; color: s
   COMMENT: { label: 'comment', color: '#9ca3af' },
 };
 
+// An automated-reviewer tag for a feed row's actor: a known VENDOR bot (by login) OR an
+// account-classified automated reviewer (in-house AI / Pierre — surfaced via the detected-
+// reviewers classification map, since those aren't login-derivable). `userId` is the actor
+// id so the inline "not a bot?" override can target it. Null → the actor is a human.
+type AutomatedTag = { userId: number | null; kind: AutomatedReviewerKind; label: string; color: string };
+
+function automatedTagFor(
+  actorUser: User | undefined,
+  classificationByUserId: Map<number, ReviewerClassification>,
+): AutomatedTag | null {
+  // Known review-bot vendor (CodeRabbit/Copilot/…) by login — the v1 path, still first.
+  const loginVendor = botVendorMeta(actorUser);
+  if (loginVendor) {
+    return {
+      userId: actorUser?.id ?? null,
+      kind: loginVendor.kind,
+      label: loginVendor.label,
+      color: loginVendor.color,
+    };
+  }
+  // Otherwise, an account-classified automated reviewer (in-house AI / Pierre) — widened
+  // from the login-only path so those tags surface in the feed too.
+  if (actorUser) {
+    const c = classificationByUserId.get(actorUser.id);
+    if (c && c.automated && c.kind != null) {
+      return { userId: actorUser.id, kind: c.kind, label: c.label, color: automatedReviewerMeta(c.kind).color };
+    }
+  }
+  return null;
+}
+
 // The consolidated Feed — a flat, chronological, social-style stream of activity events.
 // Cross-repo when `repoId` is absent (scoped by the active FilterBar repos/members); scoped
 // to a single repo when a rail repo is selected. Each item is flagged `isMyTurn` (a PR you
@@ -118,6 +153,26 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
   const { claudeReview: claudeReviewEnabled } = useProCapabilities();
+
+  // Detected-reviewer classifications (CORE / free) → the actor→kind map that lets in-house
+  // AI / Pierre actors carry a vendor tag (login-based vendors don't need it). The inline
+  // "not a bot?" override reclassifies an actor as human (automated:false); on success the
+  // detected-reviewers query invalidates and the tag drops.
+  const { data: detectedReviewers } = useDetectedReviewers();
+  const reviewerOverride = useReviewerOverride();
+  const classificationByUserId = useMemo(() => {
+    const m = new Map<number, ReviewerClassification>();
+    for (const r of detectedReviewers?.reviewers ?? []) {
+      if (r.classification.automated && r.classification.kind != null) m.set(r.userId, r.classification);
+    }
+    return m;
+  }, [detectedReviewers]);
+  const overridePendingUserId = reviewerOverride.isPending
+    ? reviewerOverride.variables?.userId ?? null
+    : null;
+  const markNotBot = (userId: number): void => {
+    reviewerOverride.mutate({ userId, body: { automated: false } });
+  };
   // The one-shot flash signal — set ONLY by a real browser Back (navigateBack), so an
   // ordinary return to Activity (e.g. clicking the Activity tab chip) never flashes.
   const flashTarget = usePinnedTabs((s) => s.activityFlashItemId);
@@ -407,11 +462,17 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
             const reviewerLabels = (item.reviewers ?? []).map((r) =>
               userLabel(usersById.get(r.userId), r.userId),
             );
+            const automatedTag = automatedTagFor(actorUser, classificationByUserId);
             return (
               <FeedRow
                 key={item.id}
                 item={item}
                 actorUser={actorUser}
+                automatedTag={automatedTag}
+                onNotBot={markNotBot}
+                overridePending={
+                  automatedTag?.userId != null && overridePendingUserId === automatedTag.userId
+                }
                 mergedByLabel={mergedByLabel}
                 reviewerLabels={reviewerLabels}
                 usersById={usersById}
@@ -615,6 +676,9 @@ const BODY_COLLAPSED_MAX = 160;
 function FeedRow({
   item,
   actorUser,
+  automatedTag,
+  onNotBot,
+  overridePending,
   mergedByLabel,
   reviewerLabels,
   usersById,
@@ -626,6 +690,9 @@ function FeedRow({
 }: {
   item: ConsolidatedFeedItem;
   actorUser: User | undefined;
+  automatedTag: AutomatedTag | null;
+  onNotBot: (userId: number) => void;
+  overridePending: boolean;
   mergedByLabel: string | null;
   reviewerLabels: string[];
   usersById: Map<number, User>;
@@ -654,8 +721,6 @@ function FeedRow({
   const claudeVerdict = item.claudeVerdict != null ? CLAUDE_VERDICT_META[item.claudeVerdict] : null;
   const affected = item.affectedThreads ?? [];
   const primaryReason = item.myTurnReasons[0];
-  // Known AI review bot? Tag the row with its vendor so it reads "CodeRabbit flagged…".
-  const botVendor = botVendorMeta(actorUser);
 
   // A review-thread card shows its FULL conversation inline (reply + resolve, with
   // the specific comment highlighted new); a PR-comment card can open a quote+@mention
@@ -741,14 +806,30 @@ function FeedRow({
           </span>
           <Avatar user={actorUser} size={20} />
           <span className="truncate font-medium text-gray-800 dark:text-gray-100">{actorName}</span>
-          {botVendor && (
-            <span
-              className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
-              style={{ color: botVendor.color, background: `${botVendor.color}1a` }}
-              title={`${botVendor.label} is an AI review bot — Pierre triages its output`}
-            >
-              <span aria-hidden>🤖</span>
-              {botVendor.label}
+          {automatedTag && (
+            <span className="group/bot inline-flex shrink-0 items-center gap-1">
+              <span
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                style={{ color: automatedTag.color, background: `${automatedTag.color}1a` }}
+                title={`${automatedTag.label} — an automated reviewer Pierre triages`}
+              >
+                <span aria-hidden>🤖</span>
+                {automatedTag.label}
+              </span>
+              {automatedTag.userId != null && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (automatedTag.userId != null) onNotBot(automatedTag.userId);
+                  }}
+                  disabled={overridePending}
+                  className="text-[9px] text-gray-400 underline underline-offset-2 opacity-0 transition-opacity hover:text-gray-600 disabled:opacity-40 group-hover/bot:opacity-100 dark:hover:text-gray-200"
+                  title="Not a bot? Reclassify this reviewer as human"
+                >
+                  {overridePending ? 'saving…' : 'not a bot?'}
+                </button>
+              )}
             </span>
           )}
           <span

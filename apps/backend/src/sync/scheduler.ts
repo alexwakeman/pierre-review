@@ -4,10 +4,16 @@ import { config } from '../config.js';
 import { syncAllRepos } from './sync-manager.js';
 import { pruneOldData } from '../db/retention.js';
 import { getScheduledJobs } from './scheduled-jobs.js';
+import { runAutoTriageSweep } from '../bot-triage/auto-triage.js';
 import type { Logger } from './sync-repo.js';
+
+// Standing bot auto-triage cron (CORE). Every 30 min; inert unless an account has an
+// `auto_resolve` mute rule, so the default cost is one cheap DISTINCT query per tick.
+const AUTO_TRIAGE_CRON = '*/30 * * * *';
 
 let task: ScheduledTask | null = null;
 let retentionTask: ScheduledTask | null = null;
+let autoTriageTask: ScheduledTask | null = null;
 // node-cron handles for plugin-registered background jobs (Slack digest cron, AI update policy).
 let proJobTasks: ScheduledTask[] = [];
 
@@ -48,6 +54,21 @@ export function startScheduler(log: FastifyBaseLogger): void {
     }
   }
 
+  // Bot auto-triage (CORE, deterministic, rule-gated). Rides the same disableScheduler gate as
+  // sync/retention — startScheduler only runs when scheduling is enabled. The sweep is INERT
+  // with zero auto_resolve rules and NEVER merges (resolve-only). A throw in a tick is caught so
+  // a bad token/network never crashes the process.
+  if (cron.validate(AUTO_TRIAGE_CRON)) {
+    autoTriageTask = cron.schedule(AUTO_TRIAGE_CRON, () => {
+      void runAutoTriageSweep(log).catch((err) =>
+        log.error({ err }, 'bot auto-triage sweep failed'),
+      );
+    });
+    log.info(`bot auto-triage started (cron "${AUTO_TRIAGE_CRON}")`);
+  } else {
+    log.warn(`invalid AUTO_TRIAGE_CRON "${AUTO_TRIAGE_CRON}"; bot auto-triage disabled`);
+  }
+
   // Plugin-registered background jobs (the @pierre/pro Slack digest cron + AI update policy).
   // Registered during bindProPlugin (which runs BEFORE startScheduler), so the registry is
   // populated here. Each rides the same disableScheduler gate as sync/retention and is torn
@@ -73,6 +94,8 @@ export function stopScheduler(): void {
   task = null;
   retentionTask?.stop();
   retentionTask = null;
+  autoTriageTask?.stop();
+  autoTriageTask = null;
   for (const t of proJobTasks) t.stop();
   proJobTasks = [];
 }

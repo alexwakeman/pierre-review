@@ -1,4 +1,5 @@
 import type {
+  AutomatedReviewerKind,
   CheckRunState,
   CiStatus,
   DerivedState,
@@ -103,11 +104,15 @@ export const MY_TURN_REASON_META: Record<MyTurnReason, { label: string; title: s
   commented: { label: 'You commented', title: 'You previously commented on this PR' },
 };
 
-// Third-party AI review-bot vendors: display label + accent colour. Keyed by the shared
-// ReviewBotKind (classification lives in @pierre-review/shared reviewBotKind; presentation
-// lives here). Drives the PrDetail "Bots" chip + the feed vendor tag, so a review-comment
-// card reads "CodeRabbit flagged…" not a bare bot login.
-export const BOT_VENDOR_META: Record<ReviewBotKind, { label: string; color: string }> = {
+// Automated-reviewer vendors: display label + accent colour. Keyed by the shared
+// AutomatedReviewerKind = ReviewBotKind ∪ 'in_house' ∪ 'pierre' (vendor classification lives
+// in @pierre-review/shared reviewBotKind; presentation lives here). Drives the PrDetail
+// "Bots" chip, the feed vendor tag, the bot-signal / bot-ROI cards, so a review-comment card
+// reads "CodeRabbit flagged…" (or "In-house AI" / "Pierre · Claude") not a bare bot login.
+export const BOT_VENDOR_META: Record<
+  AutomatedReviewerKind,
+  { label: string; color: string }
+> = {
   coderabbit: { label: 'CodeRabbit', color: '#ff7a45' },
   greptile: { label: 'Greptile', color: '#16a34a' },
   copilot: { label: 'Copilot', color: '#8957e5' },
@@ -121,7 +126,19 @@ export const BOT_VENDOR_META: Record<ReviewBotKind, { label: string; color: stri
   cursor: { label: 'Cursor', color: '#334155' },
   devin: { label: 'Devin', color: '#0891b2' },
   entelligence: { label: 'Entelligence', color: '#ca8a04' },
+  in_house: { label: 'In-house AI', color: '#6b7280' },
+  pierre: { label: 'Pierre · Claude', color: '#d97757' },
 };
+
+// Display meta for an automated-reviewer kind (vendor / in-house / Pierre). The one lookup
+// for "how do I render this AutomatedReviewerKind" — used wherever a classified kind is in
+// hand (bot-signal / bot-ROI cards, provenance badges, dedup rollups).
+export function automatedReviewerMeta(kind: AutomatedReviewerKind): {
+  label: string;
+  color: string;
+} {
+  return BOT_VENDOR_META[kind];
+}
 
 // Classify a user (by login) as a known AI review bot → its vendor kind + display meta, or
 // null for humans / non-review bots. The one call site for "is this actor a review bot".

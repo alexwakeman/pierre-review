@@ -279,7 +279,7 @@ fixture tests (see Conventions).
 
 ### Data model (`src/db/schema.sqlite.ts` + its `schema.pg.ts` twin are authoritative)
 
-17 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
+19 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
 `users` + `commitFiles` global). The core entities:
 
 - **`accounts`** — a tenant. Local mode has exactly one (`id 1`, `isLocal=true`,
@@ -289,7 +289,8 @@ fixture tests (see Conventions).
 - **`repos`** — watched repos (`accountId`; unique `(accountId, owner, name)` and
   `(accountId, githubNodeId)`).
 - **`users`** — GitHub actor metadata (`githubLogin` unique, `isBot`, `displayName`,
-  `avatarUrl`); **global**.
+  `avatarUrl`, `githubType` — the GraphQL author `__typename`, fed to the bot classifier);
+  **global**.
 - **`pullRequests`** — PR metadata, state, draft, timestamps, CI/mergeable, etc.; carries
   `accountId`, unique `(accountId, githubNodeId)`.
 - **`reviews`** — submitted reviews (`state`: approved / changes_requested / commented /
@@ -313,6 +314,12 @@ fixture tests (see Conventions).
   `userBody`/`userVerdict` are what post. Each run records its `reviewMode`/`routeReason`;
   findings carry `anchored`/`included` + the agent's wording. **Not** in the lean timeline;
   loaded on demand.
+- **`botReviewClassification`** + **`botMuteRules`** — the **Bot-Triage** tables (both CORE,
+  `accountId`-scoped). `botReviewClassification` stores manual + auto automated-reviewer
+  classifications (unique `(accountId, authorUserId)`; a manual row wins the resolution order);
+  `botMuteRules` holds per-reviewer mute/auto-triage rules (`action` `hide`|`auto_resolve` +
+  `autoResolveDays`). The plugin-owned `pro_settings` gained 11 `bot_*` columns (cost, Pierre
+  tag/footer toggles, Slack digest). See **Bot-Triage Platform** below.
 
 Conventions: timestamps are unix-epoch integers in SQLite (`mode:'timestamp'`) /
 `timestamptz` in Postgres — both infer `Date` in the read layer (one hand-rolled epoch
@@ -331,7 +338,11 @@ file maps to a `client.ts` method.
 | `GET /api/timeline?from&to&repoIds&userIds&types&statuses&reviewStates&excludeBots` | **lean** feed `{prs[],events[]}` — no bodies/diffs. Defaults: 14d, bots shown (toggle in Members). `reviewStates` filters `review_submitted` markers by verdict (approved/changes_requested/commented/dismissed); absent = all, empty = none |
 | `GET /api/prs/:id` | full PR detail (threads, reviews, comments, commits, checks, labels) |
 | `POST /api/prs/:id/mark-viewed` (alias `/dismiss`) | record a view (`sha?` defaults to head) → clears new-since badges |
-| `POST /api/prs/:id/resolve-bot-threads {threadIds}` | **bulk-resolve** the review-bot threads a later commit likely addressed → `{resolved,failed,results[]}`. Server RE-DERIVES eligibility (owned + review-bot-originated + `likely_addressed`) ∩ the client's reviewed list, then GitHub-resolves each; never auto/blind. Core |
+| `POST /api/prs/:id/resolve-bot-threads {threadIds}` | **bulk-resolve** the review-bot threads a later commit likely addressed → `{resolved,failed,results[]}`. Server RE-DERIVES eligibility (owned + review-bot-originated + `likely_addressed`) ∩ the client's reviewed list, then GitHub-resolves each (shares the `bot-triage/resolve.ts` `resolveThreadsOnGitHub` helper with auto-triage; behavior unchanged); never auto/blind. Core |
+| `GET /api/bot-reviewers` · `PATCH /api/bot-reviewers/:userId` | **Bot-Triage** (CORE): detected automated reviewers → `DetectedReviewersResponse` · two-way manual override → `ReviewerClassification` (writes `bot_review_classification`) |
+| `GET /api/bot-analytics?window=` | **Bot-ROI** (CORE): per-`AutomatedReviewerKind` volume/actedOn%/untouched/oldest/humanFollowThrough/noiseRatio/`verdict`(keep\|tune\|kill) + ≤12wk trend + tuning suggestions → `BotAnalyticsResponse`. Returns `cost=null` — the client overlays cost from `pro_settings` |
+| `GET /api/prs/:id/bot-dedup` | **cross-bot dedup** (CORE): automated-reviewer threads grouped by `(path, line±window)` across distinct kinds → consensus/conflict clusters → `BotDedupResponse` |
+| `GET·POST·DELETE /api/bot-mute-rules` | **Bot-Triage** mute/auto-triage rules (CORE; `bot_mute_rules`) |
 | `GET /api/open-prs?repoIds&userIds` | currently-open PRs (ignores date range) |
 | `GET /api/threads/:id` | single thread detail |
 | `GET/POST /api/repos`, `DELETE /api/repos/:id` | manage watched repos (delete → 409 if syncing, else 204) |
@@ -604,9 +615,9 @@ remain distinct but flip together.
 
 **The plugin boundary.** `src/pro/contract.ts` defines `ProContext` (the host hands the
 plugin `db`/`schema`/`runTransaction`/`isPg`/`accountIdOf`/`llm.complete`/`queries`/
-`reviewEvents`/`registerLearningsProvider`/`registerFyiProvider`/`registerMigrations`/`aiCredits`), `ProPlugin
-{apiVersion:10, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
-`/api/me` (`pro:{activityDigest,reviewMemory,aiAnalysis,aiFix,teamInsights,claudeReview,feedMyTurn}`)
+`reviewEvents`/`registerLearningsProvider`/`registerScheduledJob`/`registerPrDetailEnricher`/`registerMigrations`/`aiCredits`), `ProPlugin
+{apiVersion:11, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
+`/api/me` (`pro:{activityDigest,reviewMemory,aiAnalysis,prSummary,aiFix,teamInsights,claudeReview,slackDigest,issueLinks}`)
 exactly like `claudeReviewEnabled`. `src/pro/bind.ts`
 runs in `index.ts` between `buildApp()` and `listen()`: gated on **`config.proEnabled`** — now
 `PRO_DISABLED!=='true' && (!isCloud || PRO_CLOUD_ENABLED==='true')`, so Pro is on locally by default
@@ -657,6 +668,49 @@ acted-on % / oldest-untouched backlog, computed in core `getTeamInsights`, rides
 `likely_addressed` bot threads (`ThreadList` → `resolve-bot-threads`). "Acted-on" = the existing
 `derivedState ∈ {resolved, likely_addressed}` heuristic (approximate — the UI says so). No migration,
 no new AI/credit surface.
+
+**Bot-Triage Platform (v2) — builds ON the v1 layer; CORE deterministic + PRO panels; NO new
+AI/credit surface for the deterministic core; `apiVersion` STAYS 11.** Detection is now an
+**account-scoped multi-signal classifier** (`sync/{review-fingerprint,reviewer-classify,reviewer-behavior,
+app-attribution}.ts`), resolution order: **manual override > known vendor login > `users.githubType`
+`'Bot'`/app-attribution > branded-marker fingerprint > behavioral score (medium confidence, never
+auto-badges) > opt-in Haiku tie-break** (settings-gated OFF — the only AI, for the medium band).
+`users.githubType` is captured from the GraphQL author `__typename`; `AUTOMATED_LOGIN_PATTERNS` + a
+per-account allowlist catch service-account PATs. Classifications live in the CORE account-scoped
+`bot_review_classification` (manual + auto rows, uniq `(accountId, authorUserId)`). New shared type
+**`AutomatedReviewerKind = ReviewBotKind | 'in_house' | 'pierre'`** (widens `BotSignalVendorStat.kind`).
+**Pierre's own review is tagged bot-derived PER-REVIEW** (not per-account): a compute-on-read join
+`claudeReviews.postedReviewId = reviews.databaseId` (both TEXT) sets `provenance` = `ai_verbatim`
+(`userBody===summary`) vs `human_curated` and `kind='pierre'` on the `ReviewDetail` ONLY — **the human
+who posted (their token) is NEVER reclassified**. An optional hidden marker `<!-- pierre:claude-review
+v=1 -->` + visible footer are stamped in `review/post-seam.ts`, gated by `pro_settings`
+`bots.tagPierreReviews`/`pierreFooter` (threaded via the back-compat OPTIONAL `PostReviewArgs.pierreMarker?`/
+`pierreFooter?`), and dogfooded through the same fingerprint detector. **Bot-ROI** (`getBotAnalytics(accountId,
+window)`, CORE) → per-kind volume/actedOn%/untouched/oldest/humanFollowThrough/noiseRatio/`verdict`
+(keep|tune|kill) + ≤12wk trend + deterministic tuning suggestions → `BotRoiPanel` (Pro-gated); **cost
+is `null` from analytics, overlaid CLIENT-side** from `pro_settings` `bots.cost`. **Cross-bot dedup**
+(`getBotDedupClusters(prId,accountId)`): groups automated-reviewer threads by `(path, line±window)`
+across DISTINCT kinds → consensus/conflict, a rollup in `ThreadList` + `FeedView`. **Slack:** a
+deterministic "Review bots" block in `buildSlackReport` (reads the `bot_signal` card from
+`getTeamInsights`), gated on `pro_settings` `bot_slack_digest`, sent even when the AI digest is empty.
+**Mute + auto-triage:** the CORE account-scoped `bot_mute_rules` (`action` `hide`|`auto_resolve` +
+`autoResolveDays`); `hide` applied at read in analytics/feed; a CORE rule-gated scheduled job
+(`sync/scheduler.ts`, `*/30 * * * *`) runs `getAutoResolveCandidates` → the shared `resolveThreadsOnGitHub`
+helper (`src/bot-triage/{resolve,auto-triage}.ts`) — **ONLY `likely_addressed` threads, age-gated,
+logged, never a merge, INERT with zero rules** (the `resolve-bot-threads` route shares the same helper).
+**"Only a bot reviewed this" risk flag:** a `bot_only_review` Insights card (`getBotOnlyReviewPrs`;
+Pierre-verbatim counts as bot-derived) + a `ChecksTab` caution. **Settings:** a "Review bots" section
+(`BotSection` / `DetectedReviewersTable` / `BotMuteRulesEditor`, two-way override) backed by
+`pro_settings`'s 11 new `bot_*` columns. **Tiers:** detection/analytics/dedup/mute/auto-triage are
+**CORE (free)**; the analytics PANELS, Slack block, and Pierre tag/footer are **PRO** (gated on the
+existing `teamInsights`/`slackDigest` caps — no new cap). **Migrations:** core `0027` (`users.github_type`),
+`0028` (`bot_review_classification`), `0029` (`bot_mute_rules`), pg baseline `0016`; pro `0009`
+(`pro_settings` + 11 `bot_*` columns). **Landmines:** (1) Pierre = **per-review** provenance — the human
+author is never reclassified; (2) auto-triage is a CORE scheduled + rule-gated job over **only
+`likely_addressed`** threads, never a merge; (3) `apiVersion` **STAYS 11** (`PostReviewArgs` gained only
+OPTIONAL back-compat fields — no new `ProContext` seam); (4) the frontend must use `automatedReviewerMeta()`,
+NOT `BOT_VENDOR_META[kind]`, for an `AutomatedReviewerKind`; (5) `getBotAnalytics` returns `cost=null` —
+the client overlays cost from `pro_settings`.
 
 **Consolidated Feed — CORE, the Activity "Feed" entry (`getConsolidatedFeed` → `FeedView`).** ONE
 flat, purely-**chronological** (newest-first) stream of **real activity events** (opens / merges /
@@ -852,8 +906,11 @@ unmetered locally; wire them when a metered agentic tier ships.
 SQLite migrations (`0000`+) track the schema's evolution — `0008_multitenant_accounts`
 added the `accounts` table + `accountId` + composite uniques; `0009`/`0010` added lean
 storage; `0013` Claude-review routing (`reviewMode`/`routeReason`); `0014`
-`accounts.lastActiveAt`. The Postgres baseline (`migrations-pg/`) is a squash — cloud
-starts empty (synced data is regenerable; no SQLite→Postgres migration). **Docs:**
+`accounts.lastActiveAt`; `0026` `accounts.aiCreditAllowance`; the **Bot-Triage** trio `0027`
+(`users.github_type`), `0028` (`bot_review_classification`), `0029` (`bot_mute_rules`) — pg
+baseline `0016`, plus plugin migration `0009` (`pro_settings` + 11 `bot_*` columns). The Postgres
+baseline (`migrations-pg/`) is a squash — cloud starts empty (synced data is regenerable; no
+SQLite→Postgres migration). **Docs:**
 `docs/SYNC.md`, `docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-AUTH-SETUP.md`,
 `docs/LOCAL-CLOUD-TESTING.md`, `docs/DOMAIN-REPUTATION.md` (Safe Browsing + Search Console),
 `docs/BILLING-STRIPE.md` (Stripe Payment Link + webhook → `accounts.plan` entitlement),

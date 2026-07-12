@@ -129,6 +129,11 @@ export const users = sqliteTable('users', {
   isBotOverridden: integer('is_bot_overridden', { mode: 'boolean' })
     .notNull()
     .default(false),
+  // GitHub GraphQL __typename of the actor ('Bot' | 'User' | 'Organization' | …),
+  // captured during sync. Plain text (no enum — the __typename set varies). Feeds the
+  // bot-triage classifier (a 'Bot' typename is a hard automated-reviewer signal).
+  // Nullable; stays GLOBAL like the rest of `users`.
+  githubType: text('github_type'),
 });
 
 export const pullRequests = sqliteTable(
@@ -643,4 +648,60 @@ export const claudeReviewFindings = sqliteTable(
       .default(sql`(unixepoch())`),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
+);
+
+// ---- Bot-Triage Platform (WS1 / WS6) ----
+// Account-scoped classification cache for automated reviewers. One row per
+// (account, author) — the layered resolver (sync/reviewer-classify.ts) writes AUTO
+// rows; the override route writes MANUAL rows (source='manual', never overwritten by
+// auto). Merged with the global vendor login map on read, so known vendors need no
+// row. Account-scoped isolation: every read/write filters accountId.
+export const botReviewClassification = sqliteTable(
+  'bot_review_classification',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    authorUserId: integer('author_user_id')
+      .notNull()
+      .references(() => users.id),
+    automated: integer('automated', { mode: 'boolean' }).notNull(),
+    kind: text('kind'), // AutomatedReviewerKind | null
+    label: text('label'),
+    confidence: text('confidence').notNull(), // 'high'|'medium'|'low'
+    source: text('source').notNull(), // ClassificationSource
+    reasonsJson: text('reasons_json', { mode: 'json' }).$type<string[]>(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountUx: uniqueIndex('brc_account_author').on(t.accountId, t.authorUserId),
+  }),
+);
+
+// Account-scoped mute / auto-triage rules (WS6). A rule matches automated-reviewer
+// threads by vendor kind × path glob × severity (null = any) and either 'hide's them
+// from the noise counts/feed or (with autoResolveDays) marks likely_addressed threads
+// older than N days for the standing auto-resolve job. Account-scoped isolation.
+export const botMuteRules = sqliteTable(
+  'bot_mute_rules',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    vendorKind: text('vendor_kind'),
+    pathGlob: text('path_glob'),
+    severity: text('severity'),
+    action: text('action').notNull(), // 'hide'|'auto_resolve'
+    autoResolveDays: integer('auto_resolve_days'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountIdx: index('bmr_account_idx').on(t.accountId),
+  }),
 );

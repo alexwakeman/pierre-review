@@ -59,18 +59,26 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
           mergeStateStatus
           author {
             login
+            __typename
             ... on User {
               id
               name
               avatarUrl
             }
+            ... on Bot {
+              id
+            }
           }
           mergedBy {
             login
+            __typename
             ... on User {
               id
               name
               avatarUrl
+            }
+            ... on Bot {
+              id
             }
           }
           labels(first: 20) {
@@ -149,10 +157,14 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
               submittedAt
               author {
                 login
+                __typename
                 ... on User {
                   id
                   name
                   avatarUrl
+                }
+                ... on Bot {
+                  id
                 }
               }
             }
@@ -173,10 +185,14 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
                   createdAt${reviewCommentDiffHunkField}
                   author {
                     login
+                    __typename
                     ... on User {
                       id
                       name
                       avatarUrl
+                    }
+                    ... on Bot {
+                      id
                     }
                   }
                 }
@@ -190,10 +206,14 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
               createdAt
               author {
                 login
+                __typename
                 ... on User {
                   id
                   name
                   avatarUrl
+                }
+                ... on Bot {
+                  id
                 }
               }
             }
@@ -384,9 +404,13 @@ export interface OwnerTypeResponse {
 
 export interface GqlActor {
   login: string;
-  id?: string; // present only for User (via inline fragment)
+  id?: string; // present only for User/Bot (via inline fragment)
   name?: string | null;
   avatarUrl?: string | null;
+  // GraphQL __typename ('User' | 'Bot' | 'Organization' | 'Mannequin' | …) — captured
+  // for the bot-triage classifier (stored on users.githubType). Absent when the actor
+  // was synthesized locally (commit authors / review requests pass {login,id} only).
+  __typename?: string;
 }
 
 export interface GqlCommitNode {

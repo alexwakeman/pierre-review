@@ -79,6 +79,10 @@ export function createUserResolver() {
             githubNodeId: actor?.id ?? null,
             displayName: actor?.name ?? null,
             avatarUrl: actor?.avatarUrl ?? null,
+            // GraphQL __typename ('User'|'Bot'|…) when the actor carried it (the fat
+            // activity query selects it on every author); null for locally-synthesized
+            // actors (commit authors / review requests). Feeds the bot-triage classifier.
+            githubType: actor?.__typename ?? null,
             isBot: isLikelyBot(login),
           })
           .onConflictDoUpdate({
@@ -87,6 +91,9 @@ export function createUserResolver() {
               githubNodeId: sql`coalesce(excluded.github_node_id, ${users.githubNodeId})`,
               displayName: sql`coalesce(excluded.display_name, ${users.displayName})`,
               avatarUrl: sql`coalesce(excluded.avatar_url, ${users.avatarUrl})`,
+              // Never overwrite a known github_type with null (a later {login,id}-only
+              // resolve of the same actor must not wipe the type captured from GraphQL).
+              githubType: sql`coalesce(excluded.github_type, ${users.githubType})`,
               // Never clobber a manual is_bot override.
               isBot: sql`case when ${users.isBotOverridden} = true then ${users.isBot} else excluded.is_bot end`,
             },

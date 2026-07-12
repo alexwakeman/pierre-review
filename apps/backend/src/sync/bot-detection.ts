@@ -73,3 +73,48 @@ export function isReviewBot(login: string | null | undefined): boolean {
 export function reviewBotLogins(): string[] {
   return Object.keys(REVIEW_BOTS);
 }
+
+// ---- WS1 service-account login heuristics (bot-triage platform) ----
+//
+// Plain-User logins that LOOK like automation (`acme-ci`, `deploy-bot`, `foo-svc`,
+// k8s-style `*-machine-user`). These are SOFT signals only: a match PROMOTES a
+// reviewer into the behavioral MEDIUM band (never a hard auto-badge — see
+// reviewer-classify.ts), and the manual override is always the escape hatch. GitHub
+// Apps are the recommended automation pattern, so the bare-PAT service account is a
+// deliberate minority long-tail we catch here + let a single click confirm forever.
+// Matched case-insensitively on the NORMALIZED login (lowercased, `[bot]` stripped).
+export const AUTOMATED_LOGIN_PATTERNS: RegExp[] = [
+  /-ci$/,
+  /-bot$/,
+  /-svc$/,
+  /-robot$/,
+  /-automation$/,
+  /^bot-/,
+  /-machine-user$/,
+];
+
+// Turn a simple `*`-glob (the per-account allowlist entries, e.g. `*-agent`, `svc-*`)
+// into an anchored, case-insensitive RegExp. Only `*` is special; every other regex
+// metacharacter is escaped.
+function globToRegExp(glob: string): RegExp {
+  const escaped = glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`, 'i');
+}
+
+// True when a login matches a built-in service-account pattern OR one of the
+// per-account allowlist globs (from the account's Pro settings `bots.loginAllowlist`,
+// simple `*` wildcards). Global/stateless — the account scoping lives in the caller.
+export function matchesAutomatedLoginPattern(
+  login: string,
+  extraAllowlist: string[] = [],
+): boolean {
+  if (!login) return false;
+  const norm = normalizeLogin(login);
+  if (AUTOMATED_LOGIN_PATTERNS.some((re) => re.test(norm))) return true;
+  for (const raw of extraAllowlist) {
+    const glob = raw.trim().toLowerCase();
+    if (!glob) continue;
+    if (globToRegExp(glob).test(norm)) return true;
+  }
+  return false;
+}

@@ -21,7 +21,6 @@ import type {
   RequestReviewersBody,
   RequestReviewersResult,
   ResolveBotThreadsBody,
-  ResolveBotThreadsResult,
   ReviewerSuggestion,
   UpdateBranchBody,
   UpdateBranchResult,
@@ -41,7 +40,6 @@ import {
   markAllViewed,
   markPrMergedLocally,
   markPrViewed,
-  stampThreadResolved,
   upsertLocalPrComment,
   upsertLocalReview,
 } from '../../db/queries.js';
@@ -62,11 +60,11 @@ import {
   postInlineComment,
   requestReviewers,
   rerunWorkflowRun,
-  setReviewThreadResolved,
   submitPrReview,
   updatePullRequestBranch,
 } from '../../github/mutations.js';
 import { hydratePrDetail } from '../../sync/hydrate-detail.js';
+import { resolveThreadsOnGitHub } from '../../bot-triage/resolve.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 // GitHub anchors a file in the PR "Files changed" diff by the SHA-256 of its
@@ -400,33 +398,14 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       const { threadIds } = req.body as ResolveBotThreadsBody;
       const accountId = accountIdOf(req);
 
+      // Server RE-DERIVES the eligible set (owned + automated-reviewer-originated +
+      // `likely_addressed` + unresolved) ∩ the client's reviewed list, then resolves each via
+      // the shared helper (the SAME code path the standing auto-triage job uses). An empty
+      // eligible set — PR not owned / no such threads / a fully-stale client list — is a no-op,
+      // not an error (the helper short-circuits before any token fetch). Status stays 200 even
+      // on partial failure; the body carries per-thread outcomes.
       const eligible = await getResolvableBotThreads(id, accountId, threadIds);
-      if (eligible.length === 0) {
-        // PR not owned / no such threads, or the client's list is fully stale — a no-op, not an error.
-        const empty: ResolveBotThreadsResult = { resolved: 0, failed: 0, results: [] };
-        return empty;
-      }
-
-      const token = await getAccessToken(accountId);
-      const results: ResolveBotThreadsResult['results'] = [];
-      let resolved = 0;
-      let failed = 0;
-      // Sequential (not Promise.all) to stay gentle on the GitHub GraphQL rate limit; a bot
-      // backlog is a handful of threads, so latency is a non-issue.
-      for (const t of eligible) {
-        try {
-          await setReviewThreadResolved(token, t.threadNodeId, true);
-          const derivedState = await stampThreadResolved(t.id, true, accountId);
-          results.push({ threadId: t.id, ok: true, derivedState: derivedState ?? 'resolved' });
-          resolved += 1;
-        } catch {
-          results.push({ threadId: t.id, ok: false, derivedState: null });
-          failed += 1;
-        }
-      }
-      // Status stays 200 even on partial failure — the body carries per-thread outcomes.
-      const out: ResolveBotThreadsResult = { resolved, failed, results };
-      return out;
+      return resolveThreadsOnGitHub(accountId, eligible);
     },
   );
 

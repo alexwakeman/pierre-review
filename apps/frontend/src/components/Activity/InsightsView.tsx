@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  BotOnlyReviewCard,
   CiStatus,
   InsightCard,
   InsightPrRef,
@@ -21,12 +22,13 @@ import {
 } from '../../hooks/useRepoDigest.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
-import { BOT_VENDOR_META, CI_META, indexUsers } from '../../lib/ui.js';
+import { automatedReviewerMeta, CI_META, indexUsers } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
 import { AiSummary } from '../AiSummary.js';
 import { ThreadCard } from '../ThreadView/index.js';
+import { BotRoiPanel } from './BotRoiPanel.js';
 import { SprintReportCard } from './SprintReportCard.js';
 import { TeamMetricsPanel } from './TeamMetricsPanel.js';
 import { TrackUsage } from './TrackUsage.js';
@@ -41,6 +43,7 @@ const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
 
 const KIND_LABEL: Record<InsightCard['kind'], string> = {
   bot_signal: 'Review-bot signal',
+  bot_only_review: 'Only a bot reviewed',
   stalled_review: 'Stalled review',
   untouched_thread: 'Untouched thread',
   reviewer_load: 'Review load',
@@ -298,6 +301,89 @@ function PrLine({
   );
 }
 
+// "Only a bot reviewed this" governance risk (WS7): an aggregate list of PRs merged (or
+// open-and-mergeable) whose ONLY review came from an automated reviewer — no human ever
+// looked. A rubber-stamping-fatigue caution; each PR opens its detail tab. Deterministic.
+function BotOnlyReviewCardView({
+  card,
+  innerRef,
+  flash,
+  onOpen,
+}: {
+  card: BotOnlyReviewCard;
+  innerRef: (el: HTMLLIElement | null) => void;
+  flash: boolean;
+  onOpen: (meta: PinnedPr, returnItemId?: string) => void;
+}): JSX.Element {
+  return (
+    <CardShell
+      card={card}
+      innerRef={innerRef}
+      flash={flash}
+      right={`${card.prs.length} PR${card.prs.length === 1 ? '' : 's'}`}
+    >
+      <div className="text-sm text-gray-800 dark:text-gray-100">
+        🤖 Only a bot reviewed{' '}
+        <span className="font-semibold tabular-nums">{card.prs.length}</span> PR
+        {card.prs.length === 1 ? '' : 's'} — no human review
+      </div>
+      <ul className="mt-1.5 space-y-1">
+        {card.prs.map((p) => (
+          <li key={p.prId} className="flex min-w-0 items-baseline gap-1.5 text-[11px]">
+            <button
+              type="button"
+              onClick={() =>
+                onOpen(
+                  {
+                    id: p.prId,
+                    number: p.number,
+                    title: p.title,
+                    repoFullName: p.repoFullName,
+                    authorLogin: null,
+                    authorDisplayName: null,
+                    authorAvatarUrl: null,
+                  },
+                  card.id,
+                )
+              }
+              className="min-w-0 truncate text-left text-gray-600 hover:underline dark:text-gray-300"
+              title="Open this PR on its Overview tab"
+            >
+              <span className="text-gray-400">
+                {p.repoFullName} #{p.number}
+              </span>{' '}
+              {p.title}
+            </button>
+            <span className="shrink-0 rounded bg-gray-500/10 px-1 py-0.5 text-[10px] uppercase tracking-wide text-gray-500">
+              {p.state}
+            </span>
+            <span
+              className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+              style={{ background: '#f59e0b1a' }}
+              title="The only review on this PR"
+            >
+              {p.botLabel}
+            </span>
+            <a
+              href={p.githubUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={(e) => e.stopPropagation()}
+              className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              title="Open on GitHub"
+            >
+              ↗
+            </a>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 text-[11px] text-gray-400">
+        A trust/safety hook — deterministic (no AI). Consider a human pass before these ship.
+      </div>
+    </CardShell>
+  );
+}
+
 export function InsightsView(): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const showThreadInChanges = useFilters((s) => s.showThreadInChanges);
@@ -333,7 +419,7 @@ export function InsightsView(): JSX.Element {
   };
 
   // ---- AI summaries: each card owns its OWN delta-gated regenerate (no unified Refresh) ----
-  const { activityDigest } = useProCapabilities();
+  const { activityDigest, teamInsights } = useProCapabilities();
   const { data: repos } = useRepos();
   // Activity is scoped to ALL watched repos (the digest set ignores the FilterBar-visible
   // selection — the console is a whole-team view, not the timeline's filtered slice).
@@ -421,6 +507,10 @@ export function InsightsView(): JSX.Element {
         label="Regenerating summaries"
         {...digestProgressProps(refreshDigests.progress)}
       />
+
+      {/* Review-bot ROI / utilisation — a Pro drill-down atop the (core) bot_signal card.
+          The analytics route is core+deterministic; the panel is UI-gated on teamInsights. */}
+      {teamInsights && <BotRoiPanel />}
 
       {isLoading ? (
         <div className="space-y-3">
@@ -601,7 +691,9 @@ export function InsightsView(): JSX.Element {
                     </div>
                     <ul className="mt-2 space-y-1">
                       {card.vendors.map((v) => {
-                        const meta = BOT_VENDOR_META[v.kind];
+                        // v.kind is AutomatedReviewerKind (vendor / in_house / pierre) — the
+                        // kind-in-hand lookup handles all three.
+                        const meta = automatedReviewerMeta(v.kind);
                         const pct = v.threads > 0 ? Math.round((v.actedOn / v.threads) * 100) : 0;
                         return (
                           <li key={v.kind} className="flex flex-wrap items-center gap-x-2 text-[11px]">
@@ -630,6 +722,16 @@ export function InsightsView(): JSX.Element {
                       Deterministic across every repo + bot — no AI.
                     </div>
                   </CardShell>
+                );
+              case 'bot_only_review':
+                return (
+                  <BotOnlyReviewCardView
+                    key={card.id}
+                    card={card}
+                    innerRef={(el) => setCardRef(card.id, el)}
+                    flash={flashId === card.id}
+                    onOpen={open}
+                  />
                 );
               default:
                 return null;
