@@ -65,7 +65,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   if (!mod) return;
 
   const plugin = (mod.default ?? mod) as ProPlugin;
-  if (plugin?.apiVersion !== 11 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 12 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -110,10 +110,10 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         }),
       getActivity: (accountId, repoIds) =>
         hostQueries.getActivity(accountId, repoIds ?? null),
-      getTeamInsights: (accountId, window) =>
-        hostQueries.getTeamInsights(accountId, window),
-      getTeamMetricsDetail: (accountId, window) =>
-        hostQueries.getTeamMetricsDetail(accountId, window),
+      getTeamInsights: (accountId, window, repoIds) =>
+        hostQueries.getTeamInsights(accountId, window, repoIds),
+      getTeamMetricsDetail: (accountId, window, repoIds) =>
+        hostQueries.getTeamMetricsDetail(accountId, window, repoIds),
       getAiUsage: (accountId, sinceMs) => getAiUsageSummary(accountId, sinceMs),
     },
     recordAiUsage: (row) => recordAiUsage(row),

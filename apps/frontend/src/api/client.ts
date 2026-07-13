@@ -71,10 +71,14 @@ import type {
   PrDetail,
   PrFilesResponse,
   SuggestedReviewersResponse,
+  PresetPromptKey,
+  PresetPromptResponse,
   ProSettings,
   ProSettingsUpdate,
   Repo,
   RepoSearchResponse,
+  Team,
+  TeamsResponse,
   ReplyResult,
   ReplyToThreadBody,
   ResolveThreadBody,
@@ -134,6 +138,18 @@ function jsonBody(method: string, body?: unknown): RequestInit {
 
 export { ApiError };
 
+// Build the `scope=` query fragment (no leading `?`/`&`). Omitted for the default 'all' scope
+// so the common case stays clean. The wire value is the string form ('all' | 'none' | '<teamId>').
+function scopeParam(scope?: string): string {
+  return scope && scope !== 'all' ? `scope=${encodeURIComponent(scope)}` : '';
+}
+
+// Join query fragments (already URL-encoded, no leading separators) onto a base path.
+function withQuery(base: string, ...parts: (string | undefined)[]): string {
+  const qs = parts.filter((p): p is string => Boolean(p)).join('&');
+  return qs ? `${base}?${qs}` : base;
+}
+
 export const api = {
   listRepos: () => get<Repo[]>('/api/repos'),
   searchRepos: (q: string, cursor?: string) =>
@@ -163,6 +179,33 @@ export const api = {
       handle<{ repoId: number; deleted: boolean }>(r),
     ),
   syncStatus: (id: number) => get<SyncStatus>(`/api/repos/${id}/sync-status`),
+
+  // ---- Teams (CORE) ----
+  listTeams: () => get<TeamsResponse>('/api/teams'),
+  createTeam: (name: string) =>
+    fetch('/api/teams', jsonBody('POST', { name })).then((r) =>
+      handle<{ team: Team }>(r),
+    ),
+  // Rename and/or replace membership (PATCH accepts { name?, repoIds? }).
+  renameTeam: (id: number, body: { name?: string; repoIds?: number[] }) =>
+    fetch(`/api/teams/${id}`, jsonBody('PATCH', body)).then((r) =>
+      handle<{ team: Team }>(r),
+    ),
+  // Replace a team's membership with exactly `repoIds` (assign new, remove missing; auto-watch).
+  setTeamRepos: (id: number, repoIds: number[]) =>
+    fetch(`/api/teams/${id}`, jsonBody('PATCH', { repoIds })).then((r) =>
+      handle<{ team: Team }>(r),
+    ),
+  deleteTeam: (id: number) =>
+    fetch(`/api/teams/${id}`, jsonBody('DELETE')).then((r) => handle<void>(r)),
+  assignRepoToTeam: (teamId: number, repoId: number) =>
+    fetch(`/api/teams/${teamId}/repos`, jsonBody('POST', { repoId })).then((r) =>
+      handle<{ team: Team }>(r),
+    ),
+  unassignRepoFromTeam: (teamId: number, repoId: number) =>
+    fetch(`/api/teams/${teamId}/repos/${repoId}`, jsonBody('DELETE')).then((r) =>
+      handle<void>(r),
+    ),
 
   listUsers: () => get<User[]>('/api/users'),
   mergers: () => get<MergersResponse>('/api/mergers'),
@@ -264,18 +307,25 @@ export const api = {
     get<TeamMetricsDetailResponse>('/api/pro/insights/metrics-detail'),
   // Month-to-date AI-usage rollup (credits, split by seam). Covers all account AI spend.
   aiUsage: () => get<AiUsageResponse>('/api/pro/ai-usage'),
-  // The Insights "Sprint report" (Pro Haiku summary; activityDigest capability).
-  sprintReport: () => get<SprintReportResponse>('/api/pro/sprint-report'),
-  refreshSprintReport: () =>
-    fetch('/api/pro/sprint-report/refresh', jsonBody('POST')).then((r) =>
-      handle<SprintReportResponse>(r),
+  // The Insights "Sprint report" (Pro Haiku summary; activityDigest capability). `scope`
+  // ('all' | 'none' | '<teamId>') narrows the report to a team's repos; omitted = all.
+  sprintReport: (scope?: string) =>
+    get<SprintReportResponse>(
+      withQuery('/api/pro/sprint-report', scopeParam(scope)),
     ),
+  refreshSprintReport: (scope?: string) =>
+    fetch(
+      withQuery('/api/pro/sprint-report/refresh', scopeParam(scope)),
+      jsonBody('POST'),
+    ).then((r) => handle<SprintReportResponse>(r)),
   // The Insights "Retro" (Pro Haiku retrospective narrative of the window; activityDigest cap).
-  retroReport: () => get<RetroReportResponse>('/api/pro/retro'),
-  refreshRetroReport: () =>
-    fetch('/api/pro/retro/refresh', jsonBody('POST')).then((r) =>
-      handle<RetroReportResponse>(r),
-    ),
+  retroReport: (scope?: string) =>
+    get<RetroReportResponse>(withQuery('/api/pro/retro', scopeParam(scope))),
+  refreshRetroReport: (scope?: string) =>
+    fetch(
+      withQuery('/api/pro/retro/refresh', scopeParam(scope)),
+      jsonBody('POST'),
+    ).then((r) => handle<RetroReportResponse>(r)),
   // Repo-scoped Claude review history (all runs per PR, newest-first). Gated on
   // config.claudeReviewEnabled; the response's `enabled` flag reflects that.
   repoClaudeReviews: (repoId: number) =>
@@ -284,13 +334,35 @@ export const api = {
   // ---- Pro per-repo digest (Workstream 2; @pierre/pro, flagged) ----
   // Cached per-repo LLM headline digests for the watched repos. Only fetched when
   // pro.activityDigest is true (absent plugin → 404 / enabled:false).
-  repoDigests: (search: string) =>
-    get<RepoDigestsResponse>(`/api/pro/activity/digests${search ? `?${search}` : ''}`),
-  refreshRepoDigests: (search?: string) =>
+  repoDigests: (search: string, scope?: string) =>
+    get<RepoDigestsResponse>(
+      withQuery('/api/pro/activity/digests', search, scopeParam(scope)),
+    ),
+  refreshRepoDigests: (search?: string, scope?: string) =>
     fetch(
-      `/api/pro/activity/digests/refresh${search ? `?${search}` : ''}`,
+      withQuery('/api/pro/activity/digests/refresh', search, scopeParam(scope)),
       jsonBody('POST'),
     ).then((r) => handle<{ status: string }>(r)),
+  // ---- Preset prompts (Pro; the routes land in a later phase — stubs against the shape) ----
+  // One-click "ask about this scope" answers (Markdown). `scope` ('all' | 'none' | '<teamId>')
+  // narrows the question to a team's repos; omitted = all.
+  presetPrompt: (key: PresetPromptKey, scope?: string) =>
+    get<PresetPromptResponse>(
+      withQuery(
+        '/api/pro/preset-prompt',
+        `key=${encodeURIComponent(key)}`,
+        scopeParam(scope),
+      ),
+    ),
+  refreshPresetPrompt: (key: PresetPromptKey, scope?: string) =>
+    fetch(
+      withQuery(
+        '/api/pro/preset-prompt/refresh',
+        `key=${encodeURIComponent(key)}`,
+        scopeParam(scope),
+      ),
+      jsonBody('POST'),
+    ).then((r) => handle<PresetPromptResponse>(r)),
   // A single repo's digest (lazy per-repo so a slow Haiku call never blocks the grid).
   repoDigest: (repoId: number) =>
     get<RepoDigest>(`/api/pro/activity/digests/${repoId}`),

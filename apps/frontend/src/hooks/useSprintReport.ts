@@ -9,7 +9,7 @@ import { api } from '../api/client.js';
 export function useSprintReport(enabled: boolean) {
   return useQuery<SprintReportResponse>({
     queryKey: ['sprint-report'],
-    queryFn: api.sprintReport,
+    queryFn: () => api.sprintReport(),
     enabled,
     staleTime: 60_000,
   });
@@ -31,7 +31,7 @@ export function useRefreshSprintReport() {
     return () => window.clearTimeout(t);
   }, [notice]);
   const mutation = useMutation({
-    mutationFn: api.refreshSprintReport,
+    mutationFn: () => api.refreshSprintReport(),
     onSuccess: (data) => {
       qc.setQueryData(['sprint-report'], data);
       // A generation may have spent credits → refresh the meter + the out-of-credits gate.

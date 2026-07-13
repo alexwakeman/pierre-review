@@ -9,7 +9,7 @@ import { api } from '../api/client.js';
 export function useRetroReport(enabled: boolean) {
   return useQuery<RetroReportResponse>({
     queryKey: ['retro-report'],
-    queryFn: api.retroReport,
+    queryFn: () => api.retroReport(),
     enabled,
     staleTime: 60_000,
   });
@@ -29,7 +29,7 @@ export function useRefreshRetroReport() {
     return () => window.clearTimeout(t);
   }, [notice]);
   const mutation = useMutation({
-    mutationFn: api.refreshRetroReport,
+    mutationFn: () => api.refreshRetroReport(),
     onSuccess: (data) => {
       qc.setQueryData(['retro-report'], data);
       void qc.invalidateQueries({ queryKey: ['ai-usage'] });

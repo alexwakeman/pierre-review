@@ -307,6 +307,91 @@ check(
 );
 check('deleteBotMuteRule(A.rule, A) returns true', (await q.deleteBotMuteRule(1, ruleA.id)) === true);
 
+// ── Teams (CORE): teams + team_repos are account-scoped; every getter/writer filters
+// accountId, and id-addressed mutators verify ownership → false/empty for a foreign team ──
+const teamA = await q.createTeam(1, 'Team A');
+await q.assignReposToTeam(teamA.id, 1, [A.repoId]);
+const teamB = await q.createTeam(2, 'Team B');
+await q.assignReposToTeam(teamB.id, 2, [B.repoId]);
+
+const listA = await q.listTeams(1);
+check(
+  "listTeams(A) returns only A's team, with A's repo",
+  listA.length === 1 &&
+    listA[0]!.id === teamA.id &&
+    listA[0]!.repoIds.length === 1 &&
+    listA[0]!.repoIds[0] === A.repoId,
+);
+check(
+  "listTeams(A) excludes B's team",
+  !(await q.listTeams(1)).some((t) => t.id === teamB.id),
+);
+check(
+  'getTeamRepoIds(teamA, A) returns A.repo',
+  (await q.getTeamRepoIds(teamA.id, 1)).length === 1,
+);
+check(
+  'getTeamRepoIds(teamA, B) leaks nothing (IDOR blocked)',
+  (await q.getTeamRepoIds(teamA.id, 2)).length === 0,
+);
+
+// B cannot rename / delete / assign into / remove from A's team.
+check(
+  'renameTeam(teamA, B) returns false (IDOR blocked)',
+  (await q.renameTeam(teamA.id, 2, 'hacked')) === false,
+);
+check(
+  "A's team name survives B's rename attempt",
+  (await q.listTeams(1))[0]!.name === 'Team A',
+);
+await q.assignReposToTeam(teamA.id, 2, [B.repoId]);
+await q.assignReposToTeam(teamA.id, 2, [A.repoId]);
+check(
+  "B's assign into A's team is a no-op",
+  (await q.getTeamRepoIds(teamA.id, 1)).length === 1 &&
+    (await q.getTeamRepoIds(teamA.id, 1))[0] === A.repoId,
+);
+check(
+  'removeRepoFromTeam(teamA, A.repo, B) returns false (IDOR blocked)',
+  (await q.removeRepoFromTeam(teamA.id, A.repoId, 2)) === false,
+);
+check(
+  "A.repo survives B's remove attempt",
+  (await q.getTeamRepoIds(teamA.id, 1)).length === 1,
+);
+check(
+  'deleteTeam(teamA, B) returns false (IDOR blocked)',
+  (await q.deleteTeam(teamA.id, 2)) === false,
+);
+check("A's team survives B's delete attempt", (await q.listTeams(1)).length === 1);
+
+// resolveScopeRepoIds honours ownership: A resolves its team; B resolving A's team → [].
+check(
+  "resolveScopeRepoIds(A, '<teamA>') resolves A's repos",
+  JSON.stringify(await q.resolveScopeRepoIds(1, String(teamA.id))) ===
+    JSON.stringify([A.repoId]),
+);
+check(
+  "resolveScopeRepoIds(B, '<teamA>') leaks nothing (IDOR blocked)",
+  (await q.resolveScopeRepoIds(2, String(teamA.id)))!.length === 0,
+);
+check("resolveScopeRepoIds(A, 'all') is null", (await q.resolveScopeRepoIds(1, 'all')) === null);
+check(
+  "resolveScopeRepoIds(A, 'none') excludes A's assigned repo",
+  !(await q.resolveScopeRepoIds(1, 'none'))!.includes(A.repoId),
+);
+check(
+  'getUnassignedRepoIds(A) is empty (A.repo is in a team)',
+  (await q.getUnassignedRepoIds(1)).length === 0,
+);
+
+// Owner delete cascades team_repos (functional sanity, not IDOR).
+check('deleteTeam(teamA, A) returns true', (await q.deleteTeam(teamA.id, 1)) === true);
+check(
+  "teamA's membership is gone after delete (cascade)",
+  (await q.getTeamRepoIds(teamA.id, 1)).length === 0,
+);
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

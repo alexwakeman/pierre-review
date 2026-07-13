@@ -705,3 +705,52 @@ export const botMuteRules = sqliteTable(
     accountIdx: index('bmr_account_idx').on(t.accountId),
   }),
 );
+
+// ---- Teams (CORE) ----
+// A named grouping of the account's repos (sprint teams / product areas). Account-scoped;
+// a repo can belong to many teams (overlap allowed via the team_repos join). Drives the
+// scope selector (all / none / <teamId>) that per-team AI + digests key off downstream.
+export const teams = sqliteTable(
+  'teams',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountNameUx: uniqueIndex('teams_account_name').on(t.accountId, t.name),
+    accountIdx: index('teams_account_idx').on(t.accountId),
+  }),
+);
+
+// Many-to-many join of teams ↔ repos (a repo may sit in several teams). `accountId` is
+// denormalized for isolation (== teams.accountId == repos.accountId). Cascades from both
+// teams and repos so deleting either cleans up membership rows automatically.
+export const teamRepos = sqliteTable(
+  'team_repos',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    teamId: integer('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    teamRepoUx: uniqueIndex('team_repos_team_repo').on(t.teamId, t.repoId),
+    accountIdx: index('team_repos_account_idx').on(t.accountId),
+    repoIdx: index('team_repos_repo_idx').on(t.repoId),
+  }),
+);
