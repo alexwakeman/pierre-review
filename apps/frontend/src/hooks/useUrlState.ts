@@ -8,6 +8,7 @@ import {
   DEFAULT_REVIEW_STATES,
   pickFilterBarState,
   sanitizePersistedFilters,
+  scopeToParam,
   useFilters,
   type FilterState,
   type RangePreset,
@@ -50,6 +51,16 @@ function readFromUrl(): Partial<FilterState> {
   }
   out.repoIds = parseIds(p.get('repos'));
   out.userIds = parseIds(p.get('users'));
+  // Team scope: 'all' (default, omitted) | 'none' | '<teamId>'. We only have the raw scope
+  // on read — set teamScope and leave the repoIds derivation to a component effect (once the
+  // teams list has loaded). An unparseable value falls back to the default 'all'.
+  const team = p.get('team');
+  if (team === 'none') out.teamScope = 'none';
+  else if (team === 'all') out.teamScope = 'all';
+  else if (team != null) {
+    const n = Number.parseInt(team, 10);
+    if (Number.isFinite(n)) out.teamScope = n;
+  }
   // Bots are SHOWN by default now, so a clean URL means "shown". Only an explicit
   // `bots=1` turns the exclude-bots filter ON (a legacy `bots=0` correctly resolves
   // to off, matching the new default).
@@ -123,6 +134,8 @@ function writeToUrl(s: FilterState): void {
   const p = new URLSearchParams();
   if (s.preset !== '14d') p.set('preset', s.preset);
   if (s.repoIds?.length) p.set('repos', s.repoIds.join(','));
+  // Team scope: emit only the non-default ('all') selection so a clean URL stays clean.
+  if (s.teamScope !== 'all') p.set('team', scopeToParam(s.teamScope));
   if (s.userIds?.length) p.set('users', s.userIds.join(','));
   // Shown is the default; only encode the non-default "exclude bots" choice (bots=1).
   if (s.excludeBots) p.set('bots', '1');

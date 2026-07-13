@@ -20,11 +20,15 @@ function digestSearch(repoIds: number[] | null): string {
 // Bulk per-repo digests for the watched repos. Only fetched when `enabled`
 // (pro.activityDigest) — absent the @pierre/pro plugin the route 404s. Cached snapshot;
 // regeneration is explicit (the refresh stream / per-banner regenerate).
-export function useRepoDigests(repoIds: number[] | null, enabled: boolean) {
+export function useRepoDigests(
+  repoIds: number[] | null,
+  enabled: boolean,
+  scope?: string,
+) {
   const search = digestSearch(repoIds);
   return useQuery<RepoDigestsResponse>({
-    queryKey: ['repo-digests', search],
-    queryFn: () => api.repoDigests(search),
+    queryKey: ['repo-digests', search, scope ?? 'all'],
+    queryFn: () => api.repoDigests(search, scope),
     enabled,
     staleTime: Infinity,
   });

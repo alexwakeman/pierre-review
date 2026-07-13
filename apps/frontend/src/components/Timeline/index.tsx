@@ -32,6 +32,7 @@ import {
   type TimelineMode,
 } from '../../store/pinnedTabs.js';
 import { escapeHtml, indexUsers, userLabel, watchedGlyphHtml } from '../../lib/ui.js';
+import { SkeletonBlock, SkeletonLine } from '../Skeleton.js';
 import { renderPrBar, prClassName, prTooltip } from './prBar.js';
 import { computeUserStats, renderUserLabel, type UserStats } from './userRow.js';
 import { UserStatsPopover } from './UserStatsPopover.js';
@@ -239,6 +240,60 @@ function prBarEndMs(pr: TimelinePr): number {
 // above the viewport. `scrollTop` is the pixel fallback used when the anchor row is
 // gone after a sync. Used both across a rebuild and across a focus enter→exit.
 type ScrollAnchor = { token: string | null; offset: number; scrollTop: number };
+
+// First-load placeholder for the timeline: a left label gutter of repo → contributor
+// rows next to horizontal PR-bar silhouettes, so the board's shape is legible before the
+// (heavy) vis instance mounts. Purely structural — mirrors the Activity console's
+// animate-pulse pattern via the shared Skeleton primitives. Absolutely positioned so it
+// overlays the (empty) vis container without shifting layout.
+const TL_SKELETON_GROUPS: { o: number; w: number }[][] = [
+  [
+    { o: 4, w: 46 },
+    { o: 24, w: 34 },
+  ],
+  [
+    { o: 10, w: 58 },
+    { o: 40, w: 28 },
+  ],
+  [
+    { o: 6, w: 40 },
+    { o: 30, w: 50 },
+  ],
+];
+
+function TimelineSkeleton(): JSX.Element {
+  return (
+    <div className="absolute inset-0 flex gap-4 overflow-hidden p-4" aria-hidden="true">
+      {/* Left label gutter: repo header line + its contributor rows. */}
+      <div className="flex w-44 shrink-0 flex-col gap-4">
+        {TL_SKELETON_GROUPS.map((rows, gi) => (
+          <div key={gi} className="flex flex-col gap-2">
+            <SkeletonLine className="h-3.5 w-28" />
+            {rows.map((_, ri) => (
+              <SkeletonLine key={ri} className="ml-4 h-3 w-24" />
+            ))}
+          </div>
+        ))}
+      </div>
+      {/* Right canvas: a header spacer (aligns with the repo label) then staggered
+          horizontal PR-bar placeholders. */}
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
+        {TL_SKELETON_GROUPS.map((rows, gi) => (
+          <div key={gi} className="flex flex-col gap-2">
+            <div className="h-3.5" />
+            {rows.map((bar, ri) => (
+              <SkeletonBlock
+                key={ri}
+                className="h-3"
+                style={{ marginLeft: `${bar.o}%`, width: `${bar.w}%` }}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // `mode` turns this into an EMBEDDED per-tab instance (App keys the remount, so only
 // ONE Timeline is ever mounted — the isolation is purely component-LOCAL):
@@ -2841,11 +2896,7 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
 
   return (
     <div className={`relative h-full w-full${focusActive ? ' tl-focus-active' : ''}`}>
-      {isLoading && !data && (
-        <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-500">
-          Loading timeline…
-        </div>
-      )}
+      {isLoading && !data && <TimelineSkeleton />}
       {error && (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-red-500">
           {String(error)}

@@ -65,26 +65,15 @@ function Header({ pr, extra }: { pr: PrDetail; extra?: JSX.Element }): JSX.Eleme
   );
 }
 
-export function ChangesTab({
-  pr,
-  focusThreadId,
-  onThreadShown,
-}: {
-  pr: PrDetail;
-  focusThreadId?: number | null;
-  onThreadShown?: () => void;
-}): JSX.Element {
+export function ChangesTab({ pr }: { pr: PrDetail }): JSX.Element {
   const { data, isLoading, isError } = usePrFiles(pr.id);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
-  // Unresolved review threads render inline at their diff line. The deep-link target is
-  // kept even if it's since resolved, so the link never dead-ends.
+  // Unresolved review threads render inline at their diff line.
   const threadCtx: DiffThreadContext = {
-    threads: pr.threads.filter((t) => !t.isResolved || t.id === focusThreadId),
+    threads: pr.threads.filter((t) => !t.isResolved),
     usersById,
     prUrl: pr.githubUrl,
-    focusThreadId: focusThreadId ?? null,
-    onThreadShown,
   };
 
   // No changes at all on this PR — same empty state as before.

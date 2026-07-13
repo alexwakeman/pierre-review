@@ -1,18 +1,19 @@
-import type { DigestPrRef, RepoDigest } from '@pierre-review/shared';
+import type { DigestPrRef } from '@pierre-review/shared';
 import { relativeTime } from '../../lib/ui.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useSprintReport, useRefreshSprintReport } from '../../hooks/useSprintReport.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
+import { useFilters, scopeToParam } from '../../store/filters.js';
 import { useSprintReportUi } from '../../store/digestCollapse.js';
 import { SummaryMarkdown } from './prRefTable.js';
-import { InsightsDigests } from './InsightsDigests.js';
 
-// A Pro Haiku summary OF the Insights, pinned atop the Insights rail: headline metrics +
+// A Pro Haiku summary OF the Insights, shown on the Insights "Sprint" sub-tab: headline metrics +
 // prioritised, PR-linked issues, repos ranked by activity + code volume. Cost-safe: it
 // only generates on an explicit Generate/Regenerate. `stale` flags that the Insights
 // changed since it was written, so the lead knows to regenerate. Referenced PRs are
-// clickable → the PR detail (Overview), mirroring the digest's #N refs.
+// clickable → the PR detail (Overview), mirroring the digest's #N refs. Scoped per team via
+// the FilterBar's team selection (teamScope) — each team's report caches independently.
 
 function refMeta(ref: DigestPrRef): PinnedPr {
   return {
@@ -27,71 +28,34 @@ function refMeta(ref: DigestPrRef): PinnedPr {
 }
 
 // The card ALWAYS owns its own delta-gated Regenerate (Haiku seam via useRefreshSprintReport):
-// the button appears only when a report exists AND `report.stale` (real delta), matching the
-// per-repo digest cards. The per-repo digest cards are nested INSIDE this card (collapsed by
-// default) to keep the Insights tab compact — the parent passes the digest data down, plus a
-// per-repo regenerate callback threaded through to InsightsDigests.
-export function SprintReportCard({
-  digests,
-  digestsLoading = false,
-  anyWatched = false,
-  refreshingRepoIds,
-  onRegenerateRepo,
-  onRegenerateAllDigests,
-  cascadeBusy = false,
-}: {
-  digests?: RepoDigest[];
-  digestsLoading?: boolean;
-  anyWatched?: boolean;
-  refreshingRepoIds?: Set<number>;
-  // Per-repo regenerate for the nested digest cards; each card offers it only when that
-  // repo's own digest is stale (delta-gated inside InsightsDigests).
-  onRegenerateRepo?: (repoId: number) => void;
-  // Cascade: (re)generating the sprint report ALSO refreshes every watched repo's digest —
-  // itself delta-gated server-side (only repos whose content actually changed regenerate), so
-  // "State of play" and the per-repo summaries move together. Fired alongside the sprint refresh.
-  onRegenerateAllDigests?: () => void;
-  // True while the cascaded digest sweep is streaming. Folded into the button's disabled state
-  // so a second click can't abort the in-flight sweep (the sprint refresh itself may resolve in
-  // ~200ms when throttled, which would otherwise re-enable the button mid-cascade).
-  cascadeBusy?: boolean;
-}): JSX.Element | null {
+// the button appears only when a report exists AND `report.stale` (real delta).
+export function SprintReportCard(): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  const { data, isLoading } = useSprintReport(activityDigest);
-  const refresh = useRefreshSprintReport();
-  // Metered-plan credit status (paid cloud): drives disabling Generate/Regenerate here AND on
-  // the nested per-repo digest cards. Fetched eagerly (the card doesn't wait for the Track-usage
-  // panel to open); shares the ['ai-usage'] cache. Unmetered (local) → allowanceCredits null →
-  // never out of credits.
+  const teamScope = useFilters((s) => s.teamScope);
+  const scope = scopeToParam(teamScope);
+  const { data, isLoading } = useSprintReport(activityDigest, scope);
+  const refresh = useRefreshSprintReport(scope);
+  // Metered-plan credit status (paid cloud): drives disabling Generate/Regenerate. Fetched
+  // eagerly (the card doesn't wait for the Track-usage panel to open); shares the ['ai-usage']
+  // cache. Unmetered (local) → allowanceCredits null → never out of credits.
   const usage = useAiUsage(activityDigest);
   const outOfCredits =
     usage.data?.allowanceCredits != null && (usage.data.remainingCredits ?? 0) <= 0;
   // Collapse state persists across Insights-tab switches / reloads (was ephemeral useState,
-  // which reset the container closed every visit). Per-repo cards inside persist separately
-  // via useInsightsDigestExpand.
+  // which reset the container closed every visit).
   const collapsed = useSprintReportUi((s) => s.collapsed);
   const setCollapsed = useSprintReportUi((s) => s.setCollapsed);
-  const reposOpen = useSprintReportUi((s) => s.reposOpen);
-  const setReposOpen = useSprintReportUi((s) => s.setReposOpen);
-  const showRepos = digests !== undefined && anyWatched;
-  const repoCount = digests?.length ?? 0;
 
   // The AI digest capability is the gate (the report shares the digest's Haiku seam +
   // cost throttle). Absent → render nothing, exactly like the digest banner.
   if (!activityDigest) return null;
 
   const report = data?.report ?? null;
-  // Disabled through BOTH the sprint refresh AND the cascaded digest sweep — clicking again
-  // mid-cascade would abort the SSE sweep and drop its cache reconciliation (see cascadeBusy).
-  const busy = refresh.isPending || cascadeBusy;
+  const busy = refresh.isPending;
 
-  // (Re)generate the sprint report AND cascade a delta-gated refresh across every watched
-  // repo's digest. The two run on independent throttles/guards, so neither starves the other;
-  // the digest side only re-bills repos whose content actually changed (payload-hash gate).
   const regenerate = (): void => {
     refresh.mutate();
-    onRegenerateAllDigests?.();
   };
 
   return (
@@ -143,7 +107,7 @@ export function SprintReportCard({
               title={
                 outOfCredits
                   ? 'Out of AI credits — resets next month'
-                  : 'Generate the first sprint report from the current Insights, and every watched repo’s summary (runs the Haiku model)'
+                  : 'Generate the first sprint report from the current Insights (runs the Haiku model)'
               }
             >
               {outOfCredits ? 'Out of credits' : busy ? 'Generating…' : 'Generate'}
@@ -161,7 +125,7 @@ export function SprintReportCard({
                 title={
                   outOfCredits
                     ? 'Out of AI credits — resets next month'
-                    : 'Regenerate the sprint report and every changed repo summary — the Insights changed since it was written (runs the Haiku model)'
+                    : 'Regenerate the sprint report — the Insights changed since it was written (runs the Haiku model)'
                 }
               >
                 <span aria-hidden="true">↻</span>
@@ -209,37 +173,8 @@ export function SprintReportCard({
           ) : (
             <div className="text-[11px] text-gray-500 dark:text-gray-400">
               A prioritised, PR-linked summary of what needs attention this sprint —
-              generated from the Insights below. Click{' '}
+              generated from the Insights. Click{' '}
               <span className="font-medium">Generate</span> above.
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Per-repo digest cards, nested + collapsed by default so the Insights tab stays
-          compact. Each repo card inside is itself collapsible (collapsed by default). */}
-      {!collapsed && showRepos && (
-        <div className="mt-3 border-t border-violet-200/60 pt-2 dark:border-violet-900/40">
-          <button
-            type="button"
-            onClick={() => setReposOpen(!reposOpen)}
-            className="flex w-full items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300"
-          >
-            <span className="w-3 select-none text-gray-400">{reposOpen ? '▾' : '▸'}</span>
-            <span aria-hidden="true">✨</span> Repo summaries
-            <span className="font-normal text-gray-400">· {repoCount}</span>
-          </button>
-          {reposOpen && (
-            <div className="mt-2">
-              <InsightsDigests
-                embedded
-                digests={digests ?? []}
-                isLoading={digestsLoading}
-                anyWatched={anyWatched}
-                refreshingRepoIds={refreshingRepoIds ?? new Set()}
-                onRegenerateRepo={onRegenerateRepo}
-                outOfCredits={outOfCredits}
-              />
             </div>
           )}
         </div>
