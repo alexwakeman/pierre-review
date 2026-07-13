@@ -20,6 +20,14 @@ import { RepoAnalyticsModal } from '../RepoAnalyticsModal.js';
 // later choice of Feed/a repo is never overridden; a full reload re-applies the default.
 let insightsDefaultApplied = false;
 
+// Called by explicit "open the Feed" navigations (the Welcome-back banner) that mount the
+// Activity console for the first time this session. It marks the one-shot Insights default
+// consumed so the effect below won't clobber the caller's chosen 'feed' back to 'insights'
+// on that first mount. Idempotent; no-op once the default has already been applied.
+export function suppressInsightsDefault(): void {
+  insightsDefaultApplied = true;
+}
+
 // Rail sort: attention desc → unread → alphabetical. Computed once per data load so
 // the rail is stable (not jumpy) as the user interacts.
 function sortRepos(repos: ActivityRepo[]): ActivityRepo[] {
