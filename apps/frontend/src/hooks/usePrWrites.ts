@@ -157,7 +157,10 @@ export function useRequestReviewers(prId: number) {
     mutationFn: (body: RequestReviewersBody) => api.requestReviewers(prId, body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['team-insights'] });
+      // The assign route stamps review_requests locally, so refetching the detail now shows
+      // the requested reviewer, and the (live) suggestions query re-gates to empty.
       void qc.invalidateQueries({ queryKey: ['pr', prId] });
+      void qc.invalidateQueries({ queryKey: ['suggested-reviewers', prId] });
     },
   });
 }

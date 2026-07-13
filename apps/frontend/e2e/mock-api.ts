@@ -450,7 +450,6 @@ function prDetailFor(id: number): PrDetail {
     changedFilesCount: 1,
     files: [],
     requestedReviewers: [],
-    suggestedReviewers: [],
     viewerCanApprove: false,
     viewerHasApprovedStanding: false,
     threads: [],
@@ -488,6 +487,9 @@ export async function installMockApi(page: Page): Promise<void> {
       // real ThreadDetail (a bare `{}` would crash `thread.comments.map`).
       if (path.match(/\/api\/threads\/\d+$/)) return json(route, THREAD_5001);
       if (path.match(/\/api\/prs\/\d+\/mention-candidates$/)) return json(route, USERS);
+      // Suggested reviewers — its own live query now; empty is fine for the fixtures.
+      if (path.match(/\/api\/prs\/\d+\/suggested-reviewers$/))
+        return json(route, { suggestedReviewers: [], users: [] });
 
       if (path.endsWith('/api/me')) return json(route, ME_RESPONSE);
       if (path.endsWith('/api/my-turn')) return json(route, MY_TURN);

@@ -4451,6 +4451,106 @@ export async function getUsersByLogins(logins: string[]): Promise<User[]> {
   return rows.map(mapUser);
 }
 
+// The DB-only basis for the live suggested-reviewers query (the route layers CODEOWNERS +
+// team history on top). Scoped to the account (→ null if the PR isn't the caller's). `wants`
+// gates on the SAME trigger the row uses (open · non-draft · nobody requested/reviewed yet),
+// read live from the DB so an optimistic stamp of a just-requested reviewer empties it.
+export interface SuggestionBasis {
+  wants: boolean;
+  owner: string;
+  name: string;
+  authorId: number | null;
+  authorLogin: string | null; // to drop the author from CODEOWNERS user suggestions
+  paths: string[];
+  suggestions: ReviewerSuggestion[]; // history-based (user) picks from synced data
+  users: User[]; // users referenced by `suggestions` (for avatar/link rendering)
+}
+
+export async function getSuggestedReviewersBasis(
+  id: number,
+  accountId: number,
+): Promise<SuggestionBasis | null> {
+  const rows = await db
+    .select()
+    .from(pullRequests)
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(and(eq(pullRequests.id, id), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  const row = rows[0] ?? null;
+  if (!row) return null;
+  const pr = row.pull_requests;
+  const repo = row.repos;
+
+  const [reviewRows, reqRows] = await Promise.all([
+    db.select({ id: reviews.id }).from(reviews).where(eq(reviews.prId, id)).execute(),
+    db
+      .select({ id: schema.reviewRequests.id })
+      .from(schema.reviewRequests)
+      .where(eq(schema.reviewRequests.prId, id))
+      .execute(),
+  ]);
+  const wants =
+    pr.state === 'open' &&
+    !pr.isDraft &&
+    reqRows.length === 0 &&
+    reviewRows.length === 0;
+
+  const paths = (pr.files ?? []).map((f) => f.path);
+  const suggestions = wants
+    ? await suggestReviewersFromHistory(accountId, pr.repoId, pr.authorId, paths)
+    : [];
+
+  const uids = new Set<number>();
+  for (const s of suggestions) if (s.userId != null) uids.add(s.userId);
+  if (pr.authorId) uids.add(pr.authorId);
+  const usersOut =
+    uids.size > 0
+      ? (
+          await db.select().from(users).where(inArray(users.id, [...uids])).execute()
+        ).map(mapUser)
+      : [];
+  const authorLogin =
+    pr.authorId != null
+      ? usersOut.find((u) => u.id === pr.authorId)?.githubLogin ?? null
+      : null;
+
+  return {
+    wants,
+    owner: repo.owner,
+    name: repo.name,
+    authorId: pr.authorId,
+    authorLogin,
+    paths,
+    suggestions,
+    users: usersOut,
+  };
+}
+
+// Optimistically record just-requested reviewers locally so the "Requested" row + the
+// suggestion gate reflect the assignment immediately, before the next sync re-derives
+// `review_requests` (idempotently). Inserts only rows not already present (the table has no
+// unique constraint, and a re-request must not duplicate). Mirrors the other write routes'
+// local-stamp pattern (approve / comment / merge).
+export async function stampReviewRequests(
+  prId: number,
+  userIds: number[],
+  teamNames: string[],
+): Promise<void> {
+  if (userIds.length === 0 && teamNames.length === 0) return;
+  const existing = await db
+    .select()
+    .from(schema.reviewRequests)
+    .where(eq(schema.reviewRequests.prId, prId))
+    .execute();
+  const haveUser = new Set(existing.filter((r) => r.userId != null).map((r) => r.userId));
+  const haveTeam = new Set(existing.filter((r) => r.teamName != null).map((r) => r.teamName));
+  const toInsert: Array<{ prId: number; userId: number | null; teamName: string | null }> = [];
+  for (const uid of new Set(userIds)) if (!haveUser.has(uid)) toInsert.push({ prId, userId: uid, teamName: null });
+  for (const tn of new Set(teamNames)) if (!haveTeam.has(tn)) toInsert.push({ prId, userId: null, teamName: tn });
+  if (toInsert.length > 0) await db.insert(schema.reviewRequests).values(toInsert).execute();
+}
+
 export async function getPrDetail(
   id: number,
   accountId: number,
@@ -4601,23 +4701,10 @@ export async function getPrDetail(
     teamName: r.teamName,
   }));
 
-  // Suggested reviewers (CORE) — only when the PR warrants them: open, non-draft, and
-  // nobody's been requested OR has reviewed yet. The route layers CODEOWNERS suggestions
-  // on top (they need a token + network); this is the history-based signal from synced
-  // data alone. Keep this trigger in lockstep with the route's CODEOWNERS gate.
-  const wantsSuggestions =
-    pr.state === 'open' &&
-    !pr.isDraft &&
-    requestedReviewers.length === 0 &&
-    reviewsOut.length === 0;
-  const suggestedReviewers: ReviewerSuggestion[] = wantsSuggestions
-    ? await suggestReviewersFromHistory(
-        accountId,
-        pr.repoId,
-        pr.authorId,
-        (pr.files ?? []).map((f) => f.path),
-      )
-    : [];
+  // NOTE: suggested reviewers are NOT part of PrDetail — they're served by their own live
+  // query (GET /api/prs/:id/suggested-reviewers → getSuggestedReviewers below) so they never
+  // freeze inside the aggressively-cached detail payload (they must empty the instant a
+  // reviewer is requested). See SuggestedReviewersResponse.
 
   // Gather referenced users for client-side lookup.
   const userIds = new Set<number>();
@@ -4631,7 +4718,6 @@ export async function getPrDetail(
     if (c.committerId) userIds.add(c.committerId);
   }
   for (const r of reviewerRows) if (r.userId) userIds.add(r.userId);
-  for (const s of suggestedReviewers) if (s.userId != null) userIds.add(s.userId);
   // A maintainer who only merged the PR (never authored/reviewed/commented) is
   // otherwise absent from userList, leaving "Merged by" unresolved.
   if (pr.mergedById) userIds.add(pr.mergedById);
@@ -4749,7 +4835,6 @@ export async function getPrDetail(
     changedFilesCount: pr.changedFiles,
     files: filesOut,
     requestedReviewers,
-    suggestedReviewers,
     viewerCanApprove,
     viewerCanPush,
     viewerHasApprovedStanding,

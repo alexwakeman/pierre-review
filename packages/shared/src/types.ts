@@ -1081,13 +1081,6 @@ export interface PrDetail {
   // GitHub returns them). Empty until a sync has populated it.
   files: PrFileChange[];
   requestedReviewers: RequestedReviewer[];
-  // Suggested reviewers (CORE) — populated ONLY when the PR warrants them (open,
-  // non-draft, no requested reviewers AND no submitted reviews); otherwise empty.
-  // Combines CODEOWNERS ownership (users + `@org/team` handles) with a history-based
-  // score (people who recently changed the touched dirs AND have merge rights / review
-  // here often). Rendered as an assignable "Suggested" row in ChecksTab. See
-  // ReviewerSuggestion.
-  suggestedReviewers: ReviewerSuggestion[];
   // Whether the viewer may approve this PR: they have GitHub WRITE/MAINTAIN/ADMIN
   // permission on the repo AND are not the PR's author. Computed on read from the
   // synced repos.viewerPermission + the account's user id. The approve route
@@ -2564,6 +2557,17 @@ export interface ReviewerSuggestion {
   teamName: string | null;
   reason: string;
   source: 'codeowners' | 'history';
+}
+
+// Response of GET /api/prs/:id/suggested-reviewers — the CORE "Suggested" row, served as
+// its OWN live query (short staleTime, NOT persisted to IndexedDB) rather than embedded in
+// the aggressively-cached PR detail, so it always reflects current state (e.g. it empties
+// the moment a reviewer is requested). `users` carries any CODEOWNERS-resolved users the PR
+// detail didn't already include (for avatar/link rendering). Empty when the PR doesn't
+// warrant suggestions (has a reviewer/review, or isn't open+non-draft).
+export interface SuggestedReviewersResponse {
+  suggestedReviewers: ReviewerSuggestion[];
+  users: User[];
 }
 
 export interface StalledReviewCard extends InsightCardBase, InsightPrRef {

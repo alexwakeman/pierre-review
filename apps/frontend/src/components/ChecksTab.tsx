@@ -27,6 +27,7 @@ import { MergeControl } from './MergeControl.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
 import { AiSummary } from './AiSummary.js';
 import { useRequestReviewers } from '../hooks/usePrWrites.js';
+import { useSuggestedReviewers } from '../hooks/usePr.js';
 
 // Per-state styling for the "Reviewers" row badges (everyone who submitted a
 // review, not just approvers): the badge hue + leading glyph hint at each
@@ -122,9 +123,11 @@ function AutomatedReviewerBadge({
 // reviews). Combines CODEOWNERS ownership (users + @org/team) with history-based picks.
 function SuggestedReviewersRow({
   pr,
+  suggestions,
   usersById,
 }: {
   pr: PrDetailT;
+  suggestions: ReviewerSuggestion[];
   usersById: Map<number, User>;
 }): JSX.Element {
   const request = useRequestReviewers(pr.id);
@@ -151,7 +154,7 @@ function SuggestedReviewersRow({
   return (
     <Row label="Suggested">
       <div className="flex flex-col gap-1.5 text-xs">
-        {(pr.suggestedReviewers ?? []).map((s) => {
+        {suggestions.map((s) => {
           const k = keyOf(s);
           const done = requested.has(k);
           const u = s.userId != null ? usersById.get(s.userId) : undefined;
@@ -331,6 +334,16 @@ export function ChecksTab({
   pr: PrDetailT;
   usersById: Map<number, User>;
 }): JSX.Element {
+  // Suggested reviewers are a LIVE query (not part of the cached detail), so they stay fresh —
+  // they empty the instant a reviewer is requested. Merge any CODEOWNERS-resolved users the
+  // detail didn't carry into the lookup map so their avatars/links render.
+  const { data: sugg } = useSuggestedReviewers(pr.id);
+  const suggestions = sugg?.suggestedReviewers ?? [];
+  const suggestUsersById =
+    (sugg?.users?.length ?? 0) > 0
+      ? new Map([...usersById, ...sugg!.users.map((u): [number, User] => [u.id, u])])
+      : usersById;
+
   const ci = CI_META[pr.ciStatus];
   const warn = mergeWarning(pr.mergeable, pr.mergeStateStatus);
   const checks = pr.checkRuns;
@@ -701,8 +714,8 @@ export function ChecksTab({
         </Row>
       )}
 
-      {(pr.suggestedReviewers?.length ?? 0) > 0 && (
-        <SuggestedReviewersRow pr={pr} usersById={usersById} />
+      {suggestions.length > 0 && (
+        <SuggestedReviewersRow pr={pr} suggestions={suggestions} usersById={suggestUsersById} />
       )}
 
       <Row label="Meta">

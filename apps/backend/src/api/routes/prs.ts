@@ -22,6 +22,7 @@ import type {
   RequestReviewersResult,
   ResolveBotThreadsBody,
   ReviewerSuggestion,
+  SuggestedReviewersResponse,
   UpdateBranchBody,
   UpdateBranchResult,
   User,
@@ -36,10 +37,13 @@ import {
   getPrWriteContext,
   getReviewerLogins,
   getResolvableBotThreads,
+  getSuggestedReviewersBasis,
+  type SuggestionBasis,
   getUsersByLogins,
   markAllViewed,
   markPrMergedLocally,
   markPrViewed,
+  stampReviewRequests,
   upsertLocalPrComment,
   upsertLocalReview,
 } from '../../db/queries.js';
@@ -228,33 +232,28 @@ const requestReviewersSchema = {
   },
 };
 
-// Layer network-derived reviewer suggestions on top of the history-USER ones getPrDetail
-// already computed. Runs ONLY when the PR still warrants suggestions (same trigger getPrDetail
-// used). Two best-effort sources, fetched in parallel and both cached per-repo:
+// Build the CORE "Suggested reviewers" set for a PR — served as its OWN live query so it's
+// never frozen inside the cached PR detail (it must empty the instant a reviewer is
+// requested). Combines the history-USER basis (from synced data) with two best-effort,
+// per-repo-cached network sources fetched in parallel:
 //   • CODEOWNERS — declared ownership for the touched paths (users + teams).
 //   • Team history — which team(s) are usually REQUESTED to review this repo (the behavioural
 //     fallback when CODEOWNERS declares no team; repo-level, so it runs even when the PR
 //     touches no owned path). See github/team-reviewers.ts.
-// Any failure (no CODEOWNERS, org wall, a repo that doesn't use team requests) simply leaves
-// the history-user suggestions untouched. Precedence: declared CODEOWNERS owners, then the
-// inferred team(s), then history users, up to a small cap. Mutates + returns the detail.
-async function enrichSuggestions(
-  detail: PrDetail,
+// Returns empty when the PR doesn't warrant suggestions. Any network failure (no CODEOWNERS,
+// org wall, a repo that doesn't use team requests) degrades to just the history-user set.
+// Precedence: declared CODEOWNERS owners, then the inferred team(s), then history users, cap 5.
+async function buildSuggestedReviewers(
+  basis: SuggestionBasis,
   accountId: number,
-): Promise<PrDetail> {
-  const wants =
-    detail.state === 'open' &&
-    !detail.isDraft &&
-    detail.requestedReviewers.length === 0 &&
-    detail.reviews.length === 0;
-  if (!wants) return detail;
+): Promise<SuggestedReviewersResponse> {
+  if (!basis.wants) return { suggestedReviewers: [], users: [] };
+  const { owner, name, authorLogin, paths, suggestions, users } = basis;
 
-  const [owner, name] = detail.repoFullName.split('/');
-  if (!owner || !name) return detail;
-
+  const extraUsers: User[] = [];
+  let merged: ReviewerSuggestion[] = suggestions;
   try {
     const token = await getAccessToken(accountId);
-    const paths = detail.files.map((f) => f.path);
     const emptyMatch: CodeownersMatch = { logins: [], teams: [] };
     const [match, historyTeams] = await Promise.all([
       paths.length > 0
@@ -262,17 +261,6 @@ async function enrichSuggestions(
         : Promise.resolve(emptyMatch),
       suggestTeamsFromHistory(token, owner, name, accountId),
     ]);
-    if (
-      match.logins.length === 0 &&
-      match.teams.length === 0 &&
-      historyTeams.length === 0
-    )
-      return detail;
-
-    const authorLogin =
-      detail.authorId != null
-        ? detail.users.find((u) => u.id === detail.authorId)?.githubLogin ?? null
-        : null;
 
     // Resolve @user owners to synced users (avatar/link); unsynced owners show login-only.
     // Exclude the PR author (GitHub rejects self-review requests).
@@ -310,17 +298,11 @@ async function enrichSuggestions(
 
     // Merge = precedence: CODEOWNERS users, CODEOWNERS teams (declared), inferred teams, then
     // the history-user suggestions. Dedup users by login and teams by slug (so a team that's
-    // both a CODEOWNER and historically requested shows once, as the CODEOWNER), capped so the
-    // row stays digestible.
+    // both a CODEOWNER and historically requested shows once, as the CODEOWNER).
     const seenLogins = new Set<string>();
     const seenTeams = new Set<string>();
-    const merged: ReviewerSuggestion[] = [];
-    for (const s of [
-      ...codeownerUsers,
-      ...codeownerTeams,
-      ...historyTeamSuggestions,
-      ...detail.suggestedReviewers,
-    ]) {
+    merged = [];
+    for (const s of [...codeownerUsers, ...codeownerTeams, ...historyTeamSuggestions, ...suggestions]) {
       if (s.kind === 'team') {
         if (s.teamSlug && !seenTeams.has(s.teamSlug)) {
           seenTeams.add(s.teamSlug);
@@ -331,15 +313,13 @@ async function enrichSuggestions(
         merged.push(s);
       }
     }
-    detail.suggestedReviewers = merged.slice(0, 5);
-
-    // Surface any newly-resolved codeowner users so the client can render avatars/links.
-    const known = new Set(detail.users.map((u) => u.id));
-    for (const u of resolved) if (!known.has(u.id)) detail.users.push(u);
+    // The newly-resolved codeowner users the basis didn't already carry.
+    const known = new Set(users.map((u) => u.id));
+    for (const u of resolved) if (!known.has(u.id)) extraUsers.push(u);
   } catch {
-    /* best-effort: keep the history suggestions */
+    /* best-effort: fall back to the history-user suggestions */
   }
-  return detail;
+  return { suggestedReviewers: merged.slice(0, 5), users: [...users, ...extraUsers] };
 }
 
 export async function prRoutes(app: FastifyInstance): Promise<void> {
@@ -365,11 +345,26 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     }
     // Cloud lean mode: fill in bulky text from GitHub (no-op in local). The client
     // caches the result in IndexedDB keyed by updatedAt so unchanged PRs don't refetch.
-    const detail = await hydratePrDetail(pr, accountId);
-    // Layer CODEOWNERS ownership + inferred review team(s) onto the history-based suggestions
-    // (best-effort; never blocks the response). getPrDetail already gated the history part on
-    // the same trigger.
-    return enrichSuggestions(detail, accountId);
+    // (Suggested reviewers are NOT here — they're a separate live query, see below — so the
+    // cached detail never freezes a stale suggestion.)
+    return hydratePrDetail(pr, accountId);
+  });
+
+  // Suggested reviewers — its OWN live query (not embedded in the cached PR detail) so it
+  // always reflects current state: it empties the instant a reviewer is requested (the assign
+  // route stamps review_requests locally), rather than staying frozen until the PR's updatedAt
+  // next bumps. Best-effort network enrichment (CODEOWNERS + inferred team) on top of the
+  // synced history basis. 404s when the PR isn't the caller's.
+  app.get('/api/prs/:id/suggested-reviewers', { schema: idParamSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const accountId = accountIdOf(req);
+    const basis = await getSuggestedReviewersBasis(id, accountId);
+    if (!basis) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    const result: SuggestedReviewersResponse = await buildSuggestedReviewers(basis, accountId);
+    return result;
   });
 
   // Candidates for an @mention autocomplete, ranked by proximity to this PR
@@ -1000,7 +995,8 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       // resolve to logins (also drops bots + unknown ids). Union with any direct logins
       // (suggested reviewers we haven't synced as users), deduped.
       const wanted = userIds.filter((uid) => uid !== ctx.authorId);
-      const resolvedLogins = (await getReviewerLogins(wanted)).map((r) => r.login);
+      const resolved = await getReviewerLogins(wanted); // [{ userId, login }]
+      const resolvedLogins = resolved.map((r) => r.login);
       const logins = [...new Set([...resolvedLogins, ...directLogins])];
       const teams = [...new Set(teamSlugs)];
       if (logins.length === 0 && teams.length === 0) {
@@ -1014,6 +1010,16 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       try {
         const token = await getAccessToken(accountId);
         await requestReviewers(token, ctx.owner, ctx.name, ctx.number, logins, teams);
+        // Optimistically stamp the request locally (mirrors approve/comment/merge) so the
+        // "Requested" row + the suggestion gate reflect it immediately; the next sync
+        // re-derives review_requests idempotently. Team handle = `owner/slug` (matches how a
+        // CODEOWNERS team + the suggestion render). Only the synced-user ids are stamped;
+        // unsynced direct logins land on the next sync.
+        await stampReviewRequests(
+          ctx.prId,
+          resolved.map((r) => r.userId),
+          teams.map((slug) => `${ctx.owner}/${slug}`),
+        );
         const result: RequestReviewersResult = {
           status: 'ok',
           requestedLogins: logins,

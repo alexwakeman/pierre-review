@@ -1,5 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import type { PrDetail, PrFilesResponse, ThreadDetail, User } from '@pierre-review/shared';
+import type {
+  PrDetail,
+  PrFilesResponse,
+  SuggestedReviewersResponse,
+  ThreadDetail,
+  User,
+} from '@pierre-review/shared';
 import { api } from '../api/client.js';
 
 // 45 minutes. Detail carries the bulky hydrated TEXT (bodies, diff hunks); a
@@ -48,6 +54,21 @@ export function useMentionCandidates(prId: number | null) {
     queryFn: () => api.mentionCandidates(prId as number),
     enabled: prId != null,
     staleTime: 1000 * 60 * 5,
+    gcTime: DETAIL_GC_TIME,
+  });
+}
+
+// Suggested reviewers — a LIVE query, deliberately its own key (`['suggested-reviewers', id]`)
+// so it's NOT persisted to IndexedDB (only 'pr'/'thread'/'pr-files' are; see main.tsx) and
+// never freezes with the detail. Short staleTime so it reflects current state (it empties the
+// moment a reviewer is requested — the assign mutation invalidates this key). Only fetched
+// when the PR is selected AND on the Overview tab (ChecksTab), where the "Suggested" row lives.
+export function useSuggestedReviewers(id: number | null, enabled = true) {
+  return useQuery<SuggestedReviewersResponse>({
+    queryKey: ['suggested-reviewers', id],
+    queryFn: () => api.suggestedReviewers(id as number),
+    enabled: id != null && enabled,
+    staleTime: 1000 * 60 * 2,
     gcTime: DETAIL_GC_TIME,
   });
 }

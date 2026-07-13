@@ -70,6 +70,7 @@ import type {
   PostReviewResult,
   PrDetail,
   PrFilesResponse,
+  SuggestedReviewersResponse,
   ProSettings,
   ProSettingsUpdate,
   Repo,
@@ -179,6 +180,10 @@ export const api = {
   repoAnalytics: (repoId: number) =>
     get<RepoAnalytics>(`/api/insights/${repoId}/analytics`),
   pr: (id: number) => get<PrDetail>(`/api/prs/${id}`),
+  // Suggested reviewers — a live query (deliberately NOT part of the cached PR detail) so it
+  // reflects current state (empties the moment a reviewer is requested).
+  suggestedReviewers: (id: number) =>
+    get<SuggestedReviewersResponse>(`/api/prs/${id}/suggested-reviewers`),
   thread: (id: number) => get<ThreadDetail>(`/api/threads/${id}`),
   // @mention candidates for a PR, pre-ranked by proximity (self + bots excluded).
   mentionCandidates: (prId: number) =>
