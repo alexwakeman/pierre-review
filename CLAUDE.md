@@ -158,9 +158,10 @@ pierre-review/
 └─ packages/
    ├─ shared/                 @pierre-review/shared — types ONLY, the contract between the apps (src/types.ts)
    └─ pro/                    @pierre/pro — PRIVATE git submodule (alexwakeman/pierre-pro), runtime-imported plugin (per-repo
-                              Haiku digest, Insights, Claude Review + AI Fix, Claude Review learnings, FYI/My-Turn feed
-                              enrichment). Resolved by PATH (not a declared dep); absent → clean OSS
-                              mode + install still succeeds. `git submodule update --init` to fetch. See "Open-core Pro plugin".
+                              Haiku digest, Insights, Claude Review + AI Fix, Claude Review learnings). Resolved by
+                              PATH (not a declared dep); absent → clean OSS mode + install still succeeds.
+                              (My Turn / FYI feed participation is CORE, not Pro — see below.)
+                              `git submodule update --init` to fetch. See "Open-core Pro plugin".
 ```
 
 ---
@@ -279,7 +280,7 @@ fixture tests (see Conventions).
 
 ### Data model (`src/db/schema.sqlite.ts` + its `schema.pg.ts` twin are authoritative)
 
-19 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
+21 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
 `users` + `commitFiles` global). The core entities:
 
 - **`accounts`** — a tenant. Local mode has exactly one (`id 1`, `isLocal=true`,
@@ -352,7 +353,7 @@ file maps to a `client.ts` method.
 | `GET /api/mergers` | per-repo merge-rights map (who's merged there) → the maintainer shield |
 | `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{activityDigest,reviewMemory}`; cloud: 401 signed out) |
 | `GET /api/activity?repoIds&userIds` | **Activity tab** (core, no AI): per repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getActivity`; scoped by the FilterBar repo + member selection (see Activity) |
-| `GET /api/activity/feed?repoIds&userIds&limit&offset&excludeBots` | **Consolidated Feed** (core, no AI; the Activity "Feed" entry): ONE flat, chronological (newest-first) stream of REAL activity events (opens / merges / reviews / comments, plus **commit-push items that ADDRESSED a review thread** — coalesced per author/PR into runs, affected threads inline via `affectedThreads`/`commitCount`/`changeSummary`; plain pushes excluded). Each item carries **`isMyTurn`** (participation: you authored the PR / are a requested reviewer / previously reviewed-or-commented, AND the actor isn't you) — that flag REPLACES the old two-source (`my_turn` vs `feed`) synthesis + dedup, so there's exactly one row per event. **FYI is a Pro capability (`feedMyTurn`):** core (`getConsolidatedFeed`) builds plain rows; the `@pierre/pro` FYI provider (registered on the `registerFyiProvider` seam) sets `isMyTurn`. `isMyTurn` rows are uncapped; plain activity is capped (`FEED_EVENT_CAP`). `excludeBots=true` drops bot-authored activity. **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, generatedAt}`. No "seen"/acknowledged concept. |
+| `GET /api/activity/feed?repoIds&userIds&limit&offset&excludeBots` | **Consolidated Feed** (core, no AI; the Activity "Feed" entry): ONE flat, chronological (newest-first) stream of REAL activity events (opens / merges / reviews / comments, plus **commit-push items that ADDRESSED a review thread** — coalesced per author/PR into runs, affected threads inline via `affectedThreads`/`commitCount`/`changeSummary`; plain pushes excluded). Each item carries **`isMyTurn`** (participation: you authored the PR / are a requested reviewer / previously reviewed-or-commented, AND the actor isn't you) — that flag REPLACES the old two-source (`my_turn` vs `feed`) synthesis + dedup, so there's exactly one row per event. **My Turn / "FYI" is CORE (free, every tier), NOT a Pro capability:** `getConsolidatedFeed` computes `isMyTurn` directly via `feed/my-turn.ts` (no capability gate, no provider seam). `isMyTurn` rows are uncapped; plain activity is capped (`FEED_EVENT_CAP`). `excludeBots=true` drops bot-authored activity. **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, generatedAt}`. No "seen"/acknowledged concept. |
 | `GET /api/repos/:id/claude-reviews` | repo-scoped Claude-review history (retrieval only; `enabled:false` when the flag is off) → `{prs:[{runs[]}]}` |
 | `GET·POST /api/pro/activity/digests*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest (the Activity Feed renders the COLLECTION of these, scoped to WATCHED repos — no separate cross-repo route/pass) + review-memory data. See "Open-core Pro plugin" |
 | `GET /api/auth/providers` · `/login[/​:provider]` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub sign-in: which providers are enabled (for SignInGate) / authorize via `oauth`\|`app` (folds provider into `state`; OAuth adds `config.oauthScope`) / exchange+upsert+session→`/app` / clear session |
@@ -604,9 +605,10 @@ public repo is genuinely public, the premium source must never be committed here
 `packages/pro/node_modules`; when absent the glob skips the empty dir and install still
 succeeds.
 
-**Three tiers.** **core (free)** = plain feed + timeline, no AI, no FYI. **pro** = AI summaries +
-Insights + **FYI / "My Turn"** (`feedMyTurn`, on whenever the plugin is active — no env flag, like
-`teamInsights`/`reviewMemory`). **pro+** = the expensive advanced-AI features **AI Analysis + AI
+**Three tiers.** **core (free)** = plain feed + timeline + **My Turn / "FYI"** (feed participation —
+moved back to core, on every tier; see `feed/my-turn.ts`), no AI. **pro** = AI summaries +
+Insights (on whenever the plugin is active — no env flag, like `teamInsights`/`reviewMemory`).
+**pro+** = the expensive advanced-AI features **AI Analysis + AI
 Fix + Claude Review**, all gated together by **one** env flag **`PRO_ADVANCED_AI_ENABLED`**
 (`PRO_CLAUDE_REVIEW_ENABLED` kept as a back-compat alias; the single source of truth is
 `packages/pro/src/tier.ts` `ADVANCED_AI_ENABLED`, read by `index.ts` for the caps AND by each
@@ -723,14 +725,13 @@ after that thread's last comment, carrying the addressed threads inline (`affect
 event on a PR the viewer PARTICIPATES in (authored / requested reviewer / previously reviewed or
 commented) AND the actor isn't the viewer. That flag **replaces the old two-source (`my_turn` vs
 `feed`) synthesis + its dedup** — there is now exactly one row per underlying event, which killed
-the duplication. **FYI / "My Turn" is a Pro capability (`feedMyTurn`).** Core builds every item as
-a PLAIN row (`isMyTurn:false`); the participation compute lives ONLY in `@pierre/pro`
-(`packages/pro/src/my-turn/`), registered on the core **`registerFyiProvider`** seam
-(`src/feed/fyi-provider.ts`, mirroring `registerLearningsProvider`) and called by
-`getConsolidatedFeed` BEFORE the cap. Without the plugin (free tier) the feed stays plain — no FYI
-on the wire, no cards/toggle/badge, no Welcome-back banner (the `me.newFeedItems` count also comes
-from the provider). `isMyTurn` rows are the **content-rich, yellow-bordered cards** with a "My
-Turn" badge + a `feedMyTurnOnly` "My Turn only" toggle (all gated on `feedMyTurn`); they're
+the duplication. **My Turn / "FYI" is CORE (free, every tier)** — it was moved back out of Pro
+(the `feedMyTurn` capability and the `registerFyiProvider` seam were removed; `feed/fyi-provider.ts`
+is gone). The participation compute lives in the core module **`src/feed/my-turn.ts`** (`enrichMyTurn`
++ reason pills + `countNewMyTurnFeedItems`); `getConsolidatedFeed` calls it directly, and `/api/me`
+uses `countNewMyTurnFeedItems` for `me.newFeedItems`. Every tier gets the My Turn cards/toggle/badge
++ Welcome-back banner — no capability gate. `isMyTurn` rows are the **content-rich, yellow-bordered
+cards** with a "My Turn" badge + a `feedMyTurnOnly` "My Turn only" toggle; they're
 uncapped, plain activity is capped (`FEED_EVENT_CAP`). Cards render the **full comment/review body
 as markdown**, the affected threads inline, + a merge/review credit line
 (`mergedById`/`reviewers`). The **`excludeBots`** filter drops bot-authored activity. **PAGINATED**

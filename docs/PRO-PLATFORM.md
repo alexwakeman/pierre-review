@@ -1,5 +1,15 @@
 # Pierre Pro — Inbox Tab, Per-Repo Digest & Review Memory: Design & Implementation Plan
 
+> ⚠️ **HISTORICAL DESIGN DOC — the plan, not the shipped state.** This is the original
+> open-core design (2026-06-29) and it has been **built and evolved substantially** since.
+> For the current architecture, **CLAUDE.md is authoritative** (see "Open-core Pro plugin").
+> Notable drift to keep in mind while reading: the **contract `apiVersion` is now 11** (not 1);
+> the "Inbox" tab shipped as the **Activity** console; and **My Turn / "FYI" feed participation
+> is CORE / free on every tier** (`feed/my-turn.ts`) — it is **not** a Pro capability (an
+> earlier iteration gated it behind a `feedMyTurn` cap + `registerFyiProvider` seam; both were
+> removed). The current Pro capability set is `activityDigest, reviewMemory, aiAnalysis,
+> prSummary, aiFix, teamInsights, claudeReview, slackDigest, issueLinks`.
+
 **Prepared:** 2026-06-29
 **Source:** 12-agent design workflow (Understand → Design → Synthesize; Inbox UX explored 3 ways and judged).
 **Status:** Plan / design — no code written yet. Respects the project's load-bearing conventions (dual-dialect schema, accountId isolation, ESM .js, shared types-only, packaging guards, no premium capability in the public repo).

@@ -100,7 +100,8 @@ Notes:
 
 ## Future direction
 
-The flat $5/mo plan gates the cheap tier (digests, Insights, FYI). The expensive
+The flat $5/mo plan gates the cheap tier (digests, Insights). (My Turn / "FYI" feed
+participation is CORE / free on every tier — not part of the paid plan.) The expensive
 **advanced-AI features** (AI Analysis, AI Fix, Claude Review — today one
 all-or-nothing `PRO_ADVANCED_AI_ENABLED` flag) are the natural candidates for
 **metered billing**: the `ai_usage` ledger already records per-account credit
