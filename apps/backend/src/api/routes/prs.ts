@@ -43,7 +43,8 @@ import {
   upsertLocalPrComment,
   upsertLocalReview,
 } from '../../db/queries.js';
-import { getCodeownersMatch } from '../../github/codeowners.js';
+import { getCodeownersMatch, type CodeownersMatch } from '../../github/codeowners.js';
+import { suggestTeamsFromHistory } from '../../github/team-reviewers.js';
 import {
   buildFileAnchors,
   fallbackAnchor,
@@ -227,12 +228,17 @@ const requestReviewersSchema = {
   },
 };
 
-// Layer CODEOWNERS-derived suggestions on top of the history-based ones getPrDetail already
-// computed. Runs ONLY when the PR still warrants suggestions (same trigger getPrDetail used).
-// Best-effort: any failure (no CODEOWNERS, org wall, parse error) leaves the history
-// suggestions untouched. CODEOWNERS owners (declared ownership) take precedence, then history
-// fills up to a small cap. Mutates + returns the detail.
-async function enrichSuggestionsWithCodeowners(
+// Layer network-derived reviewer suggestions on top of the history-USER ones getPrDetail
+// already computed. Runs ONLY when the PR still warrants suggestions (same trigger getPrDetail
+// used). Two best-effort sources, fetched in parallel and both cached per-repo:
+//   • CODEOWNERS — declared ownership for the touched paths (users + teams).
+//   • Team history — which team(s) are usually REQUESTED to review this repo (the behavioural
+//     fallback when CODEOWNERS declares no team; repo-level, so it runs even when the PR
+//     touches no owned path). See github/team-reviewers.ts.
+// Any failure (no CODEOWNERS, org wall, a repo that doesn't use team requests) simply leaves
+// the history-user suggestions untouched. Precedence: declared CODEOWNERS owners, then the
+// inferred team(s), then history users, up to a small cap. Mutates + returns the detail.
+async function enrichSuggestions(
   detail: PrDetail,
   accountId: number,
 ): Promise<PrDetail> {
@@ -245,13 +251,23 @@ async function enrichSuggestionsWithCodeowners(
 
   const [owner, name] = detail.repoFullName.split('/');
   if (!owner || !name) return detail;
-  const paths = detail.files.map((f) => f.path);
-  if (paths.length === 0) return detail;
 
   try {
     const token = await getAccessToken(accountId);
-    const match = await getCodeownersMatch(token, owner, name, accountId, paths);
-    if (match.logins.length === 0 && match.teams.length === 0) return detail;
+    const paths = detail.files.map((f) => f.path);
+    const emptyMatch: CodeownersMatch = { logins: [], teams: [] };
+    const [match, historyTeams] = await Promise.all([
+      paths.length > 0
+        ? getCodeownersMatch(token, owner, name, accountId, paths)
+        : Promise.resolve(emptyMatch),
+      suggestTeamsFromHistory(token, owner, name, accountId),
+    ]);
+    if (
+      match.logins.length === 0 &&
+      match.teams.length === 0 &&
+      historyTeams.length === 0
+    )
+      return detail;
 
     const authorLogin =
       detail.authorId != null
@@ -282,13 +298,29 @@ async function enrichSuggestionsWithCodeowners(
       reason: 'owns this path (CODEOWNERS)',
       source: 'codeowners',
     }));
+    const historyTeamSuggestions: ReviewerSuggestion[] = historyTeams.map((t) => ({
+      kind: 'team',
+      login: null,
+      userId: null,
+      teamSlug: t.slug,
+      teamName: t.name,
+      reason: `usually requested here (${t.count} recent PR${t.count === 1 ? '' : 's'})`,
+      source: 'history',
+    }));
 
-    // Merge: CODEOWNERS users, then teams, then the history suggestions — dedup users by
-    // login and teams by slug, capped so the row stays digestible.
+    // Merge = precedence: CODEOWNERS users, CODEOWNERS teams (declared), inferred teams, then
+    // the history-user suggestions. Dedup users by login and teams by slug (so a team that's
+    // both a CODEOWNER and historically requested shows once, as the CODEOWNER), capped so the
+    // row stays digestible.
     const seenLogins = new Set<string>();
     const seenTeams = new Set<string>();
     const merged: ReviewerSuggestion[] = [];
-    for (const s of [...codeownerUsers, ...codeownerTeams, ...detail.suggestedReviewers]) {
+    for (const s of [
+      ...codeownerUsers,
+      ...codeownerTeams,
+      ...historyTeamSuggestions,
+      ...detail.suggestedReviewers,
+    ]) {
       if (s.kind === 'team') {
         if (s.teamSlug && !seenTeams.has(s.teamSlug)) {
           seenTeams.add(s.teamSlug);
@@ -334,9 +366,10 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     // Cloud lean mode: fill in bulky text from GitHub (no-op in local). The client
     // caches the result in IndexedDB keyed by updatedAt so unchanged PRs don't refetch.
     const detail = await hydratePrDetail(pr, accountId);
-    // Layer CODEOWNERS ownership onto the history-based suggestions (best-effort; never
-    // blocks the response). getPrDetail already gated the history part on the same trigger.
-    return enrichSuggestionsWithCodeowners(detail, accountId);
+    // Layer CODEOWNERS ownership + inferred review team(s) onto the history-based suggestions
+    // (best-effort; never blocks the response). getPrDetail already gated the history part on
+    // the same trigger.
+    return enrichSuggestions(detail, accountId);
   });
 
   // Candidates for an @mention autocomplete, ranked by proximity to this PR
