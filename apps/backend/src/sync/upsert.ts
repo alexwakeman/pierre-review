@@ -71,12 +71,64 @@ export function createUserResolver() {
       const cached = cache.get(login);
       if (cached !== undefined) return cached;
 
+      const nodeId = actor?.id ?? null;
+
+      // The GitHub node id is the STABLE identity; the login is NOT. The same
+      // account can surface under two different logins — even inside one sync
+      // payload: a bot's Bot-typed author field reads `dependabot[bot]` while its
+      // commit-author field reads the bare `dependabot`, both carrying the same
+      // node id; and humans get renamed. Because BOTH `github_login` AND
+      // `github_node_id` are UNIQUE, the login-keyed upsert below is unsafe when a
+      // DIFFERENT row already owns this node id: matching the login (or inserting a
+      // new one) while `coalesce`-stamping the node raises "UNIQUE constraint
+      // failed: users.github_node_id". So when we have a node id, resolve on it
+      // FIRST and reuse the row that owns it — the colliding insert/update is never
+      // issued. Only a brand-new (or absent) node id falls through to the
+      // login-keyed upsert, where stamping the node can't collide.
+      if (nodeId) {
+        const owner = (
+          await exec
+            .select({
+              id: users.id,
+              isBot: users.isBot,
+              isBotOverridden: users.isBotOverridden,
+            })
+            .from(users)
+            .where(eq(users.githubNodeId, nodeId))
+            .limit(1)
+            .execute()
+        )[0];
+        if (owner) {
+          // Refresh volatile metadata but NEVER rewrite the login: the row already
+          // holds a canonical login for this node id, and rewriting it would risk the
+          // github_login UNIQUE (when the incoming login belongs to another live row)
+          // and thrash a bot that alternates login forms across a single sync. Only
+          // set fields the actor actually carries (a commit-author resolve has no
+          // name/avatar/typename) so we never clobber a known value with null — the
+          // same "coalesce" intent as the upsert below, via plain portable value
+          // binds (a raw `sql` boolean can't bind on sqlite; a bare null param can
+          // confuse pg type inference). isBot honours a manual override.
+          const set: {
+            displayName?: string;
+            avatarUrl?: string;
+            githubType?: string;
+            isBot: boolean;
+          } = { isBot: owner.isBotOverridden ? owner.isBot : isLikelyBot(login) };
+          if (actor?.name != null) set.displayName = actor.name;
+          if (actor?.avatarUrl != null) set.avatarUrl = actor.avatarUrl;
+          if (actor?.__typename != null) set.githubType = actor.__typename;
+          await exec.update(users).set(set).where(eq(users.id, owner.id)).execute();
+          cache.set(login, owner.id);
+          return owner.id;
+        }
+      }
+
       const row = (
         await exec
           .insert(users)
           .values({
             githubLogin: login,
-            githubNodeId: actor?.id ?? null,
+            githubNodeId: nodeId,
             displayName: actor?.name ?? null,
             avatarUrl: actor?.avatarUrl ?? null,
             // GraphQL __typename ('User'|'Bot'|…) when the actor carried it (the fat
