@@ -478,16 +478,20 @@ export interface ProHostQueries {
   // `window` (epoch-millis) overrides the default metrics window with the account's configured
   // SPRINT (see the Pro sprint config); open PRs always count regardless of age. Omitted → the
   // built-in default window (unchanged legacy behavior).
+  // The optional `repoIds` (apiVersion 12) scopes the computation to an explicit repo set (a
+  // Team) INSTEAD of the account's watched repos; omitted/null keeps the watched-set default.
   getTeamInsights(
     accountId: number,
     window?: SprintWindow,
+    repoIds?: number[] | null,
   ): Promise<unknown>;
   // The per-metric PR drill-down behind the flow-metric tiles (watched repos + sprint).
   // Returns TeamMetricsDetail. Heavier than getTeamInsights — loaded on demand. Same optional
-  // sprint `window` override.
+  // sprint `window` override + the apiVersion-12 optional `repoIds` team scope.
   getTeamMetricsDetail(
     accountId: number,
     window?: SprintWindow,
+    repoIds?: number[] | null,
   ): Promise<unknown>;
   // Month-to-date-style AI-spend rollup for an account, split by seam (summary / agent).
   // Returns { summaryUsd, agentUsd, totalUsd } — the plugin converts to credits.
@@ -570,7 +574,7 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  apiVersion: 11; // contract handshake; host warns on mismatch
+  apiVersion: 12; // contract handshake; host warns on mismatch
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 

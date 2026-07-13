@@ -62,6 +62,7 @@ import type {
   PrStatus,
   ReasonTag,
   Repo,
+  Team,
   RepoInsights,
   RepoMergers,
   ReviewDetail,
@@ -176,6 +177,8 @@ const {
   ciStatusEvents,
   botReviewClassification,
   botMuteRules,
+  teams,
+  teamRepos,
 } = schema;
 
 function iso(d: Date | null): string | null {
@@ -238,6 +241,220 @@ export async function getWatchedRepoNodeIds(accountId: number): Promise<Set<stri
     .where(eq(repos.accountId, accountId))
     .execute();
   return new Set(rows.map((r) => r.nodeId));
+}
+
+// ---- Teams (CORE) ----
+// Named groupings of an account's repos. Every read/write is accountId-scoped; id-addressed
+// mutators verify ownership and return false/empty for another account's team (→ 404 at the
+// route). A repo may belong to several teams (the team_repos join allows overlap). Assigning a
+// repo to a team auto-Watches it (inboxWatch=true) so team activity flows into the inbox.
+
+function mapTeam(
+  t: typeof teams.$inferSelect,
+  repoIds: number[],
+): Team {
+  return {
+    id: t.id,
+    name: t.name,
+    repoIds,
+    repoCount: repoIds.length,
+    createdAt: t.createdAt.toISOString(),
+  };
+}
+
+// All teams for an account, each carrying its member repo ids (join team_repos). Ordered by
+// name for a stable UI.
+export async function listTeams(accountId: number): Promise<Team[]> {
+  const teamRows = await db
+    .select()
+    .from(teams)
+    .where(eq(teams.accountId, accountId))
+    .orderBy(asc(teams.name))
+    .execute();
+  if (teamRows.length === 0) return [];
+  const memberRows = await db
+    .select({ teamId: teamRepos.teamId, repoId: teamRepos.repoId })
+    .from(teamRepos)
+    .where(eq(teamRepos.accountId, accountId))
+    .execute();
+  const byTeam = new Map<number, number[]>();
+  for (const m of memberRows) {
+    const arr = byTeam.get(m.teamId) ?? [];
+    arr.push(m.repoId);
+    byTeam.set(m.teamId, arr);
+  }
+  return teamRows.map((t) => mapTeam(t, byTeam.get(t.id) ?? []));
+}
+
+// Create a team (unique per (accountId, name)). Throws on a duplicate name — the caller maps
+// the unique-constraint failure to a 400. Returns the fresh Team (no repos yet).
+export async function createTeam(accountId: number, name: string): Promise<Team> {
+  const [row] = await db
+    .insert(teams)
+    .values({ accountId, name })
+    .returning()
+    .execute();
+  return mapTeam(row!, []);
+}
+
+// Rename a team (account-scoped → false/404 for a team this account doesn't own). Returns
+// false when nothing was updated (unknown/foreign team).
+export async function renameTeam(
+  id: number,
+  accountId: number,
+  name: string,
+): Promise<boolean> {
+  const updated = await db
+    .update(teams)
+    .set({ name })
+    .where(and(eq(teams.id, id), eq(teams.accountId, accountId)))
+    .returning({ id: teams.id })
+    .execute();
+  return updated.length > 0;
+}
+
+// Delete a team (account-scoped). The team_repos rows cascade via FK, but we also delete them
+// explicitly first so the txn ordering is dialect-agnostic (Postgres enforces FKs immediately;
+// SQLite only when foreign_keys=ON). Returns false for an unknown/foreign team.
+export async function deleteTeam(id: number, accountId: number): Promise<boolean> {
+  const owned = await db
+    .select({ id: teams.id })
+    .from(teams)
+    .where(and(eq(teams.id, id), eq(teams.accountId, accountId)))
+    .limit(1)
+    .execute();
+  if (!owned[0]) return false;
+  await runTransaction(async (tx) => {
+    await tx
+      .delete(teamRepos)
+      .where(and(eq(teamRepos.teamId, id), eq(teamRepos.accountId, accountId)))
+      .execute();
+    await tx
+      .delete(teams)
+      .where(and(eq(teams.id, id), eq(teams.accountId, accountId)))
+      .execute();
+  });
+  return true;
+}
+
+// The member repo ids of a team, account-scoped (foreign/unknown team → empty array). The FK
+// on team_repos.repoId guarantees these are live repo ids.
+export async function getTeamRepoIds(
+  teamId: number,
+  accountId: number,
+): Promise<number[]> {
+  // Ownership is enforced via the accountId predicate on team_repos (denormalized) — a foreign
+  // team's rows carry a different accountId and are filtered out.
+  const rows = await db
+    .select({ repoId: teamRepos.repoId })
+    .from(teamRepos)
+    .innerJoin(teams, eq(teams.id, teamRepos.teamId))
+    .where(and(eq(teamRepos.teamId, teamId), eq(teams.accountId, accountId)))
+    .execute();
+  return rows.map((r) => r.repoId);
+}
+
+// Repo ids owned by the account that belong to NO team (the "unassigned" bucket → scope 'none').
+// Filtered in JS against the (small, ≤ per-account cap) assigned set — no subquery, so it stays
+// on the portable async surface both dialects share.
+export async function getUnassignedRepoIds(accountId: number): Promise<number[]> {
+  const [repoRows, assignedRows] = await Promise.all([
+    db.select({ id: repos.id }).from(repos).where(eq(repos.accountId, accountId)).execute(),
+    db
+      .select({ repoId: teamRepos.repoId })
+      .from(teamRepos)
+      .where(eq(teamRepos.accountId, accountId))
+      .execute(),
+  ]);
+  const assigned = new Set(assignedRows.map((r) => r.repoId));
+  return repoRows.map((r) => r.id).filter((id) => !assigned.has(id));
+}
+
+// Assign repos to a team (idempotent). Only repos the account actually owns are assigned (a
+// foreign repoId is silently dropped — no cross-account leakage). Each assigned repo is
+// auto-Watched (inboxWatch=true) so its activity flows into the inbox. No-op for a
+// foreign/unknown team.
+export async function assignReposToTeam(
+  teamId: number,
+  accountId: number,
+  repoIds: number[],
+): Promise<void> {
+  // Verify team ownership first.
+  const owned = await db
+    .select({ id: teams.id })
+    .from(teams)
+    .where(and(eq(teams.id, teamId), eq(teams.accountId, accountId)))
+    .limit(1)
+    .execute();
+  if (!owned[0]) return;
+  if (repoIds.length === 0) return;
+  // Keep only repos this account owns (defends the FK + the isolation invariant).
+  const ownedRepos = await db
+    .select({ id: repos.id })
+    .from(repos)
+    .where(and(eq(repos.accountId, accountId), inArray(repos.id, repoIds)))
+    .execute();
+  const validIds = ownedRepos.map((r) => r.id);
+  if (validIds.length === 0) return;
+  await runTransaction(async (tx) => {
+    for (const repoId of validIds) {
+      await tx
+        .insert(teamRepos)
+        .values({ accountId, teamId, repoId })
+        .onConflictDoNothing({
+          target: [teamRepos.teamId, teamRepos.repoId],
+        })
+        .execute();
+    }
+    // Auto-watch every assigned repo (idempotent). Stamp the watch-start only when unset so a
+    // re-assign preserves the original window (mirrors setRepoInboxWatch).
+    await tx
+      .update(repos)
+      .set({
+        inboxWatch: true,
+        inboxWatchStartedAt: sql`coalesce(${repos.inboxWatchStartedAt}, ${tsBound(new Date())})`,
+      })
+      .where(and(eq(repos.accountId, accountId), inArray(repos.id, validIds)))
+      .execute();
+  });
+}
+
+// Remove one repo from a team (account-scoped). Returns false when nothing was removed
+// (foreign/unknown team or the repo wasn't a member). Does NOT un-Watch the repo — a repo can
+// be watched independently of team membership.
+export async function removeRepoFromTeam(
+  teamId: number,
+  repoId: number,
+  accountId: number,
+): Promise<boolean> {
+  const removed = await db
+    .delete(teamRepos)
+    .where(
+      and(
+        eq(teamRepos.teamId, teamId),
+        eq(teamRepos.repoId, repoId),
+        eq(teamRepos.accountId, accountId),
+      ),
+    )
+    .returning({ id: teamRepos.id })
+    .execute();
+  return removed.length > 0;
+}
+
+// The single scope resolver. A `scope` wire value ('all' | 'none' | '<teamId>') resolves to
+// the concrete repo-id set to compute over: 'all' → null (means "every account repo", the
+// callers' existing default), 'none' → the unassigned repos, a numeric string → that team's
+// repos (ownership-checked; an unknown/foreign team → empty array). Reuse this everywhere a
+// scope needs turning into repo ids.
+export async function resolveScopeRepoIds(
+  accountId: number,
+  scope: string,
+): Promise<number[] | null> {
+  if (scope === 'all') return null;
+  if (scope === 'none') return getUnassignedRepoIds(accountId);
+  const teamId = Number(scope);
+  if (!Number.isInteger(teamId) || teamId <= 0) return [];
+  return getTeamRepoIds(teamId, accountId);
 }
 
 export async function listUsers(): Promise<User[]> {
@@ -1424,6 +1641,56 @@ export async function getRepoAnalytics(
     activityHeatmap[d.getUTCDay() * 24 + d.getUTCHours()]!++;
   }
 
+  // ---- CI recovery + failure reasons (from the ci_status_events transition log) ----
+  // Port of the cross-repo walk in getTeamMetrics, SCOPED to this single repo and WEEKLY-
+  // bucketed over the 84-day window. Walk each PR's events in time order: a red streak opens
+  // on the first failure and closes on the next success → a resolution duration, bucketed by
+  // resolution week. Failing-check names tally into the by-stage reason breakdown. No events →
+  // both arrays come back empty (the chart shows an empty state).
+  const ciEvents = await db
+    .select({
+      prId: ciStatusEvents.prId,
+      status: ciStatusEvents.status,
+      failingChecks: ciStatusEvents.failingChecks,
+      observedAt: ciStatusEvents.observedAt,
+    })
+    .from(ciStatusEvents)
+    .where(
+      and(
+        eq(ciStatusEvents.accountId, accountId),
+        eq(ciStatusEvents.repoId, repoId),
+        gte(ciStatusEvents.observedAt, windowStart),
+      ),
+    )
+    .orderBy(ciStatusEvents.prId, ciStatusEvents.observedAt)
+    .execute();
+
+  const ciRecoveryByBucket: number[][] = Array.from({ length: nBuckets }, () => []);
+  const ciReasonCounts = new Map<string, number>();
+  {
+    let curPr: number | null = null;
+    let failStartMs: number | null = null;
+    for (const e of ciEvents) {
+      if (e.prId !== curPr) {
+        curPr = e.prId;
+        failStartMs = null;
+      }
+      const obsMs = e.observedAt.getTime();
+      if (e.status === 'failure' || e.status === 'error') {
+        if (failStartMs == null) failStartMs = obsMs;
+        for (const name of e.failingChecks ?? [])
+          ciReasonCounts.set(name, (ciReasonCounts.get(name) ?? 0) + 1);
+      } else if (e.status === 'success' && failStartMs != null) {
+        if (inWin(obsMs)) ciRecoveryByBucket[bi(obsMs)]!.push((obsMs - failStartMs) / 3_600_000);
+        failStartMs = null;
+      }
+    }
+  }
+  const ciFailuresByStage = [...ciReasonCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([stage, count]) => ({ stage, count }));
+
   const round1 = (x: number): number => Math.round(x * 10) / 10;
   return {
     repoId: repo.id,
@@ -1432,6 +1699,15 @@ export async function getRepoAnalytics(
     stallThresholdDays: config.stallThresholdDays,
     generatedAt: new Date().toISOString(),
     weekBuckets,
+    ciRecovery: ciRecoveryByBucket.map((arr, i) => {
+      const m = median(arr);
+      return {
+        weekStart: weekBuckets[i]!,
+        medianHours: m == null ? null : round1(m),
+        incidents: arr.length,
+      };
+    }),
+    ciFailuresByStage,
     throughput: { opened, merged: mergedSeries, closed: closedSeries },
     backlog: { open, stalled },
     reviewLatencyTrend: {
@@ -2422,6 +2698,10 @@ export async function getTeamMetricsDetail(
   // uses window.fromMs; `now` remains the upper bound. `mode` is unused here (a current-window PR
   // list, no cur/prev split) but accepted so callers pass the same object as getTeamMetrics.
   window?: MetricsWindow,
+  // Optional explicit repo scope (per-team AI). When provided (non-null) these exact repos are
+  // used INSTEAD of the account's watched set; null/undefined keeps the watched-set default. An
+  // empty array (e.g. a scope that resolved to no repos) → the empty result.
+  scopeRepoIds?: number[] | null,
 ): Promise<TeamMetricsDetail> {
   const now = Date.now();
   const sprintFromMs = window?.fromMs ?? now - INSIGHT_SPRINT_DAYS * 86_400_000;
@@ -2442,10 +2722,16 @@ export async function getTeamMetricsDetail(
     users: [],
   };
 
+  // An explicit empty scope short-circuits (also dodges the empty-array inArray pitfall below).
+  if (scopeRepoIds != null && scopeRepoIds.length === 0) return empty;
   const watched = await db
     .select({ id: repos.id, owner: repos.owner, name: repos.name })
     .from(repos)
-    .where(and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)))
+    .where(
+      scopeRepoIds != null
+        ? and(eq(repos.accountId, accountId), inArray(repos.id, scopeRepoIds))
+        : and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)),
+    )
     .execute();
   const repoIds = watched.map((r) => r.id);
   if (repoIds.length === 0) return empty;
@@ -2702,6 +2988,10 @@ export async function getTeamMetricsDetail(
 export async function getTeamInsights(
   accountId: number,
   window?: MetricsWindow,
+  // Optional explicit repo scope (per-team AI). When provided (non-null) these exact repos are
+  // used INSTEAD of the account's watched set (both for the cards AND the forwarded team
+  // metrics); null/undefined keeps the watched-set default. An empty array → no repos.
+  scopeRepoIds?: number[] | null,
 ): Promise<TeamInsightsResponse> {
   const now = Date.now();
   const generatedAt = new Date(now);
@@ -2719,11 +3009,18 @@ export async function getTeamInsights(
     if (id != null) userIdSet.add(id);
   };
 
-  const watched = await db
-    .select({ id: repos.id, owner: repos.owner, name: repos.name })
-    .from(repos)
-    .where(and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)))
-    .execute();
+  const watched =
+    scopeRepoIds != null && scopeRepoIds.length === 0
+      ? [] // explicit empty scope → no repos (dodges the empty-array inArray pitfall)
+      : await db
+          .select({ id: repos.id, owner: repos.owner, name: repos.name })
+          .from(repos)
+          .where(
+            scopeRepoIds != null
+              ? and(eq(repos.accountId, accountId), inArray(repos.id, scopeRepoIds))
+              : and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)),
+          )
+          .execute();
   const repoName = new Map(watched.map((r) => [r.id, `${r.owner}/${r.name}`]));
   const repoIds = watched.map((r) => r.id);
   const finish = async (): Promise<TeamInsightsResponse> => {
@@ -5057,6 +5354,9 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       await tx.delete(claudeReviews).where(inArray(claudeReviews.prId, prIds)).execute();
       await tx.delete(pullRequests).where(eq(pullRequests.repoId, id)).execute();
     }
+    // Team membership rows reference this repo (FK is ON DELETE cascade, but delete them
+    // explicitly so the ordering is dialect-agnostic and can't FK-fail if foreign_keys is off).
+    await tx.delete(teamRepos).where(eq(teamRepos.repoId, id)).execute();
     await tx.delete(syncState).where(eq(syncState.repoId, id)).execute();
     await tx.delete(repos).where(eq(repos.id, id)).execute();
   });

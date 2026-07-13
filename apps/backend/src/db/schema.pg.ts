@@ -637,3 +637,50 @@ export const botMuteRules = pgTable(
     accountIdx: index('bmr_account_idx').on(t.accountId),
   }),
 );
+
+// ---- Teams (CORE) ----
+// Named grouping of the account's repos — the pg twin of schema.sqlite.ts teams. Kept in
+// sync by hand (schema-parity.test.ts).
+export const teams = pgTable(
+  'teams',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountNameUx: uniqueIndex('teams_account_name').on(t.accountId, t.name),
+    accountIdx: index('teams_account_idx').on(t.accountId),
+  }),
+);
+
+// Many-to-many join of teams ↔ repos — the pg twin of schema.sqlite.ts teamRepos. Kept in
+// sync by hand (schema-parity.test.ts).
+export const teamRepos = pgTable(
+  'team_repos',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    teamId: integer('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    teamRepoUx: uniqueIndex('team_repos_team_repo').on(t.teamId, t.repoId),
+    accountIdx: index('team_repos_account_idx').on(t.accountId),
+    repoIdx: index('team_repos_repo_idx').on(t.repoId),
+  }),
+);

@@ -13,6 +13,7 @@ import {
 import { authRoutes } from './api/routes/auth.js';
 import { healthRoutes } from './api/routes/health.js';
 import { repoRoutes } from './api/routes/repos.js';
+import { teamRoutes } from './api/routes/teams.js';
 import { userRoutes } from './api/routes/users.js';
 import { timelineRoutes } from './api/routes/timeline.js';
 import { prRoutes } from './api/routes/prs.js';
@@ -142,6 +143,8 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(healthRoutes);
   await app.register(repoRoutes);
+  // Teams (CORE, always registered): group repos into named teams; account-scoped, no AI.
+  await app.register(teamRoutes);
   await app.register(userRoutes);
   await app.register(timelineRoutes);
   await app.register(prRoutes);

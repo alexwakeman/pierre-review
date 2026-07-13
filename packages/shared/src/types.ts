@@ -315,6 +315,96 @@ export interface Repo {
   inboxWatch: boolean;
 }
 
+// ---- Teams (CORE) ----
+// A named grouping of an account's repos (sprint teams / product areas). A repo may belong to
+// several teams (overlap allowed). `repoIds` are the member repo ids; `repoCount` is their count.
+export interface Team {
+  id: number;
+  name: string;
+  repoIds: number[];
+  repoCount: number;
+  createdAt: string; // ISO-8601
+}
+
+export interface TeamsResponse {
+  teams: Team[];
+}
+
+// The frontend store value for the active scope selector: 'all' (every account repo), 'none'
+// (repos in no team), or a teamId (that team's repos). NOTE the WIRE `scope` query param is the
+// STRING form — `'all' | 'none' | '<teamId>'` — resolved server-side by resolveScopeRepoIds.
+export type TeamScope = 'all' | 'none' | number;
+
+// ---- Preset prompts (declared now; implemented later by Pro + the frontend) ----
+// The fixed set of one-click "ask about this scope" questions the AI answer surface offers.
+export type PresetPromptKey =
+  | 'attention_now'
+  | 'blocked_threads'
+  | 'biggest_changes'
+  | 'longest_to_merge'
+  | 'review_bottlenecks'
+  | 'ship_ready';
+
+export interface PresetPrompt {
+  key: PresetPromptKey;
+  label: string; // short user-facing button label
+  question: string; // the full natural-language question sent to the model
+}
+
+// The 6 presets (the last two — review_bottlenecks + ship_ready — are the "couple more"
+// beyond the four core ones).
+export const PRESET_PROMPTS: PresetPrompt[] = [
+  {
+    key: 'attention_now',
+    label: 'Needs attention',
+    question: 'What needs attention now?',
+  },
+  {
+    key: 'blocked_threads',
+    label: 'Blocked threads',
+    question: 'Which review threads are blocked right now?',
+  },
+  {
+    key: 'biggest_changes',
+    label: 'Biggest changes',
+    question:
+      'What were the biggest changes merged this sprint (largest PRs by LoC)?',
+  },
+  {
+    key: 'longest_to_merge',
+    label: 'Slowest to merge',
+    question: 'Which PRs took the longest to merge?',
+  },
+  {
+    key: 'review_bottlenecks',
+    label: 'Review bottlenecks',
+    question:
+      'Where are the review bottlenecks — who/what is holding up merges?',
+  },
+  {
+    key: 'ship_ready',
+    label: 'Ready to ship',
+    question: 'Which open PRs look ready to ship?',
+  },
+];
+
+// One preset-prompt answer (Markdown), keyed by preset + the model that produced it.
+export interface PresetPromptResult {
+  key: PresetPromptKey;
+  markdown: string;
+  generatedAt: string; // ISO-8601
+  model: string;
+}
+
+// GET /api/pro/preset-prompt?key=&scope= and its refresh POST. `enabled` false = the capability
+// is off (plugin absent / not entitled); `throttled` / `creditsExhausted` mirror the digest gates.
+export interface PresetPromptResponse {
+  enabled: boolean;
+  result: PresetPromptResult | null;
+  throttled?: boolean;
+  creditsExhausted?: boolean;
+}
+
 export type SyncRunStatus = 'idle' | 'running' | 'ok' | 'error';
 
 // Live progress of an in-flight sync. Present only while status === 'running'.
@@ -937,6 +1027,15 @@ export interface RepoAnalytics {
   // Cadence: activity counts by weekday×hour (UTC), row-major dow*24+hour,
   // dow 0=Sunday. Length 168.
   activityHeatmap: number[];
+
+  // CI recovery (from the ci_status_events transition log), per weekly bucket (aligned to
+  // weekBuckets): the median hours a PR head spent red before CI went green again that week,
+  // plus how many recoveries (incidents) resolved in the week. medianHours null = no sample.
+  // Empty array when the repo has no CI transition history yet.
+  ciRecovery: { weekStart: string; medianHours: number | null; incidents: number }[];
+  // Top CI failure reasons over the window, by failing check/stage name (desc). Empty when
+  // there's no CI transition history.
+  ciFailuresByStage: { stage: string; count: number }[];
 }
 
 // Lean event shape for the timeline. No bodies.

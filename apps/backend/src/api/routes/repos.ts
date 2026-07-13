@@ -232,7 +232,7 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/api/repos', { schema: createRepoSchema }, async (req, reply) => {
-    const { owner, name, watch } = req.body as CreateRepoBody;
+    const { owner, name } = req.body as CreateRepoBody;
     const accountId = accountIdOf(req);
 
     let resp: RepoIdResponse;
@@ -279,9 +279,11 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       accountId,
     );
 
-    // Auto-watch "yours" repos for the inbox. Idempotent on re-add and preserves an
-    // existing watch-start (setRepoInboxWatch only stamps the start when unset).
-    if (watch === true) await setRepoInboxWatch(accountId, repoId, true);
+    // Auto-watch every newly-added repo for the inbox (so its activity flows into the feed +
+    // team scopes by default). Idempotent on re-add and preserves an existing watch-start
+    // (setRepoInboxWatch only stamps the start when unset). The `watch` body field is now
+    // vestigial — every add watches — but the schema still accepts it for back-compat.
+    await setRepoInboxWatch(accountId, repoId, true);
 
     // Kick off the initial backfill in the background.
     runSyncForRepo(repoId, app.log, { background: true });
