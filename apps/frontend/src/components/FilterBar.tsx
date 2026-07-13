@@ -1,17 +1,13 @@
 import { useMemo } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { type Repo, type User } from '@pierre-review/shared';
-import { api, ApiError } from '../api/client.js';
+import { type User } from '@pierre-review/shared';
 import { useMergers, useRepos, useSearchTimeline, useUsers } from '../hooks/useTimeline.js';
 import { useSearchOpenPrs } from '../hooks/useTriage.js';
 import { useFilters, type RangePreset } from '../store/filters.js';
-import { ACTIVITY_QUERY_KEYS } from '../hooks/useActivity.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { EventSelectPanel } from './EventSelectPanel.js';
-import { RepoSearch } from './RepoSearch.js';
-import { RepoSelectPanel } from './RepoSelectPanel.js';
 import { SavedViews } from './SavedViews.js';
 import { StatusSelectPanel } from './StatusSelectPanel.js';
+import { TeamSelector } from './TeamSelector.js';
 import { ThreadStateSelectPanel } from './ThreadStateSelectPanel.js';
 import { UserSelectPanel, type MemberSection } from './UserSelectPanel.js';
 
@@ -116,98 +112,8 @@ export function FilterBar(): JSX.Element {
 
   // The FilterBar is always fully live now — PR-isolation / My-Turn focus is a separate
   // TAB (its own keyed <Timeline>), so it no longer disables or fades the board filters.
-
-  const qc = useQueryClient();
-  const removeRepo = useMutation({
-    mutationFn: (id: number) => api.deleteRepo(id),
-    // Optimistically drop the row from the shared ['repos'] cache so it disappears
-    // instantly (this cache also backs useRepos() and SyncStatus's poller). Cancel
-    // in-flight refetches first, snapshot for rollback, then filter the row out.
-    onMutate: async (id: number) => {
-      await qc.cancelQueries({ queryKey: ['repos'] });
-      const previous = qc.getQueryData<Repo[]>(['repos']);
-      qc.setQueryData<Repo[]>(['repos'], (old) => old?.filter((r) => r.id !== id));
-      return { previous };
-    },
-    // DELETE 409s while a sync runs — on any error, restore the snapshot so the row
-    // reappears rather than vanishing optimistically forever.
-    onError: (_e, _id, ctx) => {
-      if (ctx?.previous) qc.setQueryData(['repos'], ctx.previous);
-    },
-    onSuccess: (_data, id) => {
-      // Drop the deleted repo from the active filter so its now-gone entries
-      // don't linger as a selected-but-missing id (empty → null = "all").
-      const cur = useFilters.getState();
-      const next = cur.repoIds?.filter((r) => r !== id);
-      cur.setRepoIds(next && next.length ? next : null);
-    },
-    onSettled: () => {
-      for (const key of ['repos', 'timeline', 'open-prs', 'users', 'my-turn', 'me']) {
-        void qc.invalidateQueries({ queryKey: [key] });
-      }
-    },
-  });
-
-  // Toggle "Watch for inbox" on a repo. Activity-only (doesn't touch timeline
-  // visibility). Optimistically flip the flag in the shared ['repos'] cache so the
-  // toggle reflects instantly; invalidate the inbox feeds so the watched section +
-  // counts refresh.
-  const watchRepo = useMutation({
-    mutationFn: (v: { id: number; watch: boolean }) =>
-      api.setRepoInboxWatch(v.id, v.watch),
-    onMutate: async ({ id, watch }) => {
-      await qc.cancelQueries({ queryKey: ['repos'] });
-      const previous = qc.getQueryData<Repo[]>(['repos']);
-      qc.setQueryData<Repo[]>(['repos'], (old) =>
-        old?.map((r) => (r.id === id ? { ...r, inboxWatch: watch } : r)),
-      );
-      return { previous };
-    },
-    onError: (_e, _v, ctx) => {
-      if (ctx?.previous) qc.setQueryData(['repos'], ctx.previous);
-    },
-    onSettled: () => {
-      // Watching/unwatching changes the WATCHED set the whole Activity console is scoped to —
-      // invalidate every Activity/Insights surface so the rail, feed and Insights track it live
-      // (no manual Refresh needed).
-      for (const key of ['repos', 'my-turn', 'my-turn-done', 'me', ...ACTIVITY_QUERY_KEYS]) {
-        void qc.invalidateQueries({ queryKey: [key] });
-      }
-    },
-  });
-
-  // Show/hide a single repo on the timeline. `repoIds` is the explicit visible
-  // subset (null = all). Toggling canonicalises back to null when every repo is
-  // visible again, so the URL stays clean and the trigger reads "all".
-  const toggleRepoVisibility = (id: number): void => {
-    const allIds = (repos ?? []).map((r) => r.id);
-    const visible = new Set(useFilters.getState().repoIds ?? allIds);
-    if (visible.has(id)) visible.delete(id);
-    else visible.add(id);
-    f.setRepoIds(
-      visible.size === 0 || visible.size === allIds.length
-        ? null
-        : allIds.filter((x) => visible.has(x)),
-    );
-  };
-
-  // Isolate the timeline to a single repo (deselect the rest) — for quick switching
-  // between repos without unchecking everything. Canonicalises to null when that
-  // repo is the only watched one (so the trigger still reads "all").
-  const showOnlyRepo = (id: number): void => {
-    const allIds = (repos ?? []).map((r) => r.id);
-    f.setRepoIds(allIds.length <= 1 ? null : [id]);
-  };
-
-  const confirmRemoveRepo = (r: Repo): void => {
-    if (
-      window.confirm(
-        `Remove ${r.fullName}? This deletes all of its locally-synced data.`,
-      )
-    ) {
-      removeRepo.mutate(r.id);
-    }
-  };
+  // Repo/team MANAGEMENT (add/remove/assign) now lives in the Activity console's TeamManager;
+  // the FilterBar only carries the read-only TEAM SCOPE selector (TeamSelector) below.
 
   // Member picker options, organised into sections: one section per in-scope repo
   // listing that repo's members. A member active in several repos is intentionally
@@ -347,31 +253,10 @@ export function FilterBar(): JSX.Element {
       {/* The board filters. Always live — focus is a separate tab now, not an overlay
           that locks the board. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        {/* Team scope: pick All repos / a team / No team. Repo management (add/remove/
+            assign to teams) lives in the Activity console's "Manage repos & teams" panel. */}
         <Section>
-          {/* removePending is hard-false: optimistic removal drops the row instantly,
-              so the list no longer freezes every remove button during a delete. */}
-          <RepoSelectPanel
-            repos={repos ?? []}
-            repoIds={f.repoIds}
-            onToggle={toggleRepoVisibility}
-            onOnly={showOnlyRepo}
-            onShowAll={() => f.setRepoIds(null)}
-            onToggleWatch={(r) => watchRepo.mutate({ id: r.id, watch: !r.inboxWatch })}
-            watchPending={false}
-            onRemove={confirmRemoveRepo}
-            removePending={false}
-          />
-          {removeRepo.error && (
-            <span
-              className="max-w-[14rem] truncate text-xs text-red-500"
-              title={String(removeRepo.error)}
-            >
-              {removeRepo.error instanceof ApiError
-                ? removeRepo.error.message
-                : 'Failed to remove repo'}
-            </span>
-          )}
-          <RepoSearch />
+          <TeamSelector />
         </Section>
 
         <Section>

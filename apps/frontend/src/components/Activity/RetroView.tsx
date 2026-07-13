@@ -3,6 +3,7 @@ import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useRetroReport, useRefreshRetroReport } from '../../hooks/useRetroReport.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
+import { useFilters, scopeToParam } from '../../store/filters.js';
 import { SummaryMarkdown } from './prRefTable.js';
 
 // The Insights "Retro" rail view — a Pro Haiku retrospective NARRATIVE over the sprint window:
@@ -44,8 +45,10 @@ function RetroSkeleton(): JSX.Element {
 export function RetroView(): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  const { data, isLoading } = useRetroReport(activityDigest);
-  const refresh = useRefreshRetroReport();
+  const teamScope = useFilters((s) => s.teamScope);
+  const scope = scopeToParam(teamScope);
+  const { data, isLoading } = useRetroReport(activityDigest, scope);
+  const refresh = useRefreshRetroReport(scope);
   const usage = useAiUsage(activityDigest);
   const outOfCredits =
     usage.data?.allowanceCredits != null && (usage.data.remainingCredits ?? 0) <= 0;
@@ -60,7 +63,7 @@ export function RetroView(): JSX.Element | null {
     report != null ? `${fmtDate(report.window.from)} – ${fmtDate(report.window.to)}` : null;
 
   return (
-    <div className="mx-auto max-w-3xl p-4">
+    <div className="p-4">
       <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-4 dark:border-violet-900/60 dark:bg-violet-950/20">
         <div className="flex items-center gap-2">
           <span className="text-base font-semibold text-gray-800 dark:text-gray-100">

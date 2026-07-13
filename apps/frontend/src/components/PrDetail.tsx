@@ -17,6 +17,7 @@ import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
 import { ChangesTab } from './ChangesTab.js';
 import { PrCommentComposer } from './PrCommentComposer.js';
+import { SkeletonBlock, SkeletonLine } from './Skeleton.js';
 // The two Pro-only agentic tabs are the heaviest components in the app (~3k LOC combined,
 // pulling their own deep imports) and are gated behind Pro capabilities most sessions never
 // open. Lazy-load them so they leave the initial bundle and fetch on first open. (Named
@@ -407,6 +408,40 @@ function PrCommentsList({
   );
 }
 
+// First-load placeholder for the detail pane: the header (title + meta), the tab strip,
+// and a few content blocks — mirrors the real layout so nothing jumps when the PR loads.
+// Structural only, using the shared Skeleton primitives (Activity-console pattern).
+function PrDetailSkeleton(): JSX.Element {
+  return (
+    <div className="flex h-full flex-col" aria-hidden="true">
+      {/* Header: a state chip + title line, then the author/meta line. */}
+      <div className="border-b border-gray-200 px-4 py-2 dark:border-gray-800">
+        <div className="flex items-center gap-2">
+          <SkeletonLine className="h-4 w-12" />
+          <SkeletonLine className="h-4 w-2/5" />
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <SkeletonLine className="h-3 w-24" />
+          <SkeletonLine className="h-3 w-32" />
+          <SkeletonLine className="h-3 w-20" />
+        </div>
+      </div>
+      {/* Tab strip. */}
+      <div className="flex gap-3 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
+        {[16, 14, 14, 14].map((w, i) => (
+          <SkeletonLine key={i} className="h-3.5" style={{ width: `${w * 4}px` }} />
+        ))}
+      </div>
+      {/* Content blocks. */}
+      <div className="flex flex-1 flex-col gap-3 p-4">
+        <SkeletonBlock className="h-20" />
+        <SkeletonBlock className="h-16" />
+        <SkeletonBlock className="h-16" />
+      </div>
+    </div>
+  );
+}
+
 export function PrDetail({
   prId,
   selectedThreadId,
@@ -438,9 +473,6 @@ export function PrDetail({
   const selectedCommentId = useFilters((s) => s.selectedCommentId);
   const claudeTabFocus = useFilters((s) => s.claudeTabFocus);
   const consumeClaudeTabFocus = useFilters((s) => s.consumeClaudeTabFocus);
-  const changesThreadFocus = useFilters((s) => s.changesThreadFocus);
-  const consumeChangesThreadFocus = useFilters((s) => s.consumeChangesThreadFocus);
-  const [changesFocusThreadId, setChangesFocusThreadId] = useState<number | null>(null);
   const aiFixTabFocus = useFilters((s) => s.aiFixTabFocus);
   const commentFocusForPr =
     commentFocus && pr && commentFocus.prId === pr.id ? commentFocus.commentId : null;
@@ -479,17 +511,6 @@ export function PrDetail({
       consumeClaudeTabFocus();
     }
   }, [claudeTabFocus, pr, claudeReviewEnabled, consumeClaudeTabFocus]);
-
-  // A Feed/Insights thread card deep-links here: open the Changes tab and scroll to the
-  // thread rendered inline in the diff. Capture the target locally, then consume; the
-  // ChangesTab clears it (onThreadShown) once it has scrolled.
-  useEffect(() => {
-    if (changesThreadFocus && pr && changesThreadFocus.prId === pr.id) {
-      setTab('changes');
-      setChangesFocusThreadId(changesThreadFocus.threadId);
-      consumeChangesThreadFocus();
-    }
-  }, [changesThreadFocus, pr, consumeChangesThreadFocus]);
 
   // "Generate fix from this review" (or any deep link) → open the AI Fix tab for the
   // matching PR. The signal is NOT consumed here — AiFixTab reads its `reviewText` to
@@ -536,7 +557,7 @@ export function PrDetail({
   }, [pr, usersById, syncPinnedMeta]);
 
   if (isLoading) {
-    return <div className="p-4 text-sm text-gray-500">Loading PR…</div>;
+    return <PrDetailSkeleton />;
   }
   if (error || !pr) {
     return (
@@ -766,11 +787,7 @@ export function PrDetail({
             onConsumed={consumeActivityFocus}
           />
         ) : tab === 'changes' ? (
-          <ChangesTab
-            pr={pr}
-            focusThreadId={changesFocusThreadId}
-            onThreadShown={() => setChangesFocusThreadId(null)}
-          />
+          <ChangesTab pr={pr} />
         ) : tab === 'ai_fix' ? (
           <AiFixTab pr={pr} />
         ) : (

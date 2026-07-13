@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import type {
   AutomatedReviewerKind,
@@ -112,6 +112,20 @@ function automatedTagFor(
   return null;
 }
 
+// A stable TabMeta for a feed item — pure (closes over nothing) so the open/openThread/focus
+// handlers below can stay referentially stable across renders (memoised rows need this).
+function metaOf(item: ConsolidatedFeedItem, prId: number): TabMeta {
+  return {
+    id: prId,
+    number: item.prNumber ?? 0,
+    title: item.prTitle ?? `#${item.prNumber ?? ''}`,
+    repoFullName: item.repoFullName,
+    authorLogin: null, // backfilled by PrDetail.syncMeta once the tab opens
+    authorDisplayName: null,
+    authorAvatarUrl: null,
+  };
+}
+
 // The consolidated Feed — a flat, chronological, social-style stream of activity events.
 // Cross-repo when `repoId` is absent (scoped by the active FilterBar repos/members); scoped
 // to a single repo when a rail repo is selected. Each item is flagged `isMyTurn` (a PR you
@@ -135,17 +149,24 @@ function nearestScrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
+// Windowing overscan (px) rendered past each edge of the visible viewport so a fast scroll
+// (or an expand-in-place row growing) never blanks, and a just-interacted row stays mounted.
+const FEED_OVERSCAN = 800;
+// Height estimate for a not-yet-measured row before the running average kicks in.
+const FEED_EST_ROW = 160;
+
 export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const userIds = useFilters((s) => s.userIds);
   const excludeBots = useFilters((s) => s.excludeBots);
   const allowedBotIds = useFilters((s) => s.allowedBotIds);
+  const repoIdsFilter = useFilters((s) => s.repoIds);
   const feedMyTurnOnly = useFilters((s) => s.feedMyTurnOnly);
   const toggleFeedMyTurnOnly = useFilters((s) => s.toggleFeedMyTurnOnly);
   const feedClaudeOnly = useFilters((s) => s.feedClaudeOnly);
   const toggleFeedClaudeOnly = useFilters((s) => s.toggleFeedClaudeOnly);
   const feedBotLens = useFilters((s) => s.feedBotLens);
   const cycleFeedBotLens = useFilters((s) => s.cycleFeedBotLens);
-  const showThreadInChanges = useFilters((s) => s.showThreadInChanges);
+  const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
   const showPrComment = useFilters((s) => s.showPrComment);
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
@@ -160,6 +181,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   // detected-reviewers query invalidates and the tag drops.
   const { data: detectedReviewers } = useDetectedReviewers();
   const reviewerOverride = useReviewerOverride();
+  const { mutate: overrideMutate } = reviewerOverride;
   const classificationByUserId = useMemo(() => {
     const m = new Map<number, ReviewerClassification>();
     for (const r of detectedReviewers?.reviewers ?? []) {
@@ -170,19 +192,23 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const overridePendingUserId = reviewerOverride.isPending
     ? reviewerOverride.variables?.userId ?? null
     : null;
-  const markNotBot = (userId: number): void => {
-    reviewerOverride.mutate({ userId, body: { automated: false } });
-  };
+  // Stable across renders so a memoised row's props don't churn.
+  const markNotBot = useCallback(
+    (userId: number): void => {
+      overrideMutate({ userId, body: { automated: false } });
+    },
+    [overrideMutate],
+  );
   // The one-shot flash signal — set ONLY by a real browser Back (navigateBack), so an
   // ordinary return to Activity (e.g. clicking the Activity tab chip) never flashes.
   const flashTarget = usePinnedTabs((s) => s.activityFlashItemId);
   const clearFlash = usePinnedTabs((s) => s.clearActivityFlashItem);
 
-  // A selected rail repo scopes the feed to just that repo; otherwise the cross-repo feed is
-  // scoped to ALL watched repos (null → the backend resolves all-watched), IGNORING the
-  // FilterBar repo-visibility selection — so the "new activity" banner only fires on watched
-  // changes, never on unwatched repos. The bots toggle + allow-list still flow in.
-  const effectiveRepoIds = repoId != null ? [repoId] : null;
+  // A selected rail repo scopes the feed to just that repo; otherwise the cross-repo feed
+  // FOLLOWS the FilterBar repo selection (which the team-scope picker drives): a `repoIds`
+  // of null → the backend resolves all-watched, a concrete list → just those repos. The bots
+  // toggle + allow-list still flow in.
+  const effectiveRepoIds = repoId != null ? [repoId] : repoIdsFilter;
 
   // Viewing the CROSS-REPO feed marks it seen server-side (once per mount), resetting the
   // "new My Turn since you were last here" count that drives the Welcome-back banner. A
@@ -223,53 +249,287 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   };
 
   const usersById = useMemo(() => indexUsers(users), [users]);
-  const myTurnCount = items.filter((i) => i.isMyTurn).length;
-  const claudeCount = items.filter((i) => i.kind === 'claude_review').length;
   // Bot lens: an actor is a "bot" for the lens if it's ANY bot (dependabot/CI/review bots),
   // so "Hide bots" gives the clean human-only view; the per-row vendor TAG is review-bot-only.
-  const isBotActor = (i: ConsolidatedFeedItem): boolean =>
-    i.actorId != null && (usersById.get(i.actorId)?.isBot ?? false);
-  const botCount = items.filter(isBotActor).length;
+  const isBotActor = useCallback(
+    (i: ConsolidatedFeedItem): boolean =>
+      i.actorId != null && (usersById.get(i.actorId)?.isBot ?? false),
+    [usersById],
+  );
+  const myTurnCount = useMemo(() => items.filter((i) => i.isMyTurn).length, [items]);
+  const claudeCount = useMemo(
+    () => items.filter((i) => i.kind === 'claude_review').length,
+    [items],
+  );
+  const botCount = useMemo(() => items.filter(isBotActor).length, [items, isBotActor]);
   // "My Turn only" and "Claude Reviews only" are mutually-exclusive client-side filters (My
   // Turn is CORE / free, so it's always available). The bot lens composes ON TOP of them.
-  const base = feedMyTurnOnly
-    ? items.filter((i) => i.isMyTurn)
-    : feedClaudeOnly
-      ? items.filter((i) => i.kind === 'claude_review')
-      : items;
-  const visible =
-    feedBotLens === 'hide'
+  const visible = useMemo(() => {
+    const base = feedMyTurnOnly
+      ? items.filter((i) => i.isMyTurn)
+      : feedClaudeOnly
+        ? items.filter((i) => i.kind === 'claude_review')
+        : items;
+    return feedBotLens === 'hide'
       ? base.filter((i) => !isBotActor(i))
       : feedBotLens === 'only'
         ? base.filter(isBotActor)
         : base;
+  }, [items, feedMyTurnOnly, feedClaudeOnly, feedBotLens, isBotActor]);
+
+  // ── Vertical, variable-height windowing ─────────────────────────────────────────────
+  // The feed accumulates unbounded across "Load more" pages, so rendering every card put
+  // thousands of nodes in the DOM (every scroll/refetch re-laid them all out). Mirror the
+  // OpenPrsStrip pattern but VERTICAL + variable-height: measure each row's real height via
+  // a ResizeObserver into a Map<id, px>, estimate unmeasured rows with the running average,
+  // compute the in-view index range from the scroll container + an overscan buffer, and
+  // render only that slice with a top/bottom spacer <li> reserving the hidden rows' height.
+  const listRef = useRef<HTMLUListElement>(null);
+  const scrollElRef = useRef<HTMLElement | null>(null);
+  const heightsRef = useRef<Map<string, number>>(new Map()); // id → measured px (kept across unmount)
+  const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map()); // id → mounted <li> (flash target)
+  const innerRefCbs = useRef<Map<string, (el: HTMLLIElement | null) => void>>(new Map());
+  const elToId = useRef<Map<Element, string>>(new Map());
+  const rowRoRef = useRef<ResizeObserver | null>(null);
+  const forceIncludeRef = useRef<string | null>(null); // an id the flash pins into the window
+  const rafRef = useRef<number | null>(null);
+  const visibleRef = useRef<ConsolidatedFeedItem[]>(visible);
+  visibleRef.current = visible;
+  const [win, setWin] = useState({ start: 0, end: 30, top: 0, bottom: 0 });
+
+  const recompute = useCallback((): void => {
+    rafRef.current = null;
+    const scrollEl = scrollElRef.current;
+    const listEl = listRef.current;
+    if (!scrollEl || !listEl) return;
+    const rows = visibleRef.current;
+    const n = rows.length;
+    if (n === 0) {
+      setWin((w) =>
+        w.start === 0 && w.end === 0 && w.top === 0 && w.bottom === 0
+          ? w
+          : { start: 0, end: 0, top: 0, bottom: 0 },
+      );
+      return;
+    }
+    const heights = heightsRef.current;
+    let hsum = 0;
+    for (const v of heights.values()) hsum += v;
+    const est = heights.size > 0 ? hsum / heights.size : FEED_EST_ROW;
+    const hOf = (i: number): number => heights.get(rows[i]!.id) ?? est;
+
+    // Position of the viewport's top in list-content coordinates (offset 0 = first row's top).
+    // Derived purely from live rects (no scrollTop math) so it works whether the scroller is
+    // an overflow pane or the document, and it self-corrects for spacer estimate error since
+    // listEl.rect reflects the ACTUAL rendered spacers.
+    const isDoc =
+      scrollEl === document.scrollingElement ||
+      scrollEl === document.documentElement ||
+      scrollEl === document.body;
+    const viewportTop = isDoc ? 0 : scrollEl.getBoundingClientRect().top;
+    const viewportH = isDoc ? window.innerHeight : scrollEl.clientHeight;
+    const rel = viewportTop - listEl.getBoundingClientRect().top;
+    const top0 = rel - FEED_OVERSCAN;
+    const bottom0 = rel + viewportH + FEED_OVERSCAN;
+
+    let start = 0;
+    let end = n;
+    let offset = 0;
+    let found = false;
+    for (let i = 0; i < n; i++) {
+      const h = hOf(i);
+      if (!found && offset + h >= top0) {
+        start = i;
+        found = true;
+      }
+      if (found && offset > bottom0) {
+        end = i;
+        break;
+      }
+      offset += h;
+    }
+    if (!found) start = n;
+
+    // Keep a flashed/forced item mounted (Back-to-feed can target a far-down row) so its
+    // scrollIntoView + flash can find the element.
+    const force = forceIncludeRef.current;
+    if (force != null) {
+      const fi = rows.findIndex((it) => it.id === force);
+      if (fi >= 0) {
+        if (fi < start) start = fi;
+        if (fi >= end) end = fi + 1;
+      }
+    }
+
+    let top = 0;
+    let bottom = 0;
+    for (let i = 0; i < start; i++) top += hOf(i);
+    for (let i = end; i < n; i++) bottom += hOf(i);
+    setWin((w) =>
+      w.start === start && w.end === end && w.top === top && w.bottom === bottom
+        ? w
+        : { start, end, top, bottom },
+    );
+  }, []);
+
+  const scheduleRecompute = useCallback((): void => {
+    if (rafRef.current == null) rafRef.current = requestAnimationFrame(recompute);
+  }, [recompute]);
+
+  // Per-row ResizeObserver: measured heights feed the window + spacer sizes, and remeasure
+  // when a row grows (expand-in-place, late <img> loads). Observe any rows already mounted
+  // (their ref callbacks fire during commit, before this effect runs).
+  useEffect(() => {
+    const ro = new ResizeObserver((entries) => {
+      let changed = false;
+      for (const e of entries) {
+        const id = elToId.current.get(e.target);
+        if (id == null) continue;
+        const h = (e.target as HTMLElement).offsetHeight;
+        const prev = heightsRef.current.get(id);
+        if (prev == null || Math.abs(prev - h) > 0.5) {
+          heightsRef.current.set(id, h);
+          changed = true;
+        }
+      }
+      if (changed) scheduleRecompute();
+    });
+    rowRoRef.current = ro;
+    for (const [id, el] of rowRefs.current) {
+      elToId.current.set(el, id);
+      ro.observe(el);
+    }
+    return () => {
+      ro.disconnect();
+      rowRoRef.current = null;
+      elToId.current.clear();
+    };
+  }, [scheduleRecompute]);
+
+  // Attach to the feed's scroll container (re-resolved once content mounts and the pane
+  // becomes scrollable) + recompute on scroll/resize.
+  const hasItems = visible.length > 0;
+  useEffect(() => {
+    const scrollEl =
+      nearestScrollParent(rootRef.current) ??
+      (document.scrollingElement as HTMLElement | null) ??
+      document.documentElement;
+    scrollElRef.current = scrollEl;
+    const isDoc =
+      scrollEl === document.scrollingElement ||
+      scrollEl === document.documentElement ||
+      scrollEl === document.body;
+    const onScroll = (): void => scheduleRecompute();
+    const scrollTarget: EventTarget = isDoc ? window : scrollEl;
+    scrollTarget.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    const ro = new ResizeObserver(onScroll);
+    ro.observe(scrollEl);
+    scheduleRecompute();
+    return () => {
+      scrollTarget.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      ro.disconnect();
+    };
+  }, [scheduleRecompute, hasItems]);
+
+  // Recompute whenever the visible set changes (filter toggles / new pages).
+  useEffect(() => {
+    scheduleRecompute();
+  }, [visible, scheduleRecompute]);
+
+  // A stable-per-id ref callback (memoised in a Map) so a memoised row's `innerRef` prop
+  // never changes identity. Registers the <li> for flash targeting + row-height measurement.
+  const getInnerRef = useCallback((id: string): ((el: HTMLLIElement | null) => void) => {
+    let cb = innerRefCbs.current.get(id);
+    if (!cb) {
+      cb = (el: HTMLLIElement | null): void => {
+        const prev = rowRefs.current.get(id);
+        if (prev && prev !== el) {
+          rowRoRef.current?.unobserve(prev);
+          elToId.current.delete(prev);
+        }
+        if (el) {
+          rowRefs.current.set(id, el);
+          elToId.current.set(el, id);
+          rowRoRef.current?.observe(el);
+        } else {
+          rowRefs.current.delete(id);
+        }
+      };
+      innerRefCbs.current.set(id, cb);
+    }
+    return cb;
+  }, []);
+
+  // Expand-in-place state is LIFTED to the parent (keyed by item id) so it survives a row
+  // scrolling out of the window and unmounting — otherwise windowing would silently collapse
+  // an expanded body / close an open reply the moment it left the overscan zone.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const [replyOpenIds, setReplyOpenIds] = useState<Set<string>>(() => new Set());
+  const toggleExpanded = useCallback((id: string): void => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const setReplyOpen = useCallback((id: string, open: boolean): void => {
+    setReplyOpenIds((prev) => {
+      if (open === prev.has(id)) return prev;
+      const next = new Set(prev);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
 
   // Back-from-a-click highlight: when a browser Back returns us to the feed (navigateBack
-  // set the one-shot flashTarget), scroll the exact row we clicked into view and flash it
-  // once, then consume the signal. Only fires on a real Back.
-  const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+  // set the one-shot flashTarget), pin the target into the window, scroll it into view, and
+  // flash it once, then consume the signal. Only fires on a real Back. A bounded rAF retry
+  // waits for the window to expand + mount the row before scrolling.
   const [flashId, setFlashId] = useState<string | null>(null);
   useEffect(() => {
     if (flashTarget == null) return;
     const id = flashTarget;
-    const raf = requestAnimationFrame(() => {
+    forceIncludeRef.current = id;
+    scheduleRecompute();
+    let tries = 0;
+    let raf = 0;
+    const release = (): void => {
+      forceIncludeRef.current = null;
+      scheduleRecompute();
+    };
+    const tryScroll = (): void => {
       const el = rowRefs.current.get(id);
       if (el) {
         el.scrollIntoView({ block: 'center', behavior: 'smooth' });
         setFlashId(id);
-        window.setTimeout(() => setFlashId((c) => (c === id ? null : c)), 1800);
+        window.setTimeout(() => {
+          setFlashId((c) => (c === id ? null : c));
+          release();
+        }, 1800);
+        clearFlash();
+      } else if (tries < 12) {
+        tries += 1;
+        raf = requestAnimationFrame(tryScroll);
+      } else {
+        release();
+        clearFlash();
       }
-      clearFlash();
-    });
+    };
+    raf = requestAnimationFrame(tryScroll);
     return () => cancelAnimationFrame(raf);
-  }, [flashTarget, clearFlash]);
+  }, [flashTarget, clearFlash, scheduleRecompute]);
 
   // Infinite scroll: auto-load the next page as the user nears the bottom of the feed, in
   // every context (cross-repo Feed + each repo's own feed both render this component). A
-  // sentinel row sits at the end of the list; an IntersectionObserver rooted on the feed's
-  // scroll container fires ~a screenful early (rootMargin) so the next page is fetching
-  // before the user hits the true bottom. `loadNextRef` holds the latest guard so the
-  // observer callback stays stable (empty-dep effect) yet always sees fresh state.
+  // sentinel row sits after the list (below the bottom spacer, which reserves the full
+  // hidden-row height so the sentinel is at the TRUE bottom); an IntersectionObserver rooted
+  // on the feed's scroll container fires ~a screenful early (rootMargin) so the next page is
+  // fetching before the user hits the true bottom. `loadNextRef` holds the latest guard so
+  // the observer callback stays stable (empty-dep effect) yet always sees fresh state.
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const sentinelVisibleRef = useRef(false);
   const loadNextRef = useRef<() => void>(() => {});
@@ -302,44 +562,42 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
     if (!isFetchingMore && sentinelVisibleRef.current) loadNextRef.current();
   }, [isFetchingMore, items.length, hasMore]);
 
-  const metaOf = (item: ConsolidatedFeedItem, prId: number): TabMeta => ({
-    id: prId,
-    number: item.prNumber ?? 0,
-    title: item.prTitle ?? `#${item.prNumber ?? ''}`,
-    repoFullName: item.repoFullName,
-    authorLogin: null, // backfilled by PrDetail.syncMeta once the tab opens
-    authorDisplayName: null,
-    authorAvatarUrl: null,
-  });
-
   // Open an item → the full-height PR DETAIL tab (its Show/Focus drive the timeline).
   // `fromActivity` arms Back-to-Activity + stashes this row's id so Back scrolls it back into
   // view. We also drive the right in-detail deep link: a Claude run → its Claude Review tab;
-  // a thread → that thread; a PR comment → scroll to + highlight the comment; else the PR.
-  function open(item: ConsolidatedFeedItem): void {
-    const prId = item.prId;
-    if (prId == null) return;
-    const meta = metaOf(item, prId);
-    const opts = { fromActivity: true, returnItemId: item.id };
-    // A Claude run lands on its Claude Review tab — openClaudeReview opens the pr-detail tab
-    // itself (so it works from any overlay), so don't also open it here (avoids a double open).
-    if (item.kind === 'claude_review') {
-      openClaudeReview(meta, opts);
-      return;
-    }
-    openPrDetailTab(meta, opts);
-    if (item.threadId != null) showThreadInChanges(prId, item.threadId);
-    else if (item.commentId != null) showPrComment(prId, item.commentId);
-    else selectPr(prId);
-  }
+  // a thread → that thread's Threads-tab card; a PR comment → scroll to + highlight the
+  // comment; else the PR. Stable (store actions are stable) so memoised rows don't churn.
+  const open = useCallback(
+    (item: ConsolidatedFeedItem): void => {
+      const prId = item.prId;
+      if (prId == null) return;
+      const meta = metaOf(item, prId);
+      const opts = { fromActivity: true, returnItemId: item.id };
+      // A Claude run lands on its Claude Review tab — openClaudeReview opens the pr-detail tab
+      // itself (so it works from any overlay), so don't also open it here (avoids a double open).
+      if (item.kind === 'claude_review') {
+        openClaudeReview(meta, opts);
+        return;
+      }
+      openPrDetailTab(meta, opts);
+      if (item.threadId != null) selectThread(prId, item.threadId);
+      else if (item.commentId != null) showPrComment(prId, item.commentId);
+      else selectPr(prId);
+    },
+    [openClaudeReview, openPrDetailTab, selectThread, showPrComment, selectPr],
+  );
 
-  // Open a specific affected thread inline on a commit item — jump straight to that thread.
-  function openThread(item: ConsolidatedFeedItem, threadId: number): void {
-    const prId = item.prId;
-    if (prId == null) return;
-    openPrDetailTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
-    showThreadInChanges(prId, threadId);
-  }
+  // Open a specific affected thread inline on a commit item — jump straight to that thread's
+  // Threads-tab card.
+  const openThread = useCallback(
+    (item: ConsolidatedFeedItem, threadId: number): void => {
+      const prId = item.prId;
+      if (prId == null) return;
+      openPrDetailTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
+      selectThread(prId, threadId);
+    },
+    [openPrDetailTab, selectThread],
+  );
 
   // The magnifier → Focus Mode: ALWAYS open the PR's own isolated timeline tab and glow the
   // marker for THIS event (a review_comment's refId is its thread id, so also pre-select that
@@ -347,16 +605,21 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   // window, so a PR that isn't on the current board still loads + highlights here — no "not on
   // the timeline" modal. (A PR older than that window still opens; the boot selects it so its
   // detail pane shows even when its bar can't be isolated.) Mirrors PrDetail's Focus link.
-  function focus(item: ConsolidatedFeedItem): void {
-    const prId = item.prId;
-    if (prId == null) return;
-    openPrFocusTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
-    if (item.kind !== 'claude_review') {
-      const refId = item.threadId ?? item.commentId ?? null;
-      const threadId = item.kind === 'review_comment' ? item.threadId : null;
-      focusEventInTab(prId, item.occurredAt, { type: item.kind as EventType, refId }, threadId);
-    }
-  }
+  const focus = useCallback(
+    (item: ConsolidatedFeedItem): void => {
+      const prId = item.prId;
+      if (prId == null) return;
+      openPrFocusTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
+      if (item.kind !== 'claude_review') {
+        const refId = item.threadId ?? item.commentId ?? null;
+        const threadId = item.kind === 'review_comment' ? item.threadId : null;
+        focusEventInTab(prId, item.occurredAt, { type: item.kind as EventType, refId }, threadId);
+      }
+    },
+    [openPrFocusTab, focusEventInTab],
+  );
+
+  const slice = visible.slice(win.start, win.end);
 
   return (
     <div className="space-y-3" data-testid="feed-view" ref={rootRef}>
@@ -451,42 +714,32 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
                 : 'Nothing needs your attention right now.'}
         </div>
       ) : (
-        <ul className="space-y-2">
-          {visible.map((item) => {
-            const actorUser = item.actorId != null ? usersById.get(item.actorId) : undefined;
-            const mergedBy = item.mergedById != null ? usersById.get(item.mergedById) : undefined;
-            const mergedByLabel =
-              mergedBy != null || item.mergedById != null
-                ? userLabel(mergedBy, item.mergedById)
-                : null;
-            const reviewerLabels = (item.reviewers ?? []).map((r) =>
-              userLabel(usersById.get(r.userId), r.userId),
-            );
-            const automatedTag = automatedTagFor(actorUser, classificationByUserId);
-            return (
-              <FeedRow
-                key={item.id}
-                item={item}
-                actorUser={actorUser}
-                automatedTag={automatedTag}
-                onNotBot={markNotBot}
-                overridePending={
-                  automatedTag?.userId != null && overridePendingUserId === automatedTag.userId
-                }
-                mergedByLabel={mergedByLabel}
-                reviewerLabels={reviewerLabels}
-                usersById={usersById}
-                flash={flashId === item.id}
-                innerRef={(el) => {
-                  if (el) rowRefs.current.set(item.id, el);
-                  else rowRefs.current.delete(item.id);
-                }}
-                onOpen={() => open(item)}
-                onOpenThread={(tid) => openThread(item, tid)}
-                onFocus={() => focus(item)}
-              />
-            );
-          })}
+        // Windowed list: only the in-view slice (+overscan) is mounted; the spacer <li>s
+        // reserve the hidden rows' summed height so the scrollbar geometry is unchanged. Each
+        // FeedRow's <li> carries its own bottom padding (pb-2) so the measured offsetHeight —
+        // and therefore the spacer sizes — includes the inter-row gap (no `space-y-2` here).
+        <ul ref={listRef}>
+          {win.top > 0 && <li aria-hidden style={{ height: win.top }} />}
+          {slice.map((item) => (
+            <FeedRow
+              key={item.id}
+              item={item}
+              usersById={usersById}
+              classificationByUserId={classificationByUserId}
+              overridePendingUserId={overridePendingUserId}
+              onNotBot={markNotBot}
+              flash={flashId === item.id}
+              expanded={expandedIds.has(item.id)}
+              onToggleExpanded={toggleExpanded}
+              replyOpen={replyOpenIds.has(item.id)}
+              onSetReplyOpen={setReplyOpen}
+              innerRef={getInnerRef(item.id)}
+              onOpen={open}
+              onOpenThread={openThread}
+              onFocus={focus}
+            />
+          ))}
+          {win.bottom > 0 && <li aria-hidden style={{ height: win.bottom }} />}
         </ul>
       )}
 
@@ -673,36 +926,56 @@ function AffectedThreadRow({
 // The collapsed height of a comment/summary body before "Show more" appears (item 2).
 const BODY_COLLAPSED_MAX = 160;
 
-function FeedRow({
+type FeedRowProps = {
+  item: ConsolidatedFeedItem;
+  usersById: Map<number, User>;
+  classificationByUserId: Map<number, ReviewerClassification>;
+  overridePendingUserId: number | null;
+  onNotBot: (userId: number) => void;
+  flash: boolean;
+  expanded: boolean;
+  onToggleExpanded: (id: string) => void;
+  replyOpen: boolean;
+  onSetReplyOpen: (id: string, open: boolean) => void;
+  innerRef: (el: HTMLLIElement | null) => void;
+  onOpen: (item: ConsolidatedFeedItem) => void;
+  onOpenThread: (item: ConsolidatedFeedItem, threadId: number) => void;
+  onFocus: (item: ConsolidatedFeedItem) => void;
+};
+
+function FeedRowImpl({
   item,
-  actorUser,
-  automatedTag,
-  onNotBot,
-  overridePending,
-  mergedByLabel,
-  reviewerLabels,
   usersById,
+  classificationByUserId,
+  overridePendingUserId,
+  onNotBot,
   flash,
+  expanded,
+  onToggleExpanded,
+  replyOpen,
+  onSetReplyOpen,
   innerRef,
   onOpen,
   onOpenThread,
   onFocus,
-}: {
-  item: ConsolidatedFeedItem;
-  actorUser: User | undefined;
-  automatedTag: AutomatedTag | null;
-  onNotBot: (userId: number) => void;
-  overridePending: boolean;
-  mergedByLabel: string | null;
-  reviewerLabels: string[];
-  usersById: Map<number, User>;
-  flash: boolean;
-  innerRef: (el: HTMLLIElement | null) => void;
-  onOpen: () => void;
-  onOpenThread: (threadId: number) => void;
-  onFocus: () => void;
-}): JSX.Element {
+}: FeedRowProps): JSX.Element {
   const glyph = itemGlyph(item);
+  // Derived, memoised per row so props into this memoised component stay stable.
+  const actorUser = item.actorId != null ? usersById.get(item.actorId) : undefined;
+  const automatedTag = useMemo(
+    () => automatedTagFor(actorUser, classificationByUserId),
+    [actorUser, classificationByUserId],
+  );
+  const overridePending =
+    automatedTag?.userId != null && overridePendingUserId === automatedTag.userId;
+  const mergedBy = item.mergedById != null ? usersById.get(item.mergedById) : undefined;
+  const mergedByLabel =
+    mergedBy != null || item.mergedById != null ? userLabel(mergedBy, item.mergedById) : null;
+  const reviewerLabels = useMemo(
+    () => (item.reviewers ?? []).map((r) => userLabel(usersById.get(r.userId), r.userId)),
+    [item.reviewers, usersById],
+  );
+
   // My Turn is CORE / free — the backend flags isMyTurn for every tier.
   const isMyTurn = item.isMyTurn;
   const isClaude = item.kind === 'claude_review';
@@ -728,7 +1001,6 @@ function FeedRow({
   const isThreadCard = item.kind === 'review_comment' && item.threadId != null;
   const isPrCommentCard = item.kind === 'pr_comment' && item.prId != null;
   const isPrOpened = item.kind === 'pr_opened';
-  const [replyOpen, setReplyOpen] = useState(false);
 
   // Item 8 — only show credit that's meaningful for THIS card's context: "Merged by" +
   // "Reviewed by" belong on a merge card (and never re-attribute the merge to its own
@@ -743,7 +1015,6 @@ function FeedRow({
   // and on width reflow — so the toggle isn't missing while the clamp silently truncates.
   const bodyRef = useRef<HTMLDivElement>(null); // clamped wrapper
   const bodyInnerRef = useRef<HTMLDivElement>(null); // unclamped content
-  const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const hasBody = item.content != null && item.content.trim() !== '';
   useEffect(() => {
@@ -764,11 +1035,11 @@ function FeedRow({
   // (they call their own handlers).
   const onCardClick = (e: ReactMouseEvent<HTMLElement>): void => {
     if ((e.target as HTMLElement).closest('a,button')) return;
-    onOpen();
+    onOpen(item);
   };
 
   return (
-    <li ref={innerRef}>
+    <li ref={innerRef} className="pb-2">
       <article
         onClick={onCardClick}
         className={`cursor-pointer rounded-md border p-2.5 text-sm transition-colors ${
@@ -789,7 +1060,7 @@ function FeedRow({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onFocus();
+                onFocus(item);
               }}
               className="shrink-0 rounded p-0.5 text-blue-500 hover:text-blue-600"
               title="Focus — open this PR in its own isolated timeline tab"
@@ -867,7 +1138,7 @@ function FeedRow({
           {prLabel !== '' && (
             <button
               type="button"
-              onClick={onOpen}
+              onClick={() => onOpen(item)}
               className="min-w-0 truncate font-medium text-gray-700 hover:text-sky-600 hover:underline dark:text-gray-200"
             >
               {prLabel}
@@ -899,7 +1170,7 @@ function FeedRow({
             {(overflows || expanded) && (
               <button
                 type="button"
-                onClick={() => setExpanded((e) => !e)}
+                onClick={() => onToggleExpanded(item.id)}
                 className="mt-1 text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
               >
                 {expanded ? 'Show less' : 'Show more'}
@@ -944,7 +1215,7 @@ function FeedRow({
                   key={t.threadId}
                   thread={t}
                   author={t.authorId != null ? usersById.get(t.authorId) : undefined}
-                  onOpen={() => onOpenThread(t.threadId)}
+                  onOpen={() => onOpenThread(item, t.threadId)}
                 />
               ))}
             </ul>
@@ -986,7 +1257,7 @@ function FeedRow({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setReplyOpen(true);
+                  onSetReplyOpen(item.id, true);
                 }}
                 className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
               >
@@ -998,8 +1269,8 @@ function FeedRow({
                   prId={item.prId}
                   initialBody={buildQuotedReply(item.content, actorUser?.githubLogin ?? null)}
                   autoFocus
-                  onCancel={() => setReplyOpen(false)}
-                  onDone={() => setReplyOpen(false)}
+                  onCancel={() => onSetReplyOpen(item.id, false)}
+                  onDone={() => onSetReplyOpen(item.id, false)}
                 />
               </div>
             )}
@@ -1009,3 +1280,28 @@ function FeedRow({
     </li>
   );
 }
+
+// Memoised so a scroll-driven parent re-render (window range / spacer height changing) skips
+// every row whose render inputs are unchanged. All props are stable references now (item is
+// query-stable; the handlers are useCallback; innerRef is a per-id cached callback), so the
+// comparator is a shallow equality over exactly the inputs that affect a row's output: item
+// identity, the flash + controlled expand/reply flags, the pending-override id, the shared
+// user/classification maps, and the stable callback identities.
+const FeedRow = memo(
+  FeedRowImpl,
+  (a, b) =>
+    a.item === b.item &&
+    a.flash === b.flash &&
+    a.expanded === b.expanded &&
+    a.replyOpen === b.replyOpen &&
+    a.overridePendingUserId === b.overridePendingUserId &&
+    a.usersById === b.usersById &&
+    a.classificationByUserId === b.classificationByUserId &&
+    a.onOpen === b.onOpen &&
+    a.onOpenThread === b.onOpenThread &&
+    a.onFocus === b.onFocus &&
+    a.onNotBot === b.onNotBot &&
+    a.onToggleExpanded === b.onToggleExpanded &&
+    a.onSetReplyOpen === b.onSetReplyOpen &&
+    a.innerRef === b.innerRef,
+);

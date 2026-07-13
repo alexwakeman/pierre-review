@@ -13,6 +13,8 @@ import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
 import { InsightsView } from './InsightsView.js';
 import { RepoAnalyticsModal } from '../RepoAnalyticsModal.js';
+import { TeamManager } from './TeamManager.js';
+import { TeamSelector } from '../TeamSelector.js';
 
 // One-shot per page load: when Pro Insights is available, it becomes the DEFAULT landing
 // rail entry (and it's rendered first). Module-scoped so it survives ActivityView
@@ -123,13 +125,17 @@ function RailRow({
 export function ActivityView(): JSX.Element {
   useStalenessTick();
   const userIds = useFilters((s) => s.userIds);
+  const teamScope = useFilters((s) => s.teamScope);
+  const repoIds = useFilters((s) => s.repoIds);
   const activityRepoId = useFilters((s) => s.activityRepoId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
   const { teamInsights } = useProCapabilities();
-  // The cross-repo Activity aggregate is scoped to ALL watched repos ∩ Members — it IGNORES
-  // the FilterBar repo-visibility selection (null → the backend resolves all-watched), so the
-  // rail + "new activity" check reflect the whole team, not just the visible-on-timeline repos.
-  const { data, isFetching, isLoading } = useActivity(null, userIds);
+  // Scope the aggregate to the active TEAM: 'all' → null (every watched repo), a team → its
+  // teamScope-derived repoIds (kept in lockstep by setTeamScope / useTeamScopeSync). Members
+  // still narrow it further. When 'all' the backend resolves the whole watched set, so the rail
+  // + "new activity" check reflect the whole team, not just one repo.
+  const scopeRepoIds = teamScope === 'all' ? null : repoIds;
+  const { data, isFetching, isLoading } = useActivity(scopeRepoIds, userIds);
   const { data: allRepos } = useRepos();
   // The per-repo analytics drill-down (item 12): the rail's "Charts" button opens the full
   // RepoAnalyticsModal for that repo.
@@ -205,10 +211,15 @@ export function ActivityView(): JSX.Element {
         {/* No manual Refresh: the console tracks the WATCHED set live — watch/add/sync all
             invalidate the Activity/Insights queries (ACTIVITY_QUERY_KEYS), and the feed has its
             own "new activity" banner — so there's nothing to refresh by hand. */}
-        <div className="flex items-center gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            State of play
-          </span>
+        <div className="flex flex-col gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              State of play
+            </span>
+            <TeamManager />
+          </div>
+          {/* Scope the whole console to a team (mirrors the FilterBar's TeamSelector). */}
+          <TeamSelector />
         </div>
         {generatedAt != null && (
           <div

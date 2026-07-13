@@ -13,14 +13,9 @@ import type {
 } from '@pierre-review/shared';
 import { useTeamInsights } from '../../hooks/useTeamInsights.js';
 import { usePr, useThread } from '../../hooks/usePr.js';
-import { useRepos, useUsers } from '../../hooks/useTimeline.js';
+import { useUsers } from '../../hooks/useTimeline.js';
 import { useRequestReviewers } from '../../hooks/usePrWrites.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
-import {
-  useRepoDigests,
-  useRefreshRepoDigests,
-  digestProgressProps,
-} from '../../hooks/useRepoDigest.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
 import { automatedReviewerMeta, CI_META, indexUsers } from '../../lib/ui.js';
@@ -32,9 +27,9 @@ import { ThreadCard } from '../ThreadView/index.js';
 import { BotRoiPanel } from './BotRoiPanel.js';
 import { RetroView } from './RetroView.js';
 import { SprintReportCard } from './SprintReportCard.js';
+import { PresetPromptPanel } from './PresetPromptPanel.js';
 import { TeamMetricsPanel } from './TeamMetricsPanel.js';
 import { TrackUsage } from './TrackUsage.js';
-import { RegenProgressBar } from './RegenProgressBar.js';
 
 // Left-accent + label per severity — the same visual grammar as the Feed's cards.
 const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
@@ -55,10 +50,11 @@ const KIND_LABEL: Record<InsightCard['kind'], string> = {
 // The insight-card kinds that belong to the Bots sub-tab (everything else is Overview).
 const BOT_CARD_KINDS = new Set<InsightCard['kind']>(['bot_signal', 'bot_only_review']);
 
-type InsightsSubTab = 'overview' | 'bots' | 'retro';
+type InsightsSubTab = 'overview' | 'bots' | 'sprint' | 'retro';
 const SUB_TABS: { key: InsightsSubTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'bots', label: 'Bots' },
+  { key: 'sprint', label: 'Sprint' },
   { key: 'retro', label: 'Retro' },
 ];
 
@@ -418,7 +414,7 @@ export function InsightsView({
   initialSubTab?: InsightsSubTab;
 } = {}): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  const showThreadInChanges = useFilters((s) => s.showThreadInChanges);
+  const selectThread = useFilters((s) => s.selectThread);
   const openMetricsDetail = useFilters((s) => s.openMetricsDetail);
   const openBotPrsDetail = useFilters((s) => s.openBotPrsDetail);
   const { data, isLoading, isError } = useTeamInsights(true);
@@ -461,28 +457,17 @@ export function InsightsView({
   };
 
   // ---- AI summaries: each card owns its OWN delta-gated regenerate (no unified Refresh) ----
-  const { activityDigest, teamInsights } = useProCapabilities();
-  const { data: repos } = useRepos();
-  // Activity is scoped to ALL watched repos (the digest set ignores the FilterBar-visible
-  // selection — the console is a whole-team view, not the timeline's filtered slice).
-  const watchedIds = useMemo(
-    () => (repos ?? []).filter((r) => r.inboxWatch).map((r) => r.id),
-    [repos],
-  );
-  const digestsQuery = useRepoDigests(watchedIds, activityDigest && watchedIds.length > 0);
-  // Still needed — now drives the PER-CARD (per-repo) regenerate, only offered when that
-  // specific repo's digest is stale (delta-gated inside the card).
-  const refreshDigests = useRefreshRepoDigests();
+  const { teamInsights } = useProCapabilities();
   const [showUsage, setShowUsage] = useState(false);
 
   // Match the Feed's interaction model: the PR title opens the PR detail on its Overview
-  // tab; the card body opens "the event in question". For a thread that event is the
-  // thread itself — deep-linked into the Changes tab, where it renders inline in context.
+  // tab; the card body opens "the event in question". For a thread that event is the thread
+  // itself — the PR detail opens on its Threads tab, deep-linked to the thread in context.
   const open = (meta: PinnedPr, returnItemId?: string): void =>
     openPrDetailTab(meta, { fromActivity: true, returnItemId });
-  const openThreadInChanges = (card: UntouchedThreadCard): void => {
+  const openThread = (card: UntouchedThreadCard): void => {
     openPrDetailTab(metaFor(card, usersById), { fromActivity: true, returnItemId: card.id });
-    showThreadInChanges(card.prId, card.threadId);
+    selectThread(card.prId, card.threadId);
   };
 
   const cards = data?.cards ?? [];
@@ -530,14 +515,14 @@ export function InsightsView({
             flash={flashId === card.id}
             right={`${ageLabel(card.ageHours)} old`}
           >
-            {/* Only this header chrome navigates (→ the thread in the Changes tab).
+            {/* Only this header chrome navigates (→ the thread on the PR's Threads tab).
                 The embedded conversation + PR summary below are for reading/replying
                 in place, NOT a click target — so the thread never feels clickable. */}
             <div
               className="-m-1 cursor-pointer rounded p-1 hover:bg-gray-50/70 dark:hover:bg-gray-900/60"
               onClick={(e) => {
                 if ((e.target as HTMLElement).closest('a,button')) return;
-                openThreadInChanges(card);
+                openThread(card);
               }}
             >
               <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
@@ -770,30 +755,6 @@ export function InsightsView({
             <TeamMetricsPanel metrics={data.metrics} onOpenMetric={openMetricsDetail} />
           )}
 
-          {/* Repo digests are nested INSIDE the sprint report card (collapsed by default) to
-              keep the Insights tab compact — pass the digest data down. */}
-          <SprintReportCard
-            digests={digestsQuery.data?.digests ?? []}
-            digestsLoading={digestsQuery.isLoading}
-            anyWatched={watchedIds.length > 0}
-            refreshingRepoIds={refreshDigests.refreshingRepoIds}
-            onRegenerateRepo={(id) => refreshDigests.mutate(id)}
-            // Cascade: a sprint-report (re)generate also refreshes every watched repo's digest
-            // (server-side delta-gated → only changed repos re-bill). Reuses the same SSE refresh
-            // that drives the RegenProgressBar below, so progress is shown for the whole sweep.
-            onRegenerateAllDigests={
-              watchedIds.length > 0 ? () => refreshDigests.mutate(watchedIds) : undefined
-            }
-            // Keep the sprint Generate/Regenerate button disabled until the cascaded sweep finishes,
-            // so a second click can't abort it mid-stream.
-            cascadeBusy={refreshDigests.isPending}
-          />
-          <RegenProgressBar
-            active={refreshDigests.isPending && (refreshDigests.progress?.total ?? 0) > 0}
-            label="Regenerating summaries"
-            {...digestProgressProps(refreshDigests.progress)}
-          />
-
           {isLoading ? (
             <div className="space-y-3">
               {[0, 1, 2].map((i) => (
@@ -829,6 +790,13 @@ export function InsightsView({
           ) : botCards.length > 0 ? (
             <ul className="space-y-2">{botCards.map((card) => renderCard(card))}</ul>
           ) : null}
+        </div>
+      ) : subTab === 'sprint' ? (
+        // The AI sprint digest (state of play), full width, followed by the one-click
+        // preset-prompt answer surface. Both are per-team (teamScope) + gated on activityDigest.
+        <div className="space-y-3">
+          <SprintReportCard />
+          <PresetPromptPanel />
         </div>
       ) : (
         <RetroView />

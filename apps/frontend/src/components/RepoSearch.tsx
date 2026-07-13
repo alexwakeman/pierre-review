@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MAX_REPOS_PER_ACCOUNT, type RepoSearchResponse } from '@pierre-review/shared';
+import { MAX_REPOS_PER_ACCOUNT, type Repo, type RepoSearchResponse } from '@pierre-review/shared';
 import { api, ApiError } from '../api/client.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
@@ -66,7 +66,17 @@ function Spinner(): JSX.Element {
 // watched repos are filtered server-side, and repos you own / are an org member
 // of are floated to the top. Picking a result adds the repo (the existing add
 // flow) and refetches the list so it drops out of the results.
-export function RepoSearch(): JSX.Element {
+export function RepoSearch({
+  // Optional: called with the freshly-added repo after a successful add (in addition to the
+  // usual sync-modal + cache-invalidation). The Activity TeamManager uses it to auto-assign a
+  // brand-new repo to the currently-selected team.
+  onAdded,
+  // Optional placeholder override (e.g. "Add a repo to this team…" in TeamManager).
+  placeholder = 'Search repos to add…',
+}: {
+  onAdded?: (repo: Repo) => void;
+  placeholder?: string;
+} = {}): JSX.Element {
   const qc = useQueryClient();
   const requestSyncModal = useFilters((s) => s.requestSyncModal);
   const showRepo = useFilters((s) => s.showRepo);
@@ -155,6 +165,8 @@ export function RepoSearch(): JSX.Element {
       // Ensure the just-added repo is visible even when a repo filter is active —
       // append it to the visible set (no-op when all repos are already shown).
       showRepo(repo.id);
+      // Let a host (e.g. TeamManager) react to the new repo — assign it to a team.
+      onAdded?.(repo);
     },
   });
 
@@ -245,7 +257,7 @@ export function RepoSearch(): JSX.Element {
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
-        placeholder="Search repos to add…"
+        placeholder={placeholder}
         role="combobox"
         aria-expanded={panelOpen}
         aria-controls={listboxId}

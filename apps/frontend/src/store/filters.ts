@@ -13,6 +13,7 @@ import {
   type ReviewBotKind,
   type ReviewState,
   type TeamMetricKey,
+  type TeamScope,
 } from '@pierre-review/shared';
 
 // Feed bot lens (the Activity "Feed" bot-vs-human view): show everything, hide bot noise,
@@ -74,6 +75,12 @@ const PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = {
 export interface FilterState {
   // null = "all" (no explicit selection yet)
   repoIds: number[] | null;
+  // The active TEAM scope selector: 'all' (every account repo), 'none' (repos in no team),
+  // or a teamId (that team's repos). Persisted + URL-mirrored (team=…). setTeamScope keeps
+  // it in lockstep with repoIds (the caller resolves the team → repoIds from the teams data,
+  // 'all' → null). A component effect re-derives repoIds once teams load for a URL-restored
+  // team=<id>.
+  teamScope: TeamScope;
   userIds: number[] | null;
   excludeBots: boolean;
   // Bots to KEEP visible even when excludeBots is on — the per-repo "important bots"
@@ -139,10 +146,6 @@ export interface FilterState {
   // transient: the Claude-review progress banner → open a PR's Claude Review tab.
   // Matched against the loaded PR by `prId`; cleared by PrDetail once it switches.
   claudeTabFocus: { prId: number } | null;
-
-  // transient: a Feed/Insights thread card → open the PR's Changes tab and scroll to
-  // that thread, rendered inline in the diff. Matched by `prId`; cleared by PrDetail.
-  changesThreadFocus: { prId: number; threadId: number } | null;
 
   // transient: "Generate fix from this review" → open the PR's AI Fix tab, seeded
   // with the review text. Matched by `prId`; cleared by PrDetail once it switches.
@@ -221,6 +224,9 @@ export interface FilterState {
   claudeReviewKickoff: number;
 
   setRepoIds: (ids: number[] | null) => void;
+  // Set the active team scope AND the resolved repo visibility together. The caller
+  // resolves `repoIds` from the teams data (via resolveScopeRepoIds); 'all' → null.
+  setTeamScope: (scope: TeamScope, repoIds: number[] | null) => void;
   toggleRepo: (id: number) => void;
   // Make a repo visible WITHOUT clearing an active filter: a no-op when all repos
   // are already shown (repoIds == null) or the id is already in the visible set,
@@ -261,10 +267,6 @@ export interface FilterState {
   setThreadBotFilter: (kind: ReviewBotKind | null) => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
-  // Deep-link a thread into the PR's Changes tab (Feed/Insights thread cards): open
-  // the PR-detail tab, switch to Changes, scroll to the thread rendered inline there.
-  showThreadInChanges: (prId: number, threadId: number) => void;
-  consumeChangesThreadFocus: () => void;
   clearSelection: () => void;
   // Open a PR from the strip / my-turn / a timeline event: select it AND ask
   // the timeline to scroll to it (optionally recentering on `focusAt`). Pass `event`
@@ -380,6 +382,7 @@ type FilterData = Omit<
 type FilterDefaults = Pick<
   FilterState,
   | 'repoIds'
+  | 'teamScope'
   | 'userIds'
   | 'excludeBots'
   | 'allowedBotIds'
@@ -400,6 +403,9 @@ type FilterDefaults = Pick<
 function freshFilterDefaults(): FilterDefaults {
   return {
     repoIds: null,
+    // Scope defaults to every account repo. The URL serializer diffs against this, so a
+    // fresh load stays clean (no team= param).
+    teamScope: 'all',
     userIds: null,
     // Bots are SHOWN on a fresh load (default OFF); the user can hide them via the
     // Members dropdown, and that non-default choice round-trips as bots=1 (see
@@ -431,6 +437,7 @@ function freshFilterDefaults(): FilterDefaults {
 export function pickFilterBarState(s: FilterState): FilterDefaults {
   return {
     repoIds: s.repoIds,
+    teamScope: s.teamScope,
     userIds: s.userIds,
     excludeBots: s.excludeBots,
     allowedBotIds: s.allowedBotIds,
@@ -492,6 +499,7 @@ export function savedViewMatchesCurrent(
   };
   return (
     setEqual(a.repoIds, current.repoIds) &&
+    a.teamScope === current.teamScope &&
     setEqual(a.userIds, current.userIds) &&
     a.excludeBots === current.excludeBots &&
     setEqual(a.allowedBotIds, current.allowedBotIds) &&
@@ -530,7 +538,6 @@ function freshDefaults(): FilterData {
     activityFocus: null,
     commentFocus: null,
     claudeTabFocus: null,
-    changesThreadFocus: null,
     aiFixTabFocus: null,
     metricsFocus: null,
     botPrsFocus: null,
@@ -558,6 +565,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   ...freshDefaults(),
 
   setRepoIds: (ids) => set({ repoIds: ids }),
+  setTeamScope: (scope, repoIds) => set({ teamScope: scope, repoIds }),
   toggleRepo: (id) =>
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),
   showRepo: (id) => {
@@ -698,9 +706,6 @@ export const useFilters = create<FilterState>((set, get) => ({
     });
   },
   consumeClaudeTabFocus: () => set({ claudeTabFocus: null }),
-  showThreadInChanges: (prId, threadId) =>
-    set({ changesThreadFocus: { prId, threadId } }),
-  consumeChangesThreadFocus: () => set({ changesThreadFocus: null }),
   openAiFixFromReview: (prId, reviewText) =>
     set({
       selectedPrId: prId,
@@ -764,6 +769,14 @@ export const useFilters = create<FilterState>((set, get) => ({
 /** Resolve the active [from, to] window from the preset or custom range. */
 export function resolveRange(s: FilterState): { from: Date; to: Date } {
   return resolveBaseRange(s);
+}
+
+/**
+ * Serialize a TeamScope to its wire/URL string form: 'all' → "all", 'none' → "none",
+ * a teamId → String(id). The inverse (string → TeamScope) is done in useUrlState.
+ */
+export function scopeToParam(scope: TeamScope): string {
+  return scope === 'all' || scope === 'none' ? scope : String(scope);
 }
 
 function resolveBaseRange(s: FilterState): { from: Date; to: Date } {

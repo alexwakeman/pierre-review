@@ -102,6 +102,31 @@ function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
     },
   ];
 
+  // CI health (per-repo, from the CI transition log)
+  const ciRecovery = data.ciRecovery;
+  const ciRecoveryEmpty =
+    ciRecovery.length === 0 || ciRecovery.every((r) => r.medianHours == null);
+  const ciIncidents = sum(ciRecovery.map((r) => r.incidents));
+  const ciRecoveryLabels = ciRecovery.map((r) => r.weekStart);
+  const ciRecoverySeries: Series[] = [
+    {
+      key: 'recovery',
+      label: 'Median recovery',
+      color: PALETTE.red,
+      values: ciRecovery.map((r) => r.medianHours),
+    },
+  ];
+  const ciFailuresByStage = data.ciFailuresByStage;
+  const ciStageLabels = ciFailuresByStage.map((f) => f.stage);
+  const ciStageSeries: Series[] = [
+    {
+      key: 'failures',
+      label: 'Failures',
+      color: PALETTE.orange,
+      values: ciFailuresByStage.map((f) => f.count),
+    },
+  ];
+
   return (
     <div className="space-y-4">
       <Section title="Flow & throughput">
@@ -141,6 +166,32 @@ function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
             <ChartEmpty />
           ) : (
             <BarChart labels={latencyLabels} series={latencyDist} />
+          )}
+        </ChartCard>
+      </Section>
+
+      <Section title="CI health">
+        <ChartCard
+          title="CI recovery time"
+          note={ciRecoveryEmpty ? 'weekly median' : `${ciIncidents} recoveries · weekly median`}
+        >
+          {ciRecoveryEmpty ? (
+            <ChartEmpty label="No CI failures recorded" />
+          ) : (
+            <LineChart
+              labels={ciRecoveryLabels}
+              series={ciRecoverySeries}
+              area
+              curved
+              formatY={fmtDuration}
+            />
+          )}
+        </ChartCard>
+        <ChartCard title="CI failures by stage" note="by check name">
+          {ciFailuresByStage.length === 0 ? (
+            <ChartEmpty label="No CI failures recorded" />
+          ) : (
+            <BarChart labels={ciStageLabels} series={ciStageSeries} rotateLabels />
           )}
         </ChartCard>
       </Section>
