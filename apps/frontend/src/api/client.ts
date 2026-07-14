@@ -34,6 +34,8 @@ import type {
   TeamInsightsResponse,
   RepoTeamMetricsResponse,
   TeamMetricsDetailResponse,
+  TeamComparisonResponse,
+  CommentAssessmentResponse,
   AiUsageResponse,
   SprintReportResponse,
   RetroReportResponse,
@@ -314,6 +316,10 @@ export const api = {
   // panel. Metrics-only; tiles render non-clickable there.
   repoTeamMetrics: (repoId: number) =>
     get<RepoTeamMetricsResponse>(`/api/pro/insights/repo/${repoId}/metrics`),
+  // Cross-team comparison (Insights "Compare" sub-tab; All-Teams scope). One TeamMetrics row
+  // per team so the SPA renders a compact metric×team matrix. No scope param — always all teams.
+  teamComparison: () =>
+    get<TeamComparisonResponse>('/api/pro/insights/team-comparison'),
   // Month-to-date AI-usage rollup (credits, split by seam). Covers all account AI spend.
   aiUsage: () => get<AiUsageResponse>('/api/pro/ai-usage'),
   // The Insights "Sprint report" (Pro Haiku summary; activityDigest capability). `scope`
@@ -375,6 +381,16 @@ export const api = {
   // A single repo's digest (lazy per-repo so a slow Haiku call never blocks the grid).
   repoDigest: (repoId: number) =>
     get<RepoDigest>(`/api/pro/activity/digests/${repoId}`),
+
+  // ---- Comment-validity assessment (Pro; reuses the prSummary capability) ----
+  // Retained Haiku assessment of a review thread's root comment (cache read; free).
+  threadAssessment: (threadId: number) =>
+    get<CommentAssessmentResponse>(`/api/pro/threads/${threadId}/assessment`),
+  // Generate / regenerate the assessment (the billing path; credit-gated, $0-on-unchanged).
+  assessThread: (threadId: number) =>
+    fetch(`/api/pro/threads/${threadId}/assess`, jsonBody('POST')).then((r) =>
+      handle<CommentAssessmentResponse>(r),
+    ),
 
   // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----
   // Aggregated retrieval signals shown BEFORE a run (Surface 1). Only fetched when

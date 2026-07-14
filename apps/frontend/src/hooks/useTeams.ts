@@ -66,6 +66,8 @@ export function useTeamMutations() {
 /**
  * Resolve a TeamScope to the concrete repo-id visibility filter:
  *  • 'all'    → null (no filter — every repo shown)
+ *  • 'teams'  → the UNION of every team's repos (cross-team monitoring; differs from 'all',
+ *               which is every repo incl. unassigned). Empty array when there are no team repos.
  *  • 'none'   → the account repos in NO team (allRepoIds minus the union of every team's repoIds)
  *  • teamId   → that team's repoIds (empty array if the team is unknown/empty)
  * Mirrors the backend's resolveScopeRepoIds so the client-side scope and the server-side one agree.
@@ -76,6 +78,11 @@ export function resolveScopeRepoIds(
   allRepoIds: number[],
 ): number[] | null {
   if (scope === 'all') return null;
+  if (scope === 'teams') {
+    const inSomeTeam = new Set<number>();
+    for (const t of teams) for (const id of t.repoIds) inSomeTeam.add(id);
+    return [...inSomeTeam];
+  }
   if (scope === 'none') {
     const inSomeTeam = new Set<number>();
     for (const t of teams) for (const id of t.repoIds) inSomeTeam.add(id);

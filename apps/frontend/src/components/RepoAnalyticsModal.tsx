@@ -136,7 +136,7 @@ export function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
           {sum(throughput.flatMap((s) => s.values as number[])) === 0 ? (
             <ChartEmpty />
           ) : (
-            <BarChart labels={weeks} series={throughput} mode="grouped" />
+            <LineChart labels={weeks} series={throughput} curved />
           )}
         </ChartCard>
         <ChartCard title="Open backlog & stalled" note="weekly snapshot">

@@ -5,7 +5,6 @@ import { useSearchOpenPrs } from '../hooks/useTriage.js';
 import { useFilters, type RangePreset } from '../store/filters.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { EventSelectPanel } from './EventSelectPanel.js';
-import { SavedViews } from './SavedViews.js';
 import { StatusSelectPanel } from './StatusSelectPanel.js';
 import { TeamSelector } from './TeamSelector.js';
 import { ThreadStateSelectPanel } from './ThreadStateSelectPanel.js';
@@ -253,11 +252,15 @@ export function FilterBar(): JSX.Element {
       {/* The board filters. Always live — focus is a separate tab now, not an overlay
           that locks the board. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {/* Team scope: pick All repos / a team / No team. Repo management (add/remove/
-            assign to teams) lives in the Activity console's "Manage repos & teams" panel. */}
-        <Section>
-          <TeamSelector />
-        </Section>
+        {/* Team scope: pick All repos / All Teams / a team / No team. Repo management (add/
+            remove/assign to teams) lives in the Activity console's "Manage repos & teams" panel.
+            On the Activity console the rail has its OWN TeamSelector, so this header one is hidden
+            there — it's the Timeline view's scope control. */}
+        {!isActivity && (
+          <Section>
+            <TeamSelector />
+          </Section>
+        )}
 
         <Section>
           <UserSelectPanel
@@ -332,12 +335,11 @@ export function FilterBar(): JSX.Element {
       </div>
 
       {/* Right cluster, pinned next to the timeline. Timeline-only filter management —
-          hidden on Activity (only repos + Members apply there). Always live otherwise:
-          Saved Views + Clear filters stay usable even while a focus/PR tab is open (that's
-          a separate tab, not a lock on the shared board). */}
+          hidden on Activity (only repos + Members apply there). Clear filters stays usable
+          even while a focus/PR tab is open (that's a separate tab, not a lock on the shared
+          board). */}
       {!isActivity && (
         <div className="ml-auto flex items-center gap-2">
-          <SavedViews disabled={false} />
           <button
             type="button"
             onClick={() => f.resetAllFilters()}

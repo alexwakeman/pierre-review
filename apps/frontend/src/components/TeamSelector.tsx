@@ -42,9 +42,10 @@ export function useTeamScopeSync(): void {
   }, [teamScope, teams, repos, setTeamScope]);
 }
 
-// A compact dropdown to pick the active TEAM scope: All repos ('all'), each team, or No team
-// ('none'). Picking one resolves the team → repoIds and sets both via setTeamScope. Mounted in
-// the FilterBar (Timeline) and the Activity rail header.
+// A compact dropdown to pick the active TEAM scope: All repos ('all'), All Teams ('teams', the
+// union of every team's repos — cross-team monitoring), each team, or No team ('none'). Picking
+// one resolves the scope → repoIds and sets both via setTeamScope. Mounted in the FilterBar
+// (Timeline) and the Activity rail header.
 export function TeamSelector(): JSX.Element {
   const teamScope = useFilters((s) => s.teamScope);
   const setTeamScope = useFilters((s) => s.setTeamScope);
@@ -67,9 +68,14 @@ export function TeamSelector(): JSX.Element {
   const activeLabel =
     teamScope === 'all'
       ? 'All repos'
-      : teamScope === 'none'
-        ? 'No team'
-        : (teams?.find((t) => t.id === teamScope)?.name ?? 'Team');
+      : teamScope === 'teams'
+        ? 'All Teams'
+        : teamScope === 'none'
+          ? 'No team'
+          : (teams?.find((t) => t.id === teamScope)?.name ?? 'Team');
+
+  // The union of every team's repos (the 'teams' scope) — its count for the option row.
+  const unionCount = new Set((teams ?? []).flatMap((t) => t.repoIds)).size;
 
   const rowCls = (active: boolean): string =>
     `flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-xs ${
@@ -88,7 +94,7 @@ export function TeamSelector(): JSX.Element {
         title="Scope to a team of repos"
         className="inline-flex max-w-[12rem] items-center gap-1 whitespace-nowrap rounded-full border border-gray-300 py-0.5 pl-2.5 pr-2 text-xs text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
       >
-        <span aria-hidden className="text-gray-400">
+        <span aria-hidden className="text-sky-500">
           ◈
         </span>
         <span className="truncate">{activeLabel}</span>
@@ -106,6 +112,18 @@ export function TeamSelector(): JSX.Element {
           <button type="button" role="menuitem" onClick={() => pick('all')} className={rowCls(teamScope === 'all')}>
             <span className="truncate">All repos</span>
           </button>
+          {(teams ?? []).length > 0 && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => pick('teams')}
+              className={rowCls(teamScope === 'teams')}
+              title="Monitor every team together — the union of all teams' repos, grouped by team"
+            >
+              <span className="truncate">All Teams</span>
+              <span className="shrink-0 tabular-nums text-[10px] text-gray-400">{unionCount}</span>
+            </button>
+          )}
           {(teams ?? []).length > 0 && (
             <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
           )}

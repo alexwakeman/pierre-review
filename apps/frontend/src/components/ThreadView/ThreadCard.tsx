@@ -6,6 +6,7 @@ import { CodeAnchor } from './CodeAnchor.js';
 import { MarkThreadDone } from './MarkThreadDone.js';
 import { ResolveThread } from './ResolveThread.js';
 import { ReplyComposer } from './ReplyComposer.js';
+import { ThreadAssessment } from './ThreadAssessment.js';
 import { isNewComment } from './NewCommentHighlight.js';
 
 // A single review thread rendered conversation-first: the code it's anchored to
@@ -98,6 +99,11 @@ export function ThreadCard({
           />
         ))}
       </div>
+
+      {/* Pro (prSummary): a critical, retained AI second opinion on this thread's originating
+          comment, with the thread + diff as context. Sits above the reply box — read it, then
+          decide what to do (and reply inline). Renders nothing without the capability. */}
+      <ThreadAssessment threadId={thread.id} />
 
       <div className="mt-2 space-y-1.5 pl-2 text-[11px]">
         <ReplyComposer prId={thread.prId} threadId={thread.id} />

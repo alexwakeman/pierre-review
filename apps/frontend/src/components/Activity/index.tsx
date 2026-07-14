@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ActivityRepo, ThreadStateCounts } from '@pierre-review/shared';
 import { useActivity } from '../../hooks/useActivity.js';
 import { useRepos } from '../../hooks/useTimeline.js';
+import { useTeams } from '../../hooks/useTeams.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
@@ -136,6 +137,8 @@ export function ActivityView(): JSX.Element {
   const scopeRepoIds = teamScope === 'all' ? null : repoIds;
   const { data, isFetching, isLoading } = useActivity(scopeRepoIds, userIds);
   const { data: allRepos } = useRepos();
+  // In All-Teams scope the rail is grouped by team (a repo in several teams shows under each).
+  const { data: teams } = useTeams();
 
   const sorted = useMemo(() => sortRepos(data?.repos ?? []), [data?.repos]);
 
@@ -162,8 +165,11 @@ export function ActivityView(): JSX.Element {
   const generatedAt = data?.generatedAt ?? null;
 
   // Rail items: the loaded inbox repos, or a name-only fallback from useRepos while
-  // the first aggregate is loading (so names paint instantly).
-  const railItems: {
+  // the first aggregate is loading (so names paint instantly). In All-Teams scope the
+  // fallback is restricted to the UNION of team repos — else, on a cold load (activity
+  // isn't IndexedDB-persisted), every account repo would briefly paint and the non-team
+  // ones would land under the "Other" group until the union-scoped aggregate resolves.
+  type RailItem = {
     repoId: number;
     fullName: string;
     maintainerCount: number;
@@ -171,7 +177,15 @@ export function ActivityView(): JSX.Element {
     attentionCount: number;
     openPrs: number | null;
     threadTotals: ThreadStateCounts | null;
-  }[] =
+  };
+  const fallbackRepos =
+    teamScope === 'teams'
+      ? (() => {
+          const union = new Set((teams ?? []).flatMap((t) => t.repoIds));
+          return (allRepos ?? []).filter((r) => union.has(r.id));
+        })()
+      : (allRepos ?? []);
+  const railItems: RailItem[] =
     data != null
       ? sorted.map((r) => ({
           repoId: r.repoId,
@@ -182,7 +196,7 @@ export function ActivityView(): JSX.Element {
           openPrs: r.stats.openPrs,
           threadTotals: r.threadTotals,
         }))
-      : (allRepos ?? []).map((r) => ({
+      : fallbackRepos.map((r) => ({
           repoId: r.id,
           fullName: r.fullName,
           maintainerCount: 0,
@@ -191,6 +205,37 @@ export function ActivityView(): JSX.Element {
           openPrs: null,
           threadTotals: null,
         }));
+
+  const renderRailRow = (r: RailItem): JSX.Element => (
+    <RailRow
+      key={r.repoId}
+      fullName={r.fullName}
+      maintainerCount={r.maintainerCount}
+      hasUnread={r.hasUnread}
+      attentionCount={r.attentionCount}
+      openPrs={r.openPrs}
+      threadTotals={r.threadTotals}
+      selected={activityRepoId === r.repoId}
+      onSelect={() => setActivityRepo(r.repoId)}
+    />
+  );
+
+  // In All-Teams scope, group the rail rows under a header per team (a repo shared by two teams
+  // shows under each). `matched` tracks placed repos so any stray unmatched row (shouldn't happen
+  // — the union is exactly the team repos) still shows under "Other" rather than vanishing.
+  const teamGroups: { id: number; name: string; rows: RailItem[] }[] = [];
+  let leftoverRows: RailItem[] = [];
+  if (teamScope === 'teams') {
+    const matched = new Set<number>();
+    for (const team of teams ?? []) {
+      const ids = new Set(team.repoIds);
+      const rows = railItems.filter((r) => ids.has(r.repoId));
+      if (rows.length === 0) continue;
+      rows.forEach((r) => matched.add(r.repoId));
+      teamGroups.push({ id: team.id, name: team.name, rows });
+    }
+    leftoverRows = railItems.filter((r) => !matched.has(r.repoId));
+  }
 
   // The Activity console is scoped to WATCHED repos, so an empty console has two distinct
   // causes: no repos added at all, vs. repos added but none watched. The remedy differs
@@ -284,19 +329,28 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
-          {railItems.map((r) => (
-            <RailRow
-              key={r.repoId}
-              fullName={r.fullName}
-              maintainerCount={r.maintainerCount}
-              hasUnread={r.hasUnread}
-              attentionCount={r.attentionCount}
-              openPrs={r.openPrs}
-              threadTotals={r.threadTotals}
-              selected={activityRepoId === r.repoId}
-              onSelect={() => setActivityRepo(r.repoId)}
-            />
-          ))}
+          {teamScope === 'teams' ? (
+            <>
+              {teamGroups.map((g) => (
+                <div key={g.id} className="flex w-56 shrink-0 flex-col gap-1 md:w-full">
+                  <div className="px-2 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                    {g.name}
+                  </div>
+                  {g.rows.map(renderRailRow)}
+                </div>
+              ))}
+              {leftoverRows.length > 0 && (
+                <div className="flex w-56 shrink-0 flex-col gap-1 md:w-full">
+                  <div className="px-2 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                    Other
+                  </div>
+                  {leftoverRows.map(renderRailRow)}
+                </div>
+              )}
+            </>
+          ) : (
+            railItems.map(renderRailRow)
+          )}
 
           {/* Legend (hidden on the narrow chip strip) */}
           <div className="mt-auto hidden flex-wrap gap-x-3 gap-y-0.5 px-1 pt-3 md:flex">

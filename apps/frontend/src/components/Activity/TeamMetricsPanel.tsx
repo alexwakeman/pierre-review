@@ -254,7 +254,7 @@ export function TeamMetricsPanel({
           {sum(metrics.throughput.opened) + sum(metrics.throughput.merged) === 0 ? (
             <ChartEmpty />
           ) : (
-            <BarChart labels={labels} series={throughputSeries} mode="grouped" />
+            <LineChart labels={labels} series={throughputSeries} area curved />
           )}
         </ChartCard>
         <ChartCard title="CI recovery time" note="median red→green · weekly">

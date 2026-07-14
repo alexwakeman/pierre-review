@@ -55,21 +55,25 @@ export function BotMuteRulesEditor({ settings, save, saving }: SectionProps): JS
       title="Mute & auto-triage rules"
       desc="Hide low-value bot threads, or (with auto-resolve on) let a background job resolve likely-addressed bot threads older than a threshold. Auto-resolve only ever touches likely-addressed threads and never merges."
     >
-      <div className="flex flex-wrap items-end gap-3">
+      {/* Master auto-resolve toggle. Kept on ONE baseline row (inline labels, items-center) so
+          every control lines up and the Save button sits with them. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={autoResolve} onChange={(e) => setAutoResolve(e.target.checked)} />
           <span className="font-medium text-gray-700 dark:text-gray-200">Enable standing auto-resolve</span>
         </label>
-        <Field label="Older than (days)">
+        <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+          <span>Older than</span>
           <input
             type="number"
             min={1}
             max={90}
-            className={`${inputCls} w-20`}
+            className={`${inputCls} w-16`}
             value={autoResolveDays}
             onChange={(e) => setAutoResolveDays(Math.min(90, Math.max(1, Number(e.target.value) || 1)))}
           />
-        </Field>
+          <span>days</span>
+        </label>
         <SaveButton dirty={masterDirty} saving={saving} onClick={() => save({ bots: { autoResolve, autoResolveDays } })} />
       </div>
 
@@ -110,53 +114,60 @@ export function BotMuteRulesEditor({ settings, save, saving }: SectionProps): JS
         )}
       </div>
 
-      <div className="flex flex-wrap items-end gap-2 rounded border border-dashed border-gray-200 p-2 dark:border-gray-700">
-        <Field label="Vendor">
-          <select
-            className={`${inputCls} w-auto`}
-            value={vendorKind}
-            onChange={(e) => setVendorKind(e.target.value as 'any' | AutomatedReviewerKind)}
-          >
-            <option value="any">Any bot</option>
-            {ALL_KINDS.map((k) => (
-              <option key={k} value={k}>
-                {automatedReviewerMeta(k).label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Path glob">
-          <input className={`${inputCls} w-28`} value={pathGlob} placeholder="e.g. tests/**" onChange={(e) => setPathGlob(e.target.value)} />
-        </Field>
-        <Field label="Severity">
-          <input className={`${inputCls} w-24`} value={severity} placeholder="e.g. nitpick" onChange={(e) => setSeverity(e.target.value)} />
-        </Field>
-        <Field label="Action">
-          <select className={`${inputCls} w-auto`} value={action} onChange={(e) => setAction(e.target.value as BotMuteAction)}>
-            <option value="hide">Hide</option>
-            <option value="auto_resolve">Auto-resolve</option>
-          </select>
-        </Field>
-        {action === 'auto_resolve' && (
-          <Field label="Days">
-            <input
-              type="number"
-              min={1}
-              max={90}
-              className={`${inputCls} w-16`}
-              value={days}
-              onChange={(e) => setDays(Math.min(90, Math.max(1, Number(e.target.value) || 1)))}
-            />
+      {/* Add-rule form. The fields sit in a uniform label-above grid (each control fills its
+          cell, so labels + inputs line up), with the action button on its OWN right-aligned row
+          — so nothing floats out of baseline regardless of how many fields wrap. */}
+      <div className="space-y-2.5 rounded border border-dashed border-gray-200 p-2.5 dark:border-gray-700">
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <Field label="Vendor">
+            <select
+              className={inputCls}
+              value={vendorKind}
+              onChange={(e) => setVendorKind(e.target.value as 'any' | AutomatedReviewerKind)}
+            >
+              <option value="any">Any bot</option>
+              {ALL_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {automatedReviewerMeta(k).label}
+                </option>
+              ))}
+            </select>
           </Field>
-        )}
-        <button
-          type="button"
-          disabled={addRule.isPending}
-          onClick={submit}
-          className="self-start rounded bg-sky-600 px-3 py-1 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-40"
-        >
-          {addRule.isPending ? 'Adding…' : 'Add rule'}
-        </button>
+          <Field label="Path glob">
+            <input className={inputCls} value={pathGlob} placeholder="e.g. tests/**" onChange={(e) => setPathGlob(e.target.value)} />
+          </Field>
+          <Field label="Severity">
+            <input className={inputCls} value={severity} placeholder="e.g. nitpick" onChange={(e) => setSeverity(e.target.value)} />
+          </Field>
+          <Field label="Action">
+            <select className={inputCls} value={action} onChange={(e) => setAction(e.target.value as BotMuteAction)}>
+              <option value="hide">Hide</option>
+              <option value="auto_resolve">Auto-resolve</option>
+            </select>
+          </Field>
+          {action === 'auto_resolve' && (
+            <Field label="Days">
+              <input
+                type="number"
+                min={1}
+                max={90}
+                className={inputCls}
+                value={days}
+                onChange={(e) => setDays(Math.min(90, Math.max(1, Number(e.target.value) || 1)))}
+              />
+            </Field>
+          )}
+        </div>
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={addRule.isPending}
+            onClick={submit}
+            className="rounded bg-sky-600 px-3 py-1 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-40"
+          >
+            {addRule.isPending ? 'Adding…' : 'Add rule'}
+          </button>
+        </div>
       </div>
       {(addRule.isError || delRule.isError) && (
         <p className="text-[11px] text-red-500">{((addRule.error ?? delRule.error) as Error)?.message}</p>

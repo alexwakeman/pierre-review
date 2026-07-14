@@ -166,6 +166,10 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const toggleFeedClaudeOnly = useFilters((s) => s.toggleFeedClaudeOnly);
   const feedBotLens = useFilters((s) => s.feedBotLens);
   const cycleFeedBotLens = useFilters((s) => s.cycleFeedBotLens);
+  const feedCatComments = useFilters((s) => s.feedCatComments);
+  const feedCatPrEvents = useFilters((s) => s.feedCatPrEvents);
+  const toggleFeedCatComments = useFilters((s) => s.toggleFeedCatComments);
+  const toggleFeedCatPrEvents = useFilters((s) => s.toggleFeedCatPrEvents);
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
   const showPrComment = useFilters((s) => s.showPrComment);
@@ -262,20 +266,44 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
     [items],
   );
   const botCount = useMemo(() => items.filter(isBotActor).length, [items, isBotActor]);
+  // Event-category matcher for the Comments / PR-events pills. Both off = no category filter.
+  // When either is on, keep only items in the enabled categories (commit + Claude rows, which
+  // are in neither category, drop out while a category pill is active).
+  const catMatch = useCallback(
+    (i: ConsolidatedFeedItem): boolean => {
+      if (!feedCatComments && !feedCatPrEvents) return true;
+      const isComment = i.kind === 'review_comment' || i.kind === 'pr_comment';
+      const isPrEvent =
+        i.kind === 'pr_opened' ||
+        i.kind === 'pr_merged' ||
+        i.kind === 'pr_closed' ||
+        i.kind === 'pr_reopened' ||
+        i.kind === 'pr_ready_for_review' ||
+        i.kind === 'review_submitted';
+      return (feedCatComments && isComment) || (feedCatPrEvents && isPrEvent);
+    },
+    [feedCatComments, feedCatPrEvents],
+  );
+  const commentCount = useMemo(
+    () => items.filter((i) => i.kind === 'review_comment' || i.kind === 'pr_comment').length,
+    [items],
+  );
   // "My Turn only" and "Claude Reviews only" are mutually-exclusive client-side filters (My
-  // Turn is CORE / free, so it's always available). The bot lens composes ON TOP of them.
+  // Turn is CORE / free, so it's always available). The category pills + the bot lens compose
+  // ON TOP of them.
   const visible = useMemo(() => {
     const base = feedMyTurnOnly
       ? items.filter((i) => i.isMyTurn)
       : feedClaudeOnly
         ? items.filter((i) => i.kind === 'claude_review')
         : items;
+    const byCat = feedCatComments || feedCatPrEvents ? base.filter(catMatch) : base;
     return feedBotLens === 'hide'
-      ? base.filter((i) => !isBotActor(i))
+      ? byCat.filter((i) => !isBotActor(i))
       : feedBotLens === 'only'
-        ? base.filter(isBotActor)
-        : base;
-  }, [items, feedMyTurnOnly, feedClaudeOnly, feedBotLens, isBotActor]);
+        ? byCat.filter(isBotActor)
+        : byCat;
+  }, [items, feedMyTurnOnly, feedClaudeOnly, feedBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor]);
 
   // ── Vertical, variable-height windowing ─────────────────────────────────────────────
   // The feed accumulates unbounded across "Load more" pages, so rendering every card put
@@ -674,6 +702,35 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
             {claudeCount > 0 && <span className="tabular-nums opacity-70">{claudeCount}</span>}
           </button>
         )}
+        {/* Event-category pills: narrow the stream to comment activity and/or PR events.
+            Independent toggles (both off = everything). Compose with the bot lens. */}
+        <button
+          type="button"
+          onClick={toggleFeedCatComments}
+          aria-pressed={feedCatComments}
+          className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+            feedCatComments
+              ? 'border-teal-400 bg-teal-50 text-teal-700 dark:border-teal-500/60 dark:bg-teal-950/30 dark:text-teal-300'
+              : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+          }`}
+          title="Show comment activity (review threads + PR comments)"
+        >
+          <span aria-hidden="true">💬</span> Comments
+          {commentCount > 0 && <span className="tabular-nums opacity-70">{commentCount}</span>}
+        </button>
+        <button
+          type="button"
+          onClick={toggleFeedCatPrEvents}
+          aria-pressed={feedCatPrEvents}
+          className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+            feedCatPrEvents
+              ? 'border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-indigo-500/60 dark:bg-indigo-950/30 dark:text-indigo-300'
+              : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+          }`}
+          title="Show PR events (opens, merges, closes, reopens, ready-for-review, reviews)"
+        >
+          <span aria-hidden="true">⑃</span> PR events
+        </button>
         {/* Bot lens — Pierre as the calm layer above your review bot. Cycles all → hide → only. */}
         {botCount > 0 && (
           <button

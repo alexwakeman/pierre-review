@@ -1,0 +1,24 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { CommentAssessmentResponse } from '@pierre-review/shared';
+import { api } from '../api/client.js';
+
+// Comment-validity assessment (Pro; reuses the prSummary capability). A retained Haiku verdict on
+// a review thread's root comment. The GET is a cache read (retained after generation); the refresh
+// mutation is the billing path. `enabled` gates on the prSummary capability + a real threadId.
+// staleTime Infinity: the stored assessment doesn't change unless the user regenerates.
+export function useCommentAssessment(threadId: number | null, enabled: boolean) {
+  return useQuery<CommentAssessmentResponse>({
+    queryKey: ['comment-assessment', threadId],
+    queryFn: () => api.threadAssessment(threadId as number),
+    enabled: threadId != null && enabled,
+    staleTime: Infinity,
+  });
+}
+
+export function useAssessComment(threadId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.assessThread(threadId),
+    onSuccess: (data) => qc.setQueryData(['comment-assessment', threadId], data),
+  });
+}
