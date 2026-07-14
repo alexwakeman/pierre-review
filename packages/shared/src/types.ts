@@ -2818,6 +2818,14 @@ export interface TeamInsightsResponse {
   users: User[]; // actors referenced by the cards (avatar/login lookup)
 }
 
+// The Insights flow-metric header (TeamMetrics tiles + trend charts) computed for a SINGLE
+// repo — powers the per-repo console's "Insights-style" panel (getTeamInsights scoped to
+// [repoId]). Metrics-only; the repo console renders these tiles NON-clickable.
+export interface RepoTeamMetricsResponse {
+  enabled: boolean; // false when the Pro plugin/capability is off
+  metrics: TeamMetrics | null; // null = repo not owned / no data
+}
+
 // ---- Team flow-metric DRILL-DOWN (Insights; clicking a metric tile) ----
 // Each of the 6 flow-metric tiles opens a drill-down tab; this is the per-metric PR
 // list behind each. Loaded on demand (a separate, heavier read than the always-loaded

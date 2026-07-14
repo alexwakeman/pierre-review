@@ -8,7 +8,7 @@ import type {
 } from '@pierre-review/shared';
 import { useBotAnalytics, useAddBotMuteRule } from '../../hooks/useBotTriage.js';
 import { useProSettings } from '../../hooks/useProSettings.js';
-import { useFilters } from '../../store/filters.js';
+import { useFilters, scopeToParam } from '../../store/filters.js';
 import { automatedReviewerMeta } from '../../lib/ui.js';
 import { LineChart } from '../charts/LineChart.js';
 import { ChartCard, ChartEmpty, type Series } from '../charts/common.js';
@@ -261,7 +261,9 @@ export function BotRoiPanel(): JSX.Element | null {
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
   const openBotPrsDetail = useFilters((s) => s.openBotPrsDetail);
-  const { data, isLoading, isError } = useBotAnalytics(window);
+  // Respect the team-scope selector — scope is in the query key so a scope change refetches.
+  const scope = scopeToParam(useFilters((s) => s.teamScope));
+  const { data, isLoading, isError } = useBotAnalytics(window, true, scope);
   const { data: settings } = useProSettings(true);
 
   const costByKind = useMemo(

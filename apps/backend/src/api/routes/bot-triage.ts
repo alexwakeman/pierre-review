@@ -17,6 +17,7 @@ import {
   getBotDedupClusters,
   listBotMuteRules,
   listDetectedReviewers,
+  resolveScopeRepoIds,
   setReviewerOverride,
 } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
@@ -54,6 +55,8 @@ const analyticsSchema = {
         enum: ['rolling_7', 'rolling_14', 'rolling_30', 'sprint'],
         default: 'rolling_14',
       },
+      // Team scope: 'all' | 'none' | '<teamId>' (see resolveScopeRepoIds). Absent = all.
+      scope: { type: 'string' },
     },
   },
 };
@@ -76,6 +79,7 @@ const vendorPrsSchema = {
         enum: ['rolling_7', 'rolling_14', 'rolling_30', 'sprint'],
         default: 'rolling_14',
       },
+      scope: { type: 'string' },
     },
   },
 };
@@ -142,8 +146,10 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // untouched + verdict + trend + deterministic tuning suggestions. Cost fields are null here
   // (the client overlays per-vendor cost from Pro settings).
   app.get('/api/bot-analytics', { schema: analyticsSchema }, async (req) => {
-    const { window } = req.query as { window: BotWindowKind };
-    const resp: BotAnalyticsResponse = await getBotAnalytics(accountIdOf(req), window);
+    const { window, scope } = req.query as { window: BotWindowKind; scope?: string };
+    const accountId = accountIdOf(req);
+    const repoIds = scope ? await resolveScopeRepoIds(accountId, scope) : null;
+    const resp: BotAnalyticsResponse = await getBotAnalytics(accountId, window, repoIds);
     return resp;
   });
 
@@ -151,8 +157,10 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // touched in the window (threads/comments/acted-on/untouched/bot-only), newest-activity first.
   app.get('/api/bot-analytics/:kind/prs', { schema: vendorPrsSchema }, async (req) => {
     const { kind } = req.params as { kind: string };
-    const { window } = req.query as { window: BotWindowKind };
-    const resp: BotVendorPrsResponse = await getBotVendorPrs(accountIdOf(req), kind, window);
+    const { window, scope } = req.query as { window: BotWindowKind; scope?: string };
+    const accountId = accountIdOf(req);
+    const repoIds = scope ? await resolveScopeRepoIds(accountId, scope) : null;
+    const resp: BotVendorPrsResponse = await getBotVendorPrs(accountId, kind, window, repoIds);
     return resp;
   });
 

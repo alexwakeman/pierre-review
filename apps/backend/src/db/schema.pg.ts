@@ -406,6 +406,8 @@ export const events = pgTable(
     repoTimeIdx: index('events_repo_time_idx').on(t.repoId, t.occurredAt),
     actorIdx: index('events_actor_idx').on(t.actorId),
     accountIdx: index('events_account_idx').on(t.accountId),
+    // pr_id-correlated EXISTS lookups (open-PR staleness, feed joins) — see schema.sqlite.ts.
+    prTimeIdx: index('events_pr_idx').on(t.prId, t.occurredAt),
     dedupeUx: uniqueIndex('events_account_dedupe').on(t.accountId, t.dedupeKey),
   }),
 );

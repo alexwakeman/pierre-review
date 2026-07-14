@@ -6566,6 +6566,9 @@ export async function getBotOnlyReviewPrs(
 export async function getBotAnalytics(
   accountId: number,
   window: BotWindowKind,
+  // Team scope: null/undefined = all account repos; a repo-id list = only those; [] = no
+  // repos in scope (e.g. the "No team" scope with everything assigned) → empty analytics.
+  scopeRepoIds?: number[] | null,
 ): Promise<BotAnalyticsResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
@@ -6578,6 +6581,13 @@ export async function getBotAnalytics(
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
 
   const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0, botOnlyPrs: 0 };
+  // Team scope resolved to no repos → nothing to analyze.
+  if (scopeRepoIds != null && scopeRepoIds.length === 0) {
+    return { enabled: true, generatedAt, window: win, vendors: [], totals: emptyTotals, suggestions: [] };
+  }
+  // Spread into each PR-joined WHERE to narrow to the scope's repos (empty = all repos).
+  const repoScopeFilter =
+    scopeRepoIds != null ? [inArray(pullRequests.repoId, scopeRepoIds)] : [];
   const automatedIds = await automatedReviewerUserIds(accountId);
   if (automatedIds.length === 0) {
     return { enabled: true, generatedAt, window: win, vendors: [], totals: emptyTotals, suggestions: [] };
@@ -6601,6 +6611,7 @@ export async function getBotAnalytics(
         eq(pullRequests.accountId, accountId),
         inArray(reviewThreads.originalCommenterId, automatedIds),
         gte(reviewThreads.createdAt, trendFrom),
+        ...repoScopeFilter,
       ),
     )
     .execute();
@@ -6760,6 +6771,7 @@ export async function getBotAnalytics(
         inArray(reviewComments.authorId, automatedIds),
         gte(reviewComments.createdAt, from),
         lte(reviewComments.createdAt, to),
+        ...repoScopeFilter,
       ),
     )
     .execute();
@@ -6835,7 +6847,7 @@ export async function getBotAnalytics(
   const botOnlyPrs = (
     await getBotOnlyReviewPrs(
       accountId,
-      allRepoRows.map((r) => r.id),
+      scopeRepoIds ?? allRepoRows.map((r) => r.id),
       { from, to },
     )
   ).length;
@@ -6866,6 +6878,9 @@ export async function getBotVendorPrs(
   accountId: number,
   kind: string,
   window: BotWindowKind,
+  // Team scope: null/undefined = all account repos; [] = no repos → empty. Applied at the
+  // final PR-metadata load (the single narrowing point), so the whole result stays scoped.
+  scopeRepoIds?: number[] | null,
 ): Promise<BotVendorPrsResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
@@ -6879,6 +6894,7 @@ export async function getBotVendorPrs(
   const empty: BotVendorPrsResponse = {
     enabled: true, kind: kindTyped, label, window: win, prs: [], generatedAt,
   };
+  if (scopeRepoIds != null && scopeRepoIds.length === 0) return empty;
 
   const kindMap = await classificationKindForUser(accountId);
   // The account's user ids classified as the requested kind. Empty for 'pierre' (per-review, not
@@ -7035,7 +7051,13 @@ export async function getBotVendorPrs(
     })
     .from(pullRequests)
     .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, prIds)))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.id, prIds),
+        ...(scopeRepoIds != null ? [inArray(pullRequests.repoId, scopeRepoIds)] : []),
+      ),
+    )
     .execute();
 
   // Bot-only flag: reuse the broadened rule (item 4a) over the candidate PRs' repos.

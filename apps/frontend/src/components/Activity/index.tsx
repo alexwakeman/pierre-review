@@ -8,11 +8,10 @@ import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { RepoFeedHeader } from './RepoFeedHeader.js';
-import { RepoInsightsCard } from './RepoInsightsCard.js';
+import { RepoInsightsPanel } from './RepoInsightsPanel.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
 import { InsightsView } from './InsightsView.js';
-import { RepoAnalyticsModal } from '../RepoAnalyticsModal.js';
 import { TeamManager } from './TeamManager.js';
 import { TeamSelector } from '../TeamSelector.js';
 
@@ -137,11 +136,6 @@ export function ActivityView(): JSX.Element {
   const scopeRepoIds = teamScope === 'all' ? null : repoIds;
   const { data, isFetching, isLoading } = useActivity(scopeRepoIds, userIds);
   const { data: allRepos } = useRepos();
-  // The per-repo analytics drill-down (item 12): the rail's "Charts" button opens the full
-  // RepoAnalyticsModal for that repo.
-  const [analyticsRepo, setAnalyticsRepo] = useState<{ repoId: number; name: string } | null>(
-    null,
-  );
 
   const sorted = useMemo(() => sortRepos(data?.repos ?? []), [data?.repos]);
 
@@ -353,16 +347,13 @@ export function ActivityView(): JSX.Element {
         ) : selectedRepo != null ? (
           <div className="space-y-3" data-testid="repo-console">
             <RepoFeedHeader repo={selectedRepo} />
-            {/* Item 12: per-repo Insights — the merge-rate graph (+ Charts drill-down) sits
-                under the AI digest (in the header) and above the open-PR list. */}
-            <RepoInsightsCard
+            {/* Per-repo Insights — the Insights Overview replicated for this ONE repo: the
+                DORA-ish tile row (NON-clickable) + primary trend charts + a "More charts"
+                button that reveals the full per-repo charts grid inline. Sits under the AI
+                digest (in the header) and above the open-PR list. */}
+            <RepoInsightsPanel
               repoId={selectedRepo.repoId}
-              onOpenCharts={() =>
-                setAnalyticsRepo({
-                  repoId: selectedRepo.repoId,
-                  name: selectedRepo.repoFullName,
-                })
-              }
+              repoFullName={selectedRepo.repoFullName}
             />
             {/* All the repo's open PRs (at-a-glance metrics) BEFORE its activity feed. */}
             <RepoOpenPrList prs={selectedRepo.prs} repoFullName={selectedRepo.repoFullName} />
@@ -373,12 +364,6 @@ export function ActivityView(): JSX.Element {
           <FeedView />
         )}
       </div>
-
-      <RepoAnalyticsModal
-        repoId={analyticsRepo?.repoId ?? null}
-        repoName={analyticsRepo?.name ?? null}
-        onClose={() => setAnalyticsRepo(null)}
-      />
     </div>
   );
 }

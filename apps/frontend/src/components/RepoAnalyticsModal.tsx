@@ -31,7 +31,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
+// Exported so the per-repo Activity console (RepoInsightsPanel) can render the full charts
+// grid INLINE (under the panel's "More charts" expander) instead of only in this modal shell.
+export function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
   const { data: users } = useUsers();
   const usersById = indexUsers(users);
   const weeks = data.weekBuckets;
