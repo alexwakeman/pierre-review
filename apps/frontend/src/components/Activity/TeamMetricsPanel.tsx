@@ -100,9 +100,18 @@ function TileShell({
 export function TeamMetricsPanel({
   metrics,
   onOpenMetric,
+  openPrsSubtitle = 'across all repos',
+  moreChartsSlot,
 }: {
   metrics: TeamMetrics;
   onOpenMetric?: (metric: TeamMetricKey) => void;
+  // The Open-PRs tile caption. Insights (all watched repos) keeps the default; the per-repo
+  // console passes a repo-scoped label (e.g. "in this repo").
+  openPrsSubtitle?: string;
+  // When provided, the "More charts" expander renders THIS node instead of the built-in
+  // lead-time / merge-CI charts — lets the per-repo console inline the full RepoAnalytics
+  // charts grid under the same single button. Absent ⇒ Insights' default expander, unchanged.
+  moreChartsSlot?: React.ReactNode;
 }): JSX.Element {
   const [showMore, setShowMore] = useState(false);
   const labels = metrics.weekBuckets;
@@ -168,7 +177,7 @@ export function TeamMetricsPanel({
           <div className="text-lg font-semibold text-gray-800 dark:text-gray-100">
             {metrics.openPrs}
           </div>
-          <div className="text-[11px] text-gray-400">across all repos</div>
+          <div className="text-[11px] text-gray-400">{openPrsSubtitle}</div>
           <div className="mt-0.5 text-[10px] text-gray-400">currently open</div>
         </TileShell>
         <Stat
@@ -271,26 +280,30 @@ export function TeamMetricsPanel({
           onClick={() => setShowMore((s) => !s)}
           className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
-          {showMore ? '▾' : '▸'} More charts — lead time · merge CI success
+          {showMore ? '▾' : '▸'} More charts
+          {moreChartsSlot == null ? ' — lead time · merge CI success' : ''}
         </button>
-        {showMore && (
-          <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <ChartCard title="Lead time for changes" note="median open→merge · weekly">
-              {metrics.leadTimeTrend.every((v) => v == null) ? (
-                <ChartEmpty />
-              ) : (
-                <LineChart labels={labels} series={leadSeries} area curved formatY={fmtDuration} />
-              )}
-            </ChartCard>
-            <ChartCard title="Merge CI success" note="% green at merge · weekly">
-              {metrics.ciSuccessTrend.every((v) => v == null) ? (
-                <ChartEmpty />
-              ) : (
-                <LineChart labels={labels} series={ciSeries} curved formatY={pctFmt} />
-              )}
-            </ChartCard>
-          </div>
-        )}
+        {showMore &&
+          (moreChartsSlot != null ? (
+            <div className="mt-2">{moreChartsSlot}</div>
+          ) : (
+            <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <ChartCard title="Lead time for changes" note="median open→merge · weekly">
+                {metrics.leadTimeTrend.every((v) => v == null) ? (
+                  <ChartEmpty />
+                ) : (
+                  <LineChart labels={labels} series={leadSeries} area curved formatY={fmtDuration} />
+                )}
+              </ChartCard>
+              <ChartCard title="Merge CI success" note="% green at merge · weekly">
+                {metrics.ciSuccessTrend.every((v) => v == null) ? (
+                  <ChartEmpty />
+                ) : (
+                  <LineChart labels={labels} series={ciSeries} curved formatY={pctFmt} />
+                )}
+              </ChartCard>
+            </div>
+          ))}
       </div>
     </div>
   );

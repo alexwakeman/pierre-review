@@ -3,7 +3,7 @@ import type { MetricPr, TeamMetricKey, User } from '@pierre-review/shared';
 import { TEAM_METRIC_KEYS } from '@pierre-review/shared';
 import { useTeamMetricsDetail } from '../../hooks/useTeamMetricsDetail.js';
 import { useUsers } from '../../hooks/useTimeline.js';
-import { useFilters } from '../../store/filters.js';
+import { useFilters, scopeToParam } from '../../store/filters.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { CI_META, indexUsers, relativeTime } from '../../lib/ui.js';
 import { fmtDuration } from '../charts/common.js';
@@ -254,7 +254,10 @@ export function MetricsDetail(): JSX.Element {
   const metricsFocus = useFilters((s) => s.metricsFocus);
   const consumeMetricsFocus = useFilters((s) => s.consumeMetricsFocus);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  const { data, isLoading, isError, refetch, isFetching } = useTeamMetricsDetail(true);
+  // Match the scoped tile that opened this drill-down — scope is in the query key so a scope
+  // change refetches.
+  const scope = scopeToParam(useFilters((s) => s.teamScope));
+  const { data, isLoading, isError, refetch, isFetching } = useTeamMetricsDetail(true, scope);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
 

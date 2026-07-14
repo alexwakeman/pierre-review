@@ -16,10 +16,11 @@ export function useBotVendorPrs(
   kind: AutomatedReviewerKind | null,
   window: BotWindowKind,
   enabled = true,
+  scope?: string,
 ) {
   return useQuery<BotVendorPrsResponse>({
-    queryKey: ['bot-vendor-prs', kind, window],
-    queryFn: () => api.botVendorPrs(kind as AutomatedReviewerKind, window),
+    queryKey: ['bot-vendor-prs', kind, window, scope ?? 'all'],
+    queryFn: () => api.botVendorPrs(kind as AutomatedReviewerKind, window, scope),
     enabled: enabled && kind != null,
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,

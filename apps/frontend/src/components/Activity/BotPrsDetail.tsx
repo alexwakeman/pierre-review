@@ -9,7 +9,7 @@ import type {
 import { useBotAnalytics } from '../../hooks/useBotTriage.js';
 import { useBotVendorPrs } from '../../hooks/useBotVendorPrs.js';
 import { useUsers } from '../../hooks/useTimeline.js';
-import { useFilters } from '../../store/filters.js';
+import { useFilters, scopeToParam } from '../../store/filters.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { CI_META, automatedReviewerMeta, indexUsers, relativeTime } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
@@ -199,13 +199,14 @@ export function BotPrsDetail(): JSX.Element {
   const consumeBotPrsFocus = useFilters((s) => s.consumeBotPrsFocus);
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
+  const scope = scopeToParam(useFilters((s) => s.teamScope));
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
 
   // Vendor sub-tabs come from the CORE analytics read (the same query the Bot-ROI panel uses,
   // so switching to this tab is usually instant off the cache).
-  const analytics = useBotAnalytics(window);
+  const analytics = useBotAnalytics(window, true, scope);
   const vendors = analytics.data?.vendors ?? NO_VENDORS;
 
   // The active vendor sub-tab. Seeded from the focus signal (the clicked ROI row); defaults to
@@ -228,7 +229,7 @@ export function BotPrsDetail(): JSX.Element {
     );
   }, [vendors]);
 
-  const prs = useBotVendorPrs(active, window);
+  const prs = useBotVendorPrs(active, window, true, scope);
   const rows = prs.data?.prs ?? [];
   const botOnlyPrs = analytics.data?.totals.botOnlyPrs ?? 0;
 

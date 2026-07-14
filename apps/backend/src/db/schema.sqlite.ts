@@ -437,6 +437,11 @@ export const events = sqliteTable(
     repoTimeIdx: index('events_repo_time_idx').on(t.repoId, t.occurredAt),
     actorIdx: index('events_actor_idx').on(t.actorId),
     accountIdx: index('events_account_idx').on(t.accountId),
+    // Correlated "does this PR have an event since <cutoff>" EXISTS lookups (getTeamInsights
+    // open-PR staleness, getOpenPrs, new-since checks, feed joins) filter by pr_id — WITHOUT
+    // this they fall back to events_account_idx and scan every account event per PR (O(open PRs
+    // × events)). Composite so the occurred_at bound resolves inside the index too.
+    prTimeIdx: index('events_pr_idx').on(t.prId, t.occurredAt),
     // Composite so the same dedupeKey can exist once per account (two accounts
     // watching the same repo share GitHub node ids). Upsert conflict target.
     dedupeUx: uniqueIndex('events_account_dedupe').on(t.accountId, t.dedupeKey),

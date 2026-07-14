@@ -32,6 +32,7 @@ import type {
   CreateRepoBody,
   ConsolidatedFeedResponse,
   TeamInsightsResponse,
+  RepoTeamMetricsResponse,
   TeamMetricsDetailResponse,
   AiUsageResponse,
   SprintReportResponse,
@@ -300,11 +301,19 @@ export const api = {
     fetch('/api/activity/feed/mark-seen', jsonBody('POST')).then((r) =>
       handle<{ feedLastSeenAt: string }>(r),
     ),
-  // Team review-intelligence "Insights" (Pro; teamInsights capability).
-  teamInsights: () => get<TeamInsightsResponse>('/api/pro/insights'),
+  // Team review-intelligence "Insights" (Pro; teamInsights capability). `scope`
+  // ('all'|'none'|'<teamId>') narrows the metrics + cards to a team's repos; omitted = all.
+  teamInsights: (scope?: string) =>
+    get<TeamInsightsResponse>(withQuery('/api/pro/insights', scopeParam(scope))),
   // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click).
-  teamMetricsDetail: () =>
-    get<TeamMetricsDetailResponse>('/api/pro/insights/metrics-detail'),
+  teamMetricsDetail: (scope?: string) =>
+    get<TeamMetricsDetailResponse>(
+      withQuery('/api/pro/insights/metrics-detail', scopeParam(scope)),
+    ),
+  // The Insights flow-metric header (tiles + trends) for a SINGLE repo — the per-repo console
+  // panel. Metrics-only; tiles render non-clickable there.
+  repoTeamMetrics: (repoId: number) =>
+    get<RepoTeamMetricsResponse>(`/api/pro/insights/repo/${repoId}/metrics`),
   // Month-to-date AI-usage rollup (credits, split by seam). Covers all account AI spend.
   aiUsage: () => get<AiUsageResponse>('/api/pro/ai-usage'),
   // The Insights "Sprint report" (Pro Haiku summary; activityDigest capability). `scope`
@@ -545,16 +554,20 @@ export const api = {
   // Per-vendor bot ROI / utilisation analytics over the chosen window (threads / acted-on %
   // / untouched / verdict / trend). Cost fields come back null — the client overlays cost
   // from /api/pro/settings `bots.cost`.
-  botAnalytics: (window: BotWindowKind) =>
-    get<BotAnalyticsResponse>(
-      `/api/bot-analytics?window=${encodeURIComponent(window)}`,
-    ),
+  botAnalytics: (window: BotWindowKind, scope?: string) => {
+    const s = scopeParam(scope);
+    return get<BotAnalyticsResponse>(
+      `/api/bot-analytics?window=${encodeURIComponent(window)}${s ? `&${s}` : ''}`,
+    );
+  },
   // The per-PR drill-down behind one vendor's Bot-ROI row: the PRs that automated reviewer kind
   // touched in the window (threads/comments/acted-on/untouched/bot-only), most-recent-activity first.
-  botVendorPrs: (kind: string, window: BotWindowKind) =>
-    get<BotVendorPrsResponse>(
-      `/api/bot-analytics/${encodeURIComponent(kind)}/prs?window=${encodeURIComponent(window)}`,
-    ),
+  botVendorPrs: (kind: string, window: BotWindowKind, scope?: string) => {
+    const s = scopeParam(scope);
+    return get<BotVendorPrsResponse>(
+      `/api/bot-analytics/${encodeURIComponent(kind)}/prs?window=${encodeURIComponent(window)}${s ? `&${s}` : ''}`,
+    );
+  },
   // Cross-bot dedup + consensus/conflict clusters for a PR (≥2 automated reviewers of
   // distinct kinds on the same path/line window).
   prBotDedup: (prId: number) => get<BotDedupResponse>(`/api/prs/${prId}/bot-dedup`),

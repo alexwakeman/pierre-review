@@ -17,13 +17,14 @@ import { api } from '../api/client.js';
 // UI-gated on caps.teamInsights by its component (the route itself is core). Every getter
 // is account-scoped server-side; these are plain DB reads that refresh on the sync cadence.
 
-// Per-vendor bot ROI / utilisation analytics over the selected window. Keyed by window so a
-// window change refetches. Cost fields arrive null — the panel overlays cost client-side
-// from /api/pro/settings `bots.cost`. `enabled` lets the caller gate the fetch (Pro panel).
-export function useBotAnalytics(window: BotWindowKind, enabled = true) {
+// Per-vendor bot ROI / utilisation analytics over the selected window. Keyed by window +
+// scope so either change refetches. Cost fields arrive null — the panel overlays cost
+// client-side from /api/pro/settings `bots.cost`. `enabled` lets the caller gate the fetch
+// (Pro panel). `scope` ('all' | 'none' | '<teamId>') narrows to a team's repos.
+export function useBotAnalytics(window: BotWindowKind, enabled = true, scope?: string) {
   return useQuery<BotAnalyticsResponse>({
-    queryKey: ['bot-analytics', window],
-    queryFn: () => api.botAnalytics(window),
+    queryKey: ['bot-analytics', window, scope ?? 'all'],
+    queryFn: () => api.botAnalytics(window, scope),
     enabled,
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,

@@ -17,7 +17,7 @@ import { useUsers } from '../../hooks/useTimeline.js';
 import { useRequestReviewers } from '../../hooks/usePrWrites.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
-import { useFilters } from '../../store/filters.js';
+import { useFilters, scopeToParam } from '../../store/filters.js';
 import { automatedReviewerMeta, CI_META, indexUsers } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
@@ -417,7 +417,12 @@ export function InsightsView({
   const selectThread = useFilters((s) => s.selectThread);
   const openMetricsDetail = useFilters((s) => s.openMetricsDetail);
   const openBotPrsDetail = useFilters((s) => s.openBotPrsDetail);
-  const { data, isLoading, isError } = useTeamInsights(true);
+  // The team-scope selector narrows the WHOLE panel: this one fetch feeds both the Overview
+  // TeamMetricsPanel metrics AND every insight card (incl. the bot cards), so scoping it
+  // scopes Overview + the Bots-tab cards. scope is in the query key → a scope change refetches.
+  const teamScope = useFilters((s) => s.teamScope);
+  const scope = scopeToParam(teamScope);
+  const { data, isLoading, isError } = useTeamInsights(true, scope);
   const usersById = useMemo(() => indexUsers(data?.users), [data?.users]);
 
   // Internal sub-tab bar (Overview | Bots | Retro). The header (Insights + Pro + sprint
