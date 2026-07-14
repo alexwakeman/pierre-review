@@ -354,6 +354,18 @@ export async function getTeamRepoIds(
   return rows.map((r) => r.repoId);
 }
 
+// The UNION of every team's member repos for the account, deduped (→ scope 'teams', cross-team
+// monitoring). Differs from 'all' (which is every account repo, incl. repos in no team): this is
+// strictly the repos assigned to at least one team. Empty when the account has no team repos.
+export async function getAllTeamRepoIds(accountId: number): Promise<number[]> {
+  const rows = await db
+    .select({ repoId: teamRepos.repoId })
+    .from(teamRepos)
+    .where(eq(teamRepos.accountId, accountId))
+    .execute();
+  return [...new Set(rows.map((r) => r.repoId))];
+}
+
 // Repo ids owned by the account that belong to NO team (the "unassigned" bucket → scope 'none').
 // Filtered in JS against the (small, ≤ per-account cap) assigned set — no subquery, so it stays
 // on the portable async surface both dialects share.
@@ -441,17 +453,18 @@ export async function removeRepoFromTeam(
   return removed.length > 0;
 }
 
-// The single scope resolver. A `scope` wire value ('all' | 'none' | '<teamId>') resolves to
-// the concrete repo-id set to compute over: 'all' → null (means "every account repo", the
-// callers' existing default), 'none' → the unassigned repos, a numeric string → that team's
-// repos (ownership-checked; an unknown/foreign team → empty array). Reuse this everywhere a
-// scope needs turning into repo ids.
+// The single scope resolver. A `scope` wire value ('all' | 'none' | 'teams' | '<teamId>') resolves
+// to the concrete repo-id set to compute over: 'all' → null (means "every account repo", the
+// callers' existing default), 'none' → the unassigned repos, 'teams' → the UNION of every team's
+// repos (cross-team monitoring), a numeric string → that team's repos (ownership-checked; an
+// unknown/foreign team → empty array). Reuse this everywhere a scope needs turning into repo ids.
 export async function resolveScopeRepoIds(
   accountId: number,
   scope: string,
 ): Promise<number[] | null> {
   if (scope === 'all') return null;
   if (scope === 'none') return getUnassignedRepoIds(accountId);
+  if (scope === 'teams') return getAllTeamRepoIds(accountId);
   const teamId = Number(scope);
   if (!Number.isInteger(teamId) || teamId <= 0) return [];
   return getTeamRepoIds(teamId, accountId);

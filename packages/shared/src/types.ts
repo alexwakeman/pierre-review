@@ -331,9 +331,11 @@ export interface TeamsResponse {
 }
 
 // The frontend store value for the active scope selector: 'all' (every account repo), 'none'
-// (repos in no team), or a teamId (that team's repos). NOTE the WIRE `scope` query param is the
-// STRING form — `'all' | 'none' | '<teamId>'` — resolved server-side by resolveScopeRepoIds.
-export type TeamScope = 'all' | 'none' | number;
+// (repos in no team), 'teams' (the UNION of every team's repos — cross-team monitoring; differs
+// from 'all', which is every account repo incl. unassigned), or a teamId (that team's repos).
+// NOTE the WIRE `scope` query param is the STRING form — `'all' | 'none' | 'teams' | '<teamId>'` —
+// resolved server-side by resolveScopeRepoIds.
+export type TeamScope = 'all' | 'none' | 'teams' | number;
 
 // ---- Preset prompts (declared now; implemented later by Pro + the frontend) ----
 // The fixed set of one-click "ask about this scope" questions the AI answer surface offers.
@@ -394,6 +396,10 @@ export interface PresetPromptResult {
   markdown: string;
   generatedAt: string; // ISO-8601
   model: string;
+  // Resolved `owner/name#N` PR references mentioned in `markdown`, for linkification —
+  // re-derived on read from the answer text (same treatment as Sprint/Retro reports), so
+  // preset answers render clickable PR links/tables. Empty when the answer names no PRs.
+  prRefs: DigestPrRef[];
 }
 
 // GET /api/pro/preset-prompt?key=&scope= and its refresh POST. `enabled` false = the capability
@@ -2893,6 +2899,53 @@ export interface TeamMetricsDetail {
 export interface TeamMetricsDetailResponse {
   enabled: boolean; // false when the capability is off (plugin absent)
   detail: TeamMetricsDetail | null; // null when there are no watched repos
+}
+
+// ---- Cross-team comparison (Insights "Compare" sub-tab; All-Teams scope only) ----
+// One row per team: that team's full flow metrics (same TeamMetrics shape the per-team
+// Insights header uses), so the SPA can render a compact metric×team comparison matrix
+// with per-team throughput sparklines. `metrics` null when the team has no repos/data.
+export interface TeamComparisonRow {
+  teamId: number;
+  teamName: string;
+  repoCount: number;
+  metrics: TeamMetrics | null;
+}
+
+export interface TeamComparisonResponse {
+  enabled: boolean; // false when the capability is off (plugin absent / not entitled)
+  generatedAt: string; // ISO-8601
+  sprint: { from: string; to: string };
+  teams: TeamComparisonRow[]; // one per team the account owns, in list order
+}
+
+// ---- Comment-validity assessment (Pro; reuses the prSummary capability) ----
+// A Haiku "is this review comment valid, given the thread + diff context?" assessment,
+// keyed to a review thread's ORIGINATING (root) comment and retained after generation.
+// `verdict` is a short at-a-glance label; `assessment` is the full Markdown rationale
+// (critical but not dismissive). One row per (account, root comment).
+export type CommentAssessmentVerdict =
+  | 'valid' // the comment holds up — worth acting on
+  | 'partly' // partially valid / needs nuance or scoping
+  | 'weak' // shaky — likely a false positive / low value
+  | 'unclear'; // not enough context to judge
+
+export interface CommentAssessment {
+  threadId: number;
+  commentId: number; // the root comment the assessment is about
+  verdict: CommentAssessmentVerdict;
+  assessment: string; // Markdown rationale
+  model: string;
+  generatedAt: string; // ISO-8601
+}
+
+// GET /api/pro/threads/:id/assessment and its POST refresh. `enabled` false = capability off;
+// `creditsExhausted` mirrors the other AI gates; `noAuth` = no resolvable Claude/Anthropic auth.
+export interface CommentAssessmentResponse {
+  enabled: boolean;
+  assessment: CommentAssessment | null;
+  creditsExhausted?: boolean;
+  noAuth?: boolean;
 }
 
 // ---- AI usage tracking (Pro; credits, transparency) ----

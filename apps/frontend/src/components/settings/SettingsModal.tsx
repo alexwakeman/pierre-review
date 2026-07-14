@@ -40,7 +40,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
       role="presentation"
     >
       <div
-        className="flex max-h-[85vh] w-[30rem] max-w-[92vw] flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+        className="flex max-h-[85vh] w-[40rem] max-w-[92vw] flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"

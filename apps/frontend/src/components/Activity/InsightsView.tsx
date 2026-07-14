@@ -29,6 +29,7 @@ import { RetroView } from './RetroView.js';
 import { SprintReportCard } from './SprintReportCard.js';
 import { PresetPromptPanel } from './PresetPromptPanel.js';
 import { TeamMetricsPanel } from './TeamMetricsPanel.js';
+import { TeamComparisonPanel } from './TeamComparisonPanel.js';
 import { TrackUsage } from './TrackUsage.js';
 
 // Left-accent + label per severity — the same visual grammar as the Feed's cards.
@@ -50,13 +51,15 @@ const KIND_LABEL: Record<InsightCard['kind'], string> = {
 // The insight-card kinds that belong to the Bots sub-tab (everything else is Overview).
 const BOT_CARD_KINDS = new Set<InsightCard['kind']>(['bot_signal', 'bot_only_review']);
 
-type InsightsSubTab = 'overview' | 'bots' | 'sprint' | 'retro';
+type InsightsSubTab = 'overview' | 'bots' | 'sprint' | 'retro' | 'compare';
 const SUB_TABS: { key: InsightsSubTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'bots', label: 'Bots' },
   { key: 'sprint', label: 'Sprint' },
   { key: 'retro', label: 'Retro' },
 ];
+// The cross-team "Compare" sub-tab is only meaningful (and only shown) in All-Teams scope.
+const COMPARE_TAB: { key: InsightsSubTab; label: string } = { key: 'compare', label: 'Compare teams' };
 
 function ageLabel(hours: number): string {
   if (hours < 48) return `${hours}h`;
@@ -434,6 +437,17 @@ export function InsightsView({
     if (initialSubTab) setSubTab(initialSubTab);
   }, [initialSubTab]);
 
+  // The Compare tab exists only in All-Teams scope. Show it there; if the scope leaves 'teams'
+  // while it's active, fall back to Overview so the tab strip never strands on a hidden tab.
+  const isAllTeams = teamScope === 'teams';
+  const subTabs = useMemo(
+    () => (isAllTeams ? [...SUB_TABS, COMPARE_TAB] : SUB_TABS),
+    [isAllTeams],
+  );
+  useEffect(() => {
+    if (subTab === 'compare' && !isAllTeams) setSubTab('overview');
+  }, [subTab, isAllTeams]);
+
   // Back-from-a-click flash — EXACT parity with the Feed (FeedView): a real browser Back
   // (navigateBack) sets a one-shot activityFlashItemId (the returnItemId we stamped when
   // opening the PR = the card's id); on return we scroll that card into view and flash it,
@@ -733,7 +747,7 @@ export function InsightsView({
       {/* Internal sub-tab bar — Overview / Bots / Retro (styled like the Flow-metrics
           drill-down bar). Retro is the retrospective narrative, now nested here. */}
       <div role="tablist" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
-        {SUB_TABS.map(({ key, label }) => {
+        {subTabs.map(({ key, label }) => {
           const on = key === subTab;
           return (
             <button
@@ -803,6 +817,9 @@ export function InsightsView({
           <SprintReportCard />
           <PresetPromptPanel />
         </div>
+      ) : subTab === 'compare' ? (
+        // Cross-team comparison — only reachable in All-Teams scope (the tab is hidden otherwise).
+        <TeamComparisonPanel />
       ) : (
         <RetroView />
       )}

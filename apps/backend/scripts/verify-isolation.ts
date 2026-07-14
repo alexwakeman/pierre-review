@@ -384,6 +384,15 @@ check(
   'getUnassignedRepoIds(A) is empty (A.repo is in a team)',
   (await q.getUnassignedRepoIds(1)).length === 0,
 );
+// 'teams' scope = the account's UNION of team repos, ownership-scoped (cross-team monitoring).
+check(
+  "resolveScopeRepoIds(A, 'teams') is A's team-repo union",
+  JSON.stringify(await q.resolveScopeRepoIds(1, 'teams')) === JSON.stringify([A.repoId]),
+);
+check(
+  "resolveScopeRepoIds(B, 'teams') is B's own union only (no A leak)",
+  JSON.stringify(await q.resolveScopeRepoIds(2, 'teams')) === JSON.stringify([B.repoId]),
+);
 
 // Owner delete cascades team_repos (functional sanity, not IDOR).
 check('deleteTeam(teamA, A) returns true', (await q.deleteTeam(teamA.id, 1)) === true);

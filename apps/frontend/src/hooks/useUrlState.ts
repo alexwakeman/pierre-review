@@ -22,7 +22,6 @@ import {
   type ReviewState,
 } from '@pierre-review/shared';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
-import { loadActiveSavedView } from './useSavedViews.js';
 
 const PRESETS: RangePreset[] = ['7d', '14d', '30d', '90d', 'custom'];
 
@@ -51,11 +50,12 @@ function readFromUrl(): Partial<FilterState> {
   }
   out.repoIds = parseIds(p.get('repos'));
   out.userIds = parseIds(p.get('users'));
-  // Team scope: 'all' (default, omitted) | 'none' | '<teamId>'. We only have the raw scope
-  // on read — set teamScope and leave the repoIds derivation to a component effect (once the
-  // teams list has loaded). An unparseable value falls back to the default 'all'.
+  // Team scope: 'all' (default, omitted) | 'teams' | 'none' | '<teamId>'. We only have the raw
+  // scope on read — set teamScope and leave the repoIds derivation to a component effect (once
+  // the teams list has loaded). An unparseable value falls back to the default 'all'.
   const team = p.get('team');
   if (team === 'none') out.teamScope = 'none';
+  else if (team === 'teams') out.teamScope = 'teams';
   else if (team === 'all') out.teamScope = 'all';
   else if (team != null) {
     const n = Number.parseInt(team, 10);
@@ -234,10 +234,7 @@ export function useUrlState(): void {
           usePinnedTabs.getState().setActiveTab('activity');
         }
       } else {
-        const activeView = loadActiveSavedView();
-        const persisted = activeView
-          ? sanitizePersistedFilters(activeView.state)
-          : loadPersistedFilters();
+        const persisted = loadPersistedFilters();
         if (persisted) useFilters.getState().hydrate(persisted);
         // Activity-first: a bare load (a fresh sign-in / "open the app") lands on the
         // Activity — the relevance-ranked state of play — with the timeline secondary.

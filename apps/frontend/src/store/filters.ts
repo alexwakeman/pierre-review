@@ -114,6 +114,13 @@ export interface FilterState {
   // Client-side view over the loaded page, ORTHOGONAL to feedMyTurnOnly/feedClaudeOnly (they
   // compose). Transient, URL-silent.
   feedBotLens: FeedBotLens;
+  // Activity "Feed" event-CATEGORY pills — narrow the stream to comment activity and/or PR
+  // events. Both false (default) = no category filter (everything shows). When either is true,
+  // the feed shows only items in the enabled categories: 'comments' = review/PR comments,
+  // 'pr_events' = opens/merges/closes/reopens/ready + reviews. Client-side, composes with the
+  // bot lens, ORTHOGONAL to feedMyTurnOnly/feedClaudeOnly. Transient, URL-silent (like feedBotLens).
+  feedCatComments: boolean;
+  feedCatPrEvents: boolean;
   // The rolling window the Bot-ROI panel (Insights) reports over. Transient, URL-silent
   // (like feedBotLens) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
@@ -260,6 +267,9 @@ export interface FilterState {
   // Feed bot lens: cycle all → hide → only → all, or set directly.
   cycleFeedBotLens: () => void;
   setFeedBotLens: (v: FeedBotLens) => void;
+  // Feed event-category pills (see feedCatComments/feedCatPrEvents) — independent toggles.
+  toggleFeedCatComments: () => void;
+  toggleFeedCatPrEvents: () => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
   // Set/clear the PR-detail Threads-tab bot filter (a ChecksTab bot chip → filter Threads to
@@ -474,52 +484,6 @@ export function sanitizePersistedFilters(
   return out;
 }
 
-// Order-insensitive set equality. Two nullable arrays are equal iff both null or the
-// same elements regardless of order (null = "all"/unset, distinct from an empty []).
-function setEqual<T>(a: readonly T[] | null, b: readonly T[] | null): boolean {
-  if (a == null || b == null) return a === b;
-  if (a.length !== b.length) return false;
-  const set = new Set<T>(a);
-  return b.every((v) => set.has(v));
-}
-
-// Whether a saved view's snapshot (any persisted blob) matches the CURRENT filter
-// bar — the basis for the "active view" label. Normalizes the saved state through
-// sanitize + defaults so an older/partial blob compares against the same field set,
-// and treats the array filters as order-insensitive SETS (repoIds/userIds as
-// nullable number sets). Self-correcting: any manual filter edit stops matching, so
-// the label clears.
-export function savedViewMatchesCurrent(
-  savedState: Partial<FilterState>,
-  current: FilterDefaults,
-): boolean {
-  const a: FilterDefaults = {
-    ...freshFilterDefaults(),
-    ...sanitizePersistedFilters(savedState),
-  };
-  return (
-    setEqual(a.repoIds, current.repoIds) &&
-    a.teamScope === current.teamScope &&
-    setEqual(a.userIds, current.userIds) &&
-    a.excludeBots === current.excludeBots &&
-    setEqual(a.allowedBotIds, current.allowedBotIds) &&
-    a.excludeStale === current.excludeStale &&
-    a.preset === current.preset &&
-    // customFrom/customTo only affect the board when preset === 'custom'; a non-custom
-    // preset ignores any lingering dates (they aren't cleared on preset change). Gate
-    // the comparison on preset so two identical-rendering states still match — mirrors
-    // the URL serializer (useUrlState only emits the dates when preset === 'custom').
-    (a.preset !== 'custom' ||
-      (a.customFrom === current.customFrom && a.customTo === current.customTo)) &&
-    setEqual(a.categories, current.categories) &&
-    setEqual(a.prStatuses, current.prStatuses) &&
-    setEqual(a.reviewStates, current.reviewStates) &&
-    setEqual(a.derivedStates, current.derivedStates) &&
-    a.searchQuery === current.searchQuery &&
-    a.stripFilter === current.stripFilter
-  );
-}
-
 // The fresh-load defaults for every (non-action) piece of state: the filters above
 // plus selection, transient signals and detail-view state. Used for the initial
 // store. (resetAllFilters resets only the filter subset.)
@@ -530,6 +494,8 @@ function freshDefaults(): FilterData {
     feedMyTurnOnly: false,
     feedClaudeOnly: false,
     feedBotLens: 'all',
+    feedCatComments: false,
+    feedCatPrEvents: false,
     botAnalyticsWindow: 'rolling_14',
     selectedPrId: null,
     selectedThreadId: null,
@@ -607,6 +573,8 @@ export const useFilters = create<FilterState>((set, get) => ({
       feedBotLens: s.feedBotLens === 'all' ? 'hide' : s.feedBotLens === 'hide' ? 'only' : 'all',
     })),
   setFeedBotLens: (v) => set({ feedBotLens: v }),
+  toggleFeedCatComments: () => set((s) => ({ feedCatComments: !s.feedCatComments })),
+  toggleFeedCatPrEvents: () => set((s) => ({ feedCatPrEvents: !s.feedCatPrEvents })),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setThreadBotFilter: (kind) =>
     set((s) => ({ threadBotFilter: s.threadBotFilter === kind ? null : kind })),
@@ -773,10 +741,11 @@ export function resolveRange(s: FilterState): { from: Date; to: Date } {
 
 /**
  * Serialize a TeamScope to its wire/URL string form: 'all' → "all", 'none' → "none",
- * a teamId → String(id). The inverse (string → TeamScope) is done in useUrlState.
+ * 'teams' → "teams" (cross-team monitoring), a teamId → String(id). The inverse
+ * (string → TeamScope) is done in useUrlState.
  */
 export function scopeToParam(scope: TeamScope): string {
-  return scope === 'all' || scope === 'none' ? scope : String(scope);
+  return scope === 'all' || scope === 'none' || scope === 'teams' ? scope : String(scope);
 }
 
 function resolveBaseRange(s: FilterState): { from: Date; to: Date } {

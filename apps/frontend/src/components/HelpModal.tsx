@@ -45,63 +45,81 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
 
         <div className="min-h-0 flex-1 space-y-4 overflow-auto px-4 py-3 text-sm leading-relaxed text-gray-600 dark:text-gray-300">
           <p className="text-gray-500 dark:text-gray-400">
-            A local dashboard for your team’s GitHub pull-request activity across
-            repos, drawn as an interactive timeline. Everything runs on your machine.
+            A dashboard for your team’s GitHub pull-request activity across many repos —
+            built for sprint situational-awareness: who’s doing what, which PRs are
+            stalled, which review threads sit untouched, and what needs <em>you</em>. It
+            opens on the <strong>Activity</strong> console; the <strong>Timeline</strong>{' '}
+            is a second lens. Runs locally off your <Code>gh</Code> login (or hosted, with
+            GitHub sign-in).
           </p>
 
-          <Section title="Track repositories">
-            Add repos in the filter bar’s <em>add repo</em> box as <Code>owner/name</Code>.
-            Pierre syncs their PR activity every few minutes into a local file — nothing
-            leaves your machine.
+          <Section title="Add repos & scope with Teams">
+            Add repos in the filter bar’s search box as <Code>owner/name</Code>. Group them
+            into <strong>Teams</strong> (the <em>◈</em> scope selector, top-left) — pick one
+            team, <strong>All Teams</strong> (every team together, grouped in the Activity
+            rail), <strong>All repos</strong>, or <strong>No team</strong>. The scope narrows
+            the whole app — Activity, Insights, and the Timeline — at once.
           </Section>
 
-          <Section title="Read the timeline">
-            Rows are grouped <strong>repo → contributor</strong>. Each PR is a bar; the
-            markers beneath it are events — commits, comments, reviews. Scroll to pan,
-            hold the zoom key while scrolling to zoom. Click a marker for its details,
-            or a PR bar to select it.
+          <Section title="Activity console (the default)">
+            The left rail is your state of play: <strong>Insights</strong>, a cross-repo{' '}
+            <strong>Feed</strong>, then each repo. The Feed is one chronological stream of
+            real activity — opens, merges, reviews, comments, and pushes that addressed a
+            thread. Filter it with the pills: <strong>My Turn</strong> (things that concern
+            you — you authored it, were asked to review, or already chimed in),{' '}
+            <strong>Comments</strong> / <strong>PR events</strong> by category, and the
+            <strong> Bots</strong> lens (all → hide → only). Click any card to open that PR;{' '}
+            <strong>Back</strong> returns you to the exact card.
           </Section>
 
-          <Section title="Focus mode">
-            To isolate one PR and just its contributors: double-click its bar, click{' '}
-            <strong>Focus</strong> in the detail pane, or click a cross-person marker.
-            Leave focus with the <strong>✕</strong> on the header{' '}
-            <strong>Focus mode</strong> badge, <Kbd>Esc</Kbd>, or the browser{' '}
-            <strong>Back</strong> button.
+          <Section title="Insights (Pro)">
+            Team review-intelligence over the current scope: flow metrics (throughput, lead
+            time, time-to-first-review, CI success &amp; recovery) plus cards for stalled
+            reviews, untouched threads and review load. Sub-tabs: <strong>Overview</strong>,{' '}
+            <strong>Bots</strong> (review-bot ROI), <strong>Sprint</strong> and{' '}
+            <strong>Retro</strong> AI write-ups, and — in <strong>All&nbsp;Teams</strong> —{' '}
+            <strong>Compare&nbsp;teams</strong>, a side-by-side matrix to spot throughput gaps
+            and blockers. On the Sprint tab, <strong>Ask about this scope</strong> answers
+            one-click questions; open several at once and their PR mentions are clickable.
           </Section>
 
-          <Section title="Detail pane">
-            Selecting a PR opens the bottom pane with <strong>Overview</strong> (checks,
-            summary, comments), <strong>Threads</strong>, and <strong>Activity</strong>.
-            The <em>Show</em> links jump back to that moment on the timeline; drag the
-            divider to resize the pane.
+          <Section title="Review-bot triage">
+            Third-party review bots (CodeRabbit, Greptile, Copilot, …) are a triaged signal,
+            not noise. A PR’s <strong>Bots</strong> chip filters its threads to that vendor;
+            you can bulk-resolve the ones a later commit likely addressed. In{' '}
+            <strong>Settings → Review bots</strong>, classify detected reviewers and add{' '}
+            <strong>mute / auto-triage rules</strong> (hide, or resolve likely-addressed bot
+            threads older than N days).
           </Section>
 
-          <Section title="Filter">
-            Narrow by date range, members (auto-scoped to who’s active in view), event
-            categories, and thread states. <em>Exclude bots</em> hides
-            renovate&nbsp;/&nbsp;dependabot&nbsp;/&nbsp;CI noise.
+          <Section title="PR detail & threads">
+            Opening a PR shows <strong>Overview</strong> (checks, reviewers &amp; approvals,
+            summary, comments), <strong>Threads</strong> (grouped by file, with code
+            anchors), and <strong>Activity</strong>. Reply or resolve inline. On the Pro
+            tier, each thread offers a <strong>Comment check</strong> — a critical,
+            retained AI read of whether the comment holds up, with the thread and diff as
+            context, so you can decide what to do.
           </Section>
 
-          <Section title="Open-PRs strip">
-            The collapsible strip up top lists currently-open PRs — toggle between{' '}
-            <strong>all</strong>, <strong>my turn</strong>, and{' '}
-            <strong>needs attention</strong>.
+          <Section title="Timeline">
+            Rows are grouped <strong>repo → contributor</strong>; each PR is a bar, the
+            markers are events. Scroll to pan, hold the zoom key to zoom. <strong>Show</strong>{' '}
+            centres a PR on the shared board; <strong>Focus</strong> (or double-clicking a
+            bar) opens the PR in its own isolated tab. The tab strip carries{' '}
+            <strong>Activity</strong> and <strong>Timeline</strong> plus any PR tabs you open.
           </Section>
 
-          <Section title="Activity &amp; Insights">
-            Clicking an item in the <strong>Activity Feed</strong> opens that PR's detail
-            tab, where <strong>Show</strong> / <strong>Focus</strong> drive the timeline; the
-            feed's <strong>My Turn only</strong> toggle narrows it to what needs you.{' '}
-            <strong>Insights</strong> opens a per-repo snapshot
-            (open&nbsp;/&nbsp;merged&nbsp;/&nbsp;stalled, time-to-first-review, review
-            load). Save filter combinations as named <strong>Views</strong>, and use the
-            bell to get notified when something new lands in your queue.
+          <Section title="Claude Review (opt-in, local)">
+            When enabled, a <strong>Claude Review</strong> tab runs an agentic review of a PR
+            into structured findings. You author your own review and tick which findings to
+            post — Pierre posts one GitHub review. It costs real money per run, so it’s off
+            by default and never runs in the hosted mode.
           </Section>
 
           <Section title="Keyboard">
             <Kbd>/</Kbd> focus the filter · <Kbd>j</Kbd>/<Kbd>k</Kbd> cycle PRs ·{' '}
-            <Kbd>i</Kbd> Insights · <Kbd>Esc</Kbd> exit focus, else clear the selection.
+            <Kbd>i</Kbd> Insights · <Kbd>Esc</Kbd> leave a tab/overlay, else clear the
+            selection.
           </Section>
         </div>
       </div>
