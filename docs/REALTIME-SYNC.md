@@ -1,13 +1,14 @@
 # Real-time sync — research & phased plan
 
-> **Status: Phases 0–1 BUILT; Phase 2 planned.** This is the design for moving
-> pierre-review's sync closer to real-time without increasing GitHub API usage, grounded
-> in the current pipeline (see [SYNC.md](SYNC.md)) and in research on what GitHub actually
-> offers. **Phase 0 (the shared targeted-sync core) and Phase 1 (the GitHub-App webhook
-> receiver) are implemented and tested.** Webhook-driven sync is **inert until
-> `GITHUB_APP_WEBHOOK_SECRET` is set** (the route replies 501 unconfigured) and is
-> **additive** — the periodic poll stays as the backstop, unchanged. Phase 2 (local
-> adaptive polling + conditional probe) is still plan.
+> **Status: Phases 0–2 BUILT.** This is the design for moving pierre-review's sync closer
+> to real-time without increasing GitHub API usage, grounded in the current pipeline (see
+> [SYNC.md](SYNC.md)) and in research on what GitHub actually offers. All three phases are
+> implemented and tested, each **inert / off by default** so nothing changes until opted
+> in: Phase 0 (the shared targeted-sync core) is called only by Phase 1/2; Phase 1 (the
+> GitHub-App webhook receiver) is inert until `GITHUB_APP_WEBHOOK_SECRET` is set and is
+> **additive** to the existing poll; Phase 2 (adaptive polling + conditional probe) is
+> gated behind `SYNC_ADAPTIVE=true`. **Not yet done:** widening `SYNC_CRON` in cloud (the
+> API-cost win) once webhook delivery is proven — a config change, no code.
 
 ## The problem
 
@@ -159,33 +160,39 @@ backstop is later widened, baseline API usage drops sharply (quiet repos cost 0;
 
 ---
 
-## Phase 2 — local adaptive polling + conditional probe
+## Phase 2 — local adaptive polling + conditional probe ✅ BUILT
 
 Local has no public endpoint, so the lever is **adaptive cadence**, made cheap with
-**conditional requests**.
+**conditional requests**. Implemented in `sync/adaptive.ts` (+ `sync/adaptive.test.ts`,
+9 tests) + a conditional helper `ghRestGetConditional` in `github/client.ts`, wired into
+`sync/sync-manager.ts`'s `syncAllRepos`. **All gated on `config.syncAdaptive`
+(`SYNC_ADAPTIVE=true`, default off)** — the scheduler loop is byte-unchanged for anyone who
+hasn't opted in. **To enable:** set `SYNC_ADAPTIVE=true` and lower `SYNC_CRON` (e.g. `*/1`)
+so the loop ticks often and the per-repo due-check decides what actually syncs.
 
-**Adaptive cadence.** Run the cron frequently (e.g. `*/1`) but inside `syncAllRepos` skip a
-repo unless its per-repo **next-due** time has arrived, bucketed by recent activity:
+**Adaptive cadence.** Each tick, `isDue(repoId, now)` skips a repo unless its bucket
+interval has elapsed since the last attempt. The bucket is by recency of the last observed
+change (`lastChangeAt`); state is **in-memory** (no migration — lost on restart just means
+one immediate attempt after boot):
 
-| Bucket | Definition | Cadence |
+| Bucket | Definition | Interval (default) |
 |---|---|---|
-| hot | produced new events in the last ~1h | every 1–2 min |
-| warm | some recent activity | ~5 min (today's default) |
-| cold | quiet for hours | 15–30 min |
+| hot | a PR changed in the last ~1h | `SYNC_HOT_INTERVAL_SEC` (120s) |
+| warm | changed within ~6h | `SYNC_WARM_INTERVAL_SEC` (300s) |
+| cold | quiet longer | `SYNC_COLD_INTERVAL_SEC` (900s) |
 
-The "did it change?" signal comes from `syncRepo` reporting whether the run persisted
-anything new (it already knows per-PR) → stamp a per-repo `lastChangeAt`.
-
-**Conditional probe (the cost-saver).** Before the fat GraphQL query, do a REST
-**conditional** GET (`GET /repos/{o}/{r}/pulls?state=open&sort=updated&per_page=1` with the
-stored `ETag`). A `304` costs **zero** rate limit, so a genuinely-idle repo is skipped
-almost free — letting the hot cadence run aggressively without burning quota.
+**Conditional probe (the cost-saver).** For an **incremental** sync, `decideIncrementalWalk`
+does a REST **conditional** GET (`/repos/{o}/{n}/pulls?state=all&sort=updated&per_page=1`
+with the stored `ETag`) before the fat GraphQL walk. A `304` costs **zero** rate limit, so a
+genuinely-idle repo is skipped almost free; a `200` also refreshes `lastChangeAt` (so an
+active repo climbs to a faster cadence and a quiet one decays). A probe error → walk anyway
+(never skip on uncertainty). First backfills (`mode:'full'`) always walk.
 
 **The blind-spot floor (honest caveat).** `updatedAt` doesn't move for CI-finish or
-thread-resolve, so the conditional probe can't detect those. Keep a **periodic full
-re-walk floor** (≤ the cold cadence, e.g. every 15–30 min) so those signals still refresh
-even when the probe reports "unchanged." This is exactly the gap webhooks close for free —
-locally it's the right trade: near-real-time for the common signals, bounded staleness for
+thread-resolve, so the probe can't detect those. A **re-walk floor**
+(`SYNC_FLOOR_INTERVAL_SEC`, 1800s) forces a full walk at least that often even on a `304`,
+so those signals still refresh. This is exactly the gap webhooks close for free — locally
+it's the right trade: near-real-time for the common signals, bounded staleness for
 CI/thread-resolve on quiet repos.
 
 **Net:** near-real-time where activity actually is, *lower* total API on quiet repos — the
@@ -198,7 +205,7 @@ opposite of naïvely dropping `SYNC_CRON`.
 | Item | Detail |
 |---|---|
 | **Config** (`config.ts`) | `GITHUB_APP_WEBHOOK_SECRET`; `WEBHOOK_DEBOUNCE_MS`; `SYNC_ADAPTIVE=true` + hot/warm/cold interval knobs; cloud backstop cadence. Local `SYNC_CRON` default unchanged for anyone who doesn't opt into adaptive. |
-| **Schema** | Phase 1: **none** (routing by `(owner,name)`). Phase 2: one nullable `repos.lastChangeAt` + a per-repo `ETag` store — or keep both in-memory to avoid a migration (lost on restart = one extra full sync, harmless). If persisted, edit **both** `schema.sqlite.ts` + `schema.pg.ts` by hand + parity + `db:generate` + `db:generate:pg`. |
+| **Schema** | **None** — Phase 1 routes by `(owner,name)` over existing `repos` rows; Phase 2 keeps cadence + `ETag` state **in-memory** (chosen over a `repos.lastChangeAt` column: lost on restart just means one immediate attempt after boot, harmless). No migration in either phase. |
 | **Isolation** | Targeted sync is `accountId`-scoped via the repo row. No new id-addressed *read* route, so exposure is minimal; still run `verify:isolation`. |
 | **Tests** | signature-verify unit; payload → `enqueuePrSync` routing/fan-out to N accounts; debounce-coalesce; `syncOnePr` idempotency vs a fixture PR; conditional-probe 304-skip. |
 | **Idempotency** | Everything routes through `persistPr`, so webhook + backstop + adaptive poll firing on the same PR never duplicate — the load-bearing guarantee in SYNC.md is preserved. |

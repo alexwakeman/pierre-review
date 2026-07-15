@@ -122,6 +122,36 @@ export function ghRestGetFor<T>(token: string, path: string): Promise<T> {
   return ghRest<T>(token, 'GET', path);
 }
 
+// Conditional REST GET for the adaptive-sync change probe (Phase 2 — see
+// docs/REALTIME-SYNC.md). Sends `If-None-Match: <etag>` when a prior ETag is known and
+// returns the status + fresh ETag WITHOUT throwing — a 304 (Not Modified) means nothing
+// changed and, crucially, does NOT count against GitHub's primary rate limit. The body is
+// drained and discarded (we only care about changed-or-not + the new ETag). A non-2xx /
+// non-304 (403/404/network) is reported as `notModified: false` so the caller falls back
+// to a full walk rather than silently skipping.
+export async function ghRestGetConditional(
+  token: string,
+  path: string,
+  etag: string | null,
+): Promise<{ status: number; notModified: boolean; etag: string | null }> {
+  const res = await fetch(`https://api.github.com${path}`, {
+    method: 'GET',
+    headers: {
+      authorization: `token ${token}`,
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': '2022-11-28',
+      ...(etag ? { 'if-none-match': etag } : {}),
+    },
+  });
+  // Drain the body so the socket is freed (we never read it).
+  await res.arrayBuffer().catch(() => {});
+  return {
+    status: res.status,
+    notModified: res.status === 304,
+    etag: res.headers.get('etag'),
+  };
+}
+
 // REST GET returning the raw response TEXT (not JSON), for endpoints with a plain-text
 // body — notably the Actions job-logs endpoint, which 302-redirects to a signed
 // download URL. fetch follows the redirect automatically AND strips the Authorization
