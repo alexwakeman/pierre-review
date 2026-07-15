@@ -103,6 +103,12 @@ export const config = {
   commitFileConcurrency: intFromEnv('COMMIT_FILE_CONCURRENCY', 10),
   syncCron: process.env.SYNC_CRON ?? '*/5 * * * *',
   syncOverlapMinutes: intFromEnv('SYNC_OVERLAP_MINUTES', 20),
+  // Phase 0 real-time sync (see docs/REALTIME-SYNC.md). enqueuePrSync coalesces a burst
+  // of change signals for the SAME PR — a push emits push + synchronize + check_run
+  // within seconds — into ONE targeted syncOnePr fired this many ms after the burst
+  // settles. Fed by webhooks (cloud) / the adaptive scheduler (local); unused until
+  // those land. WEBHOOK_DEBOUNCE_MS overrides.
+  webhookDebounceMs: intFromEnv('WEBHOOK_DEBOUNCE_MS', 4000),
   // CLOUD ONLY: the scheduled sync skips any account whose loaded frontend hasn't
   // been seen within this many minutes (accounts.lastActiveAt), so a tenant with no
   // open tab is not re-synced every 5 min. Comfortably exceeds the cron period so a

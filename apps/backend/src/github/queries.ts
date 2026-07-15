@@ -12,6 +12,199 @@ const commitMessageField = fullText ? '\n                message' : '';
 const reviewCommentDiffHunkField = fullText ? '\n                  diffHunk' : '';
 const prCommentBodyField = '\n              body';
 
+// The full PR-node field selection, shared by the per-repo walk (REPO_ACTIVITY_QUERY)
+// and the single-PR targeted fetch (PR_ACTIVITY_ONE_QUERY) so their result shape can
+// NEVER drift — both feed the same persistPr(pr: GqlPullRequest, …) unchanged. Edit the
+// fields here once and both queries stay in lockstep. The lean-gating interpolations
+// (prBodyField, …) apply identically to both.
+const PR_NODE_FIELDS = /* GraphQL */ `
+  id
+  number
+  title${prBodyField}
+  isDraft
+  state
+  additions
+  deletions
+  changedFiles
+  files(first: 100) {
+    nodes {
+      path
+      additions
+      deletions
+    }
+  }
+  createdAt
+  mergedAt
+  closedAt
+  updatedAt
+  url
+  baseRefName
+  headRefName
+  mergeable
+  mergeStateStatus
+  author {
+    login
+    __typename
+    ... on User {
+      id
+      name
+      avatarUrl
+    }
+    ... on Bot {
+      id
+    }
+  }
+  mergedBy {
+    login
+    __typename
+    ... on User {
+      id
+      name
+      avatarUrl
+    }
+    ... on Bot {
+      id
+    }
+  }
+  labels(first: 20) {
+    nodes {
+      name
+      color
+    }
+  }
+  reviewRequests(first: 20) {
+    nodes {
+      requestedReviewer {
+        __typename
+        ... on User {
+          id
+          login
+        }
+        ... on Team {
+          id
+          name
+        }
+      }
+    }
+  }
+  headCommit: commits(last: 1) {
+    nodes {
+      commit {
+        oid
+        statusCheckRollup {
+          state
+          contexts(first: 100) {
+            nodes {
+              __typename
+              ... on CheckRun {
+                name
+                status
+                conclusion
+                detailsUrl
+              }
+              ... on StatusContext {
+                context
+                state
+                targetUrl
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  commits(last: 100) {
+    nodes {
+      commit {
+        oid
+        committedDate${commitMessageField}
+        author {
+          user {
+            login
+            id
+          }
+        }
+        committer {
+          user {
+            login
+            id
+          }
+        }
+      }
+    }
+  }
+  reviews(first: 50) {
+    nodes {
+      id
+      fullDatabaseId
+      state
+      body
+      submittedAt
+      author {
+        login
+        __typename
+        ... on User {
+          id
+          name
+          avatarUrl
+        }
+        ... on Bot {
+          id
+        }
+      }
+    }
+  }
+  reviewThreads(first: 50) {
+    nodes {
+      id
+      isResolved
+      isOutdated
+      isCollapsed
+      path
+      line
+      comments(first: 50) {
+        nodes {
+          id
+          fullDatabaseId
+          body
+          createdAt${reviewCommentDiffHunkField}
+          author {
+            login
+            __typename
+            ... on User {
+              id
+              name
+              avatarUrl
+            }
+            ... on Bot {
+              id
+            }
+          }
+        }
+      }
+    }
+  }
+  comments(first: 50) {
+    nodes {
+      id
+      fullDatabaseId${prCommentBodyField}
+      createdAt
+      author {
+        login
+        __typename
+        ... on User {
+          id
+          name
+          avatarUrl
+        }
+        ... on Bot {
+          id
+        }
+      }
+    }
+  }
+`;
+
 // One query per repo per sync: PRs, reviews, review threads (+comments),
 // general PR comments, and commits in a single round trip.
 export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
@@ -33,192 +226,27 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
           endCursor
         }
         nodes {
-          id
-          number
-          title${prBodyField}
-          isDraft
-          state
-          additions
-          deletions
-          changedFiles
-          files(first: 100) {
-            nodes {
-              path
-              additions
-              deletions
-            }
-          }
-          createdAt
-          mergedAt
-          closedAt
-          updatedAt
-          url
-          baseRefName
-          headRefName
-          mergeable
-          mergeStateStatus
-          author {
-            login
-            __typename
-            ... on User {
-              id
-              name
-              avatarUrl
-            }
-            ... on Bot {
-              id
-            }
-          }
-          mergedBy {
-            login
-            __typename
-            ... on User {
-              id
-              name
-              avatarUrl
-            }
-            ... on Bot {
-              id
-            }
-          }
-          labels(first: 20) {
-            nodes {
-              name
-              color
-            }
-          }
-          reviewRequests(first: 20) {
-            nodes {
-              requestedReviewer {
-                __typename
-                ... on User {
-                  id
-                  login
-                }
-                ... on Team {
-                  id
-                  name
-                }
-              }
-            }
-          }
-          headCommit: commits(last: 1) {
-            nodes {
-              commit {
-                oid
-                statusCheckRollup {
-                  state
-                  contexts(first: 100) {
-                    nodes {
-                      __typename
-                      ... on CheckRun {
-                        name
-                        status
-                        conclusion
-                        detailsUrl
-                      }
-                      ... on StatusContext {
-                        context
-                        state
-                        targetUrl
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-          commits(last: 100) {
-            nodes {
-              commit {
-                oid
-                committedDate${commitMessageField}
-                author {
-                  user {
-                    login
-                    id
-                  }
-                }
-                committer {
-                  user {
-                    login
-                    id
-                  }
-                }
-              }
-            }
-          }
-          reviews(first: 50) {
-            nodes {
-              id
-              fullDatabaseId
-              state
-              body
-              submittedAt
-              author {
-                login
-                __typename
-                ... on User {
-                  id
-                  name
-                  avatarUrl
-                }
-                ... on Bot {
-                  id
-                }
-              }
-            }
-          }
-          reviewThreads(first: 50) {
-            nodes {
-              id
-              isResolved
-              isOutdated
-              isCollapsed
-              path
-              line
-              comments(first: 50) {
-                nodes {
-                  id
-                  fullDatabaseId
-                  body
-                  createdAt${reviewCommentDiffHunkField}
-                  author {
-                    login
-                    __typename
-                    ... on User {
-                      id
-                      name
-                      avatarUrl
-                    }
-                    ... on Bot {
-                      id
-                    }
-                  }
-                }
-              }
-            }
-          }
-          comments(first: 50) {
-            nodes {
-              id
-              fullDatabaseId${prCommentBodyField}
-              createdAt
-              author {
-                login
-                __typename
-                ... on User {
-                  id
-                  name
-                  avatarUrl
-                }
-                ... on Bot {
-                  id
-                }
-              }
-            }
-          }
+          ${PR_NODE_FIELDS}
         }
+      }
+    }
+    rateLimit {
+      remaining
+      resetAt
+      cost
+    }
+  }
+`;
+
+// Single-PR targeted fetch (Phase 0 real-time sync — see docs/REALTIME-SYNC.md). Selects
+// the SAME node fields as REPO_ACTIVITY_QUERY (via PR_NODE_FIELDS), fetched BY NUMBER
+// instead of walked, so the result feeds persistPr unchanged. Costs ~1 point vs a
+// multi-page walk. Fed by webhooks (cloud) / the adaptive scheduler (local).
+export const PR_ACTIVITY_ONE_QUERY = /* GraphQL */ `
+  query PrActivityOne($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        ${PR_NODE_FIELDS}
       }
     }
     rateLimit {
@@ -546,6 +574,21 @@ export interface RepoActivityResponse {
       pageInfo: { hasNextPage: boolean; endCursor: string | null };
       nodes: GqlPullRequest[];
     };
+  } | null;
+  rateLimit: {
+    remaining: number;
+    resetAt: string;
+    cost: number;
+  };
+}
+
+// Response shape for PR_ACTIVITY_ONE_QUERY. `pullRequest` reuses GqlPullRequest (the
+// SAME node type REPO_ACTIVITY_QUERY yields), so a targeted fetch feeds persistPr
+// unchanged. Null when the PR is missing / inaccessible (deleted, wrong number, lost
+// access), or `repository` null on a SAML wall / NOT_FOUND salvaged by graphqlTolerant.
+export interface PrActivityOneResponse {
+  repository: {
+    pullRequest: GqlPullRequest | null;
   } | null;
   rateLimit: {
     remaining: number;
