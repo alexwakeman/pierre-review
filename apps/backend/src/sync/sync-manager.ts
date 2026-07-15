@@ -4,6 +4,7 @@ import { db, schema } from '../db/client.js';
 import { config } from '../config.js';
 import { getAccessToken } from '../auth/account.js';
 import { syncRepo, type Logger } from './sync-repo.js';
+import { isDue, decideIncrementalWalk, recordFullWalk } from './adaptive.js';
 
 const { repos, syncState, accounts } = schema;
 
@@ -296,6 +297,10 @@ export async function syncAllRepos(log: Logger): Promise<void> {
   }
   for (const r of all) {
     if (running.has(r.id)) continue;
+    // Adaptive (config.syncAdaptive): skip repos not yet due for their activity bucket —
+    // cheap, no I/O — before reserving the slot or fetching a token. Off by default, so
+    // the loop below is unchanged for everyone who hasn't opted in.
+    if (config.syncAdaptive && !isDue(r.id, Date.now())) continue;
     // Reserve the slot synchronously before the now-async getRepoRow/planSync
     // awaits below so a concurrent tick doesn't double-start this repo.
     running.add(r.id);
@@ -303,6 +308,24 @@ export async function syncAllRepos(log: Logger): Promise<void> {
       const repo = (await getRepoRow(r.id))!;
       const token = await getAccessToken(repo.accountId);
       const plan = await planSync(r.id);
+      // Adaptive: for an INCREMENTAL sync, probe a cheap conditional request first and skip
+      // the fat GraphQL walk when nothing changed (304, free) and the re-walk floor isn't
+      // due. First backfills (mode 'full') always walk. The `finally` releases the slot.
+      if (config.syncAdaptive && plan.mode === 'incremental') {
+        const decision = await decideIncrementalWalk(
+          r.id,
+          repo.owner,
+          repo.name,
+          token,
+          Date.now(),
+        );
+        if (!decision.walk) {
+          log.info(
+            `scheduled sync ${repo.owner}/${repo.name} skipped (${decision.reason})`,
+          );
+          continue;
+        }
+      }
       setSyncProgress(r.id, { percent: 0, prsProcessed: 0, pages: 0, mode: plan.mode });
       await syncRepo({
         owner: repo.owner,
@@ -316,6 +339,8 @@ export async function syncAllRepos(log: Logger): Promise<void> {
         onProgress: (p) => setSyncProgress(r.id, { ...p, mode: plan.mode }),
         shouldCancel: () => cancelRequested.has(r.id),
       });
+      // Adaptive: reset the re-walk floor now that a full walk has completed.
+      if (config.syncAdaptive) recordFullWalk(r.id, Date.now());
     } catch (err) {
       log.error(
         `scheduled sync of repo ${r.id} failed: ${err instanceof Error ? err.message : err}`,

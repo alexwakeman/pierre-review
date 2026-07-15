@@ -109,6 +109,25 @@ export const config = {
   // settles. Fed by webhooks (cloud) / the adaptive scheduler (local); unused until
   // those land. WEBHOOK_DEBOUNCE_MS overrides.
   webhookDebounceMs: intFromEnv('WEBHOOK_DEBOUNCE_MS', 4000),
+
+  // ---- Phase 2 real-time sync: adaptive polling (see docs/REALTIME-SYNC.md) ----
+  // OFF by default → zero behaviour change. When true, the scheduler's per-repo pass
+  // becomes adaptive: run SYNC_CRON frequently (e.g. */1) but only actually sync a repo
+  // when it's DUE for its activity bucket, and — for incremental syncs — probe a cheap
+  // conditional REST request first, skipping the fat GraphQL walk when nothing changed
+  // (a 304 costs no rate limit). Primarily for local (no webhooks); composes with the
+  // cloud activity-gate. SYNC_ADAPTIVE=true opts in.
+  syncAdaptive: process.env.SYNC_ADAPTIVE === 'true',
+  // Per-bucket minimum seconds between sync attempts. A repo is "hot" when a PR changed
+  // within the last hour, "warm" within 6h, else "cold" (windows are constants in
+  // sync/adaptive.ts). Fresher where activity is; backs off when quiet.
+  syncHotIntervalSec: intFromEnv('SYNC_HOT_INTERVAL_SEC', 120),
+  syncWarmIntervalSec: intFromEnv('SYNC_WARM_INTERVAL_SEC', 300),
+  syncColdIntervalSec: intFromEnv('SYNC_COLD_INTERVAL_SEC', 900),
+  // The conditional probe can't see CI-finish / thread-resolve (they don't bump a PR's
+  // updatedAt), so force a full re-walk at least this often even when the probe says
+  // "unchanged" — the floor that keeps those signals fresh. SYNC_FLOOR_INTERVAL_SEC.
+  syncFloorIntervalSec: intFromEnv('SYNC_FLOOR_INTERVAL_SEC', 1800),
   // CLOUD ONLY: the scheduled sync skips any account whose loaded frontend hasn't
   // been seen within this many minutes (accounts.lastActiveAt), so a tenant with no
   // open tab is not re-synced every 5 min. Comfortably exceeds the cron period so a
