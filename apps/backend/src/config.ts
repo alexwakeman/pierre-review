@@ -154,6 +154,13 @@ export const config = {
   // The GitHub App's URL slug — builds the private-repo install link
   // (github.com/apps/<slug>/installations/new), shown on the sign-in gate.
   githubAppSlug: process.env.GITHUB_APP_SLUG ?? '',
+  // GitHub App webhook shared secret (real-time sync Phase 1 — see docs/REALTIME-SYNC.md).
+  // The App POSTs events to /api/webhooks/github; we verify X-Hub-Signature-256
+  // (HMAC-SHA256 over the raw body) against this. Empty = the route replies 501
+  // (unconfigured), so webhook-driven sync is INERT until it's set — a deployment opts
+  // in additively without weakening the periodic poll. Optional (NOT required by
+  // assertCloudConfig). GITHUB_APP_WEBHOOK_SECRET.
+  githubAppWebhookSecret: process.env.GITHUB_APP_WEBHOOK_SECRET ?? '',
   // Derived: is each provider fully configured? (Both are optional; assertCloudConfig requires
   // at least one.) The auth routes + SignInGate gate on these.
   oauthProviderEnabled: !!(

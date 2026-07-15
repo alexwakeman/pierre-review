@@ -1,11 +1,13 @@
 # Real-time sync — research & phased plan
 
-> **Status: Phase 0 BUILT; Phases 1–2 planned.** This is the design for moving
+> **Status: Phases 0–1 BUILT; Phase 2 planned.** This is the design for moving
 > pierre-review's sync closer to real-time without increasing GitHub API usage, grounded
 > in the current pipeline (see [SYNC.md](SYNC.md)) and in research on what GitHub actually
-> offers. **Phase 0 (the shared targeted-sync core) is implemented and tested but not yet
-> wired to any trigger** — it's inert until Phase 1 (webhooks) / Phase 2 (adaptive polling)
-> call it. Phases 1–2 are still plan.
+> offers. **Phase 0 (the shared targeted-sync core) and Phase 1 (the GitHub-App webhook
+> receiver) are implemented and tested.** Webhook-driven sync is **inert until
+> `GITHUB_APP_WEBHOOK_SECRET` is set** (the route replies 501 unconfigured) and is
+> **additive** — the periodic poll stays as the backstop, unchanged. Phase 2 (local
+> adaptive polling + conditional probe) is still plan.
 
 ## The problem
 
@@ -102,38 +104,58 @@ Surface: 1 shared query fragment + 1 new query, 1 new module, **no migration**.
 
 ---
 
-## Phase 1 — cloud webhooks (the high-payoff phase)
+## Phase 1 — cloud webhooks (the high-payoff phase) ✅ BUILT
 
-**Route** `POST /api/webhooks/github` (`api/routes/webhooks.ts`):
+Implemented in `api/routes/webhooks.ts` (+ `api/routes/webhooks.test.ts`, 14 tests),
+registered in `app.ts` (both modes), exempted from the auth gate in `api/plugins/auth.ts`.
 
-- **Exempt from the auth gate** — add alongside `/api/health` + `/api/auth/*` in
-  `registerAuthGate` (`api/plugins/auth.ts`). Its auth is the HMAC signature, not a session.
-- **Raw-body gotcha:** signature verification needs the *raw* request bytes, but Fastify
-  parses JSON by default. Register a route-scoped raw-body parser and verify
-  `X-Hub-Signature-256` (HMAC-SHA256 with `GITHUB_APP_WEBHOOK_SECRET`) **before** parsing.
-  Bad signature → 401; otherwise **2xx fast** (GitHub retries non-2xx, so do the sync work
-  async after responding).
-- **Routing needs NO new table.** `repos` is keyed `(accountId, owner, name)`, so read
-  `repository.owner.login` + `repository.name` + the PR number from the payload →
-  `SELECT id, accountId FROM repos WHERE owner=? AND name=?` → `enqueuePrSync` for each
-  matching `(accountId, repoId)`. Multi-tenant fan-out is automatic; `getAccessToken(accountId)`
-  resolves each account's own token. An account watching the same repo via OAuth-App (no
-  install) even gets refreshed for free off another account's App-triggered delivery.
-- **Events to subscribe:** `pull_request`, `pull_request_review`,
-  `pull_request_review_comment`, `pull_request_review_thread`, `issue_comment`, `push`,
-  `check_run`/`check_suite`. Optionally `installation`/`installation_repositories` to
-  auto-add/remove watched repos on install changes.
+**Route** `POST /api/webhooks/github`:
 
-**App config (ops, documented not coded):** set the App's webhook URL to
-`<APP_BASE_URL>/api/webhooks/github` + a webhook secret + event subscriptions + the
-matching read permissions. Add to `docs/GITHUB-AUTH-SETUP.md` / `docs/DEPLOY-RAILWAY.md`.
+- **Exempt from the auth gate** (alongside `/api/health`, `/api/auth/*`, `/api/billing/webhook`
+  in `registerAuthGate`). Authenticity is the HMAC signature, not a session.
+- **Raw body** via an **encapsulated** `application/json` buffer parser inside a nested
+  `register` scope — so ONLY this route sees the raw bytes; the rest of the API keeps normal
+  JSON parsing (proven by the sibling-route test). Verifies `X-Hub-Signature-256`
+  (HMAC-SHA256 over the raw body with `config.githubAppWebhookSecret`) **before** parsing;
+  bad/missing signature → **401**, unconfigured → **501**, `ping` → 200 ack. This mirrors the
+  Stripe webhook (`api/routes/billing.ts`) exactly.
+- **Routing needs NO new table.** `repos` is keyed `(accountId, owner, name)`, so the handler
+  reads `repository.owner.login` + `repository.name` + the PR number(s) from the payload →
+  `SELECT id FROM repos WHERE owner=? AND name=?` → `enqueuePrSync(repoId, prNumber, log)` for
+  each matching row. Multi-tenant fan-out is automatic; `syncOnePr` resolves each account's own
+  token, so an account watching the same public repo via the OAuth App (no install) even gets
+  refreshed for free off another account's App-triggered delivery. Responds
+  `{ received, queued }` (`queued` = rows × PR numbers).
+- **PR-number extraction** (`extractPrTargets`, pure/tested) per event: `pull_request` /
+  `pull_request_review` / `_review_comment` / `_review_thread` → `pull_request.number`;
+  `issue_comment` → `issue.number` **only when `issue.pull_request` is present** (it also fires
+  on plain issues); `check_run` / `check_suite` → each entry of `pull_requests[].number` (this
+  is how a **check finishing** — which never bumps a PR's `updatedAt` — drives a refresh). A
+  raw `push` carries no PR (it arrives as `pull_request` `synchronize`), so it's a no-op.
 
-**Backstop:** keep the cron but widen the **cloud** cadence to 15–30 min (webhooks carry
-freshness). It catches dropped deliveries (delivery isn't guaranteed) and serves OAuth-only
-accounts. The existing `lastActiveAt` activity-gate stays.
+**Events to subscribe** (App config): `pull_request`, `pull_request_review`,
+`pull_request_review_comment`, `pull_request_review_thread`, `issue_comment`,
+`check_run`/`check_suite`. (`installation`/`installation_repositories` optional, for future
+auto-add on install.)
 
-**Net:** latency → seconds; baseline API usage drops sharply (quiet repos cost 0; a change
-costs 1 targeted fetch instead of a windowed re-walk × every active tenant).
+**Ops setup** (once, on the GitHub App — not code):
+1. App settings → **Webhook**: URL = `<APP_BASE_URL>/api/webhooks/github`, set a **secret**,
+   and put that same value in **`GITHUB_APP_WEBHOOK_SECRET`** on the deployment.
+2. Subscribe to the events listed above; ensure the App's **read** permissions cover
+   pull requests, contents, and checks.
+3. The App must be **installed** on a repo for its events to fire there (the private-repo
+   install flow already exists). Public repos watched via the OAuth App only still rely on the
+   periodic poll — which is why Phase 1 is additive.
+
+**Backstop decision (deliberate):** Phase 1 does **not** touch the cron — webhooks are layered
+**on top of** the existing 5-min poll, so a webhook-delivery gap can't regress freshness while
+the new path proves out. Widening the cloud cadence (the API-cost win) is a **follow-up** once
+webhook delivery is proven in production: operators set `SYNC_CRON` (e.g. `*/20`) — no code
+change needed. OAuth-only accounts (no install → no webhooks) keep the current cadence.
+
+**Net (once webhooks are configured):** latency → seconds for installed repos; and after the
+backstop is later widened, baseline API usage drops sharply (quiet repos cost 0; a change costs
+1 targeted fetch instead of a windowed re-walk × every active tenant).
 
 ---
 

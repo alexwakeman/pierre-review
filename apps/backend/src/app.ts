@@ -26,6 +26,7 @@ import { insightsRoutes } from './api/routes/insights.js';
 import { activityRoutes } from './api/routes/activity.js';
 import { billingRoutes } from './api/routes/billing.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
+import { webhookRoutes } from './api/routes/webhooks.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -161,6 +162,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Stripe billing seam (checkout redirect + webhook). Registered in both modes;
   // inert until the STRIPE_* env vars are set (webhook 501s unconfigured).
   await app.register(billingRoutes);
+  // GitHub App webhook receiver (real-time sync Phase 1). Registered in both modes;
+  // inert until GITHUB_APP_WEBHOOK_SECRET is set (501s unconfigured). Additive on top of
+  // the periodic poll — see docs/REALTIME-SYNC.md.
+  await app.register(webhookRoutes);
   // Claude Review moved into the @pierre/pro plugin (its routes register there, gated on the
   // `claudeReview` capability). The SDK-run / diff-prep / GitHub-post infra + the tables stay
   // in core behind the ctx.review seam; nothing to register here.

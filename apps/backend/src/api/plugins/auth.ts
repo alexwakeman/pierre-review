@@ -101,6 +101,9 @@ export function registerAuthGate(app: FastifyInstance): void {
     if (path === '/api/health') return;
     if (path.startsWith('/api/auth/')) return;
     if (path === '/api/billing/webhook') return;
+    // GitHub App webhook: GitHub posts unauthenticated — authenticity is the
+    // X-Hub-Signature-256 HMAC, verified in the route (see api/routes/webhooks.ts).
+    if (path === '/api/webhooks/github') return;
     // The pricing page's "Get Pro" is a plain browser navigation from the public
     // landing; the route itself bounces anonymous visitors to sign-in instead of
     // dead-ending them on a JSON 401.
