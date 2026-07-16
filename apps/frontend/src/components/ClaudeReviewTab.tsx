@@ -30,6 +30,7 @@ import {
   usePostFinding,
   usePostReview,
   useSetClaudeKey,
+  useSetReviewBudget,
   useUpdateFinding,
   useUpdateReview,
 } from '../hooks/useClaudeReview.js';
@@ -1005,6 +1006,115 @@ function ApiKeyPanel({
   );
 }
 
+// Per-review budget cap (local settings). The hard USD ceiling each run may spend: a
+// run that trips it stops and is recorded failed (and still bills for what it used), so
+// this is the lever to raise when "Deep" reviews on a large repo keep hitting the cap —
+// or to lower to fail-fast expensive runs. Local-only; mirrors ApiKeyPanel's write pattern.
+function ReviewBudgetPanel({
+  prId,
+  budgetUsd,
+  budgetMax,
+}: {
+  prId: number;
+  budgetUsd: number;
+  budgetMax: number;
+}): JSX.Element {
+  const setBudget = useSetReviewBudget(prId);
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(budgetUsd.toFixed(2));
+  // Re-sync the input if the server value changes (e.g. a save clamped it to the max).
+  useEffect(() => {
+    setValue(budgetUsd.toFixed(2));
+  }, [budgetUsd]);
+
+  const save = (): void => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return;
+    setBudget.mutate(Math.min(n, budgetMax));
+  };
+
+  if (!open) {
+    return (
+      <div className="px-4 pb-2">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+        >
+          Max budget per review:{' '}
+          <span className="font-mono text-gray-600 dark:text-gray-300">
+            ${budgetUsd.toFixed(2)}
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-4 pb-2">
+      <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/50">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-xs uppercase tracking-wide text-gray-400">
+            Review budget
+          </span>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+          >
+            Hide
+          </button>
+        </div>
+        <div className="space-y-1.5">
+          <div className="text-sm font-semibold">Max budget per review</div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Hard USD ceiling each review run may spend (max ${budgetMax.toFixed(2)}). A run
+            that hits the cap stops and is recorded failed, so keep this comfortably above a
+            normal review’s cost — raise it if deep reviews keep failing.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-gray-500 dark:text-gray-400">$</span>
+            <input
+              type="number"
+              min={0.5}
+              max={budgetMax}
+              step={0.5}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              className="w-24 rounded border border-gray-300 bg-white px-2 py-1 font-mono text-sm dark:border-gray-700 dark:bg-gray-900"
+            />
+            <button
+              type="button"
+              onClick={save}
+              disabled={
+                setBudget.isPending ||
+                !(Number(value) > 0) ||
+                Number(value) === budgetUsd
+              }
+              className="rounded border border-blue-400 px-2 py-1 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+            >
+              {setBudget.isPending ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setBudget.mutate(null)}
+              disabled={setBudget.isPending}
+              className="rounded border border-gray-300 px-2 py-1 text-sm text-gray-500 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+            >
+              Reset to default
+            </button>
+          </div>
+          {setBudget.isError && (
+            <div className="text-xs text-red-500">
+              {(setBudget.error as Error)?.message ?? 'Failed to save the budget.'}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Subtle confidence label (right-aligned on a match row) — never a hard claim,
 // mirroring the app's heuristic-honesty ethos.
 const CONFIDENCE_CLASS: Record<LearningMatch['confidence'], string> = {
@@ -1591,6 +1701,15 @@ export function ClaudeReviewTab({
             </div>
           )}
         </div>
+        {/* Per-review budget cap (local-only). Always available — the lever to raise when
+            a deep review keeps tripping the default ceiling. */}
+        {data != null && (
+          <ReviewBudgetPanel
+            prId={pr.id}
+            budgetUsd={data.reviewBudgetUsd}
+            budgetMax={data.reviewBudgetMax}
+          />
+        )}
         {/* Compact key management — only when the user has their OWN stored key to
             manage. If ambient auth (an env ANTHROPIC_API_KEY / OAuth token / logged-in
             session) already satisfies Claude, there's nothing to add, so we hide it. */}

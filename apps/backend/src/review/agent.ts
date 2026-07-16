@@ -16,6 +16,7 @@ import type {
 import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
 import { applyClaudeReviewAuth } from './auth.js';
+import { getEffectiveReviewBudget } from './local-settings.js';
 import {
   cleanupCloneCache,
   prepWorktree,
@@ -172,7 +173,8 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         allowedTools,
         disallowedTools: DISALLOWED_TOOLS,
         maxTurns,
-        maxBudgetUsd: config.reviewBudgetUsd,
+        // User-set per-review cap (local settings) when present, else the operator default.
+        maxBudgetUsd: getEffectiveReviewBudget(),
         // Don't inherit the host's .claude settings / CLAUDE.md / skills.
         settingSources: [],
         mcpServers: { review: server },

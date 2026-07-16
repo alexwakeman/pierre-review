@@ -27,6 +27,7 @@ import type {
   ClaudeReviewResponse,
   ClaudeReviewStatusResponse,
   ClaudeReviewVerdict,
+  ReviewBudgetResponse,
   CreatePrCommentBody,
   CreatePrCommentResult,
   CreateRepoBody,
@@ -452,6 +453,12 @@ export const api = {
   setClaudeKey: (key: string) =>
     fetch('/api/claude-review/key', jsonBody('PUT', { key })).then((r) =>
       handle<ClaudeKeyResponse>(r),
+    ),
+  // Set (a number, clamped server-side) or clear (null → operator default) the local
+  // per-review budget cap.
+  setReviewBudget: (usd: number | null) =>
+    fetch('/api/claude-review/budget', jsonBody('PUT', { usd })).then((r) =>
+      handle<ReviewBudgetResponse>(r),
     ),
   claudeReviewById: (reviewId: number) =>
     get<ClaudeReview>(`/api/claude-reviews/${reviewId}`),

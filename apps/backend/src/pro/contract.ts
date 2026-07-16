@@ -447,8 +447,17 @@ export interface ReviewSeam {
   // Post ONE finding as a standalone inline / PR-level comment.
   postFinding(args: PostFindingArgs): Promise<PostFindingOutcome>;
   // Local Anthropic key (local-only credential store) — applied inside runReview.
-  getLocalKeyStatus(): { hasUserKey: boolean };
+  // Also carries the local per-review budget: `reviewBudgetUsd` is the effective cap a
+  // run will use (user override or operator default), `reviewBudgetMax` the hard ceiling.
+  getLocalKeyStatus(): {
+    hasUserKey: boolean;
+    reviewBudgetUsd: number;
+    reviewBudgetMax: number;
+  };
   setLocalKey(key: string | null): { hasUserKey: boolean; auth: 'ok' | 'none' };
+  // Set (number, clamped to the max) or clear (null → operator default) the local per-review
+  // budget cap; returns the new effective value.
+  setReviewBudget(usd: number | null): { reviewBudgetUsd: number };
 }
 
 // An explicit Insights metrics window (epoch millis, inclusive) used to override the default
