@@ -199,6 +199,17 @@ export function useSetClaudeKey(prId: number) {
   });
 }
 
+// Set or clear the per-review budget cap, then refetch the review so the displayed
+// value reflects the (server-clamped) result.
+export function useSetReviewBudget(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (usd: number | null) => api.setReviewBudget(usd),
+    onSuccess: () =>
+      void qc.invalidateQueries({ queryKey: ['claude-review', prId] }),
+  });
+}
+
 export function usePostReview(prId: number) {
   const qc = useQueryClient();
   return useMutation({

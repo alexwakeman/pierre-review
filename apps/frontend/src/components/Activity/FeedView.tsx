@@ -837,6 +837,9 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
   const { data: thread, isLoading } = useThread(item.threadId);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
+  // A resolved thread needs no attention — start collapsed to a one-line summary and let
+  // the reader expand the full conversation on demand (keeps the feed scannable).
+  const [expanded, setExpanded] = useState(false);
   // The feed item carries the THREAD id but not the specific comment id, so resolve
   // the comment this card represents by matching its author + timestamp (mirrors the
   // timeline MarkerPopover). That one comment is highlighted "new"; the rest of the
@@ -860,6 +863,34 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
   if (!thread) {
     return (
       <div className="px-1 py-2 text-xs text-gray-400">Couldn’t load this conversation.</div>
+    );
+  }
+  if (thread.derivedState === 'resolved' && !expanded) {
+    const meta = DERIVED_STATE_META[thread.derivedState];
+    const file = thread.path.split('/').pop() ?? thread.path;
+    const count = thread.comments.length;
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="group/rt flex w-full items-center gap-1.5 rounded border border-gray-200 bg-white/60 px-2 py-1 text-left text-[11px] hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
+      >
+        <span
+          aria-hidden="true"
+          className="inline-block h-2 w-2 shrink-0 rounded-full"
+          style={{ background: meta.color }}
+        />
+        <code className="truncate font-mono text-gray-600 group-hover/rt:text-sky-600 dark:text-gray-300">
+          {file}
+          {thread.line != null ? `:${thread.line}` : ''}
+        </code>
+        <span className="shrink-0 text-gray-400">
+          resolved · {count === 1 ? '1 comment' : `${count} comments`}
+        </span>
+        <span className="ml-auto shrink-0 text-sky-600 opacity-0 group-hover/rt:opacity-100 dark:text-sky-400">
+          Show
+        </span>
+      </button>
     );
   }
   return (
@@ -977,6 +1008,52 @@ function AffectedThreadRow({
         )}
       </button>
     </li>
+  );
+}
+
+// The threads a commit push addressed. Already-RESOLVED threads need no attention, so
+// they're collapsed behind a "Show N resolved" disclosure by default — the reader sees
+// the still-open ones first, and can reveal the resolved ones on demand.
+function AffectedThreadsList({
+  affected,
+  usersById,
+  onOpenThread,
+}: {
+  affected: FeedAffectedThread[];
+  usersById: Map<number, User>;
+  onOpenThread: (threadId: number) => void;
+}): JSX.Element {
+  const [showResolved, setShowResolved] = useState(false);
+  const open = affected.filter((t) => t.derivedState !== 'resolved');
+  const resolved = affected.filter((t) => t.derivedState === 'resolved');
+  const row = (t: FeedAffectedThread): JSX.Element => (
+    <AffectedThreadRow
+      key={t.threadId}
+      thread={t}
+      author={t.authorId != null ? usersById.get(t.authorId) : undefined}
+      onOpen={() => onOpenThread(t.threadId)}
+    />
+  );
+  return (
+    <ul className="space-y-1.5">
+      {open.map(row)}
+      {resolved.length > 0 && (
+        <li>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowResolved((v) => !v);
+            }}
+            className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+          >
+            {showResolved ? 'Hide' : 'Show'} {resolved.length} resolved{' '}
+            {resolved.length === 1 ? 'thread' : 'threads'}
+          </button>
+        </li>
+      )}
+      {showResolved && resolved.map(row)}
+    </ul>
   );
 }
 
@@ -1266,16 +1343,11 @@ function FeedRowImpl({
                 {item.changeSummary}
               </div>
             )}
-            <ul className="space-y-1.5">
-              {affected.map((t) => (
-                <AffectedThreadRow
-                  key={t.threadId}
-                  thread={t}
-                  author={t.authorId != null ? usersById.get(t.authorId) : undefined}
-                  onOpen={() => onOpenThread(item, t.threadId)}
-                />
-              ))}
-            </ul>
+            <AffectedThreadsList
+              affected={affected}
+              usersById={usersById}
+              onOpenThread={(tid) => onOpenThread(item, tid)}
+            />
           </div>
         )}
 

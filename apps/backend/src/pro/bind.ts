@@ -16,6 +16,9 @@ import { detectClaudeAuth } from '../review/auth.js';
 import {
   hasUserAnthropicKey,
   setUserAnthropicKey,
+  getEffectiveReviewBudget,
+  setUserReviewBudget,
+  MAX_REVIEW_BUDGET_USD,
 } from '../review/local-settings.js';
 import { getAccessToken, getAccountById } from '../auth/account.js';
 import {
@@ -173,10 +176,18 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       runReview: async (a) => (await import('../review/agent.js')).runReview(a),
       postReview: async (a) => (await import('../review/post-seam.js')).postReview(a),
       postFinding: async (a) => (await import('../review/post-seam.js')).postFinding(a),
-      getLocalKeyStatus: () => ({ hasUserKey: hasUserAnthropicKey() }),
+      getLocalKeyStatus: () => ({
+        hasUserKey: hasUserAnthropicKey(),
+        reviewBudgetUsd: getEffectiveReviewBudget(),
+        reviewBudgetMax: MAX_REVIEW_BUDGET_USD,
+      }),
       setLocalKey: (k) => {
         setUserAnthropicKey(k ?? '');
         return { hasUserKey: hasUserAnthropicKey(), auth: detectClaudeAuth().status };
+      },
+      setReviewBudget: (usd) => {
+        setUserReviewBudget(usd);
+        return { reviewBudgetUsd: getEffectiveReviewBudget() };
       },
     },
   };

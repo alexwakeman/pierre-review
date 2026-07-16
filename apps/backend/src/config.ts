@@ -246,8 +246,9 @@ export const config = {
   // The cap must therefore sit ABOVE the cost of a normal completed review, not at
   // it; `reviewEffort` below is the real cost lever (a large diff at default-high
   // effort is what blew the old $1 cap). Lower REVIEW_BUDGET_USD only if you'd
-  // rather a borderline review fail than complete.
-  reviewBudgetUsd: floatFromEnv('REVIEW_BUDGET_USD', 1.5),
+  // rather a borderline review fail than complete. Users can override this per
+  // review in the Claude Review tab (local settings), up to a $5 hard ceiling.
+  reviewBudgetUsd: floatFromEnv('REVIEW_BUDGET_USD', 3),
   // Turn cap for a diff-only run. These are TOOL-LESS (only submit_review), so they
   // should finish in ~2 turns; a tight cap is a cheap runaway guard.
   reviewDiffOnlyMaxTurns: intFromEnv('REVIEW_DIFF_ONLY_MAX_TURNS', 6),

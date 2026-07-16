@@ -1763,6 +1763,11 @@ export interface ClaudeReviewResponse {
   // Whether a user-supplied Anthropic API key is stored locally (local mode
   // only). When true, that key overrides the ambient Claude auth at run time.
   hasUserKey: boolean;
+  // The per-review USD budget cap a run will use (the user's local override, or the
+  // operator default when unset) and the hard ceiling the user can set it to. Local
+  // mode only; meaningless (and ignored) in cloud.
+  reviewBudgetUsd: number;
+  reviewBudgetMax: number;
   // The latest run for the PR (with findings), or null if never run.
   review: ClaudeReview | null;
   // All prior runs for the PR (newest first), lighter shape.
@@ -1777,6 +1782,16 @@ export interface SetClaudeKeyBody {
 export interface ClaudeKeyResponse {
   hasUserKey: boolean;
   auth: ClaudeAuthStatus;
+}
+
+// Set (a positive number, clamped server-side to the max) or clear (null → operator
+// default) the local per-review budget cap.
+export interface SetReviewBudgetBody {
+  usd: number | null;
+}
+
+export interface ReviewBudgetResponse {
+  reviewBudgetUsd: number;
 }
 
 export type ClaudeReviewPhase =
