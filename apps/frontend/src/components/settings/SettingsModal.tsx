@@ -7,6 +7,7 @@ import { SlackSection } from './SlackSection.js';
 import { AiPolicySection } from './AiPolicySection.js';
 import { IssueLinksSection } from './IssueLinksSection.js';
 import { BotSection } from './BotSection.js';
+import { AnthropicKeySection } from './AnthropicKeySection.js';
 
 // User configuration modal, opened from the header avatar menu. Mirrors HelpModal's shell
 // (fixed overlay + role=dialog card + capture-phase Escape so a dismiss doesn't reach the global
@@ -65,6 +66,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
               {(mutation.error as Error).message}
             </p>
           )}
+          {/* BYO Anthropic key — advanced AI only (Claude Review + AI Fix). Independent of
+              pro_settings (it's a local file store), so it renders above the loading gate. */}
+          {(caps.claudeReview || caps.aiFix) && <AnthropicKeySection />}
           {query.isLoading || settings == null ? (
             <p className="py-6 text-center text-xs text-gray-400">
               {query.isError ? 'Settings unavailable.' : 'Loading…'}

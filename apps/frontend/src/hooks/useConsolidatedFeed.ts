@@ -30,10 +30,13 @@ function feedSearch(
   userIds: number[] | null,
   excludeBots: boolean,
   allowedBotIds: number[],
+  prId: number | null,
 ): string {
   const p = new URLSearchParams();
   if (repoIds && repoIds.length > 0) p.set('repoIds', repoIds.join(','));
   if (userIds && userIds.length > 0) p.set('userIds', userIds.join(','));
+  // Isolate to a single PR (the Feed "open PRs" panel). Only emitted when set.
+  if (prId != null) p.set('prId', String(prId));
   // Mirror the timeline: only emit when hiding bots (default false keeps the key clean).
   if (excludeBots) {
     p.set('excludeBots', 'true');
@@ -57,6 +60,7 @@ export function useConsolidatedFeed(opts: {
   userIds: number[] | null;
   excludeBots?: boolean;
   allowedBotIds?: number[];
+  prId?: number | null;
   enabled?: boolean;
 }) {
   const search = feedSearch(
@@ -64,6 +68,7 @@ export function useConsolidatedFeed(opts: {
     opts.userIds,
     opts.excludeBots ?? false,
     opts.allowedBotIds ?? [],
+    opts.prId ?? null,
   );
   const query = useInfiniteQuery<ConsolidatedFeedResponse>({
     queryKey: ['consolidated-feed', search],
@@ -123,6 +128,7 @@ export function useFeedHasNew(opts: {
   userIds: number[] | null;
   excludeBots?: boolean;
   allowedBotIds?: number[];
+  prId?: number | null;
   loadedLatestId: string | null;
   loadedTotal: number;
   // True once the loaded feed has finished its initial load, so we can distinguish "empty
@@ -137,6 +143,7 @@ export function useFeedHasNew(opts: {
     opts.userIds,
     opts.excludeBots ?? false,
     opts.allowedBotIds ?? [],
+    opts.prId ?? null,
   );
   const head = useQuery<ConsolidatedFeedResponse>({
     queryKey: ['feed-head', search],

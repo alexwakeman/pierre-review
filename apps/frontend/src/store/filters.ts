@@ -121,6 +121,10 @@ export interface FilterState {
   // bot lens, ORTHOGONAL to feedMyTurnOnly/feedClaudeOnly. Transient, URL-silent (like feedBotLens).
   feedCatComments: boolean;
   feedCatPrEvents: boolean;
+  // Activity "Feed" single-PR isolation: null (default) → every PR in scope; a pr id →
+  // the consolidated Feed shows ONLY that PR's items. Driven by the Feed "open PRs" panel.
+  // Transient, URL-silent (like the other feed toggles); cleared on rail / scope changes.
+  feedIsolatedPrId: number | null;
   // The rolling window the Bot-ROI panel (Insights) reports over. Transient, URL-silent
   // (like feedBotLens) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
@@ -270,6 +274,8 @@ export interface FilterState {
   // Feed event-category pills (see feedCatComments/feedCatPrEvents) — independent toggles.
   toggleFeedCatComments: () => void;
   toggleFeedCatPrEvents: () => void;
+  // Isolate the Feed to a single PR (or clear with null) — the Feed "open PRs" panel.
+  setFeedIsolatedPrId: (id: number | null) => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
   // Set/clear the PR-detail Threads-tab bot filter (a ChecksTab bot chip → filter Threads to
@@ -496,6 +502,7 @@ function freshDefaults(): FilterData {
     feedBotLens: 'all',
     feedCatComments: false,
     feedCatPrEvents: false,
+    feedIsolatedPrId: null,
     botAnalyticsWindow: 'rolling_14',
     selectedPrId: null,
     selectedThreadId: null,
@@ -531,7 +538,10 @@ export const useFilters = create<FilterState>((set, get) => ({
   ...freshDefaults(),
 
   setRepoIds: (ids) => set({ repoIds: ids }),
-  setTeamScope: (scope, repoIds) => set({ teamScope: scope, repoIds }),
+  // Changing the team scope re-scopes the whole feed; an isolated PR may fall out of the
+  // new scope, so drop the isolation to avoid a confusing empty feed.
+  setTeamScope: (scope, repoIds) =>
+    set({ teamScope: scope, repoIds, feedIsolatedPrId: null }),
   toggleRepo: (id) =>
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),
   showRepo: (id) => {
@@ -575,6 +585,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   setFeedBotLens: (v) => set({ feedBotLens: v }),
   toggleFeedCatComments: () => set((s) => ({ feedCatComments: !s.feedCatComments })),
   toggleFeedCatPrEvents: () => set((s) => ({ feedCatPrEvents: !s.feedCatPrEvents })),
+  setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setThreadBotFilter: (kind) =>
     set((s) => ({ threadBotFilter: s.threadBotFilter === kind ? null : kind })),
@@ -698,10 +709,14 @@ export const useFilters = create<FilterState>((set, get) => ({
     set((s) => ({ claudeReviewKickoff: s.claudeReviewKickoff + 1 })),
   setStripCollapsed: (v) => set({ stripCollapsed: v }),
   setStripFilter: (f) => set({ stripFilter: f }),
-  // Selecting a different repo console drops any lingering thread-state filter so a
-  // narrow from one repo doesn't carry over to the next.
+  // Selecting a different repo console drops any lingering thread-state filter + the Feed's
+  // single-PR isolation so a narrow from one view doesn't carry over to the next.
   setActivityRepo: (id) =>
-    set((s) => (s.activityRepoId === id ? {} : { activityRepoId: id, activityThreadFilter: null })),
+    set((s) =>
+      s.activityRepoId === id
+        ? {}
+        : { activityRepoId: id, activityThreadFilter: null, feedIsolatedPrId: null },
+    ),
   setActivityThreadFilter: (st) =>
     set((s) => ({ activityThreadFilter: s.activityThreadFilter === st ? null : st })),
   setSearchQuery: (q) => set({ searchQuery: q }),

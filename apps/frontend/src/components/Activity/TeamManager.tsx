@@ -10,32 +10,11 @@ import { RepoSearch } from '../RepoSearch.js';
 
 // Repo/team management for the Activity console: create/rename/delete teams, assign & unassign
 // the account's repos to the selected team, add brand-new repos (auto-assigned to the selected
-// team), remove repos, and see the "No team" (ad-hoc) repos. Rendered as a trigger button + a
-// modal so the rail stays compact. All mutations flow through useTeamMutations (which invalidates
-// the teams + repos + Activity/Insights caches), so the rail/feed/scope selector track changes live.
-export function TeamManager(): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const { data: teams } = useTeams();
-  const teamCount = teams?.length ?? 0;
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        title="Create teams and assign repos"
-        className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 transition hover:border-gray-400 hover:text-gray-800 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-100"
-      >
-        <span aria-hidden>⚙</span>
-        Manage repos &amp; teams
-        {teamCount > 0 && <span className="text-gray-400">· {teamCount}</span>}
-      </button>
-      {open && <TeamManagerModal onClose={() => setOpen(false)} />}
-    </>
-  );
-}
-
-function TeamManagerModal({ onClose }: { onClose: () => void }): JSX.Element {
+// team), remove repos, and see the "No team" (ad-hoc) repos. The modal is opened from the header
+// TeamSelector's "Manage repos & teams" entry. All mutations flow through useTeamMutations (which
+// invalidates the teams + repos + Activity/Insights caches), so the rail/feed/scope selector
+// track changes live.
+export function TeamManagerModal({ onClose }: { onClose: () => void }): JSX.Element {
   const qc = useQueryClient();
   const { data: teams } = useTeams();
   const { data: repos } = useRepos();

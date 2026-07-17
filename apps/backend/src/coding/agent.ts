@@ -6,6 +6,7 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
 import { getAccessToken } from '../auth/account.js';
+import { applyClaudeReviewAuth } from '../review/auth.js';
 import {
   cleanupCloneCache,
   prepWorktree,
@@ -128,9 +129,11 @@ interface AgentRunOutcome {
  * `settingSources:[]`, budget/turn caps, whitelisted tools) and streams activity, but
  * knows nothing about worktree prep, diff capture, or git — the callers own those.
  *
- * Auth: runs on the AMBIENT Claude env WITHOUT mutating process.env (unlike Claude
- * Review's applyClaudeReviewAuth) — the AI-Fix jobs are concurrency 1, and mutating
- * env would race a concurrent review manager. Whatever credential is ambient is used.
+ * Auth: prefers the ambient Claude session, else falls back to the user's local BYO
+ * Anthropic key — the SAME advanced-AI credential policy as Claude Review
+ * (applyClaudeReviewAuth), restored in `finally`. AI-Fix jobs are concurrency 1; the env
+ * mutation only bites when there's no ambient auth (a BYO-key-only setup), where it and a
+ * concurrent review would set the identical key.
  */
 export async function runAgentInWorktree(
   opts: AgentRunOptions,
@@ -147,6 +150,9 @@ export async function runAgentInWorktree(
     ? config.reviewEffort
     : undefined;
 
+  // Advanced-AI credential: ambient session preferred, else the local BYO key. Restored below.
+  const restoreEnv = applyClaudeReviewAuth(true);
+  try {
   const q = query({
     prompt: opts.prompt,
     options: {
@@ -223,6 +229,9 @@ export async function runAgentInWorktree(
     numTurns: result?.num_turns ?? null,
     aborted: false,
   };
+  } finally {
+    restoreEnv();
+  }
 }
 
 /**

@@ -614,7 +614,7 @@ export type StoredPrFile = Omit<PrFileChange, 'githubUrl'>;
 
 // Hard cap on how many repositories a single account may watch. Enforced on the
 // add-repo route (backend, the source of truth) and surfaced in the add-repo UI.
-export const MAX_REPOS_PER_ACCOUNT = 15;
+export const MAX_REPOS_PER_ACCOUNT = 100;
 
 // The single most useful reason a PR matters right now, in priority order.
 export type ReasonTag =
@@ -1782,6 +1782,12 @@ export interface SetClaudeKeyBody {
 export interface ClaudeKeyResponse {
   hasUserKey: boolean;
   auth: ClaudeAuthStatus;
+}
+
+// GET /api/claude-review/key — a non-PR-scoped read of whether a local Anthropic key is
+// stored (for the Settings modal, which manages the key outside any PR).
+export interface ClaudeKeyStatusResponse {
+  hasUserKey: boolean;
 }
 
 // Set (a positive number, clamped server-side to the max) or clear (null → operator

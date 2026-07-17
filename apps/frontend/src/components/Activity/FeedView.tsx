@@ -16,7 +16,7 @@ import {
   useMarkFeedSeen,
 } from '../../hooks/useConsolidatedFeed.js';
 import { useDetectedReviewers, useReviewerOverride } from '../../hooks/useBotTriage.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useProCapabilities, useOpenPrs } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
@@ -39,6 +39,7 @@ import { MagnifierIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
 import { ThreadCard } from '../ThreadView/index.js';
+import { FeedOpenPrsPanel } from './FeedOpenPrsPanel.js';
 
 // A coloured chip + label describing WHAT an item is (the event kind). The My-Turn reason is
 // a separate pill (see MY_TURN_REASON_META); Claude runs get their own violet chip.
@@ -170,6 +171,8 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const feedCatPrEvents = useFilters((s) => s.feedCatPrEvents);
   const toggleFeedCatComments = useFilters((s) => s.toggleFeedCatComments);
   const toggleFeedCatPrEvents = useFilters((s) => s.toggleFeedCatPrEvents);
+  const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
+  const setFeedIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
   const showPrComment = useFilters((s) => s.showPrComment);
@@ -214,6 +217,18 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   // toggle + allow-list still flow in.
   const effectiveRepoIds = repoId != null ? [repoId] : repoIdsFilter;
 
+  // Single-PR isolation applies to BOTH the cross-repo feed (the team-grouped "open PRs"
+  // panel) and a per-repo console (its RepoOpenPrList rows) — clicking a PR in either filters
+  // the feed to that PR. `setActivityRepo` clears it when switching rails, so it never leaks
+  // across repos.
+  const isolatedPrId = feedIsolatedPrId;
+  // Resolve the isolated PR (shared open-PRs cache) for the active-filter banner's label.
+  const { data: openPrsData } = useOpenPrs();
+  const isolatedPr =
+    isolatedPrId != null
+      ? (openPrsData?.prs.find((p) => p.id === isolatedPrId) ?? null)
+      : null;
+
   // Viewing the CROSS-REPO feed marks it seen server-side (once per mount), resetting the
   // "new My Turn since you were last here" count that drives the Welcome-back banner. A
   // per-repo feed (repoId set) doesn't touch the global marker.
@@ -232,6 +247,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
       userIds,
       excludeBots,
       allowedBotIds,
+      prId: isolatedPrId,
     });
 
   // "New activity" detector: poll the server head for this exact scope and compare to what's
@@ -243,6 +259,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
     userIds,
     excludeBots,
     allowedBotIds,
+    prId: isolatedPrId,
     loadedLatestId: latestId,
     loadedTotal: total,
     feedSettled: !isLoading,
@@ -670,6 +687,35 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
       {/* The AI repo-summary (digest) collection now lives in the Insights panel — one home
           for every AI summary, with a single unified Refresh. It's no longer atop the Feed. */}
 
+      {/* Cross-repo only: a collapsible panel of open PRs grouped by team; clicking a PR
+          isolates the feed to that PR (below). */}
+      {repoId == null && <FeedOpenPrsPanel />}
+
+      {/* Active single-PR filter — always visible while isolating (even with the panel
+          collapsed), with a one-click Clear. */}
+      {isolatedPrId != null && (
+        <div className="flex items-center gap-2 rounded-md border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs text-sky-800 dark:border-sky-500/50 dark:bg-sky-950/40 dark:text-sky-200">
+          <span aria-hidden="true">☰</span>
+          <span className="min-w-0 flex-1 truncate">
+            Showing only{' '}
+            {isolatedPr != null ? (
+              <>
+                <span className="font-mono">#{isolatedPr.number}</span> {isolatedPr.title}
+              </>
+            ) : (
+              'the selected PR'
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={() => setFeedIsolatedPrId(null)}
+            className="shrink-0 rounded border border-sky-400 px-2 py-0.5 font-medium hover:bg-sky-100 dark:border-sky-500/60 dark:hover:bg-sky-900/40"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {/* My Turn / Claude filter toggles + a "showing X of Y" hint. My Turn is CORE / free. */}
       <div className="flex items-center gap-2 px-0.5">
         <button
@@ -865,32 +911,54 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
       <div className="px-1 py-2 text-xs text-gray-400">Couldn’t load this conversation.</div>
     );
   }
-  if (thread.derivedState === 'resolved' && !expanded) {
+  // A resolved thread renders collapsed to a one-line summary that TOGGLES the full
+  // conversation on click (both expand and collapse). The header row is the only
+  // clickable affordance; the expanded conversation sits in a cursor-default wrapper so
+  // its (non-interactive) content doesn't inherit the feed card's pointer cursor.
+  if (thread.derivedState === 'resolved') {
     const meta = DERIVED_STATE_META[thread.derivedState];
     const file = thread.path.split('/').pop() ?? thread.path;
     const count = thread.comments.length;
     return (
-      <button
-        type="button"
-        onClick={() => setExpanded(true)}
-        className="group/rt flex w-full items-center gap-1.5 rounded border border-gray-200 bg-white/60 px-2 py-1 text-left text-[11px] hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
-      >
-        <span
-          aria-hidden="true"
-          className="inline-block h-2 w-2 shrink-0 rounded-full"
-          style={{ background: meta.color }}
-        />
-        <code className="truncate font-mono text-gray-600 group-hover/rt:text-sky-600 dark:text-gray-300">
-          {file}
-          {thread.line != null ? `:${thread.line}` : ''}
-        </code>
-        <span className="shrink-0 text-gray-400">
-          resolved · {count === 1 ? '1 comment' : `${count} comments`}
-        </span>
-        <span className="ml-auto shrink-0 text-sky-600 opacity-0 group-hover/rt:opacity-100 dark:text-sky-400">
-          Show
-        </span>
-      </button>
+      <div>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="group/rt flex w-full cursor-pointer items-center gap-1.5 rounded border border-gray-200 bg-white/60 px-2 py-1 text-left text-[11px] hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
+        >
+          <span
+            aria-hidden="true"
+            className="inline-block h-2 w-2 shrink-0 rounded-full"
+            style={{ background: meta.color }}
+          />
+          <code className="truncate font-mono text-gray-600 group-hover/rt:text-sky-600 dark:text-gray-300">
+            {file}
+            {thread.line != null ? `:${thread.line}` : ''}
+          </code>
+          <span className="shrink-0 text-gray-400">
+            resolved · {count === 1 ? '1 comment' : `${count} comments`}
+          </span>
+          <span
+            className={`ml-auto shrink-0 text-sky-600 dark:text-sky-400 ${
+              expanded ? '' : 'opacity-0 group-hover/rt:opacity-100'
+            }`}
+          >
+            {expanded ? 'Hide' : 'Show'}
+          </span>
+        </button>
+        {expanded && (
+          <div className="mt-1.5 cursor-default">
+            <ThreadCard
+              thread={thread}
+              usersById={usersById}
+              prUrl={prUrl}
+              repoId={item.repoId}
+              highlightCommentId={highlightCommentId}
+            />
+          </div>
+        )}
+      </div>
     );
   }
   return (
@@ -1371,9 +1439,10 @@ function FeedRowImpl({
 
         {/* A review-thread card shows the full conversation inline (reply + resolve,
             exactly like the Threads tab), with the comment this card represents
-            highlighted new. Stop propagation so interacting never opens the tab. */}
+            highlighted new. Stop propagation so interacting never opens the tab, and
+            reset the cursor so the thread body doesn't inherit the card's pointer. */}
         {isThreadCard && (
-          <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
+          <div className="mt-1.5 cursor-default" onClick={(e) => e.stopPropagation()}>
             <InlineThread item={item} />
           </div>
         )}

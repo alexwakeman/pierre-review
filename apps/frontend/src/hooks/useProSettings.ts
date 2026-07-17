@@ -3,12 +3,18 @@ import type { ProSettings, ProSettingsUpdate } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { useProCapabilities } from './useTriage.js';
 
-// Whether the config modal has ANY Pro section to show. Used to gate the /api/pro/settings
+// Whether the config modal has ANY section to show — the pro_settings-backed sections OR the
+// advanced-AI BYO Anthropic-key section. Used to gate the menu entry + the /api/pro/settings
 // fetch (which 404s without the plugin) so the free tier never calls it.
 export function useHasProSettings(): boolean {
   const caps = useProCapabilities();
   return (
-    caps.teamInsights || caps.activityDigest || caps.slackDigest || caps.issueLinks
+    caps.teamInsights ||
+    caps.activityDigest ||
+    caps.slackDigest ||
+    caps.issueLinks ||
+    caps.claudeReview ||
+    caps.aiFix
   );
 }
 

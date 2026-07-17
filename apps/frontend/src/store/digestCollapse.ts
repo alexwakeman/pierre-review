@@ -130,3 +130,46 @@ export const useSprintReportUi = create<SprintReportUiState>((set, get) => {
     },
   };
 });
+
+// The Feed's "Open PRs" panel (team-grouped open PRs above the cross-repo feed). COLLAPSED
+// BY DEFAULT — it's a filter affordance, not primary content — and its open/closed choice is
+// persisted so it survives navigating away from the Feed and back, and across reloads.
+const FEED_OPEN_PRS_KEY = 'pierre:feedOpenPrsPanel';
+
+function loadFeedOpenPrsCollapsed(): boolean {
+  try {
+    const raw = localStorage.getItem(FEED_OPEN_PRS_KEY);
+    if (raw == null) return true; // default: collapsed
+    return JSON.parse(raw) === true;
+  } catch {
+    return true;
+  }
+}
+
+interface FeedOpenPrsPanelState {
+  collapsed: boolean;
+  setCollapsed: (v: boolean) => void;
+  toggle: () => void;
+}
+
+export const useFeedOpenPrsPanel = create<FeedOpenPrsPanelState>((set, get) => {
+  const save = (collapsed: boolean): void => {
+    try {
+      localStorage.setItem(FEED_OPEN_PRS_KEY, JSON.stringify(collapsed));
+    } catch {
+      /* quota / private mode — non-fatal */
+    }
+  };
+  return {
+    collapsed: loadFeedOpenPrsCollapsed(),
+    setCollapsed: (v) => {
+      set({ collapsed: v });
+      save(v);
+    },
+    toggle: () => {
+      const next = !get().collapsed;
+      set({ collapsed: next });
+      save(next);
+    },
+  };
+});

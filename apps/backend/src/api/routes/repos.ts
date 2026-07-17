@@ -35,7 +35,7 @@ import { accountIdOf } from '../plugins/auth.js';
 // Local copy of the shared MAX_REPOS_PER_ACCOUNT value. `@pierre-review/shared` is
 // a types-only package (not shipped in the published tarball), so the backend must
 // only `import type` from it — runtime constants are duplicated here. Keep in sync.
-const MAX_REPOS_PER_ACCOUNT = 15;
+const MAX_REPOS_PER_ACCOUNT = 100;
 
 const createRepoSchema = {
   body: {

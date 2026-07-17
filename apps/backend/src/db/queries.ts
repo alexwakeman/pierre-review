@@ -2027,6 +2027,10 @@ export interface ConsolidatedFeedFilters {
   repoIds?: number[] | null;
   // Member filter: null / empty → all actors; a list → only those actors.
   userIds?: number[] | null;
+  // Isolate the feed to a SINGLE PR: null → every PR in scope; a pr id → only that PR's
+  // items. Applied after coalesce + my-turn enrich so `total` and the page reflect the
+  // isolated set. Drives the Feed "open PRs" panel's per-PR filter.
+  prId?: number | null;
   // Mirror the timeline's "exclude bots" toggle: drop feed activity + My Turn items whose
   // actor is a known bot (users.isBot). Claude-review items are never dropped (no member
   // author). Absent/false → bots shown.
@@ -3559,6 +3563,7 @@ export async function getConsolidatedFeed(
   const {
     repoIds = null,
     userIds = null,
+    prId = null,
     limit = null,
     offset = 0,
     excludeBots = false,
@@ -3672,11 +3677,15 @@ export async function getConsolidatedFeed(
   // in its PR. Runs BEFORE the cap so uncapped My-Turn rows survive.
   await enrichMyTurn(accountId, items);
 
+  // Optional single-PR isolation (the Feed "open PRs" panel): keep only this PR's items.
+  // Applied here so `total` + the page bounds reflect the isolated set.
+  const scoped = prId == null ? items : items.filter((i) => i.prId === prId);
+
   // Pure chronological — newest first. Keep every My Turn item AND every Claude-review item
   // (both are always relevant); cap the plain activity rows so a busy multi-repo account
   // doesn't render thousands of them.
-  const alwaysRows = items.filter((i) => i.isMyTurn || i.kind === 'claude_review');
-  const feedRows = items
+  const alwaysRows = scoped.filter((i) => i.isMyTurn || i.kind === 'claude_review');
+  const feedRows = scoped
     .filter((i) => !i.isMyTurn && i.kind !== 'claude_review')
     .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
     .slice(0, FEED_EVENT_CAP);

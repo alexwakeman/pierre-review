@@ -199,6 +199,24 @@ export function useSetClaudeKey(prId: number) {
   });
 }
 
+// Non-PR-scoped key status + setter for the Settings modal (which manages the BYO Anthropic
+// key outside any PR context). Setting invalidates BOTH the global key-status query AND every
+// per-PR claude-review query so any open review tab reflects the change.
+export function useClaudeKeyStatus() {
+  return useQuery({ queryKey: ['claude-key-status'], queryFn: () => api.claudeKeyStatus() });
+}
+
+export function useSetClaudeKeyGlobal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => api.setClaudeKey(key),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['claude-key-status'] });
+      void qc.invalidateQueries({ queryKey: ['claude-review'] });
+    },
+  });
+}
+
 // Set or clear the per-review budget cap, then refetch the review so the displayed
 // value reflects the (server-clamped) result.
 export function useSetReviewBudget(prId: number) {

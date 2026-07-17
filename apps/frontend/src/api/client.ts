@@ -27,6 +27,7 @@ import type {
   ClaudeReviewResponse,
   ClaudeReviewStatusResponse,
   ClaudeReviewVerdict,
+  ClaudeKeyStatusResponse,
   ReviewBudgetResponse,
   CreatePrCommentBody,
   CreatePrCommentResult,
@@ -454,6 +455,9 @@ export const api = {
     fetch('/api/claude-review/key', jsonBody('PUT', { key })).then((r) =>
       handle<ClaudeKeyResponse>(r),
     ),
+  // Non-PR read of whether a local Anthropic key is stored (for the Settings modal).
+  claudeKeyStatus: () =>
+    get<ClaudeKeyStatusResponse>('/api/claude-review/key'),
   // Set (a number, clamped server-side) or clear (null → operator default) the local
   // per-review budget cap.
   setReviewBudget: (usd: number | null) =>

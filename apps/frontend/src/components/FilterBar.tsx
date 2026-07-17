@@ -252,15 +252,12 @@ export function FilterBar(): JSX.Element {
       {/* The board filters. Always live — focus is a separate tab now, not an overlay
           that locks the board. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {/* Team scope: pick All repos / All Teams / a team / No team. Repo management (add/
-            remove/assign to teams) lives in the Activity console's "Manage repos & teams" panel.
-            On the Activity console the rail has its OWN TeamSelector, so this header one is hidden
-            there — it's the Timeline view's scope control. */}
-        {!isActivity && (
-          <Section>
-            <TeamSelector />
-          </Section>
-        )}
+        {/* Team scope: pick All repos / All Teams / a team / No team; repo/team management
+            lives inside this dropdown. Shown on EVERY view (Timeline + Activity/Insights) — the
+            single scope control, so the Activity rail no longer carries its own. */}
+        <Section>
+          <TeamSelector />
+        </Section>
 
         <Section>
           <UserSelectPanel

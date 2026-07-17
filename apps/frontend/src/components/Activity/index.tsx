@@ -13,8 +13,6 @@ import { RepoInsightsPanel } from './RepoInsightsPanel.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
 import { InsightsView } from './InsightsView.js';
-import { TeamManager } from './TeamManager.js';
-import { TeamSelector } from '../TeamSelector.js';
 
 // One-shot per page load: when Pro Insights is available, it becomes the DEFAULT landing
 // rail entry (and it's rendered first). Module-scoped so it survives ActivityView
@@ -250,16 +248,8 @@ export function ActivityView(): JSX.Element {
         {/* No manual Refresh: the console tracks the WATCHED set live — watch/add/sync all
             invalidate the Activity/Insights queries (ACTIVITY_QUERY_KEYS), and the feed has its
             own "new activity" banner — so there's nothing to refresh by hand. */}
-        <div className="flex flex-col gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              State of play
-            </span>
-            <TeamManager />
-          </div>
-          {/* Scope the whole console to a team (mirrors the FilterBar's TeamSelector). */}
-          <TeamSelector />
-        </div>
+        {/* The team scope selector + "Manage repos & teams" now live in the header's
+            TeamSelector (shown on every view), so the rail no longer carries its own header. */}
         {generatedAt != null && (
           <div
             className="px-3 py-1 text-[10px] text-gray-400"
@@ -410,7 +400,7 @@ export function ActivityView(): JSX.Element {
               repoFullName={selectedRepo.repoFullName}
             />
             {/* All the repo's open PRs (at-a-glance metrics) BEFORE its activity feed. */}
-            <RepoOpenPrList prs={selectedRepo.prs} repoFullName={selectedRepo.repoFullName} />
+            <RepoOpenPrList prs={selectedRepo.prs} />
             <FeedView repoId={selectedRepo.repoId} />
           </div>
         ) : (

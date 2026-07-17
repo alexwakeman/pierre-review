@@ -4,6 +4,7 @@ import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { resolveScopeRepoIds, useTeams } from '../hooks/useTeams.js';
 import { useFilters } from '../store/filters.js';
+import { TeamManagerModal } from './Activity/TeamManager.js';
 
 // Order-insensitive nullable-set equality (null = "all", distinct from []).
 function sameIds(a: number[] | null, b: number[] | null): boolean {
@@ -52,6 +53,9 @@ export function TeamSelector(): JSX.Element {
   const { data: teams } = useTeams();
   const { data: repos } = useRepos();
   const [open, setOpen] = useState(false);
+  // Repo/team management now lives INSIDE this dropdown (no separate rail button) — an
+  // entry at the bottom opens the full management modal.
+  const [manageOpen, setManageOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   // Keep repoIds resolved as teams load / change (see the hook above).
@@ -151,8 +155,29 @@ export function TeamSelector(): JSX.Element {
           >
             <span className="truncate">No team</span>
           </button>
+          <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+          {/* Repo/team management — add/remove repos, create teams, assign repos to them. */}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setManageOpen(true);
+            }}
+            title="Add or remove repos, create teams, and assign repos to them"
+            className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            <span aria-hidden>⚙</span>
+            <span className="truncate">Manage repos &amp; teams</span>
+            {(teams ?? []).length > 0 && (
+              <span className="ml-auto shrink-0 tabular-nums text-[10px] text-gray-400">
+                {(teams ?? []).length}
+              </span>
+            )}
+          </button>
         </div>
       )}
+      {manageOpen && <TeamManagerModal onClose={() => setManageOpen(false)} />}
     </div>
   );
 }
