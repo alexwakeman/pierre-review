@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ConsolidatedFeedItem } from '@pierre-review/shared';
-import { coalesceReviewComments } from './queries.js';
+import { coalesceEventComments } from './queries.js';
 
 // Minimal ConsolidatedFeedItem factory — only the fields the coalescing pass reads matter;
 // everything else is filled with an inert default so the shape stays exhaustive.
@@ -40,7 +40,7 @@ function item(over: Partial<ConsolidatedFeedItem> & Pick<ConsolidatedFeedItem, '
 
 function run(items: ConsolidatedFeedItem[]): ConsolidatedFeedItem[] {
   const byId = new Map(items.map((i) => [i.id, i]));
-  coalesceReviewComments(items, byId);
+  coalesceEventComments(items, byId);
   // byId must stay consistent with the surviving items.
   expect([...byId.keys()].sort()).toEqual(items.map((i) => i.id).sort());
   return items;
@@ -48,7 +48,7 @@ function run(items: ConsolidatedFeedItem[]): ConsolidatedFeedItem[] {
 
 const T = (min: number): string => new Date(Date.parse('2026-07-07T12:00:00.000Z') + min * 60_000).toISOString();
 
-describe('coalesceReviewComments', () => {
+describe('coalesceEventComments', () => {
   it('folds a same-actor PR comment posted within 5 min into the review', () => {
     const items = run([
       item({ id: 'r', kind: 'review_submitted', reviewState: 'approved', occurredAt: T(0), content: 'LGTM' }),
@@ -108,11 +108,42 @@ describe('coalesceReviewComments', () => {
     expect(rB.mergedComments.map((c) => c.commentId)).toEqual([9]);
   });
 
-  it('leaves a standalone comment (no nearby review) as its own row', () => {
+  it('leaves a standalone comment as its own row when the only nearby event is not a host', () => {
+    // pr_opened is NOT a fold host — "Comment" alone doesn't create it — so the comment stays.
     const items = run([
       item({ id: 'c', kind: 'pr_comment', commentId: 9, occurredAt: T(0) }),
       item({ id: 'o', kind: 'pr_opened', occurredAt: T(1) }),
     ]);
     expect(items.map((i) => i.id).sort()).toEqual(['c', 'o']);
+  });
+
+  it('folds a "Comment and close" comment into the pr_closed card', () => {
+    const items = run([
+      item({ id: 'x', kind: 'pr_closed', occurredAt: T(0) }),
+      item({ id: 'c', kind: 'pr_comment', commentId: 7, occurredAt: T(0), content: 'closing — superseded' }),
+    ]);
+    expect(items.map((i) => i.id)).toEqual(['x']);
+    expect(items[0]!.mergedComments).toEqual([
+      { commentId: 7, content: 'closing — superseded', occurredAt: T(0) },
+    ]);
+  });
+
+  it('folds a "Comment and merge" comment into the pr_merged card', () => {
+    const items = run([
+      item({ id: 'm', kind: 'pr_merged', occurredAt: T(1) }),
+      item({ id: 'c', kind: 'pr_comment', commentId: 8, occurredAt: T(0), content: 'merging, thanks!' }),
+    ]);
+    expect(items.map((i) => i.id)).toEqual(['m']);
+    expect(items[0]!.mergedComments.map((c) => c.commentId)).toEqual([8]);
+  });
+
+  it('prefers a review over a lifecycle host when a comment is equidistant from both', () => {
+    const items = run([
+      item({ id: 'x', kind: 'pr_closed', occurredAt: T(0) }),
+      item({ id: 'r', kind: 'review_submitted', occurredAt: T(4) }),
+      item({ id: 'c', kind: 'pr_comment', commentId: 9, occurredAt: T(2) }), // 2 min from each
+    ]);
+    expect(items.find((i) => i.id === 'x')!.mergedComments).toEqual([]);
+    expect(items.find((i) => i.id === 'r')!.mergedComments.map((c) => c.commentId)).toEqual([9]);
   });
 });

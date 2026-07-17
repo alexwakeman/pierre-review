@@ -1931,22 +1931,36 @@ export async function getActivity(
 // the most recent, so a busy multi-repo account doesn't render thousands of them.
 const FEED_EVENT_CAP = 250;
 
-// A submitted review and the same actor's top-level PR comment(s) on the same PR are folded
-// into ONE card when they land within this window of each other (issue comments carry no head
-// SHA, so time is the only proxy for "posted together"). Symmetric around the review's time.
-const REVIEW_COMMENT_MERGE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+// A top-level PR comment and a coinciding "host" event by the SAME actor on the SAME PR are
+// folded into ONE card when they land within this window of each other (issue comments carry
+// no head SHA, so time is the only proxy for "posted together"). Symmetric around the host.
+const COMMENT_MERGE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
-// Fold each actor's near-in-time top-level PR comment(s) INTO their review on the same PR
-// (appending to the review's `mergedComments`) and remove those comment rows from `items` +
-// `byId`, IN PLACE. A comment with no review within the window keeps its own row; a comment
-// is claimed by its NEAREST review, so two reviews in one window don't both grab it. This is
-// what collapses "submit a review, then drop a summary comment" into a single feed card.
-// Exported for unit tests (pure over the item arrays).
-export function coalesceReviewComments(
+// The events a PR comment can fold INTO: a submitted review (approve / comment / request-
+// changes) OR a lifecycle action taken WITH a comment — GitHub's "Comment and close" /
+// "Comment and merge" post the comment and the close/merge as separate objects at the same
+// instant, which otherwise read as two feed cards. The number ranks hosts for the rare tie
+// where a comment is equidistant from two (a review is the richest headline, then merge,
+// then close).
+const HOST_PRIORITY: Record<string, number> = {
+  review_submitted: 0,
+  pr_merged: 1,
+  pr_closed: 2,
+};
+const hostPriority = (kind: string): number => HOST_PRIORITY[kind] ?? 99;
+const isCommentHost = (kind: string): boolean => kind in HOST_PRIORITY;
+
+// Fold each actor's near-in-time top-level PR comment(s) INTO their coinciding host event on
+// the same PR (appending to the host's `mergedComments`) and remove those comment rows from
+// `items` + `byId`, IN PLACE. A comment with no host within the window keeps its own row; a
+// comment is claimed by its NEAREST host (host-priority breaks the rare tie), so two hosts in
+// one window don't both grab it. This collapses "approve + summary comment", "close + why",
+// and "merge + note" into a single feed card. Exported for unit tests (pure over the arrays).
+export function coalesceEventComments(
   items: ConsolidatedFeedItem[],
   byId: Map<string, ConsolidatedFeedItem>,
 ): void {
-  const reviewsByKey = new Map<string, ConsolidatedFeedItem[]>();
+  const hostsByKey = new Map<string, ConsolidatedFeedItem[]>();
   const commentsByKey = new Map<string, ConsolidatedFeedItem[]>();
   const bucketPush = (
     m: Map<string, ConsolidatedFeedItem[]>,
@@ -1960,23 +1974,28 @@ export function coalesceReviewComments(
   for (const it of items) {
     if (it.actorId == null || it.prId == null) continue;
     const key = `${it.actorId}:${it.prId}`;
-    if (it.kind === 'review_submitted') bucketPush(reviewsByKey, key, it);
+    if (isCommentHost(it.kind)) bucketPush(hostsByKey, key, it);
     else if (it.kind === 'pr_comment' && it.commentId != null) bucketPush(commentsByKey, key, it);
   }
-  if (reviewsByKey.size === 0 || commentsByKey.size === 0) return;
+  if (hostsByKey.size === 0 || commentsByKey.size === 0) return;
 
   const foldedIds = new Set<string>();
   for (const [key, comments] of commentsByKey) {
-    const reviews = reviewsByKey.get(key);
-    if (reviews == null) continue;
+    const hosts = hostsByKey.get(key);
+    if (hosts == null) continue;
     for (const comment of comments) {
       const ct = Date.parse(comment.occurredAt);
       let best: ConsolidatedFeedItem | null = null;
       let bestDist = Infinity;
-      for (const rev of reviews) {
-        const dist = Math.abs(Date.parse(rev.occurredAt) - ct);
-        if (dist <= REVIEW_COMMENT_MERGE_WINDOW_MS && dist < bestDist) {
-          best = rev;
+      for (const host of hosts) {
+        const dist = Math.abs(Date.parse(host.occurredAt) - ct);
+        if (dist > COMMENT_MERGE_WINDOW_MS) continue;
+        // Nearest wins; equidistant → the higher-priority host kind.
+        if (
+          dist < bestDist ||
+          (dist === bestDist && best != null && hostPriority(host.kind) < hostPriority(best.kind))
+        ) {
+          best = host;
           bestDist = dist;
         }
       }
@@ -1991,11 +2010,11 @@ export function coalesceReviewComments(
   }
   if (foldedIds.size === 0) return;
 
-  // Chronological within each review (a review can fold more than one comment).
-  for (const reviews of reviewsByKey.values())
-    for (const rev of reviews)
-      if (rev.mergedComments.length > 1)
-        rev.mergedComments.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+  // Chronological within each host (a host can fold more than one comment).
+  for (const hosts of hostsByKey.values())
+    for (const host of hosts)
+      if (host.mergedComments.length > 1)
+        host.mergedComments.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
 
   for (const id of foldedIds) byId.delete(id);
   const kept = items.filter((it) => !foldedIds.has(it.id));
@@ -3640,13 +3659,14 @@ export async function getConsolidatedFeed(
   // flow but always retained (see the caps below) so the "Claude Reviews" pill finds them.
   for (const it of claudeItems) push(it);
 
-  // Consolidate a submitted review + the SAME actor's top-level PR comment(s) on the SAME PR
-  // posted within a short window (issue comments carry no head SHA, so time is the proxy):
-  // fold the comment(s) into the review's `mergedComments` and drop their standalone rows, so
-  // "review, then a summary comment" reads as one card everywhere (including My Turn) instead
-  // of two. Runs BEFORE the my-turn enrich/cap/paginate so `total`, participation and page
-  // bounds reflect the collapsed set (a comment folded here is never separately flagged/capped).
-  coalesceReviewComments(items, byId);
+  // Consolidate a coinciding host event (a submitted review OR a close/merge) + the SAME
+  // actor's top-level PR comment(s) on the SAME PR posted within a short window (issue comments
+  // carry no head SHA, so time is the proxy): fold the comment(s) into the host's
+  // `mergedComments` and drop their standalone rows, so "review + summary comment", "close +
+  // why", and "merge + note" each read as one card everywhere (including My Turn) instead of
+  // two. Runs BEFORE the my-turn enrich/cap/paginate so `total`, participation and page bounds
+  // reflect the collapsed set (a comment folded here is never separately flagged/capped).
+  coalesceEventComments(items, byId);
 
   // "My Turn" enrichment (CORE / free): flag each item `isMyTurn` by the viewer's participation
   // in its PR. Runs BEFORE the cap so uncapped My-Turn rows survive.

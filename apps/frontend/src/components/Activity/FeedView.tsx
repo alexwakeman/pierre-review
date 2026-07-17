@@ -1313,9 +1313,10 @@ function FeedRowImpl({
           </div>
         )}
 
-        {/* Consolidated top-level PR comment(s) folded into this review (posted by the same
-            person around the same time) — shown as "Also commented" instead of separate feed
-            rows. Independent of the review body so a bare approval + comment still shows it. */}
+        {/* Consolidated top-level PR comment(s) folded into this card (posted by the same
+            person around the same time as this review / close / merge) — shown as "Also
+            commented" instead of separate feed rows. Independent of the card's own body, so a
+            bare approval + comment or a "Comment and close" still shows it. */}
         {item.mergedComments.length > 0 && (
           <div className="mt-1.5 space-y-1.5">
             {item.mergedComments.map((c) => (
