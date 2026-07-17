@@ -2597,11 +2597,12 @@ export interface ConsolidatedFeedItem {
   // null on every other kind.
   claudeReviewId: number | null;
   claudeVerdict: ClaudeReviewVerdict | null;
-  // Consolidated top-level PR comment(s) folded INTO a review_submitted item — the actor's
-  // issue-level comments posted within a short window of the review. When non-empty the
-  // review card is the headline (its verdict pill) and these render below as an "Also
-  // commented" block, INSTEAD of separate pr_comment rows. Chronological. Empty for every
-  // other kind / an un-coalesced review.
+  // Consolidated top-level PR comment(s) folded INTO a coinciding "host" event — a
+  // review_submitted OR a lifecycle action (pr_merged / pr_closed) — where the same actor
+  // posted the comment(s) within a short window (GitHub's "Comment and close/merge", or a
+  // review + summary comment). When non-empty the host card is the headline and these render
+  // below as an "Also commented" block, INSTEAD of separate pr_comment rows. Chronological.
+  // Empty for every other kind / an un-coalesced host.
   mergedComments: { commentId: number; content: string; occurredAt: string }[];
 }
 
