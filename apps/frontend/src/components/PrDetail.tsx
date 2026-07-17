@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { EventType, PrDetail as PrDetailT, User } from '@pierre-review/shared';
+import type { EventType, PrDetail as PrDetailT, ReviewState, User } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
 import { useMe, useProCapabilities } from '../hooks/useTriage.js';
 import { useRepos } from '../hooks/useTimeline.js';
@@ -267,10 +267,56 @@ function ActivityList({
   );
 }
 
-// Issue-level PR comments (distinct from inline review threads). Each maps to a
-// `pr_comment` timeline event whose refId is the comment row id, so "Show on
-// timeline" reuses the same (type, refId) + recenter mechanism as the Activity
-// tab.
+// A review that carries a body counts as a "PR comment" for the conversation view (the
+// note the reviewer wrote when submitting — a plain "Review: comment", or the summary
+// attached to an approval / change-request). Inline review-thread comments live in the
+// Threads tab, so they're NOT counted here.
+const reviewCommentCount = (pr: PrDetailT): number =>
+  pr.reviews.filter((r) => r.body != null && r.body.trim() !== '').length;
+
+// Small state pill next to a review author in the conversation, so an approval-with-note
+// reads differently from a plain review comment or a change request.
+const REVIEW_TAG: Record<ReviewState, { label: string; cls: string }> = {
+  approved: { label: 'approved', cls: 'bg-green-500/10 text-green-700 dark:text-green-400' },
+  changes_requested: {
+    label: 'changes requested',
+    cls: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+  },
+  commented: { label: 'review', cls: 'bg-sky-500/10 text-sky-700 dark:text-sky-400' },
+  dismissed: { label: 'dismissed', cls: 'bg-gray-500/10 text-gray-500' },
+  pending: { label: 'pending', cls: 'bg-gray-500/10 text-gray-500' },
+};
+
+function ReviewStateTag({ state }: { state: ReviewState }): JSX.Element {
+  const t = REVIEW_TAG[state];
+  return (
+    <span
+      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${t.cls}`}
+      title={`Review: ${state.replace('_', ' ')}`}
+    >
+      {t.label}
+    </span>
+  );
+}
+
+// One entry in the merged conversation: either an issue-level PR comment or a review
+// that carried a body. Both are sorted together chronologically so the pane reads like
+// the GitHub conversation, not two disjoint lists.
+type ConversationItem = {
+  kind: 'comment' | 'review';
+  id: number;
+  authorId: number | null;
+  body: string;
+  at: string;
+  url: string | null;
+  state?: ReviewState;
+};
+
+// The PR conversation: issue-level comments PLUS reviews that carry a body (a review
+// summary / "Review: comment"), merged chronologically. Comments map to a `pr_comment`
+// timeline event, reviews to `review_submitted`, so "Show on timeline" reuses the same
+// (type, refId) + recenter mechanism as the Activity tab. Inline review-thread comments
+// are the Threads tab's concern, not this list.
 function PrCommentsList({
   pr,
   usersById,
@@ -292,8 +338,9 @@ function PrCommentsList({
 }): JSX.Element {
   const cardRefs = useRef(new Map<number, HTMLDivElement>());
   const [flashId, setFlashId] = useState<number | null>(null);
-  // The comment whose expand-in-place reply composer is open (only one at a time).
-  const [replyingTo, setReplyingTo] = useState<number | null>(null);
+  // The item whose expand-in-place reply composer is open (only one at a time). Keyed by
+  // `${kind}:${id}` so a review id can't collide with a comment id.
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
 
   // Scroll to + flash the deep-linked comment once it's rendered, then consume the
   // request (the flash lives on its own state so consuming can't cancel it early).
@@ -312,7 +359,35 @@ function PrCommentsList({
     return () => clearTimeout(t);
   }, [flashId]);
 
-  if (pr.comments.length === 0) {
+  // Merge issue comments + reviews-with-body, oldest first — chronological reading order
+  // (matches the GitHub conversation; comments carry createdAt, reviews submittedAt).
+  const items: ConversationItem[] = [
+    ...pr.comments.map(
+      (c): ConversationItem => ({
+        kind: 'comment',
+        id: c.id,
+        authorId: c.authorId,
+        body: c.body,
+        at: c.createdAt,
+        url: c.url,
+      }),
+    ),
+    ...pr.reviews
+      .filter((r) => r.body != null && r.body.trim() !== '')
+      .map(
+        (r): ConversationItem => ({
+          kind: 'review',
+          id: r.id,
+          authorId: r.authorId,
+          body: r.body as string,
+          at: r.submittedAt,
+          url: r.url,
+          state: r.state,
+        }),
+      ),
+  ].sort((a, b) => a.at.localeCompare(b.at));
+
+  if (items.length === 0) {
     return (
       <div className="px-3 py-6 text-center text-sm text-gray-500">
         No PR comments on this PR.
@@ -320,80 +395,95 @@ function PrCommentsList({
     );
   }
 
-  // Oldest first — chronological reading order (matches the API's natural order).
-  const comments = [...pr.comments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-
   return (
     <div className="space-y-2 px-3 pb-3">
-      {comments.map((c) => {
-        const user = c.authorId != null ? usersById.get(c.authorId) : undefined;
-        const isNew = isNewComment(c.createdAt, viewedSince);
+      {items.map((it) => {
+        const user = it.authorId != null ? usersById.get(it.authorId) : undefined;
+        const isNew = isNewComment(it.at, viewedSince);
+        const isComment = it.kind === 'comment';
+        const rowKey = `${it.kind}:${it.id}`;
+        // Timeline focus/selection deep links target comment ids only (from the
+        // pr_comment popover); reviews don't participate, so they never register a
+        // cardRef or take the selected/flash styling.
+        const selected = isComment && it.id === selectedCommentId;
+        const flashing = isComment && it.id === flashId;
         return (
           <div
-            key={c.id}
-            ref={(el) => {
-              if (el) cardRefs.current.set(c.id, el);
-              else cardRefs.current.delete(c.id);
-            }}
+            key={rowKey}
+            ref={
+              isComment
+                ? (el) => {
+                    if (el) cardRefs.current.set(it.id, el);
+                    else cardRefs.current.delete(it.id);
+                  }
+                : undefined
+            }
             className={`rounded-md border px-2.5 py-2 ${
-              c.id === selectedCommentId
+              selected
                 ? 'border-amber-400 bg-amber-400/5'
                 : 'border-gray-200 dark:border-gray-800'
-            } ${isNew ? 'comment-new' : ''} ${
-              c.id === flashId ? 'activity-flash' : ''
-            }`}
+            } ${isNew ? 'comment-new' : ''} ${flashing ? 'activity-flash' : ''}`}
           >
             <div className="flex items-center gap-2 text-xs">
               <ShowOnTimeline
                 prId={pr.id}
-                at={c.createdAt}
-                event={{ type: 'pr_comment', refId: c.id }}
-                title="Show this comment on the timeline"
+                at={it.at}
+                event={
+                  isComment
+                    ? { type: 'pr_comment', refId: it.id }
+                    : { type: 'review_submitted', refId: it.id }
+                }
+                title={
+                  isComment
+                    ? 'Show this comment on the timeline'
+                    : 'Show this review on the timeline'
+                }
               />
               <span className="text-gray-300 dark:text-gray-600">·</span>
               <Avatar user={user} size={18} />
               <UserName
                 user={user}
-                fallbackId={c.authorId}
+                fallbackId={it.authorId}
                 repoId={pr.repoId}
                 className="font-semibold"
               />
-              <span className="text-gray-400" title={dateTime(c.createdAt)}>
-                {relativeTime(c.createdAt)}
+              {it.kind === 'review' && it.state != null && <ReviewStateTag state={it.state} />}
+              <span className="text-gray-400" title={dateTime(it.at)}>
+                {relativeTime(it.at)}
               </span>
               {isNew && <NewTag />}
             </div>
             <div className="mt-1 text-sm">
-              <Markdown>{c.body}</Markdown>
+              <Markdown>{it.body}</Markdown>
             </div>
             <div className="mt-2 flex items-center gap-3 pl-2 text-[11px]">
-              {replyingTo !== c.id && (
+              {replyingTo !== rowKey && (
                 <button
                   type="button"
-                  onClick={() => setReplyingTo(c.id)}
+                  onClick={() => setReplyingTo(rowKey)}
                   className="text-blue-500 hover:underline"
                 >
                   Reply
                 </button>
               )}
-              {c.url && (
+              {it.url && (
                 <a
-                  href={c.url}
+                  href={it.url}
                   target="_blank"
                   rel="noreferrer noopener"
                   className="text-blue-500 hover:underline"
                 >
-                  ↗ View comment on GitHub
+                  ↗ {isComment ? 'View comment on GitHub' : 'View review on GitHub'}
                 </a>
               )}
             </div>
-            {replyingTo === c.id && (
+            {replyingTo === rowKey && (
               <div className="mt-2">
                 <PrCommentComposer
                   prId={pr.id}
                   initialBody={buildQuotedReply(
-                    c.body,
-                    usersById.get(c.authorId ?? -1)?.githubLogin ?? null,
+                    it.body,
+                    usersById.get(it.authorId ?? -1)?.githubLogin ?? null,
                   )}
                   autoFocus
                   onCancel={() => setReplyingTo(null)}
@@ -751,8 +841,10 @@ export function PrDetail({
             <div className="border-t border-gray-200 dark:border-gray-800">
               <div className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
                 PR comments
-                {pr.comments.length > 0 && (
-                  <span className="ml-1 font-normal opacity-70">· {pr.comments.length}</span>
+                {pr.comments.length + reviewCommentCount(pr) > 0 && (
+                  <span className="ml-1 font-normal opacity-70">
+                    · {pr.comments.length + reviewCommentCount(pr)}
+                  </span>
                 )}
               </div>
               <PrCommentsList
