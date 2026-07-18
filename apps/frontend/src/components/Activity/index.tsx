@@ -14,6 +14,7 @@ import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
 import { InsightsView } from './InsightsView.js';
 import { BotsView } from './BotsView.js';
+import { FirstRunOnboarding } from './FirstRunOnboarding.js';
 
 // One-shot per page load: when Pro Insights is available, it becomes the DEFAULT landing
 // rail entry (and it's rendered first). Module-scoped so it survives ActivityView
@@ -294,6 +295,12 @@ export function ActivityView(): JSX.Element {
   // (add a repo vs. toggle Watch), so distinguish them in the empty state below.
   const noRepos = data != null && sorted.length === 0;
   const hasAnyRepo = (allRepos ?? []).length > 0;
+  // A genuine FIRST-RUN account: the repos list has LOADED and is empty (distinct from
+  // "still loading", where allRepos is undefined — we mustn't flash onboarding then). When
+  // true, first-run onboarding replaces the whole console body REGARDLESS of the selected rail
+  // entry (a zero-repo account must always reach it — bots/insights could otherwise win).
+  const reposLoaded = allRepos != null;
+  const noReposAtAll = reposLoaded && !hasAnyRepo;
 
   return (
     <div className="flex h-full min-h-0 flex-col md:flex-row">
@@ -440,7 +447,12 @@ export function ActivityView(): JSX.Element {
 
       {/* RIGHT DETAIL */}
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {showingBots ? (
+        {noReposAtAll ? (
+          // First-run: detect the viewer's recent repos + one-click watch. Hoisted above the
+          // rail-entry branches so a zero-repo account always lands here (a Pro account could
+          // otherwise auto-select Insights and never reach the empty state).
+          <FirstRunOnboarding />
+        ) : showingBots ? (
           // The CORE/free review-bot triage console (ROI panel + a bot-only feed). Scoped by the
           // FilterBar repos (the bot feed ignores the human-member filter); carries its own empty
           // states, so it renders even before any repo data loads.
@@ -454,8 +466,8 @@ export function ActivityView(): JSX.Element {
         ) : noRepos ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-400">
             {hasAnyRepo
-              ? 'No watched repos yet. Open the repos dropdown in the filter bar and toggle Watch on a repo to populate the Activity console.'
-              : 'No repos yet. Add a repo from the filter bar to populate the Activity console.'}
+              ? 'No watched repos yet. Open "Manage repos & teams" in the header and toggle Watch on a repo to populate the Activity console.'
+              : 'Detecting the repos you work on…'}
           </div>
         ) : showingFeed ? (
           <FeedView />

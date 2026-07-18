@@ -1543,6 +1543,16 @@ export interface RepoSearchResponse {
   cursor: string | null;
 }
 
+// The viewer's recently-active repositories, detected from their GitHub activity (recent
+// pushes + contributions), for the first-run onboarding "watch what you're working on"
+// picker. Already-added repos are filtered out; results are ordered most-recently-pushed
+// first. Sourced live from GitHub — never persisted. Reuses RepoSearchResult so the picker
+// rows render identically. Local sees whatever the `gh` token sees (private + org repos);
+// cloud sees whatever the OAuth/App token can read.
+export interface SuggestedReposResponse {
+  results: RepoSearchResult[];
+}
+
 export interface RepoSearchQuery {
   q: string;
   cursor?: string;

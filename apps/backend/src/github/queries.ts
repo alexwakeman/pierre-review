@@ -413,6 +413,69 @@ export const REPO_SEARCH_QUERY = /* GraphQL */ `
   }
 `;
 
+// The viewer's own recently-active repositories, for first-run onboarding ("watch the
+// repos you're working on"). Two complementary lists are folded into one round trip:
+// `repositories` (owned / collaborator / org-member repos the viewer can push to) and
+// `repositoriesContributedTo` (repos the viewer has committed / opened PRs / reviewed on
+// but may not own) — both ordered most-recently-pushed first. The route merges + dedupes
+// them by node id. Same repo fields as REPO_SEARCH_QUERY plus `pushedAt` (drives the merge
+// tie-break + final ordering). `viewer` + orgs mirror the search query so the route can
+// mark owned/member repos. No GraphQL variables → no `query`-reserved-name concern. Local's
+// broad `gh` token sees private + org repos; a scoped cloud token sees only what it can read.
+export const VIEWER_REPOS_QUERY = /* GraphQL */ `
+  query ViewerRepos {
+    viewer {
+      login
+      organizations(first: 100) {
+        nodes {
+          login
+        }
+      }
+      repositories(
+        first: 30
+        orderBy: { field: PUSHED_AT, direction: DESC }
+        affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]
+      ) {
+        nodes {
+          ...ViewerRepoFields
+        }
+      }
+      repositoriesContributedTo(
+        first: 30
+        includeUserRepositories: true
+        orderBy: { field: PUSHED_AT, direction: DESC }
+        contributionTypes: [COMMIT, PULL_REQUEST, PULL_REQUEST_REVIEW]
+      ) {
+        nodes {
+          ...ViewerRepoFields
+        }
+      }
+    }
+    rateLimit {
+      cost
+      remaining
+    }
+  }
+
+  fragment ViewerRepoFields on Repository {
+    id
+    name
+    nameWithOwner
+    description
+    url
+    isPrivate
+    stargazerCount
+    pushedAt
+    owner {
+      login
+      avatarUrl
+    }
+    pullRequests(states: OPEN) {
+      totalCount
+    }
+  }
+`;
+
 // Resolves whether an owner login is a User or an Organization, so an `owner/`
 // prefix search can pick the correct GitHub search qualifier (`org:` vs `user:`).
 // `__typename` is "User" | "Organization" | (null when the login doesn't exist).
@@ -671,4 +734,25 @@ export interface RepoSearchGqlResponse {
     organizations: { nodes: Array<{ login: string } | null> };
   };
   rateLimit: { remaining: number; resetAt: string; cost: number };
+}
+
+// A repo node from VIEWER_REPOS_QUERY — the search-repo shape plus `pushedAt`, used by the
+// route to dedupe the two node lists (keeping the max pushedAt) and order the result by recency.
+export interface GqlViewerRepo extends GqlSearchRepo {
+  pushedAt: string | null;
+}
+
+export interface ViewerReposGqlResponse {
+  viewer: {
+    login: string;
+    // Org nodes can come back null under a scoped token (missing read:org) — mirror the
+    // tolerance in RepoSearchGqlResponse.
+    organizations: { nodes: Array<{ login: string } | null> };
+    // Each `nodes` array can itself be null, and individual nodes can be null under a scoped
+    // GitHub-App token (cloud); a broad local `gh` PAT sees them all. The route null-drops the
+    // array and every node before reading any field.
+    repositories: { nodes: Array<GqlViewerRepo | null> | null };
+    repositoriesContributedTo: { nodes: Array<GqlViewerRepo | null> | null };
+  };
+  rateLimit: { cost: number; remaining: number };
 }

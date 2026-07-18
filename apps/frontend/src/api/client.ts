@@ -84,6 +84,7 @@ import type {
   ProSettingsUpdate,
   Repo,
   RepoSearchResponse,
+  SuggestedReposResponse,
   Team,
   TeamsResponse,
   ReplyResult,
@@ -172,6 +173,9 @@ export const api = {
         cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
       }`,
     ),
+  // The viewer's recently-active repositories (first-run onboarding). Detected from GitHub
+  // activity; already-added repos filtered out server-side; ordered most-recently-pushed first.
+  suggestedRepos: () => get<SuggestedReposResponse>('/api/repos/suggested'),
   addRepo: (body: CreateRepoBody) =>
     fetch('/api/repos', jsonBody('POST', body)).then((r) => handle<Repo>(r)),
   // Toggle "Watch for inbox" on a repo (inbox-only; does not affect timeline

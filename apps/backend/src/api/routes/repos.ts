@@ -3,6 +3,7 @@ import type {
   CreateRepoBody,
   RepoSearchResponse,
   RepoSearchResult,
+  SuggestedReposResponse,
 } from '@pierre-review/shared';
 import { getGraphqlClientFor } from '../../github/client.js';
 import { getAccessToken } from '../../auth/account.js';
@@ -10,10 +11,13 @@ import {
   OWNER_TYPE_QUERY,
   REPO_ID_QUERY,
   REPO_SEARCH_QUERY,
+  VIEWER_REPOS_QUERY,
   type GqlSearchRepo,
+  type GqlViewerRepo,
   type OwnerTypeResponse,
   type RepoIdResponse,
   type RepoSearchGqlResponse,
+  type ViewerReposGqlResponse,
 } from '../../github/queries.js';
 import { upsertRepo } from '../../sync/upsert.js';
 import {
@@ -228,6 +232,79 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       hasNextPage: resp.search.pageInfo.hasNextPage,
       cursor: resp.search.pageInfo.endCursor,
     };
+    return body;
+  });
+
+  // First-run onboarding: the viewer's recently-active repositories, detected from their
+  // GitHub activity (recent pushes + contributions). Same token idiom as /search; already-
+  // watched repos filtered out; mapped to the picker's RepoSearchResult shape and ordered
+  // most-recently-pushed first, capped at 30. Detail comes straight from GitHub — nothing
+  // persisted. Local's broad `gh` token surfaces private + org repos; a scoped cloud token
+  // surfaces only what it can read (both are handled by the same null-tolerant merge below).
+  app.get('/api/repos/suggested', async (req, reply) => {
+    const accountId = accountIdOf(req);
+    const client = getGraphqlClientFor(await getAccessToken(accountId));
+
+    let resp: ViewerReposGqlResponse;
+    try {
+      resp = await client(VIEWER_REPOS_QUERY);
+    } catch (err) {
+      reply.status(502);
+      return {
+        error: 'GitHubError',
+        message: err instanceof Error ? err.message : 'GitHub request failed',
+      };
+    }
+
+    const me = resp.viewer.login.toLowerCase();
+    const orgLogins = new Set(
+      resp.viewer.organizations.nodes
+        .filter((o): o is { login: string } => o != null)
+        .map((o) => o.login.toLowerCase()),
+    );
+
+    // Merge the two recency-ordered lists, deduping by repo node id and keeping the more
+    // recent pushedAt. Null node arrays (scoped token) and null nodes are dropped BEFORE any
+    // field read (ISO-8601 pushedAt strings compare lexically; a null pushedAt sorts last).
+    const byId = new Map<string, GqlViewerRepo>();
+    const merged = [
+      ...(resp.viewer.repositories.nodes ?? []),
+      ...(resp.viewer.repositoriesContributedTo.nodes ?? []),
+    ];
+    for (const n of merged) {
+      if (n == null || typeof n.id !== 'string') continue;
+      const existing = byId.get(n.id);
+      if (existing == null || (n.pushedAt ?? '') > (existing.pushedAt ?? '')) {
+        byId.set(n.id, n);
+      }
+    }
+
+    const watched = await getWatchedRepoNodeIds(accountId);
+    const results: RepoSearchResult[] = [...byId.values()]
+      .filter((n) => !watched.has(n.id))
+      // Most-recently-pushed first; a missing pushedAt sorts to the bottom.
+      .sort((a, b) => (b.pushedAt ?? '').localeCompare(a.pushedAt ?? ''))
+      .slice(0, 30)
+      .map((n) => {
+        const ownerLogin = n.owner.login;
+        return {
+          githubNodeId: n.id,
+          owner: ownerLogin,
+          name: n.name,
+          fullName: n.nameWithOwner,
+          description: n.description,
+          ownerAvatarUrl: n.owner.avatarUrl,
+          stargazerCount: n.stargazerCount,
+          openPrCount: n.pullRequests.totalCount,
+          url: n.url,
+          isPrivate: n.isPrivate,
+          isOwnedOrMember:
+            ownerLogin.toLowerCase() === me ||
+            orgLogins.has(ownerLogin.toLowerCase()),
+        };
+      });
+
+    const body: SuggestedReposResponse = { results };
     return body;
   });
 
