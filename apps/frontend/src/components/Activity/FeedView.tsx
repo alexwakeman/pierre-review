@@ -18,7 +18,7 @@ import {
 } from '../../hooks/useConsolidatedFeed.js';
 import { useDetectedReviewers, useReviewerOverride } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
-import { useProCapabilities, useOpenPrs } from '../../hooks/useTriage.js';
+import { useProCapabilities, useSearchOpenPrs } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
@@ -187,9 +187,6 @@ export function FeedView({
   // addressed / Resolved). Also drops the open-PRs panel + the cross-repo "seen" marker.
   botsMode?: boolean;
 }): JSX.Element {
-  const userIds = useFilters((s) => s.userIds);
-  const excludeBots = useFilters((s) => s.excludeBots);
-  const allowedBotIds = useFilters((s) => s.allowedBotIds);
   const repoIdsFilter = useFilters((s) => s.repoIds);
   const feedMyTurnOnly = useFilters((s) => s.feedMyTurnOnly);
   const toggleFeedMyTurnOnly = useFilters((s) => s.toggleFeedMyTurnOnly);
@@ -246,8 +243,7 @@ export function FeedView({
 
   // A selected rail repo scopes the feed to just that repo; otherwise the cross-repo feed
   // FOLLOWS the FilterBar repo selection (which the team-scope picker drives): a `repoIds`
-  // of null → the backend resolves all-watched, a concrete list → just those repos. The bots
-  // toggle + allow-list still flow in.
+  // of null → the backend resolves all-watched, a concrete list → just those repos.
   const effectiveRepoIds = repoId != null ? [repoId] : repoIdsFilter;
 
   // Single-PR isolation applies to BOTH the cross-repo feed (the team-grouped "open PRs"
@@ -255,8 +251,9 @@ export function FeedView({
   // the feed to that PR. `setActivityRepo` clears it when switching rails, so it never leaks
   // across repos.
   const isolatedPrId = feedIsolatedPrId;
-  // Resolve the isolated PR (shared open-PRs cache) for the active-filter banner's label.
-  const { data: openPrsData } = useOpenPrs();
+  // Resolve the isolated PR for the active-filter banner's label. The member-AGNOSTIC
+  // open-PRs cache (shared with FeedOpenPrsPanel) — Members is a Timeline-only filter.
+  const { data: openPrsData } = useSearchOpenPrs();
   const isolatedPr =
     isolatedPrId != null
       ? (openPrsData?.prs.find((p) => p.id === isolatedPrId) ?? null)
@@ -275,19 +272,15 @@ export function FeedView({
     }
   }, [repoId, botsMode, markFeedSeen]);
 
-  // The Bots pane is a bot-ONLY view, so the backend must NOT drop bot activity — force
-  // excludeBots off there regardless of the FilterBar's exclude-bots toggle (otherwise the bot
-  // feed would come back empty whenever a member filter has bots excluded). It also drops the
-  // MEMBER (userIds) filter: that filters by actor, and bots aren't human members, so a narrowed
-  // member selection would otherwise empty the bot feed. The repo scope still applies.
-  const effectiveExcludeBots = botsMode ? false : excludeBots;
-  const effectiveUserIds = botsMode ? null : userIds;
+  // Members + the header exclude-bots toggle/allow-list are TIMELINE-only filters — the feed
+  // never sends them (userIds → null, excludeBots/allowedBotIds omitted). Bot filtering here
+  // is Activity-native only: the feedBotLens pills (client-side) and botsMode (server-side).
+  // useConsolidatedFeed and useFeedHasNew below MUST share identical scope inputs, or the
+  // "New activity" banner false-fires against a differently-scoped head.
   const { items, users, total, counts, latestId, isLoading, hasMore, loadMore, isFetchingMore } =
     useConsolidatedFeed({
       repoIds: effectiveRepoIds,
-      userIds: effectiveUserIds,
-      excludeBots: effectiveExcludeBots,
-      allowedBotIds,
+      userIds: null,
       prId: isolatedPrId,
       // Bot pane: the backend filters to automated reviewers IN SQL (before the cap), so the
       // feed spans the full window of bot activity instead of a bot-slice of a capped page.
@@ -300,9 +293,7 @@ export function FeedView({
   const rootRef = useRef<HTMLDivElement>(null);
   const { hasNew, refresh: refreshFeed } = useFeedHasNew({
     repoIds: effectiveRepoIds,
-    userIds: effectiveUserIds,
-    excludeBots: effectiveExcludeBots,
-    allowedBotIds,
+    userIds: null,
     prId: isolatedPrId,
     botsOnly: botsMode,
     loadedLatestId: latestId,

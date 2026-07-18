@@ -174,7 +174,6 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
 // no AI (the only Pro surface is the per-repo digest banner inside RepoFeedHeader).
 export function ActivityView(): JSX.Element {
   useStalenessTick();
-  const userIds = useFilters((s) => s.userIds);
   const teamScope = useFilters((s) => s.teamScope);
   const repoIds = useFilters((s) => s.repoIds);
   const activityRepoId = useFilters((s) => s.activityRepoId);
@@ -182,10 +181,11 @@ export function ActivityView(): JSX.Element {
   const { teamInsights } = useProCapabilities();
   // Scope the aggregate to the active TEAM: 'all' → null (every watched repo), a team → its
   // teamScope-derived repoIds (kept in lockstep by setTeamScope / useTeamScopeSync). Members
-  // still narrow it further. When 'all' the backend resolves the whole watched set, so the rail
-  // + "new activity" check reflect the whole team, not just one repo.
+  // is a TIMELINE-only filter, so it never narrows the console (userIds → null). When 'all'
+  // the backend resolves the whole watched set, so the rail + "new activity" check reflect
+  // the whole team, not just one repo.
   const scopeRepoIds = teamScope === 'all' ? null : repoIds;
-  const { data, isFetching, isLoading } = useActivity(scopeRepoIds, userIds);
+  const { data, isFetching, isLoading } = useActivity(scopeRepoIds, null);
   const { data: allRepos } = useRepos();
   // In All-Teams scope the rail is grouped by team (a repo in several teams shows under each).
   const { data: teams } = useTeams();

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Team, TeamScope, TimelinePr } from '@pierre-review/shared';
-import { useOpenPrs } from '../../hooks/useTriage.js';
+import { useSearchOpenPrs } from '../../hooks/useTriage.js';
 import { useTeams } from '../../hooks/useTeams.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
@@ -44,7 +44,9 @@ function groupOpenPrsByTeam(prs: TimelinePr[], teams: Team[], scope: TeamScope):
 // to that PR's items (toggle: click the selected one again to clear); the selected row is
 // highlighted, and FeedView shows the active-filter banner + Clear above the stream.
 export function FeedOpenPrsPanel(): JSX.Element | null {
-  const { data: openPrs } = useOpenPrs();
+  // Member-AGNOSTIC open PRs (repo scope still applies) — Members is a Timeline-only filter,
+  // so the Activity panel must not narrow by it (OpenPrsStrip's useOpenPrs stays member-scoped).
+  const { data: openPrs } = useSearchOpenPrs();
   const { data: teams } = useTeams();
   const { data: users } = useUsers();
   const teamScope = useFilters((s) => s.teamScope);

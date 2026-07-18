@@ -103,7 +103,7 @@ export function FilterBar(): JSX.Element {
 
   const f = useFilters();
 
-  // The Activity console only honours the repos selector + Members — Range / Status /
+  // The Activity console only honours the team/repos scope — Members / Range / Status /
   // Events / Threads are timeline-only, so on the Activity tab they (and the right-hand
   // Saved-Views / Clear-filters cluster) are hidden.
   const activeTab = usePinnedTabs((s) => s.activeTab);
@@ -259,22 +259,26 @@ export function FilterBar(): JSX.Element {
           <TeamSelector />
         </Section>
 
-        <Section>
-          <UserSelectPanel
-            sections={memberSections}
-            botSections={botSections}
-            userIds={f.userIds}
-            maintainerIds={maintainerIds}
-            onApply={(ids) => f.setUserIds(ids)}
-            excludeBots={f.excludeBots}
-            onExcludeBotsChange={f.setExcludeBots}
-            allowedBotIds={f.allowedBotIds}
-            onToggleAllowedBot={f.toggleAllowedBot}
-          />
-        </Section>
+        {/* Members is timeline-only too — Activity's queries ignore the member selection
+            (its bot filtering lives in the feed's own lens pills), so the panel hides there. */}
+        {!isActivity && (
+          <Section>
+            <UserSelectPanel
+              sections={memberSections}
+              botSections={botSections}
+              userIds={f.userIds}
+              maintainerIds={maintainerIds}
+              onApply={(ids) => f.setUserIds(ids)}
+              excludeBots={f.excludeBots}
+              onExcludeBotsChange={f.setExcludeBots}
+              allowedBotIds={f.allowedBotIds}
+              onToggleAllowedBot={f.toggleAllowedBot}
+            />
+          </Section>
+        )}
 
         {/* Status / Events / Threads / Range are timeline-only — hidden on Activity,
-            where only the repos selector + Members apply. */}
+            where only the team/repos scope applies. */}
         {!isActivity && (
           <Section>
             <StatusSelectPanel
@@ -332,7 +336,7 @@ export function FilterBar(): JSX.Element {
       </div>
 
       {/* Right cluster, pinned next to the timeline. Timeline-only filter management —
-          hidden on Activity (only repos + Members apply there). Clear filters stays usable
+          hidden on Activity (only the team/repos scope applies there). Clear filters stays usable
           even while a focus/PR tab is open (that's a separate tab, not a lock on the shared
           board). */}
       {!isActivity && (
