@@ -52,6 +52,7 @@ export function useProCapabilities(): ProCapabilities {
       claudeReview: false,
       slackDigest: false,
       issueLinks: false,
+      botTriage: false,
     }
   );
 }

@@ -119,8 +119,11 @@ function readFromUrl(): Partial<FilterState> {
   // in useUrlState). `activityThreadFilter` is intentionally URL-silent.
   const activityRepo = p.get('activityRepo');
   if (activityRepo) {
-    const n = Number.parseInt(activityRepo, 10);
-    if (Number.isFinite(n)) out.activityRepoId = n;
+    if (activityRepo === 'bots') out.activityRepoId = 'bots';
+    else {
+      const n = Number.parseInt(activityRepo, 10);
+      if (Number.isFinite(n)) out.activityRepoId = n;
+    }
   }
 
   // `open=1` means the user expanded the Open-PRs strip (non-default; default is
@@ -169,10 +172,12 @@ function writeToUrl(s: FilterState): void {
   // is emitted only for a single-repo console (the 'all' feed is the default).
   if (usePinnedTabs.getState().activeTab === 'activity') {
     p.set('view', 'activity');
-    // Only a single-repo console is deep-linkable; the 'all' / 'feed' pseudo-rows are
-    // defaults and stay out of the URL.
+    // A single-repo console and the CORE Bots console are deep-linkable; the 'feed' /
+    // 'insights' / 'retro' pseudo-rows are defaults and stay out of the URL.
     if (typeof s.activityRepoId === 'number') {
       p.set('activityRepo', String(s.activityRepoId));
+    } else if (s.activityRepoId === 'bots') {
+      p.set('activityRepo', 'bots');
     }
   }
 

@@ -13,6 +13,7 @@ import { RepoInsightsPanel } from './RepoInsightsPanel.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
 import { InsightsView } from './InsightsView.js';
+import { BotsView } from './BotsView.js';
 
 // One-shot per page load: when Pro Insights is available, it becomes the DEFAULT landing
 // rail entry (and it's rendered first). Module-scoped so it survives ActivityView
@@ -149,6 +150,9 @@ export function ActivityView(): JSX.Element {
   const showingFeed = activityRepoId === 'feed' || activityRepoId == null;
   const showingInsights = activityRepoId === 'insights';
   const showingRetro = activityRepoId === 'retro';
+  // The CORE/free review-bot triage console (BotsView) — always available (reads the core bot
+  // routes), independent of the Pro Insights caps.
+  const showingBots = activityRepoId === 'bots';
 
   // Make Insights the default view when Pro is available — but only once per page load, and
   // only from the pristine 'feed' default (never overriding a deep-linked repo or a choice
@@ -319,6 +323,27 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
+          {/* BOTS pseudo-row — "the calm layer above your review bots". CORE/free (reads the
+              deterministic bot routes), so it's ALWAYS shown, on every tier, no Pro gate. */}
+          <button
+            type="button"
+            onClick={() => setActivityRepo('bots')}
+            aria-pressed={showingBots}
+            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+              showingBots
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            title="Detect, measure, and triage your automated review bots (free)"
+          >
+            <span aria-hidden="true" className="shrink-0">
+              🤖
+            </span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+              Bots
+            </span>
+          </button>
+
           {teamScope === 'teams' ? (
             <>
               {teamGroups.map((g) => (
@@ -365,7 +390,12 @@ export function ActivityView(): JSX.Element {
 
       {/* RIGHT DETAIL */}
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {showingInsights ? (
+        {showingBots ? (
+          // The CORE/free review-bot triage console (ROI panel + a bot-only feed). Scoped by the
+          // FilterBar repos (the bot feed ignores the human-member filter); carries its own empty
+          // states, so it renders even before any repo data loads.
+          <BotsView />
+        ) : showingInsights ? (
           <InsightsView />
         ) : showingRetro ? (
           // Legacy/deep-linked 'retro' rail value now lands on the Retro sub-tab INSIDE

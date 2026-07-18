@@ -980,19 +980,25 @@ export interface FeedFilters {
   userIds?: number[] | null;
   // Legacy /api/feed IndexedDB-mirror semantics only: restrict to inbox-watched repos.
   watchedOnly?: boolean;
+  // Single-PR isolation: scope to this PR's events AND drop the `daysBefore` window (the
+  // scan is one PR, so its full history is cheap). Lets the Feed's per-PR filter show an
+  // old PR's opened event + all activity, not just the last `daysBefore` days.
+  prId?: number | null;
 }
 
 export async function getFeed(
   accountId: number,
   opts: FeedFilters = {},
 ): Promise<FeedResponse> {
-  const { daysBefore = 14, repoIds = null, userIds = null, watchedOnly = false } = opts;
-  const since = new Date(Date.now() - daysBefore * 24 * 60 * 60 * 1000);
+  const { daysBefore = 14, repoIds = null, userIds = null, watchedOnly = false, prId = null } = opts;
+  // Isolated to one PR → no time window (epoch 0); otherwise the rolling `daysBefore` window.
+  const since = prId != null ? new Date(0) : new Date(Date.now() - daysBefore * 24 * 60 * 60 * 1000);
   const conds: SQL[] = [
     eq(events.accountId, accountId),
     gte(events.occurredAt, since),
     ne(events.type, 'commit_pushed'),
   ];
+  if (prId != null) conds.push(eq(events.prId, prId));
   if (watchedOnly) conds.push(eq(repos.inboxWatch, true));
   if (repoIds) conds.push(inArray(events.repoId, repoIds));
   if (userIds && userIds.length > 0) conds.push(inArray(events.actorId, userIds));
@@ -2058,9 +2064,17 @@ const COMMIT_RUN_GAP_MS = 6 * 60 * 60 * 1000; // >6h between an author's commits
 
 async function getCommitThreadItems(
   accountId: number,
-  opts: { repoIds: number[] | null; userIds: number[] | null; botIds: Set<number>; since: Date },
+  opts: {
+    repoIds: number[] | null;
+    userIds: number[] | null;
+    botIds: Set<number>;
+    since: Date;
+    // Single-PR isolation (see getFeed): scope to this PR's commit rows. The caller widens
+    // `since` alongside it so the isolated view shows the PR's full thread-addressing history.
+    prId?: number | null;
+  },
 ): Promise<ConsolidatedFeedItem[]> {
-  const { repoIds, userIds, botIds, since } = opts;
+  const { repoIds, userIds, botIds, since, prId = null } = opts;
   const conds: SQL[] = [
     eq(events.accountId, accountId),
     eq(events.type, 'commit_pushed'),
@@ -2069,6 +2083,7 @@ async function getCommitThreadItems(
     isNotNull(events.prId),
     gte(events.occurredAt, since),
   ];
+  if (prId != null) conds.push(eq(events.prId, prId));
   if (repoIds) conds.push(inArray(events.repoId, repoIds));
   if (userIds && userIds.length > 0) conds.push(inArray(events.actorId, userIds));
   if (botIds.size > 0)
@@ -2319,6 +2334,8 @@ async function getClaudeReviewFeedItems(
   accountId: number,
   repoIds: number[] | null,
   since: Date,
+  // Single-PR isolation (see getFeed): scope to this PR's runs (with a widened `since`).
+  prId: number | null = null,
 ): Promise<ConsolidatedFeedItem[]> {
   if (!getProCapabilities().claudeReview) return [];
   const conds = [
@@ -2326,6 +2343,7 @@ async function getClaudeReviewFeedItems(
     eq(claudeReviews.status, 'succeeded'),
     gte(sql`coalesce(${claudeReviews.finishedAt}, ${claudeReviews.createdAt})`, tsBound(since)),
   ];
+  if (prId != null) conds.push(eq(claudeReviews.prId, prId));
   if (repoIds) conds.push(inArray(pullRequests.repoId, repoIds));
   const rows = await db
     .select({
@@ -3589,14 +3607,24 @@ export async function getConsolidatedFeed(
   const notBot = (id: number | null): boolean =>
     !excludeBots || id == null || !botIds.has(id);
 
-  const feedSince = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  // Isolated to a single PR (the Open-PRs filter) → show that PR's FULL history: scope every
+  // source to the PR and drop the 14-day window (epoch since). The scan is one PR, so it's
+  // cheap, and the reader sees the opened event + all activity even on a long-idle PR — not an
+  // empty pane. The un-isolated feed keeps the rolling 14-day window (a live activity stream).
+  const feedSince = prId != null ? new Date(0) : new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
   const [feed, commitItems, claudeItems] = await Promise.all([
-    getFeed(accountId, { daysBefore: 14, repoIds: effectiveRepoIds, userIds }),
+    getFeed(accountId, { daysBefore: 14, prId, repoIds: effectiveRepoIds, userIds }),
     // Commit-push activity that ADDRESSED a review thread (the only commit rows we surface
     // — plain pushes are noise). Each carries the affected threads inline.
-    getCommitThreadItems(accountId, { repoIds: effectiveRepoIds, userIds, botIds, since: feedSince }),
+    getCommitThreadItems(accountId, {
+      repoIds: effectiveRepoIds,
+      userIds,
+      botIds,
+      since: feedSince,
+      prId,
+    }),
     // Claude Review runs surfaced as their own feed item kind (local-only; empty in cloud).
-    getClaudeReviewFeedItems(accountId, effectiveRepoIds, feedSince),
+    getClaudeReviewFeedItems(accountId, effectiveRepoIds, feedSince, prId),
   ]);
 
   // The "My Turn" participation flag (isMyTurn / myTurnReasons / reasonTag) is CORE / free
@@ -3672,6 +3700,26 @@ export async function getConsolidatedFeed(
   // two. Runs BEFORE the my-turn enrich/cap/paginate so `total`, participation and page bounds
   // reflect the collapsed set (a comment folded here is never separately flagged/capped).
   coalesceEventComments(items, byId);
+
+  // Attach each thread-bearing item's review-thread derived state (untouched / replied /
+  // likely_addressed / resolved) — powers the Bots pane's state-filter pills. One query over
+  // the distinct thread ids referenced by this page's items; non-thread items stay null.
+  const feedThreadIds = [
+    ...new Set(items.map((i) => i.threadId).filter((t): t is number => t != null)),
+  ];
+  if (feedThreadIds.length > 0) {
+    const stateRows = await db
+      .select({ id: reviewThreads.id, derivedState: reviewThreads.derivedState })
+      .from(reviewThreads)
+      .where(inArray(reviewThreads.id, feedThreadIds))
+      .execute();
+    const stateById = new Map<number, DerivedState>(
+      stateRows.map((r) => [r.id, r.derivedState]),
+    );
+    for (const it of items) {
+      if (it.threadId != null) it.derivedState = stateById.get(it.threadId) ?? null;
+    }
+  }
 
   // "My Turn" enrichment (CORE / free): flag each item `isMyTurn` by the viewer's participation
   // in its PR. Runs BEFORE the cap so uncapped My-Turn rows survive.

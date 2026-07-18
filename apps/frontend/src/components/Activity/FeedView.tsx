@@ -4,6 +4,7 @@ import type {
   AutomatedReviewerKind,
   ClaudeReviewVerdict,
   ConsolidatedFeedItem,
+  DerivedState,
   EventType,
   FeedAffectedThread,
   ReviewerClassification,
@@ -38,6 +39,7 @@ import { Avatar } from '../CommentCard.js';
 import { MagnifierIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
+import { StateBadge } from '../StateBadge.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { FeedOpenPrsPanel } from './FeedOpenPrsPanel.js';
 
@@ -156,7 +158,25 @@ const FEED_OVERSCAN = 800;
 // Height estimate for a not-yet-measured row before the running average kicks in.
 const FEED_EST_ROW = 160;
 
-export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
+// The DERIVED-state pills shown in `botsMode` (the Bots pane's bot-only feed). Order mirrors
+// the timeline legend: needs-attention → in-progress → done.
+const BOT_STATE_ORDER: DerivedState[] = [
+  'untouched',
+  'replied_unresolved',
+  'likely_addressed',
+  'resolved',
+];
+
+export function FeedView({
+  repoId,
+  botsMode = false,
+}: {
+  repoId?: number;
+  // The Bots pane's bot-only feed: hard-filters to automated-reviewer activity and swaps the
+  // normal pill row for review-thread derived-state pills (Untouched / Replied / Likely
+  // addressed / Resolved). Also drops the open-PRs panel + the cross-repo "seen" marker.
+  botsMode?: boolean;
+}): JSX.Element {
   const userIds = useFilters((s) => s.userIds);
   const excludeBots = useFilters((s) => s.excludeBots);
   const allowedBotIds = useFilters((s) => s.allowedBotIds);
@@ -235,17 +255,25 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const markFeedSeen = useMarkFeedSeen();
   const markedSeenRef = useRef(false);
   useEffect(() => {
-    if (repoId == null && !markedSeenRef.current) {
+    // botsMode is a scoped bot-only view — it must NOT reset the cross-repo My-Turn "seen" marker.
+    if (repoId == null && !botsMode && !markedSeenRef.current) {
       markedSeenRef.current = true;
       markFeedSeen.mutate();
     }
-  }, [repoId, markFeedSeen]);
+  }, [repoId, botsMode, markFeedSeen]);
 
+  // The Bots pane is a bot-ONLY view, so the backend must NOT drop bot activity — force
+  // excludeBots off there regardless of the FilterBar's exclude-bots toggle (otherwise the bot
+  // feed would come back empty whenever a member filter has bots excluded). It also drops the
+  // MEMBER (userIds) filter: that filters by actor, and bots aren't human members, so a narrowed
+  // member selection would otherwise empty the bot feed. The repo scope still applies.
+  const effectiveExcludeBots = botsMode ? false : excludeBots;
+  const effectiveUserIds = botsMode ? null : userIds;
   const { items, users, total, latestId, isLoading, hasMore, loadMore, isFetchingMore } =
     useConsolidatedFeed({
       repoIds: effectiveRepoIds,
-      userIds,
-      excludeBots,
+      userIds: effectiveUserIds,
+      excludeBots: effectiveExcludeBots,
       allowedBotIds,
       prId: isolatedPrId,
     });
@@ -256,8 +284,8 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null);
   const { hasNew, refresh: refreshFeed } = useFeedHasNew({
     repoIds: effectiveRepoIds,
-    userIds,
-    excludeBots,
+    userIds: effectiveUserIds,
+    excludeBots: effectiveExcludeBots,
     allowedBotIds,
     prId: isolatedPrId,
     loadedLatestId: latestId,
@@ -276,6 +304,15 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
     (i: ConsolidatedFeedItem): boolean =>
       i.actorId != null && (usersById.get(i.actorId)?.isBot ?? false),
     [usersById],
+  );
+  // The Bots pane uses a WIDER definition than the bot lens: any isBot vendor OR an
+  // account-classified automated reviewer (in-house AI / Pierre — not always isBot-flagged), so
+  // "all bot activity" is surfaced, matching the per-row automated tag.
+  const isAutomatedActor = useCallback(
+    (i: ConsolidatedFeedItem): boolean =>
+      i.actorId != null &&
+      ((usersById.get(i.actorId)?.isBot ?? false) || classificationByUserId.has(i.actorId)),
+    [usersById, classificationByUserId],
   );
   const myTurnCount = useMemo(() => items.filter((i) => i.isMyTurn).length, [items]);
   const claudeCount = useMemo(
@@ -305,10 +342,46 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
     () => items.filter((i) => i.kind === 'review_comment' || i.kind === 'pr_comment').length,
     [items],
   );
+  // Bots pane: a review-thread DERIVED-state filter (a Set of selected states; empty = all).
+  // Local (not a store filter) — it only exists in the bot-only feed. Only thread-bearing bot
+  // items carry a derivedState; a non-thread bot item (a bot PR comment / review submit) drops
+  // out whenever any state pill is active.
+  const [botStateFilter, setBotStateFilter] = useState<Set<DerivedState>>(() => new Set());
+  const toggleBotState = useCallback((s: DerivedState): void => {
+    setBotStateFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
+  }, []);
+  // Per-state counts across all bot items (for the pill badges), independent of the active pills.
+  const botStateCounts = useMemo(() => {
+    const m = new Map<DerivedState, number>();
+    if (!botsMode) return m;
+    for (const i of items) {
+      if (!isAutomatedActor(i) || i.derivedState == null) continue;
+      m.set(i.derivedState, (m.get(i.derivedState) ?? 0) + 1);
+    }
+    return m;
+  }, [botsMode, items, isAutomatedActor]);
+  // Total automated-reviewer items (the Bots pane's "X of N" denominator).
+  const automatedCount = useMemo(
+    () => (botsMode ? items.filter(isAutomatedActor).length : 0),
+    [botsMode, items, isAutomatedActor],
+  );
+
   // "My Turn only" and "Claude Reviews only" are mutually-exclusive client-side filters (My
   // Turn is CORE / free, so it's always available). The category pills + the bot lens compose
-  // ON TOP of them.
+  // ON TOP of them. In botsMode the stream is hard-filtered to bot activity + the derived-state
+  // pills instead (the store lens/category/my-turn filters don't apply).
   const visible = useMemo(() => {
+    if (botsMode) {
+      const bots = items.filter(isAutomatedActor);
+      return botStateFilter.size === 0
+        ? bots
+        : bots.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState));
+    }
     const base = feedMyTurnOnly
       ? items.filter((i) => i.isMyTurn)
       : feedClaudeOnly
@@ -320,7 +393,7 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
       : feedBotLens === 'only'
         ? byCat.filter(isBotActor)
         : byCat;
-  }, [items, feedMyTurnOnly, feedClaudeOnly, feedBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor]);
+  }, [botsMode, botStateFilter, items, feedMyTurnOnly, feedClaudeOnly, feedBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor, isAutomatedActor]);
 
   // ── Vertical, variable-height windowing ─────────────────────────────────────────────
   // The feed accumulates unbounded across "Load more" pages, so rendering every card put
@@ -688,8 +761,8 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
           for every AI summary, with a single unified Refresh. It's no longer atop the Feed. */}
 
       {/* Cross-repo only: a collapsible panel of open PRs grouped by team; clicking a PR
-          isolates the feed to that PR (below). */}
-      {repoId == null && <FeedOpenPrsPanel />}
+          isolates the feed to that PR (below). Not in the Bots pane (a pure activity stream). */}
+      {repoId == null && !botsMode && <FeedOpenPrsPanel />}
 
       {/* Active single-PR filter — always visible while isolating (even with the panel
           collapsed), with a one-click Clear. */}
@@ -716,6 +789,45 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
         </div>
       )}
 
+      {/* Bots pane: review-thread derived-state pills (a bot-only feed). These replace the
+          normal My-Turn/Claude/category/bot-lens pills. Toggling multiple ORs them. */}
+      {botsMode ? (
+        <div className="flex flex-wrap items-center gap-2 px-0.5">
+          {BOT_STATE_ORDER.map((st) => {
+            const meta = DERIVED_STATE_META[st];
+            const on = botStateFilter.has(st);
+            const count = botStateCounts.get(st) ?? 0;
+            return (
+              <button
+                key={st}
+                type="button"
+                onClick={() => toggleBotState(st)}
+                aria-pressed={on}
+                className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                  on
+                    ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
+                    : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                }`}
+                title={meta.description}
+              >
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ background: meta.color }}
+                />
+                {meta.label}
+                {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
+              </button>
+            );
+          })}
+          {automatedCount > 0 && (
+            <span className="text-[11px] text-gray-400">
+              {visible.length} of {automatedCount}
+            </span>
+          )}
+        </div>
+      ) : (
+      <>
       {/* My Turn / Claude filter toggles + a "showing X of Y" hint. My Turn is CORE / free. */}
       <div className="flex items-center gap-2 px-0.5">
         <button
@@ -801,14 +913,22 @@ export function FeedView({ repoId }: { repoId?: number }): JSX.Element {
           </span>
         )}
       </div>
+      </>
+      )}
 
       {items.length === 0 ? (
         <div className="flex h-32 items-center justify-center text-sm text-gray-400">
-          Nothing to show yet — activity across your repos will appear here.
+          {botsMode
+            ? 'No bot activity yet — automated-reviewer activity across your repos will appear here.'
+            : 'Nothing to show yet — activity across your repos will appear here.'}
         </div>
       ) : visible.length === 0 ? (
         <div className="flex h-32 items-center justify-center text-sm text-gray-400">
-          {feedClaudeOnly
+          {botsMode
+            ? botStateFilter.size > 0
+              ? 'No bot activity matches these state filters.'
+              : 'No bot activity in this window.'
+            : feedClaudeOnly
             ? 'No Claude Reviews in this window.'
             : feedBotLens === 'only'
               ? 'No bot activity in this window.'
@@ -916,7 +1036,6 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
   // clickable affordance; the expanded conversation sits in a cursor-default wrapper so
   // its (non-interactive) content doesn't inherit the feed card's pointer cursor.
   if (thread.derivedState === 'resolved') {
-    const meta = DERIVED_STATE_META[thread.derivedState];
     const file = thread.path.split('/').pop() ?? thread.path;
     const count = thread.comments.length;
     return (
@@ -927,17 +1046,18 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
           aria-expanded={expanded}
           className="group/rt flex w-full cursor-pointer items-center gap-1.5 rounded border border-gray-200 bg-white/60 px-2 py-1 text-left text-[11px] hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
         >
-          <span
-            aria-hidden="true"
-            className="inline-block h-2 w-2 shrink-0 rounded-full"
-            style={{ background: meta.color }}
-          />
+          {/* The Resolved pill, anchored top-LEFT, stays visible while the thread is
+              collapsed — the reader knows it's resolved without expanding. Same pill the
+              expanded ThreadCard shows, so collapsed and expanded read uniformly. */}
+          <span className="shrink-0">
+            <StateBadge state={thread.derivedState} />
+          </span>
           <code className="truncate font-mono text-gray-600 group-hover/rt:text-sky-600 dark:text-gray-300">
             {file}
             {thread.line != null ? `:${thread.line}` : ''}
           </code>
           <span className="shrink-0 text-gray-400">
-            resolved · {count === 1 ? '1 comment' : `${count} comments`}
+            {count === 1 ? '1 comment' : `${count} comments`}
           </span>
           <span
             className={`ml-auto shrink-0 text-sky-600 dark:text-sky-400 ${
@@ -989,6 +1109,26 @@ function PrOpenedSummary({ prId }: { prId: number }): JSX.Element {
       <Markdown>{body}</Markdown>
     </div>
   );
+}
+
+// A PR-comment card whose STORED body is null (legacy lean-era rows never re-synced) renders
+// blank from item.content. Hydrate it on demand from the PR detail (the same fetch PR detail
+// uses — cached + deduped per PR, so a single-PR isolated feed does ONE fetch for all its
+// comments), matching by comment id. Falls back to a muted note if truly unavailable.
+function PrCommentBody({ prId, commentId }: { prId: number; commentId: number }): JSX.Element {
+  const { data: pr, isLoading } = usePr(prId);
+  if (isLoading) {
+    return <span className="text-xs text-gray-400">Loading comment…</span>;
+  }
+  const body = pr?.comments.find((c) => c.id === commentId)?.body?.trim();
+  if (!body) {
+    return (
+      <span className="text-xs italic text-gray-400">
+        Comment body unavailable — open the PR to view.
+      </span>
+    );
+  }
+  return <Markdown>{body}</Markdown>;
 }
 
 // Extra at-a-glance context on a "PR opened" card: CI rollup + changed-file count (both
@@ -1378,6 +1518,15 @@ function FeedRowImpl({
                 {expanded ? 'Show less' : 'Show more'}
               </button>
             )}
+          </div>
+        )}
+
+        {/* A PR-comment card whose stored body is null (legacy data): hydrate + render it on
+            demand so the card isn't blank (common in the single-PR isolated feed, which shows
+            full history). Only for issue-level PR comments with a comment id. */}
+        {isPrCommentCard && !hasBody && item.commentId != null && item.prId != null && (
+          <div className="mt-1.5 rounded bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50">
+            <PrCommentBody prId={item.prId} commentId={item.commentId} />
           </div>
         )}
 

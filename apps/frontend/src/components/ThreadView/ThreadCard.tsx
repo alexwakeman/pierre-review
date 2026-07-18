@@ -46,6 +46,10 @@ export function ThreadCard({
       }`}
     >
       <div className="mb-2 flex items-center gap-2 text-[11px] text-gray-400">
+        {/* State pill anchored top-LEFT on every thread card — so a resolved (or otherwise-
+            stateful) thread is legible at a glance without expanding it, and all thread cards
+            read uniformly. */}
+        <StateBadge state={thread.derivedState} />
         <ShowOnTimeline
           prId={thread.prId}
           at={thread.createdAt}
@@ -62,7 +66,6 @@ export function ThreadCard({
             threadId={thread.id}
             isResolved={thread.isResolved}
           />
-          <StateBadge state={thread.derivedState} />
         </span>
       </div>
 

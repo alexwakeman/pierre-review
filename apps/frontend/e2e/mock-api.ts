@@ -178,6 +178,7 @@ const ME_RESPONSE: MeResponse = {
     claudeReview: false,
     slackDigest: false,
     issueLinks: false,
+    botTriage: false,
   },
   authNotices: [],
 };

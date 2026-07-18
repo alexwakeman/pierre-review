@@ -704,9 +704,14 @@ export interface ProCapabilities {
   // Slack digest delivery (Pro): a per-account webhook receives the freshly-generated sprint +
   // repo digest on a cadence. The report is AI-generated (Haiku), so this mirrors activityDigest.
   slackDigest: boolean;
-  // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI, no env flag — on whenever the
-  // plugin is active locally, like activityDigest). Config (provider + base URL) lives in pro_settings.
+  // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI). Gated (like teamInsights) on
+  // PRO_DIGEST_ENABLED. Config (provider + base URL) lives in pro_settings.
   issueLinks: boolean;
+  // Review-bot triage tier — CORE/FREE. The Bots rail view reads the core bot routes and shows
+  // regardless; this flag is true whenever the plugin is LOADED (independent of the paid PRO_*
+  // flags) so the free bot Settings section + the ROI cost overlay (both pro_settings-backed)
+  // stay reachable. All-false only when the plugin is absent.
+  botTriage: boolean;
 }
 
 export interface MeResponse {
@@ -2564,6 +2569,11 @@ export interface ConsolidatedFeedItem {
   content: string | null;
   // Thread ("awaiting your reply") items only — for code anchor + thread-scoped nav.
   threadId: number | null;
+  // The review-thread derived state for thread-bearing items (kind 'review_comment' with a
+  // threadId) — 'untouched' | 'replied_unresolved' | 'likely_addressed' | 'resolved'. Powers
+  // the Bots pane's state-filter pills. Optional: undefined/null on non-thread items and on
+  // feeds that don't attach it.
+  derivedState?: DerivedState | null;
   // Issue-level PR-comment items (kind 'pr_comment') only: the comment id, so a click can
   // deep-link straight to + highlight that comment in the PR detail's Overview tab. null
   // on every other kind.

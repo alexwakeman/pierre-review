@@ -78,7 +78,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
               {caps.teamInsights && (
                 <SprintSection settings={settings} save={save} saving={mutation.isPending} />
               )}
-              {caps.teamInsights && (
+              {/* Review bots — FREE (botTriage is true whenever the plugin is loaded, even with
+                  the paid PRO_* flags off), so the bot settings stay reachable on a flag-less run. */}
+              {caps.botTriage && (
                 <BotSection settings={settings} save={save} saving={mutation.isPending} />
               )}
               {caps.slackDigest && (

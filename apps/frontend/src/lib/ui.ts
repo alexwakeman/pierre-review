@@ -11,6 +11,7 @@ import type {
   ReasonTag,
   ReviewBotKind,
   ThreadStateCounts,
+  TimelinePr,
   User,
 } from '@pierre-review/shared';
 import { AI_CREDITS_PER_USD, reviewBotKind } from '@pierre-review/shared';
@@ -168,6 +169,39 @@ export function prNeedsAttention(pr: {
   reasonTag: ReasonTag;
 }): boolean {
   return pr.isStalled || pr.threadCounts.untouched > 0 || ATTENTION_REASONS.has(pr.reasonTag);
+}
+
+// A PR's "volume of activity" proxy for the open-PR sort: how much discussion it has
+// accumulated (total review threads across every state — untouched + replied + likely-
+// addressed + resolved). Cheap (already on the lean TimelinePr) and monotonic in activity.
+export function prActivityVolume(pr: TimelinePr): number {
+  const c = pr.threadCounts;
+  return c.untouched + c.replied_unresolved + c.likely_addressed + c.resolved;
+}
+
+// Order a repo's / scope's OPEN PRs for the Activity console lists. Precedence:
+//   1. maintainer-authored first (prioritised so they land on the first page) —
+//      `isMaintainerAuthor(pr)` = the PR's author has merge rights in the PR's repo,
+//   2. recentness of activity (updatedAt, newest first),
+//   3. volume of activity (prActivityVolume, most first),
+//   4. PR number desc — a stable final tiebreak.
+// Returns a sorted COPY (never mutates the input). Both Activity open-PR lists share this
+// so the cross-repo Feed panel and the per-repo list order identically.
+export function sortOpenPrsByActivity(
+  prs: TimelinePr[],
+  isMaintainerAuthor: (pr: TimelinePr) => boolean,
+): TimelinePr[] {
+  return [...prs].sort((a, b) => {
+    const ma = isMaintainerAuthor(a) ? 0 : 1;
+    const mb = isMaintainerAuthor(b) ? 0 : 1;
+    if (ma !== mb) return ma - mb;
+    // ISO-8601 strings sort chronologically under localeCompare; reverse for newest-first.
+    const r = b.updatedAt.localeCompare(a.updatedAt);
+    if (r !== 0) return r;
+    const v = prActivityVolume(b) - prActivityVolume(a);
+    if (v !== 0) return v;
+    return b.number - a.number;
+  });
 }
 
 // CI rollup → dot colour + label. `null` when there are no checks at all.

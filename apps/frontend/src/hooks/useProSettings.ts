@@ -5,7 +5,9 @@ import { useProCapabilities } from './useTriage.js';
 
 // Whether the config modal has ANY section to show — the pro_settings-backed sections OR the
 // advanced-AI BYO Anthropic-key section. Used to gate the menu entry + the /api/pro/settings
-// fetch (which 404s without the plugin) so the free tier never calls it.
+// fetch (which 404s without the plugin) so the free tier never calls it. `botTriage` is true
+// whenever the plugin is loaded (even with the paid flags off), so the FREE "Review bots"
+// settings section keeps the modal reachable on a flag-less local run.
 export function useHasProSettings(): boolean {
   const caps = useProCapabilities();
   return (
@@ -14,7 +16,8 @@ export function useHasProSettings(): boolean {
     caps.slackDigest ||
     caps.issueLinks ||
     caps.claudeReview ||
-    caps.aiFix
+    caps.aiFix ||
+    caps.botTriage
   );
 }
 

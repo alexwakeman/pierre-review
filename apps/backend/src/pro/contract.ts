@@ -33,6 +33,10 @@ export interface ProCapabilities {
   claudeReview: boolean; // agentic Claude Review (Agent SDK; the product lives in the plugin)
   slackDigest: boolean; // Slack webhook delivery of the sprint + repo digest (Pro; mirrors activityDigest)
   issueLinks: boolean; // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI)
+  botTriage: boolean; // Review-bot triage tier — CORE/FREE, but its advanced settings + cost
+  // overlay are pro_settings-backed, so this flag is true whenever the plugin is loaded
+  // (regardless of the paid PRO_* flags). It gates the free bot Settings section + overlays,
+  // NOT the Bots rail view (that reads the core bot routes and shows even with no plugin).
 }
 
 // ---- AI Fix seams (github + coding) -------------------------------------------
@@ -600,6 +604,7 @@ export const EMPTY_CAPABILITIES: ProCapabilities = {
   claudeReview: false,
   slackDigest: false,
   issueLinks: false,
+  botTriage: false,
 };
 let active: ProCapabilities = EMPTY_CAPABILITIES;
 export function setProCapabilities(c: ProCapabilities): void {

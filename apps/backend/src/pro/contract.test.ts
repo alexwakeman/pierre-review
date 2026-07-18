@@ -18,6 +18,7 @@ const FULL: ProCapabilities = {
   claudeReview: true,
   slackDigest: true,
   issueLinks: true,
+  botTriage: true,
 };
 
 afterEach(() => {

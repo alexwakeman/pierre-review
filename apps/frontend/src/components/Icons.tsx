@@ -78,6 +78,31 @@ export function OctocatIcon({ size = 15, className, title }: IconProps): JSX.Ele
 }
 
 // External-link (arrow out of a box) — opens the entity on GitHub in a new tab.
+// "Open in its own tab" — a tabbed panel (window + tab strip), distinct from the
+// ExternalLinkIcon's ↗ (which means "open on GitHub"). Mirrors the app's PinnedTabsBar.
+export function NewTabIcon({ size = 13, className, title }: IconProps): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden={title == null ? true : undefined}
+      role={title != null ? 'img' : undefined}
+    >
+      {title != null && <title>{title}</title>}
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <line x1="3" y1="9" x2="21" y2="9" />
+      <line x1="8" y1="4" x2="8" y2="9" />
+    </svg>
+  );
+}
+
 export function ExternalLinkIcon({ size = 13, className, title }: IconProps): JSX.Element {
   return (
     <svg

@@ -7,18 +7,19 @@ import type {
   BotWindowKind,
 } from '@pierre-review/shared';
 import { useBotAnalytics, useAddBotMuteRule } from '../../hooks/useBotTriage.js';
-import { useProSettings } from '../../hooks/useProSettings.js';
+import { useProSettings, useHasProSettings } from '../../hooks/useProSettings.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
 import { automatedReviewerMeta } from '../../lib/ui.js';
 import { LineChart } from '../charts/LineChart.js';
 import { ChartCard, ChartEmpty, type Series } from '../charts/common.js';
 
-// Bot ROI / utilisation panel (WS3, PRO — gated on caps.teamInsights by the caller). The
-// analytics route itself is CORE + deterministic (no AI); this panel is the Pro surfacing:
-// a per-vendor signal-to-noise table + a 12-week thread-volume trend + keep/tune/kill
-// verdicts, plus the deterministic tuning suggestions with one-click mute-rule creation.
-// Cost is entered per-vendor in Pro settings (bots.cost) and overlaid CLIENT-side here
-// (getBotAnalytics returns cost fields null) → a $/acted-on-comment ROI figure.
+// Bot ROI / utilisation panel — CORE/FREE (rendered in the Bots rail console). The analytics
+// route is CORE + deterministic (no AI): a per-vendor signal-to-noise table + a 12-week
+// thread-volume trend + keep/tune/kill verdicts, plus the deterministic tuning suggestions with
+// one-click mute-rule creation. The ONLY plugin-backed bit is the per-vendor $ cost overlay
+// (entered in Settings → Review bots, stored in pro_settings, overlaid CLIENT-side here since
+// getBotAnalytics returns cost fields null); its fetch is gated on plugin presence so the pure
+// OSS path never calls /api/pro/settings (the cost column just shows "—").
 
 const WINDOWS: { key: BotWindowKind; label: string }[] = [
   { key: 'rolling_7', label: '7d' },
@@ -264,7 +265,9 @@ export function BotRoiPanel(): JSX.Element | null {
   // Respect the team-scope selector — scope is in the query key so a scope change refetches.
   const scope = scopeToParam(useFilters((s) => s.teamScope));
   const { data, isLoading, isError } = useBotAnalytics(window, true, scope);
-  const { data: settings } = useProSettings(true);
+  // Cost overlay is the one plugin-backed bit — gate the fetch on plugin presence so the OSS
+  // path never hits /api/pro/settings (which 404s without the plugin).
+  const { data: settings } = useProSettings(useHasProSettings());
 
   const costByKind = useMemo(
     () => new Map((settings?.bots.cost ?? []).map((c) => [c.kind, c.monthlyUsd])),
@@ -278,9 +281,6 @@ export function BotRoiPanel(): JSX.Element | null {
   const header = (
     <div className="flex flex-wrap items-center gap-2">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Review-bot ROI</h3>
-      <span className="rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
-        Pro
-      </span>
       <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
         {WINDOWS.map((wOpt) => (
           <button

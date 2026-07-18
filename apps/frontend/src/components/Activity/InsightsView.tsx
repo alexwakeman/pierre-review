@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AutomatedReviewerKind,
-  BotOnlyReviewCard,
   CiStatus,
   InsightCard,
   InsightPrRef,
@@ -15,7 +14,6 @@ import { useTeamInsights } from '../../hooks/useTeamInsights.js';
 import { usePr, useThread } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useRequestReviewers } from '../../hooks/usePrWrites.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
 import { automatedReviewerMeta, CI_META, indexUsers } from '../../lib/ui.js';
@@ -24,7 +22,6 @@ import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
 import { AiSummary } from '../AiSummary.js';
 import { ThreadCard } from '../ThreadView/index.js';
-import { BotRoiPanel } from './BotRoiPanel.js';
 import { RetroView } from './RetroView.js';
 import { SprintReportCard } from './SprintReportCard.js';
 import { PresetPromptPanel } from './PresetPromptPanel.js';
@@ -48,13 +45,14 @@ const KIND_LABEL: Record<InsightCard['kind'], string> = {
   reviewer_routing: 'Needs a reviewer',
 };
 
-// The insight-card kinds that belong to the Bots sub-tab (everything else is Overview).
+// The bot insight-card kinds — excluded from the Insights Overview. They now surface in the
+// CORE/free Bots rail console (BotsView), not here; they're still computed in core
+// getTeamInsights (feeding the Pro Slack block), just no longer rendered in Insights.
 const BOT_CARD_KINDS = new Set<InsightCard['kind']>(['bot_signal', 'bot_only_review']);
 
-type InsightsSubTab = 'overview' | 'bots' | 'sprint' | 'retro' | 'compare';
+type InsightsSubTab = 'overview' | 'sprint' | 'retro' | 'compare';
 const SUB_TABS: { key: InsightsSubTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
-  { key: 'bots', label: 'Bots' },
   { key: 'sprint', label: 'Sprint' },
   { key: 'retro', label: 'Retro' },
 ];
@@ -328,89 +326,6 @@ function PrLine({
   );
 }
 
-// "Only a bot reviewed this" governance risk (WS7): an aggregate list of PRs merged (or
-// open-and-mergeable) whose ONLY review came from an automated reviewer — no human ever
-// looked. A rubber-stamping-fatigue caution; each PR opens its detail tab. Deterministic.
-function BotOnlyReviewCardView({
-  card,
-  innerRef,
-  flash,
-  onOpen,
-}: {
-  card: BotOnlyReviewCard;
-  innerRef: (el: HTMLLIElement | null) => void;
-  flash: boolean;
-  onOpen: (meta: PinnedPr, returnItemId?: string) => void;
-}): JSX.Element {
-  return (
-    <CardShell
-      card={card}
-      innerRef={innerRef}
-      flash={flash}
-      right={`${card.prs.length} PR${card.prs.length === 1 ? '' : 's'}`}
-    >
-      <div className="text-sm text-gray-800 dark:text-gray-100">
-        🤖 Only a bot reviewed{' '}
-        <span className="font-semibold tabular-nums">{card.prs.length}</span> PR
-        {card.prs.length === 1 ? '' : 's'} — no human review
-      </div>
-      <ul className="mt-1.5 space-y-1">
-        {card.prs.map((p) => (
-          <li key={p.prId} className="flex min-w-0 items-baseline gap-1.5 text-[11px]">
-            <button
-              type="button"
-              onClick={() =>
-                onOpen(
-                  {
-                    id: p.prId,
-                    number: p.number,
-                    title: p.title,
-                    repoFullName: p.repoFullName,
-                    authorLogin: null,
-                    authorDisplayName: null,
-                    authorAvatarUrl: null,
-                  },
-                  card.id,
-                )
-              }
-              className="min-w-0 truncate text-left text-gray-600 hover:underline dark:text-gray-300"
-              title="Open this PR on its Overview tab"
-            >
-              <span className="text-gray-400">
-                {p.repoFullName} #{p.number}
-              </span>{' '}
-              {p.title}
-            </button>
-            <span className="shrink-0 rounded bg-gray-500/10 px-1 py-0.5 text-[10px] uppercase tracking-wide text-gray-500">
-              {p.state}
-            </span>
-            <span
-              className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
-              style={{ background: '#f59e0b1a' }}
-              title="The only review on this PR"
-            >
-              {p.botLabel}
-            </span>
-            <a
-              href={p.githubUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              onClick={(e) => e.stopPropagation()}
-              className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title="Open on GitHub"
-            >
-              ↗
-            </a>
-          </li>
-        ))}
-      </ul>
-      <div className="mt-2 text-[11px] text-gray-400">
-        A trust/safety hook — deterministic (no AI). Consider a human pass before these ship.
-      </div>
-    </CardShell>
-  );
-}
-
 export function InsightsView({
   initialSubTab,
 }: {
@@ -419,7 +334,6 @@ export function InsightsView({
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const selectThread = useFilters((s) => s.selectThread);
   const openMetricsDetail = useFilters((s) => s.openMetricsDetail);
-  const openBotPrsDetail = useFilters((s) => s.openBotPrsDetail);
   // The team-scope selector narrows the WHOLE panel: this one fetch feeds both the Overview
   // TeamMetricsPanel metrics AND every insight card (incl. the bot cards), so scoping it
   // scopes Overview + the Bots-tab cards. scope is in the query key → a scope change refetches.
@@ -476,7 +390,6 @@ export function InsightsView({
   };
 
   // ---- AI summaries: each card owns its OWN delta-gated regenerate (no unified Refresh) ----
-  const { teamInsights } = useProCapabilities();
   const [showUsage, setShowUsage] = useState(false);
 
   // Match the Feed's interaction model: the PR title opens the PR detail on its Overview
@@ -490,10 +403,9 @@ export function InsightsView({
   };
 
   const cards = data?.cards ?? [];
-  // Partition by kind: the Bots sub-tab owns bot_signal + bot_only_review; Overview owns
-  // the rest (stalled_review / untouched_thread / reviewer_load / reviewer_routing).
+  // Overview owns every NON-bot card (stalled_review / untouched_thread / reviewer_load /
+  // reviewer_routing); the bot cards moved to the free Bots console, so they're excluded here.
   const nonBotCards = cards.filter((c) => !BOT_CARD_KINDS.has(c.kind));
-  const botCards = cards.filter((c) => BOT_CARD_KINDS.has(c.kind));
 
   // The shared card-rendering switch — the same JSX for a card wherever it appears. A card
   // that isn't in the active sub-tab simply isn't in the DOM (and its ref is dropped), which
@@ -635,75 +547,6 @@ export function InsightsView({
             )}
           </CardShell>
         );
-      case 'bot_signal':
-        return (
-          <CardShell
-            key={card.id}
-            card={card}
-            innerRef={(el) => setCardRef(card.id, el)}
-            flash={flashId === card.id}
-            right={card.actedOnPct != null ? `${card.actedOnPct}% acted on` : undefined}
-          >
-            <div className="text-sm text-gray-800 dark:text-gray-100">
-              <span className="font-semibold tabular-nums">{card.totalThreads}</span>{' '}
-              review-bot thread{card.totalThreads === 1 ? '' : 's'} this sprint ·{' '}
-              <span className="tabular-nums">{card.totalUntouched}</span> untouched
-              {card.oldestUntouchedDays != null && card.totalUntouched > 0 && (
-                <>
-                  , oldest{' '}
-                  <span className="tabular-nums">{card.oldestUntouchedDays}</span>d
-                </>
-              )}
-            </div>
-            <ul className="mt-2 space-y-1">
-              {card.vendors.map((v) => {
-                // v.kind is AutomatedReviewerKind (vendor / in_house / pierre) — the
-                // kind-in-hand lookup handles all three.
-                const meta = automatedReviewerMeta(v.kind);
-                const pct = v.threads > 0 ? Math.round((v.actedOn / v.threads) * 100) : 0;
-                return (
-                  <li key={v.kind} className="flex flex-wrap items-center gap-x-2 text-[11px]">
-                    {/* Click a vendor → its Bot-PRs tab (the drill-down of every PR this
-                        automated reviewer touched in the window). */}
-                    <button
-                      type="button"
-                      onClick={() => openBotPrsDetail(v.kind)}
-                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:underline"
-                      style={{ color: meta.color, background: `${meta.color}1a` }}
-                      title="View this bot's PRs"
-                    >
-                      🤖 {meta.label}
-                    </button>
-                    <span className="tabular-nums text-gray-500">
-                      {v.threads} thread{v.threads === 1 ? '' : 's'}
-                    </span>
-                    <span className="text-gray-400">·</span>
-                    <span className="tabular-nums text-gray-500">{pct}% acted on</span>
-                    {v.untouched > 0 && (
-                      <span className="tabular-nums text-amber-600 dark:text-amber-400">
-                        · {v.untouched} untouched
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-            <div className="mt-2 text-[11px] text-gray-400">
-              “Acted on” = a later commit touched the flagged file (approximate).
-              Deterministic across every repo + bot — no AI.
-            </div>
-          </CardShell>
-        );
-      case 'bot_only_review':
-        return (
-          <BotOnlyReviewCardView
-            key={card.id}
-            card={card}
-            innerRef={(el) => setCardRef(card.id, el)}
-            flash={flashId === card.id}
-            onOpen={open}
-          />
-        );
       default:
         return null;
     }
@@ -722,8 +565,8 @@ export function InsightsView({
           <span className="text-[11px] text-gray-400">
             {/* Cadence-aware (matches the Flow-metrics caption below); default 14d when the
                 metrics window isn't available. */}
-            sprint: last {data.metrics?.sprintDays ?? 14}d · {cards.length} item
-            {cards.length === 1 ? '' : 's'}
+            sprint: last {data.metrics?.sprintDays ?? 14}d · {nonBotCards.length} item
+            {nonBotCards.length === 1 ? '' : 's'}
           </span>
         )}
         <div className="ml-auto flex items-center gap-1.5">
@@ -796,19 +639,6 @@ export function InsightsView({
           ) : (
             <ul className="space-y-2">{nonBotCards.map((card) => renderCard(card))}</ul>
           )}
-        </div>
-      ) : subTab === 'bots' ? (
-        <div className="space-y-3">
-          {/* Review-bot ROI / utilisation — a Pro drill-down atop the (core) bot cards.
-              The analytics route is core+deterministic; the panel is UI-gated on teamInsights.
-              It carries its own empty state, so the Bots tab never shows the generic
-              "nothing needs attention" block. */}
-          {teamInsights && <BotRoiPanel />}
-          {isError ? (
-            <div className="text-sm text-red-500">Couldn’t load insights.</div>
-          ) : botCards.length > 0 ? (
-            <ul className="space-y-2">{botCards.map((card) => renderCard(card))}</ul>
-          ) : null}
         </div>
       ) : subTab === 'sprint' ? (
         // The AI sprint digest (state of play), full width, followed by the one-click

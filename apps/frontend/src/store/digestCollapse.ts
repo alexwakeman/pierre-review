@@ -173,3 +173,41 @@ export const useFeedOpenPrsPanel = create<FeedOpenPrsPanelState>((set, get) => {
     },
   };
 });
+
+// The single-repo console's "Open PRs" list (above that repo's activity feed). COLLAPSED
+// BY DEFAULT — same treatment as the cross-repo Feed panel above — so the repo view opens
+// on its feed, with the open-PR list one click away. Its own persisted key, so collapsing
+// the repo list doesn't move the Feed panel and vice versa.
+const REPO_OPEN_PRS_KEY = 'pierre:repoOpenPrsPanel';
+
+function loadRepoOpenPrsCollapsed(): boolean {
+  try {
+    const raw = localStorage.getItem(REPO_OPEN_PRS_KEY);
+    if (raw == null) return true; // default: collapsed
+    return JSON.parse(raw) === true;
+  } catch {
+    return true;
+  }
+}
+
+export const useRepoOpenPrsPanel = create<FeedOpenPrsPanelState>((set, get) => {
+  const save = (collapsed: boolean): void => {
+    try {
+      localStorage.setItem(REPO_OPEN_PRS_KEY, JSON.stringify(collapsed));
+    } catch {
+      /* quota / private mode — non-fatal */
+    }
+  };
+  return {
+    collapsed: loadRepoOpenPrsCollapsed(),
+    setCollapsed: (v) => {
+      set({ collapsed: v });
+      save(v);
+    },
+    toggle: () => {
+      const next = !get().collapsed;
+      set({ collapsed: next });
+      save(next);
+    },
+  };
+});

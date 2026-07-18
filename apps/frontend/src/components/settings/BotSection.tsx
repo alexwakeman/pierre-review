@@ -31,11 +31,12 @@ function Toggle({
   );
 }
 
-// WS8 — the "Review bots" control surface. One logical section (data-testid="bot-settings-section")
-// composed of: detected-reviewers table (two-way override), in-house detection toggles + login
-// allowlist, Pierre tagging, mute/auto-triage rules, per-vendor cost, and the Slack bot digest.
-// Gated in SettingsModal on caps.teamInsights; the Slack-digest toggle additionally needs
-// caps.slackDigest. Detection/rules are CORE; the panel just lives behind the Pro settings gate.
+// The "Review bots" settings surface (data-testid="bot-settings-section") — the advanced,
+// pro_settings-backed knobs: in-house detection toggles + login allowlist, Pierre tagging,
+// per-vendor cost, and the Slack bot digest. The detected-reviewers table + mute/auto-triage
+// rules moved to the CORE/free Bots rail console (BotsView). Gated in SettingsModal on
+// caps.botTriage (true whenever the plugin is loaded — so this stays FREE, no paid flag); the
+// Slack-digest toggle additionally needs caps.slackDigest.
 export function BotSection({ settings, save, saving }: SectionProps): JSX.Element {
   const caps = useProCapabilities();
   const b = settings.bots;
@@ -152,7 +153,7 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
         />
       </SectionShell>
 
-      <BotMuteRulesEditor settings={settings} save={save} saving={saving} />
+      <BotMuteRulesEditor />
 
       <SectionShell
         title="Per-vendor cost"

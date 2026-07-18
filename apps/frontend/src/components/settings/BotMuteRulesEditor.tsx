@@ -2,6 +2,11 @@ import { useState } from 'react';
 import type { AutomatedReviewerKind, BotMuteAction } from '@pierre-review/shared';
 import { automatedReviewerMeta, BOT_VENDOR_META } from '../../lib/ui.js';
 import { useAddBotMuteRule, useBotMuteRules, useDeleteBotMuteRule } from '../../hooks/useBotTriage.js';
+import {
+  useProSettings,
+  useHasProSettings,
+  useUpdateProSettings,
+} from '../../hooks/useProSettings.js';
 import { Field, SaveButton, SectionShell, inputCls, type SectionProps } from './ui.js';
 
 const ALL_KINDS = Object.keys(BOT_VENDOR_META) as AutomatedReviewerKind[];
@@ -9,20 +14,53 @@ const ALL_KINDS = Object.keys(BOT_VENDOR_META) as AutomatedReviewerKind[];
 const vendorLabel = (kind: AutomatedReviewerKind | null): string =>
   kind == null ? 'Any bot' : automatedReviewerMeta(kind).label;
 
+// The master "standing auto-resolve" default lives in pro_settings (plugin-backed), so it's a
+// separate inner component that only mounts once the settings have loaded — its useState can
+// then initialise straight from server truth (no undefined-then-populate flicker).
+function MasterAutoResolve({ settings, save, saving }: SectionProps): JSX.Element {
+  const b = settings.bots;
+  const [autoResolve, setAutoResolve] = useState<boolean>(b.autoResolve);
+  const [autoResolveDays, setAutoResolveDays] = useState<number>(b.autoResolveDays);
+  const masterDirty = autoResolve !== b.autoResolve || autoResolveDays !== b.autoResolveDays;
+  return (
+    // Kept on ONE baseline row (inline labels, items-center) so every control lines up and the
+    // Save button sits with them.
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <label className="flex items-center gap-2 text-xs">
+        <input type="checkbox" checked={autoResolve} onChange={(e) => setAutoResolve(e.target.checked)} />
+        <span className="font-medium text-gray-700 dark:text-gray-200">Enable standing auto-resolve</span>
+      </label>
+      <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+        <span>Older than</span>
+        <input
+          type="number"
+          min={1}
+          max={90}
+          className={`${inputCls} w-16`}
+          value={autoResolveDays}
+          onChange={(e) => setAutoResolveDays(Math.min(90, Math.max(1, Number(e.target.value) || 1)))}
+        />
+        <span>days</span>
+      </label>
+      <SaveButton dirty={masterDirty} saving={saving} onClick={() => save({ bots: { autoResolve, autoResolveDays } })} />
+    </div>
+  );
+}
+
 // Mute & auto-triage rules (CORE, deterministic). A rule matches automated-bot threads by
 // vendor × path glob × severity and either HIDES them from the feed or, under the master
 // auto-resolve toggle, resolves `likely_addressed` threads older than N days on a cron. The
 // master switch + day count live in pro_settings (bots.autoResolve/autoResolveDays); the rules
 // themselves are the CORE /api/bot-mute-rules resource.
-export function BotMuteRulesEditor({ settings, save, saving }: SectionProps): JSX.Element {
+export function BotMuteRulesEditor(): JSX.Element {
   const rulesQ = useBotMuteRules();
   const addRule = useAddBotMuteRule();
   const delRule = useDeleteBotMuteRule();
-
-  const b = settings.bots;
-  const [autoResolve, setAutoResolve] = useState<boolean>(b.autoResolve);
-  const [autoResolveDays, setAutoResolveDays] = useState<number>(b.autoResolveDays);
-  const masterDirty = autoResolve !== b.autoResolve || autoResolveDays !== b.autoResolveDays;
+  // The mute-rule CRUD below is fully CORE (works on npx/OSS). Only the master auto-resolve
+  // default is pro_settings-backed, so fetch it only when the plugin is present.
+  const hasPro = useHasProSettings();
+  const settingsQ = useProSettings(hasPro);
+  const update = useUpdateProSettings();
 
   const [vendorKind, setVendorKind] = useState<'any' | AutomatedReviewerKind>('any');
   const [pathGlob, setPathGlob] = useState<string>('');
@@ -55,27 +93,15 @@ export function BotMuteRulesEditor({ settings, save, saving }: SectionProps): JS
       title="Mute & auto-triage rules"
       desc="Hide low-value bot threads, or (with auto-resolve on) let a background job resolve likely-addressed bot threads older than a threshold. Auto-resolve only ever touches likely-addressed threads and never merges."
     >
-      {/* Master auto-resolve toggle. Kept on ONE baseline row (inline labels, items-center) so
-          every control lines up and the Save button sits with them. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <label className="flex items-center gap-2 text-xs">
-          <input type="checkbox" checked={autoResolve} onChange={(e) => setAutoResolve(e.target.checked)} />
-          <span className="font-medium text-gray-700 dark:text-gray-200">Enable standing auto-resolve</span>
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
-          <span>Older than</span>
-          <input
-            type="number"
-            min={1}
-            max={90}
-            className={`${inputCls} w-16`}
-            value={autoResolveDays}
-            onChange={(e) => setAutoResolveDays(Math.min(90, Math.max(1, Number(e.target.value) || 1)))}
-          />
-          <span>days</span>
-        </label>
-        <SaveButton dirty={masterDirty} saving={saving} onClick={() => save({ bots: { autoResolve, autoResolveDays } })} />
-      </div>
+      {/* Master auto-resolve default (pro_settings-backed) — shown only when the plugin is
+          loaded. Everything below is CORE and always renders. */}
+      {settingsQ.data != null && (
+        <MasterAutoResolve
+          settings={settingsQ.data}
+          save={(patch) => update.mutate(patch)}
+          saving={update.isPending}
+        />
+      )}
 
       <div className="mt-1 space-y-1">
         {rulesQ.isLoading ? (

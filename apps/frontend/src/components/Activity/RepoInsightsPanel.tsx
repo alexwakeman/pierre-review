@@ -1,5 +1,5 @@
 import { useRepoTeamMetrics } from '../../hooks/useRepoTeamMetrics.js';
-import { useRepoAnalytics } from '../../hooks/useTriage.js';
+import { useRepoAnalytics, useProCapabilities } from '../../hooks/useTriage.js';
 import { Charts } from '../RepoAnalyticsModal.js';
 import { TeamMetricsPanel } from './TeamMetricsPanel.js';
 
@@ -18,7 +18,11 @@ export function RepoInsightsPanel({
   repoId: number;
   repoFullName: string;
 }): JSX.Element {
-  const { data: rm, isLoading: rmLoading } = useRepoTeamMetrics(repoId);
+  // The flow-metric header (DORA-ish tiles + trend charts) is the Pro Insights surface, so gate
+  // its fetch on teamInsights. When Pro is off (no PRO_DIGEST_ENABLED) rm stays undefined and the
+  // panel degrades to just the CORE per-repo charts below — the same as the OSS/no-plugin path.
+  const { teamInsights } = useProCapabilities();
+  const { data: rm, isLoading: rmLoading } = useRepoTeamMetrics(repoId, teamInsights);
   const { data: analytics, isLoading: analyticsLoading } = useRepoAnalytics(repoId);
 
   // The full per-repo charts grid, inlined under the panel's "More charts" expander (null

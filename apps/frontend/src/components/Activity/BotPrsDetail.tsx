@@ -257,9 +257,6 @@ export function BotPrsDetail(): JSX.Element {
     <div className="mx-auto max-w-6xl space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Bot PRs</h2>
-        <span className="rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
-          Pro
-        </span>
         <span className="text-[11px] text-gray-400">
           PRs an automated reviewer touched · most-recent activity first
           {botOnlyPrs > 0 && (

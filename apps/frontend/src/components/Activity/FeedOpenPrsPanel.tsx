@@ -3,10 +3,11 @@ import type { Team, TeamScope, TimelinePr } from '@pierre-review/shared';
 import { useOpenPrs } from '../../hooks/useTriage.js';
 import { useTeams } from '../../hooks/useTeams.js';
 import { useUsers } from '../../hooks/useTimeline.js';
+import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
 import { useFilters } from '../../store/filters.js';
 import { useFeedOpenPrsPanel } from '../../store/digestCollapse.js';
-import { indexUsers } from '../../lib/ui.js';
-import { OpenPrRow } from './RepoOpenPrList.js';
+import { indexUsers, sortOpenPrsByActivity } from '../../lib/ui.js';
+import { OpenPrRows } from './RepoOpenPrList.js';
 
 interface PrGroup {
   teamId: number | null;
@@ -47,17 +48,25 @@ export function FeedOpenPrsPanel(): JSX.Element | null {
   const { data: teams } = useTeams();
   const { data: users } = useUsers();
   const teamScope = useFilters((s) => s.teamScope);
-  const isolatedPrId = useFilters((s) => s.feedIsolatedPrId);
-  const setIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
   const collapsed = useFeedOpenPrsPanel((s) => s.collapsed);
   const toggleCollapsed = useFeedOpenPrsPanel((s) => s.toggle);
+  const maintainersByRepo = useMaintainersByRepo();
   const usersById = useMemo(() => indexUsers(users), [users]);
 
   const prs = openPrs?.prs ?? [];
-  const groups = useMemo(
-    () => groupOpenPrsByTeam(prs, teams ?? [], teamScope),
-    [prs, teams, teamScope],
-  );
+  // Group by team, then order each group by sortOpenPrsByActivity (maintainer-authored
+  // first, then recency, then volume). Sorting WITHIN groups keeps the maintainer priority
+  // scoped to each team's own list; each group paginates independently below.
+  const groups = useMemo(() => {
+    const isMaintainerAuthor = (pr: TimelinePr): boolean => {
+      const set = maintainersByRepo.get(pr.repoId);
+      return pr.authorId != null && set != null && set.has(pr.authorId);
+    };
+    return groupOpenPrsByTeam(prs, teams ?? [], teamScope).map((g) => ({
+      ...g,
+      prs: sortOpenPrsByActivity(g.prs, isMaintainerAuthor),
+    }));
+  }, [prs, teams, teamScope, maintainersByRepo]);
 
   // Nothing to show → no panel (keeps the Feed header clean when there's no open work).
   if (prs.length === 0) return null;
@@ -100,17 +109,11 @@ export function FeedOpenPrsPanel(): JSX.Element | null {
                   <span className="font-normal"> · {g.prs.length}</span>
                 </div>
               )}
-              <ul className="divide-y divide-gray-100 dark:divide-gray-800/70">
-                {g.prs.map((pr) => (
-                  <OpenPrRow
-                    key={`${g.teamId ?? 'none'}:${pr.id}`}
-                    pr={pr}
-                    author={pr.authorId != null ? usersById.get(pr.authorId) : undefined}
-                    selected={isolatedPrId === pr.id}
-                    onClick={() => setIsolatedPrId(isolatedPrId === pr.id ? null : pr.id)}
-                  />
-                ))}
-              </ul>
+              <OpenPrRows
+                prs={g.prs}
+                usersById={usersById}
+                keyPrefix={`${g.teamId ?? 'none'}:`}
+              />
             </div>
           ))}
         </div>

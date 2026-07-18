@@ -1,7 +1,10 @@
-import { useMemo } from 'react';
-import type { TimelinePr, User } from '@pierre-review/shared';
-import { useUsers } from '../../hooks/useTimeline.js';
+import { useCallback, useMemo, useState } from 'react';
+import type { Repo, TimelinePr, User } from '@pierre-review/shared';
+import { useRepos, useUsers } from '../../hooks/useTimeline.js';
+import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
 import { useFilters } from '../../store/filters.js';
+import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
+import { useRepoOpenPrsPanel } from '../../store/digestCollapse.js';
 import {
   CI_META,
   REASON_META,
@@ -9,10 +12,17 @@ import {
   mergeWarning,
   prNeedsAttention,
   relativeTime,
+  sortOpenPrsByActivity,
   userLabel,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
+import { NewTabIcon } from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
+
+// How many open-PR rows to reveal at a time (initial page + each "Show more" step). Keeps a
+// busy repo's list scannable — the sort floats maintainer + most-recently-active PRs to the
+// first page, the rest are one click away.
+const OPEN_PRS_PAGE = 10;
 
 // One open-PR row: CI dot · ⚠ needs-attention · #number title · author · draft / approval /
 // merge chips · thread-state bar · my-turn reason or updated-time. Shared by the single-repo
@@ -22,11 +32,15 @@ export function OpenPrRow({
   pr,
   author,
   onClick,
+  onOpenTab,
   selected = false,
 }: {
   pr: TimelinePr;
   author: User | undefined;
   onClick: () => void;
+  // Open this PR in its own full-height pr-detail tab (the trailing ⧉ button). Distinct from
+  // the row body's onClick, which filters the feed to this PR.
+  onOpenTab: () => void;
   selected?: boolean;
 }): JSX.Element {
   const ci = CI_META[pr.ciStatus];
@@ -38,16 +52,16 @@ export function OpenPrRow({
       ? { label: 'changes', color: '#ef4444' }
       : null;
   return (
-    <li>
+    <li
+      className={`flex items-stretch ${
+        selected ? 'bg-sky-100 dark:bg-sky-900/40' : 'hover:bg-gray-50 dark:hover:bg-gray-800/40'
+      }`}
+    >
       <button
         type="button"
         onClick={onClick}
         aria-pressed={selected}
-        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${
-          selected
-            ? 'bg-sky-100 dark:bg-sky-900/40'
-            : 'hover:bg-gray-50 dark:hover:bg-gray-800/40'
-        }`}
+        className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-xs"
       >
         {/* CI rollup dot (a hollow ring when there are no checks) */}
         <span
@@ -113,19 +127,121 @@ export function OpenPrRow({
           </span>
         )}
       </button>
+      {/* Trailing action: open this PR in its own full-height tab (its Show/Focus links then
+          drive the timeline). Kept a SIBLING of the row button — not nested — so a click here
+          opens the tab without also toggling the row's feed filter. */}
+      <button
+        type="button"
+        onClick={onOpenTab}
+        title={`Open #${pr.number} in its own tab`}
+        aria-label={`Open PR #${pr.number} in its own tab`}
+        className="flex shrink-0 items-center px-2.5 text-gray-400 hover:text-sky-600 dark:hover:text-sky-300"
+      >
+        <NewTabIcon size={14} />
+      </button>
     </li>
   );
 }
 
-// A compact, at-a-glance list of a repo's OPEN PRs (already member-filtered + reason-sorted
-// by the server), shown ABOVE the repo's activity feed. Clicking a PR ISOLATES the repo's
-// feed to that PR (toggle: click the selected one again to clear) — mirroring the cross-repo
-// FeedOpenPrsPanel — so this list doubles as the repo feed's per-PR filter.
-export function RepoOpenPrList({ prs }: { prs: TimelinePr[] }): JSX.Element | null {
-  const { data: users } = useUsers();
+// A paginated <ul> of open-PR rows, shared by the per-repo list and the cross-repo Feed
+// panel (one instance per team group). `prs` must ALREADY be sorted by the caller
+// (sortOpenPrsByActivity). Reveals OPEN_PRS_PAGE rows at a time via a "Show N more" footer;
+// clicking a row isolates the feed to that PR (toggle). `keyPrefix` keeps React keys unique
+// when the same PR appears under multiple team groups.
+export function OpenPrRows({
+  prs,
+  usersById,
+  keyPrefix = '',
+}: {
+  prs: TimelinePr[];
+  usersById: Map<number, User>;
+  keyPrefix?: string;
+}): JSX.Element {
+  const { data: repos } = useRepos();
   const isolatedPrId = useFilters((s) => s.feedIsolatedPrId);
   const setIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
+  const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
+  const [visible, setVisible] = useState(OPEN_PRS_PAGE);
+
+  const reposById = useMemo(() => {
+    const m = new Map<number, Repo>();
+    for (const r of repos ?? []) m.set(r.id, r);
+    return m;
+  }, [repos]);
+
+  // Open the PR in its own pr-detail tab. Builds a TabMeta from the row's PR + resolved
+  // repo/author (PrDetail.syncMeta backfills anything missing once the tab mounts).
+  const openTab = useCallback(
+    (pr: TimelinePr, author: User | undefined): void => {
+      const meta: TabMeta = {
+        id: pr.id,
+        number: pr.number,
+        title: pr.title,
+        repoFullName: reposById.get(pr.repoId)?.fullName ?? '',
+        authorLogin: author?.githubLogin ?? null,
+        authorDisplayName: author?.displayName ?? null,
+        authorAvatarUrl: author?.avatarUrl ?? null,
+      };
+      openPrDetailTab(meta, { fromActivity: true });
+    },
+    [reposById, openPrDetailTab],
+  );
+
+  const shown = prs.slice(0, visible);
+  const remaining = prs.length - shown.length;
+
+  return (
+    <>
+      <ul className="divide-y divide-gray-100 dark:divide-gray-800/70">
+        {shown.map((pr) => {
+          const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
+          return (
+            <OpenPrRow
+              key={`${keyPrefix}${pr.id}`}
+              pr={pr}
+              author={author}
+              selected={isolatedPrId === pr.id}
+              onClick={() => setIsolatedPrId(isolatedPrId === pr.id ? null : pr.id)}
+              onOpenTab={() => openTab(pr, author)}
+            />
+          );
+        })}
+      </ul>
+      {remaining > 0 && (
+        <button
+          type="button"
+          onClick={() => setVisible((v) => v + OPEN_PRS_PAGE)}
+          className="flex w-full items-center justify-center gap-1 border-t border-gray-100 px-3 py-1.5 text-[11px] font-medium text-sky-600 hover:bg-gray-50 dark:border-gray-800/70 dark:text-sky-400 dark:hover:bg-gray-800/40"
+        >
+          Show {Math.min(OPEN_PRS_PAGE, remaining)} more
+          <span className="text-gray-400">· {remaining} remaining</span>
+        </button>
+      )}
+    </>
+  );
+}
+
+// A compact, at-a-glance list of a repo's OPEN PRs, shown ABOVE the repo's activity feed.
+// COLLAPSED BY DEFAULT (persisted, mirroring the cross-repo Feed panel) — the repo view
+// opens on its feed with this list one click away. Ordered by sortOpenPrsByActivity
+// (maintainer-authored first, then recency, then volume) and paginated (OpenPrRows).
+// Clicking a PR ISOLATES the repo's feed to that PR (toggle: click the selected one again to
+// clear), so this list doubles as the repo feed's per-PR filter.
+export function RepoOpenPrList({ prs }: { prs: TimelinePr[] }): JSX.Element | null {
+  const { data: users } = useUsers();
+  const maintainersByRepo = useMaintainersByRepo();
+  const collapsed = useRepoOpenPrsPanel((s) => s.collapsed);
+  const toggleCollapsed = useRepoOpenPrsPanel((s) => s.toggle);
   const usersById = useMemo(() => indexUsers(users), [users]);
+
+  const sorted = useMemo(
+    () =>
+      sortOpenPrsByActivity(prs, (pr) => {
+        const set = maintainersByRepo.get(pr.repoId);
+        return pr.authorId != null && set != null && set.has(pr.authorId);
+      }),
+    [prs, maintainersByRepo],
+  );
 
   if (prs.length === 0) return null;
 
@@ -137,7 +253,15 @@ export function RepoOpenPrList({ prs }: { prs: TimelinePr[] }): JSX.Element | nu
 
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-800">
-      <div className="flex items-center gap-1.5 border-b border-gray-200 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
+      <button
+        type="button"
+        onClick={toggleCollapsed}
+        aria-expanded={!collapsed}
+        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/40"
+      >
+        <span aria-hidden="true" className="text-gray-400">
+          {collapsed ? '▸' : '▾'}
+        </span>
         Open PRs · {openCount}
         {draftCount > 0 && (
           <span className="font-normal normal-case text-gray-400">
@@ -147,18 +271,12 @@ export function RepoOpenPrList({ prs }: { prs: TimelinePr[] }): JSX.Element | nu
         <span className="ml-auto font-normal normal-case text-gray-400">
           click a PR to filter the feed
         </span>
-      </div>
-      <ul className="divide-y divide-gray-100 dark:divide-gray-800/70">
-        {prs.map((pr) => (
-          <OpenPrRow
-            key={pr.id}
-            pr={pr}
-            author={pr.authorId != null ? usersById.get(pr.authorId) : undefined}
-            selected={isolatedPrId === pr.id}
-            onClick={() => setIsolatedPrId(isolatedPrId === pr.id ? null : pr.id)}
-          />
-        ))}
-      </ul>
+      </button>
+      {!collapsed && (
+        <div className="border-t border-gray-200 dark:border-gray-800">
+          <OpenPrRows prs={sorted} usersById={usersById} />
+        </div>
+      )}
     </div>
   );
 }
