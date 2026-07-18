@@ -231,6 +231,26 @@ check(
 const rbtCross = await q.getResolvableBotThreads(A.prId, 2);
 check('getResolvableBotThreads(A.pr, B) leaks nothing (IDOR blocked)', rbtCross.length === 0);
 
+// Scope-wide variant (item 3 "clear the stale-bot backlog"): getResolvableBotThreadsForScope
+// generalizes the per-PR getter to the whole account / a repo set. Same PR→account ownership
+// join, so A sees its seeded thread and B sees nothing even when handed A's repo ids. The
+// threadIds=[] "resolve nothing" landmine is preserved across the scope variant too.
+const scopeOwn = await q.getResolvableBotThreadsForScope(1, null);
+check(
+  'getResolvableBotThreadsForScope(A, null scope) includes A’s seeded bot thread',
+  scopeOwn.threads.some((t) => t.threadNodeId === 'RT_iso_A') && scopeOwn.totalEligible >= 1,
+);
+const scopeCross = await q.getResolvableBotThreadsForScope(2, [A.repoId]);
+check(
+  'getResolvableBotThreadsForScope(B, A.repo) leaks nothing (IDOR blocked)',
+  scopeCross.threads.length === 0 && scopeCross.totalEligible === 0,
+);
+const scopeEmptySel = await q.getResolvableBotThreadsForScope(1, null, []);
+check(
+  'getResolvableBotThreadsForScope(A, threadIds=[]) resolves nothing (landmine preserved)',
+  scopeEmptySel.threads.length === 0 && scopeEmptySel.totalEligible === 0,
+);
+
 // ── Bot-Triage Platform: classification + mute rules + the new getters ──────────
 // bot_review_classification + bot_mute_rules are account-scoped tables; setReviewerOverride
 // writes a MANUAL row for exactly one account, and every new getter filters accountId.

@@ -44,6 +44,7 @@ import type {
   BotWindowKind,
   BotAnalyticsResponse,
   BotOnlyPrsResponse,
+  BotResolvableThreadsResponse,
   BotVendorPrsResponse,
   BotDedupResponse,
   BotMuteRule,
@@ -91,6 +92,7 @@ import type {
   ResolveThreadResult,
   ResolveBotThreadsBody,
   ResolveBotThreadsResult,
+  ScopeResolveBotThreadsBody,
   SyncStatus,
   ThreadDetail,
   TimelineResponse,
@@ -640,5 +642,19 @@ export const api = {
   deleteBotMuteRule: (id: number) =>
     fetch(`/api/bot-mute-rules/${id}`, jsonBody('DELETE')).then((r) =>
       handle<void>(r),
+    ),
+  // Scope-wide "clear the stale-bot backlog": the review list of every likely-addressed
+  // automated-reviewer thread across the account (or a repo scope), grouped by PR + capped, and
+  // the confirm-gated resolve. `repoIds` (the per-repo Bots tab) wins over `scope` server-side.
+  resolvableBotThreads: (scope?: string, repoIds?: number[] | null) => {
+    const r = repoIdsParam(repoIds);
+    const s = r ? '' : scopeParam(scope);
+    return get<BotResolvableThreadsResponse>(withQuery('/api/bot-threads/resolvable', s, r));
+  },
+  // Resolve the explicit reviewed thread ids (server re-derives eligibility ∩ this list). The
+  // caller chunks a large selection into ≤500-id POSTs; the response aggregates per chunk.
+  scopeResolveBotThreads: (body: ScopeResolveBotThreadsBody) =>
+    fetch('/api/bot-threads/resolve', jsonBody('POST', body)).then((r) =>
+      handle<ResolveBotThreadsResult>(r),
     ),
 };

@@ -2,13 +2,18 @@ import type { FastifyInstance } from 'fastify';
 import type {
   BotAnalyticsResponse,
   BotOnlyPrsResponse,
+  BotResolvableThread,
+  BotResolvableThreadGroup,
+  BotResolvableThreadsResponse,
   BotVendorPrsResponse,
   BotMuteRule,
   BotMuteRuleInput,
   BotMuteRulesResponse,
   BotWindowKind,
   DetectedReviewersResponse,
+  ResolveBotThreadsResult,
   ReviewerOverrideBody,
+  ScopeResolveBotThreadsBody,
 } from '@pierre-review/shared';
 import {
   addBotMuteRule,
@@ -17,11 +22,14 @@ import {
   getBotOnlyPrs,
   getBotVendorPrs,
   getBotDedupClusters,
+  getResolvableBotThreadsForScope,
   listBotMuteRules,
   listDetectedReviewers,
   resolveScopeRepoIds,
   setReviewerOverride,
+  SCOPE_RESOLVE_THREAD_CAP,
 } from '../../db/queries.js';
+import { resolveThreadsOnGitHub } from '../../bot-triage/resolve.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 // Parse a comma-separated id list into a positive-int array, or null when empty/absent (so
@@ -131,6 +139,39 @@ const ruleIdParamSchema = {
     type: 'object',
     required: ['id'],
     properties: { id: { type: 'integer' } },
+  },
+};
+
+// GET /api/bot-threads/resolvable?scope=&repoIds= — the scope-wide review list. Same
+// scope/repoIds resolution as the analytics routes (an explicit `repoIds` wins over `scope`).
+const resolvableSchema = {
+  querystring: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      scope: { type: 'string' },
+      repoIds: { type: 'string' },
+    },
+  },
+};
+
+// POST /api/bot-threads/resolve — the confirm-gated scope-wide resolve. `threadIds` is the
+// explicit reviewed list (required, non-empty allowed to be [] → no-op), capped at
+// SCOPE_RESOLVE_THREAD_CAP per request (the client chunks a larger selection); `repoIds` is the
+// optional scope the server re-derives eligibility against. maxItems is a hard input guard.
+const scopeResolveSchema = {
+  body: {
+    type: 'object',
+    required: ['threadIds'],
+    additionalProperties: false,
+    properties: {
+      threadIds: {
+        type: 'array',
+        items: { type: 'integer' },
+        maxItems: SCOPE_RESOLVE_THREAD_CAP,
+      },
+      repoIds: { type: 'array', items: { type: 'integer' } },
+    },
   },
 };
 
@@ -256,5 +297,82 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     }
     reply.status(204);
     return null;
+  });
+
+  // The scope-wide review list: every `likely_addressed` automated-reviewer thread across the
+  // account (or a repo scope), grouped by PR, capped + newest-first, with `totalEligible` so the
+  // UI can say "showing the N most recent". Read-only; the client reviews it before resolving.
+  app.get('/api/bot-threads/resolvable', { schema: resolvableSchema }, async (req) => {
+    const { scope, repoIds } = req.query as { scope?: string; repoIds?: string };
+    const accountId = accountIdOf(req);
+    const explicit = parseIntList(repoIds);
+    const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
+    const { threads, totalEligible } = await getResolvableBotThreadsForScope(accountId, scopeRepoIds);
+
+    // Group by PR, preserving the query's newest-thread-first order (first-seen PR wins the slot).
+    const byPr = new Map<number, BotResolvableThreadGroup>();
+    for (const t of threads) {
+      let g = byPr.get(t.prId);
+      if (!g) {
+        g = {
+          prId: t.prId,
+          prNumber: t.prNumber,
+          prTitle: t.prTitle,
+          repoFullName: t.repoFullName,
+          githubUrl: t.prGithubUrl,
+          threads: [],
+        };
+        byPr.set(t.prId, g);
+      }
+      const thread: BotResolvableThread = {
+        threadId: t.threadId,
+        path: t.path,
+        excerpt: t.excerpt,
+        botLabel: t.botLabel,
+      };
+      g.threads.push(thread);
+    }
+    const resp: BotResolvableThreadsResponse = {
+      groups: [...byPr.values()],
+      totalEligible,
+      shown: threads.length,
+      generatedAt: new Date().toISOString(),
+    };
+    return resp;
+  });
+
+  // The confirm-gated scope-wide resolve. NEVER blind: the server RE-DERIVES the eligible set
+  // (owned + automated-reviewer-originated + `likely_addressed` + unresolved) ∩ the client's
+  // explicit reviewed ids, scoped to `repoIds`, then resolves each via the SAME shared helper the
+  // per-PR route + the standing auto-triage job use. An empty list is a no-op (not an error);
+  // per-thread failures are reported, not fatal. The re-derive path passes `threadIds` so the
+  // page cap is bypassed — no requested-and-eligible id is silently dropped.
+  app.post('/api/bot-threads/resolve', { schema: scopeResolveSchema }, async (req) => {
+    const { threadIds, repoIds } = req.body as ScopeResolveBotThreadsBody;
+    const accountId = accountIdOf(req);
+    if (threadIds.length === 0) {
+      const noop: ResolveBotThreadsResult = { resolved: 0, failed: 0, results: [] };
+      return noop;
+    }
+    const { threads: eligible } = await getResolvableBotThreadsForScope(
+      accountId,
+      repoIds ?? null,
+      threadIds,
+    );
+    const result = await resolveThreadsOnGitHub(
+      accountId,
+      eligible.map((t) => ({ id: t.threadId, threadNodeId: t.threadNodeId })),
+    );
+    req.log.info(
+      {
+        accountId,
+        requested: threadIds.length,
+        eligible: eligible.length,
+        resolved: result.resolved,
+        failed: result.failed,
+      },
+      'scope-wide bot-thread resolve',
+    );
+    return result;
   });
 }

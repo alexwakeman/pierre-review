@@ -5767,6 +5767,165 @@ export async function getResolvableBotThreads(
   return rows.flatMap((r) => (r.threadNodeId != null ? [{ id: r.id, threadNodeId: r.threadNodeId }] : []));
 }
 
+// The whole-scope generalization of getResolvableBotThreads — the review-BOT threads a later
+// commit has LIKELY ADDRESSED across the WHOLE account (or one repo / a repo set), for the
+// "clear the stale-bot backlog" review-and-resolve flow on the Bots rail / per-repo Bots tab.
+// Same eligibility predicate as the per-PR getter (owned + automated-reviewer-originated +
+// `likely_addressed` + unresolved + carries a GitHub node id) MINUS the single-PR filter, PLUS
+// an optional repo scope. The returned page is CAPPED (SCOPE_RESOLVE_THREAD_CAP) and ordered
+// newest-first, but `totalEligible` reports the UN-capped size so the UI can say "showing the
+// N most recent". Enriched with the per-thread root-comment excerpt + a resolved bot label for
+// the review list; the node id stays server-side (the resolve helper needs it, the client doesn't).
+//
+// scopeRepoIds: null/undefined = the whole account; [] = an empty scope (resolve nothing);
+// a non-empty list = only those repos. threadIds: identical semantics to the per-PR getter —
+// null/undefined = unfiltered, [] = resolve nothing (the load-bearing landmine), a non-empty
+// list = the exact reviewed set (the confirm-gated resolve path). On the resolve path (threadIds
+// present) the page cap is NOT applied — the inArray already bounds the result to ≤ the caller's
+// list — so a re-derive never silently drops a requested-and-eligible id.
+export const SCOPE_RESOLVE_THREAD_CAP = 500;
+
+export interface ResolvableBotThreadRow {
+  threadId: number;
+  threadNodeId: string;
+  path: string;
+  prId: number;
+  prNumber: number;
+  prTitle: string;
+  repoFullName: string;
+  prGithubUrl: string;
+  originalCommenterId: number | null;
+  excerpt: string | null;
+  botLabel: string;
+}
+
+export async function getResolvableBotThreadsForScope(
+  accountId: number,
+  scopeRepoIds: number[] | null = null,
+  threadIds: number[] | null = null,
+): Promise<{ threads: ResolvableBotThreadRow[]; totalEligible: number }> {
+  const empty = { threads: [] as ResolvableBotThreadRow[], totalEligible: 0 };
+  // An empty repo scope or an empty reviewed list both mean "nothing" — resolve/return nothing.
+  if (scopeRepoIds != null && scopeRepoIds.length === 0) return empty;
+  if (threadIds != null && threadIds.length === 0) return empty;
+  const botIds = await automatedReviewerUserIds(accountId);
+  if (botIds.length === 0) return empty;
+
+  const preds = [
+    eq(pullRequests.accountId, accountId),
+    inArray(reviewThreads.originalCommenterId, botIds),
+    eq(reviewThreads.derivedState, 'likely_addressed'),
+    eq(reviewThreads.isResolved, false),
+    isNotNull(reviewThreads.githubNodeId),
+  ];
+  if (scopeRepoIds != null) preds.push(inArray(pullRequests.repoId, scopeRepoIds));
+  if (threadIds != null) preds.push(inArray(reviewThreads.id, threadIds));
+  const where = and(...preds);
+
+  const cnt = await db
+    .select({ c: count() })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(where)
+    .execute();
+  const totalEligible = cnt[0]?.c ?? 0;
+  if (totalEligible === 0) return empty;
+
+  // The resolve path (threadIds present) is already bounded by the client's ≤-cap list, so it
+  // must NOT be re-capped — that would silently drop a requested id. Only the listing path caps.
+  const base = db
+    .select({
+      threadId: reviewThreads.id,
+      threadNodeId: reviewThreads.githubNodeId,
+      path: reviewThreads.path,
+      commenterId: reviewThreads.originalCommenterId,
+      prId: pullRequests.id,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      owner: repos.owner,
+      name: repos.name,
+    })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(where)
+    .orderBy(desc(reviewThreads.createdAt), desc(reviewThreads.id));
+  const pageRows = await (threadIds != null ? base : base.limit(SCOPE_RESOLVE_THREAD_CAP)).execute();
+
+  // Per-thread root-comment excerpt: the EARLIEST non-empty comment on each page thread, in ONE
+  // query. `excerpt` (always kept) is preferred; a body falls back. Whitespace-collapsed + capped
+  // so a long markdown body renders as a single dim one-liner in the review list.
+  const pageThreadIds = pageRows.map((r) => r.threadId);
+  const excerptByThread = new Map<number, string>();
+  if (pageThreadIds.length > 0) {
+    const comments = await db
+      .select({
+        threadId: reviewComments.threadId,
+        excerpt: reviewComments.excerpt,
+        body: reviewComments.body,
+      })
+      .from(reviewComments)
+      .where(inArray(reviewComments.threadId, pageThreadIds))
+      .orderBy(asc(reviewComments.createdAt), asc(reviewComments.id))
+      .execute();
+    for (const c of comments) {
+      if (excerptByThread.has(c.threadId)) continue; // earliest non-empty wins
+      const raw = c.excerpt ?? c.body;
+      if (raw && raw.trim() !== '') {
+        excerptByThread.set(c.threadId, raw.replace(/\s+/g, ' ').trim().slice(0, 200));
+      }
+    }
+  }
+
+  // Bot label per commenter, mirroring getBotAnalytics' reviewerLabel resolution EXACTLY: the
+  // account's custom classification label → the vendor's pretty name (known vendors) → the
+  // reviewer's display name/login. (Chose the full resolution over login-only: it's a few cheap
+  // account-scoped maps and gives the same labels the ROI table shows — no drift.)
+  const kindMap = await classificationKindForUser(accountId);
+  const classLabel = new Map<number, string>();
+  for (const r of await db
+    .select({ id: botReviewClassification.authorUserId, label: botReviewClassification.label })
+    .from(botReviewClassification)
+    .where(eq(botReviewClassification.accountId, accountId))
+    .execute()) {
+    if (r.label != null && r.label.trim() !== '') classLabel.set(r.id, r.label.trim());
+  }
+  const commenterIds = [...new Set(pageRows.flatMap((r) => (r.commenterId != null ? [r.commenterId] : [])))];
+  const loginById = new Map<number, string>();
+  if (commenterIds.length > 0) {
+    for (const r of await db
+      .select({ id: users.id, login: users.githubLogin, name: users.displayName })
+      .from(users)
+      .where(inArray(users.id, commenterIds))
+      .execute()) {
+      loginById.set(r.id, r.name?.trim() || r.login || `#${r.id}`);
+    }
+  }
+  const botLabelFor = (userId: number | null): string => {
+    if (userId == null) return 'Automated';
+    const custom = classLabel.get(userId);
+    if (custom) return custom;
+    const kind = kindMap.get(userId) ?? 'in_house';
+    if (kind !== 'in_house' && kind !== 'pierre') return labelForKind(kind);
+    return loginById.get(userId) ?? labelForKind(kind);
+  };
+
+  const threads: ResolvableBotThreadRow[] = pageRows.map((r) => ({
+    threadId: r.threadId,
+    threadNodeId: r.threadNodeId,
+    path: r.path,
+    prId: r.prId,
+    prNumber: r.prNumber,
+    prTitle: r.prTitle,
+    repoFullName: `${r.owner}/${r.name}`,
+    prGithubUrl: `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}`,
+    originalCommenterId: r.commenterId,
+    excerpt: excerptByThread.get(r.threadId) ?? null,
+    botLabel: botLabelFor(r.commenterId),
+  }));
+  return { threads, totalEligible };
+}
+
 export async function getThreadWriteContext(
   threadId: number,
   accountId: number,

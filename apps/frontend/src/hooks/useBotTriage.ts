@@ -6,12 +6,18 @@ import type {
   BotMuteRuleInput,
   BotMuteRulesResponse,
   BotOnlyPrsResponse,
+  BotResolvableThreadsResponse,
   BotWindowKind,
   DetectedReviewersResponse,
   ReviewerClassification,
   ReviewerOverrideBody,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+
+// Per-request cap on the scope-wide resolve: the client chunks a larger reviewed selection into
+// sequential POSTs so a hundreds-of-threads resolve streams progress instead of one multi-minute
+// request. MUST stay ≤ the server's SCOPE_RESOLVE_THREAD_CAP (500) body limit.
+const RESOLVE_CHUNK_SIZE = 25;
 
 // The bot-triage read/write hooks (CORE, deterministic — no AI). Detection, dedup and mute
 // rules are free-tier; the Bot-ROI analytics panel that consumes useBotAnalytics is
@@ -138,6 +144,73 @@ export function useDeleteBotMuteRule() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['bot-mute-rules'] });
       void qc.invalidateQueries({ queryKey: ['bot-analytics'] });
+    },
+  });
+}
+
+// The scope-wide review list of every `likely_addressed` automated-reviewer thread (grouped by
+// PR, capped + newest-first, with `totalEligible`). `enabled` gates the fetch (the banner mounts
+// it eagerly — it's a cheap count + ≤500 rows — but the OSS/no-bots path can pass false). No
+// refetchInterval: it refreshes on the resolve invalidation, not a poll. The query key MUST
+// namespace the scope slot (`repo:` vs `scope:`) exactly like useBotAnalytics — a bare repoId and
+// a numeric teamId are both plain integer strings and would otherwise collide.
+export function useResolvableBotThreads(
+  enabled = true,
+  scope?: string,
+  repoIds?: number[] | null,
+) {
+  const repoKey = repoIds && repoIds.length > 0 ? [...repoIds].sort((a, b) => a - b).join(',') : null;
+  return useQuery<BotResolvableThreadsResponse>({
+    queryKey: ['bot-resolvable', repoKey != null ? `repo:${repoKey}` : `scope:${scope ?? 'all'}`],
+    queryFn: () => api.resolvableBotThreads(scope, repoIds),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+// Resolve a whole reviewed thread-id list scope-wide. One long request would sit for minutes on
+// hundreds of GraphQL mutations, so the list is CHUNKED into ≤RESOLVE_CHUNK_SIZE sequential POSTs;
+// each chunk's outcome is aggregated and `onProgress` fires after it so the UI can stream
+// "Resolving… X/Y". The server re-derives eligibility per chunk (never blind); a chunk that
+// resolves nothing still counts toward progress. onSettled invalidates every surface a resolve
+// shifts (the review list, the analytics/PR lists, the feed).
+export function useScopeResolveBotThreads() {
+  const qc = useQueryClient();
+  return useMutation<
+    { resolved: number; failed: number },
+    Error,
+    {
+      threadIds: number[];
+      repoIds?: number[] | null;
+      onProgress?: (done: number, total: number, resolved: number, failed: number) => void;
+    }
+  >({
+    mutationFn: async ({ threadIds, repoIds, onProgress }) => {
+      const total = threadIds.length;
+      let resolved = 0;
+      let failed = 0;
+      let done = 0;
+      for (let i = 0; i < threadIds.length; i += RESOLVE_CHUNK_SIZE) {
+        const chunk = threadIds.slice(i, i + RESOLVE_CHUNK_SIZE);
+        const res = await api.scopeResolveBotThreads({
+          threadIds: chunk,
+          ...(repoIds && repoIds.length > 0 ? { repoIds } : {}),
+        });
+        resolved += res.resolved;
+        failed += res.failed;
+        done += chunk.length;
+        onProgress?.(done, total, resolved, failed);
+      }
+      return { resolved, failed };
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['bot-resolvable'] });
+      void qc.invalidateQueries({ queryKey: ['bot-analytics'] });
+      void qc.invalidateQueries({ queryKey: ['bot-only-prs'] });
+      void qc.invalidateQueries({ queryKey: ['bot-vendor-prs'] });
+      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
+      // The per-repo Activity console shows bot acted-on stats — mirror the per-PR resolve hook.
+      void qc.invalidateQueries({ queryKey: ['activity'] });
     },
   });
 }

@@ -335,6 +335,42 @@ export interface BotTuningSuggestion {
   untouchedPct: number; volume: number; rationale: string;
 }
 
+// ── Scope-wide bulk resolve of likely-addressed bot threads ─────────
+// The "review & clear the stale-bot backlog" flow generalizes the per-PR resolve-bot-threads
+// action to a WHOLE scope (the account, or one repo / the per-repo Bots tab). The client lists
+// every `likely_addressed` automated-reviewer thread, reviews the list with per-thread
+// checkboxes, then resolves the checked ones. Same sacred contract as the per-PR path: the
+// server ALWAYS re-derives eligibility ∩ the client's explicit ids (never blind), only
+// `likely_addressed` + unresolved, per-thread failures don't abort the batch, resolutions logged.
+// The thread GitHub node id is NOT shipped — the client only needs to identify + label a thread.
+export interface BotResolvableThread {
+  threadId: number;
+  path: string;
+  excerpt: string | null;  // earliest root-comment preview (one dim line)
+  botLabel: string;        // the originating reviewer's label ("CodeRabbit" | "Pierre · Claude" | login…)
+}
+// The resolvable threads on ONE PR (the review list groups by PR).
+export interface BotResolvableThreadGroup {
+  prId: number;
+  prNumber: number;
+  prTitle: string;
+  repoFullName: string;
+  githubUrl: string;
+  threads: BotResolvableThread[];
+}
+export interface BotResolvableThreadsResponse {
+  groups: BotResolvableThreadGroup[]; // PRs with ≥1 resolvable bot thread, newest-thread-first
+  totalEligible: number;              // UN-capped eligible count (may exceed `shown`)
+  shown: number;                      // threads actually returned (capped page size)
+  generatedAt: string;
+}
+// POST body for the scope-wide resolve: the explicit reviewed thread-id list (required; ≤500 per
+// request — the client chunks larger selections) + an optional repo scope the server re-derives against.
+export interface ScopeResolveBotThreadsBody {
+  threadIds: number[];
+  repoIds?: number[];
+}
+
 export interface Repo {
   id: number;
   owner: string;
