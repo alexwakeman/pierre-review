@@ -108,6 +108,9 @@ export function useConsolidatedFeed(opts: {
     items,
     users,
     total: query.data?.pages[0]?.total ?? 0,
+    // Pre-cap stream length (see ConsolidatedFeedResponse.uncappedTotal) — > total means the
+    // plain-activity cap dropped older rows. Undefined on a stale IndexedDB response.
+    uncappedTotal: query.data?.pages[0]?.uncappedTotal,
     // Server-computed facet counts over the WHOLE loadable stream (see ConsolidatedFeedCounts).
     // From the FIRST page — every page carries the same whole-stream counts. Undefined only for
     // a stale IndexedDB-persisted response predating this field; consumers fall back then.

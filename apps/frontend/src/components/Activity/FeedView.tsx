@@ -168,8 +168,8 @@ const FEED_OVERSCAN = 800;
 // Height estimate for a not-yet-measured row before the running average kicks in.
 const FEED_EST_ROW = 160;
 
-// The DERIVED-state pills shown in `botsMode` (the Bots pane's bot-only feed). Order mirrors
-// the timeline legend: needs-attention → in-progress → done.
+// The review-thread DERIVED-state pills (every feed view). Order mirrors the timeline
+// legend: needs-attention → in-progress → done.
 const BOT_STATE_ORDER: DerivedState[] = [
   'untouched',
   'replied_unresolved',
@@ -277,8 +277,18 @@ export function FeedView({
   // is Activity-native only: the feedBotLens pills (client-side) and botsMode (server-side).
   // useConsolidatedFeed and useFeedHasNew below MUST share identical scope inputs, or the
   // "New activity" banner false-fires against a differently-scoped head.
-  const { items, users, total, counts, latestId, isLoading, hasMore, loadMore, isFetchingMore } =
-    useConsolidatedFeed({
+  const {
+    items,
+    users,
+    total,
+    uncappedTotal,
+    counts,
+    latestId,
+    isLoading,
+    hasMore,
+    loadMore,
+    isFetchingMore,
+  } = useConsolidatedFeed({
       repoIds: effectiveRepoIds,
       userIds: null,
       prId: isolatedPrId,
@@ -351,10 +361,10 @@ export function FeedView({
       items.filter((i) => i.kind === 'review_comment' || i.kind === 'pr_comment').length,
     [counts, items],
   );
-  // Bots pane: a review-thread DERIVED-state filter (a Set of selected states; empty = all).
-  // Local (not a store filter) — it only exists in the bot-only feed. Only thread-bearing bot
-  // items carry a derivedState; a non-thread bot item (a bot PR comment / review submit) drops
-  // out whenever any state pill is active.
+  // Review-thread DERIVED-state filter (a Set of selected states; empty = all) — a pill row
+  // on EVERY feed view, not just the Bots pane. Local (not a store filter). Only
+  // thread-bearing items carry a derivedState; a non-thread item (a PR open/merge, a plain
+  // comment, a Claude run) drops out whenever any state pill is active.
   const [botStateFilter, setBotStateFilter] = useState<Set<DerivedState>>(() => new Set());
   const toggleBotState = useCallback((s: DerivedState): void => {
     setBotStateFilter((prev) => {
@@ -413,11 +423,11 @@ export function FeedView({
     }
     return [...m.values()].sort((a, b) => b.count - a.count);
   }, [botsMode, counts, items, usersById, classificationByUserId, botColor]);
-  // Per-state counts across the (already bot-only) items, for the pill badges — independent of
-  // the active pills. The backend filtered to automated reviewers, so every item counts.
+  // Per-state counts for the pill badges — independent of the active pills. byThreadState
+  // populates server-side for every feed view (thread-bearing items only), so the same row
+  // works in and out of botsMode.
   const botStateCounts = useMemo(() => {
     const m = new Map<DerivedState, number>();
-    if (!botsMode) return m;
     // Prefer the server facet (whole loadable stream); fall back to the loaded page on a stale
     // cache. byThreadState is a DerivedState-keyed object; rehydrate into the consumer's Map.
     if (counts?.byThreadState) {
@@ -431,7 +441,7 @@ export function FeedView({
       m.set(i.derivedState, (m.get(i.derivedState) ?? 0) + 1);
     }
     return m;
-  }, [botsMode, counts, items]);
+  }, [counts, items]);
 
   // "My Turn only" and "Claude Reviews only" are mutually-exclusive client-side filters (My
   // Turn is CORE / free, so it's always available). The category pills + the bot lens compose
@@ -454,12 +464,34 @@ export function FeedView({
         ? items.filter((i) => i.kind === 'claude_review')
         : items;
     const byCat = feedCatComments || feedCatPrEvents ? base.filter(catMatch) : base;
-    return feedBotLens === 'hide'
-      ? byCat.filter((i) => !isBotActor(i))
-      : feedBotLens === 'only'
-        ? byCat.filter(isBotActor)
-        : byCat;
+    const byLens =
+      feedBotLens === 'hide'
+        ? byCat.filter((i) => !isBotActor(i))
+        : feedBotLens === 'only'
+          ? byCat.filter(isBotActor)
+          : byCat;
+    // Same rule as botsMode: any active state pill hides items without a derivedState
+    // (opens/merges/plain comments/Claude rows carry none).
+    return botStateFilter.size > 0
+      ? byLens.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState))
+      : byLens;
   }, [botsMode, botStateFilter, botVendorFilter, items, feedMyTurnOnly, feedClaudeOnly, feedBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor]);
+
+  // Honest count line: loaded-of-TOTAL (the server's post-cap stream length), never
+  // visible-of-loaded — the initial page must not read "50 of 50" when the stream holds
+  // more. Active pills prepend the shown count; a server cap (uncappedTotal > total)
+  // appends a terse disclosure.
+  const countLabel = useMemo(() => {
+    const base =
+      visible.length !== items.length
+        ? `${visible.length} shown · ${items.length} loaded of ${total}`
+        : `${items.length} of ${total} loaded`;
+    const capped =
+      uncappedTotal != null && uncappedTotal > total
+        ? ` · ${total} most recent of ${uncappedTotal} in window`
+        : '';
+    return base + capped;
+  }, [visible.length, items.length, total, uncappedTotal]);
 
   // ── Vertical, variable-height windowing ─────────────────────────────────────────────
   // The feed accumulates unbounded across "Load more" pages, so rendering every card put
@@ -855,13 +887,14 @@ export function FeedView({
         </div>
       )}
 
-      {/* Bots pane: two independent, composable pill rows — VENDOR (one per distinct bot, so the
-          in-house bots isolate separately) and STATE (review-thread derived state). Toggling
-          multiple within a row ORs them; the two rows AND together (vendor ∧ state). These
-          replace the normal My-Turn/Claude/category/bot-lens pills. */}
-      {botsMode ? (
-        <div className="space-y-2 px-0.5">
-          {botVendors.length > 0 && (
+      {/* Filter pills, two rows. Row 1 branches: the Bots pane gets a per-VENDOR row (one per
+          distinct bot, so the in-house bots isolate separately) replacing the normal
+          My-Turn/Claude/category/bot-lens pills. Row 2 — the review-thread derived-STATE
+          pills — is SHARED by every feed view. Toggling multiple within a row ORs them; the
+          rows AND together. */}
+      <div className="space-y-2 px-0.5">
+        {botsMode ? (
+          botVendors.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
                 Vendor
@@ -893,49 +926,11 @@ export function FeedView({
                 );
               })}
             </div>
-          )}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-              State
-            </span>
-            {BOT_STATE_ORDER.map((st) => {
-              const meta = DERIVED_STATE_META[st];
-              const on = botStateFilter.has(st);
-              const count = botStateCounts.get(st) ?? 0;
-              return (
-                <button
-                  key={st}
-                  type="button"
-                  onClick={() => toggleBotState(st)}
-                  aria-pressed={on}
-                  className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                    on
-                      ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
-                      : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-                  }`}
-                  title={meta.description}
-                >
-                  <span
-                    aria-hidden="true"
-                    className="inline-block h-2 w-2 rounded-full"
-                    style={{ background: meta.color }}
-                  />
-                  {meta.label}
-                  {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
-                </button>
-              );
-            })}
-            {items.length > 0 && (
-              <span className="text-[11px] text-gray-400">
-                {visible.length} of {items.length}
-              </span>
-            )}
-          </div>
-        </div>
-      ) : (
+          )
+        ) : (
       <>
-      {/* My Turn / Claude filter toggles + a "showing X of Y" hint. My Turn is CORE / free. */}
-      <div className="flex items-center gap-2 px-0.5">
+      {/* My Turn / Claude filter toggles. My Turn is CORE / free. */}
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={toggleFeedMyTurnOnly}
@@ -1013,14 +1008,46 @@ export function FeedView({
             {feedBotLens === 'all' && <span className="tabular-nums opacity-70">{botCount}</span>}
           </button>
         )}
-        {items.length > 0 && (
-          <span className="text-[11px] text-gray-400">
-            {visible.length} of {items.length}
-          </span>
-        )}
       </div>
       </>
-      )}
+        )}
+        {/* Review-thread derived-STATE pills + the honest count line — every feed view. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+            State
+          </span>
+          {BOT_STATE_ORDER.map((st) => {
+            const meta = DERIVED_STATE_META[st];
+            const on = botStateFilter.has(st);
+            const count = botStateCounts.get(st) ?? 0;
+            return (
+              <button
+                key={st}
+                type="button"
+                onClick={() => toggleBotState(st)}
+                aria-pressed={on}
+                className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                  on
+                    ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
+                    : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                }`}
+                title={meta.description}
+              >
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ background: meta.color }}
+                />
+                {meta.label}
+                {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
+              </button>
+            );
+          })}
+          {items.length > 0 && (
+            <span className="text-[11px] text-gray-400">{countLabel}</span>
+          )}
+        </div>
+      </div>
 
       {items.length === 0 ? (
         <div className="flex h-32 items-center justify-center text-sm text-gray-400">
@@ -1034,6 +1061,8 @@ export function FeedView({
             ? botStateFilter.size > 0
               ? 'No bot activity matches these state filters.'
               : 'No bot activity in this window.'
+            : botStateFilter.size > 0
+            ? 'Nothing matches these state filters.'
             : feedClaudeOnly
             ? 'No Claude Reviews in this window.'
             : feedBotLens === 'only'

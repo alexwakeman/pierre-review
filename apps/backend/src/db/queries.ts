@@ -3663,6 +3663,7 @@ export async function getConsolidatedFeed(
     items: [],
     users: [],
     total: 0,
+    uncappedTotal: 0,
     counts: computeFeedCounts([], new Set<number>(), botsOnly),
     generatedAt: new Date().toISOString(),
   });
@@ -3710,6 +3711,7 @@ export async function getConsolidatedFeed(
       items: [],
       users: [],
       total: 0,
+      uncappedTotal: 0,
       counts: computeFeedCounts([], globalBotIds, botsOnly),
       generatedAt: new Date().toISOString(),
     };
@@ -3967,6 +3969,9 @@ export async function getConsolidatedFeed(
     items: page,
     users: pageUsers,
     total,
+    // Pre-cap stream length — lets the client disclose "total most recent of N" honestly
+    // when the plain-activity cap dropped older rows (uncappedTotal > total).
+    uncappedTotal: scoped.length,
     counts,
     generatedAt: new Date().toISOString(),
   };

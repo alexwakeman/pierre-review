@@ -2738,6 +2738,12 @@ export interface ConsolidatedFeedResponse {
   // Actors/authors referenced by items on this page, for client-side login/avatar lookup.
   users: User[];
   total: number;
+  // The PRE-cap stream length (post-coalesce, before the plain-activity cap). When it
+  // exceeds `total`, older plain rows were dropped by the cap and the client should
+  // disclose "total most recent of uncappedTotal". OPTIONAL only so a stale
+  // IndexedDB-persisted response (PersistQueryClientProvider) stays type-honest; the
+  // server ALWAYS sends it.
+  uncappedTotal?: number;
   // Facet counts over the whole loadable stream (see ConsolidatedFeedCounts). OPTIONAL only
   // so a stale IndexedDB-persisted response (PersistQueryClientProvider) stays type-honest;
   // the server ALWAYS sends it.
