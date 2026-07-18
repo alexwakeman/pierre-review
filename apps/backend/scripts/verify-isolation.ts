@@ -275,6 +275,15 @@ check(
 const anB = await q.getBotAnalytics(2, 'rolling_30');
 check('getBotAnalytics(B) surfaces no vendors (IDOR blocked)', anB.vendors.length === 0);
 
+// getBotVendorPrs (item 6 — the per-REVIEWER drill-down) is account-scoped by the PR join: A's
+// owner call surfaces its own bot's PR; the SAME userId under account B leaks nothing (the
+// vendor's threads/comments bind pullRequests.accountId, and botUser isn't automated for B).
+const vpA = await q.getBotVendorPrs(1, { userId: botUser!.id }, 'rolling_30');
+check('getBotVendorPrs(A, botUser) surfaces A’s PR', vpA.prs.some((p) => p.prId === A.prId));
+check('getBotVendorPrs(A, botUser) echoes the per-reviewer key', vpA.key === `u${botUser!.id}`);
+const vpCross = await q.getBotVendorPrs(2, { userId: botUser!.id }, 'rolling_30');
+check('getBotVendorPrs(B, A’s botUser) leaks nothing (IDOR blocked)', vpCross.prs.length === 0);
+
 // getBotOnlyPrs (the caption's expandable list) is account-scoped: the owner call resolves
 // its own repos and never contains another account's PR; a cross-account call passing the
 // OTHER account's repo ids returns nothing (getBotOnlyReviewPrs binds pullRequests.accountId).

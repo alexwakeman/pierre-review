@@ -77,14 +77,14 @@ const analyticsSchema = {
   },
 };
 
-// GET /api/bot-analytics/:kind/prs?window= — per-vendor PR drill-down. `kind` is left an open
-// string (AutomatedReviewerKind is types-only shared, unimportable at runtime; the query layer
-// coerces an unknown kind); the window reuses the same closed enum/default as /api/bot-analytics.
+// GET /api/bot-analytics/vendor/:key/prs?window= — per-REVIEWER PR drill-down. `key` is the
+// analytics-row identity: `u<userId>` (a single reviewer) or the 'pierre' sentinel; the handler
+// parses it (anything else → 400). The window reuses the same closed enum/default as /api/bot-analytics.
 const vendorPrsSchema = {
   params: {
     type: 'object',
-    required: ['kind'],
-    properties: { kind: { type: 'string' } },
+    required: ['key'],
+    properties: { key: { type: 'string' } },
   },
   querystring: {
     type: 'object',
@@ -194,19 +194,31 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     return resp;
   });
 
-  // The per-vendor PR drill-down behind one Bot-ROI row: the PRs that automated reviewer kind
+  // The per-REVIEWER PR drill-down behind one Bot-ROI row: the PRs that one automated reviewer
   // touched in the window (threads/comments/acted-on/untouched/bot-only), newest-activity first.
-  app.get('/api/bot-analytics/:kind/prs', { schema: vendorPrsSchema }, async (req) => {
-    const { kind } = req.params as { kind: string };
+  // `key` is the analytics row identity — `u<userId>` (a single reviewer) or the 'pierre' sentinel;
+  // anything else is a client bug → 400.
+  app.get('/api/bot-analytics/vendor/:key/prs', { schema: vendorPrsSchema }, async (req, reply) => {
+    const { key } = req.params as { key: string };
     const { window, scope, repoIds } = req.query as {
       window: BotWindowKind;
       scope?: string;
       repoIds?: string;
     };
+    const m = /^u(\d+)$/.exec(key);
+    const target = m
+      ? { userId: Number(m[1]) }
+      : key === 'pierre'
+        ? ({ kind: 'pierre' } as const)
+        : null;
+    if (!target) {
+      reply.status(400);
+      return { error: 'BadRequest', message: `Invalid vendor key: ${key}` };
+    }
     const accountId = accountIdOf(req);
     const explicit = parseIntList(repoIds);
     const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
-    const resp: BotVendorPrsResponse = await getBotVendorPrs(accountId, kind, window, scopeRepoIds);
+    const resp: BotVendorPrsResponse = await getBotVendorPrs(accountId, target, window, scopeRepoIds);
     return resp;
   });
 

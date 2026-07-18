@@ -4,7 +4,6 @@ import {
   EVENT_CATEGORY_BY_TYPE,
   PR_STATUSES,
   REVIEW_FILTER_STATES,
-  type AutomatedReviewerKind,
   type BotWindowKind,
   type DerivedState,
   type EventCategory,
@@ -166,10 +165,10 @@ export interface FilterState {
   // Seeds/re-jumps the MetricsDetail sub-tab (the tab itself is a singleton). null = none.
   metricsFocus: TeamMetricKey | null;
 
-  // transient: a clicked Bot-ROI vendor row → which automated-reviewer kind the bot-PR
-  // drill-down tab should show. Seeds/re-jumps the BotPrsDetail sub-tab (the tab itself is a
-  // singleton). null = none.
-  botPrsFocus: AutomatedReviewerKind | null;
+  // transient: a clicked Bot-ROI vendor row → which analytics-row KEY (`u<userId>` | 'pierre')
+  // the bot-PR drill-down tab should show. Seeds/re-jumps the BotPrsDetail sub-tab (the tab
+  // itself is a singleton). null = none.
+  botPrsFocusKey: string | null;
   // transient: the repo the bot-PR drill-down was opened FROM (the per-repo Bots tab), so the
   // drill-down stays scoped to that repo. null = account/team scope (the cross-repo Bots rail).
   botPrsFocusRepoId: number | null;
@@ -349,10 +348,10 @@ export interface FilterState {
   // metricsFocus signal + opens the singleton metrics tab; MetricsDetail consumes it.
   openMetricsDetail: (metric: TeamMetricKey) => void;
   consumeMetricsFocus: () => void;
-  // Open (or re-focus) the bot-vendor PR drill-down tab on a specific automated-reviewer
-  // kind. Sets the botPrsFocus signal + opens the singleton bot-PRs tab; BotPrsDetail
-  // consumes it.
-  openBotPrsDetail: (kind: AutomatedReviewerKind, repoId?: number | null) => void;
+  // Open (or re-focus) the bot-vendor PR drill-down tab on a specific analytics-row key
+  // (`u<userId>` | 'pierre'). Sets the botPrsFocusKey signal + opens the singleton bot-PRs tab;
+  // BotPrsDetail consumes it.
+  openBotPrsDetail: (key: string, repoId?: number | null) => void;
   consumeBotPrsFocus: () => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
@@ -517,7 +516,7 @@ function freshDefaults(): FilterData {
     claudeTabFocus: null,
     aiFixTabFocus: null,
     metricsFocus: null,
-    botPrsFocus: null,
+    botPrsFocusKey: null,
     botPrsFocusRepoId: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
@@ -703,11 +702,11 @@ export const useFilters = create<FilterState>((set, get) => ({
     usePinnedTabs.getState().openMetricsTab({ fromActivity: true });
   },
   consumeMetricsFocus: () => set({ metricsFocus: null }),
-  openBotPrsDetail: (kind, repoId) => {
-    set({ botPrsFocus: kind, botPrsFocusRepoId: repoId ?? null });
+  openBotPrsDetail: (key, repoId) => {
+    set({ botPrsFocusKey: key, botPrsFocusRepoId: repoId ?? null });
     usePinnedTabs.getState().openBotPrsTab({ fromActivity: true });
   },
-  consumeBotPrsFocus: () => set({ botPrsFocus: null }),
+  consumeBotPrsFocus: () => set({ botPrsFocusKey: null }),
   requestSyncModal: (repoId: number) =>
     set((s) => ({ syncModalSignal: s.syncModalSignal + 1, syncModalRepoId: repoId })),
   bumpClaudeReviewKickoff: () =>

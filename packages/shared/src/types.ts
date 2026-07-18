@@ -233,8 +233,8 @@ export interface BotAnalyticsResponse {
   suggestions: BotTuningSuggestion[];  // WS6c, deterministic
 }
 
-// One PR row behind a vendor's Bot-ROI panel — the drill-down list of PRs an automated reviewer
-// KIND touched in the window (GET /api/bot-analytics/:kind/prs). Deterministic, no AI, account-
+// One PR row behind a vendor's Bot-ROI panel — the drill-down list of PRs one automated REVIEWER
+// touched in the window (GET /api/bot-analytics/vendor/:key/prs). Deterministic, no AI, account-
 // scoped; ordered most-recent-bot-activity first.
 export interface BotVendorPr {
   prId: number;
@@ -261,8 +261,14 @@ export interface BotVendorPr {
 
 export interface BotVendorPrsResponse {
   enabled: boolean;
+  // The analytics-row identity this list belongs to: `u<userId>` for a per-reviewer row, or the
+  // 'pierre' sentinel (per-review provenance, no userId). Mirrors BotVendorAnalytics.key.
+  key: string;
   kind: AutomatedReviewerKind;
   label: string;
+  // The reviewer's github login (per-reviewer rows); null for the 'pierre' sentinel or an
+  // unresolved login.
+  login: string | null;
   window: { kind: BotWindowKind; from: string; to: string };
   prs: BotVendorPr[]; // most-recent-bot-activity first
   generatedAt: string;

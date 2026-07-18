@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import type {
-  AutomatedReviewerKind,
   BotVendorAnalytics,
   BotVendorPr,
   BotWindowKind,
@@ -8,10 +7,11 @@ import type {
 } from '@pierre-review/shared';
 import { useBotAnalytics } from '../../hooks/useBotTriage.js';
 import { useBotVendorPrs } from '../../hooks/useBotVendorPrs.js';
+import { useBotColors } from '../../hooks/useBotColors.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
-import { CI_META, automatedReviewerMeta, indexUsers, relativeTime } from '../../lib/ui.js';
+import { CI_META, indexUsers, relativeTime } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
 
@@ -195,7 +195,7 @@ function Table({
 }
 
 export function BotPrsDetail(): JSX.Element {
-  const botPrsFocus = useFilters((s) => s.botPrsFocus);
+  const botPrsFocusKey = useFilters((s) => s.botPrsFocusKey);
   const consumeBotPrsFocus = useFilters((s) => s.consumeBotPrsFocus);
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
@@ -208,34 +208,39 @@ export function BotPrsDetail(): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
+  // The account-wide per-bot colour resolver (brand-aware) — so each in-house reviewer's tab
+  // gets its own distinct hue instead of all sharing the neutral gray.
+  const botColor = useBotColors();
 
   // Vendor sub-tabs come from the CORE analytics read (the same query the Bot-ROI panel uses,
   // so switching to this tab is usually instant off the cache).
   const analytics = useBotAnalytics(window, true, scope, repoScope);
   const vendors = analytics.data?.vendors ?? NO_VENDORS;
 
-  // The active vendor sub-tab. Seeded from the focus signal (the clicked ROI row); defaults to
-  // the first (most-threads) vendor once analytics load / when the current pick drops out of
-  // the window.
-  const [active, setActive] = useState<AutomatedReviewerKind | null>(botPrsFocus);
-  // A clicked ROI row (even while the tab is already open) re-jumps to that vendor's sub-tab.
+  // The active reviewer sub-tab, identified by its analytics-row KEY (`u<userId>` | 'pierre').
+  // Seeded from the focus signal (the clicked ROI row); defaults to the first (most-threads)
+  // reviewer once analytics load / when the current pick drops out of the window.
+  const [active, setActive] = useState<string | null>(botPrsFocusKey);
+  // A clicked ROI row (even while the tab is already open) re-jumps to that reviewer's sub-tab.
   useEffect(() => {
-    if (botPrsFocus) {
-      setActive(botPrsFocus);
+    if (botPrsFocusKey) {
+      setActive(botPrsFocusKey);
       consumeBotPrsFocus();
     }
-  }, [botPrsFocus, consumeBotPrsFocus]);
-  // Default (or re-default) to the first vendor when nothing valid is selected — e.g. the
-  // initial load, or a window change that dropped the previously-active vendor.
+  }, [botPrsFocusKey, consumeBotPrsFocus]);
+  // Default (or re-default) to the first reviewer when nothing valid is selected — e.g. the
+  // initial load, or a window change that dropped the previously-active reviewer.
   useEffect(() => {
     if (vendors.length === 0) return;
     setActive((cur) =>
-      cur != null && vendors.some((v) => v.kind === cur) ? cur : (vendors[0] as BotVendorAnalytics).kind,
+      cur != null && vendors.some((v) => v.key === cur) ? cur : (vendors[0] as BotVendorAnalytics).key,
     );
   }, [vendors]);
 
   const prs = useBotVendorPrs(active, window, true, scope, repoScope);
   const rows = prs.data?.prs ?? [];
+  // The selected reviewer's per-reviewer label (from the drill-down response) for the header.
+  const activeLabel = prs.data?.label ?? null;
   const botOnlyPrs = analytics.data?.totals.botOnlyPrs ?? 0;
 
   const openPr = (pr: BotVendorPr): void => {
@@ -263,7 +268,7 @@ export function BotPrsDetail(): JSX.Element {
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Bot PRs</h2>
         <span className="text-[11px] text-gray-400">
-          PRs an automated reviewer touched · most-recent activity first
+          PRs {activeLabel ?? 'an automated reviewer'} touched · most-recent activity first
           {botOnlyPrs > 0 && (
             <>
               {' · '}
@@ -324,21 +329,21 @@ export function BotPrsDetail(): JSX.Element {
           {/* Sub-tab bar — one per detected vendor. */}
           <div role="tablist" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
             {vendors.map((v) => {
-              const on = v.kind === active;
-              const meta = automatedReviewerMeta(v.kind);
+              const on = v.key === active;
+              const color = botColor({ login: v.login, kind: v.kind });
               return (
                 <button
-                  key={v.kind}
+                  key={v.key}
                   type="button"
                   role="tab"
                   aria-selected={on}
-                  onClick={() => setActive(v.kind)}
+                  onClick={() => setActive(v.key)}
                   className={`-mb-px flex items-center gap-1 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
                     on
                       ? 'border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950'
                       : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
                   }`}
-                  style={on ? { color: meta.color } : undefined}
+                  style={on ? { color } : undefined}
                 >
                   <span aria-hidden>🤖</span>
                   {v.label}

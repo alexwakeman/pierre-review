@@ -7419,18 +7419,21 @@ export async function deleteBenchmarkContributions(accountId: number): Promise<v
     .execute();
 }
 
-// Item 7 — the per-PR drill-down behind a vendor's Bot-ROI row (GET /api/bot-analytics/:kind/prs).
-// Lists the PRs one automated reviewer KIND touched in the window (its review threads + comments),
-// with per-PR volume, the merged "acted-on" count (item 6: resolved | likely_addressed | a human
-// followed up after the bot), the untouched backlog, last-activity, and the broadened bot-only flag
-// (item 4a). Ordered most-recent-bot-activity first (nulls last). Deterministic, NO AI, account-
-// scoped. For kind==='pierre' the PRs are those with a Pierre-verbatim posted review in-window —
-// per-review provenance means Pierre has no attributable threads/comments (the human who posted is
-// never reclassified), so its rows carry the review timestamp as lastBotActivityAt and 0 thread/
-// comment counts. When the account has no automated reviewers of that kind, returns prs:[].
+// Item 6 — the per-PR drill-down behind a vendor's Bot-ROI row (GET /api/bot-analytics/vendor/:key/prs).
+// Keyed by the analytics ROW (per-REVIEWER, not per-kind), so two in-house bots don't collapse into
+// one merged list. `target` is either `{ userId }` (a single reviewer) or the `{ kind: 'pierre' }`
+// sentinel. Lists the PRs that reviewer touched in the window (its review threads + comments), with
+// per-PR volume, the merged "acted-on" count (resolved | likely_addressed | a human followed up
+// after the bot), the untouched backlog, last-activity, and the broadened bot-only flag. Ordered
+// most-recent-bot-activity first (nulls last). Deterministic, NO AI, account-scoped (the vendor's
+// threads/comments bind pullRequests.accountId via the PR join — a foreign/unknown userId surfaces
+// nothing). For the 'pierre' sentinel the PRs are those with a Pierre-verbatim posted review
+// in-window — per-review provenance means Pierre has no attributable threads/comments (the human who
+// posted is never reclassified), so its rows carry the review timestamp as lastBotActivityAt and 0
+// thread/comment counts.
 export async function getBotVendorPrs(
   accountId: number,
-  kind: string,
+  target: { userId: number } | { kind: 'pierre' },
   window: BotWindowKind,
   // Team scope: null/undefined = all account repos; [] = no repos → empty. Applied at the
   // final PR-metadata load (the single narrowing point), so the whole result stays scoped.
@@ -7442,18 +7445,57 @@ export async function getBotVendorPrs(
   const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
   const from = new Date(nowMs - windowDays * 86_400_000);
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
-  const kindTyped = kind as AutomatedReviewerKind;
-  const label = labelForKind(kindTyped);
   const generatedAt = new Date(nowMs).toISOString();
+
+  // Resolve the drill-down's identity — the analytics ROW this list belongs to.
+  const isPierre = 'kind' in target;
+  let key: string;
+  let kindTyped: AutomatedReviewerKind;
+  let label: string;
+  let login: string | null;
+  let vendorIds: number[];
+  if (isPierre) {
+    key = 'pierre';
+    kindTyped = 'pierre';
+    label = labelForKind('pierre');
+    login = null;
+    vendorIds = [];
+  } else {
+    const userId = target.userId;
+    key = `u${userId}`;
+    const kindMap = await classificationKindForUser(accountId);
+    kindTyped = kindMap.get(userId) ?? 'in_house';
+    vendorIds = [userId];
+    // Per-reviewer identity — mirrors getBotAnalytics's reviewerLabel resolution: the account's
+    // custom classification label → the vendor's pretty name (known vendors) → login/display name.
+    const [classRow] = await db
+      .select({ label: botReviewClassification.label })
+      .from(botReviewClassification)
+      .where(
+        and(
+          eq(botReviewClassification.accountId, accountId),
+          eq(botReviewClassification.authorUserId, userId),
+        ),
+      )
+      .limit(1)
+      .execute();
+    const [userRow] = await db
+      .select({ login: users.githubLogin, name: users.displayName })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+      .execute();
+    login = userRow?.login ?? null;
+    const custom = classRow?.label?.trim();
+    if (custom) label = custom;
+    else if (kindTyped !== 'in_house' && kindTyped !== 'pierre') label = labelForKind(kindTyped);
+    else label = userRow?.name?.trim() || login || `u${userId}`;
+  }
+
   const empty: BotVendorPrsResponse = {
-    enabled: true, kind: kindTyped, label, window: win, prs: [], generatedAt,
+    enabled: true, key, kind: kindTyped, label, login, window: win, prs: [], generatedAt,
   };
   if (scopeRepoIds != null && scopeRepoIds.length === 0) return empty;
-
-  const kindMap = await classificationKindForUser(accountId);
-  // The account's user ids classified as the requested kind. Empty for 'pierre' (per-review, not
-  // per-user) — that kind is resolved from verbatim posted reviews instead.
-  const vendorIds = [...kindMap.entries()].filter(([, k]) => k === kind).map(([id]) => id);
 
   // Per-PR vendor-activity accumulator.
   type PrAcc = {
@@ -7476,7 +7518,7 @@ export async function getBotVendorPrs(
     if (a.lastAtMs == null || atMs > a.lastAtMs) a.lastAtMs = atMs;
   };
 
-  if (kind === 'pierre') {
+  if (isPierre) {
     // Pierre PRs via Pierre-verbatim posted reviews in-window (postedReviewId == reviews.databaseId).
     const crRows = await db
       .select({
@@ -7662,7 +7704,7 @@ export async function getBotVendorPrs(
     return ya - xa;
   });
 
-  return { enabled: true, kind: kindTyped, label, window: win, prs, generatedAt };
+  return { enabled: true, key, kind: kindTyped, label, login, window: win, prs, generatedAt };
 }
 
 // WS4 — cross-bot dedup + consensus for one PR. Groups the PR's automated-reviewer

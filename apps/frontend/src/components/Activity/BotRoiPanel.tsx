@@ -256,7 +256,7 @@ function VendorTable({
 }: {
   vendors: BotVendorAnalytics[];
   botColor: BotColor;
-  onOpenVendor: (kind: AutomatedReviewerKind) => void;
+  onOpenVendor: (key: string) => void;
 }): JSX.Element {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
@@ -299,7 +299,7 @@ function VendorTable({
                 <td className="px-2 py-1.5">
                   <button
                     type="button"
-                    onClick={() => onOpenVendor(v.kind)}
+                    onClick={() => onOpenVendor(v.key)}
                     title="View this bot's PRs"
                     className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:underline"
                     style={{ color, background: `${color}1a` }}
@@ -444,7 +444,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
         <VendorTable
           vendors={vendors}
           botColor={botColor}
-          onOpenVendor={(kind) => openBotPrsDetail(kind, repoId ?? null)}
+          onOpenVendor={(key) => openBotPrsDetail(key, repoId ?? null)}
         />
         {/* Bot-effectiveness charts (per vendor) — all always visible: raw weekly volume, the
             volume-independent effectiveness + verdict, and the acted-on vs untouched split. */}

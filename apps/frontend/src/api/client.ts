@@ -612,14 +612,15 @@ export const api = {
       withQuery(`/api/bot-analytics/bot-only-prs`, `window=${encodeURIComponent(window)}`, s, r),
     );
   },
-  // The per-PR drill-down behind one vendor's Bot-ROI row: the PRs that automated reviewer kind
-  // touched in the window (threads/comments/acted-on/untouched/bot-only), most-recent-activity first.
-  botVendorPrs: (kind: string, window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
+  // The per-PR drill-down behind one Bot-ROI row: the PRs that one automated reviewer touched in
+  // the window (threads/comments/acted-on/untouched/bot-only), most-recent-activity first. `key` is
+  // the analytics row identity — `u<userId>` (a single reviewer) or the 'pierre' sentinel.
+  botVendorPrs: (key: string, window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
     const r = repoIdsParam(repoIds);
     const s = r ? '' : scopeParam(scope);
     return get<BotVendorPrsResponse>(
       withQuery(
-        `/api/bot-analytics/${encodeURIComponent(kind)}/prs`,
+        `/api/bot-analytics/vendor/${encodeURIComponent(key)}/prs`,
         `window=${encodeURIComponent(window)}`,
         s,
         r,

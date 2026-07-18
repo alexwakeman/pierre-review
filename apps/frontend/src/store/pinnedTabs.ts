@@ -45,8 +45,8 @@ export const prFocusKey = (id: number): string => `pr-focus:${id}`;
 // transient `metricsFocus` signal (store/filters.ts), not the key. EPHEMERAL: excluded from
 // persistence (see `persist`) + not matched by parseTabKey, so a reload drops it.
 export const METRICS_TAB_KEY = 'metrics-detail';
-// The bot-vendor PR drill-down is likewise a SINGLETON, non-PR tab. Which vendor it shows is
-// driven by the transient `botPrsFocus` signal (store/filters.ts), not the key. EPHEMERAL:
+// The bot-vendor PR drill-down is likewise a SINGLETON, non-PR tab. Which reviewer it shows is
+// driven by the transient `botPrsFocusKey` signal (store/filters.ts), not the key. EPHEMERAL:
 // excluded from persistence (see `persist`) + not matched by parseTabKey, so a reload drops it.
 export const BOT_PRS_TAB_KEY = 'bot-prs';
 
