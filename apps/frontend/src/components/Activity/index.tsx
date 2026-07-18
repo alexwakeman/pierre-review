@@ -117,6 +117,56 @@ function RailRow({
   );
 }
 
+// One repo's console, with an Activity | Bots sub-tab strip. Activity is the default (repo
+// digest header + per-repo Insights + open-PR list + the repo feed); Bots is the per-repo
+// replica of the cross-repo Bots rail (BotsView scoped to this repo — its ROI panel, charts
+// and bot-only feed all narrow to this repo, and only bots active here surface). Mounted keyed
+// by repoId (see the caller) so switching repos remounts this and resets the tab to Activity.
+function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
+  const [tab, setTab] = useState<'activity' | 'bots'>('activity');
+  return (
+    <div className="space-y-3" data-testid="repo-console">
+      <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
+        {(['activity', 'bots'] as const).map((t) => {
+          const on = tab === t;
+          return (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              onClick={() => setTab(t)}
+              className={`-mb-px flex items-center gap-1 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
+                on
+                  ? 'border-gray-300 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200'
+                  : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
+              }`}
+            >
+              {t === 'bots' && <span aria-hidden="true">🤖</span>}
+              {t === 'activity' ? 'Activity' : 'Bots'}
+            </button>
+          );
+        })}
+      </div>
+      {tab === 'activity' ? (
+        <>
+          <RepoFeedHeader repo={repo} />
+          {/* Per-repo Insights — the Insights Overview replicated for this ONE repo: the
+              DORA-ish tile row (NON-clickable) + primary trend charts + a "More charts"
+              button that reveals the full per-repo charts grid inline. Sits under the AI
+              digest (in the header) and above the open-PR list. */}
+          <RepoInsightsPanel repoId={repo.repoId} repoFullName={repo.repoFullName} />
+          {/* All the repo's open PRs (at-a-glance metrics) BEFORE its activity feed. */}
+          <RepoOpenPrList prs={repo.prs} />
+          <FeedView repoId={repo.repoId} />
+        </>
+      ) : (
+        <BotsView repoId={repo.repoId} />
+      )}
+    </div>
+  );
+}
+
 // The Activity "Triage Console with a Briefing Feed": a fixed left rail of repos (the
 // cross-repo glance) + a right detail that defaults to the cross-repo consolidated Feed
 // and narrows to a single-repo console on selection. Entirely on the core query layer —
@@ -419,20 +469,8 @@ export function ActivityView(): JSX.Element {
             ))}
           </div>
         ) : selectedRepo != null ? (
-          <div className="space-y-3" data-testid="repo-console">
-            <RepoFeedHeader repo={selectedRepo} />
-            {/* Per-repo Insights — the Insights Overview replicated for this ONE repo: the
-                DORA-ish tile row (NON-clickable) + primary trend charts + a "More charts"
-                button that reveals the full per-repo charts grid inline. Sits under the AI
-                digest (in the header) and above the open-PR list. */}
-            <RepoInsightsPanel
-              repoId={selectedRepo.repoId}
-              repoFullName={selectedRepo.repoFullName}
-            />
-            {/* All the repo's open PRs (at-a-glance metrics) BEFORE its activity feed. */}
-            <RepoOpenPrList prs={selectedRepo.prs} />
-            <FeedView repoId={selectedRepo.repoId} />
-          </div>
+          // Keyed by repoId so switching repos remounts the console (resets its Activity|Bots tab).
+          <RepoConsole key={selectedRepo.repoId} repo={selectedRepo} />
         ) : (
           // A numeric repo id that didn't resolve (e.g. removed) — fall back to Feed.
           <FeedView />

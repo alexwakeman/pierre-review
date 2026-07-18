@@ -170,6 +170,9 @@ export interface FilterState {
   // drill-down tab should show. Seeds/re-jumps the BotPrsDetail sub-tab (the tab itself is a
   // singleton). null = none.
   botPrsFocus: AutomatedReviewerKind | null;
+  // transient: the repo the bot-PR drill-down was opened FROM (the per-repo Bots tab), so the
+  // drill-down stays scoped to that repo. null = account/team scope (the cross-repo Bots rail).
+  botPrsFocusRepoId: number | null;
 
   // open PRs strip
   stripCollapsed: boolean;
@@ -349,7 +352,7 @@ export interface FilterState {
   // Open (or re-focus) the bot-vendor PR drill-down tab on a specific automated-reviewer
   // kind. Sets the botPrsFocus signal + opens the singleton bot-PRs tab; BotPrsDetail
   // consumes it.
-  openBotPrsDetail: (kind: AutomatedReviewerKind) => void;
+  openBotPrsDetail: (kind: AutomatedReviewerKind, repoId?: number | null) => void;
   consumeBotPrsFocus: () => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
@@ -515,6 +518,7 @@ function freshDefaults(): FilterData {
     aiFixTabFocus: null,
     metricsFocus: null,
     botPrsFocus: null,
+    botPrsFocusRepoId: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
@@ -699,8 +703,8 @@ export const useFilters = create<FilterState>((set, get) => ({
     usePinnedTabs.getState().openMetricsTab({ fromActivity: true });
   },
   consumeMetricsFocus: () => set({ metricsFocus: null }),
-  openBotPrsDetail: (kind) => {
-    set({ botPrsFocus: kind });
+  openBotPrsDetail: (kind, repoId) => {
+    set({ botPrsFocus: kind, botPrsFocusRepoId: repoId ?? null });
     usePinnedTabs.getState().openBotPrsTab({ fromActivity: true });
   },
   consumeBotPrsFocus: () => set({ botPrsFocus: null }),

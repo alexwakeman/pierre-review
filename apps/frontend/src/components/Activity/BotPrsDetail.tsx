@@ -200,13 +200,18 @@ export function BotPrsDetail(): JSX.Element {
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
   const scope = scopeToParam(useFilters((s) => s.teamScope));
+  // The repo the drill-down was opened from (per-repo Bots tab) — scopes the whole tab to that
+  // repo; null (the cross-repo Bots rail) falls back to the team scope. Read (not consumed) so
+  // the scope persists for the tab's lifetime; it's only reset when the next drill-down opens.
+  const focusRepoId = useFilters((s) => s.botPrsFocusRepoId);
+  const repoScope = useMemo(() => (focusRepoId != null ? [focusRepoId] : null), [focusRepoId]);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
 
   // Vendor sub-tabs come from the CORE analytics read (the same query the Bot-ROI panel uses,
   // so switching to this tab is usually instant off the cache).
-  const analytics = useBotAnalytics(window, true, scope);
+  const analytics = useBotAnalytics(window, true, scope, repoScope);
   const vendors = analytics.data?.vendors ?? NO_VENDORS;
 
   // The active vendor sub-tab. Seeded from the focus signal (the clicked ROI row); defaults to
@@ -229,7 +234,7 @@ export function BotPrsDetail(): JSX.Element {
     );
   }, [vendors]);
 
-  const prs = useBotVendorPrs(active, window, true, scope);
+  const prs = useBotVendorPrs(active, window, true, scope, repoScope);
   const rows = prs.data?.prs ?? [];
   const botOnlyPrs = analytics.data?.totals.botOnlyPrs ?? 0;
 

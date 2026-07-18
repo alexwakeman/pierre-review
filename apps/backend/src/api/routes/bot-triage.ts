@@ -22,6 +22,17 @@ import {
 } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
+// Parse a comma-separated id list into a positive-int array, or null when empty/absent (so
+// the query layer treats it as "all repos"). Mirrors the parser in activity.ts.
+function parseIntList(raw?: string): number[] | null {
+  if (raw == null || raw.trim() === '') return null;
+  const ids = raw
+    .split(',')
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  return ids.length > 0 ? ids : null;
+}
+
 // PATCH /api/bot-reviewers/:userId — the two-way manual override. `kind`/`label` are left as
 // open strings (nullable) rather than an enum: AutomatedReviewerKind is defined in the
 // types-only shared package the backend can't import at runtime, and the query layer coerces
@@ -57,6 +68,9 @@ const analyticsSchema = {
       },
       // Team scope: 'all' | 'none' | '<teamId>' (see resolveScopeRepoIds). Absent = all.
       scope: { type: 'string' },
+      // Explicit repo scope (comma-separated ids) — the per-repo Bots tab. When present it
+      // WINS over `scope` (a specific repo is the more specific selection).
+      repoIds: { type: 'string' },
     },
   },
 };
@@ -80,6 +94,7 @@ const vendorPrsSchema = {
         default: 'rolling_14',
       },
       scope: { type: 'string' },
+      repoIds: { type: 'string' },
     },
   },
 };
@@ -146,10 +161,16 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // untouched + verdict + trend + deterministic tuning suggestions. Cost fields are null here
   // (the client overlays per-vendor cost from Pro settings).
   app.get('/api/bot-analytics', { schema: analyticsSchema }, async (req) => {
-    const { window, scope } = req.query as { window: BotWindowKind; scope?: string };
+    const { window, scope, repoIds } = req.query as {
+      window: BotWindowKind;
+      scope?: string;
+      repoIds?: string;
+    };
     const accountId = accountIdOf(req);
-    const repoIds = scope ? await resolveScopeRepoIds(accountId, scope) : null;
-    const resp: BotAnalyticsResponse = await getBotAnalytics(accountId, window, repoIds);
+    // An explicit repoIds list (the per-repo Bots tab) wins over the team scope.
+    const explicit = parseIntList(repoIds);
+    const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
+    const resp: BotAnalyticsResponse = await getBotAnalytics(accountId, window, scopeRepoIds);
     return resp;
   });
 
@@ -157,10 +178,15 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // touched in the window (threads/comments/acted-on/untouched/bot-only), newest-activity first.
   app.get('/api/bot-analytics/:kind/prs', { schema: vendorPrsSchema }, async (req) => {
     const { kind } = req.params as { kind: string };
-    const { window, scope } = req.query as { window: BotWindowKind; scope?: string };
+    const { window, scope, repoIds } = req.query as {
+      window: BotWindowKind;
+      scope?: string;
+      repoIds?: string;
+    };
     const accountId = accountIdOf(req);
-    const repoIds = scope ? await resolveScopeRepoIds(accountId, scope) : null;
-    const resp: BotVendorPrsResponse = await getBotVendorPrs(accountId, kind, window, repoIds);
+    const explicit = parseIntList(repoIds);
+    const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
+    const resp: BotVendorPrsResponse = await getBotVendorPrs(accountId, kind, window, scopeRepoIds);
     return resp;
   });
 

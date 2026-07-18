@@ -17,10 +17,15 @@ export function useBotVendorPrs(
   window: BotWindowKind,
   enabled = true,
   scope?: string,
+  repoIds?: number[] | null,
 ) {
+  // A repo scope (the per-repo Bots tab drill-down) wins over the team scope, keyed for cache.
+  // NAMESPACE the slot (`repo:` vs `scope:`) so a bare repoId can't collide with a numeric teamId
+  // (independent id-spaces) and alias the wrong scope's cache entry — see useBotAnalytics.
+  const repoKey = repoIds && repoIds.length > 0 ? [...repoIds].sort((a, b) => a - b).join(',') : null;
   return useQuery<BotVendorPrsResponse>({
-    queryKey: ['bot-vendor-prs', kind, window, scope ?? 'all'],
-    queryFn: () => api.botVendorPrs(kind as AutomatedReviewerKind, window, scope),
+    queryKey: ['bot-vendor-prs', kind, window, repoKey != null ? `repo:${repoKey}` : `scope:${scope ?? 'all'}`],
+    queryFn: () => api.botVendorPrs(kind as AutomatedReviewerKind, window, scope, repoIds),
     enabled: enabled && kind != null,
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,

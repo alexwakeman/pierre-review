@@ -21,10 +21,20 @@ import { api } from '../api/client.js';
 // scope so either change refetches. Cost fields arrive null — the panel overlays cost
 // client-side from /api/pro/settings `bots.cost`. `enabled` lets the caller gate the fetch
 // (Pro panel). `scope` ('all' | 'none' | '<teamId>') narrows to a team's repos.
-export function useBotAnalytics(window: BotWindowKind, enabled = true, scope?: string) {
+export function useBotAnalytics(
+  window: BotWindowKind,
+  enabled = true,
+  scope?: string,
+  repoIds?: number[] | null,
+) {
+  // A repo scope (the per-repo Bots tab) wins over the team scope, both here and on the wire.
+  // NAMESPACE the key slot (`repo:` vs `scope:`) — a bare repoId and a numeric teamId are both
+  // plain integer strings (repo/team ids are independent autoincrements), so an un-prefixed slot
+  // would let repo N alias team N's cache entry and show the wrong in-account scope.
+  const repoKey = repoIds && repoIds.length > 0 ? [...repoIds].sort((a, b) => a - b).join(',') : null;
   return useQuery<BotAnalyticsResponse>({
-    queryKey: ['bot-analytics', window, scope ?? 'all'],
-    queryFn: () => api.botAnalytics(window, scope),
+    queryKey: ['bot-analytics', window, repoKey != null ? `repo:${repoKey}` : `scope:${scope ?? 'all'}`],
+    queryFn: () => api.botAnalytics(window, scope, repoIds),
     enabled,
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,

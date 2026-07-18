@@ -12,12 +12,17 @@ import { FeedView } from './FeedView.js';
 // Everything reads the CORE, deterministic bot routes + the core consolidated-feed route — no AI,
 // no Pro gate. The detection / mute-rule / cost / Pierre-tagging SETTINGS live in the Settings
 // modal's "Review bots" section (free, plugin-backed).
-export function BotsView(): JSX.Element {
+//
+// `repoId` scopes the WHOLE console to one repo (the per-repo Bots tab in the repo console):
+// analytics, the bot-only feed, the bot-only-review caution, and the vendor drill-down all
+// narrow to that repo, and only bots active in it surface. Absent = the cross-repo Bots rail.
+export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // Reuse the same analytics query BotRoiPanel drives (same key → deduped) just for the
-  // account-level bot-only-review count in the header caution.
+  // bot-only-review count in the header caution. A repo scope (per-repo tab) wins over the team
+  // scope, matching BotRoiPanel so both hit the same cache entry.
   const window = useFilters((s) => s.botAnalyticsWindow);
   const scope = scopeToParam(useFilters((s) => s.teamScope));
-  const { data } = useBotAnalytics(window, true, scope);
+  const { data } = useBotAnalytics(window, true, scope, repoId != null ? [repoId] : null);
   const botOnly = data?.totals.botOnlyPrs ?? 0;
 
   return (
@@ -25,8 +30,9 @@ export function BotsView(): JSX.Element {
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Review bots</h2>
         <span className="text-[11px] text-gray-400">
-          The calm layer above your review bots — detect, measure, and triage automated
-          reviewers. Deterministic, no AI.
+          {repoId != null
+            ? 'The calm layer above your review bots — scoped to this repo. Deterministic, no AI.'
+            : 'The calm layer above your review bots — detect, measure, and triage automated reviewers. Deterministic, no AI.'}
         </span>
       </div>
 
@@ -40,13 +46,14 @@ export function BotsView(): JSX.Element {
         </div>
       )}
 
-      <BotRoiPanel />
+      <BotRoiPanel repoId={repoId} />
 
       {/* The bot-only activity feed — the consolidated Feed filtered to automated-reviewer
           activity, with review-thread derived-state pills for triage. Same cards / inline
-          threads / pagination as every other feed, just bot-scoped. */}
+          threads / pagination as every other feed, just bot-scoped (and repo-scoped in the
+          per-repo Bots tab). */}
       <div className="border-t border-gray-200 pt-3 dark:border-gray-800">
-        <FeedView botsMode />
+        <FeedView repoId={repoId} botsMode />
       </div>
     </div>
   );

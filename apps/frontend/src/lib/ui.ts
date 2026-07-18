@@ -150,6 +150,92 @@ export function botVendorMeta(
   return kind ? { kind, ...BOT_VENDOR_META[kind] } : null;
 }
 
+// A curated categorical palette for bots that DON'T have a recognizable brand colour — every
+// in-house bot, an unbranded reviewer, or a collision that needs breaking. 10 mid-tone hues
+// spread across the wheel, each legible on both light and dark surfaces (used as chart strokes,
+// small swatches, and text-on-10%-tint pills). ORDER MATTERS: buildBotColorMap assigns greedily
+// from the front, so we lead with hues furthest from the most COMMON review-bot brand colours
+// (CodeRabbit orange, Copilot/Qodo purple, Sourcery teal, Korbit blue, Greptile green) — this
+// way the usual 1–3 in-house bots land on pink/lime/cyan, clearly distinct from the brands they
+// sit beside, before we reach the brand-adjacent hues at the tail.
+export const BOT_PALETTE: readonly string[] = [
+  '#ec4899', // pink
+  '#84cc16', // lime
+  '#06b6d4', // cyan
+  '#ef4444', // red
+  '#3b82f6', // blue
+  '#8b5cf6', // violet
+  '#f59e0b', // amber
+  '#14b8a6', // teal
+  '#22c55e', // green
+  '#f97316', // orange
+] as const;
+
+// The generic fallback tint for an automated reviewer we can't place (no login, roster not
+// loaded yet) — the same neutral gray in_house has always used.
+const BOT_FALLBACK_COLOR = BOT_VENDOR_META.in_house.color;
+
+// The kinds that carry a distinctive BRAND colour worth preserving (recognition beats a
+// palette slot). `in_house` (and anything unknown) is deliberately excluded — those are the
+// bots that need a distinct palette colour instead of the shared gray.
+function isBrandedKind(kind: AutomatedReviewerKind): boolean {
+  return kind !== 'in_house';
+}
+
+// Build a stable login → colour map for a roster of automated reviewers (brand-aware hybrid):
+//   1. branded kinds (known vendors + Pierre) keep their BOT_VENDOR_META brand colour, and
+//   2. in-house / unknown bots each get a DISTINCT palette colour (greedy, skipping any hue a
+//      brand already claimed), so no two bots share a colour until the palette is exhausted.
+// Keyed by login (unique per user) and seeded by a stable login sort, so a given bot resolves
+// to the same colour across every surface + view (the map is account-wide, not per-view).
+export function buildBotColorMap(
+  roster: { login: string; kind: AutomatedReviewerKind }[],
+): Map<string, string> {
+  const map = new Map<string, string>();
+  const used = new Set<string>();
+  const sorted = [...roster].sort((a, b) => a.login.localeCompare(b.login));
+  // Pass 1: branded vendors + Pierre claim their brand colour.
+  for (const r of sorted) {
+    if (map.has(r.login) || !isBrandedKind(r.kind)) continue;
+    const c = BOT_VENDOR_META[r.kind].color;
+    map.set(r.login, c);
+    used.add(c.toLowerCase());
+  }
+  // Pass 2: in-house / unknown bots each take the next palette colour not already in use;
+  // once the palette is exhausted, colours repeat (acceptable beyond the palette size).
+  let cursor = 0;
+  for (const r of sorted) {
+    if (map.has(r.login)) continue;
+    let chosen = BOT_PALETTE[cursor % BOT_PALETTE.length]!;
+    for (let k = 0; k < BOT_PALETTE.length; k++) {
+      const cand = BOT_PALETTE[(cursor + k) % BOT_PALETTE.length]!;
+      if (!used.has(cand.toLowerCase())) {
+        chosen = cand;
+        cursor += k + 1;
+        break;
+      }
+      if (k === BOT_PALETTE.length - 1) cursor += 1; // all used → cycle from the next slot
+    }
+    map.set(r.login, chosen);
+    used.add(chosen.toLowerCase());
+  }
+  return map;
+}
+
+// Resolve one bot's colour: the account-wide map by login → its brand colour (branded kinds)
+// → the neutral fallback. `login`/map absent (roster still loading) degrades to brand-by-kind,
+// so a branded bot never flashes and an in-house bot briefly shows gray before its palette hue.
+export function resolveBotColor(
+  colorMap: Map<string, string>,
+  bot: { login?: string | null; kind: AutomatedReviewerKind },
+): string {
+  if (bot.login) {
+    const c = colorMap.get(bot.login);
+    if (c) return c;
+  }
+  return isBrandedKind(bot.kind) ? BOT_VENDOR_META[bot.kind].color : BOT_FALLBACK_COLOR;
+}
+
 // The reason tags that make a PR "need attention" — mirrors the backend's
 // ACTIVITY_ATTENTION_REASONS (db/queries.ts) so the per-PR ⚠ badge and the repo-level
 // attentionCount agree exactly.

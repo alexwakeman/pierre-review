@@ -17,13 +17,13 @@ import {
   useMarkFeedSeen,
 } from '../../hooks/useConsolidatedFeed.js';
 import { useDetectedReviewers, useReviewerOverride } from '../../hooks/useBotTriage.js';
+import { useBotColors } from '../../hooks/useBotColors.js';
 import { useProCapabilities, useOpenPrs } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
-  automatedReviewerMeta,
   botVendorMeta,
   buildQuotedReply,
   CI_META,
@@ -90,9 +90,14 @@ const CLAUDE_VERDICT_META: Record<ClaudeReviewVerdict, { label: string; color: s
 // id so the inline "not a bot?" override can target it. Null → the actor is a human.
 type AutomatedTag = { userId: number | null; kind: AutomatedReviewerKind; label: string; color: string };
 
+// The account-wide per-bot colour resolver (see useBotColors) — so an in-house bot keeps the
+// SAME distinct colour in the feed as in the Bots ROI console / per-repo Bots tab.
+type BotColorFn = (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
+
 function automatedTagFor(
   actorUser: User | undefined,
   classificationByUserId: Map<number, ReviewerClassification>,
+  botColor: BotColorFn,
 ): AutomatedTag | null {
   // Known review-bot vendor (CodeRabbit/Copilot/…) by login — the v1 path, still first.
   const loginVendor = botVendorMeta(actorUser);
@@ -101,7 +106,7 @@ function automatedTagFor(
       userId: actorUser?.id ?? null,
       kind: loginVendor.kind,
       label: loginVendor.label,
-      color: loginVendor.color,
+      color: botColor({ login: actorUser?.githubLogin, kind: loginVendor.kind }),
     };
   }
   // Otherwise, an account-classified automated reviewer (in-house AI / Pierre) — widened
@@ -109,7 +114,12 @@ function automatedTagFor(
   if (actorUser) {
     const c = classificationByUserId.get(actorUser.id);
     if (c && c.automated && c.kind != null) {
-      return { userId: actorUser.id, kind: c.kind, label: c.label, color: automatedReviewerMeta(c.kind).color };
+      return {
+        userId: actorUser.id,
+        kind: c.kind,
+        label: c.label,
+        color: botColor({ login: actorUser.githubLogin, kind: c.kind }),
+      };
     }
   }
   return null;
@@ -207,6 +217,9 @@ export function FeedView({
   // "not a bot?" override reclassifies an actor as human (automated:false); on success the
   // detected-reviewers query invalidates and the tag drops.
   const { data: detectedReviewers } = useDetectedReviewers();
+  // Account-wide per-bot colour resolver (shares the detected-reviewers cache above — no extra
+  // fetch). Gives in-house bots a distinct, consistent colour in the feed pills + row tags.
+  const botColor = useBotColors();
   const reviewerOverride = useReviewerOverride();
   const { mutate: overrideMutate } = reviewerOverride;
   const classificationByUserId = useMemo(() => {
@@ -376,12 +389,12 @@ export function FeedView({
         continue;
       }
       const u = usersById.get(aid);
-      const tag = automatedTagFor(u, classificationByUserId);
+      const tag = automatedTagFor(u, classificationByUserId, botColor);
       const label = tag?.label?.trim() ? tag.label : userLabel(u, aid);
       m.set(aid, { actorId: aid, label, color: tag?.color ?? '#6b7280', count: 1 });
     }
     return [...m.values()].sort((a, b) => b.count - a.count);
-  }, [botsMode, items, usersById, classificationByUserId]);
+  }, [botsMode, items, usersById, classificationByUserId, botColor]);
   // Per-state counts across the (already bot-only) items, for the pill badges — independent of
   // the active pills. The backend filtered to automated reviewers, so every item counts.
   const botStateCounts = useMemo(() => {
@@ -1016,6 +1029,7 @@ export function FeedView({
               item={item}
               usersById={usersById}
               classificationByUserId={classificationByUserId}
+              botColor={botColor}
               overridePendingUserId={overridePendingUserId}
               onNotBot={markNotBot}
               flash={flashId === item.id}
@@ -1339,6 +1353,7 @@ type FeedRowProps = {
   item: ConsolidatedFeedItem;
   usersById: Map<number, User>;
   classificationByUserId: Map<number, ReviewerClassification>;
+  botColor: BotColorFn;
   overridePendingUserId: number | null;
   onNotBot: (userId: number) => void;
   flash: boolean;
@@ -1356,6 +1371,7 @@ function FeedRowImpl({
   item,
   usersById,
   classificationByUserId,
+  botColor,
   overridePendingUserId,
   onNotBot,
   flash,
@@ -1372,8 +1388,8 @@ function FeedRowImpl({
   // Derived, memoised per row so props into this memoised component stay stable.
   const actorUser = item.actorId != null ? usersById.get(item.actorId) : undefined;
   const automatedTag = useMemo(
-    () => automatedTagFor(actorUser, classificationByUserId),
-    [actorUser, classificationByUserId],
+    () => automatedTagFor(actorUser, classificationByUserId, botColor),
+    [actorUser, classificationByUserId, botColor],
   );
   const overridePending =
     automatedTag?.userId != null && overridePendingUserId === automatedTag.userId;
@@ -1712,6 +1728,7 @@ const FeedRow = memo(
     a.overridePendingUserId === b.overridePendingUserId &&
     a.usersById === b.usersById &&
     a.classificationByUserId === b.classificationByUserId &&
+    a.botColor === b.botColor &&
     a.onOpen === b.onOpen &&
     a.onOpenThread === b.onOpenThread &&
     a.onFocus === b.onFocus &&

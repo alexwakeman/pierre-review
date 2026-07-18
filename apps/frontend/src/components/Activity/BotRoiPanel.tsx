@@ -11,6 +11,7 @@ import { useBotAnalytics, useAddBotMuteRule } from '../../hooks/useBotTriage.js'
 import { useProSettings, useHasProSettings } from '../../hooks/useProSettings.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
 import { automatedReviewerMeta } from '../../lib/ui.js';
+import { useBotColors } from '../../hooks/useBotColors.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js';
@@ -49,6 +50,10 @@ const VERDICT_META: Record<BotVerdict, { label: string; className: string; title
     title: 'High volume, low acted-on, high untouched — probably not paying for itself.',
   },
 };
+
+// The account-wide per-bot colour resolver (brand-aware hybrid — see useBotColors): the same
+// colour for a given bot across the ROI charts, table, feed pills, and the per-repo Bots tab.
+type BotColor = (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
 
 function pct(v: number | null): string {
   return v == null ? '—' : `${Math.round(v)}%`;
@@ -94,11 +99,13 @@ function withCost(
 function VendorTrendChart({
   vendors,
   value,
+  botColor,
   formatY,
   height = 140,
 }: {
   vendors: BotVendorAnalytics[];
   value: (p: BotVendorTrendPoint) => number | null;
+  botColor: BotColor;
   formatY?: (n: number) => string;
   height?: number;
 }): JSX.Element {
@@ -113,12 +120,12 @@ function VendorTrendChart({
         return {
           key: v.key,
           label: v.label,
-          color: automatedReviewerMeta(v.kind).color,
+          color: botColor({ login: v.login, kind: v.kind }),
           values: labels.map((w) => byWeek.get(w) ?? null),
         };
       });
     return { labels, series };
-  }, [vendors, value]);
+  }, [vendors, value, botColor]);
 
   if (labels.length < 2 || series.length === 0) {
     return <ChartEmpty label="Not enough weekly history yet" />;
@@ -244,9 +251,11 @@ function TuningSuggestions({
 
 function VendorTable({
   vendors,
+  botColor,
   onOpenVendor,
 }: {
   vendors: BotVendorAnalytics[];
+  botColor: BotColor;
   onOpenVendor: (kind: AutomatedReviewerKind) => void;
 }): JSX.Element {
   return (
@@ -280,7 +289,7 @@ function VendorTable({
         </thead>
         <tbody>
           {vendors.map((v) => {
-            const meta = automatedReviewerMeta(v.kind);
+            const color = botColor({ login: v.login, kind: v.kind });
             const verdict = VERDICT_META[v.verdict];
             return (
               <tr
@@ -293,7 +302,7 @@ function VendorTable({
                     onClick={() => onOpenVendor(v.kind)}
                     title="View this bot's PRs"
                     className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:underline"
-                    style={{ color: meta.color, background: `${meta.color}1a` }}
+                    style={{ color, background: `${color}1a` }}
                   >
                     🤖 {v.label}
                   </button>
@@ -344,13 +353,19 @@ function VendorTable({
   );
 }
 
-export function BotRoiPanel(): JSX.Element | null {
+// `repoId` scopes the whole panel to ONE repo (the per-repo Bots tab): analytics + the vendor
+// drill-down narrow to that repo, and only bots active in it surface. Absent = the cross-repo
+// Bots rail (respects the team-scope selector).
+export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element | null {
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
   const openBotPrsDetail = useFilters((s) => s.openBotPrsDetail);
-  // Respect the team-scope selector — scope is in the query key so a scope change refetches.
+  // A repo scope (per-repo Bots tab) wins over the team-scope selector; both are in the query
+  // key so either change refetches.
   const scope = scopeToParam(useFilters((s) => s.teamScope));
-  const { data, isLoading, isError } = useBotAnalytics(window, true, scope);
+  const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
+  const { data, isLoading, isError } = useBotAnalytics(window, true, scope, repoScope);
+  const botColor = useBotColors();
   // Cost overlay is the one plugin-backed bit — gate the fetch on plugin presence so the OSS
   // path never hits /api/pro/settings (which 404s without the plugin).
   const { data: settings } = useProSettings(useHasProSettings());
@@ -426,12 +441,16 @@ export function BotRoiPanel(): JSX.Element | null {
             bot-only PR{t.botOnlyPrs === 1 ? '' : 's'}
           </span>
         </div>
-        <VendorTable vendors={vendors} onOpenVendor={openBotPrsDetail} />
+        <VendorTable
+          vendors={vendors}
+          botColor={botColor}
+          onOpenVendor={(kind) => openBotPrsDetail(kind, repoId ?? null)}
+        />
         {/* Bot-effectiveness charts (per vendor) — all always visible: raw weekly volume, the
             volume-independent effectiveness + verdict, and the acted-on vs untouched split. */}
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           <ChartCard title="Thread volume" note="weekly · last 12">
-            <VendorTrendChart vendors={vendors} value={threadsVal} />
+            <VendorTrendChart vendors={vendors} value={threadsVal} botColor={botColor} />
           </ChartCard>
           <ChartCard title="Bot effectiveness" note="acted-on % · keep / tune / kill">
             <EffectivenessChart vendors={vendors} />

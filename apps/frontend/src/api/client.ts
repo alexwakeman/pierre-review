@@ -149,6 +149,12 @@ function scopeParam(scope?: string): string {
   return scope && scope !== 'all' ? `scope=${encodeURIComponent(scope)}` : '';
 }
 
+// Build the `repoIds=` query fragment (no leading separators) from an id list; omitted when
+// empty/absent. Used by the per-repo Bots tab to scope bot analytics to one repo.
+function repoIdsParam(repoIds?: number[] | null): string {
+  return repoIds && repoIds.length > 0 ? `repoIds=${repoIds.join(',')}` : '';
+}
+
 // Join query fragments (already URL-encoded, no leading separators) onto a base path.
 function withQuery(base: string, ...parts: (string | undefined)[]): string {
   const qs = parts.filter((p): p is string => Boolean(p)).join('&');
@@ -581,18 +587,26 @@ export const api = {
   // Per-vendor bot ROI / utilisation analytics over the chosen window (threads / acted-on %
   // / untouched / verdict / trend). Cost fields come back null — the client overlays cost
   // from /api/pro/settings `bots.cost`.
-  botAnalytics: (window: BotWindowKind, scope?: string) => {
-    const s = scopeParam(scope);
+  botAnalytics: (window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
+    const r = repoIdsParam(repoIds);
+    // A repo scope wins over the team scope (the per-repo Bots tab); omit `scope` then.
+    const s = r ? '' : scopeParam(scope);
     return get<BotAnalyticsResponse>(
-      `/api/bot-analytics?window=${encodeURIComponent(window)}${s ? `&${s}` : ''}`,
+      withQuery(`/api/bot-analytics`, `window=${encodeURIComponent(window)}`, s, r),
     );
   },
   // The per-PR drill-down behind one vendor's Bot-ROI row: the PRs that automated reviewer kind
   // touched in the window (threads/comments/acted-on/untouched/bot-only), most-recent-activity first.
-  botVendorPrs: (kind: string, window: BotWindowKind, scope?: string) => {
-    const s = scopeParam(scope);
+  botVendorPrs: (kind: string, window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
+    const r = repoIdsParam(repoIds);
+    const s = r ? '' : scopeParam(scope);
     return get<BotVendorPrsResponse>(
-      `/api/bot-analytics/${encodeURIComponent(kind)}/prs?window=${encodeURIComponent(window)}${s ? `&${s}` : ''}`,
+      withQuery(
+        `/api/bot-analytics/${encodeURIComponent(kind)}/prs`,
+        `window=${encodeURIComponent(window)}`,
+        s,
+        r,
+      ),
     );
   },
   // Cross-bot dedup + consensus/conflict clusters for a PR (≥2 automated reviewers of

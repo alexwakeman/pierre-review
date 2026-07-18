@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { AutomatedReviewerKind, DetectedReviewer } from '@pierre-review/shared';
 import { automatedReviewerMeta, BOT_VENDOR_META } from '../../lib/ui.js';
 import { useAddBotMuteRule, useDetectedReviewers, useReviewerOverride } from '../../hooks/useBotTriage.js';
+import { useBotColors } from '../../hooks/useBotColors.js';
 import { SectionShell, inputCls } from './ui.js';
 
 const ALL_KINDS = Object.keys(BOT_VENDOR_META) as AutomatedReviewerKind[];
@@ -15,6 +16,7 @@ const MAX_SEARCH_MATCHES = 8;
 // which they move into the bot list where kind/label are already editable.
 export function DetectedReviewersTable(): JSX.Element {
   const q = useDetectedReviewers();
+  const botColor = useBotColors();
   const override = useReviewerOverride();
   const addRule = useAddBotMuteRule();
   const [drafts, setDrafts] = useState<Record<number, { kind: AutomatedReviewerKind; label: string }>>({});
@@ -68,6 +70,9 @@ export function DetectedReviewersTable(): JSX.Element {
                 const c = r.classification;
                 const d = rowDraft(r);
                 const meta = automatedReviewerMeta(c.kind ?? 'in_house');
+                // Per-bot colour (brand-aware hybrid) so multiple in-house bots read distinctly,
+                // matching their colour in the Bots ROI console + feed.
+                const color = botColor({ login: r.login, kind: c.kind ?? 'in_house' });
                 return (
                   <li key={r.userId} className="flex flex-col gap-1.5 px-2.5 py-2">
                     <div className="flex items-center gap-2">
@@ -86,9 +91,9 @@ export function DetectedReviewersTable(): JSX.Element {
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span
                         className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-                        style={{ color: meta.color, backgroundColor: `${meta.color}1a` }}
+                        style={{ color, backgroundColor: `${color}1a` }}
                       >
-                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
                         {meta.label}
                       </span>
                       {c.confidence !== 'high' && (
