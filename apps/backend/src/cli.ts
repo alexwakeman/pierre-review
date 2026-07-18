@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -78,6 +78,11 @@ function printUsage(): void {
 Usage:
   pierre [options]
   pierre-review [options]
+  pierre status [options]
+
+Commands:
+  status           Your cross-repo "my turn" queue in the terminal, with
+                   clickable links (see \`pierre status --help\`)
 
 Options:
   --no-open        Don't open the browser (also honours NO_OPEN env)
@@ -112,8 +117,162 @@ function openBrowser(url: string): void {
   });
 }
 
+// The default local SQLite location — a user-writable home dir, never the (possibly
+// read-only) install dir. Shared by the server boot and `pierre status`.
+function defaultLocalDbPath(): string {
+  return join(homedir(), '.pierre-review', 'pierre-review.sqlite');
+}
+
+// Fail fast with a friendly message when the GitHub CLI isn't installed / authed.
+// Both the local server boot and `pierre status` need a working `gh` token.
+function ghAuthPreCheck(): void {
+  try {
+    execFileSync('gh', ['auth', 'token'], { stdio: 'ignore' });
+  } catch {
+    console.error('');
+    console.error(bold('GitHub CLI not found or not authenticated.'));
+    console.error(
+      'Install the GitHub CLI (https://cli.github.com) and run `gh auth login`.',
+    );
+    console.error('');
+    process.exit(1);
+  }
+}
+
+// ── `pierre status` — a self-contained, read-only subcommand ────────────────
+interface StatusOptions {
+  watch: boolean;
+  sync: boolean;
+  intervalSeconds: number;
+  db?: string;
+  help: boolean;
+}
+
+function parseStatusArgs(argv: string[]): StatusOptions {
+  const opts: StatusOptions = {
+    watch: false,
+    sync: false,
+    intervalSeconds: 60,
+    help: false,
+  };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    switch (arg) {
+      case '--watch':
+        opts.watch = true;
+        break;
+      case '--sync':
+        opts.sync = true;
+        break;
+      case '--interval': {
+        const v = argv[++i];
+        const n = v ? Number.parseInt(v, 10) : NaN;
+        if (!Number.isFinite(n)) {
+          console.error('--interval requires a number of seconds');
+          process.exit(1);
+        }
+        opts.intervalSeconds = Math.max(10, n);
+        break;
+      }
+      case '--db': {
+        const v = argv[++i];
+        if (!v) {
+          console.error('--db requires a path');
+          process.exit(1);
+        }
+        opts.db = v;
+        break;
+      }
+      case '--help':
+      case '-h':
+        opts.help = true;
+        break;
+      default:
+        console.error(`Unknown argument: ${arg}`);
+        console.error('Run `pierre status --help` for usage.');
+        process.exit(1);
+    }
+  }
+  return opts;
+}
+
+function printStatusUsage(): void {
+  console.log(`pierre status — your cross-repo "my turn" queue in the terminal
+
+Usage:
+  pierre status [options]
+
+Options:
+  --sync           Fetch fresh state from GitHub first (otherwise shows data as of
+                   the last sync). Under --watch, re-syncs at most every 5 minutes.
+  --watch          Repaint on an interval until you quit (Ctrl-C)
+  --interval <n>   Seconds between repaints under --watch (default 60, min 10)
+  --db <path>      SQLite DB path (also DATABASE_URL env)
+  -h, --help       Show this help
+
+Reads the local pierre database. Without --sync it shows data as of the last sync
+— run it alongside \`pierre\`, or pass --sync to fetch fresh state first. Links are
+clickable in terminals that support OSC-8 hyperlinks.
+`);
+}
+
+async function runStatusCommand(argv: string[]): Promise<void> {
+  const opts = parseStatusArgs(argv);
+  if (opts.help) {
+    printStatusUsage();
+    process.exit(0);
+  }
+
+  // status is LOCAL-only — it reads your on-disk SQLite database directly.
+  if (process.env.DEPLOYMENT_MODE === 'cloud') {
+    console.error(
+      '`pierre status` is local-only — it reads your local SQLite database.',
+    );
+    process.exit(1);
+  }
+
+  // ── map flags → env BEFORE any dynamic import (config/db snapshot env on load) ──
+  process.env.NODE_ENV ??= 'production';
+  if (opts.db !== undefined) process.env.DATABASE_URL = opts.db;
+  if (!process.env.DATABASE_URL) process.env.DATABASE_URL = defaultLocalDbPath();
+  try {
+    mkdirSync(dirname(process.env.DATABASE_URL), { recursive: true });
+  } catch {
+    /* best-effort; client.ts also mkdirs */
+  }
+
+  // Friendlier than the server path: don't silently create an empty DB just to show
+  // an empty queue. --sync legitimately bootstraps a fresh DB, so skip the guard then.
+  if (!opts.sync && !existsSync(process.env.DATABASE_URL)) {
+    console.error(
+      `No pierre database found at ${process.env.DATABASE_URL} — run \`pierre\` first to sync, or pass --db.`,
+    );
+    process.exit(1);
+  }
+
+  // ensureLocalAccount (`gh api user`) and --sync both need a working gh token.
+  ghAuthPreCheck();
+
+  const { runStatus } = await import('./status.js');
+  await runStatus({
+    watch: opts.watch,
+    sync: opts.sync,
+    intervalSeconds: opts.intervalSeconds,
+  });
+}
+
 async function main(): Promise<void> {
-  const opts = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+
+  // `pierre status` — a read-only subcommand with its own parser, usage, and env
+  // mapping. Peeled off BEFORE parseArgs (whose default case rejects any bare token),
+  // and it never reaches the server boot below.
+  if (argv[0] === 'status') {
+    await runStatusCommand(argv.slice(1));
+    return;
+  }
+
+  const opts = parseArgs(argv);
 
   if (opts.help) {
     printUsage();
@@ -134,8 +293,7 @@ async function main(): Promise<void> {
     // ── local: default the DB to a user-writable home location (mkdir -p) ────
     // The package dir is read-only for global installs, so never write there.
     if (!process.env.DATABASE_URL) {
-      const dbPath = join(homedir(), '.pierre-review', 'pierre-review.sqlite');
-      process.env.DATABASE_URL = dbPath;
+      process.env.DATABASE_URL = defaultLocalDbPath();
     }
     try {
       mkdirSync(dirname(process.env.DATABASE_URL), { recursive: true });
@@ -144,17 +302,7 @@ async function main(): Promise<void> {
     }
 
     // ── pre-check gh auth with a friendly message (contract §6) ─────────────
-    try {
-      execFileSync('gh', ['auth', 'token'], { stdio: 'ignore' });
-    } catch {
-      console.error('');
-      console.error(bold('GitHub CLI not found or not authenticated.'));
-      console.error(
-        'Install the GitHub CLI (https://cli.github.com) and run `gh auth login`.',
-      );
-      console.error('');
-      process.exit(1);
-    }
+    ghAuthPreCheck();
   }
   // Cloud mode: no gh pre-check (each account brings its own OAuth token) and no
   // SQLite home default (DATABASE_URL must be a Postgres URL). config.ts /
