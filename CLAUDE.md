@@ -343,17 +343,21 @@ file maps to a `client.ts` method.
 | `GET /api/bot-reviewers` · `PATCH /api/bot-reviewers/:userId` | **Bot-Triage** (CORE): detected automated reviewers → `DetectedReviewersResponse` · two-way manual override → `ReviewerClassification` (writes `bot_review_classification`) |
 | `GET /api/bot-analytics?window=` | **Bot-ROI** (CORE): per-`AutomatedReviewerKind` volume/actedOn%/untouched/oldest/humanFollowThrough/noiseRatio/`verdict`(keep\|tune\|kill) + ≤12wk trend + tuning suggestions → `BotAnalyticsResponse`. Returns `cost=null` — the client overlays cost from `pro_settings` |
 | `GET /api/prs/:id/bot-dedup` | **cross-bot dedup** (CORE): automated-reviewer threads grouped by `(path, line±window)` across distinct kinds → consensus/conflict clusters → `BotDedupResponse` |
+| `GET /api/bot-analytics/bot-only-prs?window&scope&repoIds` | the exact PR list behind `totals.botOnlyPrs` ("only a bot reviewed these") — same window/scope resolution as the analytics count so caption ≡ list → `BotOnlyPrsResponse` (CORE; BotsView's expandable amber caption) |
+| `GET /api/bot-analytics/vendor/:key/prs?window&scope&repoIds` | per-REVIEWER Bot-PRs drill-down; `key` = the analytics row identity `u<userId>` \| `'pierre'` (invalid → 400) → `BotVendorPrsResponse` (+`key`/`login`). Replaced the old kind-keyed `/:kind/prs` (removed — two in-house bots no longer merge) |
+| `GET /api/bot-threads/resolvable?scope&repoIds` · `POST /api/bot-threads/resolve {threadIds,repoIds?}` | **scope-wide review & resolve** of `likely_addressed` bot threads (CORE): grouped-by-PR review list (capped 500 newest + uncapped `totalEligible`) · confirm-gated resolve that RE-DERIVES eligibility ∩ the explicit ids (cap bypassed on that path; never blind; shares `resolveThreadsOnGitHub`); client chunks 25 ids/POST for progress. The `ResolveBacklogBanner` in BotRoiPanel |
 | `GET·POST·DELETE /api/bot-mute-rules` | **Bot-Triage** mute/auto-triage rules (CORE; `bot_mute_rules`) |
 | `GET /api/open-prs?repoIds&userIds` | currently-open PRs (ignores date range) |
 | `GET /api/threads/:id` | single thread detail |
 | `GET/POST /api/repos`, `DELETE /api/repos/:id` | manage watched repos (delete → 409 if syncing, else 204) |
 | `GET /api/repos/search?q&cursor&limit` | live GitHub repo search → `{results[],hasNextPage,cursor}`; already-watched filtered out, owned/member floated up; `limit` 10 (max 25) |
+| `GET /api/repos/suggested` | **first-run onboarding**: the viewer's recently-active repos (`VIEWER_REPOS_QUERY`: `viewer.repositories` + `repositoriesContributedTo`, PUSHED_AT desc, null-tolerant for scoped cloud tokens), already-added filtered out, `RepoSearchResult` shape, cap 30 → `SuggestedReposResponse`. Drives `FirstRunOnboarding` (the zero-repo Activity console body, hoisted above all rail branches; top 5 pre-checked, sequential adds, one invalidation batch) |
 | `POST /api/repos/:id/sync?full=true` | trigger sync → `202 {status:'started'}`, or `409` if already running |
 | `GET /api/users` (+ isBot updates) | user list / bot flagging |
 | `GET /api/mergers` | per-repo merge-rights map (who's merged there) → the maintainer shield |
 | `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{activityDigest,reviewMemory}`; cloud: 401 signed out) |
 | `GET /api/activity?repoIds&userIds` | **Activity tab** (core, no AI): per repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getActivity`; scoped by the FilterBar repo + member selection (see Activity) |
-| `GET /api/activity/feed?repoIds&userIds&limit&offset&excludeBots` | **Consolidated Feed** (core, no AI; the Activity "Feed" entry): ONE flat, chronological (newest-first) stream of REAL activity events (opens / merges / reviews / comments, plus **commit-push items that ADDRESSED a review thread** — coalesced per author/PR into runs, affected threads inline via `affectedThreads`/`commitCount`/`changeSummary`; plain pushes excluded). Each item carries **`isMyTurn`** (participation: you authored the PR / are a requested reviewer / previously reviewed-or-commented, AND the actor isn't you) — that flag REPLACES the old two-source (`my_turn` vs `feed`) synthesis + dedup, so there's exactly one row per event. **My Turn / "FYI" is CORE (free, every tier), NOT a Pro capability:** `getConsolidatedFeed` computes `isMyTurn` directly via `feed/my-turn.ts` (no capability gate, no provider seam). `isMyTurn` rows are uncapped; plain activity is capped (`FEED_EVENT_CAP`). `excludeBots=true` drops bot-authored activity. **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, generatedAt}`. No "seen"/acknowledged concept. |
+| `GET /api/activity/feed?repoIds&userIds&limit&offset&excludeBots` | **Consolidated Feed** (core, no AI; the Activity "Feed" entry): ONE flat, chronological (newest-first) stream of REAL activity events (opens / merges / reviews / comments, plus **commit-push items that ADDRESSED a review thread** — coalesced per author/PR into runs, affected threads inline via `affectedThreads`/`commitCount`/`changeSummary`; plain pushes excluded). Each item carries **`isMyTurn`** (participation: you authored the PR / are a requested reviewer / previously reviewed-or-commented, AND the actor isn't you) — that flag REPLACES the old two-source (`my_turn` vs `feed`) synthesis + dedup, so there's exactly one row per event. **My Turn / "FYI" is CORE (free, every tier), NOT a Pro capability:** `getConsolidatedFeed` computes `isMyTurn` directly via `feed/my-turn.ts` (no capability gate, no provider seam). `isMyTurn` rows are uncapped; plain activity is capped (`FEED_EVENT_CAP`). `excludeBots=true` drops bot-authored activity. **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, counts, generatedAt}` — **`counts` = server-computed facet counts over the WHOLE post-cap stream** (`ConsolidatedFeedCounts`: myTurn/claude/comments/prEvents/bots/byBotActor/byThreadState via the pure `computeFeedCounts`), so FeedView's pill badges reflect every matching item, not the loaded page (stale IndexedDB responses fall back to page-derived counts). No "seen"/acknowledged concept. |
 | `GET /api/repos/:id/claude-reviews` | repo-scoped Claude-review history (retrieval only; `enabled:false` when the flag is off) → `{prs:[{runs[]}]}` |
 | `GET·POST /api/pro/activity/digests*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest (the Activity Feed renders the COLLECTION of these, scoped to WATCHED repos — no separate cross-repo route/pass) + review-memory data. See "Open-core Pro plugin" |
 | `GET /api/auth/providers` · `/login[/​:provider]` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub sign-in: which providers are enabled (for SignInGate) / authorize via `oauth`\|`app` (folds provider into `state`; OAuth adds `config.oauthScope`) / exchange+upsert+session→`/app` / clear session |
@@ -403,9 +407,12 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
 
 ### UI regions (`App.tsx`)
 
-- **FilterBar** — add repos via a debounced GitHub search picker (`RepoSearch` →
-  `/api/repos/search`; a successful add pops the sync-progress modal via `syncModalSignal`).
-  Watched repos live in a **show/hide dropdown** (`RepoSelectPanel`): per-repo checkbox
+- **FilterBar** — repo/team MANAGEMENT (add/remove/assign) lives in the Activity console's
+  **TeamManager** modal ("Manage repos & teams"), where the debounced GitHub search picker
+  (`RepoSearch` → `/api/repos/search`) is mounted (a successful add pops the sync-progress
+  modal via `syncModalSignal`); `RepoSearch` also mounts standalone inside
+  `FirstRunOnboarding` (zero-repo first run). The FilterBar keeps the visibility controls:
+  watched repos in a **show/hide dropdown** (`RepoSelectPanel`): per-repo checkbox
   labelled `owner/name`, immediate visibility toggle (canonicalises to `repoIds=null` at
   all/none, won't hide the last one), per-row remove. Plus Members (auto-scoped, exclude-bots
   toggle), range presets (7/14/30/90d/custom) + a **Now** action (`timelineCenterAt`), event
@@ -849,7 +856,14 @@ tree**, so `pnpm dev`'s Vite proxy is unchanged). All routing is the **single**
 `setNotFoundHandler` (`api/plugins/error-handler.ts`): unknown `/api` → JSON 404; `/app*`
 → SPA; `/` + other → landing (cloud) or 302 `/app` (local). SPA built `base:'/app/'`.
 
-**CLI** (`cli.ts` → `dist/cli.js`): parses `--no-open/--port/--db/--cloud/--mode` (+ env),
+**CLI** (`cli.ts` → `dist/cli.js`): the **`pierre status` subcommand** (peeled off argv
+BEFORE `parseArgs`, whose default case rejects bare tokens) renders the cross-repo My-Turn
+queue in the terminal via `status.ts` — OSC-8 clickable links (non-TTY falls back to
+`label (url)`), `--watch` repaint loop (new-since-tick bullets), `--sync` (re-syncs ≤ every
+5 min under watch), `--interval/--db`; LOCAL-only (refuses cloud), refuses to create an
+empty DB without `--sync`, one-shot `runMigrations → ensureLocalAccount → getMyTurn →
+closeDb` lifecycle, env mapped before any config/db import. The server path parses
+`--no-open/--port/--db/--cloud/--mode` (+ env),
 maps them to env **before** importing config, sets `NODE_ENV=production`. Local defaults
 the DB to `~/.pierre-review/…sqlite` (never the read-only install dir) + pre-checks
 `gh auth token`; `--cloud` skips both (Postgres `DATABASE_URL`; `assertCloudConfig` at
