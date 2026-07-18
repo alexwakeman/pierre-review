@@ -63,6 +63,9 @@ export const accounts = pgTable('accounts', {
   // plan default (2,500 for paid cloud); local/unlimited accounts ignore it. See the sqlite
   // twin. Kept in sync by hand (schema-parity.test.ts).
   aiCreditAllowance: integer('ai_credit_allowance'),
+  // CLOUD-ONLY, opt-in (default OFF): contribute de-identified aggregate weekly review-bot
+  // outcome stats to the cross-org benchmark network. See the sqlite twin + benchmarkContributions.
+  benchmarkOptIn: boolean('benchmark_opt_in').notNull().default(false),
 });
 
 export const repos = pgTable(
@@ -684,5 +687,37 @@ export const teamRepos = pgTable(
     teamRepoUx: uniqueIndex('team_repos_team_repo').on(t.teamId, t.repoId),
     accountIdx: index('team_repos_account_idx').on(t.accountId),
     repoIdx: index('team_repos_repo_idx').on(t.repoId),
+  }),
+);
+
+// ── Cross-org benchmark network (CORE, cloud-only, opt-in) ── the pg twin of the sqlite
+// benchmarkContributions table. See that file for the full rationale (aggregate-only, no PII,
+// in_house/pierre excluded, written only by the firewalled weekly rollup; serving is Phase 1).
+export const benchmarkContributions = pgTable(
+  'benchmark_contributions',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    vendorKind: text('vendor_kind').notNull(),
+    weekStart: timestamp('week_start', { withTimezone: true, mode: 'date' }).notNull(),
+    threads: integer('threads').notNull().default(0),
+    comments: integer('comments').notNull().default(0),
+    actedOn: integer('acted_on').notNull().default(0),
+    untouched: integer('untouched').notNull().default(0),
+    humanFollow: integer('human_follow').notNull().default(0),
+    oldestUntouchedDays: integer('oldest_untouched_days'),
+    orgSizeBucket: text('org_size_bucket').notNull(),
+    mlMetrics: text('ml_metrics'),
+    schemaVersion: integer('schema_version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    uniq: uniqueIndex('bench_contrib_uniq').on(t.accountId, t.vendorKind, t.weekStart),
+    accountIdx: index('bench_contrib_account_idx').on(t.accountId),
+    cohortIdx: index('bench_contrib_cohort_idx').on(t.vendorKind, t.weekStart),
   }),
 );

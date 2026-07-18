@@ -225,6 +225,13 @@
       "when": 1783820880004,
       "tag": "0031_events_pr_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1783820880005,
+      "tag": "0032_benchmark_contributions",
+      "breakpoints": true
     }
   ]
 }

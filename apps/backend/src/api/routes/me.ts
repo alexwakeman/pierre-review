@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import type { MeResponse, MyTurnDismissBody } from '@pierre-review/shared';
 import { config } from '../../config.js';
-import { accountToLocalUser } from '../../auth/account.js';
+import { accountToLocalUser, setBenchmarkConsent } from '../../auth/account.js';
+import { runBenchmarkRollupForAccount } from '../../sync/benchmark-rollup.js';
 import { accountIdOf } from '../plugins/auth.js';
 import {
   EMPTY_CAPABILITIES,
@@ -30,6 +31,15 @@ const dismissSchema = {
       },
       refId: { type: 'integer' },
     },
+  },
+};
+
+const benchmarkConsentSchema = {
+  body: {
+    type: 'object',
+    required: ['optIn'],
+    additionalProperties: false,
+    properties: { optIn: { type: 'boolean' } },
   },
 };
 
@@ -66,9 +76,31 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // Claude Review is now the Pro `claudeReview` capability (in `pro` below).
       deploymentMode: config.deploymentMode,
       pro: entitled,
+      // Cross-org benchmark consent (cloud-only; always false in local). Drives the Settings toggle.
+      benchmarkOptIn: config.isCloud ? req.account?.benchmarkOptIn ?? false : false,
       // Orgs currently SAML-blocked for this account (empty in the normal case + in local).
       authNotices: getAuthNotices(accountId),
     };
+  });
+
+  // Cross-org benchmark consent (CLOUD-ONLY, opt-in). Setting it true seeds the account's
+  // contributions immediately (best-effort, in the background); false withdraws + deletes them
+  // (handled in setBenchmarkConsent). Available to every cloud account — free or paid — because
+  // the network needs volume to be worth anything (viewing the benchmark is the paid part, later).
+  app.post('/api/me/benchmark-consent', { schema: benchmarkConsentSchema }, async (req, reply) => {
+    if (!config.isCloud) {
+      return reply.code(400).send({ error: 'BadRequest', message: 'Benchmark is cloud-only' });
+    }
+    const accountId = accountIdOf(req);
+    const { optIn } = req.body as { optIn: boolean };
+    await setBenchmarkConsent(accountId, optIn);
+    if (optIn) {
+      // Fire-and-forget: don't block the response on the rollup; a failure is logged, not fatal.
+      void runBenchmarkRollupForAccount(accountId, req.log).catch((err) =>
+        req.log.error({ err, accountId }, 'benchmark seed after opt-in failed'),
+      );
+    }
+    return { status: 'ok', benchmarkOptIn: optIn };
   });
 
   app.get('/api/my-turn', async (req) => getMyTurn(accountIdOf(req)));

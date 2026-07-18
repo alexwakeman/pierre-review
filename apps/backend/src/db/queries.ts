@@ -179,6 +179,7 @@ const {
   botMuteRules,
   teams,
   teamRepos,
+  benchmarkContributions,
 } = schema;
 
 function iso(d: Date | null): string | null {
@@ -7031,6 +7032,285 @@ export async function getBotAnalytics(
     botOnlyPrs,
   };
   return { enabled: true, generatedAt, window: win, vendors, totals, suggestions };
+}
+
+// ── Cross-org benchmark network — Phase 0 collection (CORE, cloud-only) ──────────────────
+// De-identified, AGGREGATE-ONLY weekly review-bot outcome stats per KNOWN vendor, for the
+// opt-in benchmark (accounts.benchmark_opt_in). Mirrors getBotAnalytics's per-thread heuristics
+// (acted-on = resolved | likely_addressed | a human replied after the bot) but grouped by
+// (vendorKind, ISO-week) and restricted to known ReviewBotKind vendors — in_house/pierre are not
+// comparable across orgs / are identifying, so EXCLUDED. Reads ONLY this account's own data
+// (accountId-scoped); the cross-account read is the future serving job (Phase 1, Pro plugin).
+
+export interface BenchmarkContributionAgg {
+  vendorKind: string; // a known ReviewBotKind
+  weekStart: Date; // UTC Monday 00:00
+  threads: number;
+  comments: number;
+  actedOn: number;
+  untouched: number;
+  humanFollow: number;
+  oldestUntouchedDays: number | null;
+}
+
+// UTC Monday 00:00 of the ISO week containing `d`.
+export function isoWeekStartUtc(d: Date): Date {
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const backToMonday = (t.getUTCDay() + 6) % 7; // getUTCDay: 0=Sun..6=Sat
+  t.setUTCDate(t.getUTCDate() - backToMonday);
+  return t;
+}
+
+// Contributor-size covariate bucket from a distinct active-author count.
+export function orgSizeBucket(contributors: number): string {
+  if (contributors <= 1) return '1';
+  if (contributors <= 5) return '2-5';
+  if (contributors <= 20) return '6-20';
+  if (contributors <= 50) return '21-50';
+  if (contributors <= 200) return '51-200';
+  return '200+';
+}
+
+// Distinct PR authors across the account's repos over the last `days` — the org-size proxy
+// (the covariate a cohort conditions on). accountId-scoped.
+export async function getAccountContributorCount(
+  accountId: number,
+  days = 90,
+): Promise<number> {
+  const since = new Date(Date.now() - days * 86_400_000);
+  const rows = await db
+    .selectDistinct({ id: pullRequests.authorId })
+    .from(pullRequests)
+    .where(and(eq(pullRequests.accountId, accountId), gte(pullRequests.openedAt, since)))
+    .execute();
+  return rows.filter((r) => r.id != null).length;
+}
+
+// Accounts that have consented to contribute (cloud-only; local never contributes). The rollup
+// loops these. NOT a cross-tenant read of tenant data — just the consent roster.
+export async function getBenchmarkOptedInAccountIds(): Promise<number[]> {
+  const rows = await db
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(and(eq(accounts.benchmarkOptIn, true), eq(accounts.isLocal, false)))
+    .execute();
+  return rows.map((r) => r.id);
+}
+
+// Weekly per-known-vendor benchmark aggregates for ONE account over [from, to).
+export async function getBenchmarkContributions(
+  accountId: number,
+  from: Date,
+  to: Date,
+): Promise<BenchmarkContributionAgg[]> {
+  const automatedIds = await automatedReviewerUserIds(accountId);
+  if (automatedIds.length === 0) return [];
+  const kindMap = await classificationKindForUser(accountId);
+  const nowMs = Date.now();
+
+  // Only KNOWN vendors are comparable across orgs — skip in_house/pierre/unclassified.
+  const vendorKindOf = (userId: number): string | null => {
+    const k = kindMap.get(userId);
+    if (!k || k === 'in_house' || k === 'pierre') return null;
+    return k;
+  };
+
+  type Acc = {
+    vendorKind: string;
+    weekMs: number;
+    threads: number;
+    comments: number;
+    actedOn: number;
+    untouched: number;
+    humanFollow: number;
+    oldestUntouchedMs: number | null;
+  };
+  const acc = new Map<string, Acc>();
+  const bucketFor = (vendorKind: string, at: Date): Acc => {
+    const weekMs = isoWeekStartUtc(at).getTime();
+    const key = `${vendorKind} ${weekMs}`;
+    let a = acc.get(key);
+    if (!a) {
+      a = {
+        vendorKind,
+        weekMs,
+        threads: 0,
+        comments: 0,
+        actedOn: 0,
+        untouched: 0,
+        humanFollow: 0,
+        oldestUntouchedMs: null,
+      };
+      acc.set(key, a);
+    }
+    return a;
+  };
+
+  // Threads opened by an automated reviewer in [from, to).
+  const threadRows = await db
+    .select({
+      id: reviewThreads.id,
+      userId: reviewThreads.originalCommenterId,
+      state: reviewThreads.derivedState,
+      createdAt: reviewThreads.createdAt,
+    })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviewThreads.originalCommenterId, automatedIds),
+        gte(reviewThreads.createdAt, from),
+        lt(reviewThreads.createdAt, to),
+      ),
+    )
+    .execute();
+
+  // Pass 1: volume / untouched / oldest-untouched per (vendor, week); remember each thread's
+  // bucket + base-acted for the merged acted-on definition below.
+  const windowThreads: { id: number; bucket: Acc; baseActed: boolean }[] = [];
+  for (const t of threadRows) {
+    if (t.userId == null) continue;
+    const kind = vendorKindOf(t.userId);
+    if (!kind) continue;
+    const bucket = bucketFor(kind, t.createdAt);
+    bucket.threads += 1;
+    const baseActed = t.state === 'resolved' || t.state === 'likely_addressed';
+    if (t.state === 'untouched') {
+      bucket.untouched += 1;
+      const ms = t.createdAt.getTime();
+      if (bucket.oldestUntouchedMs == null || ms < bucket.oldestUntouchedMs) {
+        bucket.oldestUntouchedMs = ms;
+      }
+    }
+    windowThreads.push({ id: t.id, bucket, baseActed });
+  }
+
+  // Pass 2: human follow-through — a human commented after the bot's last comment on the thread.
+  const wtIds = windowThreads.map((w) => w.id);
+  const humanFollow = new Set<number>();
+  if (wtIds.length > 0) {
+    const ftRows = await db
+      .select({
+        threadId: reviewComments.threadId,
+        authorId: reviewComments.authorId,
+        createdAt: reviewComments.createdAt,
+      })
+      .from(reviewComments)
+      .where(inArray(reviewComments.threadId, wtIds))
+      .execute();
+    const byThread = new Map<number, { authorId: number | null; at: number }[]>();
+    for (const r of ftRows) {
+      const arr = byThread.get(r.threadId) ?? [];
+      arr.push({ authorId: r.authorId, at: r.createdAt.getTime() });
+      byThread.set(r.threadId, arr);
+    }
+    const autoSet = new Set(automatedIds);
+    for (const [threadId, comments] of byThread) {
+      let botLastAt = -Infinity;
+      for (const c of comments) {
+        if (c.authorId != null && autoSet.has(c.authorId) && c.at > botLastAt) botLastAt = c.at;
+      }
+      if (comments.some((c) => c.authorId != null && !autoSet.has(c.authorId) && c.at > botLastAt)) {
+        humanFollow.add(threadId);
+      }
+    }
+  }
+  for (const w of windowThreads) {
+    if (humanFollow.has(w.id)) w.bucket.humanFollow += 1;
+    if (w.baseActed || humanFollow.has(w.id)) w.bucket.actedOn += 1;
+  }
+
+  // Comments authored by an automated reviewer in [from, to), per (vendor, week).
+  const commentRows = await db
+    .select({
+      authorId: reviewComments.authorId,
+      createdAt: reviewComments.createdAt,
+    })
+    .from(reviewComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviewComments.authorId, automatedIds),
+        gte(reviewComments.createdAt, from),
+        lt(reviewComments.createdAt, to),
+      ),
+    )
+    .execute();
+  for (const c of commentRows) {
+    if (c.authorId == null) continue;
+    const kind = vendorKindOf(c.authorId);
+    if (!kind) continue;
+    bucketFor(kind, c.createdAt).comments += 1;
+  }
+
+  return [...acc.values()]
+    .filter((a) => a.threads > 0 || a.comments > 0)
+    .map((a) => ({
+      vendorKind: a.vendorKind,
+      weekStart: new Date(a.weekMs),
+      threads: a.threads,
+      comments: a.comments,
+      actedOn: a.actedOn,
+      untouched: a.untouched,
+      humanFollow: a.humanFollow,
+      oldestUntouchedDays:
+        a.oldestUntouchedMs == null
+          ? null
+          : Math.floor((nowMs - a.oldestUntouchedMs) / 86_400_000),
+    }));
+}
+
+// Idempotent upsert of an account's weekly contributions (one row per vendor+week). The
+// org-size bucket is the account's size at contribution time (denormalized per row).
+export async function upsertBenchmarkContributions(
+  accountId: number,
+  sizeBucket: string,
+  rows: BenchmarkContributionAgg[],
+): Promise<void> {
+  for (const r of rows) {
+    await db
+      .insert(benchmarkContributions)
+      .values({
+        accountId,
+        vendorKind: r.vendorKind,
+        weekStart: r.weekStart,
+        threads: r.threads,
+        comments: r.comments,
+        actedOn: r.actedOn,
+        untouched: r.untouched,
+        humanFollow: r.humanFollow,
+        oldestUntouchedDays: r.oldestUntouchedDays,
+        orgSizeBucket: sizeBucket,
+        schemaVersion: 1,
+      })
+      .onConflictDoUpdate({
+        target: [
+          benchmarkContributions.accountId,
+          benchmarkContributions.vendorKind,
+          benchmarkContributions.weekStart,
+        ],
+        set: {
+          threads: r.threads,
+          comments: r.comments,
+          actedOn: r.actedOn,
+          untouched: r.untouched,
+          humanFollow: r.humanFollow,
+          oldestUntouchedDays: r.oldestUntouchedDays,
+          orgSizeBucket: sizeBucket,
+        },
+      })
+      .execute();
+  }
+}
+
+// Withdraw consent → delete the account's contributions (one-click, complete removal).
+export async function deleteBenchmarkContributions(accountId: number): Promise<void> {
+  await db
+    .delete(benchmarkContributions)
+    .where(eq(benchmarkContributions.accountId, accountId))
+    .execute();
 }
 
 // Item 7 — the per-PR drill-down behind a vendor's Bot-ROI row (GET /api/bot-analytics/:kind/prs).

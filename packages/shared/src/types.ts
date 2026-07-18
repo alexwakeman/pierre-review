@@ -736,6 +736,10 @@ export interface MeResponse {
   deploymentMode: 'local' | 'cloud';
   // Premium capability flags (all-false in OSS mode).
   pro: ProCapabilities;
+  // CLOUD-ONLY: whether this account has consented to contribute aggregate, de-identified
+  // weekly review-bot stats to the cross-org benchmark network (opt-in, default false). Drives
+  // the Settings consent toggle. Always false in local mode (local never contributes).
+  benchmarkOptIn: boolean;
   // Orgs whose sync is currently BLOCKED because the sign-in token isn't authorized for their
   // SAML SSO (cloud). Populated by the sync when it hits the SAML wall; drives the global
   // "Reconnect GitHub for <org>" banner. Empty in the normal case + always empty in local mode.

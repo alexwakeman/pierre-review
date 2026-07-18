@@ -23,6 +23,9 @@ export interface Account {
   // Per-account monthly SUMMARY-AI credit-allowance override (metered cloud plan). null =
   // plan default (2,500 for paid cloud); local accounts are unmetered regardless.
   aiCreditAllowance: number | null;
+  // CLOUD-ONLY consent (default false): contribute aggregate weekly bot stats to the cross-org
+  // benchmark. Local accounts never contribute (always false).
+  benchmarkOptIn: boolean;
 }
 
 export type AccountPlan = 'free' | 'pro';
@@ -67,6 +70,7 @@ function rowToAccount(row: typeof schema.accounts.$inferSelect): Account {
     plan: row.plan === 'pro' ? 'pro' : 'free',
     stripeCustomerId: row.stripeCustomerId,
     aiCreditAllowance: row.aiCreditAllowance ?? null,
+    benchmarkOptIn: row.benchmarkOptIn ?? false,
   };
 }
 
@@ -243,6 +247,27 @@ export async function setAccountPlan(
   const set: { plan: AccountPlan; stripeCustomerId?: string } = { plan };
   if (stripeCustomerId != null) set.stripeCustomerId = stripeCustomerId;
   await db.update(accounts).set(set).where(eq(accounts.id, accountId)).execute();
+}
+
+/**
+ * Set an account's cross-org benchmark consent (cloud-only feature). Withdrawing (optIn=false)
+ * DELETES the account's contributions — one-click, complete removal, honouring the consent
+ * promise. The caller (the /api/me/benchmark-consent route) seeds contributions on opt-in.
+ */
+export async function setBenchmarkConsent(
+  accountId: number,
+  optIn: boolean,
+): Promise<void> {
+  const { accounts } = schema;
+  await db
+    .update(accounts)
+    .set({ benchmarkOptIn: optIn })
+    .where(eq(accounts.id, accountId))
+    .execute();
+  if (!optIn) {
+    const { deleteBenchmarkContributions } = await import('../db/queries.js');
+    await deleteBenchmarkContributions(accountId);
+  }
 }
 
 /** Resolve an account by its Stripe customer id (subscription webhooks). */

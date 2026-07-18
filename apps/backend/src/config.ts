@@ -145,6 +145,9 @@ export const config = {
   // When the retention sweep runs (node-cron). Daily at 03:00 by default; off-peak so a
   // large delete doesn't contend with the 5-minute sync. RETENTION_CRON overrides.
   retentionCron: process.env.RETENTION_CRON ?? '0 3 * * *',
+  // Cross-org benchmark rollup (CLOUD-ONLY; inert unless an account has opted in). Weekly,
+  // Monday 04:00 UTC — after a fresh ISO week starts, off-peak. BENCHMARK_ROLLUP_CRON overrides.
+  benchmarkRollupCron: process.env.BENCHMARK_ROLLUP_CRON ?? '0 4 * * 1',
   // Disable the periodic scheduler (used by scripts/tests).
   disableScheduler: process.env.DISABLE_SCHEDULER === 'true',
 

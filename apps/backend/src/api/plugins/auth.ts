@@ -49,6 +49,7 @@ export function registerAccountContext(app: FastifyInstance): void {
           plan: 'free',
           stripeCustomerId: null,
           aiCreditAllowance: null,
+          benchmarkOptIn: false,
         };
     }
   });

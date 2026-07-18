@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
 import { useProSettings, useUpdateProSettings } from '../../hooks/useProSettings.js';
 import type { ProSettingsUpdate } from '@pierre-review/shared';
 import { SprintSection } from './SprintSection.js';
@@ -8,6 +8,7 @@ import { AiPolicySection } from './AiPolicySection.js';
 import { IssueLinksSection } from './IssueLinksSection.js';
 import { BotSection } from './BotSection.js';
 import { AnthropicKeySection } from './AnthropicKeySection.js';
+import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
 
 // User configuration modal, opened from the header avatar menu. Mirrors HelpModal's shell
 // (fixed overlay + role=dialog card + capture-phase Escape so a dismiss doesn't reach the global
@@ -15,6 +16,7 @@ import { AnthropicKeySection } from './AnthropicKeySection.js';
 // section reads/writes the per-account pro_settings via /api/pro/settings.
 export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element {
   const caps = useProCapabilities();
+  const isCloud = useMe().data?.deploymentMode === 'cloud';
   const query = useProSettings(true);
   const mutation = useUpdateProSettings();
   const save = (patch: ProSettingsUpdate): void => {
@@ -69,6 +71,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
           {/* BYO Anthropic key — advanced AI only (Claude Review + AI Fix). Independent of
               pro_settings (it's a local file store), so it renders above the loading gate. */}
           {(caps.claudeReview || caps.aiFix) && <AnthropicKeySection />}
+          {/* Cross-org benchmark consent — CORE/free, cloud-only, independent of pro_settings
+              (a plain /api/me flag), so it renders above the pro-settings loading gate. */}
+          {isCloud && <BenchmarkConsentSection />}
           {query.isLoading || settings == null ? (
             <p className="py-6 text-center text-xs text-gray-400">
               {query.isError ? 'Settings unavailable.' : 'Loading…'}

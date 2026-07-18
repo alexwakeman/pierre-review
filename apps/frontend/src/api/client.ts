@@ -311,6 +311,12 @@ export const api = {
     fetch('/api/activity/feed/mark-seen', jsonBody('POST')).then((r) =>
       handle<{ feedLastSeenAt: string }>(r),
     ),
+  // Cross-org benchmark consent (cloud-only): opt in/out of contributing aggregate weekly
+  // review-bot stats. Opting in seeds contributions server-side; opting out deletes them.
+  setBenchmarkConsent: (optIn: boolean) =>
+    fetch('/api/me/benchmark-consent', jsonBody('POST', { optIn })).then((r) =>
+      handle<{ status: string; benchmarkOptIn: boolean }>(r),
+    ),
   // Team review-intelligence "Insights" (Pro; teamInsights capability). `scope`
   // ('all'|'none'|'<teamId>') narrows the metrics + cards to a team's repos; omitted = all.
   teamInsights: (scope?: string) =>

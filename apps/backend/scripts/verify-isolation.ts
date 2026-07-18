@@ -401,6 +401,31 @@ check(
   (await q.getTeamRepoIds(teamA.id, 1)).length === 0,
 );
 
+// Cross-org benchmark contributions (Phase 0): the consent roster respects the opt-in flag +
+// excludes local accounts, and WITHDRAWAL (delete) is account-scoped — it must never touch
+// another tenant's contributions.
+await db
+  .update(accounts)
+  .set({ benchmarkOptIn: true })
+  .where(eq(accounts.id, 2))
+  .execute();
+const optedIds = await q.getBenchmarkOptedInAccountIds();
+check('getBenchmarkOptedInAccountIds includes opted-in non-local (B)', optedIds.includes(2));
+check('getBenchmarkOptedInAccountIds excludes non-opted (A)', !optedIds.includes(1));
+await db
+  .insert(schema.benchmarkContributions)
+  .values([
+    { accountId: 1, vendorKind: 'coderabbit', weekStart: now, orgSizeBucket: '1' },
+    { accountId: 2, vendorKind: 'coderabbit', weekStart: now, orgSizeBucket: '1' },
+  ])
+  .execute();
+await q.deleteBenchmarkContributions(1);
+const remainingContrib = await db.select().from(schema.benchmarkContributions).execute();
+check(
+  "deleteBenchmarkContributions(A) leaves B's contributions untouched (IDOR blocked)",
+  remainingContrib.length === 1 && remainingContrib[0]!.accountId === 2,
+);
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

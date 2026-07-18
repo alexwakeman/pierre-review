@@ -71,6 +71,12 @@ export const accounts = sqliteTable('accounts', {
   // use the plan default (2,500 for a paid cloud account); local/unlimited accounts ignore
   // it entirely. A forward hook for top-ups / alternate plans without another migration.
   aiCreditAllowance: integer('ai_credit_allowance'),
+  // CLOUD-ONLY, opt-in (default OFF): whether this account contributes de-identified,
+  // aggregate weekly review-bot outcome stats to the cross-org benchmark network (see
+  // `benchmarkContributions`). Consent is a distinct PURPOSE from running the dashboard,
+  // so it must be explicit + reversible; withdrawing (set false) deletes the account's
+  // contributions. Local accounts never contribute (never phone home) — always false.
+  benchmarkOptIn: integer('benchmark_opt_in', { mode: 'boolean' }).notNull().default(false),
 });
 
 export const repos = sqliteTable(
@@ -757,5 +763,58 @@ export const teamRepos = sqliteTable(
     teamRepoUx: uniqueIndex('team_repos_team_repo').on(t.teamId, t.repoId),
     accountIdx: index('team_repos_account_idx').on(t.accountId),
     repoIdx: index('team_repos_repo_idx').on(t.repoId),
+  }),
+);
+
+// ── Cross-org benchmark network (CORE, cloud-only, opt-in) ──────────────────────────────
+// Phase 0 of the neutral review-bot benchmark: de-identified, AGGREGATE-ONLY weekly outcome
+// stats per known vendor, contributed by opted-in cloud accounts (see accounts.benchmarkOptIn),
+// so a later paid feature can show "your CodeRabbit is 38% acted-on vs a 45% peer median".
+// NO raw text / logins / repo names / PR titles ever land here — counts only. `in_house` /
+// `pierre` are EXCLUDED at collection (not comparable across orgs / identifying). Written ONLY
+// by the firewalled weekly rollup (sync/benchmark-rollup.ts) from each account's OWN data, so
+// collection stays accountId-scoped; the CROSS-account read is the future serving job (Phase 1),
+// which applies k-anonymity (K>=5). Serving (percentiles/cohorts) lives in the Pro plugin later.
+export const benchmarkContributions = sqliteTable(
+  'benchmark_contributions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // A known review-bot vendor kind (shared ReviewBotKind). Never in_house/pierre.
+    vendorKind: text('vendor_kind').notNull(),
+    // ISO-week start (UTC Monday 00:00) the aggregates cover.
+    weekStart: integer('week_start', { mode: 'timestamp' }).notNull(),
+    // Deterministic weekly outcome aggregates — counts only.
+    threads: integer('threads').notNull().default(0),
+    comments: integer('comments').notNull().default(0),
+    // "acted-on" = resolved | likely_addressed | a human replied after the bot (the same
+    // heuristic the ROI panel uses; approximate — the UI says so).
+    actedOn: integer('acted_on').notNull().default(0),
+    untouched: integer('untouched').notNull().default(0),
+    humanFollow: integer('human_follow').notNull().default(0),
+    // Oldest still-untouched thread age (days) in the week; null when none untouched.
+    oldestUntouchedDays: integer('oldest_untouched_days'),
+    // Covariate: the account's active-contributor size bucket at contribution time
+    // ('1' | '2-5' | '6-20' | '21-50' | '51-200' | '200+'), so cohorts can condition on size.
+    orgSizeBucket: text('org_size_bucket').notNull(),
+    // RESERVED for FUTURE ML-derived aggregate distributions (category mix / severity mix /
+    // precision-by-category) — populated by the SAME rollup once the classifier ships, still
+    // aggregate-only JSON. Null in Phase 0. Forward hook so ML enrichment needs no new migration.
+    mlMetrics: text('ml_metrics'),
+    // Contribution-format version so the row shape can evolve unambiguously.
+    schemaVersion: integer('schema_version').notNull().default(1),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    // One row per (account, vendor, week) — the idempotent upsert target. accountId-first so
+    // uniqueness is per-tenant (two accounts contribute the same vendor+week independently).
+    uniq: uniqueIndex('bench_contrib_uniq').on(t.accountId, t.vendorKind, t.weekStart),
+    accountIdx: index('bench_contrib_account_idx').on(t.accountId),
+    // Serving-side cohort scans (Phase 1): all accounts' rows for a vendor across weeks.
+    cohortIdx: index('bench_contrib_cohort_idx').on(t.vendorKind, t.weekStart),
   }),
 );
