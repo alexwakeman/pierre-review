@@ -3,6 +3,7 @@ import type {
   AutomatedReviewerKind,
   BotTuningSuggestion,
   BotVendorAnalytics,
+  BotVendorTrendPoint,
   BotVerdict,
   BotWindowKind,
 } from '@pierre-review/shared';
@@ -11,7 +12,8 @@ import { useProSettings, useHasProSettings } from '../../hooks/useProSettings.js
 import { useFilters, scopeToParam } from '../../store/filters.js';
 import { automatedReviewerMeta } from '../../lib/ui.js';
 import { LineChart } from '../charts/LineChart.js';
-import { ChartCard, ChartEmpty, type Series } from '../charts/common.js';
+import { BarChart } from '../charts/BarChart.js';
+import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js';
 
 // Bot ROI / utilisation panel — CORE/FREE (rendered in the Bots rail console). The analytics
 // route is CORE + deterministic (no AI): a per-vendor signal-to-noise table + a 12-week
@@ -52,29 +54,54 @@ function pct(v: number | null): string {
   return v == null ? '—' : `${Math.round(v)}%`;
 }
 
+// Chart y-axis / value formatter (BarChart never passes null).
+const pctAxis = (n: number): string => `${Math.round(n)}%`;
+
+// Per-week metric extractor for the thread-volume trend. Module-level so its identity is
+// stable (keeps VendorTrendChart's useMemo from recomputing every render).
+const threadsVal = (p: BotVendorTrendPoint): number | null => p.threads;
+
+// Keep/tune/kill → the traffic-light hue that tints each effectiveness bar.
+const VERDICT_COLOR: Record<BotVerdict, string> = {
+  keep: PALETTE.green,
+  tune: PALETTE.amber,
+  kill: PALETTE.red,
+};
+
 function usd(v: number | null): string {
   if (v == null) return '—';
   return `$${v.toFixed(2)}`;
 }
 
-// Overlay the per-vendor monthly cost (from Pro settings) onto the analytics rows, deriving
-// $/acted-on-comment client-side. getBotAnalytics returns cost fields null by design (core
-// can't read pro_settings), so this is where the ROI figure actually lands.
+// Overlay the per-BOT monthly cost (from Pro settings, keyed by reviewer login) onto the analytics
+// rows, deriving $/acted-on-comment client-side. getBotAnalytics returns cost fields null by design
+// (core can't read pro_settings), so this is where the ROI figure actually lands.
 function withCost(
   vendors: BotVendorAnalytics[],
-  costByKind: Map<string, number>,
+  costByLogin: Map<string, number>,
 ): BotVendorAnalytics[] {
   return vendors.map((v) => {
-    const monthly = costByKind.get(v.kind) ?? null;
+    const monthly = v.login != null ? costByLogin.get(v.login) ?? null : null;
     const perActedOn = monthly != null && v.actedOn > 0 ? monthly / v.actedOn : null;
     return { ...v, costMonthlyUsd: monthly, costPerActedOnUsd: perActedOn };
   });
 }
 
-// One multi-series line chart of weekly thread volume per vendor, over a unified weekly
-// x-axis (the union of every vendor's trend weekStarts, oldest→newest, last 12). A vendor
-// with no threads in a given week reads as a gap (null), mirroring the toolkit's semantics.
-function TrendChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Element {
+// One multi-series weekly line chart across vendors, over a unified weekly x-axis (the union
+// of every vendor's trend weekStarts, oldest→newest, last 12). `value` pulls the metric from
+// each weekly point; a vendor with no data that week reads as a gap (null), mirroring the
+// toolkit's semantics. Drives thread volume, noise ratio, acted-on rate, and untouched backlog.
+function VendorTrendChart({
+  vendors,
+  value,
+  formatY,
+  height = 140,
+}: {
+  vendors: BotVendorAnalytics[];
+  value: (p: BotVendorTrendPoint) => number | null;
+  formatY?: (n: number) => string;
+  height?: number;
+}): JSX.Element {
   const { labels, series } = useMemo(() => {
     const weekSet = new Set<string>();
     for (const v of vendors) for (const p of v.trend) weekSet.add(p.weekStart);
@@ -82,21 +109,80 @@ function TrendChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Element
     const series: Series[] = vendors
       .filter((v) => v.trend.length > 0)
       .map((v) => {
-        const byWeek = new Map(v.trend.map((p) => [p.weekStart, p.threads]));
+        const byWeek = new Map(v.trend.map((p) => [p.weekStart, value(p)]));
         return {
-          key: v.kind,
+          key: v.key,
           label: v.label,
           color: automatedReviewerMeta(v.kind).color,
           values: labels.map((w) => byWeek.get(w) ?? null),
         };
       });
     return { labels, series };
-  }, [vendors]);
+  }, [vendors, value]);
 
   if (labels.length < 2 || series.length === 0) {
     return <ChartEmpty label="Not enough weekly history yet" />;
   }
-  return <LineChart labels={labels} series={series} height={140} curved />;
+  return <LineChart labels={labels} series={series} height={height} curved formatY={formatY} />;
+}
+
+// A per-bot acted-on-vs-untouched snapshot over the selected window (stacked bar per bot):
+// the deterministic effectiveness split — how much of each bot's volume drove action vs sat
+// untouched. Labels rotate so bot names don't collide.
+function ActedVsUntouchedChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Element {
+  const labels = vendors.map((v) => v.label);
+  const series: Series[] = [
+    { key: 'acted', label: 'Acted on', color: PALETTE.green, values: vendors.map((v) => v.actedOn) },
+    { key: 'untouched', label: 'Untouched', color: PALETTE.amber, values: vendors.map((v) => v.untouched) },
+  ];
+  if (labels.length === 0 || vendors.every((v) => v.actedOn + v.untouched === 0)) {
+    return <ChartEmpty />;
+  }
+  return <BarChart labels={labels} series={series} mode="stacked" rotateLabels height={160} />;
+}
+
+// Volume-INDEPENDENT effectiveness: each bot's acted-on % over the window, the bar tinted by
+// its keep/tune/kill verdict. Surfaces low-volume-but-ineffective bots the count charts bury
+// (a 24-thread bot at 25% acted-on reads as clearly "kill" here, where its stacked bar is a
+// sliver). A small verdict legend sits under it so the traffic-light colours are legible.
+function EffectivenessChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Element {
+  const rated = vendors.filter((v) => v.actedOnPct != null);
+  if (rated.length === 0) return <ChartEmpty label="No acted-on data yet" />;
+  const series: Series[] = [
+    {
+      key: 'acted',
+      label: 'Acted-on %',
+      color: PALETTE.slate,
+      values: rated.map((v) => v.actedOnPct ?? 0),
+      colors: rated.map((v) => VERDICT_COLOR[v.verdict]),
+    },
+  ];
+  return (
+    <div>
+      <BarChart
+        labels={rated.map((v) => v.label)}
+        series={series}
+        formatY={pctAxis}
+        formatValue={pctAxis}
+        rotateLabels
+        height={160}
+      />
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+        {(['keep', 'tune', 'kill'] as BotVerdict[]).map((v) => (
+          <span
+            key={v}
+            className="flex items-center gap-1 text-[10px] capitalize text-gray-500 dark:text-gray-400"
+          >
+            <span
+              className="inline-block h-2 w-2 rounded-[2px]"
+              style={{ background: VERDICT_COLOR[v] }}
+            />
+            {v}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function TuningSuggestions({
@@ -198,7 +284,7 @@ function VendorTable({
             const verdict = VERDICT_META[v.verdict];
             return (
               <tr
-                key={v.kind}
+                key={v.key}
                 className="border-b border-gray-100 last:border-0 dark:border-gray-800/60"
               >
                 <td className="px-2 py-1.5">
@@ -269,13 +355,13 @@ export function BotRoiPanel(): JSX.Element | null {
   // path never hits /api/pro/settings (which 404s without the plugin).
   const { data: settings } = useProSettings(useHasProSettings());
 
-  const costByKind = useMemo(
-    () => new Map((settings?.bots.cost ?? []).map((c) => [c.kind, c.monthlyUsd])),
+  const costByLogin = useMemo(
+    () => new Map((settings?.bots.cost ?? []).map((c) => [c.login, c.monthlyUsd])),
     [settings?.bots.cost],
   );
   const vendors = useMemo(
-    () => (data ? withCost(data.vendors, costByKind) : []),
-    [data, costByKind],
+    () => (data ? withCost(data.vendors, costByLogin) : []),
+    [data, costByLogin],
   );
 
   const header = (
@@ -341,14 +427,25 @@ export function BotRoiPanel(): JSX.Element | null {
           </span>
         </div>
         <VendorTable vendors={vendors} onOpenVendor={openBotPrsDetail} />
-        <ChartCard title="Weekly thread volume" note="last 12 weeks">
-          <TrendChart vendors={vendors} />
-        </ChartCard>
+        {/* Bot-effectiveness charts (per vendor) — all always visible: raw weekly volume, the
+            volume-independent effectiveness + verdict, and the acted-on vs untouched split. */}
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+          <ChartCard title="Thread volume" note="weekly · last 12">
+            <VendorTrendChart vendors={vendors} value={threadsVal} />
+          </ChartCard>
+          <ChartCard title="Bot effectiveness" note="acted-on % · keep / tune / kill">
+            <EffectivenessChart vendors={vendors} />
+          </ChartCard>
+          <ChartCard title="Acted-on vs untouched" note="by bot · current window">
+            <ActedVsUntouchedChart vendors={vendors} />
+          </ChartCard>
+        </div>
         <TuningSuggestions suggestions={data.suggestions} />
         <div className="text-[11px] text-gray-400">
           “Acted on” = a later commit likely addressed the thread, it was resolved, or a human
-          replied/resolved after the bot (approximate). Verdicts + cost are deterministic — no
-          AI. Set per-vendor monthly cost in Settings → Review bots to see $/acted-on.
+          replied/resolved after the bot (approximate). Noise ratio = the untouched share of a
+          bot's threads. Verdicts + cost are deterministic — no AI. Set per-bot monthly cost in
+          Settings → Review bots to see $/acted-on.
         </div>
       </div>
     );

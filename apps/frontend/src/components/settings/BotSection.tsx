@@ -1,12 +1,9 @@
 import { useState } from 'react';
-import type { AutomatedReviewerKind } from '@pierre-review/shared';
-import { automatedReviewerMeta, BOT_VENDOR_META } from '../../lib/ui.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useDetectedReviewers } from '../../hooks/useBotTriage.js';
 import { DetectedReviewersTable } from './DetectedReviewersTable.js';
 import { BotMuteRulesEditor } from './BotMuteRulesEditor.js';
 import { Field, SaveButton, SectionShell, inputCls, type SectionProps } from './ui.js';
-
-const ALL_KINDS = Object.keys(BOT_VENDOR_META) as AutomatedReviewerKind[];
 
 // A checkbox row matching the modal's compact type scale.
 function Toggle({
@@ -63,11 +60,18 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
   const [pierreFooter, setPierreFooter] = useState<boolean>(b.pierreFooter);
   const pierreDirty = tagPierre !== b.tagPierreReviews || pierreFooter !== b.pierreFooter;
 
-  // Per-vendor cost group.
-  const [cost, setCost] = useState<{ kind: AutomatedReviewerKind; monthlyUsd: number }[]>(b.cost);
+  // Per-BOT cost group (keyed by reviewer login, so in-house bots are costed individually).
+  const [cost, setCost] = useState<{ login: string; monthlyUsd: number }[]>(b.cost);
   const costDirty = JSON.stringify(cost) !== JSON.stringify(b.cost);
-  const firstUnusedKind = (): AutomatedReviewerKind =>
-    ALL_KINDS.find((k) => !cost.some((c) => c.kind === k)) ?? 'in_house';
+  // The detected automated reviewers drive the per-bot picker (login → display label).
+  const { data: detected } = useDetectedReviewers();
+  const bots = (detected?.reviewers ?? []).filter((r) => r.classification.automated);
+  const botLabel = (login: string): string => {
+    const r = bots.find((x) => x.login === login);
+    return r ? r.classification.label?.trim() || r.displayName?.trim() || r.login : login;
+  };
+  const firstUnusedLogin = (): string =>
+    bots.find((r) => !cost.some((c) => c.login === r.login))?.login ?? '';
 
   // Slack bot digest (only meaningful when the account has a Slack digest configured).
   const [slackDigest, setSlackDigest] = useState<boolean>(b.slackDigest);
@@ -156,67 +160,79 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
       <BotMuteRulesEditor />
 
       <SectionShell
-        title="Per-vendor cost"
-        desc="Optional monthly spend per reviewer, used to show cost-per-acted-on in the Bot ROI panel. Stays on your account."
+        title="Per-bot cost"
+        desc="Optional monthly spend per bot (each in-house bot separately), used to show cost-per-acted-on in the Bot ROI panel. Stays on your account."
       >
         {cost.length === 0 ? (
           <p className="text-[11px] text-gray-400">No costs entered.</p>
         ) : (
           <ul className="space-y-1.5">
-            {cost.map((c, i) => (
-              <li key={i} className="flex items-center gap-2">
-                <select
-                  className={`${inputCls} w-auto`}
-                  value={c.kind}
-                  onChange={(e) =>
-                    setCost((prev) =>
-                      prev.map((row, j) => (j === i ? { ...row, kind: e.target.value as AutomatedReviewerKind } : row)),
-                    )
-                  }
-                  aria-label="Vendor"
-                >
-                  {ALL_KINDS.map((k) => (
-                    <option key={k} value={k}>
-                      {automatedReviewerMeta(k).label}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-[11px] text-gray-400">$</span>
-                <input
-                  type="number"
-                  min={0}
-                  className={`${inputCls} w-24`}
-                  value={c.monthlyUsd}
-                  onChange={(e) =>
-                    setCost((prev) =>
-                      prev.map((row, j) =>
-                        j === i ? { ...row, monthlyUsd: Math.max(0, Number(e.target.value) || 0) } : row,
-                      ),
-                    )
-                  }
-                  aria-label="Monthly USD"
-                />
-                <span className="text-[11px] text-gray-400">/mo</span>
-                <button
-                  type="button"
-                  onClick={() => setCost((prev) => prev.filter((_, j) => j !== i))}
-                  className="ml-auto text-gray-400 hover:text-red-500"
-                  aria-label="Remove"
-                  title="Remove"
-                >
-                  ✕
-                </button>
-              </li>
-            ))}
+            {cost.map((c, i) => {
+              // Options: every detected bot, plus this row's own login if it's no longer detected
+              // (so an existing entry never silently loses its selection).
+              const options: { login: string }[] = bots.some((r) => r.login === c.login)
+                ? bots
+                : [{ login: c.login }, ...bots];
+              return (
+                <li key={i} className="flex items-center gap-2">
+                  <select
+                    className={`${inputCls} w-auto`}
+                    value={c.login}
+                    onChange={(e) =>
+                      setCost((prev) =>
+                        prev.map((row, j) => (j === i ? { ...row, login: e.target.value } : row)),
+                      )
+                    }
+                    aria-label="Bot"
+                  >
+                    {options.map((r) => (
+                      <option key={r.login} value={r.login}>
+                        {botLabel(r.login)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-[11px] text-gray-400">$</span>
+                  <input
+                    type="number"
+                    min={0}
+                    className={`${inputCls} w-24`}
+                    value={c.monthlyUsd}
+                    onChange={(e) =>
+                      setCost((prev) =>
+                        prev.map((row, j) =>
+                          j === i ? { ...row, monthlyUsd: Math.max(0, Number(e.target.value) || 0) } : row,
+                        ),
+                      )
+                    }
+                    aria-label="Monthly USD"
+                  />
+                  <span className="text-[11px] text-gray-400">/mo</span>
+                  <button
+                    type="button"
+                    onClick={() => setCost((prev) => prev.filter((_, j) => j !== i))}
+                    className="ml-auto text-gray-400 hover:text-red-500"
+                    aria-label="Remove"
+                    title="Remove"
+                  >
+                    ✕
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setCost((prev) => [...prev, { kind: firstUnusedKind(), monthlyUsd: 0 }])}
-            className="rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            disabled={firstUnusedLogin() === ''}
+            onClick={() => {
+              const login = firstUnusedLogin();
+              if (login !== '') setCost((prev) => [...prev, { login, monthlyUsd: 0 }]);
+            }}
+            className="rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            title={firstUnusedLogin() === '' ? 'No more detected bots to add' : 'Add a per-bot cost'}
           >
-            Add vendor cost
+            Add bot cost
           </button>
           <SaveButton dirty={costDirty} saving={saving} onClick={() => save({ bots: { cost } })} />
         </div>

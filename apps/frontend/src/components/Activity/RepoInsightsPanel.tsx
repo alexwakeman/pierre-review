@@ -48,12 +48,14 @@ export function RepoInsightsPanel({
     );
   }
 
-  // Header unavailable (Pro off / repo not owned / no metrics) — degrade gracefully to just
-  // the charts grid so the repo pane still shows its analytics.
+  // Header unavailable (Pro off / repo not owned / no metrics) — degrade gracefully to the
+  // per-repo charts. Collapsible so the free/core repo view defaults to the same primary trio
+  // as the Insights pane (throughput · CI recovery · CI failures by stage) with a "More charts"
+  // expander, rather than dumping the whole grid expanded.
   if (analytics) {
     return (
       <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-800 dark:bg-gray-900/20">
-        <Charts data={analytics} />
+        <Charts data={analytics} collapsible />
       </div>
     );
   }

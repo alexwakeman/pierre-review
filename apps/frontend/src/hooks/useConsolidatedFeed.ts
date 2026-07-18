@@ -31,6 +31,7 @@ function feedSearch(
   excludeBots: boolean,
   allowedBotIds: number[],
   prId: number | null,
+  botsOnly: boolean,
 ): string {
   const p = new URLSearchParams();
   if (repoIds && repoIds.length > 0) p.set('repoIds', repoIds.join(','));
@@ -43,6 +44,8 @@ function feedSearch(
     // The allow-list only bites under excludeBots — keep those bots visible.
     if (allowedBotIds.length > 0) p.set('allowBotIds', allowedBotIds.join(','));
   }
+  // The Bots pane's bot-only feed — filtered to automated reviewers server-side, before the cap.
+  if (botsOnly) p.set('botsOnly', 'true');
   return p.toString();
 }
 
@@ -61,6 +64,7 @@ export function useConsolidatedFeed(opts: {
   excludeBots?: boolean;
   allowedBotIds?: number[];
   prId?: number | null;
+  botsOnly?: boolean;
   enabled?: boolean;
 }) {
   const search = feedSearch(
@@ -69,6 +73,7 @@ export function useConsolidatedFeed(opts: {
     opts.excludeBots ?? false,
     opts.allowedBotIds ?? [],
     opts.prId ?? null,
+    opts.botsOnly ?? false,
   );
   const query = useInfiniteQuery<ConsolidatedFeedResponse>({
     queryKey: ['consolidated-feed', search],
@@ -129,6 +134,7 @@ export function useFeedHasNew(opts: {
   excludeBots?: boolean;
   allowedBotIds?: number[];
   prId?: number | null;
+  botsOnly?: boolean;
   loadedLatestId: string | null;
   loadedTotal: number;
   // True once the loaded feed has finished its initial load, so we can distinguish "empty
@@ -144,6 +150,7 @@ export function useFeedHasNew(opts: {
     opts.excludeBots ?? false,
     opts.allowedBotIds ?? [],
     opts.prId ?? null,
+    opts.botsOnly ?? false,
   );
   const head = useQuery<ConsolidatedFeedResponse>({
     queryKey: ['feed-head', search],

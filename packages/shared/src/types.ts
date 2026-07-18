@@ -197,10 +197,17 @@ export type ReviewProvenance = 'ai_verbatim' | 'human_curated';
 // ── WS3 Bot ROI / utilisation analytics ─────────────────────────────
 export type BotWindowKind = 'rolling_7' | 'rolling_14' | 'rolling_30' | 'sprint';
 export type BotVerdict = 'keep' | 'tune' | 'kill';
-export interface BotVendorTrendPoint { weekStart: string; threads: number; actedOnPct: number | null; }
+export interface BotVendorTrendPoint { weekStart: string; threads: number; actedOnPct: number | null; untouched: number; }
 export interface BotVendorAnalytics {
+  // Stable unique row key. Analytics are now per-REVIEWER (so in-house bots — all kind
+  // 'in_house' — get their own rows), and `kind` repeats across them, so the UI keys on this.
+  key: string;
   kind: AutomatedReviewerKind;
+  // Per-bot display name (custom classification label → vendor name → login), not the kind label.
   label: string;
+  // The reviewer's github login — the stable key the client maps per-bot cost onto. Null only
+  // when the login couldn't be resolved.
+  login: string | null;
   reviewers: number;
   threads: number;
   comments: number;
@@ -784,7 +791,9 @@ export interface ProSettings {
     slackDigest: boolean;       // WS5
     autoResolve: boolean;       // WS6b master enable
     autoResolveDays: number;
-    cost: { kind: AutomatedReviewerKind; monthlyUsd: number }[];  // WS3b
+    // Per-BOT monthly cost, keyed by the reviewer's github LOGIN (not kind) — several in-house
+    // bots share kind 'in_house' but have wildly different ROI, so cost is tracked per bot.
+    cost: { login: string; monthlyUsd: number }[];  // WS3b
   };
 }
 
@@ -813,7 +822,7 @@ export interface ProSettingsUpdate {
     inhouseDetect?: boolean; autoTagHighConfidence?: boolean; loginAllowlist?: string[];
     deepDetect?: boolean; aiTiebreak?: boolean; tagPierreReviews?: boolean; pierreFooter?: boolean;
     slackDigest?: boolean; autoResolve?: boolean; autoResolveDays?: number;
-    cost?: { kind: AutomatedReviewerKind; monthlyUsd: number }[];
+    cost?: { login: string; monthlyUsd: number }[];
   };
 }
 

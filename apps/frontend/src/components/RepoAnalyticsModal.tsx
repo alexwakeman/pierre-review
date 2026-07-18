@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { RepoAnalytics } from '@pierre-review/shared';
 import { useRepoAnalytics } from '../hooks/useTriage.js';
 import { useUsers } from '../hooks/useTimeline.js';
@@ -33,7 +33,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 // Exported so the per-repo Activity console (RepoInsightsPanel) can render the full charts
 // grid INLINE (under the panel's "More charts" expander) instead of only in this modal shell.
-export function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
+//
+// `collapsible` (repo console default): show only the 3 primary charts up front — PR throughput
+// (open/merged/closed) · CI recovery time · CI failures by stage, matching the Insights pane's
+// primary trio — and fold the rest behind a "More charts" expander. Absent ⇒ the full sectioned
+// grid (the analytics modal + the Pro "More charts" slot both want everything).
+export function Charts({
+  data,
+  collapsible = false,
+}: {
+  data: RepoAnalytics;
+  collapsible?: boolean;
+}): JSX.Element {
+  const [showMore, setShowMore] = useState(false);
   const { data: users } = useUsers();
   const usersById = indexUsers(users);
   const weeks = data.weekBuckets;
@@ -129,16 +141,52 @@ export function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
     },
   ];
 
-  return (
+  // The 3 primary charts, extracted so both the full grid and the collapsible repo-console
+  // layout reference the SAME cards (defined once). These mirror the Insights pane's trio.
+  const throughputCard = (
+    <ChartCard title="PR throughput" note={weeksNote}>
+      {sum(throughput.flatMap((s) => s.values as number[])) === 0 ? (
+        <ChartEmpty />
+      ) : (
+        <LineChart labels={weeks} series={throughput} curved />
+      )}
+    </ChartCard>
+  );
+  const ciRecoveryCard = (
+    <ChartCard
+      title="CI recovery time"
+      note={ciRecoveryEmpty ? 'weekly median' : `${ciIncidents} recoveries · weekly median`}
+    >
+      {ciRecoveryEmpty ? (
+        <ChartEmpty label="No CI failures recorded" />
+      ) : (
+        <LineChart
+          labels={ciRecoveryLabels}
+          series={ciRecoverySeries}
+          area
+          curved
+          formatY={fmtDuration}
+        />
+      )}
+    </ChartCard>
+  );
+  const ciStageCard = (
+    <ChartCard title="CI failures by stage" note="by check name">
+      {ciFailuresByStage.length === 0 ? (
+        <ChartEmpty label="No CI failures recorded" />
+      ) : (
+        <BarChart labels={ciStageLabels} series={ciStageSeries} rotateLabels />
+      )}
+    </ChartCard>
+  );
+
+  // The sectioned charts grid. `includePrimaries` = render the 3 primary cards inline (the full
+  // modal / Pro-slot view); false = OMIT them (the collapsible repo view shows them up front, so
+  // the "More charts" expander must not repeat them).
+  const grid = (includePrimaries: boolean): JSX.Element => (
     <div className="space-y-4">
       <Section title="Flow & throughput">
-        <ChartCard title="PR throughput" note={weeksNote}>
-          {sum(throughput.flatMap((s) => s.values as number[])) === 0 ? (
-            <ChartEmpty />
-          ) : (
-            <LineChart labels={weeks} series={throughput} curved />
-          )}
-        </ChartCard>
+        {includePrimaries && throughputCard}
         <ChartCard title="Open backlog & stalled" note="weekly snapshot">
           {Math.max(0, ...data.backlog.open) === 0 ? (
             <ChartEmpty />
@@ -172,31 +220,12 @@ export function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
         </ChartCard>
       </Section>
 
-      <Section title="CI health">
-        <ChartCard
-          title="CI recovery time"
-          note={ciRecoveryEmpty ? 'weekly median' : `${ciIncidents} recoveries · weekly median`}
-        >
-          {ciRecoveryEmpty ? (
-            <ChartEmpty label="No CI failures recorded" />
-          ) : (
-            <LineChart
-              labels={ciRecoveryLabels}
-              series={ciRecoverySeries}
-              area
-              curved
-              formatY={fmtDuration}
-            />
-          )}
-        </ChartCard>
-        <ChartCard title="CI failures by stage" note="by check name">
-          {ciFailuresByStage.length === 0 ? (
-            <ChartEmpty label="No CI failures recorded" />
-          ) : (
-            <BarChart labels={ciStageLabels} series={ciStageSeries} rotateLabels />
-          )}
-        </ChartCard>
-      </Section>
+      {includePrimaries && (
+        <Section title="CI health">
+          {ciRecoveryCard}
+          {ciStageCard}
+        </Section>
+      )}
 
       <Section title="Review health">
         <ChartCard title="Thread-resolution mix" note="by thread created week">
@@ -267,6 +296,30 @@ export function Charts({ data }: { data: RepoAnalytics }): JSX.Element {
           )}
         </ChartCard>
       </Section>
+    </div>
+  );
+
+  if (!collapsible) return grid(true);
+
+  // Repo console: primary trio up front (matches the Insights pane), everything else folded
+  // behind "More charts" — which OMITS the trio (grid(false)) so nothing is shown twice.
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        {throughputCard}
+        {ciRecoveryCard}
+        {ciStageCard}
+      </div>
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowMore((s) => !s)}
+          className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        >
+          {showMore ? '▾' : '▸'} More charts
+        </button>
+        {showMore && <div className="mt-3">{grid(false)}</div>}
+      </div>
     </div>
   );
 }

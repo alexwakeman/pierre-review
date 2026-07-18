@@ -44,6 +44,7 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       offset?: string;
       excludeBots?: string;
       allowBotIds?: string;
+      botsOnly?: string;
     };
     const limit = q.limit != null ? Number(q.limit) : null;
     const offset = q.offset != null ? Number(q.offset) : 0;
@@ -56,6 +57,7 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       offset: Number.isFinite(offset) && offset > 0 ? offset : 0,
       excludeBots: q.excludeBots === 'true',
       allowBotIds: parseIntList(q.allowBotIds),
+      botsOnly: q.botsOnly === 'true',
     });
   });
 

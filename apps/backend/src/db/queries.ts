@@ -984,13 +984,17 @@ export interface FeedFilters {
   // scan is one PR, so its full history is cheap). Lets the Feed's per-PR filter show an
   // old PR's opened event + all activity, not just the last `daysBefore` days.
   prId?: number | null;
+  // Bot feed: restrict events to these actor ids (the automated-reviewer set) IN SQL, so the
+  // bot-only feed filters before the cap instead of the client thinning an already-capped mixed
+  // page. Null/omitted → no actor restriction. An empty array yields an empty feed by design.
+  botActorIds?: number[] | null;
 }
 
 export async function getFeed(
   accountId: number,
   opts: FeedFilters = {},
 ): Promise<FeedResponse> {
-  const { daysBefore = 14, repoIds = null, userIds = null, watchedOnly = false, prId = null } = opts;
+  const { daysBefore = 14, repoIds = null, userIds = null, watchedOnly = false, prId = null, botActorIds = null } = opts;
   // Isolated to one PR → no time window (epoch 0); otherwise the rolling `daysBefore` window.
   const since = prId != null ? new Date(0) : new Date(Date.now() - daysBefore * 24 * 60 * 60 * 1000);
   const conds: SQL[] = [
@@ -1002,6 +1006,12 @@ export async function getFeed(
   if (watchedOnly) conds.push(eq(repos.inboxWatch, true));
   if (repoIds) conds.push(inArray(events.repoId, repoIds));
   if (userIds && userIds.length > 0) conds.push(inArray(events.actorId, userIds));
+  // Bot feed: restrict to the automated-reviewer actor set (before the cap). An empty set
+  // means "no bots" → force an unsatisfiable predicate so the feed is empty (not unfiltered).
+  if (botActorIds != null)
+    conds.push(
+      botActorIds.length > 0 ? inArray(events.actorId, botActorIds) : sql`1 = 0`,
+    );
   const rows = await db
     .select({
       id: events.id,
@@ -1936,6 +1946,10 @@ export async function getActivity(
 // Every My Turn (participated) event is always kept; the plain activity rows are bounded to
 // the most recent, so a busy multi-repo account doesn't render thousands of them.
 const FEED_EVENT_CAP = 250;
+// The Bots pane's bot-only feed filters to automated reviewers IN SQL, so its cap governs bot
+// activity alone (not a slice of all activity). Set generously so it spans the full window and
+// tracks the ROI thread counts; the feed is paginated + DOM-windowed, so a high total is cheap.
+const BOT_FEED_EVENT_CAP = 1000;
 
 // A top-level PR comment and a coinciding "host" event by the SAME actor on the SAME PR are
 // folded into ONE card when they land within this window of each other (issue comments carry
@@ -2044,6 +2058,12 @@ export interface ConsolidatedFeedFilters {
   // Bots to KEEP visible even when excludeBots is on (the per-repo allow-list override).
   // null/empty → exclude every bot. Ignored when excludeBots is false.
   allowBotIds?: number[] | null;
+  // The Bots pane's bot-ONLY feed: restrict to the automated-reviewer set (deepsource /
+  // coderabbit / classified in-house / Pierre …) IN SQL, before the cap — so bot activity spans
+  // the full window instead of being thinned out of a 250-event mixed page. Skips commit-push +
+  // Claude items (not review-bot activity), ignores excludeBots, and uses a higher cap. The
+  // caller should also drop the member (userIds) filter (bots aren't members).
+  botsOnly?: boolean;
   // Pagination over the merged, chronologically-sorted stream. `limit` omitted → the
   // whole stream (legacy). The response `total` is the full count so the client knows
   // when to stop "Load more". Only the returned page is enriched (merge/review credit)
@@ -3586,6 +3606,7 @@ export async function getConsolidatedFeed(
     offset = 0,
     excludeBots = false,
     allowBotIds = null,
+    botsOnly = false,
   } = opts;
 
   // Restrict to the account's WATCHED repos; a passed repoIds narrows within them. An
@@ -3601,9 +3622,11 @@ export async function getConsolidatedFeed(
   // their activity stays visible. getFeed doesn't filter bots, so we do it here; the commit
   // helper filters in its own SQL.
   const allowBots = new Set(allowBotIds ?? []);
-  const botIds = excludeBots
-    ? new Set((await botUserIds()).filter((id) => !allowBots.has(id)))
-    : new Set<number>();
+  // excludeBots is meaningless in the bot-only feed (it would drop everything) — force it off.
+  const botIds =
+    !botsOnly && excludeBots
+      ? new Set((await botUserIds()).filter((id) => !allowBots.has(id)))
+      : new Set<number>();
   const notBot = (id: number | null): boolean =>
     !excludeBots || id == null || !botIds.has(id);
 
@@ -3612,19 +3635,32 @@ export async function getConsolidatedFeed(
   // cheap, and the reader sees the opened event + all activity even on a long-idle PR — not an
   // empty pane. The un-isolated feed keeps the rolling 14-day window (a live activity stream).
   const feedSince = prId != null ? new Date(0) : new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  // Bot-only feed: resolve the automated-reviewer actor set (vendors + classified in-house /
+  // Pierre — the SAME set the ROI panel counts, so it catches deepsource-io etc. that aren't
+  // users.isBot). Empty → nobody's classified → an empty feed. Filtered IN SQL by getFeed.
+  const botActorIds = botsOnly ? await automatedReviewerUserIds(accountId) : null;
+  if (botsOnly && (botActorIds == null || botActorIds.length === 0)) {
+    return { items: [], users: [], total: 0, generatedAt: new Date().toISOString() };
+  }
   const [feed, commitItems, claudeItems] = await Promise.all([
-    getFeed(accountId, { daysBefore: 14, prId, repoIds: effectiveRepoIds, userIds }),
+    getFeed(accountId, { daysBefore: 14, prId, repoIds: effectiveRepoIds, userIds, botActorIds }),
     // Commit-push activity that ADDRESSED a review thread (the only commit rows we surface
-    // — plain pushes are noise). Each carries the affected threads inline.
-    getCommitThreadItems(accountId, {
-      repoIds: effectiveRepoIds,
-      userIds,
-      botIds,
-      since: feedSince,
-      prId,
-    }),
+    // — plain pushes are noise). Each carries the affected threads inline. Skipped in the
+    // bot-only feed (a commit push is the AUTHOR responding, not review-bot activity).
+    botsOnly
+      ? Promise.resolve<ConsolidatedFeedItem[]>([])
+      : getCommitThreadItems(accountId, {
+          repoIds: effectiveRepoIds,
+          userIds,
+          botIds,
+          since: feedSince,
+          prId,
+        }),
     // Claude Review runs surfaced as their own feed item kind (local-only; empty in cloud).
-    getClaudeReviewFeedItems(accountId, effectiveRepoIds, feedSince, prId),
+    // Skipped in the bot-only feed (they're the user's own runs, not review-bot activity).
+    botsOnly
+      ? Promise.resolve<ConsolidatedFeedItem[]>([])
+      : getClaudeReviewFeedItems(accountId, effectiveRepoIds, feedSince, prId),
   ]);
 
   // The "My Turn" participation flag (isMyTurn / myTurnReasons / reasonTag) is CORE / free
@@ -3736,7 +3772,7 @@ export async function getConsolidatedFeed(
   const feedRows = scoped
     .filter((i) => !i.isMyTurn && i.kind !== 'claude_review')
     .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
-    .slice(0, FEED_EVENT_CAP);
+    .slice(0, botsOnly ? BOT_FEED_EVENT_CAP : FEED_EVENT_CAP);
   const ordered = [...alwaysRows, ...feedRows].sort((a, b) =>
     b.occurredAt.localeCompare(a.occurredAt),
   );
@@ -6685,6 +6721,36 @@ export async function getBotAnalytics(
   const kindMap = await classificationKindForUser(accountId);
   const hideRules = (await listBotMuteRules(accountId)).filter((r) => r.action === 'hide');
 
+  // Per-REVIEWER identity (so in-house bots — all kind 'in_house' — separate into their own rows
+  // instead of collapsing). Label preference: the account's custom classification label →
+  // the vendor's pretty name (for known vendors) → the reviewer's login/display name.
+  const classLabel = new Map<number, string>();
+  for (const r of await db
+    .select({ id: botReviewClassification.authorUserId, label: botReviewClassification.label })
+    .from(botReviewClassification)
+    .where(eq(botReviewClassification.accountId, accountId))
+    .execute()) {
+    if (r.label != null && r.label.trim() !== '') classLabel.set(r.id, r.label.trim());
+  }
+  const loginById = new Map<number, string>(); // display fallback (name || login)
+  const rawLoginById = new Map<number, string>(); // the github login — the per-bot cost key
+  if (automatedIds.length > 0) {
+    for (const r of await db
+      .select({ id: users.id, login: users.githubLogin, name: users.displayName })
+      .from(users)
+      .where(inArray(users.id, automatedIds))
+      .execute()) {
+      loginById.set(r.id, r.name?.trim() || r.login || `#${r.id}`);
+      if (r.login) rawLoginById.set(r.id, r.login);
+    }
+  }
+  const reviewerLabel = (userId: number, kind: AutomatedReviewerKind): string => {
+    const custom = classLabel.get(userId);
+    if (custom) return custom;
+    if (kind !== 'in_house' && kind !== 'pierre') return labelForKind(kind);
+    return loginById.get(userId) ?? labelForKind(kind);
+  };
+
   // Automated-reviewer threads over the 12-week trend span (⊇ the selected window).
   const threadRows = await db
     .select({
@@ -6740,50 +6806,56 @@ export async function getBotAnalytics(
   };
 
   type Acc = {
+    kind: AutomatedReviewerKind;
     reviewers: Set<number>;
     threads: number;
     actedOn: number;
     untouched: number;
     oldestUntouchedMs: number | null;
     humanFollow: number;
-    // weekly buckets (12), each {threads, actedOn}
-    weekly: { threads: number; actedOn: number }[];
+    // weekly buckets (12), each {threads, actedOn, untouched} — untouched drives the
+    // per-vendor noise-ratio-over-time trend (untouched / threads).
+    weekly: { threads: number; actedOn: number; untouched: number }[];
     // (pathBucket → {volume, untouched}) for tuning suggestions.
     buckets: Map<string, { volume: number; untouched: number }>;
   };
-  const byKind = new Map<AutomatedReviewerKind, Acc>();
-  const accFor = (kind: AutomatedReviewerKind): Acc => {
-    let a = byKind.get(kind);
+  // Keyed by REVIEWER user id (not kind) so each bot — including every in-house bot that shares
+  // kind 'in_house' — gets its own row. `kind` rides along for colour / cost / verdict semantics.
+  const byUser = new Map<number, Acc>();
+  const accFor = (userId: number, kind: AutomatedReviewerKind): Acc => {
+    let a = byUser.get(userId);
     if (!a) {
       a = {
+        kind,
         reviewers: new Set(),
         threads: 0,
         actedOn: 0,
         untouched: 0,
         oldestUntouchedMs: null,
         humanFollow: 0,
-        weekly: Array.from({ length: 12 }, () => ({ threads: 0, actedOn: 0 })),
+        weekly: Array.from({ length: 12 }, () => ({ threads: 0, actedOn: 0, untouched: 0 })),
         buckets: new Map(),
       };
-      byKind.set(kind, a);
+      byUser.set(userId, a);
     }
     return a;
   };
 
   // Trend (12 weekly buckets, oldest→newest) uses the full 12-week span.
-  const windowThreads: { id: number; kind: AutomatedReviewerKind; path: string; state: DerivedState; createdAt: Date }[] = [];
+  const windowThreads: { id: number; userId: number; kind: AutomatedReviewerKind; path: string; state: DerivedState; createdAt: Date }[] = [];
   for (const t of threadRows) {
     if (t.userId == null) continue;
     const kind = kindMap.get(t.userId);
     if (!kind) continue;
     if (isHidden(t, kind)) continue;
-    const acc = accFor(kind);
+    const acc = accFor(t.userId, kind);
     const acted = t.state === 'resolved' || t.state === 'likely_addressed';
     // Trend bucket by created week.
     const wk = Math.min(11, Math.max(0, Math.floor((t.createdAt.getTime() - trendFrom.getTime()) / (7 * 86_400_000))));
     const bucket = acc.weekly[wk]!;
     bucket.threads += 1;
     if (acted) bucket.actedOn += 1;
+    if (t.state === 'untouched') bucket.untouched += 1;
     // Headline metrics use only the selected window. NOTE: acc.actedOn is accumulated LATER
     // (after the human-follow-up pass) under the merged "acted-on" definition (item 6) —
     // resolved | likely_addressed | a human replied after the bot's last comment.
@@ -6800,7 +6872,7 @@ export async function getBotAnalytics(
       b.volume += 1;
       if (t.state === 'untouched') b.untouched += 1;
       acc.buckets.set(pb, b);
-      windowThreads.push({ id: t.id, kind, path: t.path, state: t.state, createdAt: t.createdAt });
+      windowThreads.push({ id: t.id, userId: t.userId, kind, path: t.path, state: t.state, createdAt: t.createdAt });
     }
   }
 
@@ -6825,10 +6897,10 @@ export async function getBotAnalytics(
       arr.push({ authorId: r.authorId, at: r.createdAt.getTime() });
       byThread.set(r.threadId, arr);
     }
-    const kindByThread = new Map(windowThreads.map((t) => [t.id, t.kind]));
+    const reviewerByThread = new Map(windowThreads.map((t) => [t.id, { userId: t.userId, kind: t.kind }]));
     for (const [threadId, comments] of byThread) {
-      const kind = kindByThread.get(threadId);
-      if (!kind) continue;
+      const rv = reviewerByThread.get(threadId);
+      if (!rv) continue;
       let botLastAt = -Infinity;
       for (const c of comments) {
         if (c.authorId != null && automatedIds.includes(c.authorId) && c.at > botLastAt) botLastAt = c.at;
@@ -6838,7 +6910,7 @@ export async function getBotAnalytics(
       );
       if (humanAfter) {
         humanFollowSet.add(threadId);
-        accFor(kind).humanFollow += 1;
+        accFor(rv.userId, rv.kind).humanFollow += 1;
       }
     }
   }
@@ -6847,10 +6919,10 @@ export async function getBotAnalytics(
   // likely_addressed (the commit heuristic) OR a human followed up after the bot (humanFollowSet).
   for (const t of windowThreads) {
     const baseActed = t.state === 'resolved' || t.state === 'likely_addressed';
-    if (baseActed || humanFollowSet.has(t.id)) accFor(t.kind).actedOn += 1;
+    if (baseActed || humanFollowSet.has(t.id)) accFor(t.userId, t.kind).actedOn += 1;
   }
 
-  // Comments volume per kind (bot-authored review comments in the window).
+  // Comments volume per REVIEWER (bot-authored review comments in the window).
   const commentRows = await db
     .select({ authorId: reviewComments.authorId })
     .from(reviewComments)
@@ -6865,20 +6937,21 @@ export async function getBotAnalytics(
       ),
     )
     .execute();
-  const commentsByKind = new Map<AutomatedReviewerKind, number>();
+  const commentsByUser = new Map<number, number>();
   for (const r of commentRows) {
     if (r.authorId == null) continue;
-    const kind = kindMap.get(r.authorId);
-    if (!kind) continue;
-    commentsByKind.set(kind, (commentsByKind.get(kind) ?? 0) + 1);
+    if (!kindMap.get(r.authorId)) continue;
+    commentsByUser.set(r.authorId, (commentsByUser.get(r.authorId) ?? 0) + 1);
   }
 
   const suggestions: BotTuningSuggestion[] = [];
   const vendors: BotVendorAnalytics[] = [];
-  for (const [kind, acc] of byKind) {
-    if (acc.threads === 0 && (commentsByKind.get(kind) ?? 0) === 0) continue;
+  for (const [userId, acc] of byUser) {
+    const comments = commentsByUser.get(userId) ?? 0;
+    if (acc.threads === 0 && comments === 0) continue;
+    const kind = acc.kind;
+    const label = reviewerLabel(userId, kind);
     const actedOnPct = acc.threads > 0 ? Math.round((acc.actedOn / acc.threads) * 100) : null;
-    const comments = commentsByKind.get(kind) ?? 0;
     const oldestUntouchedDays =
       acc.oldestUntouchedMs == null ? null : Math.floor((nowMs - acc.oldestUntouchedMs) / 86_400_000);
     const humanFollowThroughPct = acc.threads > 0 ? Math.round((acc.humanFollow / acc.threads) * 100) : null;
@@ -6888,10 +6961,15 @@ export async function getBotAnalytics(
       weekStart: new Date(trendFrom.getTime() + i * 7 * 86_400_000).toISOString(),
       threads: w.threads,
       actedOnPct: w.threads > 0 ? Math.round((w.actedOn / w.threads) * 100) : null,
+      untouched: w.untouched,
     }));
     vendors.push({
+      // A stable per-reviewer row key (kind repeats across in-house bots, so the table can't key
+      // on kind). `kind` still drives colour / cost / verdict; `label` is the per-bot name.
+      key: `u${userId}`,
       kind,
-      label: labelForKind(kind),
+      label,
+      login: rawLoginById.get(userId) ?? null,
       reviewers: acc.reviewers.size,
       threads: acc.threads,
       comments,
@@ -6906,20 +6984,20 @@ export async function getBotAnalytics(
       costPerActedOnUsd: null,
       trend,
     });
-    // Deterministic tuning suggestions (§3h): a (kind, path-bucket) with volume ≥ 5 and
-    // untouchedPct ≥ 70 → "mute this".
+    // Deterministic tuning suggestions (§3h): a (reviewer, path-bucket) with volume ≥ 5 and
+    // untouchedPct ≥ 70 → "mute this". vendorKind stays the kind (mute rules match by kind).
     for (const [pb, b] of acc.buckets) {
       if (b.volume < 5) continue;
       const untouchedPct = Math.round((b.untouched / b.volume) * 100);
       if (untouchedPct < 70) continue;
       suggestions.push({
         vendorKind: kind,
-        label: labelForKind(kind),
+        label,
         pathGlob: pb,
         severity: null,
         untouchedPct,
         volume: b.volume,
-        rationale: `${untouchedPct}% of ${labelForKind(kind)}'s ${b.volume} threads in ${pb} went untouched — mute them?`,
+        rationale: `${untouchedPct}% of ${label}'s ${b.volume} threads in ${pb} went untouched — mute them?`,
       });
     }
   }

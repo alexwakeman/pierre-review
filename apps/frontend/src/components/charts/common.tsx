@@ -56,6 +56,10 @@ export interface Series {
   label: string;
   color: string;
   values: (number | null)[];
+  // Optional per-index colour override (BarChart only): when set, bar i uses colors[i]
+  // instead of `color` — e.g. a single "acted-on %" series whose bars are tinted by each
+  // bot's keep/tune/kill verdict. Falls back to `color` where an entry is null/absent.
+  colors?: (string | null)[];
 }
 
 // Hours → compact human duration (m / h / d), precision shrinking with magnitude.

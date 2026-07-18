@@ -115,7 +115,7 @@ export function BarChart({
                       y={yTop}
                       width={barAreaW}
                       height={Math.max(h, 0)}
-                      fill={s.color}
+                      fill={s.colors?.[i] ?? s.color}
                     />
                   );
                 });
@@ -131,7 +131,7 @@ export function BarChart({
                     y={y(v)}
                     width={Math.max(each - 0.5, 0.5)}
                     height={baseY - y(v)}
-                    fill={s.color}
+                    fill={s.colors?.[i] ?? s.color}
                   />
                 );
               });
@@ -184,7 +184,10 @@ export function BarChart({
             <div className="font-medium">{labelFor(hover)}</div>
             {series.map((s) => (
               <div key={s.key} className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-1.5 rounded-[1px]" style={{ background: s.color }} />
+                <span
+                  className="inline-block h-1.5 w-1.5 rounded-[1px]"
+                  style={{ background: s.colors?.[hover] ?? s.color }}
+                />
                 {s.label}: {formatValue(s.values[hover] ?? 0)}
               </div>
             ))}

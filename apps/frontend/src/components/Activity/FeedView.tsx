@@ -276,6 +276,9 @@ export function FeedView({
       excludeBots: effectiveExcludeBots,
       allowedBotIds,
       prId: isolatedPrId,
+      // Bot pane: the backend filters to automated reviewers IN SQL (before the cap), so the
+      // feed spans the full window of bot activity instead of a bot-slice of a capped page.
+      botsOnly: botsMode,
     });
 
   // "New activity" detector: poll the server head for this exact scope and compare to what's
@@ -288,6 +291,7 @@ export function FeedView({
     excludeBots: effectiveExcludeBots,
     allowedBotIds,
     prId: isolatedPrId,
+    botsOnly: botsMode,
     loadedLatestId: latestId,
     loadedTotal: total,
     feedSettled: !isLoading,
@@ -304,15 +308,6 @@ export function FeedView({
     (i: ConsolidatedFeedItem): boolean =>
       i.actorId != null && (usersById.get(i.actorId)?.isBot ?? false),
     [usersById],
-  );
-  // The Bots pane uses a WIDER definition than the bot lens: any isBot vendor OR an
-  // account-classified automated reviewer (in-house AI / Pierre — not always isBot-flagged), so
-  // "all bot activity" is surfaced, matching the per-row automated tag.
-  const isAutomatedActor = useCallback(
-    (i: ConsolidatedFeedItem): boolean =>
-      i.actorId != null &&
-      ((usersById.get(i.actorId)?.isBot ?? false) || classificationByUserId.has(i.actorId)),
-    [usersById, classificationByUserId],
   );
   const myTurnCount = useMemo(() => items.filter((i) => i.isMyTurn).length, [items]);
   const claudeCount = useMemo(
@@ -355,21 +350,49 @@ export function FeedView({
       return next;
     });
   }, []);
-  // Per-state counts across all bot items (for the pill badges), independent of the active pills.
+  // Bots pane: a per-VENDOR filter — a Set of actor ids (each distinct bot is one pill, so the
+  // in-house bots deepsource / github-actions / … isolate separately, not lumped as "in_house").
+  // Composes with the state pills (vendor ∧ state). Local, botsMode-only.
+  const [botVendorFilter, setBotVendorFilter] = useState<Set<number>>(() => new Set());
+  const toggleBotVendor = useCallback((actorId: number): void => {
+    setBotVendorFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(actorId)) next.delete(actorId);
+      else next.add(actorId);
+      return next;
+    });
+  }, []);
+  // The distinct bots present in the (already bot-only) feed → one pill each, labelled by the
+  // automated-reviewer tag (classification label / vendor name), most-active first.
+  const botVendors = useMemo(() => {
+    if (!botsMode) return [] as { actorId: number; label: string; color: string; count: number }[];
+    const m = new Map<number, { actorId: number; label: string; color: string; count: number }>();
+    for (const i of items) {
+      const aid = i.actorId;
+      if (aid == null) continue;
+      const existing = m.get(aid);
+      if (existing) {
+        existing.count += 1;
+        continue;
+      }
+      const u = usersById.get(aid);
+      const tag = automatedTagFor(u, classificationByUserId);
+      const label = tag?.label?.trim() ? tag.label : userLabel(u, aid);
+      m.set(aid, { actorId: aid, label, color: tag?.color ?? '#6b7280', count: 1 });
+    }
+    return [...m.values()].sort((a, b) => b.count - a.count);
+  }, [botsMode, items, usersById, classificationByUserId]);
+  // Per-state counts across the (already bot-only) items, for the pill badges — independent of
+  // the active pills. The backend filtered to automated reviewers, so every item counts.
   const botStateCounts = useMemo(() => {
     const m = new Map<DerivedState, number>();
     if (!botsMode) return m;
     for (const i of items) {
-      if (!isAutomatedActor(i) || i.derivedState == null) continue;
+      if (i.derivedState == null) continue;
       m.set(i.derivedState, (m.get(i.derivedState) ?? 0) + 1);
     }
     return m;
-  }, [botsMode, items, isAutomatedActor]);
-  // Total automated-reviewer items (the Bots pane's "X of N" denominator).
-  const automatedCount = useMemo(
-    () => (botsMode ? items.filter(isAutomatedActor).length : 0),
-    [botsMode, items, isAutomatedActor],
-  );
+  }, [botsMode, items]);
 
   // "My Turn only" and "Claude Reviews only" are mutually-exclusive client-side filters (My
   // Turn is CORE / free, so it's always available). The category pills + the bot lens compose
@@ -377,10 +400,14 @@ export function FeedView({
   // pills instead (the store lens/category/my-turn filters don't apply).
   const visible = useMemo(() => {
     if (botsMode) {
-      const bots = items.filter(isAutomatedActor);
-      return botStateFilter.size === 0
-        ? bots
-        : bots.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState));
+      // Backend already restricted to automated reviewers; the vendor + state pills compose here
+      // (vendor ∧ state — an empty set for a dimension means "all" for that dimension).
+      let base = items;
+      if (botVendorFilter.size > 0)
+        base = base.filter((i) => i.actorId != null && botVendorFilter.has(i.actorId));
+      if (botStateFilter.size > 0)
+        base = base.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState));
+      return base;
     }
     const base = feedMyTurnOnly
       ? items.filter((i) => i.isMyTurn)
@@ -393,7 +420,7 @@ export function FeedView({
       : feedBotLens === 'only'
         ? byCat.filter(isBotActor)
         : byCat;
-  }, [botsMode, botStateFilter, items, feedMyTurnOnly, feedClaudeOnly, feedBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor, isAutomatedActor]);
+  }, [botsMode, botStateFilter, botVendorFilter, items, feedMyTurnOnly, feedClaudeOnly, feedBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor]);
 
   // ── Vertical, variable-height windowing ─────────────────────────────────────────────
   // The feed accumulates unbounded across "Load more" pages, so rendering every card put
@@ -789,42 +816,82 @@ export function FeedView({
         </div>
       )}
 
-      {/* Bots pane: review-thread derived-state pills (a bot-only feed). These replace the
-          normal My-Turn/Claude/category/bot-lens pills. Toggling multiple ORs them. */}
+      {/* Bots pane: two independent, composable pill rows — VENDOR (one per distinct bot, so the
+          in-house bots isolate separately) and STATE (review-thread derived state). Toggling
+          multiple within a row ORs them; the two rows AND together (vendor ∧ state). These
+          replace the normal My-Turn/Claude/category/bot-lens pills. */}
       {botsMode ? (
-        <div className="flex flex-wrap items-center gap-2 px-0.5">
-          {BOT_STATE_ORDER.map((st) => {
-            const meta = DERIVED_STATE_META[st];
-            const on = botStateFilter.has(st);
-            const count = botStateCounts.get(st) ?? 0;
-            return (
-              <button
-                key={st}
-                type="button"
-                onClick={() => toggleBotState(st)}
-                aria-pressed={on}
-                className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                  on
-                    ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
-                    : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-                }`}
-                title={meta.description}
-              >
-                <span
-                  aria-hidden="true"
-                  className="inline-block h-2 w-2 rounded-full"
-                  style={{ background: meta.color }}
-                />
-                {meta.label}
-                {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
-              </button>
-            );
-          })}
-          {automatedCount > 0 && (
-            <span className="text-[11px] text-gray-400">
-              {visible.length} of {automatedCount}
-            </span>
+        <div className="space-y-2 px-0.5">
+          {botVendors.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                Vendor
+              </span>
+              {botVendors.map((v) => {
+                const on = botVendorFilter.has(v.actorId);
+                return (
+                  <button
+                    key={v.actorId}
+                    type="button"
+                    onClick={() => toggleBotVendor(v.actorId)}
+                    aria-pressed={on}
+                    className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                      on
+                        ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
+                        : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                    }`}
+                    title={`Show only ${v.label}`}
+                  >
+                    <span aria-hidden="true">🤖</span>
+                    <span
+                      aria-hidden="true"
+                      className="inline-block h-2 w-2 rounded-full"
+                      style={{ background: v.color }}
+                    />
+                    {v.label}
+                    <span className="tabular-nums opacity-70">{v.count}</span>
+                  </button>
+                );
+              })}
+            </div>
           )}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+              State
+            </span>
+            {BOT_STATE_ORDER.map((st) => {
+              const meta = DERIVED_STATE_META[st];
+              const on = botStateFilter.has(st);
+              const count = botStateCounts.get(st) ?? 0;
+              return (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => toggleBotState(st)}
+                  aria-pressed={on}
+                  className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                    on
+                      ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
+                      : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                  }`}
+                  title={meta.description}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ background: meta.color }}
+                  />
+                  {meta.label}
+                  {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
+                </button>
+              );
+            })}
+            {items.length > 0 && (
+              <span className="text-[11px] text-gray-400">
+                {visible.length} of {items.length}
+              </span>
+            )}
+          </div>
         </div>
       ) : (
       <>
