@@ -282,7 +282,7 @@ export function FeedView({
   // member selection would otherwise empty the bot feed. The repo scope still applies.
   const effectiveExcludeBots = botsMode ? false : excludeBots;
   const effectiveUserIds = botsMode ? null : userIds;
-  const { items, users, total, latestId, isLoading, hasMore, loadMore, isFetchingMore } =
+  const { items, users, total, counts, latestId, isLoading, hasMore, loadMore, isFetchingMore } =
     useConsolidatedFeed({
       repoIds: effectiveRepoIds,
       userIds: effectiveUserIds,
@@ -322,12 +322,20 @@ export function FeedView({
       i.actorId != null && (usersById.get(i.actorId)?.isBot ?? false),
     [usersById],
   );
-  const myTurnCount = useMemo(() => items.filter((i) => i.isMyTurn).length, [items]);
-  const claudeCount = useMemo(
-    () => items.filter((i) => i.kind === 'claude_review').length,
-    [items],
+  // Pill badge counts come from the SERVER facets (whole loadable stream), falling back to the
+  // loaded-page derivation only for a stale IndexedDB response predating `counts`.
+  const myTurnCount = useMemo(
+    () => counts?.myTurn ?? items.filter((i) => i.isMyTurn).length,
+    [counts, items],
   );
-  const botCount = useMemo(() => items.filter(isBotActor).length, [items, isBotActor]);
+  const claudeCount = useMemo(
+    () => counts?.claude ?? items.filter((i) => i.kind === 'claude_review').length,
+    [counts, items],
+  );
+  const botCount = useMemo(
+    () => counts?.bots ?? items.filter(isBotActor).length,
+    [counts, items, isBotActor],
+  );
   // Event-category matcher for the Comments / PR-events pills. Both off = no category filter.
   // When either is on, keep only items in the enabled categories (commit + Claude rows, which
   // are in neither category, drop out while a category pill is active).
@@ -347,8 +355,10 @@ export function FeedView({
     [feedCatComments, feedCatPrEvents],
   );
   const commentCount = useMemo(
-    () => items.filter((i) => i.kind === 'review_comment' || i.kind === 'pr_comment').length,
-    [items],
+    () =>
+      counts?.comments ??
+      items.filter((i) => i.kind === 'review_comment' || i.kind === 'pr_comment').length,
+    [counts, items],
   );
   // Bots pane: a review-thread DERIVED-state filter (a Set of selected states; empty = all).
   // Local (not a store filter) — it only exists in the bot-only feed. Only thread-bearing bot
@@ -378,8 +388,28 @@ export function FeedView({
   // The distinct bots present in the (already bot-only) feed → one pill each, labelled by the
   // automated-reviewer tag (classification label / vendor name), most-active first.
   const botVendors = useMemo(() => {
-    if (!botsMode) return [] as { actorId: number; label: string; color: string; count: number }[];
-    const m = new Map<number, { actorId: number; label: string; color: string; count: number }>();
+    type Vendor = { actorId: number; label: string; color: string; count: number };
+    if (!botsMode) return [] as Vendor[];
+    const resolve = (aid: number, count: number): Vendor => {
+      const u = usersById.get(aid);
+      const tag = automatedTagFor(u, classificationByUserId, botColor);
+      const label = tag?.label?.trim() ? tag.label : userLabel(u, aid);
+      return { actorId: aid, label, color: tag?.color ?? '#6b7280', count };
+    };
+    // Prefer the server facet (whole loadable stream): the counts + actor set span beyond the
+    // loaded page, and the backend ships every byBotActor actor in `users` so labels resolve.
+    // Skip an actor we can't label (defensive — shouldn't happen given the backfill).
+    if (counts?.byBotActor) {
+      const out: Vendor[] = [];
+      for (const [key, count] of Object.entries(counts.byBotActor)) {
+        const aid = Number(key);
+        if (!usersById.has(aid)) continue;
+        out.push(resolve(aid, count));
+      }
+      return out.sort((a, b) => b.count - a.count);
+    }
+    // Stale-cache fallback: derive from the loaded page (original items-based path).
+    const m = new Map<number, Vendor>();
     for (const i of items) {
       const aid = i.actorId;
       if (aid == null) continue;
@@ -388,24 +418,29 @@ export function FeedView({
         existing.count += 1;
         continue;
       }
-      const u = usersById.get(aid);
-      const tag = automatedTagFor(u, classificationByUserId, botColor);
-      const label = tag?.label?.trim() ? tag.label : userLabel(u, aid);
-      m.set(aid, { actorId: aid, label, color: tag?.color ?? '#6b7280', count: 1 });
+      m.set(aid, resolve(aid, 1));
     }
     return [...m.values()].sort((a, b) => b.count - a.count);
-  }, [botsMode, items, usersById, classificationByUserId, botColor]);
+  }, [botsMode, counts, items, usersById, classificationByUserId, botColor]);
   // Per-state counts across the (already bot-only) items, for the pill badges — independent of
   // the active pills. The backend filtered to automated reviewers, so every item counts.
   const botStateCounts = useMemo(() => {
     const m = new Map<DerivedState, number>();
     if (!botsMode) return m;
+    // Prefer the server facet (whole loadable stream); fall back to the loaded page on a stale
+    // cache. byThreadState is a DerivedState-keyed object; rehydrate into the consumer's Map.
+    if (counts?.byThreadState) {
+      for (const [state, n] of Object.entries(counts.byThreadState)) {
+        m.set(state as DerivedState, n);
+      }
+      return m;
+    }
     for (const i of items) {
       if (i.derivedState == null) continue;
       m.set(i.derivedState, (m.get(i.derivedState) ?? 0) + 1);
     }
     return m;
-  }, [botsMode, items]);
+  }, [botsMode, counts, items]);
 
   // "My Turn only" and "Claude Reviews only" are mutually-exclusive client-side filters (My
   // Turn is CORE / free, so it's always available). The category pills + the bot lens compose

@@ -108,6 +108,10 @@ export function useConsolidatedFeed(opts: {
     items,
     users,
     total: query.data?.pages[0]?.total ?? 0,
+    // Server-computed facet counts over the WHOLE loadable stream (see ConsolidatedFeedCounts).
+    // From the FIRST page — every page carries the same whole-stream counts. Undefined only for
+    // a stale IndexedDB-persisted response predating this field; consumers fall back then.
+    counts: query.data?.pages[0]?.counts,
     generatedAt: query.data?.pages[0]?.generatedAt ?? null,
     // The newest LOADED item's id (items are newest-first) — the baseline useFeedHasNew
     // compares the server head against.

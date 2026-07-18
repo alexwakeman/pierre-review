@@ -86,6 +86,7 @@ import type {
   RepoClaudeReviewPr,
   ConsolidatedFeedItem,
   ConsolidatedFeedResponse,
+  ConsolidatedFeedCounts,
   FeedAffectedThread,
   MyTurnPr,
   BotSignalCard,
@@ -3592,6 +3593,48 @@ export async function getTeamInsights(
   return finish();
 }
 
+// Facet counts over the post-cap `ordered` stream (see ConsolidatedFeedCounts). Pure, so it's
+// unit-testable and shares the exact set the page is sliced from — the badges reconcile with
+// the loadable feed by construction. `globalBotIds` is the raw users.isBot id set (NOT the
+// allow-list-subtracted excludeBots set), matching the SPA's isBotActor. `byBotActor` is only
+// built in the bot-only feed; `byThreadState` groups items carrying a derivedState.
+export function computeFeedCounts(
+  ordered: ConsolidatedFeedItem[],
+  globalBotIds: ReadonlySet<number>,
+  botsOnly: boolean,
+): ConsolidatedFeedCounts {
+  const counts: ConsolidatedFeedCounts = {
+    total: ordered.length,
+    myTurn: 0,
+    claude: 0,
+    comments: 0,
+    prEvents: 0,
+    bots: 0,
+    byBotActor: {},
+    byThreadState: {},
+  };
+  for (const it of ordered) {
+    if (it.isMyTurn) counts.myTurn += 1;
+    if (it.kind === 'claude_review') counts.claude += 1;
+    if (it.kind === 'review_comment' || it.kind === 'pr_comment') counts.comments += 1;
+    if (
+      it.kind === 'pr_opened' ||
+      it.kind === 'pr_merged' ||
+      it.kind === 'pr_closed' ||
+      it.kind === 'pr_reopened' ||
+      it.kind === 'pr_ready_for_review' ||
+      it.kind === 'review_submitted'
+    )
+      counts.prEvents += 1;
+    if (it.actorId != null && globalBotIds.has(it.actorId)) counts.bots += 1;
+    if (botsOnly && it.actorId != null)
+      counts.byBotActor[it.actorId] = (counts.byBotActor[it.actorId] ?? 0) + 1;
+    if (it.derivedState != null)
+      counts.byThreadState[it.derivedState] = (counts.byThreadState[it.derivedState] ?? 0) + 1;
+  }
+  return counts;
+}
+
 // The consolidated Feed. Scoped to the account's WATCHED repos (inboxWatch); a passed
 // `repoIds` further narrows WITHIN watched (null → all watched). One flat, newest-first
 // stream of real activity, each row flagged isMyTurn by participation (CORE; feed/my-turn.ts).
@@ -3617,16 +3660,24 @@ export async function getConsolidatedFeed(
     ? repoIds.filter((id) => watchedIds.includes(id))
     : watchedIds;
   if (effectiveRepoIds.length === 0)
-    return { items: [], users: [], total: 0, generatedAt: new Date().toISOString() };
-  // Bot set (only loaded when the filter is on) — drops bot-authored activity, mirroring
-  // the timeline's excludeBots. The per-repo allow-list subtracts the "important" bots so
-  // their activity stays visible. getFeed doesn't filter bots, so we do it here; the commit
-  // helper filters in its own SQL.
+    return {
+      items: [],
+      users: [],
+      total: 0,
+      counts: computeFeedCounts([], new Set<number>(), botsOnly),
+      generatedAt: new Date().toISOString(),
+    };
   const allowBots = new Set(allowBotIds ?? []);
+  // The global users.isBot id set — ONE lookup, reused for BOTH the excludeBots filter (below,
+  // minus the per-repo allow-list) AND the `bots` facet count (raw isBot, matching the SPA's
+  // isBotActor). getFeed doesn't filter bots, so the notBot() below applies excludeBots here;
+  // the commit helper filters in its own SQL.
+  const globalBotIds = new Set(await botUserIds());
   // excludeBots is meaningless in the bot-only feed (it would drop everything) — force it off.
+  // The per-repo allow-list subtracts the "important" bots so their activity stays visible.
   const botIds =
     !botsOnly && excludeBots
-      ? new Set((await botUserIds()).filter((id) => !allowBots.has(id)))
+      ? new Set([...globalBotIds].filter((id) => !allowBots.has(id)))
       : new Set<number>();
   const notBot = (id: number | null): boolean =>
     !excludeBots || id == null || !botIds.has(id);
@@ -3641,7 +3692,13 @@ export async function getConsolidatedFeed(
   // users.isBot). Empty → nobody's classified → an empty feed. Filtered IN SQL by getFeed.
   const botActorIds = botsOnly ? await automatedReviewerUserIds(accountId) : null;
   if (botsOnly && (botActorIds == null || botActorIds.length === 0)) {
-    return { items: [], users: [], total: 0, generatedAt: new Date().toISOString() };
+    return {
+      items: [],
+      users: [],
+      total: 0,
+      counts: computeFeedCounts([], globalBotIds, botsOnly),
+      generatedAt: new Date().toISOString(),
+    };
   }
   const [feed, commitItems, claudeItems] = await Promise.all([
     getFeed(accountId, { daysBefore: 14, prId, repoIds: effectiveRepoIds, userIds, botActorIds }),
@@ -3781,6 +3838,9 @@ export async function getConsolidatedFeed(
   // Paginate: `total` is the full stream length; `page` is the requested window. Only
   // the page is enriched + has its users backfilled, so hidden items cost nothing.
   const total = ordered.length;
+  // Facet counts over the WHOLE post-cap stream (not just the page) so the SPA's pill badges
+  // reflect every matching item. Uses the raw global bot set, so `bots` matches isBotActor.
+  const counts = computeFeedCounts(ordered, globalBotIds, botsOnly);
   const start = Math.max(0, offset ?? 0);
   const page =
     limit != null ? ordered.slice(start, start + Math.max(0, limit)) : ordered.slice(start);
@@ -3866,6 +3926,15 @@ export async function getConsolidatedFeed(
   const pageUsers: User[] = [];
   const pageUserIds = new Set(needed);
   for (const i of page) if (i.actorId != null) pageUserIds.add(i.actorId);
+  // Bot-only feed: the vendor pills are built from `counts.byBotActor`, which spans the WHOLE
+  // stream (beyond the loaded page). Fetch + ship every such actor so the SPA can label a pill
+  // whose items all fall past the current page.
+  if (botsOnly)
+    for (const key of Object.keys(counts.byBotActor)) {
+      const id = Number(key);
+      needed.add(id);
+      pageUserIds.add(id);
+    }
   for (const id of usersById.keys()) needed.delete(id);
   if (needed.size > 0) {
     for (const u of await db
@@ -3884,6 +3953,7 @@ export async function getConsolidatedFeed(
     items: page,
     users: pageUsers,
     total,
+    counts,
     generatedAt: new Date().toISOString(),
   };
 }

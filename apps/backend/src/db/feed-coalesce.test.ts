@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ConsolidatedFeedItem } from '@pierre-review/shared';
-import { coalesceEventComments } from './queries.js';
+import { coalesceEventComments, computeFeedCounts } from './queries.js';
 
 // Minimal ConsolidatedFeedItem factory — only the fields the coalescing pass reads matter;
 // everything else is filled with an inert default so the shape stays exhaustive.
@@ -145,5 +145,53 @@ describe('coalesceEventComments', () => {
     ]);
     expect(items.find((i) => i.id === 'x')!.mergedComments).toEqual([]);
     expect(items.find((i) => i.id === 'r')!.mergedComments.map((c) => c.commentId)).toEqual([9]);
+  });
+});
+
+describe('computeFeedCounts', () => {
+  it('tallies each facet over the whole stream; total == length', () => {
+    const items = [
+      item({ id: 'a', kind: 'pr_opened', isMyTurn: true, actorId: 1 }),
+      item({ id: 'b', kind: 'review_comment', actorId: 2, threadId: 5, derivedState: 'untouched' }),
+      item({ id: 'c', kind: 'pr_comment', actorId: 3 }),
+      item({ id: 'd', kind: 'claude_review', actorId: 1 }),
+      item({ id: 'e', kind: 'pr_merged', actorId: 9 }), // actor 9 is the only bot
+      item({ id: 'f', kind: 'review_comment', actorId: 2, threadId: 6, derivedState: 'untouched' }),
+    ];
+    const counts = computeFeedCounts(items, new Set([9]), false);
+    expect(counts.total).toBe(6);
+    expect(counts.myTurn).toBe(1);
+    expect(counts.claude).toBe(1);
+    expect(counts.comments).toBe(3); // b, c, f
+    expect(counts.prEvents).toBe(2); // a (pr_opened) + e (pr_merged)
+    expect(counts.bots).toBe(1); // only e's actor 9 is in the global bot set
+    expect(counts.byThreadState).toEqual({ untouched: 2 });
+    expect(counts.byBotActor).toEqual({}); // not the bot-only feed
+  });
+
+  it('populates byBotActor only in the bot-only feed, grouped by actor', () => {
+    const items = [
+      item({ id: 'a', kind: 'review_submitted', actorId: 7 }),
+      item({ id: 'b', kind: 'review_comment', actorId: 7, threadId: 1, derivedState: 'likely_addressed' }),
+      item({ id: 'c', kind: 'review_comment', actorId: 8, threadId: 2, derivedState: 'resolved' }),
+    ];
+    const counts = computeFeedCounts(items, new Set<number>(), true);
+    expect(counts.total).toBe(3);
+    expect(counts.byBotActor).toEqual({ '7': 2, '8': 1 });
+    expect(counts.byThreadState).toEqual({ likely_addressed: 1, resolved: 1 });
+  });
+
+  it('is all-zero / empty on an empty stream', () => {
+    const counts = computeFeedCounts([], new Set<number>(), false);
+    expect(counts).toEqual({
+      total: 0,
+      myTurn: 0,
+      claude: 0,
+      comments: 0,
+      prEvents: 0,
+      bots: 0,
+      byBotActor: {},
+      byThreadState: {},
+    });
   });
 });

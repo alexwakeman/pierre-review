@@ -2635,6 +2635,22 @@ export interface ConsolidatedFeedItem {
   mergedComments: { commentId: number; content: string; occurredAt: string }[];
 }
 
+// Server-computed facet counts over the WHOLE loadable stream (the post-cap `ordered` set
+// the page is sliced from), so the SPA's pill badges reflect every matching item — not just
+// the loaded page of 50. Computed with the same coalescing / caps / capability-gating /
+// my-turn enrichment the page uses, so it reconciles with the client by construction; each
+// facet is independent of the active pills (a count is "how many exist", not "how many show").
+export interface ConsolidatedFeedCounts {
+  total: number; // == ConsolidatedFeedResponse.total (the full loadable stream length)
+  myTurn: number; // items flagged isMyTurn
+  claude: number; // kind 'claude_review'
+  comments: number; // kind 'review_comment' | 'pr_comment'
+  prEvents: number; // kind pr_opened|pr_merged|pr_closed|pr_reopened|pr_ready_for_review|review_submitted
+  bots: number; // actorId in the GLOBAL users.isBot set (matches FeedView's isBotActor)
+  byBotActor: Record<string, number>; // actorId -> count; populated only in the bot-only feed
+  byThreadState: Record<string, number>; // DerivedState -> count over items carrying a derivedState
+}
+
 export interface ConsolidatedFeedResponse {
   // The requested page of the merged, newest-first stream (see the `limit`/`offset`
   // query params). `items` is just this page; `total` is the full stream length so the
@@ -2643,6 +2659,10 @@ export interface ConsolidatedFeedResponse {
   // Actors/authors referenced by items on this page, for client-side login/avatar lookup.
   users: User[];
   total: number;
+  // Facet counts over the whole loadable stream (see ConsolidatedFeedCounts). OPTIONAL only
+  // so a stale IndexedDB-persisted response (PersistQueryClientProvider) stays type-honest;
+  // the server ALWAYS sends it.
+  counts?: ConsolidatedFeedCounts;
   generatedAt: string; // ISO-8601
 }
 
