@@ -122,9 +122,12 @@ function RailRow({
 // digest header + per-repo Insights + open-PR list + the repo feed); Bots is the per-repo
 // replica of the cross-repo Bots rail (BotsView scoped to this repo — its ROI panel, charts
 // and bot-only feed all narrow to this repo, and only bots active here surface). Mounted keyed
-// by repoId (see the caller) so switching repos remounts this and resets the tab to Activity.
+// by repoId (see the caller); the active sub-tab is store-remembered PER REPO
+// (repoConsoleTabs), so rail switches / pr-detail Back / Timeline round-trips — all of which
+// unmount this — restore the last-active tab instead of resetting to Activity.
 function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
-  const [tab, setTab] = useState<'activity' | 'bots'>('activity');
+  const tab = useFilters((s) => s.repoConsoleTabs[repo.repoId] ?? 'activity');
+  const setRepoConsoleTab = useFilters((s) => s.setRepoConsoleTab);
   return (
     <div className="space-y-3" data-testid="repo-console">
       <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
@@ -136,7 +139,7 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
               type="button"
               role="tab"
               aria-selected={on}
-              onClick={() => setTab(t)}
+              onClick={() => setRepoConsoleTab(repo.repoId, t)}
               className={`-mb-px flex items-center gap-1 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
                 on
                   ? 'border-gray-300 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200'
@@ -481,7 +484,8 @@ export function ActivityView(): JSX.Element {
             ))}
           </div>
         ) : selectedRepo != null ? (
-          // Keyed by repoId so switching repos remounts the console (resets its Activity|Bots tab).
+          // Keyed by repoId so switching repos remounts the console cleanly; its Activity|Bots
+          // sub-tab is store-remembered per repo (repoConsoleTabs), so the remount restores it.
           <RepoConsole key={selectedRepo.repoId} repo={selectedRepo} />
         ) : (
           // A numeric repo id that didn't resolve (e.g. removed) — fall back to Feed.

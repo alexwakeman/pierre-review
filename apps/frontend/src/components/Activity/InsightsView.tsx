@@ -15,7 +15,7 @@ import { usePr, useThread } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useRequestReviewers } from '../../hooks/usePrWrites.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { useFilters, scopeToParam, type InsightsSubTab } from '../../store/filters.js';
 import { automatedReviewerMeta, CI_META, indexUsers } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
@@ -50,7 +50,7 @@ const KIND_LABEL: Record<InsightCard['kind'], string> = {
 // getTeamInsights (feeding the Pro Slack block), just no longer rendered in Insights.
 const BOT_CARD_KINDS = new Set<InsightCard['kind']>(['bot_signal', 'bot_only_review']);
 
-type InsightsSubTab = 'overview' | 'sprint' | 'retro' | 'compare';
+// InsightsSubTab lives in the store (filters.ts) — the last-active tab is remembered there.
 const SUB_TABS: { key: InsightsSubTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'sprint', label: 'Sprint' },
@@ -343,12 +343,24 @@ export function InsightsView({
   const usersById = useMemo(() => indexUsers(data?.users), [data?.users]);
 
   // Internal sub-tab bar (Overview | Bots | Retro). The header (Insights + Pro + sprint
-  // caption + Track usage) sits ABOVE it and is shared across sub-tabs. A deep-linked
-  // initialSubTab (e.g. the legacy 'retro' rail value → the Retro sub-tab) is honoured,
-  // including a later change to it.
-  const [subTab, setSubTab] = useState<InsightsSubTab>(initialSubTab ?? 'overview');
+  // caption + Track usage) sits ABOVE it and is shared across sub-tabs. The last-active tab
+  // is store-remembered (insightsSubTab) so a remount (rail switch / pr-detail Back /
+  // Timeline round-trip) restores it; a deep-linked initialSubTab (e.g. the legacy 'retro'
+  // rail value → the Retro sub-tab) wins over the memory, including a later change to it.
+  // Tab changes write BOTH the local state and the store.
+  const storedSubTab = useFilters((s) => s.insightsSubTab);
+  const setInsightsSubTab = useFilters((s) => s.setInsightsSubTab);
+  const [subTab, setSubTabLocal] = useState<InsightsSubTab>(
+    initialSubTab ?? storedSubTab ?? 'overview',
+  );
+  const setSubTab = (tab: InsightsSubTab): void => {
+    setSubTabLocal(tab);
+    setInsightsSubTab(tab);
+  };
   useEffect(() => {
     if (initialSubTab) setSubTab(initialSubTab);
+    // setSubTab is a stable pair of setters re-created per render; only initialSubTab matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSubTab]);
 
   // The Compare tab exists only in All-Teams scope. Show it there; if the scope leaves 'teams'

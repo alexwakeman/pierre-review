@@ -19,6 +19,12 @@ import {
 // or bot activity only. Transient, URL-silent — like feedMyTurnOnly.
 export type FeedBotLens = 'all' | 'hide' | 'only';
 
+// The Activity repo-console sub-tab strip (Activity | Bots) and the Insights console's
+// sub-tab bar. Store-remembered (see repoConsoleTabs / insightsSubTab) so returning to a
+// rail entry restores its last-active sub-tab.
+export type RepoConsoleTab = 'activity' | 'bots';
+export type InsightsSubTab = 'overview' | 'sprint' | 'retro' | 'compare';
+
 export type RangePreset = '7d' | '14d' | '30d' | '90d' | 'custom';
 
 export type StripFilter = 'all' | 'my_turn' | 'needs_attention';
@@ -191,6 +197,15 @@ export interface FilterState {
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
   activityThreadFilter: DerivedState | null;
+  // Per-repo memory of the repo console's Activity|Bots sub-tab, so returning to a rail
+  // repo (or Back from a pr-detail tab / a Timeline round-trip — all of which unmount
+  // ActivityView) restores the last-active sub-tab. Transient like activityThreadFilter
+  // (freshDefaults() only — not persisted, not URL-synced); deliberately NOT cleared by
+  // setActivityRepo — surviving rail switches is the point.
+  repoConsoleTabs: Record<number, RepoConsoleTab>;
+  // The Insights console's last-active sub-tab. null = never set this session (InsightsView
+  // falls back to its initialSubTab ?? 'overview'). Transient, URL-silent, like repoConsoleTabs.
+  insightsSubTab: InsightsSubTab | null;
 
   // PR-title search box (App.tsx). Sticky: persists across input blur and PR
   // selection so re-focusing re-shows the same results. Store-only (NOT URL-synced
@@ -366,6 +381,10 @@ export interface FilterState {
   // Set/clear the Activity repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
   setActivityThreadFilter: (s: DerivedState | null) => void;
+  // Remember a repo console's Activity|Bots sub-tab (see repoConsoleTabs).
+  setRepoConsoleTab: (repoId: number, tab: RepoConsoleTab) => void;
+  // Remember the Insights console's sub-tab (see insightsSubTab).
+  setInsightsSubTab: (tab: InsightsSubTab) => void;
   setSearchQuery: (q: string) => void;
   toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
@@ -524,6 +543,8 @@ function freshDefaults(): FilterData {
     // with no thread-state filter.
     activityRepoId: 'feed',
     activityThreadFilter: null,
+    repoConsoleTabs: {},
+    insightsSubTab: null,
     expandedFileGroups: [],
     collapsedFileGroups: [],
     expandedDiffHunks: [],
@@ -723,6 +744,9 @@ export const useFilters = create<FilterState>((set, get) => ({
     ),
   setActivityThreadFilter: (st) =>
     set((s) => ({ activityThreadFilter: s.activityThreadFilter === st ? null : st })),
+  setRepoConsoleTab: (repoId, tab) =>
+    set((s) => ({ repoConsoleTabs: { ...s.repoConsoleTabs, [repoId]: tab } })),
+  setInsightsSubTab: (tab) => set({ insightsSubTab: tab }),
   setSearchQuery: (q) => set({ searchQuery: q }),
   toggleFileGroup: (path, defaultExpanded) =>
     set((s) => {
