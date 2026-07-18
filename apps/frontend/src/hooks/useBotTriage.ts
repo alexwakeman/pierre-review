@@ -182,6 +182,9 @@ export function useScopeResolveBotThreads() {
     {
       threadIds: number[];
       repoIds?: number[] | null;
+      // The PRs the selected threads belong to (the caller has the grouped list) — each gets
+      // its cached PR detail invalidated so the Threads tab reflects the resolves.
+      prIds?: number[];
       onProgress?: (done: number, total: number, resolved: number, failed: number) => void;
     }
   >({
@@ -203,14 +206,22 @@ export function useScopeResolveBotThreads() {
       }
       return { resolved, failed };
     },
-    onSettled: () => {
+    onSettled: (_data, _err, vars) => {
       void qc.invalidateQueries({ queryKey: ['bot-resolvable'] });
       void qc.invalidateQueries({ queryKey: ['bot-analytics'] });
       void qc.invalidateQueries({ queryKey: ['bot-only-prs'] });
       void qc.invalidateQueries({ queryKey: ['bot-vendor-prs'] });
       void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
-      // The per-repo Activity console shows bot acted-on stats — mirror the per-PR resolve hook.
+      // Mirror the per-PR resolve hook (usePrWrites.useResolveBotThreads): the Activity
+      // console's acted-on stats, the triage queue, and each affected PR's cached detail
+      // (+ its thread queries) all shift when threads resolve.
       void qc.invalidateQueries({ queryKey: ['activity'] });
+      void qc.invalidateQueries({ queryKey: ['my-turn'] });
+      void qc.invalidateQueries({ queryKey: ['me'] });
+      void qc.invalidateQueries({ queryKey: ['thread'] });
+      for (const prId of vars.prIds ?? []) {
+        void qc.invalidateQueries({ queryKey: ['pr', prId] });
+      }
     },
   });
 }

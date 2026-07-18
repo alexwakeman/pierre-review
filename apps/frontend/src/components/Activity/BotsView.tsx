@@ -125,19 +125,31 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
                     <span className="shrink-0 text-[10px] uppercase tracking-wide text-amber-500/80 dark:text-amber-400/60">
                       {pr.state}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setFeedIsolatedPrId(isolated ? null : pr.prId)}
-                      aria-pressed={isolated}
-                      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
-                        isolated
-                          ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/40 dark:text-sky-300'
-                          : 'border-amber-400 text-amber-700 hover:bg-amber-100 dark:border-amber-600/70 dark:text-amber-300 dark:hover:bg-amber-900/30'
-                      }`}
-                      title={isolated ? 'Clear the feed filter' : 'Isolate this PR in the bot feed below'}
-                    >
-                      {isolated ? 'In feed' : 'Show in feed'}
-                    </button>
+                    {pr.viaPierreOnly ? (
+                      // A Pierre-verbatim review is posted with the HUMAN's token, so the PR
+                      // has no bot-ACTOR events — isolating it in the bot feed below would
+                      // show nothing. Explain instead of offering a dead-end button.
+                      <span
+                        className="shrink-0 cursor-help rounded border border-amber-300/60 px-1.5 py-0.5 text-[10px] text-amber-500 dark:border-amber-700/50 dark:text-amber-400/70"
+                        title="This review was posted via Pierre with your token, so it has no bot activity to show in the bot feed — open it on GitHub instead."
+                      >
+                        via Pierre
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setFeedIsolatedPrId(isolated ? null : pr.prId)}
+                        aria-pressed={isolated}
+                        className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                          isolated
+                            ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/40 dark:text-sky-300'
+                            : 'border-amber-400 text-amber-700 hover:bg-amber-100 dark:border-amber-600/70 dark:text-amber-300 dark:hover:bg-amber-900/30'
+                        }`}
+                        title={isolated ? 'Clear the feed filter' : 'Isolate this PR in the bot feed below'}
+                      >
+                        {isolated ? 'In feed' : 'Show in feed'}
+                      </button>
+                    )}
                   </div>
                 );
               })}

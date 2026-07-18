@@ -83,6 +83,11 @@ export function FirstRunOnboarding(): JSX.Element {
     null,
   );
   const [failures, setFailures] = useState<{ fullName: string; message: string }[]>([]);
+  // Successful adds whose sync-modal signal + cache invalidation are HELD BACK while failures
+  // are on screen: firing either mid-batch (or under a failure box) refetches ['repos'] — via
+  // SyncStatus's signal handler — flips hasAnyRepo, and unmounts this component before the
+  // user ever sees what failed. Flushed by the "Continue" button.
+  const [pendingSuccessIds, setPendingSuccessIds] = useState<number[]>([]);
 
   const chosen = suggestions.filter((r) => selected.has(r.githubNodeId));
 
@@ -96,19 +101,32 @@ export function FirstRunOnboarding(): JSX.Element {
     });
   }
 
+  // Fire the deferred sync-modal signals (the modal merges them into one scoped round) and
+  // the ONE invalidation batch. On ≥1 success ['repos'] refetches, the account is no longer
+  // zero-repo, and ActivityView swaps this component out for the populated console.
+  function flushBatch(successIds: number[]): void {
+    for (const id of successIds) requestSyncModal(id);
+    for (const key of INVALIDATE_KEYS) {
+      void qc.invalidateQueries({ queryKey: [key] });
+    }
+    setPendingSuccessIds([]);
+  }
+
   async function watchSelected(): Promise<void> {
     if (running || chosen.length === 0) return;
     setRunning(true);
     setFailures([]);
     const fails: { fullName: string; message: string }[] = [];
+    const successIds: number[] = [];
     let done = 0;
     for (const r of chosen) {
       setProgress({ done, total: chosen.length, current: r.fullName });
       try {
         const repo = await api.addRepo({ owner: r.owner, name: r.name, watch: r.isOwnedOrMember });
-        // Scope the shared sync-progress modal to just this repo (it merges concurrent adds
-        // into one modal so the sequential adds surface as combined progress).
-        requestSyncModal(repo.id);
+        // The backfill is already running server-side; the sync-modal signal is DEFERRED to
+        // flushBatch — signalling now would make SyncStatus invalidate ['repos'] and unmount
+        // this component mid-loop (killing the progress display and any failure report).
+        successIds.push(repo.id);
       } catch (err) {
         fails.push({
           fullName: r.fullName,
@@ -120,10 +138,12 @@ export function FirstRunOnboarding(): JSX.Element {
     setProgress(null);
     setFailures(fails);
     setRunning(false);
-    // ONE invalidation batch after the whole run — on ≥1 success ['repos'] refetches, the
-    // account is no longer zero-repo, and ActivityView swaps this out for the populated console.
-    for (const key of INVALIDATE_KEYS) {
-      void qc.invalidateQueries({ queryKey: [key] });
+    if (fails.length === 0) {
+      // Clean run — hand off to the populated console immediately.
+      flushBatch(successIds);
+    } else {
+      // Hold the flush so the failure report stays on screen; "Continue" releases it.
+      setPendingSuccessIds(successIds);
     }
   }
 
@@ -245,6 +265,16 @@ export function FirstRunOnboarding(): JSX.Element {
                   </li>
                 ))}
               </ul>
+              {pendingSuccessIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => flushBatch(pendingSuccessIds)}
+                  className="mt-2 rounded bg-sky-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-sky-700"
+                >
+                  Continue with the {pendingSuccessIds.length} added repo
+                  {pendingSuccessIds.length === 1 ? '' : 's'}
+                </button>
+              )}
             </div>
           )}
         </div>

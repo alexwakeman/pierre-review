@@ -2,7 +2,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 // ── tiny ANSI helpers (degrade gracefully when not a TTY) ──────────────────
 const useColor = process.stdout.isTTY && process.env.NO_COLOR === undefined;
@@ -230,10 +230,17 @@ async function runStatusCommand(argv: string[]): Promise<void> {
     );
     process.exit(1);
   }
+  // Pin local BEFORE the dynamic import: config.ts loads .env files on import, and
+  // process.loadEnvFile never overrides an already-set var — so an .env-declared
+  // DEPLOYMENT_MODE=cloud can't flip status onto the Postgres driver after the guard.
+  process.env.DEPLOYMENT_MODE = 'local';
 
   // ── map flags → env BEFORE any dynamic import (config/db snapshot env on load) ──
+  // resolve() the --db flag against the CWD (what the user means by a relative path);
+  // config.ts resolves relative paths against the INSTALL dir, so an unresolved value
+  // would make this guard check one file while the DB opens another.
   process.env.NODE_ENV ??= 'production';
-  if (opts.db !== undefined) process.env.DATABASE_URL = opts.db;
+  if (opts.db !== undefined) process.env.DATABASE_URL = resolve(opts.db);
   if (!process.env.DATABASE_URL) process.env.DATABASE_URL = defaultLocalDbPath();
   try {
     mkdirSync(dirname(process.env.DATABASE_URL), { recursive: true });
@@ -280,8 +287,10 @@ async function main(): Promise<void> {
   }
 
   // ── map flags → env BEFORE importing config/app (config reads these) ──────
+  // --db is resolved against the CWD (config.ts resolves relative paths against the
+  // install dir, which is never what a user typing a relative path means).
   if (opts.port !== undefined) process.env.PORT = String(opts.port);
-  if (opts.db !== undefined) process.env.DATABASE_URL = opts.db;
+  if (opts.db !== undefined) process.env.DATABASE_URL = resolve(opts.db);
   if (opts.open === false) process.env.NO_OPEN = '1';
   if (opts.cloud) process.env.DEPLOYMENT_MODE = 'cloud';
   const isCloud = process.env.DEPLOYMENT_MODE === 'cloud';

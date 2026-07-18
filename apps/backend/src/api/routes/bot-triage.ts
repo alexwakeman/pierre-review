@@ -170,7 +170,9 @@ const scopeResolveSchema = {
         items: { type: 'integer' },
         maxItems: SCOPE_RESOLVE_THREAD_CAP,
       },
-      repoIds: { type: 'array', items: { type: 'integer' } },
+      // Bounded like threadIds — an account has ≤100 repos, so 500 is generous headroom; an
+      // unbounded array would only ever be a hand-crafted request heading for a DB error.
+      repoIds: { type: 'array', items: { type: 'integer' }, maxItems: SCOPE_RESOLVE_THREAD_CAP },
     },
   },
 };

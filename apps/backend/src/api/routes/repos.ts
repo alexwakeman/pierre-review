@@ -5,7 +5,7 @@ import type {
   RepoSearchResult,
   SuggestedReposResponse,
 } from '@pierre-review/shared';
-import { getGraphqlClientFor } from '../../github/client.js';
+import { getGraphqlClientFor, graphqlTolerant } from '../../github/client.js';
 import { getAccessToken } from '../../auth/account.js';
 import {
   OWNER_TYPE_QUERY,
@@ -247,7 +247,15 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
 
     let resp: ViewerReposGqlResponse;
     try {
-      resp = await client(VIEWER_REPOS_QUERY);
+      // Tolerate PARTIAL GraphQL errors (a scoped cloud token forbidden one sub-field answers
+      // 200 + partial data) — the null-drop merge below is built for exactly that. Only a
+      // response with NO usable data (auth failure, rate limit, network) 502s.
+      resp = await graphqlTolerant<ViewerReposGqlResponse>(
+        client,
+        VIEWER_REPOS_QUERY,
+        {},
+        (errors) => req.log.warn({ errors }, 'partial viewer-repos response'),
+      );
     } catch (err) {
       reply.status(502);
       return {
@@ -255,6 +263,7 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
         message: err instanceof Error ? err.message : 'GitHub request failed',
       };
     }
+    if (resp?.viewer == null) return { results: [] } satisfies SuggestedReposResponse;
 
     const me = resp.viewer.login.toLowerCase();
     const orgLogins = new Set(

@@ -412,11 +412,17 @@ function ResolveBacklogBanner({
 
   const runResolve = (): void => {
     if (selectedIds.length === 0) return;
+    // The PRs the selected threads belong to — their cached detail invalidates post-resolve.
+    const selectedSet = new Set(selectedIds);
+    const prIds = groups
+      .filter((g) => g.threads.some((t) => selectedSet.has(t.threadId)))
+      .map((g) => g.prId);
     setProgress({ done: 0, total: selectedIds.length, resolved: 0, failed: 0 });
     resolve.mutate(
       {
         threadIds: selectedIds,
         repoIds: repoScope,
+        prIds,
         onProgress: (done, total, resolved, failed) => setProgress({ done, total, resolved, failed }),
       },
       { onSettled: () => setConfirming(false) },
@@ -662,7 +668,6 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             bot-only PR{t.botOnlyPrs === 1 ? '' : 's'}
           </span>
         </div>
-        <ResolveBacklogBanner scope={scope} repoScope={repoScope} />
         <VendorTable
           vendors={vendors}
           botColor={botColor}
@@ -695,6 +700,11 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   return (
     <div className="space-y-2" data-testid="bot-roi-panel">
       {header}
+      {/* The resolve-backlog banner sits OUTSIDE the analytics branches: the backlog query is
+          windowless, so a stale backlog must surface even when the selected window has zero
+          vendor activity (the "No automated-reviewer activity" card) — that's exactly the
+          "clear the old bot noise" case. The banner self-hides at totalEligible === 0. */}
+      <ResolveBacklogBanner scope={scope} repoScope={repoScope} />
       {body}
     </div>
   );

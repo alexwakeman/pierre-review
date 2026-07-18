@@ -3655,18 +3655,32 @@ export async function getConsolidatedFeed(
 
   // Restrict to the account's WATCHED repos; a passed repoIds narrows within them. An
   // out-of-scope / empty selection → a valid empty page (also avoids an inArray([]) below).
-  const watchedIds = (await listRepos(accountId)).filter((r) => r.inboxWatch).map((r) => r.id);
-  const effectiveRepoIds = repoIds
-    ? repoIds.filter((id) => watchedIds.includes(id))
-    : watchedIds;
-  if (effectiveRepoIds.length === 0)
-    return {
-      items: [],
-      users: [],
-      total: 0,
-      counts: computeFeedCounts([], new Set<number>(), botsOnly),
-      generatedAt: new Date().toISOString(),
-    };
+  // EXCEPTION — single-PR isolation (prId) bypasses the watched∩filter narrowing entirely:
+  // "Show in feed" promises the PR's history, and its repo may be unwatched (the bot-only
+  // list scopes to ALL account repos) or hidden by the FilterBar. Ownership still gates it —
+  // a foreign/unknown prId is an empty page, never a leak.
+  const emptyResponse = (): ConsolidatedFeedResponse => ({
+    items: [],
+    users: [],
+    total: 0,
+    counts: computeFeedCounts([], new Set<number>(), botsOnly),
+    generatedAt: new Date().toISOString(),
+  });
+  let effectiveRepoIds: number[];
+  if (prId != null) {
+    const [ownedPr] = await db
+      .select({ repoId: pullRequests.repoId })
+      .from(pullRequests)
+      .where(and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)))
+      .limit(1)
+      .execute();
+    if (!ownedPr) return emptyResponse();
+    effectiveRepoIds = [ownedPr.repoId];
+  } else {
+    const watchedIds = (await listRepos(accountId)).filter((r) => r.inboxWatch).map((r) => r.id);
+    effectiveRepoIds = repoIds ? repoIds.filter((id) => watchedIds.includes(id)) : watchedIds;
+  }
+  if (effectiveRepoIds.length === 0) return emptyResponse();
   const allowBots = new Set(allowBotIds ?? []);
   // The global users.isBot id set — ONE lookup, reused for BOTH the excludeBots filter (below,
   // minus the per-repo allow-list) AND the `bots` facet count (raw isBot, matching the SPA's
@@ -6763,6 +6777,9 @@ export interface BotOnlyReviewPr {
   state: PrState;
   githubUrl: string;
   authorId: number | null;
+  // The PR's ONLY automated touch is a Pierre-verbatim review (posted with the human's token,
+  // so no bot-ACTOR events exist) — the bot-only feed isolation can't surface it.
+  viaPierreOnly: boolean;
 }
 export async function getBotOnlyReviewPrs(
   accountId: number,
@@ -6873,9 +6890,14 @@ export async function getBotOnlyReviewPrs(
     );
     let anyAutomated = false;
     let anyHuman = false;
+    // True when a CLASSIFIED bot actor touched the PR. A PR whose only automated touch is a
+    // Pierre-VERBATIM review has NO bot-actor events (the human's token posted it), so the
+    // bot-only feed isolation can't surface it — the UI needs to know (viaPierreOnly).
+    let anyRealBot = false;
     let botLabel: string | null = null;
     const noteAuto = (authorId: number | null, isPierre: boolean): void => {
       anyAutomated = true;
+      if (authorId != null && automatedIds.has(authorId)) anyRealBot = true;
       if (botLabel == null) {
         const kind = authorId != null ? kindMap.get(authorId) : undefined;
         botLabel = kind ? labelForKind(kind) : isPierre ? labelForKind('pierre') : 'Automated';
@@ -6907,6 +6929,7 @@ export async function getBotOnlyReviewPrs(
         state: pr.state,
         githubUrl: `https://github.com/${full}/pull/${pr.number}`,
         authorId: pr.authorId,
+        viaPierreOnly: !anyRealBot,
       });
     }
   }
@@ -7623,8 +7646,12 @@ export async function getBotVendorPrs(
     const userId = target.userId;
     key = `u${userId}`;
     const kindMap = await classificationKindForUser(accountId);
+    // Only a reviewer this account has CLASSIFIED as automated is a valid drill-down target —
+    // an arbitrary (human / foreign / unknown) userId echoes its identity but lists nothing
+    // (the empty vendorIds hits the `vendorIds.length === 0 → empty` guard below), preserving
+    // the old "unclassified kind → prs:[]" contract.
     kindTyped = kindMap.get(userId) ?? 'in_house';
-    vendorIds = [userId];
+    vendorIds = kindMap.has(userId) ? [userId] : [];
     // Per-reviewer identity — mirrors getBotAnalytics's reviewerLabel resolution: the account's
     // custom classification label → the vendor's pretty name (known vendors) → login/display name.
     const [classRow] = await db

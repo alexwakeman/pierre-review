@@ -290,6 +290,10 @@ export interface BotOnlyPrItem {
   state: PrState;      // 'open' (mergeable) | 'merged' (in window)
   githubUrl: string;
   authorId: number | null;
+  // The PR's only automated touch is a Pierre-verbatim review — posted with the human's
+  // token, so it has NO bot-actor events and the bot-only feed isolation can't surface it
+  // (the UI hides "Show in feed" for these rows).
+  viaPierreOnly: boolean;
 }
 export interface BotOnlyPrsResponse {
   window: { kind: BotWindowKind; from: string; to: string };

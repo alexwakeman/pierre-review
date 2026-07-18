@@ -27,6 +27,15 @@ function link(url: string, label: string): string {
 
 const termWidth = (): number => process.stdout.columns ?? 100;
 
+// Strip C0 control bytes (ESC, BEL, …) from REMOTE-controlled text (PR titles, paths,
+// comment excerpts) before it reaches the terminal — an ESC embedded in a PR title could
+// otherwise inject escape sequences into the very terminal we're emitting OSC-8 links to.
+// Note the excerpt's whitespace collapse does NOT catch these: \s excludes ESC/BEL.
+function sanitize(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+}
+
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   if (max <= 1) return '…';
@@ -108,12 +117,17 @@ function render(
   // One PR/thread row: bullet · dim(repo#n) · linked title · dim(suffix) · dim(age).
   const row = (
     key: string,
-    ref: string,
-    url: string,
-    title: string,
+    rawRef: string,
+    rawUrl: string,
+    rawTitle: string,
     ageIso: string,
-    suffix: string | null,
+    rawSuffix: string | null,
   ): void => {
+    // Every remote-controlled string is sanitized here — the one choke point all rows pass.
+    const ref = sanitize(rawRef);
+    const url = sanitize(rawUrl);
+    const title = sanitize(rawTitle);
+    const suffix = rawSuffix == null ? null : sanitize(rawSuffix);
     keys.add(key);
     const isNew = prevKeys != null && !prevKeys.has(key);
     const bullet = isNew ? green('●') : dim('·');
@@ -159,7 +173,7 @@ function render(
         it.lastReplyAt,
         replier ? `↩ @${replier}` : null,
       );
-      const excerpt = (it.lastReplyExcerpt ?? '').replace(/\s+/g, ' ').trim();
+      const excerpt = sanitize((it.lastReplyExcerpt ?? '').replace(/\s+/g, ' ').trim());
       if (excerpt) {
         lines.push(`      ${dim(truncate(excerpt, Math.max(12, termWidth() - 8)))}`);
       }
@@ -195,7 +209,7 @@ function render(
         it.openedAt,
         null,
       );
-      if (it.summary) lines.push(`      ${dim(it.summary)}`);
+      if (it.summary) lines.push(`      ${dim(sanitize(it.summary))}`);
     }
     lines.push('');
   }
