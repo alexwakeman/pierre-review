@@ -1,4 +1,5 @@
-import { useBotAnalytics } from '../../hooks/useBotTriage.js';
+import { useState } from 'react';
+import { useBotAnalytics, useBotOnlyPrs } from '../../hooks/useBotTriage.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
 import { BotRoiPanel } from './BotRoiPanel.js';
 import { FeedView } from './FeedView.js';
@@ -22,8 +23,22 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // scope, matching BotRoiPanel so both hit the same cache entry.
   const window = useFilters((s) => s.botAnalyticsWindow);
   const scope = scopeToParam(useFilters((s) => s.teamScope));
-  const { data } = useBotAnalytics(window, true, scope, repoId != null ? [repoId] : null);
+  const repoScope = repoId != null ? [repoId] : null;
+  const { data } = useBotAnalytics(window, true, scope, repoScope);
   const botOnly = data?.totals.botOnlyPrs ?? 0;
+
+  // Expand the caption into the EXACT PR list the count came from — served by a dedicated route
+  // with the SAME window/scope/repoIds, so the number above and the list below are computed
+  // identically and can never disagree (the earlier confusion: the count is a PR-state snapshot,
+  // the bot feed a 14-day event stream). Fetched only while expanded.
+  const [expanded, setExpanded] = useState(false);
+  const { data: botOnlyData, isLoading, isError } = useBotOnlyPrs(window, expanded, scope, repoScope);
+  const prs = botOnlyData?.prs ?? [];
+
+  // "Show in feed" isolates a PR in the bot-only feed below (FeedView reads feedIsolatedPrId and
+  // switches to an epoch-since fetch, so even a PR older than the 14-day feed window surfaces).
+  const setFeedIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
+  const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
 
   return (
     <div className="space-y-3" data-testid="bots-view">
@@ -37,12 +52,97 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
       </div>
 
       {/* Governance caution: PRs whose only review came from an automated reviewer — no human
-          ever looked. Sourced from the CORE analytics totals (no Pro card needed). */}
+          ever looked. Sourced from the CORE analytics totals; click to expand into the exact
+          PR list (same route/scope → count ≡ list). */}
       {botOnly > 0 && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
-          🤖 Only a bot reviewed{' '}
-          <span className="font-semibold tabular-nums">{botOnly}</span> PR
-          {botOnly === 1 ? '' : 's'} — no human review. Consider a human pass before these ship.
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            className="flex w-full items-start gap-1.5 text-left"
+            data-testid="bot-only-caption"
+          >
+            <span
+              aria-hidden="true"
+              className={`mt-px shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+            >
+              ▸
+            </span>
+            <span className="flex-1">
+              🤖 Only a bot reviewed{' '}
+              <span className="font-semibold tabular-nums">{botOnly}</span> PR
+              {botOnly === 1 ? '' : 's'} — no human review. Consider a human pass before these ship.
+            </span>
+            <span className="shrink-0 self-center text-[10px] font-medium underline underline-offset-2">
+              {expanded ? 'Hide' : `Show ${botOnly === 1 ? 'PR' : 'list'}`}
+            </span>
+          </button>
+
+          {expanded && (
+            <div className="mt-2 space-y-1 border-t border-amber-200 pt-2 dark:border-amber-800/60">
+              <p className="text-[10px] text-amber-600/90 dark:text-amber-400/80">
+                Counted by review state, so these can predate the feed window below — use{' '}
+                <span className="font-medium">Show in feed</span> to isolate a PR and bypass it.
+              </p>
+
+              {isLoading && (
+                <p className="py-1 text-[11px] text-amber-600/80 dark:text-amber-400/70">Loading…</p>
+              )}
+              {isError && (
+                <p className="py-1 text-[11px] text-amber-600/80 dark:text-amber-400/70">
+                  Couldn’t load the PR list.
+                </p>
+              )}
+              {!isLoading && !isError && prs.length === 0 && (
+                <p className="py-1 text-[11px] text-amber-600/80 dark:text-amber-400/70">
+                  No bot-only PRs in this window.
+                </p>
+              )}
+
+              {prs.map((pr) => {
+                const isolated = feedIsolatedPrId === pr.prId;
+                return (
+                  <div
+                    key={pr.prId}
+                    className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-amber-100/60 dark:hover:bg-amber-900/20"
+                  >
+                    <a
+                      href={pr.githubUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="min-w-0 flex-1 truncate text-amber-800 hover:underline dark:text-amber-200"
+                      title={`${pr.repoFullName} #${pr.number} — open on GitHub`}
+                    >
+                      <span className="font-mono text-amber-600/90 dark:text-amber-400/80">
+                        #{pr.number}
+                      </span>{' '}
+                      {pr.title}
+                    </a>
+                    <span className="shrink-0 rounded border border-amber-300 bg-amber-100/70 px-1.5 py-px text-[10px] font-medium text-amber-700 dark:border-amber-700/60 dark:bg-amber-900/30 dark:text-amber-300">
+                      {pr.botLabel}
+                    </span>
+                    <span className="shrink-0 text-[10px] uppercase tracking-wide text-amber-500/80 dark:text-amber-400/60">
+                      {pr.state}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setFeedIsolatedPrId(isolated ? null : pr.prId)}
+                      aria-pressed={isolated}
+                      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                        isolated
+                          ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/40 dark:text-sky-300'
+                          : 'border-amber-400 text-amber-700 hover:bg-amber-100 dark:border-amber-600/70 dark:text-amber-300 dark:hover:bg-amber-900/30'
+                      }`}
+                      title={isolated ? 'Clear the feed filter' : 'Isolate this PR in the bot feed below'}
+                    >
+                      {isolated ? 'In feed' : 'Show in feed'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

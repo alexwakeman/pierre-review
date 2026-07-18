@@ -43,6 +43,7 @@ import type {
   RetroReportResponse,
   BotWindowKind,
   BotAnalyticsResponse,
+  BotOnlyPrsResponse,
   BotVendorPrsResponse,
   BotDedupResponse,
   BotMuteRule,
@@ -599,6 +600,16 @@ export const api = {
     const s = r ? '' : scopeParam(scope);
     return get<BotAnalyticsResponse>(
       withQuery(`/api/bot-analytics`, `window=${encodeURIComponent(window)}`, s, r),
+    );
+  },
+  // The exact PR list behind the analytics `totals.botOnlyPrs` count — "only a bot reviewed
+  // these". Same window/scope/repoIds wiring as botAnalytics (repo scope wins over team scope),
+  // so the caption's number and this list are computed identically server-side.
+  botOnlyPrs: (window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
+    const r = repoIdsParam(repoIds);
+    const s = r ? '' : scopeParam(scope);
+    return get<BotOnlyPrsResponse>(
+      withQuery(`/api/bot-analytics/bot-only-prs`, `window=${encodeURIComponent(window)}`, s, r),
     );
   },
   // The per-PR drill-down behind one vendor's Bot-ROI row: the PRs that automated reviewer kind

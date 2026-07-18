@@ -268,6 +268,29 @@ export interface BotVendorPrsResponse {
   generatedAt: string;
 }
 
+// The exact PR LIST behind getBotAnalytics's totals.botOnlyPrs count — "only a bot reviewed
+// these" (GET /api/bot-analytics/bot-only-prs). Served by a DEDICATED route so the amber caption
+// and its expandable list are computed from the SAME query and can never disagree: the count is a
+// PR-STATE snapshot (merged-in-window OR open-and-mergeable at any age, bot-touch judged over the
+// PR's ENTIRE history), NOT the 14-day feed event stream. Deterministic, no AI, account-scoped;
+// the bot-only rule is getBotOnlyReviewPrs's — automated review/comment touch (incl. Pierre-
+// verbatim) with NO human review AND NO human comment.
+export interface BotOnlyPrItem {
+  prId: number;
+  number: number;
+  title: string;
+  repoFullName: string;
+  botLabel: string;    // the first automated reviewer's label ("CodeRabbit" | "Pierre · Claude" | …)
+  state: PrState;      // 'open' (mergeable) | 'merged' (in window)
+  githubUrl: string;
+  authorId: number | null;
+}
+export interface BotOnlyPrsResponse {
+  window: { kind: BotWindowKind; from: string; to: string };
+  prs: BotOnlyPrItem[]; // no inherent order — a small, bounded list
+  generatedAt: string;
+}
+
 // ── WS4 cross-bot dedup + consensus ─────────────────────────────────
 export interface BotDedupMember {
   threadId: number; userId: number; kind: AutomatedReviewerKind;

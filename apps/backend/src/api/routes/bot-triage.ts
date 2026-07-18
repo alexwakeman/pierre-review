@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type {
   BotAnalyticsResponse,
+  BotOnlyPrsResponse,
   BotVendorPrsResponse,
   BotMuteRule,
   BotMuteRuleInput,
@@ -13,6 +14,7 @@ import {
   addBotMuteRule,
   deleteBotMuteRule,
   getBotAnalytics,
+  getBotOnlyPrs,
   getBotVendorPrs,
   getBotDedupClusters,
   listBotMuteRules,
@@ -171,6 +173,24 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     const explicit = parseIntList(repoIds);
     const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
     const resp: BotAnalyticsResponse = await getBotAnalytics(accountId, window, scopeRepoIds);
+    return resp;
+  });
+
+  // The exact PR list behind the analytics totals.botOnlyPrs count — "only a bot reviewed these".
+  // Same window/scope resolution as /api/bot-analytics (a specific `repoIds` wins over `scope`) so
+  // the amber caption's number and this expandable list are computed identically and can't drift.
+  // Unbounded but small (real bot-only PRs); no pagination.
+  app.get('/api/bot-analytics/bot-only-prs', { schema: analyticsSchema }, async (req) => {
+    const { window, scope, repoIds } = req.query as {
+      window: BotWindowKind;
+      scope?: string;
+      repoIds?: string;
+    };
+    const accountId = accountIdOf(req);
+    const explicit = parseIntList(repoIds);
+    const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
+    const { window: win, prs } = await getBotOnlyPrs(accountId, window, scopeRepoIds);
+    const resp: BotOnlyPrsResponse = { window: win, prs, generatedAt: new Date().toISOString() };
     return resp;
   });
 

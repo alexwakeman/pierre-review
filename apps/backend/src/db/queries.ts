@@ -6601,7 +6601,7 @@ export interface BotOnlyReviewPr {
   title: string;
   repoFullName: string;
   botLabel: string;
-  state: string;
+  state: PrState;
   githubUrl: string;
   authorId: number | null;
 }
@@ -7102,6 +7102,42 @@ export async function getBotAnalytics(
     botOnlyPrs,
   };
   return { enabled: true, generatedAt, window: win, vendors, totals, suggestions };
+}
+
+// Item 4 — the exact PR LIST behind getBotAnalytics's totals.botOnlyPrs count. A THIN wrapper:
+// it resolves the window date range + the default repo scope IDENTICALLY to the analytics
+// count path (§7078: window days from the kind; null scope → every account repo; [] short-
+// circuits to empty) then defers to getBotOnlyReviewPrs for the shared bot-only rule, so the
+// caption and its expandable list are computed from the same source and can NEVER disagree. The
+// return shape (BotOnlyPrItem[]) is structurally the local BotOnlyReviewPr. Deterministic, no AI,
+// account-scoped (getBotOnlyReviewPrs binds pullRequests.accountId, so a foreign repo id → []).
+export async function getBotOnlyPrs(
+  accountId: number,
+  window: BotWindowKind,
+  // Team scope: null/undefined = all account repos; a repo-id list = only those; [] = no repos
+  // in scope → empty (mirrors getBotAnalytics's early-out).
+  scopeRepoIds?: number[] | null,
+): Promise<{ window: { kind: BotWindowKind; from: string; to: string }; prs: BotOnlyReviewPr[] }> {
+  const nowMs = Date.now();
+  const to = new Date(nowMs);
+  // rolling_14 and 'sprint' both use the 14-day trailing window (matches getBotAnalytics).
+  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
+  const from = new Date(nowMs - windowDays * 86_400_000);
+  const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
+
+  // A resolved-but-empty scope means "no repos" → no PRs.
+  if (scopeRepoIds != null && scopeRepoIds.length === 0) return { window: win, prs: [] };
+  const repoIds =
+    scopeRepoIds ??
+    (
+      await db
+        .select({ id: repos.id })
+        .from(repos)
+        .where(eq(repos.accountId, accountId))
+        .execute()
+    ).map((r) => r.id);
+  const prs = await getBotOnlyReviewPrs(accountId, repoIds, { from, to });
+  return { window: win, prs };
 }
 
 // ── Cross-org benchmark network — Phase 0 collection (CORE, cloud-only) ──────────────────

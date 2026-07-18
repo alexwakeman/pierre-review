@@ -5,6 +5,7 @@ import type {
   BotMuteRule,
   BotMuteRuleInput,
   BotMuteRulesResponse,
+  BotOnlyPrsResponse,
   BotWindowKind,
   DetectedReviewersResponse,
   ReviewerClassification,
@@ -35,6 +36,29 @@ export function useBotAnalytics(
   return useQuery<BotAnalyticsResponse>({
     queryKey: ['bot-analytics', window, repoKey != null ? `repo:${repoKey}` : `scope:${scope ?? 'all'}`],
     queryFn: () => api.botAnalytics(window, scope, repoIds),
+    enabled,
+    refetchInterval: 5 * 60_000, // main sync cadence
+    refetchIntervalInBackground: false,
+    staleTime: 60_000,
+  });
+}
+
+// The exact PR list behind the analytics `totals.botOnlyPrs` count ("only a bot reviewed
+// these"), served by a dedicated route so the count and its expandable list can't disagree.
+// SAME window/scope/repoIds as useBotAnalytics → the same server-side resolution. `enabled`
+// gates the fetch so the caller only hits the route when the panel is expanded. The query key
+// MUST namespace the scope slot (`repo:` vs `scope:`) exactly like useBotAnalytics — a bare
+// repoId and a numeric teamId are both plain integer strings and would otherwise collide.
+export function useBotOnlyPrs(
+  window: BotWindowKind,
+  enabled = true,
+  scope?: string,
+  repoIds?: number[] | null,
+) {
+  const repoKey = repoIds && repoIds.length > 0 ? [...repoIds].sort((a, b) => a - b).join(',') : null;
+  return useQuery<BotOnlyPrsResponse>({
+    queryKey: ['bot-only-prs', window, repoKey != null ? `repo:${repoKey}` : `scope:${scope ?? 'all'}`],
+    queryFn: () => api.botOnlyPrs(window, scope, repoIds),
     enabled,
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,

@@ -275,6 +275,19 @@ check(
 const anB = await q.getBotAnalytics(2, 'rolling_30');
 check('getBotAnalytics(B) surfaces no vendors (IDOR blocked)', anB.vendors.length === 0);
 
+// getBotOnlyPrs (the caption's expandable list) is account-scoped: the owner call resolves
+// its own repos and never contains another account's PR; a cross-account call passing the
+// OTHER account's repo ids returns nothing (getBotOnlyReviewPrs binds pullRequests.accountId).
+const boA = await q.getBotOnlyPrs(1, 'rolling_30');
+check(
+  "getBotOnlyPrs(A) returns a list, never B's PR",
+  Array.isArray(boA.prs) && !boA.prs.some((p) => p.prId === B.prId),
+);
+const boCrossA = await q.getBotOnlyPrs(2, 'rolling_30', [A.repoId]);
+check('getBotOnlyPrs(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)', boCrossA.prs.length === 0);
+const boCrossB = await q.getBotOnlyPrs(1, 'rolling_30', [B.repoId]);
+check('getBotOnlyPrs(A, repoIds=[B.repo]) leaks nothing (IDOR blocked)', boCrossB.prs.length === 0);
+
 // getBotDedupClusters: A resolves its PR; B gets null (ownership → 404).
 check(
   'getBotDedupClusters(A.pr, A) returns a response',
