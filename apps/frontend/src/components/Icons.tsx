@@ -125,3 +125,31 @@ export function ExternalLinkIcon({ size = 13, className, title }: IconProps): JS
     </svg>
   );
 }
+
+// Feed — stacked dot-and-line rows, the "show this PR in the Activity feed (isolated to it)"
+// affordance in the PR-detail header.
+export function FeedIcon({ size = 15, className, title }: IconProps): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden={title == null ? true : undefined}
+      role={title != null ? 'img' : undefined}
+    >
+      {title != null && <title>{title}</title>}
+      <circle cx="5" cy="6" r="1" />
+      <line x1="9" y1="6" x2="20" y2="6" />
+      <circle cx="5" cy="12" r="1" />
+      <line x1="9" y1="12" x2="20" y2="12" />
+      <circle cx="5" cy="18" r="1" />
+      <line x1="9" y1="18" x2="20" y2="18" />
+    </svg>
+  );
+}

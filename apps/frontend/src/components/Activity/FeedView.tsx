@@ -857,6 +857,32 @@ export function FeedView({
 
   return (
     <div className="space-y-3" data-testid="feed-view" ref={rootRef}>
+      {/* Active single-PR filter — pinned to the TOP of the feed so it's obvious the stream is
+          scoped to one PR (set e.g. from the PR-detail "Show in feed" button or an open-PR
+          drill-down). Sticky + always visible while isolating, with a one-click Clear. */}
+      {isolatedPrId != null && (
+        <div className="sticky top-0 z-20 flex items-center gap-2 rounded-md border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs text-sky-800 shadow-sm dark:border-sky-500/50 dark:bg-sky-950/60 dark:text-sky-200">
+          <span aria-hidden="true">☰</span>
+          <span className="min-w-0 flex-1 truncate">
+            Showing only{' '}
+            {isolatedPr != null ? (
+              <>
+                <span className="font-mono">#{isolatedPr.number}</span> {isolatedPr.title}
+              </>
+            ) : (
+              'the selected PR'
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={() => setFeedIsolatedPrId(null)}
+            className="shrink-0 rounded border border-sky-400 px-2 py-0.5 font-medium hover:bg-sky-100 dark:border-sky-500/60 dark:hover:bg-sky-900/40"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {/* Feed-wide "new activity" banner — sticks to the top of the feed pane while there's
           newer server activity than what's loaded. Manual by design (never yanks content
           while you're reading); clicking it refreshes the feed + scrolls to the top. */}
@@ -879,31 +905,6 @@ export function FeedView({
       {/* Cross-repo only: a collapsible panel of open PRs grouped by team; clicking a PR
           isolates the feed to that PR (below). Not in the Bots pane (a pure activity stream). */}
       {repoId == null && !botsMode && <FeedOpenPrsPanel />}
-
-      {/* Active single-PR filter — always visible while isolating (even with the panel
-          collapsed), with a one-click Clear. */}
-      {isolatedPrId != null && (
-        <div className="flex items-center gap-2 rounded-md border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs text-sky-800 dark:border-sky-500/50 dark:bg-sky-950/40 dark:text-sky-200">
-          <span aria-hidden="true">☰</span>
-          <span className="min-w-0 flex-1 truncate">
-            Showing only{' '}
-            {isolatedPr != null ? (
-              <>
-                <span className="font-mono">#{isolatedPr.number}</span> {isolatedPr.title}
-              </>
-            ) : (
-              'the selected PR'
-            )}
-          </span>
-          <button
-            type="button"
-            onClick={() => setFeedIsolatedPrId(null)}
-            className="shrink-0 rounded border border-sky-400 px-2 py-0.5 font-medium hover:bg-sky-100 dark:border-sky-500/60 dark:hover:bg-sky-900/40"
-          >
-            Clear
-          </button>
-        </div>
-      )}
 
       {/* Filter pills, two rows. Row 1 branches: the Bots pane gets a per-VENDOR row (one per
           distinct bot, so the in-house bots isolate separately) replacing the normal

@@ -18,7 +18,7 @@ import { buildQuotedReply, dateTime, indexUsers, PR_STATE_META, relativeTime } f
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
 import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
-import { ExternalLinkIcon, MagnifierIcon, OctocatIcon, TimelineIcon } from './Icons.js';
+import { ExternalLinkIcon, FeedIcon, MagnifierIcon, OctocatIcon, TimelineIcon } from './Icons.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
 import { ChangesTab } from './ChangesTab.js';
@@ -559,6 +559,13 @@ export function PrDetail({
   const openPrFocused = useFilters((s) => s.openPrFocused);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
+  // "Show in Activity feed" — jump to this PR's repo console (activity sub-tab) with the PR
+  // isolated as the feed filter. ORDER IS LOAD-BEARING: setActivityRepo clears feedIsolatedPrId,
+  // so isolate AFTER the rail move (mirrors OpenPrsDetail.showInFeed / BotOnlyPrsDetail).
+  const setActivityRepo = useFilters((s) => s.setActivityRepo);
+  const setRepoConsoleTab = useFilters((s) => s.setRepoConsoleTab);
+  const setFeedIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
+  const showActivity = usePinnedTabs((s) => s.showActivity);
   const activityFocus = useFilters((s) => s.activityFocus);
   const consumeActivityFocus = useFilters((s) => s.consumeActivityFocus);
   const activityFocusForPr = useMemo(
@@ -733,6 +740,22 @@ export function PrDetail({
             aria-label="Focus this PR in its own timeline tab"
           >
             <MagnifierIcon size={15} />
+          </button>
+          {/* Show in the Activity feed — jump to this PR's repo console with the feed isolated
+              to just this PR (order load-bearing: isolate AFTER the rail move). */}
+          <button
+            type="button"
+            onClick={() => {
+              setRepoConsoleTab(pr.repoId, 'activity');
+              setActivityRepo(pr.repoId);
+              setFeedIsolatedPrId(pr.id);
+              showActivity();
+            }}
+            className="shrink-0 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            title="Show this PR in its repo's Activity feed (filtered to this PR)"
+            aria-label="Show this PR in the Activity feed"
+          >
+            <FeedIcon size={15} />
           </button>
           {/* Open on GitHub (Octocat). */}
           <a
