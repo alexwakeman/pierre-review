@@ -428,6 +428,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
   const openBotPrsDetail = useFilters((s) => s.openBotPrsDetail);
+  const openBotOnlyDetail = useFilters((s) => s.openBotOnlyDetail);
   // A repo scope (per-repo Bots tab) wins over the team-scope selector; both are in the query
   // key so either change refetches.
   const scope = scopeToParam(useFilters((s) => s.teamScope));
@@ -502,13 +503,15 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             {t.untouched}
           </span>{' '}
           untouched ·{' '}
-          <span
-            title="PRs whose only reviews/comments came from bots — no human review or comment since they opened"
-            className="cursor-help"
+          <button
+            type="button"
+            onClick={() => openBotOnlyDetail(repoId ?? null)}
+            title="Show the PRs only a bot reviewed — no human review or comment since they opened"
+            className="rounded underline decoration-dotted underline-offset-2 hover:text-gray-700 dark:hover:text-gray-200"
           >
             <b className="tabular-nums text-gray-700 dark:text-gray-200">{t.botOnlyPrs}</b>{' '}
             bot-only PR{t.botOnlyPrs === 1 ? '' : 's'}
-          </span>
+          </button>
         </div>
         <VendorTable
           vendors={vendors}

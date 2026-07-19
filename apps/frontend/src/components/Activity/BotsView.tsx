@@ -45,9 +45,14 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           ever looked. Sourced from the CORE analytics totals; "Show list" opens the bot-only-PRs
           drill-down tab (same route/scope → count ≡ list). */}
       {botOnly > 0 && (
-        <div
-          className="flex items-start gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300"
+        // The WHOLE caution is clickable — it opens the bot-only-PRs drill-down tab (the exact
+        // PR list behind the count; same route/scope → count ≡ list).
+        <button
+          type="button"
+          onClick={() => openBotOnlyDetail(repoId ?? null)}
           data-testid="bot-only-caption"
+          title="Show the PRs only a bot reviewed"
+          className="flex w-full items-start gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-left text-[11px] text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
         >
           <span className="flex-1">
             🤖 Only a bot reviewed <span className="font-semibold tabular-nums">{botOnly}</span>{' '}
@@ -59,14 +64,10 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               Counted by review state — may predate the window.
             </span>
           </span>
-          <button
-            type="button"
-            onClick={() => openBotOnlyDetail(repoId ?? null)}
-            className="shrink-0 self-center rounded border border-amber-400 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-600/70 dark:text-amber-300 dark:hover:bg-amber-900/30"
-          >
-            Show list
-          </button>
-        </div>
+          <span className="shrink-0 self-center rounded border border-amber-400 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-600/70 dark:text-amber-300">
+            Show list →
+          </span>
+        </button>
       )}
 
       <BotRoiPanel repoId={repoId} />
