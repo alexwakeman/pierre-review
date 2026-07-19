@@ -6823,10 +6823,13 @@ export interface BotOnlyReviewPr {
   prId: number;
   number: number;
   title: string;
+  repoId: number;
   repoFullName: string;
   botLabel: string;
   state: PrState;
   githubUrl: string;
+  openedAt: string;
+  updatedAt: string;
   authorId: number | null;
   // The PR's ONLY automated touch is a Pierre-verbatim review (posted with the human's token,
   // so no bot-ACTOR events exist) — the bot-only feed isolation can't surface it.
@@ -6869,6 +6872,8 @@ export async function getBotOnlyReviewPrs(
       title: pullRequests.title,
       authorId: pullRequests.authorId,
       state: pullRequests.state,
+      openedAt: pullRequests.openedAt,
+      updatedAt: pullRequests.updatedAt,
     })
     .from(pullRequests)
     .where(
@@ -6975,10 +6980,13 @@ export async function getBotOnlyReviewPrs(
         prId: pr.id,
         number: pr.number,
         title: pr.title,
+        repoId: pr.repoId,
         repoFullName: full,
         botLabel: botLabel ?? 'Automated',
         state: pr.state,
         githubUrl: `https://github.com/${full}/pull/${pr.number}`,
+        openedAt: pr.openedAt.toISOString(),
+        updatedAt: pr.updatedAt.toISOString(),
         authorId: pr.authorId,
         viaPierreOnly: !anyRealBot,
       });

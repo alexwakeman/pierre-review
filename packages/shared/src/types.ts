@@ -291,10 +291,13 @@ export interface BotOnlyPrItem {
   prId: number;
   number: number;
   title: string;
+  repoId: number;      // for the cross-repo drill-down's repo filter
   repoFullName: string;
   botLabel: string;    // the first automated reviewer's label ("CodeRabbit" | "Pierre · Claude" | …)
   state: PrState;      // 'open' (mergeable) | 'merged' (in window)
   githubUrl: string;
+  openedAt: string;    // ISO-8601 — the PR age (sortable)
+  updatedAt: string;   // ISO-8601 — last activity (sortable)
   authorId: number | null;
   // The PR's only automated touch is a Pierre-verbatim review — posted with the human's
   // token, so it has NO bot-actor events and the bot-only feed isolation can't surface it

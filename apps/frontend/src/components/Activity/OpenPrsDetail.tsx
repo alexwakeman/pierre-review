@@ -15,6 +15,7 @@ import {
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
+import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
 
 // The all-open-PRs DRILL-DOWN — a persistent, singleton tab opened by the "Show all N open
 // PRs" footer under the Activity open-PR lists. Lists the scope's open PRs (the `openPrsScope`
@@ -33,11 +34,6 @@ type SortCol =
   | 'threads'
   | 'ci'
   | 'approval';
-
-interface SortState {
-  col: SortCol;
-  dir: 'asc' | 'desc';
-}
 
 // Each column's "natural" first-click direction (a second click flips it): text columns read
 // A→Z, time/size/backlog columns lead with the most pressing end (longest-open, most-recently
@@ -101,49 +97,6 @@ function sortValue(
     case 'approval':
       return approvalRank(pr);
   }
-}
-
-function compare(a: number | string, b: number | string): number {
-  if (typeof a === 'string' && typeof b === 'string') return a.localeCompare(b);
-  return (a as number) - (b as number);
-}
-
-// A clickable column header: toggles asc/desc on the active column, or activates a new one
-// with its natural direction. The ▲/▼ indicator only shows on the active column.
-function SortHeader({
-  col,
-  label,
-  sort,
-  onSort,
-  title,
-}: {
-  col: SortCol;
-  label: string;
-  sort: SortState | null;
-  onSort: (col: SortCol) => void;
-  title?: string;
-}): JSX.Element {
-  const dir = sort != null && sort.col === col ? sort.dir : null;
-  return (
-    <th
-      className="pb-1 pr-3 font-semibold"
-      aria-sort={dir != null ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}
-    >
-      <button
-        type="button"
-        onClick={() => onSort(col)}
-        title={title}
-        className={`inline-flex items-center gap-0.5 uppercase tracking-wide hover:text-gray-600 dark:hover:text-gray-300 ${
-          dir != null ? 'text-gray-600 dark:text-gray-300' : ''
-        }`}
-      >
-        {label}
-        <span aria-hidden className={dir != null ? '' : 'invisible'}>
-          {dir === 'asc' ? '▲' : '▼'}
-        </span>
-      </button>
-    </th>
-  );
 }
 
 function CiCell({ ci }: { ci: TimelinePr['ciStatus'] }): JSX.Element {
@@ -242,13 +195,8 @@ export function OpenPrsDetail(): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
 
   // null = the default activity order (sortOpenPrsByActivity — same as the inline lists).
-  const [sort, setSort] = useState<SortState | null>(null);
-  const onSort = (col: SortCol): void =>
-    setSort((cur) =>
-      cur?.col === col
-        ? { col, dir: cur.dir === 'asc' ? 'desc' : 'asc' }
-        : { col, dir: DEFAULT_DIR[col] },
-    );
+  const [sort, setSort] = useState<SortState<SortCol> | null>(null);
+  const onSort = (col: SortCol): void => setSort((cur) => nextSort(cur, col, DEFAULT_DIR));
 
   const prs = data?.prs ?? [];
   const rows = useMemo(() => {
