@@ -359,13 +359,22 @@ export interface BotResolvableThread {
   excerpt: string | null;  // earliest root-comment preview (one dim line)
   botLabel: string;        // the originating reviewer's label ("CodeRabbit" | "Pierre · Claude" | login…)
 }
-// The resolvable threads on ONE PR (the review list groups by PR).
+// The resolvable threads on ONE PR (the review list groups by PR). Carries enough PR context
+// for a compact one-line row (author / CI / age / a bot thread-state summary) so the list no
+// longer needs to enumerate every thread — the thread ids stay in `threads` for the resolve.
 export interface BotResolvableThreadGroup {
   prId: number;
   prNumber: number;
   prTitle: string;
   repoFullName: string;
   githubUrl: string;
+  authorId: number | null;
+  ciStatus: CiStatus;
+  openedAt: string; // ISO-8601 — the PR age
+  updatedAt: string; // ISO-8601
+  // The PR's review-thread state mix RESTRICTED to automated-reviewer threads (the "review
+  // bots" framing). `botThreadCounts.likely_addressed` == `threads.length` (the resolvable set).
+  botThreadCounts: ThreadStateCounts;
   threads: BotResolvableThread[];
 }
 export interface BotResolvableThreadsResponse {

@@ -309,7 +309,10 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     const accountId = accountIdOf(req);
     const explicit = parseIntList(repoIds);
     const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
-    const { threads, totalEligible } = await getResolvableBotThreadsForScope(accountId, scopeRepoIds);
+    const { threads, totalEligible, botCountsByPr } = await getResolvableBotThreadsForScope(
+      accountId,
+      scopeRepoIds,
+    );
 
     // Group by PR, preserving the query's newest-thread-first order (first-seen PR wins the slot).
     const byPr = new Map<number, BotResolvableThreadGroup>();
@@ -322,6 +325,16 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
           prTitle: t.prTitle,
           repoFullName: t.repoFullName,
           githubUrl: t.prGithubUrl,
+          authorId: t.authorId,
+          ciStatus: t.ciStatus,
+          openedAt: t.openedAt,
+          updatedAt: t.updatedAt,
+          botThreadCounts: botCountsByPr.get(t.prId) ?? {
+            resolved: 0,
+            likely_addressed: 0,
+            replied_unresolved: 0,
+            untouched: 0,
+          },
           threads: [],
         };
         byPr.set(t.prId, g);

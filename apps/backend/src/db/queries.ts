@@ -5829,6 +5829,10 @@ export interface ResolvableBotThreadRow {
   prTitle: string;
   repoFullName: string;
   prGithubUrl: string;
+  authorId: number | null;
+  ciStatus: CiStatus;
+  openedAt: string;
+  updatedAt: string;
   originalCommenterId: number | null;
   excerpt: string | null;
   botLabel: string;
@@ -5838,8 +5842,18 @@ export async function getResolvableBotThreadsForScope(
   accountId: number,
   scopeRepoIds: number[] | null = null,
   threadIds: number[] | null = null,
-): Promise<{ threads: ResolvableBotThreadRow[]; totalEligible: number }> {
-  const empty = { threads: [] as ResolvableBotThreadRow[], totalEligible: 0 };
+): Promise<{
+  threads: ResolvableBotThreadRow[];
+  totalEligible: number;
+  // Per-PR bot-only thread-state mix for the compact list rows. Populated only on the LISTING
+  // path (threadIds == null); empty on the resolve path, which needs only ids.
+  botCountsByPr: Map<number, ThreadStateCounts>;
+}> {
+  const empty = {
+    threads: [] as ResolvableBotThreadRow[],
+    totalEligible: 0,
+    botCountsByPr: new Map<number, ThreadStateCounts>(),
+  };
   // An empty repo scope or an empty reviewed list both mean "nothing" — resolve/return nothing.
   if (scopeRepoIds != null && scopeRepoIds.length === 0) return empty;
   if (threadIds != null && threadIds.length === 0) return empty;
@@ -5877,6 +5891,10 @@ export async function getResolvableBotThreadsForScope(
       prId: pullRequests.id,
       prNumber: pullRequests.number,
       prTitle: pullRequests.title,
+      authorId: pullRequests.authorId,
+      ciStatus: pullRequests.ciStatus,
+      openedAt: pullRequests.openedAt,
+      updatedAt: pullRequests.updatedAt,
       owner: repos.owner,
       name: repos.name,
     })
@@ -5945,6 +5963,14 @@ export async function getResolvableBotThreadsForScope(
     return loginById.get(userId) ?? labelForKind(kind);
   };
 
+  // Bot-only thread-state mix per page PR — only the listing path needs it (the resolve path
+  // maps ids only, so skip the extra GROUP BY there). All page PRs carry ≥1 likely_addressed
+  // bot thread by the predicate, so every group gets an entry; the route falls back defensively.
+  const botCountsByPr =
+    threadIds == null
+      ? await buildBotThreadCounts([...new Set(pageRows.map((r) => r.prId))], botIds)
+      : new Map<number, ThreadStateCounts>();
+
   const threads: ResolvableBotThreadRow[] = pageRows.map((r) => ({
     threadId: r.threadId,
     threadNodeId: r.threadNodeId,
@@ -5954,11 +5980,15 @@ export async function getResolvableBotThreadsForScope(
     prTitle: r.prTitle,
     repoFullName: `${r.owner}/${r.name}`,
     prGithubUrl: `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}`,
+    authorId: r.authorId,
+    ciStatus: (r.ciStatus ?? 'unknown') as CiStatus,
+    openedAt: r.openedAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
     originalCommenterId: r.commenterId,
     excerpt: excerptByThread.get(r.threadId) ?? null,
     botLabel: botLabelFor(r.commenterId),
   }));
-  return { threads, totalEligible };
+  return { threads, totalEligible, botCountsByPr };
 }
 
 export async function getThreadWriteContext(

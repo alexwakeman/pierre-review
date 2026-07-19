@@ -1,12 +1,16 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReviewBotKind, ThreadDetail, User } from '@pierre-review/shared';
-import { reviewBotKind } from '@pierre-review/shared';
+import type { DerivedState, ReviewBotKind, ThreadDetail, User } from '@pierre-review/shared';
+import { DERIVED_STATES, reviewBotKind } from '@pierre-review/shared';
 import { useMyTurn } from '../../hooks/useTriage.js';
 import { useResolveBotThreads } from '../../hooks/usePrWrites.js';
 import { usePrBotDedup } from '../../hooks/useBotTriage.js';
 import { useFilters } from '../../store/filters.js';
-import { automatedReviewerMeta, BOT_VENDOR_META } from '../../lib/ui.js';
+import { automatedReviewerMeta, BOT_VENDOR_META, DERIVED_STATE_META } from '../../lib/ui.js';
 import { FileGroup } from './FileGroup.js';
+import { rollupCounts } from './ThreadCountChips.js';
+
+// Stable empty Set so an absent stateFilter prop doesn't churn the memo deps every render.
+const EMPTY_STATE_SET: Set<DerivedState> = new Set();
 
 interface FileBucket {
   path: string;
@@ -49,6 +53,7 @@ export function ThreadList({
   selectedThreadId,
   viewedSince,
   botFilter = null,
+  stateFilter,
 }: {
   threads: ThreadDetail[];
   usersById: Map<number, User>;
@@ -59,9 +64,15 @@ export function ThreadList({
   viewedSince?: string | null;
   // When set, show ONLY this vendor's threads (from an Overview "Bots" chip click).
   botFilter?: ReviewBotKind | null;
+  // Derived-state pill filter (empty = all). ANDs with botFilter. Preset to
+  // {likely_addressed} when arriving from the resolvable-bot-threads tab.
+  stateFilter?: Set<DerivedState>;
 }): JSX.Element {
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
   const setThreadBotFilter = useFilters((s) => s.setThreadBotFilter);
+  const toggleThreadStateFilter = useFilters((s) => s.toggleThreadStateFilter);
+  const setThreadStateFilter = useFilters((s) => s.setThreadStateFilter);
+  const activeStates = stateFilter ?? EMPTY_STATE_SET;
   const resolveBotThreads = useResolveBotThreads();
   const [confirming, setConfirming] = useState(false);
 
@@ -85,22 +96,39 @@ export function ThreadList({
     rowRefs.current.get(threadId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
-  // Apply the vendor filter (Overview "Bots" chip → Threads tab scoped to that vendor).
+  // Apply the vendor filter (Overview "Bots" chip → scoped to a vendor) AND the derived-state
+  // pill filter (empty = all). Both narrow the visible list + its file groups + counts.
   const shown = useMemo(
-    () => (botFilter ? threads.filter((t) => threadBotKind(t, usersById) === botFilter) : threads),
-    [threads, botFilter, usersById],
+    () =>
+      threads.filter(
+        (t) =>
+          (botFilter ? threadBotKind(t, usersById) === botFilter : true) &&
+          (activeStates.size === 0 || activeStates.has(t.derivedState)),
+      ),
+    [threads, botFilter, usersById, activeStates],
   );
+
+  // Per-state counts for the pill badges — over the FULL thread list (independent of the active
+  // pills, like the feed's whole-stream facet counts), so a pill's badge doesn't drop to 0 when
+  // another pill is active.
+  const stateCounts = useMemo(() => rollupCounts(threads), [threads]);
 
   // The bot threads a later commit has LIKELY ADDRESSED — the set the bulk "clear backlog"
   // action can safely resolve (matches the server's getResolvableBotThreads eligibility).
+  // Derived from the FULL list (not `shown`) so the resolve target never depends on which
+  // state/vendor pills are active — only the vendor filter, which scopes intent.
   const addressedBotThreadIds = useMemo(
     () =>
-      shown
+      threads
         .filter(
-          (t) => !t.isResolved && t.derivedState === 'likely_addressed' && threadBotKind(t, usersById),
+          (t) =>
+            !t.isResolved &&
+            t.derivedState === 'likely_addressed' &&
+            threadBotKind(t, usersById) &&
+            (botFilter ? threadBotKind(t, usersById) === botFilter : true),
         )
         .map((t) => t.id),
-    [shown, usersById],
+    [threads, usersById, botFilter],
   );
 
   // Scroll to a thread selected from a timeline marker / popover.
@@ -128,28 +156,74 @@ export function ThreadList({
 
   return (
     <div>
-      {vendor && (
+      {/* Sticky filter header: the derived-state pills (always) + the vendor row (when a vendor
+          filter is active). The two filters AND together in `shown`. */}
+      {threads.length > 0 && (
         <div
-          className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-gray-100 bg-white/95 px-3 py-2 text-xs backdrop-blur dark:border-gray-800 dark:bg-gray-900/95"
-          style={{ boxShadow: `inset 3px 0 0 ${vendor.color}` }}
+          className="sticky top-0 z-10 space-y-2 border-b border-gray-100 bg-white/95 px-3 py-2 backdrop-blur dark:border-gray-800 dark:bg-gray-900/95"
+          style={vendor ? { boxShadow: `inset 3px 0 0 ${vendor.color}` } : undefined}
         >
-          <span className="font-medium" style={{ color: vendor.color }}>
-            🤖 {vendor.label}
-          </span>
-          <span className="text-gray-500">
-            {shown.length} thread{shown.length === 1 ? '' : 's'}
-          </span>
-          <button
-            type="button"
-            onClick={() => setThreadBotFilter(null)}
-            className="rounded px-1.5 py-0.5 text-gray-500 underline-offset-2 hover:underline"
-          >
-            Show all threads
-          </button>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+              State
+            </span>
+            {DERIVED_STATES.map((st) => {
+              const meta = DERIVED_STATE_META[st];
+              const on = activeStates.has(st);
+              const count = stateCounts[st];
+              return (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => toggleThreadStateFilter(st)}
+                  aria-pressed={on}
+                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                    on
+                      ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
+                      : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                  }`}
+                  title={meta.description}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ background: meta.color }}
+                  />
+                  {meta.label}
+                  {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
+                </button>
+              );
+            })}
+            {activeStates.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setThreadStateFilter(new Set())}
+                className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 underline-offset-2 hover:underline"
+              >
+                Clear
+              </button>
+            )}
+          </div>
 
-          {/* Phase 3: clear the addressed-bot backlog — never automatic, always confirm-gated. */}
-          {addressedBotThreadIds.length > 0 && (
-            <span className="ml-auto flex items-center gap-2">
+          {vendor && (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-medium" style={{ color: vendor.color }}>
+                🤖 {vendor.label}
+              </span>
+              <span className="text-gray-500">
+                {shown.length} thread{shown.length === 1 ? '' : 's'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setThreadBotFilter(null)}
+                className="rounded px-1.5 py-0.5 text-gray-500 underline-offset-2 hover:underline"
+              >
+                Show all threads
+              </button>
+
+              {/* Phase 3: clear the addressed-bot backlog — never automatic, always confirm-gated. */}
+              {addressedBotThreadIds.length > 0 && (
+                <span className="ml-auto flex items-center gap-2">
               {confirming ? (
                 <>
                   <span className="text-gray-500">
@@ -184,7 +258,9 @@ export function ThreadList({
                   Resolve {addressedBotThreadIds.length} addressed
                 </button>
               )}
-            </span>
+                </span>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -263,7 +339,11 @@ export function ThreadList({
 
       {shown.length === 0 ? (
         <div className="px-3 py-6 text-center text-sm text-gray-500">
-          {botFilter ? 'No threads from this bot on this PR.' : 'No review threads on this PR.'}
+          {activeStates.size > 0
+            ? 'No threads in the selected state(s).'
+            : botFilter
+              ? 'No threads from this bot on this PR.'
+              : 'No review threads on this PR.'}
         </div>
       ) : (
         buckets.map((b) => (

@@ -1,23 +1,24 @@
 import { useMemo, useState } from 'react';
-import type {
-  BotResolvableThread,
-  BotResolvableThreadGroup,
-} from '@pierre-review/shared';
+import type { BotResolvableThreadGroup } from '@pierre-review/shared';
 import {
   useResolvableBotThreads,
   useScopeResolveBotThreads,
 } from '../../hooks/useBotTriage.js';
+import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
-import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
+import { type TabMeta } from '../../store/pinnedTabs.js';
+import { CI_META, indexUsers, relativeTime, userLabel } from '../../lib/ui.js';
+import { Avatar } from '../CommentCard.js';
+import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
 
 // The resolvable-bot-threads DRILL-DOWN — a persistent, singleton tab opened by the Bot-ROI
-// backlog banner ("Review & resolve"). The scope-wide review-and-resolve flow lives HERE (moved
-// out of the inline banner): every `likely_addressed` automated-reviewer thread in scope,
-// grouped by PR with per-thread checkboxes (all checked by default), a confirm gate, and
-// streamed chunked progress. The heuristic wording stays honest — these threads only LOOK
-// addressed (a later commit touched their file), so the user reviews before resolving. NEW
-// here: clicking a thread row navigates INTO the thread (its PR's detail tab, Threads tab
-// scrolled + highlighted) so a doubtful row can be inspected before resolving.
+// backlog banner ("Review & resolve"). The scope-wide review-and-resolve flow lives here. It
+// lists every PR with ≥1 `likely_addressed` automated-reviewer thread as a COMPACT one-line row
+// (author · CI · age · a bot thread-state summary), with the bulk resolve action pinned to the
+// TOP. Per-PR exclusion checkboxes let a reviewer drop a PR they'd rather handle by hand; the
+// resolve is confirm-gated, chunked, and the server RE-DERIVES eligibility (the heuristic only
+// LOOKS addressed — a later commit touched the file). Clicking a row opens that PR's detail tab
+// on its Threads tab with the 'likely_addressed' pill preselected — inspect before resolving.
 
 export function BotThreadsDetail(): JSX.Element {
   const scope = scopeToParam(useFilters((s) => s.teamScope));
@@ -32,12 +33,13 @@ export function BotThreadsDetail(): JSX.Element {
     repoScope,
   );
   const resolve = useScopeResolveBotThreads();
-  const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  const selectThread = useFilters((s) => s.selectThread);
+  const openPrThreadsFiltered = useFilters((s) => s.openPrThreadsFiltered);
+  const { data: users } = useUsers();
+  const usersById = useMemo(() => indexUsers(users), [users]);
 
   const [confirming, setConfirming] = useState(false);
-  // Empty = all checked (the default). Tracks DE-selections so a refetch that drops resolved
-  // threads doesn't need a reset effect — stale ids just fall out of `allIds`.
+  // Empty = all PRs checked (the default). Tracks DE-selected PR ids so a refetch that drops
+  // a resolved PR needs no reset effect — a stale id just falls out of `groups`.
   const [deselected, setDeselected] = useState<Set<number>>(new Set());
   const [progress, setProgress] = useState<{
     done: number;
@@ -47,62 +49,54 @@ export function BotThreadsDetail(): JSX.Element {
   } | null>(null);
 
   const groups = data?.groups ?? [];
-  const allIds = useMemo(() => groups.flatMap((g) => g.threads.map((t) => t.threadId)), [groups]);
-  const selectedIds = useMemo(
-    () => allIds.filter((id) => !deselected.has(id)),
-    [allIds, deselected],
-  );
   const totalEligible = data?.totalEligible ?? 0;
   const shown = data?.shown ?? 0;
 
-  const toggleThread = (id: number): void =>
-    setDeselected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  const toggleGroup = (g: BotResolvableThreadGroup): void => {
-    const ids = g.threads.map((t) => t.threadId);
-    const allSelected = ids.every((id) => !deselected.has(id));
-    setDeselected((prev) => {
-      const next = new Set(prev);
-      // All selected → deselect the group; otherwise select the whole group.
-      for (const id of ids) (allSelected ? next.add(id) : next.delete(id));
-      return next;
-    });
-  };
+  // The selected PRs (not de-selected) and every resolvable thread id under them.
+  const selectedGroups = useMemo(
+    () => groups.filter((g) => !deselected.has(g.prId)),
+    [groups, deselected],
+  );
+  const selectedPrIds = useMemo(() => selectedGroups.map((g) => g.prId), [selectedGroups]);
+  const selectedThreadIds = useMemo(
+    () => selectedGroups.flatMap((g) => g.threads.map((t) => t.threadId)),
+    [selectedGroups],
+  );
 
-  // Navigate into the thread: the PR's detail tab with its Threads tab scrolled to + amber-
-  // highlighting this thread (the FeedView pattern). Author fields null — PrDetail backfills.
-  const openThread = (g: BotResolvableThreadGroup, t: BotResolvableThread): void => {
+  const toggleGroup = (prId: number): void =>
+    setDeselected((prev) => {
+      const next = new Set(prev);
+      if (next.has(prId)) next.delete(prId);
+      else next.add(prId);
+      return next;
+    });
+
+  // Open the PR's detail tab on its Threads tab with the likely-addressed pill preset. Does NOT
+  // route back to the Bots feed — goes straight to the PR detail. Author fields from the loaded
+  // user map (PrDetail backfills any gaps).
+  const openPr = (g: BotResolvableThreadGroup): void => {
+    const author = g.authorId != null ? usersById.get(g.authorId) : undefined;
     const meta: TabMeta = {
       id: g.prId,
       number: g.prNumber,
       title: g.prTitle,
       repoFullName: g.repoFullName,
-      authorLogin: null,
-      authorDisplayName: null,
-      authorAvatarUrl: null,
+      authorLogin: author?.githubLogin ?? null,
+      authorDisplayName: author?.displayName ?? null,
+      authorAvatarUrl: author?.avatarUrl ?? null,
     };
-    openPrDetailTab(meta, { fromActivity: true });
-    selectThread(g.prId, t.threadId);
+    openPrThreadsFiltered(meta, 'likely_addressed');
   };
 
   const runResolve = (): void => {
     // NEVER send an empty threadIds list — [] means resolve-NOTHING by design server-side.
-    if (selectedIds.length === 0) return;
-    // The PRs the selected threads belong to — their cached detail invalidates post-resolve.
-    const selectedSet = new Set(selectedIds);
-    const prIds = groups
-      .filter((g) => g.threads.some((t) => selectedSet.has(t.threadId)))
-      .map((g) => g.prId);
-    setProgress({ done: 0, total: selectedIds.length, resolved: 0, failed: 0 });
+    if (selectedThreadIds.length === 0) return;
+    setProgress({ done: 0, total: selectedThreadIds.length, resolved: 0, failed: 0 });
     resolve.mutate(
       {
-        threadIds: selectedIds,
+        threadIds: selectedThreadIds,
         repoIds: repoScope,
-        prIds,
+        prIds: selectedPrIds,
         onProgress: (done, total, resolved, failed) =>
           setProgress({ done, total, resolved, failed }),
       },
@@ -117,8 +111,8 @@ export function BotThreadsDetail(): JSX.Element {
           <span aria-hidden>🧹</span> Resolve bot threads
         </h2>
         <span className="text-[11px] text-gray-400">
-          likely-addressed automated-reviewer threads — a later commit touched their file, so
-          they only LOOK resolved. Review, then resolve on GitHub. Click a thread to inspect it.
+          PRs with likely-addressed automated-reviewer threads — a later commit touched their
+          file, so they only LOOK resolved. Review, then resolve on GitHub. Click a PR to inspect.
         </span>
         <button
           type="button"
@@ -147,100 +141,25 @@ export function BotThreadsDetail(): JSX.Element {
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
-            <span className="tabular-nums">
-              {selectedIds.length} of {allIds.length} selected
-            </span>
-            {totalEligible > shown && (
-              <span className="text-gray-400">
-                showing the {shown} newest of {totalEligible} — resolve these and refresh for
-                more
-              </span>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            {groups.map((g) => {
-              const ids = g.threads.map((t) => t.threadId);
-              const allSelected = ids.every((id) => !deselected.has(id));
-              return (
-                <div key={g.prId} className="rounded border border-gray-200 dark:border-gray-800">
-                  <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-2 py-1 dark:border-gray-800/60">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={() => toggleGroup(g)}
-                      className="h-3 w-3 cursor-pointer"
-                      title="Toggle all this PR's threads"
-                    />
-                    <a
-                      href={g.githubUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="min-w-0 truncate text-[12px] font-medium text-gray-700 hover:underline dark:text-gray-200"
-                      title={`${g.repoFullName} #${g.prNumber}`}
-                    >
-                      <span className="text-gray-400">{g.repoFullName}</span> #{g.prNumber}{' '}
-                      {g.prTitle}
-                    </a>
-                    <span className="ml-auto shrink-0 text-[10px] text-gray-400">
-                      {g.threads.length} thread{g.threads.length === 1 ? '' : 's'}
-                    </span>
-                  </div>
-                  <ul>
-                    {g.threads.map((t) => (
-                      <li
-                        key={t.threadId}
-                        onClick={() => openThread(g, t)}
-                        title="Open this thread in the PR's Threads tab"
-                        className="flex cursor-pointer items-start gap-2 px-2 py-1 text-[11px] hover:bg-gray-50 dark:hover:bg-gray-800/40"
-                      >
-                        {/* stopPropagation so ticking the box never also navigates. */}
-                        <input
-                          type="checkbox"
-                          checked={!deselected.has(t.threadId)}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={() => toggleThread(t.threadId)}
-                          className="mt-0.5 h-3 w-3 shrink-0 cursor-pointer"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="font-mono text-[10px] text-gray-600 dark:text-gray-300">
-                              {t.path}
-                            </span>
-                            <span className="rounded bg-gray-100 px-1 py-px text-[9px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                              🤖 {t.botLabel}
-                            </span>
-                          </div>
-                          {t.excerpt && (
-                            <div className="truncate text-[10px] text-gray-400">{t.excerpt}</div>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          {/* TOP action bar — the bulk resolve pinned above the list. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2 dark:border-gray-800 dark:bg-gray-900/40">
             {resolve.isPending && progress ? (
-              <span className="text-gray-500 tabular-nums">
+              <span className="text-[12px] text-gray-500 tabular-nums">
                 Resolving… {progress.done}/{progress.total} ({progress.resolved} resolved
                 {progress.failed > 0 ? `, ${progress.failed} failed` : ''})
               </span>
             ) : confirming ? (
               <>
-                <span className="text-gray-500">
-                  Resolve {selectedIds.length} likely-addressed thread
-                  {selectedIds.length === 1 ? '' : 's'} on GitHub?
+                <span className="text-[12px] text-gray-600 dark:text-gray-300">
+                  Resolve {selectedThreadIds.length} likely-addressed thread
+                  {selectedThreadIds.length === 1 ? '' : 's'} across {selectedPrIds.length} PR
+                  {selectedPrIds.length === 1 ? '' : 's'} on GitHub?
                 </span>
                 <button
                   type="button"
-                  disabled={resolve.isPending || selectedIds.length === 0}
+                  disabled={resolve.isPending || selectedThreadIds.length === 0}
                   onClick={runResolve}
-                  className="rounded bg-green-600 px-2 py-0.5 font-medium text-white hover:bg-green-700 disabled:opacity-60"
+                  className="rounded bg-green-600 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-green-700 disabled:opacity-60"
                 >
                   Yes, resolve
                 </button>
@@ -248,7 +167,7 @@ export function BotThreadsDetail(): JSX.Element {
                   type="button"
                   disabled={resolve.isPending}
                   onClick={() => setConfirming(false)}
-                  className="rounded px-2 py-0.5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                  className="rounded px-2 py-1 text-[12px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
                 >
                   Cancel
                 </button>
@@ -256,27 +175,98 @@ export function BotThreadsDetail(): JSX.Element {
             ) : (
               <button
                 type="button"
-                disabled={selectedIds.length === 0}
+                disabled={selectedThreadIds.length === 0}
                 onClick={() => setConfirming(true)}
-                className="rounded border border-sky-400 px-2 py-0.5 font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50 dark:border-sky-600 dark:text-sky-200 dark:hover:bg-sky-900/30"
+                className="rounded border border-sky-400 px-2.5 py-1 text-[12px] font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50 dark:border-sky-600 dark:text-sky-200 dark:hover:bg-sky-900/30"
                 title="These threads only LOOK addressed (a later commit touched their file) — you approve the batch before it resolves on GitHub."
               >
-                Resolve {selectedIds.length} on GitHub
+                Resolve {selectedThreadIds.length} thread{selectedThreadIds.length === 1 ? '' : 's'}
+                {' '}across {selectedPrIds.length} PR{selectedPrIds.length === 1 ? '' : 's'}
               </button>
             )}
+            <span className="text-[11px] text-gray-400 tabular-nums">
+              {selectedPrIds.length} of {groups.length} PR{groups.length === 1 ? '' : 's'} selected
+              {totalEligible > shown && ` · showing the ${shown} newest of ${totalEligible}`}
+            </span>
             {!resolve.isPending &&
               resolve.data &&
               (resolve.data.resolved > 0 || resolve.data.failed > 0) && (
-                <span className="text-gray-500">
+                <span className="text-[11px] text-gray-500">
                   Resolved {resolve.data.resolved}
                   {resolve.data.failed > 0 && ` · ${resolve.data.failed} failed`}.
                 </span>
               )}
             {resolve.isError && (
-              <span className="text-red-500">
+              <span className="text-[11px] text-red-500">
                 {(resolve.error as Error)?.message ?? 'Couldn’t resolve.'}
               </span>
             )}
+          </div>
+
+          {/* Compact per-PR rows — a checkbox to exclude, then a clickable body that opens the
+              PR's Threads tab (likely-addressed pill preset). No per-thread enumeration. */}
+          <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
+            {groups.map((g) => {
+              const selected = !deselected.has(g.prId);
+              const author = g.authorId != null ? usersById.get(g.authorId) : undefined;
+              const ci = CI_META[g.ciStatus];
+              const resolvable = g.botThreadCounts.likely_addressed;
+              return (
+                <div
+                  key={g.prId}
+                  className={`flex items-center gap-2.5 border-b border-gray-100 px-3 py-2 last:border-b-0 dark:border-gray-800/60 ${
+                    selected ? '' : 'opacity-50'
+                  }`}
+                >
+                  {/* stopPropagation so excluding a PR never also navigates. */}
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={() => toggleGroup(g.prId)}
+                    title={selected ? 'Exclude this PR from the resolve' : 'Include this PR'}
+                    className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-sky-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => openPr(g)}
+                    title="Open this PR's Threads tab (likely-addressed threads)"
+                    className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                  >
+                    <span
+                      className="inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={ci ? { background: ci.color } : { boxShadow: 'inset 0 0 0 1px #9ca3af' }}
+                      title={ci?.label ?? 'no checks'}
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="font-mono text-[11px] text-gray-400">
+                        {g.repoFullName} #{g.prNumber}
+                      </span>{' '}
+                      <span className="text-[13px] font-medium text-gray-800 dark:text-gray-100">
+                        {g.prTitle}
+                      </span>
+                    </span>
+                    <span className="hidden shrink-0 items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400 sm:inline-flex">
+                      <Avatar user={author} size={14} />
+                      <span className="max-w-[7rem] truncate">
+                        {userLabel(author, g.authorId)}
+                      </span>
+                    </span>
+                    <span className="hidden shrink-0 text-[11px] text-gray-400 md:inline">
+                      {relativeTime(g.openedAt)}
+                    </span>
+                    <ThreadCountChips counts={g.botThreadCounts} />
+                    <span
+                      className="shrink-0 rounded bg-sky-100 px-1.5 py-px text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
+                      title="Threads a later commit likely addressed — the resolvable set"
+                    >
+                      {resolvable} resolvable
+                    </span>
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </>
       )}

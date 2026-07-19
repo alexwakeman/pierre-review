@@ -583,6 +583,13 @@ export function PrDetail({
     if (threadBotFilter != null) setTab('threads');
   }, [threadBotFilter]);
 
+  // Arriving from the resolvable-bot-threads tab presets a derived-state pill (likely_addressed)
+  // → force the Threads tab so the relevant threads are visible immediately.
+  const threadStateFilter = useFilters((s) => s.threadStateFilter);
+  useEffect(() => {
+    if (threadStateFilter.size > 0) setTab('threads');
+  }, [threadStateFilter]);
+
   // A timeline deep link to an Activity entry (e.g. the commit popover) forces the
   // Activity tab and clears the "since" filter so the target is visible; the list
   // then scrolls to + flashes it.
@@ -868,6 +875,7 @@ export function PrDetail({
             selectedThreadId={selectedThreadId}
             viewedSince={pr.lastViewedAt}
             botFilter={threadBotFilter}
+            stateFilter={threadStateFilter}
           />
         ) : tab === 'activity' ? (
           <ActivityList

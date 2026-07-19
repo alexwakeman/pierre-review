@@ -144,6 +144,11 @@ export interface FilterState {
   // vendor's threads (set by clicking a "CodeRabbit · 12 · 3 unresolved" chip in Overview).
   // null = no filter. Transient; cleared when the PR changes / selection clears.
   threadBotFilter: ReviewBotKind | null;
+  // PR-detail Threads-tab derived-STATE filter pills (Untouched/Replied/Likely-addressed/
+  // Resolved), matching the feed's state pills. Empty = all shown. Preset to
+  // {likely_addressed} when arriving from the resolvable-bot-threads tab. Transient; cleared
+  // when the PR changes / selection clears.
+  threadStateFilter: Set<DerivedState>;
   // A specific issue-level PR comment selected from the timeline popover's "Open in
   // detail pane". Drives a PERMANENT amber highlight on that comment card (mirroring
   // selectedThreadId's thread highlight); cleared when another thread/comment/PR is
@@ -316,9 +321,16 @@ export interface FilterState {
   // Set/clear the PR-detail Threads-tab bot filter (a ChecksTab bot chip → filter Threads to
   // that vendor). Re-selecting the same vendor toggles it off.
   setThreadBotFilter: (kind: ReviewBotKind | null) => void;
+  // Toggle one state pill on the PR-detail Threads tab (rebuilds the Set so subscribers rerender).
+  toggleThreadStateFilter: (s: DerivedState) => void;
+  setThreadStateFilter: (states: Set<DerivedState>) => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
   clearSelection: () => void;
+  // Open a PR's detail tab landing on its Threads tab with a derived-state pill preset (the
+  // resolvable-bot-threads row click → the PR's likely-addressed threads). Does NOT touch the
+  // Activity rail / feed isolation — navigation goes to the PR detail, not back to the Bots pane.
+  openPrThreadsFiltered: (meta: TabMeta, state: DerivedState) => void;
   // Open a PR from the strip / my-turn / a timeline event: select it AND ask
   // the timeline to scroll to it (optionally recentering on `focusAt`). Pass `event`
   // to also glow a specific marker once the timeline recenters (e.g. a thread's
@@ -556,6 +568,7 @@ function freshDefaults(): FilterData {
     selectedPrId: null,
     selectedThreadId: null,
     threadBotFilter: null,
+    threadStateFilter: new Set<DerivedState>(),
     selectedCommentId: null,
     activityFocus: null,
     commentFocus: null,
@@ -644,18 +657,31 @@ export const useFilters = create<FilterState>((set, get) => ({
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setThreadBotFilter: (kind) =>
     set((s) => ({ threadBotFilter: s.threadBotFilter === kind ? null : kind })),
+  toggleThreadStateFilter: (st) =>
+    set((s) => {
+      const next = new Set(s.threadStateFilter);
+      if (next.has(st)) next.delete(st);
+      else next.add(st);
+      return { threadStateFilter: next };
+    }),
+  setThreadStateFilter: (states) => set({ threadStateFilter: states }),
   selectPr: (id) =>
     set({
       selectedPrId: id,
       selectedThreadId: null,
       selectedCommentId: null,
       threadBotFilter: null,
+      threadStateFilter: new Set<DerivedState>(),
     }),
   selectThread: (prId, threadId) =>
     set((s) => ({
       selectedPrId: prId ?? s.selectedPrId,
       selectedThreadId: threadId,
       selectedCommentId: null,
+      // Focusing a SPECIFIC thread must guarantee it's visible — a leftover state-pill preset
+      // (from the resolvable-bot-threads tab) could otherwise filter the target thread out and
+      // it would never scroll into view.
+      threadStateFilter: threadId != null ? new Set<DerivedState>() : s.threadStateFilter,
     })),
   clearSelection: () =>
     set({
@@ -663,6 +689,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedThreadId: null,
       selectedCommentId: null,
       threadBotFilter: null,
+      threadStateFilter: new Set<DerivedState>(),
     }),
   openPrFocused: (id, threadId = null, focusAt = null, event = null) => {
     // Any timeline navigation leaves an open focus/PR tab so the move is visible on the
@@ -670,14 +697,16 @@ export const useFilters = create<FilterState>((set, get) => ({
     // move is launched FROM an Activity-opened detail tab (the repurposed PR-title "Show"),
     // this pushes a back-step so browser Back returns to that detail tab first.
     usePinnedTabs.getState().showBoardFromDetail();
-    set({
+    set((s) => ({
       selectedPrId: id,
       selectedThreadId: threadId,
       selectedCommentId: null,
       timelineFocusPr: id,
       timelineFocusAt: focusAt,
       timelineFocusEvent: event,
-    });
+      // Clear a leftover Threads-tab state preset when focusing a specific thread (see selectThread).
+      threadStateFilter: threadId != null ? new Set<DerivedState>() : s.threadStateFilter,
+    }));
   },
   showEventOnTimeline: (prId, focusAt, event) => {
     usePinnedTabs.getState().showBoardFromDetail();
@@ -769,6 +798,20 @@ export const useFilters = create<FilterState>((set, get) => ({
   openBotThreadsDetail: (repoId) => {
     set({ botThreadsFocusRepoId: repoId });
     usePinnedTabs.getState().openBotThreadsTab({ fromActivity: true });
+  },
+  openPrThreadsFiltered: (meta, state) => {
+    // Open the PR's detail tab (Back returns to the Activity console via fromActivity), then
+    // select the PR + seed the Threads-tab pill in ONE set() — done together so selectPr's
+    // reset can't race away the preset. PrDetail's threadStateFilter effect forces the Threads
+    // tab. No setActivityRepo / setFeedIsolatedPrId: we go to the PR, not back to the Bots pane.
+    usePinnedTabs.getState().openPrDetailTab(meta, { fromActivity: true });
+    set({
+      selectedPrId: meta.id,
+      selectedThreadId: null,
+      selectedCommentId: null,
+      threadBotFilter: null,
+      threadStateFilter: new Set<DerivedState>([state]),
+    });
   },
   requestSyncModal: (repoId: number) =>
     set((s) => ({ syncModalSignal: s.syncModalSignal + 1, syncModalRepoId: repoId })),
