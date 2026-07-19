@@ -13,11 +13,18 @@ import type {
   ReviewerOverrideBody,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { ACTIVITY_GC_TIME } from './useActivity.js';
 
 // Per-request cap on the scope-wide resolve: the client chunks a larger reviewed selection into
 // sequential POSTs so a hundreds-of-threads resolve streams progress instead of one multi-minute
 // request. MUST stay ≤ the server's SCOPE_RESOLVE_THREAD_CAP (500) body limit.
 const RESOLVE_CHUNK_SIZE = 25;
+
+// The Bots sub-tab UNMOUNTS on every tab / sub-tab switch, so at the default 5-min gcTime its
+// queries are evicted after a short absence and reopening shows the BotRoiPanel skeleton +
+// refetch. These stay short-stale (60s) so they still background-refresh on reopen — the longer
+// gcTime only keeps the last snapshot resident so the charts/table repaint WARM immediately
+// instead of blank. Reuses the Activity ceiling (45 min).
 
 // The bot-triage read/write hooks (CORE, deterministic — no AI). Detection, dedup and mute
 // rules are free-tier; the Bot-ROI analytics panel that consumes useBotAnalytics is
@@ -46,6 +53,7 @@ export function useBotAnalytics(
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,
     staleTime: 60_000,
+    gcTime: ACTIVITY_GC_TIME,
   });
 }
 
@@ -69,6 +77,7 @@ export function useBotOnlyPrs(
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,
     staleTime: 60_000,
+    gcTime: ACTIVITY_GC_TIME,
   });
 }
 
@@ -80,6 +89,7 @@ export function useDetectedReviewers(enabled = true) {
     queryFn: () => api.botReviewers(),
     enabled,
     staleTime: 60_000,
+    gcTime: ACTIVITY_GC_TIME,
   });
 }
 
@@ -109,6 +119,7 @@ export function usePrBotDedup(prId: number | null, enabled = true) {
     queryFn: () => api.prBotDedup(prId as number),
     enabled: enabled && prId != null,
     staleTime: 60_000,
+    gcTime: ACTIVITY_GC_TIME,
   });
 }
 
@@ -120,6 +131,7 @@ export function useBotMuteRules(enabled = true) {
     queryFn: () => api.botMuteRules(),
     enabled,
     staleTime: 60_000,
+    gcTime: ACTIVITY_GC_TIME,
   });
 }
 
@@ -166,6 +178,7 @@ export function useResolvableBotThreads(
     queryFn: () => api.resolvableBotThreads(scope, repoIds),
     enabled,
     staleTime: 60_000,
+    gcTime: ACTIVITY_GC_TIME,
   });
 }
 

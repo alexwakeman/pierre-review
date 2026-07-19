@@ -7,6 +7,7 @@ import {
 import { useMemo } from 'react';
 import type { ConsolidatedFeedItem, ConsolidatedFeedResponse, User } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { ACTIVITY_GC_TIME } from './useActivity.js';
 
 // Record that the cross-repo Activity Feed has been viewed (server-side "seen" marker).
 // On success, refresh /api/me so the Welcome-back banner's "new since last seen" count
@@ -97,6 +98,9 @@ export function useConsolidatedFeed(opts: {
     },
     enabled: opts.enabled ?? true,
     staleTime: Infinity,
+    // Survive the Activity console's unmount-on-tab-switch (see ACTIVITY_GC_TIME) so a
+    // switch-away-and-back repaints the loaded feed pages instantly instead of cold-loading.
+    gcTime: ACTIVITY_GC_TIME,
     refetchOnMount: false,
     placeholderData: (prev) => prev,
   });

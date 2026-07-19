@@ -24,6 +24,17 @@ function activitySearch(repoIds: number[] | null, userIds: number[] | null): str
   return p.toString();
 }
 
+// 45 minutes — matches usePr's DETAIL_GC_TIME. The Activity console (and the Bots sub-tab)
+// UNMOUNTS on every tab switch (`{inboxActive && <ActivityView/>}` in App.tsx), so the moment
+// you flip to the Timeline / a PR tab, these queries lose their only observer. At the default
+// 5-min gcTime the cached snapshot is then evicted, so switching back after a short while hit a
+// cold `isLoading` skeleton → refetch → a big first render. These are snapshots (staleTime
+// Infinity / short-stale, invalidated explicitly on watch/add/sync), so a longer gcTime only
+// keeps the already-fetched data resident across a working session's tab churn — never an extra
+// refetch — and repeat opens repaint instantly from cache. Bounded + not IndexedDB-persisted, so
+// abandoned scopes still evict after 45 min idle.
+export const ACTIVITY_GC_TIME = 1000 * 60 * 45;
+
 // The multi-repo triage aggregate backing the Activity tab. Repo + member scope ride in
 // the query key so a FilterBar change refetches. Snapshot intent — like the IndexedDB-
 // cached PR/thread queries it's `staleTime: Infinity` + `refetchOnMount: false`, so
@@ -36,6 +47,7 @@ export function useActivity(repoIds: number[] | null, userIds: number[] | null) 
     queryKey: ['activity', search],
     queryFn: () => api.inbox(search),
     staleTime: Infinity,
+    gcTime: ACTIVITY_GC_TIME,
     refetchOnMount: false,
     placeholderData: (prev) => prev,
   });

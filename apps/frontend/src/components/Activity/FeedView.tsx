@@ -524,7 +524,12 @@ export function FeedView({
   const rafRef = useRef<number | null>(null);
   const visibleRef = useRef<ConsolidatedFeedItem[]>(visible);
   visibleRef.current = visible;
-  const [win, setWin] = useState({ start: 0, end: 30, top: 0, bottom: 0 });
+  // Initial window kept small on purpose: the post-paint rAF `recompute` (below) immediately
+  // widens it to the true viewport + FEED_OVERSCAN. A large initial `end` only makes the FIRST
+  // synchronous paint mount — and then discard, one frame later — markdown/highlight-heavy cards
+  // it never needed, which is the dominant cost of opening the Activity feed / Bots feed. ~12
+  // covers a console pane's visible rows; a taller pane fills in on the next frame.
+  const [win, setWin] = useState({ start: 0, end: 12, top: 0, bottom: 0 });
 
   const recompute = useCallback((): void => {
     rafRef.current = null;
