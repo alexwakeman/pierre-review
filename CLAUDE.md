@@ -696,9 +696,23 @@ Refresh re-queries the **DB only**. Open-PR lists show 10 rows; ">10" swaps the 
 for a "Show all N" footer opening the sortable `open-prs` drill-down tab (a FeedOpenPrsPanel
 TEAM group passes its label + exact repo set so the tab reproduces the group's count).
 **Clicking any open-PR row/card opens the PR's detail tab** (`openPrDetailTab`) — no longer
-isolates the feed on click. The **"Showing only #N" feed-isolation banner is pinned to the TOP
-of the feed** (`FeedView`, sticky), set from PrDetail's "Show in Activity feed" button or a
-drill-down, dismissible with Clear.
+isolates the feed on click. The **"Showing only #N" feed-isolation banner** (`FeedIsolationBanner`,
+set from PrDetail's "Show in Activity feed" button or a drill-down, dismissible with Clear) renders
+**once at the actual TOP of ActivityView's right-detail panel** (`Activity/index.tsx`, above the
+Open-PRs pane / repo header / Bots view in EVERY context) and is **NOT sticky** — it scrolls with
+the content. `FeedView` still reads `feedIsolatedPrId` only to scope its query; the feed-wide "New
+activity — Refresh" banner remains sticky as its own element.
+
+**Activity render-perf (client-side; the console + Bots sub-tab mount fresh on every tab switch).**
+Two low-risk levers keep opens fast: (1) **warm snapshots** — `useActivity`/`useConsolidatedFeed`
++ the six bot read-queries carry `gcTime: ACTIVITY_GC_TIME` (45min, exported from `useActivity.ts`,
+mirrors usePr's `DETAIL_GC_TIME`) so a switch-away-and-back within a session repaints from cache
+instead of the default-5-min-GC → skeleton → refetch; retention-only (staleTime unchanged, so no
+stale surprise). (2) **smaller first-paint window** — `FeedView`'s initial virtual window is `end:12`
+(not 30); the post-paint rAF `recompute` widens it to viewport+`FEED_OVERSCAN`, so first paint no
+longer builds ~30 react-markdown/highlight cards it discards a frame later. The bigger "keep
+ActivityView mounted-but-hidden" lever was deferred (medium-risk: hidden-mount windowing/`clientHeight`,
+mark-seen/insights-default once-per-mount effects, the 60s head poll).
 
 **Review-bot triage — "the calm layer above your review bot" (CORE, deterministic, NO AI).**
 Third-party AI review bots (CodeRabbit/Greptile/Copilot/Qodo/…) are a **first-class, triaged
