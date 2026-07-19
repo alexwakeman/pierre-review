@@ -1,4 +1,6 @@
 import { usePinnedTabs, type Tab } from '../store/pinnedTabs.js';
+import { useFilters } from '../store/filters.js';
+import { useRepos } from '../hooks/useTimeline.js';
 import { MagnifierIcon } from './Icons.js';
 
 // A single closable tab chip (pr-detail / pr-focus): fixed width, closable (✕). Clicking
@@ -27,6 +29,15 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
   const active = usePinnedTabs((s) => s.activeTab === tab.key);
   const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
   const closeTab = usePinnedTabs((s) => s.closeTab);
+  // Repo-scoped drill-down chips (bot-only-prs / bot-threads / open-prs) show the repo name so a
+  // per-repo tab is easy to track. These hooks run UNCONDITIONALLY (before the kind branches) to
+  // satisfy the Rules of Hooks — TabChip renders for every tab; only the branches below use them.
+  const botOnlyRepoId = useFilters((s) => s.botOnlyFocusRepoId);
+  const botThreadsRepoId = useFilters((s) => s.botThreadsFocusRepoId);
+  const openPrsScope = useFilters((s) => s.openPrsScope);
+  const { data: repos } = useRepos();
+  const repoName = (id: number | null): string | null =>
+    id != null ? ((repos ?? []).find((r) => r.id === id)?.fullName ?? `repo ${id}`) : null;
 
   // The metrics drill-down is a non-PR, singleton tab — render a compact chip (no PR meta).
   if (tab.kind === 'metrics-detail') {
@@ -114,8 +125,15 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
     );
   }
 
-  // The all-open-PRs drill-down is a non-PR, singleton tab — a compact chip (no PR meta).
+  // The all-open-PRs drill-down is a non-PR, singleton tab — a compact chip (no PR meta). A
+  // repo/group scope surfaces its name so a scoped tab is easy to track ('feed' shows none).
   if (tab.kind === 'open-prs') {
+    const scopeName =
+      typeof openPrsScope === 'number'
+        ? repoName(openPrsScope)
+        : openPrsScope != null && typeof openPrsScope === 'object'
+          ? openPrsScope.label
+          : null;
     return (
       <div
         role="presentation"
@@ -131,17 +149,17 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
           aria-selected={active}
           onClick={() => setActiveTab(tab.key)}
           className="flex items-center gap-1.5 py-1.5 text-left"
-          title="Open PRs — sortable drill-down"
+          title={`Open PRs — sortable drill-down${scopeName ? ` · ${scopeName}` : ''}`}
         >
           <span aria-hidden="true" className="shrink-0 text-sky-500">
             {OpenPrsIcon}
           </span>
           <span
-            className={`text-xs font-medium ${
+            className={`max-w-[12rem] truncate text-xs font-medium ${
               active ? 'text-sky-600 dark:text-sky-400' : 'text-gray-600 dark:text-gray-300'
             }`}
           >
-            Open PRs
+            Open PRs{scopeName ? ` · ${scopeName}` : ''}
           </span>
         </button>
         <button
@@ -157,8 +175,10 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
     );
   }
 
-  // The bot-only-PRs drill-down is a non-PR, singleton tab — a compact chip (no PR meta).
+  // The bot-only-PRs drill-down is a non-PR, singleton tab — a compact chip (no PR meta). A
+  // per-repo scope (opened from the per-repo Bots tab) surfaces its repo name.
   if (tab.kind === 'bot-only-prs') {
+    const scopeName = repoName(botOnlyRepoId);
     return (
       <div
         role="presentation"
@@ -174,17 +194,17 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
           aria-selected={active}
           onClick={() => setActiveTab(tab.key)}
           className="flex items-center gap-1.5 py-1.5 text-left"
-          title="Bot-only PRs — only a bot reviewed these"
+          title={`Bot-only PRs — only a bot reviewed these${scopeName ? ` · ${scopeName}` : ''}`}
         >
           <span aria-hidden="true" className="shrink-0">
             🤖
           </span>
           <span
-            className={`text-xs font-medium ${
+            className={`max-w-[12rem] truncate text-xs font-medium ${
               active ? 'text-amber-600 dark:text-amber-400' : 'text-gray-600 dark:text-gray-300'
             }`}
           >
-            Bot-only PRs
+            Bot-only PRs{scopeName ? ` · ${scopeName}` : ''}
           </span>
         </button>
         <button
@@ -200,8 +220,10 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
     );
   }
 
-  // The resolvable-bot-threads review & resolve is a non-PR, singleton tab — a compact chip.
+  // The resolvable-bot-threads review & resolve is a non-PR, singleton tab — a compact chip. A
+  // per-repo scope (opened from the per-repo Bots tab) surfaces its repo name.
   if (tab.kind === 'bot-threads') {
+    const scopeName = repoName(botThreadsRepoId);
     return (
       <div
         role="presentation"
@@ -217,17 +239,17 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
           aria-selected={active}
           onClick={() => setActiveTab(tab.key)}
           className="flex items-center gap-1.5 py-1.5 text-left"
-          title="Bot threads — review & resolve the likely-addressed backlog"
+          title={`Bot threads — review & resolve the likely-addressed backlog${scopeName ? ` · ${scopeName}` : ''}`}
         >
           <span aria-hidden="true" className="shrink-0">
             🧹
           </span>
           <span
-            className={`text-xs font-medium ${
+            className={`max-w-[12rem] truncate text-xs font-medium ${
               active ? 'text-sky-600 dark:text-sky-400' : 'text-gray-600 dark:text-gray-300'
             }`}
           >
-            Bot threads
+            Bot threads{scopeName ? ` · ${scopeName}` : ''}
           </span>
         </button>
         <button
