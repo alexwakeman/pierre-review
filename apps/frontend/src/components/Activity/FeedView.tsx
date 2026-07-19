@@ -18,7 +18,7 @@ import {
 } from '../../hooks/useConsolidatedFeed.js';
 import { useDetectedReviewers, useReviewerOverride } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
-import { useProCapabilities, useSearchOpenPrs } from '../../hooks/useTriage.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
@@ -199,7 +199,6 @@ export function FeedView({
   const toggleFeedCatComments = useFilters((s) => s.toggleFeedCatComments);
   const toggleFeedCatPrEvents = useFilters((s) => s.toggleFeedCatPrEvents);
   const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
-  const setFeedIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
   const showPrComment = useFilters((s) => s.showPrComment);
@@ -250,14 +249,10 @@ export function FeedView({
   // panel) and a per-repo console (its RepoOpenPrList rows) — clicking a PR in either filters
   // the feed to that PR. `setActivityRepo` clears it when switching rails, so it never leaks
   // across repos.
+  // Scopes the feed query to a single PR when set. The "Showing only #N" banner itself now
+  // renders once at the TOP of the Activity detail panel (FeedIsolationBanner), above the
+  // Open-PRs pane — not here, buried under it.
   const isolatedPrId = feedIsolatedPrId;
-  // Resolve the isolated PR for the active-filter banner's label. The member-AGNOSTIC
-  // open-PRs cache (shared with FeedOpenPrsPanel) — Members is a Timeline-only filter.
-  const { data: openPrsData } = useSearchOpenPrs();
-  const isolatedPr =
-    isolatedPrId != null
-      ? (openPrsData?.prs.find((p) => p.id === isolatedPrId) ?? null)
-      : null;
 
   // Viewing the CROSS-REPO feed marks it seen server-side (once per mount), resetting the
   // "new My Turn since you were last here" count that drives the Welcome-back banner. A
@@ -857,47 +852,20 @@ export function FeedView({
 
   return (
     <div className="space-y-3" data-testid="feed-view" ref={rootRef}>
-      {/* Both top-of-feed banners share ONE sticky container so they STACK (never overlap): the
-          active single-PR filter pinned at the top so it's obvious the stream is scoped to one
-          PR (set from the PR-detail "Show in feed" button or a drill-down), then the feed-wide
-          "new activity" refresh banner. Two separate `sticky top-0` siblings would collide at the
-          same offset and the higher-z one would hide the other. */}
-      {(isolatedPrId != null || hasNew) && (
-        <div className="sticky top-0 z-20 space-y-2">
-          {isolatedPrId != null && (
-            <div className="flex items-center gap-2 rounded-md border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs text-sky-800 shadow-sm dark:border-sky-500/50 dark:bg-sky-950/60 dark:text-sky-200">
-              <span aria-hidden="true">☰</span>
-              <span className="min-w-0 flex-1 truncate">
-                Showing only{' '}
-                {isolatedPr != null ? (
-                  <>
-                    <span className="font-mono">#{isolatedPr.number}</span> {isolatedPr.title}
-                  </>
-                ) : (
-                  'the selected PR'
-                )}
-              </span>
-              <button
-                type="button"
-                onClick={() => setFeedIsolatedPrId(null)}
-                className="shrink-0 rounded border border-sky-400 px-2 py-0.5 font-medium hover:bg-sky-100 dark:border-sky-500/60 dark:hover:bg-sky-900/40"
-              >
-                Clear
-              </button>
-            </div>
-          )}
-          {/* Manual by design (never yanks content while you're reading); clicking refreshes
-              the feed + scrolls to the top. */}
-          {hasNew && (
-            <button
-              type="button"
-              onClick={onRefreshClick}
-              data-testid="feed-new-activity"
-              className="flex w-full items-center justify-center gap-2 rounded-full border border-sky-400 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 shadow-sm transition-colors hover:bg-sky-100 dark:border-sky-500/60 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/60"
-            >
-              <span aria-hidden="true">↑</span> New activity — Refresh
-            </button>
-          )}
+      {/* Feed-wide "new activity" refresh banner. Manual by design (never yanks content while
+          you're reading); clicking refreshes the feed + scrolls to the top. Sticky so it stays
+          reachable while scrolled. (The single-PR "Showing only #N" filter banner moved OUT of
+          the feed to the top of the Activity detail panel — see FeedIsolationBanner.) */}
+      {hasNew && (
+        <div className="sticky top-0 z-20">
+          <button
+            type="button"
+            onClick={onRefreshClick}
+            data-testid="feed-new-activity"
+            className="flex w-full items-center justify-center gap-2 rounded-full border border-sky-400 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 shadow-sm transition-colors hover:bg-sky-100 dark:border-sky-500/60 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/60"
+          >
+            <span aria-hidden="true">↑</span> New activity — Refresh
+          </button>
         </div>
       )}
 

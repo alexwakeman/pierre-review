@@ -12,6 +12,7 @@ import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { RepoInsightsPanel } from './RepoInsightsPanel.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
+import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { InsightsView } from './InsightsView.js';
 import { BotsView } from './BotsView.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
@@ -450,6 +451,10 @@ export function ActivityView(): JSX.Element {
 
       {/* RIGHT DETAIL */}
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        {/* Single-PR feed isolation ("Showing only #N …") pinned to the ACTUAL top of whatever
+            panel is active — above the Open-PRs pane / repo header / bots view — in every
+            context. Non-sticky (scrolls with content). Returns null when nothing's isolated. */}
+        <FeedIsolationBanner />
         {noReposAtAll ? (
           // First-run: detect the viewer's recent repos + one-click watch. Hoisted above the
           // rail-entry branches so a zero-repo account always lands here (a Pro account could
