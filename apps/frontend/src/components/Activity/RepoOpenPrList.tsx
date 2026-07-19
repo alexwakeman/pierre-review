@@ -16,7 +16,6 @@ import {
   userLabel,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
-import { NewTabIcon } from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 
 // How many open-PR rows the inline lists show. Keeps a busy repo's list scannable — the sort
@@ -26,22 +25,18 @@ const OPEN_PRS_PAGE = 10;
 
 // One open-PR row: CI dot · ⚠ needs-attention · #number title · author · draft / approval /
 // merge chips · thread-state bar · my-turn reason or updated-time. Shared by the single-repo
-// RepoOpenPrList and the Feed's team-grouped "open PRs" panel, so both read identically. The
-// click action + selected highlight are injected (open a detail tab vs isolate the feed).
+// RepoOpenPrList and the Feed's team-grouped "open PRs" panel, so both read identically.
+// Clicking the row opens the PR's own full-height pr-detail tab (its Show/Focus links then
+// drive the timeline; a PR-detail button isolates the feed if wanted).
 export function OpenPrRow({
   pr,
   author,
   onClick,
-  onOpenTab,
-  selected = false,
 }: {
   pr: TimelinePr;
   author: User | undefined;
+  // Open this PR in its own full-height pr-detail tab.
   onClick: () => void;
-  // Open this PR in its own full-height pr-detail tab (the trailing ⧉ button). Distinct from
-  // the row body's onClick, which filters the feed to this PR.
-  onOpenTab: () => void;
-  selected?: boolean;
 }): JSX.Element {
   const ci = CI_META[pr.ciStatus];
   const reason = REASON_META[pr.reasonTag];
@@ -52,15 +47,11 @@ export function OpenPrRow({
       ? { label: 'changes', color: '#ef4444' }
       : null;
   return (
-    <li
-      className={`flex items-stretch ${
-        selected ? 'bg-sky-100 dark:bg-sky-900/40' : 'hover:bg-gray-50 dark:hover:bg-gray-800/40'
-      }`}
-    >
+    <li className="flex items-stretch hover:bg-gray-50 dark:hover:bg-gray-800/40">
       <button
         type="button"
         onClick={onClick}
-        aria-pressed={selected}
+        title={`Open #${pr.number} — ${pr.title}`}
         className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-xs"
       >
         {/* CI rollup dot (a hollow ring when there are no checks) */}
@@ -127,18 +118,6 @@ export function OpenPrRow({
           </span>
         )}
       </button>
-      {/* Trailing action: open this PR in its own full-height tab (its Show/Focus links then
-          drive the timeline). Kept a SIBLING of the row button — not nested — so a click here
-          opens the tab without also toggling the row's feed filter. */}
-      <button
-        type="button"
-        onClick={onOpenTab}
-        title={`Open #${pr.number} in its own tab`}
-        aria-label={`Open PR #${pr.number} in its own tab`}
-        className="flex shrink-0 items-center px-2.5 text-gray-400 hover:text-sky-600 dark:hover:text-sky-300"
-      >
-        <NewTabIcon size={14} />
-      </button>
     </li>
   );
 }
@@ -147,8 +126,8 @@ export function OpenPrRow({
 // cross-repo Feed panel (one instance per team group). `prs` must ALREADY be sorted by the
 // caller (sortOpenPrsByActivity). Anything beyond the first page lives in the all-open-PRs
 // drill-down tab — the footer's "Show all N" calls `onShowAll` (the caller opens the tab with
-// its own scope). Clicking a row isolates the feed to that PR (toggle). `keyPrefix` keeps
-// React keys unique when the same PR appears under multiple team groups.
+// its own scope). Clicking a row opens the PR's own pr-detail tab. `keyPrefix` keeps React
+// keys unique when the same PR appears under multiple team groups.
 export function OpenPrRows({
   prs,
   usersById,
@@ -162,8 +141,6 @@ export function OpenPrRows({
   onShowAll: () => void;
 }): JSX.Element {
   const { data: repos } = useRepos();
-  const isolatedPrId = useFilters((s) => s.feedIsolatedPrId);
-  const setIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
 
   const reposById = useMemo(() => {
@@ -203,9 +180,7 @@ export function OpenPrRows({
               key={`${keyPrefix}${pr.id}`}
               pr={pr}
               author={author}
-              selected={isolatedPrId === pr.id}
-              onClick={() => setIsolatedPrId(isolatedPrId === pr.id ? null : pr.id)}
-              onOpenTab={() => openTab(pr, author)}
+              onClick={() => openTab(pr, author)}
             />
           );
         })}
@@ -228,8 +203,7 @@ export function OpenPrRows({
 // COLLAPSED BY DEFAULT (persisted, mirroring the cross-repo Feed panel) — the repo view
 // opens on its feed with this list one click away. Ordered by sortOpenPrsByActivity
 // (maintainer-authored first, then recency, then volume) and paginated (OpenPrRows).
-// Clicking a PR ISOLATES the repo's feed to that PR (toggle: click the selected one again to
-// clear), so this list doubles as the repo feed's per-PR filter.
+// Clicking a PR opens its own pr-detail tab.
 export function RepoOpenPrList({
   repoId,
   prs,
@@ -279,7 +253,7 @@ export function RepoOpenPrList({
           </span>
         )}
         <span className="ml-auto font-normal normal-case text-gray-400">
-          click a PR to filter the feed
+          click a PR to open it
         </span>
       </button>
       {!collapsed && (

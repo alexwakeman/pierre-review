@@ -14,7 +14,6 @@ import {
   userLabel,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
-import { NewTabIcon } from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 
 // The all-open-PRs DRILL-DOWN — a persistent, singleton tab opened by the "Show all N open
@@ -22,8 +21,7 @@ import { ThreadStateBar } from './ThreadStateBar.js';
 // seed: one repo, or 'feed' = the FilterBar-visible scope) as a SORTABLE table — age, staleness,
 // LoC, thread backlog, CI, approval — so a lead can order the open work however the question
 // demands. Default order = sortOpenPrsByActivity (the same order the inline lists use).
-// Clicking a row returns to the matching Feed rail entry with the PR isolated as the feed
-// filter; the trailing ⧉ opens the PR's own detail tab.
+// Clicking a row opens the PR's own detail tab.
 
 type SortCol =
   | 'pr'
@@ -241,11 +239,7 @@ export function OpenPrsDetail(): JSX.Element {
     [repos],
   );
 
-  const setRepoConsoleTab = useFilters((s) => s.setRepoConsoleTab);
-  const setActivityRepo = useFilters((s) => s.setActivityRepo);
-  const setFeedIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  const showActivity = usePinnedTabs((s) => s.showActivity);
 
   // null = the default activity order (sortOpenPrsByActivity — same as the inline lists).
   const [sort, setSort] = useState<SortState | null>(null);
@@ -274,19 +268,6 @@ export function OpenPrsDetail(): JSX.Element {
           ) || b.number - a.number, // stable final tiebreak
     );
   }, [prs, sort, maintainersByRepo, usersById, repoNameById]);
-
-  // Row click → the matching Feed rail entry with this PR isolated as the feed filter.
-  // ORDER IS LOAD-BEARING: setActivityRepo clears feedIsolatedPrId, so isolate AFTER it.
-  const showInFeed = (pr: TimelinePr): void => {
-    if (repoScopeId != null) {
-      setRepoConsoleTab(repoScopeId, 'activity');
-      setActivityRepo(repoScopeId);
-    } else {
-      setActivityRepo('feed');
-    }
-    setFeedIsolatedPrId(pr.id);
-    showActivity();
-  };
 
   const openTab = (pr: TimelinePr): void => {
     const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
@@ -317,7 +298,7 @@ export function OpenPrsDetail(): JSX.Element {
         <span className="text-[11px] text-gray-400">
           {scopeLabel} · {rows.length} open
           {draftCount > 0 && ` (${draftCount} draft${draftCount === 1 ? '' : 's'})`} · click a
-          column to sort · click a row to filter its feed
+          column to sort · click a row to open it
         </span>
         <button
           type="button"
@@ -360,7 +341,6 @@ export function OpenPrsDetail(): JSX.Element {
                 <SortHeader col="threads" label="Threads" sort={sort} onSort={onSort} title="Untouched review threads + the state mix" />
                 <SortHeader col="ci" label="CI" sort={sort} onSort={onSort} />
                 <SortHeader col="approval" label="Approval" sort={sort} onSort={onSort} />
-                <th className="pb-1 font-semibold" aria-label="Open in tab" />
               </tr>
             </thead>
             <tbody>
@@ -369,8 +349,8 @@ export function OpenPrsDetail(): JSX.Element {
                 return (
                   <tr
                     key={pr.id}
-                    onClick={() => showInFeed(pr)}
-                    title="Show this PR isolated in its feed"
+                    onClick={() => openTab(pr)}
+                    title={`Open #${pr.number} in its own tab`}
                     className="cursor-pointer border-t border-gray-100 align-top hover:bg-gray-50/70 dark:border-gray-800/60 dark:hover:bg-gray-900/40"
                   >
                     <td className="max-w-md py-1.5 pr-3">
@@ -418,22 +398,6 @@ export function OpenPrsDetail(): JSX.Element {
                     </td>
                     <td className="py-1.5 pr-3">
                       <ApprovalCell pr={pr} />
-                    </td>
-                    <td className="py-1.5">
-                      {/* stopPropagation so the ⧉ opens the tab without also firing the
-                          row's feed navigation. */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openTab(pr);
-                        }}
-                        title={`Open #${pr.number} in its own tab`}
-                        aria-label={`Open PR #${pr.number} in its own tab`}
-                        className="flex items-center px-1 text-gray-400 hover:text-sky-600 dark:hover:text-sky-300"
-                      >
-                        <NewTabIcon size={14} />
-                      </button>
                     </td>
                   </tr>
                 );

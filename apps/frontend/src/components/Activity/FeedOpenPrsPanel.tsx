@@ -40,9 +40,8 @@ function groupOpenPrsByTeam(prs: TimelinePr[], teams: Team[], scope: TeamScope):
 }
 
 // A collapsible panel atop the cross-repo Feed listing the scope's open PRs, grouped by team
-// (see groupOpenPrsByTeam). Collapsed by default (persisted). Clicking a PR isolates the Feed
-// to that PR's items (toggle: click the selected one again to clear); the selected row is
-// highlighted, and FeedView shows the active-filter banner + Clear above the stream.
+// (see groupOpenPrsByTeam). Collapsed by default (persisted). Clicking a PR opens its own
+// pr-detail tab (its Show/Focus links then drive the timeline / feed).
 export function FeedOpenPrsPanel(): JSX.Element | null {
   // Member-AGNOSTIC open PRs (repo scope still applies) — Members is a Timeline-only filter,
   // so the Activity panel must not narrow by it (OpenPrsStrip's useOpenPrs stays member-scoped).
@@ -98,7 +97,7 @@ export function FeedOpenPrsPanel(): JSX.Element | null {
           </span>
         )}
         <span className="ml-auto font-normal normal-case text-gray-400">
-          click a PR to filter the feed
+          click a PR to open it
         </span>
       </button>
 

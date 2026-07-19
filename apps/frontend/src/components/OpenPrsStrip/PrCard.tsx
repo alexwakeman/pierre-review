@@ -5,6 +5,7 @@ import { api } from '../../api/client.js';
 import { Avatar } from '../CommentCard.js';
 import { relativeTime, userLabel } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
+import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { StatusRow } from './StatusRow.js';
 import { ReasonTag } from './ReasonTag.js';
 import { WatchedBadge } from '../WatchedBadge.js';
@@ -20,9 +21,24 @@ export function PrCard({
   repoWatched?: boolean;
   usersById: Map<number, User>;
 }): JSX.Element {
-  const openPrFocused = useFilters((s) => s.openPrFocused);
+  const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const selectedPrId = useFilters((s) => s.selectedPrId);
   const qc = useQueryClient();
+  const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
+  // Clicking a strip card opens the PR's own full-height detail tab (its Show/Focus links then
+  // drive the timeline). NOT fromActivity — the strip lives on the board, not the Activity console.
+  const openTab = (): void => {
+    const meta: TabMeta = {
+      id: pr.id,
+      number: pr.number,
+      title: pr.title,
+      repoFullName,
+      authorLogin: author?.githubLogin ?? null,
+      authorDisplayName: author?.displayName ?? null,
+      authorAvatarUrl: author?.avatarUrl ?? null,
+    };
+    openPrDetailTab(meta);
+  };
   const dismiss = useMutation({
     mutationFn: (id: number) => api.dismissPr(id),
     onSuccess: () => {
@@ -32,7 +48,6 @@ export function PrCard({
       void qc.invalidateQueries({ queryKey: ['me'] });
     },
   });
-  const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
   const myTurn = isMyTurnReason(pr.reasonTag);
   const selected = selectedPrId === pr.id;
   const n = pr.newSinceLastViewed;
@@ -42,9 +57,9 @@ export function PrCard({
     <div
       role="button"
       tabIndex={0}
-      onClick={() => openPrFocused(pr.id)}
+      onClick={openTab}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') openPrFocused(pr.id);
+        if (e.key === 'Enter' || e.key === ' ') openTab();
       }}
       className={`relative flex w-52 shrink-0 cursor-pointer flex-col gap-1 rounded-lg border p-2 text-left transition ${
         selected
