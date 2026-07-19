@@ -388,8 +388,8 @@ function VendorTable({
 
 // The scope-wide "clear the stale-bot backlog" banner — now a compact one-liner: the count +
 // a "Review & resolve" button that opens the resolvable-bot-threads drill-down TAB (the whole
-// review-and-resolve flow lives in BotThreadsDetail). Renders NOTHING until the eager (cheap:
-// a count + ≤500 rows) resolvable query shows ≥1 likely-addressed automated-reviewer thread.
+// review-and-resolve flow lives in BotThreadsDetail). Renders NOTHING until the eager resolvable
+// query (a lean per-PR id-list) shows ≥1 likely-addressed automated-reviewer thread.
 function ResolveBacklogBanner({
   scope,
   repoScope,
@@ -399,15 +399,15 @@ function ResolveBacklogBanner({
 }): JSX.Element | null {
   const { data } = useResolvableBotThreads(true, scope, repoScope);
   const openBotThreadsDetail = useFilters((s) => s.openBotThreadsDetail);
-  const totalEligible = data?.totalEligible ?? 0;
+  const totalThreads = data?.totalThreads ?? 0;
 
-  if (totalEligible === 0) return null;
+  if (totalThreads === 0) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-300/50 bg-sky-50/50 px-3 py-2 text-[12px] dark:border-sky-500/30 dark:bg-sky-950/20">
       <span className="text-sky-700 dark:text-sky-300">🧹</span>
       <span className="font-medium text-sky-800 dark:text-sky-200">
-        {totalEligible} likely-addressed bot thread{totalEligible === 1 ? '' : 's'} look
+        {totalThreads} likely-addressed bot thread{totalThreads === 1 ? '' : 's'} look
         resolved by later commits
       </span>
       <button
@@ -548,7 +548,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
       {/* The resolve-backlog banner sits OUTSIDE the analytics branches: the backlog query is
           windowless, so a stale backlog must surface even when the selected window has zero
           vendor activity (the "No automated-reviewer activity" card) — that's exactly the
-          "clear the old bot noise" case. The banner self-hides at totalEligible === 0. */}
+          "clear the old bot noise" case. The banner self-hides at totalThreads === 0. */}
       <ResolveBacklogBanner scope={scope} repoScope={repoScope} />
       {body}
     </div>

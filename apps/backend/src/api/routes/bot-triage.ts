@@ -2,9 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type {
   BotAnalyticsResponse,
   BotOnlyPrsResponse,
-  BotResolvableThread,
-  BotResolvableThreadGroup,
-  BotResolvableThreadsResponse,
+  ResolvableThreadPrsResponse,
   BotVendorPrsResponse,
   BotMuteRule,
   BotMuteRuleInput,
@@ -22,6 +20,7 @@ import {
   getBotOnlyPrs,
   getBotVendorPrs,
   getBotDedupClusters,
+  getResolvableBotThreadPrs,
   getResolvableBotThreadsForScope,
   listBotMuteRules,
   listDetectedReviewers,
@@ -301,56 +300,19 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     return null;
   });
 
-  // The scope-wide review list: every `likely_addressed` automated-reviewer thread across the
-  // account (or a repo scope), grouped by PR, capped + newest-first, with `totalEligible` so the
-  // UI can say "showing the N most recent". Read-only; the client reviews it before resolving.
+  // The scope-wide review list: every PR with ≥1 `likely_addressed` automated-reviewer thread
+  // across the account (or a repo scope), UNCAPPED, newest-thread-first, each row carrying all
+  // its resolvable thread ids + a bot thread-state mix + `totalThreads` (the whole backlog). The
+  // client sorts / paginates / "Select all"s across pages and chunks the resolve. Read-only.
   app.get('/api/bot-threads/resolvable', { schema: resolvableSchema }, async (req) => {
     const { scope, repoIds } = req.query as { scope?: string; repoIds?: string };
     const accountId = accountIdOf(req);
     const explicit = parseIntList(repoIds);
     const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
-    const { threads, totalEligible, botCountsByPr } = await getResolvableBotThreadsForScope(
-      accountId,
-      scopeRepoIds,
-    );
-
-    // Group by PR, preserving the query's newest-thread-first order (first-seen PR wins the slot).
-    const byPr = new Map<number, BotResolvableThreadGroup>();
-    for (const t of threads) {
-      let g = byPr.get(t.prId);
-      if (!g) {
-        g = {
-          prId: t.prId,
-          prNumber: t.prNumber,
-          prTitle: t.prTitle,
-          repoFullName: t.repoFullName,
-          githubUrl: t.prGithubUrl,
-          authorId: t.authorId,
-          ciStatus: t.ciStatus,
-          openedAt: t.openedAt,
-          updatedAt: t.updatedAt,
-          botThreadCounts: botCountsByPr.get(t.prId) ?? {
-            resolved: 0,
-            likely_addressed: 0,
-            replied_unresolved: 0,
-            untouched: 0,
-          },
-          threads: [],
-        };
-        byPr.set(t.prId, g);
-      }
-      const thread: BotResolvableThread = {
-        threadId: t.threadId,
-        path: t.path,
-        excerpt: t.excerpt,
-        botLabel: t.botLabel,
-      };
-      g.threads.push(thread);
-    }
-    const resp: BotResolvableThreadsResponse = {
-      groups: [...byPr.values()],
-      totalEligible,
-      shown: threads.length,
+    const { prs, totalThreads } = await getResolvableBotThreadPrs(accountId, scopeRepoIds);
+    const resp: ResolvableThreadPrsResponse = {
+      prs,
+      totalThreads,
       generatedAt: new Date().toISOString(),
     };
     return resp;

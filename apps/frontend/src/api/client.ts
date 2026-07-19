@@ -44,7 +44,7 @@ import type {
   BotWindowKind,
   BotAnalyticsResponse,
   BotOnlyPrsResponse,
-  BotResolvableThreadsResponse,
+  ResolvableThreadPrsResponse,
   BotVendorPrsResponse,
   BotDedupResponse,
   BotMuteRule,
@@ -653,7 +653,7 @@ export const api = {
   resolvableBotThreads: (scope?: string, repoIds?: number[] | null) => {
     const r = repoIdsParam(repoIds);
     const s = r ? '' : scopeParam(scope);
-    return get<BotResolvableThreadsResponse>(withQuery('/api/bot-threads/resolvable', s, r));
+    return get<ResolvableThreadPrsResponse>(withQuery('/api/bot-threads/resolvable', s, r));
   },
   // Resolve the explicit reviewed thread ids (server re-derives eligibility ∩ this list). The
   // caller chunks a large selection into ≤500-id POSTs; the response aggregates per chunk.

@@ -6,7 +6,7 @@ import type {
   BotMuteRuleInput,
   BotMuteRulesResponse,
   BotOnlyPrsResponse,
-  BotResolvableThreadsResponse,
+  ResolvableThreadPrsResponse,
   BotWindowKind,
   DetectedReviewersResponse,
   ReviewerClassification,
@@ -148,19 +148,20 @@ export function useDeleteBotMuteRule() {
   });
 }
 
-// The scope-wide review list of every `likely_addressed` automated-reviewer thread (grouped by
-// PR, capped + newest-first, with `totalEligible`). `enabled` gates the fetch (the banner mounts
-// it eagerly — it's a cheap count + ≤500 rows — but the OSS/no-bots path can pass false). No
-// refetchInterval: it refreshes on the resolve invalidation, not a poll. The query key MUST
-// namespace the scope slot (`repo:` vs `scope:`) exactly like useBotAnalytics — a bare repoId and
-// a numeric teamId are both plain integer strings and would otherwise collide.
+// The scope-wide review list — every PR with ≥1 `likely_addressed` automated-reviewer thread
+// (grouped by PR, UNCAPPED, newest-thread-first, each carrying its full resolvable-thread-id
+// list + `totalThreads`). `enabled` gates the fetch (the banner mounts it eagerly — the OSS/no-
+// bots path can pass false). No refetchInterval: it refreshes on the resolve invalidation, not a
+// poll. The query key MUST namespace the scope slot (`repo:` vs `scope:`) exactly like
+// useBotAnalytics — a bare repoId and a numeric teamId are both plain integer strings and would
+// otherwise collide.
 export function useResolvableBotThreads(
   enabled = true,
   scope?: string,
   repoIds?: number[] | null,
 ) {
   const repoKey = repoIds && repoIds.length > 0 ? [...repoIds].sort((a, b) => a - b).join(',') : null;
-  return useQuery<BotResolvableThreadsResponse>({
+  return useQuery<ResolvableThreadPrsResponse>({
     queryKey: ['bot-resolvable', repoKey != null ? `repo:${repoKey}` : `scope:${scope ?? 'all'}`],
     queryFn: () => api.resolvableBotThreads(scope, repoIds),
     enabled,
@@ -171,13 +172,14 @@ export function useResolvableBotThreads(
 // Resolve a whole reviewed thread-id list scope-wide. One long request would sit for minutes on
 // hundreds of GraphQL mutations, so the list is CHUNKED into ≤RESOLVE_CHUNK_SIZE sequential POSTs;
 // each chunk's outcome is aggregated and `onProgress` fires after it so the UI can stream
-// "Resolving… X/Y". The server re-derives eligibility per chunk (never blind); a chunk that
-// resolves nothing still counts toward progress. onSettled invalidates every surface a resolve
-// shifts (the review list, the analytics/PR lists, the feed).
+// "Resolving… X/Y". A `shouldStop` predicate is checked BEFORE each chunk so a long resolve-all
+// can be halted between chunks (clean — never mid-chunk). The server re-derives eligibility per
+// chunk (never blind); a chunk that resolves nothing still counts toward progress. onSettled
+// invalidates every surface a resolve shifts (the review list, the analytics/PR lists, the feed).
 export function useScopeResolveBotThreads() {
   const qc = useQueryClient();
   return useMutation<
-    { resolved: number; failed: number },
+    { resolved: number; failed: number; stopped: boolean },
     Error,
     {
       threadIds: number[];
@@ -186,14 +188,21 @@ export function useScopeResolveBotThreads() {
       // its cached PR detail invalidated so the Threads tab reflects the resolves.
       prIds?: number[];
       onProgress?: (done: number, total: number, resolved: number, failed: number) => void;
+      // Checked before each chunk — returning true halts the run cleanly between chunks.
+      shouldStop?: () => boolean;
     }
   >({
-    mutationFn: async ({ threadIds, repoIds, onProgress }) => {
+    mutationFn: async ({ threadIds, repoIds, onProgress, shouldStop }) => {
       const total = threadIds.length;
       let resolved = 0;
       let failed = 0;
       let done = 0;
+      let stopped = false;
       for (let i = 0; i < threadIds.length; i += RESOLVE_CHUNK_SIZE) {
+        if (shouldStop?.()) {
+          stopped = true;
+          break;
+        }
         const chunk = threadIds.slice(i, i + RESOLVE_CHUNK_SIZE);
         const res = await api.scopeResolveBotThreads({
           threadIds: chunk,
@@ -204,7 +213,7 @@ export function useScopeResolveBotThreads() {
         done += chunk.length;
         onProgress?.(done, total, resolved, failed);
       }
-      return { resolved, failed };
+      return { resolved, failed, stopped };
     },
     onSettled: (_data, _err, vars) => {
       void qc.invalidateQueries({ queryKey: ['bot-resolvable'] });

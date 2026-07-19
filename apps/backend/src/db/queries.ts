@@ -56,6 +56,7 @@ import type {
   InsightsResponse,
   InsightsTimePoint,
   RepoAnalytics,
+  ResolvableThreadPr,
   ReviewerLoadSeries,
   SizeCyclePoint,
   SizeCycleBucket,
@@ -5989,6 +5990,86 @@ export async function getResolvableBotThreadsForScope(
     botLabel: botLabelFor(r.commenterId),
   }));
   return { threads, totalEligible, botCountsByPr };
+}
+
+// The UNCAPPED, PR-centric listing for the "review & clear the stale-bot backlog" tab. Same
+// eligibility predicate as getResolvableBotThreadsForScope (owned + automated-reviewer-originated
+// + `likely_addressed` + unresolved + carries a node id), grouped by PR, with EVERY resolvable
+// thread id per PR (no page cap) + the bot-only thread-state mix. The client sorts, paginates,
+// and "Select all"s across the whole backlog; the resolve is chunked into ≤cap-per-POST requests
+// (getResolvableBotThreadsForScope re-derives eligibility for each chunk). No excerpts/labels —
+// the compact rows don't render per-thread detail, so this stays a lean id-list query even at
+// thousands of threads. Account-scoped (binds pullRequests.accountId).
+export async function getResolvableBotThreadPrs(
+  accountId: number,
+  scopeRepoIds: number[] | null = null,
+): Promise<{ prs: ResolvableThreadPr[]; totalThreads: number }> {
+  if (scopeRepoIds != null && scopeRepoIds.length === 0) return { prs: [], totalThreads: 0 };
+  const botIds = await automatedReviewerUserIds(accountId);
+  if (botIds.length === 0) return { prs: [], totalThreads: 0 };
+
+  const preds = [
+    eq(pullRequests.accountId, accountId),
+    inArray(reviewThreads.originalCommenterId, botIds),
+    eq(reviewThreads.derivedState, 'likely_addressed'),
+    eq(reviewThreads.isResolved, false),
+    isNotNull(reviewThreads.githubNodeId),
+  ];
+  if (scopeRepoIds != null) preds.push(inArray(pullRequests.repoId, scopeRepoIds));
+
+  const rows = await db
+    .select({
+      threadId: reviewThreads.id,
+      prId: pullRequests.id,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      repoId: pullRequests.repoId,
+      authorId: pullRequests.authorId,
+      ciStatus: pullRequests.ciStatus,
+      openedAt: pullRequests.openedAt,
+      updatedAt: pullRequests.updatedAt,
+      owner: repos.owner,
+      name: repos.name,
+    })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(and(...preds))
+    .orderBy(desc(reviewThreads.createdAt), desc(reviewThreads.id))
+    .execute();
+
+  // Group by PR, preserving newest-thread-first order (first-seen PR wins the slot).
+  const byPr = new Map<number, ResolvableThreadPr>();
+  for (const r of rows) {
+    let g = byPr.get(r.prId);
+    if (!g) {
+      const full = `${r.owner}/${r.name}`;
+      g = {
+        prId: r.prId,
+        prNumber: r.prNumber,
+        prTitle: r.prTitle,
+        repoId: r.repoId,
+        repoFullName: full,
+        githubUrl: `https://github.com/${full}/pull/${r.prNumber}`,
+        authorId: r.authorId,
+        ciStatus: (r.ciStatus ?? 'unknown') as CiStatus,
+        openedAt: r.openedAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+        botThreadCounts: emptyCounts(),
+        resolvableCount: 0,
+        threadIds: [],
+      };
+      byPr.set(r.prId, g);
+    }
+    g.threadIds.push(r.threadId);
+    g.resolvableCount += 1;
+  }
+
+  const prIds = [...byPr.keys()];
+  const counts = await buildBotThreadCounts(prIds, botIds);
+  for (const [prId, g] of byPr) g.botThreadCounts = counts.get(prId) ?? emptyCounts();
+
+  return { prs: [...byPr.values()], totalThreads: rows.length };
 }
 
 export async function getThreadWriteContext(

@@ -355,37 +355,33 @@ export interface BotTuningSuggestion {
 // checkboxes, then resolves the checked ones. Same sacred contract as the per-PR path: the
 // server ALWAYS re-derives eligibility ∩ the client's explicit ids (never blind), only
 // `likely_addressed` + unresolved, per-thread failures don't abort the batch, resolutions logged.
-// The thread GitHub node id is NOT shipped — the client only needs to identify + label a thread.
-export interface BotResolvableThread {
-  threadId: number;
-  path: string;
-  excerpt: string | null;  // earliest root-comment preview (one dim line)
-  botLabel: string;        // the originating reviewer's label ("CodeRabbit" | "Pierre · Claude" | login…)
-}
-// The resolvable threads on ONE PR (the review list groups by PR). Carries enough PR context
-// for a compact one-line row (author / CI / age / a bot thread-state summary) so the list no
-// longer needs to enumerate every thread — the thread ids stay in `threads` for the resolve.
-export interface BotResolvableThreadGroup {
+// The thread GitHub node ids are NOT shipped — the client only carries the integer thread ids
+// (the resolve re-derives node ids server-side). One row PER PR: enough context for a sortable
+// tabular row (author / CI / age / last-update / a bot thread-state mix) plus the FULL list of
+// this PR's resolvable thread ids. UNCAPPED — every eligible PR + all its resolvable ids come
+// back so the client can sort, paginate, and "Select all" (resolve the entire backlog) across
+// pages; the resolve itself is client-chunked into ≤500-id POSTs.
+export interface ResolvableThreadPr {
   prId: number;
   prNumber: number;
   prTitle: string;
+  repoId: number;      // for the cross-repo repo filter
   repoFullName: string;
   githubUrl: string;
   authorId: number | null;
   ciStatus: CiStatus;
   openedAt: string; // ISO-8601 — the PR age
-  updatedAt: string; // ISO-8601
-  // The PR's FULL review-thread state mix RESTRICTED to automated-reviewer threads (the "review
-  // bots" framing) — uncapped per-PR context. `threads` below carries only the RESOLVABLE subset
-  // actually returned (globally capped when the backlog is large), so `threads.length` ≤
-  // `botThreadCounts.likely_addressed` and is the count this row's resolve acts on.
+  updatedAt: string; // ISO-8601 — last activity
+  // The PR's FULL review-thread state mix RESTRICTED to automated-reviewer threads (context).
   botThreadCounts: ThreadStateCounts;
-  threads: BotResolvableThread[];
+  // Every RESOLVABLE (likely_addressed + unresolved) automated-reviewer thread id on this PR.
+  // resolvableCount === threadIds.length === botThreadCounts.likely_addressed (uncapped now).
+  resolvableCount: number;
+  threadIds: number[];
 }
-export interface BotResolvableThreadsResponse {
-  groups: BotResolvableThreadGroup[]; // PRs with ≥1 resolvable bot thread, newest-thread-first
-  totalEligible: number;              // UN-capped eligible count (may exceed `shown`)
-  shown: number;                      // threads actually returned (capped page size)
+export interface ResolvableThreadPrsResponse {
+  prs: ResolvableThreadPr[]; // every PR with ≥1 resolvable bot thread, newest-thread-first
+  totalThreads: number;      // sum of resolvableCount across all PRs (the whole backlog)
   generatedAt: string;
 }
 // POST body for the scope-wide resolve: the explicit reviewed thread-id list (required; ≤500 per
