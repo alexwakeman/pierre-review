@@ -345,7 +345,7 @@ file maps to a `client.ts` method.
 | `GET /api/prs/:id/bot-dedup` | **cross-bot dedup** (CORE): automated-reviewer threads grouped by `(path, line±window)` across distinct kinds → consensus/conflict clusters → `BotDedupResponse` |
 | `GET /api/bot-analytics/bot-only-prs?window&scope&repoIds` | the exact PR list behind `totals.botOnlyPrs` ("only a bot reviewed these") — same window/scope resolution as the analytics count so caption ≡ list → `BotOnlyPrsResponse` (CORE; BotsView's amber caption now opens the `bot-only-prs` drill-down TAB — the count is a review-state SNAPSHOT of open PRs, unwindowed by design) |
 | `GET /api/bot-analytics/vendor/:key/prs?window&scope&repoIds` | per-REVIEWER Bot-PRs drill-down; `key` = the analytics row identity `u<userId>` \| `'pierre'` (invalid → 400) → `BotVendorPrsResponse` (+`key`/`login`). Replaced the old kind-keyed `/:kind/prs` (removed — two in-house bots no longer merge) |
-| `GET /api/bot-threads/resolvable?scope&repoIds` · `POST /api/bot-threads/resolve {threadIds,repoIds?}` | **scope-wide review & resolve** of `likely_addressed` bot threads (CORE): grouped-by-PR review list (capped 500 newest + uncapped `totalEligible`) · confirm-gated resolve that RE-DERIVES eligibility ∩ the explicit ids (cap bypassed on that path; never blind; shares `resolveThreadsOnGitHub`); client chunks 25 ids/POST for progress. BotRoiPanel's `ResolveBacklogBanner` is now a one-liner opening the `bot-threads` drill-down TAB, which owns the whole review-and-resolve flow + per-thread navigation |
+| `GET /api/bot-threads/resolvable?scope&repoIds` · `POST /api/bot-threads/resolve {threadIds,repoIds?}` | **scope-wide review & resolve** of `likely_addressed` bot threads (CORE): grouped-by-PR review list (capped 500 newest + uncapped `totalEligible`) · confirm-gated resolve that RE-DERIVES eligibility ∩ the explicit ids (cap bypassed on that path; never blind; shares `resolveThreadsOnGitHub`); client chunks 25 ids/POST for progress. The grouped-by-PR list is a COMPACT per-PR row (author/CI/age + a bot-only `botThreadCounts` state mix + an `authorId`/`ciStatus`/`openedAt`/`updatedAt`-enriched group), the resolve action pinned to the TOP with per-PR exclusion checkboxes. **`botThreadCounts` is the PR's FULL (uncapped) bot thread mix; `group.threads` is the globally-capped resolvable subset — `threads.length` ≤ `botThreadCounts.likely_addressed`, and the "N to resolve" chip reads `threads.length` (what the row actually resolves), NOT the count.** BotRoiPanel's `ResolveBacklogBanner` is a one-liner opening the `bot-threads` drill-down TAB; clicking a PR row opens its detail Threads tab with the `likely_addressed` state pill preset (not back to the Bots pane) |
 | `GET·POST·DELETE /api/bot-mute-rules` | **Bot-Triage** mute/auto-triage rules (CORE; `bot_mute_rules`) |
 | `GET /api/open-prs?repoIds&userIds` | currently-open PRs (ignores date range) |
 | `GET /api/threads/:id` | single thread detail |
@@ -549,7 +549,14 @@ Header carries **Show** + **Focus** links (drive the timeline). Three tabs:
   each with a "Show" link.
 - **Threads** — `ThreadList`/`ThreadView`: review threads grouped by file, **newest first**
   (files by most-recent thread; within a file by `createdAt` desc), with code anchors +
-  new-comment highlights; each has a "Show" link.
+  new-comment highlights; each has a "Show" link. A sticky header carries **derived-state filter
+  pills** (Untouched/Replied/Likely-addressed/Resolved, `store.threadStateFilter: Set<DerivedState>`)
+  ANDed with the vendor `threadBotFilter`; the pills' badge counts come from the full loaded set
+  (stable), and the bulk "Resolve N addressed" set is derived from the full list (independent of
+  the visible filter). Arriving from the `bot-threads` tab presets `{likely_addressed}` via
+  `openPrThreadsFiltered`. **Landmine:** `threadStateFilter` is a GLOBAL store field reset only in
+  the selection actions — PrDetail applies it only when `selectedPrId === prId` (mirroring App's
+  `selectedThreadId` guard) so a PR opened via `openPrDetailTab` doesn't inherit a stale preset.
 - **Activity** — a chronological feed (**newest first**) of opens / commits / reviews /
   comments / merge-close, each with a "Show on timeline" action. A timeline **commit**
   ("View in Activity") or **review** ("Open in detail pane") popover deep-links here via the
