@@ -922,6 +922,11 @@ export interface TimelinePr {
   closedAt: string | null;
   updatedAt: string;
   threadCounts: ThreadStateCounts;
+  // Diff size (synced pull_requests columns, not hydrated) — the open-PR drill-down's
+  // LoC column. Three small ints, cheap enough to ride the lean timeline payload.
+  additions: number;
+  deletions: number;
+  changedFiles: number;
   // v1.1 triage fields
   ciStatus: CiStatus;
   mergeable: Mergeable;

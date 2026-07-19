@@ -50,6 +50,7 @@ export function FeedOpenPrsPanel(): JSX.Element | null {
   const { data: teams } = useTeams();
   const { data: users } = useUsers();
   const teamScope = useFilters((s) => s.teamScope);
+  const openOpenPrsDetail = useFilters((s) => s.openOpenPrsDetail);
   const collapsed = useFeedOpenPrsPanel((s) => s.collapsed);
   const toggleCollapsed = useFeedOpenPrsPanel((s) => s.toggle);
   const maintainersByRepo = useMaintainersByRepo();
@@ -115,6 +116,7 @@ export function FeedOpenPrsPanel(): JSX.Element | null {
                 prs={g.prs}
                 usersById={usersById}
                 keyPrefix={`${g.teamId ?? 'none'}:`}
+                onShowAll={() => openOpenPrsDetail('feed')}
               />
             </div>
           ))}

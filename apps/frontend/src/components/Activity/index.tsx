@@ -161,7 +161,7 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
               digest (in the header) and above the open-PR list. */}
           <RepoInsightsPanel repoId={repo.repoId} repoFullName={repo.repoFullName} />
           {/* All the repo's open PRs (at-a-glance metrics) BEFORE its activity feed. */}
-          <RepoOpenPrList prs={repo.prs} />
+          <RepoOpenPrList repoId={repo.repoId} prs={repo.prs} />
           <FeedView repoId={repo.repoId} />
         </>
       ) : (

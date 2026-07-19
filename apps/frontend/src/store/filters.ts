@@ -179,6 +179,11 @@ export interface FilterState {
   // drill-down stays scoped to that repo. null = account/team scope (the cross-repo Bots rail).
   botPrsFocusRepoId: number | null;
 
+  // transient: the scope the all-open-PRs drill-down tab lists — a repoId (that repo's open
+  // PRs) or 'feed' (the FilterBar-visible scope). Read (not consumed) for the tab's lifetime,
+  // like botPrsFocusRepoId; only reset when the next drill-down opens. null = never opened.
+  openPrsScope: number | 'feed' | null;
+
   // open PRs strip
   stripCollapsed: boolean;
   stripFilter: StripFilter;
@@ -368,6 +373,10 @@ export interface FilterState {
   // BotPrsDetail consumes it.
   openBotPrsDetail: (key: string, repoId?: number | null) => void;
   consumeBotPrsFocus: () => void;
+  // Open (or re-focus) the sortable all-open-PRs drill-down tab on a scope (a repoId | the
+  // FilterBar-visible 'feed' scope). Sets the openPrsScope seed + opens the singleton tab;
+  // OpenPrsDetail reads (never consumes) the seed.
+  openOpenPrsDetail: (scope: number | 'feed') => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
   // records the added repo id so the modal can scope to just that repo.
@@ -537,6 +546,7 @@ function freshDefaults(): FilterData {
     metricsFocus: null,
     botPrsFocusKey: null,
     botPrsFocusRepoId: null,
+    openPrsScope: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
@@ -728,6 +738,10 @@ export const useFilters = create<FilterState>((set, get) => ({
     usePinnedTabs.getState().openBotPrsTab({ fromActivity: true });
   },
   consumeBotPrsFocus: () => set({ botPrsFocusKey: null }),
+  openOpenPrsDetail: (scope) => {
+    set({ openPrsScope: scope });
+    usePinnedTabs.getState().openOpenPrsTab({ fromActivity: true });
+  },
   requestSyncModal: (repoId: number) =>
     set((s) => ({ syncModalSignal: s.syncModalSignal + 1, syncModalRepoId: repoId })),
   bumpClaudeReviewKickoff: () =>

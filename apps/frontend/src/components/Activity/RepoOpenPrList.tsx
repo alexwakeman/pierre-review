@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { Repo, TimelinePr, User } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
@@ -19,9 +19,9 @@ import { Avatar } from '../CommentCard.js';
 import { NewTabIcon } from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 
-// How many open-PR rows to reveal at a time (initial page + each "Show more" step). Keeps a
-// busy repo's list scannable — the sort floats maintainer + most-recently-active PRs to the
-// first page, the rest are one click away.
+// How many open-PR rows the inline lists show. Keeps a busy repo's list scannable — the sort
+// floats maintainer + most-recently-active PRs onto the visible slice; the full, sortable
+// list lives in the all-open-PRs drill-down tab (the "Show all" footer → onShowAll).
 const OPEN_PRS_PAGE = 10;
 
 // One open-PR row: CI dot · ⚠ needs-attention · #number title · author · draft / approval /
@@ -143,25 +143,28 @@ export function OpenPrRow({
   );
 }
 
-// A paginated <ul> of open-PR rows, shared by the per-repo list and the cross-repo Feed
-// panel (one instance per team group). `prs` must ALREADY be sorted by the caller
-// (sortOpenPrsByActivity). Reveals OPEN_PRS_PAGE rows at a time via a "Show N more" footer;
-// clicking a row isolates the feed to that PR (toggle). `keyPrefix` keeps React keys unique
-// when the same PR appears under multiple team groups.
+// A <ul> of the first OPEN_PRS_PAGE open-PR rows, shared by the per-repo list and the
+// cross-repo Feed panel (one instance per team group). `prs` must ALREADY be sorted by the
+// caller (sortOpenPrsByActivity). Anything beyond the first page lives in the all-open-PRs
+// drill-down tab — the footer's "Show all N" calls `onShowAll` (the caller opens the tab with
+// its own scope). Clicking a row isolates the feed to that PR (toggle). `keyPrefix` keeps
+// React keys unique when the same PR appears under multiple team groups.
 export function OpenPrRows({
   prs,
   usersById,
   keyPrefix = '',
+  onShowAll,
 }: {
   prs: TimelinePr[];
   usersById: Map<number, User>;
   keyPrefix?: string;
+  // Open the sortable all-open-PRs drill-down for this list's scope (a repo | 'feed').
+  onShowAll: () => void;
 }): JSX.Element {
   const { data: repos } = useRepos();
   const isolatedPrId = useFilters((s) => s.feedIsolatedPrId);
   const setIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  const [visible, setVisible] = useState(OPEN_PRS_PAGE);
 
   const reposById = useMemo(() => {
     const m = new Map<number, Repo>();
@@ -187,7 +190,7 @@ export function OpenPrRows({
     [reposById, openPrDetailTab],
   );
 
-  const shown = prs.slice(0, visible);
+  const shown = prs.slice(0, OPEN_PRS_PAGE);
   const remaining = prs.length - shown.length;
 
   return (
@@ -210,11 +213,11 @@ export function OpenPrRows({
       {remaining > 0 && (
         <button
           type="button"
-          onClick={() => setVisible((v) => v + OPEN_PRS_PAGE)}
+          onClick={onShowAll}
           className="flex w-full items-center justify-center gap-1 border-t border-gray-100 px-3 py-1.5 text-[11px] font-medium text-sky-600 hover:bg-gray-50 dark:border-gray-800/70 dark:text-sky-400 dark:hover:bg-gray-800/40"
         >
-          Show {Math.min(OPEN_PRS_PAGE, remaining)} more
-          <span className="text-gray-400">· {remaining} remaining</span>
+          Show all {prs.length} open PRs
+          <span className="text-gray-400">· sortable</span>
         </button>
       )}
     </>
@@ -227,11 +230,18 @@ export function OpenPrRows({
 // (maintainer-authored first, then recency, then volume) and paginated (OpenPrRows).
 // Clicking a PR ISOLATES the repo's feed to that PR (toggle: click the selected one again to
 // clear), so this list doubles as the repo feed's per-PR filter.
-export function RepoOpenPrList({ prs }: { prs: TimelinePr[] }): JSX.Element | null {
+export function RepoOpenPrList({
+  repoId,
+  prs,
+}: {
+  repoId: number;
+  prs: TimelinePr[];
+}): JSX.Element | null {
   const { data: users } = useUsers();
   const maintainersByRepo = useMaintainersByRepo();
   const collapsed = useRepoOpenPrsPanel((s) => s.collapsed);
   const toggleCollapsed = useRepoOpenPrsPanel((s) => s.toggle);
+  const openOpenPrsDetail = useFilters((s) => s.openOpenPrsDetail);
   const usersById = useMemo(() => indexUsers(users), [users]);
 
   const sorted = useMemo(
@@ -274,7 +284,11 @@ export function RepoOpenPrList({ prs }: { prs: TimelinePr[] }): JSX.Element | nu
       </button>
       {!collapsed && (
         <div className="border-t border-gray-200 dark:border-gray-800">
-          <OpenPrRows prs={sorted} usersById={usersById} />
+          <OpenPrRows
+            prs={sorted}
+            usersById={usersById}
+            onShowAll={() => openOpenPrsDetail(repoId)}
+          />
         </div>
       )}
     </div>

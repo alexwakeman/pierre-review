@@ -12,6 +12,16 @@ const MetricsIcon = (
     <line x1="20" y1="20" x2="20" y2="9" />
   </svg>
 );
+// A git-pull-request glyph for the all-open-PRs drill-down chip.
+const OpenPrsIcon = (
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="6" cy="6" r="3" />
+    <circle cx="6" cy="18" r="3" />
+    <line x1="6" y1="9" x2="6" y2="15" />
+    <circle cx="18" cy="18" r="3" />
+    <path d="M18 15V9a3 3 0 0 0-3-3h-3" />
+  </svg>
+);
 
 function TabChip({ tab }: { tab: Tab }): JSX.Element {
   const active = usePinnedTabs((s) => s.activeTab === tab.key);
@@ -97,6 +107,49 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
           className="shrink-0 self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
           title="Close this tab"
           aria-label="Close bot-PRs tab"
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
+
+  // The all-open-PRs drill-down is a non-PR, singleton tab — a compact chip (no PR meta).
+  if (tab.kind === 'open-prs') {
+    return (
+      <div
+        role="presentation"
+        className={`group flex shrink-0 items-center gap-1 rounded-t-md border border-b-0 pl-2 pr-1 ${
+          active
+            ? 'border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950'
+            : 'border-transparent bg-transparent hover:bg-gray-200/60 dark:hover:bg-gray-800/60'
+        }`}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={active}
+          onClick={() => setActiveTab(tab.key)}
+          className="flex items-center gap-1.5 py-1.5 text-left"
+          title="Open PRs — sortable drill-down"
+        >
+          <span aria-hidden="true" className="shrink-0 text-sky-500">
+            {OpenPrsIcon}
+          </span>
+          <span
+            className={`text-xs font-medium ${
+              active ? 'text-sky-600 dark:text-sky-400' : 'text-gray-600 dark:text-gray-300'
+            }`}
+          >
+            Open PRs
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => closeTab(tab.key)}
+          className="shrink-0 self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+          title="Close this tab"
+          aria-label="Close open-PRs tab"
         >
           ✕
         </button>
