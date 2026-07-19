@@ -32,6 +32,7 @@ function feedSearch(
   allowedBotIds: number[],
   prId: number | null,
   botsOnly: boolean,
+  botWindowDays: number | null,
 ): string {
   const p = new URLSearchParams();
   if (repoIds && repoIds.length > 0) p.set('repoIds', repoIds.join(','));
@@ -46,6 +47,9 @@ function feedSearch(
   }
   // The Bots pane's bot-only feed — filtered to automated reviewers server-side, before the cap.
   if (botsOnly) p.set('botsOnly', 'true');
+  // Bot-only feed window (days), following the analytics window selector. Only meaningful —
+  // and only emitted — alongside botsOnly (the server ignores it otherwise).
+  if (botsOnly && botWindowDays != null) p.set('botWindowDays', String(botWindowDays));
   return p.toString();
 }
 
@@ -65,6 +69,7 @@ export function useConsolidatedFeed(opts: {
   allowedBotIds?: number[];
   prId?: number | null;
   botsOnly?: boolean;
+  botWindowDays?: number | null;
   enabled?: boolean;
 }) {
   const search = feedSearch(
@@ -74,6 +79,7 @@ export function useConsolidatedFeed(opts: {
     opts.allowedBotIds ?? [],
     opts.prId ?? null,
     opts.botsOnly ?? false,
+    opts.botWindowDays ?? null,
   );
   const query = useInfiniteQuery<ConsolidatedFeedResponse>({
     queryKey: ['consolidated-feed', search],
@@ -142,6 +148,7 @@ export function useFeedHasNew(opts: {
   allowedBotIds?: number[];
   prId?: number | null;
   botsOnly?: boolean;
+  botWindowDays?: number | null;
   loadedLatestId: string | null;
   loadedTotal: number;
   // True once the loaded feed has finished its initial load, so we can distinguish "empty
@@ -158,6 +165,7 @@ export function useFeedHasNew(opts: {
     opts.allowedBotIds ?? [],
     opts.prId ?? null,
     opts.botsOnly ?? false,
+    opts.botWindowDays ?? null,
   );
   const head = useQuery<ConsolidatedFeedResponse>({
     queryKey: ['feed-head', search],

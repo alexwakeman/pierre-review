@@ -220,6 +220,12 @@ export interface BotVendorAnalytics {
   verdict: BotVerdict;
   costMonthlyUsd: number | null;
   costPerActedOnUsd: number | null;
+  // Zero window activity (no threads, comments, OR submitted reviews in the window) — the row
+  // survives on its 12-week trend so a paused/quiet bot doesn't silently vanish from the table.
+  dormant: boolean;
+  // Most recent activity (thread opened / review comment / review submitted) across the
+  // 12-week trend span; ISO. Null when nothing in the span carried a timestamp.
+  lastActiveAt: string | null;
   trend: BotVendorTrendPoint[];   // ≤12 weekly points, oldest→newest
 }
 export interface BotAnalyticsResponse {

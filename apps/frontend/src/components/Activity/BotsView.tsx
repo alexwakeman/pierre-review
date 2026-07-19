@@ -72,7 +72,12 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
             <span className="flex-1">
               🤖 Only a bot reviewed{' '}
               <span className="font-semibold tabular-nums">{botOnly}</span> PR
-              {botOnly === 1 ? '' : 's'} — no human review. Consider a human pass before these ship.
+              {botOnly === 1 ? '' : 's'} — no human review. Consider a human pass before these ship.{' '}
+              {/* Snapshot disclaimer — must be visible PRE-expansion (the count is a PR-state
+                  snapshot, not a feed-window event count). */}
+              <span className="text-amber-600/80 dark:text-amber-400/70">
+                Counted by review state — may predate the window.
+              </span>
             </span>
             <span className="shrink-0 self-center text-[10px] font-medium underline underline-offset-2">
               {expanded ? 'Hide' : `Show ${botOnly === 1 ? 'PR' : 'list'}`}
@@ -82,8 +87,8 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           {expanded && (
             <div className="mt-2 space-y-1 border-t border-amber-200 pt-2 dark:border-amber-800/60">
               <p className="text-[10px] text-amber-600/90 dark:text-amber-400/80">
-                Counted by review state, so these can predate the feed window below — use{' '}
-                <span className="font-medium">Show in feed</span> to isolate a PR and bypass it.
+                Use <span className="font-medium">Show in feed</span> to isolate a PR — that
+                bypasses the feed window below.
               </p>
 
               {isLoading && (

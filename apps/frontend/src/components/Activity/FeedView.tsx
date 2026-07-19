@@ -272,6 +272,18 @@ export function FeedView({
     }
   }, [repoId, botsMode, markFeedSeen]);
 
+  // Bots pane: the feed window follows the analytics window selector (shared store field),
+  // using the SAME window→days mapping as getBotAnalytics (rolling_7=7, rolling_30=30, else —
+  // incl. sprint — 14). Null outside botsMode so normal feeds keep their default window.
+  const botAnalyticsWindow = useFilters((s) => s.botAnalyticsWindow);
+  const botWindowDays = botsMode
+    ? botAnalyticsWindow === 'rolling_7'
+      ? 7
+      : botAnalyticsWindow === 'rolling_30'
+        ? 30
+        : 14
+    : null;
+
   // Members + the header exclude-bots toggle/allow-list are TIMELINE-only filters — the feed
   // never sends them (userIds → null, excludeBots/allowedBotIds omitted). Bot filtering here
   // is Activity-native only: the feedBotLens pills (client-side) and botsMode (server-side).
@@ -295,6 +307,7 @@ export function FeedView({
       // Bot pane: the backend filters to automated reviewers IN SQL (before the cap), so the
       // feed spans the full window of bot activity instead of a bot-slice of a capped page.
       botsOnly: botsMode,
+      botWindowDays,
     });
 
   // "New activity" detector: poll the server head for this exact scope and compare to what's
@@ -306,6 +319,7 @@ export function FeedView({
     userIds: null,
     prId: isolatedPrId,
     botsOnly: botsMode,
+    botWindowDays,
     loadedLatestId: latestId,
     loadedTotal: total,
     feedSettled: !isLoading,

@@ -45,10 +45,17 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       excludeBots?: string;
       allowBotIds?: string;
       botsOnly?: string;
+      botWindowDays?: string;
     };
     const limit = q.limit != null ? Number(q.limit) : null;
     const offset = q.offset != null ? Number(q.offset) : 0;
     const prId = q.prId != null ? Number(q.prId) : null;
+    // Bot-only feed window (days) — clamped to 1..90; only honored on the botsOnly path.
+    const botWindowDaysRaw = q.botWindowDays != null ? Number(q.botWindowDays) : null;
+    const botWindowDays =
+      botWindowDaysRaw != null && Number.isFinite(botWindowDaysRaw)
+        ? Math.min(90, Math.max(1, Math.trunc(botWindowDaysRaw)))
+        : null;
     return getConsolidatedFeed(accountIdOf(req), {
       repoIds: parseIntList(q.repoIds),
       userIds: parseIntList(q.userIds),
@@ -58,6 +65,7 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       excludeBots: q.excludeBots === 'true',
       allowBotIds: parseIntList(q.allowBotIds),
       botsOnly: q.botsOnly === 'true',
+      botWindowDays,
     });
   });
 

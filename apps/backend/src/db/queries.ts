@@ -2066,6 +2066,10 @@ export interface ConsolidatedFeedFilters {
   // Claude items (not review-bot activity), ignores excludeBots, and uses a higher cap. The
   // caller should also drop the member (userIds) filter (bots aren't members).
   botsOnly?: boolean;
+  // Bot-only feed window override (days) so the bot feed follows the analytics window
+  // selector. Applied ONLY on the botsOnly path; absent/null → the default 14. The route
+  // clamps it to 1..90.
+  botWindowDays?: number | null;
   // Pagination over the merged, chronologically-sorted stream. `limit` omitted → the
   // whole stream (legacy). The response `total` is the full count so the client knows
   // when to stop "Load more". Only the returned page is enriched (merge/review credit)
@@ -3651,6 +3655,7 @@ export async function getConsolidatedFeed(
     excludeBots = false,
     allowBotIds = null,
     botsOnly = false,
+    botWindowDays = null,
   } = opts;
 
   // Restrict to the account's WATCHED repos; a passed repoIds narrows within them. An
@@ -3717,7 +3722,15 @@ export async function getConsolidatedFeed(
     };
   }
   const [feed, commitItems, claudeItems] = await Promise.all([
-    getFeed(accountId, { daysBefore: 14, prId, repoIds: effectiveRepoIds, userIds, botActorIds }),
+    // The bot-only feed follows the analytics window selector (botWindowDays); every other
+    // view keeps the rolling 14 days.
+    getFeed(accountId, {
+      daysBefore: botsOnly && botWindowDays != null ? botWindowDays : 14,
+      prId,
+      repoIds: effectiveRepoIds,
+      userIds,
+      botActorIds,
+    }),
     // Commit-push activity that ADDRESSED a review thread (the only commit rows we surface
     // — plain pushes are noise). Each carries the affected threads inline. Skipped in the
     // bot-only feed (a commit push is the AUTHOR responding, not review-bot activity).
@@ -7099,12 +7112,22 @@ export async function getBotAnalytics(
     return a;
   };
 
+  // Last activity per reviewer across the trend span (thread opened / review comment /
+  // submitted review) — context on every row, and what `dormant` is relative to. Bumped even
+  // for hide-muted threads (muting drops counts, not the fact the bot was active).
+  const lastActiveMsByUser = new Map<number, number>();
+  const bumpLastActive = (userId: number, ms: number): void => {
+    const cur = lastActiveMsByUser.get(userId);
+    if (cur == null || ms > cur) lastActiveMsByUser.set(userId, ms);
+  };
+
   // Trend (12 weekly buckets, oldest→newest) uses the full 12-week span.
   const windowThreads: { id: number; userId: number; kind: AutomatedReviewerKind; path: string; state: DerivedState; createdAt: Date }[] = [];
   for (const t of threadRows) {
     if (t.userId == null) continue;
     const kind = kindMap.get(t.userId);
     if (!kind) continue;
+    bumpLastActive(t.userId, t.createdAt.getTime());
     if (isHidden(t, kind)) continue;
     const acc = accFor(t.userId, kind);
     const acted = t.state === 'resolved' || t.state === 'likely_addressed';
@@ -7180,16 +7203,17 @@ export async function getBotAnalytics(
     if (baseActed || humanFollowSet.has(t.id)) accFor(t.userId, t.kind).actedOn += 1;
   }
 
-  // Comments volume per REVIEWER (bot-authored review comments in the window).
+  // Comments volume per REVIEWER — fetched over the TREND span (⊇ the window) so the same
+  // rows also feed lastActiveAt; only createdAt >= from counts toward window volume.
   const commentRows = await db
-    .select({ authorId: reviewComments.authorId })
+    .select({ authorId: reviewComments.authorId, createdAt: reviewComments.createdAt })
     .from(reviewComments)
     .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
     .where(
       and(
         eq(pullRequests.accountId, accountId),
         inArray(reviewComments.authorId, automatedIds),
-        gte(reviewComments.createdAt, from),
+        gte(reviewComments.createdAt, trendFrom),
         lte(reviewComments.createdAt, to),
         ...repoScopeFilter,
       ),
@@ -7199,14 +7223,55 @@ export async function getBotAnalytics(
   for (const r of commentRows) {
     if (r.authorId == null) continue;
     if (!kindMap.get(r.authorId)) continue;
-    commentsByUser.set(r.authorId, (commentsByUser.get(r.authorId) ?? 0) + 1);
+    bumpLastActive(r.authorId, r.createdAt.getTime());
+    if (r.createdAt >= from)
+      commentsByUser.set(r.authorId, (commentsByUser.get(r.authorId) ?? 0) + 1);
+  }
+
+  // Submitted reviews per REVIEWER over the trend span. A body-only review (no inline
+  // threads — e.g. Copilot's "reviewed, nothing to flag" pass) is still window ACTIVITY: it
+  // gates row emission + dormancy and feeds lastActiveAt, but deliberately stays OUT of the
+  // volume / acted-on math (that stays threads + comments).
+  const reviewSubmitRows = await db
+    .select({ authorId: reviews.authorId, submittedAt: reviews.submittedAt })
+    .from(reviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviews.authorId, automatedIds),
+        ne(reviews.state, 'pending'),
+        gte(reviews.submittedAt, trendFrom),
+        lte(reviews.submittedAt, to),
+        ...repoScopeFilter,
+      ),
+    )
+    .execute();
+  const windowReviewsByUser = new Map<number, number>();
+  for (const r of reviewSubmitRows) {
+    if (r.authorId == null) continue;
+    const kind = kindMap.get(r.authorId);
+    if (!kind) continue;
+    bumpLastActive(r.authorId, r.submittedAt.getTime());
+    if (r.submittedAt >= from) {
+      windowReviewsByUser.set(r.authorId, (windowReviewsByUser.get(r.authorId) ?? 0) + 1);
+      // A reviews-only reviewer (zero threads across the trend span) still needs a row.
+      accFor(r.authorId, kind);
+    }
   }
 
   const suggestions: BotTuningSuggestion[] = [];
   const vendors: BotVendorAnalytics[] = [];
   for (const [userId, acc] of byUser) {
     const comments = commentsByUser.get(userId) ?? 0;
-    if (acc.threads === 0 && comments === 0) continue;
+    // Window activity = threads/comments (the volume math) OR a body-only submitted review.
+    // No window activity but threads somewhere in the 12-week trend → the row survives as
+    // DORMANT (zeroed window counts + the trend) instead of vanishing from the table.
+    const hasWindowActivity =
+      acc.threads > 0 || comments > 0 || (windowReviewsByUser.get(userId) ?? 0) > 0;
+    if (!hasWindowActivity && !acc.weekly.some((w) => w.threads > 0)) continue;
+    const dormant = !hasWindowActivity;
+    const lastActiveMs = lastActiveMsByUser.get(userId);
     const kind = acc.kind;
     const label = reviewerLabel(userId, kind);
     const actedOnPct = acc.threads > 0 ? Math.round((acc.actedOn / acc.threads) * 100) : null;
@@ -7240,6 +7305,8 @@ export async function getBotAnalytics(
       verdict: botVerdict(acc.threads, actedOnPct, acc.untouched),
       costMonthlyUsd: null,
       costPerActedOnUsd: null,
+      dormant,
+      lastActiveAt: lastActiveMs != null ? new Date(lastActiveMs).toISOString() : null,
       trend,
     });
     // Deterministic tuning suggestions (§3h): a (reviewer, path-bucket) with volume ≥ 5 and

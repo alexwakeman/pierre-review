@@ -16,7 +16,7 @@ import {
 } from '../../hooks/useBotTriage.js';
 import { useProSettings, useHasProSettings } from '../../hooks/useProSettings.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
-import { automatedReviewerMeta } from '../../lib/ui.js';
+import { automatedReviewerMeta, relativeTime } from '../../lib/ui.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
@@ -297,6 +297,10 @@ function VendorTable({
           {vendors.map((v) => {
             const color = botColor({ login: v.login, kind: v.kind });
             const verdict = VERDICT_META[v.verdict];
+            // A DORMANT row (no window activity — the row survives on its 12-week trend):
+            // zeros here would read as "active but useless", so dash the window metrics and
+            // explain via a chip + last-active instead.
+            const dash = <span className="text-gray-300 dark:text-gray-600">—</span>;
             return (
               <tr
                 key={v.key}
@@ -315,40 +319,65 @@ function VendorTable({
                   {v.reviewers > 1 && (
                     <span className="ml-1 text-gray-400">×{v.reviewers}</span>
                   )}
+                  {v.dormant && (
+                    <span
+                      className="ml-1.5 inline-block rounded border border-gray-300 px-1 py-px text-[10px] text-gray-400 dark:border-gray-700 dark:text-gray-500"
+                      title="No activity in the selected window — the trend below still shows its earlier threads. Widen the window to see them counted."
+                    >
+                      dormant
+                      {v.lastActiveAt != null && ` · last active ${relativeTime(v.lastActiveAt)}`}
+                    </span>
+                  )}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{v.threads}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">
+                  {v.dormant ? dash : v.threads}
+                </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
-                  {v.comments}
+                  {v.dormant ? dash : v.comments}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums">
-                  <span className="text-gray-700 dark:text-gray-200">{v.actedOn}</span>
-                  <span className="ml-1 text-gray-400">{pct(v.actedOnPct)}</span>
+                  {v.dormant ? (
+                    dash
+                  ) : (
+                    <>
+                      <span className="text-gray-700 dark:text-gray-200">{v.actedOn}</span>
+                      <span className="ml-1 text-gray-400">{pct(v.actedOnPct)}</span>
+                    </>
+                  )}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums">
-                  <span
-                    className={
-                      v.untouched > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'
-                    }
-                  >
-                    {v.untouched}
-                  </span>
+                  {v.dormant ? (
+                    dash
+                  ) : (
+                    <span
+                      className={
+                        v.untouched > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'
+                      }
+                    >
+                      {v.untouched}
+                    </span>
+                  )}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
                   {v.oldestUntouchedDays != null ? `${v.oldestUntouchedDays}d` : '—'}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
-                  {pct(v.noiseRatioPct)}
+                  {v.dormant ? dash : pct(v.noiseRatioPct)}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500" title={v.costMonthlyUsd != null ? `$${v.costMonthlyUsd}/mo` : 'Set a monthly cost in Settings → Review bots'}>
-                  {usd(v.costPerActedOnUsd)}
+                  {v.dormant ? dash : usd(v.costPerActedOnUsd)}
                 </td>
                 <td className="px-2 py-1.5 text-center">
-                  <span
-                    className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${verdict.className}`}
-                    title={verdict.title}
-                  >
-                    {verdict.label}
-                  </span>
+                  {v.dormant ? (
+                    dash
+                  ) : (
+                    <span
+                      className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${verdict.className}`}
+                      title={verdict.title}
+                    >
+                      {verdict.label}
+                    </span>
+                  )}
                 </td>
               </tr>
             );
@@ -641,7 +670,8 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
         No automated-reviewer activity in this window.
         <div className="mt-1 text-[11px]">
           When review bots (CodeRabbit, Copilot, in-house AI…) comment on your PRs, their
-          signal-to-noise lands here.
+          signal-to-noise lands here. A bot that was active earlier may just be quiet — try
+          widening the window above.
         </div>
       </div>
     );
