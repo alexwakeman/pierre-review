@@ -372,8 +372,10 @@ export interface BotResolvableThreadGroup {
   ciStatus: CiStatus;
   openedAt: string; // ISO-8601 — the PR age
   updatedAt: string; // ISO-8601
-  // The PR's review-thread state mix RESTRICTED to automated-reviewer threads (the "review
-  // bots" framing). `botThreadCounts.likely_addressed` == `threads.length` (the resolvable set).
+  // The PR's FULL review-thread state mix RESTRICTED to automated-reviewer threads (the "review
+  // bots" framing) — uncapped per-PR context. `threads` below carries only the RESOLVABLE subset
+  // actually returned (globally capped when the backlog is large), so `threads.length` ≤
+  // `botThreadCounts.likely_addressed` and is the count this row's resolve acts on.
   botThreadCounts: ThreadStateCounts;
   threads: BotResolvableThread[];
 }

@@ -1,6 +1,12 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { EventType, PrDetail as PrDetailT, ReviewState, User } from '@pierre-review/shared';
+import type {
+  DerivedState,
+  EventType,
+  PrDetail as PrDetailT,
+  ReviewState,
+  User,
+} from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
 import { useMe, useProCapabilities } from '../hooks/useTriage.js';
 import { useRepos } from '../hooks/useTimeline.js';
@@ -532,6 +538,10 @@ function PrDetailSkeleton(): JSX.Element {
   );
 }
 
+// Stable empty filter for the guarded threadStateFilter (see the effect below) — a fresh Set
+// each render would churn the effect deps.
+const EMPTY_THREAD_STATE_FILTER: Set<DerivedState> = new Set();
+
 export function PrDetail({
   prId,
   selectedThreadId,
@@ -584,8 +594,15 @@ export function PrDetail({
   }, [threadBotFilter]);
 
   // Arriving from the resolvable-bot-threads tab presets a derived-state pill (likely_addressed)
-  // → force the Threads tab so the relevant threads are visible immediately.
-  const threadStateFilter = useFilters((s) => s.threadStateFilter);
+  // → force the Threads tab so the relevant threads are visible immediately. The preset belongs
+  // to the PR it was set FOR (openPrThreadsFiltered sets selectedPrId + the filter together);
+  // guard on selectedPrId === prId — mirroring App's selectedThreadId guard — so opening ANOTHER
+  // PR via openPrDetailTab (which never resets the filter) can't inherit it and force the wrong
+  // tab / hide a subset of threads.
+  const selectedPrId = useFilters((s) => s.selectedPrId);
+  const rawThreadStateFilter = useFilters((s) => s.threadStateFilter);
+  const threadStateFilter =
+    selectedPrId === prId ? rawThreadStateFilter : EMPTY_THREAD_STATE_FILTER;
   useEffect(() => {
     if (threadStateFilter.size > 0) setTab('threads');
   }, [threadStateFilter]);

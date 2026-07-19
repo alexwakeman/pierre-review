@@ -210,7 +210,11 @@ export function BotThreadsDetail(): JSX.Element {
               const selected = !deselected.has(g.prId);
               const author = g.authorId != null ? usersById.get(g.authorId) : undefined;
               const ci = CI_META[g.ciStatus];
-              const resolvable = g.botThreadCounts.likely_addressed;
+              // The actionable set for THIS row = the resolvable thread ids actually carried
+              // (g.threads). Under a large backlog the scope query caps the page, so a PR's full
+              // likely_addressed count (botThreadCounts) can exceed what's queued here — the top
+              // "showing the N newest of M" caption covers the remainder (refresh for more).
+              const resolvable = g.threads.length;
               return (
                 <div
                   key={g.prId}
@@ -259,9 +263,9 @@ export function BotThreadsDetail(): JSX.Element {
                     <ThreadCountChips counts={g.botThreadCounts} />
                     <span
                       className="shrink-0 rounded bg-sky-100 px-1.5 py-px text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
-                      title="Threads a later commit likely addressed — the resolvable set"
+                      title="Likely-addressed bot threads queued to resolve for this PR (the newest, if the backlog exceeds the page cap)"
                     >
-                      {resolvable} resolvable
+                      {resolvable} to resolve
                     </span>
                   </button>
                 </div>
