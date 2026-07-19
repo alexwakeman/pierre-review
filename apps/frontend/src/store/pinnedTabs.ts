@@ -22,7 +22,16 @@ export type PinnedPr = TabMeta;
 //  - metrics-detail: the flow-metric drill-down (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-prs: the bot-vendor PR drill-down (a singleton, non-PR, EPHEMERAL tab)
 //  - open-prs: the sortable all-open-PRs drill-down (a singleton, non-PR, EPHEMERAL tab)
-export type TabKind = 'pr-detail' | 'pr-focus' | 'metrics-detail' | 'bot-prs' | 'open-prs';
+//  - bot-only-prs: the bot-only-reviewed PR drill-down (a singleton, non-PR, EPHEMERAL tab)
+//  - bot-threads: the resolvable-bot-threads review & resolve (a singleton, non-PR, EPHEMERAL tab)
+export type TabKind =
+  | 'pr-detail'
+  | 'pr-focus'
+  | 'metrics-detail'
+  | 'bot-prs'
+  | 'open-prs'
+  | 'bot-only-prs'
+  | 'bot-threads';
 
 export interface Tab {
   key: string; // stable: 'pr-detail:123' | 'pr-focus:123'
@@ -54,6 +63,10 @@ export const BOT_PRS_TAB_KEY = 'bot-prs';
 // lists (a repo | the FilterBar-visible 'feed' scope) is driven by the transient `openPrsScope`
 // signal (store/filters.ts), not the key. EPHEMERAL like the two above.
 export const OPEN_PRS_TAB_KEY = 'open-prs';
+// Two more SINGLETON, non-PR bot drill-downs, seeded by transient repo-scope signals
+// (store/filters.ts botOnlyFocusRepoId / botThreadsFocusRepoId). EPHEMERAL like the above.
+export const BOT_ONLY_PRS_TAB_KEY = 'bot-only-prs';
+export const BOT_THREADS_TAB_KEY = 'bot-threads';
 
 /** Parse a Tab.key back into its kind + PR id (null for unknown). */
 export function parseTabKey(key: string): { kind: TabKind; prId: number } | null {
@@ -97,6 +110,8 @@ interface TabsState {
   openMetricsTab: (opts?: OpenOpts) => void; // ensure the singleton metrics drill-down + activate
   openBotPrsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-vendor PR drill-down + activate
   openOpenPrsTab: (opts?: OpenOpts) => void; // ensure the singleton all-open-PRs drill-down + activate
+  openBotOnlyPrsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-only-PRs drill-down + activate
+  openBotThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-threads resolve tab + activate
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
   closeTab: (key: string) => void; // remove; fall back to 'timeline' if it was active
@@ -268,6 +283,10 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       openTab({ key: BOT_PRS_TAB_KEY, kind: 'bot-prs', prId: 0, meta: null }, opts),
     openOpenPrsTab: (opts) =>
       openTab({ key: OPEN_PRS_TAB_KEY, kind: 'open-prs', prId: 0, meta: null }, opts),
+    openBotOnlyPrsTab: (opts) =>
+      openTab({ key: BOT_ONLY_PRS_TAB_KEY, kind: 'bot-only-prs', prId: 0, meta: null }, opts),
+    openBotThreadsTab: (opts) =>
+      openTab({ key: BOT_THREADS_TAB_KEY, kind: 'bot-threads', prId: 0, meta: null }, opts),
 
     syncMeta: (meta) =>
       set((s) => {

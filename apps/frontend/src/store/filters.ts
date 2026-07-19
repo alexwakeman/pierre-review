@@ -184,6 +184,13 @@ export interface FilterState {
   // like botPrsFocusRepoId; only reset when the next drill-down opens. null = never opened.
   openPrsScope: number | 'feed' | null;
 
+  // transient: the repo the bot-only-PRs drill-down was opened FROM (the per-repo Bots tab).
+  // null = account/team scope (the cross-repo Bots rail). Read-not-consumed, like the above.
+  botOnlyFocusRepoId: number | null;
+  // transient: the repo the resolvable-bot-threads tab was opened FROM. null = account/team
+  // scope. Read-not-consumed, like the above.
+  botThreadsFocusRepoId: number | null;
+
   // open PRs strip
   stripCollapsed: boolean;
   stripFilter: StripFilter;
@@ -377,6 +384,12 @@ export interface FilterState {
   // FilterBar-visible 'feed' scope). Sets the openPrsScope seed + opens the singleton tab;
   // OpenPrsDetail reads (never consumes) the seed.
   openOpenPrsDetail: (scope: number | 'feed') => void;
+  // Open (or re-focus) the bot-only-PRs drill-down tab (the amber "only a bot reviewed
+  // these" caption). repoId scopes it to one repo; null = the cross-repo Bots scope.
+  openBotOnlyDetail: (repoId: number | null) => void;
+  // Open (or re-focus) the resolvable-bot-threads review & resolve tab (the Bot-ROI
+  // backlog banner). repoId scopes it to one repo; null = the cross-repo Bots scope.
+  openBotThreadsDetail: (repoId: number | null) => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
   // records the added repo id so the modal can scope to just that repo.
@@ -547,6 +560,8 @@ function freshDefaults(): FilterData {
     botPrsFocusKey: null,
     botPrsFocusRepoId: null,
     openPrsScope: null,
+    botOnlyFocusRepoId: null,
+    botThreadsFocusRepoId: null,
     stripCollapsed: true, // strip starts collapsed for more timeline room
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
@@ -741,6 +756,14 @@ export const useFilters = create<FilterState>((set, get) => ({
   openOpenPrsDetail: (scope) => {
     set({ openPrsScope: scope });
     usePinnedTabs.getState().openOpenPrsTab({ fromActivity: true });
+  },
+  openBotOnlyDetail: (repoId) => {
+    set({ botOnlyFocusRepoId: repoId });
+    usePinnedTabs.getState().openBotOnlyPrsTab({ fromActivity: true });
+  },
+  openBotThreadsDetail: (repoId) => {
+    set({ botThreadsFocusRepoId: repoId });
+    usePinnedTabs.getState().openBotThreadsTab({ fromActivity: true });
   },
   requestSyncModal: (repoId: number) =>
     set((s) => ({ syncModalSignal: s.syncModalSignal + 1, syncModalRepoId: repoId })),

@@ -8,6 +8,8 @@ import { ActivityView } from './components/Activity/index.js';
 import { MetricsDetail } from './components/Activity/MetricsDetail.js';
 import { BotPrsDetail } from './components/Activity/BotPrsDetail.js';
 import { OpenPrsDetail } from './components/Activity/OpenPrsDetail.js';
+import { BotOnlyPrsDetail } from './components/Activity/BotOnlyPrsDetail.js';
+import { BotThreadsDetail } from './components/Activity/BotThreadsDetail.js';
 import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
@@ -110,6 +112,8 @@ export default function App(): JSX.Element {
   const metricsActive = activeTabObj?.kind === 'metrics-detail';
   const botPrsActive = activeTabObj?.kind === 'bot-prs';
   const openPrsActive = activeTabObj?.kind === 'open-prs';
+  const botOnlyActive = activeTabObj?.kind === 'bot-only-prs';
+  const botThreadsActive = activeTabObj?.kind === 'bot-threads';
   const boardMode: TimelineMode | null =
     activeTabObj?.kind === 'pr-focus'
       ? { kind: 'isolate', prId: activeTabObj.prId }
@@ -118,7 +122,13 @@ export default function App(): JSX.Element {
   // bot-PRs) covers the warm full board. Drives the `inert` a11y treatment. pr-focus is NOT
   // an overlay — it replaces the board slot, so it doesn't set this.
   const overlayActive =
-    prDetailId != null || inboxActive || metricsActive || botPrsActive || openPrsActive;
+    prDetailId != null ||
+    inboxActive ||
+    metricsActive ||
+    botPrsActive ||
+    openPrsActive ||
+    botOnlyActive ||
+    botThreadsActive;
   // The detail pane is shown at the bottom of any board-slot Timeline (shared or
   // pr-focus) once a PR is selected there.
   const paneVisible = selectedPrId != null && !overlayActive;
@@ -403,6 +413,26 @@ export default function App(): JSX.Element {
             className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
           >
             <OpenPrsDetail />
+          </div>
+        )}
+
+        {/* The bot-only-PRs drill-down — a sibling full-main overlay over the board. */}
+        {botOnlyActive && (
+          <div
+            data-testid="bot-only-prs-overlay"
+            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
+          >
+            <BotOnlyPrsDetail />
+          </div>
+        )}
+
+        {/* The resolvable-bot-threads review & resolve — a sibling full-main overlay. */}
+        {botThreadsActive && (
+          <div
+            data-testid="bot-threads-overlay"
+            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
+          >
+            <BotThreadsDetail />
           </div>
         )}
       </main>

@@ -157,6 +157,92 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
     );
   }
 
+  // The bot-only-PRs drill-down is a non-PR, singleton tab — a compact chip (no PR meta).
+  if (tab.kind === 'bot-only-prs') {
+    return (
+      <div
+        role="presentation"
+        className={`group flex shrink-0 items-center gap-1 rounded-t-md border border-b-0 pl-2 pr-1 ${
+          active
+            ? 'border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950'
+            : 'border-transparent bg-transparent hover:bg-gray-200/60 dark:hover:bg-gray-800/60'
+        }`}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={active}
+          onClick={() => setActiveTab(tab.key)}
+          className="flex items-center gap-1.5 py-1.5 text-left"
+          title="Bot-only PRs — only a bot reviewed these"
+        >
+          <span aria-hidden="true" className="shrink-0">
+            🤖
+          </span>
+          <span
+            className={`text-xs font-medium ${
+              active ? 'text-amber-600 dark:text-amber-400' : 'text-gray-600 dark:text-gray-300'
+            }`}
+          >
+            Bot-only PRs
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => closeTab(tab.key)}
+          className="shrink-0 self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+          title="Close this tab"
+          aria-label="Close bot-only-PRs tab"
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
+
+  // The resolvable-bot-threads review & resolve is a non-PR, singleton tab — a compact chip.
+  if (tab.kind === 'bot-threads') {
+    return (
+      <div
+        role="presentation"
+        className={`group flex shrink-0 items-center gap-1 rounded-t-md border border-b-0 pl-2 pr-1 ${
+          active
+            ? 'border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950'
+            : 'border-transparent bg-transparent hover:bg-gray-200/60 dark:hover:bg-gray-800/60'
+        }`}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={active}
+          onClick={() => setActiveTab(tab.key)}
+          className="flex items-center gap-1.5 py-1.5 text-left"
+          title="Bot threads — review & resolve the likely-addressed backlog"
+        >
+          <span aria-hidden="true" className="shrink-0">
+            🧹
+          </span>
+          <span
+            className={`text-xs font-medium ${
+              active ? 'text-sky-600 dark:text-sky-400' : 'text-gray-600 dark:text-gray-300'
+            }`}
+          >
+            Bot threads
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => closeTab(tab.key)}
+          className="shrink-0 self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+          title="Close this tab"
+          aria-label="Close bot-threads tab"
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
+
   const isFocus = tab.kind === 'pr-focus';
   const meta = tab.meta;
   const author = meta?.authorDisplayName ?? meta?.authorLogin ?? 'unknown';
