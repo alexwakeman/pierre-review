@@ -343,9 +343,9 @@ file maps to a `client.ts` method.
 | `GET /api/bot-reviewers` · `PATCH /api/bot-reviewers/:userId` | **Bot-Triage** (CORE): detected automated reviewers → `DetectedReviewersResponse` · two-way manual override → `ReviewerClassification` (writes `bot_review_classification`) |
 | `GET /api/bot-analytics?window=` | **Bot-ROI** (CORE): per-`AutomatedReviewerKind` volume/actedOn%/untouched/oldest/humanFollowThrough/noiseRatio/`verdict`(keep\|tune\|kill) + ≤12wk trend + tuning suggestions → `BotAnalyticsResponse`. Returns `cost=null` — the client overlays cost from `pro_settings`. Vendor rows carry `dormant`+`lastActiveAt`: ANY trend-span footprint (threads, comments, or body-only reviews) keeps a quiet reviewer visible as a DORMANT row (zeroed window counts + trend + last-active chip) instead of vanishing; body-only reviews count as window activity for emission/dormancy but never enter the volume math |
 | `GET /api/prs/:id/bot-dedup` | **cross-bot dedup** (CORE): automated-reviewer threads grouped by `(path, line±window)` across distinct kinds → consensus/conflict clusters → `BotDedupResponse` |
-| `GET /api/bot-analytics/bot-only-prs?window&scope&repoIds` | the exact PR list behind `totals.botOnlyPrs` ("only a bot reviewed these") — same window/scope resolution as the analytics count so caption ≡ list → `BotOnlyPrsResponse` (CORE; BotsView's amber caption now opens the `bot-only-prs` drill-down TAB — the count is a review-state SNAPSHOT of open PRs, unwindowed by design) |
+| `GET /api/bot-analytics/bot-only-prs?window&scope&repoIds` | the exact PR list behind `totals.botOnlyPrs` ("only a bot reviewed these") — same window/scope resolution as the analytics count so caption ≡ list → `BotOnlyPrsResponse` (CORE; `BotOnlyPrItem` now carries `repoId`/`openedAt`/`updatedAt`; the drill-down is a **sortable table** with Age/Updated columns + a cross-repo **repo-filter dropdown**. Both BotsView's amber caution AND the Bot-ROI "N bot-only PRs" stat open this drill-down TAB — the count is a review-state SNAPSHOT of open PRs, unwindowed by design) |
 | `GET /api/bot-analytics/vendor/:key/prs?window&scope&repoIds` | per-REVIEWER Bot-PRs drill-down; `key` = the analytics row identity `u<userId>` \| `'pierre'` (invalid → 400) → `BotVendorPrsResponse` (+`key`/`login`). Replaced the old kind-keyed `/:kind/prs` (removed — two in-house bots no longer merge) |
-| `GET /api/bot-threads/resolvable?scope&repoIds` · `POST /api/bot-threads/resolve {threadIds,repoIds?}` | **scope-wide review & resolve** of `likely_addressed` bot threads (CORE): grouped-by-PR review list (capped 500 newest + uncapped `totalEligible`) · confirm-gated resolve that RE-DERIVES eligibility ∩ the explicit ids (cap bypassed on that path; never blind; shares `resolveThreadsOnGitHub`); client chunks 25 ids/POST for progress. The grouped-by-PR list is a COMPACT per-PR row (author/CI/age + a bot-only `botThreadCounts` state mix + an `authorId`/`ciStatus`/`openedAt`/`updatedAt`-enriched group), the resolve action pinned to the TOP with per-PR exclusion checkboxes. **`botThreadCounts` is the PR's FULL (uncapped) bot thread mix; `group.threads` is the globally-capped resolvable subset — `threads.length` ≤ `botThreadCounts.likely_addressed`, and the "N to resolve" chip reads `threads.length` (what the row actually resolves), NOT the count.** BotRoiPanel's `ResolveBacklogBanner` is a one-liner opening the `bot-threads` drill-down TAB; clicking a PR row opens its detail Threads tab with the `likely_addressed` state pill preset (not back to the Bots pane) |
+| `GET /api/bot-threads/resolvable?scope&repoIds` · `POST /api/bot-threads/resolve {threadIds,repoIds?}` | **scope-wide review & resolve** of `likely_addressed` bot threads (CORE): the listing is now **UNCAPPED + PR-centric** (`getResolvableBotThreadPrs` → `ResolvableThreadPrsResponse{prs[],totalThreads}`) — **one row PER PR carrying ALL its resolvable thread ids** (`threadIds`) + `resolvableCount` (=`threadIds.length`=`botThreadCounts.likely_addressed`, now equal since uncapped) + a bot-only `botThreadCounts` mix + `repoId`/`authorId`/`ciStatus`/`openedAt`/`updatedAt`. Replaces the old 500-capped grouped-`threads` shape. The confirm-gated resolve still RE-DERIVES eligibility ∩ the explicit ids via `getResolvableBotThreadsForScope` (kept for that path; still 500/POST, client chunks 25 ids/POST for progress) so "Select all" resolves the WHOLE backlog. UI (`BotThreadsDetail`): a **SORTABLE tabular** list (PR/repo/author/age/updated/CI/resolvable), **PRs DESELECTED by default** with per-row checkboxes + **Select-all (across all pages) / Clear**, resolve pinned TOP with a **Stop** control (halts cleanly between chunks via `shouldStop`), a cross-repo **repo-filter dropdown** + Repo column, and **client-side pagination** (50/PR page; selection & Select-all span pages). Clicking a PR row opens its detail Threads tab with the `likely_addressed` state pill preset (not back to the Bots pane). BotRoiPanel's `ResolveBacklogBanner` (reads `totalThreads`) opens the `bot-threads` TAB |
 | `GET·POST·DELETE /api/bot-mute-rules` | **Bot-Triage** mute/auto-triage rules (CORE; `bot_mute_rules`) |
 | `GET /api/open-prs?repoIds&userIds` | currently-open PRs (ignores date range) |
 | `GET /api/threads/:id` | single thread detail |
@@ -438,14 +438,22 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   tab moves to the adjacent tab** (left, else right, else the Timeline board) — it does NOT
   snap back to the board when other tabs remain (`closeTab` in `store/pinnedTabs.ts`).
   Besides the PR tabs there's a family of **singleton, EPHEMERAL drill-down tabs** (never
-  URL/localStorage-persisted; a reload drops them): `metrics-detail`, `bot-prs`, and the
-  2026-07-19 trio `open-prs` (sortable all-open-PRs: age/author/LoC/untouched-threads/CI/
-  approval columns; row click → the matching Feed rail line with the PR isolated),
-  `bot-only-prs`, and `bot-threads` (scope-wide review & resolve with per-thread navigation
-  via `openPrDetailTab` + `selectThread`). Each = a `TabKind` + key const + opener in
-  `pinnedTabs.ts`, a transient read-not-consumed seed + `openXDetail()` action in
+  URL/localStorage-persisted; a reload drops them): `metrics-detail`, `bot-prs`, `open-prs`
+  (sortable all-open-PRs: age/author/LoC/untouched-threads/CI/approval columns), `bot-only-prs`
+  (sortable + Age/Updated + cross-repo repo-filter dropdown), and `bot-threads` (sortable +
+  DESELECT-by-default + Select-all/Clear across pages + Stop + repo-filter + client pagination;
+  scope-wide review & resolve). **Row click across ALL these list surfaces (the drill-down TABLES
+  + the inline `OpenPrRows`/`FeedOpenPrsPanel` lists + the FilterBar `OpenPrsStrip` cards) now
+  opens the PR's own detail TAB** (`openPrDetailTab`) — the old feed-isolation / timeline-focus
+  on-click + the ⧉ button were removed; **feed isolation is reached from PrDetail's "Show in
+  Activity feed" header button** (`FeedIcon`: `setRepoConsoleTab(repoId,'activity')`→`setActivityRepo`
+  →`setFeedIsolatedPrId`→`showActivity`, order load-bearing). `bot-threads` rows open the PR's
+  Threads tab with the `likely_addressed` pill preset. **Repo-scoped chips show the repo name**
+  (`PinnedTabsBar` `TabChip` reads the seed + `useRepos`). Each drill-down = a `TabKind` + key
+  const + opener in `pinnedTabs.ts`, a transient read-not-consumed seed + `openXDetail()` action in
   `store/filters.ts` (`{fromActivity:true}` arms Back-to-Activity), a full-`<main>` overlay
-  branch in `App.tsx` (MUST join `overlayActive`), and a compact chip in `PinnedTabsBar`.
+  branch in `App.tsx` (MUST join `overlayActive`), and a compact chip in `PinnedTabsBar`. The
+  three drill-down TABLES share `Activity/sortableTable.tsx` (`SortHeader`/`compare`/`nextSort`).
   The rail's per-repo console remembers its Activity|Bots sub-tab in
   `filters.repoConsoleTabs` (and Insights its sub-tab in `insightsSubTab`) — surviving rail
   switches and tab round-trips; cross-view jumps set it explicitly (e.g. Show-in-feed →
@@ -687,6 +695,10 @@ queries send `userIds: null` and the Members panel is hidden while Activity is a
 Refresh re-queries the **DB only**. Open-PR lists show 10 rows; ">10" swaps the old pagination
 for a "Show all N" footer opening the sortable `open-prs` drill-down tab (a FeedOpenPrsPanel
 TEAM group passes its label + exact repo set so the tab reproduces the group's count).
+**Clicking any open-PR row/card opens the PR's detail tab** (`openPrDetailTab`) — no longer
+isolates the feed on click. The **"Showing only #N" feed-isolation banner is pinned to the TOP
+of the feed** (`FeedView`, sticky), set from PrDetail's "Show in Activity feed" button or a
+drill-down, dismissible with Clear.
 
 **Review-bot triage — "the calm layer above your review bot" (CORE, deterministic, NO AI).**
 Third-party AI review bots (CodeRabbit/Greptile/Copilot/Qodo/…) are a **first-class, triaged
