@@ -213,11 +213,18 @@ export function OpenPrsDetail(): JSX.Element {
   // stale null (can't normally happen — the tab is ephemeral) falls back to the feed scope.
   const scope = useFilters((s) => s.openPrsScope);
   const repoScopeId = typeof scope === 'number' ? scope : null;
+  // A team GROUP scope (from a FeedOpenPrsPanel group footer): the group's exact repo set,
+  // so the tab reproduces the group and the footer's promised count holds.
+  const groupScope = scope != null && typeof scope === 'object' ? scope : null;
   // Member-AGNOSTIC fetch (Members is a Timeline-only filter — the Activity lists never
-  // narrow by it): a repo scope fetches just that repo; 'feed' reuses the FilterBar-visible
-  // repo scope (the same query string as useSearchOpenPrs → shared cache entry).
+  // narrow by it): a repo/group scope fetches just those repos; 'feed' reuses the FilterBar-
+  // visible repo scope (the same query string as useSearchOpenPrs → shared cache entry).
   const search = useFilters((s) =>
-    repoScopeId != null ? `repoIds=${repoScopeId}` : buildOpenPrsSearch(s, false),
+    repoScopeId != null
+      ? `repoIds=${repoScopeId}`
+      : groupScope != null
+        ? new URLSearchParams({ repoIds: groupScope.repoIds.join(',') }).toString()
+        : buildOpenPrsSearch(s, false),
   );
   const { data, isLoading, isError, refetch, isFetching } = useQuery<OpenPrsResponse>({
     queryKey: ['open-prs', search],
@@ -298,7 +305,9 @@ export function OpenPrsDetail(): JSX.Element {
   const scopeLabel =
     repoScopeId != null
       ? repoNameById.get(repoScopeId) ?? `repo ${repoScopeId}`
-      : 'all visible repos';
+      : groupScope != null
+        ? groupScope.label
+        : 'all visible repos';
   const draftCount = rows.reduce((n, p) => n + (p.isDraft ? 1 : 0), 0);
 
   return (

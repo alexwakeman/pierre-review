@@ -297,6 +297,7 @@ export function FeedView({
     counts,
     latestId,
     isLoading,
+    isPlaceholderData,
     hasMore,
     loadMore,
     isFetchingMore,
@@ -322,7 +323,10 @@ export function FeedView({
     botWindowDays,
     loadedLatestId: latestId,
     loadedTotal: total,
-    feedSettled: !isLoading,
+    // Placeholder pages belong to the PREVIOUS key (e.g. a bots-window flip): total/latestId
+    // are stale then, and the head poll — already on the NEW key — would false-fire the
+    // banner via serverTotal > loadedTotal until page 0 lands.
+    feedSettled: !isLoading && !isPlaceholderData,
   });
   const onRefreshClick = (): void => {
     refreshFeed();

@@ -116,7 +116,16 @@ export function FeedOpenPrsPanel(): JSX.Element | null {
                 prs={g.prs}
                 usersById={usersById}
                 keyPrefix={`${g.teamId ?? 'none'}:`}
-                onShowAll={() => openOpenPrsDetail('feed')}
+                onShowAll={() =>
+                  // The footer promises THIS group's count, so the drill-down must scope to
+                  // the group: pass its exact repo set (teams span repos, so a repoId list —
+                  // not a teamId — reproduces it). A lone ungrouped list ≡ the feed scope.
+                  openOpenPrsDetail(
+                    groups.length === 1 && g.teamId == null
+                      ? 'feed'
+                      : { label: g.teamName, repoIds: [...new Set(g.prs.map((p) => p.repoId))] },
+                  )
+                }
               />
             </div>
           ))}

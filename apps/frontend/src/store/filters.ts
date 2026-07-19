@@ -24,6 +24,9 @@ export type FeedBotLens = 'all' | 'hide' | 'only';
 // rail entry restores its last-active sub-tab.
 export type RepoConsoleTab = 'activity' | 'bots';
 export type InsightsSubTab = 'overview' | 'sprint' | 'retro' | 'compare';
+// The all-open-PRs drill-down's scope: one repo | the FilterBar-visible 'feed' scope | a
+// team group (label + the exact repo set behind it — see openPrsScope).
+export type OpenPrsScope = number | 'feed' | { label: string; repoIds: number[] };
 
 export type RangePreset = '7d' | '14d' | '30d' | '90d' | 'custom';
 
@@ -180,9 +183,11 @@ export interface FilterState {
   botPrsFocusRepoId: number | null;
 
   // transient: the scope the all-open-PRs drill-down tab lists — a repoId (that repo's open
-  // PRs) or 'feed' (the FilterBar-visible scope). Read (not consumed) for the tab's lifetime,
-  // like botPrsFocusRepoId; only reset when the next drill-down opens. null = never opened.
-  openPrsScope: number | 'feed' | null;
+  // PRs), 'feed' (the FilterBar-visible scope), or a team GROUP (label + the exact repo set
+  // behind a FeedOpenPrsPanel group — teams span repos, so a repoId list, not a teamId,
+  // reproduces the group and keeps the footer's promised count ≡ the tab). Read (not
+  // consumed) for the tab's lifetime, like botPrsFocusRepoId. null = never opened.
+  openPrsScope: OpenPrsScope | null;
 
   // transient: the repo the bot-only-PRs drill-down was opened FROM (the per-repo Bots tab).
   // null = account/team scope (the cross-repo Bots rail). Read-not-consumed, like the above.
@@ -381,9 +386,9 @@ export interface FilterState {
   openBotPrsDetail: (key: string, repoId?: number | null) => void;
   consumeBotPrsFocus: () => void;
   // Open (or re-focus) the sortable all-open-PRs drill-down tab on a scope (a repoId | the
-  // FilterBar-visible 'feed' scope). Sets the openPrsScope seed + opens the singleton tab;
-  // OpenPrsDetail reads (never consumes) the seed.
-  openOpenPrsDetail: (scope: number | 'feed') => void;
+  // FilterBar-visible 'feed' scope | a team group). Sets the openPrsScope seed + opens the
+  // singleton tab; OpenPrsDetail reads (never consumes) the seed.
+  openOpenPrsDetail: (scope: OpenPrsScope) => void;
   // Open (or re-focus) the bot-only-PRs drill-down tab (the amber "only a bot reviewed
   // these" caption). repoId scopes it to one repo; null = the cross-repo Bots scope.
   openBotOnlyDetail: (repoId: number | null) => void;

@@ -7222,11 +7222,17 @@ export async function getBotAnalytics(
       ),
     )
     .execute();
+  // Reviewers whose only trend-span footprint is comments/reviews (no authored threads) still
+  // need an accumulator + a survival signal, or they vanish instead of going dormant.
+  const trendActiveUserIds = new Set<number>();
   const commentsByUser = new Map<number, number>();
   for (const r of commentRows) {
     if (r.authorId == null) continue;
-    if (!kindMap.get(r.authorId)) continue;
+    const kind = kindMap.get(r.authorId);
+    if (!kind) continue;
     bumpLastActive(r.authorId, r.createdAt.getTime());
+    accFor(r.authorId, kind);
+    trendActiveUserIds.add(r.authorId);
     if (r.createdAt >= from)
       commentsByUser.set(r.authorId, (commentsByUser.get(r.authorId) ?? 0) + 1);
   }
@@ -7256,11 +7262,12 @@ export async function getBotAnalytics(
     const kind = kindMap.get(r.authorId);
     if (!kind) continue;
     bumpLastActive(r.authorId, r.submittedAt.getTime());
-    if (r.submittedAt >= from) {
+    // A reviews-only reviewer (zero threads across the trend span) still needs a row —
+    // even when its last review predates the window, so it can surface as DORMANT.
+    accFor(r.authorId, kind);
+    trendActiveUserIds.add(r.authorId);
+    if (r.submittedAt >= from)
       windowReviewsByUser.set(r.authorId, (windowReviewsByUser.get(r.authorId) ?? 0) + 1);
-      // A reviews-only reviewer (zero threads across the trend span) still needs a row.
-      accFor(r.authorId, kind);
-    }
   }
 
   const suggestions: BotTuningSuggestion[] = [];
@@ -7268,11 +7275,13 @@ export async function getBotAnalytics(
   for (const [userId, acc] of byUser) {
     const comments = commentsByUser.get(userId) ?? 0;
     // Window activity = threads/comments (the volume math) OR a body-only submitted review.
-    // No window activity but threads somewhere in the 12-week trend → the row survives as
-    // DORMANT (zeroed window counts + the trend) instead of vanishing from the table.
+    // No window activity but ANY 12-week-trend footprint (threads, comments, or body-only
+    // reviews) → the row survives as DORMANT (zeroed window counts + the trend) instead of
+    // vanishing from the table.
     const hasWindowActivity =
       acc.threads > 0 || comments > 0 || (windowReviewsByUser.get(userId) ?? 0) > 0;
-    if (!hasWindowActivity && !acc.weekly.some((w) => w.threads > 0)) continue;
+    if (!hasWindowActivity && !acc.weekly.some((w) => w.threads > 0) && !trendActiveUserIds.has(userId))
+      continue;
     const dormant = !hasWindowActivity;
     const lastActiveMs = lastActiveMsByUser.get(userId);
     const kind = acc.kind;

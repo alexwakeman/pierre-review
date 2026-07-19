@@ -94,6 +94,25 @@ beforeAll(async () => {
       submittedAt: reviewAt,
     })
     .execute();
+
+  // A second bot whose ONLY footprint is that same-age body-only review — zero threads
+  // anywhere in the trend span. Its row must survive on the review alone (the original
+  // fixture's thread masked this: the trend-survival leg was threads-only).
+  const [reviewsOnlyBot] = await db
+    .insert(users)
+    .values({ githubLogin: 'greptile-apps', githubNodeId: 'U_bd2', isBot: true })
+    .returning()
+    .execute();
+  await db
+    .insert(reviews)
+    .values({
+      githubNodeId: 'BD_RV2',
+      prId: pr.id,
+      authorId: reviewsOnlyBot.id,
+      state: 'commented',
+      submittedAt: reviewAt,
+    })
+    .execute();
 });
 
 afterAll(() => closeDb?.());
@@ -101,9 +120,8 @@ afterAll(() => closeDb?.());
 describe('getBotAnalytics dormant emission', () => {
   it('rolling_14: zero window activity → a dormant row riding the trend, not a dropped one', async () => {
     const resp = await q.getBotAnalytics(1, 'rolling_14');
-    expect(resp.vendors).toHaveLength(1);
-    const v = resp.vendors[0]!;
-    expect(v.kind).toBe('coderabbit');
+    expect(resp.vendors).toHaveLength(2);
+    const v = resp.vendors.find((x: { kind: string }) => x.kind === 'coderabbit')!;
     expect(v.dormant).toBe(true);
     expect(v.threads).toBe(0);
     expect(v.comments).toBe(0);
@@ -115,14 +133,25 @@ describe('getBotAnalytics dormant emission', () => {
     expect(resp.totals.threads).toBe(0);
   });
 
+  it('rolling_14: a reviews-ONLY bot (zero threads ever) survives as dormant on the review alone', async () => {
+    const resp = await q.getBotAnalytics(1, 'rolling_14');
+    const v = resp.vendors.find((x: { kind: string }) => x.kind === 'greptile')!;
+    expect(v).toBeDefined();
+    expect(v.dormant).toBe(true);
+    expect(v.threads).toBe(0);
+    expect(v.trend.reduce((s: number, p: { threads: number }) => s + p.threads, 0)).toBe(0);
+    expect(v.lastActiveAt).toBe(reviewAt.toISOString());
+  });
+
   it('rolling_30: a body-only review is window activity → non-dormant, volume math unchanged', async () => {
     const resp = await q.getBotAnalytics(1, 'rolling_30');
-    expect(resp.vendors).toHaveLength(1);
-    const v = resp.vendors[0]!;
-    expect(v.dormant).toBe(false);
-    // Reviews gate emission/dormancy only — thread/comment volume stays zero.
-    expect(v.threads).toBe(0);
-    expect(v.comments).toBe(0);
-    expect(v.lastActiveAt).toBe(reviewAt.toISOString());
+    expect(resp.vendors).toHaveLength(2);
+    for (const v of resp.vendors) {
+      expect(v.dormant).toBe(false);
+      // Reviews gate emission/dormancy only — thread/comment volume stays zero.
+      expect(v.threads).toBe(0);
+      expect(v.comments).toBe(0);
+      expect(v.lastActiveAt).toBe(reviewAt.toISOString());
+    }
   });
 });

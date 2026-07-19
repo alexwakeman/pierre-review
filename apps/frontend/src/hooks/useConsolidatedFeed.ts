@@ -130,6 +130,10 @@ export function useConsolidatedFeed(opts: {
     isFetchingMore: query.isFetchingNextPage,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
+    // True while a key change (e.g. the bots window selector re-keying the search) is being
+    // served from the PREVIOUS key's pages via placeholderData — total/latestId reflect the
+    // old key then, so has-new comparisons against them are meaningless.
+    isPlaceholderData: query.isPlaceholderData,
   };
 }
 
@@ -151,9 +155,11 @@ export function useFeedHasNew(opts: {
   botWindowDays?: number | null;
   loadedLatestId: string | null;
   loadedTotal: number;
-  // True once the loaded feed has finished its initial load, so we can distinguish "empty
-  // because still loading" (suppress) from "empty because truly empty" (a later arrival should
-  // surface the banner). Also avoids a spurious flash when the head query resolves first.
+  // True once the loaded feed's data actually belongs to the CURRENT key: initial load done
+  // AND not placeholder pages from a previous key (a re-key, e.g. the bots window selector).
+  // Distinguishes "empty because still loading" (suppress) from "truly empty" (a later
+  // arrival should surface the banner), and keeps a stale loadedTotal from false-firing
+  // against a fresh head.
   feedSettled: boolean;
   enabled?: boolean;
 }): { hasNew: boolean; refresh: () => void } {
