@@ -341,11 +341,11 @@ file maps to a `client.ts` method.
 | `POST /api/prs/:id/mark-viewed` (alias `/dismiss`) | record a view (`sha?` defaults to head) → clears new-since badges |
 | `POST /api/prs/:id/resolve-bot-threads {threadIds}` | **bulk-resolve** the review-bot threads a later commit likely addressed → `{resolved,failed,results[]}`. Server RE-DERIVES eligibility (owned + review-bot-originated + `likely_addressed`) ∩ the client's reviewed list, then GitHub-resolves each (shares the `bot-triage/resolve.ts` `resolveThreadsOnGitHub` helper with auto-triage; behavior unchanged); never auto/blind. Core |
 | `GET /api/bot-reviewers` · `PATCH /api/bot-reviewers/:userId` | **Bot-Triage** (CORE): detected automated reviewers → `DetectedReviewersResponse` · two-way manual override → `ReviewerClassification` (writes `bot_review_classification`) |
-| `GET /api/bot-analytics?window=` | **Bot-ROI** (CORE): per-`AutomatedReviewerKind` volume/actedOn%/untouched/oldest/humanFollowThrough/noiseRatio/`verdict`(keep\|tune\|kill) + ≤12wk trend + tuning suggestions → `BotAnalyticsResponse`. Returns `cost=null` — the client overlays cost from `pro_settings` |
+| `GET /api/bot-analytics?window=` | **Bot-ROI** (CORE): per-`AutomatedReviewerKind` volume/actedOn%/untouched/oldest/humanFollowThrough/noiseRatio/`verdict`(keep\|tune\|kill) + ≤12wk trend + tuning suggestions → `BotAnalyticsResponse`. Returns `cost=null` — the client overlays cost from `pro_settings`. Vendor rows carry `dormant`+`lastActiveAt`: ANY trend-span footprint (threads, comments, or body-only reviews) keeps a quiet reviewer visible as a DORMANT row (zeroed window counts + trend + last-active chip) instead of vanishing; body-only reviews count as window activity for emission/dormancy but never enter the volume math |
 | `GET /api/prs/:id/bot-dedup` | **cross-bot dedup** (CORE): automated-reviewer threads grouped by `(path, line±window)` across distinct kinds → consensus/conflict clusters → `BotDedupResponse` |
-| `GET /api/bot-analytics/bot-only-prs?window&scope&repoIds` | the exact PR list behind `totals.botOnlyPrs` ("only a bot reviewed these") — same window/scope resolution as the analytics count so caption ≡ list → `BotOnlyPrsResponse` (CORE; BotsView's expandable amber caption) |
+| `GET /api/bot-analytics/bot-only-prs?window&scope&repoIds` | the exact PR list behind `totals.botOnlyPrs` ("only a bot reviewed these") — same window/scope resolution as the analytics count so caption ≡ list → `BotOnlyPrsResponse` (CORE; BotsView's amber caption now opens the `bot-only-prs` drill-down TAB — the count is a review-state SNAPSHOT of open PRs, unwindowed by design) |
 | `GET /api/bot-analytics/vendor/:key/prs?window&scope&repoIds` | per-REVIEWER Bot-PRs drill-down; `key` = the analytics row identity `u<userId>` \| `'pierre'` (invalid → 400) → `BotVendorPrsResponse` (+`key`/`login`). Replaced the old kind-keyed `/:kind/prs` (removed — two in-house bots no longer merge) |
-| `GET /api/bot-threads/resolvable?scope&repoIds` · `POST /api/bot-threads/resolve {threadIds,repoIds?}` | **scope-wide review & resolve** of `likely_addressed` bot threads (CORE): grouped-by-PR review list (capped 500 newest + uncapped `totalEligible`) · confirm-gated resolve that RE-DERIVES eligibility ∩ the explicit ids (cap bypassed on that path; never blind; shares `resolveThreadsOnGitHub`); client chunks 25 ids/POST for progress. The `ResolveBacklogBanner` in BotRoiPanel |
+| `GET /api/bot-threads/resolvable?scope&repoIds` · `POST /api/bot-threads/resolve {threadIds,repoIds?}` | **scope-wide review & resolve** of `likely_addressed` bot threads (CORE): grouped-by-PR review list (capped 500 newest + uncapped `totalEligible`) · confirm-gated resolve that RE-DERIVES eligibility ∩ the explicit ids (cap bypassed on that path; never blind; shares `resolveThreadsOnGitHub`); client chunks 25 ids/POST for progress. BotRoiPanel's `ResolveBacklogBanner` is now a one-liner opening the `bot-threads` drill-down TAB, which owns the whole review-and-resolve flow + per-thread navigation |
 | `GET·POST·DELETE /api/bot-mute-rules` | **Bot-Triage** mute/auto-triage rules (CORE; `bot_mute_rules`) |
 | `GET /api/open-prs?repoIds&userIds` | currently-open PRs (ignores date range) |
 | `GET /api/threads/:id` | single thread detail |
@@ -357,7 +357,7 @@ file maps to a `client.ts` method.
 | `GET /api/mergers` | per-repo merge-rights map (who's merged there) → the maintainer shield |
 | `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{activityDigest,reviewMemory}`; cloud: 401 signed out) |
 | `GET /api/activity?repoIds&userIds` | **Activity tab** (core, no AI): per repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getActivity`; scoped by the FilterBar repo + member selection (see Activity) |
-| `GET /api/activity/feed?repoIds&userIds&limit&offset&excludeBots` | **Consolidated Feed** (core, no AI; the Activity "Feed" entry): ONE flat, chronological (newest-first) stream of REAL activity events (opens / merges / reviews / comments, plus **commit-push items that ADDRESSED a review thread** — coalesced per author/PR into runs, affected threads inline via `affectedThreads`/`commitCount`/`changeSummary`; plain pushes excluded). Each item carries **`isMyTurn`** (participation: you authored the PR / are a requested reviewer / previously reviewed-or-commented, AND the actor isn't you) — that flag REPLACES the old two-source (`my_turn` vs `feed`) synthesis + dedup, so there's exactly one row per event. **My Turn / "FYI" is CORE (free, every tier), NOT a Pro capability:** `getConsolidatedFeed` computes `isMyTurn` directly via `feed/my-turn.ts` (no capability gate, no provider seam). `isMyTurn` rows are uncapped; plain activity is capped (`FEED_EVENT_CAP`). `excludeBots=true` drops bot-authored activity. **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, counts, generatedAt}` — **`counts` = server-computed facet counts over the WHOLE post-cap stream** (`ConsolidatedFeedCounts`: myTurn/claude/comments/prEvents/bots/byBotActor/byThreadState via the pure `computeFeedCounts`), so FeedView's pill badges reflect every matching item, not the loaded page (stale IndexedDB responses fall back to page-derived counts). No "seen"/acknowledged concept. |
+| `GET /api/activity/feed?repoIds&userIds&limit&offset&excludeBots&botWindowDays` | **Consolidated Feed** (core, no AI; the Activity "Feed" entry): ONE flat, chronological (newest-first) stream of REAL activity events (opens / merges / reviews / comments, plus **commit-push items that ADDRESSED a review thread** — coalesced per author/PR into runs, affected threads inline via `affectedThreads`/`commitCount`/`changeSummary`; plain pushes excluded). Each item carries **`isMyTurn`** (participation: you authored the PR / are a requested reviewer / previously reviewed-or-commented, AND the actor isn't you) — that flag REPLACES the old two-source (`my_turn` vs `feed`) synthesis + dedup, so there's exactly one row per event. **My Turn / "FYI" is CORE (free, every tier), NOT a Pro capability:** `getConsolidatedFeed` computes `isMyTurn` directly via `feed/my-turn.ts` (no capability gate, no provider seam). `isMyTurn` rows are uncapped; plain activity is capped (`FEED_EVENT_CAP`). `excludeBots=true` drops bot-authored activity. **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, counts, generatedAt}` — **`counts` = server-computed facet counts over the WHOLE post-cap stream** (`ConsolidatedFeedCounts`: myTurn/claude/comments/prEvents/bots/byBotActor/byThreadState via the pure `computeFeedCounts`), so FeedView's pill badges reflect every matching item, not the loaded page (stale IndexedDB responses fall back to page-derived counts). Response also carries **`uncappedTotal?`** (pre-cap post-coalesce stream length) — FeedView's count label renders loaded-of-`total` + a "N most recent of M in window" cap disclosure, never the old visible-of-loaded "50 of 50". **Thread-state pills render on EVERY feed view** (not just botsMode; same semantics: an active state pill hides derivedState-less items). `botWindowDays` (clamped 1–90) widens the **botsOnly** feed window to match the shared `botAnalyticsWindow` selector (normal feed stays 14d); the head poll (`useFeedHasNew`) gets the identical params AND is gated on `!isPlaceholderData` so a window flip can't false-fire the refresh banner. No "seen"/acknowledged concept. |
 | `GET /api/repos/:id/claude-reviews` | repo-scoped Claude-review history (retrieval only; `enabled:false` when the flag is off) → `{prs:[{runs[]}]}` |
 | `GET·POST /api/pro/activity/digests*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest (the Activity Feed renders the COLLECTION of these, scoped to WATCHED repos — no separate cross-repo route/pass) + review-memory data. See "Open-core Pro plugin" |
 | `GET /api/auth/providers` · `/login[/​:provider]` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub sign-in: which providers are enabled (for SignInGate) / authorize via `oauth`\|`app` (folds provider into `state`; OAuth adds `config.oauthScope`) / exchange+upsert+session→`/app` / clear session |
@@ -416,7 +416,10 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   labelled `owner/name`, immediate visibility toggle (canonicalises to `repoIds=null` at
   all/none, won't hide the last one), per-row remove. Plus Members (auto-scoped, exclude-bots
   toggle), range presets (7/14/30/90d/custom) + a **Now** action (`timelineCenterAt`), event
-  categories, derived-state tags.
+  categories, derived-state tags. **Members is a TIMELINE-ONLY filter**: the whole
+  Members/exclude-bots panel is hidden while the Activity console is active AND the console's
+  queries never send `userIds`/`excludeBots` (Activity's bot control is the feed's own
+  bot-lens pills); OpenPrsStrip + the board stay member-scoped.
 - **OpenPrsStrip** — collapsible top strip of open PRs (`all` / `my_turn` / `needs_attention`).
 - **Timeline** — the centerpiece (below).
 - **DetailPane** — resizable bottom pane (height persisted) under the board slot. **Hidden
@@ -434,6 +437,20 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   dynamic tabs (pr-detail / pr-focus) follow as closable PR-named chips. **Closing the active
   tab moves to the adjacent tab** (left, else right, else the Timeline board) — it does NOT
   snap back to the board when other tabs remain (`closeTab` in `store/pinnedTabs.ts`).
+  Besides the PR tabs there's a family of **singleton, EPHEMERAL drill-down tabs** (never
+  URL/localStorage-persisted; a reload drops them): `metrics-detail`, `bot-prs`, and the
+  2026-07-19 trio `open-prs` (sortable all-open-PRs: age/author/LoC/untouched-threads/CI/
+  approval columns; row click → the matching Feed rail line with the PR isolated),
+  `bot-only-prs`, and `bot-threads` (scope-wide review & resolve with per-thread navigation
+  via `openPrDetailTab` + `selectThread`). Each = a `TabKind` + key const + opener in
+  `pinnedTabs.ts`, a transient read-not-consumed seed + `openXDetail()` action in
+  `store/filters.ts` (`{fromActivity:true}` arms Back-to-Activity), a full-`<main>` overlay
+  branch in `App.tsx` (MUST join `overlayActive`), and a compact chip in `PinnedTabsBar`.
+  The rail's per-repo console remembers its Activity|Bots sub-tab in
+  `filters.repoConsoleTabs` (and Insights its sub-tab in `insightsSubTab`) — surviving rail
+  switches and tab round-trips; cross-view jumps set it explicitly (e.g. Show-in-feed →
+  `setRepoConsoleTab(repoId,'bots')` BEFORE `setActivityRepo`, isolation set AFTER — the
+  setter clears `feedIsolatedPrId`).
 
 ### The timeline (`components/Timeline/`)
 
@@ -656,9 +673,13 @@ at-a-glance CI / approval standing / thread counts) THEN that **repo's own feed*
 + `RepoOpenPrList` + `<FeedView repoId>`). The rail selection is `store/filters.ts` `activityRepoId`
 (`'feed'` default | a repoId). Built **entirely on the read layer**: `getActivity` composes
 `getInsights`/`getOpenPrs`/`getMergers`; `listClaudeReviewsByRepo` is retrieval-only. **Scoped by
-the FilterBar** — the repo + member selection flows into `useActivity` / `useConsolidatedFeed`
-query keys, so a filter change re-scopes the whole console and refetches (dim, never blank).
-Refresh re-queries the **DB only**.
+the FilterBar's REPO selection only** — repo visibility (+ team scope) flows into `useActivity` /
+`useConsolidatedFeed` query keys, so a filter change re-scopes the whole console and refetches
+(dim, never blank); **Members never scopes Activity** (Timeline-only filter — the console's
+queries send `userIds: null` and the Members panel is hidden while Activity is active).
+Refresh re-queries the **DB only**. Open-PR lists show 10 rows; ">10" swaps the old pagination
+for a "Show all N" footer opening the sortable `open-prs` drill-down tab (a FeedOpenPrsPanel
+TEAM group passes its label + exact repo set so the tab reproduces the group's count).
 
 **Review-bot triage — "the calm layer above your review bot" (CORE, deterministic, NO AI).**
 Third-party AI review bots (CodeRabbit/Greptile/Copilot/Qodo/…) are a **first-class, triaged
