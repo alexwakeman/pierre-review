@@ -857,45 +857,47 @@ export function FeedView({
 
   return (
     <div className="space-y-3" data-testid="feed-view" ref={rootRef}>
-      {/* Active single-PR filter — pinned to the TOP of the feed so it's obvious the stream is
-          scoped to one PR (set e.g. from the PR-detail "Show in feed" button or an open-PR
-          drill-down). Sticky + always visible while isolating, with a one-click Clear. */}
-      {isolatedPrId != null && (
-        <div className="sticky top-0 z-20 flex items-center gap-2 rounded-md border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs text-sky-800 shadow-sm dark:border-sky-500/50 dark:bg-sky-950/60 dark:text-sky-200">
-          <span aria-hidden="true">☰</span>
-          <span className="min-w-0 flex-1 truncate">
-            Showing only{' '}
-            {isolatedPr != null ? (
-              <>
-                <span className="font-mono">#{isolatedPr.number}</span> {isolatedPr.title}
-              </>
-            ) : (
-              'the selected PR'
-            )}
-          </span>
-          <button
-            type="button"
-            onClick={() => setFeedIsolatedPrId(null)}
-            className="shrink-0 rounded border border-sky-400 px-2 py-0.5 font-medium hover:bg-sky-100 dark:border-sky-500/60 dark:hover:bg-sky-900/40"
-          >
-            Clear
-          </button>
-        </div>
-      )}
-
-      {/* Feed-wide "new activity" banner — sticks to the top of the feed pane while there's
-          newer server activity than what's loaded. Manual by design (never yanks content
-          while you're reading); clicking it refreshes the feed + scrolls to the top. */}
-      {hasNew && (
-        <div className="sticky top-0 z-10">
-          <button
-            type="button"
-            onClick={onRefreshClick}
-            data-testid="feed-new-activity"
-            className="flex w-full items-center justify-center gap-2 rounded-full border border-sky-400 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 shadow-sm transition-colors hover:bg-sky-100 dark:border-sky-500/60 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/60"
-          >
-            <span aria-hidden="true">↑</span> New activity — Refresh
-          </button>
+      {/* Both top-of-feed banners share ONE sticky container so they STACK (never overlap): the
+          active single-PR filter pinned at the top so it's obvious the stream is scoped to one
+          PR (set from the PR-detail "Show in feed" button or a drill-down), then the feed-wide
+          "new activity" refresh banner. Two separate `sticky top-0` siblings would collide at the
+          same offset and the higher-z one would hide the other. */}
+      {(isolatedPrId != null || hasNew) && (
+        <div className="sticky top-0 z-20 space-y-2">
+          {isolatedPrId != null && (
+            <div className="flex items-center gap-2 rounded-md border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs text-sky-800 shadow-sm dark:border-sky-500/50 dark:bg-sky-950/60 dark:text-sky-200">
+              <span aria-hidden="true">☰</span>
+              <span className="min-w-0 flex-1 truncate">
+                Showing only{' '}
+                {isolatedPr != null ? (
+                  <>
+                    <span className="font-mono">#{isolatedPr.number}</span> {isolatedPr.title}
+                  </>
+                ) : (
+                  'the selected PR'
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => setFeedIsolatedPrId(null)}
+                className="shrink-0 rounded border border-sky-400 px-2 py-0.5 font-medium hover:bg-sky-100 dark:border-sky-500/60 dark:hover:bg-sky-900/40"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+          {/* Manual by design (never yanks content while you're reading); clicking refreshes
+              the feed + scrolls to the top. */}
+          {hasNew && (
+            <button
+              type="button"
+              onClick={onRefreshClick}
+              data-testid="feed-new-activity"
+              className="flex w-full items-center justify-center gap-2 rounded-full border border-sky-400 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 shadow-sm transition-colors hover:bg-sky-100 dark:border-sky-500/60 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/60"
+            >
+              <span aria-hidden="true">↑</span> New activity — Refresh
+            </button>
+          )}
         </div>
       )}
 

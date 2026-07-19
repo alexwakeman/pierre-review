@@ -137,8 +137,14 @@ export function BotThreadsDetail(): JSX.Element {
   const safePage = Math.min(page, pageCount - 1);
   const pageRows = sorted.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
-  // Selection → the resolve set (the whole selected set, regardless of page/filter).
-  const selectedPrs = useMemo(() => prs.filter((p) => selected.has(p.prId)), [prs, selected]);
+  // Selection → the resolve set. Scoped to the CURRENT repo filter (the dropdown "isolates to
+  // specific repos"), so the count, header checkbox, and resolve all match what's visible — a
+  // stale cross-repo id in `selected` never inflates the count past `filtered.length` or resolves
+  // a hidden repo. Spans all PAGES within the filter (selection is not page-local).
+  const selectedPrs = useMemo(
+    () => filtered.filter((p) => selected.has(p.prId)),
+    [filtered, selected],
+  );
   const selectedThreadIds = useMemo(
     () => selectedPrs.flatMap((p) => p.threadIds),
     [selectedPrs],
@@ -447,7 +453,7 @@ export function BotThreadsDetail(): JSX.Element {
             <div className="flex items-center justify-center gap-3 text-[11px] text-gray-500">
               <button
                 type="button"
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                onClick={() => setPage(Math.max(0, safePage - 1))}
                 disabled={safePage === 0}
                 className="rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 disabled:opacity-40 dark:border-gray-700"
               >
@@ -458,7 +464,7 @@ export function BotThreadsDetail(): JSX.Element {
               </span>
               <button
                 type="button"
-                onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
                 disabled={safePage >= pageCount - 1}
                 className="rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 disabled:opacity-40 dark:border-gray-700"
               >
