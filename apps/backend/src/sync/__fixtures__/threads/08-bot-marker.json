@@ -1,0 +1,23 @@
+{
+  "name": "bot posts a resolution marker in a later comment → likely_addressed, high confidence",
+  "expected": "likely_addressed",
+  "expectedConfidence": "high",
+  "thread": {
+    "isResolved": false,
+    "path": "src/foo.ts",
+    "comments": [
+      {
+        "author": { "login": "coderabbitai" },
+        "createdAt": "2026-01-01T10:00:00Z",
+        "body": "Consider guarding against a null value here."
+      },
+      {
+        "author": { "login": "coderabbitai" },
+        "createdAt": "2026-01-02T09:00:00Z",
+        "body": "✅ Addressed in a1b2c3d4"
+      }
+    ]
+  },
+  "commits": [],
+  "commitFiles": {}
+}

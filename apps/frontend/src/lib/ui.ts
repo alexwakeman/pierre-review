@@ -1,4 +1,6 @@
 import type {
+  AddressedConfidence,
+  AddressedVerdict,
   AutomatedReviewerKind,
   CheckRunState,
   CiStatus,
@@ -53,6 +55,44 @@ export const DERIVED_STATE_META: Record<DerivedState, StateMeta> = {
     color: '#22c55e',
     description: 'Marked resolved on GitHub.',
   },
+};
+
+// Deterministic "how sure are we the thread was addressed?" grade (Part A/B). Advisory — drives
+// the confidence pill + confidence-aware bulk-resolve. Distinct hues from the state colors so the
+// two badges read independently side by side.
+export const CONFIDENCE_META: Record<AddressedConfidence, StateMeta> = {
+  high: {
+    label: 'High',
+    color: '#16a34a',
+    description:
+      'Strong deterministic evidence the thread was addressed — GitHub marked the lines outdated AND a later commit touched them, or the bot itself confirmed/resolved it.',
+  },
+  medium: {
+    label: 'Medium',
+    color: '#d97706',
+    description:
+      'One change signal — a later commit touched the file, or GitHub marked the lines outdated (could be an unrelated edit or a rebase).',
+  },
+  low: {
+    label: 'Low',
+    color: '#94a3b8',
+    description: 'Only a reply — no follow-up change detected.',
+  },
+  none: {
+    label: 'None',
+    color: '#94a3b8',
+    description: 'No addressed signal.',
+  },
+};
+
+// Pro Haiku "was it TRULY addressed?" verdict vocabulary (Part C). The SEMANTIC layer — rendered
+// with a ✨ to distinguish it from the deterministic CONFIDENCE_META.
+export const ADDRESSED_VERDICT_META: Record<AddressedVerdict, { label: string; color: string }> = {
+  addressed: { label: 'Addressed', color: '#16a34a' },
+  likely: { label: 'Likely addressed', color: '#3b82f6' },
+  partial: { label: 'Partially addressed', color: '#d97706' },
+  not_addressed: { label: 'Not addressed', color: '#ef4444' },
+  unclear: { label: 'Unclear', color: '#94a3b8' },
 };
 
 export const PR_STATE_META: Record<PrState, { label: string; color: string }> = {

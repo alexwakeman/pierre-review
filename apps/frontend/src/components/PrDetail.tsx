@@ -21,6 +21,7 @@ import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
 import { ExternalLinkIcon, FeedIcon, MagnifierIcon, OctocatIcon, TimelineIcon } from './Icons.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
+import { AddressedCheckControl } from './AddressedCheck.js';
 import { ChangesTab } from './ChangesTab.js';
 import { PrCommentComposer } from './PrCommentComposer.js';
 import { SkeletonBlock, SkeletonLine } from './Skeleton.js';
@@ -482,6 +483,7 @@ function PrCommentsList({
                   ↗ {isComment ? 'View comment on GitHub' : 'View review on GitHub'}
                 </a>
               )}
+              {isComment && <AddressedCheckControl kind="pr_comment" targetId={it.id} />}
             </div>
             {replyingTo === rowKey && (
               <div className="mt-2">

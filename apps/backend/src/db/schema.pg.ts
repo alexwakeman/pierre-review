@@ -259,6 +259,17 @@ export const reviewThreads = pgTable(
     derivedState: text('derived_state', {
       enum: ['resolved', 'likely_addressed', 'replied_unresolved', 'untouched'],
     }).notNull(),
+    // Deterministic "how sure are we it was addressed?" grade computed alongside derivedState
+    // (sync/derive-thread-state.ts). Additive to the 4-state contract — advisory only.
+    addressedConfidence: text('addressed_confidence', {
+      enum: ['none', 'low', 'medium', 'high'],
+    })
+      .notNull()
+      .default('none'),
+    // Compact machine tag explaining the grade (e.g. 'outdated+commit', 'bot-marker:coderabbit').
+    addressedReason: text('addressed_reason'),
+    // GitHub login of whoever resolved the thread (from `resolvedBy`), null when unresolved.
+    resolvedByLogin: text('resolved_by_login'),
     originalCommenterId: integer('original_commenter_id').references(
       () => users.id,
     ),

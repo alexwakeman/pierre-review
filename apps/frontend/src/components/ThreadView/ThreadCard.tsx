@@ -1,5 +1,7 @@
 import type { ThreadDetail, User } from '@pierre-review/shared';
 import { StateBadge } from '../StateBadge.js';
+import { ConfidenceBadge } from '../ConfidenceBadge.js';
+import { AddressedCheckControl } from '../AddressedCheck.js';
 import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';
 import { CodeAnchor } from './CodeAnchor.js';
@@ -50,6 +52,12 @@ export function ThreadCard({
             stateful) thread is legible at a glance without expanding it, and all thread cards
             read uniformly. */}
         <StateBadge state={thread.derivedState} />
+        {thread.derivedState === 'likely_addressed' && (
+          <ConfidenceBadge
+            confidence={thread.addressedConfidence}
+            reason={thread.addressedReason}
+          />
+        )}
         <ShowOnTimeline
           prId={thread.prId}
           at={thread.createdAt}
@@ -59,6 +67,9 @@ export function ThreadCard({
         <span className="text-gray-300 dark:text-gray-600">·</span>
         {thread.line != null ? <span>line {thread.line}</span> : <span>file-level</span>}
         {thread.isOutdated && <span>· outdated</span>}
+        {!thread.isResolved && (
+          <AddressedCheckControl kind="thread" targetId={thread.id} />
+        )}
         <span className="ml-auto flex items-center gap-2">
           {inMyTurn && <MarkThreadDone threadId={thread.id} />}
           <ResolveThread

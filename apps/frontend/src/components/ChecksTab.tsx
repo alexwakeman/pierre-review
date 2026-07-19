@@ -26,8 +26,10 @@ import { ApproveControl } from './ApproveControl.js';
 import { MergeControl } from './MergeControl.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
 import { AiSummary } from './AiSummary.js';
+import { PrAddressedCheckButton } from './AddressedCheck.js';
 import { useRequestReviewers } from '../hooks/usePrWrites.js';
 import { useSuggestedReviewers } from '../hooks/usePr.js';
+import { useProCapabilities } from '../hooks/useTriage.js';
 
 // Per-state styling for the "Reviewers" row badges (everyone who submitted a
 // review, not just approvers): the badge hue + leading glyph hint at each
@@ -338,6 +340,7 @@ export function ChecksTab({
   // they empty the instant a reviewer is requested. Merge any CODEOWNERS-resolved users the
   // detail didn't carry into the lookup map so their avatars/links render.
   const { data: sugg } = useSuggestedReviewers(pr.id);
+  const canCheckAddressed = useProCapabilities().prSummary;
   const suggestions = sugg?.suggestedReviewers ?? [];
   const suggestUsersById =
     (sugg?.users?.length ?? 0) > 0
@@ -566,6 +569,12 @@ export function ChecksTab({
               </button>
             ))}
           </div>
+        </Row>
+      )}
+
+      {canCheckAddressed && (
+        <Row label="Addressed?">
+          <PrAddressedCheckButton prId={pr.id} />
         </Row>
       )}
 

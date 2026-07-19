@@ -14,6 +14,19 @@ export const DERIVED_STATES: DerivedState[] = [
   'resolved',
 ];
 
+// Deterministic "how confident are we that the thread was addressed?" grade, computed at sync
+// time alongside derivedState (see sync/derive-thread-state.ts). ADDITIVE to the 4-state
+// contract — nothing keys off it for eligibility; it's advisory for confident bulk-resolve and
+// the input signal to the Pro "truly addressed?" check. `none` = no addressed signal.
+export type AddressedConfidence = 'none' | 'low' | 'medium' | 'high';
+
+export const ADDRESSED_CONFIDENCES: AddressedConfidence[] = [
+  'none',
+  'low',
+  'medium',
+  'high',
+];
+
 export type PrState = 'open' | 'merged' | 'closed';
 
 // PR status as exposed by the top-level filter. Derived from (state, isDraft):
@@ -314,6 +327,7 @@ export interface BotOnlyPrsResponse {
 export interface BotDedupMember {
   threadId: number; userId: number; kind: AutomatedReviewerKind;
   login: string; label: string; excerpt: string | null; derivedState: DerivedState;
+  addressedConfidence: AddressedConfidence;
 }
 export interface BotDedupCluster {
   path: string; line: number | null;
@@ -378,6 +392,10 @@ export interface ResolvableThreadPr {
   // resolvableCount === threadIds.length === botThreadCounts.likely_addressed (uncapped now).
   resolvableCount: number;
   threadIds: number[];
+  // Deterministic addressed-confidence breakdown of the resolvable ids + the subset graded
+  // `high` (so the client can pre-select the safest threads).
+  confidenceCounts: AddressedConfidenceCounts;
+  highConfidenceThreadIds: number[];
 }
 export interface ResolvableThreadPrsResponse {
   prs: ResolvableThreadPr[]; // every PR with ≥1 resolvable bot thread, newest-thread-first
@@ -535,6 +553,15 @@ export interface ThreadStateCounts {
   likely_addressed: number;
   replied_unresolved: number;
   untouched: number;
+}
+
+// Breakdown of a set of threads by deterministic addressed-confidence (Part A/B). Lets a PR row
+// show "N high · M medium" and drive "select high-confidence only" bulk-resolve.
+export interface AddressedConfidenceCounts {
+  high: number;
+  medium: number;
+  low: number;
+  none: number;
 }
 
 // ---- v1.1: CI / mergeability / triage ----
@@ -1198,6 +1225,9 @@ export interface ThreadDetail {
   isResolved: boolean;
   isOutdated: boolean;
   derivedState: DerivedState;
+  // Deterministic addressed-confidence + a compact machine reason tag (see Part A). Advisory.
+  addressedConfidence: AddressedConfidence;
+  addressedReason: string | null;
   originalCommenterId: number | null;
   createdAt: string;
   comments: CommentDetail[];
@@ -3118,6 +3148,84 @@ export interface CommentAssessmentResponse {
   creditsExhausted?: boolean;
   noAuth?: boolean;
 }
+
+// ── Pro: "was this thread / PR comment TRULY addressed?" check ───────
+// A Haiku verdict on whether the concern a review thread or PR-level comment raised was actually
+// resolved by later changes — the SEMANTIC layer above the deterministic addressedConfidence
+// (Part A). Works for review threads (bot OR human) AND PR-level comments (which carry no
+// derivedState at all). One row per (account, targetKind, targetId), retained + $0-on-unchanged.
+export type AddressedVerdict =
+  | 'addressed' // clearly resolved by a later change
+  | 'likely' // probably resolved, some uncertainty
+  | 'partial' // partially addressed
+  | 'not_addressed' // no evidence the concern was handled
+  | 'unclear'; // insufficient context to judge
+
+export const ADDRESSED_VERDICTS: AddressedVerdict[] = [
+  'addressed',
+  'likely',
+  'partial',
+  'not_addressed',
+  'unclear',
+];
+
+export type AddressedTargetKind = 'thread' | 'pr_comment';
+
+export interface AddressedCheck {
+  targetKind: AddressedTargetKind;
+  targetId: number; // reviewThreads.id (thread) or prComments.id (pr_comment)
+  prId: number;
+  verdict: AddressedVerdict;
+  confidence: number; // 0-100
+  rationale: string; // Markdown
+  model: string;
+  generatedAt: string; // ISO-8601
+}
+
+// GET /api/pro/threads/:id/addressed | /api/pro/pr-comments/:id/addressed and their POST refresh.
+export interface AddressedCheckResponse {
+  enabled: boolean;
+  check: AddressedCheck | null;
+  creditsExhausted?: boolean;
+  noAuth?: boolean;
+}
+
+// PR-wide batch (one item at a time). The rollup answers "can I safely resolve these?".
+export interface AddressedCheckSummary {
+  addressed: number;
+  likely: number;
+  partial: number;
+  not_addressed: number;
+  unclear: number;
+}
+export interface PrAddressedCheckResponse {
+  enabled: boolean;
+  prId: number;
+  checks: AddressedCheck[];
+  summary: AddressedCheckSummary;
+  creditsExhausted?: boolean;
+  noAuth?: boolean;
+  generatedAt: string;
+}
+// SSE progress events for the PR-wide batch (mirrors the digest refresh stream).
+export type AddressedCheckProgress =
+  | { type: 'start'; total: number }
+  | {
+      type: 'item';
+      targetKind: AddressedTargetKind;
+      targetId: number;
+      verdict: AddressedVerdict;
+      confidence: number;
+      done: number;
+      total: number;
+    }
+  | { type: 'error'; message: string }
+  | {
+      type: 'done';
+      summary: AddressedCheckSummary;
+      creditsExhausted?: boolean;
+      noAuth?: boolean;
+    };
 
 // ---- AI usage tracking (Pro; credits, transparency) ----
 // A non-currency view of AI spend. Cost is tracked in USD server-side (needed for the

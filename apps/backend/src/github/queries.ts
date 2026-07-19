@@ -162,6 +162,9 @@ const PR_NODE_FIELDS = /* GraphQL */ `
       isCollapsed
       path
       line
+      resolvedBy {
+        login
+      }
       comments(first: 50) {
         nodes {
           id
@@ -539,6 +542,7 @@ export interface GqlReviewThread {
   isCollapsed: boolean;
   path: string;
   line: number | null;
+  resolvedBy: { login: string } | null;
   comments: { nodes: GqlReviewComment[] };
 }
 

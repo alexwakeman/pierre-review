@@ -2,6 +2,8 @@ import type {
   ActiveReviewsResponse,
   AddReviewCommentBody,
   AddReviewCommentResult,
+  AddressedCheckResponse,
+  PrAddressedCheckResponse,
   RequestReviewersBody,
   RequestReviewersResult,
   AiFixMergePreview,
@@ -411,6 +413,26 @@ export const api = {
   assessThread: (threadId: number) =>
     fetch(`/api/pro/threads/${threadId}/assess`, jsonBody('POST')).then((r) =>
       handle<CommentAssessmentResponse>(r),
+    ),
+
+  // ---- "Was this TRULY addressed?" check (Pro; reuses the prSummary capability) ----
+  // Retained Haiku verdict + 0-100 confidence for a review thread / PR-level comment (cache read).
+  threadAddressed: (threadId: number) =>
+    get<AddressedCheckResponse>(`/api/pro/threads/${threadId}/addressed`),
+  checkThreadAddressed: (threadId: number) =>
+    fetch(`/api/pro/threads/${threadId}/addressed/check`, jsonBody('POST')).then((r) =>
+      handle<AddressedCheckResponse>(r),
+    ),
+  prCommentAddressed: (commentId: number) =>
+    get<AddressedCheckResponse>(`/api/pro/pr-comments/${commentId}/addressed`),
+  checkPrCommentAddressed: (commentId: number) =>
+    fetch(`/api/pro/pr-comments/${commentId}/addressed/check`, jsonBody('POST')).then((r) =>
+      handle<AddressedCheckResponse>(r),
+    ),
+  // PR-wide batch (JSON twin; the SSE stream is consumed via sse.ts in the hook).
+  prAddressedCheck: (prId: number) =>
+    fetch(`/api/pro/prs/${prId}/addressed/check`, jsonBody('POST')).then((r) =>
+      handle<PrAddressedCheckResponse>(r),
     ),
 
   // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----

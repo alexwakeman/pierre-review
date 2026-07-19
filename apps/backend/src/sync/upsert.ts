@@ -753,18 +753,23 @@ export async function persistPr(
       const commentNodes = t.comments.nodes;
       const originalCommenterId = await resolver.resolve(tx, commentNodes[0]?.author);
 
-      const derivedState = deriveThreadState(
-        {
-          isResolved: t.isResolved,
-          path: t.path,
-          comments: commentNodes.map((c) => ({
-            author: c.author ? { login: c.author.login } : null,
-            createdAt: c.createdAt,
-          })),
-        },
-        commitInputs,
-        commitFilesBySha,
-      );
+      const resolvedByLogin = t.resolvedBy?.login ?? null;
+      const { state: derivedState, addressedConfidence, addressedReason } =
+        deriveThreadState(
+          {
+            isResolved: t.isResolved,
+            path: t.path,
+            isOutdated: t.isOutdated,
+            resolvedByLogin,
+            comments: commentNodes.map((c) => ({
+              author: c.author ? { login: c.author.login } : null,
+              createdAt: c.createdAt,
+              body: c.body ?? null,
+            })),
+          },
+          commitInputs,
+          commitFilesBySha,
+        );
 
       const threadRow = (
         await tx
@@ -777,6 +782,9 @@ export async function persistPr(
           isResolved: t.isResolved,
           isOutdated: t.isOutdated,
           derivedState,
+          addressedConfidence,
+          addressedReason,
+          resolvedByLogin,
           originalCommenterId,
           createdAt: commentNodes[0]
             ? new Date(commentNodes[0].createdAt)
@@ -788,6 +796,9 @@ export async function persistPr(
             isResolved: t.isResolved,
             isOutdated: t.isOutdated,
             derivedState,
+            addressedConfidence,
+            addressedReason,
+            resolvedByLogin,
             line: t.line,
           },
         })

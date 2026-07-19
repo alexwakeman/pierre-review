@@ -5146,6 +5146,8 @@ export async function getPrDetail(
       isResolved: t.isResolved,
       isOutdated: t.isOutdated,
       derivedState: t.derivedState,
+      addressedConfidence: t.addressedConfidence,
+      addressedReason: t.addressedReason,
       originalCommenterId: t.originalCommenterId,
       createdAt: t.createdAt.toISOString(),
       comments: tComments.map((c) => ({
@@ -5510,6 +5512,8 @@ export async function getThreadDetail(
     isResolved: t.isResolved,
     isOutdated: t.isOutdated,
     derivedState: t.derivedState,
+    addressedConfidence: t.addressedConfidence,
+    addressedReason: t.addressedReason,
     originalCommenterId: t.originalCommenterId,
     createdAt: t.createdAt.toISOString(),
     comments: comments.map((c) => ({
@@ -6020,6 +6024,7 @@ export async function getResolvableBotThreadPrs(
   const rows = await db
     .select({
       threadId: reviewThreads.id,
+      addressedConfidence: reviewThreads.addressedConfidence,
       prId: pullRequests.id,
       prNumber: pullRequests.number,
       prTitle: pullRequests.title,
@@ -6058,11 +6063,15 @@ export async function getResolvableBotThreadPrs(
         botThreadCounts: emptyCounts(),
         resolvableCount: 0,
         threadIds: [],
+        confidenceCounts: { high: 0, medium: 0, low: 0, none: 0 },
+        highConfidenceThreadIds: [],
       };
       byPr.set(r.prId, g);
     }
     g.threadIds.push(r.threadId);
     g.resolvableCount += 1;
+    g.confidenceCounts[r.addressedConfidence] += 1;
+    if (r.addressedConfidence === 'high') g.highConfidenceThreadIds.push(r.threadId);
   }
 
   const prIds = [...byPr.keys()];
@@ -8125,6 +8134,7 @@ export async function getBotDedupClusters(
       path: reviewThreads.path,
       line: reviewThreads.line,
       state: reviewThreads.derivedState,
+      addressedConfidence: reviewThreads.addressedConfidence,
       login: users.githubLogin,
     })
     .from(reviewThreads)
@@ -8171,6 +8181,7 @@ export async function getBotDedupClusters(
       label: labelForKind(kind),
       excerpt: excerptByThread.get(r.id) ?? null,
       derivedState: r.state,
+      addressedConfidence: r.addressedConfidence,
       line: r.line,
     });
     membersByPath.set(r.path, arr);

@@ -10,6 +10,7 @@ import { type TabMeta } from '../../store/pinnedTabs.js';
 import { CI_META, indexUsers, relativeTime, userLabel } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
+import { PrAddressedCheckButton } from '../AddressedCheck.js';
 import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
 
 // The resolvable-bot-threads DRILL-DOWN — a persistent, singleton tab opened by the Bot-ROI
@@ -88,6 +89,9 @@ export function BotThreadsDetail(): JSX.Element {
   const totalThreads = data?.totalThreads ?? 0;
 
   const [confirming, setConfirming] = useState(false);
+  // When on, the resolve set narrows to each PR's HIGH-confidence thread ids — the safest subset
+  // (outdated + a later commit, a bot self-confirm/resolve). Off = every likely_addressed thread.
+  const [highOnly, setHighOnly] = useState(false);
   // Empty by default — PRs are DESELECTED until the reviewer picks or "Select all"s. Tracks
   // SELECTED pr ids; a stale id (a resolved PR that dropped out) just contributes no threads.
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -146,10 +150,15 @@ export function BotThreadsDetail(): JSX.Element {
     [filtered, selected],
   );
   const selectedThreadIds = useMemo(
-    () => selectedPrs.flatMap((p) => p.threadIds),
-    [selectedPrs],
+    () => selectedPrs.flatMap((p) => (highOnly ? p.highConfidenceThreadIds : p.threadIds)),
+    [selectedPrs, highOnly],
   );
   const selectedPrIds = useMemo(() => selectedPrs.map((p) => p.prId), [selectedPrs]);
+  // Whole-backlog high-confidence total (for the toggle label).
+  const totalHigh = useMemo(
+    () => filtered.reduce((n, p) => n + p.highConfidenceThreadIds.length, 0),
+    [filtered],
+  );
 
   const toggleRow = (prId: number): void =>
     setSelected((prev) => {
@@ -324,6 +333,18 @@ export function BotThreadsDetail(): JSX.Element {
                 >
                   Clear
                 </button>
+                <label
+                  className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400"
+                  title="Resolve only threads with HIGH deterministic addressed-confidence — GitHub marked the lines outdated AND a later commit touched them, or the bot itself confirmed/resolved it."
+                >
+                  <input
+                    type="checkbox"
+                    checked={highOnly}
+                    onChange={(e) => setHighOnly(e.target.checked)}
+                    className="h-3.5 w-3.5 cursor-pointer accent-green-600"
+                  />
+                  High-confidence only{totalHigh > 0 ? ` (${totalHigh})` : ''}
+                </label>
               </>
             )}
             <span className="text-[11px] text-gray-400 tabular-nums">
@@ -434,12 +455,25 @@ export function BotThreadsDetail(): JSX.Element {
                         </span>
                       </td>
                       <td className="py-1.5 pr-3">
-                        <span className="rounded bg-sky-100 px-1.5 py-px text-[11px] font-semibold tabular-nums text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-                          {g.resolvableCount}
+                        <span className="inline-flex items-center gap-1">
+                          <span className="rounded bg-sky-100 px-1.5 py-px text-[11px] font-semibold tabular-nums text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                            {g.resolvableCount}
+                          </span>
+                          {g.confidenceCounts.high > 0 && (
+                            <span
+                              className="rounded bg-green-100 px-1.5 py-px text-[10px] font-semibold tabular-nums text-green-700 dark:bg-green-900/40 dark:text-green-300"
+                              title="Threads graded HIGH addressed-confidence — the safest to resolve."
+                            >
+                              {g.confidenceCounts.high} high
+                            </span>
+                          )}
                         </span>
                       </td>
                       <td className="py-1.5">
-                        <ThreadCountChips counts={g.botThreadCounts} />
+                        <div className="flex flex-col items-start gap-1">
+                          <ThreadCountChips counts={g.botThreadCounts} />
+                          <PrAddressedCheckButton prId={g.prId} compact />
+                        </div>
                       </td>
                     </tr>
                   );
