@@ -10,6 +10,7 @@ import { fmtDuration } from '../charts/common.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
+import { SortHeader, type SortDir, type SortState, compare, nextSort } from './sortableTable.js';
 
 // The flow-metric DRILL-DOWN — a persistent tab opened by clicking a metric tile in
 // Insights. One sub-tab per metric, each listing the PRs behind that number (with the
@@ -17,14 +18,114 @@ import { MetricRepoFilter } from './MetricRepoFilter.js';
 // single lazy read (useTeamMetricsDetail); clicking any PR opens its detail tab.
 
 const METRIC_META: Record<TeamMetricKey, { label: string; blurb: string }> = {
-  open_prs: { label: 'Open PRs', blurb: 'All currently-open PRs · longest-open first' },
-  merges: { label: 'Merges', blurb: 'Merged this sprint · newest first' },
+  open_prs: { label: 'Open PRs', blurb: 'All currently-open PRs · most-recently-updated first' },
+  merges: { label: 'Merges', blurb: 'Merged this sprint · most-recently-updated first' },
   lead_time: { label: 'Lead time', blurb: 'Open → merge (merged + open) · longest first' },
   review_latency: { label: 'Review latency', blurb: 'Open → first review · longest first' },
   merge_ci: { label: 'Merge CI', blurb: 'Merged PRs · CI-failed-at-merge first' },
   ci_recovery: { label: 'CI recovery', blurb: 'Red → green · slowest first' },
   ci_red: { label: 'CI red now', blurb: 'Currently-failing branches · longest red first' },
 };
+
+// ── Sortable-table wiring (shared mechanics from ./sortableTable) ─────────────────────────
+// The drill-down is a single table whose "value" + last columns are metric-specific, so the
+// sort machinery switches on the active metric. Columns: pr | value | ci | diff | author |
+// last (Reviewers/Merged by/Opened) | updated.
+type SortCol = 'pr' | 'value' | 'ci' | 'diff' | 'author' | 'last' | 'updated';
+
+// Natural first-click direction: text A→Z, time/size/duration lead with the most pressing end.
+const DEFAULT_DIR: Record<SortCol, SortDir> = {
+  pr: 'desc',
+  value: 'desc',
+  ci: 'asc',
+  diff: 'desc',
+  author: 'asc',
+  last: 'desc',
+  updated: 'desc',
+};
+
+// Per-tab default sort. Recency (updated desc) for the two tabs where "what moved lately" is
+// the useful lens; the duration/CI tabs keep the metric magnitude as the sort (which IS the
+// point of the tile — e.g. NOT recency for lead time), reproducing the backend order.
+const DEFAULT_SORT: Record<TeamMetricKey, SortState<SortCol> | null> = {
+  open_prs: { col: 'updated', dir: 'desc' },
+  merges: { col: 'updated', dir: 'desc' },
+  lead_time: { col: 'value', dir: 'desc' },
+  review_latency: { col: 'value', dir: 'desc' },
+  merge_ci: { col: 'value', dir: 'desc' },
+  ci_recovery: { col: 'value', dir: 'desc' },
+  ci_red: { col: 'value', dir: 'desc' },
+};
+
+// CI rollup → a sortable rank (failing first under 'asc'; null/no-checks last).
+const CI_RANK: Record<string, number> = {
+  failure: 0,
+  error: 0,
+  pending: 1,
+  success: 2,
+  expected: 3,
+  unknown: 4,
+};
+function ciRank(ci: MetricPr['ciStatus']): number {
+  return ci == null ? 5 : CI_RANK[ci] ?? 4;
+}
+
+// The metric-specific "value" column, mapped to a numeric magnitude so it sorts sensibly.
+function valueSort(m: TeamMetricKey, pr: MetricPr): number {
+  switch (m) {
+    case 'open_prs':
+    case 'merges':
+    case 'lead_time':
+      return pr.leadTimeHours ?? -1;
+    case 'review_latency':
+      return pr.reviewLatencyHours ?? -1;
+    case 'ci_recovery':
+      return pr.recoveryHours ?? -1;
+    case 'ci_red':
+      return pr.redAgeHours ?? -1;
+    case 'merge_ci':
+      // "redness" — red highest so a desc sort surfaces CI-failed-at-merge first (backend order).
+      return pr.ciStatus === 'failure' || pr.ciStatus === 'error' ? 2 : pr.ciStatus === 'pending' ? 1 : 0;
+  }
+}
+
+// The contextual last column (Reviewers / Merged by / Opened) → a sortable value.
+function lastColSort(m: TeamMetricKey, pr: MetricPr, usersById: Map<number, User>): number | string {
+  if (m === 'review_latency') return pr.reviewerIds.length;
+  if (m === 'merges' || m === 'merge_ci') {
+    const u = pr.mergedById != null ? usersById.get(pr.mergedById) : undefined;
+    return (u?.githubLogin ?? String(pr.mergedById ?? '')).toLowerCase();
+  }
+  return pr.openedAt; // ISO-8601 → chronological string sort
+}
+
+// The per-column sort value. Numeric columns MUST return a number (never the formatted
+// DiffCell string), or compare() localeCompares lexicographically and '100' < '20'.
+function sortValue(
+  pr: MetricPr,
+  m: TeamMetricKey,
+  col: SortCol,
+  usersById: Map<number, User>,
+): number | string {
+  switch (col) {
+    case 'pr':
+      return pr.prNumber;
+    case 'value':
+      return valueSort(m, pr);
+    case 'ci':
+      return ciRank(pr.ciStatus);
+    case 'diff':
+      return pr.additions + pr.deletions; // numeric LoC — the diff-count sort fix
+    case 'author': {
+      const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
+      return (u?.githubLogin ?? String(pr.authorId ?? '')).toLowerCase();
+    }
+    case 'updated':
+      return pr.updatedAt;
+    case 'last':
+      return lastColSort(m, pr, usersById);
+  }
+}
 
 function listFor(
   detail: NonNullable<ReturnType<typeof useTeamMetricsDetail>['data']>['detail'],
@@ -211,6 +312,9 @@ function Row({
           relativeTime(pr.openedAt)
         )}
       </td>
+      <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
+        {relativeTime(pr.updatedAt)}
+      </td>
     </tr>
   );
 }
@@ -220,24 +324,29 @@ function Table({
   rows,
   usersById,
   onOpen,
+  sort,
+  onSort,
 }: {
   m: TeamMetricKey;
   rows: MetricPr[];
   usersById: Map<number, User>;
   onOpen: (pr: MetricPr) => void;
+  sort: SortState<SortCol> | null;
+  onSort: (col: SortCol) => void;
 }): JSX.Element {
   const lastCol = m === 'review_latency' ? 'Reviewers' : m === 'merges' || m === 'merge_ci' ? 'Merged by' : 'Opened';
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[720px] border-collapse text-sm">
+      <table className="w-full min-w-[760px] border-collapse text-sm">
         <thead>
           <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-            <th className="pb-1 pr-3 font-semibold">Pull request</th>
-            <th className="pb-1 pr-3 font-semibold">{valueHeader(m)}</th>
-            <th className="pb-1 pr-3 font-semibold">CI</th>
-            <th className="pb-1 pr-3 font-semibold">Diff</th>
-            <th className="pb-1 pr-3 font-semibold">Author</th>
-            <th className="pb-1 pr-3 font-semibold">{lastCol}</th>
+            <SortHeader col="pr" label="Pull request" sort={sort} onSort={onSort} />
+            <SortHeader col="value" label={valueHeader(m)} sort={sort} onSort={onSort} />
+            <SortHeader col="ci" label="CI" sort={sort} onSort={onSort} />
+            <SortHeader col="diff" label="Diff" sort={sort} onSort={onSort} title="Diff size (added + deleted lines)" />
+            <SortHeader col="author" label="Author" sort={sort} onSort={onSort} />
+            <SortHeader col="last" label={lastCol} sort={sort} onSort={onSort} />
+            <SortHeader col="updated" label="Updated" sort={sort} onSort={onSort} title="GitHub last-activity time" />
           </tr>
         </thead>
         <tbody>
@@ -270,6 +379,15 @@ export function MetricsDetail(): JSX.Element {
     }
   }, [metricsFocus, consumeMetricsFocus]);
 
+  // Sort is PER-TAB (each metric keeps its own column + direction), seeded from DEFAULT_SORT —
+  // recency for open_prs/merges, metric magnitude for the duration/CI tabs. Header clicks toggle.
+  const [sortByTab, setSortByTab] = useState<Record<TeamMetricKey, SortState<SortCol> | null>>(
+    () => ({ ...DEFAULT_SORT }),
+  );
+  const sort = sortByTab[active];
+  const onSort = (col: SortCol): void =>
+    setSortByTab((prev) => ({ ...prev, [active]: nextSort(prev[active], col, DEFAULT_DIR) }));
+
   const detail = data?.detail ?? null;
 
   // Per-metric-tab repo filter — each tab owns its own selection (null = all team repos),
@@ -291,9 +409,19 @@ export function MetricsDetail(): JSX.Element {
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
   }, [detail]);
 
-  // Flat list ordered by the metric, filtered to the selected repos (null = all, across repos).
+  // Flat list ordered by the metric, filtered to the selected repos (null = all, across repos),
+  // then re-sorted by the active tab's column (null sort = the backend's metric order).
   const allRows = listFor(detail, active);
-  const rows = activeSel == null ? allRows : allRows.filter((r) => activeSel.includes(r.repoId));
+  const rows = useMemo(() => {
+    const filtered = activeSel == null ? allRows : allRows.filter((r) => activeSel.includes(r.repoId));
+    if (sort == null) return filtered;
+    const mul = sort.dir === 'asc' ? 1 : -1;
+    return [...filtered].sort(
+      (a, b) =>
+        mul * compare(sortValue(a, active, sort.col, usersById), sortValue(b, active, sort.col, usersById)) ||
+        b.prNumber - a.prNumber, // stable final tiebreak
+    );
+  }, [allRows, activeSel, sort, active, usersById]);
   const openPr = (pr: MetricPr): void => {
     const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
     const meta: PinnedPr = {
@@ -356,7 +484,9 @@ export function MetricsDetail(): JSX.Element {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <div className="text-[11px] text-gray-400">{METRIC_META[active].blurb}</div>
+        <div className="text-[11px] text-gray-400">
+          {METRIC_META[active].blurb} · click a column to sort
+        </div>
         {rows.length !== allRows.length && (
           <span className="text-[11px] text-gray-400">
             · {rows.length} of {allRows.length}
@@ -385,7 +515,7 @@ export function MetricsDetail(): JSX.Element {
             : 'No PRs for the selected repos — adjust the repo filter.'}
         </div>
       ) : (
-        <Table m={active} rows={rows} usersById={usersById} onOpen={openPr} />
+        <Table m={active} rows={rows} usersById={usersById} onOpen={openPr} sort={sort} onSort={onSort} />
       )}
     </div>
   );

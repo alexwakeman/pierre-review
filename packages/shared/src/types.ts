@@ -3077,6 +3077,7 @@ export interface MetricPr {
   deletions: number;
   changedFiles: number;
   openedAt: string; // ISO-8601
+  updatedAt: string; // ISO-8601 — GitHub last-activity ts (drives the sortable "Updated" column)
   mergedAt: string | null; // ISO-8601 (merged PRs)
   // Metric-specific figures (null unless relevant to this row's list):
   leadTimeHours: number | null; // open→merge (merged) / open→now (open) — merges + lead_time
