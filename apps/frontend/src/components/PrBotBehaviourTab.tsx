@@ -61,8 +61,10 @@ function BotBlock({ bot, color }: { bot: PrBotBehaviour; color: string }): JSX.E
           <span className="text-[11px] text-gray-400">first touch {relativeTime(bot.firstTouchAt)}</span>
         )}
         {anomaly && (
+          // The ABSOLUTE delta over typical (not a ratio — a ratio rounds to a misleading "1×"
+          // near the threshold, and divides by ~0 when a bot's typical TTFR is 0).
           <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400">
-            ⚠ {Math.round((bot.ttfrHours ?? 0) / Math.max(bot.typicalTtfrHours ?? 1, 1e-6))}× slower
+            ⚠ {dur((bot.ttfrHours ?? 0) - (bot.typicalTtfrHours ?? 0))} slower than usual
           </span>
         )}
       </div>

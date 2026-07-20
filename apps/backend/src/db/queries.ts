@@ -7605,7 +7605,7 @@ interface WeekAnomaly { z: number; typical: number; direction: 'high' | 'low' }
 // Per-index anomaly (or null) over a weekly series. `direction`: 'high' flags only worse-than-
 // -typical (TTFR), 'both' flags either way (volume, follow-up). `minScale` is the metric's
 // floor on the robust SD (e.g. 0.5h for TTFR, a couple of touches for volume, 10pp for a rate).
-function weeklyAnomalies(
+export function weeklyAnomalies(
   values: (number | null)[],
   opts: { direction: 'high' | 'both'; minScale: number },
 ): (WeekAnomaly | null)[] {
@@ -7629,7 +7629,7 @@ function weeklyAnomalies(
 // Only for a normally-REGULAR bot (≥ MIN_BASELINE_POINTS active days); a run flags when it's ≥
 // max(3, 3·medianGap) days, where medianGap is the bot's typical spacing between active days — so
 // a daily bot flags a 3-day silence while a naturally sparse bot doesn't cry wolf.
-function detectSilentRuns(daily: number[]): { startDay: number; days: number }[] {
+export function detectSilentRuns(daily: number[]): { startDay: number; days: number }[] {
   const activeDays: number[] = [];
   for (let i = 0; i < daily.length; i++) if (daily[i]! > 0) activeDays.push(i);
   if (activeDays.length < MIN_BASELINE_POINTS) return [];
@@ -7876,7 +7876,14 @@ export async function getBotBehaviourAnalytics(
       }
     }
 
-    if (totalActivity === 0 && prsReviewed === 0) continue; // no window footprint → skip the row
+    // Coverage gaps — computed BEFORE the row gate so the "bot went dark" alert survives. A
+    // trailing (ongoing) silent run reaches the end of the strip: a bot with early-span activity
+    // then total silence has zero WINDOW footprint, but IS the highest-value signal, so keep it.
+    const silentRuns = detectSilentRuns(dailyActivity);
+    const hasTrailingSilence = silentRuns.some((r) => r.startDay + r.days >= SPAN_DAYS);
+    // No window footprint AND no ongoing silence to report → skip the row (a bot that was never
+    // regular enough to have a silent run, or is simply out of scope).
+    if (totalActivity === 0 && prsReviewed === 0 && !hasTrailingSilence) continue;
 
     const baseline: BotBehaviourBotStat['ttfrBaseline'] =
       baselineTally.ready === 0 && baselineTally.opened === 0
@@ -7893,8 +7900,14 @@ export async function getBotBehaviourAnalytics(
     const followupSeries = followupByWeek.map((w) =>
       w.total > 0 ? Math.round((w.withFollowup / w.total) * 100) : null,
     );
+    // Volume's baseline is the bot's ACTIVE weeks only (zero weeks → null): a "typical volume"
+    // means "how much when it's working". This makes the MIN_BASELINE_POINTS guard count real
+    // weeks (a new / bursty bot with < 4 active weeks reads as "building baseline", not an
+    // "anomalous spike vs typical 0"), and leaves drops-to-ZERO to the silence detector — a
+    // volume anomaly is a change in the bot's ACTIVE output (e.g. 50→5/week), not going dark.
+    const volumeSeries: (number | null)[] = volumeByWeek.map((v) => (v > 0 ? v : null));
     const ttfrAnoms = weeklyAnomalies(ttfrSeries, { direction: 'high', minScale: 0.5 });
-    const volAnoms = weeklyAnomalies(volumeByWeek, { direction: 'both', minScale: 2 });
+    const volAnoms = weeklyAnomalies(volumeSeries, { direction: 'both', minScale: 2 });
     const followupAnoms = weeklyAnomalies(followupSeries, { direction: 'both', minScale: 10 });
 
     const trend: BotBehaviourTrendPoint[] = Array.from({ length: SPAN_WEEKS }, (_, i) => ({
@@ -7907,9 +7920,9 @@ export async function getBotBehaviourAnalytics(
       followupAnomaly: followupAnoms[i] != null,
     }));
 
-    // Coverage gaps + the anomaly evidence list (newest week first, then silence runs). typical =
-    // the bot's own robust median for that metric — the "vs typical" the customer's claim needs.
-    const silentRuns = detectSilentRuns(dailyActivity);
+    // The anomaly evidence list (newest week first, then silence runs). typical = the bot's own
+    // robust median for that metric — the "vs typical" the customer's claim needs. (silentRuns
+    // was computed above the row gate so the "bot went dark" case survives.)
     const anomalies: BotBehaviourAnomaly[] = [];
     for (let i = SPAN_WEEKS - 1; i >= 0; i--) {
       const weekStart = trend[i]!.weekStart;

@@ -679,9 +679,12 @@ export function PrDetail({
 
   const usersById = useMemo(() => indexUsers(pr?.users), [pr]);
 
-  // PR-scoped bot behaviour (EXPERIMENTAL, CORE — not Pro): show the "Bot activity" tab only
-  // when an automated reviewer actually touched this PR (presence-gated). Reviews carry the
-  // precise `automatedKind`; a thread-opening / commenting bot falls back to users.isBot.
+  // PR-scoped bot behaviour (EXPERIMENTAL, CORE — not Pro): a CHEAP client gate that ENABLES the
+  // fetch (the tab's actual visibility is the server's confirmed count, see botTabVisible below).
+  // Reviews carry the precise account-scoped `automatedKind`; a thread-opening / commenting bot
+  // falls back to the global users.isBot. Known residual: a reviewer manually classified as
+  // automated in Settings (isBot stays false) that ONLY comments (never submits a review) won't
+  // trip this gate, so the fetch won't fire — a rare edge the cheap client heuristic can't see.
   const hasBots = useMemo(() => {
     if (!pr) return false;
     if (pr.reviews.some((r) => r.automatedKind != null)) return true;
@@ -691,9 +694,19 @@ export function PrDetail({
     return false;
   }, [pr, usersById]);
   // Fetched here (deduped with the tab's own call) so the tab label + Overview chip can badge a
-  // "slower than typical" bot without opening the tab. Only fires for bot PRs.
+  // "slower than typical" bot without opening the tab. `hasBots` is a CHEAP fetch gate (a superset
+  // of the server's set — it fires for any isBot/automated participant, incl. dependency bots).
   const { data: prBotBehaviour } = usePrBotBehaviour(pr?.id ?? null, hasBots);
+  // The TAB's visibility is gated on the SERVER's confirmed automated-REVIEWER count, not the
+  // client heuristic — so a PR whose only bot is a dependency bot (dependabot/renovate, excluded
+  // from the review-bot set) never shows a "Bot activity" tab that would render an empty state.
+  const botTabVisible = (prBotBehaviour?.bots.length ?? 0) > 0;
   const botTtfrAnomalies = (prBotBehaviour?.bots ?? []).filter((b) => b.ttfrAnomaly != null).length;
+  // If the active tab is bot_activity but this PR has no bot reviewers (e.g. switched to a
+  // human-only PR while on the tab), fall back to Overview so the content can't strand.
+  useEffect(() => {
+    if (tab === 'bot_activity' && !botTabVisible) setTab('overview');
+  }, [tab, botTabVisible]);
 
   // Keep a pinned tab's label fresh if the PR detail (re)loads with a new title /
   // author (e.g. a renamed PR). No-op when the PR isn't pinned or nothing changed.
@@ -860,7 +873,7 @@ export function PrDetail({
             'threads',
             'activity',
             'changes',
-            ...(hasBots ? (['bot_activity'] as Tab[]) : []),
+            ...(botTabVisible ? (['bot_activity'] as Tab[]) : []),
             ...(claudeReviewEnabled ? (['claude_review'] as Tab[]) : []),
             ...(aiFixTabEnabled ? (['ai_fix'] as Tab[]) : []),
           ] as Tab[]
@@ -920,7 +933,7 @@ export function PrDetail({
             <ChecksTab
               pr={pr}
               usersById={usersById}
-              onShowBotActivity={hasBots ? () => setTab('bot_activity') : undefined}
+              onShowBotActivity={botTabVisible ? () => setTab('bot_activity') : undefined}
             />
             <div className="border-t border-gray-200 dark:border-gray-800">
               <div className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
