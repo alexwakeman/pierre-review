@@ -103,6 +103,9 @@ import type {
   BotVendorTrendPoint,
   BotVendorAnalytics,
   BotAnalyticsResponse,
+  BotBehaviourResponse,
+  BotBehaviourBotStat,
+  BotBehaviourTrendPoint,
   BotVendorPr,
   BotVendorPrsResponse,
   BotDedupMember,
@@ -7554,6 +7557,291 @@ export async function getBotAnalytics(
     botOnlyPrs,
   };
   return { enabled: true, generatedAt, window: win, vendors, totals, suggestions };
+}
+
+// ── Bot BEHAVIOUR analytics (EXPERIMENTAL, CORE, deterministic) ────────────────────────────
+// A SEPARATE surface from getBotAnalytics (which stays untouched) powering the "Behaviour"
+// sub-tab. Per bot, over the shared window (+ a 12-week TTFR trend): time-to-first-review, the
+// LoC-to-comments ratio, the week×hour activity heatmap (coverage / rate-limit inference), and
+// post-first-review follow-up behaviour. All from durable timestamped rows (reviews.submittedAt,
+// reviewComments/prComments.createdAt) — no lean-gated text — so it's fully deterministic. TTFR
+// clock start = pr_ready_for_review (when observed) else pullRequests.openedAt.
+const TTFR_BUCKETS: { label: string; maxHours: number }[] = [
+  { label: '<1h', maxHours: 1 },
+  { label: '1–4h', maxHours: 4 },
+  { label: '4–12h', maxHours: 12 },
+  { label: '12–24h', maxHours: 24 },
+  { label: '1–3d', maxHours: 72 },
+  { label: '>3d', maxHours: Infinity },
+];
+function bucketize(values: number[], buckets: { label: string; maxHours: number }[]): AnalyticsBin[] {
+  const counts = new Array<number>(buckets.length).fill(0);
+  for (const v of values) {
+    const i = buckets.findIndex((b) => v < b.maxHours);
+    counts[i < 0 ? buckets.length - 1 : i]! += 1;
+  }
+  return buckets.map((b, i) => ({ label: b.label, count: counts[i]! }));
+}
+// medianOf is defined once above (shared with getTeamMetrics).
+function percentileOf(xs: number[], p: number): number | null {
+  if (xs.length === 0) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const idx = Math.min(s.length - 1, Math.max(0, Math.ceil(p * s.length) - 1));
+  return s[idx]!;
+}
+
+export async function getBotBehaviourAnalytics(
+  accountId: number,
+  window: BotWindowKind,
+  // Team scope (mirrors getBotAnalytics): null = all account repos; a list = only those; [] = none.
+  scopeRepoIds?: number[] | null,
+): Promise<BotBehaviourResponse> {
+  const nowMs = Date.now();
+  const to = new Date(nowMs);
+  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
+  const from = new Date(nowMs - windowDays * 86_400_000);
+  const fromMs = from.getTime();
+  const trendFrom = new Date(nowMs - 12 * 7 * 86_400_000); // 84 days ⊇ every window
+  const generatedAt = to.toISOString();
+  const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
+  const empty = (): BotBehaviourResponse => ({ enabled: true, generatedAt, window: win, bots: [] });
+
+  if (scopeRepoIds != null && scopeRepoIds.length === 0) return empty();
+  const repoScopeFilter = scopeRepoIds != null ? [inArray(pullRequests.repoId, scopeRepoIds)] : [];
+  const automatedIds = await automatedReviewerUserIds(accountId);
+  if (automatedIds.length === 0) return empty();
+  const kindMap = await classificationKindForUser(accountId);
+
+  // Identity (label + login) — mirrors getBotAnalytics.reviewerLabel exactly.
+  const classLabel = new Map<number, string>();
+  for (const r of await db
+    .select({ id: botReviewClassification.authorUserId, label: botReviewClassification.label })
+    .from(botReviewClassification)
+    .where(eq(botReviewClassification.accountId, accountId))
+    .execute())
+    if (r.label != null && r.label.trim() !== '') classLabel.set(r.id, r.label.trim());
+  const loginById = new Map<number, string>();
+  const rawLoginById = new Map<number, string>();
+  for (const r of await db
+    .select({ id: users.id, login: users.githubLogin, name: users.displayName })
+    .from(users)
+    .where(inArray(users.id, automatedIds))
+    .execute()) {
+    loginById.set(r.id, r.name?.trim() || r.login || `#${r.id}`);
+    if (r.login) rawLoginById.set(r.id, r.login);
+  }
+  const reviewerLabel = (userId: number, kind: AutomatedReviewerKind): string => {
+    const custom = classLabel.get(userId);
+    if (custom) return custom;
+    if (kind !== 'in_house' && kind !== 'pierre') return labelForKind(kind);
+    return loginById.get(userId) ?? labelForKind(kind);
+  };
+
+  // Bot touches over the 12-week trend span (⊇ the window). Reviews (excl. pending) + inline
+  // comments + issue-level comments — the three ways a review bot marks a PR.
+  const reviewRows = await db
+    .select({ authorId: reviews.authorId, prId: reviews.prId, at: reviews.submittedAt })
+    .from(reviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviews.authorId, automatedIds),
+        ne(reviews.state, 'pending'),
+        gte(reviews.submittedAt, trendFrom),
+        lte(reviews.submittedAt, to),
+        ...repoScopeFilter,
+      ),
+    )
+    .execute();
+  const rcRows = await db
+    .select({ authorId: reviewComments.authorId, prId: reviewComments.prId, at: reviewComments.createdAt })
+    .from(reviewComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviewComments.authorId, automatedIds),
+        gte(reviewComments.createdAt, trendFrom),
+        lte(reviewComments.createdAt, to),
+        ...repoScopeFilter,
+      ),
+    )
+    .execute();
+  const pcRows = await db
+    .select({ authorId: prComments.authorId, prId: prComments.prId, at: prComments.createdAt })
+    .from(prComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(prComments.authorId, automatedIds),
+        gte(prComments.createdAt, trendFrom),
+        lte(prComments.createdAt, to),
+        ...repoScopeFilter,
+      ),
+    )
+    .execute();
+
+  // (userId → prId → touches) over the trend span, + the flat per-user touch times for the heatmap.
+  interface Touch { ms: number; isComment: boolean }
+  const touchesByUserPr = new Map<number, Map<number, Touch[]>>();
+  const involvedPrIds = new Set<number>();
+  const addTouch = (userId: number | null, prId: number | null, at: Date, isComment: boolean): void => {
+    if (userId == null || prId == null || !kindMap.has(userId)) return;
+    involvedPrIds.add(prId);
+    let byPr = touchesByUserPr.get(userId);
+    if (!byPr) {
+      byPr = new Map();
+      touchesByUserPr.set(userId, byPr);
+    }
+    const arr = byPr.get(prId) ?? [];
+    arr.push({ ms: at.getTime(), isComment });
+    byPr.set(prId, arr);
+  };
+  for (const r of reviewRows) addTouch(r.authorId, r.prId, r.at, false);
+  for (const r of rcRows) addTouch(r.authorId, r.prId, r.at, true);
+  for (const r of pcRows) addTouch(r.authorId, r.prId, r.at, true);
+  if (touchesByUserPr.size === 0) return empty();
+
+  // PR baselines: openedAt + diff size, and the earliest observed ready-for-review event.
+  const prIdList = [...involvedPrIds];
+  const prMeta = new Map<number, { openedMs: number; loc: number }>();
+  for (const p of await db
+    .select({
+      id: pullRequests.id,
+      openedAt: pullRequests.openedAt,
+      additions: pullRequests.additions,
+      deletions: pullRequests.deletions,
+    })
+    .from(pullRequests)
+    .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, prIdList)))
+    .execute())
+    prMeta.set(p.id, { openedMs: p.openedAt.getTime(), loc: p.additions + p.deletions });
+  const readyByPr = new Map<number, number>();
+  for (const e of await db
+    .select({ prId: events.prId, at: events.occurredAt })
+    .from(events)
+    .where(
+      and(
+        eq(events.accountId, accountId),
+        eq(events.type, 'pr_ready_for_review'),
+        inArray(events.prId, prIdList),
+      ),
+    )
+    .execute()) {
+    if (e.prId == null) continue;
+    const ms = e.at.getTime();
+    const cur = readyByPr.get(e.prId);
+    if (cur == null || ms < cur) readyByPr.set(e.prId, ms);
+  }
+
+  const HOUR = 3_600_000;
+  const bots: BotBehaviourBotStat[] = [];
+  for (const [userId, byPr] of touchesByUserPr) {
+    const kind = kindMap.get(userId);
+    if (!kind) continue;
+
+    // Per-PR aggregation over the trend span (windowed slices pulled out below).
+    const ttfrWindow: number[] = []; // hours, PRs FIRST touched in-window
+    const baselineTally = { ready: 0, opened: 0 };
+    const followupGaps: number[] = []; // hours between consecutive touches, in-window PRs
+    const followupCounts: number[] = []; // extra touches per in-window PR
+    const locPerComment: number[] = [];
+    let totalComments = 0;
+    let prsReviewed = 0;
+    const ttfrByWeek = new Map<number, number[]>(); // week index (0..11) → TTFR hours
+    const heatmap = new Array<number>(168).fill(0);
+    let totalActivity = 0;
+
+    for (const [prId, touches] of byPr) {
+      const meta = prMeta.get(prId);
+      if (!meta) continue;
+      const sorted = [...touches].sort((a, b) => a.ms - b.ms);
+      const firstMs = sorted[0]!.ms;
+      // TTFR baseline: ready-for-review when observed at/before the first touch, else opened.
+      const readyMs = readyByPr.get(prId);
+      const useReady = readyMs != null && readyMs <= firstMs;
+      const baselineMs = useReady ? readyMs : meta.openedMs;
+      const ttfrHours = Math.max(0, (firstMs - baselineMs) / HOUR);
+
+      // 12-week trend: bucket every trend-span PR by the week of its first touch.
+      const wk = Math.min(11, Math.max(0, Math.floor((firstMs - trendFrom.getTime()) / (7 * 86_400_000))));
+      const wkArr = ttfrByWeek.get(wk) ?? [];
+      wkArr.push(ttfrHours);
+      ttfrByWeek.set(wk, wkArr);
+
+      // Heatmap: every touch that falls inside the window (WHEN the bot is active).
+      for (const t of touches) {
+        if (t.ms < fromMs) continue;
+        const d = new Date(t.ms);
+        heatmap[d.getUTCDay() * 24 + d.getUTCHours()]! += 1;
+        totalActivity += 1;
+      }
+
+      // Headline metrics: PRs whose FIRST touch landed in the window.
+      if (firstMs >= fromMs) {
+        prsReviewed += 1;
+        ttfrWindow.push(ttfrHours);
+        baselineTally[useReady ? 'ready' : 'opened'] += 1;
+        followupCounts.push(sorted.length - 1);
+        for (let i = 1; i < sorted.length; i++)
+          followupGaps.push((sorted[i]!.ms - sorted[i - 1]!.ms) / HOUR);
+        const comments = touches.reduce((n, t) => n + (t.isComment ? 1 : 0), 0);
+        totalComments += comments;
+        if (comments > 0) locPerComment.push(meta.loc / comments);
+      }
+    }
+
+    if (totalActivity === 0 && prsReviewed === 0) continue; // no window footprint → skip the row
+
+    const baseline: BotBehaviourBotStat['ttfrBaseline'] =
+      baselineTally.ready === 0 && baselineTally.opened === 0
+        ? null
+        : baselineTally.ready > 0 && baselineTally.opened > 0
+          ? 'mixed'
+          : baselineTally.ready > 0
+            ? 'ready'
+            : 'opened';
+    const ttfrTrend: BotBehaviourTrendPoint[] = Array.from({ length: 12 }, (_, i) => ({
+      weekStart: new Date(trendFrom.getTime() + i * 7 * 86_400_000).toISOString(),
+      medianTtfrHours: medianOf(ttfrByWeek.get(i) ?? []),
+    }));
+    bots.push({
+      key: `u${userId}`,
+      userId,
+      login: rawLoginById.get(userId) ?? null,
+      kind,
+      label: reviewerLabel(userId, kind),
+      prsReviewed,
+      ttfrMedianHours: medianOf(ttfrWindow),
+      ttfrP90Hours: percentileOf(ttfrWindow, 0.9),
+      ttfrBaseline: baseline,
+      ttfrDist: bucketize(ttfrWindow, TTFR_BUCKETS),
+      ttfrTrend,
+      followupLatencyMedianHours: medianOf(followupGaps),
+      medianLocPerComment: medianOf(locPerComment),
+      totalComments,
+      activityHeatmap: heatmap,
+      totalActivity,
+      followupRatePct:
+        followupCounts.length > 0
+          ? Math.round((followupCounts.filter((c) => c > 0).length / followupCounts.length) * 100)
+          : null,
+      avgFollowups:
+        followupCounts.length > 0
+          ? Math.round((followupCounts.reduce((s, c) => s + c, 0) / followupCounts.length) * 10) / 10
+          : null,
+      followupDist: [
+        { label: '0', count: followupCounts.filter((c) => c === 0).length },
+        { label: '1', count: followupCounts.filter((c) => c === 1).length },
+        { label: '2–3', count: followupCounts.filter((c) => c === 2 || c === 3).length },
+        { label: '4+', count: followupCounts.filter((c) => c >= 4).length },
+      ],
+    });
+  }
+  bots.sort((a, b) => b.totalActivity - a.totalActivity || b.prsReviewed - a.prsReviewed);
+  return { enabled: true, generatedAt, window: win, bots };
 }
 
 // Item 4 — the exact PR LIST behind getBotAnalytics's totals.botOnlyPrs count. A THIN wrapper:

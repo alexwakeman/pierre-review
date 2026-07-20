@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   BotAnalyticsResponse,
+  BotBehaviourResponse,
   BotDedupResponse,
   BotMuteRule,
   BotMuteRuleInput,
@@ -51,6 +52,28 @@ export function useBotAnalytics(
     queryFn: () => api.botAnalytics(window, scope, repoIds),
     enabled,
     refetchInterval: 5 * 60_000, // main sync cadence
+    refetchIntervalInBackground: false,
+    staleTime: 60_000,
+    gcTime: ACTIVITY_GC_TIME,
+  });
+}
+
+// EXPERIMENTAL bot BEHAVIOUR analytics (TTFR / LoC-to-comments / 24h heatmap / follow-ups) over
+// the selected window. Same window/scope/repoIds resolution + key-namespacing rule as
+// useBotAnalytics (repo scope wins over team scope; the `repo:`/`scope:` slot prevents a bare
+// repoId aliasing a numeric teamId). CORE / deterministic — the "Behaviour" sub-tab consumes it.
+export function useBotBehaviour(
+  window: BotWindowKind,
+  enabled = true,
+  scope?: string,
+  repoIds?: number[] | null,
+) {
+  const repoKey = repoIds && repoIds.length > 0 ? [...repoIds].sort((a, b) => a - b).join(',') : null;
+  return useQuery<BotBehaviourResponse>({
+    queryKey: ['bot-behaviour', window, repoKey != null ? `repo:${repoKey}` : `scope:${scope ?? 'all'}`],
+    queryFn: () => api.botBehaviour(window, scope, repoIds),
+    enabled,
+    refetchInterval: 5 * 60_000,
     refetchIntervalInBackground: false,
     staleTime: 60_000,
     gcTime: ACTIVITY_GC_TIME,

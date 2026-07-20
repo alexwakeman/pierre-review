@@ -8,7 +8,17 @@ const ROW_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon..Sun (source dow indices)
 const ROW_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const FULL_DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-export function Heatmap({ cells, height }: { cells: number[]; height?: number }): JSX.Element {
+export function Heatmap({
+  cells,
+  height,
+  color,
+}: {
+  cells: number[];
+  height?: number;
+  // Cell hue (default the toolkit blue) — lets a per-bot heatmap use that bot's brand colour.
+  color?: string;
+}): JSX.Element {
+  const hue = color ?? PALETTE.blue;
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<{ row: number; col: number } | null>(null);
 
@@ -60,10 +70,10 @@ export function Heatmap({ cells, height }: { cells: number[]; height?: number })
                     width={Math.max(cellW - 1, 1)}
                     height={cellH - 1}
                     rx={1.5}
-                    fill={c > 0 ? PALETTE.blue : 'currentColor'}
+                    fill={c > 0 ? hue : 'currentColor'}
                     className={c > 0 ? '' : 'text-gray-100 dark:text-gray-800'}
                     fillOpacity={c > 0 ? 0.15 + 0.85 * (c / max) : 1}
-                    stroke={isHover ? PALETTE.blue : 'none'}
+                    stroke={isHover ? hue : 'none'}
                     strokeWidth={isHover ? 1.5 : 0}
                   />
                 );

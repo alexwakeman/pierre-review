@@ -254,6 +254,58 @@ export interface BotAnalyticsResponse {
   suggestions: BotTuningSuggestion[];  // WS6c, deterministic
 }
 
+// ── Bot BEHAVIOUR analytics (EXPERIMENTAL) — GET /api/bot-behaviour ────────────────────────
+// A SEPARATE, deterministic (no-AI) CORE surface from the Bot-ROI panel, developed in its own
+// "Behaviour" sub-tab so it can mature without touching the shipped ROI response. Answers the
+// common review-bot gripes: how fast does a bot get to a PR (TTFR), how noisy is it per line of
+// code, WHEN across the day is it active (coverage / rate-limit inference), and does it keep
+// finding issues AFTER its first pass. All figures are computed over the shared bot-analytics
+// window; per-bot, account- + scope-scoped. Aggregate-only for now (per-PR is a follow-up).
+export interface BotBehaviourTrendPoint {
+  weekStart: string; // ISO — bucket start (oldest→newest, ≤12 weeks)
+  medianTtfrHours: number | null; // median time-to-first-review for PRs first touched that week
+}
+
+export interface BotBehaviourBotStat {
+  key: string; // stable per-reviewer row key `u<userId>` — mirrors BotVendorAnalytics.key
+  userId: number;
+  login: string | null;
+  kind: AutomatedReviewerKind;
+  label: string; // custom classification label → vendor name → login (mirrors ROI reviewerLabel)
+  prsReviewed: number; // distinct PRs the bot FIRST touched inside the window
+  // Time-to-first-review: the bot's first activity (review/comment) since the PR became ready
+  // for review (fallback: opened). ttfrBaseline reports which clock start dominated (transparency).
+  ttfrMedianHours: number | null;
+  ttfrP90Hours: number | null;
+  ttfrBaseline: 'ready' | 'opened' | 'mixed' | null;
+  ttfrDist: AnalyticsBin[]; // bucketed distribution (<1h, 1–4h, 4–12h, 12–24h, 1–3d, >3d)
+  ttfrTrend: BotBehaviourTrendPoint[]; // ≤12 weekly median-TTFR points
+  // Follow-up cadence: median gap between the bot's consecutive touches ON THE SAME PR (how long
+  // between a bot's first pass and its next comment — the "review latency after first review").
+  followupLatencyMedianHours: number | null;
+  // LoC-to-bot-comments: PR diff size (additions+deletions) ÷ the bot's comment count on that PR,
+  // median across the window's PRs (lower = noisier per line). totalComments is the raw denominator.
+  medianLocPerComment: number | null;
+  totalComments: number;
+  // Activity distribution across the week × hour (UTC), row-major dow*24+hour, dow 0=Sunday,
+  // length 168 — the SAME convention as RepoAnalytics.activityHeatmap. Gaps/anomalies here hint at
+  // rate-limit throttling or coverage windows (INFERRED from review/comment timestamps, labelled so).
+  activityHeatmap: number[];
+  totalActivity: number; // sum of the heatmap (bot touches in-window)
+  // Follow-up behaviour: does the bot come back after its first pass? followupRatePct = share of
+  // reviewed PRs with >1 touch; avgFollowups = mean extra touches; followupDist buckets the count.
+  followupRatePct: number | null;
+  avgFollowups: number | null;
+  followupDist: AnalyticsBin[]; // buckets: 0, 1, 2–3, 4+
+}
+
+export interface BotBehaviourResponse {
+  enabled: boolean; // always true (CORE / deterministic) — parallels BotAnalyticsResponse.enabled
+  generatedAt: string;
+  window: { kind: BotWindowKind; from: string; to: string };
+  bots: BotBehaviourBotStat[]; // most-active-first
+}
+
 // One PR row behind a vendor's Bot-ROI panel — the drill-down list of PRs one automated REVIEWER
 // touched in the window (GET /api/bot-analytics/vendor/:key/prs). Deterministic, no AI, account-
 // scoped; ordered most-recent-bot-activity first.

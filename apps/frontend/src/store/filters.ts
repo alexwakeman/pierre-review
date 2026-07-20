@@ -139,6 +139,10 @@ export interface FilterState {
   // The rolling window the Bot-ROI panel (Insights) reports over. Transient, URL-silent
   // (like feedBotLens) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
+  // Which inner sub-tab the Bots view shows: 'roi' (the shipped ROI panel + bot feed) or
+  // 'behaviour' (the EXPERIMENTAL behaviour analytics). A single scalar (both the cross-repo
+  // rail Bots view and the per-repo console Bots tab share one BotsView). Transient, URL-silent.
+  botsInnerTab: 'roi' | 'behaviour';
 
   // selection
   selectedPrId: number | null;
@@ -320,6 +324,8 @@ export interface FilterState {
   setFeedIsolatedPrId: (id: number | null) => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
+  // Switch the Bots view's inner sub-tab (ROI vs experimental Behaviour).
+  setBotsInnerTab: (v: 'roi' | 'behaviour') => void;
   // Set/clear the PR-detail Threads-tab bot filter (a ChecksTab bot chip → filter Threads to
   // that vendor). Re-selecting the same vendor toggles it off.
   setThreadBotFilter: (kind: ReviewBotKind | null) => void;
@@ -563,6 +569,7 @@ function freshDefaults(): FilterData {
     feedShowCommits: false,
     feedIsolatedPrId: null,
     botAnalyticsWindow: 'rolling_14',
+    botsInnerTab: 'roi',
     selectedPrId: null,
     selectedThreadId: null,
     threadBotFilter: null,
@@ -653,6 +660,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   toggleFeedShowCommits: () => set((s) => ({ feedShowCommits: !s.feedShowCommits })),
   setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
+  setBotsInnerTab: (v) => set({ botsInnerTab: v }),
   setThreadBotFilter: (kind) =>
     set((s) => ({ threadBotFilter: s.threadBotFilter === kind ? null : kind })),
   toggleThreadStateFilter: (st) =>

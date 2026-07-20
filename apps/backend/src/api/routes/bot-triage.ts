@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type {
   BotAnalyticsResponse,
+  BotBehaviourResponse,
   BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
   BotVendorPrsResponse,
@@ -17,6 +18,7 @@ import {
   addBotMuteRule,
   deleteBotMuteRule,
   getBotAnalytics,
+  getBotBehaviourAnalytics,
   getBotOnlyPrs,
   getBotVendorPrs,
   getBotDedupClusters,
@@ -215,6 +217,23 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     const explicit = parseIntList(repoIds);
     const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
     const resp: BotAnalyticsResponse = await getBotAnalytics(accountId, window, scopeRepoIds);
+    return resp;
+  });
+
+  // EXPERIMENTAL bot BEHAVIOUR analytics (CORE, deterministic — no AI). Per bot, over the same
+  // window/scope resolution as /api/bot-analytics: time-to-first-review, LoC-to-comments ratio,
+  // the week×hour activity heatmap (coverage / rate-limit inference), and post-first-review
+  // follow-up behaviour. Powers the Bots "Behaviour" sub-tab, kept separate from the ROI panel.
+  app.get('/api/bot-behaviour', { schema: analyticsSchema }, async (req) => {
+    const { window, scope, repoIds } = req.query as {
+      window: BotWindowKind;
+      scope?: string;
+      repoIds?: string;
+    };
+    const accountId = accountIdOf(req);
+    const explicit = parseIntList(repoIds);
+    const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
+    const resp: BotBehaviourResponse = await getBotBehaviourAnalytics(accountId, window, scopeRepoIds);
     return resp;
   });
 

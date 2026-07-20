@@ -46,6 +46,7 @@ import type {
   RetroReportResponse,
   BotWindowKind,
   BotAnalyticsResponse,
+  BotBehaviourResponse,
   BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
   BotVendorPrsResponse,
@@ -631,6 +632,15 @@ export const api = {
     const s = r ? '' : scopeParam(scope);
     return get<BotAnalyticsResponse>(
       withQuery(`/api/bot-analytics`, `window=${encodeURIComponent(window)}`, s, r),
+    );
+  },
+  // EXPERIMENTAL bot behaviour analytics (TTFR / LoC-to-comments / 24h heatmap / follow-ups).
+  // Same window/scope/repoIds wiring as botAnalytics (repo scope wins over team scope).
+  botBehaviour: (window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
+    const r = repoIdsParam(repoIds);
+    const s = r ? '' : scopeParam(scope);
+    return get<BotBehaviourResponse>(
+      withQuery(`/api/bot-behaviour`, `window=${encodeURIComponent(window)}`, s, r),
     );
   },
   // The exact PR list behind the analytics `totals.botOnlyPrs` count — "only a bot reviewed
