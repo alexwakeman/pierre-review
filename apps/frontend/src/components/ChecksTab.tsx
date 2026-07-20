@@ -29,6 +29,7 @@ import { AiSummary } from './AiSummary.js';
 import { PrAddressedCheckButton } from './AddressedCheck.js';
 import { useRequestReviewers } from '../hooks/usePrWrites.js';
 import { useSuggestedReviewers } from '../hooks/usePr.js';
+import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 
 // Per-state styling for the "Reviewers" row badges (everyone who submitted a
@@ -332,14 +333,22 @@ function PrSummary({ body }: { body: string }): JSX.Element {
 export function ChecksTab({
   pr,
   usersById,
+  onShowBotActivity,
 }: {
   pr: PrDetailT;
   usersById: Map<number, User>;
+  // Set (by PrDetail) only when this PR has automated-reviewer activity — enables the per-PR
+  // bot-behaviour fetch + the "slower than typical" Overview badge that opens the Bot activity tab.
+  onShowBotActivity?: () => void;
 }): JSX.Element {
   // Suggested reviewers are a LIVE query (not part of the cached detail), so they stay fresh —
   // they empty the instant a reviewer is requested. Merge any CODEOWNERS-resolved users the
   // detail didn't carry into the lookup map so their avatars/links render.
   const { data: sugg } = useSuggestedReviewers(pr.id);
+  // Per-PR bot behaviour — only fetched for bot PRs (onShowBotActivity set). Powers the
+  // "slower than typical" caution that opens the Bot activity tab.
+  const { data: prBots } = usePrBotBehaviour(pr.id, onShowBotActivity != null);
+  const slowBots = (prBots?.bots ?? []).filter((b) => b.ttfrAnomaly != null);
   const canCheckAddressed = useProCapabilities().prSummary;
   const suggestions = sugg?.suggestedReviewers ?? [];
   const suggestUsersById =
@@ -569,6 +578,27 @@ export function ChecksTab({
               </button>
             ))}
           </div>
+        </Row>
+      )}
+
+      {/* "Slower than typical" caution — a bot took anomalously longer to first-review THIS PR
+          than its own baseline. Opens the Bot activity tab for the evidence + timeline. */}
+      {slowBots.length > 0 && onShowBotActivity && (
+        <Row label="Bot activity">
+          <button
+            type="button"
+            onClick={onShowBotActivity}
+            className="inline-flex items-center gap-1 rounded bg-red-500/10 px-1.5 py-0.5 text-xs font-medium text-red-600 transition-opacity hover:opacity-80 dark:text-red-400"
+            title={slowBots
+              .map((b) => `${b.label}: slower than its typical on this PR`)
+              .join(' · ')}
+          >
+            <span aria-hidden>⚠</span>
+            {slowBots.length === 1
+              ? `${slowBots[0]!.label} slower than typical`
+              : `${slowBots.length} bots slower than typical`}
+            <span className="opacity-70">— view</span>
+          </button>
         </Row>
       )}
 

@@ -107,6 +107,8 @@ import type {
   BotBehaviourBotStat,
   BotBehaviourTrendPoint,
   BotBehaviourAnomaly,
+  PrBotBehaviourResponse,
+  PrBotBehaviour,
   BotVendorPr,
   BotVendorPrsResponse,
   BotDedupMember,
@@ -7975,6 +7977,210 @@ export async function getBotBehaviourAnalytics(
   }
   bots.sort((a, b) => b.totalActivity - a.totalActivity || b.prsReviewed - a.prsReviewed);
   return { enabled: true, generatedAt, window: win, bots };
+}
+
+// PR-SCOPED bot behaviour (EXPERIMENTAL, CORE, deterministic) — the per-PR view of the aggregate
+// Behaviour tab. For ONE PR, each automated reviewer's touch timeline + how its behaviour ON THIS
+// PR compares to that bot's OWN typical (an 84-day account-wide robust baseline, same self-baseline
+// idea as the aggregate tab). Account-scoped: a foreign/unknown prId → null (the route 404s).
+export async function getPrBotBehaviour(
+  prId: number,
+  accountId: number,
+): Promise<PrBotBehaviourResponse | null> {
+  const [pr] = await db
+    .select({ id: pullRequests.id, openedAt: pullRequests.openedAt })
+    .from(pullRequests)
+    .where(and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)))
+    .limit(1)
+    .execute();
+  if (!pr) return null; // not the caller's PR → 404
+
+  const automatedIds = await automatedReviewerUserIds(accountId);
+  if (automatedIds.length === 0) return { enabled: true, prId, bots: [] };
+  const kindMap = await classificationKindForUser(accountId);
+
+  // Identity (label + login) — same resolution as getBotBehaviourAnalytics / the ROI panel.
+  const classLabel = new Map<number, string>();
+  for (const r of await db
+    .select({ id: botReviewClassification.authorUserId, label: botReviewClassification.label })
+    .from(botReviewClassification)
+    .where(eq(botReviewClassification.accountId, accountId))
+    .execute())
+    if (r.label != null && r.label.trim() !== '') classLabel.set(r.id, r.label.trim());
+  const loginById = new Map<number, string>();
+  const rawLoginById = new Map<number, string>();
+  for (const r of await db
+    .select({ id: users.id, login: users.githubLogin, name: users.displayName })
+    .from(users)
+    .where(inArray(users.id, automatedIds))
+    .execute()) {
+    loginById.set(r.id, r.name?.trim() || r.login || `#${r.id}`);
+    if (r.login) rawLoginById.set(r.id, r.login);
+  }
+  const reviewerLabel = (userId: number, kind: AutomatedReviewerKind): string => {
+    const custom = classLabel.get(userId);
+    if (custom) return custom;
+    if (kind !== 'in_house' && kind !== 'pierre') return labelForKind(kind);
+    return loginById.get(userId) ?? labelForKind(kind);
+  };
+
+  const HOUR = 3_600_000;
+  const trendFrom = new Date(Date.now() - 84 * 86_400_000);
+
+  // (1) THIS PR's bot touches (reviews + inline comments + issue comments) for automated authors.
+  type Touch = { userId: number; at: Date; kind: 'review' | 'comment' };
+  const prTouches: Touch[] = [];
+  for (const r of await db
+    .select({ userId: reviews.authorId, at: reviews.submittedAt })
+    .from(reviews)
+    .where(and(eq(reviews.prId, prId), inArray(reviews.authorId, automatedIds), ne(reviews.state, 'pending')))
+    .execute())
+    if (r.userId != null) prTouches.push({ userId: r.userId, at: r.at, kind: 'review' });
+  for (const r of await db
+    .select({ userId: reviewComments.authorId, at: reviewComments.createdAt })
+    .from(reviewComments)
+    .where(and(eq(reviewComments.prId, prId), inArray(reviewComments.authorId, automatedIds)))
+    .execute())
+    if (r.userId != null) prTouches.push({ userId: r.userId, at: r.at, kind: 'comment' });
+  for (const r of await db
+    .select({ userId: prComments.authorId, at: prComments.createdAt })
+    .from(prComments)
+    .where(and(eq(prComments.prId, prId), inArray(prComments.authorId, automatedIds)))
+    .execute())
+    if (r.userId != null) prTouches.push({ userId: r.userId, at: r.at, kind: 'comment' });
+  const prBotIds = [...new Set(prTouches.map((t) => t.userId))].filter((id) => kindMap.has(id));
+  if (prBotIds.length === 0) return { enabled: true, prId, bots: [] };
+
+  // ready-for-review for THIS PR (the TTFR clock start when observed at/before the first touch).
+  const [readyEv] = await db
+    .select({ at: events.occurredAt })
+    .from(events)
+    .where(and(eq(events.accountId, accountId), eq(events.prId, prId), eq(events.type, 'pr_ready_for_review')))
+    .orderBy(asc(events.occurredAt))
+    .limit(1)
+    .execute();
+  const readyThisPr = readyEv ? readyEv.at.getTime() : null;
+
+  // (2) BASELINE: the prBotIds' per-PR first-touch + follow-ups over 84 days, account-wide — the
+  // "typical" each bot is judged against. Only the bots on this PR (usually 1–3), so it's bounded.
+  type BTouch = { userId: number; bPrId: number; ms: number };
+  const baseTouches: BTouch[] = [];
+  for (const r of await db
+    .select({ userId: reviews.authorId, bPrId: reviews.prId, at: reviews.submittedAt })
+    .from(reviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+    .where(and(eq(pullRequests.accountId, accountId), inArray(reviews.authorId, prBotIds), ne(reviews.state, 'pending'), gte(reviews.submittedAt, trendFrom)))
+    .execute())
+    if (r.userId != null && r.bPrId != null) baseTouches.push({ userId: r.userId, bPrId: r.bPrId, ms: r.at.getTime() });
+  for (const r of await db
+    .select({ userId: reviewComments.authorId, bPrId: reviewComments.prId, at: reviewComments.createdAt })
+    .from(reviewComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+    .where(and(eq(pullRequests.accountId, accountId), inArray(reviewComments.authorId, prBotIds), gte(reviewComments.createdAt, trendFrom)))
+    .execute())
+    if (r.userId != null && r.bPrId != null) baseTouches.push({ userId: r.userId, bPrId: r.bPrId, ms: r.at.getTime() });
+  for (const r of await db
+    .select({ userId: prComments.authorId, bPrId: prComments.prId, at: prComments.createdAt })
+    .from(prComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+    .where(and(eq(pullRequests.accountId, accountId), inArray(prComments.authorId, prBotIds), gte(prComments.createdAt, trendFrom)))
+    .execute())
+    if (r.userId != null && r.bPrId != null) baseTouches.push({ userId: r.userId, bPrId: r.bPrId, ms: r.at.getTime() });
+
+  // Baseline PRs' openedAt + ready events (the TTFR clock, same rule as this PR).
+  const basePrIds = [...new Set(baseTouches.map((t) => t.bPrId))];
+  const openedByPr = new Map<number, number>();
+  const readyByPr = new Map<number, number>();
+  if (basePrIds.length > 0) {
+    for (const p of await db
+      .select({ id: pullRequests.id, openedAt: pullRequests.openedAt })
+      .from(pullRequests)
+      .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, basePrIds)))
+      .execute())
+      openedByPr.set(p.id, p.openedAt.getTime());
+    for (const e of await db
+      .select({ bPrId: events.prId, at: events.occurredAt })
+      .from(events)
+      .where(and(eq(events.accountId, accountId), eq(events.type, 'pr_ready_for_review'), inArray(events.prId, basePrIds)))
+      .execute()) {
+      if (e.bPrId == null) continue;
+      const ms = e.at.getTime();
+      const cur = readyByPr.get(e.bPrId);
+      if (cur == null || ms < cur) readyByPr.set(e.bPrId, ms);
+    }
+  }
+  const ttfrOf = (pid: number, firstMs: number): number => {
+    const ready = readyByPr.get(pid);
+    const opened = openedByPr.get(pid) ?? firstMs;
+    const base = ready != null && ready <= firstMs ? ready : opened;
+    return Math.max(0, (firstMs - base) / HOUR);
+  };
+  // Group baseline per (bot, PR): first-touch + touch count → the bot's TTFR + follow-up samples.
+  const byBotPr = new Map<number, Map<number, { first: number; count: number }>>();
+  for (const t of baseTouches) {
+    let m = byBotPr.get(t.userId);
+    if (!m) {
+      m = new Map();
+      byBotPr.set(t.userId, m);
+    }
+    const e = m.get(t.bPrId);
+    if (!e) m.set(t.bPrId, { first: t.ms, count: 1 });
+    else {
+      if (t.ms < e.first) e.first = t.ms;
+      e.count += 1;
+    }
+  }
+
+  // (3) Per-bot output: this PR's numbers + the vs-typical comparison.
+  const out: PrBotBehaviour[] = [];
+  for (const userId of prBotIds) {
+    const kind = kindMap.get(userId)!;
+    const mine = prTouches
+      .filter((t) => t.userId === userId)
+      .sort((a, b) => a.at.getTime() - b.at.getTime());
+    const firstMs = mine[0]!.at.getTime();
+    const useReady = readyThisPr != null && readyThisPr <= firstMs;
+    const base = useReady ? readyThisPr! : pr.openedAt.getTime();
+    const ttfrHours = Math.max(0, (firstMs - base) / HOUR);
+
+    const perPr = byBotPr.get(userId) ?? new Map<number, { first: number; count: number }>();
+    const ttfrSample: number[] = [];
+    const followupSample: number[] = [];
+    for (const [pid, e] of perPr) {
+      ttfrSample.push(ttfrOf(pid, e.first));
+      followupSample.push(e.count - 1);
+    }
+    const typicalTtfr = ttfrSample.length >= MIN_BASELINE_POINTS ? medianOf(ttfrSample) : null;
+    const typicalFollowups = followupSample.length >= MIN_BASELINE_POINTS ? medianOf(followupSample) : null;
+    let ttfrAnomaly: { z: number; typical: number } | null = null;
+    if (typicalTtfr != null) {
+      const mad = medianOf(ttfrSample.map((v) => Math.abs(v - typicalTtfr)))!;
+      const sigma = Math.max(1.4826 * mad, 0.5);
+      const z = (ttfrHours - typicalTtfr) / sigma;
+      if (z >= ANOMALY_Z) ttfrAnomaly = { z: Math.round(z * 10) / 10, typical: typicalTtfr };
+    }
+
+    out.push({
+      key: `u${userId}`,
+      userId,
+      login: rawLoginById.get(userId) ?? null,
+      kind,
+      label: reviewerLabel(userId, kind),
+      firstTouchAt: mine[0]!.at.toISOString(),
+      ttfrHours,
+      ttfrBasis: useReady ? 'ready' : 'opened',
+      touchCount: mine.length,
+      followupCount: mine.length - 1,
+      commentCount: mine.filter((t) => t.kind === 'comment').length,
+      touches: mine.map((t) => ({ at: t.at.toISOString(), kind: t.kind })),
+      typicalTtfrHours: typicalTtfr,
+      typicalFollowups,
+      baselinePrs: ttfrSample.length,
+      ttfrAnomaly,
+    });
+  }
+  out.sort((a, b) => (a.firstTouchAt ?? '').localeCompare(b.firstTouchAt ?? ''));
+  return { enabled: true, prId, bots: out };
 }
 
 // Item 4 — the exact PR LIST behind getBotAnalytics's totals.botOnlyPrs count. A THIN wrapper:

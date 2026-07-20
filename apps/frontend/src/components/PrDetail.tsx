@@ -10,6 +10,7 @@ import type {
 import { usePr } from '../hooks/usePr.js';
 import { useMe, useProCapabilities } from '../hooks/useTriage.js';
 import { useRepos } from '../hooks/useTimeline.js';
+import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { WatchedBadge } from './WatchedBadge.js';
 import { api } from '../api/client.js';
 import { useFilters } from '../store/filters.js';
@@ -33,6 +34,9 @@ const ClaudeReviewTab = lazy(() =>
   import('./ClaudeReviewTab.js').then((m) => ({ default: m.ClaudeReviewTab })),
 );
 const AiFixTab = lazy(() => import('./AiFixTab.js').then((m) => ({ default: m.AiFixTab })));
+const PrBotBehaviourTab = lazy(() =>
+  import('./PrBotBehaviourTab.js').then((m) => ({ default: m.PrBotBehaviourTab })),
+);
 import { Markdown } from './Markdown.js';
 import { isNewComment, NewTag } from './ThreadView/index.js';
 
@@ -50,6 +54,7 @@ type Tab =
   | 'threads'
   | 'activity'
   | 'changes'
+  | 'bot_activity'
   | 'claude_review'
   | 'ai_fix';
 
@@ -74,6 +79,7 @@ const TAB_LABELS: Record<Tab, string> = {
   threads: 'Threads',
   activity: 'Activity',
   changes: 'Changes',
+  bot_activity: 'Bot activity',
   claude_review: 'Claude Review',
   ai_fix: 'AI Analysis and Fix',
 };
@@ -673,6 +679,22 @@ export function PrDetail({
 
   const usersById = useMemo(() => indexUsers(pr?.users), [pr]);
 
+  // PR-scoped bot behaviour (EXPERIMENTAL, CORE — not Pro): show the "Bot activity" tab only
+  // when an automated reviewer actually touched this PR (presence-gated). Reviews carry the
+  // precise `automatedKind`; a thread-opening / commenting bot falls back to users.isBot.
+  const hasBots = useMemo(() => {
+    if (!pr) return false;
+    if (pr.reviews.some((r) => r.automatedKind != null)) return true;
+    if (pr.threads.some((t) => t.originalCommenterId != null && usersById.get(t.originalCommenterId)?.isBot))
+      return true;
+    if (pr.comments.some((c) => c.authorId != null && usersById.get(c.authorId)?.isBot)) return true;
+    return false;
+  }, [pr, usersById]);
+  // Fetched here (deduped with the tab's own call) so the tab label + Overview chip can badge a
+  // "slower than typical" bot without opening the tab. Only fires for bot PRs.
+  const { data: prBotBehaviour } = usePrBotBehaviour(pr?.id ?? null, hasBots);
+  const botTtfrAnomalies = (prBotBehaviour?.bots ?? []).filter((b) => b.ttfrAnomaly != null).length;
+
   // Keep a pinned tab's label fresh if the PR detail (re)loads with a new title /
   // author (e.g. a renamed PR). No-op when the PR isn't pinned or nothing changed.
   useEffect(() => {
@@ -838,6 +860,7 @@ export function PrDetail({
             'threads',
             'activity',
             'changes',
+            ...(hasBots ? (['bot_activity'] as Tab[]) : []),
             ...(claudeReviewEnabled ? (['claude_review'] as Tab[]) : []),
             ...(aiFixTabEnabled ? (['ai_fix'] as Tab[]) : []),
           ] as Tab[]
@@ -875,6 +898,14 @@ export function PrDetail({
                   {pr.changedFilesCount}
                 </span>
               )}
+              {t === 'bot_activity' && botTtfrAnomalies > 0 && (
+                <span
+                  className="ml-1 text-red-500"
+                  title={`${botTtfrAnomalies} bot slower than its typical on this PR`}
+                >
+                  ⚠
+                </span>
+              )}
             </button>
           );
         })}
@@ -886,7 +917,11 @@ export function PrDetail({
         >
         {tab === 'overview' ? (
           <div>
-            <ChecksTab pr={pr} usersById={usersById} />
+            <ChecksTab
+              pr={pr}
+              usersById={usersById}
+              onShowBotActivity={hasBots ? () => setTab('bot_activity') : undefined}
+            />
             <div className="border-t border-gray-200 dark:border-gray-800">
               <div className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
                 PR comments
@@ -930,6 +965,8 @@ export function PrDetail({
           />
         ) : tab === 'changes' ? (
           <ChangesTab pr={pr} />
+        ) : tab === 'bot_activity' ? (
+          <PrBotBehaviourTab pr={pr} />
         ) : tab === 'ai_fix' ? (
           <AiFixTab pr={pr} />
         ) : (

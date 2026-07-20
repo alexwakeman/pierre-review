@@ -51,6 +51,7 @@ import type {
   ResolvableThreadPrsResponse,
   BotVendorPrsResponse,
   BotDedupResponse,
+  PrBotBehaviourResponse,
   BotMuteRule,
   BotMuteRuleInput,
   BotMuteRulesResponse,
@@ -671,6 +672,9 @@ export const api = {
   // Cross-bot dedup + consensus/conflict clusters for a PR (≥2 automated reviewers of
   // distinct kinds on the same path/line window).
   prBotDedup: (prId: number) => get<BotDedupResponse>(`/api/prs/${prId}/bot-dedup`),
+  // Per-PR bot behaviour — each automated reviewer's on-PR timeline + vs-typical comparison.
+  prBotBehaviour: (prId: number) =>
+    get<PrBotBehaviourResponse>(`/api/prs/${prId}/bot-behaviour`),
   // Mute / auto-triage rules (hide or auto-resolve automated-bot threads by vendor / path /
   // severity).
   botMuteRules: () => get<BotMuteRulesResponse>('/api/bot-mute-rules'),

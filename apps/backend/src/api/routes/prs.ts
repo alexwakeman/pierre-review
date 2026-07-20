@@ -33,6 +33,7 @@ import { fetchActionsJobLog } from '../../github/actions-logs.js';
 import {
   getMentionCandidates,
   getPrDetail,
+  getPrBotBehaviour,
   getPrFilesContext,
   getPrWriteContext,
   getReviewerLogins,
@@ -348,6 +349,20 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     // (Suggested reviewers are NOT here — they're a separate live query, see below — so the
     // cached detail never freezes a stale suggestion.)
     return hydratePrDetail(pr, accountId);
+  });
+
+  // PR-scoped bot behaviour (EXPERIMENTAL, CORE, deterministic — no AI): each automated reviewer's
+  // touch timeline ON THIS PR + how it compares to that bot's OWN typical (an 84-day account-wide
+  // robust baseline). Powers the PrDetail "Bot activity" tab + the Overview chip warn badge.
+  // Account-scoped: 404 when the PR isn't the caller's; empty `bots` when no bot touched it.
+  app.get('/api/prs/:id/bot-behaviour', { schema: idParamSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const resp = await getPrBotBehaviour(id, accountIdOf(req));
+    if (!resp) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    return resp;
   });
 
   // Suggested reviewers — its OWN live query (not embedded in the cached PR detail) so it

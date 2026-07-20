@@ -340,6 +340,45 @@ export interface BotBehaviourResponse {
   bots: BotBehaviourBotStat[]; // most-active-first
 }
 
+// ── PR-scoped bot behaviour (EXPERIMENTAL) — GET /api/prs/:id/bot-behaviour ─────────────────
+// The per-PR view of the aggregate Behaviour tab: for THIS PR, each automated reviewer's touch
+// timeline + how its behaviour ON THIS PR compares to that bot's OWN typical (an 84-day
+// account-wide robust baseline). Powers the PrDetail "Bot activity" tab + the Overview chip's
+// "slower than typical" warn badge. CORE / deterministic, account-scoped (id-route → 404).
+export interface PrBotTouch {
+  at: string; // ISO
+  kind: 'review' | 'comment';
+}
+
+export interface PrBotBehaviour {
+  key: string; // `u<userId>` — mirrors the aggregate BotBehaviourBotStat.key
+  userId: number;
+  login: string | null;
+  kind: AutomatedReviewerKind;
+  label: string;
+  // This PR
+  firstTouchAt: string | null; // the bot's first review/comment on this PR
+  ttfrHours: number | null; // first touch since ready-for-review (fallback opened)
+  ttfrBasis: 'ready' | 'opened' | null; // which clock start this PR used (transparency)
+  touchCount: number; // total touches on this PR
+  followupCount: number; // touches after the first (== touchCount − 1)
+  commentCount: number;
+  touches: PrBotTouch[]; // the timeline (oldest→newest)
+  // Vs the bot's own typical (84-day account-wide robust baseline; null when < the baseline
+  // minimum PRs, i.e. "building baseline"). ttfrAnomaly is set only when THIS PR's TTFR is
+  // anomalously SLOWER than typical (the "delays beyond typical" evidence).
+  typicalTtfrHours: number | null;
+  typicalFollowups: number | null; // the bot's median follow-ups per PR
+  baselinePrs: number; // how many of the bot's PRs the baseline is built from
+  ttfrAnomaly: { z: number; typical: number } | null; // slower-than-typical outlier on this PR
+}
+
+export interface PrBotBehaviourResponse {
+  enabled: boolean; // true (CORE); the tab renders whenever a PR has automated-reviewer activity
+  prId: number;
+  bots: PrBotBehaviour[]; // reviewers that touched this PR, first-touch order
+}
+
 // One PR row behind a vendor's Bot-ROI panel — the drill-down list of PRs one automated REVIEWER
 // touched in the window (GET /api/bot-analytics/vendor/:key/prs). Deterministic, no AI, account-
 // scoped; ordered most-recent-bot-activity first.

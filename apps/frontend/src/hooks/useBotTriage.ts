@@ -7,6 +7,7 @@ import type {
   BotMuteRuleInput,
   BotMuteRulesResponse,
   BotOnlyPrsResponse,
+  PrBotBehaviourResponse,
   ResolvableThreadPrsResponse,
   BotWindowKind,
   DetectedReviewersResponse,
@@ -140,6 +141,19 @@ export function usePrBotDedup(prId: number | null, enabled = true) {
   return useQuery<BotDedupResponse>({
     queryKey: ['bot-dedup', prId],
     queryFn: () => api.prBotDedup(prId as number),
+    enabled: enabled && prId != null,
+    staleTime: 60_000,
+    gcTime: ACTIVITY_GC_TIME,
+  });
+}
+
+// Per-PR bot behaviour (EXPERIMENTAL, CORE): each automated reviewer's on-PR touch timeline +
+// how its TTFR / follow-ups compare to that bot's OWN typical. Fetched only when a PR is open
+// AND it has bot activity (the caller gates `enabled`), so human-only PRs never hit the route.
+export function usePrBotBehaviour(prId: number | null, enabled = true) {
+  return useQuery<PrBotBehaviourResponse>({
+    queryKey: ['pr-bot-behaviour', prId],
+    queryFn: () => api.prBotBehaviour(prId as number),
     enabled: enabled && prId != null,
     staleTime: 60_000,
     gcTime: ACTIVITY_GC_TIME,
