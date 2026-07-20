@@ -1753,7 +1753,7 @@ Map complete. Here is the frontend shell map for adding a top-level "Inbox" tab.
 Render tree (top → bottom), all inside `<div className="flex h-full flex-col">`:
 - `<header>` (lines 205-373): brand title, signed-in user chip (`meUser`), `<FeedPill/>`, `<CountsPill/>`, then an `ml-auto` cluster: `<TimelineSearch/>`, `<SyncStatus/>`, **Insights button** (`setInsightsOpen(true)`), notifications toggle, **Claude Reviews button** (gated by `claudeReviewEnabled`, opens `reviewsOpen` modal state — line 303-329), Help `?`, dark-mode toggle, and cloud-only Sign-out. This header is where a new top-level nav control most naturally lives.
 - Modals mounted as siblings (375-385): `<InsightsModal/>`, `<HelpModal/>`, `<ClaudeReviewsModal/>` (only mounted when `claudeReviewEnabled`).
-- `<WelcomeBackBanner/>` (387), `<FilterBar/>` (388), `<OpenPrsStrip/>` (389), `<PinnedTabsBar/>` (390).
+- `<WelcomeBackBanner/>`, `<FilterBar/>`, `<PinnedTabsBar/>` (above `<main>`).
 - `<main className="relative flex min-h-0 flex-1 flex-col ...">` (394-431) — the swappable region. Contains:
   - `<section ref={timelineSectionRef}>` → `<Timeline/>` (399-401)
   - resize separator (drag handle, 402-411)
@@ -1826,7 +1826,7 @@ export interface MeResponse {
 - `Avatar` — exported from `/Users/alex/Projects/pierre-review/apps/frontend/src/components/CommentCard.tsx` (6-34); `size` prop, avatarUrl-or-initials fallback.
 - `UserName` (`components/UserName.tsx`) — profile link + appends `<MaintainerShield/>` when `repoId` given and user has merge rights (via `useMaintainersByRepo()` from `hooks/useMaintainers.ts`).
 - `MaintainerShield` (`components/MaintainerShield.tsx`) — purple #8957e5 shield SVG.
-- `WatchedBadge` (`components/WatchedBadge.tsx`) — sky eye glyph; `inboxWatch` flag comes from `Repo.inboxWatch` (see `OpenPrsStrip/index.tsx` 38-39).
+- `WatchedBadge` (`components/WatchedBadge.tsx`) — sky eye glyph; `inboxWatch` flag comes from `Repo.inboxWatch`.
 
 **MyTurnPanel layout** (`components/MyTurnPanel/index.tsx`) — **the strongest template for a sectioned, repo/user-grouped Inbox.** Header row with uppercase `text-xs font-semibold text-gray-400` title + tab buttons + `ml-auto` action (76-111); body `min-h-0 flex-1 overflow-auto p-4`; tabbed `'todo'|'done'|'summary'` (19-24). Reusable section components in the same dir: `AwaitingReviewSection`, `ApprovedPrsSection`, `YourPrsSection`, `WatchedRepoPrsSection` (**repo-grouped already**), `ThreadsAwaitingSection`, `ClaudeReviewsToActionSection` (**lists Claude reviews to action**), `DismissedSection`, `FeedSection`, `CountsPill`. `SummaryStats` (`components/SummaryStats.tsx`) is a **per-repo open/stalled/untouched/replied table built purely from `useTimeline()` + `useRepos()`** — a ready-made no-AI repo aggregation Inbox can reuse/extend.
 

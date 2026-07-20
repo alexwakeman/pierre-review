@@ -12,7 +12,6 @@ import {
   useFilters,
   type FilterState,
   type RangePreset,
-  type StripFilter,
 } from '../store/filters.js';
 import {
   DERIVED_STATES,
@@ -109,11 +108,6 @@ function readFromUrl(): Partial<FilterState> {
   const thread = p.get('thread');
   if (thread) out.selectedThreadId = Number.parseInt(thread, 10);
 
-  const strip = p.get('strip');
-  if (strip === 'my_turn' || strip === 'needs_attention' || strip === 'all') {
-    out.stripFilter = strip as StripFilter;
-  }
-
   // Activity deep link: `?activityRepo=<id>` selects that repo's console (the active TAB
   // itself — `?view=activity` — lives in the pinnedTabs store and is applied separately
   // in useUrlState). `activityThreadFilter` is intentionally URL-silent.
@@ -125,10 +119,6 @@ function readFromUrl(): Partial<FilterState> {
       if (Number.isFinite(n)) out.activityRepoId = n;
     }
   }
-
-  // `open=1` means the user expanded the Open-PRs strip (non-default; default is
-  // collapsed). Absent → keep the collapsed default.
-  if (p.get('open') === '1') out.stripCollapsed = false;
 
   return out;
 }
@@ -163,8 +153,6 @@ function writeToUrl(s: FilterState): void {
   // myTurnOnly (My Turn Focus Mode) is transient — intentionally not serialized.
   if (s.selectedPrId) p.set('pr', String(s.selectedPrId));
   if (s.selectedThreadId) p.set('thread', String(s.selectedThreadId));
-  if (s.stripFilter !== 'all') p.set('strip', s.stripFilter);
-  if (!s.stripCollapsed) p.set('open', '1');
 
   // Activity tab (the only overlay tab that's URL-deep-linkable; pinned-PR tabs stay
   // localStorage-only). Read the active tab from the pinnedTabs store — a different

@@ -30,8 +30,6 @@ export type OpenPrsScope = number | 'feed' | { label: string; repoIds: number[] 
 
 export type RangePreset = '7d' | '14d' | '30d' | '90d' | 'custom';
 
-export type StripFilter = 'all' | 'my_turn' | 'needs_attention';
-
 // The user-facing event-CATEGORY toggles (Events panel). Two categories are NOT
 // here, by design:
 //  • 'lifecycle' (PR opened/merged/closed/…) — its events draw no markers (they're
@@ -201,9 +199,6 @@ export interface FilterState {
   // scope. Read-not-consumed, like the above.
   botThreadsFocusRepoId: number | null;
 
-  // open PRs strip
-  stripCollapsed: boolean;
-  stripFilter: StripFilter;
 
   // Activity tab (the master-detail triage console). Which detail is shown:
   // 'feed' = the cross-repo consolidated Feed (the default landing detail), a number =
@@ -412,8 +407,6 @@ export interface FilterState {
   // records the added repo id so the modal can scope to just that repo.
   requestSyncModal: (repoId: number) => void;
   bumpClaudeReviewKickoff: () => void;
-  setStripCollapsed: (v: boolean) => void;
-  setStripFilter: (f: StripFilter) => void;
   // Select an Activity detail target (a repo id, or 'feed' for the cross-repo consolidated
   // Feed).
   setActivityRepo: (id: number | 'feed' | 'insights' | 'retro' | 'bots') => void;
@@ -472,7 +465,6 @@ type FilterDefaults = Pick<
   | 'reviewStates'
   | 'derivedStates'
   | 'searchQuery'
-  | 'stripFilter'
 >;
 
 // Single source of truth for the filter defaults; array defaults are rebuilt per
@@ -502,7 +494,6 @@ function freshFilterDefaults(): FilterDefaults {
     reviewStates: [...DEFAULT_REVIEW_STATES],
     derivedStates: [],
     searchQuery: '',
-    stripFilter: 'all',
   };
 }
 
@@ -527,7 +518,6 @@ export function pickFilterBarState(s: FilterState): FilterDefaults {
     reviewStates: s.reviewStates,
     derivedStates: s.derivedStates,
     searchQuery: s.searchQuery,
-    stripFilter: s.stripFilter,
   };
 }
 
@@ -580,7 +570,6 @@ function freshDefaults(): FilterData {
     openPrsScope: null,
     botOnlyFocusRepoId: null,
     botThreadsFocusRepoId: null,
-    stripCollapsed: true, // strip starts collapsed for more timeline room
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
     // with no thread-state filter.
@@ -817,8 +806,6 @@ export const useFilters = create<FilterState>((set, get) => ({
     set((s) => ({ syncModalSignal: s.syncModalSignal + 1, syncModalRepoId: repoId })),
   bumpClaudeReviewKickoff: () =>
     set((s) => ({ claudeReviewKickoff: s.claudeReviewKickoff + 1 })),
-  setStripCollapsed: (v) => set({ stripCollapsed: v }),
-  setStripFilter: (f) => set({ stripFilter: f }),
   // Selecting a different repo console drops any lingering thread-state filter + the Feed's
   // single-PR isolation so a narrow from one view doesn't carry over to the next.
   setActivityRepo: (id) =>

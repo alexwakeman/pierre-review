@@ -160,3 +160,13 @@ pnpm --filter @pierre-review/backend verify:isolation
 - `packages/shared` — API types shared by both sides
 
 See `CLAUDE.md` for the architecture, conventions, and the local/cloud split.
+
+## License
+
+Pierre is **source-available** under the [Functional Source License
+(FSL-1.1-MIT)](./LICENSE). You may use, self-host, and modify it freely; you may
+**not** offer it as a competing commercial or hosted product. Each release
+automatically converts to the **MIT License** two years after its publication.
+
+(The private `@pierre/pro` plugin is a separate, proprietary component and is not
+covered by this license.)

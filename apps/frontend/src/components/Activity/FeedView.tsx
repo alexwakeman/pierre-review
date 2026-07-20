@@ -249,9 +249,9 @@ export function FeedView({
   // panel) and a per-repo console (its RepoOpenPrList rows) — clicking a PR in either filters
   // the feed to that PR. `setActivityRepo` clears it when switching rails, so it never leaks
   // across repos.
-  // Scopes the feed query to a single PR when set. The "Showing only #N" banner itself now
-  // renders once at the TOP of the Activity detail panel (FeedIsolationBanner), above the
-  // Open-PRs pane — not here, buried under it.
+  // Scopes the feed query to a single PR when set. The "Showing only #N" banner itself renders
+  // in the surrounding panel (FeedIsolationBanner — under the repo/bots summary header), not
+  // here; when isolated, this view also drops its own cross-repo Open-PRs panel (below).
   const isolatedPrId = feedIsolatedPrId;
 
   // Viewing the CROSS-REPO feed marks it seen server-side (once per mount), resetting the
@@ -508,8 +508,8 @@ export function FeedView({
 
   // ── Vertical, variable-height windowing ─────────────────────────────────────────────
   // The feed accumulates unbounded across "Load more" pages, so rendering every card put
-  // thousands of nodes in the DOM (every scroll/refetch re-laid them all out). Mirror the
-  // OpenPrsStrip pattern but VERTICAL + variable-height: measure each row's real height via
+  // thousands of nodes in the DOM (every scroll/refetch re-laid them all out). Windowing,
+  // VERTICAL + variable-height: measure each row's real height via
   // a ResizeObserver into a Map<id, px>, estimate unmeasured rows with the running average,
   // compute the in-view index range from the scroll container + an overscan buffer, and
   // render only that slice with a top/bottom spacer <li> reserving the hidden rows' height.
@@ -859,8 +859,8 @@ export function FeedView({
     <div className="space-y-3" data-testid="feed-view" ref={rootRef}>
       {/* Feed-wide "new activity" refresh banner. Manual by design (never yanks content while
           you're reading); clicking refreshes the feed + scrolls to the top. Sticky so it stays
-          reachable while scrolled. (The single-PR "Showing only #N" filter banner moved OUT of
-          the feed to the top of the Activity detail panel — see FeedIsolationBanner.) */}
+          reachable while scrolled. (The single-PR "Showing only #N" filter banner lives in the
+          surrounding panel, under its summary header — see FeedIsolationBanner.) */}
       {hasNew && (
         <div className="sticky top-0 z-20">
           <button
@@ -879,7 +879,7 @@ export function FeedView({
 
       {/* Cross-repo only: a collapsible panel of open PRs grouped by team; clicking a PR
           isolates the feed to that PR (below). Not in the Bots pane (a pure activity stream). */}
-      {repoId == null && !botsMode && <FeedOpenPrsPanel />}
+      {repoId == null && !botsMode && isolatedPrId == null && <FeedOpenPrsPanel />}
 
       {/* Filter pills, two rows. Row 1 branches: the Bots pane gets a per-VENDOR row (one per
           distinct bot, so the in-house bots isolate separately) replacing the normal

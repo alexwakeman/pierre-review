@@ -13,6 +13,7 @@ import { RepoInsightsPanel } from './RepoInsightsPanel.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
+import { FeedMetricsPanel } from './FeedMetricsPanel.js';
 import { InsightsView } from './InsightsView.js';
 import { BotsView } from './BotsView.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
@@ -129,6 +130,10 @@ function RailRow({
 function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
   const tab = useFilters((s) => s.repoConsoleTabs[repo.repoId] ?? 'activity');
   const setRepoConsoleTab = useFilters((s) => s.setRepoConsoleTab);
+  // When the feed is isolated to a single PR ("Showing only #N"), the console becomes a focused
+  // single-PR view: the repo-wide charts + open-PR list are noise, so they're hidden, and the
+  // isolation banner sits right under the repo summary header.
+  const isolated = useFilters((s) => s.feedIsolatedPrId != null);
   return (
     <div className="space-y-3" data-testid="repo-console">
       <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
@@ -156,13 +161,21 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
       {tab === 'activity' ? (
         <>
           <RepoFeedHeader repo={repo} />
-          {/* Per-repo Insights — the Insights Overview replicated for this ONE repo: the
-              DORA-ish tile row (NON-clickable) + primary trend charts + a "More charts"
-              button that reveals the full per-repo charts grid inline. Sits under the AI
-              digest (in the header) and above the open-PR list. */}
-          <RepoInsightsPanel repoId={repo.repoId} repoFullName={repo.repoFullName} />
-          {/* All the repo's open PRs (at-a-glance metrics) BEFORE its activity feed. */}
-          <RepoOpenPrList repoId={repo.repoId} prs={repo.prs} />
+          {/* "Showing only #N" sits directly UNDER the repo summary header (not floating).
+              Self-hides when nothing is isolated. */}
+          <FeedIsolationBanner />
+          {!isolated && (
+            <>
+              {/* Per-repo Insights — the Insights Overview replicated for this ONE repo: the
+                  DORA-ish tile row (NON-clickable) + primary trend charts + a "More charts"
+                  button that reveals the full per-repo charts grid inline. HIDDEN in the
+                  single-PR isolated view (repo-wide charts are noise there). */}
+              <RepoInsightsPanel repoId={repo.repoId} repoFullName={repo.repoFullName} />
+              {/* All the repo's open PRs (at-a-glance metrics) BEFORE its activity feed —
+                  also HIDDEN when isolated to a single PR. */}
+              <RepoOpenPrList repoId={repo.repoId} prs={repo.prs} />
+            </>
+          )}
           <FeedView repoId={repo.repoId} />
         </>
       ) : (
@@ -451,10 +464,6 @@ export function ActivityView(): JSX.Element {
 
       {/* RIGHT DETAIL */}
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {/* Single-PR feed isolation ("Showing only #N …") pinned to the ACTUAL top of whatever
-            panel is active — above the Open-PRs pane / repo header / bots view — in every
-            context. Non-sticky (scrolls with content). Returns null when nothing's isolated. */}
-        <FeedIsolationBanner />
         {noReposAtAll ? (
           // First-run: detect the viewer's recent repos + one-click watch. Hoisted above the
           // rail-entry branches so a zero-repo account always lands here (a Pro account could
@@ -478,7 +487,12 @@ export function ActivityView(): JSX.Element {
               : 'Detecting the repos you work on…'}
           </div>
         ) : showingFeed ? (
-          <FeedView />
+          // The cross-repo Feed: the team flow-metric header (DORA-ish tiles + trend charts —
+          // CORE/free, moved out of the Pro Insights pane) atop the consolidated feed stream.
+          <div className="space-y-3">
+            <FeedMetricsPanel />
+            <FeedView />
+          </div>
         ) : isLoading && data == null ? (
           <div className="space-y-3">
             {[0, 1, 2].map((i) => (
@@ -493,8 +507,13 @@ export function ActivityView(): JSX.Element {
           // sub-tab is store-remembered per repo (repoConsoleTabs), so the remount restores it.
           <RepoConsole key={selectedRepo.repoId} repo={selectedRepo} />
         ) : (
-          // A numeric repo id that didn't resolve (e.g. removed) — fall back to Feed.
-          <FeedView />
+          // A numeric repo id that didn't resolve (e.g. removed, or added-but-unwatched so it's
+          // absent from the watched aggregate) — fall back to the cross-repo Feed, still
+          // surfacing the "Showing only #N" banner + Clear when a PR is isolated here.
+          <div className="space-y-3">
+            <FeedIsolationBanner />
+            <FeedView />
+          </div>
         )}
       </div>
     </div>

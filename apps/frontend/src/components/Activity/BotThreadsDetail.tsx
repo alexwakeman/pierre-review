@@ -1,5 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
-import type { CiStatus, ResolvableThreadPr, User } from '@pierre-review/shared';
+import type {
+  AddressedConfidence,
+  AddressedConfidenceCounts,
+  CiStatus,
+  ResolvableThreadPr,
+  User,
+} from '@pierre-review/shared';
 import {
   useResolvableBotThreads,
   useScopeResolveBotThreads,
@@ -7,7 +13,7 @@ import {
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
 import { type TabMeta } from '../../store/pinnedTabs.js';
-import { CI_META, indexUsers, relativeTime, userLabel } from '../../lib/ui.js';
+import { CI_META, CONFIDENCE_META, indexUsers, relativeTime, userLabel } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
 import { PrAddressedCheckButton } from '../AddressedCheck.js';
@@ -25,7 +31,7 @@ import { SortHeader, type SortState, compare, nextSort } from './sortableTable.j
 
 const PAGE_SIZE = 50;
 
-type SortCol = 'pr' | 'repo' | 'author' | 'age' | 'updated' | 'ci' | 'resolvable';
+type SortCol = 'pr' | 'repo' | 'author' | 'age' | 'updated' | 'ci' | 'resolvable' | 'confidence';
 
 const DEFAULT_DIR: Record<SortCol, 'asc' | 'desc'> = {
   pr: 'desc',
@@ -35,7 +41,42 @@ const DEFAULT_DIR: Record<SortCol, 'asc' | 'desc'> = {
   updated: 'desc', // most-recently-updated first
   ci: 'asc', // failing first
   resolvable: 'desc', // biggest backlog first
+  confidence: 'desc', // most confidently-addressed first
 };
+
+// Per-PR addressed-confidence rating for sorting: weight the resolvable threads by grade so PRs
+// whose threads are the most confidently addressed (safest to resolve) sort to the top under the
+// default 'desc'. Volume-aware (a PR with more high/medium threads outranks one with fewer).
+function confidenceScore(c: AddressedConfidenceCounts): number {
+  return c.high * 3 + c.medium * 2 + c.low;
+}
+
+// The resolvable-thread confidence MIX for a PR row — one compact tinted pill per non-empty grade
+// (High / Medium / Low; `none` is omitted). Colours + copy come from CONFIDENCE_META so the badge
+// reads the same as the per-thread ConfidenceBadge elsewhere. "—" when nothing is graded.
+function ConfidenceMix({ counts }: { counts: AddressedConfidenceCounts }): JSX.Element {
+  const levels: AddressedConfidence[] = ['high', 'medium', 'low'];
+  const shown = levels.filter((l) => counts[l] > 0);
+  if (shown.length === 0) return <span className="text-[11px] text-gray-400">—</span>;
+  return (
+    <span className="inline-flex items-center gap-1">
+      {shown.map((l) => {
+        const meta = CONFIDENCE_META[l];
+        return (
+          <span
+            key={l}
+            title={`${counts[l]} ${meta.label}-confidence thread${counts[l] === 1 ? '' : 's'} — ${meta.description}`}
+            className="inline-flex items-center gap-0.5 rounded px-1.5 py-px text-[10px] font-semibold tabular-nums"
+            style={{ color: meta.color, background: `${meta.color}1f` }}
+          >
+            {counts[l]}
+            <span className="tracking-wide">{meta.label[0]}</span>
+          </span>
+        );
+      })}
+    </span>
+  );
+}
 
 // CI rollup → a sortable rank (failing first under 'asc'); mirrors OpenPrsDetail.
 const CI_RANK: Record<CiStatus, number> = {
@@ -65,6 +106,8 @@ function sortValue(pr: ResolvableThreadPr, col: SortCol, usersById: Map<number, 
       return CI_RANK[pr.ciStatus];
     case 'resolvable':
       return pr.resolvableCount;
+    case 'confidence':
+      return confidenceScore(pr.confidenceCounts);
   }
 }
 
@@ -121,12 +164,15 @@ export function BotThreadsDetail(): JSX.Element {
   const onSort = (col: SortCol): void => setSort((cur) => nextSort(cur, col, DEFAULT_DIR));
   const [page, setPage] = useState(0);
 
-  // Repo-filtered set (all pages) — the basis for sorting, pagination and "Select all".
-  const filtered = useMemo(
-    () =>
-      effectiveRepoFilter === 'all' ? prs : prs.filter((p) => p.repoId === effectiveRepoFilter),
-    [prs, effectiveRepoFilter],
-  );
+  // Repo-filtered set (all pages) — the basis for sorting, pagination and "Select all". When
+  // "High-confidence only" is on it ALSO drops PRs with no high-confidence resolvable thread, so
+  // toggling the box visibly narrows the whole list (and select-all / the counts / the resolve
+  // then act on the high subset) instead of silently changing only the hidden resolve total.
+  const filtered = useMemo(() => {
+    const byRepo =
+      effectiveRepoFilter === 'all' ? prs : prs.filter((p) => p.repoId === effectiveRepoFilter);
+    return highOnly ? byRepo.filter((p) => p.highConfidenceThreadIds.length > 0) : byRepo;
+  }, [prs, effectiveRepoFilter, highOnly]);
   const sorted = useMemo(() => {
     if (sort == null) return filtered;
     const mul = sort.dir === 'asc' ? 1 : -1;
@@ -154,11 +200,14 @@ export function BotThreadsDetail(): JSX.Element {
     [selectedPrs, highOnly],
   );
   const selectedPrIds = useMemo(() => selectedPrs.map((p) => p.prId), [selectedPrs]);
-  // Whole-backlog high-confidence total (for the toggle label).
+  // Whole-backlog high-confidence total (for the toggle label). Stable across the toggle: when
+  // highOnly narrows `filtered` the excluded PRs contributed 0 high ids anyway.
   const totalHigh = useMemo(
     () => filtered.reduce((n, p) => n + p.highConfidenceThreadIds.length, 0),
     [filtered],
   );
+  // Backlog thread count shown in the summary line — the high-only subset while the box is on.
+  const backlogThreads = highOnly ? totalHigh : totalThreads;
 
   const toggleRow = (prId: number): void =>
     setSelected((prev) => {
@@ -205,7 +254,7 @@ export function BotThreadsDetail(): JSX.Element {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4">
+    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
           <span aria-hidden>🧹</span> Resolve bot threads
@@ -319,7 +368,7 @@ export function BotThreadsDetail(): JSX.Element {
                 <button
                   type="button"
                   onClick={selectAll}
-                  disabled={allSelected}
+                  disabled={allSelected || filtered.length === 0}
                   className="rounded border border-gray-300 px-2 py-1 text-[12px] font-medium text-gray-600 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
                   title="Select every PR in scope (across all pages)"
                 >
@@ -328,14 +377,17 @@ export function BotThreadsDetail(): JSX.Element {
                 <button
                   type="button"
                   onClick={clearSelection}
-                  disabled={selected.size === 0}
+                  // Reflect the VISIBLE (filtered) selection, not raw `selected` — so under a repo
+                  // or high-only filter that hides every selected PR, Clear greys out in step with
+                  // the "0 of 0 selected" summary instead of dangling enabled off a hidden ghost.
+                  disabled={selectedPrIds.length === 0}
                   className="rounded px-2 py-1 text-[12px] text-gray-500 hover:text-gray-700 disabled:opacity-40 dark:hover:text-gray-300"
                 >
                   Clear
                 </button>
                 <label
                   className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400"
-                  title="Resolve only threads with HIGH deterministic addressed-confidence — GitHub marked the lines outdated AND a later commit touched them, or the bot itself confirmed/resolved it."
+                  title="Show only PRs with a HIGH-confidence resolvable thread, and resolve just those — GitHub marked the lines outdated AND a later commit touched them, or the bot itself confirmed/resolved it. The safest subset."
                 >
                   <input
                     type="checkbox"
@@ -349,7 +401,8 @@ export function BotThreadsDetail(): JSX.Element {
             )}
             <span className="text-[11px] text-gray-400 tabular-nums">
               {selectedPrIds.length} of {filtered.length} PR{filtered.length === 1 ? '' : 's'}{' '}
-              selected · {totalThreads} thread{totalThreads === 1 ? '' : 's'} in backlog
+              selected · {backlogThreads} {highOnly ? 'high-confidence ' : ''}thread
+              {backlogThreads === 1 ? '' : 's'} in backlog
             </span>
             {!resolve.isPending &&
               resolve.data &&
@@ -367,10 +420,21 @@ export function BotThreadsDetail(): JSX.Element {
             )}
           </div>
 
+          {/* When "High-confidence only" (or a repo filter) empties the list, explain it instead
+              of leaving a bare header-only table. */}
+          {filtered.length === 0 && (
+            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+              {highOnly
+                ? 'No high-confidence threads in this scope — uncheck “High-confidence only” to see the rest of the backlog.'
+                : 'No PRs match this filter.'}
+            </div>
+          )}
+
           {/* Sortable per-PR table — a checkbox to include, then a clickable body opening the PR's
               Threads tab (likely-addressed pill preset). No per-thread enumeration. */}
+          {filtered.length > 0 && (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] border-collapse text-sm">
+            <table className="w-full min-w-[940px] border-collapse text-sm">
               <thead>
                 <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400">
                   <th className="pb-1 pr-2">
@@ -389,6 +453,7 @@ export function BotThreadsDetail(): JSX.Element {
                   <SortHeader col="updated" label="Updated" sort={sort} onSort={onSort} />
                   <SortHeader col="ci" label="CI" sort={sort} onSort={onSort} />
                   <SortHeader col="resolvable" label="Resolvable" sort={sort} onSort={onSort} title="Likely-addressed bot threads this row resolves" />
+                  <SortHeader col="confidence" label="Confidence" sort={sort} onSort={onSort} title="Deterministic addressed-confidence of this PR's resolvable threads (High / Medium / Low)" />
                   <th className="pb-1 font-semibold">Bot threads</th>
                 </tr>
               </thead>
@@ -455,19 +520,12 @@ export function BotThreadsDetail(): JSX.Element {
                         </span>
                       </td>
                       <td className="py-1.5 pr-3">
-                        <span className="inline-flex items-center gap-1">
-                          <span className="rounded bg-sky-100 px-1.5 py-px text-[11px] font-semibold tabular-nums text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-                            {g.resolvableCount}
-                          </span>
-                          {g.confidenceCounts.high > 0 && (
-                            <span
-                              className="rounded bg-green-100 px-1.5 py-px text-[10px] font-semibold tabular-nums text-green-700 dark:bg-green-900/40 dark:text-green-300"
-                              title="Threads graded HIGH addressed-confidence — the safest to resolve."
-                            >
-                              {g.confidenceCounts.high} high
-                            </span>
-                          )}
+                        <span className="rounded bg-sky-100 px-1.5 py-px text-[11px] font-semibold tabular-nums text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                          {g.resolvableCount}
                         </span>
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <ConfidenceMix counts={g.confidenceCounts} />
                       </td>
                       <td className="py-1.5">
                         <div className="flex flex-col items-start gap-1">
@@ -481,6 +539,7 @@ export function BotThreadsDetail(): JSX.Element {
               </tbody>
             </table>
           </div>
+          )}
 
           {/* Client-side pager (selection + "Select all" span every page). */}
           {pageCount > 1 && (

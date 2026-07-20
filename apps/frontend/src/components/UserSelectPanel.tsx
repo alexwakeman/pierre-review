@@ -61,6 +61,10 @@ export function UserSelectPanel({
   // In-panel type-to-filter over the (potentially large) roster. View-only: it
   // narrows which options are shown, never the staged selection.
   const [filter, setFilter] = useState('');
+  // Per-section (repo) count of NON-maintainer members revealed — 0 = collapsed, so a section
+  // shows only its maintainers by default. "Show more" bumps it by 10; reset when the panel
+  // reopens. Ignored while searching (a query always shows every match).
+  const [shownOthers, setShownOthers] = useState<Record<string, number>>({});
   const rootRef = useRef<HTMLDivElement>(null);
 
   const activeCount = userIds?.length ?? 0;
@@ -68,6 +72,7 @@ export function UserSelectPanel({
   const openPanel = (): void => {
     setStaged(new Set(userIds ?? [])); // seed from committed selection
     setFilter('');
+    setShownOthers({}); // every section back to maintainers-only
     setOpen(true);
   };
 
@@ -138,6 +143,22 @@ export function UserSelectPanel({
   // Clear all unchecks every staged member. It does NOT commit on its own — the
   // user clicks Apply (empty => setUserIds(null) => all rows shown).
   const clearAll = (): void => setStaged(new Set());
+
+  // One member row (checkbox + avatar + name + maintainer shield). Shared by a section's
+  // always-shown maintainers and its expandable non-maintainer list.
+  const memberRow = (sec: MemberSection, u: User): JSX.Element => (
+    <label
+      key={`${sec.key}:${u.id}`}
+      className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
+    >
+      <input type="checkbox" checked={staged.has(u.id)} onChange={() => toggle(u.id)} />
+      <Avatar user={u} size={16} />
+      <span className="min-w-0 truncate" title={u.githubLogin}>
+        {userLabel(u, u.id)}
+      </span>
+      {maintainerIds.has(u.id) && <MaintainerShield />}
+    </label>
+  );
 
   return (
     <div ref={rootRef} className="relative">
@@ -222,37 +243,64 @@ export function UserSelectPanel({
               visibleSections.map((sec) => {
                 const ids = sec.members.map((u) => u.id);
                 const allChecked = ids.every((id) => staged.has(id));
+                const searching = q.length > 0;
+                // Default (no search): show every maintainer, collapse the rest behind a per-repo
+                // "show more" that reveals 10 at a time. While searching, show all matches flat so
+                // a filtered member is never hidden by the collapse.
+                const maints = searching ? [] : sec.members.filter((u) => maintainerIds.has(u.id));
+                const rest = searching
+                  ? sec.members
+                  : sec.members.filter((u) => !maintainerIds.has(u.id));
+                const shown = shownOthers[sec.key] ?? 0;
+                const visibleRest = searching ? rest : rest.slice(0, shown);
+                const remaining = rest.length - visibleRest.length;
                 return (
                   <div key={sec.key} className="mb-1 last:mb-0">
-                    <div className="sticky top-0 flex items-center justify-between bg-white px-1 pb-0.5 pt-1 dark:bg-gray-900">
+                    {/* Opaque + z-10 + a hairline so a scrolling member row passes cleanly BEHIND
+                        the pinned repo name instead of bleeding through it. */}
+                    <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-100 bg-white px-1 pb-0.5 pt-1 dark:border-gray-800 dark:bg-gray-900">
                       <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
                         {sec.label}
                       </span>
                       <button
                         type="button"
                         onClick={() => toggleMany(ids, !allChecked)}
+                        title="Select / clear every member in this repo (including any collapsed below)"
                         className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
                       >
                         {allChecked ? 'none' : 'all'}
                       </button>
                     </div>
-                    {sec.members.map((u) => (
-                      <label
-                        key={`${sec.key}:${u.id}`}
-                        className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={staged.has(u.id)}
-                          onChange={() => toggle(u.id)}
-                        />
-                        <Avatar user={u} size={16} />
-                        <span className="min-w-0 truncate" title={u.githubLogin}>
-                          {userLabel(u, u.id)}
-                        </span>
-                        {maintainerIds.has(u.id) && <MaintainerShield />}
-                      </label>
-                    ))}
+                    {maints.map((u) => memberRow(sec, u))}
+                    {visibleRest.map((u) => memberRow(sec, u))}
+                    {!searching && rest.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 py-0.5 text-[10px]">
+                        {remaining > 0 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setShownOthers((s) => ({ ...s, [sec.key]: (s[sec.key] ?? 0) + 10 }))
+                            }
+                            className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                          >
+                            {/* Lead number == what THIS click reveals (always ≤10, since the
+                                onClick bumps by 10); "· N hidden" is the total still collapsed. */}
+                            {remaining <= 10
+                              ? `Show ${remaining} more`
+                              : `Show 10 more · ${remaining} hidden`}
+                          </button>
+                        )}
+                        {shown > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setShownOthers((s) => ({ ...s, [sec.key]: 0 }))}
+                            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                          >
+                            Show fewer
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -286,7 +334,7 @@ export function UserSelectPanel({
               <div className="max-h-40 overflow-y-auto">
                 {visibleBotSections.map((sec) => (
                   <div key={sec.key} className="mb-1 last:mb-0">
-                    <div className="sticky top-0 bg-white px-1 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:bg-gray-900">
+                    <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-1 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800 dark:bg-gray-900">
                       {sec.label}
                     </div>
                     {sec.members.map((u) => (

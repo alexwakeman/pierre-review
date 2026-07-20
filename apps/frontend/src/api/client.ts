@@ -38,6 +38,7 @@ import type {
   TeamInsightsResponse,
   RepoTeamMetricsResponse,
   TeamMetricsDetailResponse,
+  TeamMetricsResponse,
   TeamComparisonResponse,
   CommentAssessmentResponse,
   AiUsageResponse,
@@ -326,15 +327,17 @@ export const api = {
     fetch('/api/me/benchmark-consent', jsonBody('POST', { optIn })).then((r) =>
       handle<{ status: string; benchmarkOptIn: boolean }>(r),
     ),
-  // Team review-intelligence "Insights" (Pro; teamInsights capability). `scope`
-  // ('all'|'none'|'<teamId>') narrows the metrics + cards to a team's repos; omitted = all.
+  // Team review-intelligence "Insights" (Pro; teamInsights capability) — the attention CARDS
+  // (+ sprint/retro/compare). The flow-metric HEADER moved OUT to the free /api/team-metrics.
   teamInsights: (scope?: string) =>
     get<TeamInsightsResponse>(withQuery('/api/pro/insights', scopeParam(scope))),
-  // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click).
+  // The team flow-metric header (DORA-ish tiles + trends) — CORE/free, now rendered in the Feed.
+  teamMetrics: (scope?: string) =>
+    get<TeamMetricsResponse>(withQuery('/api/team-metrics', scopeParam(scope))),
+  // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click) — CORE/free
+  // too, so a Feed tile opens the drill-down for everyone.
   teamMetricsDetail: (scope?: string) =>
-    get<TeamMetricsDetailResponse>(
-      withQuery('/api/pro/insights/metrics-detail', scopeParam(scope)),
-    ),
+    get<TeamMetricsDetailResponse>(withQuery('/api/team-metrics/detail', scopeParam(scope))),
   // The Insights flow-metric header (tiles + trends) for a SINGLE repo — the per-repo console
   // panel. Metrics-only; tiles render non-clickable there.
   repoTeamMetrics: (repoId: number) =>

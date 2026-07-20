@@ -9,15 +9,15 @@ import { Avatar } from '../CommentCard.js';
 import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
 
 // The bot-only-PRs DRILL-DOWN — a persistent, singleton tab opened by the amber "only a bot
-// reviewed these" caption in BotsView. Lists the EXACT PR set behind the analytics
-// `totals.botOnlyPrs` count (the dedicated route shares the analytics' window/scope
-// resolution, so caption ≡ list). A SORTABLE table (age, last-update, author, bot, state);
-// the cross-repo tab adds a Repo column + a repo filter dropdown. The count is a review-STATE
-// snapshot — merged-in-window OR open-and-mergeable at any age, bot-touch judged over the PR's
-// whole history — so rows may predate the feed window (the header says so). Clicking a row
-// opens its detail tab; "Show in feed" returns to the matching Bots rail entry with the PR
-// isolated (bypasses the feed window); a Pierre-verbatim row has no bot-actor events, so it
-// explains instead.
+// reviewed these" caption in BotsView. Shows currently-OPEN bot-only PRs by DEFAULT (the
+// actionable "needs a human before it merges" set — this matches the banner's `totals.botOnlyPrs`
+// count, which is now open-only); a "Show merged" checkbox adds the merged-in-window rows the
+// route also returns (client-side filter on `state`, so toggling is instant). A SORTABLE table
+// (age, last-update, author, bot, state); the cross-repo tab adds a Repo column + a repo filter
+// dropdown. Bot-touch is judged over the PR's whole history and open PRs are unwindowed, so rows
+// may predate the feed window. Clicking a row opens its detail tab; "Show in feed" returns to the
+// matching Bots rail entry with the PR isolated (bypasses the feed window); a Pierre-verbatim row
+// has no bot-actor events, so it explains instead.
 
 // The window picker options — kept in lockstep with BotRoiPanel's WINDOWS (same store field).
 const WINDOWS: { key: BotWindowKind; label: string }[] = [
@@ -197,10 +197,27 @@ export function BotOnlyPrsDetail(): JSX.Element {
 
   const [sort, setSort] = useState<SortState<SortCol> | null>({ col: 'updated', dir: 'desc' });
   const onSort = (col: SortCol): void => setSort((cur) => nextSort(cur, col, DEFAULT_DIR));
+  // OPEN PRs by default — the actionable "needs a human before it merges" set, matching the
+  // banner count. "Show merged" adds the merged-in-window rows (already shipped) the route
+  // also returns; the split is client-side on `state`, so toggling is instant (no refetch).
+  const [showMerged, setShowMerged] = useState(false);
+
+  // Repo-filtered set (BEFORE the open/merged split) — the basis for the open/merged counts.
+  const repoFiltered = useMemo(
+    () => (effectiveRepoFilter === 'all' ? prs : prs.filter((p) => p.repoId === effectiveRepoFilter)),
+    [prs, effectiveRepoFilter],
+  );
+  const openCount = useMemo(
+    () => repoFiltered.filter((p) => p.state === 'open').length,
+    [repoFiltered],
+  );
+  const mergedCount = useMemo(
+    () => repoFiltered.filter((p) => p.state === 'merged').length,
+    [repoFiltered],
+  );
 
   const rows = useMemo(() => {
-    const filtered =
-      effectiveRepoFilter === 'all' ? prs : prs.filter((p) => p.repoId === effectiveRepoFilter);
+    const filtered = showMerged ? repoFiltered : repoFiltered.filter((p) => p.state === 'open');
     if (sort == null) return filtered;
     const mul = sort.dir === 'asc' ? 1 : -1;
     return [...filtered].sort(
@@ -208,7 +225,7 @@ export function BotOnlyPrsDetail(): JSX.Element {
         mul * compare(sortValue(a, sort.col, usersById), sortValue(b, sort.col, usersById)) ||
         b.number - a.number,
     );
-  }, [prs, sort, usersById, effectiveRepoFilter]);
+  }, [repoFiltered, showMerged, sort, usersById]);
 
   const openPr = (pr: BotOnlyPrItem): void => {
     const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
@@ -238,14 +255,13 @@ export function BotOnlyPrsDetail(): JSX.Element {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4">
+    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Bot-only PRs</h2>
         <span className="text-[11px] text-gray-400">
           only a bot reviewed these — no human review or comment.{' '}
-          {/* The snapshot invariant, tersely: review-state, not the feed event stream. */}
           <span className="text-amber-600 dark:text-amber-400">
-            Counted by review state — may predate the window.
+            {showMerged ? `${openCount} open · ${mergedCount} merged` : `${openCount} open`}
           </span>{' '}
           · click a column to sort · click a row to open it
         </span>
@@ -267,6 +283,20 @@ export function BotOnlyPrsDetail(): JSX.Element {
             ))}
           </select>
         )}
+        {/* Show-merged toggle — OPEN bot-only PRs show by default (the actionable set, matching
+            the banner); ticking adds the merged-in-window rows (already shipped). */}
+        <label
+          className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400"
+          title="Also show bot-only PRs that already merged in this window — open PRs are the actionable set"
+        >
+          <input
+            type="checkbox"
+            checked={showMerged}
+            onChange={(e) => setShowMerged(e.target.checked)}
+            className="h-3.5 w-3.5 cursor-pointer accent-violet-600"
+          />
+          Show merged{mergedCount > 0 ? ` (${mergedCount})` : ''}
+        </label>
         {/* Window picker (shared with the Bot-ROI panel via botAnalyticsWindow). */}
         <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
           {WINDOWS.map((wOpt) => (
@@ -307,7 +337,9 @@ export function BotOnlyPrsDetail(): JSX.Element {
         <div className="text-sm text-red-500">Couldn’t load the PR list.</div>
       ) : rows.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          No bot-only PRs in this window. 🎉
+          {!showMerged && mergedCount > 0
+            ? `No open bot-only PRs — ${mergedCount} merged in this window. Tick “Show merged” to see them.`
+            : 'No bot-only PRs in this window. 🎉'}
         </div>
       ) : (
         <div className="overflow-x-auto">

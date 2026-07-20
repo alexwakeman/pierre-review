@@ -2765,6 +2765,32 @@ export async function getTeamMetrics(
   };
 }
 
+// CORE/free wrapper around getTeamMetrics: resolves the scope (a concrete repo-id list, or
+// null/undefined → the WATCHED set) the SAME way getTeamInsights does, then computes the
+// flow-metric header. Lets the core /api/team-metrics route serve the Feed's now-free metrics
+// (moved out of the Pro Insights pane) without the Pro insights bundle.
+export async function getTeamMetricsForScope(
+  accountId: number,
+  scopeRepoIds?: number[] | null,
+): Promise<TeamMetrics | null> {
+  if (scopeRepoIds != null && scopeRepoIds.length === 0) return null;
+  const watched = await db
+    .select({ id: repos.id })
+    .from(repos)
+    .where(
+      scopeRepoIds != null
+        ? and(eq(repos.accountId, accountId), inArray(repos.id, scopeRepoIds))
+        : and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)),
+    )
+    .execute();
+  return getTeamMetrics(
+    accountId,
+    watched.map((r) => r.id),
+    Date.now(),
+    undefined,
+  );
+}
+
 // Per-list safety cap for the drill-down. Deliberately GENEROUS: the lists are already
 // bounded (the 2-week sprint window for merges / review-latency / recovery; the open-PR
 // backlog for lead-time / red-now), so 500 shows every entry for any realistic sprint —
@@ -6929,6 +6955,11 @@ export async function getBotOnlyReviewPrs(
   accountId: number,
   repoIds: number[],
   window: { from: Date; to: Date },
+  // openOnly: restrict to currently-OPEN (mergeable) PRs, dropping merged-in-window. The
+  // analytics COUNT (the "only a bot reviewed…" banner) uses this — it's a live "needs a human
+  // before it merges" signal, and merged PRs have already shipped. The drill-down LIST omits
+  // this so the tab can offer merged behind a "Show merged" toggle.
+  opts?: { openOnly?: boolean },
 ): Promise<BotOnlyReviewPr[]> {
   if (repoIds.length === 0) return [];
   const automatedIds = new Set(await automatedReviewerUserIds(accountId));
@@ -6970,14 +7001,16 @@ export async function getBotOnlyReviewPrs(
       and(
         eq(pullRequests.accountId, accountId),
         inArray(pullRequests.repoId, repoIds),
-        or(
-          and(
-            eq(pullRequests.state, 'merged'),
-            gte(pullRequests.mergedAt, window.from),
-            lte(pullRequests.mergedAt, window.to),
-          ),
-          and(eq(pullRequests.state, 'open'), eq(pullRequests.mergeable, 'mergeable')),
-        ),
+        opts?.openOnly
+          ? and(eq(pullRequests.state, 'open'), eq(pullRequests.mergeable, 'mergeable'))
+          : or(
+              and(
+                eq(pullRequests.state, 'merged'),
+                gte(pullRequests.mergedAt, window.from),
+                lte(pullRequests.mergedAt, window.to),
+              ),
+              and(eq(pullRequests.state, 'open'), eq(pullRequests.mergeable, 'mergeable')),
+            ),
       ),
     )
     .execute();
@@ -7469,9 +7502,11 @@ export async function getBotAnalytics(
   vendors.sort((a, b) => b.threads - a.threads || b.comments - a.comments);
   suggestions.sort((a, b) => b.volume - a.volume);
 
-  // Item 4b — bot-only PR count across ALL the account's repos in the window, using the same
-  // broadened rule as getBotOnlyReviewPrs (item 4a): automated touch (review OR comment, incl.
-  // Pierre-verbatim) with no human review AND no human comment.
+  // Item 4b — bot-only OPEN PR count across ALL the account's repos, using the same broadened
+  // rule as getBotOnlyReviewPrs (item 4a): automated touch (review OR comment, incl. Pierre-
+  // verbatim) with no human review AND no human comment. OPEN-only (`openOnly`) — the banner is
+  // a live "needs a human before it merges" signal, so merged PRs (already shipped) are excluded;
+  // the drill-down list still offers them behind a toggle.
   const allRepoRows = await db
     .select({ id: repos.id })
     .from(repos)
@@ -7482,6 +7517,7 @@ export async function getBotAnalytics(
       accountId,
       scopeRepoIds ?? allRepoRows.map((r) => r.id),
       { from, to },
+      { openOnly: true },
     )
   ).length;
 

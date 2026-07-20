@@ -402,10 +402,11 @@ export function PinnedTabsBar(): JSX.Element {
       data-testid="pinned-tabs"
       role="tablist"
       aria-label="Views"
-      // Fixed min-height so the strip never shrinks when the (taller, two-line) PR tabs are
-      // all closed — the Activity/Timeline chips alone are shorter, which otherwise made the
-      // bar jump height. min-h pins it to the with-PR-tabs height.
-      className="flex min-h-[42px] shrink-0 items-end gap-1 overflow-x-auto bg-gray-100 px-2 pt-1 dark:bg-gray-900"
+      // Fixed min-height so the strip never shrinks when the (taller, two-line) PR tabs are all
+      // closed. `items-stretch` makes EVERY tab fill the strip's full height, so the single-line
+      // chips (Activity / Timeline / drill-downs) and the two-line PR tabs come out the SAME
+      // height with vertically-centred content — no ragged tops or misaligned text.
+      className="flex min-h-[42px] shrink-0 items-stretch gap-1 overflow-x-auto bg-gray-100 px-2 pt-1 dark:bg-gray-900"
     >
       <FixedChip
         active={activeTab === 'activity'}

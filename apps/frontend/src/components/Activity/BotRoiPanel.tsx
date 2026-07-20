@@ -386,11 +386,12 @@ function VendorTable({
   );
 }
 
-// The scope-wide "clear the stale-bot backlog" banner — now a compact one-liner: the count +
-// a "Review & resolve" button that opens the resolvable-bot-threads drill-down TAB (the whole
-// review-and-resolve flow lives in BotThreadsDetail). Renders NOTHING until the eager resolvable
-// query (a lean per-PR id-list) shows ≥1 likely-addressed automated-reviewer thread.
-function ResolveBacklogBanner({
+// The scope-wide "clear the stale-bot backlog" caution — rendered in BotsView directly beneath
+// the "only a bot reviewed" caution and styled to MATCH it (full-width clickable + a "Show list"
+// pill), in sky (its own colour). The whole banner opens the resolvable-bot-threads review-and-
+// resolve drill-down TAB (BotThreadsDetail). Renders NOTHING until the eager resolvable query (a
+// lean per-PR id-list) shows ≥1 likely-addressed automated-reviewer thread.
+export function ResolveBacklogBanner({
   scope,
   repoScope,
 }: {
@@ -404,20 +405,22 @@ function ResolveBacklogBanner({
   if (totalThreads === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-300/50 bg-sky-50/50 px-3 py-2 text-[12px] dark:border-sky-500/30 dark:bg-sky-950/20">
-      <span className="text-sky-700 dark:text-sky-300">🧹</span>
-      <span className="font-medium text-sky-800 dark:text-sky-200">
-        {totalThreads} likely-addressed bot thread{totalThreads === 1 ? '' : 's'} look
-        resolved by later commits
+    <button
+      type="button"
+      onClick={() => openBotThreadsDetail(repoScope?.[0] ?? null)}
+      data-testid="resolve-backlog-caption"
+      title="Review & resolve the likely-addressed bot threads"
+      className="flex w-full items-start gap-1.5 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-left text-[11px] text-sky-700 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-300 dark:hover:bg-sky-900/40"
+    >
+      <span className="flex-1">
+        🧹 <span className="font-semibold tabular-nums">{totalThreads}</span> likely-addressed bot
+        thread{totalThreads === 1 ? '' : 's'} look resolved by later commits — review before
+        resolving on GitHub.
       </span>
-      <button
-        type="button"
-        onClick={() => openBotThreadsDetail(repoScope?.[0] ?? null)}
-        className="ml-auto text-[11px] font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
-      >
-        Review &amp; resolve
-      </button>
-    </div>
+      <span className="shrink-0 self-center rounded border border-sky-400 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:border-sky-600/70 dark:text-sky-300">
+        Show list →
+      </span>
+    </button>
   );
 }
 
@@ -449,8 +452,9 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   );
 
   const header = (
+    // The "Review-bot ROI" heading was dropped (the rail line already has a header); just the
+    // window/date-range picker remains, right-aligned.
     <div className="flex flex-wrap items-center gap-2">
-      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Review-bot ROI</h3>
       <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
         {WINDOWS.map((wOpt) => (
           <button
@@ -506,11 +510,11 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           <button
             type="button"
             onClick={() => openBotOnlyDetail(repoId ?? null)}
-            title="Show the PRs only a bot reviewed — no human review or comment since they opened"
+            title="Show the OPEN PRs only a bot reviewed — no human review or comment since they opened"
             className="rounded underline decoration-dotted underline-offset-2 hover:text-gray-700 dark:hover:text-gray-200"
           >
             <b className="tabular-nums text-gray-700 dark:text-gray-200">{t.botOnlyPrs}</b>{' '}
-            bot-only PR{t.botOnlyPrs === 1 ? '' : 's'}
+            bot-only open PR{t.botOnlyPrs === 1 ? '' : 's'}
           </button>
         </div>
         <VendorTable
@@ -535,8 +539,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
         <div className="text-[11px] text-gray-400">
           “Acted on” = a later commit likely addressed the thread, it was resolved, or a human
           replied/resolved after the bot (approximate). Noise ratio = the untouched share of a
-          bot's threads. Verdicts + cost are deterministic — no AI. Set per-bot monthly cost in
-          Settings → Review bots to see $/acted-on.
+          bot's threads. Set per-bot monthly cost in Settings → Review bots to see $/acted-on.
         </div>
       </div>
     );
@@ -545,11 +548,6 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   return (
     <div className="space-y-2" data-testid="bot-roi-panel">
       {header}
-      {/* The resolve-backlog banner sits OUTSIDE the analytics branches: the backlog query is
-          windowless, so a stale backlog must surface even when the selected window has zero
-          vendor activity (the "No automated-reviewer activity" card) — that's exactly the
-          "clear the old bot noise" case. The banner self-hides at totalThreads === 0. */}
-      <ResolveBacklogBanner scope={scope} repoScope={repoScope} />
       {body}
     </div>
   );

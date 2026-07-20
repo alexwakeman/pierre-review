@@ -1,7 +1,9 @@
+import { useMemo } from 'react';
 import { useBotAnalytics } from '../../hooks/useBotTriage.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
-import { BotRoiPanel } from './BotRoiPanel.js';
+import { BotRoiPanel, ResolveBacklogBanner } from './BotRoiPanel.js';
 import { FeedView } from './FeedView.js';
+import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 
 // The Bots rail view — "the calm layer above your review bots" as a CORE, FREE feature (works
 // via the npx / OSS path, no @pierre/pro plugin). It composes:
@@ -22,7 +24,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // scope, matching BotRoiPanel so both hit the same cache entry.
   const window = useFilters((s) => s.botAnalyticsWindow);
   const scope = scopeToParam(useFilters((s) => s.teamScope));
-  const repoScope = repoId != null ? [repoId] : null;
+  const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
   const { data } = useBotAnalytics(window, true, scope, repoScope);
   const botOnly = data?.totals.botOnlyPrs ?? 0;
 
@@ -36,10 +38,15 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Review bots</h2>
         <span className="text-[11px] text-gray-400">
           {repoId != null
-            ? 'The calm layer above your review bots — scoped to this repo. Deterministic, no AI.'
-            : 'The calm layer above your review bots — detect, measure, and triage automated reviewers. Deterministic, no AI.'}
+            ? 'The calm layer above your review bots — scoped to this repo.'
+            : 'The calm layer above your review bots — detect, measure, and triage automated reviewers.'}
         </span>
       </div>
+
+      {/* "Showing only #N" when the bot feed is isolated to one PR (e.g. from the Bot-only-PRs
+          "Show in feed", which lands here). Under the panel header; self-hides otherwise — its
+          Clear is the only in-view way to un-isolate the bot feed. */}
+      <FeedIsolationBanner />
 
       {/* Governance caution: PRs whose only review came from an automated reviewer — no human
           ever looked. Sourced from the CORE analytics totals; "Show list" opens the bot-only-PRs
@@ -51,17 +58,17 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           type="button"
           onClick={() => openBotOnlyDetail(repoId ?? null)}
           data-testid="bot-only-caption"
-          title="Show the PRs only a bot reviewed"
+          title="Show the open PRs only a bot reviewed"
           className="flex w-full items-start gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-left text-[11px] text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
         >
           <span className="flex-1">
-            🤖 Only a bot reviewed <span className="font-semibold tabular-nums">{botOnly}</span>{' '}
-            PR{botOnly === 1 ? '' : 's'} — no human review. Consider a human pass before these
-            ship.{' '}
-            {/* Snapshot disclaimer — visible up front (the count is a PR-state snapshot, not a
-                feed-window event count). */}
+            🤖 Only a bot reviewed <span className="font-semibold tabular-nums">{botOnly}</span> open{' '}
+            PR{botOnly === 1 ? '' : 's'} — no human review yet. Consider a human pass before they
+            merge.{' '}
+            {/* The count is a live review-state snapshot of currently-OPEN PRs (any age); merged
+                PRs are excluded here (they're in the list behind "Show merged"). */}
             <span className="text-amber-600/80 dark:text-amber-400/70">
-              Counted by review state — may predate the window.
+              Open PRs only, any age.
             </span>
           </span>
           <span className="shrink-0 self-center rounded border border-amber-400 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-600/70 dark:text-amber-300">
@@ -69,6 +76,11 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           </span>
         </button>
       )}
+
+      {/* Directly beneath the "only a bot reviewed" caution: the likely-addressed backlog, in the
+          SAME full-width-clickable + "Show list" layout (sky, its own colour). Self-hides when the
+          backlog is empty; opens the resolvable-bot-threads review-and-resolve tab. */}
+      <ResolveBacklogBanner scope={scope} repoScope={repoScope} />
 
       <BotRoiPanel repoId={repoId} />
 

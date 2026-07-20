@@ -246,8 +246,10 @@ export interface BotAnalyticsResponse {
   generatedAt: string;
   window: { kind: BotWindowKind; from: string; to: string };
   vendors: BotVendorAnalytics[];  // most-threads-first
-  // `botOnlyPrs` = PRs in the account's repos in the window whose only review/comment touch was
-  // automated (incl. Pierre-verbatim) — no human review AND no human comment. See getBotVendorPrs.
+  // `botOnlyPrs` = currently-OPEN (mergeable) PRs in the account's repos whose only review/comment
+  // touch was automated (incl. Pierre-verbatim) — no human review AND no human comment. Merged PRs
+  // are excluded (the banner is a "needs a human before it merges" signal); the drill-down list
+  // adds merged behind a toggle. See getBotOnlyReviewPrs / getBotVendorPrs.
   totals: { threads: number; comments: number; actedOn: number; actedOnPct: number | null; untouched: number; botOnlyPrs: number };
   suggestions: BotTuningSuggestion[];  // WS6c, deterministic
 }
@@ -3100,6 +3102,12 @@ export interface TeamMetricsDetail {
 export interface TeamMetricsDetailResponse {
   enabled: boolean; // false when the capability is off (plugin absent)
   detail: TeamMetricsDetail | null; // null when there are no watched repos
+}
+
+// The team flow-metric header (DORA-ish tiles + trend charts) as a standalone CORE/free payload,
+// served by /api/team-metrics — moved out of the Pro Insights bundle into the Feed.
+export interface TeamMetricsResponse {
+  metrics: TeamMetrics | null; // null = no repos in scope
 }
 
 // ---- Cross-team comparison (Insights "Compare" sub-tab; All-Teams scope only) ----

@@ -103,11 +103,12 @@ export function FilterBar(): JSX.Element {
 
   const f = useFilters();
 
-  // The Activity console only honours the team/repos scope — Members / Range / Status /
-  // Events / Threads are timeline-only, so on the Activity tab they (and the right-hand
-  // Saved-Views / Clear-filters cluster) are hidden.
+  // Every filter except the Team scope is TIMELINE-only — Members / Status / Events / Threads /
+  // Range (and the right-hand Clear-filters cluster) only make sense against the shared timeline
+  // board, so they show ONLY when the Timeline is the active tab. On Activity, Insights, a
+  // PR-detail/focus tab, and every drill-down, just the Team dropdown remains.
   const activeTab = usePinnedTabs((s) => s.activeTab);
-  const isActivity = activeTab === 'activity';
+  const isTimeline = activeTab === 'timeline';
 
   // The FilterBar is always fully live now — PR-isolation / My-Turn focus is a separate
   // TAB (its own keyed <Timeline>), so it no longer disables or fades the board filters.
@@ -259,9 +260,10 @@ export function FilterBar(): JSX.Element {
           <TeamSelector />
         </Section>
 
-        {/* Members is timeline-only too — Activity's queries ignore the member selection
-            (its bot filtering lives in the feed's own lens pills), so the panel hides there. */}
-        {!isActivity && (
+        {/* Members is timeline-only too — off the board nothing honours the member selection
+            (Activity's bot filtering lives in the feed's own lens pills), so the panel shows
+            only on the Timeline. */}
+        {isTimeline && (
           <Section>
             <UserSelectPanel
               sections={memberSections}
@@ -277,9 +279,9 @@ export function FilterBar(): JSX.Element {
           </Section>
         )}
 
-        {/* Status / Events / Threads / Range are timeline-only — hidden on Activity,
-            where only the team/repos scope applies. */}
-        {!isActivity && (
+        {/* Status / Events / Threads / Range are timeline-only — shown only on the Timeline
+            board; every other tab keeps just the team/repos scope. */}
+        {isTimeline && (
           <Section>
             <StatusSelectPanel
               statuses={f.prStatuses}
@@ -291,7 +293,7 @@ export function FilterBar(): JSX.Element {
           </Section>
         )}
 
-        {!isActivity && (
+        {isTimeline && (
           <Section>
             <EventSelectPanel
               categories={f.categories}
@@ -304,7 +306,7 @@ export function FilterBar(): JSX.Element {
           </Section>
         )}
 
-        {!isActivity && (
+        {isTimeline && (
           <Section>
             <ThreadStateSelectPanel
               derivedStates={f.derivedStates}
@@ -315,7 +317,7 @@ export function FilterBar(): JSX.Element {
         )}
 
         {/* Range (+ Now) sits at the END of the board-filters cluster. */}
-        {!isActivity && (
+        {isTimeline && (
           <Section label="Range">
             {PRESETS.map((p) => (
               <Chip key={p} active={f.preset === p} onClick={() => f.setPreset(p)}>
@@ -335,11 +337,9 @@ export function FilterBar(): JSX.Element {
 
       </div>
 
-      {/* Right cluster, pinned next to the timeline. Timeline-only filter management —
-          hidden on Activity (only the team/repos scope applies there). Clear filters stays usable
-          even while a focus/PR tab is open (that's a separate tab, not a lock on the shared
-          board). */}
-      {!isActivity && (
+      {/* Right cluster, pinned next to the timeline. Timeline-only — Clear filters shows only on
+          the Timeline board (every other tab keeps just the team/repos scope). */}
+      {isTimeline && (
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"

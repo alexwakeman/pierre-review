@@ -240,7 +240,7 @@ export function OpenPrsDetail(): JSX.Element {
   const draftCount = rows.reduce((n, p) => n + (p.isDraft ? 1 : 0), 0);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4">
+    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Open PRs</h2>
         <span className="text-[11px] text-gray-400">

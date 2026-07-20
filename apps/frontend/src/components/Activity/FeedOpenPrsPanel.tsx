@@ -44,7 +44,7 @@ function groupOpenPrsByTeam(prs: TimelinePr[], teams: Team[], scope: TeamScope):
 // pr-detail tab (its Show/Focus links then drive the timeline / feed).
 export function FeedOpenPrsPanel(): JSX.Element | null {
   // Member-AGNOSTIC open PRs (repo scope still applies) — Members is a Timeline-only filter,
-  // so the Activity panel must not narrow by it (OpenPrsStrip's useOpenPrs stays member-scoped).
+  // so the Activity panel must not narrow by it.
   const { data: openPrs } = useSearchOpenPrs();
   const { data: teams } = useTeams();
   const { data: users } = useUsers();

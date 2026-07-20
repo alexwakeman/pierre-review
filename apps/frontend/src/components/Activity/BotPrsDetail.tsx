@@ -264,7 +264,7 @@ export function BotPrsDetail(): JSX.Element {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4">
+    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Bot PRs</h2>
         <span className="text-[11px] text-gray-400">
@@ -273,7 +273,7 @@ export function BotPrsDetail(): JSX.Element {
             <>
               {' · '}
               <span className="text-amber-600 dark:text-amber-400">
-                {botOnlyPrs} bot-only
+                {botOnlyPrs} bot-only open
               </span>
             </>
           )}

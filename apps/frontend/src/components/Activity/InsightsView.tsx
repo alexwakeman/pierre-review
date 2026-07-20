@@ -25,7 +25,6 @@ import { ThreadCard } from '../ThreadView/index.js';
 import { RetroView } from './RetroView.js';
 import { SprintReportCard } from './SprintReportCard.js';
 import { PresetPromptPanel } from './PresetPromptPanel.js';
-import { TeamMetricsPanel } from './TeamMetricsPanel.js';
 import { TeamComparisonPanel } from './TeamComparisonPanel.js';
 import { TrackUsage } from './TrackUsage.js';
 
@@ -333,10 +332,9 @@ export function InsightsView({
 } = {}): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const selectThread = useFilters((s) => s.selectThread);
-  const openMetricsDetail = useFilters((s) => s.openMetricsDetail);
-  // The team-scope selector narrows the WHOLE panel: this one fetch feeds both the Overview
-  // TeamMetricsPanel metrics AND every insight card (incl. the bot cards), so scoping it
-  // scopes Overview + the Bots-tab cards. scope is in the query key → a scope change refetches.
+  // The team-scope selector narrows the WHOLE panel: this one fetch feeds every insight card
+  // (incl. the bot cards). scope is in the query key → a scope change refetches. (The flow-metric
+  // header moved to the free Feed — see FeedMetricsPanel.)
   const teamScope = useFilters((s) => s.teamScope);
   const scope = scopeToParam(teamScope);
   const { data, isLoading, isError } = useTeamInsights(true, scope);
@@ -625,10 +623,9 @@ export function InsightsView({
 
       {subTab === 'overview' ? (
         <div className="space-y-3">
-          {data?.metrics && (
-            <TeamMetricsPanel metrics={data.metrics} onOpenMetric={openMetricsDetail} />
-          )}
-
+          {/* The flow-metric header (DORA-ish tiles + trend charts) moved OUT to the cross-repo
+              Feed (now CORE/free — see FeedMetricsPanel). The Insights Overview keeps the
+              attention cards below (+ Sprint / Retro / Compare tabs). */}
           {isLoading ? (
             <div className="space-y-3">
               {[0, 1, 2].map((i) => (

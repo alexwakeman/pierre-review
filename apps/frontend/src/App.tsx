@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { FilterBar } from './components/FilterBar.js';
-import { OpenPrsStrip } from './components/OpenPrsStrip/index.js';
 import { PinnedTabsBar } from './components/PinnedTabsBar.js';
 import { PrDetail } from './components/PrDetail.js';
 import { Timeline } from './components/Timeline/index.js';
@@ -145,8 +144,7 @@ export default function App(): JSX.Element {
   // A11y: when a pinned PR is shown full-screen, the timeline + detail pane sit behind
   // an opaque overlay. Mark them `inert` so keyboard / screen-reader users don't tab
   // into hidden content (the overlay's controls become the only focusable ones in the
-  // main area). `inert` isn't typed in this @types/react version, so set it
-  // imperatively — same pattern as OpenPrsStrip's collapsed panel.
+  // main area). `inert` isn't typed in this @types/react version, so set it imperatively.
   useEffect(() => {
     for (const el of [timelineSectionRef.current, paneRef.current]) {
       if (!el) continue;
@@ -316,7 +314,6 @@ export default function App(): JSX.Element {
 
       <WelcomeBackBanner />
       <FilterBar />
-      <OpenPrsStrip />
       <PinnedTabsBar />
 
       {/* `relative` anchors the full-main overlays (pr-detail / Activity) below. */}
