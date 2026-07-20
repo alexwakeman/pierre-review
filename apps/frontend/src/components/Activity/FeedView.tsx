@@ -374,6 +374,22 @@ export function FeedView({
       items.filter((i) => i.kind === 'review_comment' || i.kind === 'pr_comment').length,
     [counts, items],
   );
+  // PR-events pill badge — the server `prEvents` facet already ships (computeFeedCounts) but was
+  // never read, so the pill showed no count. Kinds kept in sync with catMatch's isPrEvent above.
+  const prEventsCount = useMemo(
+    () =>
+      counts?.prEvents ??
+      items.filter(
+        (i) =>
+          i.kind === 'pr_opened' ||
+          i.kind === 'pr_merged' ||
+          i.kind === 'pr_closed' ||
+          i.kind === 'pr_reopened' ||
+          i.kind === 'pr_ready_for_review' ||
+          i.kind === 'review_submitted',
+      ).length,
+    [counts, items],
+  );
   // Review-thread DERIVED-state filter (a Set of selected states; empty = all) — a pill row
   // on EVERY feed view, not just the Bots pane. Local (not a store filter). Only
   // thread-bearing items carry a derivedState; a non-thread item (a PR open/merge, a plain
@@ -983,6 +999,7 @@ export function FeedView({
           title="Show PR events (opens, merges, closes, reopens, ready-for-review, reviews)"
         >
           <span aria-hidden="true">⑃</span> PR events
+          {prEventsCount > 0 && <span className="tabular-nums opacity-70">{prEventsCount}</span>}
         </button>
         {/* Bot lens — Pierre as the calm layer above your review bot. Cycles all → hide → only. */}
         {botCount > 0 && (
