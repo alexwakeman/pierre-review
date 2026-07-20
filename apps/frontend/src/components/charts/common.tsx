@@ -40,6 +40,10 @@ export const PALETTE = {
   violet: '#a78bfa',
 } as const;
 
+// The colour for an anomaly marker (a divergence from a bot's own typical) — shared so the
+// LineChart rings and the coverage-strip silent-run highlight read as the same signal.
+export const ANOMALY_RING = PALETTE.red;
+
 // A rotating set for series whose count isn't fixed (e.g. reviewers).
 export const SERIES_COLORS = [
   PALETTE.blue,
@@ -60,6 +64,9 @@ export interface Series {
   // instead of `color` — e.g. a single "acted-on %" series whose bars are tinted by each
   // bot's keep/tune/kill verdict. Falls back to `color` where an entry is null/absent.
   colors?: (string | null)[];
+  // Optional per-index anomaly flag (LineChart): when true, point i is ringed as an outlier
+  // (the bot diverged from its own typical that week). Aligned 1:1 with `values`.
+  pointFlags?: (boolean | null)[];
 }
 
 // Hours → compact human duration (m / h / d), precision shrinking with magnitude.

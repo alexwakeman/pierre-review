@@ -6,6 +6,7 @@ import {
   niceMax,
   Legend,
   FloatingTip,
+  ANOMALY_RING,
   type Series,
 } from './common.js';
 
@@ -185,17 +186,31 @@ export function LineChart({
               />
             ))}
             {series.map((s) =>
-              s.values.map((v, i) =>
-                v == null ? null : (
-                  <circle
-                    key={`${s.key}-${i}`}
-                    cx={x(i)}
-                    cy={y(v)}
-                    r={hover === i ? 3 : 1.8}
-                    fill={s.color}
-                  />
-                ),
-              ),
+              s.values.map((v, i) => {
+                if (v == null) return null;
+                const flagged = s.pointFlags?.[i] === true;
+                return (
+                  <g key={`${s.key}-${i}`}>
+                    {/* Anomaly ring: this point diverged from the bot's own typical. */}
+                    {flagged && (
+                      <circle
+                        cx={x(i)}
+                        cy={y(v)}
+                        r={4.5}
+                        fill="none"
+                        stroke={ANOMALY_RING}
+                        strokeWidth={1.5}
+                      />
+                    )}
+                    <circle
+                      cx={x(i)}
+                      cy={y(v)}
+                      r={hover === i ? 3 : flagged ? 2.4 : 1.8}
+                      fill={flagged ? ANOMALY_RING : s.color}
+                    />
+                  </g>
+                );
+              }),
             )}
             {/* x ticks: first + last */}
             <text x={PAD_L} y={height - 4} className="fill-gray-400 text-[8px]">

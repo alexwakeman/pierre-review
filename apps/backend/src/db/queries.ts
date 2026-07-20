@@ -106,6 +106,7 @@ import type {
   BotBehaviourResponse,
   BotBehaviourBotStat,
   BotBehaviourTrendPoint,
+  BotBehaviourAnomaly,
   BotVendorPr,
   BotVendorPrsResponse,
   BotDedupMember,
@@ -7590,6 +7591,69 @@ function percentileOf(xs: number[], p: number): number | null {
   return s[idx]!;
 }
 
+// ── Robust anomaly detection (deterministic, no AI) ────────────────────────────────────────
+// Each bot is judged against ITS OWN history (a self-baseline), so "typical" means typical for
+// THAT bot — the evidence a consistency claim needs. We use the MEDIAN + MAD (median absolute
+// deviation), not mean/stddev: MAD is spike-resistant, so one bad week can't inflate the very
+// baseline it should stand out against. Robust z = (x − median) / max(1.4826·MAD, minScale);
+// the minScale floor stops a near-constant series from flagging trivial wobble as an anomaly.
+const ANOMALY_Z = 3; // ≥3 robust-SDs from the bot's own median is an exception
+const MIN_BASELINE_POINTS = 4; // fewer than this and "typical" isn't yet meaningful ("building baseline")
+interface WeekAnomaly { z: number; typical: number; direction: 'high' | 'low' }
+// Per-index anomaly (or null) over a weekly series. `direction`: 'high' flags only worse-than-
+// -typical (TTFR), 'both' flags either way (volume, follow-up). `minScale` is the metric's
+// floor on the robust SD (e.g. 0.5h for TTFR, a couple of touches for volume, 10pp for a rate).
+function weeklyAnomalies(
+  values: (number | null)[],
+  opts: { direction: 'high' | 'both'; minScale: number },
+): (WeekAnomaly | null)[] {
+  const present = values.filter((v): v is number => v != null);
+  if (present.length < MIN_BASELINE_POINTS) return values.map(() => null);
+  const median = medianOf(present)!;
+  const mad = medianOf(present.map((v) => Math.abs(v - median)))!;
+  const sigma = Math.max(1.4826 * mad, opts.minScale);
+  return values.map((v) => {
+    if (v == null) return null;
+    const z = (v - median) / sigma;
+    if (Math.abs(z) < ANOMALY_Z) return null;
+    if (opts.direction === 'high' && z <= 0) return null; // faster-than-usual TTFR isn't a problem
+    return { z: Math.abs(z), typical: median, direction: z > 0 ? 'high' : 'low' };
+  });
+}
+
+// Coverage-gap detection over a bot's daily activity. A "silent run" = consecutive zero-activity
+// days AFTER the bot's first active day (a leading run is just "started mid-span", not a gap; a
+// TRAILING run is the bot going quiet and staying quiet — the highest-value alert, so it's kept).
+// Only for a normally-REGULAR bot (≥ MIN_BASELINE_POINTS active days); a run flags when it's ≥
+// max(3, 3·medianGap) days, where medianGap is the bot's typical spacing between active days — so
+// a daily bot flags a 3-day silence while a naturally sparse bot doesn't cry wolf.
+function detectSilentRuns(daily: number[]): { startDay: number; days: number }[] {
+  const activeDays: number[] = [];
+  for (let i = 0; i < daily.length; i++) if (daily[i]! > 0) activeDays.push(i);
+  if (activeDays.length < MIN_BASELINE_POINTS) return [];
+  const gaps: number[] = [];
+  for (let k = 1; k < activeDays.length; k++) gaps.push(activeDays[k]! - activeDays[k - 1]!);
+  const medianGap = gaps.length > 0 ? medianOf(gaps)! : 1;
+  const threshold = Math.max(3, Math.round(3 * medianGap));
+  const first = activeDays[0]!;
+  const runs: { startDay: number; days: number }[] = [];
+  let runStart = -1;
+  for (let i = first + 1; i < daily.length; i++) {
+    if (daily[i] === 0) {
+      if (runStart < 0) runStart = i;
+    } else if (runStart >= 0) {
+      const len = i - runStart;
+      if (len >= threshold) runs.push({ startDay: runStart, days: len });
+      runStart = -1;
+    }
+  }
+  if (runStart >= 0) {
+    const len = daily.length - runStart; // trailing (ongoing) silence up to now
+    if (len >= threshold) runs.push({ startDay: runStart, days: len });
+  }
+  return runs;
+}
+
 export async function getBotBehaviourAnalytics(
   accountId: number,
   window: BotWindowKind,
@@ -7737,6 +7801,10 @@ export async function getBotBehaviourAnalytics(
   }
 
   const HOUR = 3_600_000;
+  const DAY = 86_400_000;
+  const SPAN_WEEKS = 12;
+  const SPAN_DAYS = 84; // == trendFrom → now; the anomaly baseline AND the coverage strip span
+  const trendFromMs = trendFrom.getTime();
   const bots: BotBehaviourBotStat[] = [];
   for (const [userId, byPr] of touchesByUserPr) {
     const kind = kindMap.get(userId);
@@ -7751,6 +7819,10 @@ export async function getBotBehaviourAnalytics(
     let totalComments = 0;
     let prsReviewed = 0;
     const ttfrByWeek = new Map<number, number[]>(); // week index (0..11) → TTFR hours
+    // Span-wide weekly series feeding the anomaly baseline + the trend charts.
+    const volumeByWeek = new Array<number>(SPAN_WEEKS).fill(0); // touches per week
+    const followupByWeek = Array.from({ length: SPAN_WEEKS }, () => ({ withFollowup: 0, total: 0 }));
+    const dailyActivity = new Array<number>(SPAN_DAYS).fill(0); // touches per day → coverage strip
     const heatmap = new Array<number>(168).fill(0);
     let totalActivity = 0;
 
@@ -7766,17 +7838,26 @@ export async function getBotBehaviourAnalytics(
       const ttfrHours = Math.max(0, (firstMs - baselineMs) / HOUR);
 
       // 12-week trend: bucket every trend-span PR by the week of its first touch.
-      const wk = Math.min(11, Math.max(0, Math.floor((firstMs - trendFrom.getTime()) / (7 * 86_400_000))));
+      const wk = Math.min(SPAN_WEEKS - 1, Math.max(0, Math.floor((firstMs - trendFromMs) / (7 * DAY))));
       const wkArr = ttfrByWeek.get(wk) ?? [];
       wkArr.push(ttfrHours);
       ttfrByWeek.set(wk, wkArr);
+      // Weekly follow-up rate: of the PRs first-reviewed in a week, the share the bot came back to.
+      followupByWeek[wk]!.total += 1;
+      if (sorted.length > 1) followupByWeek[wk]!.withFollowup += 1;
 
-      // Heatmap: every touch that falls inside the window (WHEN the bot is active).
+      // Every touch → the span-wide weekly volume + the daily coverage strip; the week×hour
+      // heatmap keeps its WINDOW scope (the coverage snapshot). All from real GitHub timestamps.
       for (const t of touches) {
-        if (t.ms < fromMs) continue;
-        const d = new Date(t.ms);
-        heatmap[d.getUTCDay() * 24 + d.getUTCHours()]! += 1;
-        totalActivity += 1;
+        const wIdx = Math.min(SPAN_WEEKS - 1, Math.max(0, Math.floor((t.ms - trendFromMs) / (7 * DAY))));
+        volumeByWeek[wIdx]! += 1;
+        const dIdx = Math.min(SPAN_DAYS - 1, Math.max(0, Math.floor((t.ms - trendFromMs) / DAY)));
+        dailyActivity[dIdx]! += 1;
+        if (t.ms >= fromMs) {
+          const d = new Date(t.ms);
+          heatmap[d.getUTCDay() * 24 + d.getUTCHours()]! += 1;
+          totalActivity += 1;
+        }
       }
 
       // Headline metrics: PRs whose FIRST touch landed in the window.
@@ -7803,10 +7884,58 @@ export async function getBotBehaviourAnalytics(
           : baselineTally.ready > 0
             ? 'ready'
             : 'opened';
-    const ttfrTrend: BotBehaviourTrendPoint[] = Array.from({ length: 12 }, (_, i) => ({
-      weekStart: new Date(trendFrom.getTime() + i * 7 * 86_400_000).toISOString(),
-      medianTtfrHours: medianOf(ttfrByWeek.get(i) ?? []),
+
+    // The three weekly series → the anomaly baseline. A week with no PRs has a null TTFR/
+    // follow-up (no data, no baseline contribution); volume is a real 0 (silence is a signal).
+    const ttfrSeries = Array.from({ length: SPAN_WEEKS }, (_, i) => medianOf(ttfrByWeek.get(i) ?? []));
+    const followupSeries = followupByWeek.map((w) =>
+      w.total > 0 ? Math.round((w.withFollowup / w.total) * 100) : null,
+    );
+    const ttfrAnoms = weeklyAnomalies(ttfrSeries, { direction: 'high', minScale: 0.5 });
+    const volAnoms = weeklyAnomalies(volumeByWeek, { direction: 'both', minScale: 2 });
+    const followupAnoms = weeklyAnomalies(followupSeries, { direction: 'both', minScale: 10 });
+
+    const trend: BotBehaviourTrendPoint[] = Array.from({ length: SPAN_WEEKS }, (_, i) => ({
+      weekStart: new Date(trendFromMs + i * 7 * DAY).toISOString(),
+      medianTtfrHours: ttfrSeries[i]!,
+      volume: volumeByWeek[i]!,
+      followupRatePct: followupSeries[i]!,
+      ttfrAnomaly: ttfrAnoms[i] != null,
+      volumeAnomaly: volAnoms[i] != null,
+      followupAnomaly: followupAnoms[i] != null,
     }));
+
+    // Coverage gaps + the anomaly evidence list (newest week first, then silence runs). typical =
+    // the bot's own robust median for that metric — the "vs typical" the customer's claim needs.
+    const silentRuns = detectSilentRuns(dailyActivity);
+    const anomalies: BotBehaviourAnomaly[] = [];
+    for (let i = SPAN_WEEKS - 1; i >= 0; i--) {
+      const weekStart = trend[i]!.weekStart;
+      const a = ttfrAnoms[i];
+      if (a) anomalies.push({ metric: 'ttfr', direction: a.direction, weekStart, observed: ttfrSeries[i]!, typical: a.typical, z: Math.round(a.z * 10) / 10 });
+      const v = volAnoms[i];
+      if (v) anomalies.push({ metric: 'volume', direction: v.direction, weekStart, observed: volumeByWeek[i]!, typical: v.typical, z: Math.round(v.z * 10) / 10 });
+      const f = followupAnoms[i];
+      if (f && followupSeries[i] != null)
+        anomalies.push({ metric: 'followup', direction: f.direction, weekStart, observed: followupSeries[i]!, typical: f.typical, z: Math.round(f.z * 10) / 10 });
+    }
+    // Silence runs → anomalies (typical = the bot's median spacing between active days).
+    const activeDays: number[] = [];
+    for (let i = 0; i < dailyActivity.length; i++) if (dailyActivity[i]! > 0) activeDays.push(i);
+    const gaps: number[] = [];
+    for (let k = 1; k < activeDays.length; k++) gaps.push(activeDays[k]! - activeDays[k - 1]!);
+    const typicalGap = gaps.length > 0 ? medianOf(gaps)! : 1;
+    for (const run of silentRuns)
+      anomalies.push({
+        metric: 'silence',
+        direction: 'low',
+        dayStart: new Date(trendFromMs + run.startDay * DAY).toISOString(),
+        spanDays: run.days,
+        observed: run.days,
+        typical: typicalGap,
+        z: null,
+      });
+
     bots.push({
       key: `u${userId}`,
       userId,
@@ -7818,12 +7947,16 @@ export async function getBotBehaviourAnalytics(
       ttfrP90Hours: percentileOf(ttfrWindow, 0.9),
       ttfrBaseline: baseline,
       ttfrDist: bucketize(ttfrWindow, TTFR_BUCKETS),
-      ttfrTrend,
+      trend,
       followupLatencyMedianHours: medianOf(followupGaps),
       medianLocPerComment: medianOf(locPerComment),
       totalComments,
       activityHeatmap: heatmap,
       totalActivity,
+      dailyActivity,
+      daySpanStart: new Date(trendFromMs).toISOString(),
+      silentRuns,
+      anomalies,
       followupRatePct:
         followupCounts.length > 0
           ? Math.round((followupCounts.filter((c) => c > 0).length / followupCounts.length) * 100)

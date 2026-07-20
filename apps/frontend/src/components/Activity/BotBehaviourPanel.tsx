@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import type {
   AnalyticsBin,
+  BotBehaviourAnomaly,
   BotBehaviourBotStat,
-  BotBehaviourTrendPoint,
   BotWindowKind,
 } from '@pierre-review/shared';
 import { useBotBehaviour } from '../../hooks/useBotTriage.js';
@@ -12,6 +12,7 @@ import { automatedReviewerMeta } from '../../lib/ui.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import { Heatmap } from '../charts/Heatmap.js';
+import { DayStrip } from '../charts/DayStrip.js';
 import { ChartCard, ChartEmpty, fmtDuration, type Series } from '../charts/common.js';
 
 // EXPERIMENTAL bot BEHAVIOUR panel — the Bots view's second inner sub-tab, kept SEPARATE from
@@ -35,11 +36,82 @@ const WINDOWS: { key: BotWindowKind; label: string }[] = [
 
 // A duration axis formatter (BarChart/LineChart never pass null).
 const durAxis = (n: number): string => fmtDuration(n);
-// Per-week median-TTFR extractor — module-level so its identity is stable across renders.
-const ttfrVal = (p: BotBehaviourTrendPoint): number | null => p.medianTtfrHours;
+const countAxis = (n: number): string => String(Math.round(n));
+const pctAxis = (n: number): string => `${Math.round(n)}%`;
 
 function dur(h: number | null): string {
   return h == null ? '—' : fmtDuration(h);
+}
+
+// Format an anomaly's observed/typical value in the metric's own units (for the evidence note).
+function fmtMetricVal(metric: BotBehaviourAnomaly['metric'], v: number): string {
+  if (metric === 'ttfr') return fmtDuration(v);
+  if (metric === 'followup') return `${Math.round(v)}%`;
+  if (metric === 'silence') return `${v}d`;
+  return String(Math.round(v)); // volume
+}
+
+// The evidence note for a weekly metric's ChartCard: how many exceptions + the latest one's
+// observed-vs-typical (the "vs its own typical" a customer's consistency claim needs). Undefined
+// when the bot was consistent for this metric (no note — the chart just reads clean).
+function anomalyNote(
+  anomalies: BotBehaviourAnomaly[],
+  metric: 'ttfr' | 'volume' | 'followup',
+): string | undefined {
+  const hits = anomalies.filter((a) => a.metric === metric);
+  if (hits.length === 0) return undefined;
+  const latest = hits[0]!; // list is newest-first
+  const obs = fmtMetricVal(metric, latest.observed);
+  const typ = fmtMetricVal(metric, latest.typical);
+  const arrow = latest.direction === 'high' ? '↑' : '↓';
+  return `⚠ ${hits.length} exception${hits.length === 1 ? '' : 's'} · latest ${arrow} ${obs} vs ${typ} typical`;
+}
+
+// The coverage-gap note for the daily strip (silence runs).
+function silenceNote(bot: BotBehaviourBotStat): string | undefined {
+  if (bot.silentRuns.length === 0) return undefined;
+  const longest = Math.max(...bot.silentRuns.map((r) => r.days));
+  return `⚠ ${bot.silentRuns.length} gap${bot.silentRuns.length === 1 ? '' : 's'} · longest ${longest}d silent`;
+}
+
+// One per-bot weekly trend mini-chart with anomaly rings (a week the bot diverged from its own
+// typical). `value`/`flag` pull the metric + its per-week anomaly flag off each trend point.
+function TrendMini({
+  title,
+  bot,
+  value,
+  flag,
+  color,
+  formatY,
+  note,
+}: {
+  title: string;
+  bot: BotBehaviourBotStat;
+  value: (p: BotBehaviourBotStat['trend'][number]) => number | null;
+  flag: (p: BotBehaviourBotStat['trend'][number]) => boolean;
+  color: string;
+  formatY: (n: number) => string;
+  note?: string;
+}): JSX.Element {
+  const labels = bot.trend.map((p) => p.weekStart);
+  const values = bot.trend.map(value);
+  const flags = bot.trend.map(flag);
+  const hasData = values.some((v) => v != null);
+  return (
+    <ChartCard title={title} note={note}>
+      {hasData ? (
+        <LineChart
+          labels={labels}
+          series={[{ key: title, label: title, color, values, pointFlags: flags }]}
+          height={120}
+          curved
+          formatY={formatY}
+        />
+      ) : (
+        <ChartEmpty label="Not enough history yet" />
+      )}
+    </ChartCard>
+  );
 }
 
 // A compact headline stat (label + value + optional sub-line).
@@ -74,17 +146,19 @@ function TtfrTrendChart({
 }): JSX.Element {
   const { labels, series } = useMemo(() => {
     const weekSet = new Set<string>();
-    for (const b of bots) for (const p of b.ttfrTrend) weekSet.add(p.weekStart);
+    for (const b of bots) for (const p of b.trend) weekSet.add(p.weekStart);
     const labels = Array.from(weekSet).sort().slice(-12);
     const series: Series[] = bots
-      .filter((b) => b.ttfrTrend.some((p) => p.medianTtfrHours != null))
+      .filter((b) => b.trend.some((p) => p.medianTtfrHours != null))
       .map((b) => {
-        const byWeek = new Map(b.ttfrTrend.map((p) => [p.weekStart, ttfrVal(p)]));
+        const byWeek = new Map(b.trend.map((p) => [p.weekStart, p.medianTtfrHours]));
+        const flagByWeek = new Map(b.trend.map((p) => [p.weekStart, p.ttfrAnomaly]));
         return {
           key: b.key,
           label: b.label,
           color: botColor({ login: b.login, kind: b.kind }),
           values: labels.map((w) => byWeek.get(w) ?? null),
+          pointFlags: labels.map((w) => flagByWeek.get(w) ?? false),
         };
       });
     return { labels, series };
@@ -148,6 +222,52 @@ function BotCard({
         <Stat label="Follow-up latency" value={dur(bot.followupLatencyMedianHours)} sub="median gap" />
       </div>
 
+      {/* Consistency over time — each weekly metric vs the bot's OWN typical; red rings mark the
+          weeks it diverged (the "evidence to the contrary" a customer's consistency claim needs). */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <TrendMini
+          title="Time to first review"
+          bot={bot}
+          value={(p) => p.medianTtfrHours}
+          flag={(p) => p.ttfrAnomaly}
+          color={color}
+          formatY={durAxis}
+          note={anomalyNote(bot.anomalies, 'ttfr') ?? 'weekly · vs own typical'}
+        />
+        <TrendMini
+          title="Review volume"
+          bot={bot}
+          value={(p) => p.volume}
+          flag={(p) => p.volumeAnomaly}
+          color={color}
+          formatY={countAxis}
+          note={anomalyNote(bot.anomalies, 'volume') ?? 'touches / week'}
+        />
+        <TrendMini
+          title="Follow-up rate"
+          bot={bot}
+          value={(p) => p.followupRatePct}
+          flag={(p) => p.followupAnomaly}
+          color={color}
+          formatY={pctAxis}
+          note={anomalyNote(bot.anomalies, 'followup') ?? 'weekly · vs own typical'}
+        />
+      </div>
+
+      {/* Daily coverage strip — silent runs (a normally-regular bot going quiet) underlined in the
+          anomaly colour. The "gaps in reviews" made visible. */}
+      <ChartCard
+        title="Daily coverage"
+        note={silenceNote(bot) ?? 'one cell / day · last 12 weeks (UTC)'}
+      >
+        <DayStrip
+          daily={bot.dailyActivity}
+          startDate={bot.daySpanStart}
+          silentRuns={bot.silentRuns}
+          color={color}
+        />
+      </ChartCard>
+
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <ChartCard title="Time to first review" note="distribution">
           <DistChart bins={bot.ttfrDist} color={color} />
@@ -183,8 +303,9 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
           Experimental
         </span>
         <span className="text-[11px] text-gray-400">
-          How your review bots behave over time — deterministic, no AI. Times are UTC; activity
-          gaps are inferred (not a direct rate-limit signal).
+          How your review bots behave over time — deterministic, no AI. Red rings & underlines mark
+          where a bot diverged from its <span className="font-medium">own</span> typical (a
+          self-baseline). Times are UTC; activity gaps are inferred (not a direct rate-limit signal).
         </span>
         <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
           {WINDOWS.map((wOpt) => (
@@ -219,7 +340,7 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
         </div>
       ) : (
         <>
-          <ChartCard title="Median time to first review" note="per bot · weekly · last 12">
+          <ChartCard title="Median time to first review" note="per bot · weekly · ⭘ = exception">
             <TtfrTrendChart bots={bots} botColor={botColor} />
           </ChartCard>
           {bots.map((b) => (

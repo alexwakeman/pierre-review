@@ -261,9 +261,32 @@ export interface BotAnalyticsResponse {
 // code, WHEN across the day is it active (coverage / rate-limit inference), and does it keep
 // finding issues AFTER its first pass. All figures are computed over the shared bot-analytics
 // window; per-bot, account- + scope-scoped. Aggregate-only for now (per-PR is a follow-up).
+// One weekly point in a bot's behaviour trend (oldest→newest, ≤12 weeks). Each metric carries
+// its own `*Anomaly` flag — true when that week diverged from the BOT'S OWN robust baseline
+// (median ± MAD over its trend), so a customer's consistency claim can be checked against
+// evidence. TTFR flags only SLOWER-than-typical weeks; volume + follow-up flag EITHER direction.
 export interface BotBehaviourTrendPoint {
-  weekStart: string; // ISO — bucket start (oldest→newest, ≤12 weeks)
+  weekStart: string; // ISO — bucket start
   medianTtfrHours: number | null; // median time-to-first-review for PRs first touched that week
+  volume: number; // the bot's touches (reviews + comments) that week
+  followupRatePct: number | null; // share of that week's first-reviewed PRs the bot came back to
+  ttfrAnomaly: boolean; // this week's TTFR is anomalously HIGH vs the bot's typical
+  volumeAnomaly: boolean; // this week's volume diverges (either way) from typical
+  followupAnomaly: boolean; // this week's follow-up rate diverges (either way) from typical
+}
+
+// A single flagged divergence — the evidence behind a chart marker (observed vs the bot's own
+// typical + the robust z-magnitude). `metric:'silence'` is a coverage GAP (a run of silent days
+// for a normally-regular bot); its `spanDays`/`dayStart` describe the run, `z` is null.
+export interface BotBehaviourAnomaly {
+  metric: 'ttfr' | 'volume' | 'followup' | 'silence';
+  direction: 'high' | 'low';
+  weekStart?: string; // weekly metrics — the affected week
+  dayStart?: string; // silence — the run's first silent day (ISO)
+  spanDays?: number; // silence — how many consecutive silent days
+  observed: number; // the week's value (TTFR hours / volume / follow-up % / gap days)
+  typical: number; // the bot's robust median for this metric
+  z: number | null; // robust z-score magnitude (null for silence runs)
 }
 
 export interface BotBehaviourBotStat {
@@ -279,7 +302,9 @@ export interface BotBehaviourBotStat {
   ttfrP90Hours: number | null;
   ttfrBaseline: 'ready' | 'opened' | 'mixed' | null;
   ttfrDist: AnalyticsBin[]; // bucketed distribution (<1h, 1–4h, 4–12h, 12–24h, 1–3d, >3d)
-  ttfrTrend: BotBehaviourTrendPoint[]; // ≤12 weekly median-TTFR points
+  // ≤12 weekly points carrying TTFR / volume / follow-up + their per-week anomaly flags. The
+  // trend SPAN is also the anomaly baseline (a self-baseline, so each bot is judged vs itself).
+  trend: BotBehaviourTrendPoint[];
   // Follow-up cadence: median gap between the bot's consecutive touches ON THE SAME PR (how long
   // between a bot's first pass and its next comment — the "review latency after first review").
   followupLatencyMedianHours: number | null;
@@ -292,6 +317,15 @@ export interface BotBehaviourBotStat {
   // rate-limit throttling or coverage windows (INFERRED from review/comment timestamps, labelled so).
   activityHeatmap: number[];
   totalActivity: number; // sum of the heatmap (bot touches in-window)
+  // Daily touch counts over the trend span (oldest→newest), for the coverage strip + gap
+  // detection. daySpanStart is the ISO date of dailyActivity[0]; silentRuns marks the anomalous
+  // gaps (index into dailyActivity + run length) for a normally-regular bot.
+  dailyActivity: number[];
+  daySpanStart: string;
+  silentRuns: { startDay: number; days: number }[];
+  // Every flagged divergence (weekly metrics + silence runs), newest-first — the evidence behind
+  // the chart markers (tooltip text / a per-chart exception count).
+  anomalies: BotBehaviourAnomaly[];
   // Follow-up behaviour: does the bot come back after its first pass? followupRatePct = share of
   // reviewed PRs with >1 touch; avgFollowups = mean extra touches; followupDist buckets the count.
   followupRatePct: number | null;
