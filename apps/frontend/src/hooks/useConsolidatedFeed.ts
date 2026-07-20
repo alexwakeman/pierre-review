@@ -34,6 +34,7 @@ function feedSearch(
   prId: number | null,
   botsOnly: boolean,
   botWindowDays: number | null,
+  includeAllCommits: boolean,
 ): string {
   const p = new URLSearchParams();
   if (repoIds && repoIds.length > 0) p.set('repoIds', repoIds.join(','));
@@ -51,6 +52,9 @@ function feedSearch(
   // Bot-only feed window (days), following the analytics window selector. Only meaningful —
   // and only emitted — alongside botsOnly (the server ignores it otherwise).
   if (botsOnly && botWindowDays != null) p.set('botWindowDays', String(botWindowDays));
+  // Opt-in "show individual commits" — surface plain commit-push runs too. Only emitted when
+  // on (default off keeps the key clean); ignored server-side on the botsOnly path.
+  if (includeAllCommits) p.set('includeAllCommits', 'true');
   return p.toString();
 }
 
@@ -71,6 +75,7 @@ export function useConsolidatedFeed(opts: {
   prId?: number | null;
   botsOnly?: boolean;
   botWindowDays?: number | null;
+  includeAllCommits?: boolean;
   enabled?: boolean;
 }) {
   const search = feedSearch(
@@ -81,6 +86,7 @@ export function useConsolidatedFeed(opts: {
     opts.prId ?? null,
     opts.botsOnly ?? false,
     opts.botWindowDays ?? null,
+    opts.includeAllCommits ?? false,
   );
   const query = useInfiniteQuery<ConsolidatedFeedResponse>({
     queryKey: ['consolidated-feed', search],
@@ -157,6 +163,7 @@ export function useFeedHasNew(opts: {
   prId?: number | null;
   botsOnly?: boolean;
   botWindowDays?: number | null;
+  includeAllCommits?: boolean;
   loadedLatestId: string | null;
   loadedTotal: number;
   // True once the loaded feed's data actually belongs to the CURRENT key: initial load done
@@ -176,6 +183,7 @@ export function useFeedHasNew(opts: {
     opts.prId ?? null,
     opts.botsOnly ?? false,
     opts.botWindowDays ?? null,
+    opts.includeAllCommits ?? false,
   );
   const head = useQuery<ConsolidatedFeedResponse>({
     queryKey: ['feed-head', search],

@@ -2778,6 +2778,7 @@ export interface ConsolidatedFeedCounts {
   claude: number; // kind 'claude_review'
   comments: number; // kind 'review_comment' | 'pr_comment'
   prEvents: number; // kind pr_opened|pr_merged|pr_closed|pr_reopened|pr_ready_for_review|review_submitted
+  commits: number; // kind 'commit_pushed' — the count behind the opt-in "Commits" pill
   bots: number; // actorId in the GLOBAL users.isBot set (matches FeedView's isBotActor)
   byBotActor: Record<string, number>; // actorId -> count; populated only in the bot-only feed
   byThreadState: Record<string, number>; // DerivedState -> count over items carrying a derivedState

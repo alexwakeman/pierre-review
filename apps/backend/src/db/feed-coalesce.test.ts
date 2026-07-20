@@ -189,6 +189,7 @@ describe('computeFeedCounts', () => {
       claude: 0,
       comments: 0,
       prEvents: 0,
+      commits: 0,
       bots: 0,
       byBotActor: {},
       byThreadState: {},

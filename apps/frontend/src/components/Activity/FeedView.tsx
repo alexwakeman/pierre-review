@@ -198,6 +198,8 @@ export function FeedView({
   const feedCatPrEvents = useFilters((s) => s.feedCatPrEvents);
   const toggleFeedCatComments = useFilters((s) => s.toggleFeedCatComments);
   const toggleFeedCatPrEvents = useFilters((s) => s.toggleFeedCatPrEvents);
+  const feedShowCommits = useFilters((s) => s.feedShowCommits);
+  const toggleFeedShowCommits = useFilters((s) => s.toggleFeedShowCommits);
   const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
@@ -304,6 +306,9 @@ export function FeedView({
       // feed spans the full window of bot activity instead of a bot-slice of a capped page.
       botsOnly: botsMode,
       botWindowDays,
+      // Opt-in "show individual commits" — surfaces plain commit-push runs (not just the ones
+      // that addressed a thread). Inert in botsMode (the bot feed skips commits anyway).
+      includeAllCommits: !botsMode && feedShowCommits,
     });
 
   // "New activity" detector: poll the server head for this exact scope and compare to what's
@@ -316,6 +321,7 @@ export function FeedView({
     prId: isolatedPrId,
     botsOnly: botsMode,
     botWindowDays,
+    includeAllCommits: !botsMode && feedShowCommits,
     loadedLatestId: latestId,
     loadedTotal: total,
     // Placeholder pages belong to the PREVIOUS key (e.g. a bots-window flip): total/latestId
@@ -388,6 +394,12 @@ export function FeedView({
           i.kind === 'pr_ready_for_review' ||
           i.kind === 'review_submitted',
       ).length,
+    [counts, items],
+  );
+  // Commits pill badge — how many commit-push items are currently in the stream (the
+  // thread-addressing runs by default; every push run once "show commits" is on).
+  const commitsCount = useMemo(
+    () => counts?.commits ?? items.filter((i) => i.kind === 'commit_pushed').length,
     [counts, items],
   );
   // Review-thread DERIVED-state filter (a Set of selected states; empty = all) — a pill row
@@ -1000,6 +1012,23 @@ export function FeedView({
         >
           <span aria-hidden="true">⑃</span> PR events
           {prEventsCount > 0 && <span className="tabular-nums opacity-70">{prEventsCount}</span>}
+        </button>
+        {/* Commits — opt-in (off by default). On: every commit-push run surfaces; off: only the
+            pushes that addressed a review thread. A fetch toggle (the server can't be asked for
+            plain commits after the fact), not part of the category OR-filter above. */}
+        <button
+          type="button"
+          onClick={toggleFeedShowCommits}
+          aria-pressed={feedShowCommits}
+          className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+            feedShowCommits
+              ? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-950/30 dark:text-amber-300'
+              : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+          }`}
+          title="Show individual commit pushes in the feed (off by default) — on surfaces every push run, off keeps only pushes that addressed a review thread"
+        >
+          <span aria-hidden="true">◆</span> Commits
+          {commitsCount > 0 && <span className="tabular-nums opacity-70">{commitsCount}</span>}
         </button>
         {/* Bot lens — Pierre as the calm layer above your review bot. Cycles all → hide → only. */}
         {botCount > 0 && (
@@ -1701,20 +1730,23 @@ function FeedRowImpl({
           </div>
         )}
 
-        {/* what changed: a commit push that addressed review threads → show them inline so
-            the reader sees the actual change without opening the PR. */}
-        {affected.length > 0 && (
+        {/* what changed: a commit push → the "pushed N commits" summary (always, so a plain
+            push under "show commits" isn't a bare card), and when it addressed review threads,
+            those threads inline so the reader sees the change without opening the PR. */}
+        {(item.changeSummary != null || affected.length > 0) && (
           <div className="mt-1.5 space-y-1.5">
             {item.changeSummary != null && (
               <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
                 {item.changeSummary}
               </div>
             )}
-            <AffectedThreadsList
-              affected={affected}
-              usersById={usersById}
-              onOpenThread={(tid) => onOpenThread(item, tid)}
-            />
+            {affected.length > 0 && (
+              <AffectedThreadsList
+                affected={affected}
+                usersById={usersById}
+                onOpenThread={(tid) => onOpenThread(item, tid)}
+              />
+            )}
           </div>
         )}
 

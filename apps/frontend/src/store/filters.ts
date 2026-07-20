@@ -127,6 +127,11 @@ export interface FilterState {
   // bot lens, ORTHOGONAL to feedMyTurnOnly/feedClaudeOnly. Transient, URL-silent (like feedBotLens).
   feedCatComments: boolean;
   feedCatPrEvents: boolean;
+  // Activity "Feed" opt-in "show individual commits" toggle. false (default) → only commit
+  // pushes that ADDRESSED a review thread surface (the existing behaviour); true → the server
+  // also emits plain commit-push runs. Server-side (the client can't synthesize plain commits),
+  // so it's threaded into the feed query key. Transient, URL-silent (like the other feed toggles).
+  feedShowCommits: boolean;
   // Activity "Feed" single-PR isolation: null (default) → every PR in scope; a pr id →
   // the consolidated Feed shows ONLY that PR's items. Driven by the Feed "open PRs" panel.
   // Transient, URL-silent (like the other feed toggles); cleared on rail / scope changes.
@@ -309,6 +314,8 @@ export interface FilterState {
   // Feed event-category pills (see feedCatComments/feedCatPrEvents) — independent toggles.
   toggleFeedCatComments: () => void;
   toggleFeedCatPrEvents: () => void;
+  // Feed "show individual commits" toggle (see feedShowCommits).
+  toggleFeedShowCommits: () => void;
   // Isolate the Feed to a single PR (or clear with null) — the Feed "open PRs" panel.
   setFeedIsolatedPrId: (id: number | null) => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
@@ -553,6 +560,7 @@ function freshDefaults(): FilterData {
     feedBotLens: 'all',
     feedCatComments: false,
     feedCatPrEvents: false,
+    feedShowCommits: false,
     feedIsolatedPrId: null,
     botAnalyticsWindow: 'rolling_14',
     selectedPrId: null,
@@ -642,6 +650,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   setFeedBotLens: (v) => set({ feedBotLens: v }),
   toggleFeedCatComments: () => set((s) => ({ feedCatComments: !s.feedCatComments })),
   toggleFeedCatPrEvents: () => set((s) => ({ feedCatPrEvents: !s.feedCatPrEvents })),
+  toggleFeedShowCommits: () => set((s) => ({ feedShowCommits: !s.feedShowCommits })),
   setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setThreadBotFilter: (kind) =>

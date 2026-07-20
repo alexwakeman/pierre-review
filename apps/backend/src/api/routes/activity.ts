@@ -46,6 +46,7 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       allowBotIds?: string;
       botsOnly?: string;
       botWindowDays?: string;
+      includeAllCommits?: string;
     };
     const limit = q.limit != null ? Number(q.limit) : null;
     const offset = q.offset != null ? Number(q.offset) : 0;
@@ -66,6 +67,7 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       allowBotIds: parseIntList(q.allowBotIds),
       botsOnly: q.botsOnly === 'true',
       botWindowDays,
+      includeAllCommits: q.includeAllCommits === 'true',
     });
   });
 

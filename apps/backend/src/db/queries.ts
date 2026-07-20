@@ -2074,6 +2074,11 @@ export interface ConsolidatedFeedFilters {
   // selector. Applied ONLY on the botsOnly path; absent/null → the default 14. The route
   // clamps it to 1..90.
   botWindowDays?: number | null;
+  // Surface EVERY commit-push run, not just the ones that addressed a review thread — the
+  // opt-in "Commits" feed toggle (off by default). Plain pushes stay hidden unless this is
+  // set. Ignored on the botsOnly path (a push is the author responding, not review-bot
+  // activity). The addressed-thread runs still ride along inline either way.
+  includeAllCommits?: boolean;
   // Pagination over the merged, chronologically-sorted stream. `limit` omitted → the
   // whole stream (legacy). The response `total` is the full count so the client knows
   // when to stop "Load more". Only the returned page is enriched (merge/review credit)
@@ -2102,9 +2107,13 @@ async function getCommitThreadItems(
     // Single-PR isolation (see getFeed): scope to this PR's commit rows. The caller widens
     // `since` alongside it so the isolated view shows the PR's full thread-addressing history.
     prId?: number | null;
+    // Emit EVERY run (opt-in "show commits"), not just the ones that addressed a thread. A
+    // run with no addressed thread carries an empty `affectedThreads` + a "pushed N commits"
+    // summary. Off → the default (thread-addressing runs only).
+    includeAllCommits?: boolean;
   },
 ): Promise<ConsolidatedFeedItem[]> {
-  const { repoIds, userIds, botIds, since, prId = null } = opts;
+  const { repoIds, userIds, botIds, since, prId = null, includeAllCommits = false } = opts;
   const conds: SQL[] = [
     eq(events.accountId, accountId),
     eq(events.type, 'commit_pushed'),
@@ -2198,28 +2207,31 @@ async function getCommitThreadItems(
     threadsByPr.set(t.prId, arr);
     candThreadIds.push(t.id);
   }
-  if (candThreadIds.length === 0) return [];
+  // No addressed threads anywhere: with the default gate that's an empty feed; under
+  // includeAllCommits we still emit the plain commit runs below.
+  if (candThreadIds.length === 0 && !includeAllCommits) return [];
 
   // First-comment excerpt/author + last-comment time per candidate thread. Only the
   // short `excerpt` is loaded (always populated — never the bulky `body`), keeping this
   // per-page pass cheap.
   const firstByThread = new Map<number, { excerpt: string | null; authorId: number | null }>();
   const lastAtByThread = new Map<number, number>();
-  for (const c of await db
-    .select({
-      threadId: reviewComments.threadId,
-      createdAt: reviewComments.createdAt,
-      excerpt: reviewComments.excerpt,
-      authorId: reviewComments.authorId,
-    })
-    .from(reviewComments)
-    .where(inArray(reviewComments.threadId, candThreadIds))
-    .orderBy(asc(reviewComments.createdAt))
-    .execute()) {
-    if (!firstByThread.has(c.threadId))
-      firstByThread.set(c.threadId, { excerpt: c.excerpt, authorId: c.authorId });
-    lastAtByThread.set(c.threadId, c.createdAt.getTime());
-  }
+  if (candThreadIds.length > 0)
+    for (const c of await db
+      .select({
+        threadId: reviewComments.threadId,
+        createdAt: reviewComments.createdAt,
+        excerpt: reviewComments.excerpt,
+        authorId: reviewComments.authorId,
+      })
+      .from(reviewComments)
+      .where(inArray(reviewComments.threadId, candThreadIds))
+      .orderBy(asc(reviewComments.createdAt))
+      .execute()) {
+      if (!firstByThread.has(c.threadId))
+        firstByThread.set(c.threadId, { excerpt: c.excerpt, authorId: c.authorId });
+      lastAtByThread.set(c.threadId, c.createdAt.getTime());
+    }
 
   // Coalesce a PR-author's commit events into contiguous runs (gap > COMMIT_RUN_GAP_MS).
   interface Run {
@@ -2291,7 +2303,7 @@ async function getCommitThreadItems(
   );
   for (const run of runsByRecency) {
     const cands = threadsByPr.get(run.prId) ?? [];
-    if (cands.length === 0) continue;
+    if (cands.length === 0 && !includeAllCommits) continue;
     const affected: FeedAffectedThread[] = [];
     for (const t of cands) {
       if (claimed.has(t.id)) continue;
@@ -2313,9 +2325,13 @@ async function getCommitThreadItems(
         authorId: t.originalCommenterId ?? first?.authorId ?? null,
       });
     }
-    if (affected.length === 0) continue;
+    if (affected.length === 0 && !includeAllCommits) continue;
     const commitWord = run.commitCount === 1 ? 'commit' : 'commits';
     const threadWord = affected.length === 1 ? 'thread' : 'threads';
+    const changeSummary =
+      affected.length === 0
+        ? `pushed ${run.commitCount} ${commitWord}`
+        : `pushed ${run.commitCount} ${commitWord} · addressed ${affected.length} ${threadWord}`;
     out.push({
       id: `feed:commitrun:${run.prId}:${run.latestEventId}`,
       // Flagged by the caller (getConsolidatedFeed) once participation is resolved.
@@ -2347,7 +2363,7 @@ async function getCommitThreadItems(
       changedFilesCount: null,
       affectedThreads: affected,
       commitCount: run.commitCount,
-      changeSummary: `pushed ${run.commitCount} ${commitWord} · addressed ${affected.length} ${threadWord}`,
+      changeSummary,
       claudeReviewId: null,
       claudeVerdict: null,
       mergedComments: [],
@@ -3645,6 +3661,7 @@ export function computeFeedCounts(
     claude: 0,
     comments: 0,
     prEvents: 0,
+    commits: 0,
     bots: 0,
     byBotActor: {},
     byThreadState: {},
@@ -3653,6 +3670,7 @@ export function computeFeedCounts(
     if (it.isMyTurn) counts.myTurn += 1;
     if (it.kind === 'claude_review') counts.claude += 1;
     if (it.kind === 'review_comment' || it.kind === 'pr_comment') counts.comments += 1;
+    if (it.kind === 'commit_pushed') counts.commits += 1;
     if (
       it.kind === 'pr_opened' ||
       it.kind === 'pr_merged' ||
@@ -3688,6 +3706,7 @@ export async function getConsolidatedFeed(
     allowBotIds = null,
     botsOnly = false,
     botWindowDays = null,
+    includeAllCommits = false,
   } = opts;
 
   // Restrict to the account's WATCHED repos; a passed repoIds narrows within them. An
@@ -3774,6 +3793,7 @@ export async function getConsolidatedFeed(
           botIds,
           since: feedSince,
           prId,
+          includeAllCommits,
         }),
     // Claude Review runs surfaced as their own feed item kind (local-only; empty in cloud).
     // Skipped in the bot-only feed (they're the user's own runs, not review-bot activity).
