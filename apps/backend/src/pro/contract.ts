@@ -4,6 +4,7 @@ import type {
   FastifyBaseLogger,
 } from 'fastify';
 import type {
+  BotWindowKind,
   CheckLogsResponse,
   ClaudeFindingSeverity,
   ClaudeFindingSide,
@@ -509,6 +510,15 @@ export interface ProHostQueries {
   // Month-to-date-style AI-spend rollup for an account, split by seam (summary / agent).
   // Returns { summaryUsd, agentUsd, totalUsd } — the plugin converts to credits.
   getAiUsage(accountId: number, sinceMs: number): Promise<unknown>;
+  // Deterministic review-bot ROI/behaviour rollup (CORE) — per-reviewer volume / acted-on% /
+  // untouched / verdict, over `window`. Additive (apiVersion stays 12). Returns BotAnalyticsResponse;
+  // the plugin casts it. `repoIds` scopes to a Team's repos (null → all account repos). Powers the
+  // ad-hoc Insights chat's optional bot-performance context.
+  getBotAnalytics(
+    accountId: number,
+    window: BotWindowKind,
+    repoIds?: number[] | null,
+  ): Promise<unknown>;
 }
 
 export interface ProContext {

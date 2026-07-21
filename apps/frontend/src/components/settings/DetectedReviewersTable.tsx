@@ -179,7 +179,8 @@ export function DetectedReviewersTable(): JSX.Element {
             </label>
             {trimmedQuery === '' ? (
               <p className="text-[10px] text-gray-400">
-                Type a reviewer's name to mark them as a bot. They default to In-house AI — set the exact vendor above once added.
+                Type a reviewer's name to mark them as a bot. They default to In-house AI — set the exact
+                vendor above once added (or pick <span className="font-medium">Vendor</span> for a proprietary tool that isn't your own).
               </p>
             ) : matches.length === 0 ? (
               <p className="text-[10px] text-gray-400">No matching reviewers.</p>

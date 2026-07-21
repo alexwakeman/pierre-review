@@ -40,6 +40,10 @@ const REVIEW_BOTS: Record<string, ReviewBotKind> = {
   cursor: 'cursor',
   'devin-ai-integration': 'devin',
   'entelligence-ai-pr-reviews': 'entelligence',
+  'deepsource-io': 'deepsource',
+  deepsourcebot: 'deepsource',
+  'github-code-quality': 'github_code_quality',
+  'github-advanced-security': 'github_advanced_security',
 };
 
 function normalizeLogin(login: string): string {

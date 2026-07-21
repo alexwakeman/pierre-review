@@ -117,7 +117,7 @@ export function ThreadCard({
       {/* Pro (prSummary): a critical, retained AI second opinion on this thread's originating
           comment, with the thread + diff as context. Sits above the reply box — read it, then
           decide what to do (and reply inline). Renders nothing without the capability. */}
-      <ThreadAssessment threadId={thread.id} />
+      <ThreadAssessment threadId={thread.id} diffHunk={anchorHunk} />
 
       <div className="mt-2 space-y-1.5 pl-2 text-[11px]">
         <ReplyComposer prId={thread.prId} threadId={thread.id} />

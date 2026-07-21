@@ -60,6 +60,9 @@ const VENDOR_LABELS: Record<ReviewBotKind, string> = {
   cursor: 'Cursor',
   devin: 'Devin',
   entelligence: 'Entelligence',
+  deepsource: 'DeepSource',
+  github_code_quality: 'GitHub Code Quality',
+  github_advanced_security: 'GitHub Advanced Security',
 };
 
 // Exported so the query layer (db/queries.ts) labels analytics/dedup groupings from the
@@ -67,6 +70,7 @@ const VENDOR_LABELS: Record<ReviewBotKind, string> = {
 export function labelFor(kind: AutomatedReviewerKind): string {
   if (kind === 'pierre') return 'Pierre · Claude';
   if (kind === 'in_house') return 'In-house AI';
+  if (kind === 'vendor') return 'Vendor';
   return VENDOR_LABELS[kind] ?? kind;
 }
 

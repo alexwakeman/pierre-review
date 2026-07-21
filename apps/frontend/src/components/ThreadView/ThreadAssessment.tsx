@@ -31,10 +31,18 @@ const VERDICT_META: Record<
   },
 };
 
-export function ThreadAssessment({ threadId }: { threadId: number }): JSX.Element | null {
+export function ThreadAssessment({
+  threadId,
+  diffHunk,
+}: {
+  threadId: number;
+  // The thread's hydrated root-comment diff hunk (present once the thread is open, even
+  // under lean storage) — forwarded to the check so it always has diff context.
+  diffHunk?: string | null;
+}): JSX.Element | null {
   const { prSummary } = useProCapabilities();
   const query = useCommentAssessment(threadId, prSummary);
-  const assess = useAssessComment(threadId);
+  const assess = useAssessComment(threadId, diffHunk);
 
   if (!prSummary) return null;
 

@@ -85,6 +85,10 @@ import type {
   SuggestedReviewersResponse,
   PresetPromptKey,
   PresetPromptResponse,
+  SprintChatBody,
+  SprintChatResponse,
+  PinnedPromptsResponse,
+  CreatePinnedPromptBody,
   ProSettings,
   ProSettingsUpdate,
   Repo,
@@ -254,6 +258,10 @@ export const api = {
   // @mention candidates for a PR, pre-ranked by proximity (self + bots excluded).
   mentionCandidates: (prId: number) =>
     get<User[]>(`/api/prs/${prId}/mention-candidates`),
+  // @mention candidates for a whole SCOPE (team / listed repos), for the ad-hoc Insights box.
+  // `scope` ('all' | 'none' | 'teams' | '<teamId>') resolves server-side to the account's repos.
+  scopeMentionCandidates: (scope?: string) =>
+    get<User[]>(withQuery('/api/mention-candidates', scopeParam(scope))),
   prFiles: (id: number) => get<PrFilesResponse>(`/api/prs/${id}/files`),
   // Tail of a failed GitHub Actions check's logs (fetched live, never stored).
   checkLogs: (prId: number, jobId: number, tail?: number) =>
@@ -406,6 +414,21 @@ export const api = {
       ),
       jsonBody('POST'),
     ).then((r) => handle<PresetPromptResponse>(r)),
+  // ---- Ad-hoc "Ask about the sprint" chat (Pro Haiku; activityDigest capability) ----
+  // A free-text question answered from the sprint snapshot. `scope` narrows to a team's repos.
+  sprintChat: (body: SprintChatBody) =>
+    fetch('/api/pro/insights/ask', jsonBody('POST', body)).then((r) =>
+      handle<SprintChatResponse>(r),
+    ),
+  // Saved, re-runnable ad-hoc prompts (server-stored per account + scope).
+  pinnedPrompts: (scope?: string) =>
+    get<PinnedPromptsResponse>(withQuery('/api/pro/insights/pinned', scopeParam(scope))),
+  createPinnedPrompt: (body: CreatePinnedPromptBody) =>
+    fetch('/api/pro/insights/pinned', jsonBody('POST', body)).then((r) =>
+      handle<{ pinned: PinnedPromptsResponse['prompts'][number] }>(r),
+    ),
+  deletePinnedPrompt: (id: number) =>
+    fetch(`/api/pro/insights/pinned/${id}`, jsonBody('DELETE')).then((r) => handle<void>(r)),
   // A single repo's digest (lazy per-repo so a slow Haiku call never blocks the grid).
   repoDigest: (repoId: number) =>
     get<RepoDigest>(`/api/pro/activity/digests/${repoId}`),
@@ -415,10 +438,13 @@ export const api = {
   threadAssessment: (threadId: number) =>
     get<CommentAssessmentResponse>(`/api/pro/threads/${threadId}/assessment`),
   // Generate / regenerate the assessment (the billing path; credit-gated, $0-on-unchanged).
-  assessThread: (threadId: number) =>
-    fetch(`/api/pro/threads/${threadId}/assess`, jsonBody('POST')).then((r) =>
-      handle<CommentAssessmentResponse>(r),
-    ),
+  // Forwards the thread's already-hydrated root-comment diff hunk so the check has diff
+  // context even under lean storage (reviewComments.diffHunk is null in the DB there).
+  assessThread: (threadId: number, diffHunk?: string | null) =>
+    fetch(
+      `/api/pro/threads/${threadId}/assess`,
+      jsonBody('POST', diffHunk != null && diffHunk !== '' ? { diffHunk } : undefined),
+    ).then((r) => handle<CommentAssessmentResponse>(r)),
 
   // ---- "Was this TRULY addressed?" check (Pro; reuses the prSummary capability) ----
   // Retained Haiku verdict + 0-100 confidence for a review thread / PR-level comment (cache read).

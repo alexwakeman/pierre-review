@@ -53,6 +53,7 @@ const PICKER_KEYS = new Set(['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape']);
 
 export function MentionTextarea({
   prId,
+  candidates: candidatesProp,
   value,
   onChange,
   rows = 3,
@@ -64,7 +65,12 @@ export function MentionTextarea({
   onKeyDown,
   onBlur,
 }: {
-  prId: number;
+  // The candidate SOURCE is either a PR (proximity-ranked via the hook) OR an explicit roster
+  // (`candidates`, e.g. a team/repo scope for the ad-hoc Insights box). Exactly one is expected;
+  // `candidates` wins when both are given. Both optional so a scope-less consumer just gets no
+  // suggestions.
+  prId?: number;
+  candidates?: User[];
   value: string;
   onChange: (value: string) => void;
   rows?: number;
@@ -79,7 +85,10 @@ export function MentionTextarea({
   onBlur?: (e: ReactFocusEvent<HTMLTextAreaElement>) => void;
 }): JSX.Element {
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const { data: candidates } = useMentionCandidates(prId);
+  // Keep the hook call unconditional (hooks-order rule); it's a no-op (disabled) when prId is
+  // absent, and an explicit `candidates` roster overrides it.
+  const { data: fetched } = useMentionCandidates(prId ?? null);
+  const candidates = candidatesProp ?? fetched;
   const [caret, setCaret] = useState(0);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);

@@ -30,7 +30,6 @@ import type {
   InsightCard,
   InsightKind,
   InsightSeverity,
-  SuggestedReviewer,
   ReviewerSuggestion,
   TeamInsightsResponse,
   TeamMetrics,
@@ -107,6 +106,10 @@ import type {
   BotBehaviourBotStat,
   BotBehaviourTrendPoint,
   BotBehaviourAnomaly,
+  BotOverlapStats,
+  BotCoReviewPair,
+  BotDirectoryUsage,
+  BotRepoPresence,
   PrBotBehaviourResponse,
   PrBotBehaviour,
   BotVendorPr,
@@ -147,6 +150,7 @@ import {
   type TriageResult,
 } from './triage.js';
 import { getAccountUserId } from '../auth/account.js';
+import { enrichReviewerSuggestions } from '../github/reviewer-suggest.js';
 import { ensureRoutingPrFiles } from '../sync/routing-files.js';
 import { reviewBotKind, reviewBotLogins } from '../sync/bot-detection.js';
 import {
@@ -3553,79 +3557,52 @@ export async function getTeamInsights(
       for (const [prId, paths] of await ensureRoutingPrFiles(accountId, missing))
         orphanFiles.set(prId, paths);
 
-    // Repo-wide "who recently worked where": every PR touched in the sprint → its author
-    // × the top-level dirs its files span. Sourced from the always-stored
-    // pull_requests.files (no commit-file dependency), so it reflects real recent
-    // activity in each area of the codebase.
-    const dirAuthors = new Map<string, Map<number, number>>();
-    for (const pr of await db
-      .select({
-        repoId: pullRequests.repoId,
-        authorId: pullRequests.authorId,
-        files: pullRequests.files,
-      })
-      .from(pullRequests)
-      .where(
-        and(
-          eq(pullRequests.accountId, accountId),
-          inArray(pullRequests.repoId, repoIds),
-          isNotNull(pullRequests.authorId),
-          isNotNull(pullRequests.files),
-          gte(pullRequests.updatedAt, sprintFrom),
-        ),
-      )
-      .execute()) {
-      if (pr.authorId == null || pr.files == null) continue;
-      for (const d of new Set(pr.files.map((f) => topLevelDir(f.path)))) {
-        const key = `${pr.repoId} ${d}`;
-        const m = dirAuthors.get(key) ?? new Map<number, number>();
-        m.set(pr.authorId, (m.get(pr.authorId) ?? 0) + 1);
-        dirAuthors.set(key, m);
-      }
-    }
+    // Author logins (to drop the author from CODEOWNERS user suggestions — no self-review).
+    const authorIds = [
+      ...new Set(orphans.map((p) => p.authorId).filter((x): x is number => x != null)),
+    ];
+    const authorLoginById = new Map<number, string>();
+    if (authorIds.length > 0)
+      for (const u of await db
+        .select({ id: users.id, login: users.githubLogin })
+        .from(users)
+        .where(inArray(users.id, authorIds))
+        .execute())
+        authorLoginById.set(u.id, u.login);
 
-    const mergers = new Map(
-      (await getMergers(accountId)).map((m) => [m.repoId, new Set(m.userIds)]),
+    // Per orphan: the SAME suggested-reviewer pipeline as the PR-detail "Suggested reviewers" row.
+    // suggestReviewersFromHistory resolves candidates through getReviewerLogins (drops bots + null
+    // logins) → so BOTS ARE STRUCTURALLY IMPOSSIBLE here; enrichReviewerSuggestions then layers
+    // CODEOWNERS owners + CODEOWNERS teams + inferred team history on top (TEAMS are first-class,
+    // exactly like the PR detail). Best-effort network per orphan (per-repo cached), parallelised;
+    // any failure degrades to just the bot-filtered history users.
+    const built = await Promise.all(
+      orphans.map(async (p) => {
+        const paths = orphanFiles.get(p.id) ?? [];
+        const full = repoName.get(p.repoId) ?? '';
+        const slash = full.indexOf('/');
+        const owner = slash > 0 ? full.slice(0, slash) : '';
+        const name = slash > 0 ? full.slice(slash + 1) : '';
+        const base = await suggestReviewersFromHistory(accountId, p.repoId, p.authorId, paths);
+        const { suggestions, extraUsers } = await enrichReviewerSuggestions({
+          accountId,
+          owner,
+          name,
+          authorLogin: p.authorId != null ? authorLoginById.get(p.authorId) ?? null : null,
+          paths,
+          userSuggestions: base,
+          knownUserIds: new Set<number>(),
+          resolveUsers: getUsersByLogins,
+        });
+        return { p, paths, suggestions, extraUsers };
+      }),
     );
 
-    for (const p of orphans) {
-      const paths = orphanFiles.get(p.id) ?? [];
-      const dirs = [...new Set(paths.map(topLevelDir))];
-      const repoMergers = mergers.get(p.repoId) ?? new Set<number>();
-      // Candidates: mergers who recently worked in the same dirs. Track each one's
-      // most-touched dir to phrase the rationale.
-      const score = new Map<number, number>();
-      const topDir = new Map<number, { dir: string; cnt: number }>();
-      for (const d of dirs) {
-        const m = dirAuthors.get(`${p.repoId} ${d}`);
-        if (!m) continue;
-        for (const [uid, cnt] of m) {
-          if (uid === p.authorId || !repoMergers.has(uid)) continue;
-          score.set(uid, (score.get(uid) ?? 0) + cnt);
-          const cur = topDir.get(uid);
-          if (!cur || cnt > cur.cnt) topDir.set(uid, { dir: d, cnt });
-        }
-      }
-      const dirLabel = (d: string): string => (d === '.' ? 'the repo root' : `${d}/`);
-      let suggested: SuggestedReviewer[] = [...score.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([uid]) => {
-          const top = topDir.get(uid);
-          return {
-            userId: uid,
-            reason: top ? `recently changed ${dirLabel(top.dir)}` : 'has merge rights here',
-          };
-        });
-      // Fallback: any repo merger who isn't the author.
-      if (suggested.length === 0)
-        suggested = [...repoMergers]
-          .filter((uid) => uid !== p.authorId)
-          .slice(0, 3)
-          .map((uid) => ({ userId: uid, reason: 'has merge rights here' }));
-      if (suggested.length === 0) continue; // nothing useful to suggest
+    for (const { p, paths, suggestions, extraUsers } of built) {
+      if (suggestions.length === 0) continue; // nothing useful to suggest (users or teams)
       addUser(p.authorId);
-      suggested.forEach((s) => addUser(s.userId));
+      for (const s of suggestions) addUser(s.userId);
+      for (const u of extraUsers) addUser(u.id);
       cards.push({
         id: `route:${p.id}`,
         kind: 'reviewer_routing',
@@ -3643,7 +3620,7 @@ export async function getTeamInsights(
         deletions: p.deletions,
         openedAt: p.openedAt!.toISOString(),
         topPaths: paths.slice(0, 5),
-        suggestedReviewers: suggested,
+        suggestedReviewers: suggestions,
       });
     }
   }
@@ -5536,6 +5513,62 @@ export async function getMentionCandidates(
     .map((x) => x.user);
 }
 
+// @mention candidates scoped to a REPO SET (a Team / the FilterBar-visible repos) rather than one
+// PR — powers the ad-hoc Insights "Ask about the sprint" box, whose questions span the whole
+// scope. `repoIds` null = every repo the account owns (the 'all' scope). People = whoever has
+// MERGED (maintainers, rank 0) or OPENED (rank 1) a PR in the scope's repos; self + bots excluded.
+// Account-scoped: the repo set is intersected with the account's own repos so a foreign repo id
+// can never widen it. Sorted by rank then login; the picker slices client-side.
+export async function getScopeMentionCandidates(
+  accountId: number,
+  repoIds: number[] | null,
+): Promise<User[]> {
+  // Resolve the scope to a bounded set of THIS account's repo ids (never trust caller ids raw).
+  const ownRepoRows = await db
+    .select({ id: repos.id })
+    .from(repos)
+    .where(eq(repos.accountId, accountId))
+    .execute();
+  const ownIds = new Set(ownRepoRows.map((r) => r.id));
+  const scopeIds =
+    repoIds == null ? [...ownIds] : repoIds.filter((id) => ownIds.has(id));
+  if (scopeIds.length === 0) return [];
+
+  const rank = new Map<number, number>();
+  const bump = (id: number | null | undefined, r: number): void => {
+    if (id == null) return;
+    const cur = rank.get(id);
+    if (cur == null || r < cur) rank.set(id, r);
+  };
+
+  const [mergerRows, authorRows] = await Promise.all([
+    db
+      .selectDistinct({ userId: pullRequests.mergedById })
+      .from(pullRequests)
+      .where(and(inArray(pullRequests.repoId, scopeIds), eq(pullRequests.state, 'merged')))
+      .execute(),
+    db
+      .selectDistinct({ authorId: pullRequests.authorId })
+      .from(pullRequests)
+      .where(inArray(pullRequests.repoId, scopeIds))
+      .execute(),
+  ]);
+  for (const r of mergerRows) bump(r.userId, 0);
+  for (const r of authorRows) bump(r.authorId, 1);
+
+  const viewerUserId = await getAccountUserId(accountId);
+  if (viewerUserId != null) rank.delete(viewerUserId);
+
+  const ids = [...rank.keys()];
+  if (ids.length === 0) return [];
+  const rows = await db.select().from(users).where(inArray(users.id, ids)).execute();
+  return rows
+    .filter((u) => !u.isBot)
+    .map((u) => ({ user: mapUser(u), rank: rank.get(u.id) ?? 99 }))
+    .sort((a, b) => a.rank - b.rank || a.user.githubLogin.localeCompare(b.user.githubLogin))
+    .map((x) => x.user);
+}
+
 export async function getThreadDetail(
   id: number,
   accountId: number,
@@ -6018,7 +6051,8 @@ export async function getResolvableBotThreadsForScope(
     const custom = classLabel.get(userId);
     if (custom) return custom;
     const kind = kindMap.get(userId) ?? 'in_house';
-    if (kind !== 'in_house' && kind !== 'pierre') return labelForKind(kind);
+    if (kind !== 'in_house' && kind !== 'pierre' && kind !== 'vendor')
+      return labelForKind(kind);
     return loginById.get(userId) ?? labelForKind(kind);
   };
 
@@ -7210,7 +7244,8 @@ export async function getBotAnalytics(
   const reviewerLabel = (userId: number, kind: AutomatedReviewerKind): string => {
     const custom = classLabel.get(userId);
     if (custom) return custom;
-    if (kind !== 'in_house' && kind !== 'pierre') return labelForKind(kind);
+    if (kind !== 'in_house' && kind !== 'pierre' && kind !== 'vendor')
+      return labelForKind(kind);
     return loginById.get(userId) ?? labelForKind(kind);
   };
 
@@ -7670,12 +7705,65 @@ export async function getBotBehaviourAnalytics(
   const trendFrom = new Date(nowMs - 12 * 7 * 86_400_000); // 84 days ⊇ every window
   const generatedAt = to.toISOString();
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
-  const empty = (): BotBehaviourResponse => ({ enabled: true, generatedAt, window: win, bots: [] });
+  const DAY = 86_400_000;
+  const SPAN_DAYS = 84; // == trendFrom → now; the anomaly baseline AND the coverage strip span
+  const trendFromMs = trendFrom.getTime();
+  const daySpanStart = trendFrom.toISOString();
 
-  if (scopeRepoIds != null && scopeRepoIds.length === 0) return empty();
+  // Second DayStrip series: per-day count of human-authored, non-draft PRs opened over the same
+  // 84-day coverage span + scope. A SHARED response field (PR inflow is an account/repo fact, not
+  // per-bot) so every bot's coverage strip can be read against real PR inflow — the days a bot went
+  // silent while PRs kept coming are exactly the coverage gaps the user wants to spot.
+  const EMPTY_OVERLAP: BotOverlapStats = {
+    reviewedPrs: 0,
+    multiReviewedPrs: 0,
+    distribution: [
+      { label: '1 bot', count: 0 },
+      { label: '2 bots', count: 0 },
+      { label: '3+ bots', count: 0 },
+    ],
+    pairs: [],
+    lineOverlapClusters: 0,
+    lineOverlapPrs: 0,
+  };
+  const empty = (prsOpenedPerDay: number[]): BotBehaviourResponse => ({
+    enabled: true,
+    generatedAt,
+    window: win,
+    bots: [],
+    prsOpenedPerDay,
+    daySpanStart,
+    overlap: EMPTY_OVERLAP,
+    directories: [],
+    repoPresence: [],
+  });
+
+  if (scopeRepoIds != null && scopeRepoIds.length === 0)
+    return empty(new Array<number>(SPAN_DAYS).fill(0));
   const repoScopeFilter = scopeRepoIds != null ? [inArray(pullRequests.repoId, scopeRepoIds)] : [];
+
+  const prsOpenedPerDay = new Array<number>(SPAN_DAYS).fill(0);
+  for (const p of await db
+    .select({ openedAt: pullRequests.openedAt })
+    .from(pullRequests)
+    .innerJoin(users, eq(users.id, pullRequests.authorId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.isDraft, false),
+        eq(users.isBot, false),
+        gte(pullRequests.openedAt, trendFrom),
+        lte(pullRequests.openedAt, to),
+        ...repoScopeFilter,
+      ),
+    )
+    .execute()) {
+    const dIdx = Math.min(SPAN_DAYS - 1, Math.max(0, Math.floor((p.openedAt.getTime() - trendFromMs) / DAY)));
+    prsOpenedPerDay[dIdx]! += 1;
+  }
+
   const automatedIds = await automatedReviewerUserIds(accountId);
-  if (automatedIds.length === 0) return empty();
+  if (automatedIds.length === 0) return empty(prsOpenedPerDay);
   const kindMap = await classificationKindForUser(accountId);
 
   // Identity (label + login) — mirrors getBotAnalytics.reviewerLabel exactly.
@@ -7699,7 +7787,8 @@ export async function getBotBehaviourAnalytics(
   const reviewerLabel = (userId: number, kind: AutomatedReviewerKind): string => {
     const custom = classLabel.get(userId);
     if (custom) return custom;
-    if (kind !== 'in_house' && kind !== 'pierre') return labelForKind(kind);
+    if (kind !== 'in_house' && kind !== 'pierre' && kind !== 'vendor')
+      return labelForKind(kind);
     return loginById.get(userId) ?? labelForKind(kind);
   };
 
@@ -7768,7 +7857,7 @@ export async function getBotBehaviourAnalytics(
   for (const r of reviewRows) addTouch(r.authorId, r.prId, r.at, false);
   for (const r of rcRows) addTouch(r.authorId, r.prId, r.at, true);
   for (const r of pcRows) addTouch(r.authorId, r.prId, r.at, true);
-  if (touchesByUserPr.size === 0) return empty();
+  if (touchesByUserPr.size === 0) return empty(prsOpenedPerDay);
 
   // PR baselines: openedAt + diff size, and the earliest observed ready-for-review event.
   const prIdList = [...involvedPrIds];
@@ -7803,10 +7892,8 @@ export async function getBotBehaviourAnalytics(
   }
 
   const HOUR = 3_600_000;
-  const DAY = 86_400_000;
   const SPAN_WEEKS = 12;
-  const SPAN_DAYS = 84; // == trendFrom → now; the anomaly baseline AND the coverage strip span
-  const trendFromMs = trendFrom.getTime();
+  // DAY / SPAN_DAYS / trendFromMs are hoisted above (they also gate the prsOpenedPerDay series).
   const bots: BotBehaviourBotStat[] = [];
   for (const [userId, byPr] of touchesByUserPr) {
     const kind = kindMap.get(userId);
@@ -7989,7 +8076,188 @@ export async function getBotBehaviourAnalytics(
     });
   }
   bots.sort((a, b) => b.totalActivity - a.totalActivity || b.prsReviewed - a.prsReviewed);
-  return { enabled: true, generatedAt, window: win, bots };
+
+  // ── Cross-bot overlap + coverage (EXPERIMENTAL) ─────────────────────────────────────────────
+  // All over the SELECTED window [from, to] + scope. Bot identity mirrors the per-bot rows
+  // (key `u<userId>`, same reviewerLabel/login/kind resolution).
+  const botIdentity = (
+    userId: number,
+  ): { key: string; label: string; login: string | null; kind: AutomatedReviewerKind } => {
+    const k = kindMap.get(userId) ?? 'in_house';
+    return {
+      key: `u${userId}`,
+      label: reviewerLabel(userId, k),
+      login: rawLoginById.get(userId) ?? null,
+      kind: k,
+    };
+  };
+
+  // (i) Multiple bots on the SAME PR — from the already-fetched touch maps (any touch type),
+  // restricted to bots with an IN-WINDOW touch. Counts DISTINCT bot accounts.
+  const prBots = new Map<number, Set<number>>();
+  for (const [uid, byPr] of touchesByUserPr)
+    for (const [prId, touches] of byPr) {
+      if (!touches.some((t) => t.ms >= fromMs)) continue;
+      let s = prBots.get(prId);
+      if (!s) {
+        s = new Set();
+        prBots.set(prId, s);
+      }
+      s.add(uid);
+    }
+  let reviewedPrs = 0;
+  let multiReviewedPrs = 0;
+  let d1 = 0;
+  let d2 = 0;
+  let d3 = 0;
+  const pairCount = new Map<string, number>();
+  for (const s of prBots.values()) {
+    const ids = [...s].sort((a, b) => a - b);
+    reviewedPrs += 1;
+    if (ids.length === 1) d1 += 1;
+    else if (ids.length === 2) d2 += 1;
+    else d3 += 1;
+    if (ids.length >= 2) {
+      multiReviewedPrs += 1;
+      for (let i = 0; i < ids.length; i++)
+        for (let j = i + 1; j < ids.length; j++)
+          pairCount.set(`${ids[i]}|${ids[j]}`, (pairCount.get(`${ids[i]}|${ids[j]}`) ?? 0) + 1);
+    }
+  }
+  const pairs: BotCoReviewPair[] = [...pairCount.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([k, prs]) => {
+      const [a, b] = k.split('|').map(Number) as [number, number];
+      const ia = botIdentity(a);
+      const ib = botIdentity(b);
+      return { aKey: ia.key, bKey: ib.key, aLabel: ia.label, bLabel: ib.label, prs };
+    });
+
+  // (ii)+(iii) One reviewThreads pass (path/line are ALWAYS persisted — no lean-gated diffHunk):
+  // same-line overlap, per-bot directory usage, and the global repo × bot presence matrix.
+  const threadRows = await db
+    .select({
+      prId: reviewThreads.prId,
+      repoId: pullRequests.repoId,
+      path: reviewThreads.path,
+      line: reviewThreads.line,
+      commenterId: reviewThreads.originalCommenterId,
+    })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviewThreads.originalCommenterId, automatedIds),
+        gte(reviewThreads.createdAt, from),
+        lte(reviewThreads.createdAt, to),
+        ...repoScopeFilter,
+      ),
+    )
+    .execute();
+
+  const dirByBot = new Map<number, Map<string, number>>();
+  const threadsByBot = new Map<number, number>();
+  const repoBot = new Map<number, Map<number, number>>();
+  const repoIdsSeen = new Set<number>();
+  const lineCluster = new Map<string, { pr: number; bots: Set<number> }>();
+  for (const r of threadRows) {
+    const uid = r.commenterId;
+    if (uid == null) continue;
+    const dir = topLevelDir(r.path);
+    let dm = dirByBot.get(uid);
+    if (!dm) {
+      dm = new Map();
+      dirByBot.set(uid, dm);
+    }
+    dm.set(dir, (dm.get(dir) ?? 0) + 1);
+    threadsByBot.set(uid, (threadsByBot.get(uid) ?? 0) + 1);
+    repoIdsSeen.add(r.repoId);
+    let rb = repoBot.get(r.repoId);
+    if (!rb) {
+      rb = new Map();
+      repoBot.set(r.repoId, rb);
+    }
+    rb.set(uid, (rb.get(uid) ?? 0) + 1);
+    const ck = `${r.prId}|${r.path}|${r.line ?? 'n'}`;
+    let c = lineCluster.get(ck);
+    if (!c) {
+      c = { pr: r.prId, bots: new Set() };
+      lineCluster.set(ck, c);
+    }
+    c.bots.add(uid);
+  }
+  let lineOverlapClusters = 0;
+  const overlapPrSet = new Set<number>();
+  for (const c of lineCluster.values())
+    if (c.bots.size >= 2) {
+      lineOverlapClusters += 1;
+      overlapPrSet.add(c.pr);
+    }
+
+  const repoNameById = new Map<number, string>();
+  if (repoIdsSeen.size > 0)
+    for (const r of await db
+      .select({ id: repos.id, owner: repos.owner, name: repos.name })
+      .from(repos)
+      .where(inArray(repos.id, [...repoIdsSeen]))
+      .execute())
+      repoNameById.set(r.id, `${r.owner}/${r.name}`);
+
+  const directories: BotDirectoryUsage[] = [...dirByBot.entries()]
+    .map(([uid, dm]) => ({
+      ...botIdentity(uid),
+      totalThreads: threadsByBot.get(uid) ?? 0,
+      dirs: [...dm.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)
+        .map(([dir, count]) => ({ dir, count })),
+    }))
+    .sort((a, b) => b.totalThreads - a.totalThreads);
+
+  const repoPresence: BotRepoPresence[] = [...repoBot.entries()]
+    .map(([repoId, bm]) => {
+      const botsHere = [...bm.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([uid, threads]) => ({ ...botIdentity(uid), threads }));
+      return {
+        repoId,
+        repoName: repoNameById.get(repoId) ?? `#${repoId}`,
+        totalBots: botsHere.length,
+        bots: botsHere,
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.totalBots - a.totalBots ||
+        b.bots.reduce((n, x) => n + x.threads, 0) - a.bots.reduce((n, x) => n + x.threads, 0),
+    );
+
+  const overlap: BotOverlapStats = {
+    reviewedPrs,
+    multiReviewedPrs,
+    distribution: [
+      { label: '1 bot', count: d1 },
+      { label: '2 bots', count: d2 },
+      { label: '3+ bots', count: d3 },
+    ],
+    pairs,
+    lineOverlapClusters,
+    lineOverlapPrs: overlapPrSet.size,
+  };
+
+  return {
+    enabled: true,
+    generatedAt,
+    window: win,
+    bots,
+    prsOpenedPerDay,
+    daySpanStart,
+    overlap,
+    directories,
+    repoPresence,
+  };
 }
 
 // PR-SCOPED bot behaviour (EXPERIMENTAL, CORE, deterministic) — the per-PR view of the aggregate
@@ -8033,7 +8301,8 @@ export async function getPrBotBehaviour(
   const reviewerLabel = (userId: number, kind: AutomatedReviewerKind): string => {
     const custom = classLabel.get(userId);
     if (custom) return custom;
-    if (kind !== 'in_house' && kind !== 'pierre') return labelForKind(kind);
+    if (kind !== 'in_house' && kind !== 'pierre' && kind !== 'vendor')
+      return labelForKind(kind);
     return loginById.get(userId) ?? labelForKind(kind);
   };
 
@@ -8306,10 +8575,10 @@ export async function getBenchmarkContributions(
   const kindMap = await classificationKindForUser(accountId);
   const nowMs = Date.now();
 
-  // Only KNOWN vendors are comparable across orgs — skip in_house/pierre/unclassified.
+  // Only KNOWN vendors are comparable across orgs — skip in_house/pierre/generic-vendor/unclassified.
   const vendorKindOf = (userId: number): string | null => {
     const k = kindMap.get(userId);
-    if (!k || k === 'in_house' || k === 'pierre') return null;
+    if (!k || k === 'in_house' || k === 'pierre' || k === 'vendor') return null;
     return k;
   };
 
@@ -8584,7 +8853,8 @@ export async function getBotVendorPrs(
     login = userRow?.login ?? null;
     const custom = classRow?.label?.trim();
     if (custom) label = custom;
-    else if (kindTyped !== 'in_house' && kindTyped !== 'pierre') label = labelForKind(kindTyped);
+    else if (kindTyped !== 'in_house' && kindTyped !== 'pierre' && kindTyped !== 'vendor')
+      label = labelForKind(kindTyped);
     else label = userRow?.name?.trim() || login || `u${userId}`;
   }
 

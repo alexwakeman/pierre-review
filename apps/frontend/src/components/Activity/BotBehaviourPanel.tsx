@@ -3,6 +3,9 @@ import type {
   AnalyticsBin,
   BotBehaviourAnomaly,
   BotBehaviourBotStat,
+  BotDirectoryUsage,
+  BotOverlapStats,
+  BotRepoPresence,
   BotWindowKind,
 } from '@pierre-review/shared';
 import { useBotBehaviour } from '../../hooks/useBotTriage.js';
@@ -14,6 +17,8 @@ import { BarChart } from '../charts/BarChart.js';
 import { Heatmap } from '../charts/Heatmap.js';
 import { DayStrip } from '../charts/DayStrip.js';
 import { ChartCard, ChartEmpty, fmtDuration, type Series } from '../charts/common.js';
+
+type BotColorFn = (bot: { login?: string | null; kind: BotBehaviourBotStat['kind'] }) => string;
 
 // EXPERIMENTAL bot BEHAVIOUR panel — the Bots view's second inner sub-tab, kept SEPARATE from
 // the shipped ROI panel so it can mature independently. CORE + deterministic (no AI): it reads
@@ -173,9 +178,15 @@ function TtfrTrendChart({
 function BotCard({
   bot,
   color,
+  prsOpenedPerDay,
+  dir,
 }: {
   bot: BotBehaviourBotStat;
   color: string;
+  // Shared across bots: human-authored, non-draft PRs opened per day over the same span.
+  prsOpenedPerDay?: number[];
+  // This bot's per-directory review-thread breakdown (which sections it operates in).
+  dir?: BotDirectoryUsage;
 }): JSX.Element {
   const meta = automatedReviewerMeta(bot.kind);
   return (
@@ -258,13 +269,19 @@ function BotCard({
           anomaly colour. The "gaps in reviews" made visible. */}
       <ChartCard
         title="Daily coverage"
-        note={silenceNote(bot) ?? 'one cell / day · last 12 weeks (UTC)'}
+        note={
+          silenceNote(bot) ??
+          (prsOpenedPerDay != null
+            ? 'one cell / day · line = PRs opened · last 12 weeks (UTC)'
+            : 'one cell / day · last 12 weeks (UTC)')
+        }
       >
         <DayStrip
           daily={bot.dailyActivity}
           startDate={bot.daySpanStart}
           silentRuns={bot.silentRuns}
           color={color}
+          opened={prsOpenedPerDay}
         />
       </ChartCard>
 
@@ -283,7 +300,117 @@ function BotCard({
           <DistChart bins={bot.followupDist} color={color} />
         </ChartCard>
       </div>
+
+      {/* Which sections of the codebase this bot's inline review threads land in. */}
+      {dir != null && dir.dirs.length > 0 && (
+        <ChartCard
+          title="Top directories"
+          note={`inline threads by top-level dir · ${dir.totalThreads} total`}
+        >
+          <BarChart
+            labels={dir.dirs.map((d) => (d.dir === '.' ? '(root)' : d.dir))}
+            series={[{ key: 'threads', label: 'Threads', color, values: dir.dirs.map((d) => d.count) }]}
+            height={130}
+            rotateLabels
+          />
+        </ChartCard>
+      )}
     </div>
+  );
+}
+
+// ── Cross-bot overlap (EXPERIMENTAL): multiple bots on the same PR + same-line overlap ──────────
+function BotOverlapSection({ overlap, color }: { overlap: BotOverlapStats; color: string }): JSX.Element | null {
+  const { reviewedPrs, multiReviewedPrs, distribution, pairs, lineOverlapClusters, lineOverlapPrs } =
+    overlap;
+  if (reviewedPrs === 0) return null;
+  const pct = Math.round((multiReviewedPrs / reviewedPrs) * 100);
+  const maxPair = Math.max(1, ...pairs.map((p) => p.prs));
+  return (
+    <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Bot overlap</span>
+        <span className="text-[11px] text-gray-400">
+          where more than one bot reviews the same PR or line — distinct bot accounts, this window
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Stat
+          label="PRs with ≥2 bots"
+          value={String(multiReviewedPrs)}
+          sub={`${pct}% of ${reviewedPrs} reviewed`}
+        />
+        <Stat
+          label="Same-line overlaps"
+          value={String(lineOverlapClusters)}
+          sub={lineOverlapClusters > 0 ? `across ${lineOverlapPrs} PR${lineOverlapPrs === 1 ? '' : 's'}` : 'no collisions'}
+        />
+      </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <ChartCard title="PRs by bot count" note="how many bots touched each reviewed PR">
+          <DistChart bins={distribution} color={color} />
+        </ChartCard>
+        <ChartCard title="Most-overlapping bot pairs" note="PRs both bots reviewed">
+          {pairs.length === 0 ? (
+            <ChartEmpty label="No PR was reviewed by two bots" />
+          ) : (
+            <ul className="space-y-1 py-1">
+              {pairs.slice(0, 8).map((p) => (
+                <li key={`${p.aKey}-${p.bKey}`} className="flex items-center gap-2 text-[11px]">
+                  <span className="w-40 shrink-0 truncate text-gray-600 dark:text-gray-300" title={`${p.aLabel} ↔ ${p.bLabel}`}>
+                    {p.aLabel} <span className="text-gray-400">↔</span> {p.bLabel}
+                  </span>
+                  <span className="h-2 rounded-full bg-sky-400/70" style={{ width: `${(p.prs / maxPair) * 100}%`, minWidth: 4 }} />
+                  <span className="ml-auto shrink-0 tabular-nums text-gray-400">{p.prs}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
+// ── Global "which bots operate on each repo" (EXPERIMENTAL) — a repo × bot stacked chart, so
+// repos worked by MULTIPLE bots show multiple stacked segments. ──────────────────────────────────
+function RepoPresenceSection({
+  repoPresence,
+  botColor,
+}: {
+  repoPresence: BotRepoPresence[];
+  botColor: BotColorFn;
+}): JSX.Element | null {
+  if (repoPresence.length === 0) return null;
+  // Distinct bots across all repos, ordered by total footprint → one stacked series each.
+  const botTotals = new Map<string, { label: string; login: string | null; kind: BotBehaviourBotStat['kind']; total: number }>();
+  for (const r of repoPresence)
+    for (const b of r.bots) {
+      const e = botTotals.get(b.key) ?? { label: b.label, login: b.login, kind: b.kind, total: 0 };
+      e.total += b.threads;
+      botTotals.set(b.key, e);
+    }
+  const botsOrdered = [...botTotals.entries()].sort((a, b) => b[1].total - a[1].total);
+  const repos = repoPresence.slice(0, 14);
+  const labels = repos.map((r) => r.repoName.split('/').pop() ?? r.repoName);
+  const series: Series[] = botsOrdered.map(([key, meta]) => ({
+    key,
+    label: meta.label,
+    color: botColor({ login: meta.login, kind: meta.kind }),
+    values: repos.map((r) => r.bots.find((b) => b.key === key)?.threads ?? 0),
+  }));
+  const multiRepos = repoPresence.filter((r) => r.totalBots >= 2).length;
+  return (
+    <ChartCard
+      title="Where bots operate"
+      note={
+        (multiRepos > 0
+          ? `${multiRepos} repo${multiRepos === 1 ? '' : 's'} reviewed by ≥2 bots · `
+          : '') + 'inline review threads per repo, by bot'
+      }
+    >
+      <BarChart labels={labels} series={series} mode="stacked" rotateLabels height={200} />
+    </ChartCard>
   );
 }
 
@@ -295,6 +422,10 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
   const botColor = useBotColors();
   const { data, isLoading, isError } = useBotBehaviour(window, true, scope, repoScope);
   const bots = data?.bots ?? [];
+  const dirByKey = useMemo(
+    () => new Map((data?.directories ?? []).map((d) => [d.key, d])),
+    [data?.directories],
+  );
 
   return (
     <div className="space-y-3">
@@ -343,8 +474,20 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
           <ChartCard title="Median time to first review" note="per bot · weekly · ⭘ = exception">
             <TtfrTrendChart bots={bots} botColor={botColor} />
           </ChartCard>
+          {data?.overlap != null && (
+            <BotOverlapSection overlap={data.overlap} color={botColor({ login: null, kind: 'in_house' })} />
+          )}
+          {data?.repoPresence != null && data.repoPresence.length > 0 && (
+            <RepoPresenceSection repoPresence={data.repoPresence} botColor={botColor} />
+          )}
           {bots.map((b) => (
-            <BotCard key={b.key} bot={b} color={botColor({ login: b.login, kind: b.kind })} />
+            <BotCard
+              key={b.key}
+              bot={b}
+              color={botColor({ login: b.login, kind: b.kind })}
+              prsOpenedPerDay={data?.prsOpenedPerDay}
+              dir={dirByKey.get(b.key)}
+            />
           ))}
         </>
       )}

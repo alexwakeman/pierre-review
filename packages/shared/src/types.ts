@@ -125,7 +125,10 @@ export type ReviewBotKind =
   | 'graphite'
   | 'cursor'
   | 'devin'
-  | 'entelligence';
+  | 'entelligence'
+  | 'deepsource'
+  | 'github_code_quality'
+  | 'github_advanced_security';
 
 // Bare GitHub login (lowercased, `[bot]` suffix stripped) → vendor. Verified 2026-07
 // against each vendor's GitHub Marketplace listing / a live PR (App slugs, not mention
@@ -154,6 +157,14 @@ export const REVIEW_BOTS: Record<string, ReviewBotKind> = {
   cursor: 'cursor', // Cursor Bugbot (app slug 'cursor', NOT 'bugbot')
   'devin-ai-integration': 'devin',
   'entelligence-ai-pr-reviews': 'entelligence',
+  // DeepSource — GitHub App slug `deepsource-io` (inline review posts as
+  // `deepsource-io[bot]`); `deepsourcebot` is the legacy machine-user alias.
+  'deepsource-io': 'deepsource',
+  deepsourcebot: 'deepsource',
+  // GitHub Code Quality (GA 2026-07-20) — CodeQL rule findings + coverage summaries.
+  'github-code-quality': 'github_code_quality',
+  // GitHub Advanced Security — code-scanning / secret-scanning + AI security detections.
+  'github-advanced-security': 'github_advanced_security',
 };
 
 // Classify a login as a known AI review bot's vendor, or null. Normalises case + the
@@ -171,7 +182,11 @@ export function reviewBotKind(login: string | null | undefined): ReviewBotKind |
 // Review. See docs/PRO-PLATFORM.md / the bot-triage plan.
 
 // ── WS1 automated-reviewer classification ────────────────────────────
-export type AutomatedReviewerKind = ReviewBotKind | 'in_house' | 'pierre';
+// `vendor` = a generic PROPRIETARY third-party reviewer a user manually classifies when it
+// isn't a known brand — distinct from `in_house` (a team's OWN AI). It carries no brand
+// colour/label (rendered by login, like in_house) and is EXCLUDED from the cross-org
+// benchmark (brand-unknown, so not comparable to a named-vendor cohort).
+export type AutomatedReviewerKind = ReviewBotKind | 'in_house' | 'pierre' | 'vendor';
 export type ClassificationConfidence = 'high' | 'medium' | 'low';
 export type ClassificationSource =
   | 'manual' | 'vendor_login' | 'github_type' | 'app_attribution'
@@ -333,11 +348,58 @@ export interface BotBehaviourBotStat {
   followupDist: AnalyticsBin[]; // buckets: 0, 1, 2–3, 4+
 }
 
+// ── Cross-bot overlap + coverage (EXPERIMENTAL) — the "where do bots collide / operate" view ──
+// All three are DETERMINISTIC, CORE, computed over the SELECTED window + scope from already-stored
+// data (touch rows + reviewThreads.path/line — no lean-gated diffHunk needed). Overlap counts
+// DISTINCT BOT ACCOUNTS (two automated reviewers = an overlap), not vendor kinds.
+export interface BotCoReviewPair {
+  aKey: string; // `u<userId>` of one bot
+  bKey: string; // `u<userId>` of the other (aKey < bKey for stability)
+  aLabel: string;
+  bLabel: string;
+  prs: number; // PRs BOTH bots touched in-window
+}
+export interface BotOverlapStats {
+  reviewedPrs: number; // PRs ≥1 automated reviewer touched in-window (the denominator)
+  multiReviewedPrs: number; // of those, how many ≥2 DISTINCT bots touched
+  // PR counts bucketed by how many distinct bots touched them: "1 bot" | "2 bots" | "3+ bots".
+  distribution: AnalyticsBin[];
+  pairs: BotCoReviewPair[]; // co-review pairs, most-overlapping first (capped) — the pair matrix
+  lineOverlapClusters: number; // (path, exact line) flagged by ≥2 DISTINCT bots — "same line" hits
+  lineOverlapPrs: number; // distinct PRs carrying ≥1 such same-line overlap
+}
+// Which sections (top-level directories) of the codebase a bot's inline review threads land in.
+export interface BotDirectoryUsage {
+  key: string; // `u<userId>`
+  label: string;
+  login: string | null;
+  kind: AutomatedReviewerKind;
+  totalThreads: number; // inline threads the bot opened in-window (the denominator)
+  dirs: { dir: string; count: number }[]; // top-level dirs, most-reviewed first (capped)
+}
+// Global "multiple bots on the same repo" view: per repo, which automated reviewers operate there.
+export interface BotRepoPresence {
+  repoId: number;
+  repoName: string; // owner/name
+  totalBots: number; // distinct automated reviewers active on this repo in-window
+  bots: { key: string; label: string; login: string | null; kind: AutomatedReviewerKind; threads: number }[];
+}
+
 export interface BotBehaviourResponse {
   enabled: boolean; // always true (CORE / deterministic) — parallels BotAnalyticsResponse.enabled
   generatedAt: string;
   window: { kind: BotWindowKind; from: string; to: string };
   bots: BotBehaviourBotStat[]; // most-active-first
+  // Cross-bot overlap + coverage (EXPERIMENTAL), over the selected window + scope:
+  overlap: BotOverlapStats; // (i) multiple bots on the same PR + (ii) same-line overlap
+  directories: BotDirectoryUsage[]; // (iii) which dirs each bot reviews in (per-bot)
+  repoPresence: BotRepoPresence[]; // (iii, global) which bots operate on each repo
+  // Second coverage-strip series (SHARED, not per-bot — PR inflow is an account/repo fact):
+  // per-day count of human-authored, non-draft PRs opened over the SAME 84-day span + scope as
+  // every bot's dailyActivity, oldest→newest, aligned to daySpanStart. Overlaid on each bot's
+  // DayStrip so silent runs can be read against real PR inflow ("bot dark while PRs kept coming").
+  prsOpenedPerDay: number[];
+  daySpanStart: string; // ISO date of prsOpenedPerDay[0] (== every bot's daySpanStart)
 }
 
 // ── PR-scoped bot behaviour (EXPERIMENTAL) — GET /api/prs/:id/bot-behaviour ─────────────────
@@ -646,6 +708,66 @@ export interface PresetPromptResponse {
   result: PresetPromptResult | null;
   throttled?: boolean;
   creditsExhausted?: boolean;
+}
+
+// ── Ad-hoc "Ask about the sprint" chat (Pro, Haiku) ──────────────────────────────────────────
+// A free-text question answered from the SAME team-insights snapshot the Sprint summary uses,
+// grounded (answer only from the JSON) with a soft decline for off-topic / unanswerable asks.
+// When `wantChart`, a SECOND constrained Haiku pass emits this narrow spec, rendered by the
+// frontend's zero-dep chart toolkit; validated strictly, dropped (chart:null) on any mismatch.
+// `unit` picks the axis formatter (count→fmtNum, percent→n%, hours→fmtDuration). `type:'line'|
+// 'area'` is for time-series (ISO-date labels); 'bar' for arbitrary categorical labels.
+export interface SprintChatChartSpec {
+  type: 'bar' | 'line' | 'area';
+  title: string;
+  unit: 'count' | 'percent' | 'hours';
+  labels: string[];
+  series: { label: string; values: (number | null)[] }[];
+}
+
+// POST /api/pro/insights/ask body. `scope` ('all' | 'none' | 'teams' | '<teamId>') narrows the
+// grounding data to a team's repos exactly like the Sprint report. `wantBots` appends Pierre's
+// deterministic bot-performance data (getBotAnalytics) to the prompt.
+export interface SprintChatBody {
+  question: string;
+  scope?: string;
+  wantChart?: boolean;
+  wantBots?: boolean;
+}
+
+export interface SprintChatResponse {
+  enabled: boolean;
+  // The grounded Markdown answer (or a one-line decline). Null only when the scope has no data
+  // or the account is out of credits with nothing to serve.
+  answer: string | null;
+  // `owner/name#N` PR references resolved from `answer`, for linkification (same treatment as the
+  // Sprint / Retro / preset cards). Empty when the answer names no PRs.
+  prRefs: DigestPrRef[];
+  // Present (non-null) only when `wantChart` was set AND the second pass produced a valid spec.
+  chart?: SprintChatChartSpec | null;
+  model?: string;
+  generatedAt?: string; // ISO-8601
+  throttled?: boolean;
+  creditsExhausted?: boolean;
+}
+
+// A saved, re-runnable ad-hoc prompt (Pro; server-stored per account + scope, cross-device).
+export interface PinnedPrompt {
+  id: number;
+  text: string;
+  wantChart: boolean;
+  wantBots: boolean;
+  createdAt: string; // ISO-8601
+}
+export interface PinnedPromptsResponse {
+  enabled: boolean;
+  prompts: PinnedPrompt[];
+}
+export interface CreatePinnedPromptBody {
+  text: string;
+  wantChart?: boolean;
+  wantBots?: boolean;
+  scope?: string;
 }
 
 export type SyncRunStatus = 'idle' | 'running' | 'ok' | 'error';
@@ -2968,15 +3090,9 @@ export interface InsightPrRef {
   openedAt: string; // ISO-8601 PR open time — drives the deterministic LOC×age priority + the age column
 }
 
-// A suggested reviewer + the human-readable rationale for the suggestion
-// (e.g. "committed to auth/ this sprint" / "has merge rights here").
-export interface SuggestedReviewer {
-  userId: number;
-  reason: string;
-}
-
-// A CORE PR-detail suggested reviewer (a peer of SuggestedReviewer, but richer so it
-// can carry BOTH GitHub users and CODEOWNERS teams, and users we haven't synced).
+// A CORE suggested reviewer (used by BOTH the PR-detail "Suggested reviewers" row and the
+// Insights `reviewer_routing` card) — rich enough to carry BOTH GitHub users and CODEOWNERS
+// teams, and users we haven't synced.
 // `kind` discriminates:
 //   'user' → `login` is always set (the assign key); `userId` is set when we've synced
 //            that user (drives the avatar / profile link) and null otherwise.
@@ -3038,7 +3154,10 @@ export interface ReviewerLoadCard extends InsightCardBase {
 export interface ReviewerRoutingCard extends InsightCardBase, InsightPrRef {
   kind: 'reviewer_routing';
   topPaths: string[]; // representative changed paths (e.g. "auth/login.ts")
-  suggestedReviewers: SuggestedReviewer[]; // who + why (merge rights + recent commits)
+  // Who + why — the SAME rich shape as the PR-detail "Suggested reviewers" row (users AND
+  // @org/team suggestions), built by the shared enrichReviewerSuggestions pipeline, so bots are
+  // structurally impossible and CODEOWNERS/teams are first-class here too.
+  suggestedReviewers: ReviewerSuggestion[];
 }
 
 // Per-vendor rollup carried by the bot_signal card.

@@ -1558,7 +1558,10 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
             case 'reviewer_load':
               return `load:${c.reviewerId}:${c.pendingCount}`;
             case 'reviewer_routing':
-              return `route:${c.prId}:${c.suggestedReviewers.map((s) => s.userId).sort((a, b) => a - b).join(',')}`;
+              return `route:${c.prId}:${c.suggestedReviewers
+                .map((s) => (s.kind === 'team' ? `t:${s.teamSlug ?? ''}` : `u:${s.login ?? s.userId ?? ''}`))
+                .sort()
+                .join(',')}`;
             default:
               return '';
           }

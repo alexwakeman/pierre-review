@@ -167,7 +167,13 @@ export const BOT_VENDOR_META: Record<
   cursor: { label: 'Cursor', color: '#334155' },
   devin: { label: 'Devin', color: '#0891b2' },
   entelligence: { label: 'Entelligence', color: '#ca8a04' },
+  deepsource: { label: 'DeepSource', color: '#0ea5e9' },
+  github_code_quality: { label: 'GitHub Code Quality', color: '#4338ca' },
+  github_advanced_security: { label: 'GitHub Advanced Security', color: '#b91c1c' },
   in_house: { label: 'In-house AI', color: '#6b7280' },
+  // Generic proprietary vendor (user-classified, brand unknown) — neutral tint; like
+  // in_house it is NOT branded, so buildBotColorMap gives each one a distinct palette hue.
+  vendor: { label: 'Vendor', color: '#71717a' },
   pierre: { label: 'Pierre · Claude', color: '#d97757' },
 };
 
@@ -219,7 +225,7 @@ const BOT_FALLBACK_COLOR = BOT_VENDOR_META.in_house.color;
 // palette slot). `in_house` (and anything unknown) is deliberately excluded — those are the
 // bots that need a distinct palette colour instead of the shared gray.
 function isBrandedKind(kind: AutomatedReviewerKind): boolean {
-  return kind !== 'in_house';
+  return kind !== 'in_house' && kind !== 'vendor';
 }
 
 // Build a stable login → colour map for a roster of automated reviewers (brand-aware hybrid):

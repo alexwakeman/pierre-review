@@ -25,6 +25,7 @@ import { ThreadCard } from '../ThreadView/index.js';
 import { RetroView } from './RetroView.js';
 import { SprintReportCard } from './SprintReportCard.js';
 import { PresetPromptPanel } from './PresetPromptPanel.js';
+import { AdHocChatPanel } from './AdHocChatPanel.js';
 import { TeamComparisonPanel } from './TeamComparisonPanel.js';
 import { TrackUsage } from './TrackUsage.js';
 
@@ -49,10 +50,11 @@ const KIND_LABEL: Record<InsightCard['kind'], string> = {
 // getTeamInsights (feeding the Pro Slack block), just no longer rendered in Insights.
 const BOT_CARD_KINDS = new Set<InsightCard['kind']>(['bot_signal', 'bot_only_review']);
 
-// InsightsSubTab lives in the store (filters.ts) — the last-active tab is remembered there.
+// InsightsSubTab lives in the store (filters.ts) — the last-active tab is remembered there. The
+// former 'Sprint' sub-tab was folded into the top of Overview (sprint report + preset carousel +
+// ad-hoc chat), so it's no longer a tab; a stale stored/deep-linked 'sprint' redirects to overview.
 const SUB_TABS: { key: InsightsSubTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
-  { key: 'sprint', label: 'Sprint' },
   { key: 'retro', label: 'Retro' },
 ];
 // The cross-team "Compare" sub-tab is only meaningful (and only shown) in All-Teams scope.
@@ -198,7 +200,9 @@ function InsightThread({ card }: { card: UntouchedThreadCard }): JSX.Element {
 }
 
 // Suggested reviewers + their rationale + a single "Assign" button that requests them
-// on the PR (server-gated on write access; drops the author + bots). Once requested,
+// on the PR (server-gated on write access; drops the author + bots). Mirrors the PR-detail
+// "Suggested reviewers" row: it carries BOTH GitHub users (synced → chip, unsynced → @login)
+// and CODEOWNERS/inferred @org/team suggestions, and bots are never suggested. Once requested,
 // ['team-insights'] is invalidated → the card leaves the board on the next refresh.
 function RoutingReviewers({
   card,
@@ -208,16 +212,29 @@ function RoutingReviewers({
   usersById: Map<number, User>;
 }): JSX.Element {
   const request = useRequestReviewers(card.prId);
-  const ids = card.suggestedReviewers.map((s) => s.userId);
+  const suggestions = card.suggestedReviewers;
+  // One request assigns every suggestion at once (the route accepts userIds + logins + teamSlugs
+  // together, and re-drops the author + bots defensively).
+  const userIds = suggestions
+    .filter((s) => s.kind === 'user' && s.userId != null)
+    .map((s) => s.userId as number);
+  const logins = suggestions
+    .filter((s) => s.kind === 'user' && s.userId == null && s.login != null)
+    .map((s) => s.login as string);
+  const teamSlugs = suggestions
+    .filter((s) => s.kind === 'team' && s.teamSlug != null)
+    .map((s) => s.teamSlug as string);
   const done = request.isSuccess;
+  const keyOf = (s: (typeof suggestions)[number]): string =>
+    s.kind === 'team' ? `team:${s.teamSlug}` : `user:${s.login ?? s.userId}`;
   return (
     <div className="mt-1.5 space-y-1.5">
       <div className="flex items-center gap-2 text-[11px] text-gray-500">
         <span className="font-medium">Suggested reviewers</span>
         <button
           type="button"
-          onClick={() => request.mutate({ userIds: ids })}
-          disabled={request.isPending || done || ids.length === 0}
+          onClick={() => request.mutate({ userIds, logins, teamSlugs })}
+          disabled={request.isPending || done || suggestions.length === 0}
           className="rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
           title="Request these reviewers on GitHub"
         >
@@ -225,13 +242,23 @@ function RoutingReviewers({
             ? '✓ Requested'
             : request.isPending
               ? 'Assigning…'
-              : `Assign${ids.length > 1 ? ' all' : ''}`}
+              : `Assign${suggestions.length > 1 ? ' all' : ''}`}
         </button>
       </div>
       <ul className="space-y-1">
-        {card.suggestedReviewers.map((s) => (
-          <li key={s.userId} className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
-            <UserChip id={s.userId} usersById={usersById} />
+        {suggestions.map((s) => (
+          <li key={keyOf(s)} className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
+            {s.kind === 'team' ? (
+              <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium">
+                @{s.teamName}
+              </span>
+            ) : s.userId != null ? (
+              <UserChip id={s.userId} usersById={usersById} />
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px]">
+                @{s.login}
+              </span>
+            )}
             <span className="text-gray-400">{s.reason}</span>
           </li>
         ))}
@@ -348,9 +375,11 @@ export function InsightsView({
   // Tab changes write BOTH the local state and the store.
   const storedSubTab = useFilters((s) => s.insightsSubTab);
   const setInsightsSubTab = useFilters((s) => s.setInsightsSubTab);
-  const [subTab, setSubTabLocal] = useState<InsightsSubTab>(
-    initialSubTab ?? storedSubTab ?? 'overview',
-  );
+  const [subTab, setSubTabLocal] = useState<InsightsSubTab>(() => {
+    const init = initialSubTab ?? storedSubTab ?? 'overview';
+    // 'sprint' is no longer a tab (folded into Overview) — land on Overview instead.
+    return init === 'sprint' ? 'overview' : init;
+  });
   const setSubTab = (tab: InsightsSubTab): void => {
     setSubTabLocal(tab);
     setInsightsSubTab(tab);
@@ -370,6 +399,8 @@ export function InsightsView({
   );
   useEffect(() => {
     if (subTab === 'compare' && !isAllTeams) setSubTab('overview');
+    // The removed 'Sprint' sub-tab redirects to Overview (where its content now lives).
+    else if (subTab === 'sprint') setSubTab('overview');
   }, [subTab, isAllTeams]);
 
   // Back-from-a-click flash — EXACT parity with the Feed (FeedView): a real browser Back
@@ -623,9 +654,14 @@ export function InsightsView({
 
       {subTab === 'overview' ? (
         <div className="space-y-3">
-          {/* The flow-metric header (DORA-ish tiles + trend charts) moved OUT to the cross-repo
-              Feed (now CORE/free — see FeedMetricsPanel). The Insights Overview keeps the
-              attention cards below (+ Sprint / Retro / Compare tabs). */}
+          {/* The AI sprint report → the six-question preset CAROUSEL → the ad-hoc "Ask about the
+              sprint" chat now live at the TOP of Overview (the former "Sprint" sub-tab was folded
+              in here); the attention cards follow. All three are per-team (teamScope) + gated on
+              activityDigest. The flow-metric header moved OUT to the cross-repo Feed (CORE/free —
+              see FeedMetricsPanel). */}
+          <SprintReportCard />
+          <PresetPromptPanel />
+          <AdHocChatPanel />
           {isLoading ? (
             <div className="space-y-3">
               {[0, 1, 2].map((i) => (
@@ -648,13 +684,6 @@ export function InsightsView({
           ) : (
             <ul className="space-y-2">{nonBotCards.map((card) => renderCard(card))}</ul>
           )}
-        </div>
-      ) : subTab === 'sprint' ? (
-        // The AI sprint digest (state of play), full width, followed by the one-click
-        // preset-prompt answer surface. Both are per-team (teamScope) + gated on activityDigest.
-        <div className="space-y-3">
-          <SprintReportCard />
-          <PresetPromptPanel />
         </div>
       ) : subTab === 'compare' ? (
         // Cross-team comparison — only reachable in All-Teams scope (the tab is hidden otherwise).

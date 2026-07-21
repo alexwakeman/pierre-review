@@ -21,11 +21,9 @@ import type {
   RequestReviewersBody,
   RequestReviewersResult,
   ResolveBotThreadsBody,
-  ReviewerSuggestion,
   SuggestedReviewersResponse,
   UpdateBranchBody,
   UpdateBranchResult,
-  User,
 } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
@@ -48,8 +46,7 @@ import {
   upsertLocalPrComment,
   upsertLocalReview,
 } from '../../db/queries.js';
-import { getCodeownersMatch, type CodeownersMatch } from '../../github/codeowners.js';
-import { suggestTeamsFromHistory } from '../../github/team-reviewers.js';
+import { enrichReviewerSuggestions } from '../../github/reviewer-suggest.js';
 import {
   buildFileAnchors,
   fallbackAnchor,
@@ -250,77 +247,17 @@ async function buildSuggestedReviewers(
 ): Promise<SuggestedReviewersResponse> {
   if (!basis.wants) return { suggestedReviewers: [], users: [] };
   const { owner, name, authorLogin, paths, suggestions, users } = basis;
-
-  const extraUsers: User[] = [];
-  let merged: ReviewerSuggestion[] = suggestions;
-  try {
-    const token = await getAccessToken(accountId);
-    const emptyMatch: CodeownersMatch = { logins: [], teams: [] };
-    const [match, historyTeams] = await Promise.all([
-      paths.length > 0
-        ? getCodeownersMatch(token, owner, name, accountId, paths)
-        : Promise.resolve(emptyMatch),
-      suggestTeamsFromHistory(token, owner, name, accountId),
-    ]);
-
-    // Resolve @user owners to synced users (avatar/link); unsynced owners show login-only.
-    // Exclude the PR author (GitHub rejects self-review requests).
-    const uniqueLogins = [...new Set(match.logins)].filter((l) => l !== authorLogin);
-    const resolved = await getUsersByLogins(uniqueLogins);
-    const byLogin = new Map(resolved.map((u) => [u.githubLogin, u]));
-
-    const codeownerUsers: ReviewerSuggestion[] = uniqueLogins.map((login) => ({
-      kind: 'user',
-      login,
-      userId: byLogin.get(login)?.id ?? null,
-      teamSlug: null,
-      teamName: null,
-      reason: 'owns this path (CODEOWNERS)',
-      source: 'codeowners',
-    }));
-    const codeownerTeams: ReviewerSuggestion[] = match.teams.map((t) => ({
-      kind: 'team',
-      login: null,
-      userId: null,
-      teamSlug: t.slug,
-      teamName: t.name,
-      reason: 'owns this path (CODEOWNERS)',
-      source: 'codeowners',
-    }));
-    const historyTeamSuggestions: ReviewerSuggestion[] = historyTeams.map((t) => ({
-      kind: 'team',
-      login: null,
-      userId: null,
-      teamSlug: t.slug,
-      teamName: t.name,
-      reason: `usually requested here (${t.count} recent PR${t.count === 1 ? '' : 's'})`,
-      source: 'history',
-    }));
-
-    // Merge = precedence: CODEOWNERS users, CODEOWNERS teams (declared), inferred teams, then
-    // the history-user suggestions. Dedup users by login and teams by slug (so a team that's
-    // both a CODEOWNER and historically requested shows once, as the CODEOWNER).
-    const seenLogins = new Set<string>();
-    const seenTeams = new Set<string>();
-    merged = [];
-    for (const s of [...codeownerUsers, ...codeownerTeams, ...historyTeamSuggestions, ...suggestions]) {
-      if (s.kind === 'team') {
-        if (s.teamSlug && !seenTeams.has(s.teamSlug)) {
-          seenTeams.add(s.teamSlug);
-          merged.push(s);
-        }
-      } else if (s.login && !seenLogins.has(s.login)) {
-        seenLogins.add(s.login);
-        merged.push(s);
-      }
-    }
-    // The newly-resolved codeowner users the basis didn't already carry.
-    const known = new Set(users.map((u) => u.id));
-    for (const u of resolved) if (!known.has(u.id)) extraUsers.push(u);
-  } catch {
-    /* best-effort: fall back to the history-user suggestions */
-  }
-  return { suggestedReviewers: merged.slice(0, 5), users: [...users, ...extraUsers] };
+  const { suggestions: merged, extraUsers } = await enrichReviewerSuggestions({
+    accountId,
+    owner,
+    name,
+    authorLogin,
+    paths,
+    userSuggestions: suggestions,
+    knownUserIds: new Set(users.map((u) => u.id)),
+    resolveUsers: getUsersByLogins,
+  });
+  return { suggestedReviewers: merged, users: [...users, ...extraUsers] };
 }
 
 export async function prRoutes(app: FastifyInstance): Promise<void> {

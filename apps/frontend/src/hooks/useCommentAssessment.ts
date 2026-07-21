@@ -15,10 +15,12 @@ export function useCommentAssessment(threadId: number | null, enabled: boolean) 
   });
 }
 
-export function useAssessComment(threadId: number) {
+// `diffHunk` = the thread's hydrated root-comment diff hunk, forwarded so the server-side
+// check always has diff context (the DB column is null under lean storage).
+export function useAssessComment(threadId: number, diffHunk?: string | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.assessThread(threadId),
+    mutationFn: () => api.assessThread(threadId, diffHunk),
     onSuccess: (data) => qc.setQueryData(['comment-assessment', threadId], data),
   });
 }
