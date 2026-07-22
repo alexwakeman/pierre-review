@@ -519,6 +519,15 @@ export interface ProHostQueries {
     window: BotWindowKind,
     repoIds?: number[] | null,
   ): Promise<unknown>;
+  // The raw automated-reviewer comment CONTENT for a scope/window (Pro "Themes" AI summary — the
+  // one bot query that returns bodies). Additive (apiVersion stays 12). Returns
+  // { comments: BotReviewCommentRow[]; truncated } (cast by the plugin); `repoIds` scopes to a
+  // Team's repos (null → all account repos). Only automated-reviewer authors, capped most-recent.
+  getBotReviewComments(
+    accountId: number,
+    window: BotWindowKind,
+    repoIds?: number[] | null,
+  ): Promise<unknown>;
 }
 
 export interface ProContext {

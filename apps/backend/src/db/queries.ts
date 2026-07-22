@@ -7353,6 +7353,203 @@ export async function getBotOnlyReviewPrs(
 // a keep/tune/kill verdict, and a ≤12-week weekly trend. Cost fields stay null (the
 // frontend overlays per-vendor cost from Pro settings). 'hide' mute rules drop matching
 // threads from the counts. Deterministic, NO AI. Account-scoped.
+// ── Bot THEMES source rows (Pro) — the raw automated-reviewer comment CONTENT ────────────────
+// The ONE bot query that returns comment BODIES (every other bot query is deterministic counts).
+// Powers the Pro "Themes" AI summary: the plugin funnels these (dedup + strip) then one Haiku pass
+// reads them. Account-scoped + TEAM-scoped (`scopeRepoIds`, mirroring getBotAnalytics) + windowed;
+// only automated-reviewer authors; capped most-recent (a `truncated` flag) so a firehose repo can't
+// blow the payload. Returns both inline review-thread comments (with path + derivedState) and
+// issue-level PR comments (path/derivedState null). The row shape is RE-DECLARED verbatim in
+// packages/pro/src/bot-themes/build.ts (open-core boundary — the plugin imports no host internals);
+// KEEP THE TWO IN LOCKSTEP.
+export interface BotReviewCommentRow {
+  id: number; // source-row id (namespaced by `source` — not globally unique across sources)
+  source: 'review' | 'issue';
+  prId: number;
+  prNumber: number;
+  repoId: number;
+  repoFullName: string;
+  path: string | null; // inline comments carry a file path; issue-level comments don't
+  authorUserId: number;
+  reviewerKey: string; // `u<userId>` — mirrors the ROI row identity
+  label: string;
+  login: string | null;
+  kind: AutomatedReviewerKind;
+  body: string | null;
+  createdAt: string; // ISO
+  derivedState: string | null; // inline threads only (untouched/replied/likely_addressed/resolved)
+  threadId: number | null;
+}
+
+const BOT_THEME_COMMENT_CAP = 3000; // most-recent bot comments per source considered for a summary
+
+export async function getBotReviewComments(
+  accountId: number,
+  window: BotWindowKind,
+  scopeRepoIds?: number[] | null,
+): Promise<{ comments: BotReviewCommentRow[]; truncated: boolean }> {
+  // Team scope resolved to no repos → nothing to summarize.
+  if (scopeRepoIds != null && scopeRepoIds.length === 0) return { comments: [], truncated: false };
+  const automatedIds = await automatedReviewerUserIds(accountId);
+  if (automatedIds.length === 0) return { comments: [], truncated: false };
+  const kindMap = await classificationKindForUser(accountId);
+
+  const nowMs = Date.now();
+  // Window resolution mirrors getBotAnalytics exactly (rolling_14 / 'sprint' both → 14d trailing).
+  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
+  const from = new Date(nowMs - windowDays * 86_400_000);
+  const repoScopeFilter =
+    scopeRepoIds != null ? [inArray(pullRequests.repoId, scopeRepoIds)] : [];
+
+  // Per-reviewer label (custom classification label → vendor pretty name → login) — mirrors
+  // getBotAnalytics.reviewerLabel exactly, so a bot reads the same here as in the ROI panel.
+  const classLabel = new Map<number, string>();
+  for (const r of await db
+    .select({ id: botReviewClassification.authorUserId, label: botReviewClassification.label })
+    .from(botReviewClassification)
+    .where(eq(botReviewClassification.accountId, accountId))
+    .execute()) {
+    if (r.label != null && r.label.trim() !== '') classLabel.set(r.id, r.label.trim());
+  }
+  const loginById = new Map<number, string>();
+  const rawLoginById = new Map<number, string>();
+  for (const r of await db
+    .select({ id: users.id, login: users.githubLogin, name: users.displayName })
+    .from(users)
+    .where(inArray(users.id, automatedIds))
+    .execute()) {
+    loginById.set(r.id, r.name?.trim() || r.login || `#${r.id}`);
+    if (r.login) rawLoginById.set(r.id, r.login);
+  }
+  const labelFor = (userId: number, kind: AutomatedReviewerKind): string => {
+    const custom = classLabel.get(userId);
+    if (custom) return custom;
+    if (kind !== 'in_house' && kind !== 'pierre' && kind !== 'vendor') return labelForKind(kind);
+    return loginById.get(userId) ?? labelForKind(kind);
+  };
+
+  // Inline review-thread comments (carry the thread's path + derivedState).
+  const reviewRows = await db
+    .select({
+      id: reviewComments.id,
+      prId: reviewComments.prId,
+      prNumber: pullRequests.number,
+      repoId: pullRequests.repoId,
+      owner: repos.owner,
+      name: repos.name,
+      authorId: reviewComments.authorId,
+      body: reviewComments.body,
+      createdAt: reviewComments.createdAt,
+      path: reviewThreads.path,
+      derivedState: reviewThreads.derivedState,
+      threadId: reviewComments.threadId,
+    })
+    .from(reviewComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .leftJoin(reviewThreads, eq(reviewThreads.id, reviewComments.threadId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviewComments.authorId, automatedIds),
+        gte(reviewComments.createdAt, from),
+        ...repoScopeFilter,
+      ),
+    )
+    .orderBy(desc(reviewComments.createdAt))
+    .limit(BOT_THEME_COMMENT_CAP)
+    .execute();
+
+  // Issue-level PR comments (no path / derivedState).
+  const prCommentRows = await db
+    .select({
+      id: prComments.id,
+      prId: prComments.prId,
+      prNumber: pullRequests.number,
+      repoId: pullRequests.repoId,
+      owner: repos.owner,
+      name: repos.name,
+      authorId: prComments.authorId,
+      body: prComments.body,
+      createdAt: prComments.createdAt,
+    })
+    .from(prComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(prComments.authorId, automatedIds),
+        gte(prComments.createdAt, from),
+        ...repoScopeFilter,
+      ),
+    )
+    .orderBy(desc(prComments.createdAt))
+    .limit(BOT_THEME_COMMENT_CAP)
+    .execute();
+
+  const toIso = (d: Date | number | null): string => {
+    if (d == null) return new Date(0).toISOString();
+    if (d instanceof Date) return d.toISOString();
+    const ms = Number(d) > 1e12 ? Number(d) : Number(d) * 1000;
+    return new Date(ms).toISOString();
+  };
+
+  const out: BotReviewCommentRow[] = [];
+  for (const r of reviewRows) {
+    if (r.authorId == null) continue;
+    const kind = kindMap.get(r.authorId) ?? 'in_house';
+    out.push({
+      id: r.id,
+      source: 'review',
+      prId: r.prId,
+      prNumber: r.prNumber,
+      repoId: r.repoId,
+      repoFullName: `${r.owner}/${r.name}`,
+      path: r.path ?? null,
+      authorUserId: r.authorId,
+      reviewerKey: `u${r.authorId}`,
+      label: labelFor(r.authorId, kind),
+      login: rawLoginById.get(r.authorId) ?? null,
+      kind,
+      body: r.body,
+      createdAt: toIso(r.createdAt),
+      derivedState: r.derivedState ?? null,
+      threadId: r.threadId ?? null,
+    });
+  }
+  for (const r of prCommentRows) {
+    if (r.authorId == null) continue;
+    const kind = kindMap.get(r.authorId) ?? 'in_house';
+    out.push({
+      id: r.id,
+      source: 'issue',
+      prId: r.prId,
+      prNumber: r.prNumber,
+      repoId: r.repoId,
+      repoFullName: `${r.owner}/${r.name}`,
+      path: null,
+      authorUserId: r.authorId,
+      reviewerKey: `u${r.authorId}`,
+      label: labelFor(r.authorId, kind),
+      login: rawLoginById.get(r.authorId) ?? null,
+      kind,
+      body: r.body,
+      createdAt: toIso(r.createdAt),
+      derivedState: null,
+      threadId: null,
+    });
+  }
+  // Newest-first, capped combined (the plugin funnels further before the LLM). `truncated` when
+  // either source hit its own cap OR the combined stream overflowed the cap.
+  out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  const truncated =
+    reviewRows.length >= BOT_THEME_COMMENT_CAP ||
+    prCommentRows.length >= BOT_THEME_COMMENT_CAP ||
+    out.length > BOT_THEME_COMMENT_CAP;
+  return { comments: out.slice(0, BOT_THEME_COMMENT_CAP), truncated };
+}
+
 export async function getBotAnalytics(
   accountId: number,
   window: BotWindowKind,

@@ -269,6 +269,87 @@ export interface BotAnalyticsResponse {
   suggestions: BotTuningSuggestion[];  // WS6c, deterministic
 }
 
+// ── Bot THEMES (Pro, AI) — GET/POST /api/pro/bot-themes ─────────────────────────────────────
+// An AI (Haiku) QUALITATIVE summary layer over the Bots console — the one bot surface that reads
+// what the automated reviewers actually SAY (every other bot surface is deterministic volume /
+// timing / area). It funnels the in-window, TEAM-SCOPED bot review + PR comments (dedup + strip),
+// then a single Haiku pass extracts the recurring THEMES (nature + criticality + where) plus a
+// short narrative. The deterministic aggregates (per-bot volume, area distribution, acted-on %)
+// are computed in-plugin from the raw rows; the themes + narrative are the model's read
+// (approximate — the UI says so). STRICTLY Pro (rides the activityDigest AI-summary tier); cached +
+// credit-metered like the preset prompts. Scoped to the current Team via `scope`, windowed like ROI.
+export type BotThemeCategory =
+  | 'correctness'
+  | 'security'
+  | 'performance'
+  | 'error_handling'
+  | 'testing'
+  | 'style'
+  | 'docs'
+  | 'maintainability'
+  | 'other';
+export type BotThemeSeverity = 'critical' | 'major' | 'minor' | 'nit';
+
+// One recurring class of issue the bots raise, as read by the model from the deduped comment
+// clusters. `occurrences` is the model's estimate of how many comments the theme covers (grounded
+// in the cluster counts it was handed); `bots`/`areas` are the reviewer labels + top-level dirs it
+// spans; `examplePrNumbers` link to representative PRs.
+export interface BotTheme {
+  title: string;
+  category: BotThemeCategory;
+  severity: BotThemeSeverity;
+  summary: string; // one sentence
+  occurrences: number;
+  bots: string[];
+  areas: string[];
+  examplePrNumbers: number[];
+}
+
+// Per-automated-reviewer rollup (DETERMINISTIC — from the raw rows, not the model). `key` mirrors
+// the ROI row identity (`u<userId>`); `actedOnPct` is the derived-state acted-on share of the
+// bot's threads in the analyzed set.
+export interface BotThemeBotRollup {
+  key: string;
+  label: string;
+  login: string | null;
+  kind: AutomatedReviewerKind;
+  comments: number;
+  actedOnPct: number | null;
+}
+
+export interface BotThemeCategoryCount { category: BotThemeCategory; count: number; }
+export interface BotThemeSeverityCount { severity: BotThemeSeverity; count: number; }
+export interface BotThemeAreaCount { area: string; count: number; }
+
+// How much of the raw bot-comment stream the summary actually covered — surfaced verbatim so a
+// truncated / heavily-deduped result never reads as "we looked at everything".
+export interface BotThemeCoverage {
+  totalComments: number; // bot comments in the analyzed set (post-scope/window, pre-dedup)
+  deduped: number;       // distinct comment clusters after near-duplicate collapse
+  analyzed: number;      // clusters actually sent to the model (post-cap)
+  truncated: boolean;    // the host row fetch hit its cap (older comments beyond it excluded)
+}
+
+export interface BotThemesResult {
+  narrative: string;                    // markdown — the 2–3 sentence overview
+  themes: BotTheme[];                   // most-critical-first
+  bots: BotThemeBotRollup[];            // per-reviewer volume + acted-on (deterministic)
+  byCategory: BotThemeCategoryCount[];  // aggregated from themes (approximate)
+  bySeverity: BotThemeSeverityCount[];  // aggregated from themes (approximate)
+  byArea: BotThemeAreaCount[];          // top-level-dir distribution (deterministic)
+  coverage: BotThemeCoverage;
+  generatedAt: string;                  // ISO
+  model: string;
+}
+
+export interface BotThemesResponse {
+  enabled: boolean;             // the Pro AI-summary tier is on (else the tab shouldn't render)
+  result: BotThemesResult | null; // the last generated report for this (scope, window); null = none yet
+  throttled?: boolean;          // a generation was already in flight
+  creditsExhausted?: boolean;   // out of the monthly AI-credit allowance
+  empty?: boolean;              // no bot comments in scope/window → nothing to summarize
+}
+
 // ── Bot BEHAVIOUR analytics (EXPERIMENTAL) — GET /api/bot-behaviour ────────────────────────
 // A SEPARATE, deterministic (no-AI) CORE surface from the Bot-ROI panel, developed in its own
 // "Behaviour" sub-tab so it can mature without touching the shipped ROI response. Answers the

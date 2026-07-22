@@ -46,6 +46,7 @@ import type {
   RetroReportResponse,
   BotWindowKind,
   BotAnalyticsResponse,
+  BotThemesResponse,
   BotBehaviourResponse,
   BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
@@ -661,6 +662,26 @@ export const api = {
       withQuery(`/api/bot-analytics`, `window=${encodeURIComponent(window)}`, s, r),
     );
   },
+  // The Bots "Themes" AI summary (Pro Haiku) — the qualitative read of what the automated
+  // reviewers are flagging over the current TEAM scope + window. GET is a pure cache read; the
+  // refresh POST is the only billing path. Team-scoped (cross-repo Bots rail), so no repoIds.
+  botThemes: (window: BotWindowKind, scope?: string) =>
+    get<BotThemesResponse>(
+      withQuery(
+        '/api/pro/bot-themes',
+        `window=${encodeURIComponent(window)}`,
+        scopeParam(scope),
+      ),
+    ),
+  botThemesRefresh: (window: BotWindowKind, scope?: string) =>
+    fetch(
+      withQuery(
+        '/api/pro/bot-themes/refresh',
+        `window=${encodeURIComponent(window)}`,
+        scopeParam(scope),
+      ),
+      jsonBody('POST'),
+    ).then((r) => handle<BotThemesResponse>(r)),
   // EXPERIMENTAL bot behaviour analytics (TTFR / LoC-to-comments / 24h heatmap / follow-ups).
   // Same window/scope/repoIds wiring as botAnalytics (repo scope wins over team scope).
   botBehaviour: (window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {

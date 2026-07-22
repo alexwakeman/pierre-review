@@ -142,7 +142,7 @@ export interface FilterState {
   // Which inner sub-tab the Bots view shows: 'roi' (the shipped ROI panel + bot feed) or
   // 'behaviour' (the EXPERIMENTAL behaviour analytics). A single scalar (both the cross-repo
   // rail Bots view and the per-repo console Bots tab share one BotsView). Transient, URL-silent.
-  botsInnerTab: 'roi' | 'behaviour';
+  botsInnerTab: 'roi' | 'behaviour' | 'themes';
 
   // selection
   selectedPrId: number | null;
@@ -325,7 +325,7 @@ export interface FilterState {
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
   // Switch the Bots view's inner sub-tab (ROI vs experimental Behaviour).
-  setBotsInnerTab: (v: 'roi' | 'behaviour') => void;
+  setBotsInnerTab: (v: 'roi' | 'behaviour' | 'themes') => void;
   // Set/clear the PR-detail Threads-tab bot filter (a ChecksTab bot chip → filter Threads to
   // that vendor). Re-selecting the same vendor toggles it off.
   setThreadBotFilter: (kind: ReviewBotKind | null) => void;

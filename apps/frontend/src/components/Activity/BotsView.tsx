@@ -1,8 +1,10 @@
 import { useMemo } from 'react';
 import { useBotAnalytics } from '../../hooks/useBotTriage.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
 import { BotRoiPanel, ResolveBacklogBanner } from './BotRoiPanel.js';
 import { BotBehaviourPanel } from './BotBehaviourPanel.js';
+import { BotThemesPanel } from './BotThemesPanel.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 
@@ -39,6 +41,13 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   const innerTab = useFilters((s) => s.botsInnerTab);
   const setInnerTab = useFilters((s) => s.setBotsInnerTab);
 
+  // The "Themes" AI summary is STRICTLY Pro (activityDigest tier) and TEAM-scoped, so it only
+  // appears in the cross-repo Bots rail (repoId == null) — not the per-repo console Bots tab. When
+  // it's unavailable but the shared scalar still points at it, fall back to ROI.
+  const { activityDigest } = useProCapabilities();
+  const showThemes = repoId == null && activityDigest;
+  const effectiveTab = innerTab === 'themes' && !showThemes ? 'roi' : innerTab;
+
   return (
     <div className="space-y-3" data-testid="bots-view">
       <div className="flex flex-wrap items-baseline gap-2">
@@ -56,8 +65,9 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         {([
           { key: 'roi', label: 'ROI' },
           { key: 'behaviour', label: 'Behaviour' },
+          ...(showThemes ? [{ key: 'themes', label: 'Themes' } as const] : []),
         ] as const).map((t) => {
-          const on = innerTab === t.key;
+          const on = effectiveTab === t.key;
           return (
             <button
               key={t.key}
@@ -72,7 +82,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               }`}
             >
               {t.label}
-              {t.key === 'behaviour' && (
+              {(t.key === 'behaviour' || t.key === 'themes') && (
                 <span className="rounded bg-sky-100 px-1 text-[9px] font-semibold uppercase text-sky-600 dark:bg-sky-900/40 dark:text-sky-300">
                   beta
                 </span>
@@ -87,8 +97,10 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           only in-view way to un-isolate the bot feed — is always reachable. Self-hides otherwise. */}
       <FeedIsolationBanner />
 
-      {innerTab === 'behaviour' ? (
+      {effectiveTab === 'behaviour' ? (
         <BotBehaviourPanel repoId={repoId} />
+      ) : effectiveTab === 'themes' ? (
+        <BotThemesPanel />
       ) : (
         <>
           {/* Governance caution: PRs whose only review came from an automated reviewer — no human
