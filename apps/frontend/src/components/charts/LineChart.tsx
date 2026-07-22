@@ -21,6 +21,8 @@ export function LineChart({
   formatY = fmtNum,
   height = 132,
   logY = false,
+  centerTip = false,
+  hideLegend = false,
 }: {
   labels: string[];
   series: Series[];
@@ -32,6 +34,11 @@ export function LineChart({
   // when the series also has large spikes. Zeros/negatives floor to the bottom decade (log has no
   // 0). Falls back to linear when there's no positive value to scale. Opt-in; default linear.
   logY?: boolean;
+  // Pin the hover tooltip to the chart's horizontal centre (see FloatingTip) so it can't spill
+  // into a neighbouring panel at the far edges — for wide, multi-series charts.
+  centerTip?: boolean;
+  // Suppress the built-in legend (the host renders its own — e.g. an interactive series selector).
+  hideLegend?: boolean;
 }): JSX.Element {
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
@@ -208,13 +215,17 @@ export function LineChart({
                 d={linePathFor(s)}
                 fill="none"
                 stroke={s.color}
-                strokeWidth={1.5}
+                strokeWidth={s.dashed ? 2 : 1.5}
+                strokeDasharray={s.dashed ? '5 4' : undefined}
                 strokeLinejoin="round"
                 strokeLinecap="round"
+                opacity={s.dashed ? 0.85 : 1}
               />
             ))}
             {series.map((s) =>
-              s.values.map((v, i) => {
+              s.dashed
+                ? null // a fitted overlay (trend line) carries no data dots
+                : s.values.map((v, i) => {
                 if (v == null) return null;
                 const flagged = s.pointFlags?.[i] === true;
                 return (
@@ -264,9 +275,9 @@ export function LineChart({
           </svg>
         )}
         {hover != null && w > 0 && (
-          <FloatingTip x={x(hover)} y={PAD_T} width={w}>
+          <FloatingTip x={x(hover)} y={PAD_T} width={w} centered={centerTip}>
             <div className="font-medium">{labels[hover] ? fmtDate(labels[hover]!) : ''}</div>
-            {series.map((s) => {
+            {series.filter((s) => !s.dashed).map((s) => {
               const note = s.pointNotes?.[hover] ?? null;
               return (
                 <div key={s.key}>
@@ -293,7 +304,7 @@ export function LineChart({
           </FloatingTip>
         )}
       </div>
-      {series.length > 1 && <Legend series={series} />}
+      {!hideLegend && series.length > 1 && <Legend series={series} />}
     </div>
   );
 }

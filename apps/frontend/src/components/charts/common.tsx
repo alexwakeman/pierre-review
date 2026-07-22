@@ -71,6 +71,9 @@ export interface Series {
   // point (observed vs typical, direction). Non-null only where pointFlags[i] is true; surfaced
   // in the hover tooltip so the anomaly circle explains itself. Aligned 1:1 with `values`.
   pointNotes?: (string | null)[];
+  // Render this series as a dashed line with NO point dots (LineChart) — for a fitted/derived
+  // overlay like a line-of-best-fit trend, visually distinct from the real data series.
+  dashed?: boolean;
 }
 
 // Hours → compact human duration (m / h / d), precision shrinking with magnitude.
@@ -124,24 +127,33 @@ export function Legend({
   );
 }
 
-// A floating tooltip pinned within the chart's relative wrapper. `x` is clamped so
-// the box stays inside [0, width]; it sits just above `y` (pointer-events:none).
+// A floating tooltip pinned within the chart's relative wrapper. Default: follows `x` (clamped so
+// the box stays inside the chart) and sits just above `y`. `centered`: ignores `x` and pins the
+// box to the chart's horizontal centre, growing DOWNWARD from the top — so a wide/tall tooltip
+// never spills past the left/right edges (into a neighbouring panel) or above into the header.
+// pointer-events:none throughout.
 export function FloatingTip({
   x,
   y,
   width,
   children,
+  centered = false,
 }: {
   x: number;
   y: number;
   width: number;
   children: React.ReactNode;
+  centered?: boolean;
 }): JSX.Element {
-  const clampedX = Math.max(58, Math.min(x, Math.max(58, width - 58)));
+  const clampedX = centered
+    ? width / 2
+    : Math.max(58, Math.min(x, Math.max(58, width - 58)));
   return (
     <div
-      className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[10px] leading-tight text-gray-700 shadow-md dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-200"
-      style={{ left: clampedX, top: Math.max(y - 6, 0) }}
+      className={`pointer-events-none absolute z-20 -translate-x-1/2 ${
+        centered ? '' : '-translate-y-full'
+      } whitespace-nowrap rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[10px] leading-tight text-gray-700 shadow-md dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-200`}
+      style={{ left: clampedX, top: centered ? 2 : Math.max(y - 6, 0) }}
     >
       {children}
     </div>

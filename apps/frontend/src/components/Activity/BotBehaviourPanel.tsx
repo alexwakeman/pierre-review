@@ -16,7 +16,7 @@ import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import { Heatmap } from '../charts/Heatmap.js';
 import { DayStrip } from '../charts/DayStrip.js';
-import { ChartCard, ChartEmpty, fmtDuration, type Series } from '../charts/common.js';
+import { ChartCard, ChartEmpty, PALETTE, fmtDuration, type Series } from '../charts/common.js';
 
 type BotColorFn = (bot: { login?: string | null; kind: BotBehaviourBotStat['kind'] }) => string;
 
@@ -148,6 +148,23 @@ function DistChart({ bins, color }: { bins: AnalyticsBin[]; color: string }): JS
 // (cleaner code or better self-review). Approximate — a tuned-down bot or more trivial PRs read
 // the same way, so it rides the panel's "deterministic proxy" caveat. per-KLoC (size-adjusted) is
 // the default; per-PR is the plainer view. Mirrors the old TTFR chart's union-of-weeks shape.
+// Least-squares fit y = m·x + b over (x,y) points; null if <2 points or degenerate.
+function fitLine(pts: { x: number; y: number }[]): { m: number; b: number } | null {
+  const n = pts.length;
+  if (n < 2) return null;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (const p of pts) {
+    sx += p.x;
+    sy += p.y;
+    sxx += p.x * p.x;
+    sxy += p.x * p.y;
+  }
+  const denom = n * sxx - sx * sx;
+  if (denom === 0) return null;
+  const m = (n * sxy - sx * sy) / denom;
+  return { m, b: (sy - m * sx) / n };
+}
+
 function DensityTrendChart({
   bots,
   botColor,
@@ -156,16 +173,42 @@ function DensityTrendChart({
   botColor: BotColorFn;
 }): JSX.Element {
   const [mode, setMode] = useState<'kloc' | 'pr'>('kloc');
-  const { labels, series } = useMemo(() => {
+  const [showTrend, setShowTrend] = useState(false);
+  // null = all bots selected (stays correct across window refetches); a Set = an explicit subset.
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+
+  // Bots that actually have density history — the selectable set (stable x-axis from all of them).
+  const botsWithData = useMemo(
+    () =>
+      bots.filter((b) =>
+        b.trend.some((p) => p.findingsPerKloc != null || p.findingsPerPr != null),
+      ),
+    [bots],
+  );
+  const allKeys = useMemo(() => botsWithData.map((b) => b.key), [botsWithData]);
+  const isOn = (key: string): boolean => selected == null || selected.has(key);
+  const toggleBot = (key: string): void =>
+    setSelected((prev) => {
+      const base = prev == null ? new Set(allKeys) : new Set(prev);
+      if (base.has(key)) base.delete(key);
+      else base.add(key);
+      return base.size === allKeys.length ? null : base; // full set → back to "all"
+    });
+
+  const { labels, series, trendPct } = useMemo(() => {
     const val = (p: BotBehaviourBotStat['trend'][number]): number | null =>
       mode === 'kloc' ? p.findingsPerKloc : p.findingsPerPr;
     const weekSet = new Set<string>();
-    for (const b of bots) for (const p of b.trend) weekSet.add(p.weekStart);
+    for (const b of botsWithData) for (const p of b.trend) weekSet.add(p.weekStart);
     const labels = Array.from(weekSet).sort().slice(-12);
-    const series: Series[] = bots
+    const chosen = botsWithData.filter((b) => selected == null || selected.has(b.key));
+
+    const valByBotWeek = new Map<string, Map<string, number | null>>();
+    const series: Series[] = chosen
       .filter((b) => b.trend.some((p) => val(p) != null))
       .map((b) => {
         const byWeek = new Map(b.trend.map((p) => [p.weekStart, val(p)]));
+        valByBotWeek.set(b.key, byWeek);
         const flagByWeek = new Map(b.trend.map((p) => [p.weekStart, p.densityAnomaly]));
         const prsByWeek = new Map(b.trend.map((p) => [p.weekStart, p.prsInWeek]));
         // Per-week exception detail from the bot's anomaly evidence (density is judged on the
@@ -191,11 +234,77 @@ function DensityTrendChart({
           pointNotes: labels.map((w) => noteByWeek.get(w) ?? null),
         };
       });
-    return { labels, series };
-  }, [bots, botColor, mode]);
+
+    // Overall trend: a log-space line of best fit over the selected bots' COMBINED weekly density
+    // (mean across bots present that week). Log-space so it renders straight on the log axis and
+    // its slope reads as a %-change over the span. Needs ≥2 weeks with data.
+    let trendPct: number | null = null;
+    if (showTrend && series.length > 0) {
+      const pts: { x: number; y: number }[] = [];
+      labels.forEach((w, i) => {
+        const vals: number[] = [];
+        for (const b of chosen) {
+          const v = valByBotWeek.get(b.key)?.get(w);
+          if (v != null) vals.push(v);
+        }
+        if (vals.length === 0) return;
+        const mean = vals.reduce((a, c) => a + c, 0) / vals.length;
+        if (mean > 0) pts.push({ x: i, y: Math.log10(mean) });
+      });
+      const fit = fitLine(pts);
+      if (fit) {
+        const yAt = (i: number): number => Math.pow(10, fit.m * i + fit.b);
+        series.push({
+          key: '__trend__',
+          label: 'Overall trend',
+          color: PALETTE.slate,
+          values: labels.map((_, i) => yAt(i)),
+          dashed: true,
+        });
+        const start = yAt(0);
+        const end = yAt(labels.length - 1);
+        if (start > 0) trendPct = Math.round((end / start - 1) * 100);
+      }
+    }
+    return { labels, series, trendPct };
+  }, [botsWithData, botColor, mode, selected, showTrend]);
+
+  // Direction chip: for findings density LOWER is better, so a fall reads green, a rise amber.
+  const trendChip = ((): { text: string; cls: string } | null => {
+    if (trendPct == null) return null;
+    const arrow = trendPct <= -10 ? '↘' : trendPct >= 10 ? '↗' : '→';
+    const cls =
+      trendPct <= -10
+        ? 'text-green-600 dark:text-green-400'
+        : trendPct >= 10
+          ? 'text-amber-600 dark:text-amber-400'
+          : 'text-gray-500 dark:text-gray-400';
+    return { text: `${arrow} ${trendPct > 0 ? '+' : ''}${trendPct}% over 12 wks`, cls };
+  })();
+
+  const noneSelected = allKeys.length > 0 && allKeys.every((k) => !isOn(k));
+
   return (
     <div className="space-y-2">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-[10px]">
+          <button
+            type="button"
+            onClick={() => setShowTrend((s) => !s)}
+            className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 font-medium ${
+              showTrend
+                ? 'border-slate-400 bg-slate-500/10 text-slate-700 dark:text-slate-200'
+                : 'border-gray-300 text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
+            }`}
+          >
+            <span
+              className="inline-block h-0 w-3 border-t-2 border-dashed"
+              style={{ borderColor: PALETTE.slate }}
+            />
+            Trend line
+          </button>
+          {showTrend && trendChip && <span className={`font-medium ${trendChip.cls}`}>{trendChip.text}</span>}
+        </div>
         <div className="inline-flex overflow-hidden rounded border border-gray-300 text-[10px] dark:border-gray-700">
           {([
             ['kloc', 'per KLoC'],
@@ -216,10 +325,57 @@ function DensityTrendChart({
           ))}
         </div>
       </div>
-      {labels.length < 2 || series.length === 0 ? (
+
+      {/* Interactive legend / bot selector — click to show/hide a bot's line. */}
+      {botsWithData.length > 1 && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {botsWithData.map((b) => {
+            const on = isOn(b.key);
+            const color = botColor({ login: b.login, kind: b.kind });
+            return (
+              <button
+                key={b.key}
+                type="button"
+                onClick={() => toggleBot(b.key)}
+                className={`flex items-center gap-1 text-[10px] ${
+                  on ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 line-through opacity-60'
+                }`}
+              >
+                <span
+                  className="inline-block h-2 w-2 rounded-[2px]"
+                  style={{ background: on ? color : 'transparent', boxShadow: `inset 0 0 0 1.5px ${color}` }}
+                />
+                {b.label}
+              </button>
+            );
+          })}
+          {selected != null && (
+            <button
+              type="button"
+              onClick={() => setSelected(null)}
+              className="text-[10px] text-sky-600 hover:underline dark:text-sky-400"
+            >
+              all
+            </button>
+          )}
+        </div>
+      )}
+
+      {noneSelected ? (
+        <ChartEmpty label="Select at least one bot" />
+      ) : labels.length < 2 || series.length === 0 ? (
         <ChartEmpty label="Not enough weekly history yet" />
       ) : (
-        <LineChart labels={labels} series={series} height={150} curved logY formatY={densAxis} />
+        <LineChart
+          labels={labels}
+          series={series}
+          height={150}
+          curved
+          logY
+          centerTip
+          hideLegend
+          formatY={densAxis}
+        />
       )}
     </div>
   );
