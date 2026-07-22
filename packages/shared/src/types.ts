@@ -393,6 +393,17 @@ export interface BotRepoPresence {
   totalBots: number; // distinct automated reviewers active on this repo in-window
   bots: { key: string; label: string; login: string | null; kind: AutomatedReviewerKind; threads: number }[];
 }
+// Where in the codebase bots WORK, per repo — the bots' inline threads bucketed by top-level
+// directory ("area"), aggregated across ALL automated reviewers. The "which repo → which area"
+// two-layer view: maintainers see where bot effort actually concentrates (globally a repo × area
+// stacked bar; per-repo the one repo's area distribution). Areas are that repo's top dirs desc,
+// capped + an 'other' bucket for the tail.
+export interface BotRepoAreaUsage {
+  repoId: number;
+  repoName: string; // owner/name
+  totalThreads: number; // bot inline threads in this repo (window)
+  areas: { dir: string; count: number }[];
+}
 
 export interface BotBehaviourResponse {
   enabled: boolean; // always true (CORE / deterministic) — parallels BotAnalyticsResponse.enabled
@@ -403,6 +414,7 @@ export interface BotBehaviourResponse {
   overlap: BotOverlapStats; // (i) multiple bots on the same PR + (ii) same-line overlap
   directories: BotDirectoryUsage[]; // (iii) which dirs each bot reviews in (per-bot)
   repoPresence: BotRepoPresence[]; // (iii, global) which bots operate on each repo
+  repoAreas: BotRepoAreaUsage[]; // (iv) where bots work per repo, by top-level area/directory
   // Second coverage-strip series (SHARED, not per-bot — PR inflow is an account/repo fact):
   // per-day count of human-authored, non-draft PRs opened over the SAME 84-day span + scope as
   // every bot's dailyActivity, oldest→newest, aligned to daySpanStart. Overlaid on each bot's

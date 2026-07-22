@@ -110,6 +110,7 @@ import type {
   BotCoReviewPair,
   BotDirectoryUsage,
   BotRepoPresence,
+  BotRepoAreaUsage,
   PrBotBehaviourResponse,
   PrBotBehaviour,
   BotVendorPr,
@@ -7902,6 +7903,7 @@ export async function getBotBehaviourAnalytics(
     overlap: EMPTY_OVERLAP,
     directories: [],
     repoPresence: [],
+    repoAreas: [],
   });
 
   if (scopeRepoIds != null && scopeRepoIds.length === 0)
@@ -8376,6 +8378,7 @@ export async function getBotBehaviourAnalytics(
   const dirByBot = new Map<number, Map<string, number>>();
   const threadsByBot = new Map<number, number>();
   const repoBot = new Map<number, Map<number, number>>();
+  const repoDir = new Map<number, Map<string, number>>(); // repo → area(dir) → bot threads
   const repoIdsSeen = new Set<number>();
   const lineCluster = new Map<string, { pr: number; bots: Set<number> }>();
   for (const r of threadRows) {
@@ -8390,6 +8393,14 @@ export async function getBotBehaviourAnalytics(
     dm.set(dir, (dm.get(dir) ?? 0) + 1);
     threadsByBot.set(uid, (threadsByBot.get(uid) ?? 0) + 1);
     repoIdsSeen.add(r.repoId);
+    // Per-repo area (top-level dir) usage, aggregated across all bots — the "where in the repo"
+    // layer beneath the repo × bot presence matrix.
+    let ra = repoDir.get(r.repoId);
+    if (!ra) {
+      ra = new Map();
+      repoDir.set(r.repoId, ra);
+    }
+    ra.set(dir, (ra.get(dir) ?? 0) + 1);
     let rb = repoBot.get(r.repoId);
     if (!rb) {
       rb = new Map();
@@ -8450,6 +8461,24 @@ export async function getBotBehaviourAnalytics(
         b.bots.reduce((n, x) => n + x.threads, 0) - a.bots.reduce((n, x) => n + x.threads, 0),
     );
 
+  // Per-repo AREA usage: each repo's top-level dirs (desc), capped at 8 + an 'other' tail bucket.
+  const AREA_TOP = 8;
+  const repoAreas: BotRepoAreaUsage[] = [...repoDir.entries()]
+    .map(([repoId, dm]) => {
+      const sorted = [...dm.entries()].sort((a, b) => b[1] - a[1]);
+      const total = sorted.reduce((n, [, c]) => n + c, 0);
+      const areas = sorted.slice(0, AREA_TOP).map(([dir, count]) => ({ dir, count }));
+      const otherCount = sorted.slice(AREA_TOP).reduce((n, [, c]) => n + c, 0);
+      if (otherCount > 0) areas.push({ dir: 'other', count: otherCount });
+      return {
+        repoId,
+        repoName: repoNameById.get(repoId) ?? `#${repoId}`,
+        totalThreads: total,
+        areas,
+      };
+    })
+    .sort((a, b) => b.totalThreads - a.totalThreads);
+
   const overlap: BotOverlapStats = {
     reviewedPrs,
     multiReviewedPrs,
@@ -8473,6 +8502,7 @@ export async function getBotBehaviourAnalytics(
     overlap,
     directories,
     repoPresence,
+    repoAreas,
   };
 }
 

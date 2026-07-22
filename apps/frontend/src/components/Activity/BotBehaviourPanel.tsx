@@ -5,6 +5,7 @@ import type {
   BotBehaviourBotStat,
   BotDirectoryUsage,
   BotOverlapStats,
+  BotRepoAreaUsage,
   BotRepoPresence,
   BotWindowKind,
 } from '@pierre-review/shared';
@@ -16,7 +17,14 @@ import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import { Heatmap } from '../charts/Heatmap.js';
 import { DayStrip } from '../charts/DayStrip.js';
-import { ChartCard, ChartEmpty, PALETTE, fmtDuration, type Series } from '../charts/common.js';
+import {
+  ChartCard,
+  ChartEmpty,
+  PALETTE,
+  SERIES_COLORS,
+  fmtDuration,
+  type Series,
+} from '../charts/common.js';
 
 type BotColorFn = (bot: { login?: string | null; kind: BotBehaviourBotStat['kind'] }) => string;
 
@@ -624,6 +632,88 @@ function RepoPresenceSection({
   );
 }
 
+// ── "Where bots WORK" (EXPERIMENTAL) — the second layer beneath repo presence: which AREAS of the
+// codebase (top-level dirs) bot review threads land in. Global (≥2 repos) → a repo × area stacked
+// bar (each repo's bar split by area, shared area colours across repos + an 'other' tail); a single
+// repo → that repo's area distribution (x = areas). Aggregated across all bots. ──────────────────
+function areaLabel(dir: string): string {
+  return dir === '.' ? '(root)' : dir === 'other' ? 'other' : dir;
+}
+function RepoAreaSection({ repoAreas }: { repoAreas: BotRepoAreaUsage[] }): JSX.Element | null {
+  if (repoAreas.length === 0) return null;
+  const total = repoAreas.reduce((n, r) => n + r.totalThreads, 0);
+  if (total === 0) return null;
+
+  // Single repo (per-repo console, or a one-repo scope): a plain area distribution for that repo.
+  if (repoAreas.length === 1) {
+    const r = repoAreas[0]!;
+    return (
+      <ChartCard title="Where bots work" note={`inline threads by codebase area · ${total} total`}>
+        <BarChart
+          labels={r.areas.map((a) => areaLabel(a.dir))}
+          series={[
+            {
+              key: 'threads',
+              label: 'Bot threads',
+              color: PALETTE.indigo,
+              values: r.areas.map((a) => a.count),
+            },
+          ]}
+          height={200}
+          rotateLabels
+        />
+      </ChartCard>
+    );
+  }
+
+  // Global: repos on x, stacked by the top areas ACROSS repos (shared colours) + an 'other' tail
+  // that folds each repo's non-top dirs (incl. its own 'other' bucket). Each bar is normalised to
+  // 100% — so a small repo's area split is as readable as a busy one ("proportionately"); the raw
+  // volume per repo lives in the "Where bots operate" chart directly above.
+  const globalTotals = new Map<string, number>();
+  for (const r of repoAreas)
+    for (const a of r.areas) {
+      if (a.dir === 'other') continue; // the tail is handled below
+      globalTotals.set(a.dir, (globalTotals.get(a.dir) ?? 0) + a.count);
+    }
+  const topAreas = [...globalTotals.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 9)
+    .map(([d]) => d);
+  const topSet = new Set(topAreas);
+  const repos = repoAreas.slice(0, 14);
+  const labels = repos.map((r) => r.repoName.split('/').pop() ?? r.repoName);
+  const asPct = (count: number, total: number): number => (total > 0 ? (count / total) * 100 : 0);
+  const series: Series[] = topAreas.map((dir, i) => ({
+    key: dir,
+    label: areaLabel(dir),
+    color: SERIES_COLORS[i % SERIES_COLORS.length]!,
+    values: repos.map((r) => asPct(r.areas.find((a) => a.dir === dir)?.count ?? 0, r.totalThreads)),
+  }));
+  const otherValues = repos.map((r) =>
+    asPct(
+      r.totalThreads - r.areas.filter((a) => topSet.has(a.dir)).reduce((n, a) => n + a.count, 0),
+      r.totalThreads,
+    ),
+  );
+  if (otherValues.some((v) => v > 0))
+    series.push({ key: '__other__', label: 'other', color: PALETTE.gray, values: otherValues });
+
+  return (
+    <ChartCard title="Where bots work" note="% of each repo's bot threads, by codebase area">
+      <BarChart
+        labels={labels}
+        series={series}
+        mode="stacked"
+        rotateLabels
+        height={200}
+        formatY={pctAxis}
+        formatValue={pctAxis}
+      />
+    </ChartCard>
+  );
+}
+
 export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Element {
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
@@ -692,6 +782,9 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
           )}
           {data?.repoPresence != null && data.repoPresence.length > 0 && (
             <RepoPresenceSection repoPresence={data.repoPresence} botColor={botColor} />
+          )}
+          {data?.repoAreas != null && data.repoAreas.length > 0 && (
+            <RepoAreaSection repoAreas={data.repoAreas} />
           )}
           {bots.map((b) => (
             <BotCard
