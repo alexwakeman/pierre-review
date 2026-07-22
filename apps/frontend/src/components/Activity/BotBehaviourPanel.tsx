@@ -167,12 +167,28 @@ function DensityTrendChart({
       .map((b) => {
         const byWeek = new Map(b.trend.map((p) => [p.weekStart, val(p)]));
         const flagByWeek = new Map(b.trend.map((p) => [p.weekStart, p.densityAnomaly]));
+        const prsByWeek = new Map(b.trend.map((p) => [p.weekStart, p.prsInWeek]));
+        // Per-week exception detail from the bot's anomaly evidence (density is judged on the
+        // per-KLoC series, so the note is stated in /KLoC terms regardless of the toggle).
+        const noteByWeek = new Map<string, string>();
+        for (const a of b.anomalies) {
+          if (a.metric !== 'density' || a.weekStart == null) continue;
+          const dir = a.direction === 'high' ? 'higher than usual' : 'lower than usual';
+          const prs = prsByWeek.get(a.weekStart);
+          const prsTxt = prs != null ? ` · over ${prs} PR${prs === 1 ? '' : 's'}` : '';
+          const z = a.z != null ? ` · robust-z ${a.z}` : '';
+          noteByWeek.set(
+            a.weekStart,
+            `${dir} — ${a.observed} vs ${a.typical}/KLoC typical${z}${prsTxt}`,
+          );
+        }
         return {
           key: b.key,
           label: b.label,
           color: botColor({ login: b.login, kind: b.kind }),
           values: labels.map((w) => byWeek.get(w) ?? null),
           pointFlags: labels.map((w) => flagByWeek.get(w) ?? false),
+          pointNotes: labels.map((w) => noteByWeek.get(w) ?? null),
         };
       });
     return { labels, series };
@@ -203,7 +219,7 @@ function DensityTrendChart({
       {labels.length < 2 || series.length === 0 ? (
         <ChartEmpty label="Not enough weekly history yet" />
       ) : (
-        <LineChart labels={labels} series={series} height={150} curved formatY={densAxis} />
+        <LineChart labels={labels} series={series} height={150} curved logY formatY={densAxis} />
       )}
     </div>
   );
@@ -509,7 +525,7 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
         <>
           <ChartCard
             title="Findings density"
-            note="threads a bot opens per PR / KLoC · weekly · lower = cleaner over time · ⭘ = exception"
+            note="threads a bot opens per PR / KLoC · weekly · log scale · lower = cleaner · hover ⭘ for why"
           >
             <DensityTrendChart bots={bots} botColor={botColor} />
           </ChartCard>

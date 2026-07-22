@@ -20,6 +20,7 @@ export function LineChart({
   curved = false,
   formatY = fmtNum,
   height = 132,
+  logY = false,
 }: {
   labels: string[];
   series: Series[];
@@ -27,6 +28,10 @@ export function LineChart({
   curved?: boolean;
   formatY?: (n: number) => string;
   height?: number;
+  // Log (base-10) y-axis with decade gridlines — accentuates small differences at the low end
+  // when the series also has large spikes. Zeros/negatives floor to the bottom decade (log has no
+  // 0). Falls back to linear when there's no positive value to scale. Opt-in; default linear.
+  logY?: boolean;
 }): JSX.Element {
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
@@ -38,12 +43,35 @@ export function LineChart({
   const n = labels.length;
   const innerW = Math.max(w - PAD_L - PAD_R, 1);
   const innerH = height - PAD_T - PAD_B;
-  const maxV = niceMax(
-    Math.max(1, ...series.flatMap((s) => s.values.map((v) => v ?? 0))),
-  );
   const x = (i: number): number => PAD_L + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
-  const y = (v: number): number => PAD_T + innerH * (1 - v / maxV);
   const baseY = PAD_T + innerH;
+
+  // y-scale: linear (0 → niceMax) by default; log10 across whole decades when `logY` and there's
+  // positive spread to justify it. Both expose the same `y(v)` mapping + a `yTicks` list for the
+  // gridlines/labels, so the rest of the renderer is scale-agnostic.
+  const positives = series
+    .flatMap((s) => s.values)
+    .filter((v): v is number => v != null && v > 0);
+  const useLog = logY && positives.length > 0;
+  let y: (v: number) => number;
+  let yTicks: number[];
+  if (useLog) {
+    const hiExp = Math.ceil(Math.log10(Math.max(...positives)) - 1e-9);
+    let loExp = Math.floor(Math.log10(Math.min(...positives)) + 1e-9);
+    if (loExp >= hiExp) loExp = hiExp - 1; // guarantee at least one decade of range
+    const span = hiExp - loExp;
+    const floorV = Math.pow(10, loExp);
+    y = (v: number): number => {
+      const cl = v <= floorV ? floorV : v; // 0 / sub-floor values sit on the bottom decade
+      return PAD_T + innerH * (1 - (Math.log10(cl) - loExp) / span);
+    };
+    yTicks = [];
+    for (let e = loExp; e <= hiExp; e++) yTicks.push(Math.pow(10, e));
+  } else {
+    const maxV = niceMax(Math.max(1, ...series.flatMap((s) => s.values.map((v) => v ?? 0))));
+    y = (v: number): number => PAD_T + innerH * (1 - v / maxV);
+    yTicks = [0, maxV];
+  }
 
   const linePath = (s: Series): string =>
     s.values
@@ -138,8 +166,8 @@ export function LineChart({
       <div ref={ref} className="relative" style={{ height }}>
         {w > 0 && (
           <svg width={w} height={height} className="block">
-            {/* y gridline + labels at 0 and max */}
-            {[0, maxV].map((v) => (
+            {/* y gridlines + labels (0/max for linear; each decade for log) */}
+            {yTicks.map((v) => (
               <g key={v}>
                 <line
                   x1={PAD_L}
@@ -238,12 +266,30 @@ export function LineChart({
         {hover != null && w > 0 && (
           <FloatingTip x={x(hover)} y={PAD_T} width={w}>
             <div className="font-medium">{labels[hover] ? fmtDate(labels[hover]!) : ''}</div>
-            {series.map((s) => (
-              <div key={s.key} className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-1.5 rounded-[1px]" style={{ background: s.color }} />
-                {s.label}: {s.values[hover] == null ? '—' : formatY(s.values[hover]!)}
-              </div>
-            ))}
+            {series.map((s) => {
+              const note = s.pointNotes?.[hover] ?? null;
+              return (
+                <div key={s.key}>
+                  <div className="flex items-center gap-1">
+                    <span
+                      className="inline-block h-1.5 w-1.5 rounded-[1px]"
+                      style={{ background: s.color }}
+                    />
+                    {s.label}: {s.values[hover] == null ? '—' : formatY(s.values[hover]!)}
+                  </div>
+                  {/* The ringed-point explanation — why THIS point is an exception. */}
+                  {note && (
+                    <div
+                      className="ml-2.5 mt-0.5 flex max-w-[220px] items-start gap-1 whitespace-normal"
+                      style={{ color: ANOMALY_RING }}
+                    >
+                      <span className="mt-px">⭘</span>
+                      <span>{note}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </FloatingTip>
         )}
       </div>

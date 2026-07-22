@@ -67,6 +67,10 @@ export interface Series {
   // Optional per-index anomaly flag (LineChart): when true, point i is ringed as an outlier
   // (the bot diverged from its own typical that week). Aligned 1:1 with `values`.
   pointFlags?: (boolean | null)[];
+  // Optional per-index exception detail (LineChart): a short human explanation of the ringed
+  // point (observed vs typical, direction). Non-null only where pointFlags[i] is true; surfaced
+  // in the hover tooltip so the anomaly circle explains itself. Aligned 1:1 with `values`.
+  pointNotes?: (string | null)[];
 }
 
 // Hours → compact human duration (m / h / d), precision shrinking with magnitude.
