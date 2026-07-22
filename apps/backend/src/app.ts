@@ -159,7 +159,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(activityRoutes);
   await app.register(mentionsRoutes);
   // Bot-triage platform (CORE, always registered): detection/override, ROI analytics,
-  // cross-bot dedup, mute / auto-triage rules. Account-scoped; no AI.
+  // cross-bot dedup, confirm-gated bot-thread resolve. Account-scoped; no AI.
   await app.register(botTriageRoutes);
   // Stripe billing seam (checkout redirect + webhook). Registered in both modes;
   // inert until the STRIPE_* env vars are set (webhook 501s unconfigured).

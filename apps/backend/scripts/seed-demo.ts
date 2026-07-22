@@ -799,13 +799,6 @@ await db
     updatedAt: now,
   })
   .execute();
-await db
-  .insert(schema.botMuteRules)
-  .values([
-    { accountId: 1, vendorKind: 'copilot', pathGlob: '**/tests/**', severity: 'nitpick', action: 'hide', autoResolveDays: null, createdAt: day(2) },
-    { accountId: 1, vendorKind: 'coderabbit', pathGlob: null, severity: null, action: 'auto_resolve', autoResolveDays: 7, createdAt: day(2) },
-  ])
-  .execute();
 
 // ===========================================================================
 // HISTORICAL ACTIVITY (weeks 3–12) — purely to populate the Insights/analytics

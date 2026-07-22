@@ -62,7 +62,7 @@ export interface Series {
   values: (number | null)[];
   // Optional per-index colour override (BarChart only): when set, bar i uses colors[i]
   // instead of `color` — e.g. a single "acted-on %" series whose bars are tinted by each
-  // bot's keep/tune/kill verdict. Falls back to `color` where an entry is null/absent.
+  // bot's keep/tune/noisy verdict. Falls back to `color` where an entry is null/absent.
   colors?: (string | null)[];
   // Optional per-index anomaly flag (LineChart): when true, point i is ringed as an outlier
   // (the bot diverged from its own typical that week). Aligned 1:1 with `values`.

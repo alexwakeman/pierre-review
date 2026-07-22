@@ -5,10 +5,11 @@ import { stampThreadResolved } from '../db/queries.js';
 
 // Resolve a batch of already-eligible review threads on GitHub AND stamp them resolved
 // locally. This is the ONE place the GitHub `resolveReviewThread` mutation is driven for
-// bot-thread triage — shared verbatim by BOTH the manual `POST /api/prs/:id/resolve-bot-
-// threads` route and the standing auto-triage scheduled job, so their behaviour can't drift.
+// bot-thread triage — shared verbatim by the manual per-PR `POST /api/prs/:id/resolve-bot-
+// threads` route and the scope-wide `POST /api/bot-threads/resolve`, so their behaviour can't
+// drift. Both are strictly user-initiated + confirm-gated — there is no automatic/cron resolve.
 //
-// Callers own eligibility: both `getResolvableBotThreads` and `getAutoResolveCandidates`
+// Callers own eligibility: `getResolvableBotThreads` / `getResolvableBotThreadsForScope`
 // return ONLY owned + automated-reviewer-originated + `likely_addressed` + unresolved threads
 // (with a GitHub node id), so this helper never has to re-derive it. It NEVER merges — it only
 // resolves. Sequential (not Promise.all) to stay gentle on the GraphQL rate limit (a bot

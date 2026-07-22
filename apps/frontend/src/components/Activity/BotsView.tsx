@@ -10,13 +10,13 @@ import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 
 // The Bots rail view — "the calm layer above your review bots" as a CORE, FREE feature (works
 // via the npx / OSS path, no @pierre/pro plugin). It composes:
-//   • the ROI / utilisation panel (per-vendor signal-to-noise + trend + keep/tune/kill verdicts),
+//   • the ROI / utilisation panel (per-vendor signal-to-noise + trend + keep/tune/noisy verdicts),
 //   • a bot-ONLY activity feed (the consolidated Feed hard-filtered to automated-reviewer
 //     activity) with review-thread derived-state pills (Untouched / Replied / Likely-addressed /
 //     Resolved) so you can triage the bot firehose by state.
 // Everything reads the CORE, deterministic bot routes + the core consolidated-feed route — no AI,
-// no Pro gate. The detection / mute-rule / cost / Pierre-tagging SETTINGS live in the Settings
-// modal's "Review bots" section (free, plugin-backed).
+// no Pro gate. The detection / cost / Pierre-tagging SETTINGS live in the Settings modal's
+// "Review bots" section (free, plugin-backed).
 //
 // `repoId` scopes the WHOLE console to one repo (the per-repo Bots tab in the repo console):
 // analytics, the bot-only feed, the bot-only-review caution, and the vendor drill-down all

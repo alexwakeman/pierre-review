@@ -5,8 +5,7 @@ import type {
   BotBehaviourBotStat,
   BotDirectoryUsage,
   BotOverlapStats,
-  BotRepoAreaUsage,
-  BotRepoPresence,
+  BotRepoDirBreakdown,
   BotWindowKind,
 } from '@pierre-review/shared';
 import { useBotBehaviour } from '../../hooks/useBotTriage.js';
@@ -20,9 +19,13 @@ import { DayStrip } from '../charts/DayStrip.js';
 import {
   ChartCard,
   ChartEmpty,
+  FloatingTip,
   PALETTE,
   SERIES_COLORS,
   fmtDuration,
+  fmtNum,
+  niceMax,
+  useChartWidth,
   type Series,
 } from '../charts/common.js';
 
@@ -197,12 +200,17 @@ function DensityTrendChart({
   );
   const allKeys = useMemo(() => botsWithData.map((b) => b.key), [botsWithData]);
   const isOn = (key: string): boolean => selected == null || selected.has(key);
+  // Click a bot to FOCUS it (show ONLY that one); click more bots to ADD them (additive). Clicking
+  // an already-shown bot removes it; removing the last one — or ending up with every bot — returns
+  // to the "all bots" view.
   const toggleBot = (key: string): void =>
     setSelected((prev) => {
-      const base = prev == null ? new Set(allKeys) : new Set(prev);
+      if (prev == null) return new Set([key]); // from "all shown" → isolate to just this bot
+      const base = new Set(prev);
       if (base.has(key)) base.delete(key);
       else base.add(key);
-      return base.size === allKeys.length ? null : base; // full set → back to "all"
+      if (base.size === 0 || base.size === allKeys.length) return null; // none / all → "all"
+      return base;
     });
 
   const { labels, series, trendPct } = useMemo(() => {
@@ -336,7 +344,7 @@ function DensityTrendChart({
         </div>
       </div>
 
-      {/* Interactive legend / bot selector — click to show/hide a bot's line. */}
+      {/* Interactive legend / bot selector — click a bot to focus just it; click others to add. */}
       {botsWithData.length > 1 && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           {botsWithData.map((b) => {
@@ -590,126 +598,223 @@ function BotOverlapSection({ overlap, color }: { overlap: BotOverlapStats; color
   );
 }
 
-// ── Global "which bots operate on each repo" (EXPERIMENTAL) — a repo × bot stacked chart, so
-// repos worked by MULTIPLE bots show multiple stacked segments. ──────────────────────────────────
-function RepoPresenceSection({
-  repoPresence,
-  botColor,
-}: {
-  repoPresence: BotRepoPresence[];
-  botColor: BotColorFn;
-}): JSX.Element | null {
-  if (repoPresence.length === 0) return null;
-  // Distinct bots across all repos, ordered by total footprint → one stacked series each.
-  const botTotals = new Map<string, { label: string; login: string | null; kind: BotBehaviourBotStat['kind']; total: number }>();
-  for (const r of repoPresence)
-    for (const b of r.bots) {
-      const e = botTotals.get(b.key) ?? { label: b.label, login: b.login, kind: b.kind, total: 0 };
-      e.total += b.threads;
-      botTotals.set(b.key, e);
-    }
-  const botsOrdered = [...botTotals.entries()].sort((a, b) => b[1].total - a[1].total);
-  const repos = repoPresence.slice(0, 14);
-  const labels = repos.map((r) => r.repoName.split('/').pop() ?? r.repoName);
-  const series: Series[] = botsOrdered.map(([key, meta]) => ({
-    key,
-    label: meta.label,
-    color: botColor({ login: meta.login, kind: meta.kind }),
-    values: repos.map((r) => r.bots.find((b) => b.key === key)?.threads ?? 0),
-  }));
-  const multiRepos = repoPresence.filter((r) => r.totalBots >= 2).length;
-  return (
-    <ChartCard
-      title="Where bots operate"
-      note={
-        (multiRepos > 0
-          ? `${multiRepos} repo${multiRepos === 1 ? '' : 's'} reviewed by ≥2 bots · `
-          : '') + 'inline review threads per repo, by bot'
-      }
-    >
-      <BarChart labels={labels} series={series} mode="stacked" rotateLabels height={200} />
-    </ChartCard>
-  );
-}
-
-// ── "Where bots WORK" (EXPERIMENTAL) — the second layer beneath repo presence: which AREAS of the
-// codebase (top-level dirs) bot review threads land in. Global (≥2 repos) → a repo × area stacked
-// bar (each repo's bar split by area, shared area colours across repos + an 'other' tail); a single
-// repo → that repo's area distribution (x = areas). Aggregated across all bots. ──────────────────
 function areaLabel(dir: string): string {
   return dir === '.' ? '(root)' : dir === 'other' ? 'other' : dir;
 }
-function RepoAreaSection({ repoAreas }: { repoAreas: BotRepoAreaUsage[] }): JSX.Element | null {
-  if (repoAreas.length === 0) return null;
-  const total = repoAreas.reduce((n, r) => n + r.totalThreads, 0);
-  if (total === 0) return null;
 
-  // Single repo (per-repo console, or a one-repo scope): a plain area distribution for that repo.
-  if (repoAreas.length === 1) {
-    const r = repoAreas[0]!;
-    return (
-      <ChartCard title="Where bots work" note={`inline threads by codebase area · ${total} total`}>
-        <BarChart
-          labels={r.areas.map((a) => areaLabel(a.dir))}
-          series={[
-            {
-              key: 'threads',
-              label: 'Bot threads',
-              color: PALETTE.indigo,
-              values: r.areas.map((a) => a.count),
-            },
-          ]}
-          height={200}
-          rotateLabels
-        />
-      </ChartCard>
-    );
-  }
+// ── Merged "Where bots work" (EXPERIMENTAL) — ONE bot-centric grouped+stacked bar. X = bot type;
+// within each bot, a bar per repo it operates in; each bar stacked by top-level directory (shared
+// area colours + an 'other' tail). Replaces the old separate repo×bot ("operate") + repo×area
+// ("work") charts. A single-repo scope collapses to one bar per bot (labelled by bot). Bar height
+// = actual thread volume (levels), not normalised. Custom SVG (grouped+stacked isn't a BarChart
+// mode). Caps: top 6 bots × top 5 repos each; top 8 shared area colours + an 'other' tail. ─────────
+function BotRepoWorkChart({
+  data,
+  botColor,
+}: {
+  data: BotRepoDirBreakdown[];
+  botColor: BotColorFn;
+}): JSX.Element | null {
+  const [ref, w] = useChartWidth();
+  const [hover, setHover] = useState<number | null>(null);
 
-  // Global: repos on x, stacked by the top areas ACROSS repos (shared colours) + an 'other' tail
-  // that folds each repo's non-top dirs (incl. its own 'other' bucket). Each bar is normalised to
-  // 100% — so a small repo's area split is as readable as a busy one ("proportionately"); the raw
-  // volume per repo lives in the "Where bots operate" chart directly above.
-  const globalTotals = new Map<string, number>();
-  for (const r of repoAreas)
-    for (const a of r.areas) {
-      if (a.dir === 'other') continue; // the tail is handled below
-      globalTotals.set(a.dir, (globalTotals.get(a.dir) ?? 0) + a.count);
+  const model = useMemo(() => {
+    const bots = data.filter((b) => b.repos.some((r) => r.totalThreads > 0)).slice(0, 6);
+    if (bots.length === 0) return null;
+
+    // Shared directory colours: rank named dirs (excl. 'other') across everything; the top get a
+    // distinct colour, the rest (+ each repo's own 'other' tail) fold into one grey 'other'.
+    const dirTotals = new Map<string, number>();
+    for (const b of bots)
+      for (const r of b.repos)
+        for (const d of r.dirs) {
+          if (d.dir === 'other') continue;
+          dirTotals.set(d.dir, (dirTotals.get(d.dir) ?? 0) + d.count);
+        }
+    const topDirs = [...dirTotals.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([d]) => d);
+    const topIdx = new Map(topDirs.map((d, i) => [d, i]));
+    const colorOf = (dir: string): string =>
+      dir === 'other' ? PALETTE.gray : SERIES_COLORS[(topIdx.get(dir) ?? 0) % SERIES_COLORS.length]!;
+
+    type Seg = { dir: string; count: number; color: string };
+    type Col = { botLabel: string; botColor: string; repoName: string; repoFull: string; segments: Seg[]; total: number };
+    const columns: Col[] = [];
+    const groups: { label: string; color: string; start: number; count: number }[] = [];
+    let usesOther = false;
+    for (const b of bots) {
+      const bc = botColor({ login: b.login, kind: b.kind });
+      const start = columns.length;
+      for (const r of b.repos.slice(0, 5)) {
+        const named = new Map<string, number>();
+        let other = 0;
+        for (const d of r.dirs) {
+          if (topIdx.has(d.dir)) named.set(d.dir, (named.get(d.dir) ?? 0) + d.count);
+          else other += d.count;
+        }
+        const segments: Seg[] = topDirs
+          .filter((d) => named.has(d))
+          .map((d) => ({ dir: d, count: named.get(d)!, color: colorOf(d) }));
+        if (other > 0) {
+          segments.push({ dir: 'other', count: other, color: PALETTE.gray });
+          usesOther = true;
+        }
+        columns.push({
+          botLabel: b.label,
+          botColor: bc,
+          repoName: r.repoName.split('/').pop() ?? r.repoName,
+          repoFull: r.repoName,
+          segments,
+          total: r.totalThreads,
+        });
+      }
+      groups.push({ label: b.label, color: bc, start, count: columns.length - start });
     }
-  const topAreas = [...globalTotals.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 9)
-    .map(([d]) => d);
-  const topSet = new Set(topAreas);
-  const repos = repoAreas.slice(0, 14);
-  const labels = repos.map((r) => r.repoName.split('/').pop() ?? r.repoName);
-  const asPct = (count: number, total: number): number => (total > 0 ? (count / total) * 100 : 0);
-  const series: Series[] = topAreas.map((dir, i) => ({
-    key: dir,
-    label: areaLabel(dir),
-    color: SERIES_COLORS[i % SERIES_COLORS.length]!,
-    values: repos.map((r) => asPct(r.areas.find((a) => a.dir === dir)?.count ?? 0, r.totalThreads)),
-  }));
-  const otherValues = repos.map((r) =>
-    asPct(
-      r.totalThreads - r.areas.filter((a) => topSet.has(a.dir)).reduce((n, a) => n + a.count, 0),
-      r.totalThreads,
-    ),
-  );
-  if (otherValues.some((v) => v > 0))
-    series.push({ key: '__other__', label: 'other', color: PALETTE.gray, values: otherValues });
+    if (columns.length === 0) return null;
+
+    const singleRepo = new Set(columns.map((c) => c.repoFull)).size <= 1;
+    const legend = [
+      ...topDirs.map((d) => ({ dir: d, color: colorOf(d) })),
+      ...(usesOther ? [{ dir: 'other', color: PALETTE.gray }] : []),
+    ];
+    return { columns, groups, singleRepo, legend };
+  }, [data, botColor]);
+
+  if (!model) return null;
+  const { columns, groups, singleRepo, legend } = model;
+
+  const height = 210;
+  const PAD_L = 30;
+  const PAD_R = 8;
+  const PAD_T = 8;
+  const PAD_B = singleRepo ? 42 : 56; // rotated labels (repo/bot) + a bot band beneath (multi-repo)
+  const innerW = Math.max(w - PAD_L - PAD_R, 1);
+  const innerH = height - PAD_T - PAD_B;
+  const baseY = PAD_T + innerH;
+  const maxV = niceMax(Math.max(1, ...columns.map((c) => c.total)));
+  const y = (v: number): number => PAD_T + innerH * (1 - v / maxV);
+
+  // Column layout: a wide gap between bot groups; a hair-gap between a group's repos.
+  const GROUP_GAP = 0.8;
+  const INTRA_GAP = 0.14;
+  const groupStarts = new Set(groups.map((g) => g.start));
+  const gapBefore: number[] = columns.map((_, i) => (i === 0 ? 0 : singleRepo || groupStarts.has(i) ? GROUP_GAP : INTRA_GAP));
+  const totalUnits = columns.length + gapBefore.reduce((a, b) => a + b, 0);
+  const unitW = innerW / Math.max(totalUnits, 1);
+  const colLeft: number[] = [];
+  let cursor = PAD_L;
+  columns.forEach((_, i) => {
+    cursor += gapBefore[i]! * unitW;
+    colLeft.push(cursor);
+    cursor += unitW;
+  });
+  const barW = Math.max(unitW * 0.82, 1);
+  const barX = (i: number): number => colLeft[i]! + (unitW - barW) / 2;
+  const colCenter = (i: number): number => colLeft[i]! + unitW / 2;
+
+  const onMove = (e: React.MouseEvent<SVGRectElement>): void => {
+    const mx = e.nativeEvent.offsetX;
+    let best = 0;
+    let bestD = Infinity;
+    columns.forEach((_, i) => {
+      const d = Math.abs(colCenter(i) - mx);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    });
+    setHover(best);
+  };
 
   return (
-    <ChartCard title="Where bots work" note="% of each repo's bot threads, by codebase area">
-      <BarChart
-        labels={labels}
-        series={series}
-        mode="stacked"
-        rotateLabels
-        height={200}
-        formatY={pctAxis}
-        formatValue={pctAxis}
-      />
+    <ChartCard
+      title="Where bots work"
+      note={
+        singleRepo
+          ? 'per bot: inline threads by codebase area'
+          : 'per bot: inline threads by repo, split by codebase area'
+      }
+    >
+      <div ref={ref} className="relative" style={{ height }}>
+        {w > 0 && (
+          <svg width={w} height={height} className="block">
+            {[0, maxV].map((v) => (
+              <g key={v}>
+                <line x1={PAD_L} y1={y(v)} x2={w - PAD_R} y2={y(v)} className="text-gray-200 dark:text-gray-700" stroke="currentColor" strokeWidth={1} />
+                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-400 text-[8px]">
+                  {fmtNum(v)}
+                </text>
+              </g>
+            ))}
+            {hover != null && (
+              <rect x={colLeft[hover]!} y={PAD_T} width={unitW} height={innerH} className="text-gray-400/10 dark:text-gray-300/10" fill="currentColor" />
+            )}
+            {columns.map((c, i) => {
+              let acc = 0;
+              return c.segments.map((s) => {
+                const yTop = y(acc + s.count);
+                const h = y(acc) - yTop;
+                acc += s.count;
+                return <rect key={`${i}-${s.dir}`} x={barX(i)} y={yTop} width={barW} height={Math.max(h, 0)} fill={s.color} />;
+              });
+            })}
+            {columns.map((c, i) => {
+              const cx = colCenter(i);
+              const ly = baseY + 9;
+              return (
+                <text key={`lbl-${i}`} x={cx} y={ly} textAnchor="end" transform={`rotate(-35 ${cx} ${ly})`} className="fill-gray-400 text-[8px]">
+                  {singleRepo ? c.botLabel : c.repoName}
+                </text>
+              );
+            })}
+            {!singleRepo &&
+              groups.map((g) => {
+                const x0 = barX(g.start);
+                const x1 = barX(g.start + g.count - 1) + barW;
+                const gy = baseY + 40;
+                return (
+                  <g key={`grp-${g.start}`}>
+                    <line x1={x0} y1={gy} x2={x1} y2={gy} stroke={g.color} strokeWidth={2} />
+                    <text x={(x0 + x1) / 2} y={gy + 10} textAnchor="middle" className="text-[8px] font-medium" fill={g.color}>
+                      {g.label}
+                    </text>
+                  </g>
+                );
+              })}
+            <rect x={0} y={0} width={w} height={height} fill="transparent" onMouseMove={onMove} onMouseLeave={() => setHover(null)} />
+          </svg>
+        )}
+        {hover != null &&
+          w > 0 &&
+          (() => {
+            const c = columns[hover]!;
+            return (
+              <FloatingTip x={colCenter(hover)} y={PAD_T} width={w}>
+                <div className="font-medium">
+                  {c.botLabel}
+                  {!singleRepo && <span className="text-gray-400"> · {c.repoFull}</span>}
+                </div>
+                {c.segments.map((s) => (
+                  <div key={s.dir} className="flex items-center gap-1">
+                    <span className="inline-block h-1.5 w-1.5 rounded-[1px]" style={{ background: s.color }} />
+                    {areaLabel(s.dir)}: {fmtNum(s.count)}
+                  </div>
+                ))}
+                <div className="mt-0.5 border-t border-gray-200 pt-0.5 dark:border-gray-700">total: {fmtNum(c.total)}</div>
+              </FloatingTip>
+            );
+          })()}
+      </div>
+      <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
+        {legend.map((l) => (
+          <span key={l.dir} className="flex items-center gap-1 text-[9px] text-gray-500 dark:text-gray-400">
+            <span className="inline-block h-2 w-2 rounded-[2px]" style={{ background: l.color }} />
+            {areaLabel(l.dir)}
+          </span>
+        ))}
+      </div>
     </ChartCard>
   );
 }
@@ -780,11 +885,8 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
           {data?.overlap != null && (
             <BotOverlapSection overlap={data.overlap} color={botColor({ login: null, kind: 'in_house' })} />
           )}
-          {data?.repoPresence != null && data.repoPresence.length > 0 && (
-            <RepoPresenceSection repoPresence={data.repoPresence} botColor={botColor} />
-          )}
-          {data?.repoAreas != null && data.repoAreas.length > 0 && (
-            <RepoAreaSection repoAreas={data.repoAreas} />
+          {data?.repoBotDirs != null && data.repoBotDirs.length > 0 && (
+            <BotRepoWorkChart data={data.repoBotDirs} botColor={botColor} />
           )}
           {bots.map((b) => (
             <BotCard

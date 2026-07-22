@@ -641,28 +641,9 @@ export const botReviewClassification = pgTable(
   }),
 );
 
-// Account-scoped mute / auto-triage rules — the pg twin of schema.sqlite.ts
-// botMuteRules. Kept in sync by hand (schema-parity.test.ts).
-export const botMuteRules = pgTable(
-  'bot_mute_rules',
-  {
-    id: serial('id').primaryKey(),
-    accountId: integer('account_id')
-      .notNull()
-      .references(() => accounts.id),
-    vendorKind: text('vendor_kind'),
-    pathGlob: text('path_glob'),
-    severity: text('severity'),
-    action: text('action').notNull(), // 'hide'|'auto_resolve'
-    autoResolveDays: integer('auto_resolve_days'),
-    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => ({
-    accountIdx: index('bmr_account_idx').on(t.accountId),
-  }),
-);
+// NOTE: `bot_mute_rules` backed a removed feature (Pierre-only "hide" mute + the standing
+// auto-resolve cron) — dropped in favour of a strictly user-initiated, confirm-gated resolve.
+// No schema binding here on purpose; the pg baseline still creates the orphan table.
 
 // ---- Teams (CORE) ----
 // Named grouping of the account's repos — the pg twin of schema.sqlite.ts teams. Kept in

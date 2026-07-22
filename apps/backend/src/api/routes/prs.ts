@@ -380,7 +380,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
 
       // Server RE-DERIVES the eligible set (owned + automated-reviewer-originated +
       // `likely_addressed` + unresolved) ∩ the client's reviewed list, then resolves each via
-      // the shared helper (the SAME code path the standing auto-triage job uses). An empty
+      // the shared helper (the SAME code path the scope-wide resolve uses). An empty
       // eligible set — PR not owned / no such threads / a fully-stale client list — is a no-op,
       // not an error (the helper short-circuits before any token fetch). Status stays 200 even
       // on partial failure; the body carries per-thread outcomes.

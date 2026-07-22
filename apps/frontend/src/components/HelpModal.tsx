@@ -86,10 +86,10 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           <Section title="Review-bot triage">
             Third-party review bots (CodeRabbit, Greptile, Copilot, …) are a triaged signal,
             not noise. A PR’s <strong>Bots</strong> chip filters its threads to that vendor;
-            you can bulk-resolve the ones a later commit likely addressed. In{' '}
-            <strong>Settings → Review bots</strong>, classify detected reviewers and add{' '}
-            <strong>mute / auto-triage rules</strong> (hide, or resolve likely-addressed bot
-            threads older than N days).
+            you can <strong>bulk-resolve</strong> the ones a later commit likely addressed —
+            always a confirm-gated, one-click action that resolves the threads on GitHub, never
+            automatic. In <strong>Settings → Review bots</strong>, classify detected reviewers,
+            and the Bots console shows per-vendor keep / tune / noisy verdicts.
           </Section>
 
           <Section title="PR detail & threads">

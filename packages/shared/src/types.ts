@@ -224,7 +224,7 @@ export type ReviewProvenance = 'ai_verbatim' | 'human_curated';
 
 // ── WS3 Bot ROI / utilisation analytics ─────────────────────────────
 export type BotWindowKind = 'rolling_7' | 'rolling_14' | 'rolling_30' | 'sprint';
-export type BotVerdict = 'keep' | 'tune' | 'kill';
+export type BotVerdict = 'keep' | 'tune' | 'noisy';
 export interface BotVendorTrendPoint { weekStart: string; threads: number; actedOnPct: number | null; untouched: number; }
 export interface BotVendorAnalytics {
   // Stable unique row key. Analytics are now per-REVIEWER (so in-house bots — all kind
@@ -241,7 +241,14 @@ export interface BotVendorAnalytics {
   comments: number;
   actedOn: number;
   actedOnPct: number | null;
+  // Not-addressed (untouched) threads: `untouched` = the total; `overdueUntouched` = the subset
+  // older than the fixed overdue grace window (totals.overdueGraceMs) — i.e. the ones genuinely
+  // being ignored, which is what the `noisy` verdict keys on. `medianAddressedMs` is THIS bot's
+  // own MEDIAN time-to-ADDRESSED (ms) — reply | resolve | addressing commit; null when no thread
+  // of its was ever addressed. Display-only.
   untouched: number;
+  overdueUntouched: number;
+  medianAddressedMs: number | null;
   oldestUntouchedDays: number | null;
   humanFollowThroughPct: number | null;
   noiseRatioPct: number | null;
@@ -265,7 +272,11 @@ export interface BotAnalyticsResponse {
   // touch was automated (incl. Pierre-verbatim) — no human review AND no human comment. Merged PRs
   // are excluded (the banner is a "needs a human before it merges" signal); the drill-down list
   // adds merged behind a toggle. See getBotOnlyReviewPrs / getBotVendorPrs.
-  totals: { threads: number; comments: number; actedOn: number; actedOnPct: number | null; untouched: number; botOnlyPrs: number };
+  // `overdueGraceMs` = the fixed grace window (currently 36h): a not-addressed thread counts as
+  // `overdueUntouched` (feeding the `noisy` verdict) once it's older than this. NOT the measured
+  // reply time — that's intrinsically fast (sample bias), so a flat cutoff is the fair gate. Each
+  // row's own `medianResponseMs` is display-only.
+  totals: { threads: number; comments: number; actedOn: number; actedOnPct: number | null; untouched: number; botOnlyPrs: number; overdueGraceMs: number };
   suggestions: BotTuningSuggestion[];  // WS6c, deterministic
 }
 
@@ -528,23 +539,23 @@ export interface BotDirectoryUsage {
   totalThreads: number; // inline threads the bot opened in-window (the denominator)
   dirs: { dir: string; count: number }[]; // top-level dirs, most-reviewed first (capped)
 }
-// Global "multiple bots on the same repo" view: per repo, which automated reviewers operate there.
-export interface BotRepoPresence {
-  repoId: number;
-  repoName: string; // owner/name
-  totalBots: number; // distinct automated reviewers active on this repo in-window
-  bots: { key: string; label: string; login: string | null; kind: AutomatedReviewerKind; threads: number }[];
-}
-// Where in the codebase bots WORK, per repo — the bots' inline threads bucketed by top-level
-// directory ("area"), aggregated across ALL automated reviewers. The "which repo → which area"
-// two-layer view: maintainers see where bot effort actually concentrates (globally a repo × area
-// stacked bar; per-repo the one repo's area distribution). Areas are that repo's top dirs desc,
-// capped + an 'other' bucket for the tail.
-export interface BotRepoAreaUsage {
-  repoId: number;
-  repoName: string; // owner/name
-  totalThreads: number; // bot inline threads in this repo (window)
-  areas: { dir: string; count: number }[];
+// Merged "where bots work" breakdown: per bot, its inline-thread volume split by the repos it
+// operates in AND, within each repo, the top-level directories/areas. Powers the grouped+stacked
+// bot chart (X = bot; one bar per repo; each bar stacked by directory). A single-repo scope
+// collapses to one bar per bot. `dirs` are that repo's top dirs desc (capped) + an 'other' tail;
+// `repos` are the bot's top repos by volume (capped), while `totalThreads` counts ALL its repos.
+export interface BotRepoDirBreakdown {
+  key: string; // `u<userId>`
+  label: string;
+  login: string | null;
+  kind: AutomatedReviewerKind;
+  totalThreads: number;
+  repos: {
+    repoId: number;
+    repoName: string; // owner/name
+    totalThreads: number;
+    dirs: { dir: string; count: number }[];
+  }[];
 }
 
 export interface BotBehaviourResponse {
@@ -554,9 +565,8 @@ export interface BotBehaviourResponse {
   bots: BotBehaviourBotStat[]; // most-active-first
   // Cross-bot overlap + coverage (EXPERIMENTAL), over the selected window + scope:
   overlap: BotOverlapStats; // (i) multiple bots on the same PR + (ii) same-line overlap
-  directories: BotDirectoryUsage[]; // (iii) which dirs each bot reviews in (per-bot)
-  repoPresence: BotRepoPresence[]; // (iii, global) which bots operate on each repo
-  repoAreas: BotRepoAreaUsage[]; // (iv) where bots work per repo, by top-level area/directory
+  directories: BotDirectoryUsage[]; // (iii) which dirs each bot reviews in (per-bot detail card)
+  repoBotDirs: BotRepoDirBreakdown[]; // (iv) merged "where bots work" — per bot × repo × directory
   // Second coverage-strip series (SHARED, not per-bot — PR inflow is an account/repo fact):
   // per-day count of human-authored, non-draft PRs opened over the SAME 84-day span + scope as
   // every bot's dailyActivity, oldest→newest, aligned to daySpanStart. Overlaid on each bot's
@@ -689,25 +699,7 @@ export interface BotDedupCluster {
 }
 export interface BotDedupResponse { prId: number; clusters: BotDedupCluster[]; }
 
-// ── WS6 mute / auto-triage rules + tuning ───────────────────────────
-export type BotMuteAction = 'hide' | 'auto_resolve';
-export interface BotMuteRule {
-  id: number;
-  vendorKind: AutomatedReviewerKind | null;  // null = any
-  pathGlob: string | null;                   // null = any
-  severity: string | null;                   // null = any
-  action: BotMuteAction;
-  autoResolveDays: number | null;            // only meaningful for 'auto_resolve'
-  createdAt: string;
-}
-export interface BotMuteRuleInput {
-  vendorKind?: AutomatedReviewerKind | null;
-  pathGlob?: string | null;
-  severity?: string | null;
-  action: BotMuteAction;
-  autoResolveDays?: number | null;
-}
-export interface BotMuteRulesResponse { rules: BotMuteRule[]; }
+// ── Bot tuning suggestions (advisory; deterministic — no action attached) ───
 export interface BotTuningSuggestion {
   vendorKind: AutomatedReviewerKind; label: string;
   pathGlob: string | null; severity: string | null;

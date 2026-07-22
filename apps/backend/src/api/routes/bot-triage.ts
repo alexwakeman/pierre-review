@@ -5,9 +5,6 @@ import type {
   BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
   BotVendorPrsResponse,
-  BotMuteRule,
-  BotMuteRuleInput,
-  BotMuteRulesResponse,
   BotWindowKind,
   DetectedReviewersResponse,
   ResolveBotThreadsResult,
@@ -15,8 +12,6 @@ import type {
   ScopeResolveBotThreadsBody,
 } from '@pierre-review/shared';
 import {
-  addBotMuteRule,
-  deleteBotMuteRule,
   getBotAnalytics,
   getBotBehaviourAnalytics,
   getBotOnlyPrs,
@@ -24,7 +19,6 @@ import {
   getBotDedupClusters,
   getResolvableBotThreadPrs,
   getResolvableBotThreadsForScope,
-  listBotMuteRules,
   listDetectedReviewers,
   resolveScopeRepoIds,
   setReviewerOverride,
@@ -118,31 +112,6 @@ const prIdParamSchema = {
   },
 };
 
-// POST /api/bot-mute-rules — `action` is a closed enum; `autoResolveDays` is floored at 1 so a
-// 0/negative-day auto-resolve rule (which would immediately clear everything) is rejected.
-const muteRuleSchema = {
-  body: {
-    type: 'object',
-    required: ['action'],
-    additionalProperties: false,
-    properties: {
-      vendorKind: { type: ['string', 'null'] },
-      pathGlob: { type: ['string', 'null'] },
-      severity: { type: ['string', 'null'] },
-      action: { type: 'string', enum: ['hide', 'auto_resolve'] },
-      autoResolveDays: { type: ['integer', 'null'], minimum: 1, maximum: 365 },
-    },
-  },
-};
-
-const ruleIdParamSchema = {
-  params: {
-    type: 'object',
-    required: ['id'],
-    properties: { id: { type: 'integer' } },
-  },
-};
-
 // GET /api/bot-threads/resolvable?scope=&repoIds= — the scope-wide review list. Same
 // scope/repoIds resolution as the analytics routes (an explicit `repoIds` wins over `scope`).
 const resolvableSchema = {
@@ -179,8 +148,8 @@ const scopeResolveSchema = {
 };
 
 // Bot-triage platform routes (CORE, always registered). Detection/override, ROI analytics,
-// per-PR cross-bot dedup, and the mute / auto-triage rule store. Every handler is account-
-// scoped via accountIdOf(req); id-addressed reads/writes verify ownership → 404. No AI.
+// per-PR cross-bot dedup, and the confirm-gated scope-wide bot-thread resolve. Every handler is
+// account-scoped via accountIdOf(req); id-addressed reads/writes verify ownership → 404. No AI.
 export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // Every distinct reviewer in the account (human + automated), classified, with 90-day
   // volume + a sample body — powers the Settings "Review bots" detected-reviewers table.
@@ -295,30 +264,6 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     return resp;
   });
 
-  // The account's mute / auto-triage rules.
-  app.get('/api/bot-mute-rules', async (req) => {
-    const rules = await listBotMuteRules(accountIdOf(req));
-    const resp: BotMuteRulesResponse = { rules };
-    return resp;
-  });
-
-  app.post('/api/bot-mute-rules', { schema: muteRuleSchema }, async (req) => {
-    const input = req.body as BotMuteRuleInput;
-    const rule: BotMuteRule = await addBotMuteRule(accountIdOf(req), input);
-    return rule;
-  });
-
-  app.delete('/api/bot-mute-rules/:id', { schema: ruleIdParamSchema }, async (req, reply) => {
-    const { id } = req.params as { id: number };
-    const ok = await deleteBotMuteRule(accountIdOf(req), id);
-    if (!ok) {
-      reply.status(404);
-      return { error: 'NotFound', message: `Mute rule ${id} not found` };
-    }
-    reply.status(204);
-    return null;
-  });
-
   // The scope-wide review list: every PR with ≥1 `likely_addressed` automated-reviewer thread
   // across the account (or a repo scope), UNCAPPED, newest-thread-first, each row carrying all
   // its resolvable thread ids + a bot thread-state mix + `totalThreads` (the whole backlog). The
@@ -340,7 +285,7 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // The confirm-gated scope-wide resolve. NEVER blind: the server RE-DERIVES the eligible set
   // (owned + automated-reviewer-originated + `likely_addressed` + unresolved) ∩ the client's
   // explicit reviewed ids, scoped to `repoIds`, then resolves each via the SAME shared helper the
-  // per-PR route + the standing auto-triage job use. An empty list is a no-op (not an error);
+  // per-PR route uses. An empty list is a no-op (not an error);
   // per-thread failures are reported, not fatal. The re-derive path passes `threadIds` so the
   // page cap is bypassed — no requested-and-eligible id is silently dropped.
   app.post('/api/bot-threads/resolve', { schema: scopeResolveSchema }, async (req) => {

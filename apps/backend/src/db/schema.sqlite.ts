@@ -712,30 +712,11 @@ export const botReviewClassification = sqliteTable(
   }),
 );
 
-// Account-scoped mute / auto-triage rules (WS6). A rule matches automated-reviewer
-// threads by vendor kind × path glob × severity (null = any) and either 'hide's them
-// from the noise counts/feed or (with autoResolveDays) marks likely_addressed threads
-// older than N days for the standing auto-resolve job. Account-scoped isolation.
-export const botMuteRules = sqliteTable(
-  'bot_mute_rules',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    accountId: integer('account_id')
-      .notNull()
-      .references(() => accounts.id),
-    vendorKind: text('vendor_kind'),
-    pathGlob: text('path_glob'),
-    severity: text('severity'),
-    action: text('action').notNull(), // 'hide'|'auto_resolve'
-    autoResolveDays: integer('auto_resolve_days'),
-    createdAt: integer('created_at', { mode: 'timestamp' })
-      .notNull()
-      .default(sql`(unixepoch())`),
-  },
-  (t) => ({
-    accountIdx: index('bmr_account_idx').on(t.accountId),
-  }),
-);
+// NOTE: the `bot_mute_rules` table (migration 0029) backed a removed feature — the
+// Pierre-only "hide" mute + the standing auto-resolve cron. Both were dropped; resolving
+// likely-addressed bot threads is now strictly user-initiated + confirm-gated (see
+// bot-triage/resolve.ts). The table is left orphaned in existing DBs (no drop migration);
+// don't reintroduce a schema binding for it.
 
 // ---- Teams (CORE) ----
 // A named grouping of the account's repos (sprint teams / product areas). Account-scoped;

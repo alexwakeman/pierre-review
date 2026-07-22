@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { AutomatedReviewerKind, DetectedReviewer } from '@pierre-review/shared';
 import { automatedReviewerMeta, BOT_VENDOR_META } from '../../lib/ui.js';
-import { useAddBotMuteRule, useDetectedReviewers, useReviewerOverride } from '../../hooks/useBotTriage.js';
+import { useDetectedReviewers, useReviewerOverride } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { SectionShell, inputCls } from './ui.js';
 
@@ -9,16 +9,14 @@ const ALL_KINDS = Object.keys(BOT_VENDOR_META) as AutomatedReviewerKind[];
 const MAX_SEARCH_MATCHES = 8;
 
 // The account's automated reviewers, plus a search box to promote any human reviewer to a bot.
-// CORE — the two-way override (mark automated / not-a-bot), rename/label and a one-click "mute
-// this vendor" all POST to /api/bot-reviewers and /api/bot-mute-rules. Only KNOWN BOTS are
-// listed by default (an account can have dozens of human maintainers — the full list is
-// unusable); the search below finds a person by login/name and marks them a review bot, after
-// which they move into the bot list where kind/label are already editable.
+// CORE — the two-way override (mark automated / not-a-bot) and rename/label all POST to
+// /api/bot-reviewers. Only KNOWN BOTS are listed by default (an account can have dozens of human
+// maintainers — the full list is unusable); the search below finds a person by login/name and
+// marks them a review bot, after which they move into the bot list where kind/label are editable.
 export function DetectedReviewersTable(): JSX.Element {
   const q = useDetectedReviewers();
   const botColor = useBotColors();
   const override = useReviewerOverride();
-  const addRule = useAddBotMuteRule();
   const [drafts, setDrafts] = useState<Record<number, { kind: AutomatedReviewerKind; label: string }>>({});
   const [query, setQuery] = useState('');
 
@@ -147,15 +145,6 @@ export function DetectedReviewersTable(): JSX.Element {
                         className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                       >
                         Not a bot
-                      </button>
-                      <button
-                        type="button"
-                        disabled={addRule.isPending}
-                        onClick={() => addRule.mutate({ vendorKind: c.kind ?? d.kind, action: 'hide' })}
-                        title="Hide this vendor's threads (adds a mute rule)"
-                        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-400 dark:hover:bg-gray-800"
-                      >
-                        Mute
                       </button>
                     </div>
                   </li>

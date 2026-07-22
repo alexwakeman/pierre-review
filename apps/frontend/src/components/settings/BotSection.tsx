@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useDetectedReviewers } from '../../hooks/useBotTriage.js';
 import { DetectedReviewersTable } from './DetectedReviewersTable.js';
-import { BotMuteRulesEditor } from './BotMuteRulesEditor.js';
 import { Field, SaveButton, SectionShell, inputCls, type SectionProps } from './ui.js';
 
 // A checkbox row matching the modal's compact type scale.
@@ -28,12 +27,11 @@ function Toggle({
   );
 }
 
-// The "Review bots" settings surface (data-testid="bot-settings-section") — the advanced,
-// pro_settings-backed knobs: in-house detection toggles + login allowlist, Pierre tagging,
-// per-vendor cost, and the Slack bot digest. The detected-reviewers table + mute/auto-triage
-// rules moved to the CORE/free Bots rail console (BotsView). Gated in SettingsModal on
-// caps.botTriage (true whenever the plugin is loaded — so this stays FREE, no paid flag); the
-// Slack-digest toggle additionally needs caps.slackDigest.
+// The "Review bots" settings surface (data-testid="bot-settings-section") — the detected-
+// reviewers table plus the advanced, pro_settings-backed knobs: in-house detection toggles +
+// login allowlist, Pierre tagging, per-vendor cost, and the Slack bot digest. Gated in
+// SettingsModal on caps.botTriage (true whenever the plugin is loaded — so this stays FREE, no
+// paid flag); the Slack-digest toggle additionally needs caps.slackDigest.
 export function BotSection({ settings, save, saving }: SectionProps): JSX.Element {
   const caps = useProCapabilities();
   const b = settings.bots;
@@ -156,8 +154,6 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
           onClick={() => save({ bots: { tagPierreReviews: tagPierre, pierreFooter } })}
         />
       </SectionShell>
-
-      <BotMuteRulesEditor />
 
       <SectionShell
         title="Per-bot cost"

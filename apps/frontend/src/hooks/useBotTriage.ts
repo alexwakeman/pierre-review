@@ -3,9 +3,6 @@ import type {
   BotAnalyticsResponse,
   BotBehaviourResponse,
   BotDedupResponse,
-  BotMuteRule,
-  BotMuteRuleInput,
-  BotMuteRulesResponse,
   BotOnlyPrsResponse,
   PrBotBehaviourResponse,
   ResolvableThreadPrsResponse,
@@ -28,9 +25,9 @@ const RESOLVE_CHUNK_SIZE = 25;
 // gcTime only keeps the last snapshot resident so the charts/table repaint WARM immediately
 // instead of blank. Reuses the Activity ceiling (45 min).
 
-// The bot-triage read/write hooks (CORE, deterministic — no AI). Detection, dedup and mute
-// rules are free-tier; the Bot-ROI analytics panel that consumes useBotAnalytics is
-// UI-gated on caps.teamInsights by its component (the route itself is core). Every getter
+// The bot-triage read/write hooks (CORE, deterministic — no AI). Detection, dedup and the
+// confirm-gated thread resolve are free-tier; the Bot-ROI analytics panel that consumes
+// useBotAnalytics is UI-gated on caps.teamInsights by its component (the route itself is core). Every getter
 // is account-scoped server-side; these are plain DB reads that refresh on the sync cadence.
 
 // Per-vendor bot ROI / utilisation analytics over the selected window. Keyed by window +
@@ -160,42 +157,6 @@ export function usePrBotBehaviour(prId: number | null, enabled = true) {
   });
 }
 
-// The account's mute / auto-triage rules (hide or auto-resolve automated-bot threads by
-// vendor / path / severity).
-export function useBotMuteRules(enabled = true) {
-  return useQuery<BotMuteRulesResponse>({
-    queryKey: ['bot-mute-rules'],
-    queryFn: () => api.botMuteRules(),
-    enabled,
-    staleTime: 60_000,
-    gcTime: ACTIVITY_GC_TIME,
-  });
-}
-
-// Add a mute rule. Invalidates the rule list AND analytics (a mute excludes the muted
-// vendor×path×severity from the ROI counts).
-export function useAddBotMuteRule() {
-  const qc = useQueryClient();
-  return useMutation<BotMuteRule, Error, BotMuteRuleInput>({
-    mutationFn: (input) => api.addBotMuteRule(input),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['bot-mute-rules'] });
-      void qc.invalidateQueries({ queryKey: ['bot-analytics'] });
-    },
-  });
-}
-
-// Delete a mute rule (204). Same invalidations as adding one.
-export function useDeleteBotMuteRule() {
-  const qc = useQueryClient();
-  return useMutation<void, Error, number>({
-    mutationFn: (id) => api.deleteBotMuteRule(id),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['bot-mute-rules'] });
-      void qc.invalidateQueries({ queryKey: ['bot-analytics'] });
-    },
-  });
-}
 
 // The scope-wide review list — every PR with ≥1 `likely_addressed` automated-reviewer thread
 // (grouped by PR, UNCAPPED, newest-thread-first, each carrying its full resolvable-thread-id

@@ -9,7 +9,6 @@ import type {
 } from '@pierre-review/shared';
 import {
   useBotAnalytics,
-  useAddBotMuteRule,
   useResolvableBotThreads,
 } from '../../hooks/useBotTriage.js';
 import { useProSettings, useHasProSettings } from '../../hooks/useProSettings.js';
@@ -22,11 +21,12 @@ import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js
 
 // Bot ROI / utilisation panel — CORE/FREE (rendered in the Bots rail console). The analytics
 // route is CORE + deterministic (no AI): a per-vendor signal-to-noise table + a 12-week
-// thread-volume trend + keep/tune/kill verdicts, plus the deterministic tuning suggestions with
-// one-click mute-rule creation. The ONLY plugin-backed bit is the per-vendor $ cost overlay
-// (entered in Settings → Review bots, stored in pro_settings, overlaid CLIENT-side here since
-// getBotAnalytics returns cost fields null); its fetch is gated on plugin presence so the pure
-// OSS path never calls /api/pro/settings (the cost column just shows "—").
+// thread-volume trend + keep/tune/noisy verdicts, plus deterministic, ADVISORY tuning suggestions
+// (which vendor × path is noisy — no action attached; tune the bot on its own platform). The
+// ONLY plugin-backed bit is the per-vendor $ cost overlay (entered in Settings → Review bots,
+// stored in pro_settings, overlaid CLIENT-side here since getBotAnalytics returns cost fields
+// null); its fetch is gated on plugin presence so the pure OSS path never calls /api/pro/settings
+// (the cost column just shows "—").
 
 const WINDOWS: { key: BotWindowKind; label: string }[] = [
   { key: 'rolling_7', label: '7d' },
@@ -46,12 +46,13 @@ const VERDICT_META: Record<BotVerdict, { label: string; className: string; title
     label: 'Tune',
     className:
       'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30',
-    title: 'A lot of comments go untouched — consider muting the noisy paths/severities.',
+    title: 'A lot of comments go unaddressed — consider tuning the noisy paths/severities on the bot.',
   },
-  kill: {
-    label: 'Kill',
+  noisy: {
+    label: 'Noisy',
     className: 'bg-red-500/10 text-red-700 dark:text-red-300 border border-red-500/30',
-    title: 'High volume, low acted-on, high untouched — probably not paying for itself.',
+    title:
+      'High volume, low acted-on, and many threads left unaddressed past your normal response window — probably not paying for itself.',
   },
 };
 
@@ -70,16 +71,27 @@ const pctAxis = (n: number): string => `${Math.round(n)}%`;
 // stable (keeps VendorTrendChart's useMemo from recomputing every render).
 const threadsVal = (p: BotVendorTrendPoint): number | null => p.threads;
 
-// Keep/tune/kill → the traffic-light hue that tints each effectiveness bar.
+// Keep/tune/noisy → the traffic-light hue that tints each effectiveness bar.
 const VERDICT_COLOR: Record<BotVerdict, string> = {
   keep: PALETTE.green,
   tune: PALETTE.amber,
-  kill: PALETTE.red,
+  noisy: PALETTE.red,
 };
 
 function usd(v: number | null): string {
   if (v == null) return '—';
   return `$${v.toFixed(2)}`;
+}
+
+// Compact human duration for response times: "45m" / "6h" / "1.8d". Null → em-dash.
+function dur(ms: number | null): string {
+  if (ms == null) return '—';
+  const mins = ms / 60_000;
+  if (mins < 60) return `${Math.max(1, Math.round(mins))}m`;
+  const hrs = mins / 60;
+  if (hrs < 24) return `${Math.round(hrs)}h`;
+  const days = hrs / 24;
+  return `${days < 10 ? days.toFixed(1) : Math.round(days)}d`;
 }
 
 // Overlay the per-BOT monthly cost (from Pro settings, keyed by reviewer login) onto the analytics
@@ -153,8 +165,8 @@ function ActedVsUntouchedChart({ vendors }: { vendors: BotVendorAnalytics[] }): 
 }
 
 // Volume-INDEPENDENT effectiveness: each bot's acted-on % over the window, the bar tinted by
-// its keep/tune/kill verdict. Surfaces low-volume-but-ineffective bots the count charts bury
-// (a 24-thread bot at 25% acted-on reads as clearly "kill" here, where its stacked bar is a
+// its keep/tune/noisy verdict. Surfaces low-volume-but-ineffective bots the count charts bury
+// (a 24-thread bot at 25% acted-on reads as clearly "noisy" here, where its stacked bar is a
 // sliver). A small verdict legend sits under it so the traffic-light colours are legible.
 function EffectivenessChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Element {
   const rated = vendors.filter((v) => v.actedOnPct != null);
@@ -179,7 +191,7 @@ function EffectivenessChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX
         height={160}
       />
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-        {(['keep', 'tune', 'kill'] as BotVerdict[]).map((v) => (
+        {(['keep', 'tune', 'noisy'] as BotVerdict[]).map((v) => (
           <span
             key={v}
             className="flex items-center gap-1 text-[10px] capitalize text-gray-500 dark:text-gray-400"
@@ -196,12 +208,14 @@ function EffectivenessChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX
   );
 }
 
+// Deterministic, ADVISORY tuning hints — which vendor × path is mostly noise. No action is
+// attached (mute rules were removed): the fix is to tune the bot on its own platform, or use
+// the confirm-gated "resolve addressed threads" flow. Purely informational.
 function TuningSuggestions({
   suggestions,
 }: {
   suggestions: BotTuningSuggestion[];
 }): JSX.Element | null {
-  const addRule = useAddBotMuteRule();
   if (suggestions.length === 0) return null;
   return (
     <div className="rounded-lg border border-amber-300/50 bg-amber-50/50 p-3 dark:border-amber-500/30 dark:bg-amber-950/20">
@@ -211,7 +225,6 @@ function TuningSuggestions({
       <ul className="space-y-1.5">
         {suggestions.map((s, i) => {
           const meta = automatedReviewerMeta(s.vendorKind);
-          const pending = addRule.isPending;
           return (
             <li
               key={`${s.vendorKind}:${s.pathGlob ?? '*'}:${s.severity ?? '*'}:${i}`}
@@ -224,31 +237,10 @@ function TuningSuggestions({
                 🤖 {meta.label}
               </span>
               <span className="text-gray-600 dark:text-gray-300">{s.rationale}</span>
-              <button
-                type="button"
-                onClick={() =>
-                  addRule.mutate({
-                    vendorKind: s.vendorKind,
-                    pathGlob: s.pathGlob,
-                    severity: s.severity,
-                    action: 'hide',
-                  })
-                }
-                disabled={pending}
-                className="ml-auto shrink-0 rounded border border-amber-400 px-1.5 py-0.5 font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-600 dark:text-amber-200 dark:hover:bg-amber-900/30"
-                title="Hide this vendor's matching threads from the feed"
-              >
-                {pending ? 'Adding…' : 'Create mute rule'}
-              </button>
             </li>
           );
         })}
       </ul>
-      {addRule.isError && (
-        <div className="mt-1 text-[11px] text-red-500">
-          {(addRule.error as Error)?.message ?? 'Couldn’t create the rule.'}
-        </div>
-      )}
     </div>
   );
 }
@@ -257,14 +249,16 @@ function VendorTable({
   vendors,
   botColor,
   onOpenVendor,
+  overdueGraceMs,
 }: {
   vendors: BotVendorAnalytics[];
   botColor: BotColor;
   onOpenVendor: (key: string) => void;
+  overdueGraceMs: number;
 }): JSX.Element {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
-      <table className="w-full min-w-[680px] border-collapse text-[11px]">
+      <table className="w-full min-w-[820px] border-collapse text-[11px]">
         <thead>
           <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-800 dark:text-gray-400">
             <th className="px-2 py-1.5 font-medium">Vendor</th>
@@ -276,10 +270,21 @@ function VendorTable({
             >
               Acted on
             </th>
-            <th className="px-2 py-1.5 text-right font-medium" title="Threads with no reply and no follow-up commit">
-              Untouched
+            <th className="px-2 py-1.5 text-right font-medium" title="Threads with no reply and no follow-up commit — the total not-addressed">
+              Not addressed
             </th>
-            <th className="px-2 py-1.5 text-right font-medium" title="Untouched threads' oldest age">
+            <th
+              className="px-2 py-1.5 text-right font-medium"
+              title={`Not-addressed threads older than the ${Math.round(
+                overdueGraceMs / 3_600_000,
+              )}h grace window — the genuinely-ignored ones that drive the 'noisy' verdict`}
+            >
+              Overdue
+            </th>
+            <th className="px-2 py-1.5 text-right font-medium" title="This bot's median time from opening a thread to it being addressed — a human reply, a resolve, or an addressing commit">
+              Time to address
+            </th>
+            <th className="px-2 py-1.5 text-right font-medium" title="Not-addressed threads' oldest age">
               Oldest
             </th>
             <th className="px-2 py-1.5 text-right font-medium" title="Low-value / untouched share — the noise floor">
@@ -355,6 +360,27 @@ function VendorTable({
                       {v.untouched}
                     </span>
                   )}
+                </td>
+                <td className="px-2 py-1.5 text-right tabular-nums">
+                  {v.dormant ? (
+                    dash
+                  ) : (
+                    <span
+                      className={
+                        v.overdueUntouched > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'
+                      }
+                      title={
+                        v.untouched > 0
+                          ? `${v.overdueUntouched} of ${v.untouched} not-addressed threads are past the normal response window`
+                          : undefined
+                      }
+                    >
+                      {v.overdueUntouched}
+                    </span>
+                  )}
+                </td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
+                  {v.dormant ? dash : dur(v.medianAddressedMs)}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
                   {v.oldestUntouchedDays != null ? `${v.oldestUntouchedDays}d` : '—'}
@@ -506,7 +532,15 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           <span className="tabular-nums text-amber-600 dark:text-amber-400">
             {t.untouched}
           </span>{' '}
-          untouched ·{' '}
+          not addressed
+          {' · '}
+          <span
+            className="tabular-nums"
+            title="Not-addressed threads count as overdue (and feed the 'noisy' verdict) once they're older than this fixed grace window."
+          >
+            overdue after {Math.round(t.overdueGraceMs / 3_600_000)}h
+          </span>
+          {' · '}
           <button
             type="button"
             onClick={() => openBotOnlyDetail(repoId ?? null)}
@@ -521,6 +555,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           vendors={vendors}
           botColor={botColor}
           onOpenVendor={(key) => openBotPrsDetail(key, repoId ?? null)}
+          overdueGraceMs={t.overdueGraceMs}
         />
         {/* Bot-effectiveness charts (per vendor) — all always visible: raw weekly volume, the
             volume-independent effectiveness + verdict, and the acted-on vs untouched split. */}
@@ -528,7 +563,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           <ChartCard title="Thread volume" note="weekly · last 12">
             <VendorTrendChart vendors={vendors} value={threadsVal} botColor={botColor} />
           </ChartCard>
-          <ChartCard title="Bot effectiveness" note="acted-on % · keep / tune / kill">
+          <ChartCard title="Bot effectiveness" note="acted-on % · keep / tune / noisy">
             <EffectivenessChart vendors={vendors} />
           </ChartCard>
           <ChartCard title="Acted-on vs untouched" note="by bot · current window">

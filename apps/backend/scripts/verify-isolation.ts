@@ -327,28 +327,6 @@ check(
   (await q.getBotDedupClusters(A.prId, 2)) === null,
 );
 
-// bot_mute_rules: account-scoped list + ownership-checked delete.
-const ruleA = await q.addBotMuteRule(1, {
-  action: 'hide',
-  vendorKind: 'coderabbit',
-  pathGlob: 'tests/**',
-  severity: null,
-});
-check('listBotMuteRules(A) returns A’s rule', (await q.listBotMuteRules(1)).some((r) => r.id === ruleA.id));
-check(
-  'listBotMuteRules(B) excludes A’s rule (IDOR blocked)',
-  !(await q.listBotMuteRules(2)).some((r) => r.id === ruleA.id),
-);
-check(
-  'deleteBotMuteRule(A.rule, B) returns false (IDOR blocked)',
-  (await q.deleteBotMuteRule(2, ruleA.id)) === false,
-);
-check(
-  "A's mute rule survives B's delete attempt",
-  (await q.listBotMuteRules(1)).some((r) => r.id === ruleA.id),
-);
-check('deleteBotMuteRule(A.rule, A) returns true', (await q.deleteBotMuteRule(1, ruleA.id)) === true);
-
 // ── Teams (CORE): teams + team_repos are account-scoped; every getter/writer filters
 // accountId, and id-addressed mutators verify ownership → false/empty for a foreign team ──
 const teamA = await q.createTeam(1, 'Team A');

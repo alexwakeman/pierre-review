@@ -109,8 +109,7 @@ import type {
   BotOverlapStats,
   BotCoReviewPair,
   BotDirectoryUsage,
-  BotRepoPresence,
-  BotRepoAreaUsage,
+  BotRepoDirBreakdown,
   PrBotBehaviourResponse,
   PrBotBehaviour,
   BotVendorPr,
@@ -118,9 +117,6 @@ import type {
   BotDedupMember,
   BotDedupCluster,
   BotDedupResponse,
-  BotMuteRule,
-  BotMuteRuleInput,
-  BotMuteAction,
   BotTuningSuggestion,
   BotOnlyReviewCard,
 } from '@pierre-review/shared';
@@ -189,7 +185,6 @@ const {
   claudeReviewFindings,
   ciStatusEvents,
   botReviewClassification,
-  botMuteRules,
   teams,
   teamRepos,
   benchmarkContributions,
@@ -6776,7 +6771,7 @@ export async function classificationKindForUser(
 
 // Best-effort review-body / comment severity inference from the account's fingerprint
 // vocabulary. Coarse buckets only (nitpick / issue / refactor); null when unknowable.
-// Used for the (optional) severity dimension of mute rules + the dedup conflict signal.
+// Used for the dedup conflict signal.
 function inferSeverity(text: string | null | undefined): string | null {
   if (!text) return null;
   if (/\bnit(?:pick|:)|🧹/i.test(text)) return 'nitpick';
@@ -6785,50 +6780,30 @@ function inferSeverity(text: string | null | undefined): string | null {
   return null;
 }
 
-// Translate a simple path glob (supports `*` within a segment and `**` across
-// segments) to an anchored, case-insensitive RegExp. null/empty glob → matches any.
-function pathGlobMatch(glob: string | null, path: string): boolean {
-  if (glob == null) return true;
-  const g = glob.trim();
-  if (!g) return true;
-  let re = '';
-  for (let i = 0; i < g.length; i++) {
-    const ch = g[i]!;
-    if (ch === '*') {
-      if (g[i + 1] === '*') {
-        re += '.*';
-        i++;
-      } else {
-        re += '[^/]*';
-      }
-    } else if ('.+?^${}()|[]\\'.includes(ch)) {
-      re += `\\${ch}`;
-    } else {
-      re += ch;
-    }
-  }
-  try {
-    return new RegExp(`^${re}$`, 'i').test(path);
-  } catch {
-    return false;
-  }
-}
-
 // The path bucket a deterministic tuning suggestion groups by: the top-level dir as a
-// `<seg>/**` glob (matched by pathGlobMatch), or the file path itself when it's at root.
+// `<seg>/**` glob, or the file path itself when it's at root. Advisory only (the pathGlob
+// rides along in the suggestion for display; nothing matches against it anymore).
 function pathBucket(path: string): string {
   const seg = path.split('/')[0];
   return seg && seg !== path ? `${seg}/**` : path;
 }
 
-// keep / tune / kill verdict (deterministic rule-of-thumb, no AI): high volume + low
-// acted-on + high untouched → kill; moderate low acted-on → tune; else keep.
-function botVerdict(threads: number, actedOnPct: number | null, untouched: number): BotVerdict {
-  const untouchedRatio = threads > 0 ? untouched / threads : 0;
+// The overdue grace window: a not-addressed (untouched) thread only counts as overdue — and only
+// then feeds the 'noisy' verdict — once it's older than this. A FIXED 36h, NOT the measured reply
+// time: the reply-time sample is intrinsically fast (only threads someone engaged with ever draw a
+// reply; ignored ones never do), so a measured norm gives almost no grace. Flat + predictable.
+const OVERDUE_GRACE_MS = 36 * 60 * 60 * 1000;
+
+// keep / tune / noisy verdict (deterministic rule-of-thumb, no AI): high volume + low
+// acted-on + a high share of OVERDUE-untouched threads (untouched AND aged past the account-
+// wide normal response window) → noisy; moderate low acted-on → tune; else keep. The overdue
+// gate is what stops a bot being called noisy for threads the team simply hasn't reached yet.
+function botVerdict(threads: number, actedOnPct: number | null, overdueUntouched: number): BotVerdict {
+  const overdueRatio = threads > 0 ? overdueUntouched / threads : 0;
   const highVolume = threads >= 10;
   const lowActedOn = actedOnPct != null && actedOnPct < 30;
-  const highUntouched = untouchedRatio >= 0.5;
-  if (highVolume && lowActedOn && highUntouched) return 'kill';
+  const highOverdue = overdueRatio >= 0.5;
+  if (highVolume && lowActedOn && highOverdue) return 'noisy';
   if (threads >= 5 && actedOnPct != null && actedOnPct < 60) return 'tune';
   return 'keep';
 }
@@ -7107,59 +7082,6 @@ export async function setReviewerOverride(
   };
 }
 
-// ---- WS6 mute / auto-triage rules (account-scoped; ownership → false/null) ----
-
-function muteRuleToApi(r: typeof botMuteRules.$inferSelect): BotMuteRule {
-  return {
-    id: r.id,
-    vendorKind: (r.vendorKind as AutomatedReviewerKind | null) ?? null,
-    pathGlob: r.pathGlob,
-    severity: r.severity,
-    action: r.action as BotMuteAction,
-    autoResolveDays: r.autoResolveDays,
-    createdAt: r.createdAt.toISOString(),
-  };
-}
-
-export async function listBotMuteRules(accountId: number): Promise<BotMuteRule[]> {
-  const rows = await db
-    .select()
-    .from(botMuteRules)
-    .where(eq(botMuteRules.accountId, accountId))
-    .orderBy(desc(botMuteRules.createdAt))
-    .execute();
-  return rows.map(muteRuleToApi);
-}
-
-export async function addBotMuteRule(
-  accountId: number,
-  input: BotMuteRuleInput,
-): Promise<BotMuteRule> {
-  const rows = await db
-    .insert(botMuteRules)
-    .values({
-      accountId,
-      vendorKind: input.vendorKind ?? null,
-      pathGlob: input.pathGlob ?? null,
-      severity: input.severity ?? null,
-      action: input.action,
-      autoResolveDays: input.autoResolveDays ?? null,
-      createdAt: new Date(),
-    })
-    .returning()
-    .execute();
-  return muteRuleToApi(rows[0]!);
-}
-
-export async function deleteBotMuteRule(accountId: number, id: number): Promise<boolean> {
-  const rows = await db
-    .delete(botMuteRules)
-    .where(and(eq(botMuteRules.accountId, accountId), eq(botMuteRules.id, id)))
-    .returning({ id: botMuteRules.id })
-    .execute();
-  return rows.length > 0;
-}
-
 // WS7 — "only a bot reviewed this": PRs (merged in-window, or open-and-mergeable) in the
 // given repos whose ONLY counting reviews (approved/changes_requested/commented) are from
 // automated reviewers (incl. Pierre-verbatim via the claudeReviews join) with NO human
@@ -7350,9 +7272,8 @@ export async function getBotOnlyReviewPrs(
 // WS3 — the Bot-ROI analytics. Per AutomatedReviewerKind over the requested window:
 // volume (threads + comments), acted-on %, untouched backlog + oldest age, human
 // follow-through %, noise ratio (untouched-share proxy — severity is often unknowable),
-// a keep/tune/kill verdict, and a ≤12-week weekly trend. Cost fields stay null (the
-// frontend overlays per-vendor cost from Pro settings). 'hide' mute rules drop matching
-// threads from the counts. Deterministic, NO AI. Account-scoped.
+// a keep/tune/noisy verdict, and a ≤12-week weekly trend. Cost fields stay null (the
+// frontend overlays per-vendor cost from Pro settings). Deterministic, NO AI. Account-scoped.
 // ── Human THEMES source rows (Pro) — the raw HUMAN review-comment CONTENT ─────────────────────
 // The sibling of getBotReviewComments for people, NOT bots: comments authored by non-bot users
 // (excludes every automated reviewer + any is_bot user), which INCLUDES human replies inside
@@ -7732,7 +7653,7 @@ export async function getBotAnalytics(
   const generatedAt = to.toISOString();
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
 
-  const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0, botOnlyPrs: 0 };
+  const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0, botOnlyPrs: 0, overdueGraceMs: OVERDUE_GRACE_MS };
   // Team scope resolved to no repos → nothing to analyze.
   if (scopeRepoIds != null && scopeRepoIds.length === 0) {
     return { enabled: true, generatedAt, window: win, vendors: [], totals: emptyTotals, suggestions: [] };
@@ -7745,7 +7666,6 @@ export async function getBotAnalytics(
     return { enabled: true, generatedAt, window: win, vendors: [], totals: emptyTotals, suggestions: [] };
   }
   const kindMap = await classificationKindForUser(accountId);
-  const hideRules = (await listBotMuteRules(accountId)).filter((r) => r.action === 'hide');
 
   // Per-REVIEWER identity (so in-house bots — all kind 'in_house' — separate into their own rows
   // instead of collapsing). Label preference: the account's custom classification label →
@@ -7782,10 +7702,12 @@ export async function getBotAnalytics(
   const threadRows = await db
     .select({
       id: reviewThreads.id,
+      prId: reviewThreads.prId,
       userId: reviewThreads.originalCommenterId,
       path: reviewThreads.path,
       state: reviewThreads.derivedState,
       createdAt: reviewThreads.createdAt,
+      resolvedAt: reviewThreads.resolvedAt,
     })
     .from(reviewThreads)
     .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
@@ -7799,39 +7721,6 @@ export async function getBotAnalytics(
     )
     .execute();
 
-  // Severity per thread is only needed if a hide rule filters on it (rare) — fetch the
-  // originating comment excerpts lazily then.
-  const needSeverity = hideRules.some((r) => r.severity != null);
-  const threadIds = threadRows.map((t) => t.id);
-  const severityByThread = new Map<number, string | null>();
-  if (needSeverity && threadIds.length > 0) {
-    const exRows = await db
-      .select({
-        threadId: reviewComments.threadId,
-        excerpt: reviewComments.excerpt,
-        createdAt: reviewComments.createdAt,
-      })
-      .from(reviewComments)
-      .where(inArray(reviewComments.threadId, threadIds))
-      .orderBy(asc(reviewComments.createdAt))
-      .execute();
-    for (const r of exRows) {
-      if (!severityByThread.has(r.threadId)) {
-        severityByThread.set(r.threadId, inferSeverity(r.excerpt));
-      }
-    }
-  }
-
-  const isHidden = (t: (typeof threadRows)[number], kind: AutomatedReviewerKind): boolean => {
-    for (const rule of hideRules) {
-      if (rule.vendorKind != null && rule.vendorKind !== kind) continue;
-      if (!pathGlobMatch(rule.pathGlob, t.path)) continue;
-      if (rule.severity != null && (severityByThread.get(t.id) ?? null) !== rule.severity) continue;
-      return true;
-    }
-    return false;
-  };
-
   type Acc = {
     kind: AutomatedReviewerKind;
     reviewers: Set<number>;
@@ -7840,6 +7729,10 @@ export async function getBotAnalytics(
     untouched: number;
     oldestUntouchedMs: number | null;
     humanFollow: number;
+    // Time-to-ADDRESSED samples (ms) for THIS bot's window threads that were addressed by ANY
+    // means — a human reply, a resolve, or an addressing commit (firstAddressed − createdAt). The
+    // MEDIAN drives the per-vendor time-to-address column (info only — robust to the skew).
+    addressedSamples: number[];
     // weekly buckets (12), each {threads, actedOn, untouched} — untouched drives the
     // per-vendor noise-ratio-over-time trend (untouched / threads).
     weekly: { threads: number; actedOn: number; untouched: number }[];
@@ -7860,6 +7753,7 @@ export async function getBotAnalytics(
         untouched: 0,
         oldestUntouchedMs: null,
         humanFollow: 0,
+        addressedSamples: [],
         weekly: Array.from({ length: 12 }, () => ({ threads: 0, actedOn: 0, untouched: 0 })),
         buckets: new Map(),
       };
@@ -7869,8 +7763,7 @@ export async function getBotAnalytics(
   };
 
   // Last activity per reviewer across the trend span (thread opened / review comment /
-  // submitted review) — context on every row, and what `dormant` is relative to. Bumped even
-  // for hide-muted threads (muting drops counts, not the fact the bot was active).
+  // submitted review) — context on every row, and what `dormant` is relative to.
   const lastActiveMsByUser = new Map<number, number>();
   const bumpLastActive = (userId: number, ms: number): void => {
     const cur = lastActiveMsByUser.get(userId);
@@ -7878,13 +7771,12 @@ export async function getBotAnalytics(
   };
 
   // Trend (12 weekly buckets, oldest→newest) uses the full 12-week span.
-  const windowThreads: { id: number; userId: number; kind: AutomatedReviewerKind; path: string; state: DerivedState; createdAt: Date }[] = [];
+  const windowThreads: { id: number; prId: number; userId: number; kind: AutomatedReviewerKind; path: string; state: DerivedState; createdAt: Date; resolvedAt: Date | null }[] = [];
   for (const t of threadRows) {
     if (t.userId == null) continue;
     const kind = kindMap.get(t.userId);
     if (!kind) continue;
     bumpLastActive(t.userId, t.createdAt.getTime());
-    if (isHidden(t, kind)) continue;
     const acc = accFor(t.userId, kind);
     const acted = t.state === 'resolved' || t.state === 'likely_addressed';
     // Trend bucket by created week.
@@ -7909,7 +7801,7 @@ export async function getBotAnalytics(
       b.volume += 1;
       if (t.state === 'untouched') b.untouched += 1;
       acc.buckets.set(pb, b);
-      windowThreads.push({ id: t.id, userId: t.userId, kind, path: t.path, state: t.state, createdAt: t.createdAt });
+      windowThreads.push({ id: t.id, prId: t.prId, userId: t.userId, kind, path: t.path, state: t.state, createdAt: t.createdAt, resolvedAt: t.resolvedAt });
     }
   }
 
@@ -7949,6 +7841,85 @@ export async function getBotAnalytics(
         humanFollowSet.add(threadId);
         accFor(rv.userId, rv.kind).humanFollow += 1;
       }
+    }
+
+    // Time-to-ADDRESSED per window thread = created → the FIRST time it was addressed by ANY
+    // means: a human reply, the thread being resolved (any resolver — it WAS addressed), or a
+    // commit that touched the thread's file after its last comment (the likely_addressed
+    // heuristic, timed by that addressing commit). The MEDIAN feeds each bot's time-to-address
+    // column (info only; the overdue gate is a fixed grace window, NOT this). A thread never
+    // addressed contributes no sample — it IS a not-addressed thread.
+    //
+    // Commit times are needed only for likely_addressed threads, so load commits + changed-file
+    // paths once for JUST those threads' PRs (the same signal derive-thread-state used).
+    const laThreads = windowThreads.filter((t) => t.state === 'likely_addressed');
+    const commitsByPr = new Map<number, { sha: string; ms: number }[]>();
+    const pathsBySha = new Map<string, string[]>();
+    if (laThreads.length > 0) {
+      const laPrIds = [...new Set(laThreads.map((t) => t.prId))];
+      const commitRows = await db
+        .select({ prId: commits.prId, sha: commits.sha, committedAt: commits.committedAt })
+        .from(commits)
+        .where(inArray(commits.prId, laPrIds))
+        .execute();
+      for (const c of commitRows) {
+        const arr = commitsByPr.get(c.prId) ?? [];
+        arr.push({ sha: c.sha, ms: c.committedAt.getTime() });
+        commitsByPr.set(c.prId, arr);
+      }
+      for (const arr of commitsByPr.values()) arr.sort((a, b) => a.ms - b.ms);
+      const shas = [...new Set(commitRows.map((c) => c.sha))];
+      if (shas.length > 0) {
+        for (const f of await db
+          .select({ sha: commitFiles.sha, paths: commitFiles.paths })
+          .from(commitFiles)
+          .where(inArray(commitFiles.sha, shas))
+          .execute()) {
+          pathsBySha.set(f.sha, f.paths);
+        }
+      }
+    }
+    // Earliest commit on the PR AFTER `afterMs` that touched `path` (commits pre-sorted ascending).
+    const addressingCommitMs = (prId: number, path: string, afterMs: number): number | null => {
+      for (const c of commitsByPr.get(prId) ?? []) {
+        if (c.ms <= afterMs) continue;
+        if ((pathsBySha.get(c.sha) ?? []).includes(path)) return c.ms;
+      }
+      return null;
+    };
+
+    for (const t of windowThreads) {
+      const createdMs = t.createdAt.getTime();
+      const comments = byThread.get(t.id) ?? [];
+      let addressedMs: number | null = null;
+      const consider = (ms: number | null): void => {
+        if (ms != null && ms > createdMs && (addressedMs == null || ms < addressedMs)) addressedMs = ms;
+      };
+      // A human reply on the thread, or the thread being resolved (any resolver — it was addressed).
+      for (const c of comments) {
+        if (c.authorId != null && !automatedIds.includes(c.authorId)) consider(c.at);
+      }
+      consider(t.resolvedAt != null ? t.resolvedAt.getTime() : null);
+      // A commit that addressed it — timed by the first file-touching commit after the last comment.
+      if (t.state === 'likely_addressed') {
+        const lastCommentMs = comments.length ? Math.max(...comments.map((c) => c.at)) : createdMs;
+        consider(addressingCommitMs(t.prId, t.path, lastCommentMs));
+      }
+      if (addressedMs != null) {
+        accFor(t.userId, t.kind).addressedSamples.push(addressedMs - createdMs);
+      }
+    }
+  }
+
+  // The overdue gate is the FIXED grace window (see OVERDUE_GRACE_MS) — not the measured reply
+  // time. An untouched thread only counts as OVERDUE (and only then feeds the noisy verdict) once
+  // its age exceeds it, so a bot isn't penalised for threads still inside the grace window.
+  const overdueGateMs = OVERDUE_GRACE_MS;
+  const overdueByUser = new Map<number, number>();
+  for (const t of windowThreads) {
+    if (t.state !== 'untouched') continue;
+    if (nowMs - t.createdAt.getTime() > overdueGateMs) {
+      overdueByUser.set(t.userId, (overdueByUser.get(t.userId) ?? 0) + 1);
     }
   }
 
@@ -8045,6 +8016,13 @@ export async function getBotAnalytics(
     const humanFollowThroughPct = acc.threads > 0 ? Math.round((acc.humanFollow / acc.threads) * 100) : null;
     // Noise ratio: untouched-share proxy (see the header — true severity is often unknowable).
     const noiseRatioPct = acc.threads > 0 ? Math.round((acc.untouched / acc.threads) * 100) : null;
+    // This bot's own MEDIAN time-to-addressed (reply | resolve | addressing commit); display-only,
+    // null when no thread of its was ever addressed.
+    const botMedian = medianOf(acc.addressedSamples);
+    const medianAddressedMs = botMedian == null ? null : Math.round(botMedian);
+    // Not-addressed (untouched) threads that have aged past the account-wide normal response
+    // window — the ones that are genuinely being ignored. This gates the noisy verdict.
+    const overdueUntouched = overdueByUser.get(userId) ?? 0;
     const trend: BotVendorTrendPoint[] = acc.weekly.map((w, i) => ({
       weekStart: new Date(trendFrom.getTime() + i * 7 * 86_400_000).toISOString(),
       threads: w.threads,
@@ -8064,18 +8042,23 @@ export async function getBotAnalytics(
       actedOn: acc.actedOn,
       actedOnPct,
       untouched: acc.untouched,
+      overdueUntouched,
+      medianAddressedMs,
       oldestUntouchedDays,
       humanFollowThroughPct,
       noiseRatioPct,
-      verdict: botVerdict(acc.threads, actedOnPct, acc.untouched),
+      // The verdict uses OVERDUE untouched (aged past the norm), not raw untouched — so a bot
+      // isn't flagged noisy for threads the team just hasn't gotten to within its normal window.
+      verdict: botVerdict(acc.threads, actedOnPct, overdueUntouched),
       costMonthlyUsd: null,
       costPerActedOnUsd: null,
       dormant,
       lastActiveAt: lastActiveMs != null ? new Date(lastActiveMs).toISOString() : null,
       trend,
     });
-    // Deterministic tuning suggestions (§3h): a (reviewer, path-bucket) with volume ≥ 5 and
-    // untouchedPct ≥ 70 → "mute this". vendorKind stays the kind (mute rules match by kind).
+    // Deterministic, ADVISORY tuning suggestions (§3h): a (reviewer, path-bucket) with volume
+    // ≥ 5 and untouchedPct ≥ 70 → a "mostly noise" hint. No action attached — the reader tunes
+    // the bot on its own platform (or resolves addressed threads via the confirm-gated flow).
     for (const [pb, b] of acc.buckets) {
       if (b.volume < 5) continue;
       const untouchedPct = Math.round((b.untouched / b.volume) * 100);
@@ -8087,7 +8070,7 @@ export async function getBotAnalytics(
         severity: null,
         untouchedPct,
         volume: b.volume,
-        rationale: `${untouchedPct}% of ${label}'s ${b.volume} threads in ${pb} went untouched — mute them?`,
+        rationale: `${untouchedPct}% of ${label}'s ${b.volume} threads in ${pb} went untouched — mostly noise; consider tuning this bot.`,
       });
     }
   }
@@ -8122,6 +8105,9 @@ export async function getBotAnalytics(
     actedOnPct: totalThreads > 0 ? Math.round((totalActedOn / totalThreads) * 100) : null,
     untouched: vendors.reduce((s, v) => s + v.untouched, 0),
     botOnlyPrs,
+    // The fixed overdue grace window (ms): a not-addressed thread is "overdue" (feeding the noisy
+    // verdict) once it's older than this. Exposed so the UI can state the rule ("overdue after 36h").
+    overdueGraceMs: OVERDUE_GRACE_MS,
   };
   return { enabled: true, generatedAt, window: win, vendors, totals, suggestions };
 }
@@ -8264,8 +8250,7 @@ export async function getBotBehaviourAnalytics(
     daySpanStart,
     overlap: EMPTY_OVERLAP,
     directories: [],
-    repoPresence: [],
-    repoAreas: [],
+    repoBotDirs: [],
   });
 
   if (scopeRepoIds != null && scopeRepoIds.length === 0)
@@ -8739,8 +8724,8 @@ export async function getBotBehaviourAnalytics(
 
   const dirByBot = new Map<number, Map<string, number>>();
   const threadsByBot = new Map<number, number>();
-  const repoBot = new Map<number, Map<number, number>>();
-  const repoDir = new Map<number, Map<string, number>>(); // repo → area(dir) → bot threads
+  // bot → repo → area(dir) → thread count: the merged "where bots work" breakdown.
+  const repoBotDir = new Map<number, Map<number, Map<string, number>>>();
   const repoIdsSeen = new Set<number>();
   const lineCluster = new Map<string, { pr: number; bots: Set<number> }>();
   for (const r of threadRows) {
@@ -8755,20 +8740,18 @@ export async function getBotBehaviourAnalytics(
     dm.set(dir, (dm.get(dir) ?? 0) + 1);
     threadsByBot.set(uid, (threadsByBot.get(uid) ?? 0) + 1);
     repoIdsSeen.add(r.repoId);
-    // Per-repo area (top-level dir) usage, aggregated across all bots — the "where in the repo"
-    // layer beneath the repo × bot presence matrix.
-    let ra = repoDir.get(r.repoId);
-    if (!ra) {
-      ra = new Map();
-      repoDir.set(r.repoId, ra);
+    // Merged breakdown: this bot's threads in this repo, by top-level area (dir).
+    let rbd = repoBotDir.get(uid);
+    if (!rbd) {
+      rbd = new Map();
+      repoBotDir.set(uid, rbd);
     }
-    ra.set(dir, (ra.get(dir) ?? 0) + 1);
-    let rb = repoBot.get(r.repoId);
-    if (!rb) {
-      rb = new Map();
-      repoBot.set(r.repoId, rb);
+    let rd = rbd.get(r.repoId);
+    if (!rd) {
+      rd = new Map();
+      rbd.set(r.repoId, rd);
     }
-    rb.set(uid, (rb.get(uid) ?? 0) + 1);
+    rd.set(dir, (rd.get(dir) ?? 0) + 1);
     const ck = `${r.prId}|${r.path}|${r.line ?? 'n'}`;
     let c = lineCluster.get(ck);
     if (!c) {
@@ -8805,39 +8788,30 @@ export async function getBotBehaviourAnalytics(
     }))
     .sort((a, b) => b.totalThreads - a.totalThreads);
 
-  const repoPresence: BotRepoPresence[] = [...repoBot.entries()]
-    .map(([repoId, bm]) => {
-      const botsHere = [...bm.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .map(([uid, threads]) => ({ ...botIdentity(uid), threads }));
-      return {
-        repoId,
-        repoName: repoNameById.get(repoId) ?? `#${repoId}`,
-        totalBots: botsHere.length,
-        bots: botsHere,
-      };
-    })
-    .sort(
-      (a, b) =>
-        b.totalBots - a.totalBots ||
-        b.bots.reduce((n, x) => n + x.threads, 0) - a.bots.reduce((n, x) => n + x.threads, 0),
-    );
-
-  // Per-repo AREA usage: each repo's top-level dirs (desc), capped at 8 + an 'other' tail bucket.
+  // Merged "where bots work": per bot → its repos (top by volume) → each repo's top areas (dirs)
+  // desc, capped + an 'other' tail. `totalThreads` on the bot counts ALL its repos; the `repos`
+  // list is capped for chart readability.
   const AREA_TOP = 8;
-  const repoAreas: BotRepoAreaUsage[] = [...repoDir.entries()]
-    .map(([repoId, dm]) => {
-      const sorted = [...dm.entries()].sort((a, b) => b[1] - a[1]);
-      const total = sorted.reduce((n, [, c]) => n + c, 0);
-      const areas = sorted.slice(0, AREA_TOP).map(([dir, count]) => ({ dir, count }));
-      const otherCount = sorted.slice(AREA_TOP).reduce((n, [, c]) => n + c, 0);
-      if (otherCount > 0) areas.push({ dir: 'other', count: otherCount });
-      return {
-        repoId,
-        repoName: repoNameById.get(repoId) ?? `#${repoId}`,
-        totalThreads: total,
-        areas,
-      };
+  const REPOS_PER_BOT = 6;
+  const repoBotDirs: BotRepoDirBreakdown[] = [...repoBotDir.entries()]
+    .map(([uid, byRepo]) => {
+      const repos = [...byRepo.entries()]
+        .map(([repoId, dm]) => {
+          const sorted = [...dm.entries()].sort((a, b) => b[1] - a[1]);
+          const total = sorted.reduce((n, [, c]) => n + c, 0);
+          const dirs = sorted.slice(0, AREA_TOP).map(([dir, count]) => ({ dir, count }));
+          const otherCount = sorted.slice(AREA_TOP).reduce((n, [, c]) => n + c, 0);
+          if (otherCount > 0) dirs.push({ dir: 'other', count: otherCount });
+          return {
+            repoId,
+            repoName: repoNameById.get(repoId) ?? `#${repoId}`,
+            totalThreads: total,
+            dirs,
+          };
+        })
+        .sort((a, b) => b.totalThreads - a.totalThreads)
+        .slice(0, REPOS_PER_BOT);
+      return { ...botIdentity(uid), totalThreads: threadsByBot.get(uid) ?? 0, repos };
     })
     .sort((a, b) => b.totalThreads - a.totalThreads);
 
@@ -8863,8 +8837,7 @@ export async function getBotBehaviourAnalytics(
     daySpanStart,
     overlap,
     directories,
-    repoPresence,
-    repoAreas,
+    repoBotDirs,
   };
 }
 
@@ -9801,79 +9774,3 @@ export async function getBotDedupClusters(
   return { prId, clusters };
 }
 
-// WS6b — the auto-triage engine's candidate finder (used by the standing scheduled job).
-// For each account auto_resolve rule, the likely_addressed + unresolved automated-bot
-// threads (with a GitHub node id) matching the rule's vendor/path/severity AND older than
-// the rule's autoResolveDays. NEVER returns a non-likely_addressed thread. Account-scoped.
-export async function getAutoResolveCandidates(
-  accountId: number,
-): Promise<{ prId: number; threadIds: number[] }[]> {
-  const rules = (await listBotMuteRules(accountId)).filter(
-    (r) => r.action === 'auto_resolve' && r.autoResolveDays != null,
-  );
-  if (rules.length === 0) return [];
-  const automatedIds = await automatedReviewerUserIds(accountId);
-  if (automatedIds.length === 0) return [];
-  const kindMap = await classificationKindForUser(accountId);
-
-  const rows = await db
-    .select({
-      id: reviewThreads.id,
-      prId: reviewThreads.prId,
-      userId: reviewThreads.originalCommenterId,
-      path: reviewThreads.path,
-      createdAt: reviewThreads.createdAt,
-    })
-    .from(reviewThreads)
-    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        inArray(reviewThreads.originalCommenterId, automatedIds),
-        eq(reviewThreads.derivedState, 'likely_addressed'),
-        eq(reviewThreads.isResolved, false),
-        isNotNull(reviewThreads.githubNodeId),
-      ),
-    )
-    .execute();
-  if (rows.length === 0) return [];
-
-  const needSeverity = rules.some((r) => r.severity != null);
-  const severityByThread = new Map<number, string | null>();
-  if (needSeverity) {
-    const exRows = await db
-      .select({
-        threadId: reviewComments.threadId,
-        excerpt: reviewComments.excerpt,
-        createdAt: reviewComments.createdAt,
-      })
-      .from(reviewComments)
-      .where(inArray(reviewComments.threadId, rows.map((r) => r.id)))
-      .orderBy(asc(reviewComments.createdAt))
-      .execute();
-    for (const r of exRows) {
-      if (!severityByThread.has(r.threadId)) severityByThread.set(r.threadId, inferSeverity(r.excerpt));
-    }
-  }
-
-  const nowMs = Date.now();
-  const byPr = new Map<number, number[]>();
-  for (const t of rows) {
-    if (t.userId == null) continue;
-    const kind = kindMap.get(t.userId);
-    if (!kind) continue;
-    const ageMs = nowMs - t.createdAt.getTime();
-    const matched = rules.some((rule) => {
-      if (rule.vendorKind != null && rule.vendorKind !== kind) return false;
-      if (!pathGlobMatch(rule.pathGlob, t.path)) return false;
-      if (rule.severity != null && (severityByThread.get(t.id) ?? null) !== rule.severity) return false;
-      const days = rule.autoResolveDays!;
-      return ageMs > days * 86_400_000;
-    });
-    if (!matched) continue;
-    const arr = byPr.get(t.prId) ?? [];
-    arr.push(t.id);
-    byPr.set(t.prId, arr);
-  }
-  return [...byPr.entries()].map(([prId, threadIds]) => ({ prId, threadIds }));
-}

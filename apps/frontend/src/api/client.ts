@@ -54,9 +54,6 @@ import type {
   BotVendorPrsResponse,
   BotDedupResponse,
   PrBotBehaviourResponse,
-  BotMuteRule,
-  BotMuteRuleInput,
-  BotMuteRulesResponse,
   DetectedReviewersResponse,
   ReviewerClassification,
   ReviewerOverrideBody,
@@ -735,17 +732,6 @@ export const api = {
   // Per-PR bot behaviour — each automated reviewer's on-PR timeline + vs-typical comparison.
   prBotBehaviour: (prId: number) =>
     get<PrBotBehaviourResponse>(`/api/prs/${prId}/bot-behaviour`),
-  // Mute / auto-triage rules (hide or auto-resolve automated-bot threads by vendor / path /
-  // severity).
-  botMuteRules: () => get<BotMuteRulesResponse>('/api/bot-mute-rules'),
-  addBotMuteRule: (input: BotMuteRuleInput) =>
-    fetch('/api/bot-mute-rules', jsonBody('POST', input)).then((r) =>
-      handle<BotMuteRule>(r),
-    ),
-  deleteBotMuteRule: (id: number) =>
-    fetch(`/api/bot-mute-rules/${id}`, jsonBody('DELETE')).then((r) =>
-      handle<void>(r),
-    ),
   // Scope-wide "clear the stale-bot backlog": the review list of every likely-addressed
   // automated-reviewer thread across the account (or a repo scope), grouped by PR + capped, and
   // the confirm-gated resolve. `repoIds` (the per-repo Bots tab) wins over `scope` server-side.
