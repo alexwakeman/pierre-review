@@ -3289,6 +3289,10 @@ export interface TeamMetrics {
   // (resolvedAt set going forward), so it's empty until post-deploy syncs observe some. "How fast
   // devs address review feedback over time" — the human line is the signal that matters.
   resolutionLatencyTrend?: { human: (number | null)[]; bot: (number | null)[] };
+  // Median hours from review REQUESTED to first review, by first-review week — review pickup
+  // responsiveness. Only defined for PRs with a request event (empty until sync backfills
+  // firstReviewRequestedAt), so unlike TTFR-from-open it doesn't skew as data accrues.
+  reviewPickupTrend?: (number | null)[];
 
   // CI failure reasons over the window, by check/stage name (top stages, desc). The
   // dimension that tells you WHY CI is failing over time.

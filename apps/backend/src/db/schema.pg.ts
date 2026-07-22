@@ -150,6 +150,12 @@ export const pullRequests = pgTable(
       withTimezone: true,
       mode: 'date',
     }),
+    // Earliest review-request time (first ReviewRequestedEvent) — clock start for review-pickup
+    // latency. See the sqlite twin for the rationale.
+    firstReviewRequestedAt: timestamp('first_review_requested_at', {
+      withTimezone: true,
+      mode: 'date',
+    }),
     lastCommitAt: timestamp('last_commit_at', {
       withTimezone: true,
       mode: 'date',

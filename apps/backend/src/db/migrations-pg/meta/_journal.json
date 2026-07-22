@@ -155,6 +155,13 @@
       "when": 1784728385379,
       "tag": "0021_green_salo",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1784728949313,
+      "tag": "0022_wise_baron_strucker",
+      "breakpoints": true
     }
   ]
 }

@@ -176,6 +176,9 @@ export const pullRequests = sqliteTable(
     isDraft: integer('is_draft', { mode: 'boolean' }).notNull().default(false),
     openedAt: integer('opened_at', { mode: 'timestamp' }).notNull(),
     firstReviewAt: integer('first_review_at', { mode: 'timestamp' }),
+    // Earliest review-request time (first ReviewRequestedEvent), null if never requested — the
+    // clock start for "review pickup time" (request→first review). Distinct from openedAt.
+    firstReviewRequestedAt: integer('first_review_requested_at', { mode: 'timestamp' }),
     lastCommitAt: integer('last_commit_at', { mode: 'timestamp' }),
     mergedAt: integer('merged_at', { mode: 'timestamp' }),
     closedAt: integer('closed_at', { mode: 'timestamp' }),

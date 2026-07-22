@@ -2580,6 +2580,7 @@ export async function getTeamMetrics(
       isDraft: pullRequests.isDraft,
       openedAt: pullRequests.openedAt,
       firstReviewAt: pullRequests.firstReviewAt,
+      firstReviewRequestedAt: pullRequests.firstReviewRequestedAt,
       mergedAt: pullRequests.mergedAt,
       lastCommitAt: pullRequests.lastCommitAt,
       ciStatus: pullRequests.ciStatus,
@@ -2615,6 +2616,10 @@ export async function getTeamMetrics(
   const mergedSeries = zeros();
   const leadByBucket: number[][] = Array.from({ length: nBuckets }, () => []);
   const ciByBucket = Array.from({ length: nBuckets }, () => ({ succ: 0, total: 0 }));
+  // Review pickup latency (request → first review), median by first-review week — a clean
+  // responsiveness signal that (unlike TTFR-from-open) only exists for PRs with a request event,
+  // so it doesn't distort as coverage grows. Empty until syncs backfill firstReviewRequestedAt.
+  const pickupByBucket: number[][] = Array.from({ length: nBuckets }, () => []);
 
   const inWin = (ms: number, lo: number, hi: number): boolean => ms >= lo && ms < hi;
 
@@ -2641,10 +2646,16 @@ export async function getTeamMetrics(
     if (p.state === 'open' && !p.isDraft) openPrsNow += 1;
 
     if (p.firstReviewAt != null) {
-      const ttfr = (p.firstReviewAt.getTime() - openedMs) / 3_600_000;
+      const firstReviewMs = p.firstReviewAt.getTime();
+      const ttfr = (firstReviewMs - openedMs) / 3_600_000;
       if (ttfr >= 0) {
         if (inWin(openedMs, curLo, curHi)) ttfrCur.push(ttfr);
         else if (inWin(openedMs, prevLo, prevHi)) ttfrPrev.push(ttfr);
+      }
+      // Review pickup: request → first review, bucketed by the first-review week.
+      if (p.firstReviewRequestedAt != null && firstReviewMs >= chartWindowStartMs) {
+        const pickup = (firstReviewMs - p.firstReviewRequestedAt.getTime()) / 3_600_000;
+        if (pickup >= 0) pickupByBucket[bi(firstReviewMs)]!.push(pickup);
       }
     }
 
@@ -2941,6 +2952,7 @@ export async function getTeamMetrics(
     reviewCoverage,
     reworkTrend,
     resolutionLatencyTrend,
+    reviewPickupTrend: pickupByBucket.map(medianOf),
     ciFailureReasons,
   };
 }

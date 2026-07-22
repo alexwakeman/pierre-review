@@ -26,7 +26,12 @@ let alice = 0;
 let bot = 0;
 let threadSeq = 0;
 
-async function mergedPr(n: number, mergedDaysAgo: number, firstReviewDaysAgo?: number): Promise<number> {
+async function mergedPr(
+  n: number,
+  mergedDaysAgo: number,
+  firstReviewDaysAgo?: number,
+  firstReviewRequestedDaysAgo?: number,
+): Promise<number> {
   const { pullRequests } = schema;
   const mergedAt = new Date(now - mergedDaysAgo * DAY);
   const [pr] = await db
@@ -41,6 +46,8 @@ async function mergedPr(n: number, mergedDaysAgo: number, firstReviewDaysAgo?: n
       isDraft: false,
       openedAt: new Date(now - (mergedDaysAgo + 4) * DAY),
       firstReviewAt: firstReviewDaysAgo != null ? new Date(now - firstReviewDaysAgo * DAY) : null,
+      firstReviewRequestedAt:
+        firstReviewRequestedDaysAgo != null ? new Date(now - firstReviewRequestedDaysAgo * DAY) : null,
       mergedAt,
       updatedAt: mergedAt,
     })
@@ -210,6 +217,10 @@ beforeAll(async () => {
   await addResolvedThread(m1, 20, 6, 'alice');
   await addResolvedThread(m1, 10, 6, 'alice');
   await addResolvedThread(m1, 8, 5, 'coderabbitai');
+
+  // Review pickup (first-review week 9): M6 requested 21d ago, first-reviewed 19d ago → 2d = 48h.
+  // (Merged 18d ago, also week 9 — chronology opened→requested→review→merged stays consistent.)
+  await mergedPr(6, 18, 19, 21);
 });
 
 afterAll(() => closeDb?.());
@@ -265,5 +276,11 @@ describe('getTeamMetrics — self-review depth (changes-requested / coverage / r
     expect(m.resolutionLatencyTrend.human[11]).toBe(216); // median(336h, 96h)
     expect(m.resolutionLatencyTrend.bot[11]).toBe(72); // one bot self-resolve, 3d
     expect(m.resolutionLatencyTrend.human[0]).toBeNull(); // no resolutions that week
+  });
+
+  it('review pickup = median requested→first-review hours, by first-review week', async () => {
+    const m = await q.getTeamMetrics(1, [repoId], now, undefined);
+    expect(m.reviewPickupTrend[9]).toBe(48); // M6: 21d→19d = 2 days
+    expect(m.reviewPickupTrend[0]).toBeNull(); // no review requests that week
   });
 });

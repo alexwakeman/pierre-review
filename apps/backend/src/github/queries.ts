@@ -87,6 +87,15 @@ const PR_NODE_FIELDS = /* GraphQL */ `
       }
     }
   }
+  # Earliest review-request timestamp — timeline items are chronological, so first:1 is the first
+  # request (tiny payload: ≤1 node/PR). Fills the "review pickup time" (request→first review) gap.
+  firstReviewRequest: timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], first: 1) {
+    nodes {
+      ... on ReviewRequestedEvent {
+        createdAt
+      }
+    }
+  }
   headCommit: commits(last: 1) {
     nodes {
       commit {
@@ -622,6 +631,9 @@ export interface GqlPullRequest {
   mergedBy: GqlActor | null;
   labels: { nodes: GqlLabel[] };
   reviewRequests: { nodes: GqlReviewRequest[] };
+  // Earliest ReviewRequestedEvent (first:1) — for firstReviewRequestedAt / review-pickup latency.
+  // Optional: absent on hand-built test fixtures predating the field.
+  firstReviewRequest?: { nodes: Array<{ createdAt?: string | null }> };
   headCommit: { nodes: GqlHeadCommit[] };
   commits: { nodes: GqlCommitNode[] };
   reviews: { nodes: GqlReview[] };

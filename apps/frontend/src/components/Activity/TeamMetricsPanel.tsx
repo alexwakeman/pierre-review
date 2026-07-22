@@ -206,6 +206,12 @@ export function TeamMetricsPanel({
   const resolutionEmpty =
     resolution == null || (nullEvery(resolution.human) && nullEvery(resolution.bot));
 
+  // Review pickup latency (request → first review), by first-review week.
+  const pickupTrend = metrics.reviewPickupTrend;
+  const pickupSeries: Series[] = pickupTrend
+    ? [{ key: 'pickup', label: 'Pickup', color: PALETTE.blue, values: pickupTrend }]
+    : [];
+
   return (
     <div
       className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-800 dark:bg-gray-900/20"
@@ -409,6 +415,13 @@ export function TeamMetricsPanel({
                     curved
                     formatY={fmtDuration}
                   />
+                )}
+              </ChartCard>
+              <ChartCard title="Review pickup time" note="median requested→first review · weekly">
+                {nullEvery(pickupTrend) ? (
+                  <ChartEmpty label="No review requests recorded yet — accrues from sync" />
+                ) : (
+                  <LineChart labels={labels} series={pickupSeries} area curved formatY={fmtDuration} />
                 )}
               </ChartCard>
             </div>

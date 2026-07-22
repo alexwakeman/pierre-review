@@ -481,6 +481,10 @@ export async function persistPr(
     const firstReviewAt = minDate(
       pr.reviews.nodes.map((r) => toDate(r.submittedAt)),
     );
+    // Earliest review request (timeline first:1 is chronological; min guards any ordering surprise).
+    const firstReviewRequestedAt = minDate(
+      (pr.firstReviewRequest?.nodes ?? []).map((n) => toDate(n.createdAt ?? null)),
+    );
 
     const head = pr.headCommit?.nodes[0]?.commit;
     const headSha = head?.oid ?? null;
@@ -541,6 +545,7 @@ export async function persistPr(
         isDraft: pr.isDraft,
         openedAt,
         firstReviewAt,
+        firstReviewRequestedAt,
         lastCommitAt,
         mergedAt,
         closedAt,
@@ -568,6 +573,7 @@ export async function persistPr(
           state: prState(pr.state),
           isDraft: pr.isDraft,
           firstReviewAt,
+          firstReviewRequestedAt,
           lastCommitAt,
           mergedAt,
           closedAt,
