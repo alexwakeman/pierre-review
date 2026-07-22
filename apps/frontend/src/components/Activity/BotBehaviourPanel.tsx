@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   AnalyticsBin,
   BotBehaviourAnomaly,
@@ -43,6 +43,8 @@ const WINDOWS: { key: BotWindowKind; label: string }[] = [
 const durAxis = (n: number): string => fmtDuration(n);
 const countAxis = (n: number): string => String(Math.round(n));
 const pctAxis = (n: number): string => `${Math.round(n)}%`;
+// Density values are small decimals (threads per PR / per KLoC): 1 dp under 10, whole above.
+const densAxis = (n: number): string => (n >= 10 ? String(Math.round(n)) : String(Math.round(n * 10) / 10));
 
 function dur(h: number | null): string {
   return h == null ? '—' : fmtDuration(h);
@@ -139,25 +141,32 @@ function DistChart({ bins, color }: { bins: AnalyticsBin[]; color: string }): JS
   return <BarChart labels={bins.map((b) => b.label)} series={series} height={130} />;
 }
 
-// The cross-bot median-TTFR trend (one line per bot over the shared ≤12-week weeks) — the
-// headline "who gets to PRs fastest, and is it drifting" comparison. Mirrors BotRoiPanel's
-// VendorTrendChart: union of weekStarts → last 12, a missing week reads as a null gap.
-function TtfrTrendChart({
+// The cross-bot findings-DENSITY trend (one line per bot over the shared ≤12-week weeks) — the
+// headline "is PR quality improving?" read that replaces the old cross-bot TTFR chart (TTFR
+// survives as a per-bot mini below). Each point = review threads the bot OPENED per PR / per 1000
+// changed lines that week; a FALLING line means fewer issues raised per PR / per line over time
+// (cleaner code or better self-review). Approximate — a tuned-down bot or more trivial PRs read
+// the same way, so it rides the panel's "deterministic proxy" caveat. per-KLoC (size-adjusted) is
+// the default; per-PR is the plainer view. Mirrors the old TTFR chart's union-of-weeks shape.
+function DensityTrendChart({
   bots,
   botColor,
 }: {
   bots: BotBehaviourBotStat[];
-  botColor: (b: { login?: string | null; kind: BotBehaviourBotStat['kind'] }) => string;
+  botColor: BotColorFn;
 }): JSX.Element {
+  const [mode, setMode] = useState<'kloc' | 'pr'>('kloc');
   const { labels, series } = useMemo(() => {
+    const val = (p: BotBehaviourBotStat['trend'][number]): number | null =>
+      mode === 'kloc' ? p.findingsPerKloc : p.findingsPerPr;
     const weekSet = new Set<string>();
     for (const b of bots) for (const p of b.trend) weekSet.add(p.weekStart);
     const labels = Array.from(weekSet).sort().slice(-12);
     const series: Series[] = bots
-      .filter((b) => b.trend.some((p) => p.medianTtfrHours != null))
+      .filter((b) => b.trend.some((p) => val(p) != null))
       .map((b) => {
-        const byWeek = new Map(b.trend.map((p) => [p.weekStart, p.medianTtfrHours]));
-        const flagByWeek = new Map(b.trend.map((p) => [p.weekStart, p.ttfrAnomaly]));
+        const byWeek = new Map(b.trend.map((p) => [p.weekStart, val(p)]));
+        const flagByWeek = new Map(b.trend.map((p) => [p.weekStart, p.densityAnomaly]));
         return {
           key: b.key,
           label: b.label,
@@ -167,10 +176,37 @@ function TtfrTrendChart({
         };
       });
     return { labels, series };
-  }, [bots, botColor]);
-  if (labels.length < 2 || series.length === 0)
-    return <ChartEmpty label="Not enough weekly history yet" />;
-  return <LineChart labels={labels} series={series} height={150} curved formatY={durAxis} />;
+  }, [bots, botColor, mode]);
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-end">
+        <div className="inline-flex overflow-hidden rounded border border-gray-300 text-[10px] dark:border-gray-700">
+          {([
+            ['kloc', 'per KLoC'],
+            ['pr', 'per PR'],
+          ] as const).map(([k, lbl]) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setMode(k)}
+              className={`px-2 py-0.5 font-medium ${
+                mode === k
+                  ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
+                  : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+              }`}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+      </div>
+      {labels.length < 2 || series.length === 0 ? (
+        <ChartEmpty label="Not enough weekly history yet" />
+      ) : (
+        <LineChart labels={labels} series={series} height={150} curved formatY={densAxis} />
+      )}
+    </div>
+  );
 }
 
 // Per-bot detail: headline stats + TTFR distribution + the week×hour activity heatmap + the
@@ -471,8 +507,11 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
         </div>
       ) : (
         <>
-          <ChartCard title="Median time to first review" note="per bot · weekly · ⭘ = exception">
-            <TtfrTrendChart bots={bots} botColor={botColor} />
+          <ChartCard
+            title="Findings density"
+            note="threads a bot opens per PR / KLoC · weekly · lower = cleaner over time · ⭘ = exception"
+          >
+            <DensityTrendChart bots={bots} botColor={botColor} />
           </ChartCard>
           {data?.overlap != null && (
             <BotOverlapSection overlap={data.overlap} color={botColor({ login: null, kind: 'in_house' })} />
