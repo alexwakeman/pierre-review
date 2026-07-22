@@ -3274,6 +3274,17 @@ export interface TeamMetrics {
   // shifting onto the bots. Optional for back-compat with cached responses predating the field.
   reviewLoad?: { human: (number | null)[]; bot: (number | null)[] };
 
+  // ── Self-review depth (Phase 2) — how well the team reviews its own code over time. All by
+  // merge week, aligned to weekBuckets; optional for cached-response back-compat. ──
+  // % of merged PRs that got a changes-requested review — a falling line = cleaner first drafts.
+  changesRequestedTrend?: (number | null)[];
+  // Merged-PR COUNTS by review coverage: got a human review / only a bot / nobody. A stacked read
+  // of "what shipped with real human eyes" vs bot-only vs unreviewed over time (governance).
+  reviewCoverage?: { human: number[]; botOnly: number[]; unreviewed: number[] };
+  // Median % of a merged PR's commits pushed AFTER its first review — how much churn happens post-
+  // review (proxy for how "baked" PRs are on submission). Only PRs that WERE reviewed contribute.
+  reworkTrend?: (number | null)[];
+
   // CI failure reasons over the window, by check/stage name (top stages, desc). The
   // dimension that tells you WHY CI is failing over time.
   ciFailureReasons: { stage: string; count: number }[];

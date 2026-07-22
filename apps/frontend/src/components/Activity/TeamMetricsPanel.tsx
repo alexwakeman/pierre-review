@@ -170,6 +170,30 @@ export function TeamMetricsPanel({
     reviewLoad == null ||
     (reviewLoad.human.every((v) => v == null) && reviewLoad.bot.every((v) => v == null));
 
+  // Self-review depth (Phase 2), folded into the "More charts" expander. All by merge week.
+  const crTrend = metrics.changesRequestedTrend;
+  const reworkTrend = metrics.reworkTrend;
+  const coverage = metrics.reviewCoverage;
+  const crSeries: Series[] = crTrend
+    ? [{ key: 'cr', label: 'Changes requested', color: PALETTE.orange, values: crTrend }]
+    : [];
+  const reworkSeries: Series[] = reworkTrend
+    ? [{ key: 'rework', label: 'Rework', color: PALETTE.purple, values: reworkTrend }]
+    : [];
+  const coverageSeries: Series[] = coverage
+    ? [
+        { key: 'human', label: 'Human-reviewed', color: PALETTE.green, values: coverage.human },
+        { key: 'botOnly', label: 'Bot-only', color: PALETTE.orange, values: coverage.botOnly },
+        { key: 'unreviewed', label: 'Unreviewed', color: PALETTE.red, values: coverage.unreviewed },
+      ]
+    : [];
+  const nullEvery = (xs?: (number | null)[]): boolean => xs == null || xs.every((v) => v == null);
+  const coverageEmpty =
+    coverage == null ||
+    (coverage.human.every((v) => v === 0) &&
+      coverage.botOnly.every((v) => v === 0) &&
+      coverage.unreviewed.every((v) => v === 0));
+
   return (
     <div
       className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-800 dark:bg-gray-900/20"
@@ -304,7 +328,7 @@ export function TeamMetricsPanel({
           className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
           {showMore ? '▾' : '▸'} More charts
-          {moreChartsSlot == null ? ' — lead time · merge CI success' : ''}
+          {moreChartsSlot == null ? ' — lead time · CI · review depth' : ''}
         </button>
         {showMore &&
           (moreChartsSlot != null ? (
@@ -323,6 +347,41 @@ export function TeamMetricsPanel({
                   <ChartEmpty />
                 ) : (
                   <LineChart labels={labels} series={ciSeries} curved formatY={pctFmt} />
+                )}
+              </ChartCard>
+              <ChartCard
+                title="Changes-requested rate"
+                note="% merged PRs sent back · weekly · lower = cleaner drafts"
+              >
+                {nullEvery(crTrend) ? (
+                  <ChartEmpty />
+                ) : (
+                  <LineChart labels={labels} series={crSeries} curved formatY={pctFmt} />
+                )}
+              </ChartCard>
+              <ChartCard
+                title="Review coverage"
+                note="merged PRs by who reviewed · weekly"
+              >
+                {coverageEmpty ? (
+                  <ChartEmpty label="No merged PRs yet" />
+                ) : (
+                  <BarChart
+                    labels={labels}
+                    series={coverageSeries}
+                    mode="stacked"
+                    formatY={countFmt}
+                  />
+                )}
+              </ChartCard>
+              <ChartCard
+                title="Rework after review"
+                note="median % of commits pushed after first review · weekly"
+              >
+                {nullEvery(reworkTrend) ? (
+                  <ChartEmpty label="No reviewed merges yet" />
+                ) : (
+                  <LineChart labels={labels} series={reworkSeries} area curved formatY={pctFmt} />
                 )}
               </ChartCard>
             </div>

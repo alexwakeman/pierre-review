@@ -2630,8 +2630,10 @@ export async function getTeamMetrics(
   let ciFailingNow = 0;
   let openPrsNow = 0;
   // Review-load: merged-PR id → its merge-week bucket (only PRs merged inside the chart window).
-  // The per-bucket merge count reuses mergedSeries as the denominator.
+  // The per-bucket merge count reuses mergedSeries as the denominator. mergedPrFirstReview carries
+  // each merged PR's first-review time (or null) for the Phase-2 rework-ratio series.
   const mergedPrBucket = new Map<number, number>();
+  const mergedPrFirstReview = new Map<number, number | null>();
 
   for (const p of prs) {
     const openedMs = p.openedAt.getTime();
@@ -2651,6 +2653,7 @@ export async function getTeamMetrics(
       if (mergedMs >= chartWindowStartMs) {
         mergedSeries[bi(mergedMs)]! += 1;
         mergedPrBucket.set(p.id, bi(mergedMs));
+        mergedPrFirstReview.set(p.id, p.firstReviewAt != null ? p.firstReviewAt.getTime() : null);
         const lead = (mergedMs - openedMs) / 3_600_000;
         if (lead >= 0) leadByBucket[bi(mergedMs)]!.push(lead);
         const green = p.ciStatus === 'success';
@@ -2753,22 +2756,33 @@ export async function getTeamMetrics(
   // comment time), so pre-merge review on an old-but-recently-merged PR is fully counted.
   const humanLoadByBucket = zeros();
   const botLoadByBucket = zeros();
+  // Phase-2 self-review depth, all keyed off the same merged-PR touch scan:
+  const prHasHuman = new Set<number>(); // PR got ≥1 human review touch
+  const prHasBot = new Set<number>(); // PR got ≥1 bot review touch
+  const crPrs = new Set<number>(); // PR got a changes-requested review
   const mergedIds = [...mergedPrBucket.keys()];
   if (mergedIds.length > 0) {
     const addLoad = (prId: number | null, isBot: boolean): void => {
       if (prId == null) return;
       const b = mergedPrBucket.get(prId);
       if (b == null) return;
-      if (isBot) botLoadByBucket[b]! += 1;
-      else humanLoadByBucket[b]! += 1;
+      if (isBot) {
+        botLoadByBucket[b]! += 1;
+        prHasBot.add(prId);
+      } else {
+        humanLoadByBucket[b]! += 1;
+        prHasHuman.add(prId);
+      }
     };
     for (const r of await db
-      .select({ prId: reviews.prId, isBot: users.isBot })
+      .select({ prId: reviews.prId, isBot: users.isBot, state: reviews.state })
       .from(reviews)
       .innerJoin(users, eq(users.id, reviews.authorId))
       .where(and(inArray(reviews.prId, mergedIds), ne(reviews.state, 'pending')))
-      .execute())
+      .execute()) {
       addLoad(r.prId, r.isBot);
+      if (r.prId != null && r.state === 'changes_requested') crPrs.add(r.prId);
+    }
     for (const r of await db
       .select({ prId: reviewComments.prId, isBot: users.isBot })
       .from(reviewComments)
@@ -2791,6 +2805,52 @@ export async function getTeamMetrics(
     human: humanLoadByBucket.map(perMergedLoad),
     bot: botLoadByBucket.map(perMergedLoad),
   };
+
+  // ---- Self-review depth (Phase 2), all by merge week ----
+  // Changes-requested rate: % of merged PRs with a changes-requested review (falling = cleaner
+  // first drafts). Coverage: each merged PR classified human-reviewed / bot-only / unreviewed.
+  const crByBucket = zeros();
+  const covHuman = zeros();
+  const covBotOnly = zeros();
+  const covUnreviewed = zeros();
+  for (const [prId, bucket] of mergedPrBucket) {
+    if (crPrs.has(prId)) crByBucket[bucket]! += 1;
+    if (prHasHuman.has(prId)) covHuman[bucket]! += 1;
+    else if (prHasBot.has(prId)) covBotOnly[bucket]! += 1;
+    else covUnreviewed[bucket]! += 1;
+  }
+  const changesRequestedTrend = crByBucket.map((n, i) =>
+    mergedSeries[i]! > 0 ? Math.round((n / mergedSeries[i]!) * 100) : null,
+  );
+  const reviewCoverage = { human: covHuman, botOnly: covBotOnly, unreviewed: covUnreviewed };
+
+  // Rework ratio: for each REVIEWED merged PR, the share of its commits pushed AFTER first review
+  // (churn once review started — a proxy for how "baked" it was on submission). Median across the
+  // week's reviewed PRs. PRs never reviewed (no firstReviewAt) can't have post-review rework → out.
+  const reworkByBucket: number[][] = Array.from({ length: nBuckets }, () => []);
+  if (mergedIds.length > 0) {
+    const prCommits = new Map<number, { total: number; after: number }>();
+    for (const c of await db
+      .select({ prId: commits.prId, at: commits.committedAt })
+      .from(commits)
+      .where(inArray(commits.prId, mergedIds))
+      .execute()) {
+      const firstReviewMs = mergedPrFirstReview.get(c.prId);
+      if (firstReviewMs === undefined) continue; // not a chart-window merged PR
+      const rec = prCommits.get(c.prId) ?? { total: 0, after: 0 };
+      rec.total += 1;
+      if (firstReviewMs != null && c.at.getTime() > firstReviewMs) rec.after += 1;
+      prCommits.set(c.prId, rec);
+    }
+    for (const [prId, rec] of prCommits) {
+      // Only PRs that were actually reviewed contribute a rework ratio.
+      if (mergedPrFirstReview.get(prId) == null || rec.total === 0) continue;
+      const bucket = mergedPrBucket.get(prId);
+      if (bucket == null) continue;
+      reworkByBucket[bucket]!.push(Math.round((rec.after / rec.total) * 100));
+    }
+  }
+  const reworkTrend = reworkByBucket.map(medianOf);
 
   // Wrap each cur/prev pair with its sample sizes + a low-confidence flag (either side below
   // TEAM_METRIC_MIN_SAMPLE). For counts the sample IS the value; for medians/percentages it's
@@ -2840,6 +2900,9 @@ export async function getTeamMetrics(
     ciSuccessTrend: ciByBucket.map(pct),
     ciRecoveryTrend: recoveryByBucket.map(medianOf),
     reviewLoad,
+    changesRequestedTrend,
+    reviewCoverage,
+    reworkTrend,
     ciFailureReasons,
   };
 }
