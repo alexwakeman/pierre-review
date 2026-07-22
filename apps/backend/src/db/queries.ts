@@ -2575,6 +2575,7 @@ export async function getTeamMetrics(
 
   const prs = await db
     .select({
+      id: pullRequests.id,
       state: pullRequests.state,
       isDraft: pullRequests.isDraft,
       openedAt: pullRequests.openedAt,
@@ -2628,6 +2629,9 @@ export async function getTeamMetrics(
   const failingAges: number[] = [];
   let ciFailingNow = 0;
   let openPrsNow = 0;
+  // Review-load: merged-PR id → its merge-week bucket (only PRs merged inside the chart window).
+  // The per-bucket merge count reuses mergedSeries as the denominator.
+  const mergedPrBucket = new Map<number, number>();
 
   for (const p of prs) {
     const openedMs = p.openedAt.getTime();
@@ -2646,6 +2650,7 @@ export async function getTeamMetrics(
       const mergedMs = p.mergedAt.getTime();
       if (mergedMs >= chartWindowStartMs) {
         mergedSeries[bi(mergedMs)]! += 1;
+        mergedPrBucket.set(p.id, bi(mergedMs));
         const lead = (mergedMs - openedMs) / 3_600_000;
         if (lead >= 0) leadByBucket[bi(mergedMs)]!.push(lead);
         const green = p.ciStatus === 'success';
@@ -2740,6 +2745,53 @@ export async function getTeamMetrics(
     .slice(0, 8)
     .map(([stage, count]) => ({ stage, count }));
 
+  // ---- Review load per merged PR (human vs bot), by merge week ----
+  // Count review TOUCHES (reviews excl. pending + inline comments + issue comments) each merged
+  // PR attracted, split by whether the author is a bot, bucketed into the PR's merge week; ÷ the
+  // week's merge count (mergedSeries) → average review load per shipped PR. Same touch model as
+  // the Bots behaviour panel, so the two surfaces read consistently. Gathered by PR id (not by
+  // comment time), so pre-merge review on an old-but-recently-merged PR is fully counted.
+  const humanLoadByBucket = zeros();
+  const botLoadByBucket = zeros();
+  const mergedIds = [...mergedPrBucket.keys()];
+  if (mergedIds.length > 0) {
+    const addLoad = (prId: number | null, isBot: boolean): void => {
+      if (prId == null) return;
+      const b = mergedPrBucket.get(prId);
+      if (b == null) return;
+      if (isBot) botLoadByBucket[b]! += 1;
+      else humanLoadByBucket[b]! += 1;
+    };
+    for (const r of await db
+      .select({ prId: reviews.prId, isBot: users.isBot })
+      .from(reviews)
+      .innerJoin(users, eq(users.id, reviews.authorId))
+      .where(and(inArray(reviews.prId, mergedIds), ne(reviews.state, 'pending')))
+      .execute())
+      addLoad(r.prId, r.isBot);
+    for (const r of await db
+      .select({ prId: reviewComments.prId, isBot: users.isBot })
+      .from(reviewComments)
+      .innerJoin(users, eq(users.id, reviewComments.authorId))
+      .where(inArray(reviewComments.prId, mergedIds))
+      .execute())
+      addLoad(r.prId, r.isBot);
+    for (const r of await db
+      .select({ prId: prComments.prId, isBot: users.isBot })
+      .from(prComments)
+      .innerJoin(users, eq(users.id, prComments.authorId))
+      .where(inArray(prComments.prId, mergedIds))
+      .execute())
+      addLoad(r.prId, r.isBot);
+  }
+  const r2 = (x: number): number => Math.round(x * 100) / 100;
+  const perMergedLoad = (n: number, i: number): number | null =>
+    mergedSeries[i]! > 0 ? r2(n / mergedSeries[i]!) : null;
+  const reviewLoad = {
+    human: humanLoadByBucket.map(perMergedLoad),
+    bot: botLoadByBucket.map(perMergedLoad),
+  };
+
   // Wrap each cur/prev pair with its sample sizes + a low-confidence flag (either side below
   // TEAM_METRIC_MIN_SAMPLE). For counts the sample IS the value; for medians/percentages it's
   // the number of items that fed the statistic.
@@ -2787,6 +2839,7 @@ export async function getTeamMetrics(
     leadTimeTrend: leadByBucket.map(medianOf),
     ciSuccessTrend: ciByBucket.map(pct),
     ciRecoveryTrend: recoveryByBucket.map(medianOf),
+    reviewLoad,
     ciFailureReasons,
   };
 }

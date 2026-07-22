@@ -3267,6 +3267,13 @@ export interface TeamMetrics {
   ciSuccessTrend: (number | null)[]; // % merged PRs green, by merge week
   ciRecoveryTrend: (number | null)[]; // median CI recovery hours, by resolution week
 
+  // Review load per merged PR, split human vs bot, by merge week — how much review a shipped PR
+  // attracts and whether human scrutiny keeps pace with bots. Each value = review touches (reviews
+  // + inline + issue comments) by humans / bots ÷ PRs merged that week; null for a merge-less week.
+  // "bot" = any bot-flagged author (users.isBot). A falling human line while bot rises = review is
+  // shifting onto the bots. Optional for back-compat with cached responses predating the field.
+  reviewLoad?: { human: (number | null)[]; bot: (number | null)[] };
+
   // CI failure reasons over the window, by check/stage name (top stages, desc). The
   // dimension that tells you WHY CI is failing over time.
   ciFailureReasons: { stage: string; count: number }[];
