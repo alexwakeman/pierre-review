@@ -270,6 +270,10 @@ export const reviewThreads = pgTable(
     addressedReason: text('addressed_reason'),
     // GitHub login of whoever resolved the thread (from `resolvedBy`), null when unresolved.
     resolvedByLogin: text('resolved_by_login'),
+    // When we FIRST OBSERVED the thread flip unresolved→resolved (sync-observation time). Stamped
+    // only on a witnessed transition; a thread already resolved when first seen stays null. Powers
+    // the resolution-latency trend. See the sqlite twin for the full rationale.
+    resolvedAt: timestamp('resolved_at', { withTimezone: true, mode: 'date' }),
     originalCommenterId: integer('original_commenter_id').references(
       () => users.id,
     ),

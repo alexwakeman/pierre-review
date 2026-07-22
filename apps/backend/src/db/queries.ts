@@ -2852,6 +2852,43 @@ export async function getTeamMetrics(
   }
   const reworkTrend = reworkByBucket.map(medianOf);
 
+  // ---- Thread resolution latency (human vs bot self-resolve), by resolution week ----
+  // For threads we OBSERVED resolve (resolvedAt set — going forward only), median hours from the
+  // thread opening (createdAt) to resolution, bucketed by the resolution week. Split by whether
+  // the resolver login is a bot (self-resolve) vs a human (a dev addressed the feedback). Empty
+  // until post-deploy syncs witness resolves; latency for a backfilled resolve is unknowable so
+  // it's excluded (resolvedAt stays null). Buckets by resolvedAt week, like CI recovery.
+  const resHumanByBucket: number[][] = Array.from({ length: nBuckets }, () => []);
+  const resBotByBucket: number[][] = Array.from({ length: nBuckets }, () => []);
+  for (const row of await db
+    .select({
+      createdAt: reviewThreads.createdAt,
+      resolvedAt: reviewThreads.resolvedAt,
+      isBot: users.isBot,
+    })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .leftJoin(users, eq(users.githubLogin, reviewThreads.resolvedByLogin))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.repoId, repoIds),
+        isNotNull(reviewThreads.resolvedAt),
+        gte(reviewThreads.resolvedAt, new Date(chartWindowStartMs)),
+      ),
+    )
+    .execute()) {
+    if (row.resolvedAt == null) continue;
+    const hours = (row.resolvedAt.getTime() - row.createdAt.getTime()) / 3_600_000;
+    if (hours < 0) continue;
+    const bucket = bi(row.resolvedAt.getTime());
+    (row.isBot === true ? resBotByBucket : resHumanByBucket)[bucket]!.push(hours);
+  }
+  const resolutionLatencyTrend = {
+    human: resHumanByBucket.map(medianOf),
+    bot: resBotByBucket.map(medianOf),
+  };
+
   // Wrap each cur/prev pair with its sample sizes + a low-confidence flag (either side below
   // TEAM_METRIC_MIN_SAMPLE). For counts the sample IS the value; for medians/percentages it's
   // the number of items that fed the statistic.
@@ -2903,6 +2940,7 @@ export async function getTeamMetrics(
     changesRequestedTrend,
     reviewCoverage,
     reworkTrend,
+    resolutionLatencyTrend,
     ciFailureReasons,
   };
 }

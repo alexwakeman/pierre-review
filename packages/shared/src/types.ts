@@ -3284,6 +3284,11 @@ export interface TeamMetrics {
   // Median % of a merged PR's commits pushed AFTER its first review — how much churn happens post-
   // review (proxy for how "baked" PRs are on submission). Only PRs that WERE reviewed contribute.
   reworkTrend?: (number | null)[];
+  // Median hours a review thread stays open before it's resolved, by resolution week, split by
+  // whether a bot self-resolved vs a human addressed it. Only counts resolves the sync WITNESSED
+  // (resolvedAt set going forward), so it's empty until post-deploy syncs observe some. "How fast
+  // devs address review feedback over time" — the human line is the signal that matters.
+  resolutionLatencyTrend?: { human: (number | null)[]; bot: (number | null)[] };
 
   // CI failure reasons over the window, by check/stage name (top stages, desc). The
   // dimension that tells you WHY CI is failing over time.

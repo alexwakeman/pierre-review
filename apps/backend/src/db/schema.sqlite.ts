@@ -303,6 +303,11 @@ export const reviewThreads = sqliteTable(
     // GitHub login of whoever resolved the thread (from `resolvedBy`), null when unresolved —
     // lets us distinguish a bot self-resolve from a human resolve.
     resolvedByLogin: text('resolved_by_login'),
+    // When we FIRST OBSERVED the thread flip unresolved→resolved (sync-observation time, ~5min
+    // granularity — GitHub's thread type exposes no resolve timestamp). Stamped only on a witnessed
+    // transition; a thread already resolved the first time we see it (backfill) stays null (unknown
+    // resolution time). Powers the resolution-latency trend. NOT a lean-gated field.
+    resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
     originalCommenterId: integer('original_commenter_id').references(
       () => users.id,
     ),

@@ -442,6 +442,23 @@ async function upsertEvent(
  * states, and emit timeline events. `commitFilesBySha` must already be
  * populated for any commits relevant to unresolved-thread derivation.
  */
+// Decide a review thread's resolvedAt on this sync. We can't read GitHub's true resolution time,
+// so we approximate it by the sync that FIRST observes the thread flip unresolved→resolved:
+//  • a prior stamp is preserved (idempotent — never moves once set),
+//  • a witnessed unresolved→resolved transition stamps `observedAt`,
+//  • a thread already resolved the first time we see it (no prior row, or prior already resolved
+//    with a null stamp) stays null — its true resolution time is unknowable, so it's excluded
+//    from the resolution-latency metric rather than counted with a bogus (deploy-time) latency.
+export function nextResolvedAt(
+  prior: { isResolved: boolean; resolvedAt: Date | null } | undefined,
+  isResolved: boolean,
+  observedAt: Date,
+): Date | null {
+  if (prior?.resolvedAt != null) return prior.resolvedAt;
+  if (isResolved && prior != null && !prior.isResolved) return observedAt;
+  return null;
+}
+
 export async function persistPr(
   pr: GqlPullRequest,
   repoId: number,
@@ -749,11 +766,29 @@ export async function persistPr(
       committedDate: c.commit.committedDate,
     }));
 
+    // Prior resolved-state per thread (this PR) so we can stamp resolvedAt on a WITNESSED
+    // unresolved→resolved flip only. A thread already resolved the first time we see it keeps a
+    // null resolvedAt (its true resolution time is unknown). Read once, before the upserts.
+    const priorThreads = new Map<string, { isResolved: boolean; resolvedAt: Date | null }>();
+    for (const row of await tx
+      .select({
+        nodeId: reviewThreads.githubNodeId,
+        isResolved: reviewThreads.isResolved,
+        resolvedAt: reviewThreads.resolvedAt,
+      })
+      .from(reviewThreads)
+      .where(eq(reviewThreads.prId, prId))
+      .execute())
+      priorThreads.set(row.nodeId, { isResolved: row.isResolved, resolvedAt: row.resolvedAt });
+    const observedAt = new Date();
+
     for (const t of pr.reviewThreads.nodes) {
       const commentNodes = t.comments.nodes;
       const originalCommenterId = await resolver.resolve(tx, commentNodes[0]?.author);
 
       const resolvedByLogin = t.resolvedBy?.login ?? null;
+      // Preserve a prior stamp; set it fresh only when we observe unresolved→resolved this sync.
+      const resolvedAt = nextResolvedAt(priorThreads.get(t.id), t.isResolved, observedAt);
       const { state: derivedState, addressedConfidence, addressedReason } =
         deriveThreadState(
           {
@@ -785,6 +820,7 @@ export async function persistPr(
           addressedConfidence,
           addressedReason,
           resolvedByLogin,
+          resolvedAt,
           originalCommenterId,
           createdAt: commentNodes[0]
             ? new Date(commentNodes[0].createdAt)
@@ -799,6 +835,7 @@ export async function persistPr(
             addressedConfidence,
             addressedReason,
             resolvedByLogin,
+            resolvedAt,
             line: t.line,
           },
         })

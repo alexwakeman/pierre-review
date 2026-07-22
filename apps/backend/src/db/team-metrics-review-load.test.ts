@@ -75,6 +75,31 @@ async function addCommit(prId: number, committedDaysAgo: number): Promise<void> 
     .execute();
 }
 
+// A thread with a recorded resolution (resolvedAt + resolver login) for the latency metric.
+async function addResolvedThread(
+  prId: number,
+  createdDaysAgo: number,
+  resolvedDaysAgo: number,
+  resolverLogin: string,
+): Promise<void> {
+  const { reviewThreads } = schema;
+  await db
+    .insert(reviewThreads)
+    .values({
+      githubNodeId: `TR_rl${threadSeq++}`,
+      prId,
+      path: 'src/z.ts',
+      line: 1,
+      isResolved: true,
+      isOutdated: false,
+      derivedState: 'resolved',
+      resolvedByLogin: resolverLogin,
+      resolvedAt: new Date(now - resolvedDaysAgo * DAY),
+      createdAt: new Date(now - createdDaysAgo * DAY),
+    })
+    .execute();
+}
+
 async function addInlineComment(prId: number, authorId: number): Promise<void> {
   const { reviewThreads, reviewComments } = schema;
   const [thread] = await db
@@ -178,6 +203,13 @@ beforeAll(async () => {
   await addCommit(m5, 62.4); // before
   await addCommit(m5, 62.3); // before
   await addCommit(m5, 61); // after first review
+
+  // Resolution latency (resolution week 11): two human resolves (14d = 336h, 4d = 96h → median
+  // 216h) + one bot self-resolve (3d = 72h). Attached to M1 (its own inline threads are unresolved
+  // → excluded by the resolvedAt filter).
+  await addResolvedThread(m1, 20, 6, 'alice');
+  await addResolvedThread(m1, 10, 6, 'alice');
+  await addResolvedThread(m1, 8, 5, 'coderabbitai');
 });
 
 afterAll(() => closeDb?.());
@@ -226,5 +258,12 @@ describe('getTeamMetrics — self-review depth (changes-requested / coverage / r
     const m = await q.getTeamMetrics(1, [repoId], now, undefined);
     expect(m.reworkTrend[3]).toBe(25); // M5: 1 of 4 commits after review
     expect(m.reworkTrend[11]).toBeNull(); // M1/M2 never had firstReviewAt → excluded
+  });
+
+  it('resolution latency = median open→resolved hours, split human vs bot self-resolve', async () => {
+    const m = await q.getTeamMetrics(1, [repoId], now, undefined);
+    expect(m.resolutionLatencyTrend.human[11]).toBe(216); // median(336h, 96h)
+    expect(m.resolutionLatencyTrend.bot[11]).toBe(72); // one bot self-resolve, 3d
+    expect(m.resolutionLatencyTrend.human[0]).toBeNull(); // no resolutions that week
   });
 });

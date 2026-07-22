@@ -194,6 +194,18 @@ export function TeamMetricsPanel({
       coverage.botOnly.every((v) => v === 0) &&
       coverage.unreviewed.every((v) => v === 0));
 
+  // Thread resolution latency (human vs bot self-resolve), by resolution week. Empty until
+  // post-deploy syncs witness resolves (resolvedAt is set only on an observed unresolved→resolved).
+  const resolution = metrics.resolutionLatencyTrend;
+  const resolutionSeries: Series[] = resolution
+    ? [
+        { key: 'human', label: 'Human-resolved', color: PALETTE.blue, values: resolution.human },
+        { key: 'bot', label: 'Bot self-resolved', color: PALETTE.orange, values: resolution.bot },
+      ]
+    : [];
+  const resolutionEmpty =
+    resolution == null || (nullEvery(resolution.human) && nullEvery(resolution.bot));
+
   return (
     <div
       className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-800 dark:bg-gray-900/20"
@@ -382,6 +394,21 @@ export function TeamMetricsPanel({
                   <ChartEmpty label="No reviewed merges yet" />
                 ) : (
                   <LineChart labels={labels} series={reworkSeries} area curved formatY={pctFmt} />
+                )}
+              </ChartCard>
+              <ChartCard
+                title="Time to resolve threads"
+                note="median open→resolved · human vs bot self-resolve · weekly"
+              >
+                {resolutionEmpty ? (
+                  <ChartEmpty label="No resolutions observed yet — accrues from sync" />
+                ) : (
+                  <LineChart
+                    labels={labels}
+                    series={resolutionSeries}
+                    curved
+                    formatY={fmtDuration}
+                  />
                 )}
               </ChartCard>
             </div>
