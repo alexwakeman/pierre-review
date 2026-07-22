@@ -19,6 +19,8 @@ import {
 
 const pctFmt = (n: number): string => `${Math.round(n)}%`;
 const countFmt = (n: number): string => String(Math.round(n));
+// Review-load values are small decimals (touches per PR): keep 1 dp so 2.5 isn't rounded to 3.
+const loadFmt = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
 // One KPI tile with a delta arrow vs the prior sprint, coloured by whether the change is
 // an improvement (merges/CI up = good; lead time / latency down = good). Clickable when
@@ -154,6 +156,20 @@ export function TeamMetricsPanel({
   ];
   const reasonLabels = metrics.ciFailureReasons.map((r) => r.stage);
 
+  // Review load per shipped PR, human vs bot — two area lines so "is human keeping pace with the
+  // bots" reads directly (band comparison, not a stack). Absent on cached responses predating the
+  // field. An approximate signal (touch counts, not weighted by depth) — the note says "per PR".
+  const reviewLoad = metrics.reviewLoad;
+  const reviewLoadSeries: Series[] = reviewLoad
+    ? [
+        { key: 'human', label: 'Human', color: PALETTE.blue, values: reviewLoad.human },
+        { key: 'bot', label: 'Bot', color: PALETTE.orange, values: reviewLoad.bot },
+      ]
+    : [];
+  const reviewLoadEmpty =
+    reviewLoad == null ||
+    (reviewLoad.human.every((v) => v == null) && reviewLoad.bot.every((v) => v == null));
+
   return (
     <div
       className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-800 dark:bg-gray-900/20"
@@ -250,6 +266,13 @@ export function TeamMetricsPanel({
         12-week trend
       </h4>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <ChartCard title="Review load per PR" note="human vs bot touches per shipped PR · weekly">
+          {reviewLoadEmpty ? (
+            <ChartEmpty label="No merged-PR review activity yet" />
+          ) : (
+            <LineChart labels={labels} series={reviewLoadSeries} area curved formatY={loadFmt} />
+          )}
+        </ChartCard>
         <ChartCard title="Throughput" note="opened vs merged · weekly">
           {sum(metrics.throughput.opened) + sum(metrics.throughput.merged) === 0 ? (
             <ChartEmpty />
