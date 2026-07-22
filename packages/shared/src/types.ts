@@ -288,13 +288,22 @@ export interface BotBehaviourTrendPoint {
   ttfrAnomaly: boolean; // this week's TTFR is anomalously HIGH vs the bot's typical
   volumeAnomaly: boolean; // this week's volume diverges (either way) from typical
   followupAnomaly: boolean; // this week's follow-up rate diverges (either way) from typical
+  // Findings DENSITY — how many review threads the bot OPENS per PR / per 1000 changed lines, over
+  // the PRs it first touched that week. This is the "is code quality improving?" signal: a FALLING
+  // density means fewer issues raised per PR / per line over time (cleaner code or better self-
+  // review) — an approximate proxy (a tuned-down bot or more trivial PRs read the same way). A PR
+  // the bot reviewed but opened no thread on contributes a real 0. Null when no PRs that week.
+  findingsPerPr: number | null; // bot threads opened ÷ PRs reviewed that week
+  findingsPerKloc: number | null; // bot threads opened ÷ (changed LoC / 1000) that week
+  prsInWeek: number; // PRs the bot first touched that week (the density denominator, for confidence)
+  densityAnomaly: boolean; // this week's per-KLoC density diverges (either way) from the bot's typical
 }
 
 // A single flagged divergence — the evidence behind a chart marker (observed vs the bot's own
 // typical + the robust z-magnitude). `metric:'silence'` is a coverage GAP (a run of silent days
 // for a normally-regular bot); its `spanDays`/`dayStart` describe the run, `z` is null.
 export interface BotBehaviourAnomaly {
-  metric: 'ttfr' | 'volume' | 'followup' | 'silence';
+  metric: 'ttfr' | 'volume' | 'followup' | 'silence' | 'density';
   direction: 'high' | 'low';
   weekStart?: string; // weekly metrics — the affected week
   dayStart?: string; // silence — the run's first silent day (ISO)

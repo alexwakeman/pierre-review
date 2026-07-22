@@ -7891,6 +7891,31 @@ export async function getBotBehaviourAnalytics(
     if (cur == null || ms < cur) readyByPr.set(e.prId, ms);
   }
 
+  // Findings-density numerator: review THREADS each bot OPENED (originalCommenterId) on the PRs it
+  // touched. Threads (not raw comments) match the user's "thread counts per PR" — a multi-comment
+  // thread is one finding. Bucketed per PR into its first-touch week in the loop below.
+  const threadsByUserPr = new Map<number, Map<number, number>>();
+  for (const t of await db
+    .select({ opener: reviewThreads.originalCommenterId, prId: reviewThreads.prId })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviewThreads.originalCommenterId, automatedIds),
+        inArray(reviewThreads.prId, prIdList),
+      ),
+    )
+    .execute()) {
+    if (t.opener == null || t.prId == null) continue;
+    let byPr = threadsByUserPr.get(t.opener);
+    if (!byPr) {
+      byPr = new Map();
+      threadsByUserPr.set(t.opener, byPr);
+    }
+    byPr.set(t.prId, (byPr.get(t.prId) ?? 0) + 1);
+  }
+
   const HOUR = 3_600_000;
   const SPAN_WEEKS = 12;
   // DAY / SPAN_DAYS / trendFromMs are hoisted above (they also gate the prsOpenedPerDay series).
@@ -7911,6 +7936,12 @@ export async function getBotBehaviourAnalytics(
     // Span-wide weekly series feeding the anomaly baseline + the trend charts.
     const volumeByWeek = new Array<number>(SPAN_WEEKS).fill(0); // touches per week
     const followupByWeek = Array.from({ length: SPAN_WEEKS }, () => ({ withFollowup: 0, total: 0 }));
+    // Findings density per week (bucketed by each PR's first-touch week): threads the bot opened,
+    // PRs it reviewed, and their changed LoC — the numerators/denominators of findingsPerPr/KLoC.
+    const threadsByWeek = new Array<number>(SPAN_WEEKS).fill(0);
+    const prsByWeek = new Array<number>(SPAN_WEEKS).fill(0);
+    const locByWeek = new Array<number>(SPAN_WEEKS).fill(0);
+    const botThreadsByPr = threadsByUserPr.get(userId);
     const dailyActivity = new Array<number>(SPAN_DAYS).fill(0); // touches per day → coverage strip
     const heatmap = new Array<number>(168).fill(0);
     let totalActivity = 0;
@@ -7934,6 +7965,10 @@ export async function getBotBehaviourAnalytics(
       // Weekly follow-up rate: of the PRs first-reviewed in a week, the share the bot came back to.
       followupByWeek[wk]!.total += 1;
       if (sorted.length > 1) followupByWeek[wk]!.withFollowup += 1;
+      // Weekly findings density: attribute this PR's opened-threads + LoC to its first-touch week.
+      prsByWeek[wk]! += 1;
+      threadsByWeek[wk]! += botThreadsByPr?.get(prId) ?? 0;
+      locByWeek[wk]! += meta.loc;
 
       // Every touch → the span-wide weekly volume + the daily coverage strip; the week×hour
       // heatmap keeps its WINDOW scope (the coverage snapshot). All from real GitHub timestamps.
@@ -7993,9 +8028,17 @@ export async function getBotBehaviourAnalytics(
     // "anomalous spike vs typical 0"), and leaves drops-to-ZERO to the silence detector — a
     // volume anomaly is a change in the bot's ACTIVE output (e.g. 50→5/week), not going dark.
     const volumeSeries: (number | null)[] = volumeByWeek.map((v) => (v > 0 ? v : null));
+    // Density series: null for a PR-less week (no data → no baseline contribution, like TTFR). The
+    // per-KLoC series drives the anomaly baseline; a diverging week (either way) is an exception.
+    const round2 = (x: number): number => Math.round(x * 100) / 100;
+    const findingsPerPrSeries = prsByWeek.map((n, i) => (n > 0 ? round2(threadsByWeek[i]! / n) : null));
+    const findingsPerKlocSeries = locByWeek.map((loc, i) =>
+      loc > 0 ? round2(threadsByWeek[i]! / (loc / 1000)) : null,
+    );
     const ttfrAnoms = weeklyAnomalies(ttfrSeries, { direction: 'high', minScale: 0.5 });
     const volAnoms = weeklyAnomalies(volumeSeries, { direction: 'both', minScale: 2 });
     const followupAnoms = weeklyAnomalies(followupSeries, { direction: 'both', minScale: 10 });
+    const densityAnoms = weeklyAnomalies(findingsPerKlocSeries, { direction: 'both', minScale: 0.5 });
 
     const trend: BotBehaviourTrendPoint[] = Array.from({ length: SPAN_WEEKS }, (_, i) => ({
       weekStart: new Date(trendFromMs + i * 7 * DAY).toISOString(),
@@ -8005,6 +8048,10 @@ export async function getBotBehaviourAnalytics(
       ttfrAnomaly: ttfrAnoms[i] != null,
       volumeAnomaly: volAnoms[i] != null,
       followupAnomaly: followupAnoms[i] != null,
+      findingsPerPr: findingsPerPrSeries[i]!,
+      findingsPerKloc: findingsPerKlocSeries[i]!,
+      prsInWeek: prsByWeek[i]!,
+      densityAnomaly: densityAnoms[i] != null,
     }));
 
     // The anomaly evidence list (newest week first, then silence runs). typical = the bot's own
@@ -8020,6 +8067,9 @@ export async function getBotBehaviourAnalytics(
       const f = followupAnoms[i];
       if (f && followupSeries[i] != null)
         anomalies.push({ metric: 'followup', direction: f.direction, weekStart, observed: followupSeries[i]!, typical: f.typical, z: Math.round(f.z * 10) / 10 });
+      const d = densityAnoms[i];
+      if (d && findingsPerKlocSeries[i] != null)
+        anomalies.push({ metric: 'density', direction: d.direction, weekStart, observed: findingsPerKlocSeries[i]!, typical: d.typical, z: Math.round(d.z * 10) / 10 });
     }
     // Silence runs → anomalies (typical = the bot's median spacing between active days).
     const activeDays: number[] = [];
