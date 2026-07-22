@@ -22,6 +22,7 @@ export function LineChart({
   height = 132,
   logY = false,
   centerTip = false,
+  tipBelow = false,
   hideLegend = false,
 }: {
   labels: string[];
@@ -37,6 +38,9 @@ export function LineChart({
   // Pin the hover tooltip to the chart's horizontal centre (see FloatingTip) so it can't spill
   // into a neighbouring panel at the far edges — for wide, multi-series charts.
   centerTip?: boolean;
+  // Render the hover summary as a right-aligned strip BELOW the chart (never overlapping the plot
+  // area or a neighbour) instead of the floating in-chart tooltip. Reserves space so no jump.
+  tipBelow?: boolean;
   // Suppress the built-in legend (the host renders its own — e.g. an interactive series selector).
   hideLegend?: boolean;
 }): JSX.Element {
@@ -162,6 +166,21 @@ export function LineChart({
   const linePathFor = curved ? smoothLinePath : linePath;
   const areaPathFor = curved ? smoothAreaPath : areaPath;
 
+  // One line's stroke. Dashed series (a fitted trend overlay) render thicker + full-opacity so
+  // they stand out, and are painted LAST (over the data lines + dots) by the caller's ordering.
+  const renderPath = (s: Series): JSX.Element => (
+    <path
+      key={s.key}
+      d={linePathFor(s)}
+      fill="none"
+      stroke={s.color}
+      strokeWidth={s.dashed ? 2.75 : 1.5}
+      strokeDasharray={s.dashed ? '6 4' : undefined}
+      strokeLinejoin="round"
+      strokeLinecap="round"
+    />
+  );
+
   const onMove = (e: React.MouseEvent<SVGRectElement>): void => {
     const ox = e.nativeEvent.offsetX;
     const i = n <= 1 ? 0 : Math.round(((ox - PAD_L) / innerW) * (n - 1));
@@ -209,19 +228,8 @@ export function LineChart({
                 strokeWidth={1}
               />
             )}
-            {series.map((s) => (
-              <path
-                key={s.key}
-                d={linePathFor(s)}
-                fill="none"
-                stroke={s.color}
-                strokeWidth={s.dashed ? 2 : 1.5}
-                strokeDasharray={s.dashed ? '5 4' : undefined}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                opacity={s.dashed ? 0.85 : 1}
-              />
-            ))}
+            {/* data lines first, then dots, then any dashed trend line ON TOP (below) */}
+            {series.filter((s) => !s.dashed).map(renderPath)}
             {series.map((s) =>
               s.dashed
                 ? null // a fitted overlay (trend line) carries no data dots
@@ -251,6 +259,8 @@ export function LineChart({
                 );
               }),
             )}
+            {/* dashed trend line(s) painted last so they sit above every data line + dot */}
+            {series.filter((s) => s.dashed).map(renderPath)}
             {/* x ticks: first + last */}
             <text x={PAD_L} y={height - 4} className="fill-gray-400 text-[8px]">
               {labels[0] ? fmtDate(labels[0]) : ''}
@@ -274,7 +284,7 @@ export function LineChart({
             />
           </svg>
         )}
-        {hover != null && w > 0 && (
+        {!tipBelow && hover != null && w > 0 && (
           <FloatingTip x={x(hover)} y={PAD_T} width={w} centered={centerTip}>
             <div className="font-medium">{labels[hover] ? fmtDate(labels[hover]!) : ''}</div>
             {series.filter((s) => !s.dashed).map((s) => {
@@ -304,6 +314,39 @@ export function LineChart({
           </FloatingTip>
         )}
       </div>
+      {/* Below-chart summary strip — the point-in-time breakdown, right-aligned, outside the plot
+          so it never covers the lines or a neighbouring panel. Reserves height to avoid a jump. */}
+      {tipBelow && (
+        <div className="mt-1 flex min-h-[1.75rem] flex-wrap items-baseline justify-end gap-x-3 gap-y-0.5 text-[10px] leading-tight">
+          {hover == null ? (
+            <span className="text-gray-400">hover a week for its point-in-time breakdown</span>
+          ) : (
+            <>
+              <span className="font-medium text-gray-600 dark:text-gray-300">
+                {labels[hover] ? fmtDate(labels[hover]!) : ''}
+              </span>
+              {series
+                .filter((s) => !s.dashed)
+                .map((s) => {
+                  const v = s.values[hover!];
+                  const note = s.pointNotes?.[hover!] ?? null;
+                  return (
+                    <span key={s.key} className="flex items-baseline gap-1">
+                      <span
+                        className="inline-block h-1.5 w-1.5 translate-y-px rounded-[1px]"
+                        style={{ background: s.color }}
+                      />
+                      <span className="text-gray-600 dark:text-gray-300">
+                        {s.label}: {v == null ? '—' : formatY(v)}
+                      </span>
+                      {note && <span style={{ color: ANOMALY_RING }}>⭘ {note}</span>}
+                    </span>
+                  );
+                })}
+            </>
+          )}
+        </div>
+      )}
       {!hideLegend && series.length > 1 && <Legend series={series} />}
     </div>
   );

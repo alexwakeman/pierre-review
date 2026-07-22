@@ -173,7 +173,9 @@ function DensityTrendChart({
   botColor: BotColorFn;
 }): JSX.Element {
   const [mode, setMode] = useState<'kloc' | 'pr'>('kloc');
-  const [showTrend, setShowTrend] = useState(false);
+  // Trend line ON by default — the combined line-of-best-fit is the headline "is density rising or
+  // falling over the span" read, the single most decision-useful mark on this chart.
+  const [showTrend, setShowTrend] = useState(true);
   // null = all bots selected (stays correct across window refetches); a Set = an explicit subset.
   const [selected, setSelected] = useState<Set<string> | null>(null);
 
@@ -257,7 +259,7 @@ function DensityTrendChart({
         series.push({
           key: '__trend__',
           label: 'Overall trend',
-          color: PALETTE.slate,
+          color: PALETTE.amber, // yellow, prominent — painted above every bot line
           values: labels.map((_, i) => yAt(i)),
           dashed: true,
         });
@@ -293,13 +295,13 @@ function DensityTrendChart({
             onClick={() => setShowTrend((s) => !s)}
             className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 font-medium ${
               showTrend
-                ? 'border-slate-400 bg-slate-500/10 text-slate-700 dark:text-slate-200'
+                ? 'border-amber-400 bg-amber-500/10 text-amber-700 dark:text-amber-300'
                 : 'border-gray-300 text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
             }`}
           >
             <span
               className="inline-block h-0 w-3 border-t-2 border-dashed"
-              style={{ borderColor: PALETTE.slate }}
+              style={{ borderColor: PALETTE.amber }}
             />
             Trend line
           </button>
@@ -372,7 +374,7 @@ function DensityTrendChart({
           height={150}
           curved
           logY
-          centerTip
+          tipBelow
           hideLegend
           formatY={densAxis}
         />
