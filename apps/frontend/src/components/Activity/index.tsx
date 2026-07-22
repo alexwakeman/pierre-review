@@ -14,6 +14,7 @@ import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { FeedMetricsPanel } from './FeedMetricsPanel.js';
+import { HumanThemesPanel } from './HumanThemesPanel.js';
 import { InsightsView } from './InsightsView.js';
 import { BotsView } from './BotsView.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
@@ -195,7 +196,11 @@ export function ActivityView(): JSX.Element {
   const repoIds = useFilters((s) => s.repoIds);
   const activityRepoId = useFilters((s) => s.activityRepoId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
-  const { teamInsights } = useProCapabilities();
+  const { teamInsights, activityDigest } = useProCapabilities();
+  // The cross-repo Feed's inner sub-tab: 'feed' (metrics + consolidated feed) vs the Pro
+  // "Discussion themes" AI summary. The Themes tab only appears when the AI-summary tier is on.
+  const feedInnerTab = useFilters((s) => s.feedInnerTab);
+  const setFeedInnerTab = useFilters((s) => s.setFeedInnerTab);
   // Scope the aggregate to the active TEAM: 'all' → null (every watched repo), a team → its
   // teamScope-derived repoIds (kept in lockstep by setTeamScope / useTeamScopeSync). Members
   // is a TIMELINE-only filter, so it never narrows the console (userIds → null). When 'all'
@@ -488,10 +493,48 @@ export function ActivityView(): JSX.Element {
           </div>
         ) : showingFeed ? (
           // The cross-repo Feed: the team flow-metric header (DORA-ish tiles + trend charts —
-          // CORE/free, moved out of the Pro Insights pane) atop the consolidated feed stream.
+          // CORE/free, moved out of the Pro Insights pane) atop the consolidated feed stream. With
+          // Pro on, a "Discussion themes" sub-tab (the human sibling of Bots → Themes) sits beside it.
           <div className="space-y-3">
-            <FeedMetricsPanel />
-            <FeedView />
+            {activityDigest && (
+              <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
+                {([
+                  { key: 'feed', label: 'Feed' },
+                  { key: 'themes', label: 'Themes' },
+                ] as const).map((t) => {
+                  const on = feedInnerTab === t.key;
+                  return (
+                    <button
+                      key={t.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={on}
+                      onClick={() => setFeedInnerTab(t.key)}
+                      className={`-mb-px flex items-center gap-1 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
+                        on
+                          ? 'border-gray-300 bg-white text-sky-600 dark:border-gray-700 dark:bg-gray-950 dark:text-sky-300'
+                          : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
+                      }`}
+                    >
+                      {t.label}
+                      {t.key === 'themes' && (
+                        <span className="rounded bg-violet-500/10 px-1 text-[9px] font-semibold uppercase text-violet-600 dark:text-violet-300">
+                          pro
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {activityDigest && feedInnerTab === 'themes' ? (
+              <HumanThemesPanel />
+            ) : (
+              <>
+                <FeedMetricsPanel />
+                <FeedView />
+              </>
+            )}
           </div>
         ) : isLoading && data == null ? (
           <div className="space-y-3">

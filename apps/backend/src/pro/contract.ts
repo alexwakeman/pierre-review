@@ -528,6 +528,15 @@ export interface ProHostQueries {
     window: BotWindowKind,
     repoIds?: number[] | null,
   ): Promise<unknown>;
+  // The HUMAN sibling of getBotReviewComments — non-bot review + PR comment CONTENT for a
+  // scope/window (the Pro "Discussion themes" Feed summary). Additive (apiVersion stays 12).
+  // Returns { comments: HumanReviewCommentRow[]; truncated } (cast by the plugin); `repoIds`
+  // scopes to a Team's repos (null → all account repos). Excludes every bot/automated reviewer.
+  getHumanReviewComments(
+    accountId: number,
+    window: BotWindowKind,
+    repoIds?: number[] | null,
+  ): Promise<unknown>;
 }
 
 export interface ProContext {

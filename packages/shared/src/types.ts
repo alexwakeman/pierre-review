@@ -350,6 +350,42 @@ export interface BotThemesResponse {
   empty?: boolean;              // no bot comments in scope/window → nothing to summarize
 }
 
+// ── Human "Discussion" THEMES (Pro, AI) — GET/POST /api/pro/human-themes ─────────────────────
+// The HUMAN sibling of the Bot "Themes" summary: the same themed AI read, but over PEOPLE'S review
+// comments (non-bot authors, INCLUDING human replies inside bot threads) rather than the bots'. It
+// answers "what are people actually discussing / raising in review?" — recurring concerns, debates,
+// decisions, questions. STRICTLY Pro (activityDigest tier), team-scoped, surfaced as a Feed sub-tab.
+// UNLIKE the bot version it does NO deterministic categorisation of the input: the funnel just
+// PRIORITISES (PR-level comments, then threads that have responses, then recency) up to a safe cap —
+// the categorisation/severity is the model's alone. Reuses BotTheme + the category/severity/area/
+// coverage shapes; only the reviewer rollup differs (people, not bots).
+export interface HumanThemeParticipant {
+  userId: number;
+  login: string | null;
+  displayName: string | null;
+  comments: number; // the participant's comment count in the analyzed set (deterministic)
+}
+
+export interface HumanThemesResult {
+  narrative: string;                    // markdown — the 2–3 sentence overview
+  themes: BotTheme[];                   // most-critical-first (LLM-assigned category + severity)
+  participants: HumanThemeParticipant[]; // per-author volume (deterministic), most-active-first
+  byCategory: BotThemeCategoryCount[];  // aggregated from themes (approximate)
+  bySeverity: BotThemeSeverityCount[];  // aggregated from themes (approximate)
+  byArea: BotThemeAreaCount[];          // top-level-dir distribution (deterministic)
+  coverage: BotThemeCoverage;           // `deduped` == totalComments here (the human funnel does NOT dedup)
+  generatedAt: string;                  // ISO
+  model: string;
+}
+
+export interface HumanThemesResponse {
+  enabled: boolean;
+  result: HumanThemesResult | null;
+  throttled?: boolean;
+  creditsExhausted?: boolean;
+  empty?: boolean;
+}
+
 // ── Bot BEHAVIOUR analytics (EXPERIMENTAL) — GET /api/bot-behaviour ────────────────────────
 // A SEPARATE, deterministic (no-AI) CORE surface from the Bot-ROI panel, developed in its own
 // "Behaviour" sub-tab so it can mature without touching the shipped ROI response. Answers the

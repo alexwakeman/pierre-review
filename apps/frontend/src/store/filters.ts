@@ -143,6 +143,9 @@ export interface FilterState {
   // 'behaviour' (the EXPERIMENTAL behaviour analytics). A single scalar (both the cross-repo
   // rail Bots view and the per-repo console Bots tab share one BotsView). Transient, URL-silent.
   botsInnerTab: 'roi' | 'behaviour' | 'themes';
+  // Which inner sub-tab the cross-repo Feed rail shows: 'feed' (the metrics header + consolidated
+  // feed) or 'themes' (the Pro "Discussion themes" AI summary). Transient, URL-silent.
+  feedInnerTab: 'feed' | 'themes';
 
   // selection
   selectedPrId: number | null;
@@ -326,6 +329,7 @@ export interface FilterState {
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
   // Switch the Bots view's inner sub-tab (ROI vs experimental Behaviour).
   setBotsInnerTab: (v: 'roi' | 'behaviour' | 'themes') => void;
+  setFeedInnerTab: (v: 'feed' | 'themes') => void;
   // Set/clear the PR-detail Threads-tab bot filter (a ChecksTab bot chip → filter Threads to
   // that vendor). Re-selecting the same vendor toggles it off.
   setThreadBotFilter: (kind: ReviewBotKind | null) => void;
@@ -570,6 +574,7 @@ function freshDefaults(): FilterData {
     feedIsolatedPrId: null,
     botAnalyticsWindow: 'rolling_14',
     botsInnerTab: 'roi',
+    feedInnerTab: 'feed',
     selectedPrId: null,
     selectedThreadId: null,
     threadBotFilter: null,
@@ -661,6 +666,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setBotsInnerTab: (v) => set({ botsInnerTab: v }),
+  setFeedInnerTab: (v) => set({ feedInnerTab: v }),
   setThreadBotFilter: (kind) =>
     set((s) => ({ threadBotFilter: s.threadBotFilter === kind ? null : kind })),
   toggleThreadStateFilter: (st) =>

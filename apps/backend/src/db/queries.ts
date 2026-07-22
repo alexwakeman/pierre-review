@@ -7353,6 +7353,171 @@ export async function getBotOnlyReviewPrs(
 // a keep/tune/kill verdict, and a ≤12-week weekly trend. Cost fields stay null (the
 // frontend overlays per-vendor cost from Pro settings). 'hide' mute rules drop matching
 // threads from the counts. Deterministic, NO AI. Account-scoped.
+// ── Human THEMES source rows (Pro) — the raw HUMAN review-comment CONTENT ─────────────────────
+// The sibling of getBotReviewComments for people, NOT bots: comments authored by non-bot users
+// (excludes every automated reviewer + any is_bot user), which INCLUDES human replies inside
+// bot-initiated threads. Powers the Pro "Discussion themes" Feed summary. Account- + TEAM-scoped +
+// windowed; capped most-recent per source (a `truncated` flag). Returns the thread's derivedState so
+// the plugin funnel can prioritise threads that have responses (derivedState != 'untouched'). The
+// row shape is RE-DECLARED verbatim in packages/pro/src/human-themes/build.ts (open-core boundary);
+// KEEP THE TWO IN LOCKSTEP.
+export interface HumanReviewCommentRow {
+  id: number;
+  source: 'review' | 'issue';
+  prId: number;
+  prNumber: number;
+  repoId: number;
+  repoFullName: string;
+  path: string | null;
+  authorUserId: number;
+  login: string | null;
+  displayName: string | null;
+  body: string | null;
+  createdAt: string; // ISO
+  derivedState: string | null; // inline threads only — the "has responses" prioritisation signal
+  threadId: number | null;
+}
+
+export async function getHumanReviewComments(
+  accountId: number,
+  window: BotWindowKind,
+  scopeRepoIds?: number[] | null,
+): Promise<{ comments: HumanReviewCommentRow[]; truncated: boolean }> {
+  if (scopeRepoIds != null && scopeRepoIds.length === 0) return { comments: [], truncated: false };
+  const automatedIds = await automatedReviewerUserIds(accountId);
+
+  const nowMs = Date.now();
+  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
+  const from = new Date(nowMs - windowDays * 86_400_000);
+  const repoScopeFilter =
+    scopeRepoIds != null ? [inArray(pullRequests.repoId, scopeRepoIds)] : [];
+  // Exclude bots two ways: any is_bot user, and the resolved automated-reviewer set (which can
+  // include service-account PATs that carry is_bot=false). notInArray on [] is a no-op we skip.
+  const excludeAutomated =
+    automatedIds.length > 0 ? [notInArray(reviewComments.authorId, automatedIds)] : [];
+  const excludeAutomatedPr =
+    automatedIds.length > 0 ? [notInArray(prComments.authorId, automatedIds)] : [];
+
+  const reviewRows = await db
+    .select({
+      id: reviewComments.id,
+      prId: reviewComments.prId,
+      prNumber: pullRequests.number,
+      repoId: pullRequests.repoId,
+      owner: repos.owner,
+      name: repos.name,
+      authorId: reviewComments.authorId,
+      login: users.githubLogin,
+      displayName: users.displayName,
+      body: reviewComments.body,
+      createdAt: reviewComments.createdAt,
+      path: reviewThreads.path,
+      derivedState: reviewThreads.derivedState,
+      threadId: reviewComments.threadId,
+    })
+    .from(reviewComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .innerJoin(users, eq(users.id, reviewComments.authorId))
+    .leftJoin(reviewThreads, eq(reviewThreads.id, reviewComments.threadId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(users.isBot, false),
+        gte(reviewComments.createdAt, from),
+        ...excludeAutomated,
+        ...repoScopeFilter,
+      ),
+    )
+    .orderBy(desc(reviewComments.createdAt))
+    .limit(BOT_THEME_COMMENT_CAP)
+    .execute();
+
+  const prCommentRows = await db
+    .select({
+      id: prComments.id,
+      prId: prComments.prId,
+      prNumber: pullRequests.number,
+      repoId: pullRequests.repoId,
+      owner: repos.owner,
+      name: repos.name,
+      authorId: prComments.authorId,
+      login: users.githubLogin,
+      displayName: users.displayName,
+      body: prComments.body,
+      createdAt: prComments.createdAt,
+    })
+    .from(prComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .innerJoin(users, eq(users.id, prComments.authorId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(users.isBot, false),
+        gte(prComments.createdAt, from),
+        ...excludeAutomatedPr,
+        ...repoScopeFilter,
+      ),
+    )
+    .orderBy(desc(prComments.createdAt))
+    .limit(BOT_THEME_COMMENT_CAP)
+    .execute();
+
+  const toIso = (d: Date | number | null): string => {
+    if (d == null) return new Date(0).toISOString();
+    if (d instanceof Date) return d.toISOString();
+    const ms = Number(d) > 1e12 ? Number(d) : Number(d) * 1000;
+    return new Date(ms).toISOString();
+  };
+
+  const out: HumanReviewCommentRow[] = [];
+  for (const r of reviewRows) {
+    if (r.authorId == null) continue;
+    out.push({
+      id: r.id,
+      source: 'review',
+      prId: r.prId,
+      prNumber: r.prNumber,
+      repoId: r.repoId,
+      repoFullName: `${r.owner}/${r.name}`,
+      path: r.path ?? null,
+      authorUserId: r.authorId,
+      login: r.login ?? null,
+      displayName: r.displayName ?? null,
+      body: r.body,
+      createdAt: toIso(r.createdAt),
+      derivedState: r.derivedState ?? null,
+      threadId: r.threadId ?? null,
+    });
+  }
+  for (const r of prCommentRows) {
+    if (r.authorId == null) continue;
+    out.push({
+      id: r.id,
+      source: 'issue',
+      prId: r.prId,
+      prNumber: r.prNumber,
+      repoId: r.repoId,
+      repoFullName: `${r.owner}/${r.name}`,
+      path: null,
+      authorUserId: r.authorId,
+      login: r.login ?? null,
+      displayName: r.displayName ?? null,
+      body: r.body,
+      createdAt: toIso(r.createdAt),
+      derivedState: null,
+      threadId: null,
+    });
+  }
+  out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  const truncated =
+    reviewRows.length >= BOT_THEME_COMMENT_CAP ||
+    prCommentRows.length >= BOT_THEME_COMMENT_CAP ||
+    out.length > BOT_THEME_COMMENT_CAP;
+  return { comments: out.slice(0, BOT_THEME_COMMENT_CAP), truncated };
+}
+
 // ── Bot THEMES source rows (Pro) — the raw automated-reviewer comment CONTENT ────────────────
 // The ONE bot query that returns comment BODIES (every other bot query is deterministic counts).
 // Powers the Pro "Themes" AI summary: the plugin funnels these (dedup + strip) then one Haiku pass

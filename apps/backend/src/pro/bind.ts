@@ -122,6 +122,8 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         hostQueries.getBotAnalytics(accountId, window, repoIds ?? null),
       getBotReviewComments: (accountId, window, repoIds) =>
         hostQueries.getBotReviewComments(accountId, window, repoIds ?? null),
+      getHumanReviewComments: (accountId, window, repoIds) =>
+        hostQueries.getHumanReviewComments(accountId, window, repoIds ?? null),
     },
     recordAiUsage: (row) => recordAiUsage(row),
     aiCredits: {

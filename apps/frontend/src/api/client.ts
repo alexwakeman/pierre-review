@@ -47,6 +47,7 @@ import type {
   BotWindowKind,
   BotAnalyticsResponse,
   BotThemesResponse,
+  HumanThemesResponse,
   BotBehaviourResponse,
   BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
@@ -682,6 +683,18 @@ export const api = {
       ),
       jsonBody('POST'),
     ).then((r) => handle<BotThemesResponse>(r)),
+  // The Feed "Discussion themes" AI summary (Pro Haiku) — the HUMAN sibling of bot-themes: what
+  // PEOPLE are raising in review, over the current TEAM scope + window. GET is a pure cache read;
+  // the refresh POST is the only billing path.
+  humanThemes: (window: BotWindowKind, scope?: string) =>
+    get<HumanThemesResponse>(
+      withQuery('/api/pro/human-themes', `window=${encodeURIComponent(window)}`, scopeParam(scope)),
+    ),
+  humanThemesRefresh: (window: BotWindowKind, scope?: string) =>
+    fetch(
+      withQuery('/api/pro/human-themes/refresh', `window=${encodeURIComponent(window)}`, scopeParam(scope)),
+      jsonBody('POST'),
+    ).then((r) => handle<HumanThemesResponse>(r)),
   // EXPERIMENTAL bot behaviour analytics (TTFR / LoC-to-comments / 24h heatmap / follow-ups).
   // Same window/scope/repoIds wiring as botAnalytics (repo scope wins over team scope).
   botBehaviour: (window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
