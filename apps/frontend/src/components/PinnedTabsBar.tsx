@@ -34,6 +34,7 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
   // satisfy the Rules of Hooks — TabChip renders for every tab; only the branches below use them.
   const botOnlyRepoId = useFilters((s) => s.botOnlyFocusRepoId);
   const botThreadsRepoId = useFilters((s) => s.botThreadsFocusRepoId);
+  const themeThreadsSeed = useFilters((s) => s.themeThreadsSeed);
   const openPrsScope = useFilters((s) => s.openPrsScope);
   const { data: repos } = useRepos();
   const repoName = (id: number | null): string | null =>
@@ -258,6 +259,51 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
           className="shrink-0 self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
           title="Close this tab"
           aria-label="Close bot-threads tab"
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
+
+  // The theme-threads drill-down — the review threads / PR comments a theme groups. Labelled with
+  // the theme's title (from the transient seed).
+  if (tab.kind === 'theme-threads') {
+    const themeTitle = themeThreadsSeed?.theme.title ?? 'Theme threads';
+    return (
+      <div
+        role="presentation"
+        className={`group flex shrink-0 items-center gap-1 rounded-t-md border border-b-0 pl-2 pr-1 ${
+          active
+            ? 'border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950'
+            : 'border-transparent bg-transparent hover:bg-gray-200/60 dark:hover:bg-gray-800/60'
+        }`}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={active}
+          onClick={() => setActiveTab(tab.key)}
+          className="flex items-center gap-1.5 py-1.5 text-left"
+          title={`Theme threads — ${themeTitle}`}
+        >
+          <span aria-hidden="true" className="shrink-0">
+            🧵
+          </span>
+          <span
+            className={`max-w-[12rem] truncate text-xs font-medium ${
+              active ? 'text-sky-600 dark:text-sky-400' : 'text-gray-600 dark:text-gray-300'
+            }`}
+          >
+            {themeTitle}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => closeTab(tab.key)}
+          className="shrink-0 self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+          title="Close this tab"
+          aria-label="Close theme-threads tab"
         >
           ✕
         </button>

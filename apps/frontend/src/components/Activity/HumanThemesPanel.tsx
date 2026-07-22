@@ -2,8 +2,10 @@ import type { HumanThemesResult } from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
+import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useHumanThemes, useRefreshHumanThemes } from '../../hooks/useHumanThemes.js';
 import { ThemesReportBody, ThemesSkeleton } from './ThemesReportView.js';
+import { prRefToMeta } from './ThemeThreadsDetail.js';
 
 // The Feed "Discussion themes" panel (Pro Haiku) — the HUMAN sibling of the Bots "Themes" panel.
 // Summarises what PEOPLE are raising in review (concerns, debates, decisions, questions), including
@@ -52,6 +54,8 @@ export function HumanThemesPanel(): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const window = useFilters((s) => s.botAnalyticsWindow);
   const scope = scopeToParam(useFilters((s) => s.teamScope));
+  const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
+  const openThemeThreads = useFilters((s) => s.openThemeThreadsDetail);
 
   const query = useHumanThemes(window, activityDigest, scope);
   const refresh = useRefreshHumanThemes(window, scope);
@@ -121,6 +125,8 @@ export function HumanThemesPanel(): JSX.Element | null {
             emptyThemesLabel="No distinct discussion themes surfaced in this window."
             reviewerSection={<ParticipantRollup result={result} />}
             coverageLine={<HumanCoverageLine result={result} />}
+            onOpenPr={(pr) => openPrDetailTab(prRefToMeta(pr), { fromActivity: true })}
+            onOpenTheme={(theme) => openThemeThreads(theme, 'human')}
           />
         </div>
       ) : (

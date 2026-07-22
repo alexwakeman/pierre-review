@@ -2,8 +2,10 @@ import type { BotThemesResult } from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
+import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useBotThemes, useRefreshBotThemes } from '../../hooks/useBotThemes.js';
 import { ThemesReportBody, ThemesSkeleton } from './ThemesReportView.js';
+import { prRefToMeta } from './ThemeThreadsDetail.js';
 
 // The Bots "Themes" panel (Pro Haiku) — the QUALITATIVE layer of the Bots console: what the
 // automated reviewers are actually flagging (nature + criticality + where), read from the deduped
@@ -57,6 +59,8 @@ export function BotThemesPanel(): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const window = useFilters((s) => s.botAnalyticsWindow);
   const scope = scopeToParam(useFilters((s) => s.teamScope));
+  const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
+  const openThemeThreads = useFilters((s) => s.openThemeThreadsDetail);
 
   const query = useBotThemes(window, activityDigest, scope);
   const refresh = useRefreshBotThemes(window, scope);
@@ -126,6 +130,8 @@ export function BotThemesPanel(): JSX.Element | null {
             emptyThemesLabel="No distinct themes surfaced from the bot comments in this window."
             reviewerSection={<BotRollup result={result} />}
             coverageLine={<BotCoverageLine result={result} />}
+            onOpenPr={(pr) => openPrDetailTab(prRefToMeta(pr), { fromActivity: true })}
+            onOpenTheme={(theme) => openThemeThreads(theme, 'bot')}
           />
         </div>
       ) : (

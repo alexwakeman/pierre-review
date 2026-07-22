@@ -4,6 +4,7 @@ import {
   EVENT_CATEGORY_BY_TYPE,
   PR_STATUSES,
   REVIEW_FILTER_STATES,
+  type BotTheme,
   type BotWindowKind,
   type DerivedState,
   type EventCategory,
@@ -210,6 +211,10 @@ export interface FilterState {
   // transient: the repo the resolvable-bot-threads tab was opened FROM. null = account/team
   // scope. Read-not-consumed, like the above.
   botThreadsFocusRepoId: number | null;
+  // transient: the theme whose review threads / PR comments the theme-threads drill-down renders
+  // (carries the theme's resolved `threads` + `prs`) + which summary it came from (for labels).
+  // Read-not-consumed, like the above.
+  themeThreadsSeed: { theme: BotTheme; source: 'bot' | 'human' } | null;
 
 
   // Activity tab (the master-detail triage console). Which detail is shown:
@@ -419,6 +424,7 @@ export interface FilterState {
   // Open (or re-focus) the resolvable-bot-threads review & resolve tab (the Bot-ROI
   // backlog banner). repoId scopes it to one repo; null = the cross-repo Bots scope.
   openBotThreadsDetail: (repoId: number | null) => void;
+  openThemeThreadsDetail: (theme: BotTheme, source: 'bot' | 'human') => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
   // records the added repo id so the modal can scope to just that repo.
@@ -590,6 +596,7 @@ function freshDefaults(): FilterData {
     openPrsScope: null,
     botOnlyFocusRepoId: null,
     botThreadsFocusRepoId: null,
+    themeThreadsSeed: null,
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
     // with no thread-state filter.
@@ -810,6 +817,10 @@ export const useFilters = create<FilterState>((set, get) => ({
   openBotThreadsDetail: (repoId) => {
     set({ botThreadsFocusRepoId: repoId });
     usePinnedTabs.getState().openBotThreadsTab({ fromActivity: true });
+  },
+  openThemeThreadsDetail: (theme, source) => {
+    set({ themeThreadsSeed: { theme, source } });
+    usePinnedTabs.getState().openThemeThreadsTab({ fromActivity: true });
   },
   openPrThreadsFiltered: (meta, state) => {
     // Open the PR's detail tab (Back returns to the Activity console via fromActivity), then

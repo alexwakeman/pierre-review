@@ -9,6 +9,7 @@ import { BotPrsDetail } from './components/Activity/BotPrsDetail.js';
 import { OpenPrsDetail } from './components/Activity/OpenPrsDetail.js';
 import { BotOnlyPrsDetail } from './components/Activity/BotOnlyPrsDetail.js';
 import { BotThreadsDetail } from './components/Activity/BotThreadsDetail.js';
+import { ThemeThreadsDetail } from './components/Activity/ThemeThreadsDetail.js';
 import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
@@ -113,6 +114,7 @@ export default function App(): JSX.Element {
   const openPrsActive = activeTabObj?.kind === 'open-prs';
   const botOnlyActive = activeTabObj?.kind === 'bot-only-prs';
   const botThreadsActive = activeTabObj?.kind === 'bot-threads';
+  const themeThreadsActive = activeTabObj?.kind === 'theme-threads';
   const boardMode: TimelineMode | null =
     activeTabObj?.kind === 'pr-focus'
       ? { kind: 'isolate', prId: activeTabObj.prId }
@@ -127,7 +129,8 @@ export default function App(): JSX.Element {
     botPrsActive ||
     openPrsActive ||
     botOnlyActive ||
-    botThreadsActive;
+    botThreadsActive ||
+    themeThreadsActive;
   // The detail pane is shown at the bottom of any board-slot Timeline (shared or
   // pr-focus) once a PR is selected there.
   const paneVisible = selectedPrId != null && !overlayActive;
@@ -430,6 +433,14 @@ export default function App(): JSX.Element {
             className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
           >
             <BotThreadsDetail />
+          </div>
+        )}
+        {themeThreadsActive && (
+          <div
+            data-testid="theme-threads-overlay"
+            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
+          >
+            <ThemeThreadsDetail />
           </div>
         )}
       </main>

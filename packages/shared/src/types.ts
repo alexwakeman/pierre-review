@@ -290,10 +290,34 @@ export type BotThemeCategory =
   | 'other';
 export type BotThemeSeverity = 'critical' | 'major' | 'minor' | 'nit';
 
-// One recurring class of issue the bots raise, as read by the model from the deduped comment
-// clusters. `occurrences` is the model's estimate of how many comments the theme covers (grounded
-// in the cluster counts it was handed); `bots`/`areas` are the reviewer labels + top-level dirs it
-// spans; `examplePrNumbers` link to representative PRs.
+// A PR reference carried on a theme — clickable in the UI to open that PR's own full detail tab.
+// Resolved SERVER-side from the theme's members (so the number is never ambiguous across repos).
+export interface ThemePrRef {
+  prId: number;
+  prNumber: number;
+  repoFullName: string;
+  title: string | null;
+  authorLogin: string | null;
+}
+
+// One concrete comment/thread that a theme groups — the "click the card → all its threads"
+// drill-down fetches each member's PR detail and renders the thread (review) or PR-comment (issue)
+// with the existing ThreadView. `threadId` set for a review-thread member, `commentId` (prComments
+// id) for an issue-comment member.
+export interface ThemeThreadRef {
+  prId: number;
+  prNumber: number;
+  repoFullName: string;
+  source: 'review' | 'issue';
+  threadId: number | null;
+  commentId: number | null;
+  path: string | null;
+}
+
+// One recurring class of issue/topic the reviewers (bots or people) raise, as read by the model.
+// `occurrences` is the model's estimate of how many comments the theme covers; `bots`/`areas` are
+// the reviewer/author labels + top-level dirs it spans. `prs` (clickable) + `threads` (the
+// drill-down members) are RESOLVED server-side from the payload items the model grouped.
 export interface BotTheme {
   title: string;
   category: BotThemeCategory;
@@ -302,7 +326,8 @@ export interface BotTheme {
   occurrences: number;
   bots: string[];
   areas: string[];
-  examplePrNumbers: number[];
+  prs: ThemePrRef[]; // distinct PRs the theme touches (resolved), most-relevant-first
+  threads: ThemeThreadRef[]; // concrete member threads/comments (capped) for the drill-down
 }
 
 // Per-automated-reviewer rollup (DETERMINISTIC — from the raw rows, not the model). `key` mirrors

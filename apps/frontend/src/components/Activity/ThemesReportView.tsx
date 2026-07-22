@@ -4,6 +4,7 @@ import type {
   BotThemeCategory,
   BotThemeSeverity,
   BotThemeSeverityCount,
+  ThemePrRef,
 } from '@pierre-review/shared';
 import { SummaryMarkdown } from './prRefTable.js';
 
@@ -32,7 +33,7 @@ const CATEGORY_LABEL: Record<BotThemeCategory, string> = {
   other: 'Other',
 };
 
-function SeverityPill({ severity }: { severity: BotThemeSeverity }): JSX.Element {
+export function SeverityPill({ severity }: { severity: BotThemeSeverity }): JSX.Element {
   const m = SEVERITY_META[severity];
   return (
     <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${m.cls}`}>
@@ -41,10 +42,40 @@ function SeverityPill({ severity }: { severity: BotThemeSeverity }): JSX.Element
   );
 }
 
-// One theme card. `actorLabel` names the meta line's actor list ("🤖" for bots, "💬" for people).
-function ThemeCard({ theme, actorEmoji }: { theme: BotTheme; actorEmoji: string }): JSX.Element {
+// One theme card. Clicking anywhere on the card (when it has member threads) opens the theme-threads
+// drill-down; clicking a PR chip opens THAT PR's own detail tab (stops the card click). `actorEmoji`
+// names the meta line's actor list ("🤖" for bots, "💬" for people).
+function ThemeCard({
+  theme,
+  actorEmoji,
+  onOpenPr,
+  onOpenTheme,
+}: {
+  theme: BotTheme;
+  actorEmoji: string;
+  onOpenPr: (pr: ThemePrRef) => void;
+  onOpenTheme: (theme: BotTheme) => void;
+}): JSX.Element {
+  const hasThreads = theme.threads.length > 0;
   return (
-    <li className="rounded-md border border-gray-200 bg-white/70 p-3 dark:border-gray-800 dark:bg-gray-900/40">
+    <li
+      className={`rounded-md border border-gray-200 bg-white/70 p-3 dark:border-gray-800 dark:bg-gray-900/40 ${
+        hasThreads ? 'cursor-pointer transition-colors hover:border-violet-300 hover:bg-violet-50/40 dark:hover:border-violet-800/70 dark:hover:bg-violet-950/20' : ''
+      }`}
+      {...(hasThreads
+        ? {
+            role: 'button' as const,
+            tabIndex: 0,
+            onClick: () => onOpenTheme(theme),
+            onKeyDown: (e: { key: string; preventDefault: () => void }) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onOpenTheme(theme);
+              }
+            },
+          }
+        : {})}
+    >
       <div className="flex items-start gap-2">
         <SeverityPill severity={theme.severity} />
         <div className="min-w-0 flex-1">
@@ -75,8 +106,28 @@ function ThemeCard({ theme, actorEmoji }: { theme: BotTheme; actorEmoji: string 
             {theme.areas.length > 0 && (
               <span className="font-mono text-gray-500 dark:text-gray-400">{theme.areas.join(' · ')}</span>
             )}
-            {theme.examplePrNumbers.length > 0 && (
-              <span className="tabular-nums">{theme.examplePrNumbers.map((n) => `#${n}`).join(' ')}</span>
+            {theme.prs.length > 0 && (
+              <span className="flex flex-wrap items-center gap-1">
+                {theme.prs.map((pr) => (
+                  <button
+                    key={pr.prId}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenPr(pr);
+                    }}
+                    title={`${pr.repoFullName}#${pr.prNumber}${pr.title ? ` — ${pr.title}` : ''} — open PR`}
+                    className="rounded px-1 tabular-nums text-sky-600 hover:bg-sky-100 hover:underline dark:text-sky-400 dark:hover:bg-sky-950/50"
+                  >
+                    #{pr.prNumber}
+                  </button>
+                ))}
+              </span>
+            )}
+            {hasThreads && (
+              <span className="ml-auto shrink-0 font-medium text-violet-500 dark:text-violet-400">
+                {theme.threads.length} thread{theme.threads.length === 1 ? '' : 's'} →
+              </span>
             )}
           </div>
         </div>
@@ -146,6 +197,8 @@ export function ThemesReportBody({
   emptyThemesLabel,
   reviewerSection,
   coverageLine,
+  onOpenPr,
+  onOpenTheme,
 }: {
   narrative: string;
   themes: BotTheme[];
@@ -155,6 +208,8 @@ export function ThemesReportBody({
   emptyThemesLabel: string;
   reviewerSection?: JSX.Element | null;
   coverageLine: JSX.Element;
+  onOpenPr: (pr: ThemePrRef) => void;
+  onOpenTheme: (theme: BotTheme) => void;
 }): JSX.Element {
   return (
     <div className="mt-3">
@@ -169,7 +224,7 @@ export function ThemesReportBody({
       {themes.length > 0 ? (
         <ul className="mt-3 space-y-2">
           {themes.map((t, i) => (
-            <ThemeCard key={i} theme={t} actorEmoji={actorEmoji} />
+            <ThemeCard key={i} theme={t} actorEmoji={actorEmoji} onOpenPr={onOpenPr} onOpenTheme={onOpenTheme} />
           ))}
         </ul>
       ) : (

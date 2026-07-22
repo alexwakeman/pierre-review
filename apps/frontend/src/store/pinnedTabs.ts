@@ -31,7 +31,8 @@ export type TabKind =
   | 'bot-prs'
   | 'open-prs'
   | 'bot-only-prs'
-  | 'bot-threads';
+  | 'bot-threads'
+  | 'theme-threads';
 
 export interface Tab {
   key: string; // stable: 'pr-detail:123' | 'pr-focus:123'
@@ -67,6 +68,10 @@ export const OPEN_PRS_TAB_KEY = 'open-prs';
 // (store/filters.ts botOnlyFocusRepoId / botThreadsFocusRepoId). EPHEMERAL like the above.
 export const BOT_ONLY_PRS_TAB_KEY = 'bot-only-prs';
 export const BOT_THREADS_TAB_KEY = 'bot-threads';
+// The theme-threads drill-down is a SINGLETON, non-PR tab: it lists all the review threads / PR
+// comments a Bot/Human theme groups. The theme itself is the transient seed (store/filters.ts
+// `themeThreadsSeed`), not the key. EPHEMERAL like the others (dropped on reload).
+export const THEME_THREADS_TAB_KEY = 'theme-threads';
 
 /** Parse a Tab.key back into its kind + PR id (null for unknown). */
 export function parseTabKey(key: string): { kind: TabKind; prId: number } | null {
@@ -112,6 +117,7 @@ interface TabsState {
   openOpenPrsTab: (opts?: OpenOpts) => void; // ensure the singleton all-open-PRs drill-down + activate
   openBotOnlyPrsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-only-PRs drill-down + activate
   openBotThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-threads resolve tab + activate
+  openThemeThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton theme-threads drill-down + activate
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
   closeTab: (key: string) => void; // remove; fall back to 'timeline' if it was active
@@ -287,6 +293,8 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       openTab({ key: BOT_ONLY_PRS_TAB_KEY, kind: 'bot-only-prs', prId: 0, meta: null }, opts),
     openBotThreadsTab: (opts) =>
       openTab({ key: BOT_THREADS_TAB_KEY, kind: 'bot-threads', prId: 0, meta: null }, opts),
+    openThemeThreadsTab: (opts) =>
+      openTab({ key: THEME_THREADS_TAB_KEY, kind: 'theme-threads', prId: 0, meta: null }, opts),
 
     syncMeta: (meta) =>
       set((s) => {
