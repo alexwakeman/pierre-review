@@ -222,6 +222,9 @@ export interface FilterState {
   // (carries the theme's resolved `threads` + `prs`) + which summary it came from (for labels).
   // Read-not-consumed, like the above.
   themeThreadsSeed: { theme: BotTheme; source: 'bot' | 'human' } | null;
+  // transient: the query string the cross-team search-results tab renders. Read-not-consumed
+  // (survives the tab's lifetime), like the drill-down seeds above. null = never opened.
+  searchSeed: string | null;
 
 
   // Activity tab (the master-detail triage console). Which detail is shown:
@@ -437,6 +440,7 @@ export interface FilterState {
   // backlog banner). repoId scopes it to one repo; null = the cross-repo Bots scope.
   openBotThreadsDetail: (repoId: number | null) => void;
   openThemeThreadsDetail: (theme: BotTheme, source: 'bot' | 'human') => void;
+  openSearchDetail: (query: string) => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
   // records the added repo id so the modal can scope to just that repo.
@@ -611,6 +615,7 @@ function freshDefaults(): FilterData {
     botOnlyFocusRepoId: null,
     botThreadsFocusRepoId: null,
     themeThreadsSeed: null,
+    searchSeed: null,
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open
     // lands on the cross-repo consolidated Feed (the relevance-ranked state of play)
     // with no thread-state filter.
@@ -838,6 +843,13 @@ export const useFilters = create<FilterState>((set, get) => ({
   openThemeThreadsDetail: (theme, source) => {
     set({ themeThreadsSeed: { theme, source } });
     usePinnedTabs.getState().openThemeThreadsTab({ fromActivity: true });
+  },
+  // Open (or re-seed) the cross-team search-results tab for `query`. No forced fromActivity — the
+  // search box is global (openable from any view), so openTab infers the Back-to-Activity arming
+  // from whether Activity is showing; re-searching from inside the tab just updates the seed.
+  openSearchDetail: (query) => {
+    set({ searchSeed: query });
+    usePinnedTabs.getState().openSearchTab();
   },
   openPrThreadsFiltered: (meta, state) => {
     // Open the PR's detail tab (Back returns to the Activity console via fromActivity), then

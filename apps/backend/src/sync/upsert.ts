@@ -1,5 +1,6 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, schema, runTransaction, type Executor } from '../db/client.js';
+import { searchText } from '../db/search.js';
 import { config } from '../config.js';
 import { isLikelyBot } from './bot-detection.js';
 import {
@@ -26,7 +27,19 @@ const {
   events,
   reviewRequests,
   ciStatusEvents,
+  searchIndex,
 } = schema;
+
+// One accumulated search-index row (the shared prId/repoId/accountId are stamped at insert time).
+// `searchText` (whitespace-collapse + length cap) is shared with the query/backfill layer.
+interface SearchRowDraft {
+  kind: 'pr' | 'review' | 'review_comment' | 'pr_comment';
+  refId: number;
+  threadId: number | null;
+  authorId: number | null;
+  body: string;
+  createdAt: Date;
+}
 
 function toDate(iso: string | null | undefined): Date | null {
   return iso ? new Date(iso) : null;
@@ -595,6 +608,21 @@ export async function persistPr(
     )[0]!;
     const prId = prRow.id;
 
+    // ---- cross-team search index rows (accumulated, written once at the end) ----
+    // `bodyText` (plain-text description) is fetched unconditionally, so the PR row indexes the
+    // description even under lean storage where pullRequests.body is null. Review / comment rows are
+    // pushed at their insert sites below. The whole set is rebuilt per-PR (delete + insert) so an
+    // edited/removed comment never leaves a stale hit.
+    const searchRows: SearchRowDraft[] = [];
+    searchRows.push({
+      kind: 'pr',
+      refId: prId,
+      threadId: null,
+      authorId,
+      body: searchText(pr.title, pr.bodyText),
+      createdAt: openedAt,
+    });
+
     // ---- CI status transition log (DORA-ish CI metrics) ----
     // Record a row whenever this PR head's CI rollup / failing-check set / head SHA
     // differs from the last snapshot — an append-only transition log (not a per-tick
@@ -751,6 +779,16 @@ export async function persistPr(
         .returning({ id: reviews.id })
         .execute()
       )[0]!;
+      const reviewBody = searchText(r.body);
+      if (reviewBody)
+        searchRows.push({
+          kind: 'review',
+          refId: reviewRow.id,
+          threadId: null,
+          authorId: reviewerId,
+          body: reviewBody,
+          createdAt: submittedAt,
+        });
       if (isSubstantiveReview(reviewState(r.state), r.body)) {
         await upsertEvent(tx, {
           accountId,
@@ -852,7 +890,8 @@ export async function persistPr(
       for (const c of commentNodes) {
         const commenterId = await resolver.resolve(tx, c.author);
         const createdAt = new Date(c.createdAt);
-        await tx
+        const rcRow = (
+          await tx
           .insert(reviewComments)
           .values({
             githubNodeId: c.id,
@@ -876,7 +915,20 @@ export async function persistPr(
               databaseId: c.fullDatabaseId ?? null,
             },
           })
-          .execute();
+          .returning({ id: reviewComments.id })
+          .execute()
+        )[0]!;
+        const rcBody = searchText(c.body);
+        if (rcBody)
+          searchRows.push({
+            kind: 'review_comment',
+            refId: rcRow.id,
+            // Deep-link target: a review-comment hit opens the PR's Threads tab on this thread.
+            threadId: threadRow.id,
+            authorId: commenterId,
+            body: rcBody,
+            createdAt,
+          });
         await upsertEvent(tx, {
           accountId,
           repoId,
@@ -918,6 +970,16 @@ export async function persistPr(
         .returning({ id: prComments.id })
         .execute()
       )[0]!;
+      const pcBody = searchText(c.body);
+      if (pcBody)
+        searchRows.push({
+          kind: 'pr_comment',
+          refId: commentRow.id,
+          threadId: null,
+          authorId: commenterId,
+          body: pcBody,
+          createdAt,
+        });
       await upsertEvent(tx, {
         accountId,
         repoId,
@@ -978,6 +1040,18 @@ export async function persistPr(
         refId: commitRow.id,
         dedupeKey: `commit_pushed:${pr.id}:${c.oid}`,
       });
+    }
+
+    // ---- rebuild this PR's search-index rows ----
+    // Delete-then-insert (inside the same tx) so an edited/removed comment leaves no stale hit and
+    // re-sync is idempotent. Chunked so a comment-heavy PR stays under SQLite's bound variable limit
+    // (999): ~7 columns × 100 rows = 700 < 999.
+    await tx.delete(searchIndex).where(eq(searchIndex.prId, prId)).execute();
+    for (let i = 0; i < searchRows.length; i += 100) {
+      await tx
+        .insert(searchIndex)
+        .values(searchRows.slice(i, i + 100).map((r) => ({ accountId, repoId, prId, ...r })))
+        .execute();
     }
   });
 }

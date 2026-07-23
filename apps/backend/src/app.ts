@@ -25,6 +25,7 @@ import { mergersRoutes } from './api/routes/mergers.js';
 import { insightsRoutes } from './api/routes/insights.js';
 import { activityRoutes } from './api/routes/activity.js';
 import { mentionsRoutes } from './api/routes/mentions.js';
+import { searchRoutes } from './api/routes/search.js';
 import { billingRoutes } from './api/routes/billing.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
 import { webhookRoutes } from './api/routes/webhooks.js';
@@ -158,6 +159,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(insightsRoutes);
   await app.register(activityRoutes);
   await app.register(mentionsRoutes);
+  await app.register(searchRoutes);
   // Bot-triage platform (CORE, always registered): detection/override, ROI analytics,
   // cross-bot dedup, confirm-gated bot-thread resolve. Account-scoped; no AI.
   await app.register(botTriageRoutes);

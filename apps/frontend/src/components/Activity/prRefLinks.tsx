@@ -29,15 +29,18 @@ export const REF_SOURCE = /([A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*)#(\d+)|#(\d+)
 
 // Resolve which capture of a REF_SOURCE match points at (a repo-qualified key or a bare
 // number), returning the ref (or undefined). Shared by the linkifier + the table renderer.
+// A QUALIFIED `owner/name#N` resolves ONLY by its exact key — NO byNumber fallback: a
+// cross-repo summary can name a repo/number pair that isn't in the ref set, and falling back
+// to byNumber would silently mislink it to a DIFFERENT repo's same-numbered PR (the bevy ↔
+// three.js #33485 hazard). An unresolved qualified token stays inert plain text. Only a BARE
+// `#N` (single-repo digest context) uses byNumber.
 export function resolveMatch(
   m: RegExpExecArray | RegExpMatchArray,
   index: PrRefIndex,
 ): DigestPrRef | undefined {
   const qualified = m[1] != null;
   const num = Number(qualified ? m[2] : m[3]);
-  return qualified
-    ? (index.byKey.get(`${m[1]}#${num}`) ?? index.byNumber.get(num))
-    : index.byNumber.get(num);
+  return qualified ? index.byKey.get(`${m[1]}#${num}`) : index.byNumber.get(num);
 }
 
 // Linkify the PR references in one line of text.
@@ -56,9 +59,9 @@ export function renderRefTokens(
     if (m.index > last) out.push(line.slice(last, m.index));
     const qualified = m[1] != null;
     const num = Number(qualified ? m[2] : m[3]);
-    const ref = qualified
-      ? (index.byKey.get(`${m[1]}#${num}`) ?? index.byNumber.get(num))
-      : index.byNumber.get(num);
+    // Qualified refs resolve by exact key ONLY (see resolveMatch) — no byNumber fallback, so a
+    // mis-scoped owner/name#N can never mislink to another repo's same-numbered PR.
+    const ref = qualified ? index.byKey.get(`${m[1]}#${num}`) : index.byNumber.get(num);
     if (ref != null) {
       const label = `${ref.repoFullName}#${ref.prNumber}`;
       out.push(

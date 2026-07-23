@@ -253,6 +253,13 @@
       "when": 1784400000000,
       "tag": "0035_pr_first_review_requested_at",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1784500000000,
+      "tag": "0036_search_index",
+      "breakpoints": true
     }
   ]
 }

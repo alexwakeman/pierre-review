@@ -32,7 +32,8 @@ export type TabKind =
   | 'open-prs'
   | 'bot-only-prs'
   | 'bot-threads'
-  | 'theme-threads';
+  | 'theme-threads'
+  | 'search';
 
 export interface Tab {
   key: string; // stable: 'pr-detail:123' | 'pr-focus:123'
@@ -72,6 +73,9 @@ export const BOT_THREADS_TAB_KEY = 'bot-threads';
 // comments a Bot/Human theme groups. The theme itself is the transient seed (store/filters.ts
 // `themeThreadsSeed`), not the key. EPHEMERAL like the others (dropped on reload).
 export const THEME_THREADS_TAB_KEY = 'theme-threads';
+// The cross-team search results drill-down is a SINGLETON, non-PR tab. The query it shows is the
+// transient seed (store/filters.ts `searchSeed`), not the key. EPHEMERAL like the others.
+export const SEARCH_TAB_KEY = 'search';
 
 /** Parse a Tab.key back into its kind + PR id (null for unknown). */
 export function parseTabKey(key: string): { kind: TabKind; prId: number } | null {
@@ -118,6 +122,7 @@ interface TabsState {
   openBotOnlyPrsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-only-PRs drill-down + activate
   openBotThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-threads resolve tab + activate
   openThemeThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton theme-threads drill-down + activate
+  openSearchTab: (opts?: OpenOpts) => void; // ensure the singleton search-results drill-down + activate
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
   closeTab: (key: string) => void; // remove; fall back to 'timeline' if it was active
@@ -295,6 +300,8 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       openTab({ key: BOT_THREADS_TAB_KEY, kind: 'bot-threads', prId: 0, meta: null }, opts),
     openThemeThreadsTab: (opts) =>
       openTab({ key: THEME_THREADS_TAB_KEY, kind: 'theme-threads', prId: 0, meta: null }, opts),
+    openSearchTab: (opts) =>
+      openTab({ key: SEARCH_TAB_KEY, kind: 'search', prId: 0, meta: null }, opts),
 
     syncMeta: (meta) =>
       set((s) => {

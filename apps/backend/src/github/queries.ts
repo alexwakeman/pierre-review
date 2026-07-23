@@ -21,6 +21,7 @@ const PR_NODE_FIELDS = /* GraphQL */ `
   id
   number
   title${prBodyField}
+  bodyText
   isDraft
   state
   additions
@@ -611,6 +612,10 @@ export interface GqlPullRequest {
   number: number;
   title: string;
   body: string | null;
+  // Plain-text rendering of the PR description, fetched UNCONDITIONALLY (unlike the lean-gated
+  // markdown `body`) so the cross-team search index can cover descriptions without persisting the
+  // full markdown. Not stored on pullRequests — flows only into search_index via persistPr.
+  bodyText: string | null;
   isDraft: boolean;
   state: 'OPEN' | 'CLOSED' | 'MERGED';
   // Diff size — GraphQL scalars + the (capped) per-file connection.

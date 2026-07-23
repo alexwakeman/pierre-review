@@ -2041,6 +2041,51 @@ export interface RepoSearchQuery {
   limit?: number;
 }
 
+// ---- cross-team text search (CORE, no AI; served by /api/search) ----
+// A full-text search over the LOCAL search_index (PR titles + descriptions, review bodies,
+// review-comments, PR-comments, and authors) across the caller's watched/team-scoped repos. Case-
+// insensitive substring match, so you can "pinpoint where certain text exists". A review-comment
+// hit carries its `threadId` so the UI deep-links straight to the thread.
+export type SearchHitKind = 'pr' | 'review' | 'review_comment' | 'pr_comment';
+
+export interface SearchHit {
+  kind: SearchHitKind;
+  prId: number;
+  prNumber: number;
+  prTitle: string;
+  prState: PrState;
+  repoId: number;
+  repoFullName: string; // "owner/name"
+  // The matched entity's id within its kind (review / review-comment / PR-comment id; = prId for a
+  // 'pr' hit) — the in-app anchor for the result.
+  refId: number;
+  // For a review_comment hit: the owning review thread's id, so the result opens the PR's Threads
+  // tab scrolled to that thread. Null for the other kinds.
+  threadId: number | null;
+  authorId: number | null;
+  authorLogin: string | null;
+  authorAvatarUrl: string | null;
+  snippet: string; // a short excerpt of the matched text, centred on the first matched term
+  createdAt: string; // ISO-8601
+}
+
+// A person whose login / display name matches the query and who has authored indexed activity in
+// the searched scope — the "People" facet of a search ("find alice's work").
+export interface SearchPerson {
+  id: number;
+  login: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  matchCount: number; // indexed items in scope this person authored
+}
+
+export interface SearchResponse {
+  query: string;
+  hits: SearchHit[];
+  people: SearchPerson[];
+  total: number; // total hits matching the query in scope (drives pagination)
+}
+
 export interface MarkViewedBody {
   sha?: string;
 }

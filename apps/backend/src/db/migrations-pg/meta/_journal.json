@@ -162,6 +162,13 @@
       "when": 1784728949313,
       "tag": "0022_wise_baron_strucker",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784729000000,
+      "tag": "0023_search_index",
+      "breakpoints": true
     }
   ]
 }

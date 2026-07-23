@@ -819,3 +819,49 @@ export const benchmarkContributions = sqliteTable(
     cohortIdx: index('bench_contrib_cohort_idx').on(t.vendorKind, t.weekStart),
   }),
 );
+
+// ── Cross-team full-text search index (CORE, no AI) ─────────────────────────────────────
+// One row per searchable text unit — a PR (title + description), a review body, a review-comment,
+// or a PR-comment — so a team lead can "pinpoint where certain text exists" across every watched
+// repo. Populated inside persistPr() (delete-by-prId then insert, so removed comments drop out) and
+// backfilled from already-stored data at startup (sync/search-backfill.ts). Denormalized `accountId`
+// is the tenant anchor: EVERY search filters on it, so cross-account isolation stays one indexed
+// predicate (mirroring events/pullRequests). Matching is PORTABLE case-insensitive SUBSTRING
+// (`lower(body) LIKE …`), so the identical query runs on SQLite and Postgres — substring is the
+// right semantics for "find this exact text" (a Postgres `pg_trgm` GIN index is a drop-in
+// accelerator, see the migration note). `threadId` lets a review-comment hit deep-link straight to
+// its thread. Rebuilt per-PR, so no unique index is needed. FKs cascade so a repo/PR delete cleans up.
+export const searchIndex = sqliteTable(
+  'search_index',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    kind: text('kind', {
+      enum: ['pr', 'review', 'review_comment', 'pr_comment'],
+    }).notNull(),
+    // The entity id within its kind (prId / reviewId / reviewCommentId / prCommentId) — builds the
+    // in-app anchor for the hit.
+    refId: integer('ref_id').notNull(),
+    // For review_comment rows: the owning reviewThreads.id, so a hit deep-links to the thread.
+    // Null for the other kinds.
+    threadId: integer('thread_id'),
+    // Who wrote this unit (users.id) — powers "search by person" (matched via the users join) and
+    // the author chip on a result. Nullable (ghost / deleted authors).
+    authorId: integer('author_id').references(() => users.id),
+    // The searchable text (PR rows carry title + description; the others carry the body).
+    body: text('body').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    accountRepoIdx: index('search_account_repo_idx').on(t.accountId, t.repoId),
+    prIdx: index('search_pr_idx').on(t.prId),
+  }),
+);

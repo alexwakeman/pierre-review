@@ -10,6 +10,7 @@ import { OpenPrsDetail } from './components/Activity/OpenPrsDetail.js';
 import { BotOnlyPrsDetail } from './components/Activity/BotOnlyPrsDetail.js';
 import { BotThreadsDetail } from './components/Activity/BotThreadsDetail.js';
 import { ThemeThreadsDetail } from './components/Activity/ThemeThreadsDetail.js';
+import { SearchResultsTab } from './components/Search/SearchResultsTab.js';
 import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
@@ -115,6 +116,7 @@ export default function App(): JSX.Element {
   const botOnlyActive = activeTabObj?.kind === 'bot-only-prs';
   const botThreadsActive = activeTabObj?.kind === 'bot-threads';
   const themeThreadsActive = activeTabObj?.kind === 'theme-threads';
+  const searchActive = activeTabObj?.kind === 'search';
   const boardMode: TimelineMode | null =
     activeTabObj?.kind === 'pr-focus'
       ? { kind: 'isolate', prId: activeTabObj.prId }
@@ -130,7 +132,8 @@ export default function App(): JSX.Element {
     openPrsActive ||
     botOnlyActive ||
     botThreadsActive ||
-    themeThreadsActive;
+    themeThreadsActive ||
+    searchActive;
   // The detail pane is shown at the bottom of any board-slot Timeline (shared or
   // pr-focus) once a PR is selected there.
   const paneVisible = selectedPrId != null && !overlayActive;
@@ -441,6 +444,15 @@ export default function App(): JSX.Element {
             className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
           >
             <ThemeThreadsDetail />
+          </div>
+        )}
+        {/* Cross-team search results — a sibling full-main overlay. */}
+        {searchActive && (
+          <div
+            data-testid="search-overlay"
+            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
+          >
+            <SearchResultsTab />
           </div>
         )}
       </main>

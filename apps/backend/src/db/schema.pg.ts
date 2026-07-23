@@ -723,3 +723,38 @@ export const benchmarkContributions = pgTable(
     cohortIdx: index('bench_contrib_cohort_idx').on(t.vendorKind, t.weekStart),
   }),
 );
+
+// ── Cross-team full-text search index (CORE, no AI) ── the pg twin of the sqlite searchIndex
+// table. See that file for the full rationale (one row per searchable unit, accountId tenant anchor,
+// portable substring match, per-PR rebuild, cascading FKs). The (account_id, repo_id) btree already
+// bounds each search to one tenant's scoped rows; for cloud scale a `pg_trgm` GIN index on
+// lower(body) is a drop-in accelerator (`CREATE EXTENSION IF NOT EXISTS pg_trgm; CREATE INDEX …
+// USING gin (lower(body) gin_trgm_ops)`) — deliberately kept OUT of the migration so a permission-
+// locked Postgres can't fail startup; add it manually where the extension is available.
+export const searchIndex = pgTable(
+  'search_index',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    kind: text('kind', {
+      enum: ['pr', 'review', 'review_comment', 'pr_comment'],
+    }).notNull(),
+    refId: integer('ref_id').notNull(),
+    threadId: integer('thread_id'),
+    authorId: integer('author_id').references(() => users.id),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => ({
+    accountRepoIdx: index('search_account_repo_idx').on(t.accountId, t.repoId),
+    prIdx: index('search_pr_idx').on(t.prId),
+  }),
+);

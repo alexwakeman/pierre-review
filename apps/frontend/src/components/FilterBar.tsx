@@ -7,6 +7,7 @@ import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { EventSelectPanel } from './EventSelectPanel.js';
 import { StatusSelectPanel } from './StatusSelectPanel.js';
 import { TeamSelector } from './TeamSelector.js';
+import { GlobalSearch } from './Search/GlobalSearch.js';
 import { ThreadStateSelectPanel } from './ThreadStateSelectPanel.js';
 import { UserSelectPanel, type MemberSection } from './UserSelectPanel.js';
 
@@ -258,6 +259,13 @@ export function FilterBar(): JSX.Element {
             single scope control, so the Activity rail no longer carries its own. */}
         <Section>
           <TeamSelector />
+        </Section>
+
+        {/* Cross-team full-text search — global (shown on EVERY view), scoped to the active team.
+            Searches the server index (PR bodies, review threads, comments, people), distinct from
+            the timeline-title TimelineSearch below. */}
+        <Section>
+          <GlobalSearch />
         </Section>
 
         {/* Members is timeline-only too — off the board nothing honours the member selection

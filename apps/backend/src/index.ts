@@ -31,6 +31,16 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
 
   const app = await buildApp();
 
+  // Backfill the cross-team search index from already-stored data (PRs that predate the feature),
+  // in the BACKGROUND so it never delays serving. Idempotent + batched; a cheap no-op once caught
+  // up. New/updated PRs are indexed live by persistPr, so this only closes the historical gap.
+  void import('./db/search.js')
+    .then(({ backfillSearchIndex }) => backfillSearchIndex())
+    .then((n) => {
+      if (n > 0) console.log(`search: backfilled ${n} PRs into the search index`);
+    })
+    .catch((err) => app.log.warn({ err }, 'search index backfill failed'));
+
   // (Claude Review moved into @pierre/pro — its crash-orphan reconcile now runs inside
   // plugin.register during bindProPlugin below, alongside the AI-Fix reconcile.)
 

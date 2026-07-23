@@ -446,6 +446,29 @@ check(
   remainingContrib.length === 1 && remainingContrib[0]!.accountId === 2,
 );
 
+// ── Cross-team text search (search_index is accountId-denormalized) ─────────────
+// Seed a search row for each account's PR sharing a common token; searchPrs must return only the
+// caller's rows and leak nothing even when B is handed A's repo id.
+const { searchPrs } = await import('../src/db/search.js');
+await db
+  .insert(schema.searchIndex)
+  .values([
+    { accountId: 1, repoId: A.repoId, prId: A.prId, kind: 'pr', refId: A.prId, body: 'isolationsearchtoken alpha payload', createdAt: now },
+    { accountId: 2, repoId: B.repoId, prId: B.prId, kind: 'pr', refId: B.prId, body: 'isolationsearchtoken beta payload', createdAt: now },
+  ])
+  .execute();
+const searchOwn = await searchPrs(1, { query: 'isolationsearchtoken', repoIds: null, limit: 50, offset: 0 });
+check(
+  'searchPrs(A) returns only A’s hits',
+  searchOwn.total === 1 && searchOwn.hits.every((h) => h.repoId === A.repoId && h.prId === A.prId),
+);
+check('searchPrs(A) excludes B’s hits', !searchOwn.hits.some((h) => h.repoId === B.repoId));
+const searchCross = await searchPrs(2, { query: 'isolationsearchtoken', repoIds: [A.repoId], limit: 50, offset: 0 });
+check(
+  'searchPrs(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)',
+  searchCross.total === 0 && searchCross.hits.length === 0,
+);
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

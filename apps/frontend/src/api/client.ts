@@ -95,6 +95,8 @@ import type {
   Repo,
   RepoSearchResponse,
   SuggestedReposResponse,
+  SearchHitKind,
+  SearchResponse,
   Team,
   TeamsResponse,
   ReplyResult,
@@ -186,6 +188,22 @@ export const api = {
   // The viewer's recently-active repositories (first-run onboarding). Detected from GitHub
   // activity; already-added repos filtered out server-side; ordered most-recently-pushed first.
   suggestedRepos: () => get<SuggestedReposResponse>('/api/repos/suggested'),
+  // Cross-team full-text search over the local index (PRs/reviews/comments/people). `scope` mirrors
+  // the Activity/Insights scope string; `kinds` optionally narrows to hit kinds; paginated.
+  search: (opts: {
+    q: string;
+    scope?: string;
+    kinds?: SearchHitKind[];
+    limit?: number;
+    offset?: number;
+  }) => {
+    const p = new URLSearchParams({ q: opts.q });
+    if (opts.scope) p.set('scope', opts.scope);
+    if (opts.kinds && opts.kinds.length > 0) p.set('kinds', opts.kinds.join(','));
+    if (opts.limit != null) p.set('limit', String(opts.limit));
+    if (opts.offset != null) p.set('offset', String(opts.offset));
+    return get<SearchResponse>(`/api/search?${p.toString()}`);
+  },
   addRepo: (body: CreateRepoBody) =>
     fetch('/api/repos', jsonBody('POST', body)).then((r) => handle<Repo>(r)),
   // Toggle "Watch for inbox" on a repo (inbox-only; does not affect timeline
