@@ -51,7 +51,7 @@ export function RetroView(): JSX.Element | null {
   const refresh = useRefreshRetroReport(scope);
   const usage = useAiUsage(activityDigest);
   const outOfCredits =
-    usage.data?.allowanceCredits != null && (usage.data.remainingCredits ?? 0) <= 0;
+    usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
 
   // The AI digest capability is the gate (the retro shares the digest's Haiku seam + cost
   // throttle). Absent → render nothing.

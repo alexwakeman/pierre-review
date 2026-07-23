@@ -100,7 +100,7 @@ function BotVendorPill({ kind }: { kind: AutomatedReviewerKind }): JSX.Element {
 
 // At-a-glance CI dot + files-changed count + a green/red LOC delta — mirrors the
 // PR-detail size label (ChangesTab / PrDetail).
-function PrMetaRow({ pr }: { pr: InsightPrRef }): JSX.Element {
+export function PrMetaRow({ pr }: { pr: InsightPrRef }): JSX.Element {
   const ci = pr.ciStatus ? CI_META[pr.ciStatus] : null;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
@@ -126,7 +126,7 @@ function PrMetaRow({ pr }: { pr: InsightPrRef }): JSX.Element {
 // Collapsible PR summary: the plain description (markdown) + the Pro AI summary with its own inline
 // Generate/Regenerate action (AiSummary self-gates on the prSummary capability). Lazy: the PR detail
 // is fetched only when expanded.
-function InsightPrSummary({ prId }: { prId: number }): JSX.Element {
+export function InsightPrSummary({ prId }: { prId: number }): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
     <div className="mt-2">

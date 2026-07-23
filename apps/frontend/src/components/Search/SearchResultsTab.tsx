@@ -1,10 +1,16 @@
-import { useEffect, useState } from 'react';
-import type { SearchHit, SearchHitKind } from '@pierre-review/shared';
+import { useEffect, useMemo, useState } from 'react';
+import type { InsightPrRef, SearchHit, SearchHitKind, User } from '@pierre-review/shared';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue.js';
 import { useSearchResults } from '../../hooks/useSearch.js';
+import { usePr, useThread } from '../../hooks/usePr.js';
+import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
+import { indexUsers, PR_STATE_META } from '../../lib/ui.js';
 import { MagnifierIcon } from '../Icons.js';
-import { KIND_GLYPH, KIND_LABEL, openSearchHit } from './searchNav.js';
+import { ThreadCard } from '../ThreadView/index.js';
+import { PrMetaRow, InsightPrSummary } from '../Activity/AttentionCards.js';
+import { KIND_GLYPH, KIND_LABEL, openHitPr, openSearchHit } from './searchNav.js';
+import { highlightTerms } from './highlight.js';
 
 // The full cross-team search-results tab (a singleton drill-down overlay). Reads the query from the
 // transient `searchSeed`, offers an editable box + kind filters + a People facet, lists every hit
@@ -43,6 +49,11 @@ export function SearchResultsTab(): JSX.Element {
 
   const { hits, people, total, isLoading, isFetching, hasMore, fetchMore, isFetchingMore } =
     useSearchResults(debounced, kinds);
+
+  // Resolve author/commenter metadata for the embedded thread cards once (useUsers is cached, so
+  // the per-card children would otherwise each rebuild this Map).
+  const { data: users } = useUsers();
+  const usersById = useMemo(() => indexUsers(users), [users]);
 
   const toggleKind = (k: SearchHitKind): void =>
     setKinds((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
@@ -133,9 +144,14 @@ export function SearchResultsTab(): JSX.Element {
           No matches for “{debounced}”{kinds.length > 0 ? ' with the selected filters' : ''}.
         </div>
       ) : (
-        <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 dark:divide-gray-800 dark:border-gray-800">
+        <ul className="space-y-3">
           {hits.map((h) => (
-            <SearchRow key={`${h.kind}:${h.refId}`} hit={h} />
+            <SearchResultCard
+              key={`${h.kind}:${h.refId}`}
+              hit={h}
+              query={debounced}
+              usersById={usersById}
+            />
           ))}
         </ul>
       )}
@@ -159,40 +175,171 @@ export function SearchResultsTab(): JSX.Element {
   );
 }
 
-function SearchRow({ hit }: { hit: SearchHit }): JSX.Element {
+// The kind/repo/PR header line shared by every result card. The "owner/name #N" reference is a
+// link to the PR's own detail tab (opens on Overview). It carries data-noactivate + stopPropagation
+// so, inside the whole-card-clickable PrHitCard, the ref-click opens the PR without double-firing.
+function HitHeader({ hit }: { hit: SearchHit }): JSX.Element {
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] text-gray-400">
+      <span aria-hidden>{KIND_GLYPH[hit.kind]}</span>
+      <span className="font-medium text-gray-500 dark:text-gray-400">{KIND_LABEL[hit.kind]}</span>
+      <span aria-hidden className="text-gray-300 dark:text-gray-600">
+        ·
+      </span>
+      <span
+        role="button"
+        tabIndex={0}
+        data-noactivate
+        onClick={(e) => {
+          e.stopPropagation();
+          openHitPr(hit);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            openHitPr(hit);
+          }
+        }}
+        title="Open this PR"
+        className="truncate rounded font-medium text-sky-600 hover:underline dark:text-sky-400"
+      >
+        {hit.repoFullName} #{hit.prNumber}
+      </span>
+      {hit.authorLogin ? (
+        <>
+          <span aria-hidden className="text-gray-300 dark:text-gray-600">
+            ·
+          </span>
+          <span className="truncate">{hit.authorLogin}</span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function SearchResultCard({
+  hit,
+  query,
+  usersById,
+}: {
+  hit: SearchHit;
+  query: string;
+  usersById: Map<number, User>;
+}): JSX.Element {
+  if (hit.kind === 'review_comment' && hit.threadId != null) {
+    return <ThreadHitCard hit={hit} query={query} usersById={usersById} />;
+  }
+  return <PrHitCard hit={hit} query={query} />;
+}
+
+// A review-comment hit: the FULL thread (code anchor + every reply + reply/resolve controls). The
+// thread header title deep-links to the thread on the PR's Threads tab (resolved threads too, since
+// openSearchHit → selectThread clears the state-pill filter). Lazily fetches the thread by id.
+function ThreadHitCard({
+  hit,
+  query,
+  usersById,
+}: {
+  hit: SearchHit;
+  query: string;
+  usersById: Map<number, User>;
+}): JSX.Element {
+  const { data: thread, isLoading } = useThread(hit.threadId);
+  const prUrl = `https://github.com/${hit.repoFullName}/pull/${hit.prNumber}`;
+  return (
+    <li className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+      <div className="mb-2">
+        <HitHeader hit={hit} />
+        <div className="mt-0.5 truncate text-sm font-medium text-gray-800 dark:text-gray-100">
+          {highlightTerms(hit.prTitle, query)}
+        </div>
+      </div>
+      {isLoading || !thread ? (
+        <div className="h-16 animate-pulse rounded bg-gray-100 dark:bg-gray-900" />
+      ) : (
+        <ThreadCard
+          thread={thread}
+          usersById={usersById}
+          prUrl={prUrl}
+          repoId={hit.repoId}
+          onOpenInPr={() => openSearchHit(hit)}
+        />
+      )}
+    </li>
+  );
+}
+
+// A PR / review / PR-comment hit: a PR card with a state badge, header, CI/LOC meta, the highlighted
+// snippet, and a collapsible PR summary. Clicking anywhere on the card (outside its own controls)
+// opens the PR's detail tab.
+function PrHitCard({ hit, query }: { hit: SearchHit; query: string }): JSX.Element {
+  const { data: pr } = usePr(hit.prId);
+  const stateMeta = PR_STATE_META[hit.prState];
+  // PrMetaRow reads an InsightPrRef; adapt the loaded PR detail (which carries the CI/LOC fields
+  // under slightly different names — changedFilesCount, and a non-null ciStatus). Rendered only
+  // once the detail loads, so PrMetaRow is skipped while fetching rather than fed a mismatch.
+  const metaRef: InsightPrRef | null = pr
+    ? {
+        prId: hit.prId,
+        repoId: hit.repoId,
+        repoFullName: hit.repoFullName,
+        prNumber: hit.prNumber,
+        prTitle: hit.prTitle,
+        authorId: hit.authorId,
+        githubUrl: pr.githubUrl,
+        ciStatus: pr.ciStatus,
+        changedFiles: pr.changedFilesCount,
+        additions: pr.additions,
+        deletions: pr.deletions,
+        openedAt: pr.openedAt,
+      }
+    : null;
+  const activate = (): void => openSearchHit(hit);
   return (
     <li>
-      <button
-        type="button"
-        onClick={() => openSearchHit(hit)}
-        className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-900"
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          // Don't navigate when the click landed on an inner control (the PR-summary toggle, a
+          // markdown link, the AI-summary button…), mirroring the Activity cards' guard.
+          if ((e.target as HTMLElement).closest('a,button,textarea,input,[data-noactivate]')) return;
+          activate();
+        }}
+        onKeyDown={(e) => {
+          // Only the card itself activates on Enter/Space — a key event bubbling up from an inner
+          // control (the PR-summary toggle, a markdown link) must reach that control, not navigate.
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            activate();
+          }
+        }}
+        className="cursor-pointer rounded-lg border border-gray-200 p-3 hover:bg-gray-50/70 dark:border-gray-800 dark:hover:bg-gray-900/60"
       >
-        <span className="flex items-center gap-1.5 text-[11px] text-gray-400">
-          <span aria-hidden>{KIND_GLYPH[hit.kind]}</span>
-          <span className="font-medium text-gray-500 dark:text-gray-400">{KIND_LABEL[hit.kind]}</span>
-          <span aria-hidden>·</span>
-          <span className="truncate font-medium text-gray-600 dark:text-gray-300">
-            {hit.repoFullName} #{hit.prNumber}
+        <div className="flex items-center gap-2">
+          <span
+            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold text-white"
+            style={{ backgroundColor: stateMeta.color }}
+          >
+            {stateMeta.label}
           </span>
-          {hit.authorLogin ? (
-            <>
-              <span aria-hidden>·</span>
-              <span className="truncate">{hit.authorLogin}</span>
-            </>
-          ) : null}
-          {hit.kind === 'review_comment' ? (
-            <span className="ml-1 rounded bg-gray-100 px-1 text-[10px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-              opens thread
-            </span>
-          ) : null}
-        </span>
-        <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-100">
-          {hit.prTitle}
-        </span>
+          <div className="min-w-0 flex-1">
+            <HitHeader hit={hit} />
+          </div>
+        </div>
+        <div className="mt-0.5 text-sm font-medium text-gray-800 dark:text-gray-100">
+          {highlightTerms(hit.prTitle, query)}
+        </div>
+        {metaRef && <PrMetaRow pr={metaRef} />}
         {hit.snippet && hit.kind !== 'pr' ? (
-          <span className="line-clamp-2 text-xs text-gray-500 dark:text-gray-400">{hit.snippet}</span>
+          <div className="mt-1 line-clamp-3 text-xs text-gray-500 dark:text-gray-400">
+            {highlightTerms(hit.snippet, query)}
+          </div>
         ) : null}
-      </button>
+        <InsightPrSummary prId={hit.prId} />
+      </div>
     </li>
   );
 }

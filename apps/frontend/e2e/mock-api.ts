@@ -181,6 +181,8 @@ const ME_RESPONSE: MeResponse = {
     botTriage: false,
   },
   authNotices: [],
+  // AI balances (summary turns + agent credits). Unmetered/none for the e2e local tier.
+  aiUsage: null,
 };
 
 function myTurnPr(id: number): MyTurnPr {

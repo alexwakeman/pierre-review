@@ -71,3 +71,30 @@ export async function getAiUsageSummary(
   }
   return { summaryUsd, agentUsd, totalUsd: summaryUsd + agentUsd };
 }
+
+// Auxiliary summary sub-calls that belong to a SINGLE user-initiated turn and must NOT count as
+// their own turn — e.g. the insights-chat CHART is a second Haiku call rendering the SAME
+// question, so one charted question is still one turn. Their $ cost stays on the ledger (COGS
+// visibility); only the turn TALLY excludes them.
+const NON_TURN_SUMMARY_FEATURES = new Set<string>(['sprint_chat_chart']);
+
+// Count the SUMMARY-seam turns an account has spent since `sinceMs` (month-to-date). One
+// recorded ledger row = one turn, EXCEPT auxiliary sub-calls (above); a $0 cache hit /
+// ambient-session completion isn't recorded, so it's free and doesn't count (recordAiUsage
+// drops non-positive-cost rows). A summary turn limit caps this. Portable across both dialects
+// (fetch + reduce in JS; the row set is bounded by ~the monthly limit — same pattern as
+// getAiUsageSummary).
+export async function getSummaryTurnCount(accountId: number, sinceMs: number): Promise<number> {
+  const rows = await db
+    .select({ feature: aiUsage.feature })
+    .from(aiUsage)
+    .where(
+      and(
+        eq(aiUsage.accountId, accountId),
+        eq(aiUsage.seam, 'summary'),
+        gte(aiUsage.occurredAt, new Date(sinceMs)),
+      ),
+    )
+    .execute();
+  return rows.filter((r) => !NON_TURN_SUMMARY_FEATURES.has(r.feature)).length;
+}

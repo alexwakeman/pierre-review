@@ -1205,3 +1205,35 @@ body {
   overflow: visible; /* keep the ring clear of neighbouring bars */
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.9);
 }
+
+/* ---- Themed thin horizontal scrollbar (the pinned-tabs strip when tabs overflow) ---- */
+/* Cross-browser: Firefox uses scrollbar-width/scrollbar-color; WebKit/Blink (Chrome, Safari,
+   Edge) use the ::-webkit-scrollbar pseudo-elements. Kept slim + app-neutral (a rounded slate
+   thumb over a transparent track) so an overflowing tab bar reads as part of the chrome, not a
+   raw OS scrollbar. .dark is class-based (darkMode:'class'). */
+.tab-scrollbar {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: rgb(203 213 225) transparent; /* thumb, track (slate-300) */
+}
+.dark .tab-scrollbar {
+  scrollbar-color: rgb(71 85 105) transparent; /* slate-600 */
+}
+.tab-scrollbar::-webkit-scrollbar {
+  height: 6px;
+}
+.tab-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.tab-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgb(203 213 225); /* slate-300 */
+  border-radius: 9999px;
+}
+.tab-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: rgb(148 163 184); /* slate-400 on hover */
+}
+.dark .tab-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgb(71 85 105); /* slate-600 */
+}
+.dark .tab-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: rgb(100 116 139); /* slate-500 on hover */
+}

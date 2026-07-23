@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import type { MeResponse, MyTurnDismissBody } from '@pierre-review/shared';
+import type { AiUsageResponse, MeResponse, MyTurnDismissBody } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { accountToLocalUser, setBenchmarkConsent } from '../../auth/account.js';
+import { aiCreditStatus, monthStartMs } from '../../db/credits.js';
 import { runBenchmarkRollupForAccount } from '../../sync/benchmark-rollup.js';
 import { accountIdOf } from '../plugins/auth.js';
 import {
@@ -61,6 +62,24 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     const newFeedItems = feedLastSeen
       ? await countNewMyTurnFeedItems(accountId, feedLastSeen)
       : 0;
+    // Month-to-date AI balances, computed CORE-side (the plan/allowance rules live in db/credits)
+    // so the SPA has the spend baseline on the very first authenticated call — no separate Pro
+    // fetch needed on login. Split by seam: summary is metered by TURN count, agent by CREDITS.
+    let aiUsage: AiUsageResponse | null = null;
+    if (req.account) {
+      const nowMs = Date.now();
+      const c = await aiCreditStatus(req.account, nowMs);
+      aiUsage = {
+        enabled: true,
+        monthStart: new Date(monthStartMs(nowMs)).toISOString(),
+        summaryTurnsUsed: c.summaryTurnsUsed,
+        summaryTurnLimit: c.summaryTurnLimit,
+        summaryTurnsRemaining: c.summaryTurnsRemaining,
+        agentCreditsUsed: c.agentCreditsUsed,
+        agentAllowanceCredits: c.agentAllowanceCredits,
+        agentCreditsRemaining: c.agentCreditsRemaining,
+      };
+    }
     return {
       user,
       counts: {
@@ -80,6 +99,7 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       benchmarkOptIn: config.isCloud ? req.account?.benchmarkOptIn ?? false : false,
       // Orgs currently SAML-blocked for this account (empty in the normal case + in local).
       authNotices: getAuthNotices(accountId),
+      aiUsage,
     };
   });
 

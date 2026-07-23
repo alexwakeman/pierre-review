@@ -82,11 +82,6 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               }`}
             >
               {t.label}
-              {(t.key === 'behaviour' || t.key === 'themes') && (
-                <span className="rounded bg-sky-100 px-1 text-[9px] font-semibold uppercase text-sky-600 dark:bg-sky-900/40 dark:text-sky-300">
-                  beta
-                </span>
-              )}
             </button>
           );
         })}

@@ -22,6 +22,7 @@ export function ThreadCard({
   viewedSince,
   inMyTurn = false,
   highlightCommentId,
+  onOpenInPr,
 }: {
   thread: ThreadDetail;
   usersById: Map<number, User>;
@@ -36,8 +37,14 @@ export function ThreadCard({
   // specific comment a card represents). When null/undefined, fall back to the
   // viewedSince heuristic (the PR-detail Threads tab).
   highlightCommentId?: number | null;
+  // When provided, the whole card HEADER becomes a clickable region that deep-links this thread
+  // inside its PR (search results + theme drill-downs) — a large, discoverable target. The
+  // header's own controls (Show-on-timeline / addressed / resolve, all <button>s) keep working
+  // via a closest() guard. Inert (a plain header) when omitted.
+  onOpenInPr?: () => void;
 }): JSX.Element {
   const anchorHunk = thread.comments[0]?.diffHunk ?? null;
+  const lineLabel = thread.line != null ? `line ${thread.line}` : 'file-level';
 
   return (
     <div
@@ -47,7 +54,38 @@ export function ThreadCard({
           : 'border-gray-200 dark:border-gray-800'
       }`}
     >
-      <div className="mb-2 flex items-center gap-2 text-[11px] text-gray-400">
+      <div
+        className={`mb-2 flex items-center gap-2 text-[11px] text-gray-400${
+          onOpenInPr
+            ? ' -mx-1 cursor-pointer rounded px-1 hover:bg-sky-50 dark:hover:bg-sky-950/20'
+            : ''
+        }`}
+        role={onOpenInPr ? 'button' : undefined}
+        tabIndex={onOpenInPr ? 0 : undefined}
+        title={onOpenInPr ? 'Open this thread in its PR' : undefined}
+        onClick={
+          onOpenInPr
+            ? (e) => {
+                // Clicking anywhere on the header opens the thread in its PR — EXCEPT the header's
+                // own controls (all <button>s), which keep working via the closest() guard.
+                if ((e.target as HTMLElement).closest('a,button,input,textarea,[data-noactivate]'))
+                  return;
+                onOpenInPr();
+              }
+            : undefined
+        }
+        onKeyDown={
+          onOpenInPr
+            ? (e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onOpenInPr();
+                }
+              }
+            : undefined
+        }
+      >
         {/* State pill anchored top-LEFT on every thread card — so a resolved (or otherwise-
             stateful) thread is legible at a glance without expanding it, and all thread cards
             read uniformly. */}
@@ -65,7 +103,15 @@ export function ThreadCard({
           title="Show this thread on the timeline"
         />
         <span className="text-gray-300 dark:text-gray-600">·</span>
-        {thread.line != null ? <span>line {thread.line}</span> : <span>file-level</span>}
+        <span
+          className={
+            onOpenInPr
+              ? 'font-medium text-gray-500 underline decoration-dotted underline-offset-2 dark:text-gray-400'
+              : undefined
+          }
+        >
+          {lineLabel}
+        </span>
         {thread.isOutdated && <span>· outdated</span>}
         {!thread.isResolved && (
           <AddressedCheckControl kind="thread" targetId={thread.id} />

@@ -31,6 +31,14 @@ export function openSearchHit(hit: SearchHit): void {
   }
 }
 
+// Open a hit's PR on its Overview (the "#N" reference link), regardless of hit kind — so a thread
+// hit's PR reference lands on the PR itself, not the specific thread (that's the thread-header
+// affordance). Clean selection clears any stale state-pill preset.
+export function openHitPr(hit: SearchHit): void {
+  usePinnedTabs.getState().openPrDetailTab(hitToMeta(hit));
+  useFilters.getState().selectPr(hit.prId);
+}
+
 export const KIND_LABEL: Record<SearchHitKind, string> = {
   pr: 'PR',
   review: 'Review',

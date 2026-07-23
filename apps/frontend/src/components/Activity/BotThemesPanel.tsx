@@ -65,7 +65,7 @@ export function BotThemesPanel(): JSX.Element | null {
   const query = useBotThemes(window, activityDigest, scope);
   const refresh = useRefreshBotThemes(window, scope);
   const usage = useAiUsage(activityDigest);
-  const outOfCredits = usage.data?.allowanceCredits != null && (usage.data.remainingCredits ?? 0) <= 0;
+  const outOfCredits = usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
 
   if (!activityDigest) return null;
 
@@ -83,9 +83,6 @@ export function BotThemesPanel(): JSX.Element | null {
         </span>
         <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
           Pro
-        </span>
-        <span className="shrink-0 rounded bg-sky-100 px-1 text-[9px] font-semibold uppercase text-sky-600 dark:bg-sky-900/40 dark:text-sky-300">
-          beta
         </span>
         <button
           type="button"

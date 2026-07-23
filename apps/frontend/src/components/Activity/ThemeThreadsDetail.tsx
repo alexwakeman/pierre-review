@@ -50,6 +50,18 @@ function ThemePrGroup({
   const { data: pr, isLoading } = usePr(prId);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const usersById = useMemo(() => indexUsers(pr?.users), [pr]);
+  const authorLogin = pr?.authorId != null ? usersById.get(pr.authorId)?.githubLogin ?? null : null;
+  const openThisPr = (): void =>
+    openPrDetailTab(prRefToMeta({ prId, prNumber, repoFullName, title: pr?.title, authorLogin }), {
+      fromActivity: true,
+    });
+  // Deep-link a specific member thread inside the PR: open the detail tab, then select the thread
+  // (selectThread clears any state-pill preset, so resolved threads become visible, and PrDetail
+  // forces the Threads tab + scrolls to it).
+  const openThread = (threadId: number): void => {
+    openThisPr();
+    useFilters.getState().selectThread(prId, threadId);
+  };
 
   const threadIds = new Set<number>();
   const commentIds = new Set<number>();
@@ -59,24 +71,30 @@ function ThemePrGroup({
   }
   const memberThreads = (pr?.threads ?? []).filter((t) => threadIds.has(t.id));
   const memberComments = (pr?.comments ?? []).filter((c) => commentIds.has(c.id));
-  const authorLogin = pr?.authorId != null ? usersById.get(pr.authorId)?.githubLogin ?? null : null;
 
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-800">
       <div className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-gray-900/50">
-        <span className="min-w-0 flex-1 truncate text-sm">
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={openThisPr}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              openThisPr();
+            }
+          }}
+          className="min-w-0 flex-1 cursor-pointer truncate text-sm hover:underline"
+          title="Open this PR in its own detail tab"
+        >
           <span className="font-mono text-gray-500">{repoFullName}</span>{' '}
           <span className="font-semibold text-gray-800 dark:text-gray-100">#{prNumber}</span>
           {pr?.title ? <span className="text-gray-600 dark:text-gray-300"> — {pr.title}</span> : null}
         </span>
         <button
           type="button"
-          onClick={() =>
-            openPrDetailTab(
-              prRefToMeta({ prId, prNumber, repoFullName, title: pr?.title, authorLogin }),
-              { fromActivity: true },
-            )
-          }
+          onClick={openThisPr}
           className="shrink-0 rounded border border-sky-300 px-2 py-0.5 text-[11px] font-medium text-sky-600 hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300 dark:hover:bg-sky-950/40"
         >
           Open PR →
@@ -94,6 +112,7 @@ function ThemePrGroup({
                 usersById={usersById}
                 prUrl={pr!.githubUrl}
                 repoId={pr!.repoId}
+                onOpenInPr={() => openThread(t.id)}
               />
             ))}
             {memberComments.map((c) => (

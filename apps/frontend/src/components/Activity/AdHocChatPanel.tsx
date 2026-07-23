@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   PRESET_PROMPTS,
   type DigestPrRef,
   type PinnedPrompt,
   type SprintChatHistoryItem,
+  type SprintChatResponse,
 } from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
@@ -93,33 +94,35 @@ function Toggle({
   );
 }
 
-// One past question in the collapsible history. Collapsed = the question + date; expanding shows
-// the STORED answer (+ chart) with no re-run (free), plus a "Reuse question" that reloads it into
-// the box for editing / re-asking.
+// One past question in the history. Clicking the row loads its STORED answer (+ chart) into the
+// main answer panel at the TOP of this component (free — no re-run), and the row is marked as the
+// current selection. A secondary "↻ Reuse" reloads the question into the box for editing / re-asking.
 function HistoryRow({
   item,
-  expanded,
-  onToggle,
-  onOpenPr,
+  selected,
+  onSelect,
   onReuse,
 }: {
   item: SprintChatHistoryItem;
-  expanded: boolean;
-  onToggle: () => void;
-  onOpenPr: (r: DigestPrRef) => void;
+  selected: boolean;
+  onSelect: () => void;
   onReuse: () => void;
 }): JSX.Element {
   return (
-    <li className="rounded border border-gray-200 dark:border-gray-800">
+    <li
+      className={`flex items-stretch overflow-hidden rounded border ${
+        selected
+          ? 'border-sky-400 bg-sky-50 ring-1 ring-sky-400 dark:border-sky-500 dark:bg-sky-950/30 dark:ring-sky-500'
+          : 'border-gray-200 dark:border-gray-800'
+      }`}
+    >
       <button
         type="button"
-        onClick={onToggle}
-        className="flex w-full items-start gap-2 px-2 py-1.5 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-900/40"
-        aria-expanded={expanded}
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 items-start gap-2 px-2 py-1.5 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-900/40"
+        aria-current={selected}
+        title={item.scope !== 'all' ? `scope ${item.scope}` : undefined}
       >
-        <span className="mt-0.5 shrink-0 text-gray-400" aria-hidden="true">
-          {expanded ? '▾' : '▸'}
-        </span>
         <span className="min-w-0 flex-1 truncate font-medium text-gray-700 dark:text-gray-200">
           {item.wantChart && <span aria-hidden="true">📊 </span>}
           {item.wantBots && <span aria-hidden="true">🤖 </span>}
@@ -132,30 +135,17 @@ function HistoryRow({
           {new Date(item.createdAt).toLocaleDateString()}
         </span>
       </button>
-      {expanded && (
-        <div className="border-t border-gray-100 px-3 py-2 dark:border-gray-800">
-          <SummaryMarkdown markdown={item.answer} prRefs={item.prRefs} onOpenPr={onOpenPr} />
-          {item.chart && (
-            <div className="mt-2">
-              <AdHocChart spec={item.chart} />
-            </div>
-          )}
-          <div className="mt-1.5 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={onReuse}
-              className="text-[10px] font-medium text-violet-600 hover:underline dark:text-violet-300"
-              title="Load this question back into the box to edit or re-ask"
-            >
-              ↻ Reuse question
-            </button>
-            <span className="text-[10px] text-gray-400">
-              {new Date(item.createdAt).toLocaleString()}
-              {item.scope !== 'all' && ` · scope ${item.scope}`}
-            </span>
-          </div>
-        </div>
-      )}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onReuse();
+        }}
+        className="shrink-0 border-l border-gray-200 px-2 text-[10px] font-medium text-violet-600 hover:bg-violet-50 hover:underline dark:border-gray-800 dark:text-violet-300 dark:hover:bg-violet-950/30"
+        title="Load this question back into the box to edit or re-ask"
+      >
+        ↻ Reuse
+      </button>
     </li>
   );
 }
@@ -176,7 +166,10 @@ export function AdHocChatPanel(): JSX.Element | null {
   // History panel (transient, session-local UI state — resets to collapsed on remount).
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyPage, setHistoryPage] = useState(0);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  // Which past question is currently loaded into the TOP answer panel (marks the row). Null = the
+  // top panel is showing a live/last Ask, not a picked history item.
+  const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
+  const answerRef = useRef<HTMLDivElement | null>(null);
 
   const chat = useSprintChat();
   const { data: candidates } = useScopeMentionCandidates(scope, activityDigest);
@@ -187,7 +180,16 @@ export function AdHocChatPanel(): JSX.Element | null {
 
   const usage = useAiUsage(activityDigest);
   const outOfCredits =
-    usage.data?.allowanceCredits != null && (usage.data.remainingCredits ?? 0) <= 0;
+    usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
+
+  // When a past question is picked, scroll the (now-replaced) top answer panel into view so the
+  // user sees the content that replaced whatever was there. Keyed on the selection id so it fires
+  // once per pick, after the store update has committed the answer DOM.
+  useEffect(() => {
+    if (selectedHistoryId != null) {
+      answerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedHistoryId]);
 
   // Absent the AI capability → render nothing (parity with RetroView).
   if (!activityDigest) return null;
@@ -198,12 +200,32 @@ export function AdHocChatPanel(): JSX.Element | null {
   const ask = (q: string, chart: boolean, bots: boolean): void => {
     const text = q.trim();
     if (text === '' || outOfCredits) return;
+    // A fresh Ask supersedes any picked history item, so the top panel shows the live answer.
+    setSelectedHistoryId(null);
     // Persist the answer into the store on success so it survives a remount; the mutation's own
     // data is component-local and would be lost when the panel unmounts.
     chat.mutate(
       { question: text, scope, wantChart: chart, wantBots: bots },
       { onSuccess: (data) => setStoredResult(data) },
     );
+  };
+
+  // Load a past question's STORED answer into the TOP answer panel (free — no re-run). We map the
+  // history item to the response shape and stash it in the store, and reset() the mutation so a
+  // prior Ask's `chat.data` can't shadow it (the top panel reads `chat.data ?? storedResult`). A
+  // later fresh Ask repopulates chat.data and wins again.
+  const selectHistory = (item: SprintChatHistoryItem): void => {
+    const mapped: SprintChatResponse = {
+      enabled: true,
+      answer: item.answer,
+      prRefs: item.prRefs,
+      chart: item.chart,
+      model: item.model ?? undefined,
+      generatedAt: item.createdAt,
+    };
+    chat.reset();
+    setStoredResult(mapped);
+    setSelectedHistoryId(item.id);
   };
 
   const runPinned = (p: PinnedPrompt): void => {
@@ -376,6 +398,7 @@ export function AdHocChatPanel(): JSX.Element | null {
         </div>
       ) : answer != null ? (
         <div
+          ref={answerRef}
           key={result?.generatedAt}
           className="digest-fade-in mt-3 rounded-md border border-violet-200/70 bg-white/60 p-3 dark:border-violet-900/50 dark:bg-gray-900/40"
         >
@@ -422,9 +445,8 @@ export function AdHocChatPanel(): JSX.Element | null {
                   <HistoryRow
                     key={it.id}
                     item={it}
-                    expanded={expandedId === it.id}
-                    onToggle={() => setExpandedId((id) => (id === it.id ? null : it.id))}
-                    onOpenPr={(r) => openPrDetailTab(refMeta(r), { fromActivity: true })}
+                    selected={selectedHistoryId === it.id}
+                    onSelect={() => selectHistory(it)}
                     onReuse={() =>
                       setDraft({
                         question: it.question,

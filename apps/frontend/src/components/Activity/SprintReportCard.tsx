@@ -41,7 +41,7 @@ export function SprintReportCard(): JSX.Element | null {
   // cache. Unmetered (local) → allowanceCredits null → never out of credits.
   const usage = useAiUsage(activityDigest);
   const outOfCredits =
-    usage.data?.allowanceCredits != null && (usage.data.remainingCredits ?? 0) <= 0;
+    usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
   // Collapse state persists across Insights-tab switches / reloads (was ephemeral useState,
   // which reset the container closed every visit).
   const collapsed = useSprintReportUi((s) => s.collapsed);

@@ -124,9 +124,6 @@ export function PrBotBehaviourTab({ pr }: { pr: PrDetail }): JSX.Element {
   return (
     <div className="space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-          Experimental
-        </span>
         <span className="text-[11px] text-gray-400">
           How each review bot behaved on THIS PR vs its <span className="font-medium">own</span>{' '}
           typical (84-day baseline). Deterministic, no AI.

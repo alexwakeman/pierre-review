@@ -251,12 +251,6 @@ export interface FilterState {
   // falls back to its initialSubTab ?? 'overview'). Transient, URL-silent, like repoConsoleTabs.
   insightsSubTab: InsightsSubTab | null;
 
-  // PR-title search box (App.tsx). Sticky: persists across input blur and PR
-  // selection so re-focusing re-shows the same results. Store-only (NOT URL-synced
-  // — transient per-session intent; keeps shared URLs clean). Client-side filter
-  // over loaded timeline/open-PR data, so it never feeds buildTimelineSearch.
-  searchQuery: string;
-
   // file groups + diff hunks (PR detail thread view)
   expandedFileGroups: string[]; // paths explicitly toggled by the user
   collapsedFileGroups: string[]; // paths explicitly collapsed by the user
@@ -456,7 +450,6 @@ export interface FilterState {
   setRepoConsoleTab: (repoId: number, tab: RepoConsoleTab) => void;
   // Remember the Insights console's sub-tab (see insightsSubTab).
   setInsightsSubTab: (tab: InsightsSubTab) => void;
-  setSearchQuery: (q: string) => void;
   toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
   // Reset every user-set FILTER (repos, members, range, categories, PR statuses,
@@ -503,7 +496,6 @@ type FilterDefaults = Pick<
   | 'prStatuses'
   | 'reviewStates'
   | 'derivedStates'
-  | 'searchQuery'
 >;
 
 // Single source of truth for the filter defaults; array defaults are rebuilt per
@@ -532,7 +524,6 @@ function freshFilterDefaults(): FilterDefaults {
     prStatuses: [...DEFAULT_PR_STATUSES],
     reviewStates: [...DEFAULT_REVIEW_STATES],
     derivedStates: [],
-    searchQuery: '',
   };
 }
 
@@ -556,7 +547,6 @@ export function pickFilterBarState(s: FilterState): FilterDefaults {
     prStatuses: s.prStatuses,
     reviewStates: s.reviewStates,
     derivedStates: s.derivedStates,
-    searchQuery: s.searchQuery,
   };
 }
 
@@ -882,7 +872,6 @@ export const useFilters = create<FilterState>((set, get) => ({
   setRepoConsoleTab: (repoId, tab) =>
     set((s) => ({ repoConsoleTabs: { ...s.repoConsoleTabs, [repoId]: tab } })),
   setInsightsSubTab: (tab) => set({ insightsSubTab: tab }),
-  setSearchQuery: (q) => set({ searchQuery: q }),
   toggleFileGroup: (path, defaultExpanded) =>
     set((s) => {
       // Track explicit user intent against the default so re-renders are stable.

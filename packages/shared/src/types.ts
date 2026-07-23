@@ -1279,6 +1279,10 @@ export interface MeResponse {
   // SAML SSO (cloud). Populated by the sync when it hits the SAML wall; drives the global
   // "Reconnect GitHub for <org>" banner. Empty in the normal case + always empty in local mode.
   authNotices: AuthNotice[];
+  // Month-to-date AI balances (summary turns + agent credits), fetched on login so the SPA has
+  // the spend baseline from the first authenticated call (seeds the Track-usage panel + any
+  // meter). null when unavailable. A null limit/allowance inside means that seam is unmetered.
+  aiUsage: AiUsageResponse | null;
 }
 
 // ---- Pro per-account settings (packages/pro `pro_settings`; via GET/PUT /api/pro/settings) ----
@@ -3740,29 +3744,35 @@ export type AddressedCheckProgress =
       noAuth?: boolean;
     };
 
-// ---- AI usage tracking (Pro; credits, transparency) ----
-// A non-currency view of AI spend. Cost is tracked in USD server-side (needed for the
-// per-run budget caps) but NEVER surfaced to the client as dollars — only as CREDITS,
-// to decouple the app's price from its underlying running cost. Conversion: $1 of model
-// cost = 1250 credits (1 credit ≈ $0.0008), so the paid cloud plan's 2,500-credit monthly
-// allowance ≈ $2.00 of Haiku spend. Split by the two seams that spend: the SUMMARY seam
-// (cheap one-shot LLM completions — digests, sprint report, PR summary, CI analysis) and
-// the AGENTIC seam (Agent-SDK runs — Claude Review, AI Fix). Covers ALL usage on the
-// account, including work outside the Watched repos.
-export const AI_CREDITS_PER_USD = 1250; // $1 of model cost = 1250 credits
+// ---- AI usage tracking (Pro; transparency) ----
+// The two AI seams are metered DIFFERENTLY:
+//  - SUMMARY (cheap one-shot Haiku completions — digests, sprint report, insights chat, PR
+//    summary, CI analysis, themes) is metered by a monthly TURN COUNT: N summaries/month,
+//    reset at the UTC month boundary. Each real (billed) completion is one turn; a $0 cache
+//    hit doesn't count. The paid plan default is 500 turns/mo (~$5 of Haiku).
+//  - AGENTIC (Agent-SDK runs — Claude Review, AI Fix) is metered by CREDITS ($ cost), because a
+//    single run's cost varies wildly. Cost is tracked in USD server-side but NEVER surfaced as
+//    dollars — only as CREDITS (conversion below). The paid plan default is a $15/mo allowance.
+// Covers ALL usage on the account, including work outside the Watched repos.
+export const AI_CREDITS_PER_USD = 1250; // $1 of model cost = 1250 credits (1 credit ≈ $0.0008)
 
-export interface AiUsageResponse {
+// The per-seam month-to-date balances. A null limit/allowance = unmetered (local / unlimited);
+// the UI shows no meter for that seam. Shared by AiUsageResponse and MeResponse.aiUsage so the
+// login fetch and the Track-usage panel agree on the same numbers.
+export interface AiUsageBalances {
+  // SUMMARY seam — monthly TURN budget.
+  summaryTurnsUsed: number;
+  summaryTurnLimit: number | null;
+  summaryTurnsRemaining: number | null;
+  // AGENTIC seam — monthly CREDIT budget.
+  agentCreditsUsed: number;
+  agentAllowanceCredits: number | null;
+  agentCreditsRemaining: number | null;
+}
+
+export interface AiUsageResponse extends AiUsageBalances {
   enabled: boolean;
   monthStart: string; // ISO-8601 — start of the current calendar month (the MTD window)
-  summaryCredits: number; // the summary / LLM-completion seam, month-to-date
-  agentCredits: number; // the agentic-tooling seam, month-to-date
-  totalCredits: number; // summary + agent
-  // The monthly credit allowance for this account. null = unmetered (local mode / an
-  // unlimited account) → the UI shows no bar. A finite number (e.g. 2500 for paid cloud)
-  // → the UI renders a used/allowance meter and blocks generation once it's exhausted.
-  allowanceCredits: number | null;
-  // allowanceCredits − totalCredits, floored at 0. null when allowanceCredits is null.
-  remainingCredits: number | null;
 }
 
 // ---- Sprint report (Pro; Haiku summary of the Insights, gated on activityDigest) ----

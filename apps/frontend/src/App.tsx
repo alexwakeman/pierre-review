@@ -14,7 +14,6 @@ import { SearchResultsTab } from './components/Search/SearchResultsTab.js';
 import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
-import { TimelineSearch } from './components/TimelineSearch.js';
 import { WelcomeBackBanner } from './components/WelcomeBackBanner.js';
 import { HelpModal } from './components/HelpModal.js';
 import { SettingsModal } from './components/settings/SettingsModal.js';
@@ -249,7 +248,6 @@ export default function App(): JSX.Element {
           Pierre
         </h1>
         <div className="ml-auto flex items-center gap-3">
-          <TimelineSearch />
           <SyncStatus />
           {notifSupported && (
             <button

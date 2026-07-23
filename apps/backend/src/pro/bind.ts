@@ -68,7 +68,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   if (!mod) return;
 
   const plugin = (mod.default ?? mod) as ProPlugin;
-  if (plugin?.apiVersion !== 12 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 13 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -130,9 +130,19 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       check: async (accountId) => {
         const account = await getAccountById(accountId);
         // Fail closed on a missing account (should never happen for a live request): block
-        // spend rather than risk unmetered generation.
+        // BOTH seams rather than risk unmetered generation.
         if (!account)
-          return { allowanceCredits: 0, usedCredits: 0, remainingCredits: 0, blocked: true };
+          return {
+            summaryTurnsUsed: 0,
+            summaryTurnLimit: 0,
+            summaryTurnsRemaining: 0,
+            summaryBlocked: true,
+            agentCreditsUsed: 0,
+            agentAllowanceCredits: 0,
+            agentCreditsRemaining: 0,
+            agentBlocked: true,
+            blocked: true,
+          };
         return aiCreditStatus(account, Date.now());
       },
     },

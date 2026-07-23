@@ -40,16 +40,11 @@ export function TeamManagerModal({ onClose }: { onClose: () => void }): JSX.Elem
   }, [onClose]);
 
   const [newName, setNewName] = useState('');
+  // null == the explicit "No team" selection (the DEFAULT — adding a repo must not require a
+  // team). A number selects that team. No auto-select of the first team.
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
-
-  // Default the selection to the first team once loaded (so the assignment panel isn't empty).
-  useEffect(() => {
-    if (selectedTeamId == null && teams && teams.length > 0) {
-      setSelectedTeamId(teams[0]!.id);
-    }
-  }, [teams, selectedTeamId]);
 
   const selectedTeam = teams?.find((t) => t.id === selectedTeamId) ?? null;
   const teamRepoIds = useMemo(
@@ -63,6 +58,12 @@ export function TeamManagerModal({ onClose }: { onClose: () => void }): JSX.Elem
     for (const t of teams ?? []) for (const id of t.repoIds) inSomeTeam.add(id);
     return new Set((repos ?? []).filter((r) => !inSomeTeam.has(r.id)).map((r) => r.id));
   }, [teams, repos]);
+  // The "No team" roster: the account's repos that aren't in any team (derived client-side
+  // from useRepos() minus the union of every team's repoIds — no backend call needed).
+  const unassignedRepos = useMemo(
+    () => (repos ?? []).filter((r) => orphanRepoIds.has(r.id)),
+    [repos, orphanRepoIds],
+  );
 
   // Remove (delete) a repo entirely. Invalidates the same cache cascade as the old FilterBar path.
   const removeRepo = useMutation({
@@ -145,7 +146,7 @@ export function TeamManagerModal({ onClose }: { onClose: () => void }): JSX.Elem
           <span className="min-w-0 truncate text-[11px] text-gray-400">
             {selectedTeam
               ? `New repos join "${selectedTeam.name}"`
-              : 'Select a team to auto-assign new repos'}
+              : 'New repos join No team'}
           </span>
         </div>
 
@@ -184,6 +185,27 @@ export function TeamManagerModal({ onClose }: { onClose: () => void }): JSX.Elem
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              {/* "No team" — the DEFAULT selection. Styled like a team row (no rename/delete);
+                  clicking it selects the team-agnostic add + the unassigned-repos roster. */}
+              <button
+                type="button"
+                onClick={() => setSelectedTeamId(null)}
+                title="Repos that aren't in any team"
+                className={`flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs ${
+                  selectedTeamId == null
+                    ? 'bg-sky-50 dark:bg-sky-950/30'
+                    : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+              >
+                <span
+                  className={`min-w-0 flex-1 truncate ${selectedTeamId == null ? 'font-semibold text-sky-700 dark:text-sky-300' : 'text-gray-700 dark:text-gray-200'}`}
+                >
+                  No team
+                </span>
+                <span className="shrink-0 tabular-nums text-[10px] text-gray-400">
+                  {orphanRepoIds.size}
+                </span>
+              </button>
               {(teams ?? []).length === 0 ? (
                 <div className="px-1 py-3 text-xs text-gray-500">
                   No teams yet. Create one above, then assign repos to it.
@@ -269,13 +291,45 @@ export function TeamManagerModal({ onClose }: { onClose: () => void }): JSX.Elem
           {/* RIGHT: repo assignment for the selected team + the roster */}
           <div className="flex min-h-0 flex-col">
             <div className="border-b border-gray-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800">
-              {selectedTeam
-                ? `Repos in ${selectedTeam.name}`
-                : 'All repos — select a team to assign'}
+              {selectedTeam ? `Repos in ${selectedTeam.name}` : 'Repos in no team'}
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              {(repos ?? []).length === 0 ? (
+              {selectedTeam == null ? (
+                /* NO TEAM — the unassigned repos (no team-membership checkboxes; the repo
+                   still offers the delete action). Adding above joins here team-agnostically. */
+                unassignedRepos.length === 0 ? (
+                  <div className="px-1 py-3 text-xs text-gray-500">
+                    {(repos ?? []).length === 0
+                      ? 'No repos yet — search to add one above.'
+                      : 'Every repo is assigned to a team.'}
+                  </div>
+                ) : (
+                  <ul className="space-y-0.5">
+                    {unassignedRepos.map((r) => (
+                      <li
+                        key={r.id}
+                        className="group flex items-center gap-2 rounded px-1 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
+                      >
+                        <span className="min-w-0 flex-1 truncate" title={r.fullName}>
+                          <span className="text-gray-400">{r.owner}/</span>
+                          <span className="font-medium text-gray-800 dark:text-gray-100">{r.name}</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => confirmRemoveRepo(r)}
+                          disabled={removeRepo.isPending}
+                          title={`Remove ${r.fullName}`}
+                          aria-label={`Remove ${r.fullName}`}
+                          className="shrink-0 px-1 text-gray-400 opacity-0 hover:text-red-500 focus:opacity-100 group-hover:opacity-100 disabled:opacity-30"
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              ) : (repos ?? []).length === 0 ? (
                 <div className="px-1 py-3 text-xs text-gray-500">
                   No repos yet — search to add one above.
                 </div>

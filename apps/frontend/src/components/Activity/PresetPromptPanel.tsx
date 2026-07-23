@@ -114,7 +114,7 @@ export function PresetPromptPanel(): JSX.Element | null {
   const refresh = useRefreshPresetPrompt(scope);
   const usage = useAiUsage(activityDigest);
   const outOfCredits =
-    usage.data?.allowanceCredits != null && (usage.data.remainingCredits ?? 0) <= 0;
+    usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
   const singleBusyKey = refresh.isPending ? (refresh.variables ?? null) : null;
 
   // The AI digest capability is the gate (shares the digest's Haiku seam + cost throttle).

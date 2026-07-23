@@ -508,7 +508,9 @@ export interface ProHostQueries {
     repoIds?: number[] | null,
   ): Promise<unknown>;
   // Month-to-date-style AI-spend rollup for an account, split by seam (summary / agent).
-  // Returns { summaryUsd, agentUsd, totalUsd } — the plugin converts to credits.
+  // Returns { summaryUsd, agentUsd, totalUsd }. Currently UNUSED by the plugin (the ai-usage
+  // route now reads ctx.aiCredits.check, which carries turns + credits) — retained as a forward
+  // hook for any future raw-USD Pro surface.
   getAiUsage(accountId: number, sinceMs: number): Promise<unknown>;
   // Deterministic review-bot ROI/behaviour rollup (CORE) — per-reviewer volume / acted-on% /
   // untouched / verdict, over `window`. Additive (apiVersion stays 12). Returns BotAnalyticsResponse;
@@ -615,7 +617,7 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  apiVersion: 12; // contract handshake; host warns on mismatch
+  apiVersion: 13; // contract handshake; host warns on mismatch
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
