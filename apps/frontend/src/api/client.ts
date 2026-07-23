@@ -36,6 +36,7 @@ import type {
   CreateRepoBody,
   ConsolidatedFeedResponse,
   TeamInsightsResponse,
+  AttentionCardsResponse,
   RepoTeamMetricsResponse,
   TeamMetricsDetailResponse,
   TeamMetricsResponse,
@@ -366,6 +367,9 @@ export const api = {
   // The team flow-metric header (DORA-ish tiles + trends) — CORE/free, now rendered in the Feed.
   teamMetrics: (scope?: string) =>
     get<TeamMetricsResponse>(withQuery('/api/team-metrics', scopeParam(scope))),
+  // The attention cards (CORE/free) for the Feed "Needs attention" tab.
+  attentionCards: (scope?: string) =>
+    get<AttentionCardsResponse>(withQuery('/api/attention', scopeParam(scope))),
   // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click) — CORE/free
   // too, so a Feed tile opens the drill-down for everyone.
   teamMetricsDetail: (scope?: string) =>

@@ -16,6 +16,7 @@ import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { FeedMetricsPanel } from './FeedMetricsPanel.js';
 import { HumanThemesPanel } from './HumanThemesPanel.js';
 import { InsightsView } from './InsightsView.js';
+import { AttentionView } from './AttentionView.js';
 import { BotsView } from './BotsView.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
 
@@ -221,6 +222,8 @@ export function ActivityView(): JSX.Element {
       : null;
   // The cross-repo consolidated Feed is the default detail (also when nothing's set).
   const showingFeed = activityRepoId === 'feed' || activityRepoId == null;
+  // The CORE/free "Needs attention" cards console — always available, no Pro gate.
+  const showingAttention = activityRepoId === 'attention';
   const showingInsights = activityRepoId === 'insights';
   const showingRetro = activityRepoId === 'retro';
   // The CORE/free review-bot triage console (BotsView) — always available (reads the core bot
@@ -402,6 +405,28 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
+          {/* NEEDS-ATTENTION pseudo-row — the attention cards (stalled reviews / untouched threads /
+              reviewer load / needs-a-reviewer), moved out from under the Pro Insights AI panels.
+              CORE/free (reads the deterministic /api/attention route), so it's ALWAYS shown. */}
+          <button
+            type="button"
+            onClick={() => setActivityRepo('attention')}
+            aria-pressed={showingAttention}
+            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+              showingAttention
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            title="Stalled reviews, untouched threads, reviewer load and un-assigned PRs (free)"
+          >
+            <span aria-hidden="true" className="shrink-0 text-amber-500">
+              ⚠
+            </span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+              Needs attention
+            </span>
+          </button>
+
           {/* BOTS pseudo-row — "the calm layer above your review bots". CORE/free (reads the
               deterministic bot routes), so it's ALWAYS shown, on every tier, no Pro gate. */}
           <button
@@ -479,6 +504,11 @@ export function ActivityView(): JSX.Element {
           // FilterBar repos (the bot feed ignores the human-member filter); carries its own empty
           // states, so it renders even before any repo data loads.
           <BotsView />
+        ) : showingAttention ? (
+          // The CORE/free "Needs attention" cards (stalled reviews / untouched threads / reviewer
+          // load / needs-a-reviewer) — moved out from under the Pro Insights AI panels. Renders on
+          // every tier, before repo data loads (its own empty/loading states).
+          <AttentionView />
         ) : showingInsights ? (
           <InsightsView />
         ) : showingRetro ? (

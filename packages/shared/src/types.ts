@@ -3522,6 +3522,15 @@ export interface TeamInsightsResponse {
   users: User[]; // actors referenced by the cards (avatar/login lookup)
 }
 
+// The attention cards (stalled reviews / untouched threads / reviewer load / needs-a-reviewer),
+// served CORE/free by GET /api/attention for the Feed "Needs attention" tab — the same cards the
+// (Pro) Insights pane computes in core getTeamInsights, minus the bot-signal cards (those live in
+// the free Bots console). No AI, no capability gate.
+export interface AttentionCardsResponse {
+  cards: InsightCard[];
+  users: User[];
+}
+
 // The Insights flow-metric header (TeamMetrics tiles + trend charts) computed for a SINGLE
 // repo — powers the per-repo console's "Insights-style" panel (getTeamInsights scoped to
 // [repoId]). Metrics-only; the repo console renders these tiles NON-clickable.

@@ -114,6 +114,7 @@ function readFromUrl(): Partial<FilterState> {
   const activityRepo = p.get('activityRepo');
   if (activityRepo) {
     if (activityRepo === 'bots') out.activityRepoId = 'bots';
+    else if (activityRepo === 'attention') out.activityRepoId = 'attention';
     else {
       const n = Number.parseInt(activityRepo, 10);
       if (Number.isFinite(n)) out.activityRepoId = n;
@@ -160,12 +161,15 @@ function writeToUrl(s: FilterState): void {
   // is emitted only for a single-repo console (the 'all' feed is the default).
   if (usePinnedTabs.getState().activeTab === 'activity') {
     p.set('view', 'activity');
-    // A single-repo console and the CORE Bots console are deep-linkable; the 'feed' /
-    // 'insights' / 'retro' pseudo-rows are defaults and stay out of the URL.
+    // A single-repo console, the CORE Bots console, and the CORE "Needs attention" console are
+    // deep-linkable; the 'feed' / 'insights' / 'retro' pseudo-rows are defaults and stay out of
+    // the URL.
     if (typeof s.activityRepoId === 'number') {
       p.set('activityRepo', String(s.activityRepoId));
     } else if (s.activityRepoId === 'bots') {
       p.set('activityRepo', 'bots');
+    } else if (s.activityRepoId === 'attention') {
+      p.set('activityRepo', 'attention');
     }
   }
 

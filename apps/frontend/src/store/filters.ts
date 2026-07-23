@@ -236,7 +236,7 @@ export interface FilterState {
   // sanitizePersistedFilters. `?activityRepo=<id>` / `?activityRepo=bots` are the URL mirrors
   // (see useUrlState); the active TAB lives in the pinnedTabs store. 'bots' = the CORE/free
   // review-bot triage console (BotsView); 'insights'/'retro' are the Pro Insights rail entries.
-  activityRepoId: number | 'feed' | 'insights' | 'retro' | 'bots' | null;
+  activityRepoId: number | 'feed' | 'attention' | 'insights' | 'retro' | 'bots' | null;
   // Soft thread-state filter inside an Activity repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
@@ -448,7 +448,7 @@ export interface FilterState {
   bumpClaudeReviewKickoff: () => void;
   // Select an Activity detail target (a repo id, or 'feed' for the cross-repo consolidated
   // Feed).
-  setActivityRepo: (id: number | 'feed' | 'insights' | 'retro' | 'bots') => void;
+  setActivityRepo: (id: number | 'feed' | 'attention' | 'insights' | 'retro' | 'bots') => void;
   // Set/clear the Activity repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
   setActivityThreadFilter: (s: DerivedState | null) => void;

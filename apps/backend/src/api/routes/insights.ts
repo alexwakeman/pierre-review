@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type {
+  AttentionCardsResponse,
   InsightsResponse,
   RepoAnalytics,
   TeamMetricsDetailResponse,
@@ -8,6 +9,7 @@ import type {
 import {
   getInsights,
   getRepoAnalytics,
+  getTeamInsights,
   getTeamMetricsDetail,
   getTeamMetricsForScope,
   resolveScopeRepoIds,
@@ -53,6 +55,21 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
     const scopeRepoIds = q.scope ? await resolveScopeRepoIds(accountId, q.scope) : null;
     const detail = await getTeamMetricsDetail(accountId, undefined, scopeRepoIds);
     return { enabled: true, detail };
+  });
+
+  // The attention cards (stalled reviews / untouched threads / reviewer load / needs-a-reviewer) —
+  // CORE/free (the same cards Pro Insights computes in core getTeamInsights), for the Feed "Needs
+  // attention" tab. The bot cards are excluded (they live in the free Bots console). `scope`
+  // resolves like the rest of the app; null/'all' → the watched set.
+  app.get('/api/attention', async (req): Promise<AttentionCardsResponse> => {
+    const q = req.query as { scope?: string };
+    const accountId = accountIdOf(req);
+    const scopeRepoIds = q.scope ? await resolveScopeRepoIds(accountId, q.scope) : null;
+    const insights = await getTeamInsights(accountId, undefined, scopeRepoIds);
+    const cards = insights.cards.filter(
+      (c) => c.kind !== 'bot_signal' && c.kind !== 'bot_only_review',
+    );
+    return { cards, users: insights.users };
   });
 
   // Heavier per-repo analytics for the drill-down chart panel — loaded on demand.

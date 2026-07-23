@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import type { DigestPrRef, PinnedPrompt, SprintChatHistoryItem } from '@pierre-review/shared';
+import {
+  PRESET_PROMPTS,
+  type DigestPrRef,
+  type PinnedPrompt,
+  type SprintChatHistoryItem,
+} from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
@@ -25,6 +30,18 @@ import { AdHocChart } from './AdHocChart.js';
 // for free. The live question + answer are held in the STORE (not component state) so they survive
 // the Insights panel unmounting (e.g. clicking a PR then returning). Gated on the activityDigest
 // capability exactly like the Sprint / preset surfaces — absent → nothing.
+
+// Quick-question pills — the former "Sprint questions" presets + a sprint-report catch-all, folded
+// into this one panel. Clicking a pill only PRE-FILLS the chat box (setDraft); the user presses Ask.
+// So the three old surfaces (Sprint report card, preset carousel, chat) collapse to one, and the
+// answers come from the single grounded chat endpoint. `label` is the pill caption, `question` the
+// text loaded into the box.
+const SPRINT_REPORT_PROMPT =
+  'Give me a sprint status report: overall flow health, what needs attention now, the biggest changes shipped this sprint, and any blockers.';
+const QUICK_QUESTIONS: { label: string; question: string }[] = [
+  { label: 'Sprint report', question: SPRINT_REPORT_PROMPT },
+  ...PRESET_PROMPTS.map((p) => ({ label: p.label, question: p.question })),
+];
 
 function refMeta(ref: DigestPrRef): PinnedPr {
   return {
@@ -172,7 +189,7 @@ export function AdHocChatPanel(): JSX.Element | null {
   const outOfCredits =
     usage.data?.allowanceCredits != null && (usage.data.remainingCredits ?? 0) <= 0;
 
-  // Absent the AI capability → render nothing (parity with PresetPromptPanel / RetroView).
+  // Absent the AI capability → render nothing (parity with RetroView).
   if (!activityDigest) return null;
 
   const trimmed = question.trim();
@@ -224,9 +241,25 @@ export function AdHocChatPanel(): JSX.Element | null {
         </span>
       </div>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        A free-text question answered from this scope&apos;s sprint data (runs the Haiku model).
-        Type <span className="font-mono">@</span> to mention a teammate.
+        Pick a question below or type your own — answered from this scope&apos;s sprint data (runs
+        the Haiku model). Type <span className="font-mono">@</span> to mention a teammate.
       </p>
+
+      {/* Quick-question pills — pre-fill the box, then press Ask. These replace the separate Sprint
+          report card + "Sprint questions" carousel. */}
+      <div className="mt-2 flex flex-wrap gap-1.5" data-testid="chat-quick-questions">
+        {QUICK_QUESTIONS.map((qq) => (
+          <button
+            key={qq.label}
+            type="button"
+            onClick={() => setDraft({ question: qq.question })}
+            className="rounded-full border border-violet-300 bg-white/70 px-2.5 py-0.5 text-[11px] font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-gray-900/50 dark:text-violet-200 dark:hover:bg-violet-950/40"
+            title={qq.question}
+          >
+            {qq.label}
+          </button>
+        ))}
+      </div>
 
       <div className="mt-3">
         <MentionTextarea

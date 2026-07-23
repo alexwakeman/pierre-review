@@ -176,6 +176,9 @@ export function useRequestReviewers(prId: number) {
     mutationFn: (body: RequestReviewersBody) => api.requestReviewers(prId, body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['team-insights'] });
+      // The CORE "Needs attention" tab renders the same routing card from a different query key —
+      // refresh it too so an Assign there also clears the card.
+      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
       // The assign route stamps review_requests locally, so refetching the detail now shows
       // the requested reviewer, and the (live) suggestions query re-gates to empty.
       void qc.invalidateQueries({ queryKey: ['pr', prId] });
