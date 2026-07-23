@@ -121,6 +121,25 @@ export function useMergePr(prId: number) {
   });
 }
 
+// Close the PR without merging (reversible on GitHub). Like useMergePr it moves the PR out of
+// the open set, so invalidate every surface that shows open-PR state (timeline, open-PRs,
+// triage queues, the feeds, the Activity console). The backend optimistically stamps closed.
+export function useClosePr(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.closePr(prId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['pr', prId] });
+      void qc.invalidateQueries({ queryKey: ['timeline'] });
+      void qc.invalidateQueries({ queryKey: ['open-prs'] });
+      void qc.invalidateQueries({ queryKey: ['my-turn'] });
+      void qc.invalidateQueries({ queryKey: ['me'] });
+      void qc.invalidateQueries({ queryKey: ['activity'] });
+      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
+    },
+  });
+}
+
 // Update the PR branch from trunk (rebase/merge). Re-fetch mergeability afterwards so the merge
 // control reflects the now-up-to-date branch.
 export function useUpdatePrBranch(prId: number) {

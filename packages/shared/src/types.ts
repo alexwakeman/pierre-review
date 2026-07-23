@@ -530,15 +530,6 @@ export interface BotOverlapStats {
   lineOverlapClusters: number; // (path, exact line) flagged by ≥2 DISTINCT bots — "same line" hits
   lineOverlapPrs: number; // distinct PRs carrying ≥1 such same-line overlap
 }
-// Which sections (top-level directories) of the codebase a bot's inline review threads land in.
-export interface BotDirectoryUsage {
-  key: string; // `u<userId>`
-  label: string;
-  login: string | null;
-  kind: AutomatedReviewerKind;
-  totalThreads: number; // inline threads the bot opened in-window (the denominator)
-  dirs: { dir: string; count: number }[]; // top-level dirs, most-reviewed first (capped)
-}
 // Merged "where bots work" breakdown: per bot, its inline-thread volume split by the repos it
 // operates in AND, within each repo, the top-level directories/areas. Powers the grouped+stacked
 // bot chart (X = bot; one bar per repo; each bar stacked by directory). A single-repo scope
@@ -565,8 +556,7 @@ export interface BotBehaviourResponse {
   bots: BotBehaviourBotStat[]; // most-active-first
   // Cross-bot overlap + coverage (EXPERIMENTAL), over the selected window + scope:
   overlap: BotOverlapStats; // (i) multiple bots on the same PR + (ii) same-line overlap
-  directories: BotDirectoryUsage[]; // (iii) which dirs each bot reviews in (per-bot detail card)
-  repoBotDirs: BotRepoDirBreakdown[]; // (iv) merged "where bots work" — per bot × repo × directory
+  repoBotDirs: BotRepoDirBreakdown[]; // (iii) merged "where bots work" — per bot × repo × directory
   // Second coverage-strip series (SHARED, not per-bot — PR inflow is an account/repo fact):
   // per-day count of human-authored, non-draft PRs opened over the SAME 84-day span + scope as
   // every bot's dailyActivity, oldest→newest, aligned to daySpanStart. Overlaid on each bot's
@@ -906,6 +896,28 @@ export interface SprintChatResponse {
   creditsExhausted?: boolean;
 }
 
+// One stored past ad-hoc chat (Pro; server-persisted per account, all scopes). Carries the full
+// grounded answer + chart + PR refs so re-opening a past question is FREE (no re-run / no spend).
+export interface SprintChatHistoryItem {
+  id: number;
+  question: string;
+  answer: string;
+  chart: SprintChatChartSpec | null;
+  prRefs: DigestPrRef[];
+  wantChart: boolean;
+  wantBots: boolean;
+  scope: string; // the scope the answer was grounded in ('all' | 'none' | '<teamId>')
+  model: string | null;
+  createdAt: string; // ISO-8601
+}
+// Paginated chat history (newest-first). `total` is the account's whole history size so the
+// client can page (default 10/page). `enabled:false` mirrors the chat itself being flagged off.
+export interface SprintChatHistoryResponse {
+  enabled: boolean;
+  items: SprintChatHistoryItem[];
+  total: number;
+}
+
 // A saved, re-runnable ad-hoc prompt (Pro; server-stored per account + scope, cross-device).
 export interface PinnedPrompt {
   id: number;
@@ -1099,6 +1111,13 @@ export interface MergePrResult {
   merged: boolean;
   sha: string | null; // the merge commit SHA GitHub created
   state: 'merged';
+}
+
+// Close a PR without merging (reversible — GitHub can reopen it). No body; permission is
+// author-or-write, re-checked server-side.
+export interface ClosePrResult {
+  closed: boolean;
+  state: 'closed';
 }
 
 // Update the PR's branch from the base/trunk before merging. strategy 'rebase' is local-only
@@ -1739,6 +1758,10 @@ export interface PrDetail {
   // controls; the push route re-checks server-side. Computed on read from the synced
   // repos.viewerPermission.
   viewerCanPush: boolean;
+  // Whether the viewer may CLOSE this PR without merging: they have WRITE+ permission on
+  // the repo OR they authored it (GitHub lets an author close their own PR). The close
+  // route re-checks server-side. Gates the Overview "Close" action (open, non-merged PRs).
+  viewerCanClose: boolean;
   // Whether the viewer's STANDING review on this PR (their latest decisive review:
   // approved / changes_requested / dismissed) is 'approved'. When true the Approve
   // control renders disabled ("Approved") — you've already approved and it still

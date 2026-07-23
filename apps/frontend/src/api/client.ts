@@ -61,6 +61,7 @@ import type {
   MergersResponse,
   MergePrBody,
   MergePrResult,
+  ClosePrResult,
   PrMergeOptions,
   UpdateBranchBody,
   UpdateBranchResult,
@@ -86,6 +87,7 @@ import type {
   PresetPromptResponse,
   SprintChatBody,
   SprintChatResponse,
+  SprintChatHistoryResponse,
   PinnedPromptsResponse,
   CreatePinnedPromptBody,
   ProSettings,
@@ -301,6 +303,9 @@ export const api = {
   mergeOptions: (prId: number) => get<PrMergeOptions>(`/api/prs/${prId}/merge-options`),
   mergePr: (prId: number, body: MergePrBody) =>
     fetch(`/api/prs/${prId}/merge`, jsonBody('POST', body)).then((r) => handle<MergePrResult>(r)),
+  // Close a PR without merging (CORE / free tier). Reversible on GitHub.
+  closePr: (prId: number) =>
+    fetch(`/api/prs/${prId}/close`, jsonBody('POST', {})).then((r) => handle<ClosePrResult>(r)),
   updatePrBranch: (prId: number, body?: UpdateBranchBody) =>
     fetch(`/api/prs/${prId}/update-branch`, jsonBody('POST', body ?? {})).then((r) =>
       handle<UpdateBranchResult>(r),
@@ -418,6 +423,11 @@ export const api = {
   sprintChat: (body: SprintChatBody) =>
     fetch('/api/pro/insights/ask', jsonBody('POST', body)).then((r) =>
       handle<SprintChatResponse>(r),
+    ),
+  // The account's paginated chat history (newest-first; stored answers, free to re-open).
+  sprintChatHistory: (limit: number, offset: number) =>
+    get<SprintChatHistoryResponse>(
+      withQuery('/api/pro/insights/chat-history', `limit=${limit}`, `offset=${offset}`),
     ),
   // Saved, re-runnable ad-hoc prompts (server-stored per account + scope).
   pinnedPrompts: (scope?: string) =>

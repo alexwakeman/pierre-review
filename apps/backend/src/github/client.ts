@@ -254,6 +254,34 @@ export async function ghRestPutStatus(
   return { status: res.status, ok: res.ok, json, text };
 }
 
+// REST PATCH returning status (updating a pull request — e.g. closing it via
+// `{ state: 'closed' }`). Mirrors ghRestPutStatus: never throws on a non-2xx, returns the
+// status + parsed body so the caller can map GitHub's error to an HTTP response.
+export async function ghRestPatchStatus(
+  token: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; ok: boolean; json: unknown; text: string }> {
+  const res = await fetch(`https://api.github.com${path}`, {
+    method: 'PATCH',
+    headers: {
+      authorization: `token ${token}`,
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': '2022-11-28',
+      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text().catch(() => '');
+  let json: unknown = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    /* non-JSON body (rare on these endpoints) */
+  }
+  return { status: res.status, ok: res.ok, json, text };
+}
+
 // REST POST (submitting a PR review — inline line comments require the REST
 // reviews endpoint) for a specific account's token.
 export function ghRestPostFor<T>(

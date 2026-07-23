@@ -3,7 +3,6 @@ import type {
   AnalyticsBin,
   BotBehaviourAnomaly,
   BotBehaviourBotStat,
-  BotDirectoryUsage,
   BotOverlapStats,
   BotRepoDirBreakdown,
   BotWindowKind,
@@ -405,14 +404,11 @@ function BotCard({
   bot,
   color,
   prsOpenedPerDay,
-  dir,
 }: {
   bot: BotBehaviourBotStat;
   color: string;
   // Shared across bots: human-authored, non-draft PRs opened per day over the same span.
   prsOpenedPerDay?: number[];
-  // This bot's per-directory review-thread breakdown (which sections it operates in).
-  dir?: BotDirectoryUsage;
 }): JSX.Element {
   const meta = automatedReviewerMeta(bot.kind);
   return (
@@ -526,21 +522,6 @@ function BotCard({
           <DistChart bins={bot.followupDist} color={color} />
         </ChartCard>
       </div>
-
-      {/* Which sections of the codebase this bot's inline review threads land in. */}
-      {dir != null && dir.dirs.length > 0 && (
-        <ChartCard
-          title="Top directories"
-          note={`inline threads by top-level dir · ${dir.totalThreads} total`}
-        >
-          <BarChart
-            labels={dir.dirs.map((d) => (d.dir === '.' ? '(root)' : d.dir))}
-            series={[{ key: 'threads', label: 'Threads', color, values: dir.dirs.map((d) => d.count) }]}
-            height={130}
-            rotateLabels
-          />
-        </ChartCard>
-      )}
     </div>
   );
 }
@@ -827,10 +808,6 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
   const botColor = useBotColors();
   const { data, isLoading, isError } = useBotBehaviour(window, true, scope, repoScope);
   const bots = data?.bots ?? [];
-  const dirByKey = useMemo(
-    () => new Map((data?.directories ?? []).map((d) => [d.key, d])),
-    [data?.directories],
-  );
 
   return (
     <div className="space-y-3">
@@ -894,7 +871,6 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
               bot={b}
               color={botColor({ login: b.login, kind: b.kind })}
               prsOpenedPerDay={data?.prsOpenedPerDay}
-              dir={dirByKey.get(b.key)}
             />
           ))}
         </>

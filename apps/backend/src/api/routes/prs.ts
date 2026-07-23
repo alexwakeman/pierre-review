@@ -8,6 +8,7 @@ import type {
   CheckLogsResponse,
   CiRerunBody,
   CiRerunResult,
+  ClosePrResult,
   CreatePrCommentBody,
   CreatePrCommentResult,
   MarkViewedBody,
@@ -40,6 +41,7 @@ import {
   type SuggestionBasis,
   getUsersByLogins,
   markAllViewed,
+  markPrClosedLocally,
   markPrMergedLocally,
   markPrViewed,
   stampReviewRequests,
@@ -54,6 +56,7 @@ import {
 } from '../../github/diff-anchor.js';
 import {
   addIssueComment,
+  closePullRequest,
   fetchHeadShaFor,
   fetchMergeability,
   fetchPrFilesWithPatch,
@@ -592,6 +595,57 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       const viewerUserId = await getAccountUserId(accountId);
       await markPrMergedLocally(id, accountId, viewerUserId);
       const result: MergePrResult = { merged: true, sha: out.sha, state: 'merged' };
+      return result;
+    } catch (err) {
+      reply.status(502);
+      return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Close a PR WITHOUT merging (CORE / free tier). Reversible on GitHub (reopen), so no
+  // head-SHA pin. Permitted for anyone with WRITE+ OR the PR author (GitHub's own rule),
+  // mirrored by viewerCanClose on the detail payload; re-checked here. Only an OPEN PR can be
+  // closed (a merged/closed one → 409). Optimistically stamps state='closed'.
+  app.post('/api/prs/:id/close', async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const accountId = accountIdOf(req);
+
+    const ctx = await getPrWriteContext(id, accountId);
+    if (!ctx) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    const viewerUserId = await getAccountUserId(accountId);
+    const canClose =
+      ['WRITE', 'MAINTAIN', 'ADMIN'].includes(ctx.viewerPermission ?? '') ||
+      (viewerUserId != null && viewerUserId === ctx.authorId);
+    if (!canClose) {
+      reply.status(403);
+      return {
+        error: 'NotPermitted',
+        message: 'You need write access or to be the PR author to close this PR.',
+      };
+    }
+    if (ctx.state !== 'open') {
+      reply.status(409);
+      return {
+        error: 'NotOpen',
+        message: `This PR is already ${ctx.state}.`,
+      };
+    }
+
+    try {
+      const token = await getAccessToken(accountId);
+      const out = await closePullRequest(token, ctx.owner, ctx.name, ctx.number);
+      if (!out.ok) {
+        reply.status(out.reason === 'not_found' ? 404 : 502);
+        return {
+          error: out.reason === 'not_found' ? 'NotFound' : 'GitHubError',
+          message: out.message,
+        };
+      }
+      await markPrClosedLocally(id, accountId);
+      const result: ClosePrResult = { closed: true, state: 'closed' };
       return result;
     } catch (err) {
       reply.status(502);

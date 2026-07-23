@@ -24,6 +24,7 @@ import { UserName } from './UserName.js';
 import { Markdown } from './Markdown.js';
 import { ApproveControl } from './ApproveControl.js';
 import { MergeControl } from './MergeControl.js';
+import { ClosePrControl } from './ClosePrControl.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
 import { AiSummary } from './AiSummary.js';
 import { PrAddressedCheckButton } from './AddressedCheck.js';
@@ -364,31 +365,13 @@ export function ChecksTab({
     return acc;
   }, {});
 
-  // A reviewer's standing decision is their LATEST decisive review: an approval
-  // is superseded once they later request changes or it gets dismissed.
-  // 'commented'/'pending' reviews don't change a standing decision, so we skip
-  // them. pr.reviews is chronological (submittedAt asc), so a later decisive
-  // review overwrites — approvers are authors whose latest decision is 'approved'.
-  const latestDecision = new Map<number, ReviewState>();
-  for (const r of pr.reviews) {
-    if (
-      r.authorId == null ||
-      (r.state !== 'approved' && r.state !== 'changes_requested' && r.state !== 'dismissed')
-    ) {
-      continue;
-    }
-    latestDecision.set(r.authorId, r.state);
-  }
-  const approverIds = [...latestDecision]
-    .filter(([, state]) => state === 'approved')
-    .map(([id]) => id);
-
   // Everyone who has SUBMITTED a review (any decisive OR commented state), with
-  // their latest review state — the fuller picture above the Approvers row, which
-  // is just the subset whose standing decision is 'approved'. pr.reviews is
-  // chronological (submittedAt asc), so the last entry per author wins. 'pending'
-  // reviews (an in-progress draft, never submitted) aren't a real review, so skip
-  // them; insertion order is preserved by the Map so reviewers stay first-seen.
+  // their latest review state — the Reviews row. An approval reads as a green ✓
+  // badge (REVIEWER_STATE_META.approved), so a separate Approvers row is redundant.
+  // pr.reviews is chronological (submittedAt asc), so the last entry per author
+  // wins. 'pending' reviews (an in-progress draft, never submitted) aren't a real
+  // review, so skip them; insertion order is preserved by the Map so reviewers stay
+  // first-seen.
   const latestReviewState = new Map<number, ReviewState>();
   for (const r of pr.reviews) {
     if (r.authorId == null || r.state === 'pending') continue;
@@ -478,44 +461,49 @@ export function ChecksTab({
         </div>
       )}
       <div className="divide-y divide-gray-100 py-1 dark:divide-gray-800">
-        <Row label="CI">
-        {ci ? (
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className="inline-block h-2.5 w-2.5 rounded-full"
-              style={{ backgroundColor: ci.color }}
-            />
-            {ci.label}
-            {checks.length > 0 && (
-              <span className="text-xs text-gray-400">
-                ·{' '}
-                {[
-                  counts.success ? `${counts.success} passed` : null,
-                  counts.failure ? `${counts.failure} failed` : null,
-                  counts.pending ? `${counts.pending} running` : null,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
+        {/* Status = CI + mergeability on one row (the two are one "can this ship?" fact). */}
+        <Row label="Status">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {ci ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: ci.color }}
+                />
+                {ci.label}
+                {checks.length > 0 && (
+                  <span className="text-xs text-gray-400">
+                    ·{' '}
+                    {[
+                      counts.success ? `${counts.success} passed` : null,
+                      counts.failure ? `${counts.failure} failed` : null,
+                      counts.pending ? `${counts.pending} running` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                )}
               </span>
+            ) : (
+              <span className="text-gray-400">no checks</span>
             )}
-          </span>
-        ) : (
-          <span className="text-gray-400">no checks reported</span>
-        )}
-      </Row>
+            <span className="text-gray-300 dark:text-gray-600" aria-hidden>
+              |
+            </span>
+            {warn ? (
+              <span className="font-medium text-orange-500">⚠ {warn}</span>
+            ) : pr.mergeable === 'mergeable' ? (
+              <span className="text-green-500">mergeable</span>
+            ) : (
+              <span className="text-gray-400">{pr.mergeStateStatus}</span>
+            )}
+          </div>
+        </Row>
 
-      <Row label="Mergeable">
-        {warn ? (
-          <span className="font-medium text-orange-500">⚠ {warn}</span>
-        ) : pr.mergeable === 'mergeable' ? (
-          <span className="text-green-500">clean</span>
-        ) : (
-          <span className="text-gray-400">{pr.mergeStateStatus}</span>
-        )}
-      </Row>
-
+        {/* Reviews = everyone who reviewed, with their latest-state badge (approvals already
+            read as a green ✓), plus the "only bots reviewed" coverage chip. */}
       {reviewerIds.length > 0 && (
-        <Row label="Reviewers">
+        <Row label="Reviews">
           <div className="flex flex-wrap gap-2 text-xs">
             {reviewerIds.map((uid) => {
               const u = usersById.get(uid);
@@ -536,20 +524,17 @@ export function ChecksTab({
                 </span>
               );
             })}
+            {onlyBotsReviewed && (
+              <span
+                data-testid="only-bots-reviewed"
+                className="inline-flex items-center gap-1 rounded bg-amber-400/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-300"
+                title="Every review on this PR came from an automated reviewer — no human has reviewed it yet."
+              >
+                <span aria-hidden>🤖</span>
+                only bots reviewed
+              </span>
+            )}
           </div>
-        </Row>
-      )}
-
-      {onlyBotsReviewed && (
-        <Row label="Coverage">
-          <span
-            data-testid="only-bots-reviewed"
-            className="inline-flex items-center gap-1 rounded bg-amber-400/10 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300"
-            title="Every review on this PR came from an automated reviewer — no human has reviewed it yet."
-          >
-            <span aria-hidden>🤖</span>
-            only bots reviewed
-          </span>
         </Row>
       )}
 
@@ -602,52 +587,25 @@ export function ChecksTab({
         </Row>
       )}
 
-      {canCheckAddressed && (
-        <Row label="Addressed?">
-          <PrAddressedCheckButton prId={pr.id} />
-        </Row>
-      )}
-
-      {approverIds.length > 0 && (
-        <Row label="Approvers">
-          <div className="flex flex-wrap gap-2 text-xs">
-            {approverIds.map((uid) => {
-              const u = usersById.get(uid);
-              const auto = automatedByAuthor.get(uid);
-              return (
-                <span
-                  key={uid}
-                  className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-green-700 dark:text-green-400"
-                  title="Approved this PR"
-                >
-                  <span className="text-green-600 dark:text-green-500">✓</span>
-                  <Avatar user={u} size={14} />
-                  <UserName user={u} fallbackId={uid} repoId={pr.repoId} />
-                  {auto && (
-                    <AutomatedReviewerBadge kind={auto.kind} provenance={auto.provenance} />
-                  )}
-                </span>
-              );
-            })}
+      {/* Actions = every viewer write action on the PR in one row: approve, merge (push +
+          open + non-draft), close-without-merging (push OR author + open), and the Pro
+          "check addressed" run. Each control expands in place; the approvers themselves read
+          from the green ✓ badges in the Reviews row above. */}
+      {(pr.viewerCanApprove ||
+        (pr.viewerCanPush && pr.state === 'open' && !pr.isDraft) ||
+        (pr.viewerCanClose && pr.state === 'open') ||
+        canCheckAddressed) && (
+        <Row label="Actions">
+          <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+            {pr.viewerCanApprove && (
+              <ApproveControl prId={pr.id} alreadyApproved={pr.viewerHasApprovedStanding} />
+            )}
+            {pr.viewerCanPush && pr.state === 'open' && !pr.isDraft && (
+              <MergeControl prId={pr.id} githubUrl={pr.githubUrl} />
+            )}
+            {pr.viewerCanClose && pr.state === 'open' && <ClosePrControl prId={pr.id} />}
+            {canCheckAddressed && <PrAddressedCheckButton prId={pr.id} compact />}
           </div>
-        </Row>
-      )}
-
-      {pr.viewerCanApprove && (
-        <Row label="Review">
-          <ApproveControl
-            prId={pr.id}
-            alreadyApproved={pr.viewerHasApprovedStanding}
-          />
-        </Row>
-      )}
-
-      {/* Merge control (CORE / free tier): anyone with push access can merge an open,
-          non-draft PR — an addition to Approve. Allowed methods + mergeability are fetched
-          lazily when it's expanded. */}
-      {pr.viewerCanPush && pr.state === 'open' && !pr.isDraft && (
-        <Row label="Merge">
-          <MergeControl prId={pr.id} githubUrl={pr.githubUrl} />
         </Row>
       )}
 

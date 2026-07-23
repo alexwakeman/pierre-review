@@ -1,24 +1,48 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import type {
   CreatePinnedPromptBody,
   PinnedPromptsResponse,
   SprintChatBody,
+  SprintChatHistoryResponse,
   SprintChatResponse,
   User,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 
+// Chat history page size (matches the server default). One shared const so the hook, the
+// pagination math, and the panel's "N per page" copy can't drift.
+export const CHAT_HISTORY_PAGE_SIZE = 10;
+
 // The ad-hoc "Ask about the sprint" chat (Pro Haiku). A free-text question is answered from the
 // current sprint snapshot; the mutation returns the grounded Markdown answer + resolved PR refs +
-// an optional chart spec. Ephemeral — no cache; the panel holds the last answer in component
-// state. A generation may spend credits → invalidate the AI-usage meter.
+// an optional chart spec. A generation may spend credits → invalidate the AI-usage meter; every
+// answer is now persisted server-side, so also refresh the chat history so the new Q&A appears.
 export function useSprintChat() {
   const qc = useQueryClient();
   return useMutation<SprintChatResponse, Error, SprintChatBody>({
     mutationFn: (body: SprintChatBody) => api.sprintChat(body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['ai-usage'] });
+      void qc.invalidateQueries({ queryKey: ['sprint-chat-history'] });
     },
+  });
+}
+
+// The account's paginated chat history (newest-first, all scopes; stored answers are free to
+// re-open — no AI). `page` is 0-based; keepPreviousData holds the current page visible while the
+// next one loads so paging doesn't flash empty. Gated on the AI capability (`enabled`).
+export function useSprintChatHistory(page: number, enabled: boolean) {
+  return useQuery<SprintChatHistoryResponse>({
+    queryKey: ['sprint-chat-history', page],
+    queryFn: () => api.sprintChatHistory(CHAT_HISTORY_PAGE_SIZE, page * CHAT_HISTORY_PAGE_SIZE),
+    enabled,
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
   });
 }
 

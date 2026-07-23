@@ -14,6 +14,7 @@ import {
   type ReviewState,
   type TeamMetricKey,
   type TeamScope,
+  type SprintChatResponse,
 } from '@pierre-review/shared';
 
 // Feed bot lens (the Activity "Feed" bot-vs-human view): show everything, hide bot noise,
@@ -147,6 +148,12 @@ export interface FilterState {
   // Which inner sub-tab the cross-repo Feed rail shows: 'feed' (the metrics header + consolidated
   // feed) or 'themes' (the Pro "Discussion themes" AI summary). Transient, URL-silent.
   feedInnerTab: 'feed' | 'themes';
+  // The ad-hoc "Ask about the sprint" chat's LIVE state, lifted here so it survives the Insights
+  // panel unmounting (e.g. clicking a PR then returning) — the mutation result lives in
+  // component state and would otherwise be lost. `draft` = the in-progress question + toggles;
+  // `result` = the last answer shown. Transient, URL-silent; NOT the persisted history.
+  sprintChatDraft: { question: string; wantChart: boolean; wantBots: boolean };
+  sprintChatResult: SprintChatResponse | null;
 
   // selection
   selectedPrId: number | null;
@@ -335,6 +342,11 @@ export interface FilterState {
   // Switch the Bots view's inner sub-tab (ROI vs experimental Behaviour).
   setBotsInnerTab: (v: 'roi' | 'behaviour' | 'themes') => void;
   setFeedInnerTab: (v: 'feed' | 'themes') => void;
+  // Persist the ad-hoc chat's live draft + last result across Insights remounts.
+  setSprintChatDraft: (
+    patch: Partial<{ question: string; wantChart: boolean; wantBots: boolean }>,
+  ) => void;
+  setSprintChatResult: (r: SprintChatResponse | null) => void;
   // Set/clear the PR-detail Threads-tab bot filter (a ChecksTab bot chip → filter Threads to
   // that vendor). Re-selecting the same vendor toggles it off.
   setThreadBotFilter: (kind: ReviewBotKind | null) => void;
@@ -581,6 +593,8 @@ function freshDefaults(): FilterData {
     botAnalyticsWindow: 'rolling_14',
     botsInnerTab: 'roi',
     feedInnerTab: 'feed',
+    sprintChatDraft: { question: '', wantChart: false, wantBots: false },
+    sprintChatResult: null,
     selectedPrId: null,
     selectedThreadId: null,
     threadBotFilter: null,
@@ -674,6 +688,9 @@ export const useFilters = create<FilterState>((set, get) => ({
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setBotsInnerTab: (v) => set({ botsInnerTab: v }),
   setFeedInnerTab: (v) => set({ feedInnerTab: v }),
+  setSprintChatDraft: (patch) =>
+    set((s) => ({ sprintChatDraft: { ...s.sprintChatDraft, ...patch } })),
+  setSprintChatResult: (r) => set({ sprintChatResult: r }),
   setThreadBotFilter: (kind) =>
     set((s) => ({ threadBotFilter: s.threadBotFilter === kind ? null : kind })),
   toggleThreadStateFilter: (st) =>

@@ -108,7 +108,6 @@ import type {
   BotBehaviourAnomaly,
   BotOverlapStats,
   BotCoReviewPair,
-  BotDirectoryUsage,
   BotRepoDirBreakdown,
   PrBotBehaviourResponse,
   PrBotBehaviour,
@@ -5498,6 +5497,10 @@ export async function getPrDetail(
   const viewerCanPush = ['WRITE', 'MAINTAIN', 'ADMIN'].includes(
     repo.viewerPermission ?? '',
   );
+  // Whether the viewer may CLOSE this PR: WRITE+ on the repo OR they authored it (GitHub
+  // lets an author close their own PR without push access). The close route re-checks.
+  const viewerCanClose =
+    viewerCanPush || (viewerUserId != null && viewerUserId === pr.authorId);
 
   // The viewer's STANDING review: their LATEST decisive review (approved /
   // changes_requested / dismissed; 'commented'/'pending' don't count). reviewRows is
@@ -5562,6 +5565,7 @@ export async function getPrDetail(
     requestedReviewers,
     viewerCanApprove,
     viewerCanPush,
+    viewerCanClose,
     viewerHasApprovedStanding,
     threads,
     reviews: reviewsOut,
@@ -6368,6 +6372,7 @@ export interface PrWriteContext {
   number: number;
   headSha: string | null;
   authorId: number | null;
+  state: 'open' | 'merged' | 'closed';
   viewerPermission: string | null;
   prUrl: string;
 }
@@ -6389,6 +6394,7 @@ export async function getPrWriteContext(
       number: pullRequests.number,
       headSha: pullRequests.headSha,
       authorId: pullRequests.authorId,
+      state: pullRequests.state,
       viewerPermission: repos.viewerPermission,
     })
     .from(pullRequests)
@@ -6406,6 +6412,7 @@ export async function getPrWriteContext(
     number: row.number,
     headSha: row.headSha,
     authorId: row.authorId,
+    state: row.state,
     viewerPermission: row.viewerPermission,
     prUrl: `https://github.com/${row.owner}/${row.name}/pull/${row.number}`,
   };
@@ -6428,6 +6435,17 @@ export async function markPrMergedLocally(
       mergedById,
       mergeStateStatus: 'unknown',
     })
+    .where(and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)))
+    .execute();
+}
+
+// Optimistic stamp for a close (not a merge): state → 'closed' + closedAt now. Mirrors
+// markPrMergedLocally so the ['pr', id] refetch reflects the close immediately; the next
+// sync reconciles from GitHub either way.
+export async function markPrClosedLocally(prId: number, accountId: number): Promise<void> {
+  await db
+    .update(pullRequests)
+    .set({ state: 'closed', closedAt: new Date(), mergeStateStatus: 'unknown' })
     .where(and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)))
     .execute();
 }
@@ -8249,7 +8267,6 @@ export async function getBotBehaviourAnalytics(
     prsOpenedPerDay,
     daySpanStart,
     overlap: EMPTY_OVERLAP,
-    directories: [],
     repoBotDirs: [],
   });
 
@@ -8699,8 +8716,8 @@ export async function getBotBehaviourAnalytics(
       return { aKey: ia.key, bKey: ib.key, aLabel: ia.label, bLabel: ib.label, prs };
     });
 
-  // (ii)+(iii) One reviewThreads pass (path/line are ALWAYS persisted — no lean-gated diffHunk):
-  // same-line overlap, per-bot directory usage, and the global repo × bot presence matrix.
+  // One reviewThreads pass (path/line are ALWAYS persisted — no lean-gated diffHunk):
+  // same-line overlap + the merged repo × bot × directory "where bots work" breakdown.
   const threadRows = await db
     .select({
       prId: reviewThreads.prId,
@@ -8722,7 +8739,6 @@ export async function getBotBehaviourAnalytics(
     )
     .execute();
 
-  const dirByBot = new Map<number, Map<string, number>>();
   const threadsByBot = new Map<number, number>();
   // bot → repo → area(dir) → thread count: the merged "where bots work" breakdown.
   const repoBotDir = new Map<number, Map<number, Map<string, number>>>();
@@ -8732,12 +8748,6 @@ export async function getBotBehaviourAnalytics(
     const uid = r.commenterId;
     if (uid == null) continue;
     const dir = topLevelDir(r.path);
-    let dm = dirByBot.get(uid);
-    if (!dm) {
-      dm = new Map();
-      dirByBot.set(uid, dm);
-    }
-    dm.set(dir, (dm.get(dir) ?? 0) + 1);
     threadsByBot.set(uid, (threadsByBot.get(uid) ?? 0) + 1);
     repoIdsSeen.add(r.repoId);
     // Merged breakdown: this bot's threads in this repo, by top-level area (dir).
@@ -8776,17 +8786,6 @@ export async function getBotBehaviourAnalytics(
       .where(inArray(repos.id, [...repoIdsSeen]))
       .execute())
       repoNameById.set(r.id, `${r.owner}/${r.name}`);
-
-  const directories: BotDirectoryUsage[] = [...dirByBot.entries()]
-    .map(([uid, dm]) => ({
-      ...botIdentity(uid),
-      totalThreads: threadsByBot.get(uid) ?? 0,
-      dirs: [...dm.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 6)
-        .map(([dir, count]) => ({ dir, count })),
-    }))
-    .sort((a, b) => b.totalThreads - a.totalThreads);
 
   // Merged "where bots work": per bot → its repos (top by volume) → each repo's top areas (dirs)
   // desc, capped + an 'other' tail. `totalThreads` on the bot counts ALL its repos; the `repos`
@@ -8836,7 +8835,6 @@ export async function getBotBehaviourAnalytics(
     prsOpenedPerDay,
     daySpanStart,
     overlap,
-    directories,
     repoBotDirs,
   };
 }

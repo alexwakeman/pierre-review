@@ -90,7 +90,7 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
   const canMerge = !options.conflicts && !options.blocked && options.allowedMethods.length > 0;
 
   return (
-    <div className="space-y-2">
+    <div className="w-full space-y-2">
       {/* Conflicts — info only. Conflict resolution is a Pro feature; free tier links out. */}
       {options.conflicts && (
         <div className="rounded border border-amber-300 bg-amber-50/60 px-2 py-1.5 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200">

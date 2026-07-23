@@ -12,6 +12,7 @@ import {
   getGraphqlClientFor,
   ghRestGetDiffStatus,
   ghRestGetFor,
+  ghRestPatchStatus,
   ghRestPostFor,
   ghRestPostNoContent,
   ghRestPutStatus,
@@ -527,6 +528,28 @@ export async function mergePullRequest(
           ? 'not_mergeable'
           : 'error';
   return { ok: false, reason, message };
+}
+
+export type ClosePrOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'error'; message: string };
+
+// Close an open PR (REST PATCH `{ state: 'closed' }`) — WITHOUT merging. Reversible on
+// GitHub (it can be reopened), so no head-SHA pin is needed. Permission is re-checked by the
+// caller (author OR write+). A 404 usually means the token can't see the PR (private/SSO).
+export async function closePullRequest(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+): Promise<ClosePrOutcome> {
+  const res = await ghRestPatchStatus(token, `/repos/${owner}/${name}/pulls/${number}`, {
+    state: 'closed',
+  });
+  if (res.ok) return { ok: true };
+  const j = (res.json ?? {}) as { message?: string };
+  const message = j.message ?? res.text.slice(0, 300);
+  return { ok: false, reason: res.status === 404 ? 'not_found' : 'error', message };
 }
 
 export type UpdateBranchOutcome =
