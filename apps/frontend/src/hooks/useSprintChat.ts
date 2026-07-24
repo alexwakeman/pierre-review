@@ -33,13 +33,15 @@ export function useSprintChat() {
   });
 }
 
-// The account's paginated chat history (newest-first, all scopes; stored answers are free to
-// re-open — no AI). `page` is 0-based; keepPreviousData holds the current page visible while the
-// next one loads so paging doesn't flash empty. Gated on the AI capability (`enabled`).
-export function useSprintChatHistory(page: number, enabled: boolean) {
+// The account's paginated chat history for the CURRENT scope (newest-first; stored answers are
+// free to re-open — no AI). `page` is 0-based; `scope` keys it to the active team context so the
+// panel shows only that context's questions. keepPreviousData holds the current page visible while
+// the next one loads so paging doesn't flash empty. Gated on the AI capability (`enabled`).
+export function useSprintChatHistory(page: number, scope: string | undefined, enabled: boolean) {
   return useQuery<SprintChatHistoryResponse>({
-    queryKey: ['sprint-chat-history', page],
-    queryFn: () => api.sprintChatHistory(CHAT_HISTORY_PAGE_SIZE, page * CHAT_HISTORY_PAGE_SIZE),
+    queryKey: ['sprint-chat-history', scope ?? 'all', page],
+    queryFn: () =>
+      api.sprintChatHistory(CHAT_HISTORY_PAGE_SIZE, page * CHAT_HISTORY_PAGE_SIZE, scope),
     enabled,
     staleTime: 30_000,
     placeholderData: keepPreviousData,

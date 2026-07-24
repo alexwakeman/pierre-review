@@ -374,6 +374,34 @@ export async function getAllTeamRepoIds(accountId: number): Promise<number[]> {
   return [...new Set(rows.map((r) => r.repoId))];
 }
 
+// The UNION of the member repos of a SPECIFIC set of teams, account-scoped + deduped (→ a
+// multi-team scope `teams:<ids>`). IDOR-safe via the denormalized teamRepos.accountId predicate —
+// a foreign team's ids contribute nothing. Empty list → empty result.
+export async function getTeamsRepoIds(
+  teamIds: number[],
+  accountId: number,
+): Promise<number[]> {
+  if (teamIds.length === 0) return [];
+  const rows = await db
+    .select({ repoId: teamRepos.repoId })
+    .from(teamRepos)
+    .where(and(eq(teamRepos.accountId, accountId), inArray(teamRepos.teamId, teamIds)))
+    .execute();
+  return [...new Set(rows.map((r) => r.repoId))];
+}
+
+// Parse a multi-team scope wire string 'teams:<ids>' → the team-id list (deduped, sorted), or null
+// when it isn't a team-set token. The canonical form the client emits (scopeToParam).
+function parseTeamSetScope(scope: string): number[] | null {
+  if (!scope.startsWith('teams:')) return null;
+  const ids = scope
+    .slice('teams:'.length)
+    .split(',')
+    .map((x) => Number.parseInt(x, 10))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  return ids.length ? [...new Set(ids)].sort((a, b) => a - b) : null;
+}
+
 // Repo ids owned by the account that belong to NO team (the "unassigned" bucket → scope 'none').
 // Filtered in JS against the (small, ≤ per-account cap) assigned set — no subquery, so it stays
 // on the portable async surface both dialects share.
@@ -461,11 +489,12 @@ export async function removeRepoFromTeam(
   return removed.length > 0;
 }
 
-// The single scope resolver. A `scope` wire value ('all' | 'none' | 'teams' | '<teamId>') resolves
-// to the concrete repo-id set to compute over: 'all' → null (means "every account repo", the
-// callers' existing default), 'none' → the unassigned repos, 'teams' → the UNION of every team's
-// repos (cross-team monitoring), a numeric string → that team's repos (ownership-checked; an
-// unknown/foreign team → empty array). Reuse this everywhere a scope needs turning into repo ids.
+// The single scope resolver. A `scope` wire value ('all' | 'none' | 'teams' | '<teamId>' |
+// 'teams:<ids>') resolves to the concrete repo-id set to compute over: 'all' → null (means "every
+// account repo", the callers' existing default), 'none' → the unassigned repos, 'teams' → the UNION
+// of every team's repos (cross-team monitoring), 'teams:<ids>' → the union of just those teams, a
+// numeric string → that team's repos (ownership-checked; an unknown/foreign team → empty array).
+// Reuse this everywhere a scope needs turning into repo ids.
 export async function resolveScopeRepoIds(
   accountId: number,
   scope: string,
@@ -473,6 +502,8 @@ export async function resolveScopeRepoIds(
   if (scope === 'all') return null;
   if (scope === 'none') return getUnassignedRepoIds(accountId);
   if (scope === 'teams') return getAllTeamRepoIds(accountId);
+  const teamSet = parseTeamSetScope(scope);
+  if (teamSet) return getTeamsRepoIds(teamSet, accountId);
   const teamId = Number(scope);
   if (!Number.isInteger(teamId) || teamId <= 0) return [];
   return getTeamRepoIds(teamId, accountId);

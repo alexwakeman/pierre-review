@@ -159,7 +159,7 @@ export function AdHocChatPanel(): JSX.Element | null {
   // Live chat state lives in the STORE so it survives this panel unmounting/remounting.
   const draft = useFilters((s) => s.sprintChatDraft);
   const setDraft = useFilters((s) => s.setSprintChatDraft);
-  const storedResult = useFilters((s) => s.sprintChatResult);
+  const storedResult = useFilters((s) => s.sprintChatResults[scope] ?? null);
   const setStoredResult = useFilters((s) => s.setSprintChatResult);
   const { question, wantChart, wantBots } = draft;
 
@@ -176,7 +176,19 @@ export function AdHocChatPanel(): JSX.Element | null {
   const pinned = usePinnedPrompts(scope, activityDigest);
   const createPin = useCreatePinnedPrompt(scope);
   const deletePin = useDeletePinnedPrompt(scope);
-  const history = useSprintChatHistory(historyPage, activityDigest && historyOpen);
+  const history = useSprintChatHistory(historyPage, scope, activityDigest && historyOpen);
+
+  // Everything in this panel is keyed to the current team scope. When the scope changes: reset the
+  // history page (so you don't land on an out-of-range page of the previous context), and clear the
+  // transient mutation UI (a stale error / in-flight state) + the history-row selection — the
+  // answer itself is already per-scope (sprintChatResults[scope]), so a context switch shows THIS
+  // context's answer or nothing, never the previous team's.
+  useEffect(() => {
+    setHistoryPage(0);
+    chat.reset();
+    setSelectedHistoryId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope]);
 
   const usage = useAiUsage(activityDigest);
   const outOfCredits =
@@ -206,14 +218,15 @@ export function AdHocChatPanel(): JSX.Element | null {
     // data is component-local and would be lost when the panel unmounts.
     chat.mutate(
       { question: text, scope, wantChart: chart, wantBots: bots },
-      { onSuccess: (data) => setStoredResult(data) },
+      // Mirror the answer into the per-scope store so it survives a remount AND is the single source
+      // the panel reads (keyed to the scope it was asked in).
+      { onSuccess: (data) => setStoredResult(scope, data) },
     );
   };
 
-  // Load a past question's STORED answer into the TOP answer panel (free — no re-run). We map the
-  // history item to the response shape and stash it in the store, and reset() the mutation so a
-  // prior Ask's `chat.data` can't shadow it (the top panel reads `chat.data ?? storedResult`). A
-  // later fresh Ask repopulates chat.data and wins again.
+  // Load a past question's STORED answer into the TOP answer panel (free — no re-run). Map the
+  // history item to the response shape and stash it under the current scope; reset() clears any
+  // stale error/in-flight banner from a prior Ask.
   const selectHistory = (item: SprintChatHistoryItem): void => {
     const mapped: SprintChatResponse = {
       enabled: true,
@@ -224,7 +237,7 @@ export function AdHocChatPanel(): JSX.Element | null {
       generatedAt: item.createdAt,
     };
     chat.reset();
-    setStoredResult(mapped);
+    setStoredResult(scope, mapped);
     setSelectedHistoryId(item.id);
   };
 
@@ -233,13 +246,22 @@ export function AdHocChatPanel(): JSX.Element | null {
     ask(p.text, p.wantChart, p.wantBots);
   };
 
+  // A quick-question pill: fill the box AND fire the Ask immediately (respecting the current
+  // chart/bots toggles), so clicking a preset submits without a separate Ask press.
+  const runQuick = (qq: { question: string }): void => {
+    setDraft({ question: qq.question });
+    ask(qq.question, wantChart, wantBots);
+  };
+
   const pinCurrent = (): void => {
     if (trimmed === '') return;
     createPin.mutate({ text: trimmed, wantChart, wantBots });
   };
 
-  // The visible answer: the just-run mutation's data, else the last result kept in the store.
-  const result = chat.data ?? storedResult;
+  // The visible answer for THIS scope. onSuccess mirrors each answer into sprintChatResults[scope],
+  // so the per-scope store entry is the single source — a context switch shows that context's
+  // answer (or nothing), never the previous team's, and there's no stale mutation-data flash.
+  const result = storedResult;
   const answer = result?.answer ?? null;
   const pins = pinned.data?.prompts ?? [];
   // Don't offer to pin a question that's already saved verbatim for this scope.
@@ -267,14 +289,14 @@ export function AdHocChatPanel(): JSX.Element | null {
         the Haiku model). Type <span className="font-mono">@</span> to mention a teammate.
       </p>
 
-      {/* Quick-question pills — pre-fill the box, then press Ask. These replace the separate Sprint
-          report card + "Sprint questions" carousel. */}
+      {/* Quick-question pills — clicking one fills the box AND fires the Ask immediately. These
+          replace the separate Sprint report card + "Sprint questions" carousel. */}
       <div className="mt-2 flex flex-wrap gap-1.5" data-testid="chat-quick-questions">
         {QUICK_QUESTIONS.map((qq) => (
           <button
             key={qq.label}
             type="button"
-            onClick={() => setDraft({ question: qq.question })}
+            onClick={() => runQuick(qq)}
             className="rounded-full border border-violet-300 bg-white/70 px-2.5 py-0.5 text-[11px] font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-gray-900/50 dark:text-violet-200 dark:hover:bg-violet-950/40"
             title={qq.question}
           >

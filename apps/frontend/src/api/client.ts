@@ -446,10 +446,16 @@ export const api = {
     fetch('/api/pro/insights/ask', jsonBody('POST', body)).then((r) =>
       handle<SprintChatResponse>(r),
     ),
-  // The account's paginated chat history (newest-first; stored answers, free to re-open).
-  sprintChatHistory: (limit: number, offset: number) =>
+  // The account's paginated chat history (newest-first; stored answers, free to re-open) SCOPED to
+  // the current team context (`scope`).
+  sprintChatHistory: (limit: number, offset: number, scope?: string) =>
     get<SprintChatHistoryResponse>(
-      withQuery('/api/pro/insights/chat-history', `limit=${limit}`, `offset=${offset}`),
+      withQuery(
+        '/api/pro/insights/chat-history',
+        `limit=${limit}`,
+        `offset=${offset}`,
+        scopeParam(scope),
+      ),
     ),
   // Saved, re-runnable ad-hoc prompts (server-stored per account + scope).
   pinnedPrompts: (scope?: string) =>

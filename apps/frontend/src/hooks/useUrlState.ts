@@ -56,7 +56,18 @@ function readFromUrl(): Partial<FilterState> {
   if (team === 'none') out.teamScope = 'none';
   else if (team === 'teams') out.teamScope = 'teams';
   else if (team === 'all') out.teamScope = 'all';
-  else if (team != null) {
+  else if (team != null && team.startsWith('teams:')) {
+    // Multi-team set 'teams:1,3'. Canonicalize (dedupe/sort); collapse 1→single, 0→'all' so a
+    // hand-edited URL matches scopeToParam's inverse.
+    const ids = team
+      .slice('teams:'.length)
+      .split(',')
+      .map((x) => Number.parseInt(x, 10))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const uniq = [...new Set(ids)].sort((a, b) => a - b);
+    if (uniq.length >= 2) out.teamScope = uniq;
+    else if (uniq.length === 1) out.teamScope = uniq[0]!;
+  } else if (team != null) {
     const n = Number.parseInt(team, 10);
     if (Number.isFinite(n)) out.teamScope = n;
   }

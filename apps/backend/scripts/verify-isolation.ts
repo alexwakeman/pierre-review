@@ -395,6 +395,17 @@ check(
   "resolveScopeRepoIds(B, '<teamA>') leaks nothing (IDOR blocked)",
   (await q.resolveScopeRepoIds(2, String(teamA.id)))!.length === 0,
 );
+// Multi-team set scope 'teams:<ids>' (the new resolver path) resolves the union of just those
+// teams, ownership-scoped: A gets A's repos; B resolving a set that names A's team → [] (IDOR).
+check(
+  "resolveScopeRepoIds(A, 'teams:<teamA>') resolves A's repos (set path)",
+  JSON.stringify(await q.resolveScopeRepoIds(1, `teams:${teamA.id}`)) ===
+    JSON.stringify([A.repoId]),
+);
+check(
+  "resolveScopeRepoIds(B, 'teams:<teamA>') leaks nothing (multi-team IDOR blocked)",
+  (await q.resolveScopeRepoIds(2, `teams:${teamA.id}`))!.length === 0,
+);
 check("resolveScopeRepoIds(A, 'all') is null", (await q.resolveScopeRepoIds(1, 'all')) === null);
 check(
   "resolveScopeRepoIds(A, 'none') excludes A's assigned repo",

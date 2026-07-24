@@ -3,7 +3,7 @@ import type { TeamScope } from '@pierre-review/shared';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { resolveScopeRepoIds, useTeams } from '../hooks/useTeams.js';
-import { useFilters } from '../store/filters.js';
+import { scopeToParam, scopeToTeamSet, teamSetToScope, useFilters } from '../store/filters.js';
 import { TeamManagerModal } from './Activity/TeamManager.js';
 
 // Order-insensitive nullable-set equality (null = "all", distinct from []).
@@ -32,6 +32,25 @@ export function useTeamScopeSync(): void {
       if (useFilters.getState().repoIds != null) setTeamScope('all', null);
       return;
     }
+    if (Array.isArray(teamScope)) {
+      // A multi-team set: drop any deleted teams + re-canonicalize (empties → 'all', 1 → single).
+      const live = teamScope.filter((id) => teams.some((t) => t.id === id));
+      const canonical = teamSetToScope(
+        live,
+        teams.map((t) => t.id),
+      );
+      if (scopeToParam(canonical) !== scopeToParam(teamScope)) {
+        setTeamScope(
+          canonical,
+          resolveScopeRepoIds(
+            canonical,
+            teams,
+            repos.map((r) => r.id),
+          ),
+        );
+        return;
+      }
+    }
     const derived = resolveScopeRepoIds(
       teamScope,
       teams,
@@ -44,9 +63,10 @@ export function useTeamScopeSync(): void {
 }
 
 // A compact dropdown to pick the active TEAM scope: All repos ('all'), All Teams ('teams', the
-// union of every team's repos — cross-team monitoring), each team, or No team ('none'). Picking
-// one resolves the scope → repoIds and sets both via setTeamScope. Mounted in the FilterBar
-// (Timeline) and the Activity rail header.
+// union of every team's repos — cross-team monitoring), No team ('none'), or a MULTI-SELECT set
+// of teams (checkbox rows — pick one or several; ticking all collapses to 'teams', one to that
+// single team). Picking resolves the scope → repoIds and sets both via setTeamScope. Mounted in
+// the FilterBar (Timeline) and the Activity rail header.
 export function TeamSelector(): JSX.Element {
   const teamScope = useFilters((s) => s.teamScope);
   const setTeamScope = useFilters((s) => s.setTeamScope);
@@ -63,10 +83,23 @@ export function TeamSelector(): JSX.Element {
 
   useClickOutside(rootRef, () => setOpen(false), open);
 
-  const pick = (scope: TeamScope): void => {
+  const allTeamIds = (teams ?? []).map((t) => t.id);
+  // The teams currently in the scope — drives the multi-select checkboxes.
+  const selectedTeams = new Set(scopeToTeamSet(teamScope, allTeamIds));
+
+  const pick = (scope: TeamScope, close = true): void => {
     const derived = resolveScopeRepoIds(scope, teams ?? [], (repos ?? []).map((r) => r.id));
     setTeamScope(scope, derived);
-    setOpen(false);
+    if (close) setOpen(false);
+  };
+
+  // Toggle one team in/out of the multi-team selection, keeping the menu OPEN for more picks.
+  // teamSetToScope canonicalizes: 0 → 'all', 1 → that team, every team → 'teams', else the set.
+  const toggleTeam = (teamId: number): void => {
+    const next = new Set(selectedTeams);
+    if (next.has(teamId)) next.delete(teamId);
+    else next.add(teamId);
+    pick(teamSetToScope([...next], allTeamIds), false);
   };
 
   const activeLabel =
@@ -76,7 +109,9 @@ export function TeamSelector(): JSX.Element {
         ? 'All Teams'
         : teamScope === 'none'
           ? 'No team'
-          : (teams?.find((t) => t.id === teamScope)?.name ?? 'Team');
+          : Array.isArray(teamScope)
+            ? `${teamScope.length} teams`
+            : (teams?.find((t) => t.id === teamScope)?.name ?? 'Team');
 
   // The union of every team's repos (the 'teams' scope) — its count for the option row.
   const unionCount = new Set((teams ?? []).flatMap((t) => t.repoIds)).size;
@@ -131,20 +166,36 @@ export function TeamSelector(): JSX.Element {
           {(teams ?? []).length > 0 && (
             <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
           )}
-          {(teams ?? []).map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="menuitem"
-              onClick={() => pick(t.id)}
-              className={rowCls(teamScope === t.id)}
-            >
-              <span className="truncate">{t.name}</span>
-              <span className="shrink-0 tabular-nums text-[10px] text-gray-400">
-                {t.repoCount}
-              </span>
-            </button>
-          ))}
+          {(teams ?? []).map((t) => {
+            const checked = selectedTeams.has(t.id);
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={checked}
+                onClick={() => toggleTeam(t.id)}
+                className={rowCls(checked)}
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span
+                    aria-hidden
+                    className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border text-[9px] leading-none ${
+                      checked
+                        ? 'border-sky-500 bg-sky-500 text-white'
+                        : 'border-gray-300 dark:border-gray-600'
+                    }`}
+                  >
+                    {checked ? '✓' : ''}
+                  </span>
+                  <span className="truncate">{t.name}</span>
+                </span>
+                <span className="shrink-0 tabular-nums text-[10px] text-gray-400">
+                  {t.repoCount}
+                </span>
+              </button>
+            );
+          })}
           <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
           <button
             type="button"

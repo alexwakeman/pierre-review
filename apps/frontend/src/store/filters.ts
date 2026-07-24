@@ -150,10 +150,12 @@ export interface FilterState {
   feedInnerTab: 'feed' | 'themes';
   // The ad-hoc "Ask about the sprint" chat's LIVE state, lifted here so it survives the Insights
   // panel unmounting (e.g. clicking a PR then returning) — the mutation result lives in
-  // component state and would otherwise be lost. `draft` = the in-progress question + toggles;
-  // `result` = the last answer shown. Transient, URL-silent; NOT the persisted history.
+  // component state and would otherwise be lost. `draft` = the in-progress question + toggles.
+  // `results` = the last answer shown, keyed BY SCOPE (scopeToParam) so each team/context keeps
+  // its own answer and switching to a context you haven't asked in shows nothing (never the
+  // previous team's output). Transient, URL-silent; NOT the persisted history.
   sprintChatDraft: { question: string; wantChart: boolean; wantBots: boolean };
-  sprintChatResult: SprintChatResponse | null;
+  sprintChatResults: Record<string, SprintChatResponse | null>;
 
   // selection
   selectedPrId: number | null;
@@ -343,7 +345,7 @@ export interface FilterState {
   setSprintChatDraft: (
     patch: Partial<{ question: string; wantChart: boolean; wantBots: boolean }>,
   ) => void;
-  setSprintChatResult: (r: SprintChatResponse | null) => void;
+  setSprintChatResult: (scope: string, r: SprintChatResponse | null) => void;
   // Set/clear the PR-detail Threads-tab bot filter (a ChecksTab bot chip → filter Threads to
   // that vendor). Re-selecting the same vendor toggles it off.
   setThreadBotFilter: (kind: ReviewBotKind | null) => void;
@@ -588,7 +590,7 @@ function freshDefaults(): FilterData {
     botsInnerTab: 'roi',
     feedInnerTab: 'feed',
     sprintChatDraft: { question: '', wantChart: false, wantBots: false },
-    sprintChatResult: null,
+    sprintChatResults: {},
     selectedPrId: null,
     selectedThreadId: null,
     threadBotFilter: null,
@@ -685,7 +687,8 @@ export const useFilters = create<FilterState>((set, get) => ({
   setFeedInnerTab: (v) => set({ feedInnerTab: v }),
   setSprintChatDraft: (patch) =>
     set((s) => ({ sprintChatDraft: { ...s.sprintChatDraft, ...patch } })),
-  setSprintChatResult: (r) => set({ sprintChatResult: r }),
+  setSprintChatResult: (scope, r) =>
+    set((s) => ({ sprintChatResults: { ...s.sprintChatResults, [scope]: r } })),
   setThreadBotFilter: (kind) =>
     set((s) => ({ threadBotFilter: s.threadBotFilter === kind ? null : kind })),
   toggleThreadStateFilter: (st) =>
@@ -908,11 +911,41 @@ export function resolveRange(s: FilterState): { from: Date; to: Date } {
 
 /**
  * Serialize a TeamScope to its wire/URL string form: 'all' → "all", 'none' → "none",
- * 'teams' → "teams" (cross-team monitoring), a teamId → String(id). The inverse
- * (string → TeamScope) is done in useUrlState.
+ * 'teams' → "teams" (cross-team monitoring), a teamId → String(id), a SET of teamIds →
+ * "teams:<sorted,comma,ids>" (canonical — sorted so the string/key is order-independent). The
+ * inverse (string → TeamScope) is done in useUrlState. Callers should hold a canonical scope
+ * (a set is never length 0 or 1 — teamSetToScope collapses those), but we sort defensively here.
  */
 export function scopeToParam(scope: TeamScope): string {
-  return scope === 'all' || scope === 'none' || scope === 'teams' ? scope : String(scope);
+  if (scope === 'all' || scope === 'none' || scope === 'teams') return scope;
+  if (Array.isArray(scope)) return `teams:${[...scope].sort((a, b) => a - b).join(',')}`;
+  return String(scope);
+}
+
+/**
+ * Canonicalize a user-selected set of team ids into a TeamScope: [] → 'all', exactly one → that
+ * `number`, ALL of the account's teams → 'teams' (the existing union sentinel), otherwise the
+ * sorted `number[]` set. Collapsing 1/all keeps single-team + all-teams scope keys stable, so a
+ * team picked via the new multi-select shares history/pins with the old single-select.
+ */
+export function teamSetToScope(selected: number[], allTeamIds: number[]): TeamScope {
+  const uniq = [...new Set(selected)].filter((id) => allTeamIds.includes(id));
+  if (uniq.length === 0) return 'all';
+  if (uniq.length === 1) return uniq[0]!;
+  if (allTeamIds.length > 0 && uniq.length === allTeamIds.length) return 'teams';
+  return uniq.sort((a, b) => a - b);
+}
+
+/**
+ * The team ids a scope currently selects, for driving the multi-select checkboxes. 'all'/'none'
+ * → [] (no team checked — those are exclusive options); 'teams' → every team; a number → [id]; a
+ * set → itself.
+ */
+export function scopeToTeamSet(scope: TeamScope, allTeamIds: number[]): number[] {
+  if (scope === 'teams') return [...allTeamIds];
+  if (typeof scope === 'number') return [scope];
+  if (Array.isArray(scope)) return scope;
+  return [];
 }
 
 function resolveBaseRange(s: FilterState): { from: Date; to: Date } {

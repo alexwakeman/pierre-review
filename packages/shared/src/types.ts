@@ -776,10 +776,13 @@ export interface TeamsResponse {
 
 // The frontend store value for the active scope selector: 'all' (every account repo), 'none'
 // (repos in no team), 'teams' (the UNION of every team's repos — cross-team monitoring; differs
-// from 'all', which is every account repo incl. unassigned), or a teamId (that team's repos).
-// NOTE the WIRE `scope` query param is the STRING form — `'all' | 'none' | 'teams' | '<teamId>'` —
-// resolved server-side by resolveScopeRepoIds.
-export type TeamScope = 'all' | 'none' | 'teams' | number;
+// from 'all', which is every account repo incl. unassigned), a single teamId (that team's repos),
+// or a SET of teamIds `number[]` (the union of just those teams — pick several, but not all).
+// NOTE the WIRE `scope` query param is the STRING form — `'all' | 'none' | 'teams' | '<teamId>' |
+// 'teams:<sorted,comma,ids>'` — resolved server-side by resolveScopeRepoIds. The set form is
+// canonical: a single-id set collapses to '<teamId>' and an all-teams set to 'teams', so a scope
+// key never fragments. Canonicalize with scopeToParam (frontend) / normalizeScope (backend).
+export type TeamScope = 'all' | 'none' | 'teams' | number | number[];
 
 // ---- Preset prompts (declared now; implemented later by Pro + the frontend) ----
 // The fixed set of one-click "ask about this scope" questions the AI answer surface offers.

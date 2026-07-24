@@ -70,6 +70,7 @@ export function useTeamMutations() {
  *               which is every repo incl. unassigned). Empty array when there are no team repos.
  *  • 'none'   → the account repos in NO team (allRepoIds minus the union of every team's repoIds)
  *  • teamId   → that team's repoIds (empty array if the team is unknown/empty)
+ *  • teamId[] → the UNION of just those teams' repoIds (a multi-team selection)
  * Mirrors the backend's resolveScopeRepoIds so the client-side scope and the server-side one agree.
  */
 export function resolveScopeRepoIds(
@@ -87,6 +88,12 @@ export function resolveScopeRepoIds(
     const inSomeTeam = new Set<number>();
     for (const t of teams) for (const id of t.repoIds) inSomeTeam.add(id);
     return allRepoIds.filter((id) => !inSomeTeam.has(id));
+  }
+  if (Array.isArray(scope)) {
+    const wanted = new Set(scope);
+    const ids = new Set<number>();
+    for (const t of teams) if (wanted.has(t.id)) for (const id of t.repoIds) ids.add(id);
+    return [...ids];
   }
   const team = teams.find((t) => t.id === scope);
   return team ? [...team.repoIds] : [];
