@@ -7137,7 +7137,7 @@ export async function setReviewerOverride(
 ): Promise<ReviewerClassification | null> {
   const u = (
     await db
-      .select({ id: users.id, login: users.githubLogin })
+      .select({ id: users.id, login: users.githubLogin, displayName: users.displayName })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1)
@@ -7145,9 +7145,10 @@ export async function setReviewerOverride(
   )[0];
   if (!u) return null;
   const kind: AutomatedReviewerKind | null = body.automated ? body.kind ?? 'in_house' : null;
-  const label = body.automated
-    ? body.label ?? (kind ? labelForKind(kind) : u.login)
-    : body.label ?? u.login;
+  // Default a MANUALLY-added bot's label to the account's own name — its display/full name
+  // ("GopherBot"), falling back to the login — NOT the generic kind label ("In-house AI"),
+  // which reads as a category rather than this specific bot. An explicit label always wins.
+  const label = body.label ?? u.displayName ?? u.login;
   const reasons = [
     body.automated
       ? 'manually tagged as an automated reviewer'
