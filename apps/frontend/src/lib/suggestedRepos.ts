@@ -90,12 +90,6 @@ export const SUGGESTED_REPOS: readonly CuratedRepo[] = [
     why: 'Google’s Go language and toolchain; the backbone of modern cloud and infrastructure software.',
   },
   {
-    owner: 'ziglang',
-    name: 'zig',
-    category: 'Languages',
-    why: 'A fast-growing low-level language aiming to be a simpler, safer C; also a drop-in C/C++ compiler.',
-  },
-  {
     owner: 'duckdb',
     name: 'duckdb',
     category: 'Databases',
@@ -136,12 +130,6 @@ export const SUGGESTED_REPOS: readonly CuratedRepo[] = [
     name: 'openssl',
     category: 'Security',
     why: 'The cryptography and TLS library securing a huge fraction of the internet’s traffic.',
-  },
-  {
-    owner: 'd3',
-    name: 'd3',
-    category: 'Visualization',
-    why: 'The canonical library for bespoke, data-driven SVG/Canvas visualizations.',
   },
   {
     owner: 'tldraw',

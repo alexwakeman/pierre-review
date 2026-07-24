@@ -82,6 +82,57 @@ export async function graphqlTolerant<T>(
   }
 }
 
+// True for GitHub failures worth RETRYING: transient upstream/gateway faults (a 5xx
+// from GitHub's edge — the fat activity query on a huge repo routinely 502s at nginx)
+// and low-level network faults (reset/timeout/DNS). Deliberately NOT ordinary 4xx
+// (auth / not-found / rate-limit-with-reset) nor GraphQL partial-data errors — those
+// are handled elsewhere (graphqlTolerant) and must not be silently re-attempted. A 502
+// arrives as an HTML error page (not GraphQL JSON), so match BOTH a structured status
+// (octokit RequestError `.status`) AND the message text as a fallback.
+export function isRetryableGithubError(err: unknown): boolean {
+  const e = err as {
+    status?: number;
+    response?: { status?: number };
+    code?: string;
+    message?: string;
+  };
+  const status = e.status ?? e.response?.status;
+  if (status === 500 || status === 502 || status === 503 || status === 504) return true;
+  if (/^(ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|EPIPE)$/.test(e.code ?? '')) {
+    return true;
+  }
+  return /\b(50[0234])\b|bad gateway|gateway time-?out|service unavailable|temporarily unavailable|socket hang up|fetch failed|econnreset|etimedout/i.test(
+    e.message ?? '',
+  );
+}
+
+// Run a GitHub call with bounded exponential-backoff retries on TRANSIENT failures
+// (see isRetryableGithubError). A single 502 on any page must not abort a multi-page
+// backfill of a large repo — without this, adding a big repo (every curated suggestion
+// is one) frequently loads only a partial window before the walk dies. Non-retryable
+// errors (4xx, GraphQL partial) propagate immediately. Backoff: 500ms, 1s, 2s.
+export async function withGithubRetry<T>(
+  fn: () => Promise<T>,
+  opts: {
+    retries?: number;
+    baseDelayMs?: number;
+    onRetry?: (attempt: number, delayMs: number, err: unknown) => void;
+  } = {},
+): Promise<T> {
+  const retries = opts.retries ?? 3;
+  const base = opts.baseDelayMs ?? 500;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt > retries || !isRetryableGithubError(err)) throw err;
+      const delayMs = base * 2 ** (attempt - 1);
+      opts.onRetry?.(attempt, delayMs, err);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+}
+
 // Per-account GitHub clients. There is deliberately NO module-level token /
 // client cache: in a multi-tenant (cloud) process a cached token would leak one
 // account's credentials into another account's request. The token is ALWAYS

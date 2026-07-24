@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GraphqlResponseError } from '@octokit/graphql';
 import {
   graphqlChecksHint,
   graphqlTolerant,
+  isRetryableGithubError,
   isSamlBlock,
   summarizeGraphqlErrors,
+  withGithubRetry,
   type GraphqlClient,
 } from './client.js';
 
@@ -118,6 +120,75 @@ describe('graphqlChecksHint', () => {
     ]);
     expect(hint).toContain('SAML');
     expect(hint).toContain('re-authorize');
+  });
+});
+
+describe('isRetryableGithubError', () => {
+  it('treats a 502 Bad Gateway (the reproduced big-repo failure) as retryable — by status', () => {
+    expect(isRetryableGithubError({ status: 502 })).toBe(true);
+  });
+  it('treats a 502 as retryable by MESSAGE too (a 502 arrives as an HTML page, no GraphQL status)', () => {
+    expect(
+      isRetryableGithubError(new Error('<html>\n<head><title>502 Bad Gateway</title></head>')),
+    ).toBe(true);
+  });
+  it('treats 503/504 and low-level network faults as retryable', () => {
+    expect(isRetryableGithubError({ status: 503 })).toBe(true);
+    expect(isRetryableGithubError({ status: 504 })).toBe(true);
+    expect(isRetryableGithubError({ code: 'ECONNRESET' })).toBe(true);
+    expect(isRetryableGithubError(new Error('fetch failed'))).toBe(true);
+  });
+  it('does NOT retry ordinary 4xx (auth / not-found / rate limit)', () => {
+    expect(isRetryableGithubError({ status: 401, message: '401 Bad credentials' })).toBe(false);
+    expect(isRetryableGithubError({ status: 404 })).toBe(false);
+    expect(isRetryableGithubError({ status: 403, message: 'API rate limit exceeded' })).toBe(false);
+  });
+});
+
+describe('withGithubRetry', () => {
+  it('retries a transient failure and returns the eventual success', async () => {
+    let calls = 0;
+    const out = await withGithubRetry(
+      async () => {
+        calls += 1;
+        if (calls < 3) throw Object.assign(new Error('502 Bad Gateway'), { status: 502 });
+        return 'ok';
+      },
+      { baseDelayMs: 0 },
+    );
+    expect(out).toBe('ok');
+    expect(calls).toBe(3);
+  });
+
+  it('gives up after the retry budget and throws the last transient error', async () => {
+    let calls = 0;
+    const onRetry = vi.fn();
+    await expect(
+      withGithubRetry(
+        async () => {
+          calls += 1;
+          throw Object.assign(new Error('504 Gateway Timeout'), { status: 504 });
+        },
+        { retries: 2, baseDelayMs: 0, onRetry },
+      ),
+    ).rejects.toThrow('504');
+    // 1 initial + 2 retries = 3 attempts; onRetry fires once per retry.
+    expect(calls).toBe(3);
+    expect(onRetry).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT retry a non-transient error — throws on the first attempt', async () => {
+    let calls = 0;
+    await expect(
+      withGithubRetry(
+        async () => {
+          calls += 1;
+          throw Object.assign(new Error('401 Bad credentials'), { status: 401 });
+        },
+        { baseDelayMs: 0 },
+      ),
+    ).rejects.toThrow('401');
+    expect(calls).toBe(1);
   });
 });
 

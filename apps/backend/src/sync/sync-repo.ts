@@ -1,5 +1,4 @@
 import { performance } from 'node:perf_hooks';
-import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/client.js';
 import {
   getGraphqlClientFor,
@@ -7,6 +6,7 @@ import {
   graphqlTolerant,
   isSamlBlock,
   summarizeGraphqlErrors,
+  withGithubRetry,
 } from '../github/client.js';
 import { clearSamlBlock, recordSamlBlock } from './auth-notices.js';
 import { REPO_ACTIVITY_QUERY, type RepoActivityResponse } from '../github/queries.js';
@@ -140,15 +140,30 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       // a private repo the token can't reach, or a token minted before its scope covered checks)
       // doesn't abort the whole sync — the PRs, reviews, comments and review REQUESTS still
       // persist; only CI check detail is dropped (the `ciStatus` rollup, when readable, is kept).
-      const resp: RepoActivityResponse = await graphqlTolerant<RepoActivityResponse>(
-        client,
-        REPO_ACTIVITY_QUERY,
-        { owner, name, cursor },
-        (errors) => {
-          if (isSamlBlock(errors)) samlBlocked = true;
-          log.warn(
-            `sync ${owner}/${name}: partial GraphQL — continuing without forbidden fields${graphqlChecksHint(errors)}. ${summarizeGraphqlErrors(errors)}`,
-          );
+      // Retry the page fetch on a TRANSIENT GitHub fault (a 502/timeout from the edge —
+      // the fat query on a big repo routinely 502s) so one hiccup can't abort the whole
+      // multi-page backfill. Partial-data (forbidden sub-field) responses are handled
+      // inside graphqlTolerant and are NOT retried.
+      const resp: RepoActivityResponse = await withGithubRetry(
+        () =>
+          graphqlTolerant<RepoActivityResponse>(
+            client,
+            REPO_ACTIVITY_QUERY,
+            { owner, name, cursor },
+            (errors) => {
+              if (isSamlBlock(errors)) samlBlocked = true;
+              log.warn(
+                `sync ${owner}/${name}: partial GraphQL — continuing without forbidden fields${graphqlChecksHint(errors)}. ${summarizeGraphqlErrors(errors)}`,
+              );
+            },
+          ),
+        {
+          onRetry: (attempt, delayMs, err) =>
+            log.warn(
+              `sync ${owner}/${name}: transient GitHub error on page ${pages + 1} ` +
+                `(attempt ${attempt}, retrying in ${delayMs}ms): ` +
+                `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+            ),
         },
       );
       graphqlMs += performance.now() - tPage;
@@ -318,10 +333,20 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (repoId !== null) {
+      // UPSERT, not a bare UPDATE. A FIRST backfill that fails has no syncState row yet
+      // (phase 1 runs commitState:false → never inserts; phase 2 inserts only on success),
+      // so an UPDATE would match zero rows and the failure would VANISH — the repo sits
+      // half-loaded, reports status 'idle' with lastSyncError null, and the user just sees
+      // "nothing loaded". Insert-or-update records the error either way, WITHOUT stamping the
+      // sync timestamps (they stay null), so the repo is still treated as never-fully-synced
+      // and gets retried on the next scheduled tick.
       await db
-        .update(syncState)
-        .set({ lastSyncStatus: 'error', lastSyncError: message })
-        .where(eq(syncState.repoId, repoId))
+        .insert(syncState)
+        .values({ repoId, lastSyncStatus: 'error', lastSyncError: message })
+        .onConflictDoUpdate({
+          target: syncState.repoId,
+          set: { lastSyncStatus: 'error', lastSyncError: message },
+        })
         .execute();
     }
     log.error(`sync ${owner}/${name} failed: ${message}`);
