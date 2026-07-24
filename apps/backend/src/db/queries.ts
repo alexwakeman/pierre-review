@@ -148,7 +148,11 @@ import {
 import { getAccountUserId } from '../auth/account.js';
 import { enrichReviewerSuggestions } from '../github/reviewer-suggest.js';
 import { ensureRoutingPrFiles } from '../sync/routing-files.js';
-import { reviewBotKind, reviewBotLogins } from '../sync/bot-detection.js';
+import {
+  matchesAutomatedLoginPattern,
+  reviewBotKind,
+  reviewBotLogins,
+} from '../sync/bot-detection.js';
 import {
   classifyReviewer,
   labelFor as labelForKind,
@@ -6950,7 +6954,7 @@ export async function listDetectedReviewers(
 ): Promise<DetectedReviewersResponse> {
   const generatedAt = new Date().toISOString();
 
-  const [revAuthors, thAuthors] = await Promise.all([
+  const [revAuthors, thAuthors, commentAuthors] = await Promise.all([
     db
       .select({ id: reviews.authorId })
       .from(reviews)
@@ -6963,10 +6967,25 @@ export async function listDetectedReviewers(
       .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
       .where(eq(pullRequests.accountId, accountId))
       .execute(),
+    // Issue-level PR commenters too. A comment-only automated account — e.g. golang's
+    // gopherbot, which posts issue comments but never a formal review or inline thread —
+    // would otherwise be invisible to this list AND to the Settings "Review bots" search
+    // (which filters this population), so it could never be classified. These take the CHEAP
+    // classification path below (no behavioral-evidence query — with no reviews there's none).
+    db
+      .select({ id: prComments.authorId })
+      .from(prComments)
+      .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+      .where(eq(pullRequests.accountId, accountId))
+      .execute(),
   ]);
-  const idSet = new Set<number>();
-  for (const r of revAuthors) if (r.id != null) idSet.add(r.id);
-  for (const r of thAuthors) if (r.id != null) idSet.add(r.id);
+  // Reviewers = submitted a review OR opened an inline thread → the full evidence-based
+  // classification. Comment-only ids join the candidate set but skip that expensive path.
+  const reviewerIds = new Set<number>();
+  for (const r of revAuthors) if (r.id != null) reviewerIds.add(r.id);
+  for (const r of thAuthors) if (r.id != null) reviewerIds.add(r.id);
+  const idSet = new Set<number>(reviewerIds);
+  for (const r of commentAuthors) if (r.id != null) idSet.add(r.id);
   if (idSet.size === 0) return { reviewers: [], generatedAt };
   const ids = [...idSet];
 
@@ -7040,7 +7059,7 @@ export async function listDetectedReviewers(
     if (cached) {
       classification = rowToClassification(cached, u.githubLogin);
       isManualOverride = cached.source === 'manual';
-    } else {
+    } else if (reviewerIds.has(id)) {
       const evidence = await reviewerEvidence(accountId, id);
       classification = await classifyReviewer(
         accountId,
@@ -7052,6 +7071,38 @@ export async function listDetectedReviewers(
         },
         evidence,
       );
+    } else if (
+      // Comment-only account. Skip the behavioral-evidence query (there are no reviews to
+      // score). Still run the CHEAP hard-signal classifier for the few that clearly look
+      // automated (known vendor login / GitHub Bot type / service-account login pattern) so a
+      // comment-only vendor or app bot is still auto-badged; everyone else is a plain human
+      // the search can promote by hand (the manual override is the escape hatch).
+      u.isBot ||
+      u.githubType === 'Bot' ||
+      reviewBotKind(u.githubLogin) != null ||
+      matchesAutomatedLoginPattern(u.githubLogin)
+    ) {
+      classification = await classifyReviewer(
+        accountId,
+        {
+          id: u.id,
+          githubLogin: u.githubLogin,
+          githubType: u.githubType,
+          isBot: u.isBot,
+        },
+        {},
+      );
+    } else {
+      classification = {
+        userId: u.id,
+        login: u.githubLogin,
+        automated: false,
+        kind: null,
+        label: u.githubLogin,
+        confidence: 'low',
+        source: 'fingerprint',
+        reasons: ['commented on PRs but has not submitted a review'],
+      };
     }
     reviewers.push({
       userId: id,
