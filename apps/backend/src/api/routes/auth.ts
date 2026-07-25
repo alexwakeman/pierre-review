@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import type { AuthProvidersResponse } from '@pierre-review/shared';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { config } from '../../config.js';
 import { encryptToken } from '../../auth/crypto.js';
@@ -80,11 +81,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   const defaultProvider: Provider = config.oauthProviderEnabled ? 'oauth' : 'app';
 
   // Which sign-in methods this deployment offers — read by the (signed-out) SignInGate to render
-  // the right button(s). Unauthenticated: it sits under the /api/auth/* auth-gate exemption.
-  app.get('/api/auth/providers', async () => ({
+  // the right button(s), and by the SIGNED-IN Settings "GitHub App" section, which needs the slug
+  // to build the install link (signing in via the App does NOT install it — see
+  // docs/REALTIME-SYNC.md). Unauthenticated: it sits under the /api/auth/* auth-gate exemption.
+  app.get('/api/auth/providers', async (): Promise<AuthProvidersResponse> => ({
     oauth: config.oauthProviderEnabled,
     app: config.appProviderEnabled,
-    // Slug drives the private-repo install link on the gate; only meaningful with the App.
+    // Slug drives the install link on the gate + in Settings; only meaningful with the App.
     appSlug: config.appProviderEnabled ? config.githubAppSlug : '',
   }));
 

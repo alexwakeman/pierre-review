@@ -1,5 +1,6 @@
 import type {
   ActiveReviewsResponse,
+  AuthProvidersResponse,
   AddReviewCommentBody,
   AddReviewCommentResult,
   AddressedCheckResponse,
@@ -354,6 +355,10 @@ export const api = {
     fetch('/api/activity/feed/mark-seen', jsonBody('POST')).then((r) =>
       handle<{ feedLastSeenAt: string }>(r),
     ),
+  // Which GitHub sign-in providers this deployment offers. Read signed-OUT by the SignInGate
+  // and signed-IN by the Settings "GitHub App" section (which needs `appSlug` for the install
+  // link). Exempt from the cloud auth gate, so it resolves in both states.
+  authProviders: () => get<AuthProvidersResponse>('/api/auth/providers'),
   // Cross-org benchmark consent (cloud-only): opt in/out of contributing aggregate weekly
   // review-bot stats. Opting in seeds contributions server-side; opting out deletes them.
   setBenchmarkConsent: (optIn: boolean) =>

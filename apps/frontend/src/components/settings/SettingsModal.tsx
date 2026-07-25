@@ -9,6 +9,7 @@ import { IssueLinksSection } from './IssueLinksSection.js';
 import { BotSection } from './BotSection.js';
 import { AnthropicKeySection } from './AnthropicKeySection.js';
 import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
+import { GithubAppInstallSection } from './GithubAppInstallSection.js';
 
 // User configuration modal, opened from the header avatar menu. Mirrors HelpModal's shell
 // (fixed overlay + role=dialog card + capture-phase Escape so a dismiss doesn't reach the global
@@ -71,6 +72,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
           {/* BYO Anthropic key — advanced AI only (Claude Review + AI Fix). Independent of
               pro_settings (it's a local file store), so it renders above the loading gate. */}
           {(caps.claudeReview || caps.aiFix) && <AnthropicKeySection />}
+          {/* GitHub App install — CORE/free, cloud-only. Signing in via the App does NOT install
+              it, and the install link otherwise lives only on the signed-out SignInGate, so a
+              signed-in user has no other route to it. Self-gates on the App provider being
+              configured; independent of pro_settings, so it sits above the loading gate. */}
+          {isCloud && <GithubAppInstallSection />}
           {/* Cross-org benchmark consent — CORE/free, cloud-only, independent of pro_settings
               (a plain /api/me flag), so it renders above the pro-settings loading gate. */}
           {isCloud && <BenchmarkConsentSection />}

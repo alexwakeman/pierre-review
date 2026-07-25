@@ -1,14 +1,32 @@
 # Real-time sync — research & phased plan
 
-> **Status: Phases 0–2 BUILT.** This is the design for moving pierre-review's sync closer
-> to real-time without increasing GitHub API usage, grounded in the current pipeline (see
-> [SYNC.md](SYNC.md)) and in research on what GitHub actually offers. All three phases are
-> implemented and tested, each **inert / off by default** so nothing changes until opted
-> in: Phase 0 (the shared targeted-sync core) is called only by Phase 1/2; Phase 1 (the
-> GitHub-App webhook receiver) is inert until `GITHUB_APP_WEBHOOK_SECRET` is set and is
-> **additive** to the existing poll; Phase 2 (adaptive polling + conditional probe) is
-> gated behind `SYNC_ADAPTIVE=true`. **Not yet done:** widening `SYNC_CRON` in cloud (the
-> API-cost win) once webhook delivery is proven — a config change, no code.
+> **Status: Phases 0–2 BUILT and LIVE by default in their respective modes** (2026-07-25).
+> This is the design for moving pierre-review's sync closer to real-time without increasing
+> GitHub API usage, grounded in the current pipeline (see [SYNC.md](SYNC.md)) and in
+> research on what GitHub actually offers.
+>
+> **Adaptive polling (Phase 2) is the PRIMARY strategy in BOTH modes** — `syncAdaptive`
+> defaults to `true` everywhere, with the scheduler tick defaulting to `*/1` so the per-repo
+> due-check actually governs cadence. `SYNC_ADAPTIVE=false` restores the fixed-clock re-walk.
+>
+> **Why adaptive rather than webhooks as the default, even in cloud** (decided 2026-07-25):
+> webhooks require the GitHub App to be **installed** on each repo, and installation needs
+> admin rights on that repo. In practice most watched repos are **third-party public repos**
+> nobody on the deployment can install on (of the first production account's 8 repos, 2 —
+> `mrdoob/three.js`, `raspberrypi/…` — are permanently uninstallable). A strategy that only
+> works where you hold admin can't be the baseline. Adaptive needs no cooperation from anyone
+> and is simultaneously *fresher* on active repos and *cheaper* on quiet ones than the fixed
+> clock, so it is the floor everywhere.
+>
+> **Webhooks (Phase 1) stay strictly ADDITIVE on top**, in cloud, for repos that *are*
+> installed: a delivery fires a targeted `syncOnePr` within seconds — better than any poll can
+> do — while adaptive keeps reconciling everything else. They compose safely because both
+> funnel into the idempotent `persistPr`. Phase 1 needs all three of: the secret env var, the
+> seven event subscriptions, AND an installation ([Ops setup](#ops-setup)); a secret alone
+> delivers nothing but the `ping`, which is what kept the receiver silently idle until
+> 2026-07-25.
+>
+> Phase 0 (the shared targeted-sync core) is called only by Phase 1/2.
 
 ## The problem
 
@@ -54,8 +72,15 @@ Feasibility diverges hard along the local/cloud deployment modes (see CLAUDE.md
 |---|---|---|
 | Public endpoint to receive webhooks | ✅ yes | ❌ no (behind NAT) |
 | GitHub App present | ✅ yes (sign-in + install flow) | ❌ n/a |
-| Webhook feasibility | **excellent** — natural fit | **poor as primary** (see below) |
-| Best lever | GitHub-App webhooks | adaptive + conditional polling |
+| Webhook feasibility | **good, but only where installed** | **poor as primary** (see below) |
+| Baseline lever | adaptive + conditional polling | adaptive + conditional polling |
+| Extra lever | GitHub-App webhooks (installed repos) | — |
+
+> **Revised 2026-07-25.** This table originally read "best lever: webhooks" for cloud. In
+> practice the binding constraint isn't feasibility, it's **permission**: an installation needs
+> admin on the repo, so webhooks simply cannot cover third-party public repos — a large share of
+> what people watch. Adaptive polling is therefore the baseline in both modes, with webhooks as
+> an accelerator on the subset that *is* installed.
 
 Local can't be the webhook target: the official `gh webhook forward` CLI extension
 ([docs](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/using-the-github-cli-to-forward-webhooks-for-testing),
@@ -139,20 +164,32 @@ registered in `app.ts` (both modes), exempted from the auth gate in `api/plugins
 `check_run`/`check_suite`. (`installation`/`installation_repositories` optional, for future
 auto-add on install.)
 
-**Ops setup** (once, on the GitHub App — not code):
-1. App settings → **Webhook**: URL = `<APP_BASE_URL>/api/webhooks/github`, set a **secret**,
-   and put that same value in **`GITHUB_APP_WEBHOOK_SECRET`** on the deployment.
-2. Subscribe to the events listed above; ensure the App's **read** permissions cover
-   pull requests, contents, and checks.
-3. The App must be **installed** on a repo for its events to fire there (the private-repo
-   install flow already exists). Public repos watched via the OAuth App only still rely on the
-   periodic poll — which is why Phase 1 is additive.
+<a id="ops-setup"></a>
+**Ops setup** (once, on the GitHub App — not code). **All THREE are required**; any one
+missing means zero deliveries, and the failure is silent:
+1. App settings → **Webhook**: tick **Active**, URL = `<APP_BASE_URL>/api/webhooks/github`,
+   set a **secret**, and put that same value in **`GITHUB_APP_WEBHOOK_SECRET`** on the
+   deployment.
+2. **Permissions & events → Subscribe to events**: tick the seven events listed above and
+   **Save changes**. These default to NONE. A configured-but-unsubscribed App still sends
+   the one-off `ping` on save, which makes "Recent Deliveries" look alive while no real
+   event ever fires — the exact trap hit here on 2026-07-25.
+3. **Install App**: the App must be **installed** on an account/org for its events to fire
+   there. On the Install App page an account showing "Install" (rather than "Configure") is
+   NOT installed. Public repos watched via the OAuth App only still rely on the periodic
+   poll — which is why Phase 1 is additive.
 
-**Backstop decision (deliberate):** Phase 1 does **not** touch the cron — webhooks are layered
-**on top of** the existing 5-min poll, so a webhook-delivery gap can't regress freshness while
-the new path proves out. Widening the cloud cadence (the API-cost win) is a **follow-up** once
-webhook delivery is proven in production: operators set `SYNC_CRON` (e.g. `*/20`) — no code
-change needed. OAuth-only accounts (no install → no webhooks) keep the current cadence.
+**Diagnosing silence.** An unsigned `curl -XPOST <base>/api/webhooks/github` returns `401
+invalid signature` when the secret is configured and `501` when it isn't — so a 401 proves
+the server half is fine and points the finger at steps 2/3. Railway HTTP logs filtered to
+`/api/webhooks/github` show whether GitHub is reaching the deployment at all. Note GitHub's
+delivery list renders timestamps in **your local timezone** while Railway logs are UTC.
+
+**Backstop (deliberate):** webhooks are layered **on top of** the poll, never replacing it —
+a delivery gap, an OAuth-only account (no install → no webhooks), or a repo the App isn't
+installed on all still reconcile on the cron. Once delivery is proven, the API-cost win is
+widening that backstop via the `SYNC_CRON` **env var on the deployment** (no code change;
+cloud's code default stays `*/5`). Target `*/15`.
 
 **Net (once webhooks are configured):** latency → seconds for installed repos; and after the
 backstop is later widened, baseline API usage drops sharply (quiet repos cost 0; a change costs
@@ -165,10 +202,30 @@ backstop is later widened, baseline API usage drops sharply (quiet repos cost 0;
 Local has no public endpoint, so the lever is **adaptive cadence**, made cheap with
 **conditional requests**. Implemented in `sync/adaptive.ts` (+ `sync/adaptive.test.ts`,
 9 tests) + a conditional helper `ghRestGetConditional` in `github/client.ts`, wired into
-`sync/sync-manager.ts`'s `syncAllRepos`. **All gated on `config.syncAdaptive`
-(`SYNC_ADAPTIVE=true`, default off)** — the scheduler loop is byte-unchanged for anyone who
-hasn't opted in. **To enable:** set `SYNC_ADAPTIVE=true` and lower `SYNC_CRON` (e.g. `*/1`)
-so the loop ticks often and the per-repo due-check decides what actually syncs.
+`sync/sync-manager.ts`'s `syncAllRepos`. **All gated on `config.syncAdaptive`, which now
+defaults to `true` in BOTH modes** (see the status note for why cloud isn't webhook-first).
+Because the due-check can only grant a repo a sync when the loop ticks, the `SYNC_CRON`
+**default follows `syncAdaptive`**: `*/1` when adaptive, `*/5` when not. Leaving the tick at
+`*/5` would pin every repo to five minutes and throw away the freshness half of the phase —
+the hot bucket is 120s. `SYNC_ADAPTIVE=false` restores the classic fixed-clock re-walk (and
+the `*/5` default with it); an explicit `SYNC_CRON` always wins — **so a deployment that
+pins `SYNC_CRON=*/5` silently keeps the old cadence even with adaptive on.** Unset it to
+adopt the default.
+
+**In cloud it composes with two existing gates, in this order:** the activity gate skips
+accounts idle > `syncActiveWindowMinutes` first (so an idle tenant costs nothing at all),
+then `isDue` skips not-yet-due repos, then the conditional probe skips unchanged ones. The
+probe uses `getAccessToken(repo.accountId)` — the tenant's own token — so isolation is
+unchanged. Net API usage goes **down** versus the `*/5` full re-walk: a 304 probe is far
+cheaper than a windowed GraphQL walk, and quiet repos back off to 15-minute attempts.
+
+**Two known caveats.** (1) Cadence + ETag state is **per-process in-memory**, so multiple
+replicas each keep their own — they'd probe independently (the pre-existing `running` set has
+the same property, so this is not a new risk, but it does bound horizontal scaling until the
+state moves to the DB). (2) A webhook-driven `syncOnePr` does **not** update the cadence map,
+so the next probe still sees the moved `updatedAt` and walks — correct and idempotent, just
+one redundant walk. Deliberate: sharing state between the two paths couples them for a saving
+that doesn't matter at current volumes.
 
 **Adaptive cadence.** Each tick, `isDue(repoId, now)` skips a repo unless its bucket
 interval has elapsed since the last attempt. The bucket is by recency of the last observed
@@ -204,7 +261,7 @@ opposite of naïvely dropping `SYNC_CRON`.
 
 | Item | Detail |
 |---|---|
-| **Config** (`config.ts`) | `GITHUB_APP_WEBHOOK_SECRET`; `WEBHOOK_DEBOUNCE_MS`; `SYNC_ADAPTIVE=true` + hot/warm/cold interval knobs; cloud backstop cadence. Local `SYNC_CRON` default unchanged for anyone who doesn't opt into adaptive. |
+| **Config** (`config.ts`) | `GITHUB_APP_WEBHOOK_SECRET`; `WEBHOOK_DEBOUNCE_MS`; `SYNC_ADAPTIVE` (defaults `!isCloud`) + hot/warm/cold/floor interval knobs. `SYNC_CRON`'s default keys off `syncAdaptive` (`*/1` vs `*/5`) — the two must move together, so change them in one place. |
 | **Schema** | **None** — Phase 1 routes by `(owner,name)` over existing `repos` rows; Phase 2 keeps cadence + `ETag` state **in-memory** (chosen over a `repos.lastChangeAt` column: lost on restart just means one immediate attempt after boot, harmless). No migration in either phase. |
 | **Isolation** | Targeted sync is `accountId`-scoped via the repo row. No new id-addressed *read* route, so exposure is minimal; still run `verify:isolation`. |
 | **Tests** | signature-verify unit; payload → `enqueuePrSync` routing/fan-out to N accounts; debounce-coalesce; `syncOnePr` idempotency vs a fixture PR; conditional-probe 304-skip. |

@@ -225,7 +225,10 @@ All via env (see `config.ts`); defaults in parentheses.
 | `BACKFILL_DAYS` | `90` | How far back the first full sync reaches. |
 | `FOREGROUND_SYNC_DAYS` | `14` | Two-phase phase-1 window (must be `< BACKFILL_DAYS` to two-phase). |
 | `SYNC_OVERLAP_MINUTES` | `20` | Trailing re-fetch window on incremental syncs. |
-| `SYNC_CRON` | `*/5 * * * *` | Scheduled incremental cadence. |
+| `SYNC_CRON` | `*/1` (`*/5` if adaptive is off) | Scheduler **tick**. Under adaptive polling this is not the per-repo cadence — it's how often the due-check runs; the bucket intervals decide what actually syncs. Setting it explicitly overrides the adaptive default, which keeps the old cadence. |
+| `SYNC_ADAPTIVE` | `true` (both modes) | Adaptive cadence + conditional probe ([REALTIME-SYNC.md](REALTIME-SYNC.md) Phase 2) — the primary strategy everywhere, since webhooks only cover repos the App is installed on. `false` restores the fixed-clock re-walk. |
+| `SYNC_HOT/WARM/COLD_INTERVAL_SEC` | `120` / `300` / `900` | Min seconds between attempts per activity bucket (adaptive only). |
+| `SYNC_FLOOR_INTERVAL_SEC` | `1800` | Force a full re-walk this often even when the probe says unchanged — catches CI-finish / thread-resolve, which never bump `updatedAt`. |
 | `COMMIT_FILE_CONCURRENCY` | `10` | Concurrent commit-file REST fetches per page. |
 | `DISABLE_SCHEDULER` | `false` | Turn the cron loop off (scripts/tests). |
 | `PERSIST_BODIES` | `false` | Store bulky text during sync instead of hydrating on demand. |

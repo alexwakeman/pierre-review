@@ -66,6 +66,23 @@ const isCloud = deploymentMode === 'cloud';
 const rawDbUrl =
   process.env.DATABASE_URL ?? (isCloud ? '' : './data/pierre-review.sqlite');
 
+// ---- Phase 2 real-time sync: adaptive polling (see docs/REALTIME-SYNC.md) ----
+// DEFAULT ON IN BOTH MODES. This is the PRIMARY sync strategy everywhere, because it's the
+// only one that needs no cooperation from the repo's owner: webhooks require the GitHub App
+// to be INSTALLED on each repo, and most watched repos are third-party public ones nobody
+// here can install on. Adaptive works on all of them — cadence by activity bucket, plus a
+// conditional REST probe whose 304 costs no rate limit, so it's both fresher on active repos
+// and cheaper on quiet ones than the fixed-clock re-walk.
+//
+// Webhooks stay strictly ADDITIVE on top (cloud, installed repos only): a delivery fires a
+// targeted syncOnePr in seconds, and adaptive keeps reconciling everything else. The two
+// compose — nothing double-syncs, since both funnel into the idempotent persistPr.
+// `SYNC_ADAPTIVE=false` restores the classic fixed-clock re-walk in either mode.
+// Hoisted above `config` because the syncCron default below keys off it.
+const syncAdaptive = process.env.SYNC_ADAPTIVE
+  ? process.env.SYNC_ADAPTIVE === 'true'
+  : true;
+
 export const config = {
   deploymentMode,
   isCloud,
@@ -101,7 +118,12 @@ export const config = {
   // page). These draw from the REST quota (disjoint from the GraphQL points
   // pool), so a modest pool safely cuts the dominant sync stage.
   commitFileConcurrency: intFromEnv('COMMIT_FILE_CONCURRENCY', 10),
-  syncCron: process.env.SYNC_CRON ?? '*/5 * * * *',
+  // The scheduler TICK, not the per-repo cadence. Under adaptive polling the tick must be
+  // faster than the hot bucket (syncHotIntervalSec, 120s) or the due-check can never grant
+  // it — a */5 tick would pin every repo to 5 min and throw away the freshness half of
+  // Phase 2 — so adaptive defaults the tick to every minute and lets isDue() decide what
+  // actually syncs. Non-adaptive keeps the classic fixed */5 re-walk. SYNC_CRON overrides.
+  syncCron: process.env.SYNC_CRON ?? (syncAdaptive ? '*/1 * * * *' : '*/5 * * * *'),
   syncOverlapMinutes: intFromEnv('SYNC_OVERLAP_MINUTES', 20),
   // Phase 0 real-time sync (see docs/REALTIME-SYNC.md). enqueuePrSync coalesces a burst
   // of change signals for the SAME PR — a push emits push + synchronize + check_run
@@ -110,14 +132,13 @@ export const config = {
   // those land. WEBHOOK_DEBOUNCE_MS overrides.
   webhookDebounceMs: intFromEnv('WEBHOOK_DEBOUNCE_MS', 4000),
 
-  // ---- Phase 2 real-time sync: adaptive polling (see docs/REALTIME-SYNC.md) ----
-  // OFF by default → zero behaviour change. When true, the scheduler's per-repo pass
-  // becomes adaptive: run SYNC_CRON frequently (e.g. */1) but only actually sync a repo
-  // when it's DUE for its activity bucket, and — for incremental syncs — probe a cheap
-  // conditional REST request first, skipping the fat GraphQL walk when nothing changed
-  // (a 304 costs no rate limit). Primarily for local (no webhooks); composes with the
-  // cloud activity-gate. SYNC_ADAPTIVE=true opts in.
-  syncAdaptive: process.env.SYNC_ADAPTIVE === 'true',
+  // Resolved above (default ON in BOTH modes). When on, the scheduler's per-repo pass
+  // becomes adaptive: the tick runs every minute but a repo only syncs when it's DUE for
+  // its activity bucket, and — for incremental syncs — a cheap conditional REST probe runs
+  // first, skipping the fat GraphQL walk when nothing changed (a 304 costs no rate limit).
+  // In cloud it composes with the activity-gate (idle tenants are skipped first) and with
+  // webhooks (which bypass the cadence entirely for installed repos).
+  syncAdaptive,
   // Per-bucket minimum seconds between sync attempts. A repo is "hot" when a PR changed
   // within the last hour, "warm" within 6h, else "cold" (windows are constants in
   // sync/adaptive.ts). Fresher where activity is; backs off when quiet.

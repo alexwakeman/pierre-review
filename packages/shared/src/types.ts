@@ -1259,6 +1259,19 @@ export interface ProCapabilities {
   botTriage: boolean;
 }
 
+// Which GitHub sign-in methods this (cloud) deployment offers — GET /api/auth/providers.
+// Read UNAUTHENTICATED by the SignInGate to render the right button(s), and SIGNED-IN by the
+// Settings "GitHub App" section, which needs `appSlug` to build the install link. The two
+// GitHub App flows are distinct and neither implies the other: /login/oauth/authorize mints a
+// user token (sign-in), while /apps/<slug>/installations/new grants repo access — and ONLY an
+// installation produces webhook deliveries (see docs/REALTIME-SYNC.md).
+export interface AuthProvidersResponse {
+  oauth: boolean;
+  app: boolean;
+  // Empty unless the GitHub App provider is enabled.
+  appSlug: string;
+}
+
 export interface MeResponse {
   user: LocalUser | null;
   counts: MyTurnCounts;

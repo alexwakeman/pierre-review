@@ -224,12 +224,30 @@ Pulls PR activity from GitHub into the DB; fully idempotent. **See
 [docs/SYNC.md](docs/SYNC.md)** for the full pipeline (triggers, two-phase backfill vs
 incremental, fetch loop, cancel, rate limits). In brief:
 
-- **Trigger** (`scheduler.ts`): `node-cron` at `config.syncCron` (default `*/5`) →
+- **Trigger** (`scheduler.ts`): `node-cron` at `config.syncCron` →
   `syncAllRepos()` (off via `config.disableScheduler`); also repo-add + the manual/deep
   `POST /api/repos/:id/sync`. The periodic pass **skips accounts idle >
   `config.syncActiveWindowMinutes`** (default 15; `accounts.lastActiveAt` is stamped on each
   request from a loaded SPA) — a tenant with no open tab stops being re-synced (cloud-only;
   local is always-on).
+- **Adaptive polling is the PRIMARY sync strategy in BOTH modes** (docs/REALTIME-SYNC.md;
+  `config.syncAdaptive` defaults to **`true` everywhere**). The cron is a **tick**, not a
+  cadence — `isDue()` gates each repo by activity bucket (hot <1h→120s, warm <6h→300s,
+  cold→900s), and incremental syncs run a conditional REST probe first (a `304` costs no rate
+  limit), with a 30-min floor forcing a re-walk so CI-finish / thread-resolve (which never
+  bump `updatedAt`) stay fresh. **`syncCron`'s default keys off `syncAdaptive`: `*/1`
+  adaptive, `*/5` not** — a `*/5` tick would pin every repo to 5 min and negate the hot
+  bucket, so the two MUST move together. **Landmine: an explicitly-set `SYNC_CRON` wins**, so
+  a deployment pinning `*/5` silently keeps the old cadence with adaptive on.
+- **Webhooks are ADDITIVE on top, cloud only** (`POST /api/webhooks/github` →
+  `enqueuePrSync`/`syncOnePr`, targeted, seconds). They are NOT the cloud default because an
+  installation needs **admin on the repo** — third-party public repos can never be covered, so
+  adaptive is the floor everywhere. Webhooks need **three** things or they silently deliver
+  nothing: the secret env var, the **event subscriptions** (default NONE), and the App
+  **installed**. Coverage is per **repo**, not per user: the receiver routes by `(owner,name)`
+  across every account watching it, so one install serves every tenant. Signing in via the App
+  (`/login/oauth/authorize`) does **not** install it — Settings' `GithubAppInstallSection` is
+  the in-app path (the SignInGate link is unreachable once signed in).
 - **Plan** (`sync-manager.ts`): never-synced → **full backfill** (`since = now −
   backfillDays`, default 90), run **two-phase** (a fast ~14-day foreground pass, then the
   deep backfill in the background) so the board fills in seconds; else **incremental** from
