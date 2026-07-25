@@ -23,7 +23,15 @@ const DAY = 24 * 60 * 60 * 1000;
 const log = { info() {}, warn() {}, error() {} } as any;
 
 async function seedPr(tag: string, updatedAt: Date): Promise<number> {
-  const { accounts, repos, pullRequests, events, reviewThreads, reviewComments } = schema;
+  const {
+    accounts,
+    repos,
+    pullRequests,
+    events,
+    reviewThreads,
+    reviewComments,
+    ciStatusEvents,
+  } = schema;
   // account 1 exists (migration 0008); one repo per PR keeps the seed simple.
   const [repo] = await db
     .insert(repos)
@@ -77,6 +85,20 @@ async function seedPr(tag: string, updatedAt: Date): Promise<number> {
       createdAt: updatedAt,
     })
     .execute();
+  // REGRESSION: ci_status_events FKs pull_requests with ON DELETE no action, so a pruned
+  // PR that ever recorded a CI transition used to FK-fail the sweep at the PR delete.
+  await db
+    .insert(ciStatusEvents)
+    .values({
+      accountId: 1,
+      repoId: repo.id,
+      prId: pr.id,
+      headSha: `sha_${tag}`,
+      status: 'failure',
+      failingChecks: ['build'],
+      observedAt: updatedAt,
+    })
+    .execute();
   return pr.id;
 }
 
@@ -85,8 +107,9 @@ async function countFor(prId: number): Promise<{
   events: number;
   threads: number;
   comments: number;
+  ciEvents: number;
 }> {
-  const { pullRequests, events, reviewThreads, reviewComments } = schema;
+  const { pullRequests, events, reviewThreads, reviewComments, ciStatusEvents } = schema;
   const c = async (t: any, col: any) =>
     (await db.select().from(t).where(eq(col, prId)).execute()).length;
   return {
@@ -94,6 +117,7 @@ async function countFor(prId: number): Promise<{
     events: await c(events, events.prId),
     threads: await c(reviewThreads, reviewThreads.prId),
     comments: await c(reviewComments, reviewComments.prId),
+    ciEvents: await c(ciStatusEvents, ciStatusEvents.prId),
   };
 }
 
@@ -120,19 +144,26 @@ afterAll(() => closeDb?.());
 describe('pruneOldData', () => {
   it('prunes the old PR + its whole subtree, keeps the recent one', async () => {
     const before = { old: await countFor(oldPrId), recent: await countFor(recentPrId) };
-    expect(before.old).toEqual({ prs: 1, events: 1, threads: 1, comments: 1 });
+    expect(before.old).toEqual({ prs: 1, events: 1, threads: 1, comments: 1, ciEvents: 1 });
 
     const pruned = await pruneOldData(log, 180);
     expect(pruned).toBe(1);
 
     // Old PR + every child gone (FK-safe; no throw).
-    expect(await countFor(oldPrId)).toEqual({ prs: 0, events: 0, threads: 0, comments: 0 });
+    expect(await countFor(oldPrId)).toEqual({
+      prs: 0,
+      events: 0,
+      threads: 0,
+      comments: 0,
+      ciEvents: 0,
+    });
     // Recent PR fully intact.
     expect(await countFor(recentPrId)).toEqual({
       prs: 1,
       events: 1,
       threads: 1,
       comments: 1,
+      ciEvents: 1,
     });
   });
 

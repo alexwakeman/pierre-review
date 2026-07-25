@@ -5838,6 +5838,10 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
 
   await runTransaction(async (tx) => {
     await tx.delete(events).where(eq(events.repoId, id)).execute();
+    // CI status history FKs BOTH repos and pull_requests with ON DELETE no action (see
+    // migrations 0022 / pg 0011), so leaving it would FK-fail the pullRequests delete
+    // below. Keyed by repoId like events (every row is stamped with its PR's repo).
+    await tx.delete(ciStatusEvents).where(eq(ciStatusEvents.repoId, id)).execute();
     if (prIds.length > 0) {
       await tx.delete(reviewComments).where(inArray(reviewComments.prId, prIds)).execute();
       await tx.delete(reviewThreads).where(inArray(reviewThreads.prId, prIds)).execute();

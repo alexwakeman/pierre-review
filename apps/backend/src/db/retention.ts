@@ -21,6 +21,7 @@ import { config } from '../config.js';
 
 const {
   events,
+  ciStatusEvents,
   reviewComments,
   reviewThreads,
   prComments,
@@ -59,6 +60,9 @@ async function deletePrSubtree(
   prIds: number[],
 ): Promise<void> {
   await tx.delete(events).where(inArray(events.prId, prIds)).execute();
+  // CI status history FKs pull_requests with ON DELETE no action (migrations 0022 / pg
+  // 0011) — it MUST go before the pullRequests delete below or the sweep FK-fails.
+  await tx.delete(ciStatusEvents).where(inArray(ciStatusEvents.prId, prIds)).execute();
   await tx.delete(reviewComments).where(inArray(reviewComments.prId, prIds)).execute();
   await tx.delete(reviewThreads).where(inArray(reviewThreads.prId, prIds)).execute();
   await tx.delete(prComments).where(inArray(prComments.prId, prIds)).execute();
