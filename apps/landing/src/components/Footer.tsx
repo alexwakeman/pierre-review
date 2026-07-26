@@ -1,5 +1,8 @@
+import { useCallback } from 'react';
 import { Link } from '../router';
 import { GitHubMark } from './icons';
+import { resetConsent } from '../lib/consent';
+import { analyticsConfigured, revokeAnalytics } from '../lib/analytics';
 
 const COLUMNS: { heading: string; links: { label: string; to: string }[] }[] = [
   {
@@ -38,13 +41,31 @@ const COLUMNS: { heading: string; links: { label: string; to: string }[] }[] = [
       { label: 'Report an issue', to: 'https://github.com/alexwakeman/pierre-review/issues' },
     ],
   },
+  {
+    heading: 'Legal',
+    links: [
+      { label: 'Privacy policy', to: '/privacy' },
+      { label: 'Cookie policy', to: '/cookies' },
+      { label: 'Terms of service', to: '/terms' },
+    ],
+  },
 ];
 
 export default function Footer(): JSX.Element {
+  // GDPR requires withdrawal to be as easy as giving consent, and to be available
+  // from a persistent place — not only on the banner that has already been dismissed.
+  // Clearing the stored choice re-shows the banner (CookieBanner listens for the
+  // consent event). Hidden entirely when no measurement id is configured, since then
+  // there is no consent to withdraw.
+  const changeCookieChoice = useCallback(() => {
+    revokeAnalytics();
+    resetConsent();
+  }, []);
+
   return (
     <footer className="mt-24 border-t border-white/5 bg-white/[0.015]">
       <div className="mx-auto max-w-6xl px-5 py-14 sm:px-6">
-        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-6">
           <div>
             <Link to="/" className="brand-title text-3xl text-gray-200">
               Pierre
@@ -90,9 +111,21 @@ export default function Footer(): JSX.Element {
           <p className="text-xs text-gray-600">
             © 2026 Pierre. Built for sprint situational awareness.
           </p>
-          <p className="text-xs text-gray-600">
-            Best on the desktop today · mobile-ready builds are on the roadmap.
-          </p>
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-gray-600">
+            {analyticsConfigured() && (
+              <>
+                <button
+                  type="button"
+                  onClick={changeCookieChoice}
+                  className="text-gray-500 underline decoration-dotted transition hover:text-gray-300"
+                >
+                  Cookie settings
+                </button>
+                <span aria-hidden>·</span>
+              </>
+            )}
+            <span>Best on the desktop today · mobile-ready builds are on the roadmap.</span>
+          </div>
         </div>
       </div>
     </footer>

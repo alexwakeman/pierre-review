@@ -17,6 +17,7 @@ import {
   dateTime,
   mergeWarning,
   relativeTime,
+  safeExternalUrl,
 } from '../lib/ui.js';
 import { useFilters } from '../store/filters.js';
 import { Avatar } from './CommentCard.js';
@@ -642,7 +643,7 @@ export function ChecksTab({
               {pr.tickets.map((t) => (
                 <a
                   key={t.key}
-                  href={t.url}
+                  href={safeExternalUrl(t.url)}
                   target="_blank"
                   rel="noreferrer noopener"
                   className="inline-flex items-center rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300"

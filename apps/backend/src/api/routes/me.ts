@@ -3,6 +3,8 @@ import type { AiUsageResponse, MeResponse, MyTurnDismissBody } from '@pierre-rev
 import { config } from '../../config.js';
 import { accountToLocalUser, setBenchmarkConsent } from '../../auth/account.js';
 import { aiCreditStatus, monthStartMs } from '../../db/credits.js';
+import { eraseAccountData } from '../../db/erase-account.js';
+import { exportAccountData } from '../../db/export-account.js';
 import { runBenchmarkRollupForAccount } from '../../sync/benchmark-rollup.js';
 import { accountIdOf } from '../plugins/auth.js';
 import {
@@ -41,6 +43,17 @@ const benchmarkConsentSchema = {
     required: ['optIn'],
     additionalProperties: false,
     properties: { optIn: { type: 'boolean' } },
+  },
+};
+
+// Erasure requires the caller to retype their own GitHub login. maxLength bounds the string
+// (every GitHub login is ≤ 39 chars) so the body can't be used to push a large payload.
+const deleteAccountSchema = {
+  body: {
+    type: 'object',
+    required: ['confirmLogin'],
+    additionalProperties: false,
+    properties: { confirmLogin: { type: 'string', minLength: 1, maxLength: 64 } },
   },
 };
 
@@ -122,6 +135,83 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     }
     return { status: 'ok', benchmarkOptIn: optIn };
   });
+
+  // ---- Data-subject rights (UK/EU GDPR Arts. 15, 17, 20; CCPA/CPRA) ----
+  //
+  // Both are SELF-SERVICE by design. A privacy policy that says "email us to be deleted" is a
+  // promise backed by a human remembering to run SQL; these two routes are the promise backed
+  // by code, and they are what the policy at /privacy §9 points at.
+
+  // Access + portability: the whole account as one JSON document. The sealed GitHub token is
+  // excluded (see db/export-account.ts) — an export is a file people email to themselves.
+  app.get('/api/me/export', async (req, reply) => {
+    const accountId = accountIdOf(req);
+    const data = await exportAccountData(accountId);
+    if (!data) {
+      return reply.code(404).send({ error: 'NotFound', message: 'Account not found' });
+    }
+    // Content-Disposition so the browser saves a file rather than rendering a huge JSON blob;
+    // the date in the name makes successive exports distinguishable.
+    const stamp = new Date().toISOString().slice(0, 10);
+    reply.header(
+      'content-disposition',
+      `attachment; filename="pierre-export-${data.account.githubLogin ?? accountId}-${stamp}.json"`,
+    );
+    reply.type('application/json');
+    return data;
+  });
+
+  // Erasure. Irreversible, and deliberately requires the caller to type their own GitHub login
+  // into `confirmLogin` — not as security (the session already proves who they are) but as
+  // INTENT: this destroys every synced repository and cannot be undone, so a mis-click or a
+  // stray fetch must not be sufficient. The cross-origin guard already blocks a foreign page
+  // from issuing it at all.
+  app.delete(
+    '/api/me/account',
+    { schema: deleteAccountSchema },
+    async (req, reply) => {
+      const account = req.account;
+      if (!account) {
+        return reply.code(401).send({ error: 'Unauthorized', message: 'Sign in first.' });
+      }
+      const { confirmLogin } = req.body as { confirmLogin: string };
+      if (
+        !account.githubLogin ||
+        confirmLogin.trim().toLowerCase() !== account.githubLogin.toLowerCase()
+      ) {
+        return reply.code(400).send({
+          error: 'BadRequest',
+          message: 'confirmLogin must match your GitHub username exactly.',
+        });
+      }
+      // A local install is a single implicit account synthesized from `gh api user` at every
+      // startup — deleting it would be recreated seconds later, and the user's actual delete
+      // action is removing the SQLite file. Refuse rather than pretend.
+      if (account.isLocal) {
+        return reply.code(400).send({
+          error: 'BadRequest',
+          message:
+            'This is a local install: there is no hosted account to delete. Remove the ' +
+            'database file (see `pierre --help` for its location) to erase everything.',
+        });
+      }
+
+      req.log.warn({ accountId: account.id }, 'account erasure requested');
+      const result = await eraseAccountData(account.id);
+      req.log.warn(
+        { accountId: account.id, reposDeleted: result.reposDeleted },
+        'account erased',
+      );
+      // Drop the session too, or the browser keeps presenting a cookie for an account that no
+      // longer exists (which resolves to `null` and 401s confusingly).
+      try {
+        req.session.delete();
+      } catch {
+        /* no session plugin in local mode — unreachable here, but harmless */
+      }
+      return { status: 'deleted', reposDeleted: result.reposDeleted };
+    },
+  );
 
   app.get('/api/my-turn', async (req) => getMyTurn(accountIdOf(req)));
 

@@ -18,7 +18,7 @@ import {
   type PrHeadInfo,
 } from '@pierre-review/shared';
 import { ApiError } from '../api/client.js';
-import { relativeTime } from '../lib/ui.js';
+import { relativeTime, safeExternalUrl } from '../lib/ui.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import { useFilters } from '../store/filters.js';
 import {
@@ -523,7 +523,7 @@ function PushedCard({ fix }: { fix: AiFix }): JSX.Element {
           <>
             {' · '}
             <a
-              href={fix.pushedPrUrl}
+              href={safeExternalUrl(fix.pushedPrUrl)}
               target="_blank"
               rel="noreferrer"
               className="underline"
@@ -576,7 +576,7 @@ function FixHistory({
                 <>
                   {' · '}
                   <a
-                    href={h.pushedPrUrl}
+                    href={safeExternalUrl(h.pushedPrUrl)}
                     target="_blank"
                     rel="noreferrer"
                     className="underline"

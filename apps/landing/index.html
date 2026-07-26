@@ -114,24 +114,14 @@
       }
     </script>
 
-    <!-- Brand wordmark font (the "Pierre" title). Loaded NON-render-blocking
-         (media="print" → flipped to "all" on load) so it never holds first paint
-         — iOS Safari otherwise blanks the screen on a cross-origin stylesheet.
+    <!-- Brand wordmark font (the "Pierre" title) is SELF-HOSTED: the @font-face is
+         in src/index.css and the .woff2 ships from src/fonts/. This replaced a
+         cross-origin Google Fonts <link> that (a) disclosed every visitor's IP to
+         Google before any consent was given, and (b) needed an inline
+         onload="this.media='all'" handler — which would have forced
+         script-src 'unsafe-inline' into the CSP. Same-origin + font-display:swap
+         keeps it off the critical path without the inline handler.
          Great Vibes ships a single 400 weight — never bolden it. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap"
-      rel="stylesheet"
-      media="print"
-      onload="this.media='all'"
-    />
-    <noscript>
-      <link
-        href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap"
-        rel="stylesheet"
-      />
-    </noscript>
     <style>
       /* Splash caret blink (matches the in-app HeroWordmark caret) — defined inline
          so the pre-React splash can blink before the bundled CSS loads. */

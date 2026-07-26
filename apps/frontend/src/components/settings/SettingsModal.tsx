@@ -10,6 +10,7 @@ import { BotSection } from './BotSection.js';
 import { AnthropicKeySection } from './AnthropicKeySection.js';
 import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
 import { GithubAppInstallSection } from './GithubAppInstallSection.js';
+import { YourDataSection } from './YourDataSection.js';
 
 // User configuration modal, opened from the header avatar menu. Mirrors HelpModal's shell
 // (fixed overlay + role=dialog card + capture-phase Escape so a dismiss doesn't reach the global
@@ -80,6 +81,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
           {/* Cross-org benchmark consent — CORE/free, cloud-only, independent of pro_settings
               (a plain /api/me flag), so it renders above the pro-settings loading gate. */}
           {isCloud && <BenchmarkConsentSection />}
+          {/* Data-subject rights (export / delete / cookie choice) — CORE/free, cloud-only. This
+              is the self-service machinery the privacy policy at /privacy §9 points at; a local
+              install has no hosted account to erase (the data is the user's own SQLite file), so
+              the backend refuses it there and the section is hidden rather than 400-ing. */}
+          {isCloud && <YourDataSection />}
           {query.isLoading || settings == null ? (
             <p className="py-6 text-center text-xs text-gray-400">
               {query.isError ? 'Settings unavailable.' : 'Loading…'}

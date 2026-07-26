@@ -1648,6 +1648,12 @@ export interface TimelineEvent {
 export interface TimelineResponse {
   prs: TimelinePr[];
   events: TimelineEvent[];
+  /**
+   * Set only when a server-side row cap truncated the result — i.e. the requested window
+   * held more PRs or events than one response may safely materialise. The board is showing
+   * the most RECENT rows; narrow the range to see the rest. Absent in the normal case.
+   */
+  truncated?: true;
 }
 
 export interface CommentDetail {

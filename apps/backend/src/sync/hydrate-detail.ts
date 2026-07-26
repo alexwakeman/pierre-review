@@ -10,8 +10,11 @@
 // row) and, for commits, by sha. The stored local ids, derived thread state, and
 // triage are preserved — only the text fields are filled in.
 //
-// In LOCAL mode config.persistBodies is true, so these functions are no-ops and the
-// detail is returned exactly as read from SQLite (instant, fully offline).
+// NOTE ON MODES — this used to say "in LOCAL mode config.persistBodies is true, so these
+// functions are no-ops", which was WRONG and hid a cost bug. `persistBodies` defaults to
+// FALSE in BOTH modes (config.ts: `process.env.PERSIST_BODIES === 'true'`), so local installs
+// hydrate on every PR open too, spending the user's own `gh` token's rate limit. Only an
+// explicit PERSIST_BODIES=true makes these no-ops. See the hydration cache below.
 import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import type {
@@ -73,7 +76,73 @@ function splitRepoFullName(fullName: string): { owner: string; name: string } {
 // access, network) so callers degrade gracefully to the stored metadata. `samlBlocked` is true
 // when the failure was GitHub's SAML-SSO wall — the token isn't authorized for the repo owner's
 // org — which the callers surface to the SPA (it's an authorization gap, not a bug).
+// ---- Short-TTL hydration cache ----
+// `GET /api/prs/:id` is the hottest read in the app, and because lean storage is the DEFAULT
+// IN BOTH MODES (config.persistBodies is false unless PERSIST_BODIES=true — the module comment
+// above used to claim otherwise), every single call ran PR_DETAIL_QUERY against GitHub. The
+// only cache was the browser's IndexedDB, so nothing server-side stopped one request from
+// becoming one GitHub GraphQL request: a loop over PR ids burned the tenant's 5,000 points/hour
+// in under a minute, after which their sync, repo search and write actions all failed for the
+// rest of the hour (and locally, the burned quota is the user's own `gh` token, so their CLI
+// throttles too).
+//
+// Two cheap defences here, plus a dedicated rate-limit tier on the route:
+//   • a 60s TTL — short enough that "on demand" still means fresh (the whole point of lean
+//     storage), long enough that re-opening a PR, a StrictMode double-render or the SPA's
+//     refetch-on-focus costs nothing;
+//   • an in-flight map — a burst of concurrent opens of the SAME PR shares ONE upstream call
+//     instead of racing N identical ones.
+const HYDRATE_TTL_MS = 60_000;
+// Bounded so a walk over many PRs cannot grow this without limit; well above the number of
+// PRs anyone opens inside one TTL window.
+const HYDRATE_CACHE_MAX = 500;
+
+type HydrateResult = { data: GhPrText | null; samlBlocked: boolean };
+const hydrateCache = new Map<string, { at: number; value: HydrateResult }>();
+const hydrateInFlight = new Map<string, Promise<HydrateResult>>();
+
+/** Cached + coalesced wrapper around fetchGhPrTextUncached. Keyed per ACCOUNT (a token's
+ *  visibility differs per tenant, so one tenant's result must never satisfy another's). */
 async function fetchGhPrText(
+  owner: string,
+  name: string,
+  number: number,
+  accountId: number,
+): Promise<HydrateResult> {
+  const key = `${accountId}:${owner}/${name}#${number}`;
+  const now = Date.now();
+
+  const hit = hydrateCache.get(key);
+  if (hit && now - hit.at < HYDRATE_TTL_MS) return hit.value;
+
+  const pending = hydrateInFlight.get(key);
+  if (pending) return pending;
+
+  const promise = (async () => {
+    try {
+      const value = await fetchGhPrTextUncached(owner, name, number, accountId);
+      // Only cache a SUCCESS: caching a failure would pin a transient error (or a
+      // mid-re-auth SAML block) for a minute, and the failure path is already cheap
+      // because it returns the stored metadata.
+      if (value.data) {
+        if (hydrateCache.size >= HYDRATE_CACHE_MAX) {
+          // Oldest-inserted first (Map preserves insertion order) — a plain FIFO trim is
+          // sufficient here; the TTL does the real work.
+          const oldest = hydrateCache.keys().next().value;
+          if (oldest !== undefined) hydrateCache.delete(oldest);
+        }
+        hydrateCache.set(key, { at: Date.now(), value });
+      }
+      return value;
+    } finally {
+      hydrateInFlight.delete(key);
+    }
+  })();
+  hydrateInFlight.set(key, promise);
+  return promise;
+}
+
+async function fetchGhPrTextUncached(
   owner: string,
   name: string,
   number: number,

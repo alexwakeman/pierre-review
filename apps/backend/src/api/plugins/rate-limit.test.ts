@@ -1,0 +1,135 @@
+// Rate-limit unit tests: the TIER CLASSIFICATION (which bucket a route lands in) and the
+// fixed-window counter. Classification is the part most likely to rot — a new expensive route
+// silently falling into the generous `read` tier is exactly the failure this file exists to
+// catch, and it is invisible at runtime until a bill arrives.
+import { beforeEach, describe, expect, it } from 'vitest';
+import { __testing } from './rate-limit.js';
+
+const { TIERS, tierFor, consume, buckets } = __testing;
+
+/** The tier NAMES a (method, path) resolves to, in order. */
+const tiers = (method: string, path: string): string[] =>
+  tierFor(method, path).map((t) => t.name);
+
+describe('tierFor — AI generation', () => {
+  it('puts the Pro generators in the ai tier (minute AND hour windows)', () => {
+    expect(tiers('POST', '/api/pro/activity/digests/refresh')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/pro/insights/ask')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/pro/sprint-report/refresh')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/pro/prs/12/ai-fix')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/pro/prs/12/addressed/check')).toEqual(['ai', 'ai_hourly']);
+  });
+
+  // Load-bearing: Claude Review kept its PRE-PLUGIN paths for frontend compatibility, so it does
+  // NOT sit under /api/pro/. A classifier that only matched that prefix would leave the single
+  // most expensive route in the product on the 600/min read tier.
+  it('catches the Claude Review routes despite them not being under /api/pro/', () => {
+    expect(tiers('POST', '/api/prs/42/claude-review')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/claude-reviews/7/post')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('PATCH', '/api/claude-findings/3')).toEqual(['ai', 'ai_hourly']);
+  });
+
+  it('treats reads of stored AI results as cheap reads, not generation', () => {
+    expect(tiers('GET', '/api/pro/insights')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/42/claude-review')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/42/claude-review/status')).toEqual(['read']);
+    expect(tiers('GET', '/api/claude-reviews')).toEqual(['read']);
+  });
+
+  it('does not bill cancels or config writes as generation', () => {
+    expect(tiers('POST', '/api/prs/42/claude-review/cancel')).toEqual(['read']);
+    expect(tiers('PUT', '/api/claude-review/key')).toEqual(['read']);
+    expect(tiers('PUT', '/api/claude-review/budget')).toEqual(['read']);
+    expect(tiers('PUT', '/api/pro/settings')).toEqual(['read']);
+  });
+});
+
+describe('tierFor — GitHub quota spenders', () => {
+  it('throttles live repo search separately', () => {
+    expect(tiers('GET', '/api/repos/search')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/repos/suggested')).toEqual(['search', 'read']);
+  });
+
+  it('throttles sync triggers and repo-add (each starts a backfill)', () => {
+    expect(tiers('POST', '/api/repos/5/sync')).toEqual(['sync']);
+    expect(tiers('POST', '/api/repos')).toEqual(['sync']);
+  });
+
+  // GET /api/prs/:id hydrates bodies from GitHub on every call under lean storage (the default
+  // in BOTH modes), so it converts HTTP requests 1:1 into GraphQL requests.
+  it('gives PR/thread detail its own tighter bucket', () => {
+    expect(tiers('GET', '/api/prs/42')).toEqual(['pr_detail', 'read']);
+    expect(tiers('GET', '/api/threads/9')).toEqual(['pr_detail', 'read']);
+    // Sub-routes are DB-only reads — not the hydration path.
+    expect(tiers('GET', '/api/prs/42/bot-behaviour')).toEqual(['read']);
+  });
+
+  it('throttles writes that reach the GitHub API', () => {
+    expect(tiers('POST', '/api/threads/9/reply')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/bot-threads/resolve')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/prs/42/approve')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/prs/42/merge')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/prs/42/resolve-bot-threads')).toEqual(['github_write']);
+  });
+});
+
+describe('tierFor — unauthenticated surface', () => {
+  it('buckets sign-in by itself (it is reachable without a session)', () => {
+    expect(tiers('GET', '/api/auth/login')).toEqual(['auth']);
+    expect(tiers('GET', '/api/auth/callback')).toEqual(['auth']);
+  });
+
+  // Webhooks are legitimately bursty (a busy org pushing), so they get a high ceiling — but not
+  // an absent one, since each delivery can enqueue a sync.
+  it('gives signed webhooks a high but finite ceiling', () => {
+    expect(tiers('POST', '/api/webhooks/github')).toEqual(['webhook']);
+    expect(tiers('POST', '/api/billing/webhook')).toEqual(['webhook']);
+    expect(TIERS.webhook.limit).toBeGreaterThan(TIERS.ai.limit);
+  });
+});
+
+describe('tier limits are ordered sensibly', () => {
+  it('AI is the tightest and read the most generous', () => {
+    expect(TIERS.ai.limit).toBeLessThan(TIERS.search.limit);
+    expect(TIERS.ai.limit).toBeLessThan(TIERS.githubWrite.limit);
+    expect(TIERS.prDetail.limit).toBeLessThan(TIERS.read.limit);
+    expect(TIERS.read.limit).toBeGreaterThan(TIERS.githubWrite.limit);
+  });
+
+  it('the hourly AI window is stricter than 60× the per-minute one', () => {
+    // Otherwise the hour bucket would never bind and the second window would be decoration.
+    expect(TIERS.aiHourly.limit).toBeLessThan(TIERS.ai.limit * 60);
+  });
+});
+
+describe('consume — fixed window', () => {
+  beforeEach(() => buckets.clear());
+
+  const tier = { name: 'test', limit: 3, windowMs: 1000 };
+
+  it('allows up to the limit, then reports the wait', () => {
+    const now = 1_000_000;
+    expect(consume('k', tier, now)).toBeNull();
+    expect(consume('k', tier, now)).toBeNull();
+    expect(consume('k', tier, now)).toBeNull();
+    // Fourth in the same window is refused, with a positive Retry-After.
+    const wait = consume('k', tier, now);
+    expect(wait).not.toBeNull();
+    expect(wait!).toBeGreaterThan(0);
+  });
+
+  it('keys are independent (one account cannot exhaust another)', () => {
+    const now = 1_000_000;
+    for (let i = 0; i < 3; i++) consume('a1', tier, now);
+    expect(consume('a1', tier, now)).not.toBeNull();
+    // A different account still has its full allowance.
+    expect(consume('a2', tier, now)).toBeNull();
+  });
+
+  it('resets once the window has elapsed', () => {
+    const now = 1_000_000;
+    for (let i = 0; i < 3; i++) consume('k', tier, now);
+    expect(consume('k', tier, now)).not.toBeNull();
+    expect(consume('k', tier, now + 1001)).toBeNull();
+  });
+});

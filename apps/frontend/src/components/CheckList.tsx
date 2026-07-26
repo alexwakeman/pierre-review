@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { CheckRun, CiRerunMode } from '@pierre-review/shared';
-import { CHECK_STATE_META } from '../lib/ui.js';
+import { CHECK_STATE_META, safeExternalUrl } from '../lib/ui.js';
 import { api } from '../api/client.js';
 import { useRerunCi, type RerunOutcome } from '../hooks/useCiRerun.js';
 
@@ -67,7 +67,7 @@ export function CheckRow({
   );
   const gitHubLink = check.url ? (
     <a
-      href={check.url}
+      href={safeExternalUrl(check.url)}
       target="_blank"
       rel="noreferrer noopener"
       onClick={(e) => e.stopPropagation()}
@@ -91,7 +91,7 @@ export function CheckRow({
       <li className="text-xs">
         {check.url ? (
           <a
-            href={check.url}
+            href={safeExternalUrl(check.url)}
             target="_blank"
             rel="noreferrer noopener"
             className="block rounded px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800"

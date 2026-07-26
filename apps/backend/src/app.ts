@@ -1,15 +1,22 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import { config } from './config.js';
+import { config, intFromEnv } from './config.js';
 import { registerErrorHandler } from './api/plugins/error-handler.js';
 import {
   registerAccountContext,
   registerAuthGate,
   registerSession,
 } from './api/plugins/auth.js';
+import {
+  corsOriginDelegate,
+  registerCrossOriginGuard,
+  registerHostGuard,
+  registerSecurityHeaders,
+} from './api/plugins/security.js';
+import { registerRateLimit } from './api/plugins/rate-limit.js';
 import { authRoutes } from './api/routes/auth.js';
 import { healthRoutes } from './api/routes/health.js';
 import { repoRoutes } from './api/routes/repos.js';
@@ -35,9 +42,68 @@ export async function buildApp(): Promise<FastifyInstance> {
     // In production (the installed CLI) the per-request "incoming request" /
     // "request completed" lines are pure noise in the user's terminal — silence
     // them while keeping startup + error logs. Dev keeps them for debugging.
-    disableRequestLogging: process.env.NODE_ENV === 'production',
+    //
+    // Via `logController` rather than the top-level `disableRequestLogging`, which
+    // Fastify 5.10 deprecated (FSTDEP023) and removes in 6 — the top-level form logs
+    // a warning on every boot, which for a CLI users run in their own terminal is
+    // exactly the noise this option exists to suppress.
+    logController: new LogController({
+      disableRequestLogging: process.env.NODE_ENV === 'production',
+    }),
+    // CLOUD ONLY. Railway terminates TLS and forwards, so without this every
+    // request's `req.ip` is the proxy's and `req.protocol` is http — which would
+    // collapse the rate limiter's IP fallback into a single shared bucket. It is
+    // deliberately NOT enabled locally: there is no proxy there, so trusting
+    // X-Forwarded-For would let any client choose its own rate-limit key.
+    trustProxy: config.isCloud,
+    // Cap request bodies. Fastify's default is already 1 MiB; pinning it here makes
+    // it an explicit, reviewable decision rather than a framework default, and
+    // 256 KiB is well above the largest legitimate body (a review draft, a settings
+    // object, a webhook delivery) while shrinking the memory a flood can pin.
+    bodyLimit: intFromEnv('BODY_LIMIT_BYTES', 256 * 1024),
+    // Refuse a request whose headers never finish arriving (slowloris) and one whose
+    // body stalls mid-stream. Fastify/Node default both to effectively unbounded.
+    requestTimeout: intFromEnv('REQUEST_TIMEOUT_MS', 60_000),
+    // A route param is an id or a short slug; 200 chars is generous. The default is
+    // 100 but applies per-param, and a long param is a cheap way to stress a router.
+    // Under `routerOptions` because the top-level `maxParamLength` is deprecated in
+    // Fastify 5 (FSTDEP022) and removed in 6 — setting it at the top level logs a
+    // warning on every boot.
+    routerOptions: { maxParamLength: 200 },
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
+      // Redaction is load-bearing, not cosmetic. An `err` from a failed HTTP call can
+      // carry the outgoing request headers — including `Authorization: token gho_…`
+      // for GitHub and `x-api-key: sk-ant-…` for Anthropic — and pino serializes error
+      // objects deeply. Every path below is a place a credential has been observed to
+      // hide in a serialized error or request. `censor` keeps the shape so a redacted
+      // log line is still diagnosable.
+      redact: {
+        paths: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'req.headers["x-hub-signature-256"]',
+          'req.headers["stripe-signature"]',
+          'res.headers["set-cookie"]',
+          'err.config.headers',
+          'err.request.headers',
+          'err.response.headers',
+          'err.headers',
+          'headers.authorization',
+          'headers.cookie',
+          '*.access_token',
+          '*.accessToken',
+          '*.accessTokenEnc',
+          '*.client_secret',
+          '*.clientSecret',
+          '*.apiKey',
+          '*.api_key',
+          '*.token',
+          '*.password',
+          '*.secret',
+        ],
+        censor: '[redacted]',
+      },
       transport:
         process.env.NODE_ENV === 'production'
           ? undefined
@@ -45,52 +111,38 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
   });
 
-  // Cloud only: canonicalise the host and pin HTTPS. Local mode runs on
-  // http://127.0.0.1, where HSTS would wrongly pin localhost to HTTPS and a www
-  // redirect is meaningless — so both are cloud-gated. Registered first so it runs
-  // before everything else (the redirect short-circuits before CORS/routing).
-  if (config.isCloud) {
-    let canonicalHost = '';
-    try {
-      // hostname (not host) so a configured port never enters the comparison.
-      canonicalHost = new URL(config.appBaseUrl).hostname.toLowerCase();
-    } catch {
-      canonicalHost = '';
-    }
+  // Security response headers (CSP per surface, nosniff, frame-deny, referrer,
+  // permissions) plus — cloud only — HSTS and the www → apex canonical 301.
+  // Registered FIRST so the headers ride on every response, including that redirect,
+  // the 404/error bodies and the static assets. See api/plugins/security.ts.
+  registerSecurityHeaders(app);
 
-    app.addHook('onRequest', async (req, reply) => {
-      // HSTS: keep browsers on HTTPS for this domain. Honored only over HTTPS
-      // (Railway terminates TLS); ignored on plain HTTP. `includeSubDomains` also
-      // covers www. No `preload` — it's hard to undo. HSTS_MAX_AGE=0 disables it.
-      if (config.hstsMaxAge > 0) {
-        reply.header(
-          'Strict-Transport-Security',
-          `max-age=${config.hstsMaxAge}; includeSubDomains`,
-        );
-      }
+  // LOCAL only: reject a request whose Host header isn't loopback. The server binds
+  // 127.0.0.1, so nothing on the network can reach it — but a DNS-rebinding attack
+  // makes an attacker-controlled hostname resolve there, at which point their page
+  // becomes same-origin and every origin check above stops helping. A rebound request
+  // still carries the attacker's Host, so this catches it. Stands down if the operator
+  // has deliberately bound a non-loopback HOST.
+  registerHostGuard(app);
 
-      // Canonical host: 301 www.<apex> → <apex> so the OAuth round-trip and the
-      // session cookie stay on a single origin (and crawlers see one canonical
-      // URL). The HSTS header set above still rides on the redirect response.
-      if (canonicalHost) {
-        // Strip any :port from the Host header before comparing hostnames.
-        const host = (req.headers.host ?? '').toLowerCase().split(':')[0] ?? '';
-        if (
-          host !== canonicalHost &&
-          host.replace(/^www\./, '') === canonicalHost
-        ) {
-          return reply.redirect(`${config.appBaseUrl}${req.url}`, 301);
-        }
-      }
-    });
-  }
-
-  // CORS: in cloud mode lock to the app's own origin and allow credentials so the
-  // session cookie rides along; local mode reflects any origin (dev convenience).
+  // CORS: an allowlist in BOTH modes now. Cloud = the deployment's own origin, with
+  // credentials so the session cookie rides along. Local = any LOOPBACK origin on any
+  // port (dev 5173/5174, the demo stack 5273, the packaged CLI on its own port) —
+  // previously this was `origin: true`, which reflected ANY origin. Combined with
+  // local mode having no auth at all (every request resolves to the single local
+  // account), that let any page the developer happened to have open read their whole
+  // synced GitHub dataset with a cross-origin fetch. See security.ts.
   await app.register(cors, {
-    origin: config.isCloud ? [config.appBaseUrl] : true,
+    origin: corsOriginDelegate,
     credentials: config.isCloud,
   });
+
+  // Reject state-changing /api calls that arrive from a foreign origin. NOT redundant
+  // with CORS: CORS only decides whether the attacker's page may READ the response —
+  // a simple cross-origin POST is still delivered and still executes. Belt to
+  // SameSite=Lax's braces in cloud; in local mode it is the only thing standing
+  // between a drive-by page and an authenticated write.
+  registerCrossOriginGuard(app);
 
   // Cloud only: parse the sealed session cookie BEFORE the account-context hook
   // reads it.
@@ -100,6 +152,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   // session's account in cloud mode). Must run after CORS/session and before the
   // route registrations so every handler can read `request.account` / accountIdOf().
   registerAccountContext(app);
+
+  // Rate limiting. AFTER registerAccountContext so buckets key on the account id (the
+  // thing that actually spends money) rather than an IP. Caps the AI-generation,
+  // GitHub-write, sync and search routes — each of which already has a per-run cost
+  // ceiling, but none of which was bounded in FREQUENCY until now. See
+  // api/plugins/rate-limit.ts.
+  registerRateLimit(app);
 
   // Cloud only: 401 unauthenticated /api data routes (after account context).
   if (config.isCloud) registerAuthGate(app);

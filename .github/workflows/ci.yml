@@ -33,6 +33,27 @@ jobs:
 
       - run: pnpm test
 
+      # ---- Dependency vulnerability audit ----
+      # BLOCKING at high. There was no audit step at all before 2026-07-26; the 8 high advisories
+      # that existed then have been cleared (@fastify/static 9→10.1.2 for the path-traversal
+      # route-guard bypass, drizzle-orm 0.38→0.45.2 for the SQL-injection-via-identifiers issue,
+      # fastify→5.10, plus scoped `pnpm.overrides` for the transitive fast-uri / find-my-way /
+      # hono / shell-quote / brace-expansion advisories no direct bump could reach).
+      #
+      # `--prod` scopes it to what actually ships or runs the service; a dev-only tool's advisory
+      # should not block a product PR. `|| true` is deliberately ABSENT — an audit that cannot
+      # fail is a report nobody reads.
+      #
+      # If this fires on something with no fix available, record the decision in
+      # `pnpm.overrides` (or pin the dependency) rather than softening the threshold. Two
+      # advisories are knowingly left below this gate and documented in CLAUDE.md: `uuid`
+      # (moderate — needs v4-with-a-`buf`-argument, which neither node-cron nor vis-data does)
+      # and `body-parser` (low — inside express inside the MCP SDK, which ships in no release
+      # artifact). Both would cost a multi-major forced bump on someone else's dependency for a
+      # code path this app never executes.
+      - name: Dependency audit (high + critical, blocking)
+        run: pnpm audit --audit-level high --prod
+
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
 

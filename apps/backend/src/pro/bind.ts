@@ -29,6 +29,7 @@ import {
 import { fetchActionsJobLog } from '../github/actions-logs.js';
 import { applyAndPush } from '../coding/git-ops.js';
 import { registerRetentionHandler } from '../db/retention.js';
+import { registerAccountErasureHandler } from '../db/erase-account.js';
 import { runPluginMigrations } from './migrate.js';
 import { setProCapabilities } from './contract.js';
 import type { ProContext, ProPlugin } from './contract.js';
@@ -91,6 +92,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
     registerMigrations: (sqliteFolder, pgFolder) =>
       runPluginMigrations(sqliteFolder, pgFolder),
     registerRetention: (handler) => registerRetentionHandler(handler),
+    registerAccountErasure: (handler) => registerAccountErasureHandler(handler),
     llm: {
       complete: cheapComplete,
       detectAuth: () => {

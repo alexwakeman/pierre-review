@@ -9,8 +9,15 @@ release/
 *.sqlite
 *.sqlite-*
 *.db
+# Ignore EVERY .env variant, then re-allow the committed templates. The old list was `.env` +
+# `.env.local` only, which did not match `.env.cloud` / `.env.production` / `.env.cloud.local` —
+# and README.md + docs/LOCAL-CLOUD-TESTING.md walk the reader through filling one of those in
+# with SESSION_SECRET, ENCRYPTION_KEY and the OAuth client secret. One `git add -A` away from
+# publishing them in a public repository.
 .env
-.env.local
+.env.*
+!.env.example
+!.env.cloud.example
 
 # Playwright UI-check screenshots (scripts/ui-harness)
 scripts/.ui-artifacts/

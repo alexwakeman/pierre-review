@@ -12,14 +12,11 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <!-- Brand wordmark font (the "Pierre" title). Loaded from Google Fonts; swap
-         the family here + in .brand-title (index.css) to try another ornate script. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Brand wordmark font (the "Pierre" title) is SELF-HOSTED — the @font-face
+         lives in src/index.css and the .woff2 is bundled from src/fonts/. It is
+         deliberately NOT a Google Fonts <link>: that leaked every viewer's IP to
+         Google on load (breaking local mode's no-phone-home promise) and forced the
+         CSP to allowlist two third-party origins. Swap the family in index.css. -->
   </head>
   <body>
     <div id="root"></div>

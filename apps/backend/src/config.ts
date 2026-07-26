@@ -17,7 +17,10 @@ for (const envPath of [
   }
 }
 
-function intFromEnv(key: string, fallback: number): number {
+// Exported so the Fastify factory (app.ts) can read its own numeric knobs
+// (bodyLimit / requestTimeout) with the same "unset or unparseable ⇒ fallback"
+// semantics as everything in `config`, without a second copy of the parser.
+export function intFromEnv(key: string, fallback: number): number {
   const raw = process.env[key];
   if (!raw) return fallback;
   const n = Number.parseInt(raw, 10);
@@ -355,6 +358,53 @@ export function assertCloudConfig(): void {
     throw new Error(
       'ENCRYPTION_KEY must be 32 bytes as 64 hex chars (generate with `openssl rand -hex 32`).',
     );
+  }
+  // SESSION_SECRET needs the SAME rigour as ENCRYPTION_KEY, and previously got none — it was
+  // only checked for being non-empty. It is not a "secret" in the guessable-password sense:
+  // api/plugins/auth.ts derives the sealing key as sha256(SESSION_SECRET) and hands that to
+  // @fastify/secure-session as a raw `key`, which BYPASSES that library's own 32-byte
+  // minimum and its deliberately-slow crypto_pwhash KDF. A single SHA-256 per candidate makes
+  // a short secret brute-forceable offline, and whoever recovers it can mint a valid
+  // `pierre_session` cookie for accountId = 1..N — i.e. read and write every tenant's data
+  // and spend every tenant's stored GitHub token. That makes it the single highest-value
+  // secret in the deployment, so a weak one must fail the boot, not merely be discouraged.
+  if (Buffer.byteLength(config.sessionSecret, 'utf8') < 32) {
+    throw new Error(
+      'SESSION_SECRET must be at least 32 bytes. It is stretched with a single SHA-256 into ' +
+        'the session sealing key, so a short or guessable value is brute-forceable offline ' +
+        'and lets an attacker forge a session for ANY account. Generate one with ' +
+        '`openssl rand -hex 32`.',
+    );
+  }
+  // Reject the obvious placeholders outright — length alone would pass 'changeme-changeme-…'.
+  const weakSecrets = ['changeme', 'change-me', 'secret', 'password', 'pierre', 'test'];
+  const lowered = config.sessionSecret.toLowerCase();
+  if (weakSecrets.some((w) => lowered.startsWith(w) || lowered === w.repeat(4))) {
+    throw new Error(
+      'SESSION_SECRET looks like a placeholder. Generate a real one: `openssl rand -hex 32`.',
+    );
+  }
+  // A cookie marked `secure` is only sent over HTTPS, and that flag is derived from
+  // APP_BASE_URL's scheme (api/plugins/auth.ts). An https deployment configured with an
+  // http:// base URL therefore ships its session cookie in the clear over the public
+  // internet — a silent, total session-hijack exposure from a one-character typo. Refuse to
+  // boot a non-localhost cloud deployment on plain http.
+  if (!config.appBaseUrl.startsWith('https://')) {
+    const host = (() => {
+      try {
+        return new URL(config.appBaseUrl).hostname;
+      } catch {
+        return '';
+      }
+    })();
+    const isLocalTest = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+    if (!isLocalTest) {
+      throw new Error(
+        `APP_BASE_URL must be https:// in cloud mode (got "${config.appBaseUrl}"). The ` +
+          'session cookie\'s `secure` flag is derived from this scheme, so an http:// value ' +
+          'would send the session cookie unencrypted. Use http:// only for localhost testing.',
+      );
+    }
   }
   // When Pro is cloud-enabled the SUMMARY seam needs its OWN metered credential: there is no
   // ambient logged-in `claude` session on Railway, so without SUMMARY_ANTHROPIC_API_KEY every

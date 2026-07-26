@@ -25,6 +25,9 @@ import {
   isSyncRunning,
   requestSyncCancel,
   runSyncForRepo,
+  manualSyncCooldownMs,
+  apiSyncSlotsExhausted,
+  noteManualSync,
   waitForSyncToStop,
 } from '../../sync/sync-manager.js';
 import {
@@ -432,14 +435,48 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       // ?full=true forces a full backfill (catches CI/thread-resolve changes
       // that don't bump PR.updatedAt and so lag the incremental path).
       const { full } = req.query as { full?: boolean };
-      const started = runSyncForRepo(id, app.log, {
+      const forceFull = full === true;
+
+      // Per-repo cooldown. `runSyncForRepo`'s own guard only refuses a sync already in
+      // flight for this repo — it did not stop a caller re-firing the moment one finished,
+      // so a loop could keep a forced 90-day backfill running permanently and drain the
+      // tenant's GitHub quota (breaking their real sync for the rest of the hour).
+      const waitMs = manualSyncCooldownMs(id, forceFull);
+      if (waitMs > 0) {
+        const retryAfter = Math.ceil(waitMs / 1000);
+        reply.status(429).header('Retry-After', String(retryAfter));
+        return {
+          error: 'TooManyRequests',
+          message: forceFull
+            ? `A deep sync for this repo ran recently — try again in ${retryAfter}s.`
+            : `This repo was synced moments ago — try again in ${retryAfter}s.`,
+          retryAfter,
+        };
+      }
+      // Process-wide cap on API-triggered syncs. The "deep sync everything" action fires one
+      // POST per repo; without this, 100 concurrent GraphQL walks run inside the single
+      // Fastify process and starve every other request (in cloud, every other tenant).
+      if (apiSyncSlotsExhausted()) {
+        reply.status(429).header('Retry-After', '30');
+        return {
+          error: 'TooManyRequests',
+          message: 'Too many syncs are already running — try again shortly.',
+          retryAfter: 30,
+        };
+      }
+
+      // NOTE the `await`: this was previously assigned un-awaited, so `started` was always a
+      // truthy Promise and the 409 below could never fire. `background: true` still returns
+      // as soon as the sync is launched, so awaiting costs nothing.
+      const started = await runSyncForRepo(id, app.log, {
         background: true,
-        forceFull: full === true,
+        forceFull,
       });
       if (!started) {
         reply.status(409);
         return { error: 'Conflict', message: 'A sync is already running for this repo' };
       }
+      noteManualSync(id);
       reply.status(202);
       return { status: 'started' };
     },

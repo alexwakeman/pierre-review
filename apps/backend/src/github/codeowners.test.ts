@@ -58,4 +58,35 @@ describe('globToRegExp — CODEOWNERS pattern matching', () => {
     expect(matches('CODEOWNERS', '.github/CODEOWNERS')).toBe(true);
     expect(matches('CODEOWNERS', 'CODEOWNERS')).toBe(true);
   });
+
+  // ---- ReDoS regression ----
+  // A CODEOWNERS file comes from a repository, so its contents are chosen by whoever owns
+  // that repo — in cloud, anyone who can sign up and add one. Each segment-aligned `**/`
+  // used to compile to its own nullable `(?:.*/)?` group, and N of them in a row gave the
+  // engine 2^N ways to consume the same prefix: `('**/' * 14) + 'zzz.txt'` against a deep
+  // non-matching path froze the (single-threaded) server for every tenant at once.
+  // The compiler now collapses a run of `**/` into one, which is semantically identical.
+  it('collapses a run of `**/` so a hostile pattern cannot backtrack', () => {
+    const evil = `${'**/'.repeat(14)}zzz.txt`;
+    // One nullable group, not fourteen.
+    expect(globToRegExp(evil).source).toBe('^(?:.*\\/)?zzz\\.txt(?:\\/.*)?$');
+
+    // The pathological input (deep path, no match) must fail fast, not hang.
+    const deepMiss = `${Array.from({ length: 30 }, (_, i) => `d${i}`).join('/')}/other.md`;
+    const started = Date.now();
+    expect(globToRegExp(evil).test(deepMiss)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(100);
+  });
+
+  it('collapsing `**/` runs preserves matching semantics', () => {
+    // Collapsed or not, these mean the same thing.
+    expect(matches('**/**/**/zzz.txt', 'a/b/zzz.txt')).toBe(true);
+    expect(matches('**/**/zzz.txt', 'zzz.txt')).toBe(true);
+    expect(matches('**/**/zzz.txt', 'azzz.txt')).toBe(false);
+    expect(matches('src/**/**/*.ts', 'src/a/b/x.ts')).toBe(true);
+  });
+
+  it('rejects an absurdly long pattern instead of compiling it', () => {
+    expect(() => globToRegExp('a'.repeat(600))).toThrow();
+  });
 });

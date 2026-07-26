@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { eq } from 'drizzle-orm';
 import type { LocalUser } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
-import { getGithubToken } from '../github/auth.js';
+import { getGithubTokenAsync } from '../github/auth.js';
 import { decryptToken } from './crypto.js';
 
 // A tenant identity. The non-sensitive view of an `accounts` row (the encrypted
@@ -320,7 +320,11 @@ export async function getAccessToken(accountId: number): Promise<string> {
     .execute();
   const row = rows[0];
   if (!row) throw new Error(`account ${accountId} not found`);
-  if (row.isLocal) return getGithubToken();
+  // The ASYNC form: this runs on request paths (PR-detail hydration, repo search, every write
+  // action), and the synchronous `gh auth token` it used to call blocked the event loop for
+  // 50–300ms per call while forking a child process. Both are now cached with a short TTL and
+  // share one in-flight invocation — see github/auth.ts.
+  if (row.isLocal) return getGithubTokenAsync();
   if (!row.accessTokenEnc) {
     throw new Error(`account ${accountId} has no stored access token (re-auth needed)`);
   }

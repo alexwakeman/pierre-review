@@ -13,7 +13,7 @@ import type { TimelineEvent, TimelinePr, User } from '@pierre-review/shared';
 import { usePr, useThread } from '../../hooks/usePr.js';
 import { useLocalStorage } from '../../hooks/useLocalStorage.js';
 import { useFilters } from '../../store/filters.js';
-import { relativeTime, userLabel } from '../../lib/ui.js';
+import { relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
 import { markerVisual } from './markerTemplate.js';
 import { StateBadge } from '../StateBadge.js';
 import { Markdown } from '../Markdown.js';
@@ -269,7 +269,7 @@ function SingleEvent({
         )}
         {isPrComment && prComment && prDetail && (
           <a
-            href={prComment.url ?? prDetail.githubUrl}
+            href={safeExternalUrl(prComment.url) ?? prDetail.githubUrl}
             target="_blank"
             rel="noreferrer noopener"
             className="text-blue-500 hover:underline"

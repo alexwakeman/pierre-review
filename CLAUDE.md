@@ -55,6 +55,12 @@ One env var — **`DEPLOYMENT_MODE` = `local` (default) | `cloud`** — drives
 | Timeline SPA | `/app` | `/app`, behind the auth gate |
 | Claude Review | allowed (flag) | force-disabled (routes unregistered) |
 | Sessions/OAuth | none | sealed cookie + `/api/auth/*` |
+| CORS | loopback origins only (was `origin:true`) | exactly `APP_BASE_URL` |
+| CSP / HSTS | CSP yes (no 3rd-party origins); HSTS no | CSP + HSTS + www→apex 301 |
+| Host guard | 421 on non-loopback `Host` | n/a (proxied) |
+| Rate limits | on, keyed by the single account | on, keyed by accountId (IP fallback) |
+| Analytics | never loaded | GA4, consent-gated |
+| Account delete/export | export yes; delete 400s (own the DB file) | both self-service |
 
 **Dual-dialect DB (the foundation).** The query layer is written **once**, `await`-based,
 against a PORTABLE async surface:
@@ -356,7 +362,7 @@ file maps to a `client.ts` method.
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/timeline?from&to&repoIds&userIds&types&statuses&reviewStates&excludeBots` | **lean** feed `{prs[],events[]}` — no bodies/diffs. Defaults: 14d, bots shown (toggle in Members). `reviewStates` filters `review_submitted` markers by verdict (approved/changes_requested/commented/dismissed); absent = all, empty = none |
+| `GET /api/timeline?from&to&repoIds&userIds&types&statuses&reviewStates&excludeBots` | **lean** feed `{prs[],events[]}` — no bodies/diffs. The window is CLAMPED to `config.retentionDays` and both selects are ROW-CAPPED (5k PRs / 20k events, newest-first) returning `truncated?: true` — unbounded dates used to materialise the whole retained dataset in one response. Defaults: 14d, bots shown (toggle in Members). `reviewStates` filters `review_submitted` markers by verdict (approved/changes_requested/commented/dismissed); absent = all, empty = none |
 | `GET /api/prs/:id` | full PR detail (threads, reviews, comments, commits, checks, labels) |
 | `POST /api/prs/:id/mark-viewed` (alias `/dismiss`) | record a view (`sha?` defaults to head) → clears new-since badges |
 | `POST /api/prs/:id/resolve-bot-threads {threadIds}` | **bulk-resolve** the review-bot threads a later commit likely addressed → `{resolved,failed,results[]}`. Server RE-DERIVES eligibility (owned + review-bot-originated + `likely_addressed`) ∩ the client's reviewed list, then GitHub-resolves each (shares the `bot-triage/resolve.ts` `resolveThreadsOnGitHub` helper with the scope-wide resolve route); never auto/blind — user-initiated + confirm-gated only. Core |
@@ -374,8 +380,9 @@ file maps to a `client.ts` method.
 | `GET /api/repos/search?q&cursor&limit` | live GitHub repo search → `{results[],hasNextPage,cursor}`; already-watched filtered out, owned/member floated up; `limit` 10 (max 25) |
 | `GET /api/repos/suggested` | **first-run onboarding**: the viewer's recently-active repos (`VIEWER_REPOS_QUERY`: `viewer.repositories` + `repositoriesContributedTo`, PUSHED_AT desc, null-tolerant for scoped cloud tokens), already-added filtered out, `RepoSearchResult` shape, cap 30 → `SuggestedReposResponse`. Drives `FirstRunOnboarding` (the zero-repo Activity console body, hoisted above all rail branches; top 5 pre-checked, sequential adds, one invalidation batch) |
 | `POST /api/repos/:id/sync?full=true` | trigger sync → `202 {status:'started'}`, or `409` if already running |
-| `GET /api/users` (+ isBot updates) | user list / bot flagging |
+| `GET /api/users` | GitHub actor metadata for the Members panel. **Account-SCOPED** (`listUsers(accountId)`): `users` is a global TABLE but the listing only returns actors appearing in the caller's own synced data. (`PATCH /api/users/:id` was DELETED — a global, ownership-free `isBot`/`isBotOverridden` write with no frontend caller; use `PATCH /api/bot-reviewers/:userId`.) |
 | `GET /api/mergers` | per-repo merge-rights map (who's merged there) → the maintainer shield |
+| `GET /api/me/export` · `DELETE /api/me/account` | **data-subject rights** (GDPR Arts. 15/20/17): the whole account as one JSON download (sealed GitHub token excluded) · irreversible erasure, confirm-by-typing-your-login, 400 in local mode. Erasure calls the plugin's `registerAccountErasure` hook — see Security & privacy posture |
 | `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{activityDigest,reviewMemory}`; cloud: 401 signed out) |
 | `GET /api/activity?repoIds&userIds` | **Activity tab** (core, no AI): per repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getActivity`; scoped by the FilterBar repo + member selection (see Activity) |
 | `GET /api/activity/feed?repoIds&userIds&limit&offset&excludeBots&botWindowDays` | **Consolidated Feed** (core, no AI; the Activity "Feed" entry): ONE flat, chronological (newest-first) stream of REAL activity events (opens / merges / reviews / comments, plus **commit-push items that ADDRESSED a review thread** — coalesced per author/PR into runs, affected threads inline via `affectedThreads`/`commitCount`/`changeSummary`; plain pushes excluded). Each item carries **`isMyTurn`** (participation: you authored the PR / are a requested reviewer / previously reviewed-or-commented, AND the actor isn't you) — that flag REPLACES the old two-source (`my_turn` vs `feed`) synthesis + dedup, so there's exactly one row per event. **My Turn / "FYI" is CORE (free, every tier), NOT a Pro capability:** `getConsolidatedFeed` computes `isMyTurn` directly via `feed/my-turn.ts` (no capability gate, no provider seam). `isMyTurn` rows are uncapped; plain activity is capped (`FEED_EVENT_CAP`). `excludeBots=true` drops bot-authored activity. **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, counts, generatedAt}` — **`counts` = server-computed facet counts over the WHOLE post-cap stream** (`ConsolidatedFeedCounts`: myTurn/claude/comments/prEvents/bots/byBotActor/byThreadState via the pure `computeFeedCounts`), so FeedView's pill badges reflect every matching item, not the loaded page (stale IndexedDB responses fall back to page-derived counts). Response also carries **`uncappedTotal?`** (pre-cap post-coalesce stream length) — FeedView's count label renders loaded-of-`total` + a "N most recent of M in window" cap disclosure, never the old visible-of-loaded "50 of 50". **Thread-state pills render on EVERY feed view** (not just botsMode; same semantics: an active state pill hides derivedState-less items). `botWindowDays` (clamped 1–90) widens the **botsOnly** feed window to match the shared `botAnalyticsWindow` selector (normal feed stays 14d); the head poll (`useFeedHasNew`) gets the identical params AND is gated on `!isPlaceholderData` so a window flip can't false-fire the refresh banner. **`includeAllCommits=true`** (the opt-in "**Commits**" pill, OFF by default, `feedShowCommits` transient store toggle) surfaces EVERY commit-push run — not just the thread-addressing ones — via `getCommitThreadItems` dropping its addressed-thread gate (run coalescing kept; a plain run emits empty `affectedThreads` + a "pushed N commits" summary); inert on the `botsOnly` path; threaded into BOTH the feed key and the head-poll key (identical scope). `counts` gained a **`commits`** facet (badges the pill); the **`prEvents`** facet is now READ by FeedView (the PR-events pill finally shows its count). No "seen"/acknowledged concept. |
@@ -890,6 +897,173 @@ which resolves a `CLAUDE_CODE_OAUTH_TOKEN` **or an ambient logged-in `claude` se
 raw SDK alone can't use an ambient session (the common Pro/Max local case), which silently
 broke the digest. Any new core LLM seam must follow this dual-auth pattern.
 
+---
+
+## Security & privacy posture (read before touching app.ts, CORS, or any AI route)
+
+Hardened for public release (2026-07-26). Two new **zero-dependency** core plugins own it —
+deliberately hand-rolled rather than `@fastify/helmet`/`@fastify/rate-limit`, because a new
+runtime dep must also be threaded through the curated release manifest + the pinned lockfile,
+and helmet's default CSP is wrong for this app three ways over.
+
+**`api/plugins/security.ts`** — registered FIRST in `app.ts` so headers ride on every response
+(redirects, 404s, static assets):
+- **CSP per surface**: `/api` → `default-src 'none'`; `/app*` → the SPA policy; else the landing
+  policy. `style-src 'unsafe-inline'` is unavoidable and accepted (React style attrs +
+  vis-timeline positions items by mutating `element.style`); **`script-src` stays strict** — no
+  `'unsafe-inline'`, no `'unsafe-eval'` (verified: no `eval`/`new Function` in vis-timeline /
+  vis-data / vis-util). `img-src https:` is REQUIRED — comment bodies are third-party markdown
+  embedding arbitrary hosts. Google origins enter the CSP **only in cloud**.
+- nosniff, `X-Frame-Options: DENY` + `frame-ancestors 'none'`, `Referrer-Policy:
+  strict-origin-when-cross-origin` (app URLs carry repo/PR ids), `Permissions-Policy`, COOP;
+  `/api` also gets `Cross-Origin-Resource-Policy: same-origin` + `Cache-Control: no-store`.
+  HSTS + the www→apex 301 moved here from `app.ts` (still cloud-gated).
+- **`corsOriginDelegate` — CORS is now an ALLOWLIST IN BOTH MODES.** Local mode was
+  `origin: true` (reflect ANY origin) *and* has no auth (every request resolves to account 1),
+  so **any page the developer had open could read their whole synced GitHub dataset
+  cross-origin and drive their write actions**. That was the audit's one CRITICAL. Local now
+  allows any **loopback** origin on any port (dev 5173/5174, demo 5273, the packaged CLI's own
+  port); cloud allows exactly `config.appBaseUrl`. `ALLOWED_ORIGINS` adds more.
+- **`registerCrossOriginGuard` — NOT redundant with CORS.** CORS only decides whether the
+  attacker's page may READ the response; a simple cross-origin POST is still delivered and still
+  executes. Rejects state-changing `/api` calls whose `Sec-Fetch-Site: cross-site` (falling back
+  to `Origin`); header-less clients (curl/CLI/webhooks) pass, since CSRF needs a browser. Also
+  guards the mutating GET `/api/auth/reconnect`. Exempts the HMAC-authenticated webhook routes.
+- **`registerHostGuard`** (local, loopback binds only) — 421s a non-loopback `Host`, the
+  DNS-rebinding case that survives every origin check. `ALLOWED_HOSTS` opts a named host back in.
+
+**`api/plugins/rate-limit.ts`** — fixed-window buckets keyed by **accountId** (the thing that
+spends money), IP fallback for unauthenticated routes. Registered AFTER `registerAccountContext`.
+Tiers: `ai` 20/min **+ `ai_hourly` 120/h**, `pr_detail` 60/min, `github_write` 60/min, `sync`
+20/min, `search` 60/min, `auth` 30/min, `webhook` 600/min, `read` 600/min. **Landmine: Claude
+Review kept its PRE-plugin paths** (`/api/prs/:id/claude-review*`, `/api/claude-reviews/*`,
+`/api/claude-findings/*`), so `tierFor` matches those EXPLICITLY — a `/api/pro/` prefix test
+would leave the most expensive routes on the 600/min read tier. `RATE_LIMIT_DISABLED=true` is the
+escape hatch; `RATE_LIMIT_<TIER>` tunes a bucket.
+
+**Fastify factory hardening** (`app.ts`): `trustProxy: config.isCloud` (Railway proxies — without
+it the limiter's IP fallback collapses into one bucket; NOT set locally, where it would let a
+client choose its own key), `bodyLimit` 256 KiB, `requestTimeout` 60s,
+`routerOptions.maxParamLength` 200 (top-level is FSTDEP022-deprecated), and a pino **`redact`**
+list — an `err` from a failed HTTP call carries the outgoing `Authorization: token gho_…` /
+`x-api-key: sk-ant-…` headers and pino serializes errors deeply.
+
+**Other fixes worth knowing:**
+- **`error-handler.ts`**: 5xx bodies are GENERIC in cloud (`err.message` on a 500 is whatever
+  Postgres/GitHub/Anthropic said — query fragments, paths, upstream bodies). 4xx stay verbatim
+  (author-written contract text); local passes 5xx through (the operator IS the caller).
+- **`db/queries.ts` `listUsers(accountId)`** — `users` stays GLOBAL storage but the LISTING is
+  account-scoped via 6 correlated subqueries (event actors, PR authors/mergers, requested
+  reviewers, review + comment authors). Unscoped, it handed any tenant every other tenant's
+  synced contributors. **`PATCH /api/users/:id` + `setUserBot` were DELETED** — a global,
+  ownership-free write of the sticky `isBotOverridden` flag, with no frontend caller; bot
+  classification is the account-scoped `PATCH /api/bot-reviewers/:userId`.
+- **`getTimeline`**: window CLAMPED to `config.retentionDays` in the route + hard row caps
+  (`TIMELINE_PR_ROW_CAP` 5k / `TIMELINE_EVENT_ROW_CAP` 20k, newest-first) returning
+  `truncated?: true`. `?from=1970&to=2100` used to materialise the whole retained dataset.
+- **`github/codeowners.ts` ReDoS**: each `**/` compiled to its own nullable `(?:.*/)?`, so
+  `('**/' × 14) + 'zzz.txt'` in a repo-supplied CODEOWNERS froze the single-threaded server for
+  every tenant. Runs of `**/` are now COLLAPSED (semantically identical) + caps on file size,
+  rule count, pattern length and paths matched.
+- **`github/auth.ts`**: `gh auth token` is CACHED (5-min TTL + in-flight coalescing) and has an
+  async form. `getAccessToken` used the SYNC one on every request — 50–300ms of blocked event
+  loop plus a forked process per request.
+- **`sync/hydrate-detail.ts`**: 60s cache + in-flight map. **`persistBodies` is FALSE by default
+  in BOTH modes** (the old module comment claimed otherwise), so every `GET /api/prs/:id` ran
+  `PR_DETAIL_QUERY` against GitHub — a loop over ids drained the tenant's 5k points/hour.
+- **`sync-manager.ts`**: per-repo manual-sync cooldown (`manualSyncCooldownMs`, 5 min forced-full
+  / 30s manual) + `apiSyncSlotsExhausted()` cap (4) → 429 from the route. Also added the missing
+  `await` on `runSyncForRepo` (the 409 branch was dead).
+- **`review/agent.ts`**: **`Bash` REMOVED from `WORKTREE_TOOLS` and denied outright.** A review
+  reads attacker-authored text (title/description/diff/comments); with `bypassPermissions` + a
+  shell that is RCE on the developer's machine via a stranger's PR. The old
+  `Bash(rm *)`-style blocklist was never a boundary. Both review prompts + the AI-Fix prompt
+  gained explicit **untrusted-input / prompt-injection** instructions.
+- **Cross-tenant in-memory state (plugin)**: `getReviewStatus`, `listActiveReviews(accountId)`,
+  `requestReviewCancel(prId, accountId)` and `getFixStatus` all key on prId in PROCESS-GLOBAL
+  maps — they now verify the entry's own `accountId`, and the claude-review SSE stream checks PR
+  ownership BEFORE `reply.hijack()` (the ai-fix pattern). Previously a foreign running PR
+  streamed another tenant's live agent activity (file paths + source snippets).
+- **Slack webhook SSRF (plugin)**: `normalizeSlackWebhookUrl` is an ALLOWLIST
+  (`https://hooks.slack.com/services/…` only, exact host — not `endsWith`), enforced at BOTH the
+  storage and the `fetch` sink, `redirect: 'error'`, and the response body no longer comes back
+  in the error (it was a read primitive against the Railway private network).
+- **`resolution-check` fan-out (plugin)**: `MAX_TARGETS_PER_BATCH` 50 + per-account in-flight set
+  + 30s interval + abort wiring on the JSON twin. One billed LLM call per thread, uncapped, on an
+  app built for bot-flooded PRs.
+- **402 entitlement gate** (`plugins/auth.ts` `isProPath`) now covers the non-`/api/pro/`
+  Claude-Review paths. Latent today (agentic is off in cloud) — real the day it is enabled.
+- **`assertCloudConfig`** now rejects a `SESSION_SECRET` under 32 bytes or a placeholder (it is
+  stretched by a single SHA-256 into the session sealing key, bypassing secure-session's own
+  minimum + its slow KDF, so a weak one is brute-forceable → forge any account's cookie), and a
+  non-https `APP_BASE_URL` (the cookie's `secure` flag derives from that scheme).
+- **SQLite file perms** 0600 + dir 0700 (incl. the `-wal`/`-shm` siblings).
+- **Dockerfile** runs as `USER node`, not root. **CI** gained a **blocking** `pnpm audit
+  --audit-level high --prod`; all 8 highs that existed were cleared (see Dependency posture).
+- **`.gitignore`** is `.env*` + `!*.example` — it was `.env` + `.env.local` only, and the docs
+  tell readers to create `.env.cloud` with `SESSION_SECRET`/`ENCRYPTION_KEY` in it.
+
+**GDPR / privacy.** GA4 is now **consent-gated in BOTH bundles** (`lib/consent.ts` +
+`CookieBanner`, storage key shared so answering on the landing carries into the app): gtag.js is
+never FETCHED before an explicit grant (configuring-but-denying still contacts Google), Consent
+Mode v2 defaults denied, Google Signals + ad personalisation off, withdrawal deletes the `_ga`
+cookies. **The brand font is SELF-HOSTED** (`src/fonts/*.woff2`, relative `url()` so Vite
+base-prefixes it to `/app/`) — the Google Fonts `<link>` leaked every viewer's IP to Google
+(breaking local mode's no-phone-home promise) and forced an inline `onload` handler that would
+have needed `script-src 'unsafe-inline'`. New landing routes **`/privacy`, `/cookies`, `/terms`**
+(+ footer column, sitemap, a terms line on `SignInGate`). Data-subject rights are SELF-SERVICE:
+`GET /api/me/export` (`db/export-account.ts` — explicit column lists; the sealed token is NEVER
+in the output) and `DELETE /api/me/account` (`db/erase-account.ts`, confirm-by-typing-your-login,
+refused in local mode). Erasure reuses `deleteRepo` per repo, then the enumerated account-level
+tables, then calls the **new optional `ctx.registerAccountErasure` seam** so the plugin drops its
+own 14 account-scoped tables (`eraseProByAccountId`). apiVersion stays **13** (purely additive).
+**Landmine: `accountScopedTables()` in `erase-account.ts` is a CHECKLIST the test iterates** — a
+new `accountId`-bearing table that isn't added there fails `erase-account.test.ts` rather than
+silently surviving a deletion the user was told was complete. (It already caught `teamRepos`.)
+
+**Dependency posture (2026-07-26).** The dev tree went from `8 high / 10 moderate / 1 low` to
+`1 moderate / 1 low`, and **the PUBLISHED npm package audits clean — 0 vulnerabilities**. CI now
+BLOCKS on high. (The two are different trees: root `pnpm.overrides` do NOT travel with the
+published manifest, so the release was audited separately as an `npx` user would receive it.) Two of the fixes were live vulnerabilities in
+code this app actually runs, so they are worth knowing:
+- **`@fastify/static` 9.1.3 → ^10.1.2** — route-guard bypass via path traversal + a
+  non-canonical-path authorization bypass. This app serves TWO static roots. v10 needed no code
+  change; verified against the packaged release (SPA index, deep links, hashed assets, the
+  self-hosted font, `/` → 302, JSON 404 on unknown `/api`, and five traversal payloads — no leak).
+- **`drizzle-orm` 0.38.4 → ^0.45.2** — SQL injection via improperly escaped SQL identifiers, in
+  the whole query layer. Also bumped `drizzle-kit` → ^0.31.10, and `fastify` → ^5.10.0.
+  **`packages/pro` declares the same two as devDeps and MUST stay in lockstep**, or the plugin
+  type-checks against a different drizzle than `ctx.db` actually is.
+- Transitives no direct bump reaches are pinned in root `pnpm.overrides`: `fast-uri` ^3.1.4,
+  `find-my-way` ^9.7.0, `hono` ^4.12.32, `@hono/node-server` ^2.0.12, `shell-quote` ^1.9.0
+  (arrived with drizzle 0.45's `gel`), and `brace-expansion@>=3.0.0 <5.0.7` → ^5.0.8 — note the
+  **scoped selector**: a blanket pin would drag 1.x/2.x consumers onto a different major.
+- **`node-cron` 3.0.3 → ^4.6.0** cleared the last advisory from the published package (v3
+  pinned a vulnerable `uuid`). `@types/node-cron` was DROPPED — v4 ships its own typings and the
+  DefinitelyTyped stub is for v3. Only four API surfaces are used (`schedule`, `validate`,
+  `ScheduledTask`, `task.stop()`) and all survive; verified at runtime that `schedule()` still
+  AUTO-STARTS without an explicit `.start()` (the sync loop depends on it) and that `stop()`
+  halts it.
+- **Knowingly left below the gate in the DEV tree only**, neither shipped nor reachable: `uuid`
+  (moderate — via `vis-data`, and the bug needs v3/v5/v6 with a `buf` argument; vis-data calls v4
+  with none) and `body-parser` (low — inside express inside the MCP SDK, an AI dep that ships in
+  no release artifact).
+- **Verification beyond the unit suite** (which runs on SQLite only): a Postgres smoke on a
+  throwaway container exercised `getTimeline` / `getActivity` / `getOpenPrs` / `getMyTurn` /
+  `getMergers` / `listUsers` / `getConsolidatedFeed` / `searchPrs` (raw-`sql` templates) /
+  `resolveScopeRepoIds` / `getTeamMetricsForScope` — 10/10 on drizzle 0.45 + node-postgres, plus
+  pg migrations from empty. **Gotcha found doing it:** `DROP SCHEMA public CASCADE` does NOT
+  reset a pg dev database — drizzle keeps its journal in a separate `drizzle` schema, so the
+  migrator then reports "Migrations applied" having done nothing. Drop both schemas.
+- Fastify 5.10 deprecated the top-level `disableRequestLogging` (FSTDEP023); it moved to
+  `logController: new LogController({...})`. Same class of fix as `routerOptions.maxParamLength`
+  — a boot-time deprecation warning is noise in the terminal of every packaged-CLI user.
+
+**Tests:** `api/plugins/security.test.ts` (15), `api/plugins/rate-limit.test.ts` (15),
+`db/erase-account.test.ts` (8), a codeowners ReDoS regression, and
+`packages/pro/test/slack-webhook-url.test.ts`. **`@pierre/pro` has NO test script or vitest
+devDependency**, so nothing in `packages/pro/test/` runs in CI — pre-existing, worth wiring.
+
 ## Conventions & gotchas
 
 - **ESM module resolution differs per package.** Backend **NodeNext** — relative imports
@@ -917,6 +1091,18 @@ broke the digest. Any new core LLM seam must follow this dual-auth pattern.
   tables). Bump `apiVersion` on any breaking `ProContext` change; `bind.ts` log-and-degrades.
 - **Keep `/api/timeline` lean** — no bodies/diff hunks; fetch detail on demand via
   `/api/prs/:id` (hot path).
+- **A new route that spends money or GitHub quota needs a rate-limit TIER.** Add it to `tierFor`
+  in `api/plugins/rate-limit.ts` (and to `rate-limit.test.ts`) — the default is the generous
+  600/min `read` bucket, which is silently wrong for an LLM call or a GraphQL walk.
+- **A new `accountId`-bearing table must be added to `accountScopedTables()`** in
+  `db/erase-account.ts` (and erased in `eraseAccountData`), or a user's deletion silently leaves
+  it behind. The test iterates that list, so the omission fails CI.
+- **Never put a data-derived URL straight into `href`/`src`.** React renders `javascript:` URLs
+  (it only console-warns), and check-run `details_url` etc. are third-party-supplied — go through
+  `safeExternalUrl()` in `lib/ui.ts`.
+- **Anything an agent reads from a PR is UNTRUSTED input** (title/description/diff/comments are
+  written by whoever opened it). Don't widen an agent's tool surface — `review/agent.ts` denies
+  `Bash` outright, and a per-command blocklist is not a substitute.
 - **Heuristics get fixture tests.** Before changing `derive-thread-state.ts`, add a sample to
   `src/sync/__fixtures__/threads/` (see its README for the JSON shape + how to capture a real
   thread via `gh api`).

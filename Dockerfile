@@ -62,6 +62,19 @@ ENV HOST=0.0.0.0
 # activating Pro in cloud ALSO needs PRO_CLOUD_ENABLED=true + SUMMARY_ANTHROPIC_API_KEY (Railway vars).
 ENV PRO_PLUGIN_PATH=${WITH_PRO:+/app/pro/dist/index.js}
 # Railway injects PORT; the app reads it (default 4000).
-COPY --from=build /app/release ./
+# Owned by the unprivileged `node` user that the base image already ships (uid 1000), so the
+# process cannot rewrite its own code at runtime.
+COPY --from=build --chown=node:node /app/release ./
+
+# Drop root. The container previously ran as uid 0 with no USER directive, which meant any
+# code-execution bug in the app — or in one of its transitive dependencies — executed as root
+# inside the container: free rein over the filesystem, the ability to patch the running app,
+# and a much shorter path out through any kernel/runtime escape. `node:22-bookworm-slim`
+# provides the `node` user for exactly this, and nothing here needs privilege: the app binds
+# 4000 (not a privileged port), writes only to Postgres, and serves static files read-only.
+#
+# NOTE for the local-mode/CLI path: that runs outside Docker as the invoking user, and its
+# SQLite/clone directories live under $HOME — unaffected by this.
+USER node
 EXPOSE 4000
 CMD ["node", "dist/index.js"]

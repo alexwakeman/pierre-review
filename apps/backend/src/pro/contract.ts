@@ -561,6 +561,16 @@ export interface ProContext {
   registerRetention(
     handler: (args: { prIds: number[] }) => Promise<void> | void,
   ): void;
+  // Erasure hook (GDPR Art. 17), the account-scoped twin of registerRetention. Core's
+  // DELETE /api/me/account removes the account and every core-owned row, then calls each
+  // registered handler so the plugin can delete ITS OWN account-scoped tables (pro_settings,
+  // sprint_reports, repo_digests, …). Core can't name them across the open-core boundary, and
+  // an "account deleted" that quietly left them behind would make the privacy policy untrue.
+  // OPTIONAL so a plugin built against an older host still type-checks; apiVersion unchanged
+  // (purely additive — an older plugin simply never registers one).
+  registerAccountErasure?(
+    handler: (args: { accountId: number }) => Promise<void> | void,
+  ): void;
   // The cheap-tier completion seam (review/llm.ts) — so the plugin adds no new
   // Anthropic dependency.
   llm: {

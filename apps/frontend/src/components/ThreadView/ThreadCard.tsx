@@ -6,6 +6,7 @@ import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';
 import { CodeAnchor } from './CodeAnchor.js';
 import { MarkThreadDone } from './MarkThreadDone.js';
+import { safeExternalUrl } from '../../lib/ui.js';
 import { ResolveThread } from './ResolveThread.js';
 import { ReplyComposer } from './ReplyComposer.js';
 import { ThreadAssessment } from './ThreadAssessment.js';
@@ -169,7 +170,7 @@ export function ThreadCard({
         <ReplyComposer prId={thread.prId} threadId={thread.id} />
         <div>
           <a
-            href={thread.url ?? `${prUrl}/files`}
+            href={safeExternalUrl(thread.url) ?? `${prUrl}/files`}
             target="_blank"
             rel="noreferrer noopener"
             className="text-blue-500 hover:underline"

@@ -384,6 +384,43 @@ export function profileUrl(login: string): string {
   return `https://github.com/${encodeURIComponent(login)}`;
 }
 
+/**
+ * Sanitise a URL that came from DATA before putting it in an `href` / `src`.
+ *
+ * React does NOT protect you here. `<a href={someUrl}>` renders whatever string it is given;
+ * for a `javascript:` URL React 18 logs a console warning and then renders it anyway. So a
+ * URL that arrived from GitHub is a script-execution sink one click wide.
+ *
+ * And plenty of these URLs are attacker-influenceable. `checkRuns[].url` is a check run's
+ * `details_url` or a commit status's `target_url` — set by whatever third-party CI app posted
+ * the status on a watched repository. Same class: ticket links derived from a configurable base
+ * URL, and any `html_url` a future GraphQL field returns.
+ *
+ * The consequence is not theoretical: the dashboard origin is also the API origin, so script
+ * running there can drive every write action (post a review, resolve threads, merge) with the
+ * caller's own session — or, in local mode, with no credential needed at all.
+ *
+ * Returns undefined for anything that is not http(s), so `href={safeExternalUrl(u)}` renders a
+ * plain non-navigating anchor rather than a live weapon. Callers that need a fallback can do
+ * `safeExternalUrl(u) ?? pr.githubUrl`.
+ */
+export function safeExternalUrl(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed === '') return undefined;
+  let url: URL;
+  try {
+    // A relative URL is fine and stays relative — base only matters for parsing.
+    url = new URL(trimmed, window.location.origin);
+  } catch {
+    return undefined;
+  }
+  // Allowlist, not blocklist: `javascript:`, `data:`, `vbscript:`, `blob:` and every future
+  // scheme are rejected by default. mailto: is not used in a data-derived href anywhere.
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+  return trimmed;
+}
+
 // Prefill for "replying" to a comment: GitHub issue comments are flat (no native
 // reply threading), so a reply is a new comment that quotes the original as a `> `
 // blockquote and @mentions its author. The user edits from there. Empty bodies

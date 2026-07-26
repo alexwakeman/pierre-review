@@ -24,6 +24,69 @@ export function isDeepSyncActive(): boolean {
   return deepSyncing.size > 0;
 }
 
+// ---- Manual-sync throttling ----
+//
+// `running.has(repoId)` only refuses a sync for the SAME repo that is already going. It did
+// not stop: (a) restarting a repo the instant its sync finished, or (b) starting a forced
+// 90-day backfill on all 100 permitted repos at once. Either turns one authenticated caller
+// into a permanent, N-way GraphQL+REST walk that drains the tenant's GitHub quota (so their
+// real sync silently stalls) and, in cloud, starves every other tenant of event-loop time in
+// the single shared Fastify process.
+//
+// Two bounds, both deliberately outside `runSyncForRepo` so its signature (and its tests)
+// stay as they are: a per-repo cooldown the route checks first, and a cap on how many
+// API-triggered syncs may be in flight at once. The SCHEDULER is exempt from both — it is a
+// sequential loop that already skips `running` repos and is not caller-controlled.
+const manualSyncAt = new Map<number, number>();
+
+// A forced full backfill is the expensive one (90 days, every page, per-commit REST fetches),
+// so it gets the long cooldown. A plain manual sync is an incremental walk — cheap, and users
+// legitimately hit Refresh — so it only needs enough to stop a hammering loop.
+// Read straight from env with a local parser rather than importing config's `intFromEnv`:
+// sync-manager's tests vi.mock('../config.js') wholesale, so importing a second symbol from it
+// would make every one of them fail on a missing mock export.
+const envSec = (key: string, fallback: number): number => {
+  const n = Number.parseInt(process.env[key] ?? '', 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+
+const FULL_SYNC_COOLDOWN_MS = envSec('FULL_SYNC_COOLDOWN_SEC', 5 * 60) * 1000;
+const MANUAL_SYNC_COOLDOWN_MS = envSec('MANUAL_SYNC_COOLDOWN_SEC', 30) * 1000;
+
+// How many API-triggered background syncs may run concurrently across the process. The "deep
+// sync everything" button fires one POST per repo, so this queues them instead of running 100
+// GraphQL walks at once — the work still happens, just not all in the same second.
+const MAX_CONCURRENT_API_SYNCS = envSec('MAX_CONCURRENT_SYNCS', 4);
+
+/**
+ * Milliseconds a caller must wait before manually syncing this repo again, or 0 when it may
+ * go now. Checked by the route so it can answer 429 + Retry-After; `runSyncForRepo` itself is
+ * unchanged so the scheduler and the tests are unaffected.
+ */
+export function manualSyncCooldownMs(repoId: number, forceFull: boolean): number {
+  const last = manualSyncAt.get(repoId);
+  if (last === undefined) return 0;
+  const window = forceFull ? FULL_SYNC_COOLDOWN_MS : MANUAL_SYNC_COOLDOWN_MS;
+  const remaining = window - (Date.now() - last);
+  return remaining > 0 ? remaining : 0;
+}
+
+/** True when too many API-triggered syncs are already in flight (caller should 429). */
+export function apiSyncSlotsExhausted(): boolean {
+  return running.size >= MAX_CONCURRENT_API_SYNCS;
+}
+
+/** Record a manual sync so the cooldown above starts running. Called by the route. */
+export function noteManualSync(repoId: number): void {
+  manualSyncAt.set(repoId, Date.now());
+  // Bounded: a tenant may watch at most MAX_REPOS_PER_ACCOUNT repos, but in cloud this map is
+  // process-wide across all tenants, so drop entries that are past every cooldown window.
+  if (manualSyncAt.size > 5_000) {
+    const cutoff = Date.now() - Math.max(FULL_SYNC_COOLDOWN_MS, MANUAL_SYNC_COOLDOWN_MS);
+    for (const [id, at] of manualSyncAt) if (at < cutoff) manualSyncAt.delete(id);
+  }
+}
+
 // Repos the user has asked to STOP mid-sync. syncRepo polls this between pages
 // (and PRs) and bails out without recording the run as complete, so a cancelled
 // initial backfill leaves the repo "never synced" (the cancel endpoint then

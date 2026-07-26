@@ -15,7 +15,7 @@ import type {
 } from '@pierre-review/shared';
 import type { LearningMatch, ReviewAction } from '@pierre-review/shared';
 import { CLAUDE_REVIEW_MODELS, CLAUDE_REVIEW_MODEL_LABELS } from '@pierre-review/shared';
-import { formatDate, usdToCredits } from '../lib/ui.js';
+import { formatDate, safeExternalUrl, usdToCredits } from '../lib/ui.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import { useReviewLearnings } from '../hooks/useReviewLearnings.js';
@@ -525,7 +525,7 @@ function FindingRow({
             {isPosted &&
               (commentUrl != null ? (
                 <a
-                  href={commentUrl}
+                  href={safeExternalUrl(commentUrl)}
                   target="_blank"
                   rel="noreferrer noopener"
                   className="rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-700 hover:underline dark:text-green-400"
@@ -761,7 +761,7 @@ function FindingRow({
             {isPosted &&
               (commentUrl != null ? (
                 <a
-                  href={commentUrl}
+                  href={safeExternalUrl(commentUrl)}
                   target="_blank"
                   rel="noreferrer noopener"
                   className="text-xs text-green-700 hover:underline dark:text-green-400"

@@ -6,6 +6,7 @@ import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { ACTIVITY_QUERY_KEYS } from '../hooks/useActivity.js';
+import { safeExternalUrl } from '../lib/ui.js';
 import { SUGGESTED_REPOS } from '../lib/suggestedRepos.js';
 import { useFilters } from '../store/filters.js';
 
@@ -457,7 +458,7 @@ export function RepoSearch({
                         in a new tab. stopPropagation keeps it from triggering the
                         row's add (belt-and-suspenders — it's a sibling, not nested). */}
                     <a
-                      href={r.url || `https://github.com/${r.owner}/${r.name}`}
+                      href={safeExternalUrl(r.url) ?? `https://github.com/${r.owner}/${r.name}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={(e) => e.stopPropagation()}

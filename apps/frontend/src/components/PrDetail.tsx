@@ -15,7 +15,14 @@ import { WatchedBadge } from './WatchedBadge.js';
 import { api } from '../api/client.js';
 import { useFilters } from '../store/filters.js';
 import { usePinnedTabs, type PinnedPr } from '../store/pinnedTabs.js';
-import { buildQuotedReply, dateTime, indexUsers, PR_STATE_META, relativeTime } from '../lib/ui.js';
+import {
+  buildQuotedReply,
+  dateTime,
+  indexUsers,
+  PR_STATE_META,
+  relativeTime,
+  safeExternalUrl,
+} from '../lib/ui.js';
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
 import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
@@ -263,7 +270,7 @@ function ActivityList({
                 </button>
                 {r.href && (
                   <a
-                    href={r.href}
+                    href={safeExternalUrl(r.href)}
                     target="_blank"
                     rel="noreferrer noopener"
                     className="text-gray-400 hover:text-blue-500"
@@ -481,7 +488,7 @@ function PrCommentsList({
               )}
               {it.url && (
                 <a
-                  href={it.url}
+                  href={safeExternalUrl(it.url)}
                   target="_blank"
                   rel="noreferrer noopener"
                   className="text-blue-500 hover:underline"

@@ -9,7 +9,7 @@
 // the probe in the cloud-refactor notes). `db` is TYPED as the Postgres drizzle
 // instance so any stray `.get()/.all()/.run()` (better-sqlite3-only) is a compile
 // error; at runtime the better-sqlite3 instance supports that same subset.
-import { mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { config } from '../config.js';
@@ -47,10 +47,25 @@ if (isPg) {
 } else {
   const { default: Database } = await import('better-sqlite3');
   const { drizzle } = await import('drizzle-orm/better-sqlite3');
-  mkdirSync(dirname(config.dbPath), { recursive: true });
+  // Owner-only on the DIRECTORY as well as the file: WAL mode creates two siblings
+  // (`-wal`, `-shm`) that hold the same data and are created by SQLite with the process
+  // umask, so locking down only the main file would leave the write-ahead log readable.
+  mkdirSync(dirname(config.dbPath), { recursive: true, mode: 0o700 });
   sqliteConn = new Database(config.dbPath);
   sqliteConn.pragma('journal_mode = WAL');
   sqliteConn.pragma('foreign_keys = ON');
+  // The local database holds every synced PR body, review comment and GitHub login the user
+  // can see — on a shared or multi-user machine the default 0644 made all of that readable by
+  // any other local account. 0600 it (and the WAL siblings, which the pragma above has just
+  // created). Best-effort: chmod is not meaningful on Windows, and a failure here must never
+  // stop the app from starting.
+  for (const suffix of ['', '-wal', '-shm']) {
+    try {
+      chmodSync(`${config.dbPath}${suffix}`, 0o600);
+    } catch {
+      /* missing sibling (non-WAL platform) or an unsupported filesystem — not fatal */
+    }
+  }
   schemaValue = sqliteSchema as unknown as Schema;
   dbInstance = drizzle(sqliteConn, {
     schema: sqliteSchema,

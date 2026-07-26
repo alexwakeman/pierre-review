@@ -3,6 +3,7 @@ import type { PrFileDiffStatus, ThreadDetail, User } from '@pierre-review/shared
 import { useAddReviewComment } from '../../hooks/usePrWrites.js';
 import { ApiError } from '../../api/client.js';
 import { parsePatch, patchLineCount, type DiffRow } from '../../lib/diff.js';
+import { safeExternalUrl } from '../../lib/ui.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
 
@@ -325,7 +326,7 @@ function InlineCommentBox({
             <>
               {' '}
               <a
-                href={notice.url}
+                href={safeExternalUrl(notice.url)}
                 target="_blank"
                 rel="noreferrer noopener"
                 className="text-blue-500 hover:underline"

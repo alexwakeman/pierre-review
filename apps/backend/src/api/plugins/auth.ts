@@ -116,14 +116,33 @@ export function registerAuthGate(app: FastifyInstance): void {
       });
       return;
     }
-    if (
-      path.startsWith('/api/pro/') &&
-      !req.account.isLocal &&
-      req.account.plan === 'free'
-    ) {
+    if (isProPath(path) && !req.account.isLocal && req.account.plan === 'free') {
       await reply.code(402).send({ error: 'pro required' });
     }
   });
+}
+
+// Which paths the free-plan 402 gate covers.
+//
+// `/api/pro/*` is the convention, but it is NOT the whole surface: when Claude Review moved
+// into the plugin it deliberately KEPT its pre-plugin URLs so the core frontend client did
+// not have to change — `/api/prs/:id/claude-review*`, `/api/claude-reviews/*`,
+// `/api/claude-findings/*`, `/api/claude-review/key|budget`. A prefix test on `/api/pro/`
+// therefore missed the most expensive routes in the product.
+//
+// Today that is latent rather than exploitable, because agentic AI is off in cloud
+// (PRO_ADVANCED_AI_ENABLED unset ⇒ the routes 404 via their own self-gate) — but "latent"
+// here means "the day someone enables the paid agentic tier, every free account gets it",
+// which is precisely the kind of gap that ships. Enumerated explicitly so adding a plugin
+// route outside /api/pro/ is a visible decision.
+function isProPath(path: string): boolean {
+  if (path.startsWith('/api/pro/')) return true;
+  if (path.startsWith('/api/claude-reviews')) return true;
+  if (path.startsWith('/api/claude-findings/')) return true;
+  if (path.startsWith('/api/claude-review/')) return true;
+  // /api/prs/<id>/claude-review, …/status, …/stream, …/cancel
+  if (/^\/api\/prs\/\d+\/claude-review/.test(path)) return true;
+  return false;
 }
 
 // preHandler that rejects unauthenticated requests in cloud mode. A no-op in

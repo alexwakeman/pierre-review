@@ -144,6 +144,34 @@ export function SignInGate(): JSX.Element {
           on that org (an org owner may need to approve). Revoke anytime from your GitHub
           settings.
         </p>
+
+        {/* Notice at the point of collection. Signing in is when this deployment starts
+            processing personal data (identity, an encrypted GitHub token, then the synced
+            repository activity), so it is where the terms must be presented and the privacy
+            notice linked — not buried in a footer the signed-out user never reaches. Plain
+            <a> rather than a router link: these pages are served by the landing app at the
+            origin root, which the SPA does not route. */}
+        <p className="mt-4 text-[11px] leading-relaxed text-gray-500">
+          By signing in you agree to the{' '}
+          <a
+            className="underline decoration-gray-600 underline-offset-2 hover:text-gray-300"
+            href="/terms"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            Terms of Service
+          </a>{' '}
+          and the{' '}
+          <a
+            className="underline decoration-gray-600 underline-offset-2 hover:text-gray-300"
+            href="/privacy"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            Privacy Policy
+          </a>
+          .
+        </p>
       </div>
     </div>
   );

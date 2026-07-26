@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---- brand wordmark font, SELF-HOSTED ---- */
+/* Great Vibes (SIL Open Font License 1.1) is bundled rather than fetched from
+   Google Fonts: a fonts.gstatic.com request discloses every visitor's IP + UA to
+   Google before they have consented to anything, which is exactly the kind of
+   third-party transfer the cookie banner exists to gate. Self-hosting removes the
+   transfer entirely (nothing to consent to) and keeps the CSP at 'self' — see
+   apps/backend/src/api/plugins/security.ts. Latin subset only. */
+@font-face {
+  font-family: 'Great Vibes';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/great-vibes-latin-400.woff2') format('woff2');
+}
+
 :root {
   color-scheme: dark;
 }

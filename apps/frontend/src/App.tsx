@@ -32,6 +32,7 @@ import { useFilters } from './store/filters.js';
 import { usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
 import { ApiError, api } from './api/client.js';
 import { initAnalytics, trackPageView } from './lib/analytics.js';
+import { CookieBanner } from './components/CookieBanner.js';
 
 function useDarkMode(): [boolean, () => void] {
   const [dark, setDark] = useState(
@@ -216,10 +217,11 @@ export default function App(): JSX.Element {
     return () => window.clearInterval(id);
   }, [isCloud]);
 
-  // Google Analytics — CLOUD ONLY. Init once the signed-in cloud app mounts and
-  // record one page view ("someone opened the app"). Gated on isCloud so local
-  // installs never load gtag or phone home (see lib/analytics.ts). No-op until a
-  // VITE_GA_ID is supplied at build time (the same id the landing uses).
+  // Google Analytics — CLOUD ONLY, and CONSENT-GATED. Gated on isCloud so local installs never
+  // load gtag or phone home; `initAnalytics` additionally no-ops without a build-time VITE_GA_ID
+  // AND a stored consent grant, so this call is safe to make unconditionally here (it re-arms
+  // analytics for someone who consented on a previous visit, and does nothing otherwise). The
+  // first-time grant is wired straight from CookieBanner. See lib/analytics.ts + lib/consent.ts.
   useEffect(() => {
     if (!isCloud) return;
     initAnalytics();
@@ -455,6 +457,9 @@ export default function App(): JSX.Element {
         )}
       </main>
       <ClaudeReviewBanner />
+      {/* Analytics consent. Renders only in cloud, only when a GA4 id was configured at build
+          time, and only until the user has chosen — see components/CookieBanner.tsx. */}
+      <CookieBanner enabled={isCloud} />
     </div>
   );
 }

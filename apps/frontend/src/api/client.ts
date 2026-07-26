@@ -257,10 +257,10 @@ export const api = {
 
   listUsers: () => get<User[]>('/api/users'),
   mergers: () => get<MergersResponse>('/api/mergers'),
-  setUserBot: (id: number, isBot: boolean) =>
-    fetch(`/api/users/${id}`, jsonBody('PATCH', { isBot })).then((r) =>
-      handle<User>(r),
-    ),
+  // `setUserBot` was removed with `PATCH /api/users/:id`: it wrote the GLOBAL users row with
+  // no ownership check, so one tenant could permanently reclassify a login for everyone. It
+  // had no caller. Bot classification is `setReviewerClassification` below, which writes the
+  // account-scoped bot_review_classification table.
 
   timeline: (search: string) =>
     get<TimelineResponse>(`/api/timeline${search ? `?${search}` : ''}`),

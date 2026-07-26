@@ -513,25 +513,113 @@ export async function resolveScopeRepoIds(
   return getTeamRepoIds(teamId, accountId);
 }
 
-export async function listUsers(): Promise<User[]> {
+/**
+ * The GitHub actors visible to ONE account.
+ *
+ * `users` is one of the two deliberately GLOBAL tables (the other is `commitFiles`) — a
+ * GitHub login is the same person for everyone, so deduplicating them account-side would be
+ * wrong. But "global row storage" must not mean "global row DISCLOSURE": this used to
+ * `select().from(users)` unscoped, so any tenant could enumerate the login, display name and
+ * avatar of every GitHub user any OTHER tenant had ever synced — including contributors to
+ * private repositories the caller has no access to, which is exactly the shape of leak the
+ * per-account isolation rule exists to prevent.
+ *
+ * Scoping predicate: an actor is visible when they appear anywhere in THIS account's synced
+ * data — as an event actor, a PR author or merger, a requested reviewer, or the author of a
+ * review or comment on one of its PRs. That is a superset of everyone the UI can render and
+ * a subset of the global table, so the Members panel is unchanged for the caller while
+ * another tenant's contributors disappear from it.
+ *
+ * All six branches are correlated SUBQUERIES rather than materialised id arrays: a busy
+ * account has hundreds of thousands of events, and round-tripping those ids through JS to
+ * build an `IN (…)` list would be slower than the leak was dangerous.
+ */
+export async function listUsers(accountId: number): Promise<User[]> {
+  // The account's PRs — the anchor for the child tables, which reach their account via prId.
+  const accountPrIds = db
+    .select({ id: pullRequests.id })
+    .from(pullRequests)
+    .where(eq(pullRequests.accountId, accountId));
+
   const rows = await db
     .select()
     .from(users)
+    .where(
+      or(
+        inArray(
+          users.id,
+          db
+            .selectDistinct({ id: events.actorId })
+            .from(events)
+            .where(and(eq(events.accountId, accountId), isNotNull(events.actorId))),
+        ),
+        inArray(
+          users.id,
+          db
+            .selectDistinct({ id: pullRequests.authorId })
+            .from(pullRequests)
+            .where(
+              and(eq(pullRequests.accountId, accountId), isNotNull(pullRequests.authorId)),
+            ),
+        ),
+        inArray(
+          users.id,
+          db
+            .selectDistinct({ id: pullRequests.mergedById })
+            .from(pullRequests)
+            .where(
+              and(eq(pullRequests.accountId, accountId), isNotNull(pullRequests.mergedById)),
+            ),
+        ),
+        // Requested reviewers who have not acted yet emit no event, so they need their own
+        // branch or they would vanish from the Members panel.
+        inArray(
+          users.id,
+          db
+            .selectDistinct({ id: reviewRequests.userId })
+            .from(reviewRequests)
+            .where(
+              and(
+                inArray(reviewRequests.prId, accountPrIds),
+                isNotNull(reviewRequests.userId),
+              ),
+            ),
+        ),
+        // An empty `commented` review is deliberately suppressed as an event, so review and
+        // comment authors are covered explicitly rather than via `events`.
+        inArray(
+          users.id,
+          db
+            .selectDistinct({ id: reviews.authorId })
+            .from(reviews)
+            .where(and(inArray(reviews.prId, accountPrIds), isNotNull(reviews.authorId))),
+        ),
+        inArray(
+          users.id,
+          db
+            .selectDistinct({ id: prComments.authorId })
+            .from(prComments)
+            .where(
+              and(inArray(prComments.prId, accountPrIds), isNotNull(prComments.authorId)),
+            ),
+        ),
+      ),
+    )
     .orderBy(asc(users.githubLogin))
     .execute();
   return rows.map(mapUser);
 }
 
-export async function setUserBot(id: number, isBot: boolean): Promise<User | null> {
-  const rows = await db
-    .update(users)
-    .set({ isBot, isBotOverridden: true })
-    .where(eq(users.id, id))
-    .returning()
-    .execute();
-  const row = rows[0] ?? null;
-  return row ? mapUser(row) : null;
-}
+// NOTE: `setUserBot` was REMOVED along with `PATCH /api/users/:id`.
+//
+// It wrote `isBot` + the sticky `isBotOverridden` flag to the GLOBAL `users` row with no
+// ownership predicate at all, so any authenticated account could flip any enumerable user id
+// and have that classification apply to EVERY tenant watching that login — permanently,
+// since `isBotOverridden` suppresses later auto-detection. Nothing in the frontend called it
+// (only `listUsers` is used); bot classification is done by the account-scoped
+// `PATCH /api/bot-reviewers/:userId`, which writes the per-account `bot_review_classification`
+// table. Deleting the route was therefore strictly better than adding a predicate to it.
+// If a global override is ever wanted again, it needs to be an operator action, not an API.
 
 export interface TimelineFilters {
   accountId: number;
@@ -560,6 +648,18 @@ export interface TimelineFilters {
   // (an id from another tenant simply matches nothing).
   prIds?: number[] | null;
 }
+
+// ---- Timeline row caps (memory bound, NOT a product limit) ----
+// `/api/timeline` is the one route whose result size is driven purely by client-supplied
+// dates, and both of its selects load whole rows into memory and then into a single JSON
+// body. The route clamps the requested span, but a clamp is not a bound: a tenant watching
+// 100 busy repos can have a legitimately enormous window inside the retention horizon.
+// These caps sit far above any real view (a 14-day default board is orders of magnitude
+// smaller, and the SPA never asks for more than 90 days) and exist so that no single
+// request — or a burst of them — can exhaust the heap of a process that, in cloud, is
+// shared by every tenant. Truncation is surfaced as `truncated` rather than hidden.
+const TIMELINE_PR_ROW_CAP = 5_000;
+const TIMELINE_EVENT_ROW_CAP = 20_000;
 
 // Event types that count as "touching" a PR for the stale filter: code pushes and
 // any human discussion (inline review comments, issue-level comments, reviews).
@@ -863,11 +963,30 @@ export async function getTimeline(
     );
   }
 
-  let prRows = await db
-    .select()
-    .from(pullRequests)
-    .where(and(...prConds))
-    .execute();
+  // Hard row caps. `from`/`to` come from the client, and the route clamps the span — but a
+  // clamp alone is not a memory bound: a tenant with 100 busy repos can legitimately have a
+  // very large retained window, and both of these selects materialise every matching row
+  // into JS objects and then into ONE JSON response. Without a cap, a handful of concurrent
+  // wide-window requests OOM the container — which in cloud is shared by every tenant, so
+  // one authenticated account could take the whole deployment down.
+  //
+  // The caps sit far above any real window (a default 14-day view is orders of magnitude
+  // smaller) and truncation is reported to the client via `truncated` so the UI can say so
+  // rather than silently showing a partial board.
+  //
+  // Ordering matters when truncating: take the MOST RECENT rows, not an arbitrary page.
+  // The pr-scoped path is never capped — a selected PR must never be filtered out.
+  let prRows = prScoped
+    ? await db.select().from(pullRequests).where(and(...prConds)).execute()
+    : await db
+        .select()
+        .from(pullRequests)
+        .where(and(...prConds))
+        .orderBy(desc(pullRequests.updatedAt))
+        .limit(TIMELINE_PR_ROW_CAP + 1)
+        .execute();
+  const prsTruncated = prRows.length > TIMELINE_PR_ROW_CAP;
+  if (prsTruncated) prRows = prRows.slice(0, TIMELINE_PR_ROW_CAP);
 
   // Stale filter: drop open PRs with no activity in the window. Computed before
   // building the lean PRs so their events can be dropped too (below). Skipped when pr-scoped.
@@ -945,12 +1064,20 @@ export async function getTimeline(
     );
   }
 
-  const evRows = await db
+  // Same cap for events. Selected NEWEST-first so a truncation drops the far (oldest) edge
+  // of the window rather than an arbitrary slice, then reversed back to the ascending order
+  // the rest of this function and the SPA both expect.
+  const evRowsDesc = await db
     .select()
     .from(events)
     .where(and(...evConds))
-    .orderBy(asc(events.occurredAt))
+    .orderBy(desc(events.occurredAt))
+    .limit(TIMELINE_EVENT_ROW_CAP + 1)
     .execute();
+  const eventsTruncated = evRowsDesc.length > TIMELINE_EVENT_ROW_CAP;
+  const evRows = (
+    eventsTruncated ? evRowsDesc.slice(0, TIMELINE_EVENT_ROW_CAP) : evRowsDesc
+  ).reverse();
 
   // Batch-load review outcomes for the review_submitted events in view, so
   // markers can show approve/changes/comment without per-marker fetches.
@@ -1007,7 +1134,12 @@ export async function getTimeline(
     };
   });
 
-  return { prs, events: timelineEvents };
+  return {
+    prs,
+    events: timelineEvents,
+    // Only present when a row cap actually bit, so the common case serialises unchanged.
+    ...(prsTruncated || eventsTruncated ? { truncated: true as const } : {}),
+  };
 }
 
 // ---- watched-repo activity Feed (My Turn panel) ----

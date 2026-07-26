@@ -1,4 +1,5 @@
 import type { FastifyError, FastifyInstance } from 'fastify';
+import { config } from '../../config.js';
 
 export interface NotFoundOptions {
   // The built timeline SPA is served (public/index.html present), under /app.
@@ -33,9 +34,26 @@ export function registerErrorHandler(
     if (status >= 500) {
       req.log.error({ err }, 'request failed');
     }
+
+    // 5xx bodies are GENERIC. A 500 is an unhandled throw, so `err.message` is whatever the
+    // failing layer happened to say — and the layers under these routes talk to Postgres,
+    // SQLite, the GitHub GraphQL/REST APIs, Stripe and Anthropic. Their error text routinely
+    // carries query fragments and column names, absolute filesystem paths, connection
+    // strings, and upstream response bodies. None of that helps a caller (there is nothing
+    // they can do about it) and all of it helps an attacker map the internals, so it goes to
+    // the log — which the operator can read, and which redacts credentials — and not to the
+    // wire. 4xx messages are deliberate, author-written text (validation detail, "PR not
+    // found", "already running") and stay as-is, because they are the API's contract.
+    //
+    // In local mode the operator IS the caller, so the real message is passed through: there
+    // is no attacker to withhold it from, and a developer debugging their own instance should
+    // not have to go and read the terminal.
+    const expose = status < 500 || !config.isCloud;
     reply.status(status).send({
-      error: err.name || 'Error',
-      message: err.message,
+      error: expose ? err.name || 'Error' : 'InternalServerError',
+      message: expose
+        ? err.message
+        : 'Something went wrong on our end. The error has been logged.',
     });
   });
 
