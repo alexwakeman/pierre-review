@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from '../router';
 import { useSeo } from '../lib/seo';
+import { seoFor } from '../lib/routes';
 import { Section, Shot, Eyebrow, Pill, Glow, FeatureRow } from '../components/ui';
 import {
   TimelineIcon,
@@ -95,12 +96,7 @@ const SHORTCUTS = [
 ];
 
 export default function Features(): JSX.Element {
-  useSeo({
-    path: '/features',
-    title: 'Open Core — the free multi-repo GitHub dashboard',
-    description:
-      'The free, open-core tier in full: the cross-repo Activity feed, the repo→contributor timeline, per-repo consoles, derived thread states, PR detail with real write actions, and the open-PR strip. Free, forever.',
-  });
+  useSeo(seoFor('/features'));
 
   return (
     <>

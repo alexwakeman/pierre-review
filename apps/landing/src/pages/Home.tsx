@@ -3,6 +3,7 @@ import HeroWordmark from '../components/HeroWordmark';
 import Carousel, { type CarouselSlide } from '../components/Carousel';
 import { Link } from '../router';
 import { useSeo } from '../lib/seo';
+import { seoFor } from '../lib/routes';
 import { Section, SectionHeading, Shot, Eyebrow, Pill, Glow } from '../components/ui';
 import {
   GitHubMark,
@@ -174,12 +175,7 @@ function FlowArrow(): JSX.Element {
 }
 
 export default function Home(): JSX.Element {
-  useSeo({
-    path: '/',
-    title: 'Pierre — the calm layer above your review bot',
-    description:
-      'Bring your own reviewer. Pierre is the cross-repo layer above CodeRabbit, Greptile and Copilot — what’s stalled, whose turn it is, and which of the bot’s comments a human still needs to read.',
-  });
+  useSeo(seoFor('/'));
 
   return (
     <>

@@ -265,10 +265,28 @@ const mustExist = [
   'public/index.html',
   'public-landing/index.html',
 ];
+// Every landing route must ship as its own PRERENDERED page (apps/landing/
+// prerender.mjs). This is a guardrail against a silent regression: if prerendering
+// breaks, the site still looks perfect in a browser — JavaScript fills it in — and
+// the only visible symptom is that crawlers, link unfurlers, AI agents and no-JS
+// visitors go back to receiving an empty shell on every URL. That is exactly the
+// class of bug nobody notices for months, so it fails the build instead.
+for (const route of ['features', 'pro', 'pricing', 'how-it-works', 'privacy', 'cookies', 'terms']) {
+  mustExist.push(`public-landing/${route}/index.html`);
+}
 // The cloud image must actually contain the plugin entry it points PRO_PLUGIN_PATH at.
 if (withPro) mustExist.push('pro/dist/index.js');
 for (const rel of mustExist) {
   if (!existsSync(join(releaseDir, rel))) fail(`missing required file: ${rel}`);
+}
+
+// …and they must contain real content, not just exist. A prerender that renders an
+// empty tree writes a well-formed file of the right name.
+for (const rel of ['public-landing/index.html', 'public-landing/pricing/index.html']) {
+  const html = readFileSync(join(releaseDir, rel), 'utf8');
+  if (html.length < 8000 || !html.includes('<h1')) {
+    fail(`${rel} looks unrendered (${html.length} bytes) — prerendering produced an empty shell`);
+  }
 }
 
 // No .ts files anywhere under release/.

@@ -1,11 +1,16 @@
 import { useEffect } from 'react';
+import { OG_IMAGE, SITE_URL } from './routes';
 
-// Per-route document head management. The SPA is client-rendered, so each page
-// sets its own <title>, description, canonical and Open Graph tags on mount;
-// Googlebot renders JS and reads them. Home-page defaults live in index.html.
+// Per-route document head management for the CLIENT-rendered pass.
+//
+// The static HTML already carries the correct head for the requested route —
+// prerender.mjs bakes it in at build time from the same ROUTE_SEO table these
+// pages read (lib/routes.ts) — so this hook is no longer what a crawler depends
+// on. It exists for the SPA navigations that follow: a client-side route change
+// never reloads the document, so the title/canonical/og tags have to be rewritten
+// in place. Prerender covers the first paint, this covers every hop after it.
 
-export const SITE_URL = 'https://pierre-review.com';
-const OG_IMAGE = `${SITE_URL}/og-image.png`;
+export { SITE_URL };
 
 type Seo = {
   title: string;

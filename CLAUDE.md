@@ -161,6 +161,8 @@ pierre-review/
 │  │     ├─ components/        Timeline/, Activity/ (rail + FeedView + open-PR list + collapsible digest cards), PrDetail, ChecksTab, ThreadList/, ThreadView/, PinnedTabsBar, …
 │  │     └─ lib/ui.ts          shared UI metadata (state colors/labels/shapes) + helpers
 │  └─ landing/                 @pierre-review/landing — public marketing page (cloud, served at `/`); no shared runtime code
+│                              PRERENDERED per route at build time (prerender.mjs + src/entry-server.tsx,
+│                              SEO copy in src/lib/routes.ts) so non-JS clients / AI agents get real HTML
 └─ packages/
    ├─ shared/                 @pierre-review/shared — types ONLY, the contract between the apps (src/types.ts)
    └─ pro/                    @pierre/pro — PRIVATE git submodule (alexwakeman/pierre-pro), runtime-imported plugin (per-repo
@@ -1145,6 +1147,36 @@ from here**; let CI (or the user) do it.
 tree**, so `pnpm dev`'s Vite proxy is unchanged). All routing is the **single**
 `setNotFoundHandler` (`api/plugins/error-handler.ts`): unknown `/api` → JSON 404; `/app*`
 → SPA; `/` + other → landing (cloud) or 302 `/app` (local). SPA built `base:'/app/'`.
+
+**The landing is PRERENDERED at build time** (`apps/landing/prerender.mjs`, chained after
+`vite build`). It used to be a pure CSR SPA: every URL returned the same ~7.8 KB shell whose
+whole `<body>` was an empty `#root` + a splash caret, so anything that doesn't execute JS —
+an AI agent, a link unfurler, a text browser, a crawler on a render budget — saw a site with
+no content and no way to tell `/pricing` from `/privacy`. Now a Vite **SSR build** of
+`src/entry-server.tsx` renders each route through `renderToStaticMarkup` into
+`dist/<route>/index.html` (21–70 KB of real content), with that route's own
+title/description/**canonical** baked in. Load-bearing details:
+- **`src/lib/routes.ts` is the ONE source of truth** for per-route SEO copy — read by the
+  pages' `useSeo()` (which now only matters for client-side hops) AND by the prerenderer, so
+  the static head and the hydrated head cannot drift.
+- **`index.html` carries `<!-- seo:start/end -->` + `<!-- app:start/end -->` markers**; the
+  prerenderer replaces those regions and **throws if they're missing**. Deleting them silently
+  reverts the whole site to a contentless shell.
+- **`createRoot`, NOT `hydrateRoot`** — several components deliberately differ between the
+  static and browser trees (`HeroWordmark` starts resolved so crawlers see "Pierre" not the
+  mid-animation "PR"; `CookieBanner` renders nothing until it has read `localStorage`). A
+  fresh client render reaches the same end state with no mismatch failure mode.
+- **`router.setStaticPath()`** pins `currentPath()` per render — without it every route
+  prerenders as the home page.
+- Serving: `@fastify/static` (`wildcard: false`) already answers `/pricing/` from its
+  directory-index scan; **`/pricing` (the canonical form) falls through to the not-found
+  handler**, which resolves it against a Set of routes scanned **once at boot** — so a URL can
+  only ever select an entry found on disk and no request path is ever joined onto a filesystem
+  root. Legacy `/insights` + `/reviews` get a copy of `/pro`'s HTML (canonical → `/pro`).
+- **Guardrails, because the failure is SILENT** (a broken prerender still looks perfect in a
+  browser): `prerender.mjs` asserts 8 routes and a per-page floor, `build-release.mjs` asserts
+  each `public-landing/<route>/index.html` exists and contains real content, and
+  `api/plugins/landing-routes.test.ts` covers the routing + traversal.
 
 **CLI** (`cli.ts` → `dist/cli.js`): the **`pierre status` subcommand** (peeled off argv
 BEFORE `parseArgs`, whose default case rejects bare tokens) renders the cross-repo My-Turn

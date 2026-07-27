@@ -9,6 +9,16 @@ import { useLightbox } from './Lightbox';
 /** A macOS-style window frame around a product screenshot. Fully responsive, and
  *  clickable — tapping it opens the shot in the full-screen Lightbox (unless
  *  `zoomable={false}`). */
+// React 18's DOM runtime does not recognise the camelCase `fetchPriority` prop —
+// only React 19 added it — so passing it drops the attribute entirely and logs a
+// warning, meaning the priority hint has never actually reached the browser.
+// `@types/react` 18.3 declares it anyway, which is why this went unnoticed. Emit
+// the lowercase HTML attribute instead, spread through an index-signature object
+// so TypeScript accepts a name its React 18 typings do not know about.
+export function fetchPriorityAttr(high: boolean): Record<string, string> {
+  return high ? { fetchpriority: 'high' } : {};
+}
+
 export function Shot({
   src,
   alt,
@@ -68,7 +78,7 @@ export function Shot({
             width={width}
             height={height}
             loading={eager ? 'eager' : 'lazy'}
-            fetchPriority={priority ? 'high' : undefined}
+            {...fetchPriorityAttr(Boolean(priority))}
             decoding="async"
             className="block h-auto w-full"
           />
@@ -80,7 +90,7 @@ export function Shot({
           width={width}
           height={height}
           loading={eager ? 'eager' : 'lazy'}
-          fetchPriority={priority ? 'high' : undefined}
+          {...fetchPriorityAttr(Boolean(priority))}
           decoding="async"
           className="block h-auto w-full"
         />

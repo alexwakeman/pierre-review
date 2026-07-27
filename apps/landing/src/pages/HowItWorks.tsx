@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useSeo } from '../lib/seo';
+import { seoFor } from '../lib/routes';
 import { Section, SectionHeading, Eyebrow, Pill, Glow } from '../components/ui';
 import {
   SyncIcon,
@@ -162,12 +163,7 @@ function Arrow(): JSX.Element {
 }
 
 export default function HowItWorks(): JSX.Element {
-  useSeo({
-    path: '/how-it-works',
-    title: 'How it works — sync, architecture & roadmap',
-    description:
-      'The engineering behind Pierre: an idempotent five-minute sync pipeline with two-phase backfill and lean storage, a dual-dialect SQLite/Postgres data layer, the local-vs-cloud split, the security model — and what’s next (metered advanced AI, BYO endpoints, deeper Jira/Linear, email digests).',
-  });
+  useSeo(seoFor('/how-it-works'));
 
   return (
     <>

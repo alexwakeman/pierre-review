@@ -15,7 +15,15 @@ function prefersReducedMotion(): boolean {
 
 export default function HeroWordmark() {
   // 0 = "PR", 1 = "P" (backspaced R), 2 = "" (bare caret), 3 = cursive "Pierre".
-  const [step, setStep] = useState<number>(() => (prefersReducedMotion() ? 3 : 0));
+  //
+  // Prerendering (no `window`) starts at the RESOLVED step, so the static HTML a
+  // crawler or a no-JS visitor receives shows the finished cursive wordmark rather
+  // than the mid-animation "PR" prompt. The browser still starts at 0 and plays the
+  // intro: main.tsx uses createRoot(), not hydrateRoot(), so this deliberate
+  // difference is a fresh client render, not a hydration mismatch.
+  const [step, setStep] = useState<number>(() =>
+    typeof window === 'undefined' || prefersReducedMotion() ? 3 : 0,
+  );
 
   useEffect(() => {
     if (prefersReducedMotion()) return; // already initialised to the final state

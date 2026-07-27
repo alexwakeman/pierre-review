@@ -33,3 +33,7 @@ playwright-report/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Landing SSR bundle: a transient build artifact of apps/landing/prerender.mjs.
+# It is deleted at the end of a successful run; this catches an interrupted one.
+.ssr-build/

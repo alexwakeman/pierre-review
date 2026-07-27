@@ -1,4 +1,5 @@
 import { useSeo } from '../lib/seo';
+import { seoFor } from '../lib/routes';
 import { Link } from '../router';
 import {
   LEGAL_CONTROLLER,
@@ -20,12 +21,7 @@ import {
 // §7 (AI output is a suggestion, not a review you can rely on).
 
 export default function Terms(): JSX.Element {
-  useSeo({
-    title: 'Terms of service — Pierre',
-    description:
-      'The terms for using the hosted Pierre service: what you get, what you are responsible for, billing and cancellation, and the limits of liability.',
-    path: '/terms',
-  });
+  useSeo(seoFor('/terms'));
 
   return (
     <LegalPage

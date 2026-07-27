@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { useSeo } from '../lib/seo';
+import { seoFor } from '../lib/routes';
 import { Link } from '../router';
 import { resetConsent, consentChoice } from '../lib/consent';
 import { revokeAnalytics } from '../lib/analytics';
@@ -19,12 +20,7 @@ import {
 // list is four cookies, two of which only exist during a sign-in.
 
 export default function Cookies(): JSX.Element {
-  useSeo({
-    title: 'Cookie policy — Pierre',
-    description:
-      'Every cookie Pierre sets, what it does, how long it lasts, and a one-click control to change your analytics choice.',
-    path: '/cookies',
-  });
+  useSeo(seoFor('/cookies'));
 
   const current = typeof window === 'undefined' ? null : consentChoice();
 

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from '../router';
 import { useSeo } from '../lib/seo';
+import { seoFor } from '../lib/routes';
 import { Section, SectionHeading, Shot, Eyebrow, Pill, Glow, FeatureRow, ExpandIcon } from '../components/ui';
 import { useLightbox } from '../components/Lightbox';
 import {
@@ -212,12 +213,7 @@ const METRICS = [
 // ---------------------------------------------------------------------------
 
 export default function Pro(): JSX.Element {
-  useSeo({
-    path: '/pro',
-    title: 'Pierre Pro — AI summaries, team insights & agentic review',
-    description:
-      'The intelligence layer: per-repo AI digests, sprint reports, team Insights, DORA-style flow metrics, My-Turn triage, Slack digests, Jira/Linear links — plus Claude Review and AI Fix with a human hand on the wheel.',
-  });
+  useSeo(seoFor('/pro'));
 
   return (
     <>

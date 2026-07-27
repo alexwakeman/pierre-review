@@ -8,9 +8,20 @@ import type { AnchorHTMLAttributes, MouseEvent, ReactNode } from 'react';
 
 const ROUTE_EVENT = 'pierre:route';
 
+// The route being prerendered, set by entry-server.tsx before each
+// renderToStaticMarkup() pass. There is no `window` in Node, so without this
+// every prerendered page would render the HOME route's component — silently
+// emitting eight identical files. Untouched (and unreachable) in the browser.
+let staticPath: string | null = null;
+
+/** Build-time only: pin the path currentPath() reports. See prerender.mjs. */
+export function setStaticPath(path: string): void {
+  staticPath = path;
+}
+
 /** Normalised current path: no trailing slash, '' → '/'. */
 export function currentPath(): string {
-  if (typeof window === 'undefined') return '/';
+  if (typeof window === 'undefined') return staticPath ?? '/';
   const p = window.location.pathname.replace(/\/+$/, '');
   return p === '' ? '/' : p;
 }

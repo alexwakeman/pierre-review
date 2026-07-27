@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Link, useRoute } from './router';
 import { initAnalytics, trackPageView } from './lib/analytics';
 import { useSeo } from './lib/seo';
+import { NOT_FOUND_SEO } from './lib/routes';
 import Nav from './components/Nav';
 import Footer from './components/Footer';
 import CookieBanner from './components/CookieBanner';
@@ -32,11 +33,7 @@ const ROUTES: Record<string, () => JSX.Element> = {
 };
 
 function NotFound(): JSX.Element {
-  useSeo({
-    title: 'Page not found — Pierre',
-    description: 'That page does not exist. Head back to the Pierre home page.',
-    robots: 'noindex, follow',
-  });
+  useSeo(NOT_FOUND_SEO);
   return (
     <div className="mx-auto max-w-xl px-6 py-32 text-center">
       <p className="brand-title text-6xl text-gray-200">Pierre</p>

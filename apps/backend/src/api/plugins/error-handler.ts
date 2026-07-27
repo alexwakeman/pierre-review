@@ -1,5 +1,34 @@
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { FastifyError, FastifyInstance } from 'fastify';
 import { config } from '../../config.js';
+
+/**
+ * The landing routes that shipped as prerendered HTML, discovered once at boot.
+ *
+ * The marketing site is built to `<route>/index.html` per route (apps/landing/
+ * prerender.mjs) so that a crawler, an AI agent or a no-JS visitor receives real
+ * content instead of an empty SPA shell. @fastify/static — registered with
+ * `wildcard: false` — already answers `/pricing/` from its directory-index scan,
+ * but NOT `/pricing`, which is the canonical, link-shaped form. Those land here.
+ *
+ * Resolved into a fixed Set at startup rather than stat-ing per request: it costs
+ * one readdir instead of a filesystem hit on every 404, and — the reason that
+ * matters — a URL can only ever select an entry that was found on disk at boot,
+ * so no request-supplied path is ever joined onto a filesystem root. Traversal
+ * is not defended against here; it is unrepresentable.
+ */
+function prerenderedRoutes(landingDir: string): Set<string> {
+  const routes = new Set<string>();
+  if (!existsSync(landingDir)) return routes;
+  for (const entry of readdirSync(landingDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (existsSync(join(landingDir, entry.name, 'index.html'))) {
+      routes.add(`/${entry.name}`);
+    }
+  }
+  return routes;
+}
 
 export interface NotFoundOptions {
   // The built timeline SPA is served (public/index.html present), under /app.
@@ -21,6 +50,10 @@ export function registerErrorHandler(
   app: FastifyInstance,
   opts: NotFoundOptions,
 ): void {
+  const landingRoutes = opts.serveLanding
+    ? prerenderedRoutes(opts.publicLandingDir)
+    : new Set<string>();
+
   app.setErrorHandler((err: FastifyError, req, reply) => {
     if (err.validation) {
       reply.status(400).send({
@@ -77,6 +110,15 @@ export function registerErrorHandler(
       // Root + other non-/api paths: cloud serves the public landing page; local
       // sends the user straight into the app (never shows a landing).
       if (opts.serveLanding) {
+        // Prefer the route's own prerendered file, so /pricing answers with the
+        // pricing copy and its own <title>/canonical rather than the generic shell
+        // (which only becomes the pricing page once JavaScript runs). Trailing
+        // slash tolerated; '/' and anything unknown fall back to the shell, which
+        // still client-routes correctly for a browser.
+        const clean = path.length > 1 ? path.replace(/\/+$/, '') : path;
+        if (landingRoutes.has(clean)) {
+          return reply.sendFile(`${clean.slice(1)}/index.html`, opts.publicLandingDir);
+        }
         return reply.sendFile('index.html', opts.publicLandingDir);
       }
       if (opts.serveSpa) {

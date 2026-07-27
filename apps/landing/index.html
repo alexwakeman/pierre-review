@@ -5,10 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b1020" />
 
-    <!-- Primary SEO. These are the home-page defaults / what a no-JS crawler sees;
-         per-route <title>/description/canonical/og:url are set at runtime by the
-         useSeo() hook (src/lib/seo.ts) — so canonical is NOT hard-coded here (a
-         non-JS crawl of a sub-page would otherwise canonicalise it to home). -->
+    <!-- Primary SEO. Everything between the seo:start/seo:end markers is REPLACED
+         per route at build time by prerender.mjs, from the ROUTE_SEO table in
+         src/lib/routes.ts — so /pricing ships its own title, description and
+         canonical in the HTML rather than inheriting the home page's. What is
+         written here is the home-page copy and the dev-server fallback; keep the
+         markers, and keep the copy in sync with ROUTE_SEO['/']. -->
+    <!-- seo:start -->
     <title>Pierre — the calm layer above your review bot</title>
     <meta
       name="description"
@@ -42,6 +45,7 @@
       name="twitter:image:alt"
       content="The Pierre timeline dashboard showing pull-request activity across a team’s repositories."
     />
+    <!-- seo:end -->
 
     <!-- Favicons (generated from the brand mark). -->
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
@@ -138,11 +142,19 @@
     </style>
   </head>
   <body>
-    <!-- Instant splash so mobile Safari paints immediately instead of a white screen
-         while the JS bundle loads. Opens on the SAME terminal "PR" prompt the
-         HeroWordmark animation starts from, so load→animation is seamless. Lives
-         INSIDE #root, so React's createRoot().render() replaces it on mount. -->
+    <!-- Everything between app:start/app:end is REPLACED at build time by
+         prerender.mjs with the route's fully-rendered markup, so the page has real,
+         readable content before a single byte of JS executes — for no-JS visitors,
+         for AI agents and crawlers that do not run scripts, and as the first paint
+         for everyone else. React's createRoot() replaces it on mount exactly as it
+         replaced the splash below.
+
+         What survives here is the DEV-server fallback (prerender.mjs only rewrites
+         the built dist/): an instant splash so mobile Safari paints immediately
+         instead of a white screen, opening on the same terminal "PR" prompt the
+         HeroWordmark animation starts from. -->
     <div id="root">
+      <!-- app:start -->
       <div
         style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #030712; color: #f3f4f6"
       >
@@ -154,6 +166,7 @@
           ></span>
         </span>
       </div>
+      <!-- app:end -->
     </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

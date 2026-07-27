@@ -1,4 +1,5 @@
 import { useSeo } from '../lib/seo';
+import { seoFor } from '../lib/routes';
 import { Link } from '../router';
 import {
   LEGAL_CONTROLLER,
@@ -23,12 +24,7 @@ import {
 //      so §4 says so explicitly and explains the legal basis.
 
 export default function Privacy(): JSX.Element {
-  useSeo({
-    title: 'Privacy policy — Pierre',
-    description:
-      'What Pierre collects, why, who processes it, how long it is kept, and how to get it deleted or exported. Run locally, Pierre collects nothing at all.',
-    path: '/privacy',
-  });
+  useSeo(seoFor('/privacy'));
 
   return (
     <LegalPage

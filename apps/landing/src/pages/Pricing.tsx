@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from '../router';
 import { useSeo } from '../lib/seo';
+import { seoFor } from '../lib/routes';
 import { Section, SectionHeading, Eyebrow, Pill, Glow } from '../components/ui';
 import { CheckIcon, SparkleIcon, ArrowRightIcon } from '../components/icons';
 
@@ -70,12 +71,7 @@ function FeatureItem({
 }
 
 export default function Pricing(): JSX.Element {
-  useSeo({
-    path: '/pricing',
-    title: 'Pricing — Pierre is open-core and free. Pro is $5/month',
-    description:
-      'The Pierre dashboard is free, local-first, and yours forever. Pro adds AI summaries, team Insights, flow metrics, Slack digests and My Turn — for $5 a month.',
-  });
+  useSeo(seoFor('/pricing'));
 
   // The checkout endpoint bounces back here with ?checkout=unavailable while
   // hosted billing is still rolling out.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLightbox } from './Lightbox';
-import { ExpandIcon } from './ui';
+import { ExpandIcon, fetchPriorityAttr } from './ui';
 
 // Auto-advancing product-screenshot carousel for the hero. One macOS-style
 // window frame with cross-fading slides inside, a per-slide caption, clickable
@@ -150,7 +150,7 @@ export default function Carousel({
                 src={s.src}
                 alt={s.alt}
                 decoding="async"
-                fetchPriority={i === 0 ? 'high' : undefined}
+                {...fetchPriorityAttr(i === 0)}
                 className={`h-full w-full ${
                   s.fit === 'contain' ? 'object-contain' : 'object-cover object-top'
                 }`}
