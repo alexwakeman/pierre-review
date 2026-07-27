@@ -219,6 +219,8 @@ export const pullRequests = sqliteTable(
     repoIdx: index('pr_repo_idx').on(t.repoId),
     openedIdx: index('pr_opened_idx').on(t.openedAt),
     accountIdx: index('pr_account_idx').on(t.accountId),
+    // Drives getUserStats (the contributor popover) from the person rather than the account.
+    authorIdx: index('pr_author_idx').on(t.authorId),
     nodeUx: uniqueIndex('pr_account_node').on(t.accountId, t.githubNodeId),
   }),
 );
@@ -347,6 +349,7 @@ export const reviewComments = sqliteTable(
   },
   (t) => ({
     threadIdx: index('rc_thread_idx').on(t.threadId),
+    authorIdx: index('rc_author_idx').on(t.authorId),
     nodeUx: uniqueIndex('rc_pr_node').on(t.prId, t.githubNodeId),
   }),
 );
@@ -368,6 +371,7 @@ export const prComments = sqliteTable(
   },
   (t) => ({
     prIdx: index('prc_pr_idx').on(t.prId),
+    authorIdx: index('prc_author_idx').on(t.authorId),
     nodeUx: uniqueIndex('prc_pr_node').on(t.prId, t.githubNodeId),
   }),
 );
@@ -391,6 +395,7 @@ export const reviews = sqliteTable(
   },
   (t) => ({
     prIdx: index('rv_pr_idx').on(t.prId),
+    authorIdx: index('rv_author_idx').on(t.authorId),
     nodeUx: uniqueIndex('reviews_pr_node').on(t.prId, t.githubNodeId),
   }),
 );

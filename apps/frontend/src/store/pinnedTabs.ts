@@ -24,6 +24,7 @@ export type PinnedPr = TabMeta;
 //  - open-prs: the sortable all-open-PRs drill-down (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-only-prs: the bot-only-reviewed PR drill-down (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-threads: the resolvable-bot-threads review & resolve (a singleton, non-PR, EPHEMERAL tab)
+//  - user-activity: one contributor's activity feed (keyed PER USER, non-PR, EPHEMERAL)
 export type TabKind =
   | 'pr-detail'
   | 'pr-focus'
@@ -33,13 +34,24 @@ export type TabKind =
   | 'bot-only-prs'
   | 'bot-threads'
   | 'theme-threads'
-  | 'search';
+  | 'search'
+  | 'user-activity';
+
+// The label metadata a user-activity tab carries, so its chip renders without a lookup
+// (and keeps rendering if the user drops out of the roster). Captured at open time.
+export interface TabUserMeta {
+  id: number;
+  login: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+}
 
 export interface Tab {
-  key: string; // stable: 'pr-detail:123' | 'pr-focus:123'
+  key: string; // stable: 'pr-detail:123' | 'pr-focus:123' | 'user-activity:45'
   kind: TabKind;
   prId: number; // PR id for pr-detail / pr-focus
   meta: TabMeta | null; // label meta for PR tabs
+  userMeta?: TabUserMeta | null; // label meta for user-activity tabs
 }
 
 // Which "tab" the main area is showing: the standard timeline board, the Activity
@@ -76,6 +88,16 @@ export const THEME_THREADS_TAB_KEY = 'theme-threads';
 // The cross-team search results drill-down is a SINGLETON, non-PR tab. The query it shows is the
 // transient seed (store/filters.ts `searchSeed`), not the key. EPHEMERAL like the others.
 export const SEARCH_TAB_KEY = 'search';
+// The per-contributor activity feed is keyed PER USER (not a singleton) — two people's feeds
+// can sit side by side, and re-clicking the same handle re-focuses their existing tab rather
+// than replacing it. Still EPHEMERAL: `persist` whitelists only the two PR kinds and
+// parseTabKey doesn't match this prefix, so a reload drops it like every other drill-down.
+export const userActivityKey = (userId: number): string => `user-activity:${userId}`;
+/** The userId behind a user-activity tab key (null for any other key). */
+export function parseUserActivityKey(key: string): number | null {
+  const m = /^user-activity:(\d+)$/.exec(key);
+  return m ? Number(m[1]) : null;
+}
 
 /** Parse a Tab.key back into its kind + PR id (null for unknown). */
 export function parseTabKey(key: string): { kind: TabKind; prId: number } | null {
@@ -123,6 +145,9 @@ interface TabsState {
   openBotThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-threads resolve tab + activate
   openThemeThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton theme-threads drill-down + activate
   openSearchTab: (opts?: OpenOpts) => void; // ensure the singleton search-results drill-down + activate
+  // Ensure (and activate) one contributor's activity-feed tab. Keyed per user; `user` is the
+  // chip's label metadata, captured at open time from whatever the caller already had.
+  openUserActivityTab: (userId: number, user: TabUserMeta | null, opts?: OpenOpts) => void;
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
   closeTab: (key: string) => void; // remove; fall back to 'timeline' if it was active
@@ -302,6 +327,17 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       openTab({ key: THEME_THREADS_TAB_KEY, kind: 'theme-threads', prId: 0, meta: null }, opts),
     openSearchTab: (opts) =>
       openTab({ key: SEARCH_TAB_KEY, kind: 'search', prId: 0, meta: null }, opts),
+    openUserActivityTab: (userId, user, opts) =>
+      openTab(
+        {
+          key: userActivityKey(userId),
+          kind: 'user-activity',
+          prId: 0,
+          meta: null,
+          userMeta: user,
+        },
+        opts,
+      ),
 
     syncMeta: (meta) =>
       set((s) => {

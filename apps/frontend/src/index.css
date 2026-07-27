@@ -369,31 +369,6 @@ body {
 .tl-focus-active .tl-collapse-caret {
   display: none;
 }
-/* Per-contributor metrics toggle — a small, quiet bar-chart glyph on the name line
-   that opens a labelled-table popover. Quiet by default, brightens on hover; mirrors
-   the collapse caret. NOT hidden in focus mode (the popover is read-only). */
-.tl-stats-toggle {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: #9ca3af;
-  line-height: 1;
-  cursor: pointer;
-}
-.tl-stats-toggle:hover {
-  background: rgba(120, 120, 120, 0.18);
-  color: #374151;
-}
-.dark .tl-stats-toggle:hover {
-  color: #e5e7eb;
-}
 .tl-user-avatar {
   flex: none;
   width: 18px;

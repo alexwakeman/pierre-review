@@ -1,0 +1,260 @@
+import { useEffect, useMemo, useRef } from 'react';
+import {
+  autoUpdate,
+  flip,
+  FloatingPortal,
+  offset,
+  shift,
+  useDismiss,
+  useFloating,
+  useInteractions,
+} from '@floating-ui/react';
+import type { User } from '@pierre-review/shared';
+import { profileUrl, userLabel } from '../lib/ui.js';
+import { useFilters } from '../store/filters.js';
+import { usePinnedTabs } from '../store/pinnedTabs.js';
+import { useRepos } from '../hooks/useTimeline.js';
+import { useUserStats } from '../hooks/useUserStats.js';
+
+// Where the popover hangs off. `element` is the ordinary case — a real anchor node (the
+// clicked handle) that floating-ui tracks directly. `selector` is the vis-timeline case: the
+// row label is destroyed + rebuilt on every timeline rebuild, so the anchor is re-resolved by
+// attribute selector each animation frame (the same trick MarkerPopover/UserStatsPopover use),
+// falling back to the click point while it's briefly missing.
+export type PopoverAnchor =
+  | { kind: 'element'; el: HTMLElement }
+  | { kind: 'selector'; selector: string; x: number; y: number };
+
+// A contributor card: enlarged avatar, their ALL-TIME contribution totals in the context you
+// clicked from, a link to their GitHub profile, and a link that opens their activity feed in
+// its own tab. Replaces the bare profile link that every handle in the app used to be — the
+// profile was one click away and told you nothing about THIS codebase.
+//
+// Scope: `repoId` set (the handle was rendered inside a PR/thread/comment) → that repo's
+// numbers. Otherwise the FilterBar-visible repo set, which the team picker already resolved.
+// The caption states which, because "12 merged" means nothing without it.
+export function UserProfilePopover({
+  user,
+  userId,
+  repoId,
+  anchor,
+  onDismiss,
+}: {
+  user: User | undefined;
+  userId: number;
+  repoId: number | null;
+  anchor: PopoverAnchor;
+  onDismiss: () => void;
+}): JSX.Element {
+  const visibleRepoIds = useFilters((s) => s.repoIds);
+  const openUserActivityTab = usePinnedTabs((s) => s.openUserActivityTab);
+  const { data: repos } = useRepos();
+
+  // The repo subset the counts cover + the caption that names it. A single in-context repo
+  // wins; otherwise the visible set (null = every watched repo, which the backend resolves).
+  const scopeRepoIds = useMemo(
+    () => (repoId != null ? [repoId] : visibleRepoIds),
+    [repoId, visibleRepoIds],
+  );
+  const scopeLabel = useMemo(() => {
+    if (repoId != null) {
+      const r = (repos ?? []).find((x) => x.id === repoId);
+      return r ? `in ${r.fullName}` : 'in this repo';
+    }
+    if (visibleRepoIds && visibleRepoIds.length > 0) {
+      if (visibleRepoIds.length === 1) {
+        const r = (repos ?? []).find((x) => x.id === visibleRepoIds[0]);
+        return r ? `in ${r.fullName}` : 'in 1 repo';
+      }
+      return `across ${visibleRepoIds.length} repos`;
+    }
+    return 'across all repos';
+  }, [repoId, visibleRepoIds, repos]);
+
+  const { data: stats, isLoading, isError } = useUserStats(userId, scopeRepoIds);
+
+  const { refs, floatingStyles, context, isPositioned } = useFloating({
+    open: true,
+    onOpenChange: (o) => {
+      if (!o) onDismiss();
+    },
+    strategy: 'fixed',
+    placement: 'bottom-start',
+    middleware: [
+      offset(6),
+      flip({ fallbackPlacements: ['top-start', 'right-start', 'left-start'] }),
+      shift({ padding: 8 }),
+    ],
+    whileElementsMounted: (ref, float, update) =>
+      autoUpdate(ref, float, update, { animationFrame: anchor.kind === 'selector' }),
+  });
+  // Outside-press dismisses, EXCEPT on another handle: those have their own toggle handler
+  // (click the same handle to close, a different one to re-anchor). Without the exclusion the
+  // pointerdown would close and the following click re-open — the toggle would never work.
+  // Both flavours of handle count: the React `UserName` button and the timeline row label,
+  // whose anchor is a selector-tracked <a> (the popover uses a VIRTUAL reference there, so
+  // floating-ui can't tell the label is "inside").
+  const dismiss = useDismiss(context, {
+    outsidePress: (e) => {
+      const t = e.target as HTMLElement | null;
+      return !t?.closest?.('[data-user-handle]') && !t?.closest?.('[data-user-gid]');
+    },
+  });
+  const { getFloatingProps } = useInteractions([dismiss]);
+
+  // Hold the last rect resolved from a live selector anchor, so the card keeps its spot when
+  // the anchor briefly vanishes mid-rebuild. Cleared when the anchored target changes.
+  const lastRectRef = useRef<DOMRect | null>(null);
+  const anchorKey = anchor.kind === 'selector' ? anchor.selector : 'element';
+  useEffect(() => {
+    lastRectRef.current = null;
+  }, [anchorKey]);
+
+  useEffect(() => {
+    if (anchor.kind === 'element') {
+      refs.setReference(anchor.el);
+      return;
+    }
+    const { selector, x, y } = anchor;
+    const clickPoint = (): DOMRect =>
+      ({ x, y, top: y, left: x, right: x, bottom: y, width: 0, height: 0 }) as DOMRect;
+    refs.setReference({
+      getBoundingClientRect: () => {
+        const el = document.querySelector(selector);
+        if (el) {
+          const r = el.getBoundingClientRect();
+          lastRectRef.current = r;
+          return r;
+        }
+        return lastRectRef.current ?? clickPoint();
+      },
+    });
+    // `anchor` is rebuilt each render by the caller; depend on its fields, not its identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refs, anchor.kind, anchorKey, anchor.kind === 'selector' ? anchor.x : 0, anchor.kind === 'selector' ? anchor.y : 0]);
+
+  const label = userLabel(user, userId);
+  const login = user?.githubLogin ?? null;
+  const rows: { label: string; value: number; dot?: string }[] = stats
+    ? [
+        { label: 'PRs merged', value: stats.prsMerged, dot: '#8957e5' },
+        { label: 'PRs open', value: stats.prsOpen, dot: '#3b82f6' },
+        { label: 'PRs draft', value: stats.prsDraft, dot: '#9ca3af' },
+        { label: 'PRs closed', value: stats.prsClosed, dot: '#ef4444' },
+        { label: 'Reviews given', value: stats.reviewsGiven },
+        { label: 'Comments', value: stats.comments },
+      ]
+    : [];
+
+  return (
+    <FloatingPortal>
+      <div
+        ref={refs.setFloating}
+        style={{ ...floatingStyles, visibility: isPositioned ? 'visible' : 'hidden' }}
+        {...getFloatingProps()}
+        data-testid="user-profile-popover"
+        className="z-50 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-700 dark:bg-gray-900"
+      >
+        <div className="flex items-center gap-2.5">
+          {user?.avatarUrl ? (
+            <img
+              src={user.avatarUrl}
+              width={44}
+              height={44}
+              alt=""
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              className="h-11 w-11 shrink-0 rounded-full bg-gray-100 dark:bg-gray-800"
+            />
+          ) : (
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gray-200 text-base font-semibold text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+              {(label[0] ?? '?').toUpperCase()}
+            </span>
+          )}
+          <div className="min-w-0">
+            <div
+              className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100"
+              title={label}
+            >
+              {label}
+            </div>
+            {login && (
+              <div className="truncate text-xs text-gray-500 dark:text-gray-400" title={`@${login}`}>
+                @{login}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-2.5 text-[10px] uppercase tracking-wide text-gray-400" title={scopeLabel}>
+          All time · {scopeLabel}
+        </div>
+
+        {isLoading && (
+          <div className="py-3 text-xs text-gray-400 dark:text-gray-500">Loading activity…</div>
+        )}
+        {isError && (
+          <div className="py-3 text-xs text-red-500 dark:text-red-400">Couldn't load stats.</div>
+        )}
+        {stats && (
+          <table className="mt-1 w-full text-xs">
+            <tbody>
+              {rows.map((r) => (
+                <tr
+                  key={r.label}
+                  className="border-t border-gray-100 first:border-0 dark:border-gray-800"
+                >
+                  <td className="py-1 pr-2 text-gray-500 dark:text-gray-400">
+                    <span className="inline-flex items-center gap-1.5">
+                      {r.dot && (
+                        <span
+                          className="inline-block h-2 w-2 rounded-full"
+                          style={{ backgroundColor: r.dot }}
+                        />
+                      )}
+                      {r.label}
+                    </span>
+                  </td>
+                  <td className="py-1 text-right font-medium tabular-nums text-gray-800 dark:text-gray-100">
+                    {r.value}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+          <button
+            type="button"
+            onClick={() => {
+              openUserActivityTab(userId, {
+                id: userId,
+                login: user?.githubLogin ?? null,
+                displayName: user?.displayName ?? null,
+                avatarUrl: user?.avatarUrl ?? null,
+              });
+              onDismiss();
+            }}
+            className="rounded px-1.5 py-1 text-xs font-medium text-sky-600 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-sky-950/40"
+            title={`Open ${label}'s recent activity in a tab`}
+          >
+            View activity →
+          </button>
+          {login && (
+            <a
+              href={profileUrl(login)}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={(e) => e.stopPropagation()}
+              className="rounded px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+              title={`@${login} on GitHub`}
+            >
+              GitHub ↗
+            </a>
+          )}
+        </div>
+      </div>
+    </FloatingPortal>
+  );
+}

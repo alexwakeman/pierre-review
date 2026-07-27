@@ -42,6 +42,7 @@ import { PrCommentComposer } from '../PrCommentComposer.js';
 import { StateBadge } from '../StateBadge.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { FeedOpenPrsPanel } from './FeedOpenPrsPanel.js';
+import { UserName } from '../UserName.js';
 
 // A coloured chip + label describing WHAT an item is (the event kind). The My-Turn reason is
 // a separate pill (see MY_TURN_REASON_META); Claude runs get their own violet chip.
@@ -180,12 +181,18 @@ const BOT_STATE_ORDER: DerivedState[] = [
 export function FeedView({
   repoId,
   botsMode = false,
+  userIds = null,
 }: {
   repoId?: number;
   // The Bots pane's bot-only feed: hard-filters to automated-reviewer activity and swaps the
   // normal pill row for review-thread derived-state pills (Untouched / Replied / Likely
   // addressed / Resolved). Also drops the open-PRs panel + the cross-repo "seen" marker.
   botsMode?: boolean;
+  // Scope the feed to specific ACTORS (the per-contributor activity tab). Like botsMode this
+  // is an Activity-native scope, filtered server-side before the cap — NOT the Timeline's
+  // Members filter, which the feed still never sends. Also drops the open-PRs panel + the
+  // cross-repo "seen" marker (a person's feed isn't "the feed" being caught up on).
+  userIds?: number[] | null;
 }): JSX.Element {
   const repoIdsFilter = useFilters((s) => s.repoIds);
   const feedMyTurnOnly = useFilters((s) => s.feedMyTurnOnly);
@@ -262,12 +269,13 @@ export function FeedView({
   const markFeedSeen = useMarkFeedSeen();
   const markedSeenRef = useRef(false);
   useEffect(() => {
-    // botsMode is a scoped bot-only view — it must NOT reset the cross-repo My-Turn "seen" marker.
-    if (repoId == null && !botsMode && !markedSeenRef.current) {
+    // botsMode and a userIds scope are both narrowed views — neither may reset the cross-repo
+    // My-Turn "seen" marker (you haven't caught up on the feed by reading one person's).
+    if (repoId == null && !botsMode && userIds == null && !markedSeenRef.current) {
       markedSeenRef.current = true;
       markFeedSeen.mutate();
     }
-  }, [repoId, botsMode, markFeedSeen]);
+  }, [repoId, botsMode, userIds, markFeedSeen]);
 
   // Bots pane: the feed window follows the analytics window selector (shared store field),
   // using the SAME window→days mapping as getBotAnalytics (rolling_7=7, rolling_30=30, else —
@@ -300,7 +308,7 @@ export function FeedView({
     isFetchingMore,
   } = useConsolidatedFeed({
       repoIds: effectiveRepoIds,
-      userIds: null,
+      userIds,
       prId: isolatedPrId,
       // Bot pane: the backend filters to automated reviewers IN SQL (before the cap), so the
       // feed spans the full window of bot activity instead of a bot-slice of a capped page.
@@ -317,7 +325,7 @@ export function FeedView({
   const rootRef = useRef<HTMLDivElement>(null);
   const { hasNew, refresh: refreshFeed } = useFeedHasNew({
     repoIds: effectiveRepoIds,
-    userIds: null,
+    userIds,
     prId: isolatedPrId,
     botsOnly: botsMode,
     botWindowDays,
@@ -907,7 +915,9 @@ export function FeedView({
 
       {/* Cross-repo only: a collapsible panel of open PRs grouped by team; clicking a PR
           isolates the feed to that PR (below). Not in the Bots pane (a pure activity stream). */}
-      {repoId == null && !botsMode && isolatedPrId == null && <FeedOpenPrsPanel />}
+      {repoId == null && !botsMode && userIds == null && isolatedPrId == null && (
+        <FeedOpenPrsPanel />
+      )}
 
       {/* Filter pills, two rows. Row 1 branches: the Bots pane gets a per-VENDOR row (one per
           distinct bot, so the in-house bots isolate separately) replacing the normal
@@ -1596,7 +1606,21 @@ function FeedRowImpl({
             {relativeTime(item.occurredAt)}
           </span>
           <Avatar user={actorUser} size={20} />
-          <span className="truncate font-medium text-gray-800 dark:text-gray-100">{actorName}</span>
+          {/* A real actor's name opens the user popover (stats + activity tab); the synthetic
+              labels ('Claude', 'A contributor') have no user behind them and stay plain text. */}
+          {actorUser != null && !isClaude ? (
+            <span className="truncate font-medium text-gray-800 dark:text-gray-100">
+              <UserName
+                user={actorUser}
+                fallbackId={item.actorId}
+                repoId={item.repoId ?? undefined}
+              />
+            </span>
+          ) : (
+            <span className="truncate font-medium text-gray-800 dark:text-gray-100">
+              {actorName}
+            </span>
+          )}
           {automatedTag && (
             <span className="group/bot inline-flex shrink-0 items-center gap-1">
               <span

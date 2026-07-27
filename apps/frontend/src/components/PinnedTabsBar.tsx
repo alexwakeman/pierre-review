@@ -222,6 +222,63 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
     );
   }
 
+  // One contributor's activity feed — a non-PR tab keyed PER USER, so the chip is labelled
+  // with that person (from the metadata captured when it was opened, no lookup needed).
+  if (tab.kind === 'user-activity') {
+    const who = tab.userMeta?.login ?? tab.userMeta?.displayName ?? 'contributor';
+    return (
+      <div
+        role="presentation"
+        className={`group flex shrink-0 items-center gap-1 rounded-t-md border border-b-0 pl-2 pr-1 ${
+          active
+            ? 'border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950'
+            : 'border-transparent bg-transparent hover:bg-gray-200/60 dark:hover:bg-gray-800/60'
+        }`}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={active}
+          onClick={() => setActiveTab(tab.key)}
+          className="flex items-center gap-1.5 py-1.5 text-left"
+          title={`${who} — recent activity`}
+        >
+          {tab.userMeta?.avatarUrl ? (
+            <img
+              src={tab.userMeta.avatarUrl}
+              width={14}
+              height={14}
+              alt=""
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              className="h-3.5 w-3.5 shrink-0 rounded-full bg-gray-200 dark:bg-gray-800"
+            />
+          ) : (
+            <span aria-hidden="true" className="shrink-0">
+              👤
+            </span>
+          )}
+          <span
+            className={`max-w-[12rem] truncate text-xs font-medium ${
+              active ? 'text-sky-600 dark:text-sky-400' : 'text-gray-600 dark:text-gray-300'
+            }`}
+          >
+            {who}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => closeTab(tab.key)}
+          className="shrink-0 self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+          title="Close this tab"
+          aria-label="Close contributor activity tab"
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
+
   // The resolvable-bot-threads review & resolve is a non-PR, singleton tab — a compact chip. A
   // per-repo scope (opened from the per-repo Bots tab) surfaces its repo name.
   if (tab.kind === 'bot-threads') {

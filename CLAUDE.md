@@ -383,6 +383,7 @@ file maps to a `client.ts` method.
 | `GET /api/repos/suggested` | **first-run onboarding**: the viewer's recently-active repos (`VIEWER_REPOS_QUERY`: `viewer.repositories` + `repositoriesContributedTo`, PUSHED_AT desc, null-tolerant for scoped cloud tokens), already-added filtered out, `RepoSearchResult` shape, cap 30 → `SuggestedReposResponse`. Drives `FirstRunOnboarding` (the zero-repo Activity console body, hoisted above all rail branches; top 5 pre-checked, sequential adds, one invalidation batch) |
 | `POST /api/repos/:id/sync?full=true` | trigger sync → `202 {status:'started'}`, or `409` if already running |
 | `GET /api/users` | GitHub actor metadata for the Members panel. **Account-SCOPED** (`listUsers(accountId)`): `users` is a global TABLE but the listing only returns actors appearing in the caller's own synced data. (`PATCH /api/users/:id` was DELETED — a global, ownership-free `isBot`/`isBotOverridden` write with no frontend caller; use `PATCH /api/bot-reviewers/:userId`.) |
+| `GET /api/users/:id/stats?repoIds&scope` | **Contributor popover** (CORE): one user's **ALL-TIME** totals over the account's synced data → `UserContributionStats` — PRs they AUTHORED by bucket (merged/open/draft/closed, the `prStatusWhere()` mapping), `reviewsGiven`, `comments` (issue-level + inline), plus the `repoIds` actually counted. **COUNTS ONLY, no profile field** — `users` is a global table, so echoing a login/avatar for an arbitrary id would make this id-addressed route a cross-tenant profile lookup; the SPA already holds the account-scoped roster. `reviews`/`prComments`/`reviewComments` carry no `accountId`, so tenancy comes from an `innerJoin(pullRequests)` + `pullRequests.accountId` — **all four** predicates are bound by `verify:isolation` (the `reviewComments` one needs its own seeded row or the guard is vacuous). **No ownership 404** — a foreign/unknown id returns all zeros, deliberately: 404-vs-200 would be an existence oracle over a global table. `reviewsGiven` excludes `pending` AND the body-less `commented` **wrapper** GitHub creates around a batch of inline comments (`isSubstantiveReview`) — those inline comments are already in `comments`, and counting the wrapper double-counted one act (>half the rows for an active reviewer). Migration `0037` (pg `0024`) adds the four `author_id` indexes this needs — without them every count scanned the ACCOUNT's PR set, so cost tracked tenant size, not the person (~55ms of blocked event loop per open on a 6k-PR DB) |
 | `GET /api/mergers` | per-repo merge-rights map (who's merged there) → the maintainer shield |
 | `GET /api/me/export` · `DELETE /api/me/account` | **data-subject rights** (GDPR Arts. 15/20/17): the whole account as one JSON download (sealed GitHub token excluded) · irreversible erasure, confirm-by-typing-your-login, 400 in local mode. Erasure calls the plugin's `registerAccountErasure` hook — see Security & privacy posture |
 | `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{activityDigest,reviewMemory}`; cloud: 401 signed out) |
@@ -480,7 +481,17 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   (sortable all-open-PRs: age/author/LoC/untouched-threads/CI/approval columns), `bot-only-prs`
   (sortable + Age/Updated + cross-repo repo-filter dropdown), and `bot-threads` (sortable +
   DESELECT-by-default + Select-all/Clear across pages + Stop + repo-filter + client pagination;
-  scope-wide review & resolve). **Row click across ALL these list surfaces (the drill-down TABLES
+  scope-wide review & resolve). **`user-activity` is the one drill-down keyed PER USER**, not a
+  singleton (`userActivityKey(userId)` / `parseUserActivityKey`): two people's feeds can sit side
+  by side and re-clicking a handle re-focuses their tab. It needs no filters-store seed — the tab
+  KEY carries the userId, so a stale key can never show the wrong person; `Tab.userMeta` carries
+  the chip's label/avatar. It renders `UserActivityDetail` → `<FeedView userIds={[id]}/>`, which
+  is a real ACTOR filter (`inArray(events.actorId, …)`); `getConsolidatedFeed` skips the
+  actor-less Claude-run items whenever `userIds` is set, and FeedView drops its cross-repo
+  Open-PRs panel + the My-Turn "seen" marker under that scope. **Merge/close rows are recorded
+  against the PR's AUTHOR** (`sync/upsert.ts` writes `actorId: authorId`), so on this tab they
+  mean "a PR they authored was merged" — the header caption says so rather than implying they
+  pressed merge. **Row click across ALL these list surfaces (the drill-down TABLES
   + the inline `OpenPrRows`/`FeedOpenPrsPanel` lists) now
   opens the PR's own detail TAB** (`openPrDetailTab`) — the old feed-isolation / timeline-focus
   on-click + the ⧉ button were removed; **feed isolation is reached from PrDetail's "Show in
@@ -567,8 +578,34 @@ Key behaviors to know about:
   for any board-navigation change.
 - **Commits are hidden by default** (`DEFAULT_CATEGORIES` excludes `commits`);
   enabling them round-trips through the URL.
-- **Contributor names are GitHub profile links** (`UserName` + the row labels). A
-  **maintainer shield** (`MaintainerShield`) marks anyone with merge rights in the
+- **Contributor names open the USER POPOVER** (`UserProfilePopover`), no longer navigating
+  straight to GitHub. Three surfaces: `UserName` (PrDetail / ChecksTab / comments / threads /
+  the drill-down tables), the **feed card actor** (`FeedView`), and the **vis-timeline row
+  labels**. The card shows an enlarged avatar, the contributor's ALL-TIME
+  `GET /api/users/:id/stats` totals, a GitHub-profile link, and **View activity →**. Details
+  that are load-bearing:
+  - **Scope**: `repoId` prop set (rendered in a PR context) → that repo's numbers; else the
+    FilterBar-visible set (`filters.repoIds`, already team-scope resolved). The caption states
+    which — "12 merged" is meaningless without it. **Pass `repoId` at every new call site.**
+  - Both flavours stay a real `<a href>` to the profile: a **modified click (⌘/ctrl/shift/alt)
+    or non-primary button is left alone** so "open the profile in a new tab" still works; only
+    a plain left click is intercepted + `preventDefault`ed.
+  - **Landmine (cost a real bug):** `UserName`'s returned tree SHAPE must not depend on
+    `open`. It used to return a bare `<a>` when closed and a `<span>`-wrapped one when open;
+    React saw the root type change, remounted the `<a>`, and the popover was handed a DETACHED
+    node with a zero rect — the card landed in the page's top-left corner. The shape now keys
+    on `shield` alone, and the anchor is a **callback ref** (`useState`), not `useRef`, since
+    it is read during render.
+  - The timeline label is an HTML STRING rebuilt by vis on every rebuild, so it carries a
+    `data-user-gid="repo:<rid>:user:<uid>"` handled by a **delegated capture listener** on the
+    container (the collapse-caret pattern; an inline `onclick` would need `script-src
+    'unsafe-inline'`, which the CSP does not grant). The popover anchors there by **selector**,
+    re-resolved each animation frame like `MarkerPopover`, with the click point as fallback.
+    `data-user-gid` must also stay in the vis `click` bail list or the label click reaches
+    `dismissEmptyCanvas()`.
+  - This REPLACED the old bar-chart metrics toggle + `UserStatsPopover` + `computeUserStats`
+    (window-scoped, timeline-only); the new card is a superset.
+- A **maintainer shield** (`MaintainerShield`) marks anyone with merge rights in the
   in-context repo (has merged a PR there, from `useMergers`); `UserName` takes an optional
   `repoId` and renders it wherever a username appears in a PR context, mirroring the
   timeline rows' HTML-string shield.
@@ -1245,7 +1282,8 @@ added the `accounts` table + `accountId` + composite uniques; `0009`/`0010` adde
 storage; `0013` Claude-review routing (`reviewMode`/`routeReason`); `0014`
 `accounts.lastActiveAt`; `0026` `accounts.aiCreditAllowance`; the **Bot-Triage** trio `0027`
 (`users.github_type`), `0028` (`bot_review_classification`), `0029` (`bot_mute_rules`) — pg
-baseline `0016`, plus plugin migration `0009` (`pro_settings` + 11 `bot_*` columns). The Postgres
+baseline `0016`, plus plugin migration `0009` (`pro_settings` + 11 `bot_*` columns); `0037`
+(pg `0024`) the four `author_id` indexes the contributor popover needs. The Postgres
 baseline (`migrations-pg/`) is a squash — cloud starts empty (synced data is regenerable; no
 SQLite→Postgres migration). **Docs:**
 `docs/SYNC.md`, `docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-AUTH-SETUP.md`,

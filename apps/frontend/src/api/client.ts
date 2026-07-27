@@ -112,6 +112,7 @@ import type {
   ThreadDetail,
   TimelineResponse,
   User,
+  UserContributionStats,
 } from '@pierre-review/shared';
 
 class ApiError extends Error {
@@ -256,6 +257,15 @@ export const api = {
     ),
 
   listUsers: () => get<User[]>('/api/users'),
+  // One contributor's ALL-TIME totals (PRs authored by state, reviews given, comments) for the
+  // user popover. `repoIds` narrows to a repo subset — the surrounding PR's repo when the
+  // handle was clicked inside one, else the FilterBar-visible set (already team-scope resolved),
+  // so the popover's caption matches what the board is showing. Counts only: the caller already
+  // has the account-scoped user roster from `listUsers`.
+  userStats: (userId: number, repoIds?: number[] | null) =>
+    get<UserContributionStats>(
+      withQuery(`/api/users/${userId}/stats`, repoIdsParam(repoIds)),
+    ),
   mergers: () => get<MergersResponse>('/api/mergers'),
   // `setUserBot` was removed with `PATCH /api/users/:id`: it wrote the GLOBAL users row with
   // no ownership check, so one tenant could permanently reclassify a login for everyone. It

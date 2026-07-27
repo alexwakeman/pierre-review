@@ -1440,6 +1440,33 @@ export interface RepoMergers {
 
 export type MergersResponse = RepoMergers[];
 
+// ---- contributor profile stats (the user popover) ----
+
+// One contributor's ALL-TIME activity totals over the synced data, scoped to the caller's
+// account and (optionally) a repo subset. Deliberately COUNTS ONLY — `users` is a global
+// table, so echoing back a login/avatar for an arbitrary id would turn this id-addressed
+// route into a cross-tenant profile lookup. The SPA already holds the account-scoped roster
+// (`useUsers()` → `listUsers(accountId)`) and joins on `userId` itself.
+export interface UserContributionStats {
+  userId: number;
+  // PRs this user AUTHORED, split by the same four buckets as `PrStatus`.
+  prsMerged: number;
+  prsOpen: number;
+  prsDraft: number;
+  prsClosed: number;
+  // Reviews this user SUBMITTED, counted the same way the timeline counts them: any
+  // verdict, but excluding `pending` drafts AND the body-less `commented` review GitHub
+  // wraps around a batch of inline comments (see `isSubstantiveReview`). Those inline
+  // comments are already in `comments`, so counting the wrapper too would double-count
+  // one act — over half the rows for an active reviewer.
+  reviewsGiven: number;
+  // Comments this user wrote — PR-level (issue) comments + inline review-thread replies.
+  comments: number;
+  // The repos the totals cover: null = every repo in the account (no narrowing was asked
+  // for), otherwise the exact ids counted. Lets the popover caption itself honestly.
+  repoIds: number[] | null;
+}
+
 // ---- insights (per-repo team/sprint stats) ----
 
 // Open review-requests still pending for one reviewer in a repo — the review-load

@@ -34,8 +34,8 @@ import {
 import { escapeHtml, indexUsers, userLabel, watchedGlyphHtml } from '../../lib/ui.js';
 import { SkeletonBlock, SkeletonLine } from '../Skeleton.js';
 import { renderPrBar, prClassName, prTooltip } from './prBar.js';
-import { computeUserStats, renderUserLabel, type UserStats } from './userRow.js';
-import { UserStatsPopover } from './UserStatsPopover.js';
+import { renderUserLabel } from './userRow.js';
+import { UserProfilePopover } from '../UserProfilePopover.js';
 import { buildMarkerItems } from './clustering.js';
 import { assignPrLanes, prGroupId } from './lanes.js';
 import {
@@ -454,18 +454,16 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   // Latest popover state, readable from stable callbacks without re-binding.
   const popoverRef = useRef<PopoverState | null>(null);
   popoverRef.current = popover;
-  // The per-contributor metrics popover (its toggle lives in each row label). Holds
-  // the row's group id + the clicked uid + the click point (fallback anchor). Local
-  // state, like `popover` — it's transient UI, not filter/URL state.
+  // The contributor popover (opened by clicking a row-label name). Holds the row's group
+  // id + the clicked uid + the row's repo (which scopes the popover's numbers) + the click
+  // point (fallback anchor). Local state, like `popover` — transient UI, not filter/URL state.
   const [statsPopover, setStatsPopover] = useState<{
     gid: string;
     uid: number;
+    repoId: number;
     x: number;
     y: number;
   } | null>(null);
-  // Latest per-user stats from the last rebuild, read by the metrics popover without
-  // re-deriving the basePrs set. Updated in the rebuild effect alongside the labels.
-  const userStatsRef = useRef<Map<number, UserStats>>(new Map());
   // True whenever a row-collapse focus overlay is active (a cross-user marker or
   // an activity "Show"). Drives the bottom-right "Exit focus" button. Clicking the
   // timeline no longer reverts focus — this button (or browser-back) is the way
@@ -1771,7 +1769,7 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       // listener; ignore it here so it never doubles as a row / empty-canvas click
       // (which would clear the selection).
       const tgt = (native?.target ?? null) as HTMLElement | null;
-      if (tgt?.closest?.('[data-collapse-gid]') || tgt?.closest?.('[data-stats-gid]')) return;
+      if (tgt?.closest?.('[data-collapse-gid]') || tgt?.closest?.('[data-user-gid]')) return;
 
       // Empty-canvas click → one-level-at-a-time dismissal (see dismissEmptyCanvas).
       if (id == null) {
@@ -2028,28 +2026,37 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     return () => container.removeEventListener('click', onClick, true);
   }, [setRowCollapsed]);
 
-  // Per-contributor metrics toggle (the bar-chart glyph on each row label). Same
-  // delegated-capture pattern as the collapse caret — vis re-creates labels on every
-  // rebuild, so an inline React handler can't survive; capture + stopPropagation keep
-  // the click from registering as a vis row click. Toggles a labelled-table popover
-  // for that row; allowed during focus mode (it's read-only and harmless).
+  // Contributor name click (each row label) → the shared user popover. Same delegated-capture
+  // pattern as the collapse caret — vis re-creates labels on every rebuild, so an inline React
+  // handler can't survive; capture + stopPropagation keep the click from registering as a vis
+  // row click. Allowed during focus mode (it's read-only and harmless).
+  //
+  // The label is a real <a> to the GitHub profile, so a MODIFIED click (⌘/ctrl/shift/alt) or a
+  // non-primary button is deliberately left alone — "open my profile in a new tab" still works
+  // exactly as it did. Only a plain left click is intercepted and preventDefaulted.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const onClick = (e: MouseEvent): void => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
-      const btn = target?.closest?.('[data-stats-gid]') as HTMLElement | null;
-      if (!btn) return;
-      const gid = btn.getAttribute('data-stats-gid');
+      const link = target?.closest?.('[data-user-gid]') as HTMLElement | null;
+      if (!link) return;
+      const gid = link.getAttribute('data-user-gid');
       if (!gid) return;
+      // gids are `repo:<rid>:user:<uid>`. Both halves must parse or we leave the click alone
+      // (the <a> then does what it always did).
+      const m = /^repo:(\d+):user:(\d+)$/.exec(gid);
+      if (!m) return;
+      const repoId = Number(m[1]);
+      const uid = Number(m[2]);
+      if (!Number.isFinite(uid) || !Number.isFinite(repoId)) return;
       e.stopPropagation();
       e.preventDefault();
-      const uid = Number(gid.split(':user:')[1]);
-      if (!Number.isFinite(uid)) return;
       // Mutually exclusive with the marker popover.
       setPopover(null);
       setStatsPopover((cur) =>
-        cur && cur.gid === gid ? null : { gid, uid, x: e.clientX, y: e.clientY },
+        cur && cur.gid === gid ? null : { gid, uid, repoId, x: e.clientX, y: e.clientY },
       );
     };
     container.addEventListener('click', onClick, true);
@@ -2297,11 +2304,6 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     const prLanes = assignPrLanes(basePrs);
     prLanesRef.current = prLanes;
 
-    // Per-user interaction tallies for the row labels — from the full timeframe
-    // (all events + all PRs), so they don't shift with the thread-state filter.
-    const userStats = computeUserStats(data.events, basePrs);
-    userStatsRef.current = userStats;
-
     // Which events drive the contributor ROWS. When the client-side Threads filter is
     // active we collapse the board to just the people in the surviving events — otherwise
     // every actor in the payload keeps an (empty) row, which defeats the filter. Mirrors
@@ -2401,7 +2403,6 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
             renderUserLabel(
               usersById.get(uid),
               uid,
-              userStats.get(uid),
               isMaintainer,
               gid,
               collapsedRowsByUserRef.current.has(gid),
@@ -2940,21 +2941,19 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
         />
       )}
       {statsPopover && (
-        <UserStatsPopover
-          gid={statsPopover.gid}
-          uid={statsPopover.uid}
+        <UserProfilePopover
+          userId={statsPopover.uid}
           user={usersById.get(statsPopover.uid)}
-          stats={
-            userStatsRef.current.get(statsPopover.uid) ?? {
-              comments: 0,
-              reviews: 0,
-              prsOpen: 0,
-              prsMerged: 0,
-              prsClosed: 0,
-            }
-          }
-          x={statsPopover.x}
-          y={statsPopover.y}
+          repoId={statsPopover.repoId}
+          // The row label is destroyed + rebuilt on every vis rebuild, so anchor by SELECTOR
+          // (re-resolved each frame) rather than by node, with the click point as the fallback.
+          // The gid is `repo:<n>:user:<n>` — digits + colons only, safe in a quoted selector.
+          anchor={{
+            kind: 'selector',
+            selector: `[data-user-gid="${statsPopover.gid}"]`,
+            x: statsPopover.x,
+            y: statsPopover.y,
+          }}
           onDismiss={() => setStatsPopover(null)}
         />
       )}

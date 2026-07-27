@@ -480,6 +480,88 @@ check(
   searchCross.total === 0 && searchCross.hits.length === 0,
 );
 
+// ── Per-user contribution stats (getUserStats) ─────────────────────────────────
+// `users` is a GLOBAL table, so the user id alone must grant nothing: every count binds
+// pullRequests.accountId (PRs directly; reviews/comments through their parent PR). Seed a
+// contributor who authored A's PR and reviewed it, then assert B asking about the SAME
+// user id gets all zeros — the cross-account IDOR this route would otherwise open.
+const [contributor] = await db
+  .insert(schema.users)
+  .values({ githubLogin: 'contrib-iso', githubNodeId: 'U_contrib', isBot: false })
+  .returning()
+  .execute();
+await db
+  .update(pullRequests)
+  .set({ authorId: contributor!.id })
+  .where(eq(pullRequests.id, A.prId))
+  .execute();
+await db
+  .insert(schema.reviews)
+  .values({
+    githubNodeId: 'RV_iso_A',
+    prId: A.prId,
+    authorId: contributor!.id,
+    state: 'approved',
+    submittedAt: now,
+  })
+  .execute();
+await db
+  .insert(schema.prComments)
+  .values({
+    githubNodeId: 'PC_iso_A',
+    prId: A.prId,
+    authorId: contributor!.id,
+    body: 'iso',
+    createdAt: now,
+  })
+  .execute();
+// An INLINE review comment too, not just the issue-level one. `comments` sums two sources,
+// and reviewComments reaches its tenant the most indirectly of the four queries — without a
+// row here, deleting its accountId predicate would leave this suite green (the cross-account
+// assertion below would still see 0 because there was nothing to leak). Seeding it, and
+// asserting comments === 2, is what actually binds that predicate.
+const [isoThread] = await db
+  .select({ id: schema.reviewThreads.id })
+  .from(schema.reviewThreads)
+  .where(eq(schema.reviewThreads.githubNodeId, 'RT_iso_A'))
+  .limit(1)
+  .execute();
+await db
+  .insert(schema.reviewComments)
+  .values({
+    githubNodeId: 'RC_iso_A',
+    threadId: isoThread!.id,
+    prId: A.prId,
+    authorId: contributor!.id,
+    body: 'iso inline',
+    createdAt: now,
+  })
+  .execute();
+const usOwn = await q.getUserStats(1, contributor!.id);
+check(
+  'getUserStats(A, contributor) counts A’s PR + review + both comment sources',
+  usOwn.prsOpen === 1 && usOwn.reviewsGiven === 1 && usOwn.comments === 2,
+);
+const usCross = await q.getUserStats(2, contributor!.id);
+check(
+  'getUserStats(B, A’s contributor) returns all zeros (IDOR blocked)',
+  usCross.prsOpen === 0 &&
+    usCross.prsMerged === 0 &&
+    usCross.prsDraft === 0 &&
+    usCross.prsClosed === 0 &&
+    usCross.reviewsGiven === 0 &&
+    usCross.comments === 0,
+);
+const usCrossRepo = await q.getUserStats(2, contributor!.id, [A.repoId]);
+check(
+  'getUserStats(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)',
+  usCrossRepo.prsOpen === 0 && usCrossRepo.reviewsGiven === 0 && usCrossRepo.comments === 0,
+);
+check(
+  'getUserStats(A, repoIds=[]) short-circuits to zeros',
+  (await q.getUserStats(1, contributor!.id, [])).prsOpen === 0,
+);
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

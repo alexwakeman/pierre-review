@@ -260,6 +260,13 @@
       "when": 1784500000000,
       "tag": "0036_search_index",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1784600000000,
+      "tag": "0037_author_indexes",
+      "breakpoints": true
     }
   ]
 }

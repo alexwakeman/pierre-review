@@ -118,6 +118,7 @@ import type {
   BotDedupResponse,
   BotTuningSuggestion,
   BotOnlyReviewCard,
+  UserContributionStats,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -608,6 +609,132 @@ export async function listUsers(accountId: number): Promise<User[]> {
     .orderBy(asc(users.githubLogin))
     .execute();
   return rows.map(mapUser);
+}
+
+// All-time contribution counts for ONE user, as seen from ONE account's synced data.
+//
+// Deliberately COUNTS-ONLY: no titles, no bodies, no ids, no profile fields — the caller
+// already knows who it asked about, and a popover that leaks a PR title would leak it from
+// repos the reader may not have open. There is no date window either; these are lifetime
+// totals over whatever this account has synced, which is what a "who is this person" hover
+// wants (a windowed number reads as "did nothing" for a long-tenured contributor).
+//
+// Account scoping is the load-bearing part. `users` is a GLOBAL table, so the user id alone
+// grants nothing: every count is bound to `pullRequests.accountId = accountId`. PRs carry
+// `accountId` directly (it's denormalized onto the anchor tables); `reviews`, `prComments`
+// and `reviewComments` do NOT, so they reach their tenant the only way they can — an inner
+// join to their parent PR, exactly as the reviewer-evidence / detected-reviewer queries do.
+// The upshot is that asking about another tenant's user returns all zeros rather than their
+// numbers, and it does so without an ownership 404 (which would make ids enumerable).
+//
+// `repoIds`: null = every repo in the account; a non-empty list narrows; an EMPTY array is a
+// caller that narrowed to nothing, which must be all-zeros rather than an `inArray([])`.
+export async function getUserStats(
+  accountId: number,
+  userId: number,
+  repoIds: number[] | null = null,
+): Promise<UserContributionStats> {
+  const zero: UserContributionStats = {
+    userId,
+    prsMerged: 0,
+    prsOpen: 0,
+    prsDraft: 0,
+    prsClosed: 0,
+    reviewsGiven: 0,
+    comments: 0,
+    repoIds,
+  };
+  if (repoIds != null && repoIds.length === 0) return zero;
+
+  // The repo narrowing, expressed once against pullRequests — every source reaches the
+  // repo through its PR, so the same predicate works for all four queries.
+  const repoScope = repoIds ? [inArray(pullRequests.repoId, repoIds)] : [];
+
+  // PR buckets: ONE grouped count folded in JS. Grouping on (state, isDraft) keeps this
+  // portable (no CASE), and `isDraft` reads back as a real boolean on both dialects
+  // (integer mode:'boolean' in sqlite, boolean in pg). Bucket mapping mirrors
+  // prStatusWhere(): merged / closed by state, open split by isDraft.
+  const [prRows, revRows, prCommentRows, reviewCommentRows] = await Promise.all([
+    db
+      .select({ state: pullRequests.state, isDraft: pullRequests.isDraft, n: count() })
+      .from(pullRequests)
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          eq(pullRequests.authorId, userId),
+          ...repoScope,
+        ),
+      )
+      .groupBy(pullRequests.state, pullRequests.isDraft)
+      .execute(),
+    // Reviews SUBMITTED. `pending` is a draft review that was never submitted — excluded
+    // here as it is everywhere else in this file.
+    //
+    // Also excluded: GitHub's body-less `commented` WRAPPER — the empty review row it
+    // creates around a batch of inline comments. Counting those would (a) disagree with
+    // what the rest of the app calls a review (`isSubstantiveReview` in sync/upsert.ts,
+    // which is why the timeline suppresses them) and (b) DOUBLE-COUNT against the
+    // `comments` total below, since the wrapper's inline comments are counted there too.
+    // On real data that is over half the rows for an active reviewer. `reviews.body` is
+    // persisted unconditionally in both modes, so the test is reliable. (A whitespace-ONLY
+    // body counts as substantive here where `isSubstantiveReview` would trim it away —
+    // expressing trim() portably would need a raw sql template for a case that does not
+    // occur; the emptiness test is `IS NOT NULL AND <> ''`.)
+    db
+      .select({ n: count() })
+      .from(reviews)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          eq(reviews.authorId, userId),
+          ne(reviews.state, 'pending'),
+          or(ne(reviews.state, 'commented'), and(isNotNull(reviews.body), ne(reviews.body, ''))),
+          ...repoScope,
+        ),
+      )
+      .execute(),
+    // Issue-level PR comments.
+    db
+      .select({ n: count() })
+      .from(prComments)
+      .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          eq(prComments.authorId, userId),
+          ...repoScope,
+        ),
+      )
+      .execute(),
+    // Inline review-thread comments. `reviewComments` carries its own `prId` alongside the
+    // thread fk, so it joins the PR directly — the shape reviewerEvidence() already uses.
+    db
+      .select({ n: count() })
+      .from(reviewComments)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          eq(reviewComments.authorId, userId),
+          ...repoScope,
+        ),
+      )
+      .execute(),
+  ]);
+
+  const stats: UserContributionStats = { ...zero };
+  for (const r of prRows) {
+    if (r.state === 'merged') stats.prsMerged += r.n;
+    else if (r.state === 'closed') stats.prsClosed += r.n;
+    else if (r.state === 'open') {
+      if (r.isDraft) stats.prsDraft += r.n;
+      else stats.prsOpen += r.n;
+    }
+  }
+  stats.reviewsGiven = revRows[0]?.n ?? 0;
+  stats.comments = (prCommentRows[0]?.n ?? 0) + (reviewCommentRows[0]?.n ?? 0);
+  return stats;
 }
 
 // NOTE: `setUserBot` was REMOVED along with `PATCH /api/users/:id`.
@@ -4108,7 +4235,11 @@ export async function getConsolidatedFeed(
         }),
     // Claude Review runs surfaced as their own feed item kind (local-only; empty in cloud).
     // Skipped in the bot-only feed (they're the user's own runs, not review-bot activity).
-    botsOnly
+    // ALSO skipped whenever a member filter is active: these rows are emitted with
+    // `actorId: null` (a run has no member author), and getClaudeReviewFeedItems takes no
+    // userIds, so they would survive every member filter and appear in a feed the reader
+    // explicitly scoped to specific people. An actor-less row cannot belong to any of them.
+    botsOnly || (userIds != null && userIds.length > 0)
       ? Promise.resolve<ConsolidatedFeedItem[]>([])
       : getClaudeReviewFeedItems(accountId, effectiveRepoIds, feedSince, prId),
   ]);
