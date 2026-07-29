@@ -140,16 +140,29 @@ function tierFor(method: string, path: string): readonly Tier[] {
   }
   if (mutating) {
     // Writes that reach GitHub: thread replies/resolves, PR comments, approvals,
-    // merges, branch updates, bulk bot-thread resolves.
+    // merges, merge-queue enqueue/dequeue, auto-merge arm/disarm, branch updates, bulk
+    // bot-thread resolves.
+    //
+    // `merge-queue` and `auto-merge` are spelled out even though `merge` would prefix-match
+    // the first (the alternation has no trailing anchor): relying on that coincidence is how
+    // a later tightening of the regex silently drops two GitHub-write routes onto the
+    // 600/min read tier. Arming auto-merge is a DB write, but disarm/arm both re-check
+    // mergeability against GitHub and the watcher merges on the account's quota, so it
+    // belongs in the same bucket as an explicit merge.
     const hitsGithub =
       path.startsWith('/api/threads/') ||
       path.startsWith('/api/bot-threads/') ||
-      /^\/api\/prs\/\d+\/(comments|approve|merge|update-branch|resolve-bot-threads|reviews)/.test(
+      /^\/api\/prs\/\d+\/(comments|approve|merge-queue|merge|auto-merge|update-branch|resolve-bot-threads|reviews)/.test(
         path,
       );
     if (hitsGithub) return [TIERS.githubWrite];
   }
 
+  // Everything else, deliberately including the two new cross-account GETs
+  // `GET /api/auto-merge` (the armed-intent list) and `GET /api/branch-status` (default-branch
+  // health): both are pure DB reads off already-synced rows — no GitHub call, no LLM — so the
+  // blanket 600/min backstop is the right bucket. If either ever grows a live GitHub fetch it
+  // must move to `search`/`prDetail` like the other hydrating reads.
   return [TIERS.read];
 }
 

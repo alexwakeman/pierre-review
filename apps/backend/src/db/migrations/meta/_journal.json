@@ -267,6 +267,27 @@
       "when": 1784600000000,
       "tag": "0037_author_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1784700000000,
+      "tag": "0038_auto_merge_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1784800000000,
+      "tag": "0039_branch_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1784900000000,
+      "tag": "0040_pr_review_decision",
+      "breakpoints": true
     }
   ]
 }

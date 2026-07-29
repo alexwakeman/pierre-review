@@ -107,6 +107,23 @@ export const repos = sqliteTable(
       .notNull()
       .default(false),
     inboxWatchStartedAt: integer('inbox_watch_started_at', { mode: 'timestamp' }),
+    // ---- Default-branch status ("is trunk green?") ----
+    // A snapshot of the repo's DEFAULT BRANCH head, distinct from `defaultBranch` above
+    // (which is just the name and has been here since the maintainer inference). All four
+    // are nullable — a freshly added repo has none until the branch sync runs, and rendering
+    // "unknown" is correct there. `defaultBranchName` is deliberately separate from
+    // `defaultBranch` rather than reusing it: the latter is written by the ACTIVITY sync from
+    // GraphQL defaultBranchRef.name, and conflating the two would make either sync silently
+    // clobber the other's freshness expectations.
+    defaultBranchName: text('default_branch_name'),
+    defaultBranchHeadSha: text('default_branch_head_sha'),
+    // Same enum as pullRequests.ciStatus (the shared CiStatus union).
+    defaultBranchCiStatus: text('default_branch_ci_status', {
+      enum: ['success', 'failure', 'pending', 'error', 'expected', 'unknown'],
+    }),
+    // When the branch snapshot was last refreshed (OUR observation time, not the commit time
+    // — that lives on the branch_commits rows).
+    defaultBranchUpdatedAt: integer('default_branch_updated_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -201,6 +218,14 @@ export const pullRequests = sqliteTable(
         'has_hooks',
         'unknown',
       ],
+    }),
+    // GitHub's overall review decision (GraphQL PullRequest.reviewDecision, lowercased).
+    // `mergeStateStatus: 'blocked'` says protection is unmet but never WHY; this names the
+    // review half of that ('review_required' / 'changes_requested'), which is what lets the
+    // merge verdict render a reason instead of a shrug. Null when the repo requires no
+    // review, or until a sync backfills it on already-synced PRs.
+    reviewDecision: text('review_decision', {
+      enum: ['approved', 'changes_requested', 'review_required'],
     }),
     labels: text('labels', { mode: 'json' }).$type<Label[]>(),
     // Per-job CI checks on the head commit (CheckRuns + StatusContexts).
@@ -550,6 +575,123 @@ export const aiUsage = sqliteTable(
   },
   (t) => ({
     accountOccurredIdx: index('au_account_occurred').on(t.accountId, t.occurredAt),
+  }),
+);
+
+// ---- Auto-merge intents ("arm it and walk away") ----------------------------------------
+// One row per (account, PR) recording a STANDING INTENT to merge once the blockers clear.
+// Pierre-side, not GitHub's native auto-merge, so it works on repos that don't enable it and
+// can offer a rebase-from-trunk step GitHub can't.
+//
+// The safety property lives in `expectedHeadOid`: arming is consent to merge THAT code. A new
+// push moves the head, the watcher notices the mismatch, and the row goes to
+// 'disarmed_head_moved' rather than merging commits the user never looked at. `expiresAt` is
+// the second backstop — an intent that never becomes mergeable dies rather than lingering.
+//
+// FKs cascade so a repo/PR delete (deleteRepo) and an account erasure clean up automatically.
+export const autoMergeRequests = sqliteTable(
+  'auto_merge_requests',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    // shared MergeMethod: 'merge' | 'squash' | 'rebase'.
+    mergeMethod: text('merge_method', {
+      enum: ['merge', 'squash', 'rebase'],
+    }).notNull(),
+    // Whether to bring a merely-behind branch up to date first, and how. 'none' = wait.
+    updateStrategy: text('update_strategy', {
+      enum: ['rebase', 'merge', 'none'],
+    }).notNull(),
+    // The head SHA at arming time — the consent anchor (see above).
+    expectedHeadOid: text('expected_head_oid').notNull(),
+    // shared ArmedMergeState.
+    state: text('state', {
+      enum: [
+        'armed',
+        'merged',
+        'disarmed_head_moved',
+        'disarmed_blocked',
+        'expired',
+        'failed',
+      ],
+    }).notNull(),
+    armedAt: integer('armed_at', { mode: 'timestamp' }).notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+    lastCheckedAt: integer('last_checked_at', { mode: 'timestamp' }),
+    // Why it is in its current state ('required reviews missing', 'head moved abc→def').
+    lastReason: text('last_reason'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    // One armed request per PR per tenant — the upsert conflict target. Re-arming a PR
+    // OVERWRITES the previous row (including a terminal one), so history is not kept here;
+    // an armed intent is current state, not a log.
+    accountPrUx: uniqueIndex('amr_account_pr').on(t.accountId, t.prId),
+    accountIdx: index('amr_account_idx').on(t.accountId),
+    // The watcher's scan: "every still-armed row", cheapest as an indexed state probe.
+    stateIdx: index('amr_state_idx').on(t.state),
+  }),
+);
+
+// ---- Default-branch commits ("is trunk green?") -----------------------------------------
+// The recent commits on each repo's DEFAULT branch, with the CI state observed for each. Not
+// derivable from `commits`, which is PR-scoped (a commit merged via squash never appears
+// there under its trunk SHA). Small and bounded: the branch sync keeps only a recent window
+// per repo. `accountId` is denormalized for isolation exactly like events/pullRequests.
+//
+// `authorUserId` is a nullable link to the global `users` row when the commit author maps to
+// a GitHub account; `authorName`/`authorAvatarUrl` carry the raw git identity for the many
+// trunk commits (merge commits, bot pushes, non-GitHub emails) that don't.
+export const branchCommits = sqliteTable(
+  'branch_commits',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    sha: text('sha').notNull(),
+    messageHeadline: text('message_headline').notNull(),
+    authorUserId: integer('author_user_id').references(() => users.id),
+    authorName: text('author_name'),
+    authorAvatarUrl: text('author_avatar_url'),
+    committedAt: integer('committed_at', { mode: 'timestamp' }).notNull(),
+    // Same enum as pullRequests.ciStatus; nullable because a just-pushed commit has no
+    // status yet (distinct from an explicit 'unknown').
+    ciStatus: text('ci_status', {
+      enum: ['success', 'failure', 'pending', 'error', 'expected', 'unknown'],
+    }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    // Idempotent upsert target — a re-sync of the same window must update CI state in place,
+    // not duplicate the commit.
+    accountRepoShaUx: uniqueIndex('bc_account_repo_sha').on(
+      t.accountId,
+      t.repoId,
+      t.sha,
+    ),
+    // The read: one repo's window, newest first.
+    accountRepoTimeIdx: index('bc_account_repo_time').on(
+      t.accountId,
+      t.repoId,
+      t.committedAt,
+    ),
+    accountIdx: index('bc_account_idx').on(t.accountId),
   }),
 );
 

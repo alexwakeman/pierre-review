@@ -18,6 +18,8 @@ describe('tierFor — AI generation', () => {
     expect(tiers('POST', '/api/pro/sprint-report/refresh')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/prs/12/ai-fix')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/prs/12/addressed/check')).toEqual(['ai', 'ai_hourly']);
+    // The comment-annotations platform: the run POST is the only billing path.
+    expect(tiers('POST', '/api/pro/prs/12/annotations/run')).toEqual(['ai', 'ai_hourly']);
   });
 
   // Load-bearing: Claude Review kept its PRE-PLUGIN paths for frontend compatibility, so it does
@@ -34,6 +36,9 @@ describe('tierFor — AI generation', () => {
     expect(tiers('GET', '/api/prs/42/claude-review')).toEqual(['read']);
     expect(tiers('GET', '/api/prs/42/claude-review/status')).toEqual(['read']);
     expect(tiers('GET', '/api/claude-reviews')).toEqual(['read']);
+    // Reading stored annotations is a pure cache hit — it must NOT land on the ai tier, or
+    // simply opening a PR would burn the 20/min generation budget.
+    expect(tiers('GET', '/api/pro/prs/12/annotations')).toEqual(['read']);
   });
 
   it('does not bill cancels or config writes as generation', () => {
@@ -70,6 +75,20 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/prs/42/approve')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/merge')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/resolve-bot-threads')).toEqual(['github_write']);
+    // Merge queue + Pierre-side auto-merge. Both verbs of each, because a DELETE that fell
+    // through to `read` would let a client hammer GitHub's dequeue at 600/min.
+    expect(tiers('POST', '/api/prs/42/merge-queue')).toEqual(['github_write']);
+    expect(tiers('DELETE', '/api/prs/42/merge-queue')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/prs/42/auto-merge')).toEqual(['github_write']);
+    expect(tiers('DELETE', '/api/prs/42/auto-merge')).toEqual(['github_write']);
+  });
+
+  // The two new cross-account GETs are pure DB reads off already-synced rows — no GitHub
+  // call, no LLM — so the generous backstop is correct. Pinned so that a later change which
+  // gives either a live GitHub fetch has to come back here and move it deliberately.
+  it('leaves the DB-only armed-merge and branch-status reads on the read tier', () => {
+    expect(tiers('GET', '/api/auto-merge')).toEqual(['read']);
+    expect(tiers('GET', '/api/branch-status')).toEqual(['read']);
   });
 });
 

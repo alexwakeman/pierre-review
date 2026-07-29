@@ -63,6 +63,16 @@ import type {
   MergersResponse,
   MergePrBody,
   MergePrResult,
+  MergeQueueEnqueueBody,
+  MergeQueueResult,
+  ArmMergeBody,
+  ArmedMergeRequest,
+  ArmedMergeListResponse,
+  BranchStatusResponse,
+  AnnotationKind,
+  AnnotationRunBody,
+  AnnotationRunResponse,
+  PrAnnotationsResponse,
   ClosePrResult,
   PrMergeOptions,
   UpdateBranchBody,
@@ -294,11 +304,26 @@ export const api = {
   scopeMentionCandidates: (scope?: string) =>
     get<User[]>(withQuery('/api/mention-candidates', scopeParam(scope))),
   prFiles: (id: number) => get<PrFilesResponse>(`/api/prs/${id}/files`),
-  // Tail of a failed GitHub Actions check's logs (fetched live, never stored).
-  checkLogs: (prId: number, jobId: number, tail?: number) =>
-    get<CheckLogsResponse>(
-      `/api/prs/${prId}/checks/${jobId}/logs${tail ? `?tail=${tail}` : ''}`,
-    ),
+  // A WINDOW of a failed GitHub Actions check's logs (fetched live, never stored).
+  //
+  // Two shapes, mirroring the route: pass `tail` for the legacy "last N lines" open, or an
+  // explicit `startByte`/`endByte` range for the scroll-up "load earlier" step (feed back the
+  // `startByte` the previous response reported, minus the chunk you want). The response always
+  // states the window it actually served plus `hasMore` (more log exists ABOVE it).
+  checkLogs: (
+    prId: number,
+    jobId: number,
+    opts?: { tail?: number; startByte?: number; endByte?: number },
+  ) => {
+    const p = new URLSearchParams();
+    if (opts?.tail != null) p.set('tail', String(opts.tail));
+    if (opts?.startByte != null) p.set('startByte', String(opts.startByte));
+    if (opts?.endByte != null) p.set('endByte', String(opts.endByte));
+    const qs = p.toString();
+    return get<CheckLogsResponse>(
+      `/api/prs/${prId}/checks/${jobId}/logs${qs ? `?${qs}` : ''}`,
+    );
+  },
   // Re-trigger a GitHub Actions workflow run (needs repo write access).
   rerunCi: (prId: number, body: CiRerunBody) =>
     fetch(`/api/prs/${prId}/ci/rerun`, jsonBody('POST', body)).then((r) =>
@@ -340,6 +365,39 @@ export const api = {
     fetch(`/api/prs/${prId}/update-branch`, jsonBody('POST', body ?? {})).then((r) =>
       handle<UpdateBranchResult>(r),
     ),
+
+  // ---- Merge queue (GitHub-native) ----
+  // Enqueue / dequeue this PR on the repo's merge queue. Only offerable when
+  // `mergeOptions().mergeQueue?.enabled` — the routes 400 otherwise rather than guessing.
+  enqueueMergeQueue: (prId: number, body?: MergeQueueEnqueueBody) =>
+    fetch(`/api/prs/${prId}/merge-queue`, jsonBody('POST', body ?? {})).then((r) =>
+      handle<MergeQueueResult>(r),
+    ),
+  dequeueMergeQueue: (prId: number) =>
+    fetch(`/api/prs/${prId}/merge-queue`, jsonBody('DELETE')).then((r) =>
+      handle<MergeQueueResult>(r),
+    ),
+
+  // ---- Auto-merge (Pierre-side "arm it and walk away") ----
+  // Arm: record the intent to merge THIS head once the blockers clear. The server pins the
+  // current head SHA as `expectedHeadOid`, so a later push disarms instead of merging code the
+  // user never saw. Disarm resolves to void (204).
+  armAutoMerge: (prId: number, body: ArmMergeBody) =>
+    fetch(`/api/prs/${prId}/auto-merge`, jsonBody('POST', body)).then((r) =>
+      handle<ArmedMergeRequest>(r),
+    ),
+  disarmAutoMerge: (prId: number) =>
+    fetch(`/api/prs/${prId}/auto-merge`, jsonBody('DELETE')).then((r) => handle<void>(r)),
+  // Every armed (and recently-resolved) intent for the account — the cross-PR "what's queued
+  // to land" surface. Pure DB read.
+  armedMerges: () => get<ArmedMergeListResponse>('/api/auto-merge'),
+
+  // ---- Default-branch status ("is trunk green?") ----
+  // Per-repo default-branch head + recent trunk commits with their CI state. `repoIds` scopes
+  // it to the visible repo set; omitted = every repo the account watches. Pure DB read off the
+  // branch sync — never a live GitHub call.
+  branchStatus: (repoIds?: number[] | null) =>
+    get<BranchStatusResponse>(withQuery('/api/branch-status', repoIdsParam(repoIds))),
   addReviewComment: (prId: number, body: AddReviewCommentBody) =>
     fetch(`/api/prs/${prId}/review-comment`, jsonBody('POST', body)).then((r) =>
       handle<AddReviewCommentResult>(r),
@@ -516,6 +574,23 @@ export const api = {
   prAddressedCheck: (prId: number) =>
     fetch(`/api/pro/prs/${prId}/addressed/check`, jsonBody('POST')).then((r) =>
       handle<PrAddressedCheckResponse>(r),
+    ),
+
+  // ---- Comment annotations platform (Pro) ----
+  // Every stored AI judgement about this PR's comments/threads, optionally narrowed to
+  // certain kinds. A pure cache read (free); the run POST below is the only billing path.
+  prAnnotations: (prId: number, kinds?: AnnotationKind[]) =>
+    get<PrAnnotationsResponse>(
+      withQuery(
+        `/api/pro/prs/${prId}/annotations`,
+        kinds && kinds.length > 0 ? `kinds=${kinds.join(',')}` : '',
+      ),
+    ),
+  // Generate one kind across the PR. `onlyStale` is the cheap refresh — regenerate just the
+  // annotations whose target has moved on since they were written.
+  runPrAnnotations: (prId: number, body: AnnotationRunBody) =>
+    fetch(`/api/pro/prs/${prId}/annotations/run`, jsonBody('POST', body)).then((r) =>
+      handle<AnnotationRunResponse>(r),
     ),
 
   // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----

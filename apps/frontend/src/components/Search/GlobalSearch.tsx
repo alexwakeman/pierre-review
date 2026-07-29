@@ -5,6 +5,7 @@ import { useSearchDropdown } from '../../hooks/useSearch.js';
 import { useFilters } from '../../store/filters.js';
 import { MagnifierIcon } from '../Icons.js';
 import { KIND_GLYPH, KIND_LABEL, openSearchHit } from './searchNav.js';
+import { highlightTerms } from './highlight.js';
 
 // The global cross-team search box (in the FilterBar). Debounced; a query ≥ 2 chars pops a panel of
 // the top hits (PRs / reviews / threads / comments) + matching people. Clicking a hit opens it (a
@@ -127,10 +128,12 @@ export function GlobalSearch(): JSX.Element {
                       {h.repoFullName} #{h.prNumber}
                     </span>
                   </span>
-                  <span className="truncate text-xs font-medium">{h.prTitle}</span>
+                  <span className="truncate text-xs font-medium">
+                    {highlightTerms(h.prTitle, debounced)}
+                  </span>
                   {h.snippet && h.kind !== 'pr' ? (
                     <span className="line-clamp-1 text-[11px] text-gray-500 dark:text-gray-400">
-                      {h.snippet}
+                      {highlightTerms(h.snippet, debounced)}
                     </span>
                   ) : null}
                 </button>

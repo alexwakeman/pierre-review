@@ -159,6 +159,37 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
       createdAt: new Date(),
     })
     .execute();
+  // A standing auto-merge intent. Seeded explicitly because the checklist test below asserts
+  // "0 rows remain", which is vacuously true for a table nothing ever wrote to — an unseeded
+  // table proves nothing about whether eraseAccountData actually handles it.
+  await db
+    .insert(s.autoMergeRequests)
+    .values({
+      accountId,
+      prId: pr.id,
+      mergeMethod: 'squash',
+      updateStrategy: 'rebase',
+      expectedHeadOid: `head-${accountId}`,
+      state: 'armed',
+      armedAt: new Date(),
+      expiresAt: new Date(Date.now() + 86_400_000),
+    })
+    .execute();
+  // A default-branch commit snapshot — same reasoning (and it carries an author name +
+  // commit subject, so it is personal data an erasure must not leave behind).
+  await db
+    .insert(s.branchCommits)
+    .values({
+      accountId,
+      repoId: repo.id,
+      sha: `trunk-${accountId}`,
+      messageHeadline: `Land change ${accountId}`,
+      authorUserId: user.id,
+      authorName: `Dev ${accountId}`,
+      committedAt: new Date(),
+      ciStatus: 'success',
+    })
+    .execute();
 }
 
 beforeAll(async () => {
@@ -249,7 +280,16 @@ describe('eraseAccountData', () => {
     }
     // Sanity: the snapshot itself was meaningful — the surviving account really does still hold
     // its repo, PR, events and account row (otherwise "unchanged" could be vacuously true).
-    for (const name of ['accounts', 'repos', 'pullRequests', 'events', 'teams', 'searchIndex']) {
+    for (const name of [
+      'accounts',
+      'repos',
+      'pullRequests',
+      'events',
+      'teams',
+      'searchIndex',
+      'autoMergeRequests',
+      'branchCommits',
+    ]) {
       expect(keepBefore[name], `${name} should have been seeded`).toBeGreaterThan(0);
     }
   });

@@ -94,6 +94,17 @@ export const repos = pgTable(
       withTimezone: true,
       mode: 'date',
     }),
+    // Default-branch status snapshot ("is trunk green?") — the pg twin of schema.sqlite.ts.
+    // All nullable until the branch sync runs. Kept in sync by hand (schema-parity.test.ts).
+    defaultBranchName: text('default_branch_name'),
+    defaultBranchHeadSha: text('default_branch_head_sha'),
+    defaultBranchCiStatus: text('default_branch_ci_status', {
+      enum: ['success', 'failure', 'pending', 'error', 'expected', 'unknown'],
+    }),
+    defaultBranchUpdatedAt: timestamp('default_branch_updated_at', {
+      withTimezone: true,
+      mode: 'date',
+    }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),
@@ -180,6 +191,11 @@ export const pullRequests = pgTable(
         'has_hooks',
         'unknown',
       ],
+    }),
+    // GitHub's overall review decision (GraphQL PullRequest.reviewDecision, lowercased) — the
+    // pg twin of schema.sqlite.ts. Names the review half of a `blocked` merge state.
+    reviewDecision: text('review_decision', {
+      enum: ['approved', 'changes_requested', 'review_required'],
     }),
     labels: jsonb('labels').$type<Label[]>(),
     checkRuns: jsonb('check_runs').$type<CheckRun[]>(),
@@ -499,6 +515,95 @@ export const aiUsage = pgTable(
   },
   (t) => ({
     accountOccurredIdx: index('au_account_occurred').on(t.accountId, t.occurredAt),
+  }),
+);
+
+// ---- Auto-merge intents ── the pg twin of the sqlite autoMergeRequests table. See that file
+// for the full rationale (Pierre-side standing intent, `expectedHeadOid` as the consent
+// anchor, `expiresAt` as the backstop, one row per (account, PR)).
+export const autoMergeRequests = pgTable(
+  'auto_merge_requests',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    mergeMethod: text('merge_method', {
+      enum: ['merge', 'squash', 'rebase'],
+    }).notNull(),
+    updateStrategy: text('update_strategy', {
+      enum: ['rebase', 'merge', 'none'],
+    }).notNull(),
+    expectedHeadOid: text('expected_head_oid').notNull(),
+    state: text('state', {
+      enum: [
+        'armed',
+        'merged',
+        'disarmed_head_moved',
+        'disarmed_blocked',
+        'expired',
+        'failed',
+      ],
+    }).notNull(),
+    armedAt: timestamp('armed_at', { withTimezone: true, mode: 'date' }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    lastCheckedAt: timestamp('last_checked_at', { withTimezone: true, mode: 'date' }),
+    lastReason: text('last_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountPrUx: uniqueIndex('amr_account_pr').on(t.accountId, t.prId),
+    accountIdx: index('amr_account_idx').on(t.accountId),
+    stateIdx: index('amr_state_idx').on(t.state),
+  }),
+);
+
+// ---- Default-branch commits ── the pg twin of the sqlite branchCommits table. See that file
+// for the full rationale (trunk commits aren't derivable from the PR-scoped `commits` table;
+// accountId denormalized for isolation; bounded recent window per repo).
+export const branchCommits = pgTable(
+  'branch_commits',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    sha: text('sha').notNull(),
+    messageHeadline: text('message_headline').notNull(),
+    authorUserId: integer('author_user_id').references(() => users.id),
+    authorName: text('author_name'),
+    authorAvatarUrl: text('author_avatar_url'),
+    committedAt: timestamp('committed_at', { withTimezone: true, mode: 'date' }).notNull(),
+    ciStatus: text('ci_status', {
+      enum: ['success', 'failure', 'pending', 'error', 'expected', 'unknown'],
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountRepoShaUx: uniqueIndex('bc_account_repo_sha').on(
+      t.accountId,
+      t.repoId,
+      t.sha,
+    ),
+    accountRepoTimeIdx: index('bc_account_repo_time').on(
+      t.accountId,
+      t.repoId,
+      t.committedAt,
+    ),
+    accountIdx: index('bc_account_idx').on(t.accountId),
   }),
 );
 

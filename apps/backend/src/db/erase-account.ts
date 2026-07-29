@@ -40,6 +40,8 @@ const {
   teamRepos,
   benchmarkContributions,
   searchIndex,
+  autoMergeRequests,
+  branchCommits,
 } = schema;
 
 /**
@@ -128,6 +130,16 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .execute();
     // Full-text search rows are keyed by (accountId, …) and are copies of comment/PR text.
     await tx.delete(searchIndex).where(eq(searchIndex.accountId, accountId)).execute();
+    // Standing auto-merge intents. Their FKs cascade from pull_requests, so deleteRepo above
+    // has already taken most of them — but a row is only as safe as the repo loop that ran,
+    // and an intent naming a PR id is a record of what this user was about to ship. Explicit.
+    await tx
+      .delete(autoMergeRequests)
+      .where(eq(autoMergeRequests.accountId, accountId))
+      .execute();
+    // Default-branch commit snapshots (author names, commit subjects) — same reasoning: the
+    // repo cascade normally clears them, this makes the guarantee independent of it.
+    await tx.delete(branchCommits).where(eq(branchCommits.accountId, accountId)).execute();
 
     // Finally the account: identity + the AES-256-GCM sealed GitHub token.
     await tx.delete(accounts).where(eq(accounts.id, accountId)).execute();
@@ -170,6 +182,12 @@ export function accountScopedTables(): {
       table: benchmarkContributions,
     },
     { name: 'searchIndex', col: searchIndex.accountId, table: searchIndex },
+    {
+      name: 'autoMergeRequests',
+      col: autoMergeRequests.accountId,
+      table: autoMergeRequests,
+    },
+    { name: 'branchCommits', col: branchCommits.accountId, table: branchCommits },
   ];
   return rows.map(({ name, col, table }) => ({
     name,

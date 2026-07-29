@@ -1009,6 +1009,15 @@ export interface Label {
   color: string;
 }
 
+// GitHub's overall review decision for a PR (GraphQL PullRequestReviewDecision, lowercased
+// to match this codebase's stored-enum convention). Distinct from any individual review's
+// state: this is the REPO's protection rule answering "does review still block the merge?".
+//   approved          — the required approvals are in
+//   changes_requested — someone requested changes and it still stands
+//   review_required   — required reviews are outstanding
+// null (not part of the union) means the repo requires no review at all.
+export type PrReviewDecision = 'approved' | 'changes_requested' | 'review_required';
+
 // A single CI check (CheckRun or legacy StatusContext) on the head commit,
 // normalised to one display state.
 export type CheckRunState =
@@ -1033,17 +1042,32 @@ export interface CheckRun {
   jobId: number | null;
 }
 
-// On-demand failed-check log tail (GET /api/prs/:id/checks/:jobId/logs). Logs are
+// On-demand failed-check log WINDOW (GET /api/prs/:id/checks/:jobId/logs). Logs are
 // fetched live from the GitHub Actions API, never stored. `available` is false when
 // the logs can't be retrieved (expired after ~90 days, the job was re-run, or the
-// token lacks actions:read) — `reason` explains why. `text` is the LAST `returnedLines`
-// lines of the log; `totalLines` is the full count so the UI can say "last N of M".
+// token lacks actions:read) — `reason` explains why. `text` is the returned slice of the
+// log; `totalLines` is the full line count so the UI can say "last N of M".
+//
+// The byte fields turn the old fixed tail into a SCROLLABLE window. The route accepts
+// `?tail=` (the legacy last-N-lines form) or an explicit `?startByte=&endByte=` range;
+// the response always reports back the window it actually served:
+//   totalBytes  — the decoded log's full size, or null when the source can't report it
+//   startByte   — inclusive offset of the first returned byte (null = served from the top)
+//   endByte     — EXCLUSIVE offset just past the last returned byte (null = served to the end)
+//   hasMore     — more log exists ABOVE the returned window (i.e. startByte > 0), so the
+//                 client can "load earlier" when the user scrolls up. NOT "more below".
+//   truncated   — the returned window is a strict subset of the whole log (either end).
 export interface CheckLogsResponse {
   available: boolean;
   reason?: string;
   text: string;
   totalLines: number;
   returnedLines: number;
+  totalBytes: number | null;
+  startByte: number | null;
+  endByte: number | null;
+  hasMore: boolean;
+  truncated: boolean;
 }
 
 // Re-trigger a GitHub Actions workflow run for a PR (POST /api/prs/:id/ci/rerun).
@@ -1087,6 +1111,115 @@ export interface RequestReviewersResult {
 // GitHub's three merge methods. 'squash' is squash-and-merge; 'rebase' is rebase-and-merge.
 export type MergeMethod = 'merge' | 'squash' | 'rebase';
 
+// ---- The one merge VERDICT (shared by every merge surface) ----
+//
+// GitHub exposes mergeability as three loosely-coupled fields (`mergeable`,
+// `mergeStateStatus`, `reviewDecision`) plus two out-of-band states (the merge queue, an
+// armed auto-merge). Every surface that renders "can this land?" — the PR-detail merge
+// control, the open-PR tables, the branch-status strip — was free to combine them its own
+// way, which is how the same PR ends up "Blocked" in one place and "Ready" in another.
+// `MergeVerdict` is the SINGLE collapsed answer; a pure resolver derives it from the raw
+// fields and everything else renders `MergeVerdictInfo`.
+//
+//   clean      — nothing in the way; merge is offerable now
+//   blocked    — branch protection unmet (required reviews / required checks / CODEOWNERS)
+//   conflicts  — conflicts with the base branch; needs a manual resolve
+//   behind     — behind the base and the repo requires up-to-date branches (offer "Update")
+//   unstable   — non-required checks are failing/pending; GitHub WILL still merge it
+//   queued     — sitting in GitHub's merge queue (position/ETA in PrMergeOptions.mergeQueue)
+//   armed      — Pierre auto-merge is armed: it lands by itself when the blockers clear
+//   draft      — still a draft; merge is not offerable until it's marked ready
+//   unknown    — GitHub hasn't computed mergeability yet (async) or we have no data
+export type MergeVerdict =
+  | 'clean'
+  | 'blocked'
+  | 'conflicts'
+  | 'behind'
+  | 'unstable'
+  | 'queued'
+  | 'armed'
+  | 'draft'
+  | 'unknown';
+
+// The rendered form of a verdict: one label, one tone, one sentence of WHY, and whether a
+// merge button should be live. `detail` is user-facing prose ("2 approvals required", "3
+// commits behind main"), null when there's nothing more to say than the label.
+export interface MergeVerdictInfo {
+  verdict: MergeVerdict;
+  label: string;
+  tone: 'ok' | 'warn' | 'bad' | 'muted';
+  canMerge: boolean;
+  detail: string | null;
+}
+
+// ---- Auto-merge ("arm it and walk away") ----
+//
+// Pierre-side, NOT GitHub's native auto-merge: a stored intent that a background pass
+// re-evaluates. It is deliberately conservative — armed against an EXPECTED head SHA, so a
+// new push disarms it rather than merging code the user never saw.
+//
+//   armed                — live; the watcher will merge when the verdict turns clean
+//   merged               — the watcher merged it (terminal)
+//   disarmed_head_moved  — a new commit landed on the head branch → intent no longer applies
+//   disarmed_blocked     — a blocker appeared that a human must clear (conflicts, changes requested)
+//   expired              — passed `expiresAt` without ever becoming mergeable
+//   failed               — the merge call itself errored (see `lastReason`)
+export type ArmedMergeState =
+  | 'armed'
+  | 'merged'
+  | 'disarmed_head_moved'
+  | 'disarmed_blocked'
+  | 'expired'
+  | 'failed';
+
+export interface ArmedMergeRequest {
+  prId: number;
+  mergeMethod: MergeMethod;
+  // Whether to bring the branch up to date first when it's merely behind, and how.
+  // 'none' = never update; a behind PR just waits (or expires).
+  updateStrategy: 'rebase' | 'merge' | 'none';
+  armedAt: string; // ISO-8601
+  // The head SHA at arming time. The watcher refuses to merge a different head — arming is
+  // consent to merge THIS code, not whatever lands next.
+  expectedHeadOid: string;
+  state: ArmedMergeState;
+  lastCheckedAt: string | null; // ISO-8601; null until the watcher has looked once
+  // Machine-ish reason for the current state ('required reviews missing', 'head moved
+  // abc1234→def5678', 'github: base branch modified'). Null while cleanly armed.
+  lastReason: string | null;
+  expiresAt: string; // ISO-8601 — the hard stop, so an intent can't linger for weeks
+}
+
+// POST /api/prs/:id/auto-merge — arm. `updateStrategy` defaults to 'none' server-side.
+export interface ArmMergeBody {
+  mergeMethod: MergeMethod;
+  updateStrategy?: 'rebase' | 'merge' | 'none';
+}
+
+// GET /api/auto-merge — every armed (and recently-resolved) request for the account.
+export interface ArmedMergeListResponse {
+  requests: ArmedMergeRequest[];
+}
+
+// GitHub's native merge queue for this PR, when the repo has one. `enabled` is the repo-level
+// capability; `inQueue` is whether THIS PR is currently sitting in it. `position` is 1-based.
+// All of position/state/estimatedTimeToMergeMs are null when not queued (or not reported).
+export interface PrMergeQueueInfo {
+  enabled: boolean;
+  inQueue: boolean;
+  position: number | null;
+  state: string | null; // GitHub's MergeQueueEntry state (QUEUED / AWAITING_CHECKS / MERGEABLE / UNMERGEABLE / LOCKED)
+  estimatedTimeToMergeMs: number | null;
+}
+
+// Pierre-side auto-merge availability + the current intent for this PR.
+export interface PrAutoMergeInfo {
+  // Whether the repo/viewer combination permits arming at all (viewer can merge here).
+  allowedByRepo: boolean;
+  // The live intent, or null when nothing is armed.
+  armed: ArmedMergeRequest | null;
+}
+
 // What the merge control needs, fetched lazily (GET /api/prs/:id/merge-options) so the hot
 // PR-detail path isn't slowed by a live GitHub call. allowedMethods/defaultMethod come from
 // the repo's own settings; the rest is GitHub's live mergeability.
@@ -1105,10 +1238,29 @@ export interface PrMergeOptions {
   // Whether a REBASE-from-trunk is available (local mode only — GitHub's native update-branch
   // can only merge trunk in). When false the update-from-trunk is merge-only.
   canRebaseUpdate: boolean;
+  // GitHub's native merge queue, when the repo has one configured. null = the repo has no
+  // merge queue (or we couldn't determine it) — render nothing.
+  mergeQueue: PrMergeQueueInfo | null;
+  // Pierre-side auto-merge: whether arming is offerable, and the live intent if any. Always
+  // present (never null) — `allowedByRepo:false, armed:null` is the "not offerable" shape.
+  autoMerge: PrAutoMergeInfo;
 }
 
 export interface MergePrBody {
   method: MergeMethod;
+}
+
+// POST/DELETE /api/prs/:id/merge-queue — enqueue / dequeue on GitHub's native merge queue.
+// `method` is only meaningful on enqueue (some repos allow a per-entry method).
+export interface MergeQueueEnqueueBody {
+  method?: MergeMethod;
+}
+
+export interface MergeQueueResult {
+  // The PR's queue state after the call. `inQueue:false` after a successful dequeue.
+  inQueue: boolean;
+  position: number | null;
+  state: string | null;
 }
 export interface MergePrResult {
   merged: boolean;
@@ -1788,6 +1940,11 @@ export interface PrDetail {
   ciStatus: CiStatus;
   mergeable: Mergeable;
   mergeStateStatus: MergeStateStatus;
+  // GitHub's overall review decision (GraphQL PullRequest.reviewDecision), synced onto the
+  // PR row. This is what makes a `blocked` merge verdict able to say WHY: `mergeStateStatus`
+  // alone only says "protection unmet", while 'review_required' / 'changes_requested' names
+  // the actual blocker. null = the repo has no review requirement, or it isn't synced yet.
+  reviewDecision: PrReviewDecision | null;
   labels: Label[];
   checkRuns: CheckRun[];
   // Diff size summary (from GitHub's pullRequest.additions/deletions/changedFiles).
@@ -2652,6 +2809,11 @@ export interface CiAnalysisResponse {
   // How likely Pierre's agentic fixer (edit repo files + push) could fix it, given the
   // available context. Low for external/quality-gate/unknown causes.
   fixability: AiConfidence | null;
+  // Metered (paid cloud) plan out of credits: generation is refused and the last stored
+  // analysis is served unchanged. REQUIRED (unlike PrSummaryResponse's optional twin) because
+  // the CI-analysis tier move makes this a routine state rather than an edge case — a caller
+  // that forgets it renders an enabled Generate button that always 402s.
+  creditsExhausted: boolean;
 }
 
 // One failing check the client asks the analyzer to consider. `jobId` is the GitHub
@@ -3936,4 +4098,112 @@ export interface ReviewAction {
 
 export interface ReviewActionsResponse {
   actions: ReviewAction[];
+}
+
+// ---- Default-branch status (CORE, no AI) -------------------------------------------------
+//
+// "Is trunk green?" — the question every PR view sidesteps, because everything else in this
+// app is PR-shaped. A broken default branch invalidates every open PR's CI at once, so it
+// gets its own strip rather than being inferred from PR checks.
+
+// One commit on a repo's default branch. `authorLogin` is the GitHub login when we could
+// resolve one (a synced `users` row or the GraphQL author); `authorName` is the raw git
+// author name, which is all a commit made by a non-GitHub identity carries. Both nullable
+// and independently useful — prefer the login, fall back to the name.
+export interface BranchCommit {
+  sha: string;
+  messageHeadline: string;
+  authorLogin: string | null;
+  authorName: string | null;
+  authorAvatarUrl: string | null;
+  committedAt: string; // ISO-8601
+  ciStatus: CiStatus;
+}
+
+// One repo's default-branch health. Everything is nullable-until-synced: a freshly added repo
+// has a row with no branch data, and rendering "unknown" is correct there.
+export interface RepoBranchStatus {
+  repoId: number;
+  branchName: string | null;
+  headSha: string | null;
+  ciStatus: CiStatus;
+  lastCommitAt: string | null; // ISO-8601
+  // Most-recent-first, capped server-side. Empty until the first branch sync.
+  commits: BranchCommit[];
+}
+
+// GET /api/branch-status?repoIds= — one entry per repo in scope (repos with no synced branch
+// data still appear, with nulls, so the strip's row count matches the repo list).
+export interface BranchStatusResponse {
+  repos: RepoBranchStatus[];
+}
+
+// ---- Comment annotations platform (Pro; plugin-owned storage) ------------------------------
+//
+// The generalisation of the one-off `comment_assessments` table: any AI judgement ABOUT a
+// review comment/thread, keyed uniformly by (kind, targetKind, targetId) so a new judgement
+// type is a new `kind` rather than a new table + route + hook. The rows live in the plugin's
+// `pr_comment_annotations`; these are only the wire shapes.
+//
+//   addressed — was the concern actually dealt with by later changes?
+//   validity  — is the comment itself well-founded, given the thread + diff? (the old
+//               comment_assessments; its rows are backfilled into this table)
+//   simplify  — could the change this comment asks for be made simpler / smaller?
+export type AnnotationKind = 'addressed' | 'validity' | 'simplify';
+
+// What an annotation hangs off. `targetId` is that entity's own primary key:
+//   thread         → reviewThreads.id
+//   review_comment → reviewComments.id
+//   pr_comment     → prComments.id
+export type AnnotationTargetKind = 'thread' | 'review_comment' | 'pr_comment';
+
+// One stored judgement. `verdict` is kind-specific free text (the client maps it to a chip),
+// `confidence` is 0-100 or null when the kind doesn't produce one, `body` is markdown
+// rationale. `stale` is computed on READ: the target has changed since the annotation was
+// generated (a newer reply, a newer commit), so the verdict may no longer hold.
+export interface CommentAnnotation {
+  kind: AnnotationKind;
+  targetKind: AnnotationTargetKind;
+  targetId: number;
+  prId: number;
+  verdict: string | null;
+  confidence: number | null;
+  body: string;
+  model: string;
+  createdAt: string; // ISO-8601
+  stale: boolean;
+}
+
+// GET /api/pro/prs/:id/annotations?kinds= — every annotation the account holds for one PR.
+// `counts` is per-kind over the returned set (every AnnotationKind is present, 0 when none),
+// `staleCount` is how many of them are stale.
+export interface PrAnnotationsResponse {
+  prId: number;
+  annotations: CommentAnnotation[];
+  counts: Record<AnnotationKind, number>;
+  staleCount: number;
+  generatedAt: string; // ISO-8601 — when this response was assembled
+}
+
+// POST /api/pro/prs/:id/annotations/run — generate one kind across a PR. `targetKinds`
+// narrows which entity types to consider (default: all three); `onlyStale` regenerates just
+// the annotations whose target has moved on, which is the cheap "refresh" path.
+export interface AnnotationRunBody {
+  kind: AnnotationKind;
+  targetKinds?: AnnotationTargetKind[];
+  onlyStale?: boolean;
+}
+
+// The outcome of a run. `cached` = a payload-hash hit ($0); `skipped` = ineligible targets
+// (nothing to judge); `truncated` = the per-run target cap was hit, so a second run would do
+// more; `creditsExhausted` = the metered plan ran out mid-run and the rest was refused.
+export interface AnnotationRunResponse {
+  kind: AnnotationKind;
+  requested: number;
+  generated: number;
+  cached: number;
+  skipped: number;
+  failed: number;
+  truncated: boolean;
+  creditsExhausted: boolean;
 }
