@@ -5,11 +5,13 @@ import { syncAllRepos } from './sync-manager.js';
 import { pruneOldData } from '../db/retention.js';
 import { getScheduledJobs } from './scheduled-jobs.js';
 import { runBenchmarkRollup } from './benchmark-rollup.js';
+import { AUTO_MERGE_CRON, runAutoMergeTick } from '../merge/auto-merge-runner.js';
 import type { Logger } from './sync-repo.js';
 
 let task: ScheduledTask | null = null;
 let retentionTask: ScheduledTask | null = null;
 let benchmarkTask: ScheduledTask | null = null;
+let autoMergeTask: ScheduledTask | null = null;
 // node-cron handles for plugin-registered background jobs (Slack digest cron, AI update policy).
 let proJobTasks: ScheduledTask[] = [];
 
@@ -63,6 +65,18 @@ export function startScheduler(log: FastifyBaseLogger): void {
     log.info(`benchmark rollup started (cron "${config.benchmarkRollupCron}")`);
   }
 
+  // Armed-merge watcher ("merge when ready"). Rides the same disableScheduler gate as sync —
+  // which is exactly why the UI must say auto-merge only lands while the app is running: with
+  // the server down there is nothing to re-evaluate the intent. Its own tick is bounded and
+  // catches internally, so a bad tenant never crashes the loop. Runs in BOTH modes: local is
+  // the common case (the app is open on the developer's machine) and cloud arms per account.
+  if (cron.validate(AUTO_MERGE_CRON)) {
+    autoMergeTask = cron.schedule(AUTO_MERGE_CRON, () => {
+      void runAutoMergeTick(log);
+    });
+    log.info(`auto-merge watcher started (cron "${AUTO_MERGE_CRON}")`);
+  }
+
   // Plugin-registered background jobs (the @pierre/pro Slack digest cron + AI update policy).
   // Registered during bindProPlugin (which runs BEFORE startScheduler), so the registry is
   // populated here. Each rides the same disableScheduler gate as sync/retention and is torn
@@ -90,6 +104,8 @@ export function stopScheduler(): void {
   retentionTask = null;
   benchmarkTask?.stop();
   benchmarkTask = null;
+  autoMergeTask?.stop();
+  autoMergeTask = null;
   for (const t of proJobTasks) t.stop();
   proJobTasks = [];
 }

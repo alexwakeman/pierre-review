@@ -14,6 +14,9 @@ export const ACTIVITY_QUERY_KEYS = [
   'repo-digests',
   'team-insights',
   'sprint-report',
+  // The default-branch strip rides the same console, so a watch toggle / repo add / sync
+  // must re-scope it alongside everything else.
+  'branch-status',
 ] as const;
 
 /** Build the /api/activity query string from the active repo + member scope. */

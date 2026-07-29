@@ -37,6 +37,7 @@ const {
   myTurnDismissals,
   botReviewClassification,
   benchmarkContributions,
+  autoMergeRequests,
 } = schema;
 
 /** Cap per collection. An export must not be a way to ask the server to build a 2 GB string;
@@ -70,6 +71,8 @@ export interface AccountExport {
   dismissals: Record<string, unknown>[];
   botClassifications: Record<string, unknown>[];
   benchmarkContributions: Record<string, unknown>[];
+  /** Armed / recently-resolved "merge when ready" intents (auto_merge_requests). */
+  autoMergeRequests: Record<string, unknown>[];
 }
 
 /** Build the full export document for one account. Returns null if the account is gone. */
@@ -139,6 +142,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     dismissalRows,
     classificationRows,
     benchmarkRows,
+    autoMergeRows,
   ] = await Promise.all([
     childRows((ids) => db.select().from(reviews).where(inArray(reviews.prId, ids)).execute()),
     childRows((ids) =>
@@ -170,6 +174,14 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       .select()
       .from(benchmarkContributions)
       .where(eq(benchmarkContributions.accountId, accountId))
+      .execute(),
+    // "Merge when ready" intents. A record of an action the user asked the server to take on
+    // their behalf (and of merges it performed), so it belongs in an Art. 15 export even
+    // though the rows are small and short-lived.
+    db
+      .select()
+      .from(autoMergeRequests)
+      .where(eq(autoMergeRequests.accountId, accountId))
       .execute(),
   ]);
 
@@ -208,5 +220,6 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     dismissals: dismissalRows,
     botClassifications: classificationRows,
     benchmarkContributions: benchmarkRows,
+    autoMergeRequests: autoMergeRows,
   };
 }

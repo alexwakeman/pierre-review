@@ -14,6 +14,7 @@ import { ThemeThreadsDetail } from './components/Activity/ThemeThreadsDetail.js'
 import { SearchResultsTab } from './components/Search/SearchResultsTab.js';
 import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
+import { AutoMergeBanner } from './components/AutoMergeBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
 import { WelcomeBackBanner } from './components/WelcomeBackBanner.js';
 import { HelpModal } from './components/HelpModal.js';
@@ -472,6 +473,7 @@ export default function App(): JSX.Element {
         )}
       </main>
       <ClaudeReviewBanner />
+      <AutoMergeBanner />
       {/* Analytics consent. Renders only in cloud, only when a GA4 id was configured at build
           time, and only until the user has chosen — see components/CookieBanner.tsx. */}
       <CookieBanner enabled={isCloud} />

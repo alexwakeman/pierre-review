@@ -31,6 +31,11 @@ export function useRunAddressedCheck(kind: AddressedTargetKind, id: number) {
   return useMutation({
     mutationFn: () =>
       kind === 'thread' ? api.checkThreadAddressed(id) : api.checkPrCommentAddressed(id),
-    onSuccess: (data) => qc.setQueryData(addressedCheckKey(kind, id), data),
+    onSuccess: (data) => {
+      qc.setQueryData(addressedCheckKey(kind, id), data);
+      // This route now writes the SAME row the annotations platform serves (kind='addressed'),
+      // so the PR-wide annotations cache must not keep the old copy.
+      void qc.invalidateQueries({ queryKey: ['pr-annotations'] });
+    },
   });
 }

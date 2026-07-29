@@ -21,6 +21,11 @@ export function useAssessComment(threadId: number, diffHunk?: string | null) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.assessThread(threadId, diffHunk),
-    onSuccess: (data) => qc.setQueryData(['comment-assessment', threadId], data),
+    onSuccess: (data) => {
+      qc.setQueryData(['comment-assessment', threadId], data);
+      // This route now writes the SAME row the annotations platform serves
+      // (kind='validity'), so the PR-wide annotations cache must not keep the old copy.
+      void qc.invalidateQueries({ queryKey: ['pr-annotations'] });
+    },
   });
 }

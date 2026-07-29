@@ -30,6 +30,7 @@ import { ExternalLinkIcon, FeedIcon, MagnifierIcon, OctocatIcon, TimelineIcon } 
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
 import { AddressedCheckControl } from './AddressedCheck.js';
+import { AnnotationRunBar, CommentAnnotations } from './CommentAnnotations.js';
 import { ChangesTab } from './ChangesTab.js';
 import { PrCommentComposer } from './PrCommentComposer.js';
 import { SkeletonBlock, SkeletonLine } from './Skeleton.js';
@@ -473,6 +474,12 @@ function PrCommentsList({
               </span>
               {isNew && <NewTag />}
             </div>
+            {/* AI annotations for a PR-level comment. The "Simplified" rewrite is ADDITIVE —
+                it sits above the body, which is always still rendered below it. Reviews are
+                not annotatable targets (only issue comments are), hence the isComment gate. */}
+            {isComment && (
+              <CommentAnnotations prId={pr.id} targetKind="pr_comment" targetId={it.id} />
+            )}
             <div className="mt-1 text-sm">
               <Markdown>{it.body}</Markdown>
             </div>
@@ -943,13 +950,18 @@ export function PrDetail({
               onShowBotActivity={botTabVisible ? () => setTab('bot_activity') : undefined}
             />
             <div className="border-t border-gray-200 dark:border-gray-800">
-              <div className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                PR comments
-                {pr.comments.length + reviewCommentCount(pr) > 0 && (
-                  <span className="ml-1 font-normal opacity-70">
-                    · {pr.comments.length + reviewCommentCount(pr)}
-                  </span>
-                )}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-1 pt-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  PR comments
+                  {pr.comments.length + reviewCommentCount(pr) > 0 && (
+                    <span className="ml-1 font-normal opacity-70">
+                      · {pr.comments.length + reviewCommentCount(pr)}
+                    </span>
+                  )}
+                </span>
+                {/* Pro (prSummary): run an AI judgement across this PR's issue comments only —
+                    the thread-scoped equivalent lives in the Threads tab's sticky header. */}
+                <AnnotationRunBar prId={pr.id} targetKinds={['pr_comment']} />
               </div>
               <PrCommentsList
                 pr={pr}

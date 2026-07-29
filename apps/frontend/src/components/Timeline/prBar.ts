@@ -3,7 +3,7 @@ import {
   CI_META,
   DERIVED_STATE_META,
   escapeHtml,
-  mergeWarning,
+  mergeVerdictWarning,
 } from '../../lib/ui.js';
 
 const DOT_ORDER: DerivedState[] = [
@@ -101,10 +101,17 @@ export function prTooltip(pr: TimelinePr, meta: PrBarMeta = {}): string {
   const ci = CI_META[pr.ciStatus];
   if (ci) rows.push(ttRow(ci.color, ci.label));
 
-  const warn = mergeWarning(pr.mergeable, pr.mergeStateStatus);
+  // The single merge verdict — `blocked` now raises the ⚠ here too (a PR with red REQUIRED
+  // checks used to show nothing at all, because `mergeable` only reports conflicts).
+  const warn = mergeVerdictWarning({
+    mergeable: pr.mergeable,
+    mergeStateStatus: pr.mergeStateStatus,
+    isDraft: pr.isDraft,
+  });
   if (warn) {
+    const why = warn.detail ? ` — ${warn.detail}` : '';
     rows.push(
-      `<div class="pr-tt-row pr-tt-warn"><span class="pr-tt-warn-icon">⚠</span><span>merge: ${escapeHtml(warn)}</span></div>`,
+      `<div class="pr-tt-row pr-tt-warn"><span class="pr-tt-warn-icon">⚠</span><span>merge: ${escapeHtml(warn.label)}${escapeHtml(why)}</span></div>`,
     );
   }
 

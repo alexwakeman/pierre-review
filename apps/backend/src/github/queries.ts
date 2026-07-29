@@ -43,6 +43,18 @@ const PR_NODE_FIELDS = /* GraphQL */ `
   headRefName
   mergeable
   mergeStateStatus
+  # ---- merge verdict (cluster A: the merge surface) ------------------------------------
+  # GitHub's OVERALL review decision (APPROVED / CHANGES_REQUESTED / REVIEW_REQUIRED / null).
+  # A BLOCKED mergeStateStatus says branch protection is unmet but never WHY; this names the
+  # review half of it, which is what lets the merge verdict render "review required" instead
+  # of a shrug. A cheap scalar on a node already being fetched — no extra request.
+  #
+  # Merge-QUEUE state (isMergeQueueEnabled / isInMergeQueue / mergeQueueEntry) is deliberately
+  # NOT here: it is volatile (a position changes minute to minute) and only ever rendered by
+  # the merge control, so it is fetched live in GET /api/prs/:id/merge-options instead of
+  # riding this per-page fat query. See fetchMergeQueueState in github/mutations.ts.
+  reviewDecision
+  # ---- end merge verdict ---------------------------------------------------------------
   author {
     login
     __typename
@@ -632,6 +644,10 @@ export interface GqlPullRequest {
   headRefName: string;
   mergeable: string | null;
   mergeStateStatus: string | null;
+  // GraphQL PullRequestReviewDecision (APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED) or
+  // null when the repo requires no review. OPTIONAL on the interface so hand-built fixtures
+  // predating the field still typecheck.
+  reviewDecision?: string | null;
   author: GqlActor | null;
   mergedBy: GqlActor | null;
   labels: { nodes: GqlLabel[] };

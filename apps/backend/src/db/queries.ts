@@ -119,6 +119,9 @@ import type {
   BotTuningSuggestion,
   BotOnlyReviewCard,
   UserContributionStats,
+  ArmedMergeRequest,
+  ArmedMergeState,
+  MergeMethod,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -192,6 +195,7 @@ const {
   teams,
   teamRepos,
   benchmarkContributions,
+  autoMergeRequests,
 } = schema;
 
 function iso(d: Date | null): string | null {
@@ -5854,6 +5858,9 @@ export async function getPrDetail(
     ciStatus: (pr.ciStatus ?? 'unknown') as CiStatus,
     mergeable: (pr.mergeable ?? 'unknown') as Mergeable,
     mergeStateStatus: (pr.mergeStateStatus ?? 'unknown') as MergeStateStatus,
+    // Null both when the repo requires no review and when this PR predates the column —
+    // the merge verdict degrades to a generic "blocked" reason either way, never a lie.
+    reviewDecision: pr.reviewDecision ?? null,
     labels: (pr.labels ?? []) as Label[],
     checkRuns: (pr.checkRuns ?? []) as CheckRun[],
     additions: pr.additions,
@@ -10122,3 +10129,245 @@ export async function getBotDedupClusters(
   return { prId, clusters };
 }
 
+
+// ---------------------------------------------------------------------------------------
+// Auto-merge intents ("arm it and walk away") — the query layer for `auto_merge_requests`.
+//
+// This is Pierre's OWN watcher, not GitHub's native auto-merge: a stored intent that the
+// background pass in `merge/auto-merge-runner.ts` re-evaluates. Everything here is
+// accountId-scoped; the one cross-account read (`listArmedMergeRequestsForRunner`) is the
+// watcher's own scan and returns the accountId on every row so the caller can fetch that
+// tenant's token and stay isolated.
+// ---------------------------------------------------------------------------------------
+
+type AutoMergeRow = typeof schema.autoMergeRequests.$inferSelect;
+
+function toArmedMergeRequest(row: AutoMergeRow): ArmedMergeRequest {
+  return {
+    prId: row.prId,
+    mergeMethod: row.mergeMethod as MergeMethod,
+    updateStrategy: row.updateStrategy,
+    armedAt: row.armedAt.toISOString(),
+    expectedHeadOid: row.expectedHeadOid,
+    state: row.state as ArmedMergeState,
+    lastCheckedAt: iso(row.lastCheckedAt),
+    lastReason: row.lastReason,
+    expiresAt: row.expiresAt.toISOString(),
+  };
+}
+
+/**
+ * Arm (or RE-arm) auto-merge for one PR. The unique `(accountId, prId)` means re-arming
+ * OVERWRITES the previous row — including a terminal one — which is the point: after a
+ * `disarmed_head_moved` the user re-arms against the NEW head and the intent starts clean
+ * (state back to 'armed', reason cleared, the clock restarted).
+ *
+ * The caller is responsible for having verified write permission and for passing the LIVE
+ * head SHA; this function does not talk to GitHub.
+ */
+export async function armAutoMerge(
+  accountId: number,
+  prId: number,
+  opts: {
+    mergeMethod: MergeMethod;
+    updateStrategy: 'rebase' | 'merge' | 'none';
+    expectedHeadOid: string;
+    expiresAt: Date;
+  },
+): Promise<ArmedMergeRequest> {
+  const now = new Date();
+  const rows = await db
+    .insert(autoMergeRequests)
+    .values({
+      accountId,
+      prId,
+      mergeMethod: opts.mergeMethod,
+      updateStrategy: opts.updateStrategy,
+      expectedHeadOid: opts.expectedHeadOid,
+      state: 'armed',
+      armedAt: now,
+      expiresAt: opts.expiresAt,
+      lastCheckedAt: null,
+      lastReason: null,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [autoMergeRequests.accountId, autoMergeRequests.prId],
+      set: {
+        mergeMethod: opts.mergeMethod,
+        updateStrategy: opts.updateStrategy,
+        expectedHeadOid: opts.expectedHeadOid,
+        state: 'armed',
+        armedAt: now,
+        expiresAt: opts.expiresAt,
+        lastCheckedAt: null,
+        lastReason: null,
+        updatedAt: now,
+      },
+    })
+    .returning()
+    .execute();
+  // The upsert always yields exactly one row; the non-null assert mirrors persistPr's.
+  return toArmedMergeRequest(rows[0]!);
+}
+
+/** The live intent for one PR, or null. Account-scoped (a foreign prId reads as null). */
+export async function getAutoMergeRequest(
+  accountId: number,
+  prId: number,
+): Promise<ArmedMergeRequest | null> {
+  const rows = await db
+    .select()
+    .from(autoMergeRequests)
+    .where(
+      and(eq(autoMergeRequests.accountId, accountId), eq(autoMergeRequests.prId, prId)),
+    )
+    .limit(1)
+    .execute();
+  const row = rows[0];
+  return row ? toArmedMergeRequest(row) : null;
+}
+
+/**
+ * Disarm: DELETE the row rather than move it to a terminal state. `ArmedMergeState` has no
+ * "the user changed their mind" value on purpose — an intent the user withdrew is not
+ * history worth keeping, and leaving a terminal row behind would make the next arm look
+ * like a re-arm in the UI. Returns whether anything was armed.
+ */
+export async function disarmAutoMerge(
+  accountId: number,
+  prId: number,
+): Promise<boolean> {
+  const rows = await db
+    .delete(autoMergeRequests)
+    .where(
+      and(eq(autoMergeRequests.accountId, accountId), eq(autoMergeRequests.prId, prId)),
+    )
+    .returning({ id: autoMergeRequests.id })
+    .execute();
+  return rows.length > 0;
+}
+
+// How long a resolved (merged / disarmed / expired / failed) intent keeps being reported by
+// GET /api/auto-merge. Long enough for the client's poll to observe the armed→merged edge
+// and raise its toast even if the tab was asleep for a while; short enough that the list
+// stays a "what's about to land" surface rather than a log.
+const RESOLVED_INTENT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Every armed intent for the account, plus recently-resolved ones (the client diffs
+ * armed→merged to raise its toast). Newest first, capped.
+ */
+export async function listAutoMergeRequests(
+  accountId: number,
+): Promise<ArmedMergeRequest[]> {
+  const cutoff = new Date(Date.now() - RESOLVED_INTENT_WINDOW_MS);
+  const rows = await db
+    .select()
+    .from(autoMergeRequests)
+    .where(
+      and(
+        eq(autoMergeRequests.accountId, accountId),
+        or(
+          eq(autoMergeRequests.state, 'armed'),
+          gte(autoMergeRequests.updatedAt, cutoff),
+        ),
+      ),
+    )
+    .orderBy(desc(autoMergeRequests.updatedAt))
+    .limit(200)
+    .execute();
+  return rows.map(toArmedMergeRequest);
+}
+
+/** One armed intent joined to everything the watcher needs to act on it. */
+export interface ArmedMergeWork {
+  id: number;
+  accountId: number;
+  prId: number;
+  prNodeId: string;
+  owner: string;
+  name: string;
+  number: number;
+  prState: PrState;
+  viewerPermission: string | null;
+  mergeMethod: MergeMethod;
+  updateStrategy: 'rebase' | 'merge' | 'none';
+  expectedHeadOid: string;
+  expiresAt: Date;
+  armedAt: Date;
+}
+
+/**
+ * The watcher's scan: still-armed intents across EVERY account, oldest-armed first (so a
+ * long-waiting PR can't be starved by a busy tenant that keeps arming new ones), bounded by
+ * `limit` — one tick must be a bounded amount of GitHub traffic no matter how many intents
+ * exist. Each row carries its `accountId`; the caller MUST fetch that account's token
+ * (`getAccessToken`) and wrap each account's work in its own try/catch.
+ */
+export async function listArmedMergeRequestsForRunner(
+  limit: number,
+): Promise<ArmedMergeWork[]> {
+  const rows = await db
+    .select({
+      id: autoMergeRequests.id,
+      accountId: autoMergeRequests.accountId,
+      prId: autoMergeRequests.prId,
+      prNodeId: pullRequests.githubNodeId,
+      owner: repos.owner,
+      name: repos.name,
+      number: pullRequests.number,
+      prState: pullRequests.state,
+      viewerPermission: repos.viewerPermission,
+      mergeMethod: autoMergeRequests.mergeMethod,
+      updateStrategy: autoMergeRequests.updateStrategy,
+      expectedHeadOid: autoMergeRequests.expectedHeadOid,
+      expiresAt: autoMergeRequests.expiresAt,
+      armedAt: autoMergeRequests.armedAt,
+    })
+    .from(autoMergeRequests)
+    .innerJoin(pullRequests, eq(pullRequests.id, autoMergeRequests.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(eq(autoMergeRequests.state, 'armed'))
+    .orderBy(asc(autoMergeRequests.armedAt))
+    .limit(limit)
+    .execute();
+  return rows.map((r) => ({
+    ...r,
+    prState: r.prState as PrState,
+    mergeMethod: r.mergeMethod as MergeMethod,
+  }));
+}
+
+/**
+ * Record the outcome of one watcher pass over an intent. `state` is omitted for the common
+ * "still waiting" case, which only stamps `lastCheckedAt` + the current blocker.
+ */
+export async function updateAutoMergeState(
+  id: number,
+  opts: {
+    state?: ArmedMergeState;
+    lastReason?: string | null;
+    checkedAt?: Date;
+    // Re-pin the consent anchor. ONLY the watcher's own "update the branch from trunk" step
+    // may do this: it moved the head itself, so leaving the old SHA in place would make the
+    // very next tick disarm the intent as "the branch moved". A head that moved for any other
+    // reason must still disarm — that is the whole point of the anchor.
+    expectedHeadOid?: string;
+  },
+): Promise<void> {
+  const now = new Date();
+  await db
+    .update(autoMergeRequests)
+    .set({
+      lastCheckedAt: opts.checkedAt ?? now,
+      updatedAt: now,
+      ...(opts.state !== undefined ? { state: opts.state } : {}),
+      ...(opts.lastReason !== undefined ? { lastReason: opts.lastReason } : {}),
+      ...(opts.expectedHeadOid !== undefined
+        ? { expectedHeadOid: opts.expectedHeadOid }
+        : {}),
+    })
+    .where(eq(autoMergeRequests.id, id))
+    .execute();
+}

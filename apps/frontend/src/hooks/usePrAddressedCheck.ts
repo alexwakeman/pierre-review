@@ -60,7 +60,12 @@ export function usePrAddressedCheck(prId: number): {
         if ((err as Error)?.name === 'AbortError') return;
         setState((s) => ({ ...s, running: false, error: (err as Error)?.message ?? 'Failed' }));
       })
-      .finally(() => setState((s) => ({ ...s, running: false })));
+      .finally(() => {
+        setState((s) => ({ ...s, running: false }));
+        // The batch writes the same rows the annotations platform serves (kind='addressed'),
+        // so refresh the PR-wide annotations cache once when the run ends.
+        void qc.invalidateQueries({ queryKey: ['pr-annotations'] });
+      });
   }, [prId, qc]);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);

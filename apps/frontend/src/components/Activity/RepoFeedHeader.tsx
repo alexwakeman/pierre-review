@@ -1,6 +1,7 @@
 import type { ActivityRepo } from '@pierre-review/shared';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
+import { BranchStatusPanel } from './BranchStatusPanel.js';
 import { DigestBanner } from './DigestBanner.js';
 import { RepoStatsLine } from './RepoStats.js';
 
@@ -42,6 +43,12 @@ export function RepoFeedHeader({ repo }: { repo: ActivityRepo }): JSX.Element {
       {/* Display-only thread-state bar (no click-to-filter — the PRs-by-author list it
           used to filter isn't in this view). */}
       <ThreadStateBar counts={repo.threadTotals} />
+
+      {/* This repo's default branch: CI state + (expandable) what recently landed on trunk.
+          Pinned to THIS repo rather than following the FilterBar scope, and `compact` so it
+          drops the redundant repo-name column and the strip's own scroll. Renders nothing
+          until the repo has been branch-synced. */}
+      <BranchStatusPanel repoIds={[repo.repoId]} compact />
 
       {/* Pro per-repo digest — BELOW the name + stats, within the same card (renders
           nothing in OSS mode; collapsible when present). */}

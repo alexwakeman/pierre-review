@@ -11,6 +11,7 @@ import {
 import { clearSamlBlock, recordSamlBlock } from './auth-notices.js';
 import { REPO_ACTIVITY_QUERY, type RepoActivityResponse } from '../github/queries.js';
 import { ensureCommitFiles } from './commit-files.js';
+import { syncBranchStatus } from './branch-status.js';
 import { createUserResolver, persistPr, upsertRepo } from './upsert.js';
 
 const { syncState } = schema;
@@ -291,6 +292,28 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
 
     if (repoId === null) {
       throw new Error(`Repository ${owner}/${name} returned no data`);
+    }
+
+    // Default-branch snapshot ("is trunk green?") — one extra ~1-point GraphQL round trip per
+    // repo per sync. STRICTLY NON-FATAL: it is an informational readout, and a token that can
+    // walk the PRs but chokes on the branch history (or a repo with no default branch at all)
+    // must never cost the caller the PR sync that just succeeded. It runs on the two-phase
+    // foreground pass as well as the deep one — the repeat is idempotent, and a freshly added
+    // repo showing trunk status within seconds is worth the duplicate point.
+    try {
+      await syncBranchStatus({
+        owner,
+        name,
+        repoId,
+        accountId,
+        token: opts.token,
+        log,
+      });
+    } catch (err) {
+      log.warn(
+        `sync ${owner}/${name}: default-branch status failed (non-fatal): ` +
+          `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+      );
     }
 
     // commitState=false (a two-phase foreground pass) deliberately does NOT stamp

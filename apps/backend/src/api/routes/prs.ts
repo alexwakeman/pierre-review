@@ -5,6 +5,9 @@ import type {
   AddReviewCommentResult,
   ApprovePrBody,
   ApprovePrResult,
+  ArmMergeBody,
+  ArmedMergeListResponse,
+  MergeQueueResult,
   CheckLogsResponse,
   CiRerunBody,
   CiRerunResult,
@@ -30,6 +33,10 @@ import { config } from '../../config.js';
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
 import { fetchActionsJobLog } from '../../github/actions-logs.js';
 import {
+  armAutoMerge,
+  disarmAutoMerge,
+  getAutoMergeRequest,
+  listAutoMergeRequests,
   getMentionCandidates,
   getPrDetail,
   getPrBotBehaviour,
@@ -57,8 +64,11 @@ import {
 import {
   addIssueComment,
   closePullRequest,
+  dequeuePullRequestFromQueue,
+  enqueuePullRequestOnQueue,
   fetchHeadShaFor,
   fetchMergeability,
+  fetchMergeQueueState,
   fetchPrFilesWithPatch,
   fetchPrHeadInfo,
   fetchRepoMergeConfig,
@@ -78,6 +88,11 @@ import { accountIdOf } from '../plugins/auth.js';
 function diffAnchorId(path: string): string {
   return createHash('sha256').update(path, 'utf8').digest('hex');
 }
+
+// How long an armed auto-merge intent stays live before the watcher expires it. A hard stop
+// so an intent can't linger for weeks against a PR the user has long forgotten — 72h covers
+// "arm it on Friday, it lands when Monday's CI goes green".
+const AUTO_MERGE_TTL_MS = 72 * 60 * 60 * 1000;
 
 const PR_FILE_STATUSES: readonly PrFileDiffStatus[] = [
   'added',
@@ -199,6 +214,31 @@ const updateBranchSchema = {
     type: 'object',
     additionalProperties: false,
     properties: { strategy: { type: 'string', enum: ['rebase', 'merge'] } },
+  },
+};
+
+// Enqueue on GitHub's native merge queue. `method` is accepted (some repos allow a per-entry
+// method) but GitHub's EnqueuePullRequestInput has no such field today, so it is ignored —
+// declared here only so a client sending it isn't 400'd by additionalProperties:false.
+const mergeQueueSchema = {
+  ...idParamSchema,
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { method: { type: 'string', enum: ['merge', 'squash', 'rebase'] } },
+  },
+};
+
+const armMergeSchema = {
+  ...idParamSchema,
+  body: {
+    type: 'object',
+    required: ['mergeMethod'],
+    additionalProperties: false,
+    properties: {
+      mergeMethod: { type: 'string', enum: ['merge', 'squash', 'rebase'] },
+      updateStrategy: { type: 'string', enum: ['rebase', 'merge', 'none'] },
+    },
   },
 };
 
@@ -510,9 +550,14 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     }
     try {
       const token = await getAccessToken(accountId);
-      const [cfg, m] = await Promise.all([
+      const [cfg, m, queue, armed] = await Promise.all([
         fetchRepoMergeConfig(token, ctx.owner, ctx.name),
         fetchMergeability(token, ctx.owner, ctx.name, ctx.number),
+        // Merge-queue state is BEST-EFFORT: a repo without a queue, an older GHES, or a token
+        // that can't run the query must not fail the whole merge control. null → render nothing.
+        fetchMergeQueueState(token, ctx.owner, ctx.name, ctx.number).catch(() => null),
+        // Pierre-side auto-merge intent — a pure DB read, never a GitHub call.
+        getAutoMergeRequest(accountId, id),
       ]);
       const allowedMethods = (['merge', 'squash', 'rebase'] as const).filter((meth) =>
         meth === 'merge'
@@ -523,6 +568,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       );
       const conflicts = m.mergeable === false || m.mergeableState === 'dirty';
       const behind = m.mergeableState === 'behind' || m.behindBy > 0;
+      const canWrite = ['WRITE', 'MAINTAIN', 'ADMIN'].includes(ctx.viewerPermission ?? '');
       const result: PrMergeOptions = {
         allowedMethods: [...allowedMethods],
         defaultMethod: allowedMethods[0] ?? 'merge',
@@ -535,6 +581,25 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         baseRef: m.baseRef,
         canUpdateBranch: behind && !conflicts,
         canRebaseUpdate: !config.isCloud,
+        // Only report a queue when the base branch actually has one — `enabled:false` would
+        // otherwise make the control render a "merge queue" section for every repo.
+        mergeQueue:
+          queue && queue.enabled
+            ? {
+                enabled: true,
+                inQueue: queue.inQueue,
+                position: queue.position,
+                state: queue.state,
+                estimatedTimeToMergeMs: queue.estimatedTimeToMergeMs,
+              }
+            : null,
+        autoMerge: {
+          // Arming is offerable to anyone who could merge by hand — the watcher merges with
+          // THIS account's token, so it can never do more than the user already can. Permission
+          // is re-checked at arm time AND again at land time.
+          allowedByRepo: canWrite && allowedMethods.length > 0,
+          armed,
+        },
       };
       return result;
     } catch (err) {
@@ -600,6 +665,167 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       reply.status(502);
       return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
     }
+  });
+
+  // ---- GitHub's native merge QUEUE ----
+  //
+  // When the base branch has a merge queue, "Merge" is not the offerable action — GitHub
+  // requires the PR to go through the queue — so the merge control swaps in "Add to merge
+  // queue". Both verbs are GraphQL-only (no REST equivalent); see github/mutations.ts.
+
+  // Enqueue. Re-checks write permission, then pins the enqueue to the LIVE head SHA so the
+  // queue can't pick up commits the user hasn't seen (the same consent anchor as a merge).
+  app.post('/api/prs/:id/merge-queue', { schema: mergeQueueSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const accountId = accountIdOf(req);
+
+    const ctx = await getPrWriteContext(id, accountId);
+    if (!ctx) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    if (!['WRITE', 'MAINTAIN', 'ADMIN'].includes(ctx.viewerPermission ?? '')) {
+      reply.status(403);
+      return { error: 'NotPermitted', message: 'You need write access to queue this PR.' };
+    }
+
+    try {
+      const token = await getAccessToken(accountId);
+      const queue = await fetchMergeQueueState(token, ctx.owner, ctx.name, ctx.number);
+      if (!queue || !queue.enabled) {
+        // 400, not a silent no-op: enqueuing where there is no queue would otherwise fail
+        // deep inside GraphQL with an opaque message.
+        reply.status(400);
+        return {
+          error: 'NoMergeQueue',
+          message: 'This PR’s base branch has no merge queue configured.',
+        };
+      }
+      if (queue.inQueue) {
+        const already: MergeQueueResult = {
+          inQueue: true,
+          position: queue.position,
+          state: queue.state,
+        };
+        return already;
+      }
+      const info = await fetchPrHeadInfo(token, ctx.owner, ctx.name, ctx.number);
+      const entry = await enqueuePullRequestOnQueue(token, ctx.prNodeId, info.headSha);
+      const result: MergeQueueResult = {
+        inQueue: true,
+        position: entry.position,
+        state: entry.state,
+      };
+      return result;
+    } catch (err) {
+      reply.status(502);
+      return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Dequeue. Idempotent: removing a PR that isn't queued reports the already-out state.
+  app.delete('/api/prs/:id/merge-queue', { schema: idParamSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const accountId = accountIdOf(req);
+
+    const ctx = await getPrWriteContext(id, accountId);
+    if (!ctx) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    if (!['WRITE', 'MAINTAIN', 'ADMIN'].includes(ctx.viewerPermission ?? '')) {
+      reply.status(403);
+      return {
+        error: 'NotPermitted',
+        message: 'You need write access to remove this PR from the queue.',
+      };
+    }
+
+    try {
+      const token = await getAccessToken(accountId);
+      await dequeuePullRequestFromQueue(token, ctx.prNodeId);
+      const result: MergeQueueResult = { inQueue: false, position: null, state: null };
+      return result;
+    } catch (err) {
+      reply.status(502);
+      return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // ---- Auto-merge ("merge when ready") ----
+  //
+  // Pierre's OWN watcher, deliberately NOT GitHub's `enablePullRequestAutoMerge`: that
+  // mutation 422s unless the requirements are already met and needs repo settings we can't
+  // assume. `merge/auto-merge-runner.ts` re-evaluates each armed intent on a cron tick.
+  //
+  // Arming pins the CURRENT head SHA. A later push disarms the intent instead of merging —
+  // arming is consent to merge THIS code, not whatever lands next.
+  app.post('/api/prs/:id/auto-merge', { schema: armMergeSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const { mergeMethod, updateStrategy } = req.body as ArmMergeBody;
+    const accountId = accountIdOf(req);
+
+    const ctx = await getPrWriteContext(id, accountId);
+    if (!ctx) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    // Permission is checked HERE and again at land time — a user can lose write access
+    // between arming and the merge, and the watcher must not act on a stale grant.
+    if (!['WRITE', 'MAINTAIN', 'ADMIN'].includes(ctx.viewerPermission ?? '')) {
+      reply.status(403);
+      return {
+        error: 'NotPermitted',
+        message: 'You need write access to arm auto-merge on this PR.',
+      };
+    }
+    if (ctx.state !== 'open') {
+      reply.status(409);
+      return { error: 'NotOpen', message: `This PR is already ${ctx.state}.` };
+    }
+
+    try {
+      const token = await getAccessToken(accountId);
+      // The LIVE head, never the possibly-stale synced one: arming against a SHA that is
+      // already superseded would disarm itself on the very first tick.
+      const info = await fetchPrHeadInfo(token, ctx.owner, ctx.name, ctx.number);
+      const armed = await armAutoMerge(accountId, id, {
+        mergeMethod,
+        updateStrategy: updateStrategy ?? 'none',
+        expectedHeadOid: info.headSha,
+        expiresAt: new Date(Date.now() + AUTO_MERGE_TTL_MS),
+      });
+      return armed;
+    } catch (err) {
+      reply.status(502);
+      return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Disarm. 204 whether or not anything was armed (idempotent).
+  app.delete('/api/prs/:id/auto-merge', { schema: idParamSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const accountId = accountIdOf(req);
+    const ctx = await getPrWriteContext(id, accountId);
+    if (!ctx) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    await disarmAutoMerge(accountId, id);
+    reply.status(204);
+    return null;
+  });
+
+  // Every armed (and recently-resolved) intent for the account. A pure DB read — this is what
+  // the SPA polls to raise its "auto-merge landed" toast, so it must never touch GitHub.
+  //
+  // Registered here rather than in its own route file because it is the cross-PR view of the
+  // per-PR routes directly above; keeping the pair together is what stops the two drifting.
+  app.get('/api/auto-merge', async (req) => {
+    const accountId = accountIdOf(req);
+    const requests = await listAutoMergeRequests(accountId);
+    const result: ArmedMergeListResponse = { requests };
+    return result;
   });
 
   // Close a PR WITHOUT merging (CORE / free tier). Reversible on GitHub (reopen), so no

@@ -1,9 +1,12 @@
-import { useLayoutEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { CheckRun, CiRerunMode } from '@pierre-review/shared';
 import { CHECK_STATE_META, safeExternalUrl } from '../lib/ui.js';
-import { api } from '../api/client.js';
 import { useRerunCi, type RerunOutcome } from '../hooks/useCiRerun.js';
+import {
+  formatLogBytes,
+  joinLogPages,
+  useCheckLogs,
+} from '../hooks/useCheckLogs.js';
 
 // A GitHub Actions check's detailsUrl is .../actions/runs/<runId>/job/<jobId>. The
 // backend parses jobId/runId into fields, but we ALSO derive them from the url here so
@@ -24,10 +27,13 @@ export function runIdOf(check: CheckRun): number | null {
   return m ? Number(m[1]) : null;
 }
 
-// One check row. A FAILED GitHub Actions check (it resolves a jobId from its
-// detailsUrl) becomes a click-to-expand inline log viewer — the tail of the job's
-// logs, fetched on demand and auto-scrolled to the bottom (the failure is at the end).
-// Everything else keeps the original external-link/plain row.
+// One check row. ANY GitHub Actions check (it resolves a jobId from its detailsUrl)
+// becomes a click-to-expand inline log viewer — the TAIL of the job's logs, fetched on
+// demand and auto-scrolled to the bottom, with scrolling UP pulling in the earlier
+// chunks. Deliberately NOT restricted to failed checks: GitHub serves logs for every
+// Actions job, and "why was this green / what did it actually run" is a real question.
+// Third-party checks carry only an external detailsUrl (no job id, no downloadable log),
+// so they keep the original external-link/plain row.
 export function CheckRow({
   prId,
   check,
@@ -37,24 +43,57 @@ export function CheckRow({
 }): JSX.Element {
   const m = CHECK_STATE_META[check.state];
   const jobId = jobIdOf(check);
-  const loggable =
-    jobId != null && (check.state === 'failure' || check.state === 'error');
+  const loggable = jobId != null;
   const [expanded, setExpanded] = useState(false);
-  const logs = useQuery({
-    queryKey: ['check-logs', prId, jobId],
-    queryFn: () => api.checkLogs(prId, jobId!, 200),
-    enabled: expanded && loggable,
-    staleTime: Infinity, // a finished job's logs are immutable
-    gcTime: 5 * 60_000,
-  });
+  const logs = useCheckLogs(prId, jobId, expanded && loggable);
+  const view = joinLogPages(logs.data?.pages);
+
   const preRef = useRef<HTMLPreElement>(null);
-  // Scroll to the bottom once the logs render — the failure is at the tail.
+  // Set just before a "load earlier" fetch so the prepended chunk can be pinned: we
+  // restore the DISTANCE FROM THE BOTTOM, which is what stays constant when content is
+  // added above. Without this the viewport jumps to a different part of the log every
+  // time a page lands.
+  const anchorRef = useRef<{ height: number; top: number } | null>(null);
+  const bottomedRef = useRef(false);
+  const pageCount = logs.data?.pages.length ?? 0;
+  const text = view?.text ?? '';
+
   useLayoutEffect(() => {
-    if (expanded && logs.data?.available) {
-      const el = preRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+    const el = preRef.current;
+    if (!el || !expanded) return;
+    const anchor = anchorRef.current;
+    if (anchor) {
+      anchorRef.current = null;
+      el.scrollTop = el.scrollHeight - anchor.height + anchor.top;
+      return;
     }
-  }, [expanded, logs.data]);
+    // First paint of the first page: land at the bottom (the interesting end).
+    if (!bottomedRef.current && text) {
+      bottomedRef.current = true;
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [expanded, pageCount, text]);
+
+  const canLoadEarlier = logs.hasNextPage && !logs.isFetchingNextPage;
+  const fetchNextPage = logs.fetchNextPage; // stable across renders (React Query)
+  const loadEarlier = useCallback((): void => {
+    const el = preRef.current;
+    if (el) anchorRef.current = { height: el.scrollHeight, top: el.scrollTop };
+    void fetchNextPage();
+  }, [fetchNextPage]);
+
+  const onScroll = useCallback((): void => {
+    const el = preRef.current;
+    if (!el || !canLoadEarlier) return;
+    if (el.scrollTop <= 80) loadEarlier();
+  }, [canLoadEarlier, loadEarlier]);
+
+  const toggle = (): void => {
+    setExpanded((v) => {
+      if (v) bottomedRef.current = false; // re-anchor to the bottom on the next open
+      return !v;
+    });
+  };
 
   const dot = (
     <span
@@ -109,7 +148,7 @@ export function CheckRow({
     <li className="text-xs">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={toggle}
         aria-expanded={expanded}
         className="block w-full rounded px-1 py-0.5 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
       >
@@ -130,24 +169,49 @@ export function CheckRow({
         <div className="mb-1 mt-1">
           {logs.isLoading ? (
             <div className="px-1 py-2 text-gray-400">Loading logs…</div>
-          ) : logs.data?.available ? (
+          ) : view?.available ? (
             <>
-              <div className="mb-1 flex items-center justify-between px-1 text-[10px] text-gray-400">
+              <div className="mb-1 flex items-center justify-between gap-2 px-1 text-[10px] text-gray-400">
                 <span>
-                  last {logs.data.returnedLines} of {logs.data.totalLines} lines
+                  {view.partial && view.loadedBytes != null
+                    ? `${view.lines} lines · ${formatLogBytes(view.loadedBytes)}${
+                        view.totalBytes != null
+                          ? ` of ${formatLogBytes(view.totalBytes)}`
+                          : ''
+                      }`
+                    : `${view.lines} line${view.lines === 1 ? '' : 's'}`}
                 </span>
-                {gitHubLink}
+                <span className="flex items-center gap-2">
+                  {/* Kept OUTSIDE the <pre>: a control that appears/disappears inside
+                      the scroller would change its scrollHeight and throw off the
+                      prepend anchoring below. */}
+                  {(logs.hasNextPage || logs.isFetchingNextPage) && (
+                    <button
+                      type="button"
+                      className="rounded border border-gray-300 px-1.5 py-0.5 text-[10px] hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+                      disabled={!canLoadEarlier}
+                      onClick={loadEarlier}
+                      title="Load the previous chunk of this log (or just scroll up)"
+                    >
+                      {logs.isFetchingNextPage
+                        ? 'Loading earlier…'
+                        : '↑ Load earlier'}
+                    </button>
+                  )}
+                  {gitHubLink}
+                </span>
               </div>
               <pre
                 ref={preRef}
+                onScroll={onScroll}
                 className="max-h-[40rem] overflow-auto whitespace-pre rounded bg-gray-900 p-2 font-mono text-[11px] leading-[1.45] text-gray-100"
               >
-                {logs.data.text || '(empty log)'}
+                {view.text || '(empty log)'}
               </pre>
             </>
           ) : (
             <div className="px-1 py-2 text-gray-400">
-              {logs.data?.reason ?? "Couldn't load logs."} {gitHubLink}
+              {view?.reason ?? "Couldn't load logs."} {gitHubLink}
             </div>
           )}
         </div>

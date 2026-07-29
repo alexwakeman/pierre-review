@@ -731,3 +731,162 @@ export async function rerunWorkflowRun(
     `/repos/${owner}/${name}/actions/runs/${runId}/${suffix}`,
   );
 }
+
+// ---- GitHub's native merge QUEUE (GraphQL only) -----------------------------------------
+//
+// House style in this file is REST-first. The merge queue forks to GraphQL because it has to:
+// `enqueuePullRequest` / `dequeuePullRequest` are GA GraphQL mutations with NO REST
+// equivalent, and queue presence is not inferable from anything REST returns — in particular
+// `MergeStateStatus` has no QUEUED value, so a queued PR looks like any other blocked one.
+//
+// Nothing here is synced. Queue position changes minute to minute and only the merge control
+// renders it, so it is fetched live in GET /api/prs/:id/merge-options and never stored.
+
+// `MergeQueueEntry.estimatedTimeToMerge` is an Int of SECONDS in the GitHub schema; the wire
+// type (PrMergeQueueInfo.estimatedTimeToMergeMs) is milliseconds, so it is scaled here — the
+// one place that assumption lives.
+const SECONDS_TO_MS = 1000;
+
+interface GqlMergeQueueState {
+  repository: {
+    pullRequest: {
+      isMergeQueueEnabled: boolean;
+      isInMergeQueue: boolean;
+      mergeQueueEntry: {
+        position: number | null;
+        state: string | null;
+        estimatedTimeToMerge: number | null;
+        enqueuedAt: string | null;
+      } | null;
+    } | null;
+  } | null;
+}
+
+const MERGE_QUEUE_STATE_QUERY = /* GraphQL */ `
+  query MergeQueueState($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        isMergeQueueEnabled
+        isInMergeQueue
+        mergeQueueEntry {
+          position
+          state
+          estimatedTimeToMerge
+          enqueuedAt
+        }
+      }
+    }
+  }
+`;
+
+export interface MergeQueueState {
+  // The PR's BASE ref has a merge queue configured (the repo-level capability).
+  enabled: boolean;
+  inQueue: boolean;
+  position: number | null;
+  // GitHub's MergeQueueEntryState: AWAITING_CHECKS | LOCKED | MERGEABLE | QUEUED | UNMERGEABLE.
+  state: string | null;
+  estimatedTimeToMergeMs: number | null;
+  enqueuedAt: string | null;
+}
+
+// Live merge-queue state for one PR. Returns null when the PR can't be read (deleted, or the
+// token can't see it) — the caller renders "no merge queue" rather than failing the whole
+// merge-options fetch.
+export async function fetchMergeQueueState(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+): Promise<MergeQueueState | null> {
+  const gql = getGraphqlClientFor(token);
+  const res = await gql<GqlMergeQueueState>(MERGE_QUEUE_STATE_QUERY, {
+    owner,
+    name,
+    number,
+  });
+  const pr = res.repository?.pullRequest;
+  if (!pr) return null;
+  const entry = pr.mergeQueueEntry;
+  return {
+    enabled: pr.isMergeQueueEnabled,
+    inQueue: pr.isInMergeQueue,
+    position: entry?.position ?? null,
+    state: entry?.state ?? null,
+    estimatedTimeToMergeMs:
+      entry?.estimatedTimeToMerge != null ? entry.estimatedTimeToMerge * SECONDS_TO_MS : null,
+    enqueuedAt: entry?.enqueuedAt ?? null,
+  };
+}
+
+interface GqlEnqueueResponse {
+  // `mergeQueueEntry` is schema-NULLABLE — GitHub can return a 200 with a null payload on a
+  // partial success, exactly like addPullRequestReviewThreadReply above.
+  enqueuePullRequest: {
+    mergeQueueEntry: {
+      position: number | null;
+      state: string | null;
+      estimatedTimeToMerge: number | null;
+    } | null;
+  } | null;
+}
+
+const ENQUEUE_MUTATION = /* GraphQL */ `
+  mutation EnqueuePr($input: EnqueuePullRequestInput!) {
+    enqueuePullRequest(input: $input) {
+      mergeQueueEntry {
+        position
+        state
+        estimatedTimeToMerge
+      }
+    }
+  }
+`;
+
+const DEQUEUE_MUTATION = /* GraphQL */ `
+  mutation DequeuePr($input: DequeuePullRequestInput!) {
+    dequeuePullRequest(input: $input) {
+      mergeQueueEntry {
+        position
+      }
+    }
+  }
+`;
+
+interface GqlDequeueResponse {
+  dequeuePullRequest: { mergeQueueEntry: { position: number | null } | null } | null;
+}
+
+/**
+ * Add the PR to its base branch's merge queue. `expectedHeadOid` pins the enqueue to the head
+ * the caller saw — GitHub rejects the mutation if the branch moved, the same consent anchor
+ * the direct merge uses (`sha` on PUT .../merge).
+ *
+ * `prNodeId` is the PR's GraphQL node id (pullRequests.githubNodeId), NOT its number.
+ */
+export async function enqueuePullRequestOnQueue(
+  token: string,
+  prNodeId: string,
+  expectedHeadOid?: string,
+): Promise<{ position: number | null; state: string | null; estimatedTimeToMergeMs: number | null }> {
+  const gql = getGraphqlClientFor(token);
+  const input: Record<string, unknown> = { pullRequestId: prNodeId };
+  if (expectedHeadOid) input.expectedHeadOid = expectedHeadOid;
+  const res = await gql<GqlEnqueueResponse>(ENQUEUE_MUTATION, { input });
+  const entry = res.enqueuePullRequest?.mergeQueueEntry ?? null;
+  return {
+    position: entry?.position ?? null,
+    state: entry?.state ?? null,
+    estimatedTimeToMergeMs:
+      entry?.estimatedTimeToMerge != null ? entry.estimatedTimeToMerge * SECONDS_TO_MS : null,
+  };
+}
+
+/** Remove the PR from the merge queue. `DequeuePullRequestInput.id` is the PR's node id. */
+export async function dequeuePullRequestFromQueue(
+  token: string,
+  prNodeId: string,
+): Promise<void> {
+  const gql = getGraphqlClientFor(token);
+  await gql<GqlDequeueResponse>(DEQUEUE_MUTATION, { input: { id: prNodeId } });
+}

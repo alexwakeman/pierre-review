@@ -224,6 +224,32 @@ export async function ghRestGetText(
   return { status: res.status, ok: res.ok, text };
 }
 
+// ADDITIVE (Actions job logs, byte-window viewer): REST GET returning the RAW Response
+// WITHOUT reading the body and WITHOUT following redirects (`redirect: 'manual'`), so
+// the caller can:
+//   (a) read the `location` of the Actions job-logs 302 and issue its OWN byte-`Range`
+//       request against the short-lived signed blob URL (which does honour Range), and
+//   (b) STREAM + cap a potentially multi-MB body instead of buffering the whole thing.
+// The signed URL must NEVER be handed to a client — it is unauthenticated and would
+// bypass our per-account ownership check. Nothing here throws on a non-2xx; the caller
+// branches on `res.status`. The Authorization header is only ever sent to api.github.com
+// because we do not follow the cross-origin hop ourselves.
+export async function ghRestGetRaw(
+  token: string,
+  path: string,
+  init?: { signal?: AbortSignal },
+): Promise<Response> {
+  return fetch(`https://api.github.com${path}`, {
+    method: 'GET',
+    redirect: 'manual',
+    headers: {
+      authorization: `token ${token}`,
+      'x-github-api-version': '2022-11-28',
+    },
+    signal: init?.signal,
+  });
+}
+
 // REST GET a repo file's RAW contents (Accept: application/vnd.github.raw), NOT throwing
 // on a non-2xx — returns the status + body so the caller can branch. Used to fetch a
 // repo's CODEOWNERS file (404 when absent → degrade to no CODEOWNERS suggestions). The

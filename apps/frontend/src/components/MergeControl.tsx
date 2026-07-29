@@ -1,16 +1,31 @@
 import { useMemo, useState } from 'react';
 import type { MergeMethod } from '@pierre-review/shared';
-import { useMergeOptions, useMergePr, useUpdatePrBranch } from '../hooks/usePrWrites.js';
+import {
+  useDequeueMergeQueue,
+  useEnqueueMergeQueue,
+  useMergeOptions,
+  useMergePr,
+  useUpdatePrBranch,
+} from '../hooks/usePrWrites.js';
+import { useArmAutoMerge, useDisarmAutoMerge } from '../hooks/useAutoMerge.js';
+import { dateTime, MERGE_TONE_CLASS, mergeVerdict, relativeTime, toMergeStateStatus } from '../lib/ui.js';
 import { ApiError } from '../api/client.js';
 
 // Merge control for the Overview tab (CORE / free tier), rendered next to Approve when the
 // viewer has push access and the PR is open + not a draft. Collapsed it's a single "Merge ▾"
 // button; expanding fetches the repo's allowed merge methods + GitHub's live mergeability
-// (lazily, so the hot PR-detail path stays fast). It offers merge / squash / rebase (whichever
-// the repo enables, defaulting to the repo's first allowed), an "Update branch from trunk"
-// when the head is behind (rebase locally / merge — no conflict resolution in the free tier),
-// and an info-only note (link to GitHub) when the PR conflicts. The server re-checks write
-// access + conflicts and 409s otherwise.
+// (lazily, so the hot PR-detail path stays fast).
+//
+// It resolves THREE ways, in this order — they are mutually exclusive by construction:
+//
+//   1. the base branch has a MERGE QUEUE  → "Add to merge queue" replaces Merge entirely.
+//      GitHub won't accept a direct merge on a queued branch, so offering one would only
+//      produce a confusing 405. Position/ETA + "Remove from queue" render while queued.
+//   2. it can merge now                   → merge / squash / rebase (whichever the repo allows).
+//   3. it can't merge YET                 → "Merge when ready" arms Pierre's own watcher.
+//
+// Everything that says "can this land?" comes from the ONE `mergeVerdict` resolver in lib/ui,
+// so this control, the open-PR rows and the timeline tooltip can never disagree.
 
 const METHOD_LABEL: Record<MergeMethod, string> = {
   merge: 'Create a merge commit',
@@ -29,6 +44,10 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
   const { data: options, isLoading, isError } = useMergeOptions(prId, open);
   const merge = useMergePr(prId);
   const update = useUpdatePrBranch(prId);
+  const enqueue = useEnqueueMergeQueue(prId);
+  const dequeue = useDequeueMergeQueue(prId);
+  const arm = useArmAutoMerge(prId);
+  const disarm = useDisarmAutoMerge(prId);
 
   // The chosen method — default to the repo's first allowed once options load.
   const [method, setMethod] = useState<MergeMethod | null>(null);
@@ -38,18 +57,12 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
       ? method
       : (options?.defaultMethod ?? 'merge');
 
-  const mergeError =
-    merge.error instanceof ApiError
-      ? merge.error.message
-      : merge.error
-        ? 'Failed to merge the PR.'
-        : null;
-  const updateError =
-    update.error instanceof ApiError
-      ? update.error.message
-      : update.error
-        ? 'Failed to update the branch.'
-        : null;
+  const errText = (e: unknown, fallback: string): string | null =>
+    e instanceof ApiError ? e.message : e ? fallback : null;
+  const mergeError = errText(merge.error, 'Failed to merge the PR.');
+  const updateError = errText(update.error, 'Failed to update the branch.');
+  const queueError = errText(enqueue.error ?? dequeue.error, 'Merge-queue action failed.');
+  const armError = errText(arm.error ?? disarm.error, 'Failed to change auto-merge.');
 
   const behindLabel = useMemo(() => {
     if (options == null || !options.behind) return null;
@@ -87,10 +100,50 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
     );
   }
 
-  const canMerge = !options.conflicts && !options.blocked && options.allowedMethods.length > 0;
+  const queue = options.mergeQueue;
+  const armed = options.autoMerge.armed;
+  const isArmed = armed?.state === 'armed';
+
+  // The one verdict, fed the live merge-options values (not the synced PR row).
+  //
+  // `autoMergeArmed` is deliberately NOT passed here even though the resolver accepts it: an
+  // 'armed' verdict reports canMerge:true (arming doesn't take the manual merge away), which
+  // on THIS surface would enable a Merge button for a PR that is still blocked. The armed
+  // state gets its own panel below; this verdict stays a pure statement of mergeability, so
+  // the button it gates can't lie. (Other surfaces, which render the verdict but offer no
+  // button, do want the 'armed' collapse.)
+  const verdict = mergeVerdict({
+    mergeable: options.conflicts
+      ? 'conflicting'
+      : options.mergeable === true
+        ? 'mergeable'
+        : 'unknown',
+    mergeStateStatus: toMergeStateStatus(options.mergeStateStatus),
+    inMergeQueue: queue?.inQueue ?? false,
+    queuePosition: queue?.position ?? null,
+    behindBy: options.behindBy,
+  });
+
+  const hasMethods = options.allowedMethods.length > 0;
+  const canMergeNow = verdict.canMerge && hasMethods;
+  // Arming only makes sense while something is still in the way. A PR that can merge right
+  // now should be merged, not queued behind a watcher tick.
+  const canArm = options.autoMerge.allowedByRepo && !isArmed && !verdict.canMerge && !queue?.enabled;
+  const busy = merge.isPending || enqueue.isPending || dequeue.isPending || arm.isPending;
 
   return (
     <div className="w-full space-y-2">
+      {/* The verdict, always first — "why can't I merge this?" answered in one line. */}
+      <div className={`text-xs font-medium ${MERGE_TONE_CLASS[verdict.tone]}`}>
+        {(verdict.tone === 'bad' || verdict.tone === 'warn') && <span aria-hidden>⚠ </span>}
+        {verdict.label}
+        {verdict.detail && (
+          <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">
+            — {verdict.detail}
+          </span>
+        )}
+      </div>
+
       {/* Conflicts — info only. Conflict resolution is a Pro feature; free tier links out. */}
       {options.conflicts && (
         <div className="rounded border border-amber-300 bg-amber-50/60 px-2 py-1.5 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200">
@@ -141,51 +194,132 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
         </div>
       )}
 
-      {/* Blocked by branch protection — merge disabled with the reason. */}
-      {options.blocked && (
-        <div className="text-xs text-gray-500 dark:text-gray-400">
-          Merging is blocked by branch protection (required reviews or checks aren’t satisfied yet).
+      {/* An armed intent — what it will do, and how to call it off. */}
+      {isArmed && armed != null && (
+        <div className="rounded border border-violet-300 bg-violet-50/60 px-2 py-1.5 text-xs text-violet-900 dark:border-violet-800/60 dark:bg-violet-950/20 dark:text-violet-200">
+          <div className="font-medium">
+            Auto-merge armed · {METHOD_VERB[armed.mergeMethod]} · armed{' '}
+            {relativeTime(armed.armedAt)}
+          </div>
+          <div className="mt-0.5 text-violet-700/90 dark:text-violet-300/90">
+            {armed.lastReason ?? 'Waiting for the blockers to clear.'}
+          </div>
+          {/* Honest about the mechanism: this is a watcher in THIS server, not a GitHub setting. */}
+          <div className="mt-0.5 text-[11px] text-violet-700/70 dark:text-violet-300/70">
+            Limn merges it while the app is running. A new commit on the branch disarms it — you
+            re-arm to merge the new code. Expires {dateTime(armed.expiresAt)}.
+          </div>
+          <button
+            type="button"
+            onClick={() => disarm.mutate()}
+            disabled={disarm.isPending}
+            className="mt-1 rounded border border-violet-400 px-1.5 py-0.5 font-medium hover:bg-violet-100 disabled:opacity-50 dark:border-violet-700 dark:hover:bg-violet-900/40"
+          >
+            {disarm.isPending ? 'Cancelling…' : 'Cancel auto-merge'}
+          </button>
         </div>
       )}
 
-      {/* Method + Merge / Cancel. */}
+      {/* Action row. A merge queue REPLACES the merge button (GitHub won't take a direct merge). */}
       <div className="flex flex-wrap items-center gap-2">
-        {options.allowedMethods.length > 1 && (
-          <select
-            value={effectiveMethod}
-            onChange={(e) => setMethod(e.target.value as MergeMethod)}
-            disabled={!canMerge || merge.isPending}
-            className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-sm dark:border-gray-700 dark:bg-gray-900"
-          >
-            {options.allowedMethods.map((m) => (
-              <option key={m} value={m}>
-                {METHOD_LABEL[m]}
-              </option>
-            ))}
-          </select>
+        {queue?.enabled ? (
+          queue.inQueue ? (
+            <>
+              <span className="text-xs text-gray-600 dark:text-gray-300">
+                In the merge queue
+                {queue.position != null && ` · position ${queue.position}`}
+                {queue.state && ` · ${queue.state.toLowerCase().replace(/_/g, ' ')}`}
+                {queue.estimatedTimeToMergeMs != null &&
+                  ` · ~${Math.max(1, Math.round(queue.estimatedTimeToMergeMs / 60000))} min`}
+              </span>
+              <button
+                type="button"
+                onClick={() => dequeue.mutate()}
+                disabled={busy}
+                className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+              >
+                {dequeue.isPending ? 'Removing…' : 'Remove from queue'}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => enqueue.mutate(effectiveMethod)}
+              disabled={busy}
+              className="whitespace-nowrap rounded border border-violet-500 px-2 py-0.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
+              title="This branch uses a merge queue — GitHub merges it in turn"
+            >
+              {enqueue.isPending ? 'Queueing…' : 'Add to merge queue'}
+            </button>
+          )
+        ) : (
+          <>
+            {options.allowedMethods.length > 1 && (
+              <select
+                value={effectiveMethod}
+                onChange={(e) => setMethod(e.target.value as MergeMethod)}
+                disabled={busy || (!canMergeNow && !canArm)}
+                className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-sm dark:border-gray-700 dark:bg-gray-900"
+              >
+                {options.allowedMethods.map((m) => (
+                  <option key={m} value={m}>
+                    {METHOD_LABEL[m]}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              type="button"
+              onClick={() => merge.mutate(effectiveMethod)}
+              disabled={!canMergeNow || busy}
+              className="whitespace-nowrap rounded border border-violet-500 px-2 py-0.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
+              title={canMergeNow ? 'Merge this PR' : verdict.detail ?? 'This PR can’t be merged right now'}
+            >
+              {merge.isPending ? 'Merging…' : METHOD_VERB[effectiveMethod]}
+            </button>
+            {canArm && (
+              <button
+                type="button"
+                onClick={() =>
+                  arm.mutate({
+                    mergeMethod: effectiveMethod,
+                    // Behind-ness is the one blocker we can clear ourselves; mirror the
+                    // update selector so the watcher uses the strategy the user picked.
+                    updateStrategy: options.canUpdateBranch
+                      ? options.canRebaseUpdate
+                        ? updateStrategy
+                        : 'merge'
+                      : 'none',
+                  })
+                }
+                disabled={busy}
+                className="whitespace-nowrap rounded border border-violet-400 px-2 py-0.5 text-sm font-medium text-violet-600 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30"
+                title="Merge it automatically once the blockers clear — while the app is running"
+              >
+                {arm.isPending ? 'Arming…' : 'Merge when ready'}
+              </button>
+            )}
+          </>
         )}
-        <button
-          type="button"
-          onClick={() => merge.mutate(effectiveMethod)}
-          disabled={!canMerge || merge.isPending}
-          className="whitespace-nowrap rounded border border-violet-500 px-2 py-0.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
-          title={canMerge ? 'Merge this PR' : 'This PR can’t be merged right now'}
-        >
-          {merge.isPending ? 'Merging…' : METHOD_VERB[effectiveMethod]}
-        </button>
         <button
           type="button"
           onClick={() => {
             setOpen(false);
             merge.reset();
             update.reset();
+            enqueue.reset();
+            dequeue.reset();
+            arm.reset();
+            disarm.reset();
           }}
-          disabled={merge.isPending}
+          disabled={busy}
           className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         >
           Cancel
         </button>
         {mergeError && <span className="text-xs text-red-500">{mergeError}</span>}
+        {queueError && <span className="text-xs text-red-500">{queueError}</span>}
+        {armError && <span className="text-xs text-red-500">{armError}</span>}
       </div>
     </div>
   );

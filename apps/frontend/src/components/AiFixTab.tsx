@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CLAUDE_REVIEW_MODELS,
   CLAUDE_REVIEW_MODEL_LABELS,
-  type AiConfidence,
   type AiFix,
   type AiFixMergePreview,
   type AiFixModel,
@@ -13,11 +12,9 @@ import {
   type AiFixStatus,
   type AiFixStatusResponse,
   type AiFixSummary,
-  type FailingCheckInput,
   type PrDetail,
   type PrHeadInfo,
 } from '@pierre-review/shared';
-import { ApiError } from '../api/client.js';
 import { relativeTime, safeExternalUrl } from '../lib/ui.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import { useFilters } from '../store/filters.js';
@@ -28,13 +25,12 @@ import {
   useCancelFix,
   useCancelPush,
   useCancelRebase,
-  useCiAnalysis,
   useMergePreview,
   usePushFix,
-  useRefreshCiAnalysis,
   useStartFix,
   useStartRebase,
 } from '../hooks/useAiFix.js';
+import { CiAnalysisCard, errText } from './CiAnalysisCard.js';
 import { Markdown } from './Markdown.js';
 import { FileDiffView, type DiffFile } from './diff/FileDiffView.js';
 import { parseGitPatch } from '../lib/diff.js';
@@ -123,34 +119,6 @@ function SectionTitle({ children }: { children: React.ReactNode }): JSX.Element 
   );
 }
 
-const CONFIDENCE_STYLE: Record<AiConfidence, string> = {
-  high: 'bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300',
-  medium: 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
-  low: 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300',
-};
-
-function ConfidenceBadge({
-  label,
-  value,
-}: {
-  label: string;
-  value: AiConfidence | null;
-}): JSX.Element | null {
-  if (!value) return null;
-  return (
-    <span
-      className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${CONFIDENCE_STYLE[value]}`}
-      title={
-        label === 'Fixability'
-          ? "How confident the analysis is that Limn's agent could fix this"
-          : 'How confident the analysis is about the root cause'
-      }
-    >
-      {label}: {value}
-    </span>
-  );
-}
-
 export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
   const { aiAnalysis, aiFix } = useProCapabilities();
   const aiFixTabFocus = useFilters((s) => s.aiFixTabFocus);
@@ -182,7 +150,6 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
         </div>
       )}
       <CiStatusSection pr={pr} />
-      {aiAnalysis && <CiAnalysisSection pr={pr} canFix={aiFix} />}
       {aiFix && (
         <FixerSection
           pr={pr}
@@ -209,103 +176,9 @@ function CiStatusSection({ pr }: { pr: PrDetail }): JSX.Element | null {
           checks={checks}
           viewerCanPush={pr.viewerCanPush}
         />
-      </div>
-    </div>
-  );
-}
-
-// ---- CI failure analysis ----
-
-function CiAnalysisSection({
-  pr,
-  canFix,
-}: {
-  pr: PrDetail;
-  canFix: boolean;
-}): JSX.Element | null {
-  const { data } = useCiAnalysis(pr.id, true);
-  const refresh = useRefreshCiAnalysis(pr.id);
-  const startFix = useStartFix(pr.id);
-
-  // ALL failing checks (name + optional Actions jobId), not just Actions jobs — so an
-  // external gate (SonarCloud etc.) with no jobId is still analyzed.
-  const failingChecks: FailingCheckInput[] = useMemo(
-    () =>
-      pr.checkRuns
-        .filter((c) => c.state === 'failure' || c.state === 'error')
-        .map((c) => ({ name: c.name, jobId: c.jobId, state: c.state })),
-    [pr.checkRuns],
-  );
-  const hasFailures = failingChecks.length > 0 || (data?.hasFailures ?? false);
-
-  // Only offer CI analysis when there's actually a failure to analyze.
-  if (!hasFailures && !data?.analysis) return null;
-
-  const lowFixability = data?.fixability === 'low';
-
-  return (
-    <div className="border-b border-gray-200 dark:border-gray-800">
-      <SectionTitle>CI failure analysis</SectionTitle>
-      <div className="px-4 pb-3">
-        {data?.analysis && (data.rootCauseConfidence || data.fixability) && (
-          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-            <span
-              className="text-[10px] font-semibold uppercase tracking-wide text-gray-400"
-              title="How confident the analysis is — not a severity rating"
-            >
-              Confidence
-            </span>
-            <ConfidenceBadge label="Root cause" value={data.rootCauseConfidence} />
-            <ConfidenceBadge label="Fixability" value={data.fixability} />
-          </div>
-        )}
-        {data?.analysis ? (
-          <div className="prose prose-sm max-w-none dark:prose-invert">
-            <Markdown>{data.analysis}</Markdown>
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">
-            Diagnose the failing CI: likely root cause + a suggested fix, from the
-            full logs of every failing check.
-          </p>
-        )}
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className={BTN_SECONDARY}
-            disabled={refresh.isPending || failingChecks.length === 0}
-            onClick={() => refresh.mutate(failingChecks)}
-          >
-            {refresh.isPending
-              ? 'Analyzing…'
-              : data?.analysis
-                ? 'Re-analyze'
-                : 'Analyze CI failure'}
-          </button>
-          {canFix && data?.analysis && (
-            <button
-              type="button"
-              className={BTN_PRIMARY}
-              disabled={startFix.isPending}
-              onClick={() =>
-                startFix.mutate({ model: 'claude-sonnet-5', seed: 'ci_analysis' })
-              }
-              title="Launch an agent to fix the CI failure"
-            >
-              Fix it →
-            </button>
-          )}
-          {canFix && lowFixability && data?.analysis && (
-            <span className="text-[11px] text-gray-500">
-              low confidence this is auto-fixable
-            </span>
-          )}
-          {refresh.isError && (
-            <span className="text-[11px] text-red-500">
-              {errText(refresh.error)}
-            </span>
-          )}
-        </div>
+        {/* The diagnosis lives next to the checks now (same shared query key as the
+            copy mounted inline on the Overview tab). Self-gated + presence-gated. */}
+        <CiAnalysisCard pr={pr} />
       </div>
     </div>
   );
@@ -1067,10 +940,4 @@ function PushControls({
       )}
     </div>
   );
-}
-
-function errText(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return 'Something went wrong';
 }

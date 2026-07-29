@@ -8,7 +8,10 @@ import type {
   EventType,
   Mergeable,
   MergeStateStatus,
+  MergeVerdict,
+  MergeVerdictInfo,
   MyTurnReason,
+  PrReviewDecision,
   PrState,
   ReasonTag,
   ReviewBotKind,
@@ -363,15 +366,218 @@ export const CHECK_STATE_META: Record<
   unknown: { label: 'unknown', color: '#9ca3af', icon: '?' },
 };
 
-// Only surface mergeability when it's a problem.
-export function mergeWarning(
-  mergeable: Mergeable,
-  mss: MergeStateStatus,
-): string | null {
-  if (mergeable === 'conflicting' || mss === 'dirty') return 'conflicts';
-  if (mss === 'behind') return 'behind';
-  if (mss === 'unstable') return 'unstable';
-  return null;
+// ---- The ONE merge verdict --------------------------------------------------------------
+//
+// Everything that renders "can this land?" resolves it here. Before this existed, each
+// surface combined GitHub's fields its own way and the PR-detail Overview read
+// `mergeable === 'mergeable'` as a green "mergeable" — which is WRONG, and wrong on ~444 of
+// the open PRs in a real database:
+//
+//   • `mergeable` reports ONLY merge-CONFLICT state (MERGEABLE / CONFLICTING / UNKNOWN). A PR
+//     whose required checks are failing is still `mergeable: 'mergeable'`.
+//   • `mergeStateStatus` is the branch-protection-aware field, and the one to lead with:
+//       clean     — mergeable and passing
+//       blocked   — protection unmet (required checks failing / required reviews missing)
+//       unstable  — NON-required checks are red; GitHub WILL still merge it
+//       behind    — the base moved and this repo requires up-to-date branches
+//       dirty     — conflicts with the base
+//       has_hooks — mergeable, with a pre-receive hook to run
+//       unknown   — GitHub hasn't computed it yet
+//     It is ACTOR-AGNOSTIC (it does not model an admin's bypass power), which is exactly why
+//     it needs no branch-protection API call to be trustworthy.
+//
+// So: mergeStateStatus first, `mergeable` only as the conflict corroborator.
+export interface MergeVerdictInput {
+  mergeable: Mergeable;
+  mergeStateStatus: MergeStateStatus;
+  // Draft-ness is its own stored boolean — GitHub's MergeStateStatus.DRAFT is deliberately
+  // not modelled in the enum (see sync/upsert.ts), so it is passed separately.
+  isDraft?: boolean;
+  // Names the review half of a `blocked` status when it's known (PrDetail carries it; the
+  // lean timeline PR does not). Absent → the blocked reason stays generic, never invented.
+  reviewDecision?: PrReviewDecision | null;
+  // Out-of-band states only the live merge-options fetch knows about.
+  inMergeQueue?: boolean;
+  queuePosition?: number | null;
+  autoMergeArmed?: boolean;
+  // Commits behind the base, when known — turns "behind" into "3 commits behind".
+  behindBy?: number;
+}
+
+function blockedDetail(decision: PrReviewDecision | null | undefined): string {
+  switch (decision) {
+    case 'review_required':
+      return 'required reviews aren’t in yet';
+    case 'changes_requested':
+      return 'a reviewer requested changes';
+    // Approved but still blocked ⇒ the review requirement is satisfied, so the blocker is
+    // the other half of branch protection.
+    case 'approved':
+      return 'required checks aren’t passing';
+    default:
+      return 'required checks or reviews aren’t satisfied';
+  }
+}
+
+const MERGE_STATE_STATUSES: readonly MergeStateStatus[] = [
+  'clean',
+  'dirty',
+  'unstable',
+  'blocked',
+  'behind',
+  'has_hooks',
+  'unknown',
+];
+
+/**
+ * Narrow a RAW mergeStateStatus string to the modelled enum. `PrMergeOptions` carries
+ * GitHub's live REST value as a plain `string` (it can return values we don't model, e.g.
+ * `draft`), so the live merge path funnels through this instead of casting.
+ */
+export function toMergeStateStatus(raw: string | null | undefined): MergeStateStatus {
+  const lower = (raw ?? '').toLowerCase();
+  return (MERGE_STATE_STATUSES as readonly string[]).includes(lower)
+    ? (lower as MergeStateStatus)
+    : 'unknown';
+}
+
+/**
+ * Collapse GitHub's mergeability fields (+ the two out-of-band states) into ONE verdict.
+ * Pure: same input, same answer, on every surface.
+ */
+export function mergeVerdict(pr: MergeVerdictInput): MergeVerdictInfo {
+  const mss = pr.mergeStateStatus;
+
+  // Out-of-band first — being in the queue or armed is the truest answer to "what happens
+  // next", and both outrank the raw status they're waiting on.
+  if (pr.inMergeQueue) {
+    return {
+      verdict: 'queued',
+      label: 'in merge queue',
+      tone: 'ok',
+      canMerge: false,
+      detail: pr.queuePosition != null ? `position ${pr.queuePosition}` : null,
+    };
+  }
+  if (pr.autoMergeArmed) {
+    return {
+      verdict: 'armed',
+      label: 'auto-merge armed',
+      tone: 'ok',
+      // Arming doesn't take the manual merge away — the user can still land it by hand.
+      canMerge: true,
+      detail: 'it lands by itself once the blockers clear',
+    };
+  }
+
+  // Conflicts outrank draft: a conflicting draft still needs a human to resolve them, and
+  // that is more actionable than "it's a draft".
+  if (mss === 'dirty' || pr.mergeable === 'conflicting') {
+    return {
+      verdict: 'conflicts',
+      label: 'conflicts',
+      tone: 'bad',
+      canMerge: false,
+      detail: 'resolve the conflicts with the base branch',
+    };
+  }
+  if (pr.isDraft) {
+    return {
+      verdict: 'draft',
+      label: 'draft',
+      tone: 'muted',
+      canMerge: false,
+      detail: 'mark it ready for review to merge',
+    };
+  }
+  if (mss === 'blocked') {
+    return {
+      verdict: 'blocked',
+      label: 'blocked',
+      tone: 'bad',
+      canMerge: false,
+      detail: blockedDetail(pr.reviewDecision),
+    };
+  }
+  if (mss === 'behind') {
+    return {
+      verdict: 'behind',
+      label: 'behind base',
+      tone: 'warn',
+      // GitHub itself refuses the merge in this state (the repo requires up-to-date
+      // branches), so offering a merge button would just produce a 405.
+      canMerge: false,
+      detail:
+        pr.behindBy != null && pr.behindBy > 0
+          ? `${pr.behindBy} commit${pr.behindBy === 1 ? '' : 's'} behind — update the branch first`
+          : 'update the branch first',
+    };
+  }
+  if (mss === 'unstable') {
+    return {
+      verdict: 'unstable',
+      label: 'checks failing',
+      tone: 'warn',
+      // The load-bearing subtlety: 'unstable' means only NON-required checks are red, so
+      // GitHub will merge it. Warn, don't block.
+      canMerge: true,
+      detail: 'some non-required checks are failing — GitHub will still merge it',
+    };
+  }
+  if (mss === 'clean' || mss === 'has_hooks') {
+    return {
+      verdict: 'clean',
+      label: 'ready to merge',
+      tone: 'ok',
+      canMerge: true,
+      detail: null,
+    };
+  }
+  // 'unknown': GitHub computes mergeability asynchronously and briefly reports nothing. We
+  // render it honestly and do NOT kick off a repair pass — a background re-fetch on every
+  // unknown would be a per-render GitHub call for a state that resolves itself.
+  return {
+    verdict: 'unknown',
+    label: 'mergeability unknown',
+    tone: 'muted',
+    canMerge: false,
+    detail: null,
+  };
+}
+
+// Tailwind classes per tone, so every compact surface tints a verdict identically.
+export const MERGE_TONE_CLASS: Record<MergeVerdictInfo['tone'], string> = {
+  ok: 'text-green-600 dark:text-green-400',
+  warn: 'text-orange-600 dark:text-orange-400',
+  bad: 'text-red-600 dark:text-red-400',
+  muted: 'text-gray-400 dark:text-gray-500',
+};
+
+// Chip backgrounds for the dense list rows (RepoOpenPrList).
+export const MERGE_TONE_CHIP: Record<MergeVerdictInfo['tone'], string> = {
+  ok: 'bg-green-500/15 text-green-700 dark:text-green-400',
+  warn: 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
+  bad: 'bg-red-500/15 text-red-600 dark:text-red-400',
+  muted: 'bg-gray-500/10 text-gray-500 dark:text-gray-400',
+};
+
+// Which verdicts deserve the ⚠ on the COMPACT surfaces (open-PR rows, timeline tooltips).
+// `blocked` joins conflicts/behind/unstable here — it is the whole point of the fix: a PR
+// whose required checks are red used to render as plain "mergeable" with no warning at all.
+const COMPACT_WARN_VERDICTS: ReadonlySet<MergeVerdict> = new Set<MergeVerdict>([
+  'conflicts',
+  'blocked',
+  'behind',
+  'unstable',
+]);
+
+/**
+ * The verdict a dense row should SHOW, or null when there is nothing worth the pixels
+ * ('clean' / 'draft' / 'unknown' are already conveyed by the row's other affordances).
+ */
+export function mergeVerdictWarning(pr: MergeVerdictInput): MergeVerdictInfo | null {
+  const info = mergeVerdict(pr);
+  return COMPACT_WARN_VERDICTS.has(info.verdict) ? info : null;
 }
 
 export function userLabel(user: User | undefined, fallbackId: number | null): string {

@@ -121,6 +121,33 @@ export function useMergePr(prId: number) {
   });
 }
 
+// ---- GitHub's native merge queue ----
+// When the base branch has a queue, enqueuing IS the merge action (GitHub won't take a direct
+// merge), so these invalidate the same surfaces as a merge would EXCEPT the PR-state ones —
+// the PR isn't merged yet, it's queued. merge-options carries the live queue position.
+export function useEnqueueMergeQueue(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (method?: MergeMethod) =>
+      api.enqueueMergeQueue(prId, method ? { method } : undefined),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['merge-options', prId] });
+      void qc.invalidateQueries({ queryKey: ['pr', prId] });
+    },
+  });
+}
+
+export function useDequeueMergeQueue(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.dequeueMergeQueue(prId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['merge-options', prId] });
+      void qc.invalidateQueries({ queryKey: ['pr', prId] });
+    },
+  });
+}
+
 // Close the PR without merging (reversible on GitHub). Like useMergePr it moves the PR out of
 // the open set, so invalidate every surface that shows open-PR state (timeline, open-PRs,
 // triage queues, the feeds, the Activity console). The backend optimistically stamps closed.

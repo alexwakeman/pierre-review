@@ -6,6 +6,7 @@ import { useResolveBotThreads } from '../../hooks/usePrWrites.js';
 import { usePrBotDedup } from '../../hooks/useBotTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { automatedReviewerMeta, BOT_VENDOR_META, DERIVED_STATE_META } from '../../lib/ui.js';
+import { AnnotationRunBar } from '../CommentAnnotations.js';
 import { FileGroup } from './FileGroup.js';
 import { rollupCounts } from './ThreadCountChips.js';
 
@@ -204,6 +205,15 @@ export function ThreadList({
               </button>
             )}
           </div>
+
+          {/* Pro (prSummary): run one AI judgement across every thread + review comment on this
+              PR — simplify the walls of bot text, sanity-check the points, or ask what's
+              actually been addressed. Cost is bounded server-side (a resumable 50-target cap,
+              chunked prompts, $0 on unchanged content); nothing here ever runs on its own.
+              Renders nothing without the capability. */}
+          {prId != null && (
+            <AnnotationRunBar prId={prId} targetKinds={['thread', 'review_comment']} />
+          )}
 
           {vendor && (
             <div className="flex flex-wrap items-center gap-2 text-xs">

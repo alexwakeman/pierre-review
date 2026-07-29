@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type {
+  BranchStatusResponse,
   CreateRepoBody,
   RepoSearchResponse,
   RepoSearchResult,
@@ -37,6 +38,7 @@ import {
   listRepos,
   setRepoInboxWatch,
 } from '../../db/queries.js';
+import { getBranchStatus } from '../../db/branch-queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 // Local copy of the shared MAX_REPOS_PER_ACCOUNT value. `@pierre-review/shared` is
@@ -99,8 +101,27 @@ const searchSchema = {
   },
 };
 
+// `repoIds=1,2,3` → [1,2,3]; absent/blank/garbage → null ("every repo in the account").
+function parseIntList(raw: string | undefined): number[] | null {
+  if (!raw) return null;
+  const ids = raw
+    .split(',')
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n));
+  return ids.length > 0 ? ids : null;
+}
+
 export async function repoRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/repos', async (req) => listRepos(accountIdOf(req)));
+
+  // Default-branch status ("is trunk green?") for every repo in scope: the head snapshot plus
+  // the recent trunk commits with their own CI state. A pure DB read off what the branch sync
+  // already persisted — never a live GitHub call, hence the plain `read` rate-limit tier.
+  // Informational only: nothing here feeds attention counts, My Turn, or any badge.
+  app.get('/api/branch-status', async (req): Promise<BranchStatusResponse> => {
+    const q = req.query as { repoIds?: string };
+    return getBranchStatus(accountIdOf(req), parseIntList(q.repoIds));
+  });
 
   // Live GitHub repository search for the Add-repo picker. Best-match ordering
   // (GitHub default), already-watched repos filtered out, owned/member repos

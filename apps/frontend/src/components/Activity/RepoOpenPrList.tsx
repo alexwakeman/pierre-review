@@ -8,8 +8,9 @@ import { useRepoOpenPrsPanel } from '../../store/digestCollapse.js';
 import {
   CI_META,
   REASON_META,
+  MERGE_TONE_CHIP,
   indexUsers,
-  mergeWarning,
+  mergeVerdictWarning,
   prNeedsAttention,
   relativeTime,
   sortOpenPrsByActivity,
@@ -40,7 +41,13 @@ export function OpenPrRow({
 }): JSX.Element {
   const ci = CI_META[pr.ciStatus];
   const reason = REASON_META[pr.reasonTag];
-  const warn = mergeWarning(pr.mergeable, pr.mergeStateStatus);
+  // One shared verdict resolver — `blocked` (required checks red / reviews missing) now
+  // shows here, where the row previously rendered nothing at all for it.
+  const warn = mergeVerdictWarning({
+    mergeable: pr.mergeable,
+    mergeStateStatus: pr.mergeStateStatus,
+    isDraft: pr.isDraft,
+  });
   const standing = pr.isApproved
     ? { label: 'approved', color: '#22c55e' }
     : pr.isChangesRequested
@@ -99,8 +106,11 @@ export function OpenPrRow({
           </span>
         )}
         {warn != null && (
-          <span className="shrink-0 rounded bg-orange-500/15 px-1 text-[10px] font-medium text-orange-600 dark:text-orange-400">
-            {warn}
+          <span
+            className={`shrink-0 rounded px-1 text-[10px] font-medium ${MERGE_TONE_CHIP[warn.tone]}`}
+            title={warn.detail ?? warn.label}
+          >
+            {warn.label}
           </span>
         )}
         <ThreadStateBar counts={pr.threadCounts} compact />

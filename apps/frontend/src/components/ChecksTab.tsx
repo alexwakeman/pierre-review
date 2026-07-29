@@ -15,7 +15,8 @@ import {
   botVendorMeta,
   CI_META,
   dateTime,
-  mergeWarning,
+  MERGE_TONE_CLASS,
+  mergeVerdict,
   relativeTime,
   safeExternalUrl,
 } from '../lib/ui.js';
@@ -359,7 +360,18 @@ export function ChecksTab({
       : usersById;
 
   const ci = CI_META[pr.ciStatus];
-  const warn = mergeWarning(pr.mergeable, pr.mergeStateStatus);
+  // ITEM 9 — the bug this replaced: this row read `pr.mergeable === 'mergeable'` and rendered
+  // a green "mergeable" for any PR without CONFLICTS, including the ~444 open PRs whose
+  // required checks were failing (`mergeStateStatus: 'blocked'`). `mergeVerdict` leads with
+  // mergeStateStatus, and `reviewDecision` lets a blocked PR say WHICH half of protection is
+  // unmet. Only meaningful while the PR is open — a merged/closed PR has no merge verdict.
+  const verdict = mergeVerdict({
+    mergeable: pr.mergeable,
+    mergeStateStatus: pr.mergeStateStatus,
+    isDraft: pr.isDraft,
+    reviewDecision: pr.reviewDecision,
+  });
+  const showVerdict = pr.state === 'open';
   const checks = pr.checkRuns;
   const counts = checks.reduce<Record<string, number>>((acc, c) => {
     acc[c.state] = (acc[c.state] ?? 0) + 1;
@@ -488,15 +500,24 @@ export function ChecksTab({
             ) : (
               <span className="text-gray-400">no checks</span>
             )}
-            <span className="text-gray-300 dark:text-gray-600" aria-hidden>
-              |
-            </span>
-            {warn ? (
-              <span className="font-medium text-orange-500">⚠ {warn}</span>
-            ) : pr.mergeable === 'mergeable' ? (
-              <span className="text-green-500">mergeable</span>
-            ) : (
-              <span className="text-gray-400">{pr.mergeStateStatus}</span>
+            {showVerdict && (
+              <>
+                <span className="text-gray-300 dark:text-gray-600" aria-hidden>
+                  |
+                </span>
+                <span
+                  className={`font-medium ${MERGE_TONE_CLASS[verdict.tone]}`}
+                  title={verdict.detail ?? undefined}
+                >
+                  {(verdict.tone === 'bad' || verdict.tone === 'warn') && (
+                    <span aria-hidden>⚠ </span>
+                  )}
+                  {verdict.label}
+                </span>
+                {verdict.detail && (
+                  <span className="text-xs text-gray-400">· {verdict.detail}</span>
+                )}
+              </>
             )}
           </div>
         </Row>

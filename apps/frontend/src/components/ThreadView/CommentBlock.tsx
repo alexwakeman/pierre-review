@@ -4,6 +4,7 @@ import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
 import { relativeTime } from '../../lib/ui.js';
 import { NewTag } from './NewCommentHighlight.js';
+import { CommentAnnotations } from '../CommentAnnotations.js';
 
 // One comment in a thread conversation. The first block carries the code
 // anchor (passed as `anchor`); replies are conversation only. `showLink` is an
@@ -14,6 +15,7 @@ export function CommentBlock({
   comment,
   usersById,
   repoId,
+  prId,
   isNew,
   anchor,
   showLink,
@@ -21,6 +23,10 @@ export function CommentBlock({
   comment: CommentDetail;
   usersById: Map<number, User>;
   repoId?: number;
+  // The PR this comment belongs to — needed to look the comment's AI annotations up in the
+  // PR-wide annotations query. Optional so the older call sites (which don't render them)
+  // stay valid; absent → no annotation surface.
+  prId?: number;
   isNew?: boolean;
   anchor?: JSX.Element | null;
   showLink?: JSX.Element;
@@ -46,6 +52,17 @@ export function CommentBlock({
         {isNew && <NewTag />}
       </div>
       {anchor && <div className="mt-1.5">{anchor}</div>}
+      {/* The AI "Simplified" rewrite sits ABOVE the body and is purely ADDITIVE — the original
+          comment below is never replaced or hidden, so a rewrite can always be checked against
+          what was actually said. Renders nothing without the Pro capability or an annotation. */}
+      {prId != null && (
+        <CommentAnnotations
+          prId={prId}
+          targetKind="review_comment"
+          targetId={comment.id}
+          kinds={['simplify']}
+        />
+      )}
       <div className="mt-1 text-sm">
         <Markdown>{comment.body}</Markdown>
       </div>

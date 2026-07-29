@@ -38,6 +38,15 @@ export interface TriageResult {
   newSinceLastViewed: NewSinceLastViewed | null;
 }
 
+// The merge-state values that mean "GitHub would let this land right now". Mirrors the
+// `canMerge` half of the frontend's `mergeVerdict()` resolver (lib/ui.ts) — the two must
+// agree, or a PR reads "approved & ready" in the triage queue and "blocked" on the PR itself.
+const READY_MERGE_STATES: ReadonlySet<MergeStateStatus> = new Set<MergeStateStatus>([
+  'clean',
+  'has_hooks',
+  'unstable',
+]);
+
 function emptyNew(): NewSinceLastViewed {
   return { commits: 0, comments: 0, reviews: 0 };
 }
@@ -242,7 +251,21 @@ function deriveReasonTag(
     if (pr.mergeable === 'conflicting' || pr.mergeStateStatus === 'dirty')
       return 'merge_conflicts';
     // CI is known-not-failing here (failing CI returned above).
-    if (ctx.approvedReady && pr.mergeable === 'mergeable')
+    //
+    // `mergeable` ONLY reports merge-CONFLICT state (MERGEABLE / CONFLICTING / UNKNOWN) — it
+    // says nothing about branch protection. Testing it alone tagged PRs "approved & ready"
+    // while their REQUIRED checks were red or a second required review was outstanding, which
+    // is the same blindness the merge surfaces had. `mergeStateStatus` is the protection-aware
+    // field, so gate on it too:
+    //   clean      — mergeable and passing
+    //   has_hooks  — mergeable, just has a pre-receive hook to run
+    //   unstable   — NON-required checks are red; GitHub will still merge it, so it IS ready
+    // Everything else (blocked / behind / dirty / unknown) is not ready by definition.
+    if (
+      ctx.approvedReady &&
+      pr.mergeable === 'mergeable' &&
+      READY_MERGE_STATES.has(pr.mergeStateStatus)
+    )
       return 'approved_ready';
     if (pr.isStalled) return 'stalled';
     if (pr.threadCounts.untouched > 0) return 'untouched_threads';

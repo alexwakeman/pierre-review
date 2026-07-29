@@ -233,7 +233,9 @@ type CiStatus =
   | 'expected'
   | 'unknown';
 
-function ciStatusFrom(state: string | null | undefined): CiStatus {
+// Exported because the default-branch snapshot (sync/branch-status.ts) maps the SAME GitHub
+// `StatusState` enum off a Commit's rollup. Two copies would drift silently.
+export function ciStatusFrom(state: string | null | undefined): CiStatus {
   switch ((state ?? '').toUpperCase()) {
     case 'SUCCESS':
       return 'success';
@@ -273,6 +275,32 @@ const MERGE_STATE_STATUSES = new Set([
   'unknown',
 ]);
 
+// GitHub's MergeStateStatus enum also has DRAFT — "the merge is blocked due to the pull
+// request being a draft". We deliberately do NOT model it: `isDraft` is already stored as
+// its own boolean, and every merge surface resolves draft-ness from that (lib/ui.ts
+// `mergeVerdict` checks `isDraft` before it looks at the status). Folding DRAFT into the
+// enum would mean a draft PR permanently reports mergeStateStatus='draft' and the moment it
+// is marked ready we'd have no idea whether it is clean or blocked until the next sync.
+// It lands in 'unknown' below, which is exactly what it is: not yet computed FOR A MERGE.
+const DRAFT_MERGE_STATE = 'draft';
+
+// GraphQL PullRequestReviewDecision → the stored lowercase enum. Null (the repo requires no
+// review at all) is preserved as null — distinct from 'approved'.
+function reviewDecisionFrom(
+  decision: string | null | undefined,
+): 'approved' | 'changes_requested' | 'review_required' | null {
+  switch ((decision ?? '').toUpperCase()) {
+    case 'APPROVED':
+      return 'approved';
+    case 'CHANGES_REQUESTED':
+      return 'changes_requested';
+    case 'REVIEW_REQUIRED':
+      return 'review_required';
+    default:
+      return null;
+  }
+}
+
 function mergeStateStatusFrom(
   state: string | null | undefined,
 ):
@@ -284,6 +312,9 @@ function mergeStateStatusFrom(
   | 'has_hooks'
   | 'unknown' {
   const lower = (state ?? '').toLowerCase();
+  // DRAFT is a known value we intentionally map to 'unknown' (see DRAFT_MERGE_STATE above);
+  // naming it here keeps that a decision rather than an accident of the fallback.
+  if (lower === DRAFT_MERGE_STATE) return 'unknown';
   return (MERGE_STATE_STATUSES.has(lower) ? lower : 'unknown') as
     | 'clean'
     | 'dirty'
@@ -504,6 +535,7 @@ export async function persistPr(
     const ciStatus = ciStatusFrom(head?.statusCheckRollup?.state);
     const mergeable = mergeableFrom(pr.mergeable);
     const mergeStateStatus = mergeStateStatusFrom(pr.mergeStateStatus);
+    const reviewDecision = reviewDecisionFrom(pr.reviewDecision);
     const labels = (pr.labels?.nodes ?? []).map((l) => ({
       name: l.name,
       color: l.color,
@@ -567,6 +599,7 @@ export async function persistPr(
         ciStatus,
         mergeable,
         mergeStateStatus,
+        reviewDecision,
         labels,
         checkRuns: config.persistBodies ? checkRuns : null,
         additions,
@@ -595,6 +628,7 @@ export async function persistPr(
           ciStatus,
           mergeable,
           mergeStateStatus,
+          reviewDecision,
           labels,
           checkRuns: config.persistBodies ? checkRuns : null,
           additions,

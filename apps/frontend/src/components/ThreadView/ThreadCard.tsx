@@ -2,6 +2,7 @@ import type { ThreadDetail, User } from '@pierre-review/shared';
 import { StateBadge } from '../StateBadge.js';
 import { ConfidenceBadge } from '../ConfidenceBadge.js';
 import { AddressedCheckControl } from '../AddressedCheck.js';
+import { CommentAnnotations } from '../CommentAnnotations.js';
 import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';
 import { CodeAnchor } from './CodeAnchor.js';
@@ -134,6 +135,7 @@ export function ThreadCard({
             comment={c}
             usersById={usersById}
             repoId={repoId}
+            prId={thread.prId}
             isNew={
               highlightCommentId != null
                 ? c.id === highlightCommentId
@@ -165,6 +167,17 @@ export function ThreadCard({
           comment, with the thread + diff as context. Sits above the reply box — read it, then
           decide what to do (and reply inline). Renders nothing without the capability. */}
       <ThreadAssessment threadId={thread.id} diffHunk={anchorHunk} />
+
+      {/* The retained "addressed" judgement for the WHOLE thread. The header's
+          AddressedCheckControl shows only the verdict pill; this is the two-section summary of
+          what the later changes DO cover and what is still open — the thing you actually need
+          before resolving the thread. Collapsed by default; renders nothing when absent. */}
+      <CommentAnnotations
+        prId={thread.prId}
+        targetKind="thread"
+        targetId={thread.id}
+        kinds={['addressed']}
+      />
 
       <div className="mt-2 space-y-1.5 pl-2 text-[11px]">
         <ReplyComposer prId={thread.prId} threadId={thread.id} />

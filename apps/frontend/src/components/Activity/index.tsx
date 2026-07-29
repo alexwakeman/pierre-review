@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ActivityRepo, ThreadStateCounts } from '@pierre-review/shared';
+import type { ActivityRepo, RepoBranchStatus, ThreadStateCounts } from '@pierre-review/shared';
 import { useActivity } from '../../hooks/useActivity.js';
+import { useBranchStatus } from '../../hooks/useBranchStatus.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { useTeams } from '../../hooks/useTeams.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
@@ -8,6 +9,8 @@ import { useFilters } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
+import { BranchStatusChip } from './BranchStatusChip.js';
+import { BranchStatusPanel } from './BranchStatusPanel.js';
 import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { RepoInsightsPanel } from './RepoInsightsPanel.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
@@ -61,6 +64,7 @@ function RailRow({
   attentionCount,
   openPrs,
   threadTotals,
+  branch,
   selected,
   onSelect,
 }: {
@@ -70,6 +74,9 @@ function RailRow({
   attentionCount: number;
   openPrs: number | null;
   threadTotals: ThreadStateCounts | null;
+  // The repo's default-branch snapshot, or null when it has never been branch-synced.
+  // Informational only — it deliberately does NOT participate in the rail sort.
+  branch: RepoBranchStatus | null;
   selected: boolean;
   onSelect: () => void;
 }): JSX.Element {
@@ -118,6 +125,9 @@ function RailRow({
           </span>
         </span>
       )}
+      {/* line 3: default-branch readout (branch · CI dot · last commit). Self-hides until the
+          repo has been branch-synced, so the row keeps its two-line shape on a fresh account. */}
+      <BranchStatusChip status={branch} className="pl-0.5" />
     </button>
   );
 }
@@ -209,6 +219,15 @@ export function ActivityView(): JSX.Element {
   // the whole team, not just one repo.
   const scopeRepoIds = teamScope === 'all' ? null : repoIds;
   const { data, isFetching, isLoading } = useActivity(scopeRepoIds, null);
+  // Default-branch status for the SAME scope (the hook reads teamScope/repoIds itself, so this
+  // needs no argument and can never drift from useActivity's scope). Purely informational: it
+  // feeds the rail's third line and the Feed strip, and nothing else — not the sort, not
+  // attentionCount, not any badge.
+  const { data: branchData } = useBranchStatus();
+  const branchByRepo = useMemo(
+    () => new Map((branchData?.repos ?? []).map((r) => [r.repoId, r])),
+    [branchData],
+  );
   const { data: allRepos } = useRepos();
   // In All-Teams scope the rail is grouped by team (a repo in several teams shows under each).
   const { data: teams } = useTeams();
@@ -293,6 +312,7 @@ export function ActivityView(): JSX.Element {
       attentionCount={r.attentionCount}
       openPrs={r.openPrs}
       threadTotals={r.threadTotals}
+      branch={branchByRepo.get(r.repoId) ?? null}
       selected={activityRepoId === r.repoId}
       onSelect={() => setActivityRepo(r.repoId)}
     />
@@ -561,6 +581,10 @@ export function ActivityView(): JSX.Element {
               <HumanThemesPanel />
             ) : (
               <>
+                {/* "Is trunk green?" across every repo in scope — above the flow metrics,
+                    because a red default branch invalidates every open PR's CI at once and is
+                    the first thing worth knowing. Read-only; self-hides until branch-synced. */}
+                <BranchStatusPanel />
                 <FeedMetricsPanel />
                 <FeedView />
               </>
