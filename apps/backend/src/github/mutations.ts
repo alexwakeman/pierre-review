@@ -436,9 +436,29 @@ export async function fetchMergeability(
     );
   }
 
-  let behindBy = 0;
-  let aheadBy = 0;
-  let baseSha = pull.base.sha;
+  const cmp = await compareBaseToHead(token, owner, name, pull);
+
+  return {
+    mergeable: pull.mergeable,
+    mergeableState: pull.mergeable_state,
+    baseRef: pull.base.ref,
+    baseSha: cmp.baseSha ?? pull.base.sha,
+    behindBy: cmp.behindBy,
+    aheadBy: cmp.aheadBy,
+  };
+}
+
+// The `GET /compare/base...head` half of the mergeability read, shared by `fetchMergeability`
+// and `fetchPrMergeSnapshot` so the fork-qualification rule can't drift between them.
+async function compareBaseToHead(
+  token: string,
+  owner: string,
+  name: string,
+  pull: {
+    base: { ref: string };
+    head: { ref: string; label: string; repo: { full_name: string } | null };
+  },
+): Promise<{ behindBy: number; aheadBy: number; baseSha: string | null }> {
   try {
     // For a fork the head must be qualified `owner:branch` (head.label); same-repo uses
     // the plain ref. Branch names with slashes are fine literal in the compare path.
@@ -448,21 +468,111 @@ export async function fetchMergeability(
       ahead_by: number;
       base_commit: { sha: string };
     }>(token, `/repos/${owner}/${name}/compare/${pull.base.ref}...${headRef}`);
-    behindBy = cmp.behind_by ?? 0;
-    aheadBy = cmp.ahead_by ?? 0;
-    baseSha = cmp.base_commit?.sha ?? baseSha;
+    return {
+      behindBy: cmp.behind_by ?? 0,
+      aheadBy: cmp.ahead_by ?? 0,
+      baseSha: cmp.base_commit?.sha ?? null,
+    };
   } catch {
     /* compare is best-effort — the mergeable flag is the load-bearing part */
+    return { behindBy: 0, aheadBy: 0, baseSha: null };
   }
+}
 
+export interface PrMergeSnapshot {
+  headSha: string;
+  headRef: string;
+  headRepoFullName: string;
+  isFork: boolean;
+  maintainerCanModify: boolean;
+  mergeable: boolean | null;
+  mergeableState: string;
+  baseRef: string;
+  baseSha: string;
+  behindBy: number;
+  aheadBy: number;
+}
+
+interface RestPullSnapshot {
+  mergeable: boolean | null;
+  mergeable_state: string;
+  maintainer_can_modify: boolean;
+  base: { ref: string; sha: string; repo: { full_name: string } };
+  head: { ref: string; label: string; sha: string; repo: { full_name: string } | null };
+}
+
+// Head info AND mergeability from ONE `GET /pulls/{n}`. `fetchPrHeadInfo` and
+// `fetchMergeability` read strictly non-overlapping fields of the SAME payload, so a caller
+// that needs both (the auto-merge watcher, on every intent on every tick) was paying two
+// identical GETs — 750 wasted calls/hour at 25 intents against a 5k/hour budget. Both of the
+// originals stay for their single-purpose callers.
+export async function fetchPrMergeSnapshot(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+): Promise<PrMergeSnapshot> {
+  const path = `/repos/${owner}/${name}/pulls/${number}`;
+  let pull = await ghRestGetFor<RestPullSnapshot>(token, path);
+  // GitHub computes `mergeable` asynchronously and can briefly return null; retry once,
+  // exactly as fetchMergeability does.
+  if (pull.mergeable === null) {
+    await new Promise((r) => setTimeout(r, 600));
+    pull = await ghRestGetFor<RestPullSnapshot>(token, path);
+  }
+  const cmp = await compareBaseToHead(token, owner, name, pull);
+  const baseRepoFullName = pull.base.repo.full_name;
+  const headRepoFullName = pull.head.repo?.full_name ?? baseRepoFullName;
   return {
+    headSha: pull.head.sha,
+    headRef: pull.head.ref,
+    headRepoFullName,
+    isFork: pull.head.repo == null || headRepoFullName !== baseRepoFullName,
+    maintainerCanModify: pull.maintainer_can_modify,
     mergeable: pull.mergeable,
     mergeableState: pull.mergeable_state,
     baseRef: pull.base.ref,
-    baseSha,
-    behindBy,
-    aheadBy,
+    baseSha: cmp.baseSha ?? pull.base.sha,
+    behindBy: cmp.behindBy,
+    aheadBy: cmp.aheadBy,
   };
+}
+
+// One commit's parent SHAs (`GET /commits/{sha}`), in order — parent 0 is the first parent.
+// Used to prove that a head move is the base-into-head merge WE asked for rather than a
+// human push: only the former is a two-parent commit whose first parent is the old head.
+export async function fetchCommitParents(
+  token: string,
+  owner: string,
+  name: string,
+  sha: string,
+): Promise<string[]> {
+  const commit = await ghRestGetFor<{ parents?: Array<{ sha: string }> }>(
+    token,
+    `/repos/${owner}/${name}/commits/${sha}`,
+  );
+  return (commit.parents ?? []).map((p) => p.sha);
+}
+
+// Is `sha` reachable from `ref`? `GET /compare/{ref}...{sha}` reports 'identical' or 'behind'
+// exactly when it is. Returns null when the comparison can't be made (deleted ref, no access)
+// — the caller must treat "don't know" as "no consent", never as a yes.
+export async function isCommitContainedInRef(
+  token: string,
+  owner: string,
+  name: string,
+  ref: string,
+  sha: string,
+): Promise<boolean | null> {
+  try {
+    const cmp = await ghRestGetFor<{ status?: string }>(
+      token,
+      `/repos/${owner}/${name}/compare/${ref}...${sha}`,
+    );
+    return cmp.status === 'identical' || cmp.status === 'behind';
+  } catch {
+    return null;
+  }
 }
 
 // ---- PR merge + update-from-trunk (CORE / free tier) ----

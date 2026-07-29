@@ -571,13 +571,32 @@ const COMPACT_WARN_VERDICTS: ReadonlySet<MergeVerdict> = new Set<MergeVerdict>([
   'unstable',
 ]);
 
+// The subset a DRAFT may still fall back to. Deliberately narrower: these two are branch
+// facts a human has to act on whether or not the PR is ready, so they survive the draft
+// verdict. `blocked`/`unstable` do NOT — required reviews being absent is what "draft" means,
+// and unstable's copy ("GitHub will still merge it") is a lie about a draft.
+const DRAFT_COMPACT_WARN_VERDICTS: ReadonlySet<MergeVerdict> = new Set<MergeVerdict>([
+  'conflicts',
+  'behind',
+]);
+
 /**
  * The verdict a dense row should SHOW, or null when there is nothing worth the pixels
- * ('clean' / 'draft' / 'unknown' are already conveyed by the row's other affordances).
+ * ('clean' / 'unknown' are already conveyed by the row's other affordances).
+ *
+ * Drafts are the trap: `mergeVerdict` returns 'draft' before it ever looks at behind/blocked,
+ * and 'draft' isn't a compact warning — so a draft that was ALSO behind its base silently lost
+ * its ⚠ on the timeline bar and the open-PR rows, which the verdict resolver's predecessor
+ * (which had no draft branch at all) did show. Re-deriving with `isDraft` dropped recovers the
+ * co-occurring condition for the compact surfaces ONLY; the main chain stays untouched, since
+ * leading with 'draft' really is the most important fact about the PR everywhere else.
  */
 export function mergeVerdictWarning(pr: MergeVerdictInput): MergeVerdictInfo | null {
   const info = mergeVerdict(pr);
-  return COMPACT_WARN_VERDICTS.has(info.verdict) ? info : null;
+  if (COMPACT_WARN_VERDICTS.has(info.verdict)) return info;
+  if (info.verdict !== 'draft') return null;
+  const underneath = mergeVerdict({ ...pr, isDraft: false });
+  return DRAFT_COMPACT_WARN_VERDICTS.has(underneath.verdict) ? underneath : null;
 }
 
 export function userLabel(user: User | undefined, fallbackId: number | null): string {

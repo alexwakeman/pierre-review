@@ -36,6 +36,7 @@ import {
   armAutoMerge,
   disarmAutoMerge,
   getAutoMergeRequest,
+  getSyncedBaseRef,
   listAutoMergeRequests,
   getMentionCandidates,
   getPrDetail,
@@ -131,7 +132,15 @@ const checkLogsSchema = {
   },
   querystring: {
     type: 'object',
-    properties: { tail: { type: 'integer', minimum: 1, maximum: 1000 } },
+    properties: {
+      tail: { type: 'integer', minimum: 1, maximum: 1000 },
+      // Byte window for the scroll-up pager. startByte is inclusive, endByte
+      // EXCLUSIVE, both in SOURCE-byte space (the \r\n normalisation the fetcher
+      // applies is display-only), so feeding a response's startByte back as the
+      // next endByte abuts exactly. Absent ⇒ anchor at the tail.
+      startByte: { type: 'integer', minimum: 0 },
+      endByte: { type: 'integer', minimum: 0 },
+    },
   },
 };
 
@@ -789,6 +798,19 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       // The LIVE head, never the possibly-stale synced one: arming against a SHA that is
       // already superseded would disarm itself on the very first tick.
       const info = await fetchPrHeadInfo(token, ctx.owner, ctx.name, ctx.number);
+      // The head pin is blind to a RETARGET (PATCH pulls/{n} with a new `base` leaves head.sha
+      // untouched), so the watcher guards the target branch too — against the last SYNCED base
+      // ref, which is the branch the SPA was showing the user. That is only a valid consent
+      // record if it agrees with GitHub right now; if the PR was retargeted since the last
+      // sync, say so instead of arming an intent the watcher would immediately disarm.
+      const syncedBaseRef = await getSyncedBaseRef(accountId, id);
+      if (syncedBaseRef !== info.baseRef) {
+        reply.status(409);
+        return {
+          error: 'StaleBase',
+          message: `This PR now targets ${info.baseRef}; Limn last saw ${syncedBaseRef ?? 'no base branch'}. Sync the repository, then arm auto-merge again.`,
+        };
+      }
       const armed = await armAutoMerge(accountId, id, {
         mergeMethod,
         updateStrategy: updateStrategy ?? 'none',
@@ -1122,7 +1144,11 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     { schema: checkLogsSchema },
     async (req, reply) => {
       const { id, jobId } = req.params as { id: number; jobId: number };
-      const { tail } = req.query as { tail?: number };
+      const { tail, startByte, endByte } = req.query as {
+        tail?: number;
+        startByte?: number;
+        endByte?: number;
+      };
       const accountId = accountIdOf(req);
 
       const ctx = await getPrWriteContext(id, accountId);
@@ -1132,12 +1158,19 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const token = await getAccessToken(accountId);
+      // An explicit byte window wins; otherwise anchor at the tail. Forwarding the
+      // window is what makes "load earlier" work at all — without it every page
+      // re-serves the same tail and the pager spins forever.
+      const window =
+        startByte != null || endByte != null
+          ? { startByte, endByte }
+          : { tail: tail ?? 200 };
       const result: CheckLogsResponse = await fetchActionsJobLog(
         token,
         ctx.owner,
         ctx.name,
         jobId,
-        tail ?? 200,
+        window,
       );
       return result;
     },

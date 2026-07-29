@@ -77,20 +77,25 @@ function reasonForStatus(status: number): string {
 
 // `Content-Range: bytes 100-199/4096` → { start:100, endExclusive:200, total:4096 }.
 // A `*` total (unknown length) yields total:null.
+//
+// It ALSO has to parse the start-less `bytes */4096` form, which is the shape RFC 7233
+// mandates on a 416 and the ONLY way we ever learn the log's true size when our window fell
+// past the end. A start-anchored-only regex silently returns null there, which made the 416
+// recovery below unreachable dead code. `start`/`endExclusive` are null for that form —
+// callers on the 2xx path must check `start != null` before using it.
 function parseContentRange(
   value: string | null,
-): { start: number; endExclusive: number; total: number | null } | null {
+): { start: number | null; endExclusive: number | null; total: number | null } | null {
   if (!value) return null;
-  const m = /^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i.exec(value.trim());
+  const m = /^bytes\s+(?:(\d+)-(\d+)|\*)\/(\d+|\*)$/i.exec(value.trim());
   if (!m) return null;
+  const total = m[3] === '*' ? null : Number(m[3]);
+  // `bytes */<total>`: no range was served, only the size is being reported.
+  if (m[1] == null || m[2] == null) return { start: null, endExclusive: null, total };
   const start = Number(m[1]);
   const end = Number(m[2]);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
-  return {
-    start,
-    endExclusive: end + 1,
-    total: m[3] === '*' ? null : Number(m[3]),
-  };
+  return { start, endExclusive: end + 1, total };
 }
 
 function concat(chunks: Uint8Array[], total: number): Uint8Array {
@@ -263,20 +268,42 @@ export async function fetchActionsJobLog(
     }
 
     if (res.status === 416) {
-      // Range past the end of the log — nothing above the requested offset.
+      // Our window sits entirely past the end of the log — almost always a STALE offset (the
+      // job was re-run and its log is now shorter, or a client replayed a cached endByte).
+      // The 416 is required to carry `bytes */<total>`, so we learn the real size here and can
+      // clamp to it and serve the tail ONCE, instead of handing the viewer a blank pane with
+      // no offset it could use to recover. Bounded to a single retry: the clamped range is by
+      // construction inside [0,total), so it cannot 416 again against a sane server, and if it
+      // does we fall through to the honest empty window below.
       await res.body?.cancel().catch(() => {});
       const total = parseContentRange(res.headers.get('content-range'))?.total ?? null;
-      return {
-        available: true,
-        text: '',
-        totalLines: 0,
-        returnedLines: 0,
-        totalBytes: total,
-        startByte: reqStart ?? 0,
-        endByte: reqStart ?? 0,
-        hasMore: false,
-        truncated: true,
-      };
+      if (total != null && total > 0 && location) {
+        const window = Math.min(cap, total);
+        reqStart = total - window;
+        reqEndExclusive = total;
+        cap = window;
+        anchor = 'head';
+        res = await fetch(location, {
+          method: 'GET',
+          headers: { range: `bytes=${reqStart}-${total - 1}` },
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        });
+      }
+      if (res.status === 416) {
+        // No total offered, an empty log, or a server that refuses the clamped range too.
+        await res.body?.cancel().catch(() => {});
+        return {
+          available: true,
+          text: '',
+          totalLines: 0,
+          returnedLines: 0,
+          totalBytes: total,
+          startByte: reqStart ?? 0,
+          endByte: reqStart ?? 0,
+          hasMore: false,
+          truncated: true,
+        };
+      }
     }
     if (!(res.status >= 200 && res.status < 300)) {
       await res.body?.cancel().catch(() => {});
@@ -285,7 +312,11 @@ export async function fetchActionsJobLog(
 
     // ---- 2. read the window (capped), and work out where it sits in the log ----
     const contentRange = parseContentRange(res.headers.get('content-range'));
-    const honouredRange = res.status === 206 && contentRange != null;
+    // A 206 always names a concrete `bytes X-Y/Z`; the start-less `bytes */Z` form belongs to
+    // the 416 handled above. Requiring a real start keeps that shape from being mistaken for a
+    // served range now that the parser accepts both.
+    const rangeStart = contentRange?.start ?? null;
+    const honouredRange = res.status === 206 && contentRange != null && rangeStart != null;
     // If the source IGNORED our Range and streamed the whole log (200), an explicit
     // window has to be carved out of that stream instead: read from the top up to the
     // requested end, then slice. (The signed blob URL does honour Range — this is the
@@ -303,8 +334,8 @@ export async function fetchActionsJobLog(
 
     let windowStart: number;
     let totalBytes: number | null;
-    if (honouredRange && contentRange) {
-      windowStart = contentRange.start + read.dropped;
+    if (honouredRange && contentRange && rangeStart != null) {
+      windowStart = rangeStart + read.dropped;
       totalBytes = contentRange.total;
     } else if (ignoredExplicit) {
       const from = Math.min(reqStart as number, bytes.byteLength);

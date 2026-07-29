@@ -65,8 +65,27 @@ describe('tierFor — GitHub quota spenders', () => {
   it('gives PR/thread detail its own tighter bucket', () => {
     expect(tiers('GET', '/api/prs/42')).toEqual(['pr_detail', 'read']);
     expect(tiers('GET', '/api/threads/9')).toEqual(['pr_detail', 'read']);
-    // Sub-routes are DB-only reads — not the hydration path.
+    // Sub-routes that only read already-synced rows are DB-only — not the hydration path.
     expect(tiers('GET', '/api/prs/42/bot-behaviour')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/42/suggested-reviewers')).toEqual(['read']);
+  });
+
+  // merge-options fires up to five live GitHub calls (merge config, mergeability, the
+  // merge-queue GraphQL probe) and /files pulls every patch — both spend MORE upstream quota
+  // per request than GET /api/prs/:id itself, so they must share its bucket rather than sit on
+  // the 600/min blanket backstop just because they happen to have a path segment after the id.
+  it('puts the hydrating PR sub-routes on the detail bucket too', () => {
+    expect(tiers('GET', '/api/prs/42/merge-options')).toEqual(['pr_detail', 'read']);
+    expect(tiers('GET', '/api/prs/42/files')).toEqual(['pr_detail', 'read']);
+  });
+
+  // The guard on the fix above: `merge` prefix-matches `merge-options`, so a careless widening
+  // could steal the merge WRITE verbs out of github_write and hand them a 600/min ceiling.
+  it('does not pull any merge WRITE route off github_write', () => {
+    expect(tiers('PUT', '/api/prs/42/merge')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/prs/42/merge')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/prs/42/merge-queue')).toEqual(['github_write']);
+    expect(tiers('DELETE', '/api/prs/42/auto-merge')).toEqual(['github_write']);
   });
 
   it('throttles writes that reach the GitHub API', () => {

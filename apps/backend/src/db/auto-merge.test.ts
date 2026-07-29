@@ -1,6 +1,6 @@
-// The auto-merge intent query layer, on a THROWAWAY sqlite DB.
+// The auto-merge intent query layer AND the watcher that acts on it, on a THROWAWAY sqlite DB.
 //
-// Three things worth pinning, all of them safety properties rather than plumbing:
+// Three things worth pinning in the query layer, all safety properties rather than plumbing:
 //
 //  1. CROSS-ACCOUNT ISOLATION. `auto_merge_requests` is an accountId-bearing table reached by
 //     id-addressed routes, so a foreign prId must read as null and a foreign disarm must be a
@@ -8,12 +8,30 @@
 //  2. RE-ARM OVERWRITES, including from a terminal state. `(accountId, prId)` is unique; after
 //     a `disarmed_head_moved` the user re-arms against the NEW head and the row must come back
 //     clean (state 'armed', reason cleared) rather than accumulate history.
-//  3. The RUNNER SCAN only returns still-armed rows, and returns each row's accountId — that
-//     accountId is what makes the watcher fetch the right tenant's token.
+//  3. The RUNNER SCAN only returns still-armed rows, returns each row's accountId (that is what
+//     makes the watcher fetch the right tenant's token), and rotates a backlog bigger than one
+//     tick's bound instead of re-picking the same rows forever.
+//
+// The watcher tests drive `runAutoMergeTick` against the real DB with GitHub stubbed out. They
+// exist because this is the one background pass that can MERGE REAL CODE: every case below is
+// something that, wrong, either lands a commit nobody consented to or never lands at all.
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The watcher's two outside edges. The DB stays real — the row transitions ARE the behaviour.
+vi.mock('../github/mutations.js', () => ({
+  fetchPrMergeSnapshot: vi.fn(),
+  fetchCommitParents: vi.fn(),
+  isCommitContainedInRef: vi.fn(),
+  mergePullRequest: vi.fn(),
+  updatePullRequestBranch: vi.fn(),
+}));
+vi.mock('../auth/account.js', () => ({
+  getAccessToken: vi.fn(async () => 'gho_test'),
+  getAccountUserId: vi.fn(async () => null),
+}));
 
 const DB_PATH = '/tmp/pierre-auto-merge-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
@@ -34,6 +52,9 @@ const A = 1;
 const B = 2;
 let prA = 0;
 let prB = 0;
+// A third PR, on a repo the account has WRITE on and with a SYNCED base ref — the shape the
+// watcher needs (no write permission ⇒ it disarms; no synced base ⇒ it can't confirm consent).
+let prC = 0;
 
 beforeAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
@@ -76,6 +97,36 @@ beforeAll(async () => {
   };
   prA = await seed(A, 'a');
   prB = await seed(B, 'b');
+
+  const [repoC] = await db
+    .insert(repos)
+    .values({
+      accountId: A,
+      owner: 'orgc',
+      name: 'repoc',
+      githubNodeId: 'R_c',
+      viewerPermission: 'WRITE',
+    })
+    .returning()
+    .execute();
+  const [pr] = await db
+    .insert(pullRequests)
+    .values({
+      githubNodeId: 'PR_c',
+      accountId: A,
+      repoId: repoC.id,
+      number: 7,
+      title: 'PR c',
+      state: 'open',
+      isDraft: false,
+      baseRefName: 'main',
+      headRefName: 'feat',
+      openedAt: new Date(now - 4 * HOUR),
+      updatedAt: new Date(now - HOUR),
+    })
+    .returning()
+    .execute();
+  prC = pr.id;
 });
 
 afterAll(async () => {
@@ -167,5 +218,189 @@ describe('auto-merge intents', () => {
     expect(await q.disarmAutoMerge(A, prA)).toBe(false);
     // B's intent is untouched.
     expect((await q.getAutoMergeRequest(B, prB))?.state).toBe('armed');
+  });
+});
+
+// The scan order is a FAIRNESS property, not cosmetics: `armedAt` never changes after arming,
+// so ordering on it meant a backlog bigger than one tick's bound re-processed the same oldest
+// rows forever and the intent past the bound was never evaluated at all.
+describe('the runner scan rotates the backlog', () => {
+  beforeAll(async () => {
+    await db.delete(schema.autoMergeRequests).execute();
+    await q.armAutoMerge(A, prA, armArgs('a1'));
+    await q.armAutoMerge(B, prB, armArgs('b1'));
+    await q.armAutoMerge(A, prC, armArgs('c1'));
+  });
+
+  const idFor = async (prId: number): Promise<number> => {
+    const rows = await db.select().from(schema.autoMergeRequests).execute();
+    return rows.find((r: any) => r.prId === prId).id;
+  };
+
+  it('orders least-recently-checked first, never-checked before everything', async () => {
+    await q.updateAutoMergeState(await idFor(prA), {
+      checkedAt: new Date(now - 10 * 60 * 1000),
+      lastReason: 'waiting',
+    });
+    await q.updateAutoMergeState(await idFor(prB), {
+      checkedAt: new Date(now - 60 * 1000),
+      lastReason: 'waiting',
+    });
+    // prC has never been checked → it must come first in BOTH dialects (sqlite sorts NULLs
+    // first in ASC, Postgres sorts them last, hence the explicit CASE key in the query).
+    const scan = await q.listArmedMergeRequestsForRunner(50);
+    expect(scan.map((w: any) => w.prId)).toEqual([prC, prA, prB]);
+    // The scan also carries the synced base ref — the watcher's retarget guard reads it.
+    expect(scan.find((w: any) => w.prId === prC).syncedBaseRef).toBe('main');
+  });
+
+  it('a bounded tick advances instead of re-picking the same row', async () => {
+    const first = await q.listArmedMergeRequestsForRunner(1);
+    expect(first[0].prId).toBe(prC);
+    await q.updateAutoMergeState(first[0].id, { lastReason: 'waiting' });
+    const second = await q.listArmedMergeRequestsForRunner(1);
+    expect(second[0].prId).toBe(prA);
+  });
+});
+
+// The watcher itself, GitHub stubbed. Each case is a way the pass could merge code nobody
+// consented to — or never merge at all.
+describe('the auto-merge watcher', () => {
+  let runner: any;
+  let gh: any;
+  const log = { info: () => {}, warn: () => {}, error: () => {} } as any;
+
+  const snapshot = (over: Record<string, unknown> = {}) => ({
+    headSha: 'aaa',
+    headRef: 'feat',
+    headRepoFullName: 'orgc/repoc',
+    isFork: false,
+    maintainerCanModify: true,
+    mergeable: true,
+    mergeableState: 'clean',
+    baseRef: 'main',
+    baseSha: 'base0',
+    behindBy: 0,
+    aheadBy: 1,
+    ...over,
+  });
+
+  const rowFor = async (prId: number): Promise<any> => {
+    const rows = await db.select().from(schema.autoMergeRequests).execute();
+    return rows.find((r: any) => r.prId === prId);
+  };
+
+  beforeAll(async () => {
+    runner = await import('../merge/auto-merge-runner.js');
+    gh = await import('../github/mutations.js');
+  });
+
+  beforeEach(async () => {
+    for (const fn of [
+      gh.fetchPrMergeSnapshot,
+      gh.fetchCommitParents,
+      gh.isCommitContainedInRef,
+      gh.mergePullRequest,
+      gh.updatePullRequestBranch,
+    ]) {
+      fn.mockReset();
+    }
+    await db.delete(schema.autoMergeRequests).execute();
+    // A previous case may have landed the PR locally; every case starts from an open one.
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(schema.pullRequests)
+      .set({ state: 'open' })
+      .where(eq(schema.pullRequests.id, prC))
+      .execute();
+  });
+
+  it('merges a CLEAN pr whose trunk merely moved on (behindBy is not a blocker)', async () => {
+    // The regression: `behindBy` comes from an independent /compare and is > 0 for almost every
+    // healthy PR, so treating it as "behind" parked every armed PR forever when the user chose
+    // updateStrategy 'none'. Only GitHub's own 'behind' merge state blocks a merge.
+    await q.armAutoMerge(A, prC, { ...armArgs('aaa'), updateStrategy: 'none' });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ mergeableState: 'clean', behindBy: 3 }));
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed1' });
+
+    await runner.runAutoMergeTick(log);
+
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
+    expect(gh.mergePullRequest.mock.calls[0][4]).toMatchObject({ expectedHeadSha: 'aaa' });
+    expect((await rowFor(prC)).state).toBe('merged');
+  });
+
+  it('refuses to merge a PR that was RETARGETED to another base', async () => {
+    // The head pin can't see a retarget — head.sha is untouched — so without this the watcher
+    // would land the change in a branch the user never chose.
+    await q.armAutoMerge(A, prC, { ...armArgs('bbb'), updateStrategy: 'none' });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'bbb', baseRef: 'release/2' }));
+
+    await runner.runAutoMergeTick(log);
+
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+    const row = await rowFor(prC);
+    expect(row.state).toBe('disarmed_blocked');
+    expect(row.lastReason).toContain('retargeted');
+  });
+
+  it('does not adopt a head it merely OBSERVED after an async update-branch', async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('ccc'), updateStrategy: 'merge' });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(
+      snapshot({ headSha: 'ccc', mergeableState: 'behind', behindBy: 2 }),
+    );
+    gh.updatePullRequestBranch.mockResolvedValue({ ok: true });
+
+    await runner.runAutoMergeTick(log);
+
+    expect(gh.updatePullRequestBranch).toHaveBeenCalledTimes(1);
+    const afterUpdate = await rowFor(prC);
+    // GitHub's 202 is ASYNC: the pin must stay put until the move is PROVEN to be ours.
+    expect(afterUpdate.expectedHeadOid).toBe('ccc');
+    expect(afterUpdate.state).toBe('armed');
+
+    // A human pushed inside the update window: one parent, so not our merge commit.
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'human1' }));
+    gh.fetchCommitParents.mockResolvedValue(['ccc']);
+    await runner.runAutoMergeTick(log);
+
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+    expect((await rowFor(prC)).state).toBe('disarmed_head_moved');
+  });
+
+  it('re-pins only to the PROVEN base-into-head merge it asked for', async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('ddd'), updateStrategy: 'merge' });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(
+      snapshot({ headSha: 'ddd', mergeableState: 'behind', behindBy: 2 }),
+    );
+    gh.updatePullRequestBranch.mockResolvedValue({ ok: true });
+    await runner.runAutoMergeTick(log);
+
+    // Two parents, first = the head we asked GitHub to update, second contained in the base.
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'ourmerge1' }));
+    gh.fetchCommitParents.mockResolvedValue(['ddd', 'basetip1']);
+    gh.isCommitContainedInRef.mockResolvedValue(true);
+    await runner.runAutoMergeTick(log);
+
+    const row = await rowFor(prC);
+    expect(row.state).toBe('armed');
+    expect(row.expectedHeadOid).toBe('ourmerge1');
+    // The move is not merged on the same tick — the new head's checks haven't even queued.
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it('a Cancel during the tick wins the race (compare-and-set before merging)', async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('eee'), updateStrategy: 'none' });
+    // The user hits Cancel while the tick is out at GitHub — which is where all the time goes.
+    gh.fetchPrMergeSnapshot.mockImplementation(async () => {
+      await q.disarmAutoMerge(A, prC);
+      return snapshot({ headSha: 'eee' });
+    });
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed2' });
+
+    await runner.runAutoMergeTick(log);
+
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+    expect(await q.getAutoMergeRequest(A, prC)).toBeNull();
   });
 });

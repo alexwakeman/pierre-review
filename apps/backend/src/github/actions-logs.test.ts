@@ -220,16 +220,40 @@ describe('fetchActionsJobLog — byte windows', () => {
     expect(r.reason).toMatch(/permission/i);
   });
 
-  it('reports an empty window (not an error) past the end of the log', async () => {
-    const { bytes } = makeLog(10);
+  // A window past the end is a STALE offset (re-run job, shorter log). GitHub answers 416 with
+  // `Content-Range: bytes */<total>` — the one form with no start — and that total is the only
+  // way back. Recovering from it means clamping to the real size and serving the tail instead
+  // of a blank pane the viewer has no offset to escape from.
+  it('recovers from a 416 by clamping to the real size and serving the tail', async () => {
+    const { bytes, lines } = makeLog(10);
     installFetch(bytes);
     const r = await fetchActionsJobLog('tok', 'o', 'n', 1, {
       startByte: bytes.byteLength + 100,
       endByte: bytes.byteLength + 200,
     });
     expect(r.available).toBe(true);
+    // The true size came back from the 416, not from a served range.
+    expect(r.totalBytes).toBe(bytes.byteLength);
+    expect(r.endByte).toBe(bytes.byteLength);
+    expect(r.text).not.toBe('');
+    // Whole lines only, and they really are the tail of the log.
+    const got = r.text.split('\n');
+    expect(got[got.length - 1]).toBe(lines[lines.length - 1]);
+    expect(lines.join('\n')).toContain(r.text);
+  });
+
+  it('reports an empty window (not an error) when there is nothing to clamp to', async () => {
+    // An empty log 416s with `bytes */0`: there is no tail to fall back to, so the honest
+    // answer is an available-but-empty window carrying the (zero) size.
+    installFetch(new Uint8Array());
+    const r = await fetchActionsJobLog('tok', 'o', 'n', 1, {
+      startByte: 100,
+      endByte: 200,
+    });
+    expect(r.available).toBe(true);
     expect(r.text).toBe('');
     expect(r.returnedLines).toBe(0);
+    expect(r.totalBytes).toBe(0);
   });
 
   it('does not split a multi-byte UTF-8 sequence at a chunk boundary', async () => {

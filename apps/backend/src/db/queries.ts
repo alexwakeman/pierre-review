@@ -10211,6 +10211,27 @@ export async function armAutoMerge(
   return toArmedMergeRequest(rows[0]!);
 }
 
+/**
+ * The base branch as last SYNCED for one PR (null when unknown / foreign / unsynced).
+ *
+ * The auto-merge watcher has no `expected_base_ref` column to pin the consented target to, so
+ * it uses the synced base ref as the consent record — which is only a valid record if it
+ * MATCHES the live base at arming time. The arm route checks exactly that with this.
+ */
+export async function getSyncedBaseRef(
+  accountId: number,
+  prId: number,
+): Promise<string | null> {
+  const rows = await db
+    .select({ baseRefName: pullRequests.baseRefName })
+    .from(pullRequests)
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .where(and(eq(pullRequests.id, prId), eq(repos.accountId, accountId)))
+    .limit(1)
+    .execute();
+  return rows[0]?.baseRefName ?? null;
+}
+
 /** The live intent for one PR, or null. Account-scoped (a foreign prId reads as null). */
 export async function getAutoMergeRequest(
   accountId: number,
@@ -10296,14 +10317,26 @@ export interface ArmedMergeWork {
   expectedHeadOid: string;
   expiresAt: Date;
   armedAt: Date;
+  // The base branch as last SYNCED — i.e. the target the SPA was showing when the user armed.
+  // The watcher compares it to the live base so a retarget (which leaves head.sha untouched,
+  // so the head pin can't see it) doesn't land the PR in a branch nobody consented to.
+  syncedBaseRef: string | null;
 }
 
 /**
- * The watcher's scan: still-armed intents across EVERY account, oldest-armed first (so a
- * long-waiting PR can't be starved by a busy tenant that keeps arming new ones), bounded by
- * `limit` — one tick must be a bounded amount of GitHub traffic no matter how many intents
- * exist. Each row carries its `accountId`; the caller MUST fetch that account's token
+ * The watcher's scan: still-armed intents across EVERY account, LEAST-RECENTLY-CHECKED first,
+ * bounded by `limit` — one tick must be a bounded amount of GitHub traffic no matter how many
+ * intents exist. Each row carries its `accountId`; the caller MUST fetch that account's token
  * (`getAccessToken`) and wrap each account's work in its own try/catch.
+ *
+ * The order is load-bearing for FAIRNESS. It used to be `armedAt ASC`, which never changes
+ * after arming — so past `limit` armed intents the same oldest `limit` rows were re-picked
+ * every tick and intent #limit+1 was never evaluated at all. `lastCheckedAt` is stamped by
+ * every pass, so ordering on it rotates the whole backlog.
+ *
+ * DIALECT TRAP: a never-checked row has a NULL `lastCheckedAt` and must sort FIRST, but SQLite
+ * sorts NULLs first in ASC while Postgres sorts them last, and drizzle's `asc()` emits no
+ * NULLS clause. The explicit CASE key pins "nulls first" identically in both dialects.
  */
 export async function listArmedMergeRequestsForRunner(
   limit: number,
@@ -10324,12 +10357,17 @@ export async function listArmedMergeRequestsForRunner(
       expectedHeadOid: autoMergeRequests.expectedHeadOid,
       expiresAt: autoMergeRequests.expiresAt,
       armedAt: autoMergeRequests.armedAt,
+      syncedBaseRef: pullRequests.baseRefName,
     })
     .from(autoMergeRequests)
     .innerJoin(pullRequests, eq(pullRequests.id, autoMergeRequests.prId))
     .innerJoin(repos, eq(repos.id, pullRequests.repoId))
     .where(eq(autoMergeRequests.state, 'armed'))
-    .orderBy(asc(autoMergeRequests.armedAt))
+    .orderBy(
+      sql`case when ${autoMergeRequests.lastCheckedAt} is null then 0 else 1 end`,
+      asc(autoMergeRequests.lastCheckedAt),
+      asc(autoMergeRequests.armedAt),
+    )
     .limit(limit)
     .execute();
   return rows.map((r) => ({

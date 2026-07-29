@@ -131,8 +131,17 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // ---- GitHub-quota spenders ----
   if (path.startsWith('/api/repos/search')) return [TIERS.search, TIERS.read];
   if (path === '/api/repos/suggested') return [TIERS.search, TIERS.read];
-  // GET /api/prs/<id> exactly (not its sub-routes, which are DB-only reads).
-  if (!mutating && /^\/api\/prs\/\d+$/.test(path)) return [TIERS.prDetail, TIERS.read];
+  // GET /api/prs/<id> plus the two sub-routes that ALSO hydrate live from GitHub rather than
+  // reading already-synced rows: `/merge-options` (repo merge config + mergeability + the
+  // merge-queue GraphQL probe — up to five upstream calls per request, strictly MORE than the
+  // detail route it sits under) and `/files` (the Changes tab's patches). This used to be
+  // anchored to the bare id "because the sub-routes are DB-only reads" — that was true when it
+  // was written and quietly stopped being true, leaving the most GitHub-expensive GET in the
+  // PR family on the 600/min blanket bucket. The rest of the sub-routes (bot-behaviour,
+  // suggested-reviewers, mention-candidates) really are DB-only and stay on `read`.
+  if (!mutating && /^\/api\/prs\/\d+(\/(merge-options|files))?$/.test(path)) {
+    return [TIERS.prDetail, TIERS.read];
+  }
   // GET /api/threads/<id> hydrates the same way.
   if (!mutating && /^\/api\/threads\/\d+$/.test(path)) return [TIERS.prDetail, TIERS.read];
   if (mutating && (path === '/api/repos' || /^\/api\/repos\/\d+\/sync$/.test(path))) {
