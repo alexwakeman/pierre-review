@@ -147,7 +147,7 @@ export function YourDataSection(): JSX.Element {
             <p className="mt-1 text-[11px] leading-relaxed text-red-700/90 dark:text-red-300/90">
               Deletes your account, your encrypted GitHub token, every repository you added and all
               activity synced for them. Nothing is archived. Your repositories on GitHub are, of
-              course, untouched — this only removes Pierre&apos;s copy.
+              course, untouched — this only removes Limn&apos;s copy.
             </p>
             <label className="mt-2 block text-[11px] font-medium text-red-700 dark:text-red-300">
               Type <span className="font-mono">{login || 'your GitHub username'}</span> to confirm

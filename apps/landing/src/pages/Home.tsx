@@ -1,176 +1,85 @@
-import type { ReactNode } from 'react';
-import HeroWordmark from '../components/HeroWordmark';
-import Carousel, { type CarouselSlide } from '../components/Carousel';
-import { Link } from '../router';
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
-import { Section, SectionHeading, Shot, Eyebrow, Pill, Glow } from '../components/ui';
+import { INSTALL_COMMAND, SITE_NAME } from '../lib/site';
 import {
-  GitHubMark,
-  ArrowRightIcon,
-  TimelineIcon,
-  SparkleIcon,
-  InsightsIcon,
-  FeedIcon,
-  BoltIcon,
-} from '../components/icons';
+  DashItem,
+  InkButton,
+  MonoLabel,
+  MonoLink,
+  RailGrid,
+  Section,
+  UnderlineLink,
+} from '../components/feint/primitives';
+import { ShotFrame } from '../components/feint/ShotFrame';
+import { TerminalPanel } from '../components/feint/Terminal';
+import { SignalFigure } from '../components/feint/Sprite';
+import { GameBar } from '../components/feint/GameBar';
 
-function PrimaryCta({ className = '' }: { className?: string }): JSX.Element {
+// ---------------------------------------------------------------------------
+// The home page — six sections.
+//
+// The IA is tightened from the previous thirteen blocks. "Who it's for" folds
+// into the problem section, "not another review bot" folds into Pro, and the
+// eight-slide product carousel collapses to a single hero screenshot. What is
+// gone entirely: the three-pillars grid, the knight-vs-kraken sketch (the brief
+// removes it by name), and every icon and emoji.
+//
+// All copy is verbatim from the live site, with "Pierre" → "Limn". The
+// typographic apostrophes and em-dashes are deliberate — straight quotes are
+// not the same copy.
+// ---------------------------------------------------------------------------
+
+const WORKS_WITH = ['CodeRabbit', 'Greptile', 'Copilot', 'Qodo', 'Sourcery'];
+
+const FOR_MANAGERS = [
+  'Sprint-oriented reports on blockers, what needs attention, and where throughput is improving.',
+  'DORA-style flow metrics you can drill into — mirrors, not scorecards.',
+  'Reviewer suggestions drawn from who actually touched the changed files — requested in one click.',
+  'A reliable state of play, in-app and in Slack, prioritised by what’s actually waiting.',
+];
+
+const FOR_ENGINEERS = [
+  'Track your PRs — and every PR you participate in — across all your team’s repos.',
+  'Know instantly when it’s your turn, without keeping forty tabs warm.',
+  'One-click AI review that remembers how you review, CI-failure analysis, and fixes pushed straight to the branch. When you say so.',
+  'The morning “what needs me?” reconstruction — gone. It’s one feed, already sorted.',
+];
+
+const FIX_FLOW = [
+  'CI fails. Limn pulls the failing job log and diagnoses it.',
+  'You approve a fix run. The agent patches in an ephemeral worktree — you review the actual diff.',
+  'The fix is pushed to the branch. PR green.',
+];
+
+const REVIEW_FLOW = [
+  'Claude reviews the PR into structured, line-anchored findings.',
+  'You tick the findings worth keeping and write your verdict.',
+  'One GitHub review is posted. Yours, not the bot’s.',
+];
+
+/** A numbered step in one of the two one-click flows. Rule-separated, no chips. */
+function FlowStep({
+  n,
+  accent,
+  last,
+  children,
+}: {
+  n: string;
+  accent: boolean;
+  last: boolean;
+  children: string;
+}): JSX.Element {
   return (
-    <a
-      href="/api/auth/login"
-      className={`group inline-flex items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-brand-blueDeep to-brand-blue px-6 py-3.5 text-base font-semibold text-white shadow-sky-glow transition hover:from-brand-blue hover:to-brand-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-skySoft focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950 ${className}`}
+    <div
+      className={`flex items-baseline gap-4 ${last ? '' : 'border-b border-rule-hair pb-3'}`}
     >
-      <GitHubMark className="h-5 w-5" />
-      Sign in with GitHub
-    </a>
-  );
-}
-
-// Hero carousel — Pro capabilities up front (the reasons to pay), then the free
-// core surfaces (the reasons to trust). Ordering is deliberate: report → metrics
-// → digests → fix → review → feed → board.
-const TOUR: CarouselSlide[] = [
-  {
-    src: '/shots/bot-review.png',
-    alt: 'A pull request with CodeRabbit’s review threads triaged: a per-vendor chip counting comments and unresolved threads, and a one-click action to resolve the ones a later commit already addressed.',
-    label: 'Bot triage',
-    tier: 'Free',
-    fit: 'contain',
-    caption:
-      'Your review bot’s output, triaged: what a commit already addressed vs what still needs a human — and clear the stale ones in one click.',
-  },
-  {
-    src: '/shots/sprint-report.png',
-    alt: 'The Pierre sprint report: an AI-written summary of the sprint window, leading with flow metrics and naming blockers with PR links.',
-    label: 'Sprint reports',
-    tier: 'Pro',
-    fit: 'contain',
-    caption:
-      'Monday status, written for you — flow metrics up top, blockers named, every PR linked. In-app and in Slack.',
-  },
-  {
-    src: '/shots/flow-metrics.png',
-    alt: 'DORA-style flow metric charts: deploy frequency, lead time, review latency, merge-vs-CI health and CI recovery time.',
-    label: 'Flow metrics',
-    tier: 'Pro',
-    fit: 'contain',
-    caption:
-      'DORA-style metrics from the PR history you already synced — every tile clicks through to the PRs behind the number.',
-  },
-  {
-    src: '/shots/repo-console.png',
-    alt: 'A repo console with its AI digest: a bulleted change report with clickable PR references above the open-PR list.',
-    label: 'Repo summaries',
-    tier: 'Pro',
-    caption:
-      'Per-repo AI change reports, chained from the previous one — what changed since you last looked, with clickable PR refs.',
-  },
-  {
-    src: '/shots/ai-fix.png',
-    alt: 'The AI Analysis & Fix tab: a CI-failure diagnosis, a generated patch shown as a reviewable file diff, and push controls.',
-    label: 'CI auto-fix',
-    tier: 'Pro · BYO key',
-    fit: 'contain',
-    caption:
-      'Red CI → diagnosis → reviewable patch → pushed to the branch. One click per step, nothing moves without you.',
-  },
-  {
-    src: '/shots/claude-review.png',
-    alt: 'The Claude Review tab: severity-tagged, line-anchored findings and a separate “your review” composer that posts to GitHub.',
-    label: 'Claude Review',
-    tier: 'Pro · BYO key',
-    fit: 'contain',
-    caption:
-      'Structured, line-anchored findings you curate and post as one GitHub review — saved per commit, feeding the next run.',
-  },
-  {
-    src: '/shots/activity-feed-pro.png',
-    alt: 'The Activity feed: one chronological cross-repo stream, with yellow-bordered My Turn cards flagging events on PRs you participate in.',
-    label: 'Activity feed',
-    tier: 'Pro',
-    caption:
-      'The cross-repo feed is free core. Pro makes it participation-aware: every event that needs you arrives flagged “My Turn”.',
-  },
-  {
-    src: '/shots/timeline.png',
-    alt: 'The Pierre timeline: pull-request activity grouped repo → contributor, with shaped review markers and an open-PR strip.',
-    label: 'Timeline',
-    tier: 'Free',
-    caption:
-      'Every repo, contributor and PR on one board — a stalled PR is a long bar with no fresh markers, obvious at a glance.',
-  },
-];
-
-const PILLARS = [
-  {
-    icon: FeedIcon,
-    accent: 'text-brand-amber',
-    chip: 'bg-brand-amber/10 ring-brand-amber/30',
-    title: 'A feed that knows what’s yours',
-    body: 'A cross-repo activity feed that reads like a changelog, not a firehose — the view Pierre opens on — and with Pro, every event on a PR you’re part of arrives flagged as your turn.',
-    to: '/features#activity',
-  },
-  {
-    icon: TimelineIcon,
-    accent: 'text-brand-sky',
-    chip: 'bg-brand-sky/10 ring-brand-sky/30',
-    title: 'A board for the whole picture',
-    body: 'Every repo, every contributor, every PR, review and CI run on one interactive timeline. Repos down the side, time across the top — the shape of the work, at a glance.',
-    to: '/features#timeline',
-  },
-  {
-    icon: SparkleIcon,
-    accent: 'text-brand-purpleSoft',
-    chip: 'bg-brand-purple/10 ring-brand-purple/30',
-    title: 'AI that answers to you',
-    body: 'Digests, sprint reports, one-click fixes, and agentic review that learns how you review — every run remembers what you kept, cut and reworded. Nothing merges, posts or pushes without your click.',
-    to: '/pro',
-  },
-];
-
-const AUDIENCES = [
-  {
-    icon: InsightsIcon,
-    accent: 'text-brand-sky',
-    chip: 'bg-brand-sky/10 ring-brand-sky/30',
-    title: 'For engineering managers',
-    points: [
-      'Sprint-oriented reports on blockers, what needs attention, and where throughput is improving.',
-      'DORA-style flow metrics you can drill into — mirrors, not scorecards.',
-      'Reviewer suggestions drawn from who actually touched the changed files — requested in one click.',
-      'A reliable state of play, in-app and in Slack, prioritised by what’s actually waiting.',
-    ],
-  },
-  {
-    icon: BoltIcon,
-    accent: 'text-brand-amber',
-    chip: 'bg-brand-amber/10 ring-brand-amber/30',
-    title: 'For engineers',
-    points: [
-      'Track your PRs — and every PR you participate in — across all your team’s repos.',
-      'Know instantly when it’s your turn, without keeping forty tabs warm.',
-      'One-click AI review that remembers how you review, CI-failure analysis, and fixes pushed straight to the branch. When you say so.',
-      'The morning “what needs me?” reconstruction — gone. It’s one feed, already sorted.',
-    ],
-  },
-];
-
-/** A single step chip in the one-click resolution flows. */
-function FlowStep({ n, children }: { n: number; children: ReactNode }): JSX.Element {
-  return (
-    <div className="flex flex-1 items-start gap-3 rounded-2xl border border-white/10 bg-white/5 p-4">
-      <span className="mt-0.5 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full bg-brand-purple/15 text-xs font-semibold text-brand-purpleSoft ring-1 ring-brand-purple/30">
+      <span
+        className={`font-mono text-mono-caption ${accent ? 'text-signal-text' : 'text-secondary'}`}
+      >
         {n}
       </span>
-      <p className="text-sm leading-relaxed text-gray-300">{children}</p>
+      <span className="text-list">{children}</span>
     </div>
-  );
-}
-
-function FlowArrow(): JSX.Element {
-  return (
-    <ArrowRightIcon className="hidden h-5 w-5 flex-none self-center text-gray-600 sm:block" />
   );
 }
 
@@ -179,439 +88,357 @@ export default function Home(): JSX.Element {
 
   return (
     <>
-      {/* ---------- 1 · hero ---------- */}
-      <header className="relative overflow-hidden">
-        <Glow className="absolute -top-32 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-brand-blueDeep/20 blur-[140px]" />
-        <Glow className="absolute -top-10 right-[6%] h-72 w-72 rounded-full bg-brand-sky/20 blur-[120px]" />
-        <Glow className="absolute top-44 left-[4%] h-72 w-72 rounded-full bg-brand-purple/20 blur-[120px]" />
+      {/* ---------- hero ---------- */}
+      <header className="grid gap-16 px-gutter pt-hero-y rail:grid-cols-hero">
+        <div>
+          <MonoLabel wide className="mb-[26px] text-secondary">
+            The cross-repo review layer
+          </MonoLabel>
 
-        <Section width="default" className="pb-14 pt-14 text-center sm:pt-20">
-          <HeroWordmark />
-
-          <h1 className="mx-auto max-w-3xl text-balance text-4xl font-bold leading-[1.08] tracking-tight text-gray-50 sm:text-6xl">
-            Your review bot flags 40 things.{' '}
-            <span className="bg-gradient-to-r from-brand-sky via-brand-blue to-brand-purpleSoft bg-clip-text text-transparent">
-              Pierre shows you the 3 that matter.
-            </span>
+          <h1 className="mb-7 max-w-[22ch] text-pretty font-display text-hero-sm font-semibold text-ink type:text-hero">
+            Your review bot flags 40 things. {SITE_NAME} shows you the{' '}
+            <span className="text-signal-text">3</span> that matter.
           </h1>
 
-          <p className="mx-auto mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-gray-400">
-            Bring your own reviewer — CodeRabbit, Greptile, Copilot, whatever you run.
-            Pierre is the calm, cross-repo layer <em className="not-italic text-gray-300">above</em>{' '}
-            it: what’s stalled, whose turn it is, and which of the bot’s comments a human
-            still needs to read. One fast timeline across every repo — and the AI spend
-            stays yours to control.
+          <p className="mb-[34px] max-w-lede text-pretty text-lede text-ink-soft">
+            Bring your own reviewer — CodeRabbit, Greptile, Copilot, whatever you run.{' '}
+            {SITE_NAME} is the calm, cross-repo layer <em>above</em> it: what’s stalled,
+            whose turn it is, and which of the bot’s comments a human still needs to read.
+            One fast timeline across every repo — and the AI spend stays yours to control.
           </p>
 
-          <div className="mt-9 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <PrimaryCta />
-            <Link
-              to="/features"
-              className="group inline-flex items-center gap-1.5 text-sm font-medium text-gray-300 transition hover:text-white"
-            >
-              See what’s free
-              <ArrowRightIcon className="h-4 w-4 transition group-hover:translate-x-0.5" />
-            </Link>
+          <div className="mb-4 flex flex-wrap items-center gap-3.5">
+            <InkButton to="/api/auth/login">Sign in with GitHub</InkButton>
+            <UnderlineLink to="/features">See what’s free</UnderlineLink>
           </div>
 
-          <p className="mt-6 text-sm text-gray-500">
-            Sign in with GitHub, or run it entirely on your machine — local mode keeps
-            no stored credentials.
+          <p className="mb-11 max-w-reassure font-mono text-mono-nav text-secondary">
+            Sign in with GitHub, or run it entirely on your machine — local mode keeps no
+            stored credentials.
           </p>
+        </div>
 
-          {/* Works-with trust row — Pierre coexists with the review bots, it doesn't replace them. */}
-          <div className="mt-10 flex flex-col items-center gap-2">
-            <span className="text-xs font-medium uppercase tracking-wider text-gray-600">
-              Works with your review bot
-            </span>
-            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm font-medium text-gray-500">
-              {['CodeRabbit', 'Greptile', 'Copilot', 'Qodo', 'Sourcery'].map((name) => (
-                <span key={name} className="flex items-center gap-1.5">
-                  <span aria-hidden className="text-gray-600">
-                    🤖
-                  </span>
-                  {name}
-                </span>
-              ))}
-            </div>
+        {/* The vendor rail. Below the `rail` breakpoint it becomes a wrapped mono
+            row under the reassurance line, per the brief — no logos, no chips. */}
+        <div className="rail:border-l rail:border-rule rail:pl-6 rail:pt-2">
+          <MonoLabel className="mb-4 text-secondary">Works with</MonoLabel>
+          <div className="flex flex-wrap gap-x-6 gap-y-2 font-mono text-mono-row text-ink-body rail:flex-col rail:gap-0">
+            {WORKS_WITH.map((name, i) => (
+              <div
+                key={name}
+                className={
+                  i === WORKS_WITH.length - 1
+                    ? ''
+                    : 'rail:mb-2.5 rail:border-b rail:border-rule-hair rail:pb-[9px]'
+                }
+              >
+                {name}
+              </div>
+            ))}
           </div>
-        </Section>
-
-        {/* ---------- 2 · the product tour carousel (Pro-first) ---------- */}
-        <Section width="wide" className="pb-6 pt-8">
-          <Glow className="absolute -top-16 left-1/2 h-72 w-[44rem] max-w-full -translate-x-1/2 rounded-full bg-brand-blue/20 blur-[130px]" />
-          <Carousel slides={TOUR} />
-        </Section>
+        </div>
       </header>
 
-      {/* ---------- 3 · the AI-era problem ---------- */}
-      <Section width="narrow" className="py-20 sm:py-28">
-        <Eyebrow className="text-brand-amber">The problem</Eyebrow>
-        <h2 className="mt-3 text-pretty text-3xl font-bold tracking-tight text-gray-50 sm:text-4xl">
-          AI writes the code. A bot reviews the code.{' '}
-          <span className="text-brand-amber">Who’s reading 300 bot comments a week?</span>
-        </h2>
-        <div className="mt-6 space-y-4 text-pretty text-base leading-relaxed text-gray-400 sm:text-lg">
-          <p>
-            Review bots are genuinely useful — and they never stop. A busy team fields
-            hundreds of AI review comments a week, and most go unread. The firehose buries
-            the handful that actually needed a human, across more repos than anyone can
-            hold in their head. The bottleneck moved from writing the change to{' '}
-            <span className="font-medium text-gray-200">noticing what matters.</span>
-          </p>
-          <p>
-            Pierre doesn’t add another bot. It sits <em className="not-italic text-gray-200">above</em>{' '}
-            the ones you already run: every review thread — human or bot — becomes a
-            triaged signal. See which of CodeRabbit’s comments a commit already addressed,
-            which still need a look, and clear the stale ones in a click.
-          </p>
-          <p>
-            One calm, cross-repo layer for exactly this:{' '}
-            <span className="font-medium text-gray-200">
-              human-in-the-loop triage for the high-throughput era.
-            </span>
-          </p>
-        </div>
-      </Section>
+      {/* ---------- arcade entry (after the CTAs, never before) ---------- */}
+      <GameBar />
 
-      {/* ---------- 4 · the duel ---------- */}
-      <section className="relative border-y border-white/5 bg-white/[0.02] py-20 sm:py-24">
-        <Glow className="absolute left-1/2 top-6 h-64 w-[38rem] max-w-full -translate-x-1/2 rounded-full bg-brand-sky/10 blur-[130px]" />
-        <Section width="default" className="text-center">
-          <img
-            src="/duel.svg"
-            alt="A hand-drawn sketch of a small knight — Pierre — squaring up to a many-tentacled notification kraken."
-            loading="lazy"
-            decoding="async"
-            className="mx-auto block h-auto w-full max-w-2xl"
-          />
-          <p className="mx-auto mt-5 max-w-xl font-serif text-base italic leading-relaxed text-gray-500">
-            Pierre v. the notification kraken. (Artist’s impression. The kraken is
-            winning at your current tab count.)
-          </p>
-          <p className="mx-auto mt-8 max-w-2xl text-pretty text-base leading-relaxed text-gray-400 sm:text-lg">
-            GitHub is a firehose wearing a UI — slow to navigate, endless tabs,
-            notifications from humans and bots alike. Pierre pulls it all into one place
-            and gets out of your way. And it’s fast. Genuinely, annoyingly fast.
-          </p>
-        </Section>
-      </section>
-
-      {/* ---------- 5 · two audiences ---------- */}
-      <Section width="wide" className="py-20 sm:py-28">
-        <SectionHeading
-          eyebrow="Who it’s for"
-          title="Built for the two people drowning in the same firehose."
+      {/* ---------- hero screenshot ---------- */}
+      <div className="mx-gutter mb-20">
+        <ShotFrame
+          src="/shots/bot-review.png"
+          alt="A pull request's review threads, triaged: which of the bot's comments a commit already addressed, and which still need a human."
+          caption={`${SITE_NAME.toLowerCase()} · bot triage`}
+          height={430}
+          fit="cover"
+          note="Your review bot’s output, triaged: what a commit already addressed vs what still needs a human — and clear the stale ones in one click."
         />
-        <div className="mt-12 grid gap-6 md:grid-cols-2">
-          {AUDIENCES.map((a) => (
-            <div
-              key={a.title}
-              className="rounded-2xl border border-white/10 bg-white/5 p-7 backdrop-blur"
-            >
-              <span
-                className={`inline-flex h-11 w-11 items-center justify-center rounded-xl ring-1 ${a.chip}`}
-              >
-                <a.icon className={`h-6 w-6 ${a.accent}`} />
-              </span>
-              <h3 className="mt-5 text-lg font-semibold text-gray-100">{a.title}</h3>
-              <ul className="mt-4 space-y-3">
-                {a.points.map((p) => (
-                  <li key={p} className="flex gap-3 text-sm leading-relaxed text-gray-400">
-                    <span
-                      aria-hidden="true"
-                      className={`mt-[7px] h-1.5 w-1.5 flex-none rounded-full ${a.accent.replace('text-', 'bg-')}`}
-                    />
-                    {p}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </Section>
+      </div>
 
-      {/* ---------- 6 · three pillars ---------- */}
-      <Section width="wide" className="pb-20 sm:pb-28">
-        <div className="grid gap-6 md:grid-cols-3">
-          {PILLARS.map((p) => (
-            <Link
-              key={p.title}
-              to={p.to}
-              className="group relative flex flex-col rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur transition hover:border-white/20 hover:bg-white/[0.07]"
-            >
-              <span
-                className={`inline-flex h-11 w-11 items-center justify-center rounded-xl ring-1 ${p.chip}`}
-              >
-                <p.icon className={`h-6 w-6 ${p.accent}`} />
-              </span>
-              <h3 className="mt-5 text-lg font-semibold text-gray-100">{p.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-gray-400">{p.body}</p>
-              <span className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-gray-300 transition group-hover:text-white">
-                Learn more
-                <ArrowRightIcon className="h-4 w-4 transition group-hover:translate-x-0.5" />
-              </span>
-            </Link>
-          ))}
-        </div>
-      </Section>
+      {/* ---------- 01 · problem ---------- */}
+      <Section>
+        <RailGrid rail={{ n: '01', word: 'Problem' }}>
+          <div className="rail:col-span-2">
+            <h2 className="mb-[30px] max-w-[30ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2-major">
+              AI writes the code. A bot reviews the code. Who’s reading 300 bot comments a
+              week?
+            </h2>
 
-      {/* ---------- 7 · free spotlight: the board + repo consoles ---------- */}
-      <section className="relative border-y border-white/5 bg-white/[0.02] py-20 sm:py-28">
-        <Glow className="absolute left-[8%] top-10 h-64 w-64 rounded-full bg-brand-sky/15 blur-[120px]" />
-        <Section width="wide">
-          <div className="grid items-center gap-8 lg:grid-cols-2 lg:gap-12">
-            <div>
-              <Eyebrow className="text-brand-green">Free, open-core, forever</Eyebrow>
-              <h2 className="mt-3 text-pretty text-3xl font-bold tracking-tight text-gray-50 sm:text-4xl">
-                Most dashboards add tabs. This one closes them.
-              </h2>
-              <p className="mt-4 text-pretty leading-relaxed text-gray-400">
-                Behind the feed sits the board — every repo, every contributor, every PR,
-                review and CI run on one interactive timeline. Duration and staleness live
-                in the shape: a long bar with no recent markers is a stalled PR, no query
-                required.
-              </p>
-              <p className="mt-4 text-pretty leading-relaxed text-gray-400">
-                Pick a repo and its console pulls the same picture into focus — stats, a
-                thread-state bar, and every open PR with its CI and approval standing. The
-                feed, the board, the consoles, the PR detail, the write actions — all of it
-                free, open-core, forever.
-              </p>
-              <Link
-                to="/features"
-                className="group mt-6 inline-flex items-center gap-1.5 text-sm font-medium text-brand-sky transition hover:text-brand-skySoft"
-              >
-                Everything in the free tier
-                <ArrowRightIcon className="h-4 w-4 transition group-hover:translate-x-0.5" />
-              </Link>
+            <div className="grid gap-grid-gutter rail:grid-cols-2">
+              <div>
+                <p className="mb-[18px]">
+                  Review bots are genuinely useful — and they never stop. A busy team
+                  fields hundreds of AI review comments a week, and most go unread. The
+                  firehose buries the handful that actually needed a human, across more
+                  repos than anyone can hold in their head. The bottleneck moved from
+                  writing the change to noticing what matters.
+                </p>
+                <p>
+                  {SITE_NAME} doesn’t add another bot. It sits <em>above</em> the ones you
+                  already run: every review thread — human or bot — becomes a triaged
+                  signal. See which of CodeRabbit’s comments a commit already addressed,
+                  which still need a look, and clear the stale ones in a click.
+                </p>
+              </div>
+
+              <div>
+                <p className="mb-[18px]">
+                  One calm, cross-repo layer for exactly this: human-in-the-loop triage for
+                  the high-throughput era.
+                </p>
+                <p className="mb-[26px] text-muted">
+                  GitHub is a firehose wearing a UI — slow to navigate, endless tabs,
+                  notifications from humans and bots alike. {SITE_NAME} pulls it all into
+                  one place and gets out of your way. And it’s fast. Genuinely, annoyingly
+                  fast.
+                </p>
+
+                {/* The signal figure — the only figure on the page. */}
+                <div className="border-t border-rule pt-5">
+                  <MonoLabel className="mb-3.5 text-secondary">
+                    300 signals · 3 need you
+                  </MonoLabel>
+                  <SignalFigure />
+                  <p className="mt-3.5 font-mono text-mono-caption text-secondary">
+                    Vermilion = a human is still required. The only figure on the page, and
+                    the same sprite family the game uses.
+                  </p>
+                </div>
+              </div>
             </div>
-            <Shot
-              src="/shots/repo-console-free.png"
-              alt="A per-repo console: a stats header, a thread-state bar, and the repo’s open PRs with CI and approval standing."
-              title="pierre · Repo console"
-            />
           </div>
-        </Section>
-      </section>
+        </RailGrid>
 
-      {/* ---------- 8 · Pro spotlight: the AI layer ---------- */}
-      <Section width="wide" className="py-20 sm:py-28">
-        <Glow className="absolute right-[8%] top-10 h-64 w-64 rounded-full bg-brand-purple/15 blur-[120px]" />
-        <div className="grid items-center gap-8 lg:grid-cols-2 lg:gap-12">
-          <Shot
-            src="/shots/sprint-report.png"
-            alt="A Pierre sprint report: an AI-written summary of the sprint window, leading with flow metrics and naming blockers with PR links."
-            title="pierre · Sprint report"
-          />
+        {/* who it's for — folded into the problem, under a rule */}
+        <RailGrid
+          rail={{ word: 'Who it’s for' }}
+          className="mt-14 border-t border-rule pt-10"
+        >
           <div>
-            <Pill className="bg-brand-purple/15 text-brand-purpleSoft ring-brand-purple/30">
-              Pro
-            </Pill>
-            <h2 className="mt-3 text-pretty text-3xl font-bold tracking-tight text-gray-50 sm:text-4xl">
-              AI summaries that make sense of the week — not another bot shouting into
-              your PRs.
+            <h3 className="mb-[18px] font-display text-h4 font-semibold text-ink">
+              For engineering managers
+            </h3>
+            <ul className="flex flex-col gap-3.5">
+              {FOR_MANAGERS.map((p) => (
+                <DashItem key={p}>{p}</DashItem>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h3 className="mb-[18px] font-display text-h4 font-semibold text-ink">
+              For engineers
+            </h3>
+            <ul className="flex flex-col gap-3.5">
+              {FOR_ENGINEERS.map((p) => (
+                <DashItem key={p}>{p}</DashItem>
+              ))}
+            </ul>
+          </div>
+        </RailGrid>
+      </Section>
+
+      {/* ---------- 02 · free ---------- */}
+      <Section tone="alt">
+        <RailGrid rail={{ n: '02', word: 'Free' }}>
+          <div>
+            <h2 className="mb-6 max-w-[22ch] font-display text-h2-sm font-semibold text-ink type:text-h2">
+              Most dashboards add tabs. This one closes them.
             </h2>
-            <p className="mt-4 text-pretty leading-relaxed text-gray-400">
+            <p className="mb-[18px]">
+              Behind the feed sits the board — every repo, every contributor, every PR,
+              review and CI run on one interactive timeline. Duration and staleness live in
+              the shape: a long bar with no recent markers is a stalled PR, no query
+              required.
+            </p>
+            <p className="mb-6">
+              Pick a repo and its console pulls the same picture into focus — stats, a
+              thread-state bar, and every open PR with its CI and approval standing. The
+              feed, the board, the consoles, the PR detail, the write actions — all of it
+              free, open-core, forever.
+            </p>
+            <MonoLink to="/features">Everything in the free tier →</MonoLink>
+          </div>
+
+          <ShotFrame
+            src="/shots/timeline.png"
+            alt="The timeline board: repos down the side, time across the top, with PR bars and event markers."
+            caption="repos down the side, time across the top"
+            height={280}
+            fit="contain"
+            strong
+          />
+        </RailGrid>
+      </Section>
+
+      {/* ---------- 03 · pro ---------- */}
+      <Section>
+        <RailGrid rail={{ n: '03', word: 'Pro' }}>
+          <div>
+            <h2 className="mb-6 text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
+              AI summaries that make sense of the week — not another bot shouting into your
+              PRs.
+            </h2>
+            <p className="mb-[18px]">
               Per-repo digests and sprint reports, each one chained from the last — what
-              changed since you last looked, with clickable PR refs. Delivered to Slack
-              on your cadence, daily or twice daily.
+              changed since you last looked, with clickable PR refs. Delivered to Slack on
+              your cadence, daily or twice daily.
             </p>
-            <p className="mt-4 text-pretty leading-relaxed text-gray-400">
-              It’s the antidote to notification fatigue:{' '}
-              <span className="font-medium text-gray-200">pull, don’t push.</span> One
-              high-quality report instead of forty pings.
+            {/* The antidote line — a pull-quote in INK, not in the signal colour.
+                Vermilion means one thing and this is not it. */}
+            <p className="mb-6 font-serif text-pull-quote italic text-ink">
+              It’s the antidote to notification fatigue: pull, don’t push. One high-quality
+              report instead of forty pings.
             </p>
-            <Link
-              to="/pro"
-              className="group mt-6 inline-flex items-center gap-1.5 text-sm font-medium text-brand-purpleSoft transition hover:text-white"
-            >
-              The whole intelligence layer
-              <ArrowRightIcon className="h-4 w-4 transition group-hover:translate-x-0.5" />
-            </Link>
+            <MonoLink to="/pro">The whole intelligence layer →</MonoLink>
+
+            <div className="mt-10 border-t border-rule pt-[30px]">
+              <MonoLabel className="mb-4 text-secondary">Not another review bot</MonoLabel>
+              <h3 className="mb-4 font-display text-h3 font-semibold text-ink">
+                The review-bot aisle is full. This is the shelf above it.
+              </h3>
+              <p className="mb-3.5 text-body-sm">
+                Review bots comment on one PR at a time — and even the good ones still bury
+                you: independent audits put roughly a third of bot comments as noise.{' '}
+                {SITE_NAME} isn’t competing to shout louder on your diffs.
+              </p>
+              <p className="mb-3.5 text-body-sm">
+                It’s cross-repo situational awareness: all high-value, pull-based
+                information — who’s blocked, what’s stalled, which threads sit unanswered —
+                with AI review as one input you control, not the product.
+              </p>
+              <p className="text-body-sm">
+                And when the AI does review, it reviews <em>your</em> way: every run learns
+                from what you kept, cut and reworded last time — so the noise goes down
+                with use, not up.
+              </p>
+            </div>
           </div>
-        </div>
+
+          <div>
+            <ShotFrame
+              src="/shots/sprint-report.png"
+              alt="A sprint report: an AI-written summary of the sprint window, leading with flow metrics and naming blockers with PR links."
+              caption="AI-written sprint summary"
+              height={230}
+              fit="contain"
+              strong
+            />
+
+            {/* BYO key — under an INK rule, because it is a change of register:
+                everything above is included, everything below needs your own key. */}
+            <div className="mt-[34px] border-t border-ink pt-6">
+              <MonoLabel className="mb-3.5 text-secondary">Pro · BYO key</MonoLabel>
+              <h3 className="mb-4 font-display text-h3 font-semibold text-ink">
+                Yes, your CLI can do this. In eleven steps.
+              </h3>
+              <p className="mb-[26px] text-body-sm">
+                You could do all of this in your IDE or CLI — clone, checkout, analyse the
+                log, prompt the agent, apply, push. Repeat for every PR, every day.{' '}
+                {SITE_NAME} makes each loop one click, including the git merge conflicts.
+              </p>
+
+              <div className="mb-[26px] flex flex-col gap-3.5">
+                {FIX_FLOW.map((step, i) => (
+                  <FlowStep key={step} n={`0${i + 1}`} accent last={false}>
+                    {step}
+                  </FlowStep>
+                ))}
+              </div>
+              <div className="mb-6 flex flex-col gap-3.5">
+                {REVIEW_FLOW.map((step, i) => (
+                  <FlowStep
+                    key={step}
+                    n={`0${i + 1}`}
+                    accent={false}
+                    last={i === REVIEW_FLOW.length - 1}
+                  >
+                    {step}
+                  </FlowStep>
+                ))}
+              </div>
+
+              <MonoLink to="/pro#claude-review">
+                Walk through both flows, screen by screen →
+              </MonoLink>
+            </div>
+          </div>
+        </RailGrid>
       </Section>
 
-      {/* ---------- 9 · one-click resolution strip ---------- */}
-      <section className="relative border-y border-white/5 bg-white/[0.02] py-20 sm:py-28">
-        <Glow className="absolute left-1/2 top-0 h-64 w-[40rem] max-w-full -translate-x-1/2 rounded-full bg-brand-purple/12 blur-[130px]" />
-        <Section width="wide">
-          <div className="mx-auto max-w-2xl text-center">
-            <Pill className="bg-brand-purple/15 text-brand-purpleSoft ring-brand-purple/30">
-              Pro · BYO key
-            </Pill>
-            <h2 className="mt-3 text-pretty text-3xl font-bold tracking-tight text-gray-50 sm:text-4xl">
-              Yes, your CLI can do this. In eleven steps.
+      {/* ---------- 04 · local ---------- */}
+      <Section>
+        <RailGrid rail={{ n: '04', word: 'Local' }}>
+          <div>
+            <h2 className="mb-6 font-display text-h2-sm font-semibold text-ink type:text-h2">
+              Or keep it entirely on your machine.
             </h2>
-            <p className="mt-4 text-pretty text-base leading-relaxed text-gray-400 sm:text-lg">
-              You could do all of this in your IDE or CLI — clone, checkout, analyse the
-              log, prompt the agent, apply, push. Repeat for every PR, every day. Pierre
-              makes each loop one click, including the git merge conflicts.
+            <p className="mb-[26px] max-w-[52ch]">
+              One command. No accounts, no hosted backend, no stored credentials — it
+              authenticates with your <span className="font-mono text-[16px]">gh</span>{' '}
+              CLI, syncs to a local SQLite file, and opens straight to the Activity console.
             </p>
+            <MonoLink to="/how-it-works#run-locally">
+              What happens when you run it →
+            </MonoLink>
           </div>
 
-          <div className="mx-auto mt-12 max-w-4xl space-y-5">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <FlowStep n={1}>
-                CI fails. Pierre pulls the failing job log and diagnoses it.
-              </FlowStep>
-              <FlowArrow />
-              <FlowStep n={2}>
-                You approve a fix run. The agent patches in an ephemeral worktree — you
-                review the actual diff.
-              </FlowStep>
-              <FlowArrow />
-              <FlowStep n={3}>
-                The fix is pushed to the branch. PR green.
-              </FlowStep>
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <FlowStep n={1}>
-                Claude reviews the PR into structured, line-anchored findings.
-              </FlowStep>
-              <FlowArrow />
-              <FlowStep n={2}>
-                You tick the findings worth keeping and write your verdict.
-              </FlowStep>
-              <FlowArrow />
-              <FlowStep n={3}>
-                One GitHub review is posted. Yours, not the bot’s.
-              </FlowStep>
-            </div>
-          </div>
-
-          <div className="mt-10 text-center">
-            <Link
-              to="/pro#claude-review"
-              className="group inline-flex items-center gap-1.5 text-sm font-medium text-brand-purpleSoft transition hover:text-white"
-            >
-              Walk through both flows, screen by screen
-              <ArrowRightIcon className="h-4 w-4 transition group-hover:translate-x-0.5" />
-            </Link>
-          </div>
-        </Section>
-      </section>
-
-      {/* ---------- 10 · not another review bot ---------- */}
-      <Section width="narrow" className="py-20 sm:py-28">
-        <Eyebrow className="text-brand-sky">Not another review bot</Eyebrow>
-        <h2 className="mt-3 text-pretty text-3xl font-bold tracking-tight text-gray-50 sm:text-4xl">
-          The review-bot aisle is full. This is the shelf above it.
-        </h2>
-        <div className="mt-6 space-y-4 text-pretty text-base leading-relaxed text-gray-400 sm:text-lg">
-          <p>
-            Review bots comment on one PR at a time — and even the good ones still bury
-            you: independent audits put roughly a third of bot comments as noise. Pierre
-            isn’t competing to shout louder on your diffs.
-          </p>
-          <p>
-            It’s cross-repo situational awareness: all high-value, pull-based
-            information — who’s blocked, what’s stalled, which threads sit unanswered —
-            with AI review as{' '}
-            <span className="font-medium text-gray-200">
-              one input you control, not the product.
-            </span>
-          </p>
-          <p>
-            And when the AI does review, it reviews <em>your</em> way: every run learns
-            from what you kept, cut and reworded last time — so the noise goes down with
-            use, not up.
-          </p>
-        </div>
+          <TerminalPanel label="zsh · ~/work" command={INSTALL_COMMAND} cursor />
+        </RailGrid>
       </Section>
 
-      {/* ---------- 11 · run locally ---------- */}
-      <Section width="narrow" className="py-8">
-        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] p-8 text-center sm:p-12">
-          <Glow className="absolute bottom-0 left-1/2 h-48 w-[28rem] max-w-full -translate-x-1/2 rounded-full bg-brand-green/10 blur-[120px]" />
-          <Eyebrow className="text-brand-green">Run it locally</Eyebrow>
-          <h2 className="mt-3 text-pretty text-2xl font-bold tracking-tight text-gray-50 sm:text-3xl">
-            Or keep it entirely on your machine.
-          </h2>
-          <p className="mx-auto mt-3 max-w-xl text-pretty leading-relaxed text-gray-400">
-            One command. No accounts, no hosted backend, no stored credentials — it
-            authenticates with your <code className="font-mono text-gray-300">gh</code> CLI,
-            syncs to a local SQLite file, and opens straight to the Activity console.
-          </p>
-          <div className="mx-auto mt-6 flex max-w-md items-center justify-center gap-3 rounded-xl border border-white/10 bg-gray-900/70 px-5 py-4 font-mono text-sm">
-            <span className="select-none text-brand-green">$</span>
-            <code className="text-gray-100">npx pierre-review</code>
+      {/* ---------- 05 · price ---------- */}
+      <Section>
+        <RailGrid rail={{ n: '05', word: 'Price' }} cols="one">
+          <div>
+            <h2 className="mb-[34px] font-display text-h2-sm font-semibold text-ink type:text-h2">
+              Free where it matters. $15 where it counts.
+            </h2>
+            <div className="grid gap-grid-gutter border-t border-ink pt-[26px] rail:grid-cols-2">
+              <div>
+                <div className="mb-3.5 flex items-baseline justify-between gap-4">
+                  <h3 className="font-display text-h5 font-semibold text-ink">Free</h3>
+                  <span className="font-mono text-mono-data text-ink">$0, forever</span>
+                </div>
+                <p className="text-body-sm">
+                  The whole dashboard — Activity feed, timeline, PR detail, write actions.
+                  Unlimited repos, local-first.
+                </p>
+              </div>
+              <div>
+                <div className="mb-3.5 flex items-baseline justify-between gap-4">
+                  <h3 className="font-display text-h5 font-semibold text-ink">Pro</h3>
+                  <span className="font-mono text-mono-data text-signal-text">
+                    $15/month
+                  </span>
+                </div>
+                <p className="text-body-sm">
+                  The intelligence layer — AI summaries, team Insights, flow metrics, Slack
+                  digests, My Turn.
+                </p>
+              </div>
+            </div>
           </div>
-          <Link
-            to="/how-it-works#run-locally"
-            className="mt-5 inline-block text-sm font-medium text-brand-sky transition hover:text-brand-skySoft"
-          >
-            What happens when you run it →
-          </Link>
-        </div>
+        </RailGrid>
       </Section>
 
-      {/* ---------- 12 · pricing teaser ---------- */}
-      <Section width="default" className="py-20 sm:py-24">
-        <SectionHeading
-          eyebrow="Pricing"
-          title={
-            <>
-              Free where it matters.{' '}
-              <span className="bg-gradient-to-r from-brand-purpleSoft to-brand-sky bg-clip-text text-transparent">
-                $5 where it counts.
-              </span>
-            </>
-          }
-        />
-        <div className="mx-auto mt-10 grid max-w-3xl gap-4 sm:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <div className="flex items-baseline justify-between">
-              <h3 className="text-base font-semibold text-gray-100">Free</h3>
-              <span className="text-sm text-gray-500">$0, forever</span>
-            </div>
-            <p className="mt-2 text-sm leading-relaxed text-gray-400">
-              The whole dashboard — Activity feed, timeline, PR detail, write actions.
-              Unlimited repos, local-first.
+      {/* ---------- final CTA ---------- */}
+      <Section divider="ink" pad="lg">
+        <div className="flex flex-col gap-10 rail:flex-row rail:items-end rail:justify-between rail:gap-14">
+          <div>
+            <h2 className="mb-5 max-w-[22ch] font-display text-h2-sm font-semibold text-ink type:text-cta">
+              Stop reconstructing the day from notifications.
+            </h2>
+            <p className="max-w-[56ch]">
+              Sign in with GitHub and the recent timeline fills in seconds, while the full
+              history backfills behind it.
             </p>
           </div>
-          <div className="rounded-2xl border border-brand-purple/30 bg-brand-purple/[0.06] p-6">
-            <div className="flex items-baseline justify-between">
-              <h3 className="text-base font-semibold text-gray-100">Pro</h3>
-              <span className="text-sm text-brand-purpleSoft">$5/month</span>
-            </div>
-            <p className="mt-2 text-sm leading-relaxed text-gray-400">
-              The intelligence layer — AI summaries, team Insights, flow metrics, Slack
-              digests, My Turn.
-            </p>
+          <div className="flex shrink-0 flex-col items-start gap-3.5">
+            <InkButton to="/api/auth/login">Sign in with GitHub</InkButton>
+            <MonoLink to="/pricing" className="border-b-0 text-secondary hover:text-ink">
+              Compare the tiers →
+            </MonoLink>
           </div>
         </div>
-        <div className="mt-8 text-center">
-          <Link
-            to="/pricing"
-            className="group inline-flex items-center gap-1.5 text-sm font-medium text-brand-sky transition hover:text-brand-skySoft"
-          >
-            Compare the tiers
-            <ArrowRightIcon className="h-4 w-4 transition group-hover:translate-x-0.5" />
-          </Link>
-        </div>
-      </Section>
-
-      {/* ---------- 13 · final CTA ---------- */}
-      <Section width="narrow" className="py-24 text-center">
-        <h2 className="text-pretty text-3xl font-bold tracking-tight text-gray-50 sm:text-4xl">
-          Stop reconstructing the day from notifications.
-        </h2>
-        <p className="mx-auto mt-4 max-w-xl text-gray-400">
-          Sign in with GitHub and the recent timeline fills in seconds, while the full
-          history backfills behind it.
-        </p>
-        <div className="mt-8 flex justify-center">
-          <PrimaryCta />
-        </div>
-        <p className="mt-5 text-sm text-gray-500">
-          Pierre is a desktop experience today — a phone-friendly build is on the{' '}
-          <Link to="/how-it-works#roadmap" className="text-gray-400 underline-offset-2 hover:underline">
-            roadmap
-          </Link>
-          .
-        </p>
       </Section>
     </>
   );

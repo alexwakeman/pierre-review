@@ -1,133 +1,87 @@
 import { useCallback } from 'react';
 import { Link } from '../router';
-import { GitHubMark } from './icons';
 import { resetConsent } from '../lib/consent';
 import { analyticsConfigured, revokeAnalytics } from '../lib/analytics';
+import { ARCADE_ENABLED, ARCADE_PATH, REPO_URL, SITE_NAME } from '../lib/site';
 
-const COLUMNS: { heading: string; links: { label: string; to: string }[] }[] = [
-  {
-    heading: 'Product',
-    links: [
-      { label: 'Open Core', to: '/features' },
-      { label: 'Pro', to: '/pro' },
-      { label: 'Pricing', to: '/pricing' },
-      { label: 'How it works', to: '/how-it-works' },
-    ],
-  },
-  {
-    heading: 'Explore',
-    links: [
-      { label: 'Activity feed', to: '/features#activity' },
-      { label: 'The timeline', to: '/features#timeline' },
-      { label: 'Sprint reports', to: '/pro#sprint' },
-      { label: 'Flow metrics', to: '/pro#metrics' },
-      { label: 'Claude Review', to: '/pro#claude-review' },
-      { label: 'AI Fix', to: '/pro#ai-fix' },
-    ],
-  },
-  {
-    heading: 'Get started',
-    links: [
-      { label: 'Sign in with GitHub', to: '/api/auth/login' },
-      { label: 'Get Pro', to: '/pricing' },
-      { label: 'Run it locally', to: '/how-it-works#run-locally' },
-      { label: 'Roadmap', to: '/how-it-works#roadmap' },
-    ],
-  },
-  {
-    heading: 'Project',
-    links: [
-      { label: 'GitHub repository', to: 'https://github.com/alexwakeman/pierre-review' },
-      { label: 'Report an issue', to: 'https://github.com/alexwakeman/pierre-review/issues' },
-    ],
-  },
-  {
-    heading: 'Legal',
-    links: [
-      { label: 'Privacy policy', to: '/privacy' },
-      { label: 'Cookie policy', to: '/cookies' },
-      { label: 'Terms of service', to: '/terms' },
-    ],
-  },
-];
+// ---------------------------------------------------------------------------
+// The footer, condensed to two mono lines — a © line with a link row, and the
+// desktop-today note. It replaced five columns of nineteen links.
+//
+// DELIBERATELY WIDER THAN THE MOCK. The design's pricing footer carries no links
+// at all and its home footer carries four; two of the links that drops are
+// compliance rather than decoration:
+//
+//   · "Cookie settings" is the consent-WITHDRAWAL control. GDPR requires
+//     withdrawal to be as easy as granting and reachable from a persistent
+//     place — not only from a banner that has already been dismissed.
+//   · /cookies and /terms must stay reachable from every page.
+//
+// The design README explicitly permits this ("the full existing footer link
+// columns can be restored from the live site; the mock shows the condensed
+// form"), so this keeps the condensed FORM and restores the required links.
+// ---------------------------------------------------------------------------
+
+const FADE = 'transition-colors duration-hover ease-standard';
+const FOCUS =
+  'focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
+const LINK = `hover:text-ink ${FADE} ${FOCUS}`;
 
 export default function Footer(): JSX.Element {
-  // GDPR requires withdrawal to be as easy as giving consent, and to be available
-  // from a persistent place — not only on the banner that has already been dismissed.
   // Clearing the stored choice re-shows the banner (CookieBanner listens for the
-  // consent event). Hidden entirely when no measurement id is configured, since then
-  // there is no consent to withdraw.
+  // consent event). Hidden entirely when no measurement id is configured, since
+  // then there is genuinely no consent to withdraw.
   const changeCookieChoice = useCallback(() => {
     revokeAnalytics();
     resetConsent();
   }, []);
 
   return (
-    <footer className="mt-24 border-t border-white/5 bg-white/[0.015]">
-      <div className="mx-auto max-w-6xl px-5 py-14 sm:px-6">
-        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-6">
-          <div>
-            <Link to="/" className="brand-title text-3xl text-gray-200">
-              Pierre
+    <footer className="border-t border-rule px-gutter py-[26px] font-mono text-mono-caption text-secondary">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-3">
+        <span>© 2026 {SITE_NAME}. Built for sprint situational awareness.</span>
+
+        <span className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
+          {ARCADE_ENABLED && (
+            <Link to={ARCADE_PATH} className={LINK}>
+              Inbox Invaders
             </Link>
-            <p className="mt-3 max-w-xs text-sm leading-relaxed text-gray-400">
-              The team&apos;s GitHub activity, at a glance. Local-first and open — run it
-              on your machine or self-host the multi-tenant cloud.
-            </p>
-            <a
-              href="https://github.com/alexwakeman/pierre-review"
-              target="_blank"
-              rel="noreferrer noopener"
-              className="mt-5 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-sky"
-            >
-              <GitHubMark className="h-4 w-4" />
-              View on GitHub
-            </a>
-          </div>
-
-          {COLUMNS.map((col) => (
-            <div key={col.heading}>
-              <h3 className="text-sm font-semibold text-gray-200">{col.heading}</h3>
-              <ul className="mt-4 space-y-2.5">
-                {col.links.map((l) => (
-                  <li key={l.label}>
-                    <Link
-                      to={l.to}
-                      className="text-sm text-gray-400 transition hover:text-gray-100"
-                      {...(l.to.startsWith('http')
-                        ? { target: '_blank', rel: 'noreferrer noopener' }
-                        : {})}
-                    >
-                      {l.label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-white/5 pt-6 text-center sm:flex-row sm:text-left">
-          <p className="text-xs text-gray-600">
-            © 2026 Pierre. Built for sprint situational awareness.
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-gray-600">
-            {analyticsConfigured() && (
-              <>
-                <button
-                  type="button"
-                  onClick={changeCookieChoice}
-                  className="text-gray-500 underline decoration-dotted transition hover:text-gray-300"
-                >
-                  Cookie settings
-                </button>
-                <span aria-hidden>·</span>
-              </>
-            )}
-            <span>Best on the desktop today · mobile-ready builds are on the roadmap.</span>
-          </div>
-        </div>
+          )}
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noreferrer noopener"
+            className={LINK}
+          >
+            GitHub
+          </a>
+          <Link to="/privacy" className={LINK}>
+            Privacy
+          </Link>
+          <Link to="/cookies" className={LINK}>
+            Cookies
+          </Link>
+          <Link to="/terms" className={LINK}>
+            Terms
+          </Link>
+          {analyticsConfigured() && (
+            <button type="button" onClick={changeCookieChoice} className={LINK}>
+              Cookie settings
+            </button>
+          )}
+        </span>
       </div>
+
+      <p className="mt-4 max-w-caption">
+        {SITE_NAME} is a desktop experience today — a phone-friendly build is on the{' '}
+        <Link
+          to="/how-it-works#roadmap"
+          className={`border-b border-rule-strong text-nav-idle ${LINK}`}
+        >
+          roadmap
+        </Link>
+        .
+      </p>
     </footer>
   );
 }

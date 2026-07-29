@@ -142,12 +142,20 @@ async function proShots() {
     await ctx.close();
   });
 
-  // 5. Flow metrics — the DORA-style charts panel inside Insights (element shot;
-  // tall viewport so the whole panel renders without inner scroll).
+  // 5. Flow metrics — the DORA-style charts panel (element shot; tall viewport so
+  // the whole panel renders without inner scroll).
+  //
+  // The panel MOVED out of the Pro Insights pane onto the cross-repo FEED rail
+  // entry when the metrics went CORE/free, and `?view=activity` now opens on
+  // Insights — so this used to time out waiting for a testid that was never going
+  // to render. It cannot be fixed with a query param either: useUrlState only
+  // parses `activityRepo` as 'bots' | 'attention' | <numeric repo id>, so 'feed'
+  // is silently dropped. Click the rail row, which is what a reader does.
   await shot('flow-metrics.png', async () => {
     const ctx = await newCtx({ width: 1400, height: 2000 });
     const page = await ctx.newPage();
     await openApp(page, '?view=activity');
+    await page.getByRole('button', { name: 'Feed', exact: true }).first().click();
     const panel = page.getByTestId('flow-metrics');
     await panel.waitFor({ timeout: 8000 });
     await page.waitForTimeout(2500); // chart render
@@ -155,7 +163,16 @@ async function proShots() {
     await ctx.close();
   });
 
-  // 6. Sprint report — the Pro sprint-report card (expanded by default), element shot.
+  // 6. Sprint report — element shot of the Pro sprint-report card.
+  //
+  // BROKEN, and not by a selector: `SprintReportCard` has ZERO call sites. Commit
+  // 8af5e4c ("consolidate Sprint questions + chat into one pill panel") replaced
+  // the standing card with a "Sprint report" preset pill in AdHocChatPanel, and
+  // the component was left orphaned. The FEATURE is alive (the /api/pro/sprint-report
+  // routes, the hook and the Slack digest all still work) — only this UI is gone,
+  // so there is nothing to photograph. Capturing what replaced it means running a
+  // real, billed Haiku call with a nondeterministic answer, which is a decision
+  // rather than a fix. Left failing loudly instead of silently shipping a stale PNG.
   await shot('sprint-report.png', async () => {
     const ctx = await newCtx({ width: 1400, height: 1800 });
     const page = await ctx.newPage();
@@ -347,6 +364,11 @@ async function proShots() {
 
   // 11. Open-PR strip — the 30-day preset so the strip surfaces the stalled PRs
   // (its header reads "N stalled" > 0). Ensure expanded, element screenshot.
+  // BROKEN: there is no `open-pr-strip` testid anywhere in the SPA. OpenPrsStrip was
+  // DELETED in the July Activity cleanup; its job is now done by the Feed's open-PR
+  // panel and the sortable `open-prs` drill-down tab. The /features page still
+  // references this shot and describes the strip as a live feature — that copy needs
+  // a decision, which is why this is left failing rather than quietly removed.
   await shot('open-pr-strip.png', async () => {
     const ctx = await newCtx();
     const page = await ctx.newPage();

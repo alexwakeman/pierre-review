@@ -84,7 +84,7 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
   // marker trails the body. Both default false when the arg is absent → body unchanged.
   const finalBody =
     args.body +
-    (args.pierreFooter ? '\n\n---\n🤖 Reviewed with Pierre + Claude' : '') +
+    (args.pierreFooter ? '\n\n---\n🤖 Reviewed with Limn + Claude' : '') +
     (args.pierreMarker ? '\n\n<!-- pierre:claude-review v=1 -->' : '');
 
   const preview: PostReviewPreview = {

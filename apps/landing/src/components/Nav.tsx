@@ -1,6 +1,19 @@
-import { useEffect, useState } from 'react';
 import { Link, useRoute } from '../router';
-import { GitHubMark, MenuIcon, CloseIcon } from './icons';
+import { Wordmark } from './feint/Wordmark';
+
+// ---------------------------------------------------------------------------
+// The header: a wordmark, four mono links, and "Sign in". No button, no icon,
+// no logo, no sticky backdrop-blur — just a rule under it.
+//
+// The active page is marked by a 2px vermilion underline on its link, which is
+// the one navigational use of the signal colour. When no nav item matches the
+// current path (the home page, the legal pages) the underline falls to "Sign
+// in", so the header always carries exactly one marker — matching both mocks.
+//
+// NO MOBILE DRAWER. The previous header had a hamburger opening a full-screen
+// menu; five mono links at 13px wrap onto a second line well before they need
+// one, and a modal drawer is exactly the kind of "box" this direction removes.
+// ---------------------------------------------------------------------------
 
 const NAV_LINKS = [
   { to: '/features', label: 'Open Core' },
@@ -15,108 +28,47 @@ function isActive(path: string, to: string): boolean {
   return path === to;
 }
 
+const ACTIVE = 'border-b-2 border-signal-fill pb-0.5 text-ink';
+const FADE = 'transition-colors duration-hover ease-standard';
+const FOCUS =
+  'focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
+
 export default function Nav(): JSX.Element {
   const path = useRoute();
-  const [open, setOpen] = useState(false);
-
-  // Close the mobile menu whenever the route changes.
-  useEffect(() => {
-    setOpen(false);
-  }, [path]);
-
-  // Lock scroll + close on Esc while the drawer is open.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.body.style.overflow = 'hidden';
-    window.addEventListener('keydown', onKey);
-    return () => {
-      document.body.style.overflow = '';
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
+  const navMatched = NAV_LINKS.some((l) => isActive(path, l.to));
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/5 bg-gray-950/80 backdrop-blur supports-[backdrop-filter]:bg-gray-950/60">
+    <header className="border-b border-rule px-gutter py-[26px]">
       <nav
         aria-label="Primary"
-        className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3.5 sm:px-6"
+        className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-4"
       >
-        <Link
-          to="/"
-          className="brand-title text-2xl text-gray-100 transition hover:text-white sm:text-3xl"
-          aria-label="Pierre — home"
-        >
-          Pierre
+        <Link to="/" aria-label={`Home`} className={`${FOCUS}`}>
+          <Wordmark />
         </Link>
 
-        {/* desktop links */}
-        <div className="hidden items-center gap-1 md:flex">
-          {NAV_LINKS.map((l) => (
-            <Link
-              key={l.to}
-              to={l.to}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                isActive(path, l.to)
-                  ? 'text-white'
-                  : 'text-gray-400 hover:text-gray-100'
-              }`}
-              aria-current={isActive(path, l.to) ? 'page' : undefined}
-            >
-              {l.label}
-            </Link>
-          ))}
-          <a
-            href="/api/auth/login"
-            className="ml-2 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3.5 py-2 text-sm font-medium text-gray-100 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-sky"
-          >
-            <GitHubMark className="h-4 w-4" />
-            Sign in
-          </a>
-        </div>
-
-        {/* mobile hamburger */}
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/5 p-2 text-gray-200 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-sky md:hidden"
-          aria-label={open ? 'Close menu' : 'Open menu'}
-          aria-expanded={open}
-        >
-          {open ? <CloseIcon className="h-5 w-5" /> : <MenuIcon className="h-5 w-5" />}
-        </button>
-      </nav>
-
-      {/* mobile drawer */}
-      {open && (
-        <div className="md:hidden">
-          <div className="space-y-1 border-t border-white/5 bg-gray-950/95 px-5 pb-6 pt-3">
-            {NAV_LINKS.map((l) => (
+        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2 font-mono text-mono-nav text-nav-idle type:gap-x-[30px]">
+          {NAV_LINKS.map((l) => {
+            const active = isActive(path, l.to);
+            return (
               <Link
                 key={l.to}
                 to={l.to}
-                className={`block rounded-lg px-3 py-3 text-base font-medium transition ${
-                  isActive(path, l.to)
-                    ? 'bg-white/5 text-white'
-                    : 'text-gray-300 hover:bg-white/5 hover:text-white'
-                }`}
-                aria-current={isActive(path, l.to) ? 'page' : undefined}
+                aria-current={active ? 'page' : undefined}
+                className={`${active ? ACTIVE : 'hover:text-ink'} ${FADE} ${FOCUS}`}
               >
                 {l.label}
               </Link>
-            ))}
-            <a
-              href="/api/auth/login"
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-brand-blueDeep to-brand-blue px-4 py-3 text-base font-semibold text-white shadow-sky-glow"
-            >
-              <GitHubMark className="h-5 w-5" />
-              Sign in with GitHub
-            </a>
-          </div>
+            );
+          })}
+          <Link
+            to="/api/auth/login"
+            className={`text-ink ${navMatched ? '' : ACTIVE} ${FADE} ${FOCUS}`}
+          >
+            Sign in
+          </Link>
         </div>
-      )}
+      </nav>
     </header>
   );
 }

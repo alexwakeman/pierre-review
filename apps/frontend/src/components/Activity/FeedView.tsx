@@ -1626,7 +1626,7 @@ function FeedRowImpl({
               <span
                 className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
                 style={{ color: automatedTag.color, background: `${automatedTag.color}1a` }}
-                title={`${automatedTag.label} — an automated reviewer Pierre triages`}
+                title={`${automatedTag.label} — an automated reviewer Limn triages`}
               >
                 <span aria-hidden>🤖</span>
                 {automatedTag.label}

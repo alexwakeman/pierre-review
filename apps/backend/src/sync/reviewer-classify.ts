@@ -68,7 +68,7 @@ const VENDOR_LABELS: Record<ReviewBotKind, string> = {
 // Exported so the query layer (db/queries.ts) labels analytics/dedup groupings from the
 // same source of truth as the persisted classification `label`.
 export function labelFor(kind: AutomatedReviewerKind): string {
-  if (kind === 'pierre') return 'Pierre · Claude';
+  if (kind === 'pierre') return 'Limn · Claude';
   if (kind === 'in_house') return 'In-house AI';
   if (kind === 'vendor') return 'Vendor';
   return VENDOR_LABELS[kind] ?? kind;

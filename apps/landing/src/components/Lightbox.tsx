@@ -7,11 +7,16 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { SITE_NAME } from '../lib/site';
 
-// A single, app-wide screenshot lightbox. Any image surface (the macOS-framed
-// <Shot>, the hero carousel, the Pro walkthrough steps) calls `useLightbox().open`
-// to blow a screenshot up to effectively full-screen on a dark scrim, framed with a
-// dark border.
+// A single, app-wide screenshot lightbox. Any image surface (a <ShotFrame>, the
+// Pro walkthrough steps) calls `useLightbox().open` to blow a screenshot up to
+// effectively full-screen on an ink scrim.
+//
+// The image itself carries NO border, radius, shadow or filter — the design's rule
+// is that a product screenshot ships un-stylised, and "Enlarge opens a lightbox at
+// native resolution" is exactly where that matters most. The scrim is ink; small
+// text on it uses the on-dark stops.
 //
 // Two ways to open:
 //   • open(item)                 — a single image. Tapping it toggles fit ⇄ zoom
@@ -114,15 +119,15 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
           aria-modal="true"
           aria-label={current.title ?? current.alt}
           onClick={close}
-          className="fixed inset-0 z-[100] flex flex-col bg-gray-950/95 backdrop-blur-md"
+          className="fixed inset-0 z-[100] flex flex-col bg-ink/95"
         >
           {/* top bar — title (+ gallery position) + close. Clicks here fall through to
               the scrim and dismiss too (only the image swallows its click). */}
           <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
-            <span className="flex min-w-0 items-center gap-2 text-xs text-gray-400 sm:text-sm">
-              <span className="min-w-0 truncate">{current.title ?? 'pierre'}</span>
+            <span className="flex min-w-0 items-center gap-2 font-mono text-mono-caption text-on-dark-secondary">
+              <span className="min-w-0 truncate">{current.title ?? SITE_NAME.toLowerCase()}</span>
               {isGallery && (
-                <span className="shrink-0 tabular-nums text-gray-500" aria-live="polite">
+                <span className="shrink-0 tabular-nums text-on-dark-tertiary" aria-live="polite">
                   {index + 1} / {count}
                 </span>
               )}
@@ -132,7 +137,7 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
               type="button"
               onClick={close}
               aria-label="Close"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-skySoft"
+              className="inline-flex items-center gap-1.5 border border-on-dark-secondary/40 px-3 py-1.5 font-mono text-mono-caption text-on-dark-body transition-colors duration-hover ease-standard hover:border-on-dark-primary hover:text-on-dark-primary focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-on-dark-primary"
             >
               <CloseIcon className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Close</span>
@@ -158,8 +163,8 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
               style={zoomed ? { width: 'min(1600px, 240vw)' } : undefined}
               className={
                 zoomed
-                  ? 'mx-auto block h-auto max-w-none cursor-zoom-out rounded-lg border-2 border-gray-800 shadow-2xl shadow-black/60 ring-1 ring-black/40'
-                  : `block max-h-full max-w-full rounded-lg border-2 border-gray-800 shadow-2xl shadow-black/60 ring-1 ring-black/40 ${
+                  ? 'mx-auto block h-auto max-w-none cursor-zoom-out'
+                  : `block max-h-full max-w-full ${
                       isGallery ? 'cursor-pointer' : 'cursor-zoom-in'
                     }`
               }
@@ -176,7 +181,7 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
                     e.stopPropagation();
                     go(-1);
                   }}
-                  className="fixed left-2 top-1/2 z-[101] -translate-y-1/2 rounded-full border border-white/10 bg-gray-950/70 p-2.5 text-gray-200 backdrop-blur transition hover:bg-gray-900 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-skySoft sm:left-4"
+                  className="fixed left-2 top-1/2 z-[101] -translate-y-1/2 border border-on-dark-secondary/40 bg-ink p-2.5 text-on-dark-body transition-colors duration-hover ease-standard hover:border-on-dark-primary hover:text-on-dark-primary focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-on-dark-primary sm:left-4"
                 >
                   <Chevron className="h-5 w-5 rotate-180" />
                 </button>
@@ -187,7 +192,7 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
                     e.stopPropagation();
                     go(1);
                   }}
-                  className="fixed right-2 top-1/2 z-[101] -translate-y-1/2 rounded-full border border-white/10 bg-gray-950/70 p-2.5 text-gray-200 backdrop-blur transition hover:bg-gray-900 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-skySoft sm:right-4"
+                  className="fixed right-2 top-1/2 z-[101] -translate-y-1/2 border border-on-dark-secondary/40 bg-ink p-2.5 text-on-dark-body transition-colors duration-hover ease-standard hover:border-on-dark-primary hover:text-on-dark-primary focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-on-dark-primary sm:right-4"
                 >
                   <Chevron className="h-5 w-5" />
                 </button>
@@ -196,7 +201,7 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
           </div>
 
           {/* hint */}
-          <p className="pointer-events-none px-4 pb-3 pt-1 text-center text-[11px] text-gray-500">
+          <p className="pointer-events-none px-4 pb-3 pt-1 text-center font-mono text-[11px] text-on-dark-tertiary">
             {isGallery
               ? 'Tap the image or use ‹ › / arrow keys for the next shot · tap outside or press Esc to close'
               : `Tap the image to ${zoomed ? 'fit it to the screen' : 'zoom in'} · tap outside or press Esc to close`}

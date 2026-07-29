@@ -154,7 +154,7 @@ export function FirstRunOnboarding(): JSX.Element {
           Watch the repos you work on
         </h2>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Pierre watches the repos you care about &mdash; here&rsquo;s what you&rsquo;ve been
+          Limn watches the repos you care about &mdash; here&rsquo;s what you&rsquo;ve been
           working on.
         </p>
       </header>

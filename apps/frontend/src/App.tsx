@@ -34,6 +34,7 @@ import { usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
 import { ApiError, api } from './api/client.js';
 import { initAnalytics, trackPageView } from './lib/analytics.js';
 import { CookieBanner } from './components/CookieBanner.js';
+import { Wordmark } from './components/Wordmark';
 
 function useDarkMode(): [boolean, () => void] {
   const [dark, setDark] = useState(
@@ -240,7 +241,7 @@ export default function App(): JSX.Element {
   if (me.isLoading && !me.data) {
     return (
       <div className="flex h-full min-h-screen items-center justify-center bg-gray-950">
-        <span className="brand-title text-4xl text-gray-100">Pierre</span>
+        <Wordmark className="text-4xl text-gray-100" />
       </div>
     );
   }
@@ -249,8 +250,8 @@ export default function App(): JSX.Element {
     <div className="flex h-full flex-col">
       <AuthNoticeBanner notices={me.data?.authNotices ?? []} />
       <header className="flex items-center gap-3 border-b border-gray-200 px-4 py-2 dark:border-gray-800">
-        <h1 className="brand-title" title="Pierre — a play on “PR”">
-          Pierre
+        <h1 title="Limn — to depict, to make clear">
+          <Wordmark />
         </h1>
         <div className="ml-auto flex items-center gap-3">
           <SyncStatus />
@@ -291,7 +292,7 @@ export default function App(): JSX.Element {
             type="button"
             onClick={() => setHelpOpen(true)}
             className="rounded border border-gray-300 px-2 py-0.5 text-xs font-semibold hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
-            title="Help — what is Pierre and how to use it"
+            title="Help — what is Limn and how to use it"
             aria-label="Help"
           >
             ?

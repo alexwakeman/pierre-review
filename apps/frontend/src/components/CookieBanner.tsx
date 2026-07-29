@@ -49,7 +49,7 @@ export function CookieBanner({ enabled }: { enabled: boolean }): JSX.Element | n
       <div className="mx-auto flex max-w-4xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">
           We&apos;d like to use Google Analytics to count page views. It sets a cookie and shares
-          your IP address with Google. Nothing loads unless you say yes, and Pierre works exactly
+          your IP address with Google. Nothing loads unless you say yes, and Limn works exactly
           the same either way.{' '}
           <a
             href="/privacy"

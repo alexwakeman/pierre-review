@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from '../router';
+import { InlineLink } from './feint/primitives';
 import { analyticsConfigured, initAnalytics, revokeAnalytics } from '../lib/analytics';
 import { consentChoice, onConsentChange, setConsent } from '../lib/consent';
 
@@ -47,35 +47,34 @@ export default function CookieBanner(): JSX.Element | null {
       role="dialog"
       aria-modal="false"
       aria-label="Cookie choices"
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-gray-950/95 backdrop-blur supports-[backdrop-filter]:bg-gray-950/80"
+      // A ruled strip on paper, not a floating card: no radius, no shadow, no
+      // backdrop blur. It reads as a footnote to the page rather than an overlay
+      // on top of it, which is the whole point — refusing must not feel costly.
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-ink bg-paper"
     >
-      <div className="mx-auto flex max-w-4xl flex-col gap-4 px-5 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
-        <p className="text-sm leading-relaxed text-gray-300">
+      <div className="mx-auto flex max-w-canvas flex-col gap-5 px-gutter py-5 rail:flex-row rail:items-center rail:justify-between">
+        <p className="max-w-answer text-list">
           We&apos;d like to use Google Analytics to count page views and see which pages
           people find useful. It sets a cookie and shares your IP address with Google.
           Nothing loads unless you say yes, and the site works exactly the same either
           way.{' '}
-          <Link to="/cookies" className="text-brand-sky underline hover:text-sky-300">
-            Cookie policy
-          </Link>
+          <InlineLink to="/cookies">Cookie policy</InlineLink>
           {' · '}
-          <Link to="/privacy" className="text-brand-sky underline hover:text-sky-300">
-            Privacy
-          </Link>
+          <InlineLink to="/privacy">Privacy</InlineLink>
         </p>
-        <div className="flex shrink-0 gap-2.5">
-          {/* Equal visual weight, deliberately. Decline is not a de-emphasised link. */}
+        {/* Equal visual weight, deliberately. Decline is not a de-emphasised link. */}
+        <div className="flex shrink-0 gap-3">
           <button
             type="button"
             onClick={decline}
-            className="flex-1 rounded-lg border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-gray-200 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-sky md:flex-none"
+            className={`${BTN} border border-ink text-ink hover:bg-ink hover:text-paper`}
           >
             Decline
           </button>
           <button
             type="button"
             onClick={accept}
-            className="flex-1 rounded-lg border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-sky md:flex-none"
+            className={`${BTN} border border-ink bg-ink text-paper hover:bg-[#08080A]`}
           >
             Accept
           </button>
@@ -84,3 +83,6 @@ export default function CookieBanner(): JSX.Element | null {
     </div>
   );
 }
+
+const BTN =
+  'px-5 py-2.5 font-display text-[15px] font-semibold transition-colors duration-hover ease-standard focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';

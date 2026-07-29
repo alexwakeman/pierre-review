@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Link, useRoute } from './router';
+import { useRoute } from './router';
 import { initAnalytics, trackPageView } from './lib/analytics';
 import { useSeo } from './lib/seo';
 import { NOT_FOUND_SEO } from './lib/routes';
@@ -7,6 +7,7 @@ import Nav from './components/Nav';
 import Footer from './components/Footer';
 import CookieBanner from './components/CookieBanner';
 import { LightboxProvider } from './components/Lightbox';
+import { InkButton, Section } from './components/feint/primitives';
 import Home from './pages/Home';
 import Features from './pages/Features';
 import Pro from './pages/Pro';
@@ -35,19 +36,15 @@ const ROUTES: Record<string, () => JSX.Element> = {
 function NotFound(): JSX.Element {
   useSeo(NOT_FOUND_SEO);
   return (
-    <div className="mx-auto max-w-xl px-6 py-32 text-center">
-      <p className="brand-title text-6xl text-gray-200">Pierre</p>
-      <h1 className="mt-6 text-3xl font-bold text-gray-50">This page wandered off.</h1>
-      <p className="mt-3 text-gray-400">
-        The link is dead, but the timeline isn&apos;t. Let&apos;s get you back.
+    <Section divider="none" pad="lg">
+      <h1 className="mb-5 max-w-[22ch] font-display text-h2-sm font-semibold text-ink type:text-h2-major">
+        This page wandered off.
+      </h1>
+      <p className="mb-9 max-w-[56ch]">
+        The link is dead, but the timeline isn’t. Let’s get you back.
       </p>
-      <Link
-        to="/"
-        className="mt-8 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-blueDeep to-brand-blue px-5 py-3 text-sm font-semibold text-white shadow-sky-glow"
-      >
-        Back to home
-      </Link>
-    </div>
+      <InkButton to="/">Back to home</InkButton>
+    </Section>
   );
 }
 
@@ -70,7 +67,10 @@ export default function App(): JSX.Element {
 
   return (
     <LightboxProvider>
-      <div className="min-h-screen bg-gray-950 text-gray-100 antialiased">
+      {/* The 1280px canvas. The design is a fixed max canvas with 56px gutters
+          rather than a full-bleed layout, so the `paper-alt` bands stop at the
+          canvas edge too — beyond it is plain paper, from `body`. */}
+      <div className="mx-auto min-h-screen max-w-canvas">
         <Nav />
         <main>
           <Page />

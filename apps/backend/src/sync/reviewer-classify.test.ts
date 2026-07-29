@@ -121,7 +121,12 @@ describe('classifyReviewer resolution order', () => {
     expect(c.source).toBe('github_type');
   });
 
-  it("4. branded fingerprint (Pierre) on a plain User → pierre, high, fingerprint", async () => {
+  // The marker in the review body stays `pierre:claude-review` after the rename to
+  // Limn, and so does the `kind` — both are permanent identifiers. The marker is
+  // written into GitHub review bodies we do not control, so the detector must keep
+  // matching it forever; the kind is a persisted DB value and a live API path
+  // segment. Only the human-readable LABEL moved. This test asserts that split.
+  it('4. branded fingerprint on a plain User → pierre, high, fingerprint', async () => {
     const fp = fingerprintReview('LGTM\n\n<!-- pierre:claude-review v=1 -->', []);
     const c = await classifyReviewer(1, userArg('pierre-poster', { githubType: 'User' }), {
       fingerprint: fp,
@@ -129,7 +134,7 @@ describe('classifyReviewer resolution order', () => {
     expect(c.automated).toBe(true);
     expect(c.kind).toBe('pierre');
     expect(c.source).toBe('fingerprint');
-    expect(c.label).toBe('Pierre · Claude');
+    expect(c.label).toBe('Limn · Claude');
   });
 
   it('5. behavioral band → MEDIUM in_house, source behavioral (never auto-badges to high)', async () => {

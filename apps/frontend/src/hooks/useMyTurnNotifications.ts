@@ -44,7 +44,7 @@ export function useMyTurnNotifications(enabled: boolean): void {
     if (watched) bits.push(`${watched} new in watched repos`);
 
     try {
-      const n = new Notification(`Pierre — ${added.length} new in My Turn`, {
+      const n = new Notification(`Limn — ${added.length} new in My Turn`, {
         body: bits.join(' · '),
         tag: 'pierre-my-turn', // collapse so repeats replace rather than stack
       });

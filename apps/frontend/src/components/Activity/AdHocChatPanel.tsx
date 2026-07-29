@@ -335,7 +335,7 @@ export function AdHocChatPanel(): JSX.Element | null {
           checked={wantBots}
           onChange={(v) => setDraft({ wantBots: v })}
           label="Include bot performance"
-          title="Append Pierre's review-bot performance data (volume, acted-on %, noise, verdict) to the question"
+          title="Append Limn's review-bot performance data (volume, acted-on %, noise, verdict) to the question"
         />
         <div className="ml-auto flex items-center gap-1.5">
           <button

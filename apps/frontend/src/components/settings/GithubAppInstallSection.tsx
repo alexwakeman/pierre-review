@@ -49,7 +49,7 @@ export function GithubAppInstallSection(): JSX.Element | null {
         </li>
         <li>
           <span className="font-medium text-gray-600 dark:text-gray-300">Real-time sync:</span>{' '}
-          installed repos push changes to Pierre as they happen, instead of waiting for the next
+          installed repos push changes to Limn as they happen, instead of waiting for the next
           scheduled poll. Coverage is per <em>repo</em>, not per person — one install covers
           everyone watching that repo.
         </li>

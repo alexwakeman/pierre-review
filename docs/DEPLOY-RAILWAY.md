@@ -157,7 +157,7 @@ automatically — there's no external registrar or manual `CNAME` step.
 
 The base cloud deploy above ships the **free** tier (timeline + activity feed including My Turn /
 "FYI" participation, no AI). To offer **paid Pro** — the **summary-AI** features (per-repo Haiku
-digests, the sprint report, team Insights, Jira/Linear issue links, Slack digest) at **$5/mo**, metered
+digests, the sprint report, team Insights, Jira/Linear issue links, Slack digest) at **$15/mo**, metered
 by a **2,500-credit monthly allowance** — you deploy a **private image** that bundles the
 `@pierre/pro` plugin. The expensive **agentic** AI (Claude Review / AI Fix) stays **off** in
 cloud; the meter still tracks it for a future tier.

@@ -1,6 +1,7 @@
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
 import { Link } from '../router';
+import { SITE_NAME } from '../lib/site';
 import {
   LEGAL_CONTROLLER,
   LegalNote,
@@ -13,12 +14,12 @@ import {
   UL,
 } from '../components/legal';
 
-// The privacy notice. Two things make Pierre's version unusual and both are stated
+// The privacy notice. Two things make Limn's version unusual and both are stated
 // up front rather than buried:
 //   1. There are TWO products here. Run locally, nothing is collected by anyone —
 //      there is no server to collect it. The notice below is almost entirely about
 //      the hosted cloud version.
-//   2. The data Pierre syncs includes personal data about people who are NOT its
+//   2. The data Limn syncs includes personal data about people who are NOT its
 //      users — the other GitHub accounts whose pull requests and comments appear on
 //      your team's board. Pretending otherwise would be the dishonest thing to do,
 //      so §4 says so explicitly and explains the legal basis.
@@ -32,14 +33,14 @@ export default function Privacy(): JSX.Element {
       intro={
         <>
           <p>
-            This notice explains what personal data Pierre processes, why, and what you
+            This notice explains what personal data {SITE_NAME} processes, why, and what you
             can do about it. It covers the hosted service at{' '}
-            <span className="font-mono text-gray-200">pierre-review.com</span>.
+            <span className="font-mono text-ink">pierre-review.com</span>.
           </p>
           <div className="mt-5">
-            <LegalNote title="If you run Pierre on your own machine, this notice barely applies to you">
+            <LegalNote title={`If you run ${SITE_NAME} on your own machine, this notice barely applies to you`}>
               <p>
-                Pierre&apos;s default mode is local: it runs on your computer, stores
+                {SITE_NAME}&apos;s default mode is local: it runs on your computer, stores
                 everything in a SQLite file under your home directory, authenticates with
                 your own <span className="font-mono">gh</span> CLI token, and sends
                 nothing to us. We have no server in that path and receive no data — not
@@ -57,7 +58,7 @@ export default function Privacy(): JSX.Element {
         <P>
           The data controller for the hosted service is <T>{LEGAL_CONTROLLER}</T>, an
           individual sole trader based in the United Kingdom, contactable at <Mail />.
-          Pierre is a small independent project, not a company with a privacy department:
+          {SITE_NAME} is a small independent project, not a company with a privacy department:
           the same person who wrote the code answers the email.
         </P>
         <P>
@@ -81,7 +82,7 @@ export default function Privacy(): JSX.Element {
             cookie banner. Decline and the script is never even downloaded. Google Signals
             and ad personalisation are switched off, so the data is never joined to an
             advertising profile. Full detail, including how to change your mind, is in the{' '}
-            <Link to="/cookies" className="text-brand-sky underline hover:text-sky-300">
+            <Link to="/cookies" className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text">
               cookie policy
             </Link>
             .
@@ -116,7 +117,7 @@ export default function Privacy(): JSX.Element {
             ],
             [
               'A GitHub access token',
-              'To read the repositories you ask Pierre to watch, and to perform actions you initiate (posting a review, resolving a thread)',
+              `To read the repositories you ask ${SITE_NAME} to watch, and to perform actions you initiate (posting a review, resolving a thread)`,
               'Encrypted at rest with AES-256-GCM. Never sent to your browser, never logged.',
             ],
             [
@@ -144,8 +145,8 @@ export default function Privacy(): JSX.Element {
 
       <LegalSection id="repo-data" heading="4. Repository data — including other people's">
         <P>
-          Pierre&apos;s purpose is to show a team&apos;s pull-request activity. When you add
-          a repository, Pierre copies recent activity from GitHub into its database so it
+          {SITE_NAME}&apos;s purpose is to show a team&apos;s pull-request activity. When you add
+          a repository, {SITE_NAME} copies recent activity from GitHub into its database so it
           can be searched, filtered and charted. That includes:
         </P>
         <UL>
@@ -165,7 +166,7 @@ export default function Privacy(): JSX.Element {
         </UL>
         <P>
           <T>
-            This means Pierre processes personal data about people who never signed up for
+            This means {SITE_NAME} processes personal data about people who never signed up for
             it
           </T>{' '}
           — your colleagues, and any outside contributor to a repository you watch. We are
@@ -173,9 +174,9 @@ export default function Privacy(): JSX.Element {
           rarely admitted.
         </P>
         <P>
-          Two things limit it. First, Pierre only ever reads what the connected GitHub
+          Two things limit it. First, {SITE_NAME} only ever reads what the connected GitHub
           token can already read, so it can never surface anything the account holder was
-          not already entitled to see. Second, by default Pierre stores <em>less</em> than
+          not already entitled to see. Second, by default {SITE_NAME} stores <em>less</em> than
           it could: pull-request descriptions, diff hunks and commit messages are not
           persisted at all unless the operator turns that on — they are fetched from GitHub
           on demand when you open a pull request, and cached in your browser rather than on
@@ -187,7 +188,7 @@ export default function Privacy(): JSX.Element {
           is professional activity that the individuals concerned published in a
           collaborative workspace, the processing is limited to what the team&apos;s existing
           access already permits, and it is not used for profiling, advertising or any
-          decision about the individual. If you are deploying Pierre for a team, you are
+          decision about the individual. If you are deploying {SITE_NAME} for a team, you are
           likely a joint or independent controller for this data under your own privacy
           notice; contact us at <Mail /> if you need a data processing agreement.
         </P>
@@ -276,7 +277,7 @@ export default function Privacy(): JSX.Element {
 
       <LegalSection id="ai" heading="7. AI features">
         <P>
-          Pierre&apos;s AI features are opt-in and clearly labelled. When you use one — a
+          {SITE_NAME}&apos;s AI features are opt-in and clearly labelled. When you use one — a
           repository digest, a pull-request summary, team insights, an AI review — the
           relevant content is sent to <T>Anthropic</T> to generate the result. That content
           can include source-code diffs, review comments and the names of the people
@@ -325,12 +326,12 @@ export default function Privacy(): JSX.Element {
           <li>
             <T>Delete account</T> — irreversibly removes your account, your encrypted
             GitHub token, your repositories and all synced activity. It also revokes
-            Pierre&apos;s access to your GitHub account.
+            {SITE_NAME}&apos;s access to your GitHub account.
           </li>
         </UL>
         <P>
           For anything else, or if you are not a user but your GitHub activity appears in
-          someone&apos;s Pierre instance, email <Mail /> and we will respond within one
+          someone&apos;s {SITE_NAME} instance, email <Mail /> and we will respond within one
           month. To help with the second case: we hold that data on behalf of whichever
           account added the repository, so we may need to put you in touch with them —
           include the repository name if you can.
@@ -341,7 +342,7 @@ export default function Privacy(): JSX.Element {
             href="https://ico.org.uk/make-a-complaint/"
             target="_blank"
             rel="noreferrer noopener"
-            className="text-brand-sky underline hover:text-sky-300"
+            className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text"
           >
             Information Commissioner&apos;s Office
           </a>

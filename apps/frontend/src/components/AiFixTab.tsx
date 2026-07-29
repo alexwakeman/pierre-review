@@ -142,7 +142,7 @@ function ConfidenceBadge({
       className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${CONFIDENCE_STYLE[value]}`}
       title={
         label === 'Fixability'
-          ? "How confident the analysis is that Pierre's agent could fix this"
+          ? "How confident the analysis is that Limn's agent could fix this"
           : 'How confident the analysis is about the root cause'
       }
     >
@@ -560,7 +560,7 @@ function FixHistory({
   return (
     <div className="mt-4 border-t border-gray-200 pt-3 dark:border-gray-800">
       <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
-        Fixes pushed via Pierre
+        Fixes pushed via Limn
       </div>
       <ul className="space-y-2">
         {pushed.map((h) => (

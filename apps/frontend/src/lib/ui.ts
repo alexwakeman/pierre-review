@@ -174,7 +174,7 @@ export const BOT_VENDOR_META: Record<
   // Generic proprietary vendor (user-classified, brand unknown) — neutral tint; like
   // in_house it is NOT branded, so buildBotColorMap gives each one a distinct palette hue.
   vendor: { label: 'Vendor', color: '#71717a' },
-  pierre: { label: 'Pierre · Claude', color: '#d97757' },
+  pierre: { label: 'Limn · Claude', color: '#d97757' },
 };
 
 // Display meta for an automated-reviewer kind (vendor / in-house / Pierre). The one lookup

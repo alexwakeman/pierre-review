@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Wordmark } from './Wordmark';
 
 // The OAuth callback (api/routes/auth.ts) redirects here with ?auth=<reason>
 // when a sign-in doesn't complete, instead of dumping a raw JSON error. Map each
@@ -70,9 +71,7 @@ export function SignInGate(): JSX.Element {
   return (
     <div className="flex h-full min-h-screen w-full items-center justify-center bg-gray-950 px-4 text-gray-100">
       <div className="flex w-full max-w-sm flex-col items-center rounded-2xl border border-gray-800 bg-gray-900/40 px-8 py-10 text-center shadow-xl">
-        <span className="brand-title text-4xl" title="Pierre — a play on “PR”">
-          Pierre
-        </span>
+        <Wordmark className="text-4xl" />
         <p className="mt-4 text-sm text-gray-400">
           Sign in to view your team&rsquo;s GitHub activity — pull requests,
           reviews, and what needs your attention.
@@ -107,7 +106,7 @@ export function SignInGate(): JSX.Element {
                 }`}
               >
                 <GithubMark />
-                Sign in with the Pierre GitHub App
+                Sign in with the Limn GitHub App
               </a>
               <span className="px-1 text-[11px] leading-snug text-amber-500/80">
                 Scope may be limited: private org repos only appear once an org admin

@@ -1,6 +1,7 @@
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
 import { Link } from '../router';
+import { SITE_NAME } from '../lib/site';
 import {
   LEGAL_CONTROLLER,
   LegalNote,
@@ -17,7 +18,7 @@ import {
 // would be both unenforceable and dishonest about the scale of the thing.
 //
 // The two clauses that genuinely matter here are §5 (you are responsible for what you
-// point Pierre at, because it reads other people's repositories with your token) and
+// point Limn at, because it reads other people's repositories with your token) and
 // §7 (AI output is a suggestion, not a review you can rely on).
 
 export default function Terms(): JSX.Element {
@@ -30,13 +31,13 @@ export default function Terms(): JSX.Element {
         <>
           <p>
             These terms cover the hosted service at{' '}
-            <span className="font-mono text-gray-200">pierre-review.com</span>. By signing
+            <span className="font-mono text-ink">pierre-review.com</span>. By signing
             in you agree to them.
           </p>
           <div className="mt-5">
             <LegalNote title="The self-hosted code is under a different licence, not these terms">
               <p>
-                Pierre&apos;s source is published under the Functional Source Licence
+                {SITE_NAME}&apos;s source is published under the Functional Source Licence
                 (FSL-1.1-MIT), which converts to MIT two years after each release. If you
                 clone the repository and run it yourself, that licence governs — not this
                 document. These terms only apply to the version we host for you.
@@ -59,14 +60,14 @@ export default function Terms(): JSX.Element {
 
       <LegalSection id="service" heading="2. What the service does">
         <P>
-          Pierre reads pull-request activity from GitHub repositories you nominate and
+          {SITE_NAME} reads pull-request activity from GitHub repositories you nominate and
           presents it as a dashboard. Some features send content to an AI model to produce
           summaries or reviews. The{' '}
-          <Link to="/features" className="text-brand-sky underline hover:text-sky-300">
+          <Link to="/features" className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text">
             features
           </Link>{' '}
           and{' '}
-          <Link to="/pricing" className="text-brand-sky underline hover:text-sky-300">
+          <Link to="/pricing" className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text">
             pricing
           </Link>{' '}
           pages describe what is included at each tier.
@@ -80,7 +81,7 @@ export default function Terms(): JSX.Element {
       <LegalSection id="account" heading="3. Your account">
         <P>
           You are responsible for activity under your account, and for keeping your GitHub
-          account secure — anyone who controls your GitHub login can sign in to Pierre as
+          account secure — anyone who controls your GitHub login can sign in to {SITE_NAME} as
           you. Tell us at <Mail /> if you believe your account has been misused.
         </P>
         <P>
@@ -121,7 +122,7 @@ export default function Terms(): JSX.Element {
 
       <LegalSection id="acceptable" heading="5. What you must not do">
         <P>
-          The important one first: Pierre reads GitHub using <em>your</em> access token, so
+          The important one first: {SITE_NAME} reads GitHub using <em>your</em> access token, so
           it can reach whatever you can reach.{' '}
           <T>
             You are responsible for having the right to access every repository you add
@@ -154,7 +155,7 @@ export default function Terms(): JSX.Element {
           You keep all rights in your code and your repository content. We claim no
           ownership and no licence beyond what is needed to run the features you use — store
           it, display it back to you, and pass it to the processors listed in the{' '}
-          <Link to="/privacy" className="text-brand-sky underline hover:text-sky-300">
+          <Link to="/privacy" className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text">
             privacy policy
           </Link>
           . We do not use your code or comments to train any model.
@@ -165,7 +166,7 @@ export default function Terms(): JSX.Element {
         <P>
           AI-generated summaries, insights and reviews are <T>suggestions produced by a
           language model</T>. They can be confidently wrong: they miss real bugs, invent
-          problems that do not exist, and misread intent. Nothing Pierre generates is a
+          problems that do not exist, and misread intent. Nothing {SITE_NAME} generates is a
           substitute for human review, and no AI review is ever posted to GitHub without you
           reading it and pressing the button.
         </P>
@@ -181,8 +182,8 @@ export default function Terms(): JSX.Element {
           The service is provided on an <T>as-is, as-available</T> basis, with no uptime
           guarantee and no service-level agreement. It is a small independent product: there
           will be maintenance, and occasionally there will be outages. Data is stored
-          durably by our hosting provider, but <T>you should not treat Pierre as the system
-          of record</T> — GitHub is. Everything Pierre holds can be re-synced from there.
+          durably by our hosting provider, but <T>you should not treat {SITE_NAME} as the system
+          of record</T> — GitHub is. Everything {SITE_NAME} holds can be re-synced from there.
         </P>
       </LegalSection>
 

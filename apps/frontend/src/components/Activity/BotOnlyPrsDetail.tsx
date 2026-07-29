@@ -134,9 +134,9 @@ function Row({
           // instead of offering a dead-end button.
           <span
             className="cursor-help rounded border border-amber-300/60 px-1.5 py-0.5 text-[10px] text-amber-500 dark:border-amber-700/50 dark:text-amber-400/70"
-            title="This review was posted via Pierre with your token, so it has no bot activity to show in the bot feed — open it on GitHub instead."
+            title="This review was posted via Limn with your token, so it has no bot activity to show in the bot feed — open it on GitHub instead."
           >
-            via Pierre
+            via Limn
           </span>
         ) : (
           <button

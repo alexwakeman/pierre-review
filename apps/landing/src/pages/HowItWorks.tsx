@@ -1,103 +1,144 @@
 import type { ReactNode } from 'react';
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
-import { Section, SectionHeading, Eyebrow, Pill, Glow } from '../components/ui';
+import { INSTALL_COMMAND, REPO_URL, SITE_NAME } from '../lib/site';
 import {
-  SyncIcon,
-  LockIcon,
-  BoltIcon,
-  ClockIcon,
-  RouteIcon,
-  ShieldIcon,
-  MapIcon,
-  GitHubMark,
-} from '../components/icons';
+  DashItem,
+  InkButton,
+  MonoLabel,
+  RailGrid,
+  RuledItem,
+  Section,
+} from '../components/feint/primitives';
+import { TerminalPanel } from '../components/feint/Terminal';
 
-const PIPELINE = [
-  { label: 'gh CLI / OAuth', sub: 'token source', accent: 'text-gray-300' },
-  { label: 'GitHub API', sub: 'GraphQL + REST', accent: 'text-brand-sky' },
-  { label: 'Sync', sub: 'every 5 min · idempotent', accent: 'text-brand-blue' },
-  { label: 'SQLite | Postgres', sub: 'local | cloud', accent: 'text-brand-green' },
-  { label: 'Fastify API', sub: 'lean read layer', accent: 'text-brand-amber' },
-  { label: 'React SPA', sub: 'vis-timeline', accent: 'text-brand-purpleSoft' },
+// ---------------------------------------------------------------------------
+// The engineering page — five numbered sections plus the closing CTA.
+//
+// This is the most sceptical audience on the site, so it is laid out as a
+// technical note rather than a product page: a spec table for the pipeline, two
+// ruled feature columns for the deployment split, and running prose everywhere
+// else. Nothing here sells; it explains.
+//
+// WHAT IS GONE, and why:
+//   · the six-box pipeline diagram with rotating arrow SVGs between the boxes —
+//     boxes and icons are both out of the system, and a printed spec table says
+//     the same thing in one column of hairlines.
+//   · the eighteen glass cards (six sync, two deployment, six roadmap, one
+//     security) — each is now a block under a rule.
+//   · the coloured eyebrows above every heading. Sections are introduced by the
+//     rail label instead, which is where the eyebrow copy went ("The sync
+//     pipeline" → the 02 rail, "Security model" → its own folded rail).
+//   · the roadmap's coloured <Pill> tags — the tag is now a mono label.
+//   · the hero <Glow>.
+//
+// NO VERMILION IN THE HEADINGS on this page, deliberately. The colour means "a
+// human is still needed" and no claim on this page is that claim, so its only
+// appearances are the security list's dashes and the link hairlines.
+//
+// All copy is verbatim from the live page, with "Pierre" → SITE_NAME. The
+// `pierre` / `pierre-review` COMMANDS are not renamed — see lib/site.ts.
+// ---------------------------------------------------------------------------
+
+/** An inline identifier in running copy — what a <code> element used to be. */
+function Term({ children }: { children: string }): JSX.Element {
+  return <span className="font-mono text-[16px]">{children}</span>;
+}
+
+const PIPELINE: { label: string; sub: string }[] = [
+  { label: 'gh CLI / OAuth', sub: 'token source' },
+  { label: 'GitHub API', sub: 'GraphQL + REST' },
+  { label: 'Sync', sub: 'every 5 min · idempotent' },
+  { label: 'SQLite | Postgres', sub: 'local | cloud' },
+  { label: 'Fastify API', sub: 'lean read layer' },
+  { label: 'React SPA', sub: 'vis-timeline' },
 ];
 
-const SYNC_CARDS: { icon: (p: { className?: string }) => ReactNode; accent: string; title: string; body: ReactNode }[] = [
+const SYNC: { title: string; body: ReactNode }[] = [
   {
-    icon: ClockIcon,
-    accent: 'text-brand-sky',
     title: 'Triggers',
     body: (
       <>
-        A <code className="font-mono text-gray-300">node-cron</code> job runs every five
-        minutes, plus on repo-add and on a manual deep sync. In the cloud, the periodic pass
-        follows the user: a tenant with no open tab for 15 minutes stops being re-synced, so
-        idle accounts don’t burn API quota. Local is always on.
+        A <Term>node-cron</Term> job runs every five minutes, plus on repo-add and on a
+        manual deep sync. In the cloud, the periodic pass follows the user: a tenant with no
+        open tab for 15 minutes stops being re-synced, so idle accounts don’t burn API
+        quota. Local is always on.
       </>
     ),
   },
   {
-    icon: BoltIcon,
-    accent: 'text-brand-green',
     title: 'Two-phase backfill',
     body: (
       <>
-        A never-synced repo fills in <span className="text-gray-200">seconds</span>: a fast
-        ~14-day foreground pass paints the recent board, then the deep backfill walks back to
-        90 days in the background, continuing the same cursor so no page is fetched twice.
+        A never-synced repo fills in <em>seconds</em>: a fast ~14-day foreground pass paints
+        the recent board, then the deep backfill walks back to 90 days in the background,
+        continuing the same cursor so no page is fetched twice.
       </>
     ),
   },
   {
-    icon: SyncIcon,
-    accent: 'text-brand-blue',
     title: 'Incremental + overlap',
     body: (
       <>
         After that, each run re-walks from the last sync minus a 20-minute overlap. GitHub
-        doesn’t bump a PR’s <code className="font-mono text-gray-300">updatedAt</code> for
-        everything that matters — a CI run finishing, a thread resolving — so the overlap
-        deliberately re-checks the trailing window and reconciles.
+        doesn’t bump a PR’s <Term>updatedAt</Term> for everything that matters — a CI run
+        finishing, a thread resolving — so the overlap deliberately re-checks the trailing
+        window and reconciles.
       </>
     ),
   },
   {
-    icon: RouteIcon,
-    accent: 'text-brand-amber',
     title: 'One fat query',
     body: (
       <>
-        Each repo is one paginated GraphQL query — 25 PRs a page, newest-first — walked until
-        a PR predates the window. Per-commit changed-file paths come from REST and are cached{' '}
-        <span className="text-gray-200">permanently</span>, since a commit SHA is immutable.
+        Each repo is one paginated GraphQL query — 25 PRs a page, newest-first — walked
+        until a PR predates the window. Per-commit changed-file paths come from REST and are
+        cached <em>permanently</em>, since a commit SHA is immutable.
       </>
     ),
   },
   {
-    icon: ShieldIcon,
-    accent: 'text-brand-purpleSoft',
     title: 'Idempotent by structure',
     body: (
       <>
-        Every entity upserts on its GitHub node id; timeline events upsert on a deterministic
-        dedupe key. Re-running — after a crash, a cancel, or an overlapping window — is always
-        safe, because conflict targets reconcile instead of duplicating.
+        Every entity upserts on its GitHub node id; timeline events upsert on a
+        deterministic dedupe key. Re-running — after a crash, a cancel, or an overlapping
+        window — is always safe, because conflict targets reconcile instead of duplicating.
       </>
     ),
   },
   {
-    icon: LockIcon,
-    accent: 'text-brand-sky',
     title: 'Lean storage',
     body: (
       <>
-        By default Pierre skips the bulky, regenerable text — PR descriptions, diff hunks,
-        commit messages — keeping the DB small. It’s hydrated on demand when you open a PR
-        and cached in your browser’s IndexedDB, so an unchanged PR never re-downloads. Flip
-        one flag to store everything for fully-offline detail.
+        By default {SITE_NAME} skips the bulky, regenerable text — PR descriptions, diff
+        hunks, commit messages — keeping the DB small. It’s hydrated on demand when you open
+        a PR and cached in your browser’s IndexedDB, so an unchanged PR never re-downloads.
+        Flip one flag to store everything for fully-offline detail.
       </>
     ),
   },
+];
+
+const LOCAL: ReactNode[] = [
+  'Runs entirely on your machine — SQLite, no hosted backend.',
+  <>
+    Authenticates with your logged-in <Term>gh</Term> CLI; stores no credentials.
+  </>,
+  'One synthesized account; opens straight to the Activity console.',
+  // A plain string, not JSX text — so the ampersand is literal, not `&amp;`.
+  'Runs the Pro intelligence layer, including agentic review & fix (opt-in).',
+  <>
+    <Term>{INSTALL_COMMAND}</Term> and you’re in.
+  </>,
+];
+
+const CLOUD: string[] = [
+  'A public landing, GitHub-App OAuth, per-user accounts.',
+  'Postgres, with every entity owned and isolated by account.',
+  'Encrypted per-user tokens; sessions behind a sealed cookie.',
+  'Self-hostable on Railway from the same image.',
+  'Sync follows active users to keep quota lean.',
 ];
 
 const SECURITY = [
@@ -106,254 +147,267 @@ const SECURITY = [
   'Local mode stores no credentials at all: it borrows your authenticated gh CLI and talks to a SQLite file on your disk.',
 ];
 
-const ROADMAP: { tag: string; tagCls: string; title: string; body: string }[] = [
+const RUN_STEPS: ReactNode[] = [
+  <>
+    It checks for an authenticated <Term>gh</Term> CLI and reads a short-lived token —
+    nothing is written to disk.
+  </>,
+  'It opens a SQLite file under your home directory and runs migrations.',
+  'A single Fastify process serves the API and the SPA, the scheduler starts, and your browser opens to the Activity console.',
+];
+
+const ROADMAP: { tag: string; title: string; body: string }[] = [
   {
     tag: 'AI',
-    tagCls: 'bg-brand-purple/15 text-brand-purpleSoft ring-brand-purple/30',
     title: 'Metered advanced AI',
     body: 'Pay-as-you-go for Claude Review, AI Analysis and AI Fix at API list price — no key of your own required, usage tracked in the same in-app credits.',
   },
   {
     tag: 'AI',
-    tagCls: 'bg-brand-purple/15 text-brand-purpleSoft ring-brand-purple/30',
     title: 'BYO AI endpoints',
     body: 'OpenAI-compatible endpoints — Bedrock, self-hosted, open models — so you choose the model and where your code goes, for cost and privacy control.',
   },
   {
     tag: 'Integrations',
-    tagCls: 'bg-brand-sky/10 text-brand-skySoft ring-brand-sky/30',
     title: 'Deeper Jira/Linear integration',
     body: 'Ticket links on PRs ship today. Next: pulling ticket status and titles into the board, so a stalled PR is visibly a stalled ticket.',
   },
   {
     tag: 'Integrations',
-    tagCls: 'bg-brand-sky/10 text-brand-skySoft ring-brand-sky/30',
     title: 'Email digests',
     body: 'The same sprint report and repo digests that reach Slack today, delivered to an inbox — for the teams whose “one place” isn’t Slack.',
   },
   {
     tag: 'Platform',
-    tagCls: 'bg-brand-green/10 text-green-200 ring-brand-green/30',
     title: 'Hosted cloud Pro rollout',
     body: 'Pro runs in the local and self-hosted deployment today; the hosted cloud tier is rolling out, same features, zero setup.',
   },
   {
     tag: 'Platform',
-    tagCls: 'bg-brand-amber/10 text-amber-200 ring-brand-amber/30',
     title: 'A phone-friendly build',
-    body: 'Pierre is a dense, desktop-first tool today. A responsive build for skimming the feed and triaging “My Turn” from your phone is planned.',
+    body: `${SITE_NAME} is a dense, desktop-first tool today. A responsive build for skimming the feed and triaging “My Turn” from your phone is planned.`,
   },
 ];
 
-function Arrow(): JSX.Element {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className="h-5 w-5 shrink-0 rotate-90 text-gray-600 md:rotate-0"
-    >
-      <path d="M5 12h14M13 6l6 6-6 6" />
-    </svg>
-  );
-}
+// The issue tracker is the one external link on the page. It is a raw <a> rather
+// than <InlineLink> so it keeps target="_blank" — the same shape the footer's
+// GitHub link uses.
+const EXTERNAL_LINK =
+  'border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
 
 export default function HowItWorks(): JSX.Element {
   useSeo(seoFor('/how-it-works'));
 
   return (
     <>
-      {/* hero */}
-      <header className="relative overflow-hidden">
-        <Glow className="absolute -top-24 left-1/2 h-96 w-[40rem] max-w-full -translate-x-1/2 rounded-full bg-brand-green/12 blur-[130px]" />
-        <Section width="default" className="pb-10 pt-16 text-center sm:pt-20">
-          <Eyebrow className="text-brand-green">Under the hood</Eyebrow>
-          <h1 className="mx-auto mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight tracking-tight text-gray-50 sm:text-5xl">
-            One idempotent pipeline, from GitHub to a live board.
-          </h1>
-          <p className="mx-auto mt-5 max-w-2xl text-pretty text-lg leading-relaxed text-gray-400">
-            No webhooks to babysit, no warehouse to feed. Pierre pulls your PR activity on a
-            schedule, stores it leanly, and serves a deliberately thin read layer to the
-            timeline. Here’s the whole machine.
-          </p>
-        </Section>
-      </header>
-
-      {/* pipeline diagram */}
-      <Section width="wide" className="py-8">
-        <ol className="flex flex-col items-stretch justify-center gap-3 md:flex-row md:items-center md:gap-2">
-          {PIPELINE.map((step, i) => (
-            <li key={step.label} className="flex flex-col items-center gap-3 md:flex-row md:gap-2">
-              <div className="flex min-w-[8.5rem] flex-col items-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-center backdrop-blur">
-                <span className={`text-sm font-semibold ${step.accent}`}>{step.label}</span>
-                <span className="mt-0.5 text-[11px] text-gray-500">{step.sub}</span>
-              </div>
-              {i < PIPELINE.length - 1 && <Arrow />}
-            </li>
-          ))}
-        </ol>
-      </Section>
-
-      {/* sync deep dive */}
-      <Section width="wide" className="py-16 sm:py-20">
-        <SectionHeading
-          eyebrow="The sync pipeline"
-          eyebrowClass="text-brand-sky"
-          title="How the board stays current."
-          lead="The sync is the load-bearing part — and it’s built to be boring: safe to re-run, cheap to keep current, and quick to fill a fresh repo."
-        />
-        <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-          {SYNC_CARDS.map((c) => (
-            <div key={c.title} className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-6">
-              <c.icon className={`h-6 w-6 ${c.accent}`} />
-              <h3 className="mt-4 text-base font-semibold text-gray-100">{c.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-gray-400">{c.body}</p>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      {/* local vs cloud */}
-      <section className="relative border-y border-white/5 bg-white/[0.02] py-16 sm:py-20">
-        <Section width="wide">
-          <SectionHeading
-            eyebrow="One codebase, two ways to run"
-            eyebrowClass="text-brand-green"
-            title="Local-first. Cloud when you need it."
-            lead="A single environment variable selects the whole stack. The query layer is written once against a portable async surface, so the same code drives SQLite on your laptop and Postgres on a server."
-          />
-          <div className="mt-12 grid gap-6 lg:grid-cols-2">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-7">
-              <div className="flex items-center gap-2">
-                <BoltIcon className="h-5 w-5 text-brand-green" />
-                <h3 className="text-lg font-bold tracking-tight text-gray-50">Local</h3>
-                <Pill className="bg-brand-green/10 text-green-200 ring-brand-green/30">default</Pill>
-              </div>
-              <ul className="mt-5 space-y-3 text-sm leading-relaxed text-gray-400">
-                <li>• Runs entirely on your machine — SQLite, no hosted backend.</li>
-                <li>• Authenticates with your logged-in <code className="font-mono text-gray-300">gh</code> CLI; stores no credentials.</li>
-                <li>• One synthesized account; opens straight to the Activity console.</li>
-                <li>• Runs the Pro intelligence layer, including agentic review &amp; fix (opt-in).</li>
-                <li>• <code className="font-mono text-gray-300">npx pierre-review</code> and you’re in.</li>
-              </ul>
-            </div>
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-7">
-              <div className="flex items-center gap-2">
-                <LockIcon className="h-5 w-5 text-brand-sky" />
-                <h3 className="text-lg font-bold tracking-tight text-gray-50">Cloud</h3>
-                <Pill className="bg-brand-sky/10 text-brand-skySoft ring-brand-sky/30">multi-tenant</Pill>
-              </div>
-              <ul className="mt-5 space-y-3 text-sm leading-relaxed text-gray-400">
-                <li>• A public landing, GitHub-App OAuth, per-user accounts.</li>
-                <li>• Postgres, with every entity owned and isolated by account.</li>
-                <li>• Encrypted per-user tokens; sessions behind a sealed cookie.</li>
-                <li>• Self-hostable on Railway from the same image.</li>
-                <li>• Sync follows active users to keep quota lean.</li>
-              </ul>
-            </div>
+      {/* ---------- hero ---------- */}
+      <Section divider="none" pad="none" className="pb-12 pt-20">
+        <RailGrid rail={{ word: 'Under the hood' }} cols="one">
+          <div>
+            <h1 className="mb-6 max-w-[26ch] text-pretty font-display text-hero-sm font-semibold text-ink type:text-page-title">
+              One idempotent pipeline, from GitHub to a live board.
+            </h1>
+            <p className="max-w-[62ch] text-lede">
+              No webhooks to babysit, no warehouse to feed. {SITE_NAME} pulls your PR
+              activity on a schedule, stores it leanly, and serves a deliberately thin read
+              layer to the timeline. Here’s the whole machine.
+            </p>
           </div>
+        </RailGrid>
+      </Section>
 
-          {/* security */}
-          <div className="mt-8 rounded-3xl border border-white/10 bg-white/[0.03] p-7">
-            <div className="flex items-center gap-2">
-              <ShieldIcon className="h-5 w-5 text-brand-purpleSoft" />
-              <Eyebrow className="text-brand-purpleSoft">Security model</Eyebrow>
-            </div>
-            <ul className="mt-4 space-y-3">
-              {SECURITY.map((s) => (
-                <li key={s} className="flex gap-3 text-sm leading-relaxed text-gray-400">
-                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-purpleSoft" />
-                  <span>{s}</span>
-                </li>
+      {/* ---------- 01 · pipeline ----------
+          The old diagram's arrows carried no information the reading order does
+          not — stage 01 feeds 02. So it is a numbered spec table. */}
+      <Section>
+        <RailGrid rail={{ n: '01', word: 'Pipeline' }} cols="one">
+          <ol className="max-w-answer border-t border-ink">
+            {PIPELINE.map((stage, i) => (
+              <li
+                key={stage.label}
+                className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-1 border-b border-rule-hair py-3.5"
+              >
+                <span className="flex items-baseline gap-4">
+                  <span className="font-mono text-mono-caption text-secondary">{`0${i + 1}`}</span>
+                  <span className="font-mono text-mono-data text-ink">{stage.label}</span>
+                </span>
+                <span className="font-mono text-mono-caption text-secondary">{stage.sub}</span>
+              </li>
+            ))}
+          </ol>
+        </RailGrid>
+      </Section>
+
+      {/* ---------- 02 · the sync pipeline ---------- */}
+      <Section tone="alt">
+        <RailGrid rail={{ n: '02', word: 'Sync pipeline' }} cols="one">
+          <div>
+            <h2 className="mb-5 font-display text-h2-sm font-semibold text-ink type:text-h2">
+              How the board stays current.
+            </h2>
+            <p className="mb-11 max-w-[64ch] text-lede">
+              The sync is the load-bearing part — and it’s built to be boring: safe to
+              re-run, cheap to keep current, and quick to fill a fresh repo.
+            </p>
+
+            <div className="grid gap-x-grid-gutter gap-y-9 rail:grid-cols-3">
+              {SYNC.map((c) => (
+                // rule-strong, not rule: these sit on the `paper-alt` ground.
+                <div key={c.title} className="border-t border-rule-strong pt-[18px]">
+                  <h3 className="mb-3 font-display text-h4-sm font-semibold text-ink">
+                    {c.title}
+                  </h3>
+                  <p className="text-list">{c.body}</p>
+                </div>
               ))}
-            </ul>
-          </div>
-        </Section>
-      </section>
-
-      {/* run locally */}
-      <Section id="run-locally" width="narrow" className="scroll-mt-24 py-16 sm:py-20">
-        <Eyebrow className="text-brand-green">Run it locally</Eyebrow>
-        <h2 className="mt-3 text-pretty text-2xl font-bold tracking-tight text-gray-50 sm:text-3xl">
-          What happens when you run the command.
-        </h2>
-        <div className="mt-6 flex items-center gap-3 rounded-xl border border-white/10 bg-gray-900/70 px-5 py-4 font-mono text-sm">
-          <span className="select-none text-brand-green">$</span>
-          <code className="text-gray-100">npx pierre-review</code>
-        </div>
-        <ol className="mt-6 space-y-3 text-pretty leading-relaxed text-gray-400">
-          <li>
-            <span className="font-medium text-gray-200">1.</span> It checks for an
-            authenticated <code className="font-mono text-gray-300">gh</code> CLI and reads a
-            short-lived token — nothing is written to disk.
-          </li>
-          <li>
-            <span className="font-medium text-gray-200">2.</span> It opens a SQLite file under
-            your home directory and runs migrations.
-          </li>
-          <li>
-            <span className="font-medium text-gray-200">3.</span> A single Fastify process
-            serves the API and the SPA, the scheduler starts, and your browser opens to the
-            Activity console.
-          </li>
-        </ol>
-        <p className="mt-5 text-sm text-gray-500">
-          Requires Node ≥ 20 and <code className="font-mono text-gray-400">gh auth login</code>.
-          Installed globally? The short <code className="font-mono text-gray-400">pierre</code>{' '}
-          command does the same.
-        </p>
-      </Section>
-
-      {/* roadmap */}
-      <Section id="roadmap" width="wide" className="scroll-mt-24 py-16 sm:py-20">
-        <div className="flex items-center justify-center gap-2">
-          <MapIcon className="h-6 w-6 text-brand-amber" />
-          <Eyebrow className="text-brand-amber">Future work</Eyebrow>
-        </div>
-        <SectionHeading
-          title="What’s next."
-          lead="Pierre is useful today, and deliberately scoped. Here’s where it’s heading — listed because it’s planned, not because it’s done."
-        />
-        <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-          {ROADMAP.map((r) => (
-            <div key={r.title} className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-6">
-              <Pill className={r.tagCls}>{r.tag}</Pill>
-              <h3 className="mt-4 text-base font-semibold text-gray-100">{r.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-gray-400">{r.body}</p>
             </div>
-          ))}
-        </div>
-        <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-gray-500">
-          Want something Pierre doesn’t do yet?{' '}
-          <a
-            href="https://github.com/alexwakeman/pierre-review/issues"
-            target="_blank"
-            rel="noreferrer noopener"
-            className="text-gray-400 underline-offset-2 hover:underline"
-          >
-            Open an issue
-          </a>
-          .
-        </p>
+          </div>
+        </RailGrid>
       </Section>
 
-      {/* final CTA */}
-      <Section width="narrow" className="py-16 text-center">
-        <h2 className="text-pretty text-2xl font-bold tracking-tight text-gray-50 sm:text-3xl">
-          Ready to see your team on one board?
-        </h2>
-        <div className="mt-7 flex justify-center">
-          <a
-            href="/api/auth/login"
-            className="inline-flex items-center gap-2.5 rounded-xl bg-gradient-to-r from-brand-blueDeep to-brand-blue px-6 py-3.5 text-base font-semibold text-white shadow-sky-glow transition hover:from-brand-blue hover:to-brand-sky"
-          >
-            <GitHubMark className="h-5 w-5" />
-            Sign in with GitHub
-          </a>
+      {/* ---------- 03 · local vs cloud ---------- */}
+      <Section>
+        <RailGrid rail={{ n: '03', word: 'Two modes' }} cols="one">
+          <div>
+            <h2 className="mb-5 font-display text-h2-sm font-semibold text-ink type:text-h2">
+              Local-first. Cloud when you need it.
+            </h2>
+            <p className="mb-11 max-w-[64ch] text-lede">
+              A single environment variable selects the whole stack. The query layer is
+              written once against a portable async surface, so the same code drives SQLite
+              on your laptop and Postgres on a server.
+            </p>
+
+            {/* Two ruled columns under equal ink rules — the pricing-tier shape,
+                but with no promotion: neither mode is the recommended one. */}
+            <div className="grid gap-grid-gutter rail:grid-cols-2">
+              <div className="border-t border-ink pt-[26px]">
+                <div className="mb-5 flex items-baseline justify-between gap-4">
+                  <h3 className="font-display text-h3 font-semibold text-ink">Local</h3>
+                  <MonoLabel className="text-secondary">default</MonoLabel>
+                </div>
+                <ul className="flex flex-col">
+                  {LOCAL.map((item, i) => (
+                    <RuledItem key={i} last={i === LOCAL.length - 1}>
+                      {item}
+                    </RuledItem>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="border-t border-ink pt-[26px]">
+                <div className="mb-5 flex items-baseline justify-between gap-4">
+                  <h3 className="font-display text-h3 font-semibold text-ink">Cloud</h3>
+                  <MonoLabel className="text-secondary">multi-tenant</MonoLabel>
+                </div>
+                <ul className="flex flex-col">
+                  {CLOUD.map((item, i) => (
+                    <RuledItem key={item} last={i === CLOUD.length - 1}>
+                      {item}
+                    </RuledItem>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </RailGrid>
+
+        {/* the security model — folded under the same section, under a rule */}
+        <RailGrid
+          rail={{ word: 'Security model' }}
+          cols="one"
+          className="mt-14 border-t border-rule pt-10"
+        >
+          <ul className="flex max-w-answer flex-col gap-3.5">
+            {SECURITY.map((s) => (
+              <DashItem key={s}>{s}</DashItem>
+            ))}
+          </ul>
+        </RailGrid>
+      </Section>
+
+      {/* ---------- 04 · run locally ---------- */}
+      <Section id="run-locally">
+        <RailGrid rail={{ n: '04', word: 'Run locally' }}>
+          <div>
+            <h2 className="mb-7 font-display text-h2-sm font-semibold text-ink type:text-h2">
+              What happens when you run the command.
+            </h2>
+
+            <div className="mb-6 flex flex-col gap-3.5">
+              {RUN_STEPS.map((step, i) => (
+                <div
+                  key={i}
+                  className={`flex items-baseline gap-4 ${
+                    i === RUN_STEPS.length - 1 ? '' : 'border-b border-rule-hair pb-3'
+                  }`}
+                >
+                  <span className="font-mono text-mono-caption text-secondary">{`0${i + 1}`}</span>
+                  <span className="text-list">{step}</span>
+                </div>
+              ))}
+            </div>
+
+            <p className="max-w-caption text-list text-muted">
+              Requires Node ≥ 20 and <Term>gh auth login</Term>. Installed globally? The
+              short <Term>pierre</Term> command does the same.
+            </p>
+          </div>
+
+          <TerminalPanel label="zsh · ~/work" command={INSTALL_COMMAND} cursor />
+        </RailGrid>
+      </Section>
+
+      {/* ---------- 05 · roadmap ---------- */}
+      <Section id="roadmap">
+        <RailGrid rail={{ n: '05', word: 'Roadmap' }} cols="one">
+          <div>
+            <h2 className="mb-5 font-display text-h2-sm font-semibold text-ink type:text-h2">
+              What’s next.
+            </h2>
+            <p className="mb-11 max-w-[64ch] text-lede">
+              {SITE_NAME} is useful today, and deliberately scoped. Here’s where it’s
+              heading — listed because it’s planned, not because it’s done.
+            </p>
+
+            {/* Two columns, so each tag's pair sits on one row. */}
+            <div className="grid gap-x-grid-gutter gap-y-9 rail:grid-cols-2">
+              {ROADMAP.map((r) => (
+                <div key={r.title} className="border-t border-rule pt-[18px]">
+                  <MonoLabel className="mb-3 text-secondary">{r.tag}</MonoLabel>
+                  <h3 className="mb-3 font-display text-h4-sm font-semibold text-ink">
+                    {r.title}
+                  </h3>
+                  <p className="text-list">{r.body}</p>
+                </div>
+              ))}
+            </div>
+
+            <p className="mt-10 max-w-answer text-body-sm">
+              Want something {SITE_NAME} doesn’t do yet?{' '}
+              <a
+                href={`${REPO_URL}/issues`}
+                target="_blank"
+                rel="noreferrer noopener"
+                className={EXTERNAL_LINK}
+              >
+                Open an issue
+              </a>
+              .
+            </p>
+          </div>
+        </RailGrid>
+      </Section>
+
+      {/* ---------- final CTA ---------- */}
+      <Section divider="ink" pad="lg">
+        <div className="flex flex-col gap-10 rail:flex-row rail:items-end rail:justify-between rail:gap-14">
+          <h2 className="max-w-[22ch] font-display text-h2-sm font-semibold text-ink type:text-cta">
+            Ready to see your team on one board?
+          </h2>
+          <div className="shrink-0">
+            <InkButton to="/api/auth/login">Sign in with GitHub</InkButton>
+          </div>
         </div>
       </Section>
     </>

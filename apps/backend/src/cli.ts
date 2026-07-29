@@ -323,8 +323,8 @@ async function main(): Promise<void> {
   const url = isCloud ? `${base}/` : `${base}/app`;
 
   // ── banner ────────────────────────────────────────────────────────────────
-  const { PIERRE_ASCII, TAGLINE } = await import('./ascii.js');
-  console.log(cyan(PIERRE_ASCII));
+  const { LIMN_ASCII, TAGLINE } = await import('./ascii.js');
+  console.log(cyan(LIMN_ASCII));
   console.log(`  ${dim(isCloud ? 'cloud mode — multi-tenant' : TAGLINE)}`);
   console.log('');
   console.log(`  ${cyan('▸')} ${bold(url)}`);

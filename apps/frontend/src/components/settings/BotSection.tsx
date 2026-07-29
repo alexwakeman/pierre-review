@@ -135,16 +135,16 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
         />
       </SectionShell>
 
-      <SectionShell title="Pierre attribution" desc="How Pierre's own Claude reviews are stamped when posted.">
+      <SectionShell title="Limn attribution" desc="How Limn's own Claude reviews are stamped when posted.">
         <Toggle
-          label="Tag Pierre reviews"
-          hint="Append a hidden marker so Pierre-posted reviews are recognised as its own (verbatim vs curated)."
+          label="Tag Limn reviews"
+          hint="Append a hidden marker so Limn-posted reviews are recognised as its own (verbatim vs curated)."
           checked={tagPierre}
           onChange={setTagPierre}
         />
         <Toggle
           label="Visible footer"
-          hint={'Also append a visible "Reviewed with Pierre + Claude" footer to posted reviews.'}
+          hint={'Also append a visible "Reviewed with Limn + Claude" footer to posted reviews.'}
           checked={pierreFooter}
           onChange={setPierreFooter}
         />

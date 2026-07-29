@@ -2,23 +2,79 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ---- brand wordmark font, SELF-HOSTED ---- */
-/* Great Vibes (SIL Open Font License 1.1) is bundled rather than fetched from
-   Google Fonts: a fonts.gstatic.com request discloses every visitor's IP + UA to
-   Google before they have consented to anything, which is exactly the kind of
-   third-party transfer the cookie banner exists to gate. Self-hosting removes the
-   transfer entirely (nothing to consent to) and keeps the CSP at 'self' — see
-   apps/backend/src/api/plugins/security.ts. Latin subset only. */
+/* ---- typefaces, SELF-HOSTED ------------------------------------------------
+   Archivo (display), Newsreader (body), JetBrains Mono (labels/data/nav) — all
+   SIL Open Font License 1.1, latin subset, static cuts.
+
+   These are BUNDLED, never fetched from Google, and that is not a preference:
+
+     1. `font-src 'self'` on the landing CSP (apps/backend/src/api/plugins/
+        security.ts) blocks fonts.gstatic.com outright.
+     2. `style-src 'self' 'unsafe-inline'` does NOT permit a <link> to
+        fonts.googleapis.com — 'unsafe-inline' covers inline style CONTENT, not a
+        foreign host.
+     3. security.test.ts asserts the `font-src 'self'` directive, so allowlisting
+        a font CDN fails CI before it ever reaches a browser.
+
+   Beyond the CSP it is a GDPR requirement: a fonts.gstatic.com request discloses
+   every visitor's IP + UA to Google BEFORE they have consented to anything, which
+   is exactly the third-party transfer the cookie banner exists to gate — and it
+   would break local mode's no-phone-home promise. Google Fonts also wants a
+   <link ... onload="this.media='all'"> handler, which would force
+   script-src 'unsafe-inline' into the CSP.
+
+   The design bundle's own mock uses the forbidden <link>; that is prototype
+   scaffolding, and its README says "self-host or subset".
+
+   STATIC CUTS, NOT VARIABLE FONTS. Measured on the real latin subsets: five
+   static files total 96,612 B, whereas the variable equivalents total 354,328 B
+   — Newsreader's two-axis (opsz + wght) roman+italic pair alone is 278,908 B.
+   The cost of that choice is that tokens.json's "Newsreader — optical sizing on"
+   cannot be honoured (`opsz` is a variable axis, so `font-optical-sizing` is a
+   no-op here). At a single 17–22px reading size that is not a visible loss.
+
+   The url() paths MUST stay relative. Vite hashes these and rewrites the
+   reference prefixed by the app's `base` — an absolute '/fonts/x.woff2' would
+   resolve outside the base and 404. */
 @font-face {
-  font-family: 'Great Vibes';
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/archivo-latin-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/archivo-latin-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url('./fonts/great-vibes-latin-400.woff2') format('woff2');
+  src: url('./fonts/newsreader-latin-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/newsreader-latin-400-italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/jetbrains-mono-latin-400.woff2') format('woff2');
 }
 
 :root {
-  color-scheme: dark;
+  /* Light-only. The previous site was `dark`; the Feint direction is paper. */
+  color-scheme: light;
 }
 
 html,
@@ -27,53 +83,34 @@ body {
 }
 
 body {
-  @apply bg-gray-950 text-gray-100;
-  font-family:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  @apply bg-paper font-serif text-body text-ink-body;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/* ---- brand wordmark ("Pierre") ----
-   Ornate cursive title. Great Vibes ships a single 400 weight, so we never
-   bolden it (faux-bold mangles the script). line-height:1 keeps the tall glyphs
-   compact. Size is controlled per-use via Tailwind text-* on the element. */
-.brand-title {
-  font-family: 'Great Vibes', ui-serif, cursive;
-  font-weight: 400;
-  line-height: 1;
-  letter-spacing: 0.3px;
+/* ---- native disclosure (the pricing FAQ) ----
+   The FAQ is native <details>/<summary> so keyboard behaviour and the no-JS case
+   come free. These two rules only remove the UA's default triangle — the +/−
+   glyph is rendered in the markup and swapped with Tailwind's `group-open:`
+   variant, so there is no JS and no custom accordion. */
+details > summary {
+  list-style: none;
+  cursor: pointer;
+}
+details > summary::-webkit-details-marker {
+  display: none;
 }
 
-/* ---- hero intro: terminal prompt caret ----
-   A solid block caret in the brand sky colour that hard-blinks like a terminal
-   cursor (steps(1) = no fade). Sized in the prompt's own em/ch so it tracks the
-   monospace "PR". The HeroWordmark JS drives the letter deletion + the cursive
-   cross-fade; this only animates the blink. */
-.hero-caret {
-  display: inline-block;
-  width: 0.1em;
-  height: 0.92em;
-  margin-left: 0.16em;
-  background: #38bdf8;
-  animation: hero-caret-blink 1s steps(1, end) infinite;
-}
-
-@keyframes hero-caret-blink {
-  0%,
-  50% {
-    opacity: 1;
-  }
-  50.01%,
-  100% {
-    opacity: 0;
-  }
-}
-
+/* ---- motion ----
+   "The site does not move. Motion is the game's job." The only animation on the
+   site proper is the terminal caret blink; everything else is a 120ms colour
+   fade on links and buttons. Under reduced motion the caret renders solid. */
 @media (prefers-reduced-motion: reduce) {
-  /* The component already skips straight to the cursive wordmark, but belt-and-
-     suspenders: never blink for reduced-motion users. */
-  .hero-caret {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
   }
 }

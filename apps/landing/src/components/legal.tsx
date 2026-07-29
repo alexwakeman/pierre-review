@@ -1,10 +1,15 @@
 import type { ReactNode } from 'react';
 
 // Shared shell + typography for the legal pages (Privacy, Cookies, Terms).
-// Deliberately plain: no glows, no screenshots, no marketing voice. These pages are
-// read when something has gone wrong or when a procurement checklist demands them,
-// and both audiences want a wide measure, real headings and a visible last-updated
-// date — not a hero.
+// Deliberately plain: no figures, no screenshots, no marketing voice. These pages
+// are read when something has gone wrong or when a procurement checklist demands
+// them, and both audiences want a wide measure, real headings and a visible
+// last-updated date — not a hero.
+//
+// Ported to the Feint language: paper, hairlines, a Newsreader reading column and
+// Archivo headings. Note that NOTHING here uses vermilion except an in-copy link
+// rule — the signal colour means "a human is still needed" and a privacy note is
+// not that.
 
 /** Single source of truth for the "last updated" line on every legal page. */
 export const LEGAL_LAST_UPDATED = '26 July 2026';
@@ -23,14 +28,14 @@ export function LegalPage({
   children: ReactNode;
 }): JSX.Element {
   return (
-    <div className="mx-auto max-w-3xl px-5 py-16 sm:px-6 sm:py-24">
-      <h1 className="text-3xl font-bold tracking-tight text-gray-50 sm:text-4xl">
+    <div className="max-w-[78ch] px-gutter py-16">
+      <h1 className="font-display text-h2-sm font-semibold text-ink type:text-h2-minor">
         {title}
       </h1>
-      <p className="mt-3 text-xs uppercase tracking-wider text-gray-500">
+      <p className="mt-3.5 font-mono text-mono-label uppercase text-secondary">
         Last updated {LEGAL_LAST_UPDATED}
       </p>
-      <div className="mt-6 text-[15px] leading-relaxed text-gray-300">{intro}</div>
+      <div className="mt-6 space-y-3.5 text-body-sm">{intro}</div>
       <div className="mt-10 space-y-10">{children}</div>
     </div>
   );
@@ -46,11 +51,9 @@ export function LegalSection({
   children: ReactNode;
 }): JSX.Element {
   return (
-    <section id={id} className="scroll-mt-24">
-      <h2 className="text-xl font-semibold text-gray-100">{heading}</h2>
-      <div className="mt-3 space-y-3 text-[15px] leading-relaxed text-gray-300">
-        {children}
-      </div>
+    <section id={id} className="scroll-mt-16 border-t border-rule pt-7">
+      <h2 className="font-display text-h4 font-semibold text-ink">{heading}</h2>
+      <div className="mt-3.5 space-y-3.5 text-body-sm">{children}</div>
     </section>
   );
 }
@@ -60,16 +63,12 @@ export function P({ children }: { children: ReactNode }): JSX.Element {
 }
 
 export function UL({ children }: { children: ReactNode }): JSX.Element {
-  return (
-    <ul className="ml-5 list-disc space-y-2 text-[15px] leading-relaxed text-gray-300">
-      {children}
-    </ul>
-  );
+  return <ul className="ml-5 list-disc space-y-2 text-body-sm">{children}</ul>;
 }
 
 /** An emphasised term at the start of a bullet, e.g. "**Your GitHub identity** — …". */
 export function T({ children }: { children: ReactNode }): JSX.Element {
-  return <span className="font-semibold text-gray-100">{children}</span>;
+  return <span className="font-display font-semibold text-ink">{children}</span>;
 }
 
 /**
@@ -84,12 +83,15 @@ export function LegalTable({
   rows: ReactNode[][];
 }): JSX.Element {
   return (
-    <div className="overflow-x-auto rounded-lg border border-white/10">
-      <table className="w-full min-w-[36rem] border-collapse text-left text-sm">
+    <div className="overflow-x-auto border border-rule">
+      <table className="w-full min-w-[36rem] border-collapse text-left text-list">
         <thead>
-          <tr className="border-b border-white/10 bg-white/[0.03]">
+          <tr className="border-b border-rule bg-paper-alt">
             {columns.map((c) => (
-              <th key={c} className="px-3 py-2.5 font-semibold text-gray-200">
+              <th
+                key={c}
+                className="px-3.5 py-3 font-mono text-mono-label uppercase text-secondary"
+              >
                 {c}
               </th>
             ))}
@@ -97,9 +99,9 @@ export function LegalTable({
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr key={i} className="border-b border-white/5 last:border-0 align-top">
+            <tr key={i} className="border-b border-rule-hair align-top last:border-0">
               {row.map((cell, j) => (
-                <td key={j} className="px-3 py-2.5 text-gray-300">
+                <td key={j} className="px-3.5 py-3">
                   {cell}
                 </td>
               ))}
@@ -120,11 +122,9 @@ export function LegalNote({
   children: ReactNode;
 }): JSX.Element {
   return (
-    <div className="rounded-lg border border-brand-sky/25 bg-brand-sky/[0.06] p-4">
-      <p className="text-sm font-semibold text-sky-200">{title}</p>
-      <div className="mt-1.5 space-y-2 text-sm leading-relaxed text-gray-300">
-        {children}
-      </div>
+    <div className="border-t border-ink bg-paper-alt px-5 py-4">
+      <p className="font-mono text-mono-label uppercase text-secondary">{title}</p>
+      <div className="mt-2.5 space-y-2 text-list">{children}</div>
     </div>
   );
 }
@@ -133,7 +133,7 @@ export function Mail(): JSX.Element {
   return (
     <a
       href={`mailto:${LEGAL_CONTACT_EMAIL}`}
-      className="text-brand-sky underline hover:text-sky-300"
+      className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
     >
       {LEGAL_CONTACT_EMAIL}
     </a>

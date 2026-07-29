@@ -3,22 +3,23 @@
 @tailwind utilities;
 
 /* ---- brand wordmark font, SELF-HOSTED ---- */
-/* Great Vibes (SIL Open Font License 1.1) is bundled rather than fetched from
-   Google Fonts. Two reasons, both load-bearing:
+/* Archivo (SIL Open Font License 1.1) is bundled rather than fetched from Google
+   Fonts. Two reasons, both load-bearing:
      • Privacy — a fonts.gstatic.com request discloses the viewer's IP + UA to
        Google on every page load. In LOCAL mode that silently broke the
        "no phone-home" promise; on the public site it is a third-party transfer
        that would need consent + disclosure under GDPR.
      • CSP — self-hosting lets script-src/style-src/font-src stay 'self' instead
        of allowlisting two Google origins (see api/plugins/security.ts).
-   Only the LATIN subset is shipped (the wordmark is "Pierre"); the relative
-   url() lets Vite fingerprint + base-prefix it, so it resolves under /app/. */
+   Only the LATIN subset is shipped; the relative url() lets Vite fingerprint +
+   base-prefix it, so it resolves under /app/. Weight 600 only — the wordmark is
+   the single thing this face is here for. */
 @font-face {
-  font-family: 'Great Vibes';
+  font-family: 'Archivo';
   font-style: normal;
-  font-weight: 400;
+  font-weight: 600;
   font-display: swap;
-  src: url('./fonts/great-vibes-latin-400.woff2') format('woff2');
+  src: url('./fonts/archivo-latin-600.woff2') format('woff2');
 }
 
 :root {
@@ -38,24 +39,17 @@ body {
     ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* ---- brand wordmark ("Pierre") ---- */
-/* Ornate cursive title in the top-left header. Great Vibes is a single 400 weight,
-   so we never bolden it (faux-bold mangles the script). line-height:1 keeps the
-   header compact despite the tall glyphs; the slight size bump gives the flourish
-   room to read. Swap the family here + the <link> in index.html for another script
-   (e.g. 'Pinyon Script', 'Parisienne', 'Tangerine'). */
+/* ---- brand wordmark ---- */
+/* Set in Archivo 600 with tight tracking, matching the marketing site exactly —
+   the two are the same mark and must not drift. Unlike the cursive face this
+   replaced, Archivo needs no baseline nudge: its metrics box and its ink agree,
+   so the header centres it correctly on its own. */
 .brand-title {
-  font-family: 'Great Vibes', ui-serif, cursive;
-  font-weight: 400;
-  font-size: 1.75rem;
+  font-family: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 1.3125rem;
   line-height: 1;
-  letter-spacing: 0.3px;
-  /* Great Vibes reserves a large descent (~11px) for flourishes that "Pierre" doesn't
-     use (actual ink descent ~1px), so the baseline sits low and the wordmark's ink
-     rides high in its line box — leaving the flex-centred box optically top-heavy in
-     the header. Nudge the glyphs DOWN so the INK (not the metrics box) is centred.
-     translateY keeps layout/header height untouched (unlike padding). */
-  transform: translateY(5px);
+  letter-spacing: -0.02em;
   /* Brand mark, not selectable text — show the default arrow, not the I-beam caret. */
   cursor: default;
   user-select: none;

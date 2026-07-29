@@ -1,11 +1,11 @@
 {
-  "name": "Pierre — team GitHub activity, at a glance",
-  "short_name": "Pierre",
+  "name": "Limn — team GitHub activity, at a glance",
+  "short_name": "Limn",
   "description": "A timeline-first dashboard for tracking a team's GitHub activity across repositories.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#030712",
-  "theme_color": "#0b1020",
+  "background_color": "#FAFAF8",
+  "theme_color": "#FAFAF8",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },

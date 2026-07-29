@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0b1020" />
+    <meta name="theme-color" content="#FAFAF8" />
 
     <!-- Primary SEO. Everything between the seo:start/seo:end markers is REPLACED
          per route at build time by prerender.mjs, from the ROUTE_SEO table in
@@ -12,38 +12,38 @@
          written here is the home-page copy and the dev-server fallback; keep the
          markers, and keep the copy in sync with ROUTE_SEO['/']. -->
     <!-- seo:start -->
-    <title>Pierre — the calm layer above your review bot</title>
+    <title>Limn — the calm layer above your review bot</title>
     <meta
       name="description"
-      content="Bring your own reviewer. Pierre is the cross-repo layer above CodeRabbit, Greptile and Copilot — what’s stalled, whose turn it is, and which of the bot’s comments a human still needs to read."
+      content="Bring your own reviewer. Limn is the cross-repo layer above CodeRabbit, Greptile and Copilot — what’s stalled, whose turn it is, and which of the bot’s comments a human still needs to read."
     />
     <meta name="robots" content="index, follow" />
 
     <!-- Open Graph / Twitter (home defaults; useSeo() sets per-route title/desc/url). -->
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Pierre" />
-    <meta property="og:title" content="Pierre — the calm layer above your review bot" />
+    <meta property="og:site_name" content="Limn" />
+    <meta property="og:title" content="Limn — the calm layer above your review bot" />
     <meta
       property="og:description"
-      content="Your review bot flags 40 things; Pierre shows you the 3 that matter. The calm, cross-repo triage layer above CodeRabbit, Greptile and Copilot — with the AI spend you control."
+      content="Your review bot flags 40 things; Limn shows you the 3 that matter. The calm, cross-repo triage layer above CodeRabbit, Greptile and Copilot — with the AI spend you control."
     />
     <meta property="og:image" content="https://pierre-review.com/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="The Pierre timeline dashboard showing pull-request activity across a team’s repositories."
+      content="The Limn timeline dashboard showing pull-request activity across a team’s repositories."
     />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Pierre — the calm layer above your review bot" />
+    <meta name="twitter:title" content="Limn — the calm layer above your review bot" />
     <meta
       name="twitter:description"
-      content="Your review bot flags 40 things; Pierre shows you the 3 that matter. The calm, cross-repo triage layer above CodeRabbit, Greptile and Copilot — with the AI spend you control."
+      content="Your review bot flags 40 things; Limn shows you the 3 that matter. The calm, cross-repo triage layer above CodeRabbit, Greptile and Copilot — with the AI spend you control."
     />
     <meta name="twitter:image" content="https://pierre-review.com/og-image.png" />
     <meta
       name="twitter:image:alt"
-      content="The Pierre timeline dashboard showing pull-request activity across a team’s repositories."
+      content="The Limn timeline dashboard showing pull-request activity across a team’s repositories."
     />
     <!-- seo:end -->
 
@@ -54,7 +54,12 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
 
-    <!-- Structured data: helps search engines understand what Pierre is. -->
+    <!-- Structured data: helps search engines understand what Limn is.
+         LANDMINE: this block sits OUTSIDE the seo:start/end markers, so the
+         prerenderer copies it verbatim into EVERY route — /privacy and /terms ship
+         these prices too. It is a second, site-wide copy of both the product name
+         and the price; when either changes it must change here as well as in
+         src/lib/routes.ts, src/lib/site.ts and src/pages/Pricing.tsx. -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -62,7 +67,7 @@
           {
             "@type": "Organization",
             "@id": "https://pierre-review.com/#org",
-            "name": "Pierre",
+            "name": "Limn",
             "url": "https://pierre-review.com/",
             "logo": "https://pierre-review.com/icon-512.png",
             "sameAs": ["https://github.com/alexwakeman/pierre-review"]
@@ -70,13 +75,13 @@
           {
             "@type": "WebSite",
             "@id": "https://pierre-review.com/#site",
-            "name": "Pierre",
+            "name": "Limn",
             "url": "https://pierre-review.com/",
             "publisher": { "@id": "https://pierre-review.com/#org" }
           },
           {
             "@type": "SoftwareApplication",
-            "name": "Pierre",
+            "name": "Limn",
             "applicationCategory": "DeveloperApplication",
             "operatingSystem": "Web, macOS, Linux, Windows",
             "description": "A timeline-first dashboard for tracking a team’s GitHub activity across repositories — sprint situational awareness, PR triage, team insights, flow metrics, and human-in-the-loop AI review.",
@@ -86,7 +91,7 @@
               "@type": "AggregateOffer",
               "priceCurrency": "USD",
               "lowPrice": "0",
-              "highPrice": "5",
+              "highPrice": "15",
               "offerCount": "2",
               "offers": [
                 {
@@ -99,12 +104,12 @@
                 {
                   "@type": "Offer",
                   "name": "Pro",
-                  "description": "The intelligence layer: AI summaries, team Insights, flow metrics, Slack digests and My Turn. $5 per month.",
-                  "price": "5",
+                  "description": "The intelligence layer: AI summaries, team Insights, flow metrics, Slack digests and My Turn. $15 per month.",
+                  "price": "15",
                   "priceCurrency": "USD",
                   "priceSpecification": {
                     "@type": "UnitPriceSpecification",
-                    "price": "5",
+                    "price": "15",
                     "priceCurrency": "USD",
                     "billingIncrement": 1,
                     "unitText": "MONTH"
@@ -118,28 +123,18 @@
       }
     </script>
 
-    <!-- Brand wordmark font (the "Pierre" title) is SELF-HOSTED: the @font-face is
-         in src/index.css and the .woff2 ships from src/fonts/. This replaced a
-         cross-origin Google Fonts <link> that (a) disclosed every visitor's IP to
-         Google before any consent was given, and (b) needed an inline
-         onload="this.media='all'" handler — which would have forced
-         script-src 'unsafe-inline' into the CSP. Same-origin + font-display:swap
-         keeps it off the critical path without the inline handler.
-         Great Vibes ships a single 400 weight — never bolden it. -->
-    <style>
-      /* Splash caret blink (matches the in-app HeroWordmark caret) — defined inline
-         so the pre-React splash can blink before the bundled CSS loads. */
-      @keyframes pierre-splash-caret {
-        0%,
-        50% {
-          opacity: 1;
-        }
-        50.01%,
-        100% {
-          opacity: 0;
-        }
-      }
-    </style>
+    <!-- The three typefaces (Archivo, Newsreader, JetBrains Mono) are SELF-HOSTED:
+         the @font-face blocks live in src/index.css and the .woff2 files ship from
+         src/fonts/. They are never fetched from Google, for three independent
+         reasons — `font-src 'self'` in the landing CSP blocks fonts.gstatic.com,
+         `style-src 'self' 'unsafe-inline'` does not permit a <link> to
+         fonts.googleapis.com, and a test pins that directive so it fails CI before
+         a browser ever sees it. On top of that it is a GDPR requirement: a gstatic
+         request discloses every visitor's IP to Google before consent, and Google
+         Fonts' recommended <link ... onload="this.media='all'"> would force
+         script-src 'unsafe-inline'. Same-origin + font-display:swap keeps them off
+         the critical path with no inline handler.
+         See apps/backend/src/api/plugins/security.ts. -->
   </head>
   <body>
     <!-- Everything between app:start/app:end is REPLACED at build time by
@@ -150,21 +145,19 @@
          replaced the splash below.
 
          What survives here is the DEV-server fallback (prerender.mjs only rewrites
-         the built dist/): an instant splash so mobile Safari paints immediately
-         instead of a white screen, opening on the same terminal "PR" prompt the
-         HeroWordmark animation starts from. -->
+         the built dist/): a plain wordmark on paper, so the first paint is already
+         the right colour instead of a white flash. It is set in system-ui rather
+         than Archivo because the bundled font has not loaded at this point — and it
+         carries no animation, because the site does not move. -->
     <div id="root">
       <!-- app:start -->
       <div
-        style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #030712; color: #f3f4f6"
+        style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #fafaf8; color: #16161a"
       >
         <span
-          style="display: inline-flex; align-items: center; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; font-size: 3rem; line-height: 1; letter-spacing: 0.04em"
+          style="font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 21px; font-weight: 600; letter-spacing: -0.02em"
+          >Limn<span style="color: #c13a20">.</span></span
         >
-          PR<span
-            style="display: inline-block; width: 0.1em; height: 0.92em; margin-left: 0.16em; background: #38bdf8; animation: pierre-splash-caret 1s steps(1, end) infinite"
-          ></span>
-        </span>
       </div>
       <!-- app:end -->
     </div>

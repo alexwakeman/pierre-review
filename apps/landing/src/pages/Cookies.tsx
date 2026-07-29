@@ -4,6 +4,7 @@ import { seoFor } from '../lib/routes';
 import { Link } from '../router';
 import { resetConsent, consentChoice } from '../lib/consent';
 import { revokeAnalytics } from '../lib/analytics';
+import { SITE_NAME } from '../lib/site';
 import {
   LegalNote,
   LegalPage,
@@ -38,7 +39,7 @@ export default function Cookies(): JSX.Element {
       intro={
         <>
           <p>
-            Pierre sets four cookies in total. Two are needed to keep you signed in, one
+            {SITE_NAME} sets four cookies in total. Two are needed to keep you signed in, one
             exists for ten minutes during a GitHub sign-in, and one is analytics — which
             only ever appears if you agreed to it.
           </p>
@@ -54,7 +55,7 @@ export default function Cookies(): JSX.Element {
               <button
                 type="button"
                 onClick={change}
-                className="mt-2 rounded-lg border border-white/15 bg-white/5 px-3.5 py-1.5 text-sm font-semibold text-gray-200 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-sky"
+                className="mt-2 border border-ink px-4 py-2 font-display text-[15px] font-semibold text-ink transition-colors duration-hover ease-standard hover:bg-ink hover:text-paper focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
               >
                 Change my choice
               </button>
@@ -94,7 +95,7 @@ export default function Cookies(): JSX.Element {
           ]}
         />
         <P>
-          Pierre also uses your browser&apos;s <T>local storage</T> — not cookies — to
+          {SITE_NAME} also uses your browser&apos;s <T>local storage</T> — not cookies — to
           remember interface preferences (which rows you collapsed, how tall the detail
           pane is, your cookie choice itself) and to cache pull-request detail so the app
           feels fast. None of it is transmitted anywhere and it never leaves your device.
@@ -111,7 +112,7 @@ export default function Cookies(): JSX.Element {
           thrown away seconds later. That is why they are set without asking.
         </P>
         <P>
-          If you would rather not have them at all, run Pierre locally instead. There is no
+          If you would rather not have them at all, run {SITE_NAME} locally instead. There is no
           session, no sign-in and no server.
         </P>
       </LegalSection>
@@ -142,7 +143,7 @@ export default function Cookies(): JSX.Element {
         <P>
           Google is the recipient of this data and acts as our processor; the transfer is to
           the United States. See §§2 and 5 of the{' '}
-          <Link to="/privacy" className="text-brand-sky underline hover:text-sky-300">
+          <Link to="/privacy" className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text">
             privacy policy
           </Link>{' '}
           for the legal detail.
@@ -151,7 +152,7 @@ export default function Cookies(): JSX.Element {
 
       <LegalSection id="self-hosted" heading="Self-hosted and local installs">
         <P>
-          If you run Pierre yourself, analytics is not configured at all unless you supply
+          If you run {SITE_NAME} yourself, analytics is not configured at all unless you supply
           your own measurement id at build time — so the banner never appears and no
           analytics cookie is ever set. The local desktop mode has no sign-in, so it sets
           neither session cookie either. A local install sets <T>no cookies whatsoever</T>.
@@ -166,7 +167,7 @@ export default function Cookies(): JSX.Element {
             href="https://tools.google.com/dlpage/gaoptout"
             target="_blank"
             rel="noreferrer noopener"
-            className="text-brand-sky underline hover:text-sky-300"
+            className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text"
           >
             Analytics opt-out extension
           </a>

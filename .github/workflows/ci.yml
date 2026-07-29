@@ -33,6 +33,24 @@ jobs:
 
       - run: pnpm test
 
+      # ---- Marketing-site prerender guardrails ----
+      # Every assertion that protects the prerendered landing site lives in
+      # apps/landing/prerender.mjs — the seo:/app: marker check, the ≥1000-byte
+      # per-route body floor, the "all 8 routes" check and the whole-page size
+      # floor. Until this step existed NONE of them ran on a pull request: CI was
+      # typecheck + test + audit only, apps/landing has no test script (so
+      # `pnpm -r test` skips it entirely), and `pnpm package` runs only in the
+      # release workflow, at publish time and after merge.
+      #
+      # That made the site's worst failure mode invisible to review: a broken
+      # prerender still renders perfectly in a browser (JS fills it in) and is a
+      # contentless shell to everything that does not run scripts — crawlers, link
+      # unfurlers, AI agents. A PR that regressed it merged green.
+      #
+      # `pnpm build` is the whole recursive build, so this also catches a landing
+      # page that fails to render server-side at all.
+      - run: pnpm build
+
       # ---- Dependency vulnerability audit ----
       # BLOCKING at high. There was no audit step at all before 2026-07-26; the 8 high advisories
       # that existed then have been cleared (@fastify/static 9→10.1.2 for the path-traversal

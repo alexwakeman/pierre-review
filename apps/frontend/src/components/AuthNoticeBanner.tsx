@@ -25,7 +25,7 @@ export function AuthNoticeBanner({ notices }: { notices: AuthNotice[] }): JSX.El
       </a>
       <span className="w-full text-[11px] text-amber-700/80 dark:text-amber-300/70">
         Reconnect signs you in again through SSO. If it doesn&rsquo;t clear, your org may restrict
-        third-party OAuth apps — an org owner has to approve Pierre once.
+        third-party OAuth apps — an org owner has to approve Limn once.
       </span>
     </div>
   );

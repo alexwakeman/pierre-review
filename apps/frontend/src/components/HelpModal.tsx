@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
+import { Wordmark } from './Wordmark';
 
 // Compact, scrollable help overlay opened from the header "?" button. A very brief
 // tour of the core flows — tracking repos, the timeline, focus mode, navigation.
@@ -28,10 +29,10 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Pierre help"
+        aria-label="Limn help"
       >
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-2 dark:border-gray-800">
-          <h2 className="brand-title">Pierre</h2>
+          <h2><Wordmark /></h2>
           <button
             type="button"
             onClick={onClose}
@@ -112,7 +113,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           <Section title="Claude Review (opt-in, local)">
             When enabled, a <strong>Claude Review</strong> tab runs an agentic review of a PR
             into structured findings. You author your own review and tick which findings to
-            post — Pierre posts one GitHub review. It costs real money per run, so it’s off
+            post — Limn posts one GitHub review. It costs real money per run, so it’s off
             by default and never runs in the hosted mode.
           </Section>
 

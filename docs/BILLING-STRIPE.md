@@ -46,7 +46,7 @@ Entitlement is enforced at two points, both keyed off `accounts.plan`:
 ## Setup
 
 1. **Create the product + Payment Link** (Stripe Dashboard → Product catalog):
-   - Product "Pierre Pro", recurring price **$5/month**.
+   - Product "Limn Pro", recurring price **$15/month**.
    - Create a **Payment Link** for that price. No special configuration is needed
      for `client_reference_id` — Payment Links accept it as a URL query parameter
      (`?client_reference_id=…`), which is exactly what `GET /api/billing/checkout`
@@ -100,7 +100,7 @@ Notes:
 
 ## Future direction
 
-The flat $5/mo plan gates the cheap tier (digests, Insights). (My Turn / "FYI" feed
+The flat $15/mo plan gates the cheap tier (digests, Insights). (My Turn / "FYI" feed
 participation is CORE / free on every tier — not part of the paid plan.) The expensive
 **advanced-AI features** (AI Analysis, AI Fix, Claude Review — today one
 all-or-nothing `PRO_ADVANCED_AI_ENABLED` flag) are the natural candidates for

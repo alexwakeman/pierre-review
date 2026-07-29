@@ -19,10 +19,11 @@
 // WHY NOT HYDRATE
 // main.tsx keeps using createRoot(), not hydrateRoot(). Hydration would save a
 // re-render but demands the server and client trees match exactly — and several
-// components here deliberately differ (HeroWordmark starts resolved in static
-// HTML and animated in the browser; CookieBanner renders nothing until it has
-// read localStorage). A mismatch degrades to a client render anyway, but noisily.
-// Static markup + a fresh client render is the same end state with no failure mode.
+// components here deliberately differ: CookieBanner and GameBar both render
+// nothing until they have read localStorage, so the static HTML omits them and the
+// browser tree includes them. A mismatch degrades to a client render anyway, but
+// noisily. Static markup + a fresh client render is the same end state with no
+// failure mode.
 //
 // The SSR bundle is a build artifact only: it is written outside dist/ and deleted
 // on the way out, so nothing extra ships.
@@ -66,7 +67,7 @@ const escapeText = (s) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** The full per-route <head> SEO block: title, description, canonical, OG, Twitter. */
-function seoBlock({ title, description, robots = 'index, follow', url, image, imageAlt }) {
+function seoBlock({ title, description, robots = 'index, follow', url, image, imageAlt, siteName }) {
   const t = escapeAttr(title);
   const d = escapeAttr(description);
   return [
@@ -78,7 +79,7 @@ function seoBlock({ title, description, robots = 'index, follow', url, image, im
     // site is one page.
     `<link rel="canonical" href="${escapeAttr(url)}" />`,
     `<meta property="og:type" content="website" />`,
-    `<meta property="og:site_name" content="Pierre" />`,
+    `<meta property="og:site_name" content="${escapeAttr(siteName)}" />`,
     `<meta property="og:title" content="${t}" />`,
     `<meta property="og:description" content="${d}" />`,
     `<meta property="og:url" content="${escapeAttr(url)}" />`,
@@ -107,14 +108,15 @@ execFileSync(
   { cwd: here, stdio: 'inherit' },
 );
 
-const { render, ROUTE_SEO, PRERENDER_PATHS, SITE_URL, OG_IMAGE } = await import(
+const { render, ROUTE_SEO, PRERENDER_PATHS, SITE_URL, OG_IMAGE, SITE_NAME } = await import(
   join(ssrDir, 'entry-server.js')
 );
 
 // ---- 2. Render each route into the built shell ---------------------------------
 const template = readFileSync(join(dist, 'index.html'), 'utf8');
-const IMAGE_ALT =
-  'The Pierre timeline dashboard showing pull-request activity across a team’s repositories.';
+// Composed from SITE_NAME rather than written out, so the product name lives in
+// exactly one place (src/lib/site.ts) across the whole build.
+const IMAGE_ALT = `The ${SITE_NAME} timeline dashboard showing pull-request activity across a team’s repositories.`;
 
 let smallest = Infinity;
 const written = [];
@@ -131,7 +133,12 @@ for (const path of PRERENDER_PATHS) {
     throw new Error(`route ${path} rendered only ${body.length} bytes — expected real content`);
   }
 
-  let html = replaceBetween(template, SEO_MARKERS, seoBlock({ ...seo, url, image: OG_IMAGE, imageAlt: IMAGE_ALT }), 'seo');
+  let html = replaceBetween(
+    template,
+    SEO_MARKERS,
+    seoBlock({ ...seo, url, image: OG_IMAGE, imageAlt: IMAGE_ALT, siteName: SITE_NAME }),
+    'seo',
+  );
   html = replaceBetween(html, APP_MARKERS, body, 'app');
 
   // '/' is dist/index.html; '/pricing' is dist/pricing/index.html — the layout
@@ -153,7 +160,11 @@ for (const path of PRERENDER_PATHS) {
 if (written.length < 8) {
   throw new Error(`only ${written.length} routes prerendered — expected all 8`);
 }
-if (smallest < 8000) {
+// The floor is on the FINAL html, and it has to clear the un-prerendered shell by
+// a real margin to mean anything: index.html plus Vite's asset tags is already
+// ~8.3 KB before a single byte of content, so the old 8000 threshold could never
+// fire. The smallest genuinely-rendered page is several times this.
+if (smallest < 12000) {
   throw new Error(`smallest page is ${smallest} bytes — prerendered content is missing`);
 }
 
