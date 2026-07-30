@@ -1,8 +1,7 @@
 import type { ThreadDetail, User } from '@pierre-review/shared';
 import { StateBadge } from '../StateBadge.js';
 import { ConfidenceBadge } from '../ConfidenceBadge.js';
-import { AddressedCheckControl } from '../AddressedCheck.js';
-import { CommentAnnotations } from '../CommentAnnotations.js';
+import { CommentAnnotations, ReviewCheckButton } from '../CommentAnnotations.js';
 import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';
 import { CodeAnchor } from './CodeAnchor.js';
@@ -115,9 +114,15 @@ export function ThreadCard({
           {lineLabel}
         </span>
         {thread.isOutdated && <span>· outdated</span>}
-        {!thread.isResolved && (
-          <AddressedCheckControl kind="thread" targetId={thread.id} />
-        )}
+        {/* Pro (prSummary): the ONE AI check, spent on this thread alone — rewrite its wall of bot
+            text, sanity-check the point, and judge what is actually still open. Deliberately NOT
+            gated on `!thread.isResolved`: the rewrite and the validity read are still worth having
+            on a resolved thread, and the server omits the addressed judgement for one, so no extra
+            judgement is billed that the PR-wide run would not have produced anyway. */}
+        <ReviewCheckButton
+          prId={thread.prId}
+          target={{ targetKind: 'thread', targetId: thread.id }}
+        />
         <span className="ml-auto flex items-center gap-2">
           {inMyTurn && <MarkThreadDone threadId={thread.id} />}
           <ResolveThread
@@ -163,15 +168,14 @@ export function ThreadCard({
         ))}
       </div>
 
-      {/* Pro (prSummary): a critical, retained AI second opinion on this thread's originating
-          comment, with the thread + diff as context. Sits above the reply box — read it, then
-          decide what to do (and reply inline). Renders nothing without the capability. */}
-      <ThreadAssessment threadId={thread.id} diffHunk={anchorHunk} />
+      {/* Pro (prSummary): the retained critical second opinion on this thread's originating
+          comment. Render-only — the one button that produces it is in the header above. */}
+      <ThreadAssessment threadId={thread.id} />
 
-      {/* The retained "addressed" judgement for the WHOLE thread. The header's
-          AddressedCheckControl shows only the verdict pill; this is the two-section summary of
-          what the later changes DO cover and what is still open — the thing you actually need
-          before resolving the thread. Collapsed by default; renders nothing when absent. */}
+      {/* The retained "addressed" judgement for the WHOLE thread: the two-section summary of what
+          the later changes DO cover and what is still open — the thing you actually need before
+          resolving the thread, and the reason it is rendered INLINE rather than hidden in a chip's
+          tooltip. Renders nothing when absent. */}
       <CommentAnnotations
         prId={thread.prId}
         targetKind="thread"

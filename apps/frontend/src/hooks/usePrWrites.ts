@@ -189,6 +189,16 @@ export function useAddReviewComment(prId: number) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['pr', prId] });
       void qc.invalidateQueries({ queryKey: ['my-turn'] });
+      // A new inline comment is a new `review_comment` event, not just a thread on this PR:
+      // it changes the FYI badge, shows up as a feed card, and draws a marker on the board.
+      // Reaching those is what makes this hook match `useReplyToThread`, which writes the same
+      // kind of row. Deliberately NOT ['pr-files', prId] — the patches are unchanged, and
+      // dropping that cache entry would re-fetch every diff in the PR for nothing. ['users'] is
+      // left alone too: the Members roster only changes when a NEW actor appears, and the actor
+      // here is the signed-in viewer, who is already in it.
+      void qc.invalidateQueries({ queryKey: ['me'] });
+      void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
+      void qc.invalidateQueries({ queryKey: ['timeline'] });
     },
   });
 }

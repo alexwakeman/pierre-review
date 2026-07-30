@@ -3164,6 +3164,23 @@ export interface AddReviewCommentResult {
   // false ⇒ GitHub re-anchored the comment to a different line (the requested
   // (path, line, side) didn't land on an addable diff line).
   anchored: boolean;
+  // ---- immediate-visibility contract ----
+  // This is the ONE GitHub write in the app with no optimistic local stamp: REST's
+  // POST /pulls/:n/comments returns the comment's own ids but NOT the enclosing review
+  // THREAD's node id, and without that a forged local thread row would have no
+  // reply/resolve identity. So instead of an echo, the route re-reads the PR through the
+  // idempotent targeted-sync path and then VERIFIES the comment row exists locally.
+  //
+  // true  ⇒ the comment is in the local DB; refetching the PR detail is GUARANTEED to
+  //         render the new thread, so the UI may SHOW it rather than promise a future sync.
+  // false ⇒ when `commentId != null` the comment IS on GitHub, we just couldn't confirm it
+  //         here (the resync failed, raced, or the PR has more review threads than one sync
+  //         page returns). Copy must claim no more than "it'll appear on the next sync" —
+  //         never "it failed", and never invite a retry, which would double-post.
+  visible: boolean;
+  // Local `reviewThreads.id` the comment landed in, so the Changes tab can scroll to and
+  // highlight the new thread. Always null when `visible` is false — there is no row to point at.
+  threadId: number | null;
 }
 
 // ---- Changes tab: per-file diff patches (GET /api/prs/:id/files) ----
@@ -4106,6 +4123,20 @@ export interface ReviewActionsResponse {
 // app is PR-shaped. A broken default branch invalidates every open PR's CI at once, so it
 // gets its own strip rather than being inferred from PR checks.
 
+// One FAILING check on a default-branch commit. Deliberately the PR side's `CheckRun` shape
+// plus ONE field, rather than a second check vocabulary: `state` is the same `CheckRunState`,
+// so the frontend renders a trunk failure with the same icon/colour/label metadata it uses for
+// a PR failure, and `runId`/`jobId` are parsed from the same Actions `detailsUrl` shape (so a
+// future "trunk failure logs" viewer needs no migration and no new type).
+//
+// `workflowName` is the GitHub Actions workflow the check belongs to ("CI", "Release"), i.e.
+// how a human actually names the failure. Null in two real cases: a legacy StatusContext
+// (third-party CI posting a bare commit status has no workflow at all) and a CheckRun whose
+// check suite isn't an Actions run. Never inferred — null means "GitHub didn't give us one".
+export interface BranchCheckRun extends CheckRun {
+  workflowName: string | null;
+}
+
 // One commit on a repo's default branch. `authorLogin` is the GitHub login when we could
 // resolve one (a synced `users` row or the GraphQL author); `authorName` is the raw git
 // author name, which is all a commit made by a non-GitHub identity carries. Both nullable
@@ -4118,6 +4149,32 @@ export interface BranchCommit {
   authorAvatarUrl: string | null;
   committedAt: string; // ISO-8601
   ciStatus: CiStatus;
+  // The checks that were FAILING on this commit — NEVER the passing ones. So this is empty for
+  // every green commit (the DB stores null there, and the read layer resolves null → []), which
+  // is what keeps a healthy repo's rows exactly as small as they are today. A per-commit
+  // expander is shown iff this is non-empty — the caret is driven by the DATA, not by the dot's
+  // colour, so a caret can never open onto an empty drawer.
+  //
+  // Empty on a RED commit is a real, expected state: a row written before the failing-checks
+  // migration (until that repo's next branch sync), or a repo whose check `contexts` the token
+  // can't read. The dot still shows the rollup; there is simply no detail to expand.
+  failingChecks: BranchCheckRun[];
+  // The PR this commit landed from (GitHub's `associatedPullRequests` for the commit), or null
+  // for a direct push to trunk — which is a legitimate, common state, not a sync gap. A commit
+  // can be reachable from several PRs (a cherry-pick, a revert-then-reland, a branch merged into
+  // another open PR); the sync stores exactly ONE, picked deterministically so a re-sync can
+  // never flip the displayed number.
+  prNumber: number | null;
+  // The LOCAL `pullRequests.id` for `prNumber`, resolved per request within (accountId, repoId)
+  // — a PR number is unique only WITHIN a repo, so it is never resolved by number alone.
+  //
+  // Null while `prNumber` is set means "that PR isn't synced for this account": squash-merged
+  // longer ago than the backfill window, or in a repo added after the fact. This PAIR is the
+  // client's whole decision:
+  //   prId != null                   → open the PR's own detail tab in-app
+  //   prNumber != null && prId null  → link out to github.com (better than dropping the ref)
+  //   both null                      → no PR chip at all
+  prId: number | null;
 }
 
 // One repo's default-branch health. Everything is nullable-until-synced: a freshly added repo
@@ -4128,6 +4185,15 @@ export interface RepoBranchStatus {
   headSha: string | null;
   ciStatus: CiStatus;
   lastCommitAt: string | null; // ISO-8601
+  // The HEAD commit's failing checks, DERIVED server-side from the `commits` entry whose sha is
+  // `headSha` — deliberately NOT a second stored copy, so there is one writer, one reader and
+  // one invariant. Drives the repo row's inline "failing · build +2" summary.
+  //
+  // Empty when trunk is green, when nothing has synced yet, or when the head's rollup reported a
+  // failure but its individual checks weren't retrievable. Also empty in the rare case where the
+  // head commit's row fell outside the stored window (a rebase with a backdated committer date),
+  // which degrades to today's behaviour: the CI label alone.
+  failingChecks: BranchCheckRun[];
   // Most-recent-first, capped server-side. Empty until the first branch sync.
   commits: BranchCommit[];
 }
@@ -4157,6 +4223,48 @@ export type AnnotationKind = 'addressed' | 'validity' | 'simplify';
 //   pr_comment     → prComments.id
 export type AnnotationTargetKind = 'thread' | 'review_comment' | 'pr_comment';
 
+// A RUN kind — deliberately NOT an `AnnotationKind`, and the distinction is load-bearing.
+//
+// `AnnotationKind` is the STORED discriminator: it is the `kind` column, the per-kind payload-hash
+// cache, the `counts` map, the `kinds=` filter on the cached GET, and the key of every per-kind
+// prompt/vocabulary record in the plugin. `'review'` is none of those things — it asks for ONE
+// combined model call per target that returns all three judgements at once, and it writes the SAME
+// rows a run of each kind would write. So there is no `review` row, no `review` payload hash and
+// no `counts.review`: a combined run and three separate runs are INDISTINGUISHABLE in storage,
+// which is exactly what keeps each kind's staleness (and its $0-on-unchanged cache) independent.
+export type AnnotationRunKind = AnnotationKind | 'review';
+
+// One anchor a run may be narrowed to — the per-thread / per-comment "check this one" button, as
+// opposed to a whole-PR sweep.
+//
+// The anchor is the ENTITY THE USER CLICKED, not the row that gets written: for a review thread it
+// is `{'thread', reviewThreads.id}` even though the run also writes rows keyed on that thread's
+// ROOT `reviewComments.id`. Absent or empty on the request body means the whole PR.
+//
+// TWO RULES GOVERN HOW THE SERVER APPLIES THIS, and getting either wrong is a silent bug rather
+// than an error:
+//
+// 1. EXPANSION — an anchor selects every enumerated target BELONGING to it, not the one whose ids
+//    happen to match. The three kinds key their rows on DIFFERENT pairs for the same thread:
+//    `addressed` on `('thread', threadId)`, `validity` on the thread's ROOT `('review_comment', id)`,
+//    and `simplify` on `('review_comment', id)` for EVERY comment in the thread. So an equality
+//    match on `(targetKind, targetId)` finds only the `addressed` target: a "Check review" on one
+//    thread would report `generated: 1`, render a single chip, and silently produce neither a
+//    validity nor a simplify verdict — with no error to notice. A `{'thread', T}` anchor therefore
+//    selects `('thread', T)` PLUS every `('review_comment', C)` whose comment C sits in thread T.
+//    `{'pr_comment', P}` and `{'review_comment', C}` select just themselves.
+//
+// 2. INTERSECTION ONLY — `targets` is a POST-FILTER over the targets enumerated from the
+//    already-account-scoped PR corpus. It is NEVER a fetch key: nothing may be loaded BY these
+//    ids. They arrive from the client, and a "load the named targets" implementation would let
+//    `{'review_comment', <another tenant's comment id>}` on a PR I own read a foreign comment
+//    body, spend my credits summarising it, and store the result where my own cached GET serves
+//    it back. An anchor matching nothing in the corpus is counted `skipped`, never fetched.
+export interface AnnotationRunTarget {
+  targetKind: AnnotationTargetKind;
+  targetId: number;
+}
+
 // One stored judgement. `verdict` is kind-specific free text (the client maps it to a chip),
 // `confidence` is 0-100 or null when the kind doesn't produce one, `body` is markdown
 // rationale. `stale` is computed on READ: the target has changed since the annotation was
@@ -4185,20 +4293,29 @@ export interface PrAnnotationsResponse {
   generatedAt: string; // ISO-8601 — when this response was assembled
 }
 
-// POST /api/pro/prs/:id/annotations/run — generate one kind across a PR. `targetKinds`
-// narrows which entity types to consider (default: all three); `onlyStale` regenerates just
-// the annotations whose target has moved on, which is the cheap "refresh" path.
+// POST /api/pro/prs/:id/annotations/run — generate across a PR. `kind` is a RUN kind, so it can
+// be one `AnnotationKind` or `'review'` (all three in one call per target — see
+// `AnnotationRunKind`). `targetKinds` narrows which entity TYPES to consider (default: all
+// three); `targets` narrows to specific anchors (one thread, one comment) and is what the
+// per-item button sends — absent or empty means the whole PR; `onlyStale` regenerates just the
+// annotations whose target has moved on, which is the cheap "refresh" path.
 export interface AnnotationRunBody {
-  kind: AnnotationKind;
+  kind: AnnotationRunKind;
   targetKinds?: AnnotationTargetKind[];
+  targets?: AnnotationRunTarget[];
   onlyStale?: boolean;
 }
 
 // The outcome of a run. `cached` = a payload-hash hit ($0); `skipped` = ineligible targets
 // (nothing to judge); `truncated` = the per-run target cap was hit, so a second run would do
 // more; `creditsExhausted` = the metered plan ran out mid-run and the rest was refused.
+//
+// The counting UNIT differs by run kind, which matters when a caller sums across runs: a per-kind
+// run counts TARGETS, which is exactly one stored row each; a combined `'review'` run also counts
+// targets (a thread or a comment), but each one is up to THREE rows. So `generated` is "how many
+// things did we judge", never "how many rows did we write".
 export interface AnnotationRunResponse {
-  kind: AnnotationKind;
+  kind: AnnotationRunKind;
   requested: number;
   generated: number;
   cached: number;

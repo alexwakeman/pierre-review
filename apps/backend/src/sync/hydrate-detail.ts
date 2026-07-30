@@ -99,32 +99,89 @@ const HYDRATE_CACHE_MAX = 500;
 
 type HydrateResult = { data: GhPrText | null; samlBlocked: boolean };
 const hydrateCache = new Map<string, { at: number; value: HydrateResult }>();
-const hydrateInFlight = new Map<string, Promise<HydrateResult>>();
+// The in-flight entry carries the epoch it started in, so a fetch issued before an
+// invalidation is never shared with a reader who arrived after it, plus a serial id so a
+// finishing fetch can tell its own slot from a newer one's.
+interface HydrateInFlight {
+  id: number;
+  epoch: number;
+  promise: Promise<HydrateResult>;
+}
+const hydrateInFlight = new Map<string, HydrateInFlight>();
+let hydrateFetchSeq = 0;
 
-/** Cached + coalesced wrapper around fetchGhPrTextUncached. Keyed per ACCOUNT (a token's
- *  visibility differs per tenant, so one tenant's result must never satisfy another's). */
+// Keyed per ACCOUNT (a token's visibility differs per tenant, so one tenant's result must
+// never satisfy another's). One spelling, used by both the fetch and the invalidator, so
+// the two can't drift.
+const hydrateKey = (
+  accountId: number,
+  owner: string,
+  name: string,
+  number: number,
+): string => `${accountId}:${owner}/${name}#${number}`;
+
+// Monotonic invalidation epoch per cache key. A write path (a just-posted inline comment)
+// has to guarantee that the NEXT hydration is fresh, and deleting the cache entry alone is
+// not enough: a hydration that started BEFORE the write is still in flight and would cache
+// its pre-write snapshot the moment it resolves. Bumping the epoch makes that in-flight
+// result un-cacheable — it still gets returned to whoever is already awaiting it (they
+// asked before the write), but it cannot poison the next reader.
+const hydrateEpoch = new Map<string, number>();
+
+/**
+ * Drop any cached hydration for ONE PR and revoke any in-flight fetch's right to cache.
+ * Call after writing to that PR on GitHub and BEFORE responding, so the client's follow-up
+ * `GET /api/prs/:id` runs a fresh PR_DETAIL_QUERY and sees the new text. Every other PR's
+ * cached hydration, and the TTL/FIFO machinery, are untouched.
+ *
+ * This matters even when a resync has already stored the new row: `diffHunk` is
+ * lean-gated (sync writes null unless PERSIST_BODIES=true), so hydration is the ONLY
+ * source of a new thread's code anchor — a ≤60s-old snapshot has no entry for the new
+ * comment's node id and the thread would render with no code context.
+ */
+export function invalidatePrHydration(
+  accountId: number,
+  owner: string,
+  name: string,
+  number: number,
+): void {
+  const key = hydrateKey(accountId, owner, name, number);
+  hydrateCache.delete(key);
+  hydrateEpoch.set(key, (hydrateEpoch.get(key) ?? 0) + 1);
+}
+
+/** Cached + coalesced wrapper around fetchGhPrTextUncached. */
 async function fetchGhPrText(
   owner: string,
   name: string,
   number: number,
   accountId: number,
 ): Promise<HydrateResult> {
-  const key = `${accountId}:${owner}/${name}#${number}`;
+  const key = hydrateKey(accountId, owner, name, number);
+  // Snapshot the epoch at fetch START; if an invalidation lands while we're in flight the
+  // result is stale by definition and must not be cached.
+  const epoch = hydrateEpoch.get(key) ?? 0;
   const now = Date.now();
 
   const hit = hydrateCache.get(key);
   if (hit && now - hit.at < HYDRATE_TTL_MS) return hit.value;
 
+  // Share an in-flight fetch only when it STARTED in the current epoch. A fetch issued
+  // before an invalidation is reading pre-write state, so a reader who arrived after the
+  // write must not be handed its result — that's the same staleness the cache guard above
+  // rejects, one step earlier.
   const pending = hydrateInFlight.get(key);
-  if (pending) return pending;
+  if (pending && pending.epoch === epoch) return pending.promise;
 
+  const fetchId = ++hydrateFetchSeq;
   const promise = (async () => {
     try {
       const value = await fetchGhPrTextUncached(owner, name, number, accountId);
       // Only cache a SUCCESS: caching a failure would pin a transient error (or a
       // mid-re-auth SAML block) for a minute, and the failure path is already cheap
-      // because it returns the stored metadata.
-      if (value.data) {
+      // because it returns the stored metadata. And only when no invalidation landed
+      // while we were in flight (see hydrateEpoch).
+      if (value.data && (hydrateEpoch.get(key) ?? 0) === epoch) {
         if (hydrateCache.size >= HYDRATE_CACHE_MAX) {
           // Oldest-inserted first (Map preserves insertion order) — a plain FIFO trim is
           // sufficient here; the TTL does the real work.
@@ -135,10 +192,13 @@ async function fetchGhPrText(
       }
       return value;
     } finally {
-      hydrateInFlight.delete(key);
+      // Only clear the slot if it is still OURS: with the epoch check above, two fetches
+      // for one key can overlap across an invalidation, and the older one finishing must
+      // not evict the newer one's entry (that would cost a third upstream call).
+      if (hydrateInFlight.get(key)?.id === fetchId) hydrateInFlight.delete(key);
     }
   })();
-  hydrateInFlight.set(key, promise);
+  hydrateInFlight.set(key, { id: fetchId, epoch, promise });
   return promise;
 }
 

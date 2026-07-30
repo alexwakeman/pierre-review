@@ -325,7 +325,11 @@ function mergeStateStatusFrom(
     | 'unknown';
 }
 
-function checkContextState(c: GqlCheckContext): CheckRunState {
+// Exported because sync/branch-status.ts maps the SAME contexts union for default-branch
+// commits. The CheckRun status/conclusion → CheckRunState table must not exist twice: if trunk
+// and PR surfaces disagreed about what "failing" means, the same check would render differently
+// depending on where you looked at it.
+export function checkContextState(c: GqlCheckContext): CheckRunState {
   if (c.__typename === 'StatusContext') {
     switch ((c.state ?? '').toUpperCase()) {
       case 'SUCCESS':
@@ -367,7 +371,11 @@ function checkContextState(c: GqlCheckContext): CheckRunState {
 // (StatusContext / external CheckRuns) has a detailsUrl pointing elsewhere; no match →
 // null, and the UI keeps it as a plain external link (logs aren't retrievable).
 const ACTIONS_JOB_RE = /\/actions\/runs\/(\d+)\/job\/(\d+)/;
-function parseActionsIds(url: string | null): { runId: number | null; jobId: number | null } {
+// Exported for the default-branch commit checks, which parse the same detailsUrl shape.
+export function parseActionsIds(url: string | null): {
+  runId: number | null;
+  jobId: number | null;
+} {
   const m = url ? ACTIONS_JOB_RE.exec(url) : null;
   if (!m) return { runId: null, jobId: null };
   return { runId: Number(m[1]), jobId: Number(m[2]) };

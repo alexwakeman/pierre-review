@@ -26,6 +26,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import type {
+  BranchCheckRun,
   CheckRun,
   Label,
   ReviewRouteReason,
@@ -215,6 +216,13 @@ export const pullRequests = pgTable(
     accountIdx: index('pr_account_idx').on(t.accountId),
     // Drives getUserStats (the contributor popover) from the person rather than the account.
     authorIdx: index('pr_author_idx').on(t.authorId),
+    // Serves resolving a PR NUMBER to a local id within a repo (the branch strip's commit → PR
+    // link). See schema.sqlite.ts for why it isn't optional polish.
+    accountRepoNumberIdx: index('pr_account_repo_number_idx').on(
+      t.accountId,
+      t.repoId,
+      t.number,
+    ),
     nodeUx: uniqueIndex('pr_account_node').on(t.accountId, t.githubNodeId),
   }),
 );
@@ -588,6 +596,13 @@ export const branchCommits = pgTable(
     ciStatus: text('ci_status', {
       enum: ['success', 'failure', 'pending', 'error', 'expected', 'unknown'],
     }),
+    // The FAILING checks on this commit (failures only, so null on a green commit) and the PR
+    // this commit landed from (a plain number, never a FK). See schema.sqlite.ts for the full
+    // rationale on both — why failing_checks is NOT lean-gated despite pullRequests.checkRuns
+    // being, why it shares a column name with ci_status_events.failing_checks while carrying a
+    // different shape, and why pr_number is resolved to a local id at READ time.
+    failingChecks: jsonb('failing_checks').$type<BranchCheckRun[]>(),
+    prNumber: integer('pr_number'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),

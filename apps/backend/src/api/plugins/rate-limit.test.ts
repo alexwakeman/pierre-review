@@ -20,6 +20,11 @@ describe('tierFor — AI generation', () => {
     expect(tiers('POST', '/api/pro/prs/12/addressed/check')).toEqual(['ai', 'ai_hourly']);
     // The comment-annotations platform: the run POST is the only billing path.
     expect(tiers('POST', '/api/pro/prs/12/annotations/run')).toEqual(['ai', 'ai_hourly']);
+    // Its SSE twin is a POST that BOTH starts the run and streams it — unlike the Claude
+    // Review / AI Fix `…/stream` GETs, which only subscribe to a run someone else started.
+    // Since the consolidated "Check review" button calls this one, it is now the primary
+    // billing entry point for the whole annotations feature and must not be left uncovered.
+    expect(tiers('POST', '/api/pro/prs/12/annotations/run/stream')).toEqual(['ai', 'ai_hourly']);
   });
 
   // Load-bearing: Claude Review kept its PRE-PLUGIN paths for frontend compatibility, so it does
@@ -67,16 +72,33 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/threads/9')).toEqual(['pr_detail', 'read']);
     // Sub-routes that only read already-synced rows are DB-only — not the hydration path.
     expect(tiers('GET', '/api/prs/42/bot-behaviour')).toEqual(['read']);
-    expect(tiers('GET', '/api/prs/42/suggested-reviewers')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/42/bot-dedup')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/42/mention-candidates')).toEqual(['read']);
   });
 
   // merge-options fires up to five live GitHub calls (merge config, mergeability, the
   // merge-queue GraphQL probe) and /files pulls every patch — both spend MORE upstream quota
   // per request than GET /api/prs/:id itself, so they must share its bucket rather than sit on
   // the 600/min blanket backstop just because they happen to have a path segment after the id.
+  //
+  // `checks/<jobId>/logs` and `suggested-reviewers` joined them later: the first 302s to a signed
+  // blob it then range-fetches, the second reads CODEOWNERS over REST plus a team-history GraphQL
+  // probe. `suggested-reviewers` was previously asserted HERE as a DB-only `read` route — the
+  // assertion pinned a mistake, because github/reviewer-suggest.ts:35 takes an access token. A test
+  // that encodes the current behaviour is only evidence of intent when the behaviour is right.
   it('puts the hydrating PR sub-routes on the detail bucket too', () => {
     expect(tiers('GET', '/api/prs/42/merge-options')).toEqual(['pr_detail', 'read']);
     expect(tiers('GET', '/api/prs/42/files')).toEqual(['pr_detail', 'read']);
+    expect(tiers('GET', '/api/prs/42/suggested-reviewers')).toEqual(['pr_detail', 'read']);
+    expect(tiers('GET', '/api/prs/42/checks/9876543/logs')).toEqual(['pr_detail', 'read']);
+  });
+
+  // The bare id must keep matching, and a sibling that is NOT in the alternation must not be
+  // swept in by the optional group — the regex has to stay anchored at both ends.
+  it('does not widen the detail bucket beyond the listed sub-routes', () => {
+    expect(tiers('GET', '/api/prs/42')).toEqual(['pr_detail', 'read']);
+    expect(tiers('GET', '/api/prs/42/claude-review')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/42/files/extra')).toEqual(['read']);
   });
 
   // The guard on the fix above: `merge` prefix-matches `merge-options`, so a careless widening
@@ -100,6 +122,28 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('DELETE', '/api/prs/42/merge-queue')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/auto-merge')).toEqual(['github_write']);
     expect(tiers('DELETE', '/api/prs/42/auto-merge')).toEqual(['github_write']);
+  });
+
+  // Every one of these five was falling through to the 600/min blanket `read` bucket: the
+  // alternation spelled `comments`/`reviews` in the plural while the routes are singular, and
+  // `close` / `ci/rerun` / `request-reviewers` were simply missing. Asserted by their EXACT
+  // path so a spelling drift fails here rather than silently un-throttling a GitHub write.
+  it('throttles the PR write routes whose exact segment the classifier used to miss', () => {
+    // The most upstream-expensive write in the family: head sha + file patches to anchor the
+    // line, the post itself, then a resync and a forced fresh PR_DETAIL_QUERY.
+    expect(tiers('POST', '/api/prs/42/review-comment')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/prs/42/comment')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/prs/42/close')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/prs/42/ci/rerun')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/prs/42/request-reviewers')).toEqual(['github_write']);
+  });
+
+  // The widening above must not swallow the two purely-local PR bookkeeping writes, which
+  // never touch GitHub and are called on every PR the user so much as looks at.
+  it('leaves the local-only view bookkeeping writes on the read tier', () => {
+    expect(tiers('POST', '/api/prs/42/mark-viewed')).toEqual(['read']);
+    expect(tiers('POST', '/api/prs/42/dismiss')).toEqual(['read']);
+    expect(tiers('POST', '/api/prs/mark-all-viewed')).toEqual(['read']);
   });
 
   // The two new cross-account GETs are pure DB reads off already-synced rows — no GitHub

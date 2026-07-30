@@ -140,9 +140,13 @@ pierre-review/
 │  │  │  │  ├─ client.ts        mode-aware driver/schema; exports db, schema, runTransaction, closeDb, isPg
 │  │  │  │  ├─ queries.ts       read layer (async, accountId-scoped): getTimeline/getPrDetail/getOpenPrs/getMyTurn/getMergers
 │  │  │  │  ├─ triage.ts        computeTriage(): reasonTag, "my turn", new-since-viewed, approvals
+│  │  │  │  ├─ branch-queries.ts  getBranchStatus(): default-branch health + trunk commits (+ commit→PR resolution)
 │  │  │  │  └─ migrations/ + migrations-pg/   sqlite (.sql + meta/) | Postgres baseline (`db:generate:pg`)
-│  │  │  ├─ github/             auth.ts (gh token), client.ts (per-account factories), queries.ts (the big query)
-│  │  │  ├─ sync/               scheduler, sync-manager, sync-repo, upsert, derive-thread-state, commit-files, hydrate-detail
+│  │  │  ├─ github/             auth.ts (gh token), client.ts (per-account factories), queries.ts (the big query),
+│  │  │  │                      mutations.ts (REST writes + the GraphQL-only merge queue), branch-queries.ts (trunk, two-phase)
+│  │  │  ├─ merge/              auto-merge-runner.ts — the "merge when ready" watcher (own cron, safety gates)
+│  │  │  ├─ sync/               scheduler, sync-manager, sync-repo, upsert, derive-thread-state, commit-files, hydrate-detail,
+│  │  │  │                      sync-one-pr (targeted), branch-status (trunk snapshot), resync-after-write (post-write tail)
 │  │  │  │  └─ __fixtures__/threads/   JSON fixtures for the thread-state heuristic tests
 │  │  │  ├─ review/             Claude Review (local-only): agent, review-manager, routing, persist, post-review, clone-manager, prompt
 │  │  │  │                      + events.ts (inert review event-bus + learnings-provider registry), llm.ts (cheapComplete Haiku seam)
@@ -156,7 +160,8 @@ pierre-review/
 │  │  └─ src/
 │  │     ├─ App.tsx            useMe() 401 → SignInGate; FilterBar / PinnedTabsBar (Activity|Timeline + dynamic tabs) / Timeline / DetailPane / Activity+pinned overlays
 │  │     ├─ store/filters.ts   Zustand: all filter + selection + timeline-hint state (+ transient activityRepoId/activityThreadFilter)
-│  │     ├─ hooks/             useUrlState, useTimeline, usePr, useTriage, useMe (+ useProCapabilities), useActivity, useReviewLearnings, …
+│  │     ├─ hooks/             useUrlState, useTimeline, usePr, useTriage, useMe (+ useProCapabilities), useActivity, useReviewLearnings,
+│  │     │                     useAutoMerge (arm/disarm + the polled list), useBranchStatus, useCheckLogs (paged log window), useAnnotations, …
 │  │     ├─ api/client.ts      typed fetch wrapper (credentialed; throws ApiError)
 │  │     ├─ components/        Timeline/, Activity/ (rail + FeedView + open-PR list + collapsible digest cards), PrDetail, ChecksTab, ThreadList/, ThreadView/, PinnedTabsBar, …
 │  │     └─ lib/ui.ts          shared UI metadata (state colors/labels/shapes) + helpers
@@ -271,6 +276,24 @@ incremental, fetch loop, cancel, rate limits). In brief:
   Derived thread state computed here.
 - **Per-account token** (`getAccessToken`) threaded into the fetch, never
   module-cached; per-account `try/catch` so one bad token doesn't abort the loop.
+- **Default-branch snapshot** (`sync/branch-status.ts` + `github/branch-queries.ts`, called at
+  the end of every repo sync, foreground pass included): trunk head + its CI rollup onto
+  `repos`, the last 20 trunk commits into `branchCommits`. **STRICTLY NON-FATAL** — it is an
+  informational readout, so a token that can walk the PRs but chokes on the branch history must
+  never cost the caller the PR sync that just succeeded. **TWO-PHASE, and the split is a cost
+  decision**: GitHub prices a GraphQL call from requested nodes, so phase 1
+  (`history(first:20)` × `associatedPullRequests(first:3)` = 80 nodes) is **1 point**, while
+  nesting `statusCheckRollup.contexts(first:100)` under that history would be ~2020 nodes ⇒
+  **~21 points on every walk of every repo, green or red**, on a call adaptive polling re-fires
+  every 120s. So failing-check DETAIL is a SECOND query (`buildCommitChecksQuery` — aliased
+  `object(oid:)` lookups, shas as GraphQL VARIABLES, only the alias names are generated and
+  those are index-derived) issued only for the commits phase 1 reported as failure/error/**pending**
+  (pending is in the set because GitHub keeps the rollup PENDING while other checks run after one
+  already FAILED). ≈1 point per non-green commit, capped by `COMMIT_CHECKS_ALIAS_CAP`=10 — worst
+  case 11 points for an all-red window, and the actual figure is LOGGED (`N non-green commit(s),
+  M with retrievable checks, K rate-limit point(s)`) rather than asserted. `contexts(first:100)`
+  must NOT be lowered: the connection has no failures-first ordering, so a smaller page can
+  return 100 green contexts on a red commit — a caret with nothing behind it.
 
 **Lean storage (both modes; default).** `config.persistBodies=false` by default
 (`PERSIST_BODIES=true` stores everything — larger DB, fully-offline detail).
@@ -306,7 +329,7 @@ fixture tests (see Conventions).
 
 ### Data model (`src/db/schema.sqlite.ts` + its `schema.pg.ts` twin are authoritative)
 
-21 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
+26 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
 `users` + `commitFiles` global). The core entities:
 
 - **`accounts`** — a tenant. Local mode has exactly one (`id 1`, `isLocal=true`,
@@ -319,7 +342,12 @@ fixture tests (see Conventions).
   `avatarUrl`, `githubType` — the GraphQL author `__typename`, fed to the bot classifier);
   **global**.
 - **`pullRequests`** — PR metadata, state, draft, timestamps, CI/mergeable, etc.; carries
-  `accountId`, unique `(accountId, githubNodeId)`.
+  `accountId`, unique `(accountId, githubNodeId)`. `reviewDecision` (`approved` |
+  `changes_requested` | `review_required` | null) is GitHub's OVERALL review verdict — the
+  thing that lets a `blocked` merge state say WHICH half of branch protection is unmet (see
+  **Merge, CI logs & trunk status**). `mergeStateStatus` deliberately does NOT model GitHub's
+  `DRAFT` value (it maps to `unknown`): draft-ness is already `isDraft`, and folding it in
+  would leave a draft reporting `draft` with no idea whether it is otherwise clean.
 - **`reviews`** — submitted reviews (`state`: approved / changes_requested / commented /
   dismissed / pending). A reviewer's *standing* decision is their latest non-`commented` review.
 - **`reviewThreads`** + **`reviewComments`** — inline threads (stored `derivedState`) +
@@ -341,6 +369,30 @@ fixture tests (see Conventions).
   `userBody`/`userVerdict` are what post. Each run records its `reviewMode`/`routeReason`;
   findings carry `anchored`/`included` + the agent's wording. **Not** in the lean timeline;
   loaded on demand.
+- **`autoMergeRequests`** — one standing "merge when ready" intent per `(accountId, prId)`
+  (that pair is the unique/upsert target, so re-arming OVERWRITES — this is current state, not a
+  log; disarm DELETEs rather than adding a "cancelled" state). Carries `mergeMethod`,
+  `updateStrategy`, the consent anchor `expectedHeadOid`, `state` (`ArmedMergeState`),
+  `expiresAt`, `lastCheckedAt`, `lastReason`. FKs cascade from `accounts`/`pullRequests`. Both
+  exported (Art. 15 — it records an action the user asked the server to take) and erased.
+- **`branchCommits`** — the recent commits on each repo's DEFAULT branch (`accountId`
+  denormalized; unique `(accountId, repoId, sha)`; trimmed to `BRANCH_COMMIT_WINDOW`=20 per
+  repo in the same transaction as the upsert). **Not derivable from `commits`**, which is
+  PR-scoped — a squash-merged PR never appears there under the SHA that landed on trunk. Plus
+  four nullable `repos` columns for the head snapshot (`defaultBranchName` /
+  `defaultBranchHeadSha` / `defaultBranchCiStatus` / `defaultBranchUpdatedAt`, the last being
+  OUR observation time, not a commit time). `defaultBranchName` is kept separate from the older
+  `defaultBranch` on purpose — that one is written by the activity sync for maintainer
+  inference, and sharing it would make the two syncs clobber each other's freshness. Two later
+  columns answer "why is that dot red / where did this come from": `failingChecks`
+  (`BranchCheckRun[]`, FAILURES ONLY so a green commit stores null — **not** lean-gated, since a
+  trunk commit belongs to no PR and so has no hydrate-on-demand path to be lazy into; same
+  column NAME as `ciStatusEvents.failingChecks` but a different shape, which `$type<>()` makes a
+  compile-time fact) and `prNumber` (a plain number, deliberately NOT a `pullRequests` FK — the
+  PR is often unsynced when the commit is observed, a stored id would go stale on the next PR
+  re-sync, and a real FK would drag this table into both delete paths). In
+  `accountScopedTables()` + explicitly erased; NOT in the Art. 15 export (unlike
+  `autoMergeRequests`) — if that was a decision rather than an omission it isn't recorded anywhere.
 - **`botReviewClassification`** — the **Bot-Triage** classification table (CORE,
   `accountId`-scoped). Stores manual + auto automated-reviewer classifications (unique
   `(accountId, authorUserId)`; a manual row wins the resolution order). The plugin-owned
@@ -367,6 +419,12 @@ file maps to a `client.ts` method.
 | `GET /api/timeline?from&to&repoIds&userIds&types&statuses&reviewStates&excludeBots` | **lean** feed `{prs[],events[]}` — no bodies/diffs. The window is CLAMPED to `config.retentionDays` and both selects are ROW-CAPPED (5k PRs / 20k events, newest-first) returning `truncated?: true` — unbounded dates used to materialise the whole retained dataset in one response. Defaults: 14d, bots shown (toggle in Members). `reviewStates` filters `review_submitted` markers by verdict (approved/changes_requested/commented/dismissed); absent = all, empty = none |
 | `GET /api/prs/:id` | full PR detail (threads, reviews, comments, commits, checks, labels) |
 | `POST /api/prs/:id/mark-viewed` (alias `/dismiss`) | record a view (`sha?` defaults to head) → clears new-since badges |
+| `GET /api/prs/:id/merge-options` | what the merge control needs, fetched LAZILY (the hot detail path must not wait on GitHub): repo-allowed methods + live mergeability + `mergeQueue` (null unless the base branch really has one — `enabled:false` would make every repo render a queue section) + `autoMerge{allowedByRepo,armed}`. The queue probe is `.catch(() => null)` — best-effort, never fails the control. Up to five upstream calls, so it shares the `prDetail` rate-limit tier with `GET /api/prs/:id` (and `…/files`) |
+| `POST · DELETE /api/prs/:id/merge-queue` | enqueue / dequeue on **GitHub's native merge queue** → `MergeQueueResult`. WRITE+ re-checked; enqueue pins the LIVE head sha (same consent anchor as a merge), 400s when the base branch has no queue (rather than failing opaquely inside GraphQL), and is idempotent both ways. GraphQL-only — see `github/mutations.ts` |
+| `POST · DELETE /api/prs/:id/auto-merge {mergeMethod,updateStrategy?}` | arm / disarm Pierre's own **"merge when ready"** → `ArmedMergeRequest` · 204 (idempotent). Arming re-checks WRITE+, refuses a non-open PR (409), pins the LIVE head sha (never the synced one — a stale pin disarms itself on the first tick), and 409s `StaleBase` when the synced base ref no longer matches GitHub's. TTL 72h |
+| `GET /api/auto-merge` | every armed (+ resolved within 24h, cap 200, newest first) intent for the account → `ArmedMergeListResponse`. A pure DB read — the SPA POLLS it for the "it landed" toast, so it must never touch GitHub |
+| `GET /api/prs/:id/checks/:jobId/logs?tail` \| `?startByte&endByte` | a live WINDOW of an Actions job log (never stored) → `CheckLogsResponse`. Offsets are SOURCE bytes (the `\r\n` normalisation is display-only), `endByte` EXCLUSIVE, `hasMore` = "more exists ABOVE this window" — so feeding a response's `startByte` back as the next `endByte` abuts exactly. Every path is capped at `MAX_LOG_BYTES` (8 MiB) via a rolling buffer (~2×cap peak) even when the source ignores `Range`. Serves PASSING checks too — see **Merge, CI logs & trunk status** |
+| `GET /api/branch-status?repoIds` | **default-branch health** per repo in scope → `BranchStatusResponse` (head snapshot + failing checks + the recent trunk commits, each with its own CI state, failing checks and originating `prNumber`/`prId`). Pure DB read off what the branch sync persisted — never a live GitHub call, hence the plain `read` tier. Repos with nothing synced still appear, with nulls. **Informational only:** nothing here feeds attention counts, badges or My Turn |
 | `POST /api/prs/:id/resolve-bot-threads {threadIds}` | **bulk-resolve** the review-bot threads a later commit likely addressed → `{resolved,failed,results[]}`. Server RE-DERIVES eligibility (owned + review-bot-originated + `likely_addressed`) ∩ the client's reviewed list, then GitHub-resolves each (shares the `bot-triage/resolve.ts` `resolveThreadsOnGitHub` helper with the scope-wide resolve route); never auto/blind — user-initiated + confirm-gated only. Core |
 | `GET /api/bot-reviewers` · `PATCH /api/bot-reviewers/:userId` | **Bot-Triage** (CORE): detected automated reviewers → `DetectedReviewersResponse` · two-way manual override → `ReviewerClassification` (writes `bot_review_classification`) |
 | `GET /api/bot-analytics?window=` | **Bot-ROI** (CORE): per-`AutomatedReviewerKind` volume/actedOn%/untouched/oldest/humanFollowThrough/noiseRatio/`verdict`(keep\|tune\|**noisy**) + ≤12wk trend + tuning suggestions → `BotAnalyticsResponse`. Returns `cost=null` — the client overlays cost from `pro_settings`. **Response-time-gated verdict:** the verdict keys on `overdueUntouched` (untouched threads older than a **fixed 36h grace window**, `totals.overdueGraceMs`), NOT raw `untouched` — so a bot isn't flagged noisy for threads still inside the grace window. (A MEASURED reply-time norm was tried but the sample is intrinsically fast — only threads someone engaged with draw a reply — so a flat cutoff is the fair gate.) Each row also carries `medianAddressedMs` (that bot's own median **time-to-ADDRESSED** — the earliest of a human reply, a resolve, or the addressing commit for a `likely_addressed` thread, computed read-time from `commits`/`commitFiles` for just those threads' PRs; display-only). ('kill' was renamed 'noisy'.) Vendor rows carry `dormant`+`lastActiveAt`: ANY trend-span footprint (threads, comments, or body-only reviews) keeps a quiet reviewer visible as a DORMANT row (zeroed window counts + trend + last-active chip) instead of vanishing; body-only reviews count as window activity for emission/dormancy but never enter the volume math |
@@ -391,6 +449,8 @@ file maps to a `client.ts` method.
 | `GET /api/activity/feed?repoIds&userIds&limit&offset&excludeBots&botWindowDays` | **Consolidated Feed** (core, no AI; the Activity "Feed" entry): ONE flat, chronological (newest-first) stream of REAL activity events (opens / merges / reviews / comments, plus **commit-push items that ADDRESSED a review thread** — coalesced per author/PR into runs, affected threads inline via `affectedThreads`/`commitCount`/`changeSummary`; plain pushes excluded). Each item carries **`isMyTurn`** (participation: you authored the PR / are a requested reviewer / previously reviewed-or-commented, AND the actor isn't you) — that flag REPLACES the old two-source (`my_turn` vs `feed`) synthesis + dedup, so there's exactly one row per event. **My Turn / "FYI" is CORE (free, every tier), NOT a Pro capability:** `getConsolidatedFeed` computes `isMyTurn` directly via `feed/my-turn.ts` (no capability gate, no provider seam). `isMyTurn` rows are uncapped; plain activity is capped (`FEED_EVENT_CAP`). `excludeBots=true` drops bot-authored activity. **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, counts, generatedAt}` — **`counts` = server-computed facet counts over the WHOLE post-cap stream** (`ConsolidatedFeedCounts`: myTurn/claude/comments/prEvents/bots/byBotActor/byThreadState via the pure `computeFeedCounts`), so FeedView's pill badges reflect every matching item, not the loaded page (stale IndexedDB responses fall back to page-derived counts). Response also carries **`uncappedTotal?`** (pre-cap post-coalesce stream length) — FeedView's count label renders loaded-of-`total` + a "N most recent of M in window" cap disclosure, never the old visible-of-loaded "50 of 50". **Thread-state pills render on EVERY feed view** (not just botsMode; same semantics: an active state pill hides derivedState-less items). `botWindowDays` (clamped 1–90) widens the **botsOnly** feed window to match the shared `botAnalyticsWindow` selector (normal feed stays 14d); the head poll (`useFeedHasNew`) gets the identical params AND is gated on `!isPlaceholderData` so a window flip can't false-fire the refresh banner. **`includeAllCommits=true`** (the opt-in "**Commits**" pill, OFF by default, `feedShowCommits` transient store toggle) surfaces EVERY commit-push run — not just the thread-addressing ones — via `getCommitThreadItems` dropping its addressed-thread gate (run coalescing kept; a plain run emits empty `affectedThreads` + a "pushed N commits" summary); inert on the `botsOnly` path; threaded into BOTH the feed key and the head-poll key (identical scope). `counts` gained a **`commits`** facet (badges the pill); the **`prEvents`** facet is now READ by FeedView (the PR-events pill finally shows its count). No "seen"/acknowledged concept. |
 | `GET /api/team-metrics?scope` · `GET /api/team-metrics/detail?scope` | **CORE/FREE** team flow-metric header (DORA-ish tiles + 12-week trend charts) + the per-tile PR drill-down. Moved OUT of the Pro Insights pane to the cross-repo **Feed** (`FeedMetricsPanel` atop `showingFeed`). `getTeamMetrics`/`getTeamMetricsDetail` were always CORE-computed; only the SERVING route was Pro-gated. `getTeamMetricsForScope` mirrors `getTeamInsights`' repo resolution (`resolveScopeRepoIds`; null/'all' → watched set). `api.teamMetricsDetail` repointed here from the old Pro `/api/pro/insights/metrics-detail` (now orphaned). `MetricsDetail` (drill-down tab) dropped its "Pro" badge. The Pro Insights Overview keeps its attention cards + Sprint/Retro/Compare (metrics no longer render there). **`MetricsDetail` is now SORTABLE** (retrofit onto `Activity/sortableTable.tsx` — it was the last static drill-down): every column clickable, a new sortable **Updated** column (backed by `MetricPr.updatedAt`, added to the `getTeamMetricsDetail` SELECT), the Diff column sorts on numeric `additions+deletions` (never the formatted string), and per-tab default sort = recency (updated desc) for open_prs/merges but the metric magnitude (value desc) for the duration/CI tabs (NOT recency for lead time) |
 | `GET /api/repos/:id/claude-reviews` | repo-scoped Claude-review history (retrieval only; `enabled:false` when the flag is off) → `{prs:[{runs[]}]}` |
+| `POST /api/prs/:id/review-comment` | post ONE inline review comment, re-anchoring to the file's first changed line when the requested `(path,line,side)` isn't addable → `AddReviewCommentResult`. Alone among the write routes it cannot stamp a local row (REST returns no review-THREAD node id), so it resyncs + VERIFIES and reports `visible`/`threadId` — see **Instant comment visibility** in Conventions. Once GitHub has 201'd, nothing downstream may fail the request |
+| `GET /api/pro/prs/:id/annotations?kinds` · `POST …/annotations/run` (+ `/stream`) | **comment annotations** (Pro, `prSummary`): the cached per-PR read (pure, no side effects, no generate-on-open) · the ONE billing path — `kind` is a RUN kind (`addressed`\|`validity`\|`simplify`\|**`review`** = all three in one call per target), `targets[]` narrows to one thread/comment, `onlyStale` is the cheap refresh → `AnnotationRunResponse`. See **Comment annotations** under the Pro plugin |
 | `GET·POST /api/pro/activity/digests*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest (the Activity Feed renders the COLLECTION of these, scoped to WATCHED repos — no separate cross-repo route/pass) + review-memory data. See "Open-core Pro plugin" |
 | `GET /api/auth/providers` · `/login[/​:provider]` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub sign-in: which providers are enabled (for SignInGate) / authorize via `oauth`\|`app` (folds provider into `state`; OAuth adds `config.oauthScope`) / exchange+upsert+session→`/app` / clear session |
 | `GET /api/prs/:id/claude-review` | latest run + findings + history + auth status + `enabled` |
@@ -466,6 +526,9 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   Timeline takes the full height (App fires a synthetic `resize` on the transition so vis
   refits). Shows **PrDetail** for the selected PR. **App lands on the Activity console by
   default** (Activity-first; a bare load → `?view=activity`, deep links keep timeline).
+- **`AutoMergeBanner`** — a bottom-right toast stack (same shape as `ClaudeReviewBanner`) fed by
+  DIFFING `GET /api/auto-merge`: the watcher runs server-side, so an `armed →` terminal
+  transition is the only signal the client gets. Transitions only, never current state.
 - **Tabs / board slot** (`PinnedTabsBar` + `App.tsx`). `<main>` renders exactly ONE
   `<Timeline>` "board slot" whose `mode` derives from the active tab: absent = the shared
   board; `{kind:'isolate',prId}` = a **pr-focus** tab's own isolated Timeline. `activity` +
@@ -628,11 +691,16 @@ Key behaviors to know about:
 
 Header carries **Show** + **Focus** links (drive the timeline). Tabs (Overview / Threads /
 Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claude Review / AI):
-- **Overview** — `ChecksTab.tsx`: CI/checks, **Reviewers** (all who submitted a review,
-  badged by latest state) above **Approvers** (latest decisive review = `approved`), then
-  **Merged by**, **Requested** reviewers, labels, meta — then the PR **Summary** (markdown,
-  clamped to 3 lines, tall images hidden when collapsed) and **PR comments** (oldest first),
-  each with a "Show" link.
+- **Overview** — `ChecksTab.tsx`: CI/checks (each Actions check expands into the inline log
+  viewer — see **Merge, CI logs & trunk status**), the **merge verdict** line (open PRs only,
+  from `mergeVerdict` — this row is where the old "mergeable" lie lived), **Reviewers** (all who
+  submitted a review, badged by latest state) above **Approvers** (latest decisive review =
+  `approved`), then **Merged by**, **Requested** reviewers, labels, meta, an **Actions** row
+  (approve / `MergeControl` / `ClosePrControl`) — then the PR **Summary** (markdown,
+  clamped to 3 lines, tall images hidden when collapsed). **PR comments** (oldest first) round the
+  tab off — each with a "Show" link, its AI annotations above the untouched body, and a per-comment
+  "Check review" — but that list is rendered by **`PrDetail` itself**, not `ChecksTab`, which is why
+  the per-comment `CommentAnnotations`/`ReviewCheckButton` call sites are there.
 - **Threads** — `ThreadList`/`ThreadView`: review threads grouped by file, **newest first**
   (files by most-recent thread; within a file by `createdAt` desc), with code anchors +
   new-comment highlights; each has a "Show" link. A sticky header carries **derived-state filter
@@ -655,9 +723,198 @@ Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claud
   slower than typical — view" caution that opens this tab. **Landmine:** `usePrBotBehaviour` is
   called at the top of PrDetail (before the loading/error early returns) — hooks-order rule.
 
+Above the tab CONTENT (not inside any tab) sits the Pro **`ReviewCheckBar`** — the single
+"Check review" run. It is there deliberately: the run spans review THREADS (Threads tab) and PR
+COMMENTS (Overview tab), so mounting it under either heading misrepresented what a click spends.
+It renders `null` without the capability, and carries its own border, so the free layout gains no
+empty strip.
+
 Keyboard (`useKeyboard.ts`): `/` focuses the filter, `j`/`k` cycle the board's PRs (board
 only), `i` opens Insights, `esc` leaves any tab/overlay → the board (else clears the
 selection).
+
+---
+
+## Merge, CI logs & trunk status (CORE, no AI)
+
+### The ONE merge verdict (`lib/ui.ts` `mergeVerdict`)
+
+Every surface that answers "can this land?" resolves it through the pure `mergeVerdict()` →
+`MergeVerdictInfo{verdict,label,tone,canMerge,detail}`. It replaced `mergeWarning()` plus each
+surface's own ad-hoc reading, which is how the same PR could read "mergeable" in the Overview
+and "blocked" in the merge control.
+
+**Why GitHub's `mergeable` is not the answer:** it reports ONLY merge-CONFLICT state
+(MERGEABLE / CONFLICTING / UNKNOWN). A PR whose REQUIRED checks are failing is still
+`mergeable: 'mergeable'` — which is exactly what the Overview row used to render as a green
+"mergeable" (~444 open PRs in one real DB). **`mergeStateStatus` is the protection-aware field**
+and the one to lead with (`clean` / `blocked` / `unstable` / `behind` / `dirty` / `has_hooks` /
+`unknown`); `mergeable` survives only as the conflict corroborator. `mergeStateStatus` is
+**ACTOR-AGNOSTIC** — it does not model an admin's bypass power, which is precisely why it needs
+no branch-protection API call to be trustworthy, and why "blocked" may not be blocking *you*.
+`reviewDecision` (new PR column) names the review half of a `blocked` status so the verdict can
+say *why*; absent (the lean timeline PR doesn't carry it) the reason stays generic, never invented.
+
+- **`unstable` IS treated as mergeable** (`canMerge: true`, warn tone): it means only
+  NON-required checks are red, and GitHub's own merge button merges it. Do not read "respects
+  CI" as stricter than that. `behind` is `canMerge: false` because GitHub itself 405s the merge
+  when the repo requires up-to-date branches. `queued`/`armed` are checked FIRST (the truest
+  answer to "what happens next"), then conflicts, then draft.
+- `db/triage.ts` had the identical blindness: `approved_ready` tested `mergeable === 'mergeable'`
+  alone and tagged PRs "approved & ready" with red required checks. It now also requires
+  `mergeStateStatus ∈ READY_MERGE_STATES {clean, has_hooks, unstable}` — **that set and
+  `mergeVerdict`'s `canMerge` must agree**, or the triage queue and the PR disagree about the
+  same PR.
+- Consumers: `ChecksTab` (Overview verdict row, open PRs only), `MergeControl`,
+  `Activity/RepoOpenPrList` + `Timeline/prBar` via **`mergeVerdictWarning()`**.
+  **Landmine:** `mergeVerdict` returns `draft` before it looks at behind/blocked, and `draft`
+  is not a compact warning — so a draft that was ALSO behind lost its ⚠ on the dense surfaces.
+  `mergeVerdictWarning` re-derives with `isDraft` dropped and shows only
+  `conflicts`/`behind` underneath (never `blocked`/`unstable` — "required reviews missing" IS
+  what draft means, and unstable's "GitHub will still merge it" is a lie about a draft).
+  `MergeControl` deliberately does NOT pass `autoMergeArmed`: the `armed` verdict reports
+  `canMerge: true`, which on that surface would enable a Merge button for a blocked PR.
+- `PrMergeOptions.mergeStateStatus` is GitHub's LIVE REST string (it can return values the enum
+  doesn't model, `draft` among them), so the live path narrows through **`toMergeStateStatus()`**
+  rather than casting — anything unrecognised becomes `unknown`.
+
+### Merge queue (GitHub's native)
+
+`fetchMergeQueueState` / `enqueuePullRequestOnQueue` / `dequeuePullRequestFromQueue` are the
+one place `github/mutations.ts` **forks from its REST house style**, and it has to:
+`enqueuePullRequest`/`dequeuePullRequest` are GraphQL-only with no REST equivalent, and queue
+presence is not inferable from REST at all — `MergeStateStatus` has no QUEUED value, so a queued
+PR looks like any other blocked one. Nothing is synced (a position changes minute to minute and
+only the merge control renders it): state rides the lazy `merge-options` fetch. When a queue
+exists the control REPLACES "Merge" with "Add to merge queue" — GitHub refuses a direct merge on
+a queued branch, so offering one only produces a confusing 405. `estimatedTimeToMerge` is SECONDS
+in GitHub's schema; the ×1000 lives in the single `SECONDS_TO_MS` constant, applied at the two
+call sites that read the field (`fetchMergeQueueState` + `enqueuePullRequestOnQueue`).
+
+### "Merge when ready" (`merge/auto-merge-runner.ts`)
+
+A Pierre-side standing intent in `auto_merge_requests`, re-evaluated on its own cron
+(`AUTO_MERGE_CRON` `*/2`, registered in `scheduler.ts` under the same `disableScheduler` gate as
+sync — hence the UI saying it only lands while the app is running). Bounded per tick
+(`MAX_INTENTS_PER_TICK` 25, least-recently-checked first so a backlog rotates), one tick at a
+time, grouped per account so each tenant's token is fetched once and one bad token fails only
+that tenant.
+
+**It deliberately does NOT use GitHub's `enablePullRequestAutoMerge`**, which has 422'd since
+2026-03-25 on any PR that does not ALREADY meet its merge requirements — i.e. exactly the PRs
+the feature exists for. Using it would invert the feature.
+
+Pre-flight, before any GitHub read: past `expiresAt` ⇒ `expired`; PR no longer open ⇒
+`disarmed_blocked`; **write permission re-checked at LAND time**, not just at arm time, because
+access can be revoked in between and the watcher must never act on a stale grant. Then, per
+intent, ONE `GET /pulls/{n}` (`fetchPrMergeSnapshot`) serves both the head and the mergeability —
+they are non-overlapping fields of the same payload, and reading them separately cost 750 wasted
+calls/hour at 25 intents. The gates it feeds:
+
+1. **Pinned `expectedHeadOid`** — arming is consent to merge THE CODE THE USER SAW. A different
+   head ⇒ `disarmed_head_moved`, never a merge.
+2. **`isOurUpdateMerge`, the one sanctioned re-pin** — a head move is adopted only on all three
+   proofs: we issued an update for THIS intent recently against exactly the pinned head; the new
+   head is a **TWO-parent** commit whose FIRST parent is that pinned head (a human commit on top
+   also has the old head as a parent — the ARITY is what separates "merged into" from "pushed
+   onto"); and the second parent is contained in the base ref. Anything unproven, including a
+   compare that couldn't run, is a NO.
+3. **Async update-branch is never re-pinned optimistically** — GitHub's update returns **202
+   ACCEPTED** and merges asynchronously with no handle to poll, so re-reading the head there
+   would adopt a concurrent human push as consented-to code. The runner records what it ASKED
+   for (`pendingUpdates`, TTL 15 min) and lets a later tick prove the move via (2).
+4. **Retarget guard** — a `PATCH pulls/{n}` base change leaves `head.sha` alone, so the head pin
+   is blind to it; the runner compares the live base against the last SYNCED base ref and
+   disarms on a mismatch (waiting, not merging, when it can't tell). The exact fix is an
+   `expected_base_ref` column that does not exist yet.
+5. **COMPARE-AND-SET immediately before the merge** — everything above acts on a scan snapshot
+   that can be minutes old; a user who hit Cancel mid-tick DELETED the row, and merging anyway
+   would leave the UI saying "cancelled" for a PR that landed.
+6. **Green light = `mergeableState ∈ {clean, has_hooks, unstable}`** — so, as everywhere else,
+   **`unstable` merges** (CI red but not REQUIRED by branch protection), matching GitHub's own
+   button. `blocked`/`conflicts` KEEP WAITING with a `lastReason` (unblocking on its own is the
+   whole value of arming); only a head move disarms. `unknown` waits.
+
+**Landmine: `behindBy > 0` is true of MOST healthy PRs** (any trunk commit since the branch
+point) — only `mergeStateStatus === 'behind'` means GitHub is blocking. Treating `behindBy` as a
+blocker parked every clean armed PR forever, and freshening on it every tick pushed a merge
+commit (and a CI run) every two minutes for the intent's 72h life; hence `freshenedIntents`,
+which honours "update before merging" exactly ONCE. A local rebase (`coding/merge.ts`, local-only
+— cloud has no clone) IS synchronous and returns the sha it pushed, so re-pinning to that adopts
+nothing we didn't produce. On success the runner stamps the PR merged locally (like the
+interactive route) and sets `merged`; a merge/close that happened outside Pierre becomes
+`disarmed_blocked`, NOT `merged` — the latter means "the watcher did it" and would raise a false
+toast. `MAX_CONSECUTIVE_FAILURES` 3, counted in memory so a restart errs towards retrying.
+Client side: `useArmedMerges` polls `GET /api/auto-merge` (45s, foreground only) and
+`AutoMergeBanner` toasts only on an `armed → terminal` TRANSITION it observed itself — the first
+poll seeds a silent baseline, so a page load never replays yesterday's outcomes.
+
+### CI logs (`github/actions-logs.ts`)
+
+`GET /repos/…/actions/jobs/{id}/logs` 302s to a short-lived signed blob URL that **does honour
+HTTP `Range`** (206 + `Content-Range`), so the fetcher resolves the redirect itself
+(`redirect:'manual'`) and issues ONE ranged GET for the window it wants — real byte chunking, not
+a download-then-slice. The signed URL is server-side only and NEVER returned to a client (it is
+unauthenticated and would bypass the route's ownership check). `parseContentRange` also parses
+the start-less `bytes */<total>` form — the shape RFC 7233 mandates on a 416, and the only way to
+learn the log's true size when the window fell past the end; a start-anchored-only regex made the
+416 recovery dead code.
+
+**Logs are offered for PASSING checks too** — the failure-only gate was OURS, not GitHub's, which
+serves logs for every Actions job, and "what did this green check actually run?" is a real
+question. `CheckRow` now expands for any check with a job id parsed out of its `detailsUrl`;
+third-party checks (external URL, no job) keep the plain link row. The viewer opens at the TAIL
+and pulls EARLIER chunks as you scroll up (`useCheckLogs`, a `useInfiniteQuery` where "next page"
+means earlier, `LOG_PAGE_BYTES` 128 KiB); the prepend is anchored by **distance from the bottom**,
+which is what stays constant when content is added above, and the "Load earlier" control lives
+OUTSIDE the `<pre>` so it can't change the scroller's `scrollHeight` mid-anchor.
+
+### Default-branch ("trunk") status
+
+`GET /api/branch-status` over `repos`' four head columns + `branch_commits` (written by the sync
+step described under **Sync pipeline**). It exists because everything else in this app is
+PR-shaped, while a broken default branch invalidates every open PR's CI at once — and because it
+**cannot come from the existing `commits` table, which is PR-scoped: a squash-merged PR never
+appears there under the SHA that landed on trunk**. Deliberately informational: it feeds no
+attention count, no badge, no My Turn.
+
+- **Both detail columns follow the partial-response write policy** (Conventions): `undefined` ⇒
+  omit the key from the upsert, `null`/`[]` ⇒ clear. `failingChecksToWrite` /`prNumberToWrite`
+  are the implementations, and what counts as GitHub's POSITIVE statement is specific — for
+  failing checks, a green/`expected` phase-1 ROLLUP or a phase-2 response that actually carried a
+  `contexts` list (an `unknown` rollup, which is also what a nulled-by-partial rollup maps to,
+  clears nothing); for the PR ref, an `associatedPullRequests.nodes` ARRAY, whose emptiness means
+  "this commit came from no PR" — a direct push, a legitimate steady state, not a gap.
+  Phase 2's own failure is caught separately (`syncBranchStatus` is already non-fatal upstream, so
+  an unguarded throw here would discard the phase-1 snapshot too): detail failure degrades to "no
+  carets", never to "no strip".
+- Failing checks reuse `sync/upsert.ts`'s `checkContextState` + `parseActionsIds` **verbatim** (now
+  exported) so a trunk failure is the SAME object as a PR failure — one vocabulary, one icon set.
+  They are deduped by display name keeping the highest Actions `runId`, because `contexts` returns
+  every check suite on the commit and does not collapse to latest-per-name the way GitHub's PR UI
+  does. `workflowName` is null for a legacy StatusContext and for a non-Actions suite; nothing may
+  require it. The repo-level `failingChecks` is DERIVED from the commit whose sha is `headSha`
+  (one writer, one reader), matched by SHA and not by position — a backdated committer date can
+  sort the head outside the read cap.
+- **Commit → PR link.** `pickAssociatedPrNumber` stores exactly ONE number from
+  `associatedPullRequests` under a 0/1/many contract, ranked (merged into THIS default branch) >
+  (merged anywhere) > (open) with the lowest number as tiebreak — determinism is the point, since
+  `first:1` on an unordered connection could FLIP between syncs. Candidates from another
+  repository are DROPPED (the connection spans the repo network, so a fork's PR can appear).
+  **Landmine: the read layer's map key is `(repoId, number)`, NEVER a bare number** — PR numbers
+  are unique only WITHIN a repo, so a number-keyed map cross-links repo A's #12 onto repo B's
+  commit and opens the wrong PR. The `inArray × inArray` predicate intentionally over-matches;
+  keying by the pair is what makes that harmless, and there is a seeded test rather than only a
+  comment. `prId != null` → open the PR's own detail tab in-app; `prNumber` set but `prId` null
+  (squash-merged before the backfill window, or a repo added later) → link out to github.com;
+  both null → no chip. Headlines go through `lib/prRef.ts` `trimTrailingPrRef` first: GitHub
+  truncates `messageHeadline` itself (~70 chars, a literal U+2026) and the trailing `(#1234)` is
+  the FIRST thing eaten, so the chip would otherwise sit next to a dangling `(#2…`.
+- UI: `Activity/BranchStatusChip` (rail row: dot + branch + age; a HOLLOW dot for "no CI
+  observed", unlike the PR surfaces which render nothing for `unknown`) and
+  `Activity/BranchStatusPanel` (cross-repo strip on the Feed entry, `compact` per-repo variant in
+  `RepoFeedHeader`). A per-commit expander is driven by `failingChecks.length`, never by the dot's
+  colour, so a caret can never open onto an empty drawer.
 
 ---
 
@@ -741,7 +998,7 @@ remain distinct but flip together.
 **The plugin boundary.** `src/pro/contract.ts` defines `ProContext` (the host hands the
 plugin `db`/`schema`/`runTransaction`/`isPg`/`accountIdOf`/`llm.complete`/`queries`/
 `reviewEvents`/`registerLearningsProvider`/`registerScheduledJob`/`registerPrDetailEnricher`/`registerMigrations`/`aiCredits`), `ProPlugin
-{apiVersion:11, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
+{apiVersion:13, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
 `/api/me` (`pro:{activityDigest,reviewMemory,aiAnalysis,prSummary,aiFix,teamInsights,claudeReview,slackDigest,issueLinks}`)
 exactly like `claudeReviewEnabled`. `src/pro/bind.ts`
 runs in `index.ts` between `buildApp()` and `listen()`: gated on **`config.proEnabled`** — now
@@ -919,6 +1176,75 @@ passes `watched∩visible` ids, and `loadRepoNames` defaults an unscoped request
 `age_hours` or a dormant repo re-bills hourly), per-account min-interval + in-flight guard,
 USD/repo caps. Capability `activityDigest` tracks `PRO_DIGEST_ENABLED`.
 
+**Pro: Comment annotations — the "Check review" platform** (`packages/pro/src/annotations/`,
+capability `prSummary`). ONE plugin-owned table `pr_comment_annotations` (migration `0017`) holds
+any AI judgement ABOUT a review comment, discriminated by **`(accountId, kind, targetKind,
+targetId)`** — that key exists because targets span `thread` / `review_comment` / `pr_comment`
+and the superseded `comment_assessments` keyed a bare comment id, so `prComments.id` and
+`reviewComments.id` would have silently collided. Three stored `AnnotationKind`s: `validity`
+(does the point hold up — the old `comment_assessments`, whose rows migration `0017` backfills
+`INSERT OR IGNORE`; that TABLE is deliberately not dropped, so a rollback is a code change rather
+than a data restore), `addressed` (was the concern
+dealt with, plus what is still open), `simplify` (a faithful rewrite of a bot wall-of-text,
+rendered ADDITIVELY above the untouched original). Staleness is **PASSIVE** — the GET is a pure
+cached read that marks rows stale; nothing regenerates on PR open, which would bill per open of a
+bot-flooded PR.
+
+- **`AnnotationRunKind = AnnotationKind | 'review'`, and the split is load-bearing.** `'review'`
+  is a RUN kind ONLY: one combined model call per target emitting all three judgements, writing
+  the SAME rows three separate runs would. **It must never reach the DB** — there is no `review`
+  row, no `review` payload hash, no `counts.review`, and it is excluded from the `KINDS` set the
+  cached GET's `kinds=` filter validates against. A combined run and three single-kind runs are
+  indistinguishable in storage, which is exactly what keeps each kind's staleness and
+  $0-on-unchanged cache independent. **Each of the three rows keeps its OWN per-kind payload
+  hash**: a single combined hash would mark all three stale the moment any one input moved and
+  re-bill three judgements for one change (the trap the digest cache already taught us).
+  Economically it is also a win — 50 threads was 50 billed `addressed` calls, combined it is
+  `ceil(50/6)` = 9 calls for all three.
+- **`COMBINED_CHUNK_SIZE` = 6, smaller than the single-kind `CHUNK_SIZE` = 8**: a combined item
+  emits a rewrite AND a validity rationale AND the two-section addressed summary (~3.4× a
+  `simplify` item's output), so 8 would want ~6.5–7k output tokens. Overflow does not error — it
+  truncates and the salvage parse silently drops the cut items, surfacing only as a lower
+  `generated`. The chunked shape is used even for ONE unit (`parseSingle`'s "verdict:" first line
+  can't carry three judgements). `recordAiUsage` fires ONCE per call (the authoritative cost);
+  per-row `costUsd` is a double approximation divided by what each unit REQUESTED.
+- **The clock exemption is measured in BILLED CALLS, not units.** A run of
+  `ceil(units / COMBINED_CHUNK_SIZE) <= 1` bypasses the 30s per-account interval clock and does
+  not stamp it. It was `SMALL_RUN_UNITS = 1`, which broke the very case it exists for: a thread
+  anchor EXPANDS to the thread plus one unit per long reply, so on a bot-flooded PR a single
+  per-thread click is already 2+ units and the next click seconds later was refused `too_soon` →
+  429 — while both clicks cost exactly one call. Spend is still bounded by the per-account
+  in-flight serialiser, `MAX_TARGETS_PER_RUN` 50 (resumable), the credit gate, and the `ai`
+  20/min + `ai_hourly` 120/h buckets.
+- **Landmine — EXPANSION.** The three kinds key their rows on DIFFERENT `(targetKind, targetId)`
+  pairs for the SAME thread: `addressed` on `('thread', T)`, `validity` on the thread's ROOT
+  `('review_comment', id)`, `simplify` on `('review_comment', id)` for EVERY comment in it. So a
+  plain equality match against a `{'thread', T}` anchor finds only the `addressed` target: "Check
+  review" on one thread reports `generated: 1`, renders one chip, and silently produces neither a
+  validity nor a simplify verdict — with no error anywhere. A thread anchor therefore matches on
+  THREAD IDENTITY (`targetMatchesAnchor`), resolved from the corpus; comment anchors match
+  themselves.
+- **Landmine — INTERSECTION ONLY.** `targets[]` is a POST-FILTER over targets enumerated from the
+  already-account-scoped PR corpus, and is **NEVER a fetch key**. The ids come from the client, so
+  a "load the named targets" implementation would let `{'review_comment', <another tenant's
+  id>}` posted against a PR I own read a foreign comment body, spend my credits summarising it,
+  and store the result where my own cached GET serves it back. An anchor matching nothing is
+  counted `skipped`; the route SHAPE-validates only, on purpose.
+- Counting unit: `requested`/`generated`/`cached`/`skipped` count the things a human pointed at
+  (a thread, a comment) — never rows, of which a combined unit writes up to three. With anchors,
+  the PR's other ineligible candidates are not counted as `skipped` (that read as nonsense on a
+  300-thread PR); only unmatched anchors are.
+- **UI: three buttons became one.** "Simplify all" / "Check validity" / "Check addressed" (which
+  lived in TWO places, one of them misleadingly under "PR comments" though a run there covered
+  threads) are gone, as are `AddressedMarker` (its verdict pill hid the rationale in a `title`
+  tooltip — invisible on touch) and `AddressedCheckControl`, and `ThreadAssessment` is now
+  render-only. The entry points are `CommentAnnotations`' **`ReviewCheckBar`** (PR-wide, above the
+  tabs, + "Re-check N stale") and **`ReviewCheckButton`** (per thread card / per PR comment, one
+  combined call). The legacy per-item routes (`/api/pro/threads/:id/assess`,
+  `…/addressed/check`) stay registered — they write the SAME rows through the same writer with the
+  same hashes, so they are supported alternate writers, and the PR-wide addressed sweep is still
+  reached from `BotThreadsDetail` where the bar isn't mounted.
+
 **Pro: Claude Review learnings/memory** (`packages/pro/src/review-memory/`). Core seam =
 `src/review/events.ts`: an **inert** typed event-bus (5 emit sites in `claude-review.ts`,
 zero subscribers in OSS) + a learnings-provider registry, plus an optional
@@ -978,7 +1304,19 @@ Tiers: `ai` 20/min **+ `ai_hourly` 120/h**, `pr_detail` 60/min, `github_write` 6
 Review kept its PRE-plugin paths** (`/api/prs/:id/claude-review*`, `/api/claude-reviews/*`,
 `/api/claude-findings/*`), so `tierFor` matches those EXPLICITLY — a `/api/pro/` prefix test
 would leave the most expensive routes on the 600/min read tier. `RATE_LIMIT_DISABLED=true` is the
-escape hatch; `RATE_LIMIT_<TIER>` tunes a bucket.
+escape hatch; `RATE_LIMIT_<TIER>` tunes a bucket. The `pr_detail` matcher covers `GET
+/api/prs/:id` **plus `/merge-options`, `/files`, `/checks/:jobId/logs` and `/suggested-reviewers`**
+— it was anchored to the bare id "because the sub-routes are DB-only reads", which was true when
+written and quietly stopped being true, leaving the most GitHub-expensive GETs in the family on the
+blanket bucket. **That mistake was then made twice**: the first fix asserted, in `tierFor`'s own
+comment AND in a test, that `suggested-reviewers` "really is DB-only" — but
+`enrichReviewerSuggestions` takes an access token (`github/reviewer-suggest.ts:35`), reads CODEOWNERS
+over REST (`github/codeowners.ts`) and infers review teams over GraphQL (`github/team-reviewers.ts`).
+Per-`(account, repo)` TTL caches make repeats free, but a cache-cold loop spends quota. **When in
+doubt, follow the token** — and note that the passing test was pinning the wrong answer, so a test
+agreeing with the code is only evidence of intent when the code is right. Genuinely DB-only and
+correctly on `read`: `/bot-behaviour`, `/bot-dedup`, `/mention-candidates`, the retrieval-only
+`/claude-review`, the cached `GET …/annotations`, `GET /api/auto-merge` and `GET /api/branch-status`.
 
 **Fastify factory hardening** (`app.ts`): `trustProxy: config.isCloud` (Railway proxies — without
 it the limiter's IP fallback collapses into one bucket; NOT set locally, where it would let a
@@ -1010,6 +1348,12 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
 - **`sync/hydrate-detail.ts`**: 60s cache + in-flight map. **`persistBodies` is FALSE by default
   in BOTH modes** (the old module comment claimed otherwise), so every `GET /api/prs/:id` ran
   `PR_DETAIL_QUERY` against GitHub — a loop over ids drained the tenant's 5k points/hour.
+  **A write that must be visible IMMEDIATELY has to bust that cache** —
+  `invalidatePrHydration(accountId, owner, name, number)`. Deleting the cache entry alone is NOT
+  enough: a fetch started *before* the write is still in the in-flight map, and the next reader
+  would join it and be served pre-write text. So the invalidator also bumps a per-key **epoch**,
+  and `fetchGhPrText` refuses both to cache a result whose epoch moved and to share an in-flight
+  fetch that began in an older epoch.
 - **`sync-manager.ts`**: per-repo manual-sync cooldown (`manualSyncCooldownMs`, 5 min forced-full
   / 30s manual) + `apiSyncSlotsExhausted()` cap (4) → 429 from the route. Also added the missing
   `await` on `runSyncForRepo` (the 409 branch was dead).
@@ -1100,8 +1444,24 @@ code this app actually runs, so they are worth knowing:
 
 **Tests:** `api/plugins/security.test.ts` (15), `api/plugins/rate-limit.test.ts` (15),
 `db/erase-account.test.ts` (8), a codeowners ReDoS regression, and
-`packages/pro/test/slack-webhook-url.test.ts`. **`@pierre/pro` has NO test script or vitest
-devDependency**, so nothing in `packages/pro/test/` runs in CI — pre-existing, worth wiring.
+`packages/pro/test/slack-webhook-url.test.ts`.
+
+**Two suites exist that CI does not run — a known gap, both needing a devDependency + script
+decision (each would touch the root lockfile, which is why neither was taken unilaterally):**
+- `packages/pro/test/` — **8 files / 115 tests**, now runnable via `packages/pro/vitest.config.ts`
+  (which aliases `better-sqlite3` to the backend's copy and exports a PLAIN object, since
+  `vitest/config` is unresolvable from a package without vitest): `./apps/backend/node_modules/.bin/vitest
+  run --root packages/pro`. The plugin still declares no `test` script and no vitest devDep, so
+  `pnpm -r test` skips it — including its cross-account isolation suite.
+- `apps/frontend/test/` — **1 file / 15 tests** (`prRef.test.ts`), same arrangement
+  (`apps/frontend/vitest.config.ts`, `include` pinned to `test/**` so vitest can't collect the
+  Playwright `e2e/*.spec.ts` and fail). Kept OUTSIDE `src/` so `pnpm typecheck` never tries to
+  resolve the uninstalled vitest types.
+
+The backend suite itself is **52 files / 480 tests** and DOES run in CI; `vitest.config.ts` raises
+`hookTimeout` to 30s because a dozen suites migrate a throwaway SQLite DB in `beforeAll` and lost
+the 10s default under parallel load — failures that look exactly like real regressions (a
+different subset each run, always in a hook, never an assertion).
 
 ## Conventions & gotchas
 
@@ -1128,11 +1488,60 @@ devDependency**, so nothing in `packages/pro/test/` runs in CI — pre-existing,
   so `pnpm install` works without the submodule. The plugin ships its **own** dual-dialect
   tables + parity + migrations + isolation test (core's `verify:isolation` can't see plugin
   tables). Bump `apiVersion` on any breaking `ProContext` change; `bind.ts` log-and-degrades.
+- **Landmine: the plugin ENTRY ORDER flips by environment, and a stale `dist` shadows `src`.**
+  `packages/pro/dist` is built only for the `--with-pro` release image, is gitignored, and nothing
+  in the dev loop refreshes it — so with `dist` first, `pnpm dev` silently froze the plugin at
+  whenever it was last built: every route added afterwards 404'd while the plugin looked perfectly
+  healthy (capabilities on, older routes serving). `bind.ts` now prefers `src/index.ts` unless
+  `NODE_ENV=production` (where no `.ts` loader exists), and **logs the entry it bound** — the first
+  thing to check when a Pro route unexpectedly 404s.
 - **Keep `/api/timeline` lean** — no bodies/diff hunks; fetch detail on demand via
   `/api/prs/:id` (hot path).
 - **A new route that spends money or GitHub quota needs a rate-limit TIER.** Add it to `tierFor`
   in `api/plugins/rate-limit.ts` (and to `rate-limit.test.ts`) — the default is the generous
-  600/min `read` bucket, which is silently wrong for an LLM call or a GraphQL walk.
+  600/min `read` bucket, which is silently wrong for an LLM call or a GraphQL walk. Spell the
+  route's **EXACT path segment** into `hitsGithub`: the alternation had `comments`/`reviews` in
+  the plural while the routes are `/comment` and `/review-comment`, and omitted `close`,
+  `ci/rerun` and `request-reviewers`, so five GitHub-write routes silently sat on the `read`
+  bucket. Nothing errors — the tier is just wrong.
+- **A new GitHub-write route must either stamp its row locally or resync-and-verify.** A write is
+  not done when GitHub 201s: the SPA re-reads from the local DB, so anything the sync hasn't
+  observed yet is invisible and the UI ends up promising "on the next sync". Most write routes
+  stamp the affected row themselves. `POST /api/prs/:id/review-comment` is the one that CAN'T —
+  REST returns the comment's ids but not the enclosing review THREAD's node id, so a forged local
+  row would have no reply/resolve identity — and it instead runs the tail in
+  `sync/resync-after-write.ts` (bust hydration → targeted `syncOnePr` → a confirming SELECT) and
+  reports a `visible` flag rather than guessing. Two routes are still short of that:
+  `/request-reviewers` stamps only the ids it could resolve to synced `users` rows (direct logins
+  land on the next sync), and `/update-branch` stamps NOTHING — the new head sha it just pushed is
+  invisible until a sync. Adding the tail costs that action a full extra GitHub round trip, so it
+  is a per-route latency decision, not a blanket rule.
+  - The tail is `invalidatePrHydration` → `syncOnePr(…, {waitForInFlight:true})` → a confirming
+    SELECT (`findPostedReviewComment`, matched on the numeric database id OR the node id, since
+    their equality is a convention and not a contract). `waitForInFlight` exists because the
+    in-flight targeted sync may have read GitHub BEFORE the write, so ITS success proves nothing
+    about the new row — the writer queues behind it (bounded, 3 attempts) and fetches itself.
+    Nothing in `resync-after-write.ts` throws: a failed resync must never turn a successful post
+    into an error.
+  - **The `visible`/`threadId` copy contract is a safety rule, not cosmetics.** `visible:false`
+    with a NON-NULL `commentId` means the comment IS on GitHub and we merely couldn't confirm it
+    locally — the copy must say "it'll show up here shortly", never "it failed", and must never
+    offer a retry, because a retry DOUBLE-POSTS. `threadId` is null whenever `visible` is false.
+    Once GitHub has 201'd, the route may not fail: the handler's single `catch` (the 422 →
+    "couldn't place", everything else → 502) is only reachable from a failure BEFORE the post,
+    because `confirmPostedReviewComment` — the sole call after it — never throws.
+  - **Known limit:** the targeted sync pages `reviewThreads(first: 50)`, so on a PR with more
+    threads than that a brand-new one may fall outside the page — a real, expected `visible:false`.
+- **A column may be CLEARED only on a positive statement from GitHub.** `graphqlTolerant` hands
+  back partial data with forbidden fields NULLED, so "GitHub said there is nothing" and "we never
+  received that selection" look identical — and an unconditional write NULLs good detail on every
+  tick for such a token, invisibly. Model the three states (`undefined` = omit the key from the
+  upsert, `null`/`[]` = clear) and SPREAD the observed keys into the values/set objects rather than
+  assigning them. `sync/branch-status.ts`'s `failingChecksToWrite` / `prNumberToWrite` are the
+  reference pair.
+- **A PR number resolves to a local id only within `(accountId, repoId)`.** Numbers are unique per
+  REPO, so any map keyed on a bare number cross-links one repo's #12 onto another's row. See
+  `db/branch-queries.ts`.
 - **A new `accountId`-bearing table must be added to `accountScopedTables()`** in
   `db/erase-account.ts` (and erased in `eraseAccountData`), or a user's deletion silently leaves
   it behind. The test iterates that list, so the omission fails CI.
@@ -1148,6 +1557,15 @@ devDependency**, so nothing in `packages/pro/test/` runs in CI — pre-existing,
 - **Idempotency is load-bearing.** New entities upsert on their GitHub node ID — the conflict
   target is **composite** with the scoping column (`accountId`/`prId`); new event types
   produce a deterministic `dedupeKey`.
+- **`req.raw.on('close')` is NOT a client-disconnect signal on a POST — watch the REPLY socket.**
+  A request's `close` fires when the REQUEST is complete, which for a POST means the moment
+  Fastify finishes reading the body — before the handler has done anything. Wiring a
+  `shouldStop`/`aborted` flag to it makes it permanently true: the run breaks out of its first
+  iteration and every `send` is suppressed, so the route 200s with an empty body while looking
+  like a no-op with no error anywhere. Use `reply.raw` (or the hijacked `raw`) instead; verified
+  both ways — on a POST with a body, `req.raw` reports closed and `reply.raw` does not, while
+  the client is still waiting. The `…/stream` endpoints that are **GETs** (Claude Review, AI Fix)
+  are unaffected and must not be "fixed".
 - **TypeScript is strict** (`noUncheckedIndexedAccess`, `verbatimModuleSyntax`).
 - The local DB + `.env` files are gitignored. Cloud secrets (`ENCRYPTION_KEY`,
   `SESSION_SECRET`, the OAuth App client id/secret) live only in env (`.env.cloud.example` template);
@@ -1283,9 +1701,22 @@ storage; `0013` Claude-review routing (`reviewMode`/`routeReason`); `0014`
 `accounts.lastActiveAt`; `0026` `accounts.aiCreditAllowance`; the **Bot-Triage** trio `0027`
 (`users.github_type`), `0028` (`bot_review_classification`), `0029` (`bot_mute_rules`) — pg
 baseline `0016`, plus plugin migration `0009` (`pro_settings` + 11 `bot_*` columns); `0037`
-(pg `0024`) the four `author_id` indexes the contributor popover needs. The Postgres
+(pg `0024`) the four `author_id` indexes the contributor popover needs. The **merge / CI / trunk**
+batch adds `0038` (pg `0025`) `auto_merge_requests`; `0039` (pg `0026`) the four `repos`
+default-branch columns + `branch_commits`; `0040` (pg `0027`) `pull_requests.review_decision`;
+`0041` (pg `0028`) `branch_commits.failing_checks` + `.pr_number` + the
+`(account_id, repo_id, number)` PR index the commit→PR resolution needs — all additive and
+nullable, so there is no backfill (the branch sync re-upserts the same window every tick, and the
+read resolves null → `[]`/null meanwhile). Plugin migration `0017` adds
+`pr_comment_annotations` (+ backfills `comment_assessments` as `kind='validity'`).
+**Every hand-written sqlite migration must also be registered in `migrations/meta/_journal.json`
+or it SILENTLY skips** — `0038`–`0041` and pg `0025`–`0028` are registered. The Postgres
 baseline (`migrations-pg/`) is a squash — cloud starts empty (synced data is regenerable; no
-SQLite→Postgres migration). **Docs:**
+SQLite→Postgres migration). **Known gaps on this branch:** the four pg twins are exercised by
+**nothing automated** — the whole test suite runs on SQLite, so their only cover is review plus the
+`schema-parity` test on the two schema modules (a pg smoke needs the throwaway-container run
+described under Dependency posture); and auto-merge's retarget guard still compares the last SYNCED
+base ref rather than a stored `expected_base_ref` (see `merge/auto-merge-runner.ts`). **Docs:**
 `docs/SYNC.md`, `docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-AUTH-SETUP.md`,
 `docs/LOCAL-CLOUD-TESTING.md`, `docs/DOMAIN-REPUTATION.md` (Safe Browsing + Search Console),
 `docs/BILLING-STRIPE.md` (Stripe Payment Link + webhook → `accounts.plan` entitlement),

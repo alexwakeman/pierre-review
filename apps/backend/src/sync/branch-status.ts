@@ -1,15 +1,27 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db, schema, runTransaction } from '../db/client.js';
-import { getGraphqlClientFor, graphqlTolerant, withGithubRetry } from '../github/client.js';
 import {
+  getGraphqlClientFor,
+  graphqlTolerant,
+  withGithubRetry,
+  type GraphqlClient,
+} from '../github/client.js';
+import {
+  buildCommitChecksQuery,
+  COMMIT_CHECKS_ALIAS_CAP,
   DEFAULT_BRANCH_QUERY,
+  type CommitChecksResponse,
   type DefaultBranchResponse,
+  type GqlAssociatedPr,
+  type GqlBranchCheckContext,
   type GqlBranchCommit,
 } from '../github/branch-queries.js';
 // One shared mapper: GitHub's `StatusState` enum is identical on a Commit's rollup and on a PR
 // head's, so this reuses sync/upsert.ts's rather than keeping a second copy that could drift.
-import { ciStatusFrom } from './upsert.js';
-import type { CiStatus } from '@pierre-review/shared';
+// `checkContextState` + `parseActionsIds` are shared for the same reason one level down: a
+// failing check on trunk must be the same object as a failing check on a PR.
+import { checkContextState, ciStatusFrom, parseActionsIds } from './upsert.js';
+import type { BranchCheckRun, CiStatus } from '@pierre-review/shared';
 
 const { repos, users, branchCommits } = schema;
 
@@ -18,11 +30,26 @@ const { repos, users, branchCommits } = schema;
 // alive below it, a larger one would write rows the trim immediately deletes.
 export const BRANCH_COMMIT_WINDOW = 20;
 
+// Which rollup states earn the SECOND round trip for failing-check detail. A green commit is
+// skipped entirely — that is what keeps the common case at the ~1 point this file's query header
+// promises. 'pending' is included because GitHub reports the ROLLUP as PENDING while other checks
+// are still running even after one has already FAILED: that is the classic amber-with-a-real-
+// failure case, and without it an amber commit could never get a caret.
+const DETAIL_STATES = new Set<CiStatus>(['failure', 'error', 'pending']);
+
+// The rollup states that are a POSITIVE statement that nothing is failing, and therefore the only
+// ones allowed to CLEAR stored detail. See the partial-response policy below for why 'unknown'
+// (which is also what a nulled-by-partial-error rollup maps to) is deliberately not in here.
+const CLEAR_STATES = new Set<CiStatus>(['success', 'expected']);
+
+// Defensive cap on the stored array. The whole point of this column is that it is tiny; a
+// pathological repo with 300 failing contexts must not write a fat row per commit.
+export const MAX_FAILING_CHECKS_PER_COMMIT = 20;
+
 export interface BranchSyncLogger {
   info: (msg: string, ...args: unknown[]) => void;
   warn: (msg: string, ...args: unknown[]) => void;
 }
-
 
 export interface SyncBranchStatusOptions {
   owner: string;
@@ -38,13 +65,212 @@ export interface BranchStatusSyncResult {
   headSha: string | null;
   ciStatus: CiStatus;
   commitCount: number;
+  // How many commits in the window earned a phase-2 detail fetch. Reported so the two-phase cost
+  // claim is MEASURED from a log line rather than trusted from an estimate.
+  failingCommitCount: number;
   rateLimitCost: number;
+}
+
+// ---- The partial-response policy, applied identically to BOTH new columns ------------------
+//
+// `graphqlTolerant` returns GitHub's PARTIAL data when a token may read most of a query but is
+// forbidden one sub-field — the forbidden field arrives NULLED. So "the response says null" and
+// "we never received that selection" look the same at the JSON level, and the two demand opposite
+// writes: the first should clear the column, the second must leave it alone. Writing
+// unconditionally would NULL yesterday's good detail on every tick for such a token, and a red
+// commit would permanently lose its caret (and a chip would blink out) for a reason no user can
+// see. Writing conditionally on non-null would instead leave a stale value alive forever after a
+// re-run turned a check green.
+//
+// The resolution, used by both `failingChecksToWrite` and `prNumberToWrite`: a value is written
+// ONLY when the response actually CARRIED the selection it is derived from —
+//   • `undefined` ⇒ not received / not knowable ⇒ omit the column from the write entirely.
+//   • `null` / `[]` ⇒ GitHub positively stated there is nothing ⇒ write it, clearing any
+//     previously stored value.
+// For failing checks the positive statement is a green (or 'expected') ROLLUP from phase 1, or a
+// phase-2 response that actually contained a `contexts` list. For the PR reference it is an
+// `associatedPullRequests.nodes` ARRAY (an empty one means "this commit came from no PR" — a
+// direct push, which is a legitimate steady state, not a gap).
+
+/**
+ * The FAILING checks among a commit's rollup contexts — never the passing ones.
+ *
+ * Reuses the PR side's `checkContextState` + `parseActionsIds` verbatim so a trunk failure and a
+ * PR failure are the same object, then dedupes by display name keeping the newest Actions run:
+ * `contexts` returns EVERY check suite attached to the commit and does NOT collapse to
+ * latest-per-name the way GitHub's own PR UI does (a re-run, or a workflow fired by both `push`
+ * and `pull_request`, contributes a second same-named CheckRun). Actions run ids increase
+ * monotonically, so the highest runId is the most recent.
+ */
+export function failingChecksFrom(
+  nodes: (GqlBranchCheckContext | null)[],
+): BranchCheckRun[] {
+  const byName = new Map<string, BranchCheckRun>();
+  for (const c of nodes) {
+    if (c == null) continue;
+    const state = checkContextState(c);
+    if (state !== 'failure' && state !== 'error') continue;
+    const url = c.__typename === 'CheckRun' ? c.detailsUrl : c.targetUrl;
+    const { runId, jobId } =
+      c.__typename === 'CheckRun' ? parseActionsIds(url) : { runId: null, jobId: null };
+    const item: BranchCheckRun = {
+      // Third-party text (a check's name is whatever the CI vendor chose), so it is length-capped
+      // here rather than trusted; the frontend renders it as a plain text node.
+      name: (c.__typename === 'CheckRun' ? c.name : c.context).slice(0, 200),
+      state,
+      url,
+      runId,
+      jobId,
+      workflowName:
+        c.__typename === 'CheckRun'
+          ? (c.checkSuite?.workflowRun?.workflow?.name ?? null)
+          : null,
+    };
+    const prev = byName.get(item.name);
+    if (!prev || (item.runId ?? -1) > (prev.runId ?? -1)) byName.set(item.name, item);
+  }
+  return [...byName.values()].slice(0, MAX_FAILING_CHECKS_PER_COMMIT);
+}
+
+/**
+ * Which single PR number to store for a trunk commit, or null for a direct push.
+ *
+ * The 0 / 1 / many contract:
+ *   0 candidates → a direct push to trunk (the legitimate no-chip case) → null.
+ *   1            → the normal squash/merge landing → that number.
+ *   2+           → the commit is reachable from several PRs (a branch merged into another open
+ *                  PR, a cherry-pick, a revert-then-reland). Store exactly ONE, ranked
+ *                  (merged into THIS repo's default branch) > (merged anywhere) > (open), with
+ *                  the LOWEST number as a stable tiebreak.
+ *
+ * Determinism is the whole point: the ranking is ours precisely so a re-sync can never flip the
+ * displayed number, which `first: 1` on an unordered connection would.
+ *
+ * A candidate from another repository is DROPPED: `associatedPullRequests` spans the repo network,
+ * so a fork's own PR can appear, and the read layer resolves a number within (accountId, repoId)
+ * — a foreign number would resolve to a completely unrelated local PR. A null `nameWithOwner` (a
+ * tolerant partial nulled it) is accepted rather than discarding an otherwise good candidate.
+ */
+export function pickAssociatedPrNumber(
+  n: GqlBranchCommit,
+  fullName: string,
+  defaultBranchName: string | null,
+): number | null {
+  const cands = (n.associatedPullRequests?.nodes ?? []).filter(
+    (p): p is GqlAssociatedPr & { number: number } =>
+      p != null &&
+      typeof p.number === 'number' &&
+      (p.repository?.nameWithOwner == null || p.repository.nameWithOwner === fullName),
+  );
+  const first = cands[0];
+  if (first == null) return null;
+  const rank = (p: GqlAssociatedPr): number => {
+    if (p.merged !== true) return 2;
+    return defaultBranchName != null && p.baseRefName === defaultBranchName ? 0 : 1;
+  };
+  let best = first;
+  for (const p of cands.slice(1)) {
+    const d = rank(p) - rank(best);
+    if (d < 0 || (d === 0 && p.number < best.number)) best = p;
+  }
+  return best.number;
+}
+
+/**
+ * Which commits in the window earn a phase-2 detail fetch: the non-green ones, newest first.
+ *
+ * `history()` returns newest-first, so slicing to the alias cap keeps the NEWEST failing commits —
+ * the ones anyone will actually expand. Exported so the "a green trunk issues no second query"
+ * claim is a test rather than a comment.
+ */
+export function detailTargetShas(nodes: GqlBranchCommit[]): string[] {
+  return nodes
+    .filter((n) => DETAIL_STATES.has(ciStatusFrom(n.statusCheckRollup?.state)))
+    .slice(0, COMMIT_CHECKS_ALIAS_CAP)
+    .map((n) => n.oid);
+}
+
+/**
+ * The failing-checks value to WRITE for one commit, per the partial-response policy above:
+ * `undefined` ⇒ omit the column (we did not learn anything), `null` ⇒ positively no failures.
+ */
+export function failingChecksToWrite(
+  n: GqlBranchCommit,
+  failingBySha: Map<string, BranchCheckRun[]>,
+): BranchCheckRun[] | null | undefined {
+  const rollup = ciStatusFrom(n.statusCheckRollup?.state);
+  if (CLEAR_STATES.has(rollup)) return null;
+  // 'unknown' — either no rollup was received (a partial error nulled it) or GitHub's state isn't
+  // one we model. Neither is a statement that nothing is failing, so nothing is cleared.
+  if (!DETAIL_STATES.has(rollup)) return undefined;
+  const found = failingBySha.get(n.oid);
+  // Absent ⇒ past the alias cap, or the contexts selection wasn't received: keep what we have.
+  if (found == null) return undefined;
+  return found.length > 0 ? found : null;
+}
+
+/**
+ * The PR-number value to WRITE for one commit, per the same policy. An `associatedPullRequests`
+ * that arrived as null (a partial error) yields `undefined` — writing null there would erase a good
+ * stored number and make the chip blink out of the UI for a reason the user cannot see.
+ */
+export function prNumberToWrite(
+  n: GqlBranchCommit,
+  fullName: string,
+  defaultBranchName: string | null,
+): number | null | undefined {
+  return Array.isArray(n.associatedPullRequests?.nodes)
+    ? pickAssociatedPrNumber(n, fullName, defaultBranchName)
+    : undefined;
+}
+
+/**
+ * Phase 2: the failing checks for the given shas, in ONE query.
+ *
+ * The returned map contains an entry ONLY for a sha whose `contexts` list actually arrived — an
+ * absent key means "not received", which the caller must not confuse with "no failures". See the
+ * partial-response policy above. Exported for the request-shape unit test.
+ */
+export async function fetchFailingChecks(
+  client: GraphqlClient,
+  owner: string,
+  name: string,
+  shas: string[],
+  log?: BranchSyncLogger,
+): Promise<{ bySha: Map<string, BranchCheckRun[]>; cost: number }> {
+  const variables: Record<string, unknown> = { owner, name };
+  shas.forEach((sha, i) => {
+    variables[`s${i}`] = sha;
+  });
+  const resp = await withGithubRetry(() =>
+    graphqlTolerant<CommitChecksResponse>(
+      client,
+      buildCommitChecksQuery(shas.length),
+      variables,
+      (errors) =>
+        log?.warn(
+          `branch-status ${owner}/${name}: partial GraphQL on commit checks — ` +
+            `keeping previously stored detail for the affected commits`,
+          errors,
+        ),
+    ),
+  );
+
+  const bySha = new Map<string, BranchCheckRun[]>();
+  shas.forEach((sha, i) => {
+    const nodes = resp.repository?.[`c${i}`]?.statusCheckRollup?.contexts?.nodes;
+    // `nodes == null` covers all three not-received shapes: the alias resolved to nothing, the
+    // rollup was nulled, or the contexts selection itself was forbidden.
+    if (nodes == null) return;
+    bySha.set(sha, failingChecksFrom(nodes));
+  });
+  return { bySha, cost: resp.rateLimit?.cost ?? 0 };
 }
 
 /**
  * Snapshot a repo's DEFAULT BRANCH: its head sha + CI rollup onto `repos`, and the most recent
- * `BRANCH_COMMIT_WINDOW` trunk commits (with their own per-commit CI state) into
- * `branch_commits`.
+ * `BRANCH_COMMIT_WINDOW` trunk commits (with their own per-commit CI state, the checks that were
+ * failing on them, and the PR each landed from) into `branch_commits`.
  *
  * Why this can't come from the existing tables: `commits` is PR-scoped, and a squash-merged PR
  * never appears there under the SHA that actually landed on trunk. So "is main green, and what
@@ -65,6 +291,7 @@ export async function syncBranchStatus(
 ): Promise<BranchStatusSyncResult> {
   const { owner, name, repoId, accountId, token } = opts;
   const client = getGraphqlClientFor(token);
+  const fullName = `${owner}/${name}`;
 
   const resp = await withGithubRetry(() =>
     graphqlTolerant<DefaultBranchResponse>(
@@ -73,7 +300,7 @@ export async function syncBranchStatus(
       { owner, name, first: BRANCH_COMMIT_WINDOW },
       (errors) =>
         opts.log?.warn(
-          `branch-status ${owner}/${name}: partial GraphQL — continuing without forbidden fields`,
+          `branch-status ${fullName}: partial GraphQL — continuing without forbidden fields`,
           errors,
         ),
     ),
@@ -109,10 +336,41 @@ export async function syncBranchStatus(
     for (const r of rows) userIdByLogin.set(r.login, r.id);
   }
 
+  // Phase 2, for the non-green commits only — a green trunk issues no second query at all.
+  const detailTargets = detailTargetShas(nodes);
+  let failingBySha = new Map<string, BranchCheckRun[]>();
+  let detailCost = 0;
+  if (detailTargets.length > 0) {
+    // LOAD-BEARING try/catch: sync-repo.ts already treats the whole of `syncBranchStatus` as
+    // non-fatal, so an unguarded throw here would discard the phase-1 snapshot too — dots,
+    // headSha, authors, the entire strip for this repo. Detail failure must degrade to "no
+    // carets", never to "no strip".
+    try {
+      const r = await fetchFailingChecks(client, owner, name, detailTargets, opts.log);
+      failingBySha = r.bySha;
+      detailCost = r.cost;
+    } catch (err) {
+      opts.log?.warn(
+        `branch-status ${fullName}: failing-check detail failed (non-fatal): ` +
+          `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+      );
+    }
+  }
+
   await runTransaction(async (tx) => {
     for (const n of nodes) {
       const login = n.author?.user?.login ?? null;
       const authorUserId = login != null ? userIdByLogin.get(login) ?? null : null;
+      const failingChecks = failingChecksToWrite(n, failingBySha);
+      const prNumber = prNumberToWrite(n, fullName, branchName);
+      // Spread rather than assign: an omitted key leaves the column at its default on INSERT and
+      // untouched on UPDATE, which is exactly what "we did not receive that selection" means.
+      // Passing `undefined` explicitly would work for drizzle today, but the spread makes the
+      // three-state intent legible at the call site.
+      const observed = {
+        ...(failingChecks !== undefined ? { failingChecks } : {}),
+        ...(prNumber !== undefined ? { prNumber } : {}),
+      };
       await tx
         .insert(branchCommits)
         .values({
@@ -127,6 +385,7 @@ export async function syncBranchStatus(
           authorAvatarUrl: n.author?.avatarUrl ?? null,
           committedAt: new Date(n.committedDate),
           ciStatus: ciStatusFrom(n.statusCheckRollup?.state),
+          ...observed,
         })
         .onConflictDoUpdate({
           target: [branchCommits.accountId, branchCommits.repoId, branchCommits.sha],
@@ -137,6 +396,7 @@ export async function syncBranchStatus(
             authorAvatarUrl: n.author?.avatarUrl ?? null,
             committedAt: new Date(n.committedDate),
             ciStatus: ciStatusFrom(n.statusCheckRollup?.state),
+            ...observed,
           },
         })
         .execute();
@@ -171,11 +431,22 @@ export async function syncBranchStatus(
       .execute();
   });
 
+  const rateLimitCost = (resp.rateLimit?.cost ?? 0) + detailCost;
+  if (detailTargets.length > 0) {
+    // The one place the two-phase cost claim is observable. Logged only when phase 2 actually
+    // ran, so a healthy repo stays silent.
+    opts.log?.info(
+      `branch-status ${fullName}: ${detailTargets.length} non-green commit(s), ` +
+        `${failingBySha.size} with retrievable checks, ${rateLimitCost} rate-limit point(s)`,
+    );
+  }
+
   return {
     branchName,
     headSha,
     ciStatus: headCi,
     commitCount: nodes.length,
-    rateLimitCost: resp.rateLimit?.cost ?? 0,
+    failingCommitCount: detailTargets.length,
+    rateLimitCost,
   };
 }

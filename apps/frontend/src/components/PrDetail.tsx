@@ -29,8 +29,7 @@ import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
 import { ExternalLinkIcon, FeedIcon, MagnifierIcon, OctocatIcon, TimelineIcon } from './Icons.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
-import { AddressedCheckControl } from './AddressedCheck.js';
-import { AnnotationRunBar, CommentAnnotations } from './CommentAnnotations.js';
+import { CommentAnnotations, ReviewCheckBar, ReviewCheckButton } from './CommentAnnotations.js';
 import { ChangesTab } from './ChangesTab.js';
 import { PrCommentComposer } from './PrCommentComposer.js';
 import { SkeletonBlock, SkeletonLine } from './Skeleton.js';
@@ -503,7 +502,14 @@ function PrCommentsList({
                   ↗ {isComment ? 'View comment on GitHub' : 'View review on GitHub'}
                 </a>
               )}
-              {isComment && <AddressedCheckControl kind="pr_comment" targetId={it.id} />}
+              {/* Pro (prSummary): spend one combined AI check on THIS comment alone — rewrite,
+                  is-it-well-founded, and was-it-addressed. Its output renders above the body. */}
+              {isComment && (
+                <ReviewCheckButton
+                  prId={pr.id}
+                  target={{ targetKind: 'pr_comment', targetId: it.id }}
+                />
+              )}
             </div>
             {replyingTo === rowKey && (
               <div className="mt-2">
@@ -938,6 +944,17 @@ export function PrDetail({
         })}
       </div>
 
+      {/* Pro (prSummary): the ONE "Check review" run, deliberately ABOVE the tab content rather
+          than inside a tab. It spans review THREADS (Threads tab) and PR COMMENTS (Overview tab),
+          so putting it under either tab's heading misrepresented what a click would spend — which
+          is exactly how it ended up under "PR comments". Renders null without the capability, so
+          the free layout is unchanged — the row's own border lives on the bar, not on a wrapper,
+          so a free tier gets no empty bordered strip. */}
+      <ReviewCheckBar
+        prId={pr.id}
+        className="border-b border-gray-200 px-4 py-1 dark:border-gray-800"
+      />
+
       <div className="min-h-0 flex-1 overflow-auto">
         <Suspense
           fallback={<div className="px-4 py-6 text-sm text-gray-400">Loading…</div>}
@@ -959,9 +976,6 @@ export function PrDetail({
                     </span>
                   )}
                 </span>
-                {/* Pro (prSummary): run an AI judgement across this PR's issue comments only —
-                    the thread-scoped equivalent lives in the Threads tab's sticky header. */}
-                <AnnotationRunBar prId={pr.id} targetKinds={['pr_comment']} />
               </div>
               <PrCommentsList
                 pr={pr}

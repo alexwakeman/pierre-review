@@ -29,11 +29,9 @@ import { MergeControl } from './MergeControl.js';
 import { ClosePrControl } from './ClosePrControl.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
 import { AiSummary } from './AiSummary.js';
-import { PrAddressedCheckButton } from './AddressedCheck.js';
 import { useRequestReviewers } from '../hooks/usePrWrites.js';
 import { useSuggestedReviewers } from '../hooks/usePr.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
-import { useProCapabilities } from '../hooks/useTriage.js';
 
 // Per-state styling for the "Reviewers" row badges (everyone who submitted a
 // review, not just approvers): the badge hue + leading glyph hint at each
@@ -352,7 +350,6 @@ export function ChecksTab({
   // "slower than typical" caution that opens the Bot activity tab.
   const { data: prBots } = usePrBotBehaviour(pr.id, onShowBotActivity != null);
   const slowBots = (prBots?.bots ?? []).filter((b) => b.ttfrAnomaly != null);
-  const canCheckAddressed = useProCapabilities().prSummary;
   const suggestions = sugg?.suggestedReviewers ?? [];
   const suggestUsersById =
     (sugg?.users?.length ?? 0) > 0
@@ -609,14 +606,15 @@ export function ChecksTab({
         </Row>
       )}
 
-      {/* Actions = every viewer write action on the PR in one row: approve, merge (push +
-          open + non-draft), close-without-merging (push OR author + open), and the Pro
-          "check addressed" run. Each control expands in place; the approvers themselves read
-          from the green ✓ badges in the Reviews row above. */}
+      {/* Actions = every viewer write action on the PR in one row: approve, merge (push + open +
+          non-draft) and close-without-merging (push OR author + open). Each control expands in
+          place; the approvers themselves read from the green ✓ badges in the Reviews row above.
+          The Pro "check addressed" run used to sit here too — it is now folded into the single
+          "Check review" bar above the tabs, which covers the same threads and comments in one
+          combined call per target, so leaving both would let a user pay twice for one judgement. */}
       {(pr.viewerCanApprove ||
         (pr.viewerCanPush && pr.state === 'open' && !pr.isDraft) ||
-        (pr.viewerCanClose && pr.state === 'open') ||
-        canCheckAddressed) && (
+        (pr.viewerCanClose && pr.state === 'open')) && (
         <Row label="Actions">
           <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
             {pr.viewerCanApprove && (
@@ -626,7 +624,6 @@ export function ChecksTab({
               <MergeControl prId={pr.id} githubUrl={pr.githubUrl} />
             )}
             {pr.viewerCanClose && pr.state === 'open' && <ClosePrControl prId={pr.id} />}
-            {canCheckAddressed && <PrAddressedCheckButton prId={pr.id} compact />}
           </div>
         </Row>
       )}

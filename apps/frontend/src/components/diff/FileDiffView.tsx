@@ -1,5 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import type { PrFileDiffStatus, ThreadDetail, User } from '@pierre-review/shared';
+import { useQueryClient } from '@tanstack/react-query';
+import type {
+  AddReviewCommentResult,
+  PrFileDiffStatus,
+  ThreadDetail,
+  User,
+} from '@pierre-review/shared';
 import { useAddReviewComment } from '../../hooks/usePrWrites.js';
 import { ApiError } from '../../api/client.js';
 import { parsePatch, patchLineCount, type DiffRow } from '../../lib/diff.js';
@@ -37,6 +43,10 @@ export interface DiffThreadContext {
   focusThreadId?: number | null;
   onThreadShown?: () => void;
 }
+
+// How long a just-posted thread keeps its highlight ring after it scrolls into view. Long
+// enough to catch the eye, short enough that it doesn't linger as permanent decoration.
+const POSTED_HIGHLIGHT_MS = 6000;
 
 // ---- collapse-by-default heuristic (GitHub-style: big files start collapsed) ----
 const LARGE_PATCH_LINES = 250;
@@ -101,6 +111,7 @@ function DiffLine({
   filePath,
   fileUrl,
   commenting,
+  onPosted,
   open,
   onOpen,
   onClose,
@@ -110,6 +121,8 @@ function DiffLine({
   // When null, inline commenting is disabled (read-only AI-Fix diff).
   fileUrl: string | null;
   commenting: { prId: number } | null;
+  // Fires with the new thread's LOCAL id once a posted comment is confirmed in our DB.
+  onPosted?: (threadId: number | null) => void;
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
@@ -160,6 +173,7 @@ function DiffLine({
               fileUrl={fileUrl}
               line={target.line}
               side={target.side}
+              onPosted={onPosted}
               onClose={onClose}
             />
           </td>
@@ -214,6 +228,7 @@ function InlineCommentBox({
   fileUrl,
   line,
   side,
+  onPosted,
   onClose,
 }: {
   prId: number;
@@ -221,15 +236,26 @@ function InlineCommentBox({
   fileUrl: string | null;
   line: number;
   side: 'LEFT' | 'RIGHT';
+  onPosted?: (threadId: number | null) => void;
   onClose: () => void;
 }): JSX.Element {
   const [body, setBody] = useState('');
+  // Every notice this box can show is cautionary (the comment moved, or couldn't be
+  // placed, or is on GitHub but not mirrored yet) — a plain "posted" toast is never one of
+  // them, because in the normal case the thread itself renders below and says so. `posted`
+  // only picks the dismiss button's wording.
   const [notice, setNotice] = useState<{
     text: string;
     url: string | null;
-    tone: 'ok' | 'warn';
+    posted: boolean;
   } | null>(null);
+  // Posting is a TWO-phase action: the POST reaches GitHub (and the server resyncs +
+  // verifies the comment landed in our DB), then we refetch the PR so the real thread
+  // renders. `refreshing` is the second phase — the composer stays mounted and disabled
+  // through it, so the user isn't handed a "posted, wait for the sync" promise.
+  const [refreshing, setRefreshing] = useState(false);
   const add = useAddReviewComment(prId);
+  const qc = useQueryClient();
 
   const error =
     add.error instanceof ApiError
@@ -238,40 +264,76 @@ function InlineCommentBox({
         ? 'Failed to post the comment.'
         : null;
 
+  const busy = add.isPending || refreshing;
+
+  const handleResult = async (result: AddReviewCommentResult): Promise<void> => {
+    if (result.commentId === null) {
+      // Nothing was posted at all (no addable diff line, or GitHub rejected the line).
+      setNotice({
+        text: "Couldn't place this comment in the diff — open it on GitHub instead.",
+        url: fileUrl,
+        posted: false,
+      });
+      return;
+    }
+    setBody('');
+
+    if (result.visible) {
+      // The server has the real GitHub state of this comment in our DB, so a refetch is
+      // GUARANTEED to render the thread. useAddReviewComment already invalidated
+      // ['pr', prId]; join that in-flight refetch (cancelRefetch:false — cancelling it
+      // would cost a second round trip) and AWAIT it, so the thread is on screen before
+      // we hand it to onPosted / close the composer.
+      setRefreshing(true);
+      try {
+        await qc.refetchQueries(
+          { queryKey: ['pr', prId], exact: true },
+          { cancelRefetch: false },
+        );
+      } finally {
+        setRefreshing(false);
+      }
+      onPosted?.(result.threadId);
+      if (result.anchored === false) {
+        // It moved — say so, and keep the composer open so the note is read. The thread
+        // itself is now rendered below at the line GitHub chose.
+        setNotice({
+          text: `Posted on the nearest changed line (${
+            result.side === 'LEFT' ? 'old' : 'new'
+          } line ${result.line}) — shown below.`,
+          url: result.url,
+          posted: true,
+        });
+        return;
+      }
+      // The thread appearing IS the confirmation; a "posted" toast beside a visible
+      // comment is noise.
+      onClose();
+      return;
+    }
+
+    // THE COMMENT IS ON GITHUB — the resync just couldn't confirm it here (it failed,
+    // raced, or this PR has more review threads than one sync page returns). Never say
+    // "failed" and never invite a retry: retrying would double-post.
+    setNotice({
+      text:
+        result.anchored === false
+          ? `Posted on GitHub on the nearest changed line (${
+              result.side === 'LEFT' ? 'old' : 'new'
+            } line ${result.line}). It couldn’t be loaded back just now — it’ll show up here shortly.`
+          : 'Posted on GitHub. It couldn’t be loaded back just now — it’ll show up here shortly.',
+      url: result.url,
+      posted: true,
+    });
+  };
+
   const send = (): void => {
     const trimmed = body.trim();
-    if (!trimmed || add.isPending) return;
+    if (!trimmed || busy) return;
     setNotice(null);
     add.mutate(
       { path: filePath, line, side, body: trimmed },
-      {
-        onSuccess: (result) => {
-          if (result.commentId === null) {
-            setNotice({
-              text: "Couldn't place this comment in the diff — open it on GitHub instead.",
-              url: fileUrl,
-              tone: 'warn',
-            });
-            return;
-          }
-          setBody('');
-          if (result.anchored === false) {
-            setNotice({
-              text: `Posted on the nearest changed line (${
-                result.side === 'LEFT' ? 'old' : 'new'
-              } line ${result.line}). It’ll appear in the Threads tab after the next sync.`,
-              url: result.url,
-              tone: 'warn',
-            });
-            return;
-          }
-          setNotice({
-            text: 'Comment posted. It’ll appear in the Threads tab after the next sync.',
-            url: result.url,
-            tone: 'ok',
-          });
-        },
-      },
+      { onSuccess: (result) => void handleResult(result) },
     );
   };
 
@@ -293,10 +355,10 @@ function InlineCommentBox({
         <button
           type="button"
           onClick={send}
-          disabled={add.isPending || body.trim().length === 0}
+          disabled={busy || body.trim().length === 0}
           className="whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
         >
-          {add.isPending ? 'Sending…' : 'Send'}
+          {refreshing ? 'Loading it…' : add.isPending ? 'Posting…' : 'Send'}
         </button>
         <button
           type="button"
@@ -306,21 +368,15 @@ function InlineCommentBox({
             add.reset();
             onClose();
           }}
-          disabled={add.isPending}
+          disabled={busy}
           className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         >
-          {notice?.tone === 'ok' ? 'Close' : 'Cancel'}
+          {notice?.posted ? 'Close' : 'Cancel'}
         </button>
         {error && <span className="text-[10px] text-red-500">{error}</span>}
       </div>
       {notice && (
-        <div
-          className={
-            notice.tone === 'ok'
-              ? 'text-[10px] text-green-600 dark:text-green-400'
-              : 'text-[10px] text-amber-600 dark:text-amber-400'
-          }
-        >
+        <div className="text-[10px] text-amber-600 dark:text-amber-400">
           {notice.text}
           {notice.url && (
             <>
@@ -344,11 +400,13 @@ function InlineCommentBox({
 function FileDiffBlock({
   file,
   commenting,
+  onPosted,
   threads,
   threadCtx,
 }: {
   file: DiffFile;
   commenting: { prId: number } | null;
+  onPosted?: (threadId: number | null) => void;
   threads: ThreadDetail[];
   threadCtx: DiffThreadContext | null;
 }): JSX.Element {
@@ -486,6 +544,7 @@ function FileDiffBlock({
                       filePath={file.path}
                       fileUrl={githubUrl}
                       commenting={commenting}
+                      onPosted={onPosted}
                       open={openRow === i}
                       onOpen={() => setOpenRow(i)}
                       onClose={() => setOpenRow(null)}
@@ -527,6 +586,39 @@ export function FileDiffView({
     return m;
   }, [threadCtx?.threads]);
 
+  // The thread a comment posted from this view just created. Held HERE rather than pushed
+  // up to the caller so the focus works from any mount point without extra wiring: it
+  // expands the file (FileDiffBlock's hasFocus effect), scrolls the row into view and rings
+  // it, then fades. A caller-supplied deep-link focus always wins over it.
+  const [postedThreadId, setPostedThreadId] = useState<number | null>(null);
+  const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (fadeTimer.current) clearTimeout(fadeTimer.current);
+    },
+    [],
+  );
+  const focusPostedThread = (threadId: number | null): void => {
+    if (threadId == null) return; // posted, but we have no local row to point at
+    setPostedThreadId(threadId);
+    if (fadeTimer.current) clearTimeout(fadeTimer.current);
+    fadeTimer.current = setTimeout(() => {
+      fadeTimer.current = null;
+      setPostedThreadId((cur) => (cur === threadId ? null : cur));
+    }, POSTED_HIGHLIGHT_MS);
+  };
+
+  const effectiveCtx: DiffThreadContext | null = threadCtx
+    ? {
+        ...threadCtx,
+        focusThreadId: threadCtx.focusThreadId ?? postedThreadId,
+        // Our own highlight fades on the timer above, so don't let the row's
+        // scrolled-into-view callback clear it the instant it lands.
+        onThreadShown:
+          threadCtx.focusThreadId != null ? threadCtx.onThreadShown : undefined,
+      }
+    : null;
+
   return (
     <div>
       {files.map((f) => (
@@ -534,8 +626,9 @@ export function FileDiffView({
           key={f.path}
           file={f}
           commenting={commenting ?? null}
+          onPosted={focusPostedThread}
           threads={threadsByPath.get(f.path) ?? []}
-          threadCtx={threadCtx ?? null}
+          threadCtx={effectiveCtx}
         />
       ))}
     </div>

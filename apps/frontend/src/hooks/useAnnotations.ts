@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AnnotationKind,
   AnnotationRunBody,
+  AnnotationRunKind,
   AnnotationRunResponse,
   AnnotationTargetKind,
   CommentAnnotation,
@@ -71,7 +72,7 @@ export function useAnnotationIndex(
 export type AnnotationRunProgress =
   | {
       type: 'start';
-      kind: AnnotationKind;
+      kind: AnnotationRunKind;
       total: number;
       cached: number;
       skipped: number;
@@ -91,7 +92,7 @@ export type AnnotationRunProgress =
 
 export interface AnnotationRunState {
   running: boolean;
-  kind: AnnotationKind | null;
+  kind: AnnotationRunKind | null;
   done: number;
   total: number;
   /** Eligible targets this run could NOT reach because of the 50-per-run cap. */
@@ -122,7 +123,7 @@ const IDLE: AnnotationRunState = {
 export function useRunAnnotations(prId: number): {
   state: AnnotationRunState;
   run: (
-    kinds: AnnotationKind | readonly AnnotationKind[],
+    kinds: AnnotationRunKind | readonly AnnotationRunKind[],
     opts?: Omit<AnnotationRunBody, 'kind'>,
   ) => void;
   stop: () => void;
@@ -136,10 +137,10 @@ export function useRunAnnotations(prId: number): {
 
   const run = useCallback(
     (
-      kinds: AnnotationKind | readonly AnnotationKind[],
+      kinds: AnnotationRunKind | readonly AnnotationRunKind[],
       opts?: Omit<AnnotationRunBody, 'kind'>,
     ) => {
-      const list = Array.isArray(kinds) ? [...kinds] : [kinds as AnnotationKind];
+      const list = Array.isArray(kinds) ? [...kinds] : [kinds as AnnotationRunKind];
       if (list.length === 0) return;
       abortRef.current?.abort();
       const ac = new AbortController();
@@ -149,7 +150,7 @@ export function useRunAnnotations(prId: number): {
       // SEQUENTIAL, never concurrent: the server serialises runs per account anyway (one
       // in-flight run at a time), so firing them in parallel would just make all but the first
       // bounce off that guard. Awaiting each stream also keeps the progress readout honest.
-      const runOne = async (kind: AnnotationKind): Promise<void> => {
+      const runOne = async (kind: AnnotationRunKind): Promise<void> => {
         setState((s) => ({ ...s, kind, done: 0, total: 0 }));
         await sseStream<AnnotationRunProgress>(`/api/pro/prs/${prId}/annotations/run/stream`, {
           method: 'POST',
@@ -164,6 +165,10 @@ export function useRunAnnotations(prId: number): {
               setState((s) => ({ ...s, error: e.message }));
             } else {
               // Accumulate across the sequence so the summary line reports the whole sweep.
+              // NOTE the counting UNIT differs by run kind: a 'review' run counts TARGETS (a
+              // thread, a comment — up to three rows each) while a per-kind run counts rows. A
+              // caller that mixes the two in one sequence therefore gets a mildly incoherent
+              // total. Cosmetic, and the alternative (two counters on the wire) buys nothing.
               setState((s) => ({
                 ...s,
                 result:

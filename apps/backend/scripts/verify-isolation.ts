@@ -562,6 +562,26 @@ check(
   (await q.getUserStats(1, contributor!.id, [])).prsOpen === 0,
 );
 
+// ── The posted-review-comment confirmation read (findPostedReviewComment) ───────
+// This one lives in `sync/resync-after-write.ts`, not `db/queries.ts`, because it is the tail of
+// a WRITE route rather than a read surface — which is exactly why it has to be named here: this
+// script is the project's IDOR guarantee and it only walks the query layer, so an id-addressed
+// read that sits outside that file is invisible to it unless imported explicitly. It is
+// id-addressed twice over (a prId AND a GitHub comment id), reaches its tenant the long way
+// round (reviewComments → pullRequests → repos.accountId), and its answer is what the route
+// reports back as "your comment is visible", so a missing predicate would let one account
+// confirm — and learn the local thread id of — another account's inline comment.
+//
+// `RC_iso_A` was seeded above on A's PR, so both directions have something real to find.
+const { findPostedReviewComment } = await import('../src/sync/resync-after-write.js');
+const rcOwn = await findPostedReviewComment(A.prId, 1, 'nonexistent-db-id', 'RC_iso_A');
+check(
+  'findPostedReviewComment(A, A’s comment) finds it by node id',
+  rcOwn != null && rcOwn.threadId === isoThread!.id,
+);
+const rcCross = await findPostedReviewComment(A.prId, 2, 'nonexistent-db-id', 'RC_iso_A');
+check('findPostedReviewComment(B, A’s comment) returns null (IDOR blocked)', rcCross === null);
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

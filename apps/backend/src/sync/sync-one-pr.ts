@@ -37,8 +37,14 @@ const errMsg = (err: unknown): string =>
 
 // One in-flight targeted sync per (repoId, prNumber). Mirrors sync-manager's `running`
 // set: reserved synchronously before any await so a concurrent trigger stands down.
-const running = new Set<string>();
+// It holds the in-flight PROMISE (not just the key) so a caller that cannot accept the
+// stand-down — see `waitForInFlight` on syncOnePr — can queue behind it.
+const running = new Map<string, Promise<boolean>>();
 const keyOf = (repoId: number, prNumber: number): string => `${repoId}:${prNumber}`;
+
+// How many times a `waitForInFlight` caller will queue behind someone else's run before
+// giving up. Bounded so a stream of writers on one hot PR can't spin here indefinitely.
+const MAX_SERIALIZE_ATTEMPTS = 3;
 
 interface RepoTarget {
   owner: string;
@@ -65,16 +71,48 @@ async function getRepoTarget(repoId: number): Promise<RepoTarget | null> {
  * or PR gone, no token). Never throws — failures are logged and swallowed so a bad
  * webhook/poll can't crash the caller; the periodic backstop sync reconciles anything
  * missed.
+ *
+ * `waitForInFlight` (used by the post-write resync — see sync/resync-after-write.ts):
+ * a caller that just WROTE to this PR cannot accept the stand-down, because the run
+ * already in flight may have read GitHub BEFORE that write, so its success proves
+ * nothing about the new row. With the flag set the caller queues behind the running
+ * sync and then does its OWN fetch.
  */
 export async function syncOnePr(
   repoId: number,
   prNumber: number,
   log: Logger,
+  opts?: { waitForInFlight?: boolean },
 ): Promise<boolean> {
   const key = keyOf(repoId, prNumber);
-  // Reserve synchronously (before any await) so a concurrent enqueue/caller stands down.
-  if (running.has(key)) return false;
-  running.add(key);
+  for (let attempt = 0; attempt < MAX_SERIALIZE_ATTEMPTS; attempt++) {
+    const inFlight = running.get(key);
+    if (!inFlight) {
+      // Reserved synchronously on this path (nothing is awaited above it), so a
+      // concurrent enqueue/caller still sees the slot taken, exactly as before. The
+      // `.finally` is attached AT CREATION, so it has already released the slot by the
+      // time any `await inFlight` below resumes — a waiter can never see a stale slot.
+      const run = runOnePrSync(repoId, prNumber, log).finally(() => {
+        running.delete(key);
+      });
+      running.set(key, run);
+      return run;
+    }
+    if (!opts?.waitForInFlight) return false;
+    // runOnePrSync never rejects, so this needs no catch.
+    await inFlight;
+  }
+  return false;
+}
+
+// The actual fetch + persist. Split out from `syncOnePr` so the in-flight bookkeeping
+// (which now has to hand the promise to waiters) lives in exactly one place. Keeps its
+// own try/catch, so it NEVER rejects.
+async function runOnePrSync(
+  repoId: number,
+  prNumber: number,
+  log: Logger,
+): Promise<boolean> {
   try {
     const target = await getRepoTarget(repoId);
     if (!target) {
@@ -155,8 +193,6 @@ export async function syncOnePr(
   } catch (err) {
     log.error(`syncOnePr repo ${repoId} #${prNumber} failed: ${errMsg(err)}`);
     return false;
-  } finally {
-    running.delete(key);
   }
 }
 

@@ -81,6 +81,7 @@ import {
   updatePullRequestBranch,
 } from '../../github/mutations.js';
 import { hydratePrDetail } from '../../sync/hydrate-detail.js';
+import { confirmPostedReviewComment } from '../../sync/resync-after-write.js';
 import { resolveThreadsOnGitHub } from '../../bot-triage/resolve.js';
 import { accountIdOf } from '../plugins/auth.js';
 
@@ -997,6 +998,12 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
   // (path, line, side) lands on an addable diff line; if not, re-anchors to the
   // file's first changed line; if the file has no changes at all, returns a
   // not-anchored result without posting.
+  //
+  // After a successful post it also RESYNCS this PR (sync/resync-after-write.ts) and
+  // VERIFIES the comment row landed locally, returning `visible`/`threadId` — this is the
+  // one write with no optimistic local stamp (REST hands back no review-THREAD node id, so
+  // a forged row would have no reply/resolve identity), so it re-reads GitHub instead. The
+  // client can then render the real thread rather than promise a future sync.
   app.post(
     '/api/prs/:id/review-comment',
     { schema: reviewCommentSchema },
@@ -1043,13 +1050,16 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         if (!isFindingAnchored(index, path, line, side)) {
           const fb = fallbackAnchor(index, path);
           if (!fb) {
-            // The file has no changes in the diff → can't post inline.
+            // The file has no changes in the diff → can't post inline. Nothing was
+            // posted, so there is nothing to make visible.
             const result: AddReviewCommentResult = {
               commentId: null,
               url: null,
               line,
               side,
               anchored: false,
+              visible: false,
+              threadId: null,
             };
             return result;
           }
@@ -1065,12 +1075,27 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
           ctx.number,
           { commitId: head, path, line: finalLine, side: finalSide, body },
         );
+        // THE COMMENT NOW EXISTS ON GITHUB. From here nothing may fail the request: the
+        // catch below maps a 422 to "couldn't place" and everything else to a 502, either
+        // of which would tell the user a live comment didn't post — and invite a retry that
+        // would double-post. `confirmPostedReviewComment` never throws (its own guard), and
+        // it is awaited outside nothing else, so the two guards are independent.
+        const { visible, threadId } = await confirmPostedReviewComment({
+          prId: ctx.prId,
+          accountId,
+          githubDatabaseId: String(gh.databaseId),
+          githubNodeId: gh.nodeId,
+          log: req.log,
+        });
+
         const result: AddReviewCommentResult = {
           commentId: gh.databaseId,
           url: gh.url,
           line: finalLine,
           side: finalSide,
           anchored,
+          visible,
+          threadId,
         };
         return result;
       } catch (err) {
@@ -1080,12 +1105,15 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         // structured "couldn't place" result so the FE's recovery UX engages
         // (open on GitHub) instead of a generic error toast.
         if (/->\s*422\b/.test(message)) {
+          // Nothing was posted (GitHub rejected the line), so nothing is visible.
           const result: AddReviewCommentResult = {
             commentId: null,
             url: null,
             line,
             side,
             anchored: false,
+            visible: false,
+            threadId: null,
           };
           return result;
         }

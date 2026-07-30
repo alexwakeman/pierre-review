@@ -22,6 +22,7 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import type {
+  BranchCheckRun,
   CheckRun,
   Label,
   ReviewRouteReason,
@@ -246,6 +247,16 @@ export const pullRequests = sqliteTable(
     accountIdx: index('pr_account_idx').on(t.accountId),
     // Drives getUserStats (the contributor popover) from the person rather than the account.
     authorIdx: index('pr_author_idx').on(t.authorId),
+    // Serves resolving a PR NUMBER to a local id within a repo — the branch strip's
+    // commit → PR link, which looks up a batch of numbers on a route the Activity console
+    // hits on every mount. Without it the planner narrows to the repo via `pr_repo_idx` and
+    // then SCANS that repo's whole PR set, so the cost tracks tenant size rather than the
+    // handful of numbers asked for (the same trap the author indexes fixed).
+    accountRepoNumberIdx: index('pr_account_repo_number_idx').on(
+      t.accountId,
+      t.repoId,
+      t.number,
+    ),
     nodeUx: uniqueIndex('pr_account_node').on(t.accountId, t.githubNodeId),
   }),
 );
@@ -673,6 +684,32 @@ export const branchCommits = sqliteTable(
     ciStatus: text('ci_status', {
       enum: ['success', 'failure', 'pending', 'error', 'expected', 'unknown'],
     }),
+    // The checks that were FAILING on this commit (state 'failure' | 'error' only) — never the
+    // passing contexts, so a green commit stores NULL and its row stays exactly as small as it
+    // is today. Same object the PR checks UI renders, plus the workflow name, so the two
+    // surfaces speak ONE vocabulary.
+    //
+    // NOT lean-gated (unlike pullRequests.checkRuns, which is): this is names-only metadata,
+    // capped per commit by the writer, and there is NO hydrate-on-demand path for a trunk
+    // commit — it belongs to no PR, so gating it would simply delete the feature in cloud
+    // rather than make it lazy. Follows the ci_status_events.failing_checks precedent, which is
+    // written unconditionally for the same reason.
+    //
+    // NOTE: the SAME column name as ci_status_events.failing_checks but a DIFFERENT shape (that
+    // one is string[] — bare names for the CI metrics log; this one is the full render payload).
+    // The $type<>() makes the difference a compile-time fact at every call site.
+    failingChecks: text('failing_checks', { mode: 'json' }).$type<
+      BranchCheckRun[]
+    >(),
+    // The PR this commit landed from (GraphQL Commit.associatedPullRequests), or null for a
+    // direct push to trunk. Stored as a plain NUMBER, deliberately NOT a pull_requests FK:
+    //  (a) the PR is often not synced when the commit is observed (squash-merged before the
+    //      backfill window, or the repo was added later),
+    //  (b) a stored id would go stale the moment that PR's subtree is re-synced, and
+    //  (c) a real FK would drag this table into BOTH delete paths.
+    // The read layer resolves the number to a local id per request, scoped by
+    // (accountId, repoId) — a PR number is unique only WITHIN a repo.
+    prNumber: integer('pr_number'),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

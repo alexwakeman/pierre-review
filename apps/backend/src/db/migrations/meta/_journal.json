@@ -288,6 +288,13 @@
       "when": 1784900000000,
       "tag": "0040_pr_review_decision",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1785000000000,
+      "tag": "0041_branch_commit_detail",
+      "breakpoints": true
     }
   ]
 }

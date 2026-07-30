@@ -163,6 +163,35 @@ describe('syncOnePr', () => {
     // Only the first run persisted; the second never got past the guard.
     expect(mockPersist).toHaveBeenCalledTimes(1);
   });
+
+  it('with waitForInFlight, queues behind the running sync and then fetches itself', async () => {
+    // A caller that just WROTE to this PR (the post-write resync) cannot accept the stand
+    // down: the in-flight run may have read GitHub BEFORE that write, so serializing must
+    // produce a SECOND fetch rather than reuse the first one's verdict.
+    let release: (() => void) | null = null;
+    mockPersist.mockImplementationOnce(
+      () => new Promise<void>((r) => { release = () => r(); }),
+    );
+    mockGraphql.mockResolvedValue(okResponse(prNode));
+
+    const first = syncOnePr(1, 46, makeLog());
+    const second = syncOnePr(1, 46, makeLog(), { waitForInFlight: true });
+
+    for (let i = 0; i < 20 && release === null; i++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    expect(release).not.toBeNull();
+    // SERIALIZED, not parallel: while the first run is still inside persist the waiter has
+    // not fetched anything — two concurrent GraphQL fetches + two concurrent persistPr
+    // transactions on one PR is exactly what the in-flight guard exists to prevent.
+    expect(mockGraphql).toHaveBeenCalledTimes(1);
+    release!();
+
+    expect(await first).toBe(true);
+    expect(await second).toBe(true);
+    expect(mockPersist).toHaveBeenCalledTimes(2);
+    expect(mockGraphql).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('enqueuePrSync', () => {

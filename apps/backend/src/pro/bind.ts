@@ -50,10 +50,18 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   // flattens the release layout (backend runs from /app/dist/…), so the repo-relative
   // packages/pro paths below don't exist there — the image sets PRO_PLUGIN_PATH=/app/pro/index.js
   // to point straight at the copied-in built plugin. It reveals nothing about Pro (just a path).
+  //
+  // The dist/src ORDER flips by environment, and that matters: `packages/pro/dist` is built only
+  // for the --with-pro release image, is gitignored, and nothing in the dev loop refreshes it.
+  // A leftover dist therefore used to SHADOW the source under `pnpm dev` and freeze the plugin at
+  // whenever it was last built — every route added afterwards 404s, with the plugin otherwise
+  // looking healthy (capabilities on, older routes serving). Dev prefers source; production, where
+  // no .ts loader exists, prefers the build.
+  const distEntry = join(repoRoot, 'packages/pro/dist/index.js'); // built plugin (node)
+  const srcEntry = join(repoRoot, 'packages/pro/src/index.ts'); // source (tsx dev)
   const entry = [
     process.env.PRO_PLUGIN_PATH, // explicit override (cloud/Docker image)
-    join(repoRoot, 'packages/pro/dist/index.js'), // built plugin (node)
-    join(repoRoot, 'packages/pro/src/index.ts'), // source (tsx dev)
+    ...(process.env.NODE_ENV === 'production' ? [distEntry, srcEntry] : [srcEntry, distEntry]),
   ]
     .filter((p): p is string => Boolean(p))
     .find(existsSync);
@@ -61,6 +69,8 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
     app.log.debug('pro plugin submodule absent — OSS mode');
     return;
   }
+  // Which entry bound is the first thing you need when a Pro route unexpectedly 404s.
+  app.log.info({ entry }, 'pro plugin entry resolved');
 
   const mod = await import(pathToFileURL(entry).href).catch((err) => {
     app.log.warn({ err }, 'pro plugin present but failed to load — OSS mode');

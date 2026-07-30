@@ -131,15 +131,28 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // ---- GitHub-quota spenders ----
   if (path.startsWith('/api/repos/search')) return [TIERS.search, TIERS.read];
   if (path === '/api/repos/suggested') return [TIERS.search, TIERS.read];
-  // GET /api/prs/<id> plus the two sub-routes that ALSO hydrate live from GitHub rather than
-  // reading already-synced rows: `/merge-options` (repo merge config + mergeability + the
-  // merge-queue GraphQL probe — up to five upstream calls per request, strictly MORE than the
-  // detail route it sits under) and `/files` (the Changes tab's patches). This used to be
-  // anchored to the bare id "because the sub-routes are DB-only reads" — that was true when it
-  // was written and quietly stopped being true, leaving the most GitHub-expensive GET in the
-  // PR family on the 600/min blanket bucket. The rest of the sub-routes (bot-behaviour,
-  // suggested-reviewers, mention-candidates) really are DB-only and stay on `read`.
-  if (!mutating && /^\/api\/prs\/\d+(\/(merge-options|files))?$/.test(path)) {
+  // GET /api/prs/<id> plus the sub-routes that ALSO hydrate live from GitHub rather than reading
+  // already-synced rows:
+  //   `/merge-options`            repo merge config + mergeability + the merge-queue GraphQL probe
+  //                               — up to five upstream calls, strictly MORE than the detail route
+  //   `/files`                    the Changes tab's patches
+  //   `/checks/<jobId>/logs`      an Actions job log: a REST call that 302s to a signed blob we
+  //                               then range-fetch, so up to two upstream requests and megabytes
+  //   `/suggested-reviewers`      CODEOWNERS via REST (`ghRestGetContentRaw`) + the team-history
+  //                               GraphQL probe. TTL-cached per (account, repo), but a COLD cache
+  //                               spends quota, and a cache that only sometimes saves you is not a
+  //                               reason to sit on the blanket bucket.
+  //
+  // This used to be anchored to the bare id "because the sub-routes are DB-only reads" — true when
+  // written, quietly false later, which left the most GitHub-expensive GETs in the PR family on the
+  // 600/min blanket bucket. The earlier fix of that mistake then repeated it in miniature by
+  // asserting in this very comment that `suggested-reviewers` "really is DB-only": it calls
+  // `getAccessToken` on line 35 of github/reviewer-suggest.ts. When in doubt, follow the token.
+  // Genuinely DB-only and correctly left on `read`: `/bot-behaviour`, `/bot-dedup`,
+  // `/mention-candidates`, `/claude-review` (retrieval), `/annotations` (the cached GET).
+  const prGithubGet =
+    /^\/api\/prs\/\d+(\/(merge-options|files|suggested-reviewers|checks\/[^/]+\/logs))?$/;
+  if (!mutating && prGithubGet.test(path)) {
     return [TIERS.prDetail, TIERS.read];
   }
   // GET /api/threads/<id> hydrates the same way.
@@ -148,20 +161,32 @@ function tierFor(method: string, path: string): readonly Tier[] {
     return [TIERS.sync];
   }
   if (mutating) {
-    // Writes that reach GitHub: thread replies/resolves, PR comments, approvals,
-    // merges, merge-queue enqueue/dequeue, auto-merge arm/disarm, branch updates, bulk
-    // bot-thread resolves.
+    // Writes that reach GitHub: thread replies/resolves, PR and inline review comments,
+    // approvals, closes, CI re-runs, reviewer requests, merges, merge-queue
+    // enqueue/dequeue, auto-merge arm/disarm, branch updates, bulk bot-thread resolves.
+    //
+    // Every route is listed by its EXACT path segment, because the alternation is matched
+    // against the real path and nothing else corrects a spelling mistake here — the failure
+    // is silent. This list previously read `comments`/`reviews` (plural) while the routes are
+    // `/comment` and `/review-comment`, and omitted `close`, `ci/rerun` and
+    // `request-reviewers` outright, so FIVE GitHub-write routes sat on the 600/min blanket
+    // `read` bucket. `review-comment` is now the most upstream-expensive write in the family:
+    // it fetches the head sha and the file patches to anchor the line, posts, then resyncs the
+    // PR and forces a fresh PR_DETAIL_QUERY so the new thread is visible immediately.
     //
     // `merge-queue` and `auto-merge` are spelled out even though `merge` would prefix-match
     // the first (the alternation has no trailing anchor): relying on that coincidence is how
     // a later tightening of the regex silently drops two GitHub-write routes onto the
-    // 600/min read tier. Arming auto-merge is a DB write, but disarm/arm both re-check
-    // mergeability against GitHub and the watcher merges on the account's quota, so it
-    // belongs in the same bucket as an explicit merge.
+    // 600/min read tier. `review-comment` is spelled out for the same reason rather than
+    // leaning on a `reviews?` prefix. Arming auto-merge is a DB write, but disarm/arm both
+    // re-check mergeability against GitHub and the watcher merges on the account's quota, so
+    // it belongs in the same bucket as an explicit merge.
+    //
+    // Deliberately NOT here: `/dismiss` and `/mark-viewed` (pure local bookkeeping).
     const hitsGithub =
       path.startsWith('/api/threads/') ||
       path.startsWith('/api/bot-threads/') ||
-      /^\/api\/prs\/\d+\/(comments|approve|merge-queue|merge|auto-merge|update-branch|resolve-bot-threads|reviews)/.test(
+      /^\/api\/prs\/\d+\/(review-comment|comments?|approve|close|ci\/rerun|request-reviewers|merge-queue|merge|auto-merge|update-branch|resolve-bot-threads|reviews)/.test(
         path,
       );
     if (hitsGithub) return [TIERS.githubWrite];

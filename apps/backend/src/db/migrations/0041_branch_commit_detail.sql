@@ -1,0 +1,38 @@
+-- Default-branch commit DETAIL, SQLite / local mode. Two additive nullable columns on
+-- `branch_commits` plus one index on `pull_requests`.
+--
+-- The strip added in 0039 answers "is trunk green?" with a dot per commit. Both halves here
+-- answer the two questions a red dot immediately raises:
+--
+--  1. `failing_checks` — WHICH checks were failing on that commit (name, state, url, workflow
+--     name). Failures ONLY, never the passing contexts, so a green commit stores NULL and a
+--     healthy repo's rows are unchanged in size. Deliberately NOT a second copy on `repos`: the
+--     head commit is the first node of the same history walk, so it already has a row here, and
+--     the read derives the repo-level summary by matching `repos.default_branch_head_sha`. One
+--     writer, one reader, one invariant.
+--
+--     NOT lean-gated (unlike `pull_requests.check_runs`): names-only metadata, capped per commit
+--     by the writer, and a trunk commit belongs to no PR so there is no hydrate-on-demand path
+--     to be lazy INTO. Gating it would delete the feature in cloud. Same reasoning (and same
+--     column name, though a different shape) as `ci_status_events.failing_checks`.
+--
+--  2. `pr_number` — the PR the commit landed from (GraphQL Commit.associatedPullRequests), or
+--     NULL for a direct push to trunk. A plain number, NOT a `pull_requests` FK: the PR is often
+--     not synced when the commit is observed (squash-merged before the backfill window, or the
+--     repo was added later), a stored id would go stale on the next PR re-sync, and a real FK
+--     would drag this table into both delete paths. The read layer resolves number → local id
+--     per request, scoped by (account_id, repo_id), because a PR number is unique only within a
+--     repo.
+--
+-- No index on either new column — both are read out of an already-fetched row, never used as a
+-- predicate. The `pull_requests` index IS needed: the number→id resolution runs on a route the
+-- Activity console hits on every mount, and without it the planner narrows to the repo via
+-- `pr_repo_idx` and then scans that repo's entire PR set.
+--
+-- No backfill: the branch sync re-fetches the same commit window every tick and upserts on
+-- (account_id, repo_id, sha), so existing rows gain both values on the next sync. Until then the
+-- read resolves NULL → [] / null and the strip renders exactly as it does today.
+-- Postgres twin: migrations-pg/0028_branch_commit_detail.sql.
+ALTER TABLE `branch_commits` ADD `failing_checks` text;--> statement-breakpoint
+ALTER TABLE `branch_commits` ADD `pr_number` integer;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `pr_account_repo_number_idx` ON `pull_requests` (`account_id`,`repo_id`,`number`);

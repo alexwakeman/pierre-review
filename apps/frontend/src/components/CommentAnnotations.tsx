@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import type {
   AnnotationKind,
+  AnnotationRunTarget,
   AnnotationTargetKind,
   AddressedVerdict,
   CommentAnnotation,
 } from '@pierre-review/shared';
+import { ADDRESSED_VERDICTS } from '@pierre-review/shared';
 import { ADDRESSED_VERDICT_META } from '../lib/ui.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
 import {
@@ -28,7 +30,7 @@ import { Markdown } from './Markdown.js';
 // STALENESS IS PASSIVE. A row whose target has changed since it was written gets a "may be out
 // of date" chip and nothing else happens: there is no regenerate-on-open path, because that
 // would bill on every open of a bot-flooded PR. The re-check is a button a human presses
-// (AnnotationRunBar's "Re-check N stale").
+// (ReviewCheckBar's "Re-check N stale").
 //
 // All of this reads ONE per-PR query (useAnnotationIndex) that every call site shares, so the
 // number of chips on screen doesn't change the number of requests.
@@ -168,47 +170,116 @@ export function CommentAnnotations({
         <AnnotationPanel
           key={a.kind}
           annotation={a}
-          // The simplified text IS the value — open it. The judgement kinds already have their
-          // verdict chip visible in the collapsed header, so they start closed.
-          defaultOpen={a.kind === 'simplify'}
+          // OPEN BY DEFAULT, every kind. A verdict chip with the reasoning behind a ▸ is the same
+          // failure as putting it in a `title` tooltip: the reader has to already suspect there is
+          // something worth reading. "Likely addressed" is not actionable — "the rename is covered,
+          // the null guard is not" is, and that sentence is the whole reason the run was paid for.
+          // Volume is self-limiting: a panel only exists where a judgement was actually generated.
+          defaultOpen
         />
       ))}
     </>
   );
 }
 
-// ---- the run bar -----------------------------------------------------------------------------
+// ---- "Check review" (the ONE run surface) ----------------------------------------------------
+//
+// There used to be three buttons ("Simplify all" / "Check validity" / "Check addressed") in two
+// places — the Threads tab's sticky header and, misleadingly, under the "PR comments" heading, even
+// though a run there covered threads too. Now there is ONE button, in ONE place, that produces all
+// three judgements in a single model call per target (see the plugin's 'review' run kind) and a
+// compact twin on each thread card and PR comment so the same check can be spent on just that one.
+//
+// The three judgements are still stored separately, so this bar's breakdown is computed CLIENT-side
+// from the annotations already in the shared per-PR query — no new wire field, no extra request.
 
-const RUN_LABEL: Record<AnnotationKind, string> = {
-  simplify: 'Simplify all',
-  validity: 'Check validity',
-  addressed: 'Check addressed',
-};
+const VERDICT_ORDER: readonly string[] = ['valid', 'partly', 'weak', 'unclear'];
 
-const RUN_TITLE: Record<AnnotationKind, string> = {
-  simplify: 'Rewrite every long comment here into short, faithful text (runs the Haiku model)',
-  validity: 'Judge whether each comment’s point holds up (runs the Haiku model)',
-  addressed: 'Judge whether each concern was actually dealt with (runs the Haiku model)',
-};
+interface BreakdownLine {
+  label: string;
+  title: string;
+  parts: Array<{ label: string; color: string; n: number }>;
+  total: number;
+}
+
+/** Group the stored judgements into one line per kind, with each kind's verdict tally. */
+function breakdownOf(annotations: readonly CommentAnnotation[]): BreakdownLine[] {
+  const tally = (kind: AnnotationKind): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const a of annotations) {
+      if (a.kind !== kind || a.verdict == null) continue;
+      m.set(a.verdict, (m.get(a.verdict) ?? 0) + 1);
+    }
+    return m;
+  };
+  const count = (kind: AnnotationKind): number =>
+    annotations.filter((a) => a.kind === kind).length;
+
+  const lines: BreakdownLine[] = [];
+
+  const simplified = count('simplify');
+  if (simplified > 0) {
+    lines.push({
+      label: KIND_META.simplify.label,
+      title: KIND_META.simplify.title,
+      parts: [{ label: 'rewritten', color: '#7c3aed', n: simplified }],
+      total: simplified,
+    });
+  }
+
+  const validity = tally('validity');
+  if (validity.size > 0) {
+    lines.push({
+      label: KIND_META.validity.label,
+      title: KIND_META.validity.title,
+      parts: VERDICT_ORDER.flatMap((v) => {
+        const n = validity.get(v) ?? 0;
+        const meta = VALIDITY_META[v];
+        return n > 0 && meta != null
+          ? [{ label: meta.label.toLowerCase(), color: meta.color, n }]
+          : [];
+      }),
+      total: count('validity'),
+    });
+  }
+
+  const addressed = tally('addressed');
+  if (addressed.size > 0) {
+    lines.push({
+      label: KIND_META.addressed.label,
+      title: KIND_META.addressed.title,
+      parts: ADDRESSED_VERDICTS.flatMap((v) => {
+        const n = addressed.get(v) ?? 0;
+        const meta = ADDRESSED_VERDICT_META[v];
+        return n > 0 ? [{ label: meta.label.toLowerCase(), color: meta.color, n }] : [];
+      }),
+      total: count('addressed'),
+    });
+  }
+
+  return lines;
+}
+
+const RUN_BUTTON_CLASS =
+  'rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:text-violet-200 dark:hover:bg-violet-900/30';
+const STOP_BUTTON_CLASS =
+  'rounded border border-amber-400 px-1.5 py-0.5 font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-300 dark:hover:bg-amber-900/30';
+
+const CHECK_REVIEW_TITLE =
+  'One AI pass over this PR’s review threads and comments: rewrite the walls of bot text, ' +
+  'sanity-check each point, and judge what has actually been addressed (Pro)';
 
 /**
- * "Run on all comments" for a set of kinds, plus the passive-staleness refresh.
- *
- * Costs are bounded server-side (a resumable 50-target cap, a $0-on-unchanged cache, chunked
- * prompts, a per-account in-flight + interval guard); this only has to make the state legible:
- * live progress, what the run cost/skipped, and how many eligible targets are LEFT when the cap
- * truncated the run so "check the next 50" is an offer rather than a mystery.
+ * The PR-wide "Check review" bar. Costs are bounded server-side (one combined call per ~6 targets,
+ * a resumable 50-target cap, $0 on unchanged content, a per-account in-flight guard and a credit
+ * gate); this only has to make the state legible — live progress, what the run produced, and a
+ * standing breakdown of every judgement the PR already holds.
  */
-export function AnnotationRunBar({
+export function ReviewCheckBar({
   prId,
-  targetKinds,
-  kinds = ['simplify', 'validity', 'addressed'],
   className = '',
 }: {
   prId: number;
-  /** Narrow which entity types a run touches (e.g. only PR-level comments). */
-  targetKinds?: AnnotationTargetKind[];
-  kinds?: readonly AnnotationKind[];
   className?: string;
 }): JSX.Element | null {
   const enabled = useProCapabilities().prSummary;
@@ -218,47 +289,42 @@ export function AnnotationRunBar({
 
   const staleCount = data?.staleCount ?? 0;
   const result = state.result;
+  const lines = breakdownOf(data?.annotations ?? []);
+  const judgements = lines.reduce((n, l) => n + l.total, 0);
 
   return (
-    <div className={`flex flex-wrap items-center gap-1.5 text-[11px] ${className}`}>
+    <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] ${className}`}>
       <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-500 dark:text-violet-300">
         <span aria-hidden="true">✨</span> AI
       </span>
+
       {state.running ? (
         <>
           <span className="tabular-nums text-gray-500">
-            {state.kind != null ? RUN_LABEL[state.kind] : 'Running'}… {state.done}/{state.total}
+            Checking review… {state.done}/{state.total}
           </span>
-          <button
-            type="button"
-            onClick={stop}
-            className="rounded border border-amber-400 px-1.5 py-0.5 font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-300 dark:hover:bg-amber-900/30"
-          >
+          <button type="button" onClick={stop} className={STOP_BUTTON_CLASS}>
             Stop
           </button>
         </>
       ) : (
         <>
-          {kinds.map((k) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => run(k, targetKinds ? { targetKinds } : undefined)}
-              title={RUN_TITLE[k]}
-              className="rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:text-violet-200 dark:hover:bg-violet-900/30"
-            >
-              {RUN_LABEL[k]}
-            </button>
-          ))}
+          <button
+            type="button"
+            onClick={() => run('review')}
+            title={CHECK_REVIEW_TITLE}
+            className={RUN_BUTTON_CLASS}
+          >
+            ✨ Check review
+          </button>
           {staleCount > 0 && (
             <button
               type="button"
               // Refresh only what has actually moved on — the cheap path. `onlyStale` never
-              // generates a judgement that didn't exist before, and the hook runs the kinds
-              // SEQUENTIALLY (the server allows one run per account at a time).
-              onClick={() => run(kinds, { targetKinds, onlyStale: true })}
+              // generates a judgement that didn't exist before.
+              onClick={() => run('review', { onlyStale: true })}
               title="Re-run only the checks whose comment or code changed after they were written"
-              className="rounded border border-amber-400 px-1.5 py-0.5 font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-300 dark:hover:bg-amber-900/30"
+              className={STOP_BUTTON_CLASS}
             >
               Re-check {staleCount} stale
             </button>
@@ -269,7 +335,7 @@ export function AnnotationRunBar({
       {!state.running && result != null && (
         <span className="text-gray-500">
           {result.generated > 0 ? `${result.generated} checked` : 'nothing to check'}
-          {result.cached > 0 && ` · ${result.cached} cached`}
+          {result.cached > 0 && ` · ${result.cached} up to date`}
           {result.failed > 0 && ` · ${result.failed} failed`}
           {result.creditsExhausted && ' · out of credits'}
         </span>
@@ -277,9 +343,9 @@ export function AnnotationRunBar({
       {!state.running && state.remaining > 0 && (
         <button
           type="button"
-          onClick={() => state.kind != null && run(state.kind, targetKinds ? { targetKinds } : undefined)}
+          onClick={() => run('review')}
           title="This run stopped at the per-run cap — run it again to take the next batch"
-          className="rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:text-violet-200 dark:hover:bg-violet-900/30"
+          className={RUN_BUTTON_CLASS}
         >
           Check the next {state.remaining > 50 ? 50 : state.remaining}
         </button>
@@ -287,6 +353,75 @@ export function AnnotationRunBar({
       {state.error != null && (
         <span className="text-amber-600 dark:text-amber-400">{state.error}</span>
       )}
+
+      {lines.length > 0 && (
+        // The breakdown the one button replaced three of: what this PR's review actually looks
+        // like once checked, per axis. Each judgement's reasoning is inline on its own comment.
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-gray-400" title="Total AI judgements stored for this PR">
+            {judgements} judgement{judgements === 1 ? '' : 's'}
+          </span>
+          {lines.map((l) => (
+            <span key={l.label} className="flex flex-wrap items-center gap-1" title={l.title}>
+              <span className="text-gray-500 dark:text-gray-400">{l.label}</span>
+              {l.parts.map((p) => (
+                <span
+                  key={p.label}
+                  className="rounded px-1 py-0.5 text-[10px] font-semibold tabular-nums"
+                  style={{ backgroundColor: `${p.color}1a`, color: p.color }}
+                >
+                  {p.n} {p.label}
+                </span>
+              ))}
+            </span>
+          ))}
+        </span>
+      )}
     </div>
+  );
+}
+
+/**
+ * The same check, spent on ONE anchor — a thread card, or a single PR comment.
+ *
+ * `target` is the entity the user clicked; the server expands a thread anchor to that thread's own
+ * judgements AND its comments' rewrites, so this button produces the same rows the PR-wide run
+ * would produce for that thread (see AnnotationRunTarget). Costs one combined call.
+ */
+export function ReviewCheckButton({
+  prId,
+  target,
+  className = '',
+}: {
+  prId: number;
+  target: AnnotationRunTarget;
+  className?: string;
+}): JSX.Element | null {
+  const enabled = useProCapabilities().prSummary;
+  const { state, run } = useRunAnnotations(prId);
+  if (!enabled) return null;
+
+  return (
+    <span className={`inline-flex items-center gap-1 ${className}`}>
+      <button
+        type="button"
+        onClick={(e) => {
+          // Thread-card headers and PR-comment rows are themselves clickable regions.
+          e.stopPropagation();
+          run('review', { targets: [target] });
+        }}
+        disabled={state.running}
+        className="rounded px-1 py-0.5 text-[10px] font-medium text-violet-600 hover:bg-violet-100 disabled:opacity-50 dark:text-violet-300 dark:hover:bg-violet-900/30"
+        title={CHECK_REVIEW_TITLE}
+      >
+        {state.running ? 'Checking…' : '✨ Check review'}
+      </button>
+      {/* The server allows one run per account at a time, so a second button pressed mid-run gets
+          'Another annotation run is already in progress.' — it MUST be visible, or that click
+          looks like it did nothing. */}
+      {state.error != null && (
+        <span className="text-[10px] text-amber-600 dark:text-amber-400">{state.error}</span>
+      )}
+    </span>
   );
 }
