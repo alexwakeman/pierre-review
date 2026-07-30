@@ -165,19 +165,32 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
 
 function CiStatusSection({ pr }: { pr: PrDetail }): JSX.Element | null {
   const checks = pr.checkRuns;
-  if (checks.length === 0) return null;
+  // Mirrors the Overview's Checks row: a PR whose ciStatus is red but whose checkRuns did not
+  // hydrate (lean storage / SAML-SSO) still reaches a stored diagnosis, instead of the whole
+  // section vanishing. The list + re-run control stay inner-gated on there being checks.
+  const ciFailed = pr.ciStatus === 'failure' || pr.ciStatus === 'error';
+  if (checks.length === 0 && !ciFailed) return null;
   return (
     <div className="border-b border-gray-200 dark:border-gray-800">
       <SectionTitle>CI status</SectionTitle>
       <div className="px-4 pb-3">
-        <ChecksList prId={pr.id} checks={checks} />
-        <CiRerunControl
-          prId={pr.id}
-          checks={checks}
-          viewerCanPush={pr.viewerCanPush}
-        />
-        {/* The diagnosis lives next to the checks now (same shared query key as the
-            copy mounted inline on the Overview tab). Self-gated + presence-gated. */}
+        {checks.length > 0 && (
+          <>
+            <ChecksList prId={pr.id} checks={checks} />
+            <CiRerunControl
+              prId={pr.id}
+              checks={checks}
+              viewerCanPush={pr.viewerCanPush}
+            />
+          </>
+        )}
+        {/* The diagnosis, next to the checks. The SAME card is mounted on the Overview's
+            Checks row (ChecksTab) — that is its primary home, since "why did CI fail?" is
+            asked on the default tab. Both mounts share the `['ai-fix-ci', prId]` query key
+            AND the refresh mutation key, and PrDetail renders one tab body at a time, so
+            there is no double fetch and no way to start two paid runs. This copy KEEPS the
+            "Fix it →" button (Overview passes showFix={false}) because the fixer's progress
+            UI is right below it, in FixerSection. */}
         <CiAnalysisCard pr={pr} />
       </div>
     </div>

@@ -64,24 +64,28 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
 
           <Section title="Activity console (the default)">
             The left rail is your state of play: <strong>Insights</strong>, a cross-repo{' '}
-            <strong>Feed</strong>, then each repo. The Feed is one chronological stream of
-            real activity — opens, merges, reviews, comments, and pushes that addressed a
-            thread. Filter it with the pills: <strong>My Turn</strong> (things that concern
+            <strong>Feed</strong>, <strong>Needs&nbsp;attention</strong>, <strong>Bots</strong>,
+            then each repo. The Feed is one chronological stream of real activity — opens,
+            merges, reviews, comments, and pushes that addressed a thread — under the free
+            flow-metric header (throughput, lead time, time-to-first-review, CI success &amp;
+            recovery). Filter it with the pills: <strong>My Turn</strong> (things that concern
             you — you authored it, were asked to review, or already chimed in),{' '}
             <strong>Comments</strong> / <strong>PR events</strong> by category, and the
-            <strong> Bots</strong> lens (all → hide → only). Click any card to open that PR;{' '}
-            <strong>Back</strong> returns you to the exact card.
+            <strong> Bots</strong> lens (all → hide → only). With <strong>two or more teams</strong>{' '}
+            in scope the Feed also offers <strong>Compare&nbsp;teams</strong>, a free
+            side-by-side matrix over the same window, and the rail groups its repos by team.
+            Click any card to open that PR; <strong>Back</strong> returns you to the exact card.
           </Section>
 
           <Section title="Insights (Pro)">
-            Team review-intelligence over the current scope: flow metrics (throughput, lead
-            time, time-to-first-review, CI success &amp; recovery) plus cards for stalled
-            reviews, untouched threads and review load. Sub-tabs: <strong>Overview</strong>,{' '}
-            <strong>Bots</strong> (review-bot ROI), <strong>Sprint</strong> and{' '}
-            <strong>Retro</strong> AI write-ups, and — in <strong>All&nbsp;Teams</strong> —{' '}
-            <strong>Compare&nbsp;teams</strong>, a side-by-side matrix to spot throughput gaps
-            and blockers. On the Sprint tab, <strong>Ask about this scope</strong> answers
-            one-click questions; open several at once and their PR mentions are clickable.
+            AI review-intelligence over the current scope.{' '}
+            <strong>Ask about the sprint</strong> answers a question from the scope&rsquo;s own
+            sprint data — pick a quick-question pill (sprint report, retro, bottlenecks,
+            biggest changes, …) or type your own, <Code>@</Code>-mention a teammate, and
+            optionally attach a chart. PR mentions in an answer are clickable, and answers can
+            be pinned. <strong>Track&nbsp;usage</strong> shows your month-to-date AI credits.
+            The flow metrics and the attention cards are not here — they are free, and live on
+            the Feed and the <strong>Needs&nbsp;attention</strong> rail entry.
           </Section>
 
           <Section title="Review-bot triage">
@@ -89,8 +93,15 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             not noise. A PR’s <strong>Bots</strong> chip filters its threads to that vendor;
             you can <strong>bulk-resolve</strong> the ones a later commit likely addressed —
             always a confirm-gated, one-click action that resolves the threads on GitHub, never
-            automatic. In <strong>Settings → Review bots</strong>, classify detected reviewers,
-            and the Bots console shows per-vendor keep / tune / noisy verdicts.
+            automatic. The rail&rsquo;s <strong>Bots</strong> console shows per-vendor keep /
+            tune / noisy verdicts (<strong>ROI</strong>), timing and coverage
+            (<strong>Behaviour</strong>), and — under <strong>Settings</strong> — who counts as
+            a review bot <em>for the selected team</em>: mark a reviewer as a{' '}
+            <strong>quality&nbsp;check</strong> (SonarCloud, Codecov &amp; co, kept out of the
+            ROI verdicts) or not a bot at all. Rows marked <em>inherited</em> are using the{' '}
+            <strong>No&nbsp;team</strong> default; editing one overrides it for that team only.
+            What a bot <em>costs</em>, how we detect it and how Limn attributes its own reviews
+            stay account-wide, in <strong>Settings → Review bots</strong>.
           </Section>
 
           <Section title="PR detail & threads">

@@ -1,7 +1,7 @@
 import type { ThreadDetail, User } from '@pierre-review/shared';
 import { StateBadge } from '../StateBadge.js';
 import { ConfidenceBadge } from '../ConfidenceBadge.js';
-import { CommentAnnotations, ReviewCheckButton } from '../CommentAnnotations.js';
+import { ReviewCheckButton, ThreadCheckOutput } from '../CommentAnnotations.js';
 import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';
 import { CodeAnchor } from './CodeAnchor.js';
@@ -9,7 +9,6 @@ import { MarkThreadDone } from './MarkThreadDone.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { ResolveThread } from './ResolveThread.js';
 import { ReplyComposer } from './ReplyComposer.js';
-import { ThreadAssessment } from './ThreadAssessment.js';
 import { isNewComment } from './NewCommentHighlight.js';
 
 // A single review thread rendered conversation-first: the code it's anchored to
@@ -140,7 +139,6 @@ export function ThreadCard({
             comment={c}
             usersById={usersById}
             repoId={repoId}
-            prId={thread.prId}
             isNew={
               highlightCommentId != null
                 ? c.id === highlightCommentId
@@ -168,20 +166,13 @@ export function ThreadCard({
         ))}
       </div>
 
-      {/* Pro (prSummary): the retained critical second opinion on this thread's originating
-          comment. Render-only — the one button that produces it is in the header above. */}
-      <ThreadAssessment threadId={thread.id} />
-
-      {/* The retained "addressed" judgement for the WHOLE thread: the two-section summary of what
-          the later changes DO cover and what is still open — the thing you actually need before
-          resolving the thread, and the reason it is rendered INLINE rather than hidden in a chip's
-          tooltip. Renders nothing when absent. */}
-      <CommentAnnotations
-        prId={thread.prId}
-        targetKind="thread"
-        targetId={thread.id}
-        kinds={['addressed']}
-      />
+      {/* Pro (prSummary): the WHOLE "Check review" output for this thread, in ONE block, directly
+          under the conversation — i.e. under the last reply, which is where the old standalone
+          "Comment check" panel sat. The three judgements key on three different ids (a rewrite per
+          comment, validity on the root comment, addressed on the thread), so they cannot be one
+          <CommentAnnotations>; ThreadCheckOutput assembles them off the same shared per-PR query.
+          Renders NOTHING — and issues no request of its own — when the thread has none. */}
+      <ThreadCheckOutput thread={thread} usersById={usersById} />
 
       <div className="mt-2 space-y-1.5 pl-2 text-[11px]">
         <ReplyComposer prId={thread.prId} threadId={thread.id} />

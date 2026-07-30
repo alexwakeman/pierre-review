@@ -425,8 +425,92 @@ check(
   JSON.stringify(await q.resolveScopeRepoIds(2, 'teams')) === JSON.stringify([B.repoId]),
 );
 
-// Owner delete cascades team_repos (functional sanity, not IDOR).
+// getTeamComparison selects TEAMS, not repo ids, so it does NOT go through resolveScopeRepoIds
+// above — it owns its own scope parser and its own `listTeams(accountId)` filter. That makes it a
+// separate ownership surface that the checks above do not cover, and it is CORE/free (reachable
+// from the Feed's "Compare teams" tab by every tier), so it gets its own pair here.
+// Landmine: teamB must already exist, or the negative check passes on an empty account and is
+// VACUOUS. It is seeded at the top of this block — do not reorder.
+const { getTeamComparisonRows } = await import('../src/db/team-comparison.js');
+check(
+  "getTeamComparisonRows(A, 'teams:<teamA>') returns A's own team",
+  (await getTeamComparisonRows(1, `teams:${teamA.id}`)).length === 1,
+);
+check(
+  "getTeamComparisonRows(B, 'teams:<teamA>') leaks nothing (IDOR blocked)",
+  (await getTeamComparisonRows(2, `teams:${teamA.id}`)).length === 0,
+);
+check(
+  "getTeamComparisonRows(B, 'all') returns only B's own teams",
+  (await getTeamComparisonRows(2, 'all')).every((r) => r.teamId === teamB.id),
+);
+
+// ── Per-TEAM bot classification (migration 0042) ────────────────────────────────
+// `bot_review_classification.team_id` is a NEW cross-tenant WRITE surface. It carries NO foreign
+// key (0 is the "No team"/inheritance-root sentinel, not a team id), so the DATABASE will accept
+// ANY integer — verified against a live Postgres. Ownership must therefore be enforced in the
+// query layer, and this block proves it in BOTH directions.
+//
+// MUTATION-CHECK (per the standing note that a new isolation check can be VACUOUS): the negative
+// assertions below would also pass if the write silently did nothing, so each is paired with a
+// POSITIVE control — the same call with the CALLER'S OWN team must succeed — plus a direct row
+// scan proving nothing was written under the foreign key.
+check(
+  'setReviewerOverride(A, teamId=teamB) returns null (foreign team → 404)',
+  (await q.setReviewerOverride(1, botUser!.id, { automated: true, teamId: teamB.id })) === null,
+);
+check(
+  'setReviewerOverride(A, teamId=999999) returns null (unknown team → 404)',
+  (await q.setReviewerOverride(1, botUser!.id, { automated: true, teamId: 999_999 })) === null,
+);
+check(
+  'deleteReviewerOverride(A, teamId=teamB) returns false (foreign team → 404)',
+  (await q.deleteReviewerOverride(1, botUser!.id, teamB.id)) === false,
+);
+// Positive control — the SAME call against A's own team must succeed, so the 404s above are
+// about ownership, not about teamId being ignored or the reviewer being unwritable.
+check(
+  'setReviewerOverride(A, teamId=teamA) succeeds (positive control)',
+  (await q.setReviewerOverride(1, botUser!.id, { automated: false, teamId: teamA.id })) !== null,
+);
+// Direct row scan: no classification row may exist under B's team id.
+const brcRows = await db.select().from(schema.botReviewClassification).execute();
+check(
+  'no bot_review_classification row was written under B’s team id',
+  !brcRows.some((r) => r.teamId === teamB.id),
+);
+check(
+  'A’s own team override WAS written (the scan above is not vacuous)',
+  brcRows.some((r) => r.accountId === 1 && r.teamId === teamA.id && r.authorUserId === botUser!.id),
+);
+// Resolution order: the team override wins for teamA; every other scope still inherits team 0
+// (where the earlier manual override marked botUser automated).
+check(
+  'automatedReviewerUserIds(A, teamA) honours the team override (bot → human)',
+  !(await q.automatedReviewerUserIds(1, teamA.id, 'all')).includes(botUser!.id),
+);
+check(
+  'automatedReviewerUserIds(A, NO_TEAM) still sees the account default',
+  (await q.automatedReviewerUserIds(1, 0, 'all')).includes(botUser!.id),
+);
+// A foreign team key on a READ can only ever resolve to the caller's OWN team-0 default: every
+// read also binds accountId, so it discloses nothing about B.
+check(
+  'listDetectedReviewers(A, teamB) falls back to A’s own default (no B disclosure)',
+  (await q.listDetectedReviewers(1, teamB.id)).reviewers.some(
+    (r) => r.userId === botUser!.id && r.teamId === 0,
+  ),
+);
+
+// Owner delete cascades team_repos (functional sanity, not IDOR) AND hand-deletes this team's
+// classification rows — there is no FK cascade for bot_review_classification.
 check('deleteTeam(teamA, A) returns true', (await q.deleteTeam(teamA.id, 1)) === true);
+check(
+  'deleteTeam also removed teamA’s bot_review_classification rows (no FK cascade exists)',
+  !(await db.select().from(schema.botReviewClassification).execute()).some(
+    (r) => r.teamId === teamA.id,
+  ),
+);
 check(
   "teamA's membership is gone after delete (cascade)",
   (await q.getTeamRepoIds(teamA.id, 1)).length === 0,

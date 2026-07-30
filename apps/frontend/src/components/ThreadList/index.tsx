@@ -1,9 +1,14 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { DerivedState, ReviewBotKind, ThreadDetail, User } from '@pierre-review/shared';
-import { DERIVED_STATES, reviewBotKind } from '@pierre-review/shared';
+import { DERIVED_STATES, NO_TEAM_KEY } from '@pierre-review/shared';
 import { useMyTurn } from '../../hooks/useTriage.js';
 import { useResolveBotThreads } from '../../hooks/usePrWrites.js';
-import { usePrBotDedup } from '../../hooks/useBotTriage.js';
+import { useDetectedReviewers, usePrBotDedup } from '../../hooks/useBotTriage.js';
+import {
+  resolvableBotThreadIds,
+  threadBotKind,
+  type ReviewerRoleInfo,
+} from './resolvable.js';
 import { useFilters } from '../../store/filters.js';
 import { automatedReviewerMeta, BOT_VENDOR_META, DERIVED_STATE_META } from '../../lib/ui.js';
 import { FileGroup } from './FileGroup.js';
@@ -37,12 +42,6 @@ function groupByFile(threads: ThreadDetail[]): FileBucket[] {
   return buckets;
 }
 
-// Which review vendor (if any) opened a thread — by its originating commenter's login.
-function threadBotKind(t: ThreadDetail, usersById: Map<number, User>): ReviewBotKind | null {
-  const authorId = t.originalCommenterId ?? t.comments[0]?.authorId ?? null;
-  if (authorId == null) return null;
-  return reviewBotKind(usersById.get(authorId)?.githubLogin);
-}
 
 export function ThreadList({
   threads,
@@ -113,22 +112,31 @@ export function ThreadList({
   // another pill is active.
   const stateCounts = useMemo(() => rollupCounts(threads), [threads]);
 
+  // The account-default reviewer classifications (NO_TEAM_KEY) — the SAME answers
+  // getResolvableBotThreads re-derives eligibility from, so the offered count matches what the
+  // resolve will accept (see resolvable.ts). Fetched only when a vendor filter is active,
+  // because the resolve control only renders there: a PR opened without touching the Bots chip
+  // costs no extra request. The key is shared with the Bots tab, so it is usually warm.
+  const { data: detected } = useDetectedReviewers(NO_TEAM_KEY, botFilter != null);
+  const reviewerRoles = useMemo(() => {
+    if (detected == null) return null;
+    const m = new Map<number, ReviewerRoleInfo>();
+    for (const r of detected.reviewers) {
+      m.set(r.userId, {
+        automated: r.classification.automated,
+        role: r.classification.role,
+      });
+    }
+    return m;
+  }, [detected]);
+
   // The bot threads a later commit has LIKELY ADDRESSED — the set the bulk "clear backlog"
   // action can safely resolve (matches the server's getResolvableBotThreads eligibility).
   // Derived from the FULL list (not `shown`) so the resolve target never depends on which
   // state/vendor pills are active — only the vendor filter, which scopes intent.
   const addressedBotThreadIds = useMemo(
-    () =>
-      threads
-        .filter(
-          (t) =>
-            !t.isResolved &&
-            t.derivedState === 'likely_addressed' &&
-            threadBotKind(t, usersById) &&
-            (botFilter ? threadBotKind(t, usersById) === botFilter : true),
-        )
-        .map((t) => t.id),
-    [threads, usersById, botFilter],
+    () => resolvableBotThreadIds(threads, usersById, botFilter, reviewerRoles),
+    [threads, usersById, botFilter, reviewerRoles],
   );
 
   // Scroll to a thread selected from a timeline marker / popover.

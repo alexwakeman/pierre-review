@@ -13,21 +13,29 @@
 // "Classify the account, not the review" — the resolver persists AUTO rows so a
 // newly-seen review inherits the account's cached verdict, and a MANUAL row (the
 // override route) is never overwritten by auto. `import type` only from shared.
-import { and, eq, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import type {
   AutomatedReviewerKind,
   ClassificationConfidence,
   ClassificationSource,
   ReviewBotKind,
   ReviewerClassification,
+  ReviewerRole,
 } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
-import { matchesAutomatedLoginPattern, reviewBotKind } from './bot-detection.js';
+import { matchesAutomatedLoginPattern, qualityCheckBot, reviewBotKind } from './bot-detection.js';
 import type { ReviewFingerprint } from './review-fingerprint.js';
 import type { BehavioralSignals } from './reviewer-behavior.js';
 import { cheapComplete } from '../review/llm.js';
 
 const { botReviewClassification, reviewComments, pullRequests } = schema;
+
+// The classification TEAM-key sentinel: 0 = "No team" AND the inheritance ROOT (resolution is
+// `explicit team row → the team-0 row → auto-detect`). This is a LOCAL COPY of `NO_TEAM_KEY` in
+// `@pierre-review/shared` — the backend may only `import type` from shared (a value import fails
+// the release build's dist grep), which is the same rule that gives us the local REVIEW_BOTS /
+// QUALITY_CHECK_BOTS copies in bot-detection.ts.
+export const NO_TEAM_KEY = 0;
 
 // The evidence the caller has already gathered (all optional — the resolver degrades to
 // the hard login/type signals when a piece is missing).
@@ -128,24 +136,55 @@ export function rowToClassification(
     automated: row.automated,
     kind: (row.kind as AutomatedReviewerKind | null) ?? null,
     label: row.label ?? login,
+    role: (row.role as ReviewerRole | null) ?? 'review',
     confidence: row.confidence as ClassificationConfidence,
     source: row.source as ClassificationSource,
     reasons: row.reasonsJson ?? [],
   };
 }
 
-// Upsert the auto classification on (accountId, authorUserId) and return it. Only ever
-// reached on a non-manual path (step 1 returns manual rows before we get here), so the
-// plain upsert can't clobber a manual override.
+// The DEFAULT role for a login nobody has classified by hand: 'quality_check' for the known
+// static-analysis / coverage automations, else 'review'.
+//
+// This is DERIVED, never carried in from the caller, and that is deliberate — see the landmine
+// on persist() below.
+export function defaultRoleFor(login: string): ReviewerRole {
+  return qualityCheckBot(login) ? 'quality_check' : 'review';
+}
+
+// Upsert the auto classification on (accountId, teamId, authorUserId) and return it. Only ever
+// reached on a non-manual path (step 1 returns manual rows before we get here), so the plain
+// upsert can't clobber a manual override.
+//
+// LANDMINE 1 — the conflict target MUST be the 3-COLUMN tuple. Migration 0042 DROPPED the old
+// two-column `brc_account_author` unique index and replaced it with `brc_account_team_author`.
+// A stale 2-column target raises "there is no unique or exclusion constraint matching the ON
+// CONFLICT specification" on Postgres (and the sqlite equivalent) at RUNTIME — it type-checks
+// perfectly and only fails when a classification is actually written.
+//
+// LANDMINE 2 — `role` is DERIVED here from the local quality-check list rather than round-
+// tripped through the ReviewerClassification the caller built. The insert and the ON CONFLICT
+// `set:` deliberately share ONE values object (cheap, and they must agree), which means anything
+// in it OVERWRITES the stored column on every auto pass. Migration 0042 backfills `role` for the
+// known quality-check logins; if that value were simply copied off the in-memory classification
+// it would be re-written from a stale default on the very next classification pass and put
+// SonarQube straight back into the review-bot metrics — the exact miscount this feature exists
+// to fix. Deriving keeps the write idempotent AND self-healing for a login added to the list
+// after the migration ran.
+// (The parameter is role-LESS on purpose: a caller physically cannot hand in a role, so
+// landmine 2 above cannot be reintroduced by a future step in the resolution order.)
 async function persist(
   accountId: number,
-  c: ReviewerClassification,
+  teamKey: number,
+  c: Omit<ReviewerClassification, 'role'>,
 ): Promise<ReviewerClassification> {
   const now = new Date();
+  const role = defaultRoleFor(c.login);
   const values = {
     automated: c.automated,
     kind: c.kind,
     label: c.label,
+    role,
     confidence: c.confidence,
     source: c.source,
     reasonsJson: c.reasons,
@@ -153,13 +192,17 @@ async function persist(
   };
   await db
     .insert(botReviewClassification)
-    .values({ accountId, authorUserId: c.userId, ...values })
+    .values({ accountId, teamId: teamKey, authorUserId: c.userId, ...values })
     .onConflictDoUpdate({
-      target: [botReviewClassification.accountId, botReviewClassification.authorUserId],
+      target: [
+        botReviewClassification.accountId,
+        botReviewClassification.teamId,
+        botReviewClassification.authorUserId,
+      ],
       set: values,
     })
     .execute();
-  return c;
+  return { ...c, role };
 }
 
 // One cheap single-shot completion over up to 3 sample comments. Only invoked from the
@@ -203,28 +246,38 @@ async function aiTiebreak(
   }
 }
 
+// `teamKey` is the TEAM whose answer we are resolving (NO_TEAM_KEY = 0 → the account default).
+// It is REQUIRED and positional, not an option, because every read of bot_review_classification
+// must filter on the team: the unique index no longer guarantees one row per (account, author),
+// so an unfiltered `limit(1)` returns whichever row the storage engine happened to hand back —
+// and on Postgres that order FLIPS after any UPDATE, silently moving a bot in and out of the
+// account-wide automated set.
 export async function classifyReviewer(
   accountId: number,
   user: { id: number; githubLogin: string; githubType?: string | null; isBot: boolean },
   evidence: ReviewerEvidence,
+  teamKey: number,
   opts: ClassifyOpts = {},
 ): Promise<ReviewerClassification> {
   const login = user.githubLogin;
 
-  // 1. Manual override always wins — return the stored row verbatim.
-  const existing = (
-    await db
-      .select()
-      .from(botReviewClassification)
-      .where(
-        and(
-          eq(botReviewClassification.accountId, accountId),
-          eq(botReviewClassification.authorUserId, user.id),
-        ),
-      )
-      .limit(1)
-      .execute()
-  )[0];
+  // 1. Manual override always wins — return the stored row verbatim. Resolution is
+  // `explicit team row → the team-0 row`: both keys are fetched in one query and the requested
+  // team's row is preferred explicitly in JS (NOT by an ORDER BY on an unindexed expression).
+  const candidateKeys = teamKey === NO_TEAM_KEY ? [NO_TEAM_KEY] : [teamKey, NO_TEAM_KEY];
+  const rows = await db
+    .select()
+    .from(botReviewClassification)
+    .where(
+      and(
+        eq(botReviewClassification.accountId, accountId),
+        inArray(botReviewClassification.teamId, candidateKeys),
+        eq(botReviewClassification.authorUserId, user.id),
+      ),
+    )
+    .execute();
+  const existing =
+    rows.find((r) => r.teamId === teamKey) ?? rows.find((r) => r.teamId === NO_TEAM_KEY);
   if (existing && existing.source === 'manual') {
     return rowToClassification(existing, login);
   }
@@ -234,7 +287,7 @@ export async function classifyReviewer(
   // 2. Known vendor login.
   const vendor = reviewBotKind(login);
   if (vendor) {
-    return persist(accountId, {
+    return persist(accountId, teamKey, {
       userId: user.id,
       login,
       automated: true,
@@ -255,7 +308,7 @@ export async function classifyReviewer(
       isBotType ? 'GitHub reports this account as a Bot' : 'posted via a GitHub App',
     ];
     if (fp?.marked) reasons.push(...describeMarkers(fp));
-    return persist(accountId, {
+    return persist(accountId, teamKey, {
       userId: user.id,
       login,
       automated: true,
@@ -270,7 +323,7 @@ export async function classifyReviewer(
   // 4. Branded/marked fingerprint.
   if (fp?.marked) {
     const kind: AutomatedReviewerKind = fp.tool ?? 'in_house';
-    return persist(accountId, {
+    return persist(accountId, teamKey, {
       userId: user.id,
       login,
       automated: true,
@@ -290,7 +343,7 @@ export async function classifyReviewer(
     if (opts.enableAiTiebreak) {
       const ai = await aiTiebreak(accountId, user.id);
       if (ai === 'automated') {
-        return persist(accountId, {
+        return persist(accountId, teamKey, {
           userId: user.id,
           login,
           automated: true,
@@ -302,7 +355,7 @@ export async function classifyReviewer(
         });
       }
       if (ai === 'human') {
-        return persist(accountId, {
+        return persist(accountId, teamKey, {
           userId: user.id,
           login,
           automated: false,
@@ -315,7 +368,7 @@ export async function classifyReviewer(
       }
       // ai === null → unavailable/ambiguous → fall through to the medium result.
     }
-    return persist(accountId, {
+    return persist(accountId, teamKey, {
       userId: user.id,
       login,
       automated: true,
@@ -330,7 +383,7 @@ export async function classifyReviewer(
   // Otherwise → human. Strong (HIGH) when we had enough behavioral evidence to look and
   // it didn't trip; LOW when there was nothing to go on.
   const hadEvidence = (evidence.behavioral?.reviews ?? 0) >= 3;
-  return persist(accountId, {
+  return persist(accountId, teamKey, {
     userId: user.id,
     login,
     automated: false,

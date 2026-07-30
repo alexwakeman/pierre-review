@@ -3,6 +3,7 @@ import type {
   AttentionCardsResponse,
   InsightsResponse,
   RepoAnalytics,
+  TeamComparisonResponse,
   TeamMetricsDetailResponse,
   TeamMetricsResponse,
 } from '@pierre-review/shared';
@@ -14,6 +15,7 @@ import {
   getTeamMetricsForScope,
   resolveScopeRepoIds,
 } from '../../db/queries.js';
+import { getTeamComparison } from '../../db/team-comparison.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 function parseIntList(raw: string | undefined): number[] | null {
@@ -55,6 +57,27 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
     const scopeRepoIds = q.scope ? await resolveScopeRepoIds(accountId, q.scope) : null;
     const detail = await getTeamMetricsDetail(accountId, undefined, scopeRepoIds);
     return { enabled: true, detail };
+  });
+
+  // Cross-team comparison — CORE/FREE, deliberately in the /api/team-metrics family because the
+  // panel now sits in the Feed beside the free DORA header and shares its (trailing-14d) window.
+  // It MOVED here from the Pro plugin's `/api/pro/insights/team-comparison`, which was behind the
+  // 402 entitlement gate, absent in OSS, and computed N × getTeamInsights to read `.metrics`.
+  //
+  // `scope` takes the same wire strings as its siblings ('all'|'none'|'teams'|'<teamId>'|
+  // 'teams:<ids>') but selects TEAMS, not repo ids — so it does NOT go through
+  // resolveScopeRepoIds. 'teams:<ids>' is the case that matters: it is what the client sends for
+  // an explicit 2-of-5 multi-select, which the old All-Teams-only gate silently dropped.
+  //
+  // Isolation is by construction: getTeamComparison narrows `listTeams(accountId)`, so a foreign
+  // team id in the scope string matches no row rather than 404-ing (no existence oracle either).
+  //
+  // Rate limit: the default 600/min `read` bucket via tierFor, like its two siblings — no GitHub
+  // quota and no AI. Note it is the first route in the family whose cost multiplies by team
+  // count, which is why the SPA only fires it while the Compare tab is active.
+  app.get('/api/team-metrics/compare', async (req): Promise<TeamComparisonResponse> => {
+    const q = req.query as { scope?: string };
+    return getTeamComparison(accountIdOf(req), q.scope);
   });
 
   // The attention cards (stalled reviews / untouched threads / reviewer load / needs-a-reviewer) —

@@ -176,6 +176,43 @@ export function reviewBotKind(login: string | null | undefined): ReviewBotKind |
   return REVIEW_BOTS[slug] ?? null;
 }
 
+// Bare GitHub login (lowercased, `[bot]` suffix stripped) → a QUALITY-CHECK automation:
+// static analysis, coverage, lint. These post review comments like a review bot, so every
+// layer of the classifier already flags them `automated` — but they are NOT reviewers, and
+// counting them as such is what makes the Bot-ROI panel read as noise. See `ReviewerRole`.
+//
+// This map only SEEDS the default role for a login nobody has classified by hand. It is
+// deliberately NOT a parallel `AutomatedReviewerKind`: role and vendor identity are
+// orthogonal axes, and a login may hold a brand kind AND the quality_check role at once.
+//
+// Deliberately EXCLUDED even though they are arguably quality-check tools: `deepsource-io`,
+// `github-code-quality`, `github-advanced-security` — all three are already named
+// `ReviewBotKind` vendors with rows in existing dashboards, so seeding them quality_check
+// would silently move numbers on upgrade. They stay `review` and remain user-flippable.
+//
+// The backend keeps a hand-synced LOCAL copy in `sync/bot-detection.ts` (it cannot import
+// shared at runtime); `bot-detection.test.ts` fails on drift, exactly as for REVIEW_BOTS.
+export const QUALITY_CHECK_BOTS: ReadonlySet<string> = new Set([
+  // SonarQube Cloud (ex-SonarCloud) — current + legacy app slugs. Both are already in the
+  // backend's KNOWN_BOTS but absent from REVIEW_BOTS, so today they resolve to `in_house`
+  // via the githubType step: the exact miscount this role exists to fix.
+  'sonarqubecloud',
+  'sonarcloud',
+  'codecov',
+  'codeclimate',
+  'codefactor-io',
+  'houndci-bot',
+  'coveralls',
+  'codacy-bot',
+]);
+
+// True when a login is a known quality-check automation (see QUALITY_CHECK_BOTS). Normalises
+// case + the `[bot]` suffix so it matches whether the login arrived via GraphQL or REST.
+export function qualityCheckBot(login: string | null | undefined): boolean {
+  if (!login) return false;
+  return QUALITY_CHECK_BOTS.has(login.toLowerCase().replace(/\[bot\]$/, ''));
+}
+
 // ── Bot-Triage Platform (WS1–WS6) ──────────────────────────────────────────────
 // The neutral measurement + triage layer above ALL automated reviewers — the known
 // vendors (ReviewBotKind), a team's own in-house AI reviewer, and Pierre's own Claude
@@ -191,12 +228,59 @@ export type ClassificationConfidence = 'high' | 'medium' | 'low';
 export type ClassificationSource =
   | 'manual' | 'vendor_login' | 'github_type' | 'app_attribution'
   | 'fingerprint' | 'behavioral' | 'ai_tiebreak';
+
+// WHAT an automated reviewer is FOR — an axis ORTHOGONAL to `AutomatedReviewerKind`, which
+// says WHO it is (the vendor brand). Adding `'quality_check'` to the kind union instead would
+// have been wrong twice over: a login would have to give up its brand identity (and its colour
+// in BOT_VENDOR_META) to be marked a linter, and `getBenchmarkContributions` filters kinds with
+// a RUNTIME string test against exactly `in_house | pierre | vendor`, so a new kind member would
+// sail straight through and ship linters to the cross-org benchmark as a named review-bot cohort.
+//
+//   'review'        — an AI code REVIEWER (CodeRabbit, Greptile, an in-house agent, Pierre).
+//   'quality_check' — static analysis / coverage / lint (SonarQube, Codecov, Hound). It posts
+//                     review comments and IS automated, but it is not reviewing: counting it as
+//                     a reviewer is what makes the ROI panel's volume and noise numbers lie.
+//
+// A quality_check reviewer stays `automated: true` — `excludeBots`, the feed bot lens and the
+// per-row vendor tag all keep working unchanged. The role only splits the two DERIVED SETS:
+//   role 'review'                    → SCORING (ROI, behaviour, dedup, benchmark)
+//   all automated (review ∪ quality) → EXCLUSION, the feed, AND bot-only PRs
+// Confusing those two is the defect this feature is most likely to ship; see the CLAUDE.md note.
+//
+// BOT-ONLY PRs DELIBERATELY DO NOT NARROW, and the reason is worth stating because the symmetry
+// is tempting: that list answers "did a human look at this before it merged". A PR reviewed only
+// by SonarQube has no human reviewer, so it is exactly what the banner exists to surface. Narrowing
+// it to role 'review' would leave such a PR with zero qualifying bot reviews, fail the "at least
+// one automated review" leg, and drop it from the list — hiding the risk instead of flagging it.
+// The scoring sets narrow because a linter's volume makes a REVIEWER's numbers lie; the risk set
+// does not, because a linter's approval is not a human's.
+export type ReviewerRole = 'review' | 'quality_check';
+
+// The classification TEAM key sentinel. `bot_review_classification.team_id` is NOT NULL and
+// defaults to this, because a UNIQUE index over a NULLable column dedupes in NEITHER dialect
+// (NULLs compare distinct), so a nullable team key would silently permit duplicate rows per
+// (account, author).
+//
+// 0 is deliberately BOTH "the No-team scope" AND the inheritance ROOT: resolution is
+// `explicit team row → the team-0 row → auto-detect`. That is why the migration needs no
+// backfill (every pre-existing account-global row is already the default every team inherits)
+// and why a team created LATER inherits the account default automatically. Surface it in the UI
+// as "No team (default)" so the conflation is visible rather than surprising.
+//
+// It carries no FK to `teams` — 0 is not a team id, so a FK would reject every default row.
+// The cost of that is manual cleanup: deleteTeam must delete this table's rows for the team.
+export const NO_TEAM_KEY = 0;
+
 export interface ReviewerClassification {
   userId: number;
   login: string;
   automated: boolean;
   kind: AutomatedReviewerKind | null;   // null when human
   label: string;                        // "CodeRabbit" | "In-house AI" | "acme-ci" | "Pierre · Claude"
+  // What this automation is FOR (see ReviewerRole). Always 'review' for a human — the field is
+  // meaningless when `automated` is false, and callers must gate on `automated` first rather
+  // than reading a human's role. Persisted NOT NULL DEFAULT 'review', so it is never absent.
+  role: ReviewerRole;
   confidence: ClassificationConfidence;
   source: ClassificationSource;
   reasons: string[];
@@ -208,14 +292,38 @@ export interface DetectedReviewer {
   avatarUrl: string | null;
   classification: ReviewerClassification;
   isManualOverride: boolean;
+  // The team key this row RESOLVED under (see NO_TEAM_KEY) — the requested team when an
+  // explicit row exists there, else 0.
+  teamId: number;
+  // True when `classification` came from the team-0 default (or from auto-detection) rather
+  // than an explicit row for the REQUESTED team. Drives the "Inherited from default" badge and
+  // disables "Reset to default", which would otherwise be a no-op the user cannot tell apart
+  // from a real override.
+  inherited: boolean;
   threadsLast90d: number;
   sampleReviewBody: string | null;
 }
-export interface DetectedReviewersResponse { reviewers: DetectedReviewer[]; generatedAt: string; }
+export interface DetectedReviewersResponse {
+  reviewers: DetectedReviewer[];
+  // The team key this listing was resolved for — echoed so the client can assert the response
+  // matches the tab it asked for before rendering (the query key and the picker can disagree
+  // for a frame while a team switch is in flight).
+  teamId: number;
+  generatedAt: string;
+}
 export interface ReviewerOverrideBody {
   automated: boolean;
   kind?: AutomatedReviewerKind | null;
   label?: string | null;
+  // Absent = leave the stored role alone (an existing row keeps its role; a new row takes the
+  // 'review' column default), so an old client that only knows `automated`/`kind` cannot
+  // silently un-mark a quality check.
+  role?: ReviewerRole;
+  // Which team this override belongs to; absent = NO_TEAM_KEY (0), the account default every
+  // team inherits. MUST be a SINGLE team id the account owns — a union scope cannot own an
+  // override, and an unowned/unknown id must 404 rather than write a row keyed to another
+  // tenant's team.
+  teamId?: number;
 }
 
 // ── WS2 Pierre-own-review provenance ────────────────────────────────
@@ -268,6 +376,14 @@ export interface BotAnalyticsResponse {
   generatedAt: string;
   window: { kind: BotWindowKind; from: string; to: string };
   vendors: BotVendorAnalytics[];  // most-threads-first
+  // Automated reviewers classified `quality_check` (SonarQube, Codecov, …) — the SAME row shape,
+  // computed the same way, but kept OUT of `vendors`, `totals` and `suggestions` because they are
+  // not reviewers: their volume inflates thread counts and their untouched threads would earn a
+  // `noisy` verdict for doing exactly their job. Rendered as a collapsed "excluded from ROI"
+  // section so a user can still see they are running, and so a mis-role is discoverable rather
+  // than looking like the bot vanished. Optional purely for wire back-compat with an older
+  // plugin/response; treat absent as [].
+  qualityChecks?: BotVendorAnalytics[];
   // `botOnlyPrs` = currently-OPEN (mergeable) PRs in the account's repos whose only review/comment
   // touch was automated (incl. Pierre-verbatim) — no human review AND no human comment. Merged PRs
   // are excluded (the banner is a "needs a human before it merges" signal); the drill-down list
@@ -3847,10 +3963,22 @@ export interface TeamMetricsResponse {
   metrics: TeamMetrics | null; // null = no repos in scope
 }
 
-// ---- Cross-team comparison (Insights "Compare" sub-tab; All-Teams scope only) ----
-// One row per team: that team's full flow metrics (same TeamMetrics shape the per-team
-// Insights header uses), so the SPA can render a compact metric×team comparison matrix
-// with per-team throughput sparklines. `metrics` null when the team has no repos/data.
+// ---- Cross-team comparison (the Feed's "Compare teams" sub-tab) ----
+// One row per team IN SCOPE: that team's full flow metrics (same TeamMetrics shape the DORA
+// header uses), so the SPA can render a compact metric×team comparison matrix with per-team
+// throughput sparklines. `metrics` null when the team has no repos/data.
+//
+// This moved OUT of the Pro Insights pane and is now CORE/FREE, served by
+// `GET /api/team-metrics/compare?scope=` beside `/api/team-metrics` and `/api/team-metrics/detail`
+// — sitting next to the free DORA header it shares its window with. It is shown whenever 2+ teams
+// are in scope, which is NOT the same test as the old All-Teams-only gate: `teamSetToScope`
+// canonicalises a full selection to `'teams'` and a one-team selection to a bare number, so the
+// predicate must count resolved team ids (`teamIdsInScope`), never inspect the scope's runtime type.
+//
+// WINDOW: core cannot read the plugin-owned `pro_settings`, so this uses the same trailing-14d
+// default `/api/team-metrics` does — NOT the account's configured sprint window. That makes
+// Compare agree with the free header directly above it, at the cost of possibly differing from a
+// Pro user's custom-window Insights header. Deliberate, and a visible change for those users.
 export interface TeamComparisonRow {
   teamId: number;
   teamName: string;
@@ -3859,10 +3987,12 @@ export interface TeamComparisonRow {
 }
 
 export interface TeamComparisonResponse {
-  enabled: boolean; // false when the capability is off (plugin absent / not entitled)
+  // Always true from the core route — kept on the wire (rather than removed) because the client
+  // never read it and dropping a field buys nothing, while a future gate might want it back.
+  enabled: boolean;
   generatedAt: string; // ISO-8601
   sprint: { from: string; to: string };
-  teams: TeamComparisonRow[]; // one per team the account owns, in list order
+  teams: TeamComparisonRow[]; // one per team IN SCOPE, in listTeams order (name asc)
 }
 
 // ---- Comment-validity assessment (Pro; reuses the prSummary capability) ----
@@ -4018,32 +4148,19 @@ export interface SprintReport {
   sprint: { from: string; to: string };
 }
 
-// The Sprint "Retro" — a retrospective NARRATIVE over the sprint window (Pro Insights AI,
-// Haiku): the story of what happened in the period — what merged and what it did, resolved-
-// thread highlights + time-to-resolve, CI failures + root causes + rates, recurring themes, a
-// light sentiment read, and follow-ups. A peer of SprintReport: where the sprint report is the
-// "state of play" (what needs attention NOW), the retro is the retrograde "what just happened"
-// over the same window setting (sprint-to-date / rolling 7 / 14). One per account (regenerated
-// for the current window; no history in v1).
-export interface RetroReport {
-  summary: string; // markdown narrative, sectioned
-  prRefs: DigestPrRef[]; // notable PRs referenced (merged in-window), cross-repo `owner/name#N`
-  model: string;
-  generatedAt: string; // ISO-8601
-  costUsd: number | null;
-  stale: boolean; // the window's activity changed since this was generated
-  window: { from: string; to: string };
-}
-
-export interface RetroReportResponse {
-  enabled: boolean; // false when the AI digest capability is off
-  model: string;
-  report: RetroReport | null; // null = not generated yet (or nothing happened in the window)
-  // Served from cache due to the per-account throttle / in-flight guard (see SprintReportResponse).
-  throttled?: boolean;
-  // Metered plan out of month-to-date credits: refresh skipped without billing; cache still renders.
-  creditsExhausted?: boolean;
-}
+// REMOVED: `RetroReport` / `RetroReportResponse` — the Insights "Retro" sub-tab, its route
+// (`/api/pro/insights/retro`), its generator and its `retro_reports` cache table are gone
+// (plugin migration 0018 drops the table). The retrospective is now a quick-question PILL on
+// the grounded Insights chat, which answers from the SAME chat payload every other pill uses.
+//
+// The one capability that did NOT survive the fold is Themes + Sentiment: those needed the
+// retro's own 50-item corpus of raw comment/review bodies, which the chat payload does not
+// carry. Discussion themes already have a home in the Feed's Pro "Themes" tab, so the pill's
+// prompt deliberately does not ask for them.
+//
+// Historical `ai_usage` rows with `feature = 'retro_report'` survive on purpose — that money
+// was really spent and must keep counting toward month-to-date credits (the column is free
+// text, so a removed feature needs no migration).
 
 export interface SprintReportResponse {
   enabled: boolean; // false when the AI digest capability is off
@@ -4297,13 +4414,23 @@ export interface PrAnnotationsResponse {
 // be one `AnnotationKind` or `'review'` (all three in one call per target — see
 // `AnnotationRunKind`). `targetKinds` narrows which entity TYPES to consider (default: all
 // three); `targets` narrows to specific anchors (one thread, one comment) and is what the
-// per-item button sends — absent or empty means the whole PR; `onlyStale` regenerates just the
-// annotations whose target has moved on, which is the cheap "refresh" path.
+// per-item "Check review" button sends.
+//
+// An absent/empty `targets` still MEANS the whole PR on the wire — the server contract is
+// unchanged — but no UI sends that any more: the PR-wide sweep bar was removed, so in practice
+// every run is one anchor. Keep the whole-PR path working; it is what `planRun`'s
+// `anchors.length === 0` branch covers and what the run-gate clock still bounds.
+//
+// REMOVED: `onlyStale`. It only ever had one sender (the sweep bar's "Re-check stale" control),
+// and with the bar gone there is no surface that asks for "just the ones that moved" — the
+// per-item button always re-checks exactly what was clicked. A client that still posts the field
+// is now silently ignored rather than honoured, which is the acceptable failure here (the run it
+// gets is a superset of the one it asked for, and the payload-hash cache makes the unchanged
+// targets free anyway).
 export interface AnnotationRunBody {
   kind: AnnotationRunKind;
   targetKinds?: AnnotationTargetKind[];
   targets?: AnnotationRunTarget[];
-  onlyStale?: boolean;
 }
 
 // The outcome of a run. `cached` = a payload-hash hit ($0); `skipped` = ineligible targets
@@ -4323,4 +4450,12 @@ export interface AnnotationRunResponse {
   failed: number;
   truncated: boolean;
   creditsExhausted: boolean;
+  // No usable Anthropic credential, so the run returned before billing anything. This is a
+  // SUCCESSFUL 200 carrying zero work — the run was refused, not attempted and failed, so
+  // `failed` stays 0 and there is nothing in the other counters to distinguish it from
+  // "everything was already cached". Without this flag the button can only say "nothing was
+  // produced", which reads as a broken feature rather than an unconfigured one; the client
+  // infers the difference from counters otherwise, and an inference is not something to make a
+  // user act on. Optional so an older plugin build simply omits it.
+  noAuth?: boolean;
 }

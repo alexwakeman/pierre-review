@@ -16,7 +16,6 @@ import { type TabMeta } from '../../store/pinnedTabs.js';
 import { CI_META, CONFIDENCE_META, indexUsers, relativeTime, userLabel } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
-import { PrAddressedCheckButton } from '../AddressedCheck.js';
 import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
 
 // The resolvable-bot-threads DRILL-DOWN — a persistent, singleton tab opened by the Bot-ROI
@@ -528,10 +527,14 @@ export function BotThreadsDetail(): JSX.Element {
                         <ConfidenceMix counts={g.confidenceCounts} />
                       </td>
                       <td className="py-1.5">
-                        <div className="flex flex-col items-start gap-1">
-                          <ThreadCountChips counts={g.botThreadCounts} />
-                          <PrAddressedCheckButton prId={g.prId} compact />
-                        </div>
+                        {/* The per-PR "✨ Check addressed" sweep that used to sit here is GONE.
+                            It was a SECOND PR-wide AI sweep on a worse cost model than the one
+                            removed from PR detail — one billed LLM call PER TARGET, up to 50 —
+                            rendered once per row of this table. The deterministic
+                            addressed-confidence mix in the column to the left is what this
+                            listing is actually sorted and selected on; the AI read is available
+                            per thread inside the PR. */}
+                        <ThreadCountChips counts={g.botThreadCounts} />
                       </td>
                     </tr>
                   );

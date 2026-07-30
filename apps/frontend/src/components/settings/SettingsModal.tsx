@@ -95,8 +95,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element
               {caps.teamInsights && (
                 <SprintSection settings={settings} save={save} saving={mutation.isPending} />
               )}
-              {/* Review bots — FREE (botTriage is true whenever the plugin is loaded, even with
-                  the paid PRO_* flags off), so the bot settings stay reachable on a flag-less run. */}
+              {/* Review bots (ACCOUNT-WIDE) — detection heuristics, per-bot cost, Limn attribution
+                  and the Slack block. All pro_settings-backed, hence the caps.botTriage gate:
+                  botTriage is FREE (true whenever the plugin is loaded, even with the paid PRO_*
+                  flags off), but with no plugin there are no pro_settings to edit.
+                  Deciding WHO COUNTS AS A BOT is deliberately NOT here — it moved to the CORE
+                  per-team Bots rail tab, which needs no plugin. That also closed a real gap: an
+                  `npx pierre-review` (OSS, plugin-absent) user could not classify a reviewer at
+                  all while this gate was the only way in. */}
               {caps.botTriage && (
                 <BotSection settings={settings} save={save} saving={mutation.isPending} />
               )}

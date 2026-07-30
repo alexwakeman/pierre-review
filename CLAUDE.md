@@ -141,6 +141,7 @@ pierre-review/
 │  │  │  │  ├─ queries.ts       read layer (async, accountId-scoped): getTimeline/getPrDetail/getOpenPrs/getMyTurn/getMergers
 │  │  │  │  ├─ triage.ts        computeTriage(): reasonTag, "my turn", new-since-viewed, approvals
 │  │  │  │  ├─ branch-queries.ts  getBranchStatus(): default-branch health + trunk commits (+ commit→PR resolution)
+│  │  │  │  ├─ team-comparison.ts getTeamComparison(): CORE/free cross-team metric matrix (listTeams ∘ getTeamMetrics)
 │  │  │  │  └─ migrations/ + migrations-pg/   sqlite (.sql + meta/) | Postgres baseline (`db:generate:pg`)
 │  │  │  ├─ github/             auth.ts (gh token), client.ts (per-account factories), queries.ts (the big query),
 │  │  │  │                      mutations.ts (REST writes + the GraphQL-only merge queue), branch-queries.ts (trunk, two-phase)
@@ -394,8 +395,14 @@ fixture tests (see Conventions).
   `accountScopedTables()` + explicitly erased; NOT in the Art. 15 export (unlike
   `autoMergeRequests`) — if that was a decision rather than an omission it isn't recorded anywhere.
 - **`botReviewClassification`** — the **Bot-Triage** classification table (CORE,
-  `accountId`-scoped). Stores manual + auto automated-reviewer classifications (unique
-  `(accountId, authorUserId)`; a manual row wins the resolution order). The plugin-owned
+  `accountId`-scoped). Stores manual + auto automated-reviewer classifications; a manual row
+  wins the resolution order. Since migration `0042` (pg `0029`) it is **PER TEAM**: `team_id`
+  (NOT NULL, **default 0**) + `role` (`ReviewerRole` `'review'|'quality_check'`, NOT NULL
+  default `'review'`), unique `(accountId, teamId, authorUserId)` (the old 2-column
+  `brc_account_author` is DROPPED) + an `(accountId, teamId)` listing index. `team_id` carries
+  **no FK** — 0 is the `NO_TEAM_KEY` sentinel, not a team id, so an FK would reject every
+  default row; `deleteTeam` deletes this table's rows by hand inside its transaction. See
+  **Per-team bot classification** below. The plugin-owned
   `pro_settings` gained 11 `bot_*` columns (cost, Pierre tag/footer toggles, Slack digest —
   its now-vestigial `bot_auto_resolve*` columns backed the removed mute feature). See
   **Bot-Triage Platform** below. (The old `botMuteRules` table / `/api/bot-mute-rules` mute +
@@ -426,14 +433,14 @@ file maps to a `client.ts` method.
 | `GET /api/prs/:id/checks/:jobId/logs?tail` \| `?startByte&endByte` | a live WINDOW of an Actions job log (never stored) → `CheckLogsResponse`. Offsets are SOURCE bytes (the `\r\n` normalisation is display-only), `endByte` EXCLUSIVE, `hasMore` = "more exists ABOVE this window" — so feeding a response's `startByte` back as the next `endByte` abuts exactly. Every path is capped at `MAX_LOG_BYTES` (8 MiB) via a rolling buffer (~2×cap peak) even when the source ignores `Range`. Serves PASSING checks too — see **Merge, CI logs & trunk status** |
 | `GET /api/branch-status?repoIds` | **default-branch health** per repo in scope → `BranchStatusResponse` (head snapshot + failing checks + the recent trunk commits, each with its own CI state, failing checks and originating `prNumber`/`prId`). Pure DB read off what the branch sync persisted — never a live GitHub call, hence the plain `read` tier. Repos with nothing synced still appear, with nulls. **Informational only:** nothing here feeds attention counts, badges or My Turn |
 | `POST /api/prs/:id/resolve-bot-threads {threadIds}` | **bulk-resolve** the review-bot threads a later commit likely addressed → `{resolved,failed,results[]}`. Server RE-DERIVES eligibility (owned + review-bot-originated + `likely_addressed`) ∩ the client's reviewed list, then GitHub-resolves each (shares the `bot-triage/resolve.ts` `resolveThreadsOnGitHub` helper with the scope-wide resolve route); never auto/blind — user-initiated + confirm-gated only. Core |
-| `GET /api/bot-reviewers` · `PATCH /api/bot-reviewers/:userId` | **Bot-Triage** (CORE): detected automated reviewers → `DetectedReviewersResponse` · two-way manual override → `ReviewerClassification` (writes `bot_review_classification`) |
-| `GET /api/bot-analytics?window=` | **Bot-ROI** (CORE): per-`AutomatedReviewerKind` volume/actedOn%/untouched/oldest/humanFollowThrough/noiseRatio/`verdict`(keep\|tune\|**noisy**) + ≤12wk trend + tuning suggestions → `BotAnalyticsResponse`. Returns `cost=null` — the client overlays cost from `pro_settings`. **Response-time-gated verdict:** the verdict keys on `overdueUntouched` (untouched threads older than a **fixed 36h grace window**, `totals.overdueGraceMs`), NOT raw `untouched` — so a bot isn't flagged noisy for threads still inside the grace window. (A MEASURED reply-time norm was tried but the sample is intrinsically fast — only threads someone engaged with draw a reply — so a flat cutoff is the fair gate.) Each row also carries `medianAddressedMs` (that bot's own median **time-to-ADDRESSED** — the earliest of a human reply, a resolve, or the addressing commit for a `likely_addressed` thread, computed read-time from `commits`/`commitFiles` for just those threads' PRs; display-only). ('kill' was renamed 'noisy'.) Vendor rows carry `dormant`+`lastActiveAt`: ANY trend-span footprint (threads, comments, or body-only reviews) keeps a quiet reviewer visible as a DORMANT row (zeroed window counts + trend + last-active chip) instead of vanishing; body-only reviews count as window activity for emission/dormancy but never enter the volume math |
+| `GET /api/bot-reviewers?teamId` · `PATCH /api/bot-reviewers/:userId {…,role?,teamId?}` · `DELETE /api/bot-reviewers/:userId?teamId` | **Bot-Triage** (CORE), now **PER TEAM**: detected automated reviewers resolved for `teamId` → `DetectedReviewersResponse` (echoes the resolved `teamId`; each `DetectedReviewer` carries `teamId` + `inherited`) · two-way manual override, also setting the `ReviewerRole` → `ReviewerClassification` · **"Reset to default"** = drop the explicit row for that team (204, idempotent). `teamId` absent = `NO_TEAM_KEY` (0) = the account default every team inherits; resolution is **explicit team row → the team-0 row → auto-detect**. The team key rides in the **body** on PATCH (it is part of the row's IDENTITY, not a filter) and the query string on GET/DELETE. **Ownership is checked on the WRITE paths only** (`setReviewerOverride`/`deleteReviewerOverride` → null/false → 404): `team_id` has no FK, so the DB accepts any integer and a caller could otherwise key a row to another tenant's team. Reads need no check — every read also binds `accountId`, so a foreign key matches nothing (and 404-vs-200 would be an existence oracle over another tenant's team ids). An absent `role` means **leave the stored role alone** so an old client can't silently un-mark a quality check |
+| `GET /api/bot-analytics?window=` | **Bot-ROI** (CORE): per-`AutomatedReviewerKind` volume/actedOn%/untouched/oldest/humanFollowThrough/noiseRatio/`verdict`(keep\|tune\|**noisy**) + ≤12wk trend + tuning suggestions → `BotAnalyticsResponse`. Returns `cost=null` — the client overlays cost from `pro_settings`. **Role split:** the getter computes a row for EVERY automated reviewer, then routes `role:'quality_check'` ones into **`qualityChecks[]`** — same shape, kept OUT of `vendors`/`totals`/`suggestions` (a linter's volume must not move an acted-on % that claims to be about REVIEW throughput, and its untouched threads would earn a `noisy` verdict for doing its job), rendered as a collapsed "excluded from ROI" section so a mis-role is discoverable instead of the bot appearing to vanish. Classification is **team-resolved** from the route's `scope` via `classificationTeamKey` (a bare team id → that team; every union form → the account default). **Response-time-gated verdict:** the verdict keys on `overdueUntouched` (untouched threads older than a **fixed 36h grace window**, `totals.overdueGraceMs`), NOT raw `untouched` — so a bot isn't flagged noisy for threads still inside the grace window. (A MEASURED reply-time norm was tried but the sample is intrinsically fast — only threads someone engaged with draw a reply — so a flat cutoff is the fair gate.) Each row also carries `medianAddressedMs` (that bot's own median **time-to-ADDRESSED** — the earliest of a human reply, a resolve, or the addressing commit for a `likely_addressed` thread, computed read-time from `commits`/`commitFiles` for just those threads' PRs; display-only). ('kill' was renamed 'noisy'.) Vendor rows carry `dormant`+`lastActiveAt`: ANY trend-span footprint (threads, comments, or body-only reviews) keeps a quiet reviewer visible as a DORMANT row (zeroed window counts + trend + last-active chip) instead of vanishing; body-only reviews count as window activity for emission/dormancy but never enter the volume math |
 | `GET /api/bot-behaviour?window&scope&repoIds` | **Bot BEHAVIOUR** (CORE, deterministic, **EXPERIMENTAL**): per bot over the window (+ a 12wk trend), the common review-bot gripes — **TTFR** (median/p90 + distribution + `ttfrTrend`; clock start = `pr_ready_for_review` when observed else `pullRequests.openedAt`), **LoC-to-comments** ratio (diff size ÷ the bot's comment count), a **week×hour activity heatmap** (`activityHeatmap` length-168, `dow*24+hour`, dow 0=Sunday — coverage / rate-limit INFERENCE, from review/comment timestamps NOT commit-push time, labelled inferred/UTC), and **post-first-review follow-up** (rate/avg/dist) → `BotBehaviourResponse`. Same window/scope/repoIds resolution as `/api/bot-analytics`; reuses the ROI identity helpers (`automatedReviewerUserIds`/`classificationKindForUser`/`u<userId>` key). Powers the Bots "**Behaviour**" inner sub-tab (`BotBehaviourPanel`), kept SEPARATE from the ROI panel so it can mature independently. **Anomaly detection (deterministic, self-baseline):** each bot's weekly series (TTFR/volume/follow-up) + a daily strip are judged against the BOT'S OWN robust baseline (median ± MAD, spike-resistant, ≥4 weeks or "building baseline"); TTFR flags only slower-than-typical weeks, volume+follow-up either direction; a silence-run detector flags coverage gaps for a normally-regular bot (run ≥ max(3, 3·median-gap) days, leading run ignored, trailing kept). `trend` points carry `*Anomaly` flags + an `anomalies[]` evidence list (observed vs typical) + `dailyActivity`/`silentRuns`. UI = **markers on the charts** (`LineChart` `pointFlags` ring + a new `DayStrip` with silent runs underlined in the anomaly colour). Also returns **`repoBotDirs`** (per bot × repo × directory) powering the merged **"Where bots work"** grouped+stacked chart (`BotRepoWorkChart`, custom SVG — X = bot; a bar per repo; each stacked by top-level directory + an 'other' tail; actual volumes; single-repo scope → one bar per bot). It REPLACED the two separate `repoPresence` (repo×bot "operate") + `repoAreas` (repo×area "work") charts/fields. No new AI/credit surface, no `apiVersion` bump |
 | `GET /api/prs/:id/bot-behaviour` | **PR-scoped Bot behaviour** (CORE, deterministic, **EXPERIMENTAL**): for ONE PR, each automated reviewer's on-PR touch timeline (first review + follow-ups) + how it compares to that bot's OWN typical (an 84-day account-wide robust baseline via `getPrBotBehaviour`) → `PrBotBehaviourResponse`. Flags this PR's TTFR when anomalously slower than typical + follow-ups above typical. Account-scoped → 404 for a foreign PR; empty `bots` when none touched it. Powers the PrDetail "**Bot activity**" tab (`PrBotBehaviourTab`, presence-gated — shown only when a bot touched the PR, NOT Pro) + a ⚠ tab-label badge + a ChecksTab Overview "N bots slower than typical — view" caution that opens the tab. Reuses the ROI identity helpers + the `ANOMALY_Z`/`MIN_BASELINE_POINTS` constants |
 | `GET /api/prs/:id/bot-dedup` | **cross-bot dedup** (CORE): automated-reviewer threads grouped by `(path, line±window)` across distinct kinds → consensus/conflict clusters → `BotDedupResponse` |
 | `GET /api/bot-analytics/bot-only-prs?window&scope&repoIds` | the PR list behind `totals.botOnlyPrs` ("only a bot reviewed these") → `BotOnlyPrsResponse` (CORE; `BotOnlyPrItem` carries `repoId`/`openedAt`/`updatedAt`/`state`). **The COUNT (`totals.botOnlyPrs`, banner + ROI stat) is OPEN-only** — `getBotOnlyReviewPrs(…,{openOnly:true})` restricts to open+mergeable, dropping merged-in-window (the banner is a "needs a human before it merges" signal; open PRs are a live, unwindowed snapshot). The LIST route still returns merged (no `openOnly`) so the drill-down `BotOnlyPrsDetail` can **default to OPEN rows** (caption "N open" ≡ the banner) with a **"Show merged (M)" checkbox** that adds merged (client-side filter on `state`; caption → "N open · M merged"). Sortable table (Age/Updated cols + cross-repo repo-filter dropdown). Both BotsView's amber caution AND the Bot-ROI "N bot-only open PRs" stat open this TAB. (`getTeamInsights`'s `bot_only_review` card still counts open+merged — a separate Pro surface.) |
-| `GET /api/bot-analytics/vendor/:key/prs?window&scope&repoIds` | per-REVIEWER Bot-PRs drill-down; `key` = the analytics row identity `u<userId>` \| `'pierre'` (invalid → 400) → `BotVendorPrsResponse` (+`key`/`login`). Replaced the old kind-keyed `/:kind/prs` (removed — two in-house bots no longer merge) |
-| `GET /api/bot-threads/resolvable?scope&repoIds` · `POST /api/bot-threads/resolve {threadIds,repoIds?}` | **scope-wide review & resolve** of `likely_addressed` bot threads (CORE): the listing is now **UNCAPPED + PR-centric** (`getResolvableBotThreadPrs` → `ResolvableThreadPrsResponse{prs[],totalThreads}`) — **one row PER PR carrying ALL its resolvable thread ids** (`threadIds`) + `resolvableCount` (=`threadIds.length`=`botThreadCounts.likely_addressed`, now equal since uncapped) + a bot-only `botThreadCounts` mix + per-PR `confidenceCounts`/`highConfidenceThreadIds` (the deterministic addressed-confidence breakdown of the resolvable ids) + `repoId`/`authorId`/`ciStatus`/`openedAt`/`updatedAt`. Replaces the old 500-capped grouped-`threads` shape. The confirm-gated resolve still RE-DERIVES eligibility ∩ the explicit ids via `getResolvableBotThreadsForScope` (kept for that path; still 500/POST, client chunks 25 ids/POST for progress) so "Select all" resolves the WHOLE backlog. UI (`BotThreadsDetail`): a **SORTABLE tabular** list (PR/repo/author/age/updated/CI/resolvable/**confidence** — the per-PR High/Medium/Low addressed-confidence mix, sorted by a grade-weighted score), **PRs DESELECTED by default** with per-row checkboxes + **Select-all (across all pages) / Clear** (both greyed when the visible/**filtered** selection is empty), a **"High-confidence only"** toggle that FILTERS the list to PRs with a high-confidence resolvable thread AND scopes Select-all/counts/resolve to that subset (was invisible when it only narrowed the hidden resolve set), resolve pinned TOP with a **Stop** control (halts cleanly between chunks via `shouldStop`), a cross-repo **repo-filter dropdown** + Repo column, and **client-side pagination** (50/PR page; selection & Select-all span pages). All five Activity drill-down overlay tabs are `max-w-[100rem]` (widened from `max-w-6xl`). Clicking a PR row opens its detail Threads tab with the `likely_addressed` state pill preset (not back to the Bots pane). BotRoiPanel's `ResolveBacklogBanner` (reads `totalThreads`) opens the `bot-threads` TAB |
+| `GET /api/bot-analytics/vendor/:key/prs?window&scope&repoIds` | per-REVIEWER Bot-PRs drill-down; `key` = the analytics row identity `u<userId>` \| `'pierre'` (invalid → 400) → `BotVendorPrsResponse` (+`key`/`login`). Replaced the old kind-keyed `/:kind/prs` (removed — two in-house bots no longer merge). **Team-resolved, and it must be:** it is opened FROM a team-scoped ROI row, so both the header label (an account-only `limit(1)` with no `ORDER BY` picked whichever row storage handed back) and the per-PR `botOnly` badge (whose `teamKey` parameter defaults to `NO_TEAM_KEY` — omit it and one screen shows two contradictory bot-only answers) take the scope's key. Pinned by `db/bot-vendor-prs-team.test.ts` |
+| `GET /api/bot-threads/resolvable?scope&repoIds` · `POST /api/bot-threads/resolve {threadIds,repoIds?}` | **scope-wide review & resolve** of `likely_addressed` bot threads (CORE): the listing is now **UNCAPPED + PR-centric** (`getResolvableBotThreadPrs` → `ResolvableThreadPrsResponse{prs[],totalThreads}`) — **one row PER PR carrying ALL its resolvable thread ids** (`threadIds`) + `resolvableCount` (=`threadIds.length`=`botThreadCounts.likely_addressed`, now equal since uncapped) + a bot-only `botThreadCounts` mix + per-PR `confidenceCounts`/`highConfidenceThreadIds` (the deterministic addressed-confidence breakdown of the resolvable ids) + `repoId`/`authorId`/`ciStatus`/`openedAt`/`updatedAt`. Replaces the old 500-capped grouped-`threads` shape. The confirm-gated resolve still RE-DERIVES eligibility ∩ the explicit ids via `getResolvableBotThreadsForScope` (kept for that path; still 500/POST, client chunks 25 ids/POST for progress) so "Select all" resolves the WHOLE backlog. UI (`BotThreadsDetail`): a **SORTABLE tabular** list (PR/repo/author/age/updated/CI/resolvable/**confidence** — the per-PR High/Medium/Low addressed-confidence mix, sorted by a grade-weighted score), **PRs DESELECTED by default** with per-row checkboxes + **Select-all (across all pages) / Clear** (both greyed when the visible/**filtered** selection is empty), a **"High-confidence only"** toggle that FILTERS the list to PRs with a high-confidence resolvable thread AND scopes Select-all/counts/resolve to that subset (was invisible when it only narrowed the hidden resolve set), resolve pinned TOP with a **Stop** control (halts cleanly between chunks via `shouldStop`), a cross-repo **repo-filter dropdown** + Repo column, and **client-side pagination** (50/PR page; selection & Select-all span pages). All five Activity drill-down overlay tabs are `max-w-[100rem]` (widened from `max-w-6xl`). Clicking a PR row opens its detail Threads tab with the `likely_addressed` state pill preset (not back to the Bots pane). BotRoiPanel's `ResolveBacklogBanner` (reads `totalThreads`) opens the `bot-threads` TAB. Both use `role:'review'` (a linter's finding is not a review comment, and `likely_addressed` is a much weaker claim for one). **KNOWN GAP:** the LISTING is team-resolved from `scope`, but the **RESOLVE re-derives at `NO_TEAM_KEY`** — `ScopeResolveBotThreadsBody` carries only `threadIds`/`repoIds` and no scope. So a reviewer marked automated ONLY under a per-team override has its threads offered and then found ineligible (resolves 0). Conservative — it never resolves something it shouldn't; the fix needs `scope?: string` on that shared body type |
 | `GET /api/open-prs?repoIds&userIds` | currently-open PRs (ignores date range) |
 | `GET /api/threads/:id` | single thread detail |
 | `GET/POST /api/repos`, `DELETE /api/repos/:id` | manage watched repos (delete → 409 if syncing, else 204) |
@@ -447,10 +454,11 @@ file maps to a `client.ts` method.
 | `GET /api/me`, `/api/my-turn`, `POST /api/my-turn/dismiss` | identity + triage queue + dismissals (`/me` carries `claudeReviewEnabled` + `deploymentMode` + `pro:{activityDigest,reviewMemory}`; cloud: 401 signed out) |
 | `GET /api/activity?repoIds&userIds` | **Activity tab** (core, no AI): per repo `{stats, threadTotals, maintainerIds, attentionCount, hasUnread, prs[]}` — composes `getActivity`; scoped by the FilterBar repo + member selection (see Activity) |
 | `GET /api/activity/feed?repoIds&userIds&limit&offset&excludeBots&botWindowDays` | **Consolidated Feed** (core, no AI; the Activity "Feed" entry): ONE flat, chronological (newest-first) stream of REAL activity events (opens / merges / reviews / comments, plus **commit-push items that ADDRESSED a review thread** — coalesced per author/PR into runs, affected threads inline via `affectedThreads`/`commitCount`/`changeSummary`; plain pushes excluded). Each item carries **`isMyTurn`** (participation: you authored the PR / are a requested reviewer / previously reviewed-or-commented, AND the actor isn't you) — that flag REPLACES the old two-source (`my_turn` vs `feed`) synthesis + dedup, so there's exactly one row per event. **My Turn / "FYI" is CORE (free, every tier), NOT a Pro capability:** `getConsolidatedFeed` computes `isMyTurn` directly via `feed/my-turn.ts` (no capability gate, no provider seam). `isMyTurn` rows are uncapped; plain activity is capped (`FEED_EVENT_CAP`). `excludeBots=true` drops bot-authored activity. **Paginated** (`limit`/`offset`; default page 50) → `{items[], users[], total, counts, generatedAt}` — **`counts` = server-computed facet counts over the WHOLE post-cap stream** (`ConsolidatedFeedCounts`: myTurn/claude/comments/prEvents/bots/byBotActor/byThreadState via the pure `computeFeedCounts`), so FeedView's pill badges reflect every matching item, not the loaded page (stale IndexedDB responses fall back to page-derived counts). Response also carries **`uncappedTotal?`** (pre-cap post-coalesce stream length) — FeedView's count label renders loaded-of-`total` + a "N most recent of M in window" cap disclosure, never the old visible-of-loaded "50 of 50". **Thread-state pills render on EVERY feed view** (not just botsMode; same semantics: an active state pill hides derivedState-less items). `botWindowDays` (clamped 1–90) widens the **botsOnly** feed window to match the shared `botAnalyticsWindow` selector (normal feed stays 14d); the head poll (`useFeedHasNew`) gets the identical params AND is gated on `!isPlaceholderData` so a window flip can't false-fire the refresh banner. **`includeAllCommits=true`** (the opt-in "**Commits**" pill, OFF by default, `feedShowCommits` transient store toggle) surfaces EVERY commit-push run — not just the thread-addressing ones — via `getCommitThreadItems` dropping its addressed-thread gate (run coalescing kept; a plain run emits empty `affectedThreads` + a "pushed N commits" summary); inert on the `botsOnly` path; threaded into BOTH the feed key and the head-poll key (identical scope). `counts` gained a **`commits`** facet (badges the pill); the **`prEvents`** facet is now READ by FeedView (the PR-events pill finally shows its count). No "seen"/acknowledged concept. |
-| `GET /api/team-metrics?scope` · `GET /api/team-metrics/detail?scope` | **CORE/FREE** team flow-metric header (DORA-ish tiles + 12-week trend charts) + the per-tile PR drill-down. Moved OUT of the Pro Insights pane to the cross-repo **Feed** (`FeedMetricsPanel` atop `showingFeed`). `getTeamMetrics`/`getTeamMetricsDetail` were always CORE-computed; only the SERVING route was Pro-gated. `getTeamMetricsForScope` mirrors `getTeamInsights`' repo resolution (`resolveScopeRepoIds`; null/'all' → watched set). `api.teamMetricsDetail` repointed here from the old Pro `/api/pro/insights/metrics-detail` (now orphaned). `MetricsDetail` (drill-down tab) dropped its "Pro" badge. The Pro Insights Overview keeps its attention cards + Sprint/Retro/Compare (metrics no longer render there). **`MetricsDetail` is now SORTABLE** (retrofit onto `Activity/sortableTable.tsx` — it was the last static drill-down): every column clickable, a new sortable **Updated** column (backed by `MetricPr.updatedAt`, added to the `getTeamMetricsDetail` SELECT), the Diff column sorts on numeric `additions+deletions` (never the formatted string), and per-tab default sort = recency (updated desc) for open_prs/merges but the metric magnitude (value desc) for the duration/CI tabs (NOT recency for lead time) |
+| `GET /api/team-metrics/compare?scope` | **cross-team comparison, CORE/FREE** (`db/team-comparison.ts` `getTeamComparison`) — one `TeamComparisonRow` per team IN SCOPE → `TeamComparisonResponse`, powering the Feed's "**Compare teams**" sub-tab. `scope` takes the same wire strings as its siblings but selects **TEAMS, not repo ids**, so it does NOT go through `resolveScopeRepoIds`: `'teams:<ids>'` (an explicit multi-select) is the case that matters. Isolation is by construction — it narrows `listTeams(accountId)`, so a foreign team id matches no row (no 404 oracle); bound by `verify:isolation` with a seeded second account so the negative check isn't vacuous. **It MOVED off the Pro `/api/pro/insights/team-comparison`** (still registered, callerless, do not repoint back), which was 402-gated, absent in OSS, and ran N × `getTeamInsights` — every insight card + the whole user roster per team — just to read `.metrics`; this composes `getTeamMetrics` directly. **Window: trailing 14d**, the same default `/api/team-metrics` uses — core cannot read the plugin-owned `pro_settings`, so Compare agrees with the free header above it and may differ from a Pro user's custom-window Insights header. Cost multiplies by team count, so the SPA only fires it while the Compare tab is active |
+| `GET /api/team-metrics?scope` · `GET /api/team-metrics/detail?scope` | **CORE/FREE** team flow-metric header (DORA-ish tiles + 12-week trend charts) + the per-tile PR drill-down. Moved OUT of the Pro Insights pane to the cross-repo **Feed** (`FeedMetricsPanel` atop `showingFeed`). `getTeamMetrics`/`getTeamMetricsDetail` were always CORE-computed; only the SERVING route was Pro-gated. `getTeamMetricsForScope` mirrors `getTeamInsights`' repo resolution (`resolveScopeRepoIds`; null/'all' → watched set). `api.teamMetricsDetail` repointed here from the old Pro `/api/pro/insights/metrics-detail` (now orphaned). `MetricsDetail` (drill-down tab) dropped its "Pro" badge. (What's left in the Pro Insights pane is the ad-hoc chat alone — metrics, attention cards, Retro and Compare have all moved out; see **Insights**.) **`MetricsDetail` is now SORTABLE** (retrofit onto `Activity/sortableTable.tsx` — it was the last static drill-down): every column clickable, a new sortable **Updated** column (backed by `MetricPr.updatedAt`, added to the `getTeamMetricsDetail` SELECT), the Diff column sorts on numeric `additions+deletions` (never the formatted string), and per-tab default sort = recency (updated desc) for open_prs/merges but the metric magnitude (value desc) for the duration/CI tabs (NOT recency for lead time) |
 | `GET /api/repos/:id/claude-reviews` | repo-scoped Claude-review history (retrieval only; `enabled:false` when the flag is off) → `{prs:[{runs[]}]}` |
 | `POST /api/prs/:id/review-comment` | post ONE inline review comment, re-anchoring to the file's first changed line when the requested `(path,line,side)` isn't addable → `AddReviewCommentResult`. Alone among the write routes it cannot stamp a local row (REST returns no review-THREAD node id), so it resyncs + VERIFIES and reports `visible`/`threadId` — see **Instant comment visibility** in Conventions. Once GitHub has 201'd, nothing downstream may fail the request |
-| `GET /api/pro/prs/:id/annotations?kinds` · `POST …/annotations/run` (+ `/stream`) | **comment annotations** (Pro, `prSummary`): the cached per-PR read (pure, no side effects, no generate-on-open) · the ONE billing path — `kind` is a RUN kind (`addressed`\|`validity`\|`simplify`\|**`review`** = all three in one call per target), `targets[]` narrows to one thread/comment, `onlyStale` is the cheap refresh → `AnnotationRunResponse`. See **Comment annotations** under the Pro plugin |
+| `GET /api/pro/prs/:id/annotations?kinds` · `POST …/annotations/run` | **comment annotations** (Pro, `prSummary`): the cached per-PR read (pure, no side effects, no generate-on-open) · the ONE billing path — `kind` is a RUN kind (`addressed`\|`validity`\|`simplify`\|**`review`** = all three in one call per target), `targets[]` narrows to the ONE thread/comment the per-item button was pressed on → `AnnotationRunResponse`. **The SSE twin `…/run/stream` and `AnnotationRunBody.onlyStale` are GONE** with the PR-wide sweep bar (a per-item run is one billed call — nothing worth streaming; `onlyStale` had no sender left). An absent `targets` still MEANS the whole PR on the wire (`planRun`'s `anchors.length === 0` branch) but no UI sends it. The 429 gate now carries a `message` — the server serialises runs per ACCOUNT and every thread card has its own button, so "clicked B while A runs" is the ordinary case. `AnnotationRunResponse.noAuth?` marks the 200-with-zero-work "no Anthropic credential" outcome. See **Comment annotations** under the Pro plugin |
 | `GET·POST /api/pro/activity/digests*` · `GET·POST /api/pro/prs/:id/review-learnings` · `…/claude-reviews/:id/actions` | **Pro plugin** routes (registered only when `@pierre/pro` loads): per-repo Haiku digest (the Activity Feed renders the COLLECTION of these, scoped to WATCHED repos — no separate cross-repo route/pass) + review-memory data. See "Open-core Pro plugin" |
 | `GET /api/auth/providers` · `/login[/​:provider]` · `/callback` · `POST /api/auth/logout` | **cloud only** — GitHub sign-in: which providers are enabled (for SignInGate) / authorize via `oauth`\|`app` (folds provider into `state`; OAuth adds `config.oauthScope`) / exchange+upsert+session→`/app` / clear session |
 | `GET /api/prs/:id/claude-review` | latest run + findings + history + auth status + `enabled` |
@@ -698,16 +706,30 @@ Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claud
   `approved`), then **Merged by**, **Requested** reviewers, labels, meta, an **Actions** row
   (approve / `MergeControl` / `ClosePrControl`) — then the PR **Summary** (markdown,
   clamped to 3 lines, tall images hidden when collapsed). **PR comments** (oldest first) round the
-  tab off — each with a "Show" link, its AI annotations above the untouched body, and a per-comment
-  "Check review" — but that list is rendered by **`PrDetail` itself**, not `ChecksTab`, which is why
-  the per-comment `CommentAnnotations`/`ReviewCheckButton` call sites are there.
+  tab off — each with a "Show" link, a per-comment "Check review", and its AI annotations **BELOW**
+  the comment (a judgement read before the thing it judges is backwards; it also matches the
+  per-thread block) — but that list is rendered by **`PrDetail` itself**, not `ChecksTab`, which is
+  why the per-comment `CommentAnnotations`/`ReviewCheckButton` call sites are there. The **Checks
+  row now also carries the CI-failure diagnosis** (`CiAnalysisCard`, `showFix={false}`) under the
+  checks list + re-run control; its visibility goes through `checksRowVisible(checkCount, ciStatus,
+  prSummary)` — the row opens for a red `ciStatus` with UNhydrated `checkRuns` (lean storage /
+  SAML-SSO) so a stored diagnosis is still reachable, but only with `prSummary`, since the card is
+  that branch's only possible content and `Row` always paints its label.
 - **Threads** — `ThreadList`/`ThreadView`: review threads grouped by file, **newest first**
   (files by most-recent thread; within a file by `createdAt` desc), with code anchors +
   new-comment highlights; each has a "Show" link. A sticky header carries **derived-state filter
   pills** (Untouched/Replied/Likely-addressed/Resolved, `store.threadStateFilter: Set<DerivedState>`)
   ANDed with the vendor `threadBotFilter`; the pills' badge counts come from the full loaded set
   (stable), and the bulk "Resolve N addressed" set is derived from the full list (independent of
-  the visible filter). Arriving from the `bot-threads` tab presets `{likely_addressed}` via
+  the visible filter). Each card renders its whole "Check review" output as ONE block under the
+  conversation (`ThreadCheckOutput` — the three judgements key on three DIFFERENT ids, so no single
+  `<CommentAnnotations>` can express a thread: `simplify` per comment, `validity` on the root,
+  `addressed` on the thread; each rewrite is sublabelled with whose comment it rewrites since it is
+  no longer adjacent to it). The bulk-resolve OFFER now goes through `ThreadList/resolvable.ts`,
+  which consults the account-default (`NO_TEAM_KEY`) `useDetectedReviewers` classification —
+  matching what the server re-derives, since classifying by vendor login alone offered a count the
+  server then refused, leaving a dead button with an unchanged count. Arriving from the
+  `bot-threads` tab presets `{likely_addressed}` via
   `openPrThreadsFiltered`. **Landmine:** `threadStateFilter` is a GLOBAL store field reset only in
   the selection actions — PrDetail applies it only when `selectedPrId === prId` (mirroring App's
   `selectedThreadId` guard) so a PR opened via `openPrDetailTab` doesn't inherit a stale preset.
@@ -723,11 +745,11 @@ Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claud
   slower than typical — view" caution that opens this tab. **Landmine:** `usePrBotBehaviour` is
   called at the top of PrDetail (before the loading/error early returns) — hooks-order rule.
 
-Above the tab CONTENT (not inside any tab) sits the Pro **`ReviewCheckBar`** — the single
-"Check review" run. It is there deliberately: the run spans review THREADS (Threads tab) and PR
-COMMENTS (Overview tab), so mounting it under either heading misrepresented what a click spends.
-It renders `null` without the capability, and carries its own border, so the free layout gains no
-empty strip.
+**There is no PR-wide "Check review" bar any more.** `ReviewCheckBar` (which sat above the tab
+content, spanning threads + PR comments) is DELETED: a whole-PR sweep on a bot-flooded PR is many
+billed calls and tens of seconds before anything appears, and the question a reader has is about
+the one thread in front of them. The only run surface is the per-item **`ReviewCheckButton`**
+(thread-card header / PR-comment actions row) — one anchor, one combined call.
 
 Keyboard (`useKeyboard.ts`): `/` focuses the filter, `j`/`k` cycle the board's PRs (board
 only), `i` opens Insights, `esc` leaves any tab/overlay → the board (else clears the
@@ -1027,7 +1049,19 @@ then each repo — selecting a repo shows a **compact header** (stats + thread-s
 per-repo Pro digest) atop that repo's **open-PR list** (`RepoOpenPrList` — all its open PRs with
 at-a-glance CI / approval standing / thread counts) THEN that **repo's own feed** (`RepoFeedHeader`
 + `RepoOpenPrList` + `<FeedView repoId>`). The rail selection is `store/filters.ts` `activityRepoId`
-(`'feed'` default | a repoId). Built **entirely on the read layer**: `getActivity` composes
+(`'feed'` default | a repoId; the `'retro'` value is gone with the Retro panel). **The rail GROUPS
+repos under per-team headers whenever 2+ teams are in scope** (`isMultiTeamScope`), each header
+carrying a `lib/teamColors.ts` identity dot that is repeated as the row's left border (selection's
+sky border always wins, so the open repo stays findable). A repo in **several** selected teams
+renders under EACH — hiding it from one would misrepresent that team's surface area and picking an
+owner would be arbitrary — so its rows share a repoId and highlight together (hence the accent;
+keys are `${teamId}:${repoId}`). A repo in **no** selected team (unassigned, or assigned only
+outside the scope) lands under **"Other"** rather than vanishing. The colour map is seeded from the
+ACCOUNT-WIDE roster in `useTeams()` order, never the selection, or every hue would shift as teams
+are ticked and the rail would disagree with the Compare matrix. **Landmine:** the grouping loop
+iterates the SELECTED teams, not all of them — iterating all (correct back when this was
+All-Teams-only) emits a header for an unselected team the moment one of its repos is shared.
+Built **entirely on the read layer**: `getActivity` composes
 `getInsights`/`getOpenPrs`/`getMergers`; `listClaudeReviewsByRepo` is retrieval-only. **Scoped by
 the FilterBar's REPO selection only** — repo visibility (+ team scope) flows into `useActivity` /
 `useConsolidatedFeed` query keys, so a filter change re-scopes the whole console and refetches
@@ -1046,6 +1080,26 @@ sticky; scrolls with content). When isolated, that view also **hides the repo-wi
 open-PR list**: RepoConsole drops `RepoInsightsPanel`/`RepoOpenPrList`, and `FeedView` drops its own
 cross-repo `FeedOpenPrsPanel`. `FeedView` still reads `feedIsolatedPrId` only to scope its query;
 the feed-wide "New activity — Refresh" banner remains sticky as its own element.
+
+**The rail entries' inner sub-tab bars** (all transient + URL-silent, all built DYNAMICALLY so a
+tab exists only where it means something):
+- **Feed** — `Feed` | `Themes` (Pro, `activityDigest`) | **`Compare teams`** (CORE/free, shown at
+  **2+ teams in scope**, `TeamComparisonPanel`). Only Themes carries a "pro" pill.
+- **Bots** (`BotsView`) — `ROI` | `Behaviour` | `Themes` (Pro, cross-repo only) | **`Settings`**
+  (CORE/free, cross-repo only — the per-team classification tab, see below).
+- **Insights** — the bar **no longer renders**: `SUB_TABS` is down to `Overview` alone (Retro is
+  deleted, Compare moved to the Feed, Sprint folded into Overview long ago), and the bar is guarded
+  on `SUB_TABS.length > 1`. The apparatus is kept live and type-checked, with a `normalizeSubTab`
+  MEMBERSHIP test (not a chain of `=== 'sprint'` literals) so a stale/deep-linked key falls back to
+  `overview` instead of stranding the pane on a tab that renders nothing — which is why
+  `InsightsSubTab` stays `'overview' | 'sprint'`: the vestigial member is the one value that keeps
+  that redirect reachable AND type-checkable. `'retro'`/`'compare'` were REMOVED from the union.
+
+**Landmine — the visible tab is DERIVED, never written back.** `feedInnerTab` / `botsInnerTab` are
+single scalars that can legitimately hold a key the current context doesn't render (Themes without
+the capability, Compare with one team, Settings on a per-repo Bots tab). Each consumer computes an
+`effectiveTab` fallback for the RENDER only; a corrective `set…` would permanently forget the
+user's choice, so un-ticking a team would lose Compare rather than restore it on re-tick.
 
 **Activity render-perf (client-side; the console + Bots sub-tab mount fresh on every tab switch).**
 Two low-risk levers keep opens fast: (1) **warm snapshots** — `useActivity`/`useConsolidatedFeed`
@@ -1084,7 +1138,8 @@ app-attribution}.ts`), resolution order: **manual override > known vendor login 
 auto-badges) > opt-in Haiku tie-break** (settings-gated OFF — the only AI, for the medium band).
 `users.githubType` is captured from the GraphQL author `__typename`; `AUTOMATED_LOGIN_PATTERNS` + a
 per-account allowlist catch service-account PATs. Classifications live in the CORE account-scoped
-`bot_review_classification` (manual + auto rows, uniq `(accountId, authorUserId)`). New shared type
+`bot_review_classification` (manual + auto rows, uniq `(accountId, teamId, authorUserId)` since
+migration `0042` — see **Per-team bot classification** below). New shared type
 **`AutomatedReviewerKind = ReviewBotKind | 'in_house' | 'pierre'`** (widens `BotSignalVendorStat.kind`).
 **Pierre's own review is tagged bot-derived PER-REVIEW** (not per-account): a compute-on-read join
 `claudeReviews.postedReviewId = reviews.databaseId` (both TEXT) sets `provenance` = `ai_verbatim`
@@ -1114,19 +1169,74 @@ changed no behaviour, and the unattended cron was replaced by the confirm-gated 
 `bot_mute_rules` table / `/api/bot-mute-rules` routes / `BotMuteRulesEditor` are gone; migration `0029`
 still creates an orphan table; `pro_settings.bot_auto_resolve*` columns are now vestigial.)_
 **"Only a bot reviewed this" risk flag:** a `bot_only_review` Insights card (`getBotOnlyReviewPrs`;
-Pierre-verbatim counts as bot-derived) + a `ChecksTab` caution. **Settings:** a "Review bots" section
-(`BotSection` / `DetectedReviewersTable`, two-way override) backed by `pro_settings`'s 11 `bot_*`
-columns. Deterministic tuning suggestions on the ROI panel are **advisory only** (no mute action).
+Pierre-verbatim counts as bot-derived) + a `ChecksTab` caution. **Settings:** the account-wide
+"Review bots" section (`BotSection`) backed by `pro_settings`'s 11 `bot_*` columns — the per-reviewer
+`DetectedReviewersTable` MOVED out of it to the per-team Bots tab (below). Deterministic tuning suggestions on the ROI panel are **advisory only** (no mute action).
 **Tiers:** detection/analytics/dedup/resolve are **CORE (free)**; the analytics PANELS, Slack block,
 and Pierre tag/footer are **PRO** (gated on the existing `teamInsights`/`slackDigest` caps — no new
 cap). **Migrations:** core `0027` (`users.github_type`), `0028` (`bot_review_classification`), `0029`
-(`bot_mute_rules`, now orphaned), pg baseline `0016`; pro `0009`
-(`pro_settings` + 11 `bot_*` columns). **Landmines:** (1) Pierre = **per-review** provenance — the human
+(`bot_mute_rules`, now orphaned), `0042` (pg `0029`: `team_id` + `role` + the unique-index swap),
+pg baseline `0016`; pro `0009` (`pro_settings` + 11 `bot_*` columns). **Landmines:** (1) Pierre = **per-review** provenance — the human
 author is never reclassified; (2) resolving bot threads is ALWAYS user-initiated + confirm-gated over
 **only `likely_addressed`** threads, never a merge (no automatic/cron path exists); (3) `apiVersion` **STAYS 11** (`PostReviewArgs` gained only
 OPTIONAL back-compat fields — no new `ProContext` seam); (4) the frontend must use `automatedReviewerMeta()`,
 NOT `BOT_VENDOR_META[kind]`, for an `AutomatedReviewerKind`; (5) `getBotAnalytics` returns `cost=null` —
 the client overlays cost from `pro_settings`.
+
+**Per-team bot classification + the quality-check ROLE (CORE, deterministic; migrations `0042` /
+pg `0029`).** Two orthogonal additions to `bot_review_classification`.
+
+**1. `team_id` — "who is a bot" became a PER-TEAM answer.** One org funnels an AI reviewer through
+`githubactions[bot]`; in another that login is plain CI. Resolution is **explicit team row → the
+team-0 row → auto-detect**; **team 0 (`NO_TEAM_KEY` in shared) is BOTH the "No team" scope AND the
+inheritance root**, which is why the migration needs no backfill or fan-out (every pre-existing
+account-global row is already the default) and a team created later inherits for free. The UI is
+the Bots rail's per-team **Settings** tab (`BotSettingsPanel` → `DetectedReviewersTable`, cross-repo
+only — `team_repos` is many-to-many, so a repo tab cannot express a team key), with an "inherited"
+badge and a **Reset to default** action (`DELETE /api/bot-reviewers/:userId`) that is disabled on an
+inherited row, where it would delete nothing indistinguishably from a reset that worked.
+**The division:** *who is a bot HERE* is per **team**; *what it costs, how we detect it, how we
+attribute Limn's own reviews* stays per **account** (`BotSection` in the Settings modal) — cost is
+keyed by LOGIN and a bot costs the same whichever team's repos it reviews. Moving the table out of
+that modal also closed a real gap: it was gated on `caps.botTriage`, so an OSS (plugin-absent) `npx`
+user could not classify a reviewer at all.
+
+**2. `role: ReviewerRole = 'review' | 'quality_check'`** — WHAT an automation is FOR, **orthogonal
+to `AutomatedReviewerKind`** (WHO it is). SonarQube / Codecov / Hound post review comments and ARE
+automated, but they are not reviewing, and counting them as reviewers is what makes the ROI numbers
+lie. Seeded from `QUALITY_CHECK_BOTS` (shared, with the usual hand-synced backend copy in
+`sync/bot-detection.ts` + drift test) and re-derived by `defaultRoleFor`, so an unclassified
+SonarQube is right before anyone opens the settings tab. It is **NOT** a new `AutomatedReviewerKind`
+member: a login would have to give up its brand identity to be marked a linter, and
+`getBenchmarkContributions` filters kinds with a RUNTIME string test against exactly
+`in_house|pierre|vendor`, so a new member would sail through and ship linters into the **cross-org
+benchmark** as a named review-bot cohort — data that leaves the tenant and cannot be un-shipped.
+A quality check stays `automated: true`, so `excludeBots`, the feed bot lens and the vendor tag are
+unchanged. **The role splits exactly two sets** (`automatedReviewerUserIds(accountId, teamKey, role)`
+takes the filter POSITIONALLY and REQUIRED, so every call site had to be re-read):
+
+| `role: 'review'` — SCORING | `role: 'all'` — EXCLUSION / visibility |
+|---|---|
+| behaviour + per-PR behaviour (`getBotBehaviourAnalytics`/`getPrBotBehaviour`), dedup, bot themes (`getBotReviewComments`), all three resolvable-thread-backlog getters, `getActivity`'s acted-on stat, `getTeamInsights`' `bot_signal`, the benchmark (`getBenchmarkContributions`) | the bots-only feed (`getConsolidatedFeed`), the human-themes exclusion set (`getHumanReviewComments`), human-follow-through detection (inside `getBotVendorPrs` — "was the replier a HUMAN"), **bot-only PRs** (`getBotOnlyReviewPrs`), **and `getBotAnalytics`** |
+
+**`getBotAnalytics` is the exception that reads like a bug and isn't** — it is the ROI getter, yet
+it passes `'all'`. It narrows by SPLITTING, not by filtering: it computes a row for EVERY automated
+reviewer and then routes `role:'quality_check'` ones into `qualityChecks[]` (via `reviewerRoleForUser`)
+so they are excluded from `vendors`/`totals`/`suggestions` but still RENDERED, in a collapsed
+"excluded from ROI" section. Filtering them out of the id set instead would have made a mis-roled bot
+silently vanish from the one screen where you'd fix the role. So "ROI scores only review bots" is true
+of the OUTPUT and false of the argument — don't grep for `'review'` expecting to find it here.
+_(Two in-code comments still say otherwise and are stale: `schema.sqlite.ts`'s `role` comment and
+`queries.ts`' `ReviewerRoleFilter` comment both list "bot-only PRs" among the sets that narrow to
+`'review'`. The code — and the paragraph below — are right; those two comments are not.)_
+
+**Bot-only PRs DELIBERATELY DO NOT NARROW**, and the symmetry is tempting enough that it is worth
+stating: that list answers "did a human look at this before it merged". A PR reviewed only by
+SonarQube has no human reviewer — exactly what the banner exists to surface. Narrowing it to
+role `'review'` leaves that PR with zero qualifying bot reviews, fails the "at least one automated
+review" leg, and DROPS it from the list, hiding the risk instead of flagging it. The scoring sets
+narrow because a linter's volume makes a reviewer's numbers lie; the risk set does not, because a
+linter's approval is not a human's.
 
 **Consolidated Feed — CORE, the Activity "Feed" entry (`getConsolidatedFeed` → `FeedView`).** ONE
 flat, purely-**chronological** (newest-first) stream of **real activity events** (opens / merges /
@@ -1176,6 +1286,27 @@ passes `watched∩visible` ids, and `loadRepoNames` defaults an unscoped request
 `age_hours` or a dormant repo re-bills hourly), per-account min-interval + in-flight guard,
 USD/repo caps. Capability `activityDigest` tracks `PRO_DIGEST_ENABLED`.
 
+**Pro: the Insights pane is now the grounded chat ALONE — "Retro" is DELETED.** The Insights
+"Retro" sub-tab, its view + hook, the plugin generator (`insights/retro.ts`), the
+`/api/pro/retro[/refresh]` routes and the `retro_reports` **table** (plugin migration `0018`,
+both dialects) are all gone. The retrospective is a **quick-question pill** in `AdHocChatPanel`
+(`RETRO_PROMPT`, a frontend-local const paired with `SPRINT_REPORT_PROMPT` — backward-looking vs
+forward-looking), answering from the SAME grounded chat payload every other pill uses: one billing
+path, one cache, one prompt surface instead of a second parallel generator. It deliberately asks
+only for what `buildChatPayload` HOLDS — merged PRs, flow metrics, CI failure reasons, attention
+items — **not themes or sentiment**, which needed the retro's own 50-item corpus of raw comment
+bodies; asking would just trip the chat's "the JSON doesn't hold the answer" decline. Discussion
+themes live in the Feed's Pro **Themes** tab. It is a **NOT a new `PresetPromptKey`**: each key is
+consumed by the plugin as two EXHAUSTIVE `Record<PresetPromptKey, string>` maps plus its own cache
+row and throttle, for a pill that only prefills the chat box. The table was **dropped rather than
+orphaned** because it carried `account_id`: an orphan would have to stay in `eraseProByAccountId`'s
+checklist (and keep both drizzle definitions alive) forever — deleting the feature while keeping
+100% of its schema surface. Historical `ai_usage` rows with `feature='retro_report'` survive on
+purpose: that money was really spent and must keep counting toward month-to-date credits (the
+column is free text, so no migration). `PresetPromptPanel` is likewise **importer-less** but kept,
+because its server side (`preset-prompt.ts` + its cache rows/throttles) is still live and this is
+its only client — delete both together or neither.
+
 **Pro: Comment annotations — the "Check review" platform** (`packages/pro/src/annotations/`,
 capability `prSummary`). ONE plugin-owned table `pr_comment_annotations` (migration `0017`) holds
 any AI judgement ABOUT a review comment, discriminated by **`(accountId, kind, targetKind,
@@ -1186,9 +1317,10 @@ and the superseded `comment_assessments` keyed a bare comment id, so `prComments
 `INSERT OR IGNORE`; that TABLE is deliberately not dropped, so a rollback is a code change rather
 than a data restore), `addressed` (was the concern
 dealt with, plus what is still open), `simplify` (a faithful rewrite of a bot wall-of-text,
-rendered ADDITIVELY above the untouched original). Staleness is **PASSIVE** — the GET is a pure
+rendered ADDITIVELY beside the untouched original). Staleness is **PASSIVE** — the GET is a pure
 cached read that marks rows stale; nothing regenerates on PR open, which would bill per open of a
-bot-flooded PR.
+bot-flooded PR. The re-check is simply pressing the same per-item "Check review" again (there is no
+bulk "re-check the stale ones" any more — there is no PR-wide sweep to hang it off).
 
 - **`AnnotationRunKind = AnnotationKind | 'review'`, and the split is load-bearing.** `'review'`
   is a RUN kind ONLY: one combined model call per target emitting all three judgements, writing
@@ -1234,16 +1366,37 @@ bot-flooded PR.
   (a thread, a comment) — never rows, of which a combined unit writes up to three. With anchors,
   the PR's other ineligible candidates are not counted as `skipped` (that read as nonsense on a
   300-thread PR); only unmatched anchors are.
-- **UI: three buttons became one.** "Simplify all" / "Check validity" / "Check addressed" (which
-  lived in TWO places, one of them misleadingly under "PR comments" though a run there covered
-  threads) are gone, as are `AddressedMarker` (its verdict pill hid the rationale in a `title`
-  tooltip — invisible on touch) and `AddressedCheckControl`, and `ThreadAssessment` is now
-  render-only. The entry points are `CommentAnnotations`' **`ReviewCheckBar`** (PR-wide, above the
-  tabs, + "Re-check N stale") and **`ReviewCheckButton`** (per thread card / per PR comment, one
-  combined call). The legacy per-item routes (`/api/pro/threads/:id/assess`,
-  `…/addressed/check`) stay registered — they write the SAME rows through the same writer with the
-  same hashes, so they are supported alternate writers, and the PR-wide addressed sweep is still
-  reached from `BotThreadsDetail` where the bar isn't mounted.
+- **UI: it is now PER-ITEM ONLY.** The three original buttons ("Simplify all" / "Check validity" /
+  "Check addressed"), then the **PR-wide `ReviewCheckBar`** that replaced them (with its
+  "Re-check N stale"), are ALL gone — a whole-PR sweep is many billed calls and tens of seconds,
+  and the answer wanted is about the one thread on screen. A **SECOND** PR-wide sweep went with it:
+  `PrAddressedCheckButton`, rendered once per ROW of the `bot-threads` drill-down, posting the
+  plugin's `POST /api/pro/prs/:id/addressed/check` — one billed call **per target, up to 50**, a
+  worse cost model than the combined runner's `ceil(units/6)`. That route + its SSE twin +
+  `runPrBatch`/`enumeratePrTargets` and the per-account batch gate they needed are deleted; the
+  drill-down row now shows only the deterministic addressed-confidence mix it is already sorted on.
+  Also deleted: the **SSE run path** end to end (`…/annotations/run/stream`, `AnnotationRunProgress`
+  in both the plugin and its frontend mirror, the hook's `stop`/`reset`/progress state) — a per-item
+  run is one billed call, so there is no progress worth streaming — and **`onlyStale`**, whose only
+  sender was the bar. The `AbortController` STAYS: it closes the socket, and the route's
+  `reply.raw.on('close')` is what stops the billing loop for a run the user walked away from (a fat
+  thread anchor really is several calls). What remains: **`ReviewCheckButton`** (thread-card header /
+  PR-comment actions) + the render-only panels. `AddressedMarker` / `AddressedCheckControl` /
+  `ThreadAssessment` / `useAddressedCheck` / `usePrAddressedCheck` / `useCommentAssessment` are all
+  deleted; the legacy PER-ITEM routes (`/api/pro/threads/:id/assess`, `…/{threads,pr-comments}/:id/
+  addressed/check`) stay registered as callerless alternate writers into the same rows.
+- **Output rendering: ONE block per target.** A thread's judgements render under the whole
+  conversation (`ThreadCheckOutput` in `ThreadCard`) instead of scattering a rewrite above each
+  comment body; a PR comment's render under its card. The "the original is always still on screen,
+  unedited" invariant survives (the conversation is above the block) and each rewrite is
+  sublabelled ("@coderabbitai's opening comment", "reply 2") since it is no longer adjacent.
+- **`lib/annotationRun.ts` `annotationRunMessage` — a click must never be silent.** The run route
+  answers **200** for outcomes that produce nothing (no Anthropic credential, exhausted credits), so
+  a 200 alone tells the reader nothing, and with the SSE `{type:'error'}` events and the bar's
+  "· out of credits" suffix both gone the button just flipped back to its idle label.
+  `AnnotationRunResponse.noAuth?` says it outright; the counter arithmetic
+  (`requested - cached - skipped > 0` with no `generated`/`failed`) is kept as a FALLBACK for older
+  plugin builds and worded with "may", because it is an inference.
 
 **Pro: Claude Review learnings/memory** (`packages/pro/src/review-memory/`). Core seam =
 `src/review/events.ts`: an **inert** typed event-bus (5 emit sites in `claude-review.ts`,
@@ -1448,17 +1601,26 @@ code this app actually runs, so they are worth knowing:
 
 **Two suites exist that CI does not run — a known gap, both needing a devDependency + script
 decision (each would touch the root lockfile, which is why neither was taken unilaterally):**
-- `packages/pro/test/` — **8 files / 115 tests**, now runnable via `packages/pro/vitest.config.ts`
+- `packages/pro/test/` — **9 files / 116 tests** (+ `annotations-empty.test.ts`, the server half
+  of the empty-panel fix: `projectAnnotations` must not invent a row or a nonzero count for an
+  unannotated target), now runnable via `packages/pro/vitest.config.ts`
   (which aliases `better-sqlite3` to the backend's copy and exports a PLAIN object, since
   `vitest/config` is unresolvable from a package without vitest): `./apps/backend/node_modules/.bin/vitest
   run --root packages/pro`. The plugin still declares no `test` script and no vitest devDep, so
   `pnpm -r test` skips it — including its cross-account isolation suite.
-- `apps/frontend/test/` — **1 file / 15 tests** (`prRef.test.ts`), same arrangement
-  (`apps/frontend/vitest.config.ts`, `include` pinned to `test/**` so vitest can't collect the
-  Playwright `e2e/*.spec.ts` and fail). Kept OUTSIDE `src/` so `pnpm typecheck` never tries to
-  resolve the uninstalled vitest types.
+- `apps/frontend/test/` — **5 files / 58 tests**, same arrangement (`apps/frontend/vitest.config.ts`,
+  `include` pinned to `test/**` so vitest can't collect the Playwright `e2e/*.spec.ts` and fail).
+  Kept OUTSIDE `src/` so `pnpm typecheck` never tries to resolve the uninstalled vitest types.
+  This batch added **four** of them, and they are where the pure logic this batch extracted from
+  components is pinned: `annotationRun.test.ts` (`annotationRunMessage`), `teamScope.test.ts`
+  (`teamIdsInScope`/`isMultiTeamScope` over every `TeamScope` wire form — the canonicalisation
+  landmine below), `resolvableBotThreads.test.ts` (the classification-backed resolve offer) and
+  `checksRow.test.ts` (`checksRowVisible`'s three-way gate). `prRef.test.ts` predates it.
 
-The backend suite itself is **52 files / 480 tests** and DOES run in CI; `vitest.config.ts` raises
+The backend suite itself is **54 files / 514 tests** and DOES run in CI (this batch added
+`db/team-comparison.test.ts` — every `TeamScope` wire form + two-way account scoping with a seeded
+second account so the negative check isn't vacuous — and `db/bot-vendor-prs-team.test.ts`, which
+pins the per-team label + `botOnly` resolution of the vendor drill-down); `vitest.config.ts` raises
 `hookTimeout` to 30s because a dozen suites migrate a throwaway SQLite DB in `beforeAll` and lost
 the 10s default under parallel load — failures that look exactly like real regressions (a
 different subset each run, always in a hook, never an assertion).
@@ -1479,6 +1641,58 @@ different subset each run, always in a hook, never an assertion).
 - **Per-account isolation is load-bearing.** Every list/feed query filters by `accountId`;
   every id-addressed read/write scopes ownership (→ 404). New id-routes: run
   `verify:isolation`. Tokens come from `getAccessToken`, never a module cache.
+- **A UNIQUE index over a NULLable column dedupes in NEITHER dialect** (NULLs compare distinct),
+  which is why `bot_review_classification.team_id` is `NOT NULL DEFAULT 0` and not a nullable
+  "no team". A nullable key would silently allow duplicate rows per `(account, author)` AND leave
+  the upsert's conflict target unreachable.
+- **When a unique index CHANGES, every `onConflictDoUpdate` on that table must change with it.**
+  Migration `0042` dropped `brc_account_author` for the 3-column `brc_account_team_author`, so both
+  writers (`reviewer-classify.ts` `persist`, `queries.ts` `setReviewerOverride`) take the 3-column
+  target. A stale 2-column target **type-checks perfectly** and raises "no unique or exclusion
+  constraint matching the ON CONFLICT specification" at RUNTIME, in both dialects, only when a
+  classification is actually written.
+- **Every read of a per-team table needs an EXPLICIT team predicate.** Ten reads of
+  `bot_review_classification` collapsed it one-row-per-author (`new Map(rows.map(…))`, `limit(1)`,
+  no `ORDER BY`), relying on the old unique key to guarantee one row. With a per-team override
+  present they returned rows in **heap order — which flips after any UPDATE on Postgres** — so a
+  bot moved in and out of the ACCOUNT-WIDE automated set between page loads, swinging `excludeBots`,
+  the feed lens, ROI, dedup and `getActivity`. Go through `resolveClassifications` /
+  `classificationKindForUser` / `classificationLabelMap` / `reviewerRoleForUser`, which take
+  `teamKey` and prefer the requested team's row **in JS**, never by an `ORDER BY`.
+- **An INSERT at a new team key must inherit the RESOLVED value, not re-derive it from the seed.**
+  A per-team row is normally BORN by editing an inherited one (the tab renders the team-0 answer and
+  Apply deliberately sends no `role`), so seeding `role` from the login alone silently REVERSED the
+  classification the user was looking at. `setReviewerOverride` resolves the inherited role first;
+  the login seed only decides when nothing is stored under either key.
+- **Landmine — `persist()` shares ONE values object between insert and `set:`.** That is
+  deliberate (they must agree), but it means anything in it OVERWRITES the stored column on every
+  auto pass. `role` is therefore DERIVED there from the local quality-check list rather than
+  round-tripped off the caller's classification — otherwise migration `0042`'s backfill would be
+  re-written from a stale default on the next classification pass, putting SonarQube straight back
+  into the review-bot metrics. (The parameter is role-LESS on purpose, so this cannot be
+  reintroduced by a future step in the resolution order.)
+- **"Is this multi-team?" has no correct shorthand — use `teamIdsInScope` / `isMultiTeamScope`.**
+  `TeamScope` is `'all' | 'none' | 'teams' | number | number[]`, and `teamSetToScope`
+  canonicalises a **full** selection to the `'teams'` sentinel and a **one-team** selection to a
+  bare `number`. So `Array.isArray(scope)` misses "every team ticked" and `scope === 'teams'`
+  misses an explicit 2-of-5 — the exact bug that made the Compare tab vanish and the rail
+  un-group. Count the RESOLVED ids, filtered to teams that still exist (a deleted team left in a
+  scope otherwise inflates the count).
+- **A target with no stored annotations must render NOTHING and issue NO request.** `ThreadAssessment`
+  rendered its bordered panel unconditionally whenever the Pro tier was on, behind a hook keyed PER
+  THREAD at ~5 DB queries a call — so a 60-thread PR fired 60 requests to draw 60 empty boxes, and
+  `ThreadCard` is mounted in **eight** places (Threads tab, feed, search results, attention cards,
+  Pro themes drill-down, diff view). Every judgement now reads the ONE shared per-PR
+  `useAnnotationIndex` query and returns `null` when the target has none.
+- **A feature can be fully built, correctly gated, and completely UNREACHABLE — grep for the
+  mount.** `CiAnalysisCard` was written to be mounted twice, its own comment said "the copy mounted
+  inline on the Overview tab", and its tier was correctly moved from the pro+ `aiFix` to the cheap
+  `prSummary` — but the only mount was inside the pro+ **AI Fix tab**, so no summary-tier user could
+  ever reach the CI diagnosis. Only the tier change had landed. When a change says a component "now
+  renders in X", the check is `grep '<Component'`, not the diff of the component.
+- **Two mounts of one paid-generation card must share the MUTATION key, not just the query key.**
+  `CiAnalysisCard`'s in-flight state reads `useIsMutating({mutationKey:['ai-fix-ci',prId]})`, because
+  per-mount `isPending` reset to "Analyze" on a tab switch mid-run — inviting a second BILLED POST.
 - **Open-core boundary (`@pierre/pro`).** Premium code lives ONLY in the private submodule
   `packages/pro` (`alexwakeman/pierre-pro`) — never commit it into this public repo (only
   `.gitmodules` + the gitlink are public). The public repo holds just the contract, the
@@ -1707,16 +1921,41 @@ default-branch columns + `branch_commits`; `0040` (pg `0027`) `pull_requests.rev
 `0041` (pg `0028`) `branch_commits.failing_checks` + `.pr_number` + the
 `(account_id, repo_id, number)` PR index the commit→PR resolution needs — all additive and
 nullable, so there is no backfill (the branch sync re-upserts the same window every tick, and the
-read resolves null → `[]`/null meanwhile). Plugin migration `0017` adds
-`pr_comment_annotations` (+ backfills `comment_assessments` as `kind='validity'`).
+read resolves null → `[]`/null meanwhile). `0042` (pg `0029`) adds
+`bot_review_classification.team_id` + `.role`, **swaps** the unique index
+`brc_account_author` → `brc_account_team_author` and adds `(account_id, team_id)`, then re-roles
+AUTO rows for the known quality-check logins in place (MANUAL rows are never touched; both new
+columns carry constant defaults, so every existing row lands at `(0,'review')` = today's behaviour
+with no fan-out). Plugin migration `0017` adds `pr_comment_annotations` (+ backfills
+`comment_assessments` as `kind='validity'`); plugin `0018` **DROPS `retro_reports`** (both
+dialects) — `0008`/`0010`, which create and widen it, must STAY, since a database replaying from
+empty still runs them first.
 **Every hand-written sqlite migration must also be registered in `migrations/meta/_journal.json`
-or it SILENTLY skips** — `0038`–`0041` and pg `0025`–`0028` are registered. The Postgres
+or it SILENTLY skips** — `0038`–`0042` and pg `0025`–`0029` are registered (plugin migrations are
+discovered by filename sort and have NO journal — that requirement is core-only). The Postgres
 baseline (`migrations-pg/`) is a squash — cloud starts empty (synced data is regenerable; no
-SQLite→Postgres migration). **Known gaps on this branch:** the four pg twins are exercised by
-**nothing automated** — the whole test suite runs on SQLite, so their only cover is review plus the
-`schema-parity` test on the two schema modules (a pg smoke needs the throwaway-container run
-described under Dependency posture); and auto-merge's retarget guard still compares the last SYNCED
-base ref rather than a stored `expected_base_ref` (see `merge/auto-merge-runner.ts`). **Docs:**
+SQLite→Postgres migration). **Postgres was PROVEN once, ON THIS BRANCH, by hand:** every core and
+plugin migration was replayed from empty against a real Postgres, including the unique-index SWAP
+(pg `0016` creates the 2-column index, `0029` drops it and builds the 3-column one) — which retired
+the standing "the pg twins are exercised by nothing" gap for the migrations that existed then. It is
+a POINT-IN-TIME result, not a guarantee: nothing automated re-checks it, the suite still runs on
+SQLite only, and the next pg twin someone hand-writes is unverified until they repeat the run (see
+the throwaway-container recipe under Dependency posture, and mind the `DROP SCHEMA public CASCADE`
+gotcha there — it leaves drizzle's own `drizzle` schema behind and the migrator then no-ops).
+**Known gaps on this branch:**
+- **PrDetail still classifies bots CLIENT-SIDE by LOGIN** — `ChecksTab`'s "Bots" chips group
+  threads by `botVendorMeta(user)` and `ThreadList`'s vendor filter by `threadBotKind`, both
+  login→`ReviewBotKind` only. A per-team classification and the `quality_check` role never reach
+  that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
+  two can disagree by design).
+- **The scope-wide bot-thread resolve re-derives at `NO_TEAM_KEY`** because its request type
+  carries no scope (see the routes table).
+- **`SprintReportCard` has no importer**, yet the plugin's AI-policy sweep (`*/5`) still calls
+  `refreshSprintReport` for every account not on `manual` — real spend for a card nothing renders.
+  (`PresetPromptPanel` is also importer-less, but its server side is deliberately kept.)
+- **`packages/pro/test/` and `apps/frontend/test/` still do not run in CI** (see Tests above).
+- Auto-merge's retarget guard still compares the last SYNCED base ref rather than a stored
+  `expected_base_ref` (see `merge/auto-merge-runner.ts`). **Docs:**
 `docs/SYNC.md`, `docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-AUTH-SETUP.md`,
 `docs/LOCAL-CLOUD-TESTING.md`, `docs/DOMAIN-REPUTATION.md` (Safe Browsing + Search Console),
 `docs/BILLING-STRIPE.md` (Stripe Payment Link + webhook → `accounts.plan` entitlement),

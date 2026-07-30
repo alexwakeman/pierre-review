@@ -25,7 +25,18 @@ export type FeedBotLens = 'all' | 'hide' | 'only';
 // sub-tab bar. Store-remembered (see repoConsoleTabs / insightsSubTab) so returning to a
 // rail entry restores its last-active sub-tab.
 export type RepoConsoleTab = 'activity' | 'bots';
-export type InsightsSubTab = 'overview' | 'sprint' | 'retro' | 'compare';
+// The Insights console's sub-tab keys. TWO members were REMOVED and must not come back here:
+//  • 'retro'   — the Pro "Retro" narrative panel was deleted (its content is now a quick-question
+//                pill in the ad-hoc chat).
+//  • 'compare' — cross-team comparison MOVED to the cross-repo Feed's sub-tab bar (feedInnerTab
+//                below), where it sits beside the free DORA header it shares a window with.
+// 'sprint' is likewise vestigial (that tab was folded into Overview long ago) and is deliberately
+// KEPT in the union: it is the one value that makes the "stale sub-tab → 'overview'" redirect in
+// InsightsView both reachable and type-checkable. A stale/deep-linked value MUST normalize to
+// 'overview' rather than select a tab that no longer renders — that is what strands a user on a
+// blank pane. This field is transient (freshDefaults only, never persisted, never URL-parsed), so
+// a stale value can only live in memory for one session.
+export type InsightsSubTab = 'overview' | 'sprint';
 // The all-open-PRs drill-down's scope: one repo | the FilterBar-visible 'feed' scope | a
 // team group (label + the exact repo set behind it — see openPrsScope).
 export type OpenPrsScope = number | 'feed' | { label: string; repoIds: number[] };
@@ -141,13 +152,33 @@ export interface FilterState {
   // The rolling window the Bot-ROI panel (Insights) reports over. Transient, URL-silent
   // (like feedBotLens) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
-  // Which inner sub-tab the Bots view shows: 'roi' (the shipped ROI panel + bot feed) or
-  // 'behaviour' (the EXPERIMENTAL behaviour analytics). A single scalar (both the cross-repo
-  // rail Bots view and the per-repo console Bots tab share one BotsView). Transient, URL-silent.
-  botsInnerTab: 'roi' | 'behaviour' | 'themes';
+  // Which inner sub-tab the Bots view shows: 'roi' (the shipped ROI panel + bot feed),
+  // 'behaviour' (the EXPERIMENTAL behaviour analytics), 'themes' (the Pro Haiku summary), or
+  // 'settings' (the per-TEAM "who counts as a review bot here" classification tab). A single
+  // scalar (both the cross-repo rail Bots view and the per-repo console Bots tab share one
+  // BotsView) — so 'settings' can be selected while a PER-REPO Bots tab is showing, where it
+  // has no meaning: a repo can sit in several teams (teamRepos is many-to-many), so a repo tab
+  // cannot express a team key. BotsView's effectiveTab fallback must degrade a stale 'settings'
+  // to 'roi' there. Transient, URL-silent.
+  botsInnerTab: 'roi' | 'behaviour' | 'themes' | 'settings';
+  // Which TEAM the Bots "Settings" tab is editing. null = not chosen this session; the panel
+  // derives its initial value from the FilterBar teamScope (a single team → that team, 'none' →
+  // NO_TEAM_KEY) and falls back to NO_TEAM_KEY. NOT `number` with a 0 default: 0 is the
+  // FIRST-CLASS "No team (default)" key (shared's NO_TEAM_KEY — simultaneously the No-team scope
+  // and the inheritance root), so "the user picked No team" and "the user hasn't picked" must
+  // stay distinguishable. Transient, URL-silent (like repoConsoleTabs / insightsSubTab).
+  botSettingsTeamId: number | null;
   // Which inner sub-tab the cross-repo Feed rail shows: 'feed' (the metrics header + consolidated
-  // feed) or 'themes' (the Pro "Discussion themes" AI summary). Transient, URL-silent.
-  feedInnerTab: 'feed' | 'themes';
+  // feed), 'themes' (the Pro "Discussion themes" AI summary), or 'compare' (the CORE/free
+  // cross-team comparison matrix, moved here from Insights — shown only when 2+ teams are in
+  // scope; see isMultiTeamScope). Transient, URL-silent.
+  //
+  // Landmine: 'themes' is capability-gated and 'compare' is scope-gated, so this scalar can hold
+  // a key whose tab isn't currently rendered. The consumer must DERIVE an effective tab from the
+  // visible tab list rather than writing a correction back into the store — a write permanently
+  // forgets the user's choice, so un-ticking a team would silently lose Compare instead of
+  // restoring it when the team is re-ticked.
+  feedInnerTab: 'feed' | 'themes' | 'compare';
   // The ad-hoc "Ask about the sprint" chat's LIVE state, lifted here so it survives the Insights
   // panel unmounting (e.g. clicking a PR then returning) — the mutation result lives in
   // component state and would otherwise be lost. `draft` = the in-progress question + toggles.
@@ -237,8 +268,10 @@ export interface FilterState {
   // insightsOpen): in freshDefaults() but NOT in pickFilterBarState /
   // sanitizePersistedFilters. `?activityRepo=<id>` / `?activityRepo=bots` are the URL mirrors
   // (see useUrlState); the active TAB lives in the pinnedTabs store. 'bots' = the CORE/free
-  // review-bot triage console (BotsView); 'insights'/'retro' are the Pro Insights rail entries.
-  activityRepoId: number | 'feed' | 'attention' | 'insights' | 'retro' | 'bots' | null;
+  // review-bot triage console (BotsView); 'insights' is the Pro Insights rail entry. (The
+  // 'retro' rail value was REMOVED with the Retro panel — it was already unreachable: nothing
+  // called setActivityRepo('retro') and useUrlState never parsed it.)
+  activityRepoId: number | 'feed' | 'attention' | 'insights' | 'bots' | null;
   // Soft thread-state filter inside an Activity repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
@@ -338,9 +371,12 @@ export interface FilterState {
   setFeedIsolatedPrId: (id: number | null) => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
-  // Switch the Bots view's inner sub-tab (ROI vs experimental Behaviour).
-  setBotsInnerTab: (v: 'roi' | 'behaviour' | 'themes') => void;
-  setFeedInnerTab: (v: 'feed' | 'themes') => void;
+  // Switch the Bots view's inner sub-tab (ROI / experimental Behaviour / Themes / per-team Settings).
+  setBotsInnerTab: (v: 'roi' | 'behaviour' | 'themes' | 'settings') => void;
+  // Set which team the Bots "Settings" tab edits (0 = No team / the account default every team
+  // inherits — shared's NO_TEAM_KEY; null = fall back to deriving it from the FilterBar scope).
+  setBotSettingsTeamId: (id: number | null) => void;
+  setFeedInnerTab: (v: 'feed' | 'themes' | 'compare') => void;
   // Persist the ad-hoc chat's live draft + last result across Insights remounts.
   setSprintChatDraft: (
     patch: Partial<{ question: string; wantChart: boolean; wantBots: boolean }>,
@@ -444,7 +480,7 @@ export interface FilterState {
   bumpClaudeReviewKickoff: () => void;
   // Select an Activity detail target (a repo id, or 'feed' for the cross-repo consolidated
   // Feed).
-  setActivityRepo: (id: number | 'feed' | 'attention' | 'insights' | 'retro' | 'bots') => void;
+  setActivityRepo: (id: number | 'feed' | 'attention' | 'insights' | 'bots') => void;
   // Set/clear the Activity repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
   setActivityThreadFilter: (s: DerivedState | null) => void;
@@ -588,6 +624,7 @@ function freshDefaults(): FilterData {
     feedIsolatedPrId: null,
     botAnalyticsWindow: 'rolling_14',
     botsInnerTab: 'roi',
+    botSettingsTeamId: null,
     feedInnerTab: 'feed',
     sprintChatDraft: { question: '', wantChart: false, wantBots: false },
     sprintChatResults: {},
@@ -684,6 +721,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setBotsInnerTab: (v) => set({ botsInnerTab: v }),
+  setBotSettingsTeamId: (id) => set({ botSettingsTeamId: id }),
   setFeedInnerTab: (v) => set({ feedInnerTab: v }),
   setSprintChatDraft: (patch) =>
     set((s) => ({ sprintChatDraft: { ...s.sprintChatDraft, ...patch } })),
@@ -946,6 +984,39 @@ export function scopeToTeamSet(scope: TeamScope, allTeamIds: number[]): number[]
   if (typeof scope === 'number') return [scope];
   if (Array.isArray(scope)) return scope;
   return [];
+}
+
+/**
+ * The team ids a scope currently resolves to, filtered to teams that still EXIST. This is the
+ * ONE way to ask "which teams am I looking at" — every surface that branches on team count (the
+ * Feed's "Compare teams" sub-tab, the Activity rail's per-team grouping) must go through it, or
+ * they will disagree with each other.
+ *
+ * LANDMINE — neither naive test works, and both were live bugs:
+ *   • `Array.isArray(scope)` misses 'teams'. `teamSetToScope` canonicalises a selection covering
+ *     EVERY team to the 'teams' sentinel, so on a 2-team account ticking both yields 'teams',
+ *     not `[a, b]`.
+ *   • `scope === 'teams'` misses an explicit subset. Ticking 2 of 5 teams yields a `number[]`,
+ *     which is exactly the multi-team case the old All-Teams-only gate silently dropped.
+ * `teamSetToScope` also collapses a ONE-team selection to a bare `number`, so the count must come
+ * from the resolved ids, never from the scope's runtime type.
+ *
+ * The `live` filter matters because teams can be deleted while a scope still names them: without
+ * it a stale id inflates the count and a surface flickers into (or stays stuck in) multi-team
+ * mode between renders.
+ */
+export function teamIdsInScope(scope: TeamScope, allTeamIds: number[]): number[] {
+  const live = new Set(allTeamIds);
+  return scopeToTeamSet(scope, allTeamIds).filter((id) => live.has(id));
+}
+
+/**
+ * True when 2+ teams are in scope — the gate for every cross-team surface (the Feed's "Compare
+ * teams" sub-tab, per-team rail grouping). One place, so moving the threshold (e.g. to show a
+ * single team's header too) is a one-line change and cannot desync two callers.
+ */
+export function isMultiTeamScope(scope: TeamScope, allTeamIds: number[]): boolean {
+  return teamIdsInScope(scope, allTeamIds).length >= 2;
 }
 
 function resolveBaseRange(s: FilterState): { from: Date; to: Date } {

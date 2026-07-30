@@ -1,7 +1,7 @@
 import { useState } from 'react';
+import { NO_TEAM_KEY } from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useDetectedReviewers } from '../../hooks/useBotTriage.js';
-import { DetectedReviewersTable } from './DetectedReviewersTable.js';
 import { Field, SaveButton, SectionShell, inputCls, type SectionProps } from './ui.js';
 
 // A checkbox row matching the modal's compact type scale.
@@ -27,11 +27,21 @@ function Toggle({
   );
 }
 
-// The "Review bots" settings surface (data-testid="bot-settings-section") — the detected-
-// reviewers table plus the advanced, pro_settings-backed knobs: in-house detection toggles +
-// login allowlist, Pierre tagging, per-vendor cost, and the Slack bot digest. Gated in
-// SettingsModal on caps.botTriage (true whenever the plugin is loaded — so this stays FREE, no
-// paid flag); the Slack-digest toggle additionally needs caps.slackDigest.
+// The ACCOUNT-WIDE "Review bots" settings surface (data-testid="bot-settings-section"): the
+// pro_settings-backed knobs only — in-house detection toggles + login allowlist, Limn attribution,
+// per-bot cost, and the Slack bot digest. Gated in SettingsModal on caps.botTriage (true whenever
+// the plugin is loaded — so this stays FREE, no paid flag); the Slack-digest toggle additionally
+// needs caps.slackDigest.
+//
+// The per-reviewer CLASSIFICATION table moved OUT of here to the Bots rail's per-TEAM "Settings"
+// tab (Activity → Bots → Settings), because teams define bots differently — one org's
+// `githubactions[bot]` funnels an AI reviewer, another's is plain CI. What stayed is everything
+// that is genuinely account-level: a bot costs the same whichever team's repos it reviews (and
+// cost is keyed by LOGIN, so the ROI cost overlay still works per team), detection heuristics are
+// global policy, and Limn attribution is about Limn's own posted reviews.
+//
+// The split, in one sentence: "who is a bot HERE" is per team; "what it costs, how we detect it,
+// how we attribute it" is per account.
 export function BotSection({ settings, save, saving }: SectionProps): JSX.Element {
   const caps = useProCapabilities();
   const b = settings.bots;
@@ -61,8 +71,10 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
   // Per-BOT cost group (keyed by reviewer login, so in-house bots are costed individually).
   const [cost, setCost] = useState<{ login: string; monthlyUsd: number }[]>(b.cost);
   const costDirty = JSON.stringify(cost) !== JSON.stringify(b.cost);
-  // The detected automated reviewers drive the per-bot picker (login → display label).
-  const { data: detected } = useDetectedReviewers();
+  // The detected automated reviewers drive the per-bot picker (login → display label). PINNED to
+  // NO_TEAM_KEY explicitly: cost is account-level, so its options must be the account default, not
+  // whichever team's tab happened to be viewed last (which is what an implicit key would give).
+  const { data: detected } = useDetectedReviewers(NO_TEAM_KEY);
   const bots = (detected?.reviewers ?? []).filter((r) => r.classification.automated);
   const botLabel = (login: string): string => {
     const r = bots.find((x) => x.login === login);
@@ -77,10 +89,15 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
 
   return (
     <div data-testid="bot-settings-section" className="space-y-4">
-      <DetectedReviewersTable />
+      <p className="rounded border border-gray-200 bg-gray-50 px-2.5 py-2 text-[11px] text-gray-500 dark:border-gray-800 dark:bg-gray-900/40 dark:text-gray-400">
+        These settings are <span className="font-medium">account-wide</span>. Deciding{' '}
+        <span className="font-medium">who counts as a review bot</span> — and which reviewers are
+        quality checks rather than reviewers — is per <span className="font-medium">team</span>,
+        and lives in <span className="font-medium">Activity → Bots → Settings</span>.
+      </p>
 
       <SectionShell
-        title="Detection"
+        title="Detection (account-wide)"
         desc="How we recognise automated reviewers beyond the known vendors — your own in-house AI reviewer or CI service accounts."
       >
         <Toggle
@@ -135,7 +152,7 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
         />
       </SectionShell>
 
-      <SectionShell title="Limn attribution" desc="How Limn's own Claude reviews are stamped when posted.">
+      <SectionShell title="Limn attribution (account-wide)" desc="How Limn's own Claude reviews are stamped when posted.">
         <Toggle
           label="Tag Limn reviews"
           hint="Append a hidden marker so Limn-posted reviews are recognised as its own (verbatim vs curated)."
@@ -156,8 +173,8 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
       </SectionShell>
 
       <SectionShell
-        title="Per-bot cost"
-        desc="Optional monthly spend per bot (each in-house bot separately), used to show cost-per-acted-on in the Bot ROI panel. Stays on your account."
+        title="Per-bot cost (account-wide)"
+        desc="Optional monthly spend per bot (each in-house bot separately), used to show cost-per-acted-on in the Bot ROI panel. Keyed by login, so one bot has one cost even if teams classify it differently. Stays on your account."
       >
         {cost.length === 0 ? (
           <p className="text-[11px] text-gray-400">No costs entered.</p>

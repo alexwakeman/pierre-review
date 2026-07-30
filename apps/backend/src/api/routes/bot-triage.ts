@@ -12,6 +12,8 @@ import type {
   ScopeResolveBotThreadsBody,
 } from '@pierre-review/shared';
 import {
+  classificationTeamKey,
+  deleteReviewerOverride,
   getBotAnalytics,
   getBotBehaviourAnalytics,
   getBotOnlyPrs,
@@ -42,6 +44,15 @@ function parseIntList(raw?: string): number[] | null {
 // open strings (nullable) rather than an enum: AutomatedReviewerKind is defined in the
 // types-only shared package the backend can't import at runtime, and the query layer coerces
 // an unknown kind to a sensible default, so pinning the vendor list here would only add drift.
+//
+// `role` IS a closed 2-value set, so it's enumerated (an unknown role would land in a NOT NULL
+// column that the metric split branches on). It is OPTIONAL and absent means "leave the stored
+// role alone" — an old client that only knows automated/kind must not be able to silently
+// un-mark a quality check.
+//
+// `teamId` rides in the BODY, not the query string, because it is part of the row's IDENTITY.
+// minimum 0 = NO_TEAM_KEY (the account default every team inherits); the query layer verifies
+// the id belongs to this account and 404s otherwise.
 const overrideSchema = {
   params: {
     type: 'object',
@@ -56,8 +67,30 @@ const overrideSchema = {
       automated: { type: 'boolean' },
       kind: { type: ['string', 'null'] },
       label: { type: ['string', 'null'] },
+      role: { type: 'string', enum: ['review', 'quality_check'] },
+      teamId: { type: 'integer', minimum: 0 },
     },
   },
+};
+
+// GET /api/bot-reviewers?teamId= — which team's classification answers to show. Absent = 0
+// (NO_TEAM_KEY, the account default). DELETE /api/bot-reviewers/:userId?teamId= reuses it for
+// "Reset to default". A string is used on the wire (query strings are untyped) and coerced by
+// the handler; the query layer rejects a non-integer / foreign team.
+const teamScopedReviewersSchema = {
+  querystring: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { teamId: { type: 'integer', minimum: 0 } },
+  },
+};
+const deleteOverrideSchema = {
+  params: {
+    type: 'object',
+    required: ['userId'],
+    properties: { userId: { type: 'integer' } },
+  },
+  ...teamScopedReviewersSchema,
 };
 
 // GET /api/bot-analytics?window= — the window is a closed 4-value set, safe to enum + default.
@@ -153,8 +186,12 @@ const scopeResolveSchema = {
 export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // Every distinct reviewer in the account (human + automated), classified, with 90-day
   // volume + a sample body — powers the Settings "Review bots" detected-reviewers table.
-  app.get('/api/bot-reviewers', async (req) => {
-    const resp: DetectedReviewersResponse = await listDetectedReviewers(accountIdOf(req));
+  app.get('/api/bot-reviewers', { schema: teamScopedReviewersSchema }, async (req) => {
+    const { teamId } = req.query as { teamId?: number };
+    const resp: DetectedReviewersResponse = await listDetectedReviewers(
+      accountIdOf(req),
+      teamId ?? 0,
+    );
     return resp;
   });
 
@@ -164,12 +201,30 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/api/bot-reviewers/:userId', { schema: overrideSchema }, async (req, reply) => {
     const { userId } = req.params as { userId: number };
     const body = req.body as ReviewerOverrideBody;
+    // null covers BOTH an unknown user id and an unknown/foreign teamId — the same 404 on
+    // purpose: distinguishing them would turn this route into an existence oracle over another
+    // tenant's team ids.
     const classification = await setReviewerOverride(accountIdOf(req), userId, body);
     if (!classification) {
       reply.status(404);
       return { error: 'NotFound', message: `Reviewer ${userId} not found` };
     }
     return classification;
+  });
+
+  // "Reset to default": drop this reviewer's explicit row for `teamId` so the team inherits the
+  // account default (or auto-detection). Idempotent — deleting a row that isn't there is a
+  // successful reset. 404 only for an unknown/foreign team.
+  app.delete('/api/bot-reviewers/:userId', { schema: deleteOverrideSchema }, async (req, reply) => {
+    const { userId } = req.params as { userId: number };
+    const { teamId } = req.query as { teamId?: number };
+    const ok = await deleteReviewerOverride(accountIdOf(req), userId, teamId ?? 0);
+    if (!ok) {
+      reply.status(404);
+      return { error: 'NotFound', message: `Team ${teamId} not found` };
+    }
+    reply.status(204);
+    return null;
   });
 
   // Bot ROI / utilisation over a window (default rolling_14): per-vendor threads/acted-on/
@@ -185,7 +240,15 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     // An explicit repoIds list (the per-repo Bots tab) wins over the team scope.
     const explicit = parseIntList(repoIds);
     const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
-    const resp: BotAnalyticsResponse = await getBotAnalytics(accountId, window, scopeRepoIds);
+    // The classification key comes from the SAME scope the repo ids do — a single team id
+    // resolves to that team's answers, every union form ('all'/'none'/'teams'/'teams:a,b') to
+    // the account default. A repo scope carries no team (teamRepos is many-to-many).
+    const resp: BotAnalyticsResponse = await getBotAnalytics(
+      accountId,
+      window,
+      scopeRepoIds,
+      classificationTeamKey(scope),
+    );
     return resp;
   });
 
@@ -202,7 +265,12 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     const accountId = accountIdOf(req);
     const explicit = parseIntList(repoIds);
     const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
-    const resp: BotBehaviourResponse = await getBotBehaviourAnalytics(accountId, window, scopeRepoIds);
+    const resp: BotBehaviourResponse = await getBotBehaviourAnalytics(
+      accountId,
+      window,
+      scopeRepoIds,
+      classificationTeamKey(scope),
+    );
     return resp;
   });
 
@@ -219,7 +287,12 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     const accountId = accountIdOf(req);
     const explicit = parseIntList(repoIds);
     const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
-    const { window: win, prs } = await getBotOnlyPrs(accountId, window, scopeRepoIds);
+    const { window: win, prs } = await getBotOnlyPrs(
+      accountId,
+      window,
+      scopeRepoIds,
+      classificationTeamKey(scope),
+    );
     const resp: BotOnlyPrsResponse = { window: win, prs, generatedAt: new Date().toISOString() };
     return resp;
   });
@@ -248,7 +321,13 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     const accountId = accountIdOf(req);
     const explicit = parseIntList(repoIds);
     const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
-    const resp: BotVendorPrsResponse = await getBotVendorPrs(accountId, target, window, scopeRepoIds);
+    const resp: BotVendorPrsResponse = await getBotVendorPrs(
+      accountId,
+      target,
+      window,
+      scopeRepoIds,
+      classificationTeamKey(scope),
+    );
     return resp;
   });
 
@@ -273,7 +352,11 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     const accountId = accountIdOf(req);
     const explicit = parseIntList(repoIds);
     const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
-    const { prs, totalThreads } = await getResolvableBotThreadPrs(accountId, scopeRepoIds);
+    const { prs, totalThreads } = await getResolvableBotThreadPrs(
+      accountId,
+      scopeRepoIds,
+      classificationTeamKey(scope),
+    );
     const resp: ResolvableThreadPrsResponse = {
       prs,
       totalThreads,
@@ -295,10 +378,17 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
       const noop: ResolveBotThreadsResult = { resolved: 0, failed: 0, results: [] };
       return noop;
     }
+    // KNOWN GAP, deliberate and documented: the re-derive runs at NO_TEAM_KEY (the account
+    // default) because `ScopeResolveBotThreadsBody` carries `threadIds`/`repoIds` and no
+    // `scope` — it is a frozen shared type. So if a reviewer is marked automated ONLY under a
+    // per-team override, the team-scoped listing offers its threads but this route finds them
+    // ineligible and resolves 0 (it never resolves something it shouldn't — the failure is
+    // conservative). Fixing it properly needs `scope?: string` on that body type.
     const { threads: eligible } = await getResolvableBotThreadsForScope(
       accountId,
       repoIds ?? null,
       threadIds,
+      classificationTeamKey(null),
     );
     const result = await resolveThreadsOnGitHub(
       accountId,

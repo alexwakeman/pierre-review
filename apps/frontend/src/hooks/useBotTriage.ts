@@ -103,20 +103,58 @@ export function useBotOnlyPrs(
 }
 
 // Every distinct reviewer in the account joined with its automated/human classification,
-// volume and a sample review body — the Settings "Review bots" detected-reviewers table.
-export function useDetectedReviewers(enabled = true) {
+// volume and a sample review body — the per-team Bots "Settings" tab, and (at the account
+// default) the per-bot cost picker, the feed's vendor tag and the bot colour map.
+//
+// `teamId` selects WHICH team's answers to show: an explicit row for that team → the team-0
+// default → auto-detection. `null`/absent/0 = NO_TEAM_KEY, the account default — which is the
+// right answer for every account-wide consumer, so the existing zero-arg call sites keep working
+// and keep meaning what they meant.
+//
+// The `team:` key prefix is MANDATORY, for the same reason the `repo:`/`scope:` slots below carry
+// theirs: repo ids, team ids and this key are all bare integers from independent autoincrements,
+// so an un-prefixed slot would let team N alias some other N.
+export function useDetectedReviewers(teamId?: number | null, enabled = true) {
+  const key = teamId != null && teamId > 0 ? teamId : 0;
   return useQuery<DetectedReviewersResponse>({
-    queryKey: ['bot-reviewers'],
-    queryFn: () => api.botReviewers(),
+    queryKey: ['bot-reviewers', `team:${key}`],
+    queryFn: () => api.botReviewers(key),
     enabled,
     staleTime: 60_000,
     gcTime: ACTIVITY_GC_TIME,
   });
 }
 
-// Two-way manual override of a reviewer's classification (mark automated / not-a-bot). On
-// success the detected-reviewers table refetches; the ROI analytics also shift (a
-// reclassification changes which users count as automated), so invalidate both.
+// Every query key a reclassification shifts. A reviewer moving in or out of the automated set (or
+// between the review / quality_check roles) changes the ROI table, the behaviour analytics, the
+// bot-only-PR list, the resolvable backlog, the per-vendor drill-down, the Activity console's
+// acted-on stats, the bot feed and each PR's cached detail (its Bots chip + Bot-activity tab).
+// The old hook invalidated only two of these, which read as "the setting didn't take".
+const RECLASSIFY_INVALIDATE_KEYS = [
+  // A PREFIX, deliberately: editing the team-0 default shifts every team that inherits it, so
+  // every ['bot-reviewers', 'team:*'] entry must refetch, not just the one that was edited.
+  'bot-reviewers',
+  'bot-analytics',
+  'bot-behaviour',
+  'bot-only-prs',
+  'bot-resolvable',
+  'bot-vendor-prs',
+  'bot-dedup',
+  'pr-bot-behaviour',
+  'activity',
+  'consolidated-feed',
+  'pr',
+] as const;
+
+function invalidateReclassify(qc: ReturnType<typeof useQueryClient>): void {
+  for (const key of RECLASSIFY_INVALIDATE_KEYS) {
+    void qc.invalidateQueries({ queryKey: [key] });
+  }
+}
+
+// Two-way manual override of a reviewer's classification (mark automated / not-a-bot, set its
+// vendor kind/label, set its ReviewerRole). The team key rides in the BODY (`teamId`, absent =
+// the account default) because it is part of the row's identity, not a filter.
 export function useReviewerOverride() {
   const qc = useQueryClient();
   return useMutation<
@@ -125,10 +163,20 @@ export function useReviewerOverride() {
     { userId: number; body: ReviewerOverrideBody }
   >({
     mutationFn: ({ userId, body }) => api.setReviewerOverride(userId, body),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['bot-reviewers'] });
-      void qc.invalidateQueries({ queryKey: ['bot-analytics'] });
-    },
+    onSuccess: () => invalidateReclassify(qc),
+  });
+}
+
+// "Reset to default": drop this reviewer's explicit row for one team so it inherits the account
+// default again. NOT the same as "Not a bot", which writes a fresh override saying "human" that
+// the team would then be stuck with. Only offered for a row the listing reported as a real team
+// override (`inherited === false`) — on an inherited row it deletes nothing and the user cannot
+// tell that apart from a reset that worked.
+export function useDeleteReviewerOverride() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { userId: number; teamId: number }>({
+    mutationFn: ({ userId, teamId }) => api.deleteReviewerOverride(userId, teamId),
+    onSuccess: () => invalidateReclassify(qc),
   });
 }
 

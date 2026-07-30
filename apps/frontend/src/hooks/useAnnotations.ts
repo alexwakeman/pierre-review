@@ -10,7 +10,6 @@ import type {
   PrAnnotationsResponse,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
-import { sseStream } from '../api/sse.js';
 
 // The comment-ANNOTATIONS platform (Pro; the prSummary capability). ONE query per PR holds every
 // stored judgement about its comments and threads; each render site looks itself up by
@@ -23,15 +22,6 @@ import { sseStream } from '../api/sse.js';
 
 export function prAnnotationsKey(prId: number | null): unknown[] {
   return ['pr-annotations', prId];
-}
-
-export function usePrAnnotations(prId: number | null, enabled: boolean) {
-  return useQuery<PrAnnotationsResponse>({
-    queryKey: prAnnotationsKey(prId),
-    queryFn: () => api.prAnnotations(prId as number),
-    enabled: prId != null && enabled,
-    staleTime: Infinity,
-  });
 }
 
 export const annotationKey = (
@@ -65,69 +55,30 @@ export function useAnnotationIndex(
 }
 
 // ---- runs ------------------------------------------------------------------------------------
-//
-// MIRROR of the plugin's AnnotationRunProgress (packages/pro/src/annotations/runner.ts). It is
-// deliberately not in @pierre-review/shared — the contract layer ships only the JSON
-// `AnnotationRunResponse`, and this is the plugin's own stream. Keep the two in lockstep.
-export type AnnotationRunProgress =
-  | {
-      type: 'start';
-      kind: AnnotationRunKind;
-      total: number;
-      cached: number;
-      skipped: number;
-      truncated: boolean;
-      remaining: number;
-    }
-  | {
-      type: 'item';
-      targetKind: AnnotationTargetKind;
-      targetId: number;
-      verdict: string | null;
-      done: number;
-      total: number;
-    }
-  | { type: 'error'; message: string }
-  | { type: 'done'; result: AnnotationRunResponse };
 
 export interface AnnotationRunState {
   running: boolean;
-  kind: AnnotationRunKind | null;
-  done: number;
-  total: number;
-  /** Eligible targets this run could NOT reach because of the 50-per-run cap. */
-  remaining: number;
   result: AnnotationRunResponse | null;
   error: string | null;
 }
 
-const IDLE: AnnotationRunState = {
-  running: false,
-  kind: null,
-  done: 0,
-  total: 0,
-  remaining: 0,
-  result: null,
-  error: null,
-};
+const IDLE: AnnotationRunState = { running: false, result: null, error: null };
 
 /**
- * Run one annotation kind across a PR, streamed. Mirrors `usePrAddressedCheck`: SSE for live
- * per-item progress, an AbortController for Stop, and a single cache invalidation at the end so
- * every open card picks the new judgements up at once (invalidating per item would refetch the
- * whole PR's annotations up to 50 times).
+ * Spend one "Check review" on ONE anchor (a thread, a PR comment) — the only run surface left.
  *
- * The cap is RESUMABLE — `state.remaining` is what's left, so the caller can offer "check the
- * next N" rather than silently truncating.
+ * PLAIN JSON, NOT SSE. The PR-wide sweep that needed live per-item progress is gone, and a
+ * per-item run is a single billed call in the common case (see the plugin's isClockExemptRun), so
+ * there is nothing worth streaming: the button reads "Checking…" and then shows the outcome.
+ *
+ * The AbortController is still load-bearing. It is what closes the socket, and the route's
+ * `reply.raw.on('close')` is what stops the billing loop — without a signal a run that the user
+ * navigated away from keeps paying to completion. A fat thread anchor (a root plus more than
+ * COMBINED_CHUNK_SIZE long replies) really is several calls, so this is not hypothetical.
  */
 export function useRunAnnotations(prId: number): {
   state: AnnotationRunState;
-  run: (
-    kinds: AnnotationRunKind | readonly AnnotationRunKind[],
-    opts?: Omit<AnnotationRunBody, 'kind'>,
-  ) => void;
-  stop: () => void;
-  reset: () => void;
+  run: (kind: AnnotationRunKind, opts?: Omit<AnnotationRunBody, 'kind'>) => void;
 } {
   const qc = useQueryClient();
   const [state, setState] = useState<AnnotationRunState>(IDLE);
@@ -136,86 +87,37 @@ export function useRunAnnotations(prId: number): {
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const run = useCallback(
-    (
-      kinds: AnnotationRunKind | readonly AnnotationRunKind[],
-      opts?: Omit<AnnotationRunBody, 'kind'>,
-    ) => {
-      const list = Array.isArray(kinds) ? [...kinds] : [kinds as AnnotationRunKind];
-      if (list.length === 0) return;
+    (kind: AnnotationRunKind, opts?: Omit<AnnotationRunBody, 'kind'>) => {
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
-      setState({ ...IDLE, running: true, kind: list[0]! });
-
-      // SEQUENTIAL, never concurrent: the server serialises runs per account anyway (one
-      // in-flight run at a time), so firing them in parallel would just make all but the first
-      // bounce off that guard. Awaiting each stream also keeps the progress readout honest.
-      const runOne = async (kind: AnnotationRunKind): Promise<void> => {
-        setState((s) => ({ ...s, kind, done: 0, total: 0 }));
-        await sseStream<AnnotationRunProgress>(`/api/pro/prs/${prId}/annotations/run/stream`, {
-          method: 'POST',
-          body: { kind, ...opts } satisfies AnnotationRunBody,
-          signal: ac.signal,
-          onEvent: (e) => {
-            if (e.type === 'start') {
-              setState((s) => ({ ...s, total: e.total, remaining: e.remaining }));
-            } else if (e.type === 'item') {
-              setState((s) => ({ ...s, done: e.done, total: e.total }));
-            } else if (e.type === 'error') {
-              setState((s) => ({ ...s, error: e.message }));
-            } else {
-              // Accumulate across the sequence so the summary line reports the whole sweep.
-              // NOTE the counting UNIT differs by run kind: a 'review' run counts TARGETS (a
-              // thread, a comment — up to three rows each) while a per-kind run counts rows. A
-              // caller that mixes the two in one sequence therefore gets a mildly incoherent
-              // total. Cosmetic, and the alternative (two counters on the wire) buys nothing.
-              setState((s) => ({
-                ...s,
-                result:
-                  s.result == null
-                    ? e.result
-                    : {
-                        ...e.result,
-                        requested: s.result.requested + e.result.requested,
-                        generated: s.result.generated + e.result.generated,
-                        cached: s.result.cached + e.result.cached,
-                        skipped: s.result.skipped + e.result.skipped,
-                        failed: s.result.failed + e.result.failed,
-                        truncated: s.result.truncated || e.result.truncated,
-                        creditsExhausted: s.result.creditsExhausted || e.result.creditsExhausted,
-                      },
-              }));
-            }
-          },
-        });
-      };
+      setState({ ...IDLE, running: true });
 
       void (async () => {
         try {
-          for (const kind of list) {
-            if (ac.signal.aborted) break;
-            await runOne(kind);
-          }
+          const result = await api.runPrAnnotations(
+            prId,
+            { kind, ...opts } satisfies AnnotationRunBody,
+            ac.signal,
+          );
+          setState({ running: false, result, error: null });
         } catch (err: unknown) {
-          if ((err as Error)?.name !== 'AbortError') {
-            setState((s) => ({ ...s, error: (err as Error)?.message ?? 'Failed' }));
+          // An abort is the user leaving, not a failure — surfacing it would flash an error on
+          // every unmount.
+          if ((err as Error)?.name === 'AbortError') {
+            setState(IDLE);
+            return;
           }
+          setState({ running: false, result: null, error: (err as Error)?.message ?? 'Failed' });
         } finally {
-          setState((s) => ({ ...s, running: false }));
-          // ONE refetch for the whole sweep (invalidating per item would refetch the PR's
-          // annotations up to 50 times). Also refresh the two legacy per-item caches — they now
-          // read the SAME rows, so a run must not leave a stale marker on screen.
+          // ONE refetch for the whole run: every open panel on the PR picks the new judgements up
+          // at once off the shared per-PR query.
           void qc.invalidateQueries({ queryKey: prAnnotationsKey(prId) });
-          void qc.invalidateQueries({ queryKey: ['addressed-check'] });
-          void qc.invalidateQueries({ queryKey: ['comment-assessment'] });
         }
       })();
     },
     [prId, qc],
   );
 
-  const stop = useCallback(() => abortRef.current?.abort(), []);
-  const reset = useCallback(() => setState(IDLE), []);
-
-  return { state, run, stop, reset };
+  return { state, run };
 }

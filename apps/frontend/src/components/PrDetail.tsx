@@ -29,7 +29,7 @@ import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
 import { ExternalLinkIcon, FeedIcon, MagnifierIcon, OctocatIcon, TimelineIcon } from './Icons.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
-import { CommentAnnotations, ReviewCheckBar, ReviewCheckButton } from './CommentAnnotations.js';
+import { CommentAnnotations, ReviewCheckButton } from './CommentAnnotations.js';
 import { ChangesTab } from './ChangesTab.js';
 import { PrCommentComposer } from './PrCommentComposer.js';
 import { SkeletonBlock, SkeletonLine } from './Skeleton.js';
@@ -473,12 +473,6 @@ function PrCommentsList({
               </span>
               {isNew && <NewTag />}
             </div>
-            {/* AI annotations for a PR-level comment. The "Simplified" rewrite is ADDITIVE —
-                it sits above the body, which is always still rendered below it. Reviews are
-                not annotatable targets (only issue comments are), hence the isComment gate. */}
-            {isComment && (
-              <CommentAnnotations prId={pr.id} targetKind="pr_comment" targetId={it.id} />
-            )}
             <div className="mt-1 text-sm">
               <Markdown>{it.body}</Markdown>
             </div>
@@ -503,7 +497,8 @@ function PrCommentsList({
                 </a>
               )}
               {/* Pro (prSummary): spend one combined AI check on THIS comment alone — rewrite,
-                  is-it-well-founded, and was-it-addressed. Its output renders above the body. */}
+                  is-it-well-founded, and was-it-addressed. Its output renders directly BELOW,
+                  under the comment card's body + actions. */}
               {isComment && (
                 <ReviewCheckButton
                   prId={pr.id}
@@ -511,6 +506,15 @@ function PrCommentsList({
                 />
               )}
             </div>
+            {/* AI annotations for a PR-level comment, UNDER the comment they judge (all three
+                kinds key on the same ('pr_comment', id), so one component covers them). They used
+                to sit above the body; a judgement you read before the thing it judges is
+                backwards, and it now matches the per-thread block. Reviews are not annotatable
+                targets (only issue comments are), hence the isComment gate. Renders nothing when
+                the comment has no stored judgements. */}
+            {isComment && (
+              <CommentAnnotations prId={pr.id} targetKind="pr_comment" targetId={it.id} />
+            )}
             {replyingTo === rowKey && (
               <div className="mt-2">
                 <PrCommentComposer
@@ -944,16 +948,11 @@ export function PrDetail({
         })}
       </div>
 
-      {/* Pro (prSummary): the ONE "Check review" run, deliberately ABOVE the tab content rather
-          than inside a tab. It spans review THREADS (Threads tab) and PR COMMENTS (Overview tab),
-          so putting it under either tab's heading misrepresented what a click would spend — which
-          is exactly how it ended up under "PR comments". Renders null without the capability, so
-          the free layout is unchanged — the row's own border lives on the bar, not on a wrapper,
-          so a free tier gets no empty bordered strip. */}
-      <ReviewCheckBar
-        prId={pr.id}
-        className="border-b border-gray-200 px-4 py-1 dark:border-gray-800"
-      />
+      {/* There is deliberately NO PR-wide "Check review" bar here any more. A whole-PR sweep on a
+          bot-flooded PR is many billed calls and tens of seconds before anything appears, and the
+          question a reader actually has is about the one thread or comment in front of them. The
+          run surface is now the per-item ReviewCheckButton (thread card header / PR-comment
+          actions row) — one anchor, one combined call. */}
 
       <div className="min-h-0 flex-1 overflow-auto">
         <Suspense

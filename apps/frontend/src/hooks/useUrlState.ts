@@ -173,8 +173,9 @@ function writeToUrl(s: FilterState): void {
   if (usePinnedTabs.getState().activeTab === 'activity') {
     p.set('view', 'activity');
     // A single-repo console, the CORE Bots console, and the CORE "Needs attention" console are
-    // deep-linkable; the 'feed' / 'insights' / 'retro' pseudo-rows are defaults and stay out of
-    // the URL.
+    // deep-linkable; the 'feed' / 'insights' pseudo-rows are defaults and stay out of the URL.
+    // (The 'retro' pseudo-row is gone with the Retro panel; it was never parsed on the read side
+    // either, so no legacy `?activityRepo=retro` link ever selected it.)
     if (typeof s.activityRepoId === 'number') {
       p.set('activityRepo', String(s.activityRepoId));
     } else if (s.activityRepoId === 'bots') {

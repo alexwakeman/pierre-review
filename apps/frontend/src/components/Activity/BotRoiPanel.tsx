@@ -245,6 +245,86 @@ function TuningSuggestions({
   );
 }
 
+/**
+ * Automated reviewers roled `quality_check` — coverage/quality gates (SonarQube, Codecov,
+ * CodeClimate, …) rather than code reviewers.
+ *
+ * COLLAPSED and VOLUME-ONLY by design. These rows exist so the user can (a) confirm the gate is
+ * still running and (b) spot a MIS-role, and for nothing else. Deliberately absent: verdict, noise
+ * ratio, $/acted-on and the charts — the whole point of the role is that ROI judgements do not
+ * apply, and showing a greyed-out verdict column would invite reading one anyway. The counts are
+ * NOT in `totals` either, so the summary line above stays a review-bot number.
+ *
+ * `<details>` rather than React state: it is a disclosure with no other behaviour, and the browser
+ * already gets keyboard + a11y right for free.
+ */
+function QualityCheckSection({
+  rows,
+  botColor,
+}: {
+  rows: BotVendorAnalytics[];
+  botColor: (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
+}): JSX.Element | null {
+  if (rows.length === 0) return null;
+  return (
+    <details className="rounded-lg border border-gray-200 dark:border-gray-800">
+      <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        Quality checks ({rows.length}){' '}
+        <span className="font-normal normal-case tracking-normal text-gray-400">
+          — excluded from ROI
+        </span>
+      </summary>
+      <div className="border-t border-gray-200 px-3 py-2 dark:border-gray-800">
+        <div className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
+          Coverage and quality gates, not code reviewers. Their volume and untouched threads are
+          left out of the verdicts and totals above — an unread coverage report is the norm, not
+          noise. Re-role one in <span className="font-medium">Settings</span> if it belongs in the
+          ROI table.
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[380px] border-collapse text-[11px]">
+            <thead>
+              <tr className="text-left text-gray-500 dark:text-gray-400">
+                <th className="py-1 pr-3 font-medium">Check</th>
+                <th className="py-1 pr-3 text-right font-medium">Threads</th>
+                <th className="py-1 pr-3 text-right font-medium">Comments</th>
+                <th className="py-1 text-right font-medium">Last active</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((v) => (
+                <tr key={v.key} className="border-t border-gray-100 dark:border-gray-800/60">
+                  <td className="py-1 pr-3">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className="inline-block h-2 w-2 shrink-0 rounded-full"
+                        style={{ background: botColor({ login: v.login, kind: v.kind }) }}
+                      />
+                      <span className="text-gray-700 dark:text-gray-200">{v.label}</span>
+                      {/* A dormant gate is the interesting case here: it usually means the
+                          integration broke, not that the bot got quieter. */}
+                      {v.dormant && (
+                        <span className="rounded bg-gray-500/10 px-1 py-px text-[10px] text-gray-500">
+                          dormant
+                        </span>
+                      )}
+                    </span>
+                  </td>
+                  <td className="py-1 pr-3 text-right tabular-nums">{v.threads}</td>
+                  <td className="py-1 pr-3 text-right tabular-nums">{v.comments}</td>
+                  <td className="py-1 text-right text-gray-500 dark:text-gray-400">
+                    {v.lastActiveAt != null ? relativeTime(v.lastActiveAt) : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+  );
+}
+
 function VendorTable({
   vendors,
   botColor,
@@ -476,6 +556,17 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
     () => (data ? withCost(data.vendors, costByLogin) : []),
     [data, costByLogin],
   );
+  // Automated reviewers the user (or the migration's login seed) marked `role: 'quality_check'`.
+  // The server computes their numbers identically but keeps them OUT of `vendors`/`totals`/
+  // `suggestions`, because a coverage gate's untouched threads would earn it a `noisy` verdict
+  // for doing exactly its job.
+  //
+  // ⚠ THEY MUST STILL BE SHOWN SOMEWHERE. Without this section, marking a bot as a quality check
+  // in Bots → Settings makes it silently VANISH from the only screen that lists review bots —
+  // indistinguishable from "we stopped detecting it", and there is no way to notice a MIS-role.
+  // Volume only: no verdict, no noise ratio, no $/acted-on, because those are the ROI judgements
+  // that were deliberately withheld.
+  const qualityChecks = data?.qualityChecks ?? [];
 
   const header = (
     // The "Review-bot ROI" heading was dropped (the rail line already has a header); just the
@@ -508,14 +599,22 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   } else if (isError) {
     body = <div className="text-sm text-red-500">Couldn’t load bot analytics.</div>;
   } else if (!data || vendors.length === 0) {
+    // LANDMINE: "no vendors" is NOT the same as "no bots". If every automated reviewer in scope
+    // is roled `quality_check`, `vendors` is empty while `qualityChecks` is not — claiming "no
+    // activity" there would be a lie, and would hide the only rows that exist. So the
+    // quality-check section renders in the empty branch too, and the wording softens to name it.
     body = (
-      <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-        No automated-reviewer activity in this window.
-        <div className="mt-1 text-[11px]">
-          When review bots (CodeRabbit, Copilot, in-house AI…) comment on your PRs, their
-          signal-to-noise lands here. A bot that was active earlier may just be quiet — try
-          widening the window above.
+      <div className="space-y-3">
+        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+          No review-bot activity in this window.
+          <div className="mt-1 text-[11px]">
+            When review bots (CodeRabbit, Copilot, in-house AI…) comment on your PRs, their
+            signal-to-noise lands here. A bot that was active earlier may just be quiet — try
+            widening the window above.
+            {qualityChecks.length > 0 && ' Quality checks are listed separately below.'}
+          </div>
         </div>
+        <QualityCheckSection rows={qualityChecks} botColor={botColor} />
       </div>
     );
   } else {
@@ -571,6 +670,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           </ChartCard>
         </div>
         <TuningSuggestions suggestions={data.suggestions} />
+        <QualityCheckSection rows={qualityChecks} botColor={botColor} />
         <div className="text-[11px] text-gray-400">
           “Acted on” = a later commit likely addressed the thread, it was resolved, or a human
           replied/resolved after the bot (approximate). Noise ratio = the untouched share of a

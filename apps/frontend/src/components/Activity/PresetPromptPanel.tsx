@@ -11,7 +11,12 @@ import { SummaryMarkdown } from './prRefTable.js';
 // CAROUSEL — page through one at a time with the arrows — driven by a SINGLE "Generate all" button
 // that answers every preset for the current team scope (each key is an independent server-side
 // throttle/cache row, so unchanged answers stay $0). PR references linkify to the PR detail (same
-// treatment as the Sprint/Retro cards). Gated on the activityDigest capability — absent → nothing.
+// treatment as the Sprint report card). Gated on the activityDigest capability — absent → nothing.
+//
+// ⚠ THIS COMPONENT HAS NO IMPORTERS. The six presets were folded into AdHocChatPanel's
+// quick-question pills, which fire the Ask directly. Left in place rather than deleted because the
+// server side (`preset-prompt.ts`, its PresetPromptKey cache rows + throttles) is still live and
+// this is its only client; delete both together or neither.
 
 function refMeta(ref: DigestPrRef): PinnedPr {
   return {

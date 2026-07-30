@@ -2,8 +2,20 @@ import { describe, expect, it } from 'vitest';
 // Runtime import of the shared VALUE is fine in a TEST (vitest transpiles the .ts source;
 // only the RELEASE build forbids a real shared import in dist). This is deliberate — it's
 // how we guarantee the backend's local review-bot copy never drifts from the shared map.
-import { REVIEW_BOTS, reviewBotKind as sharedReviewBotKind } from '@pierre-review/shared';
-import { isLikelyBot, isReviewBot, reviewBotKind, reviewBotLogins } from './bot-detection.js';
+import {
+  QUALITY_CHECK_BOTS,
+  REVIEW_BOTS,
+  qualityCheckBot as sharedQualityCheckBot,
+  reviewBotKind as sharedReviewBotKind,
+} from '@pierre-review/shared';
+import {
+  isLikelyBot,
+  isReviewBot,
+  qualityCheckBot,
+  qualityCheckBotLogins,
+  reviewBotKind,
+  reviewBotLogins,
+} from './bot-detection.js';
 
 describe('bot-detection', () => {
   describe('review-bot classifier ⇄ shared parity (kept in lockstep BY HAND)', () => {
@@ -15,6 +27,52 @@ describe('bot-detection', () => {
       for (const login of Object.keys(REVIEW_BOTS)) {
         expect(reviewBotKind(login)).toBe(sharedReviewBotKind(login));
       }
+    });
+  });
+
+  // The SECOND hand-synced list (the quality-check ROLE seed). Same contract, same failure mode:
+  // drift here means the backend's default role disagrees with the SPA's, and — worse — with
+  // migration 0042's backfill `IN (…)` list, so a login would be re-roled by the migration and
+  // then flipped back on the next classification pass.
+  describe('quality-check classifier ⇄ shared parity (kept in lockstep BY HAND)', () => {
+    it('exposes exactly the same login set as @pierre-review/shared QUALITY_CHECK_BOTS', () => {
+      expect(qualityCheckBotLogins().sort()).toEqual([...QUALITY_CHECK_BOTS].sort());
+    });
+
+    it('agrees with shared on every login in either list', () => {
+      for (const login of [...QUALITY_CHECK_BOTS, ...Object.keys(REVIEW_BOTS)]) {
+        expect(qualityCheckBot(login)).toBe(sharedQualityCheckBot(login));
+      }
+    });
+  });
+
+  describe('qualityCheckBot', () => {
+    it('flags static-analysis / coverage automations', () => {
+      expect(qualityCheckBot('sonarqubecloud')).toBe(true);
+      expect(qualityCheckBot('codecov')).toBe(true);
+      expect(qualityCheckBot('houndci-bot')).toBe(true);
+    });
+
+    it('normalises case + the [bot] suffix', () => {
+      expect(qualityCheckBot('SonarQubeCloud[bot]')).toBe(true);
+      expect(qualityCheckBot('CODECOV')).toBe(true);
+    });
+
+    it('does NOT flag AI review bots — role and vendor identity are orthogonal axes', () => {
+      expect(qualityCheckBot('coderabbitai')).toBe(false);
+      expect(qualityCheckBot('greptile-apps')).toBe(false);
+      // Deliberately left `review` even though they are arguably quality-check tools: all three
+      // are already named ReviewBotKind vendors, so seeding them would move existing dashboards.
+      expect(qualityCheckBot('deepsource-io')).toBe(false);
+      expect(qualityCheckBot('github-code-quality')).toBe(false);
+      expect(qualityCheckBot('github-advanced-security')).toBe(false);
+    });
+
+    it('returns false for humans / empty', () => {
+      expect(qualityCheckBot('octocat')).toBe(false);
+      expect(qualityCheckBot('')).toBe(false);
+      expect(qualityCheckBot(null)).toBe(false);
+      expect(qualityCheckBot(undefined)).toBe(false);
     });
   });
 

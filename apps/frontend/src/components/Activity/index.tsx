@@ -5,9 +5,10 @@ import { useBranchStatus } from '../../hooks/useBranchStatus.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { useTeams } from '../../hooks/useTeams.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
-import { useFilters } from '../../store/filters.js';
+import { useFilters, isMultiTeamScope, scopeToParam, teamIdsInScope } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
+import { buildTeamColorMap, teamColorFor } from '../../lib/teamColors.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { BranchStatusChip } from './BranchStatusChip.js';
 import { BranchStatusPanel } from './BranchStatusPanel.js';
@@ -18,6 +19,7 @@ import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { FeedMetricsPanel } from './FeedMetricsPanel.js';
 import { HumanThemesPanel } from './HumanThemesPanel.js';
+import { TeamComparisonPanel } from './TeamComparisonPanel.js';
 import { InsightsView } from './InsightsView.js';
 import { AttentionView } from './AttentionView.js';
 import { BotsView } from './BotsView.js';
@@ -65,6 +67,7 @@ function RailRow({
   openPrs,
   threadTotals,
   branch,
+  accent,
   selected,
   onSelect,
 }: {
@@ -77,6 +80,10 @@ function RailRow({
   // The repo's default-branch snapshot, or null when it has never been branch-synced.
   // Informational only — it deliberately does NOT participate in the rail sort.
   branch: RepoBranchStatus | null;
+  // The owning team's identity colour when the rail is grouped by team, else null. Rendered as
+  // the row's left border so a row visually belongs to the header above it — and so a repo that
+  // legitimately appears under TWO teams is distinguishable at a glance.
+  accent: string | null;
   selected: boolean;
   onSelect: () => void;
 }): JSX.Element {
@@ -88,10 +95,17 @@ function RailRow({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
+      // SELECTION WINS over the team accent: the sky border is how you find the open repo, and
+      // an accent that overrode it would make the selected row indistinguishable. The inline
+      // style is only applied on unselected rows, and only when grouped (accent != null) —
+      // Tailwind can't express a runtime palette value.
+      style={!selected && accent ? { borderLeftColor: accent } : undefined}
       className={`flex w-56 shrink-0 flex-col gap-0.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
         selected
           ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
-          : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+          : accent
+            ? 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
       }`}
     >
       {/* line 1: repo name */}
@@ -229,8 +243,27 @@ export function ActivityView(): JSX.Element {
     [branchData],
   );
   const { data: allRepos } = useRepos();
-  // In All-Teams scope the rail is grouped by team (a repo in several teams shows under each).
+  // The rail is grouped by team whenever 2+ teams are in scope (a repo in several teams shows
+  // under each). See `scopedTeamIds` below for why the predicate is not a scope-shape test.
   const { data: teams } = useTeams();
+  const allTeamIds = useMemo(() => (teams ?? []).map((t) => t.id), [teams]);
+  // The teams currently in scope, and the ONE gate every cross-team surface here shares.
+  //
+  // LANDMINE (this is the bug the whole change fixes): neither `teamScope === 'teams'` nor
+  // `Array.isArray(teamScope)` is a correct multi-team test. `teamSetToScope` canonicalises a
+  // selection covering EVERY team to the 'teams' sentinel and a one-team selection to a bare
+  // number, so the count must come from the RESOLVED ids. The old rail + Compare gates both
+  // tested the sentinel, which is why ticking two of five teams silently un-grouped the rail
+  // and made the Compare tab disappear.
+  const scopedTeamIds = useMemo(
+    () => teamIdsInScope(teamScope, allTeamIds),
+    [teamScope, allTeamIds],
+  );
+  const groupRail = isMultiTeamScope(teamScope, allTeamIds);
+  // Colours are seeded from the ACCOUNT-WIDE roster, never `scopedTeamIds` — otherwise every
+  // team's hue would shift as the selection changed, and the rail would disagree with the
+  // Compare matrix built from a different subset. (Same discipline as buildBotColorMap.)
+  const teamColors = useMemo(() => buildTeamColorMap(allTeamIds), [allTeamIds]);
 
   const sorted = useMemo(() => sortRepos(data?.repos ?? []), [data?.repos]);
 
@@ -244,7 +277,6 @@ export function ActivityView(): JSX.Element {
   // The CORE/free "Needs attention" cards console — always available, no Pro gate.
   const showingAttention = activityRepoId === 'attention';
   const showingInsights = activityRepoId === 'insights';
-  const showingRetro = activityRepoId === 'retro';
   // The CORE/free review-bot triage console (BotsView) — always available (reads the core bot
   // routes), independent of the Pro Insights caps.
   const showingBots = activityRepoId === 'bots';
@@ -259,13 +291,32 @@ export function ActivityView(): JSX.Element {
     }
   }, [teamInsights, setActivityRepo]);
 
+  // The cross-repo Feed's sub-tab bar. Built dynamically so a tab exists only where it means
+  // something: Themes needs the Pro AI tier, Compare needs 2+ teams to compare.
+  const feedTabs = useMemo(() => {
+    const tabs: { key: 'feed' | 'themes' | 'compare'; label: string }[] = [
+      { key: 'feed', label: 'Feed' },
+    ];
+    if (activityDigest) tabs.push({ key: 'themes', label: 'Themes' });
+    if (groupRail) tabs.push({ key: 'compare', label: 'Compare teams' });
+    return tabs;
+  }, [activityDigest, groupRail]);
+  // DERIVED, never written back to the store. Un-ticking a team (or Pro going away) must not
+  // strand the pane on a tab that no longer exists — but a corrective `setFeedInnerTab` would
+  // also FORGET the user's choice, so re-ticking the team wouldn't restore Compare. Falling back
+  // for the render only keeps the choice intact. This also fixes the pre-existing wart where
+  // `activityDigest` flipping off left feedInnerTab stuck on 'themes' with no tab highlighted.
+  const effectiveFeedTab = feedTabs.some((t) => t.key === feedInnerTab) ? feedInnerTab : 'feed';
+
   const generatedAt = data?.generatedAt ?? null;
 
-  // Rail items: the loaded inbox repos, or a name-only fallback from useRepos while
-  // the first aggregate is loading (so names paint instantly). In All-Teams scope the
-  // fallback is restricted to the UNION of team repos — else, on a cold load (activity
-  // isn't IndexedDB-persisted), every account repo would briefly paint and the non-team
-  // ones would land under the "Other" group until the union-scoped aggregate resolves.
+  // Rail items: the loaded inbox repos, or a name-only fallback from useRepos while the first
+  // aggregate is loading (so names paint instantly). When ANY team is in scope the fallback is
+  // restricted to the union of THOSE teams' repos — else, on a cold load (activity isn't
+  // IndexedDB-persisted, so this happens every time), every account repo briefly paints and the
+  // out-of-scope ones land under "Other" until the scoped aggregate resolves, which reads as the
+  // rail reshuffling itself. This used to narrow only for the All-Teams sentinel, so both the
+  // 2-team and the single-team scopes flashed the whole account.
   type RailItem = {
     repoId: number;
     fullName: string;
@@ -275,13 +326,19 @@ export function ActivityView(): JSX.Element {
     openPrs: number | null;
     threadTotals: ThreadStateCounts | null;
   };
-  const fallbackRepos =
-    teamScope === 'teams'
-      ? (() => {
-          const union = new Set((teams ?? []).flatMap((t) => t.repoIds));
-          return (allRepos ?? []).filter((r) => union.has(r.id));
-        })()
-      : (allRepos ?? []);
+  const fallbackRepos = (() => {
+    const repos = allRepos ?? [];
+    if (scopedTeamIds.length > 0) {
+      const scoped = new Set(scopedTeamIds);
+      const union = new Set(
+        (teams ?? []).filter((t) => scoped.has(t.id)).flatMap((t) => t.repoIds),
+      );
+      return repos.filter((r) => union.has(r.id));
+    }
+    // No team in scope ('all' / 'none'): fall back to the FilterBar's repo visibility if it
+    // narrows anything, else the whole list.
+    return repoIds != null ? repos.filter((r) => repoIds.includes(r.id)) : repos;
+  })();
   const railItems: RailItem[] =
     data != null
       ? sorted.map((r) => ({
@@ -303,9 +360,12 @@ export function ActivityView(): JSX.Element {
           threadTotals: null,
         }));
 
-  const renderRailRow = (r: RailItem): JSX.Element => (
+  // `key` is passed by the caller, not derived from repoId: under grouping a repo shared by two
+  // teams renders once per group, so the key must be `${teamId}:${repoId}` there.
+  const renderRailRow = (r: RailItem, key: string, accent: string | null): JSX.Element => (
     <RailRow
-      key={r.repoId}
+      key={key}
+      accent={accent}
       fullName={r.fullName}
       maintainerCount={r.maintainerCount}
       hasUnread={r.hasUnread}
@@ -318,14 +378,25 @@ export function ActivityView(): JSX.Element {
     />
   );
 
-  // In All-Teams scope, group the rail rows under a header per team (a repo shared by two teams
-  // shows under each). `matched` tracks placed repos so any stray unmatched row (shouldn't happen
-  // — the union is exactly the team repos) still shows under "Other" rather than vanishing.
+  // With 2+ teams in scope, group the rail rows under a header per team.
+  //
+  // A repo can belong to SEVERAL teams. It is shown under EACH of them, deliberately: hiding it
+  // from one group would misrepresent that team's surface area, and silently picking one owner
+  // would be arbitrary. The rows are genuinely the same repo, so selecting either highlights
+  // both — accepted, and the reason the accent colour matters (you can see which group you are
+  // reading). `matched` tracks placed repos so a row in NO selected team (a repo that is watched
+  // but unassigned, or assigned only to a team outside the scope) lands under "Other" rather
+  // than vanishing from the rail.
+  //
+  // LANDMINE: the loop iterates the SELECTED teams, not every team. Iterating all of them — as
+  // it did when this was All-Teams-only and "all teams" was the same set — would emit a header
+  // for an unselected team the moment one of its repos was shared with a selected one.
   const teamGroups: { id: number; name: string; rows: RailItem[] }[] = [];
   let leftoverRows: RailItem[] = [];
-  if (teamScope === 'teams') {
+  if (groupRail) {
     const matched = new Set<number>();
-    for (const team of teams ?? []) {
+    const scoped = new Set(scopedTeamIds);
+    for (const team of (teams ?? []).filter((t) => scoped.has(t.id))) {
       const ids = new Set(team.repoIds);
       const rows = railItems.filter((r) => ids.has(r.repoId));
       if (rows.length === 0) continue;
@@ -468,27 +539,42 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
-          {teamScope === 'teams' ? (
+          {/* Grouped by team (2+ teams in scope) vs the flat list. The single-team and no-team
+              cases render EXACTLY as before — same rows, no header, accent null. */}
+          {groupRail ? (
             <>
-              {teamGroups.map((g) => (
-                <div key={g.id} className="flex w-56 shrink-0 flex-col gap-1 md:w-full">
-                  <div className="px-2 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                    {g.name}
+              {teamGroups.map((g) => {
+                const color = teamColorFor(teamColors, g.id);
+                return (
+                  <div key={g.id} className="flex w-56 shrink-0 flex-col gap-1 md:w-full">
+                    <div className="flex items-center gap-1.5 px-2 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                      <span
+                        aria-hidden="true"
+                        className="inline-block h-2 w-2 shrink-0 rounded-full"
+                        style={{ background: color }}
+                      />
+                      <span className="min-w-0 truncate">{g.name}</span>
+                      <span className="shrink-0 font-normal normal-case tabular-nums text-gray-400">
+                        · {g.rows.length}
+                      </span>
+                    </div>
+                    {g.rows.map((r) => renderRailRow(r, `${g.id}:${r.repoId}`, color))}
                   </div>
-                  {g.rows.map(renderRailRow)}
-                </div>
-              ))}
+                );
+              })}
               {leftoverRows.length > 0 && (
                 <div className="flex w-56 shrink-0 flex-col gap-1 md:w-full">
+                  {/* Repos in NO selected team still need a home — they are watched and in the
+                      aggregate, so dropping them would lose real activity. */}
                   <div className="px-2 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                    Other
+                    Other · {leftoverRows.length}
                   </div>
-                  {leftoverRows.map(renderRailRow)}
+                  {leftoverRows.map((r) => renderRailRow(r, `other:${r.repoId}`, null))}
                 </div>
               )}
             </>
           ) : (
-            railItems.map(renderRailRow)
+            railItems.map((r) => renderRailRow(r, String(r.repoId), null))
           )}
 
           {/* Legend (hidden on the narrow chip strip) */}
@@ -531,10 +617,6 @@ export function ActivityView(): JSX.Element {
           <AttentionView />
         ) : showingInsights ? (
           <InsightsView />
-        ) : showingRetro ? (
-          // Legacy/deep-linked 'retro' rail value now lands on the Retro sub-tab INSIDE
-          // Insights (the standalone Retro rail entry was removed).
-          <InsightsView initialSubTab="retro" />
         ) : noRepos ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-400">
             {hasAnyRepo
@@ -546,13 +628,10 @@ export function ActivityView(): JSX.Element {
           // CORE/free, moved out of the Pro Insights pane) atop the consolidated feed stream. With
           // Pro on, a "Discussion themes" sub-tab (the human sibling of Bots → Themes) sits beside it.
           <div className="space-y-3">
-            {activityDigest && (
+            {feedTabs.length > 1 && (
               <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
-                {([
-                  { key: 'feed', label: 'Feed' },
-                  { key: 'themes', label: 'Themes' },
-                ] as const).map((t) => {
-                  const on = feedInnerTab === t.key;
+                {feedTabs.map((t) => {
+                  const on = effectiveFeedTab === t.key;
                   return (
                     <button
                       key={t.key}
@@ -567,6 +646,7 @@ export function ActivityView(): JSX.Element {
                       }`}
                     >
                       {t.label}
+                      {/* Only Themes is Pro. Compare deliberately carries NO pill — it is core. */}
                       {t.key === 'themes' && (
                         <span className="rounded bg-violet-500/10 px-1 text-[9px] font-semibold uppercase text-violet-600 dark:text-violet-300">
                           pro
@@ -577,8 +657,12 @@ export function ActivityView(): JSX.Element {
                 })}
               </div>
             )}
-            {activityDigest && feedInnerTab === 'themes' ? (
+            {effectiveFeedTab === 'themes' ? (
               <HumanThemesPanel />
+            ) : effectiveFeedTab === 'compare' ? (
+              // Cross-team flow-metric matrix — beside the free DORA header whose window it
+              // shares, and reachable from ANY 2+ team selection (not just All-Teams).
+              <TeamComparisonPanel teamIds={scopedTeamIds} scope={scopeToParam(teamScope)} />
             ) : (
               <>
                 {/* "Is trunk green?" across every repo in scope — above the flow metrics,

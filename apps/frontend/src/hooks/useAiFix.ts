@@ -52,9 +52,16 @@ export function useRefreshSummary(prId: number) {
   });
 }
 
+// The CI diagnosis is now mounted TWICE for the same PR (the Overview's Checks row and the
+// AI Fix tab's CI-status section). Both read the one `['ai-fix-ci', prId]` query key, so a
+// generation in either updates both — but `isPending` is per-mount, so switching tabs
+// mid-run used to reset the button to "Analyze" and invite a SECOND billed POST. The
+// mutationKey makes the run observable across mounts via `useIsMutating` (CiAnalysisCard).
+// It is load-bearing for that, not cosmetic: without it the mutation is anonymous.
 export function useRefreshCiAnalysis(prId: number) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: ['ai-fix-ci', prId],
     mutationFn: (checks: FailingCheckInput[]) =>
       api.refreshAiFixCiAnalysis(prId, checks),
     onSuccess: (data) => qc.setQueryData(['ai-fix-ci', prId], data),

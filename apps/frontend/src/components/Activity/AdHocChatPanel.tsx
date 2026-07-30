@@ -32,15 +32,33 @@ import { AdHocChart } from './AdHocChart.js';
 // the Insights panel unmounting (e.g. clicking a PR then returning). Gated on the activityDigest
 // capability exactly like the Sprint / preset surfaces — absent → nothing.
 
-// Quick-question pills — the former "Sprint questions" presets + a sprint-report catch-all, folded
-// into this one panel. Clicking a pill only PRE-FILLS the chat box (setDraft); the user presses Ask.
-// So the three old surfaces (Sprint report card, preset carousel, chat) collapse to one, and the
-// answers come from the single grounded chat endpoint. `label` is the pill caption, `question` the
-// text loaded into the box.
+// Quick-question pills — the former "Sprint questions" presets plus two catch-alls (sprint report,
+// retro), folded into this one panel. So the four old surfaces (Sprint report card, preset carousel,
+// the Retro sub-tab, chat) collapse to one, and every answer comes from the single grounded chat
+// endpoint. `label` is the pill caption, `question` the text loaded into the box.
 const SPRINT_REPORT_PROMPT =
   'Give me a sprint status report: overall flow health, what needs attention now, the biggest changes shipped this sprint, and any blockers.';
+// The retrospective catch-all — this REPLACES the deleted Insights "Retro" sub-tab, its route and
+// its own `retro_reports` cache. Paired with the sprint report as the two catch-alls: that one is
+// forward-looking ("what needs attention now"), this one backward-looking ("what just happened").
+//
+// It deliberately asks ONLY for what the chat's grounding payload actually holds — merged PRs,
+// flow metrics, CI failure reasons, attention items. NOT themes or sentiment: those needed the
+// retro's own 50-item corpus of raw comment/review bodies, which buildChatPayload has no
+// equivalent of, so asking would just trip CHAT_SYSTEM's "the JSON doesn't hold the answer"
+// decline and burn a third of a ~200-word answer. Discussion themes live in the Feed's Pro
+// "Themes" tab instead.
+//
+// Frontend-LOCAL const, exactly like SPRINT_REPORT_PROMPT and for the same reason — NOT an entry
+// in shared's PRESET_PROMPTS. A new PresetPromptKey is consumed by the plugin as two EXHAUSTIVE
+// Record<PresetPromptKey, string> maps (PRESET_QUESTIONS + a bespoke per-key system prompt), so
+// it would be an immediate compile error in packages/pro plus a new cache-row kind and a new
+// independent throttle/billing path — for a pill that only needs to prefill the chat box.
+const RETRO_PROMPT =
+  'Give me a retrospective of this sprint: what shipped, what went well and what dragged in review, how CI held up and why it failed, and two or three things to change next sprint.';
 const QUICK_QUESTIONS: { label: string; question: string }[] = [
   { label: 'Sprint report', question: SPRINT_REPORT_PROMPT },
+  { label: 'Retro', question: RETRO_PROMPT },
   ...PRESET_PROMPTS.map((p) => ({ label: p.label, question: p.question })),
 ];
 
@@ -203,7 +221,7 @@ export function AdHocChatPanel(): JSX.Element | null {
     }
   }, [selectedHistoryId]);
 
-  // Absent the AI capability → render nothing (parity with RetroView).
+  // Absent the AI capability → render nothing (parity with the other Pro panels).
   if (!activityDigest) return null;
 
   const trimmed = question.trim();

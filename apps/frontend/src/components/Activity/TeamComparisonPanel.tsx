@@ -1,14 +1,24 @@
 import { useMemo } from 'react';
 import type { TeamComparisonRow, TeamMetrics } from '@pierre-review/shared';
 import { useTeamComparison } from '../../hooks/useTeamComparison.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useTeams } from '../../hooks/useTeams.js';
+import { buildTeamColorMap, teamColorFor } from '../../lib/teamColors.js';
 import { fmtDuration, fmtNum } from '../charts/common.js';
 
-// Cross-team comparison (Insights "Compare" sub-tab; All-Teams scope only). A compact metric×team
-// matrix — teams as columns, flow metrics as rows — plus a 12-week throughput sparkline per team.
-// Reuses the per-team TeamMetrics the Insights header already computes (one row per team from
-// /api/pro/insights/team-comparison). Highlights the best/worst team per metric so a lead can
-// spot throughput gaps and blockers across teams at a glance. Gated on teamInsights.
+// Cross-team comparison — the Feed's "Compare teams" sub-tab, shown whenever 2+ teams are in
+// scope. A compact metric×team matrix (teams as columns, flow metrics as rows) plus a 12-week
+// throughput sparkline per team, highlighting the best/worst team per metric so a lead can spot
+// throughput gaps and blockers at a glance.
+//
+// CORE/FREE, on every tier. It used to live as an Insights sub-tab behind the teamInsights Pro
+// capability AND a `teamScope === 'teams'` gate, reading the Pro route. Both are gone: it now
+// reads `GET /api/team-metrics/compare` and renders beside the free DORA header whose window it
+// shares. The Pro gate would have been wrong here twice over — the panel is deterministic (no
+// AI) and its neighbour in the same tab bar is free.
+//
+// The caller passes the EXPLICIT team ids in scope (via `teamIdsInScope`) rather than a scope
+// sentinel: the whole bug this fixes was a gate that only recognised All-Teams and vanished the
+// moment a user ticked two of five teams.
 
 // One matrix row: how to read + format a metric off a team's TeamMetrics, and whether a LOWER
 // value is better (drives the best/worst highlight — the "blocker" is the worst).
@@ -59,9 +69,25 @@ function Sparkline({ values }: { values: number[] }): JSX.Element {
   );
 }
 
-export function TeamComparisonPanel(): JSX.Element | null {
-  const { teamInsights } = useProCapabilities();
-  const { data, isLoading, isError } = useTeamComparison(teamInsights);
+export function TeamComparisonPanel({
+  // The teams in scope, already resolved + filtered to live teams by `teamIdsInScope`. Drives
+  // both the server-side selection (via the scope string) and the "N teams" caption.
+  teamIds,
+  // The scope wire string (scopeToParam) — the query key AND the server filter. Passed rather
+  // than derived here so the panel can never disagree with the tab that mounted it.
+  scope,
+}: {
+  teamIds: number[];
+  scope: string;
+}): JSX.Element {
+  const { data, isLoading, isError } = useTeamComparison(scope, true);
+  // Colour map over the ACCOUNT-WIDE roster (never `teamIds`), so a column's dot matches its
+  // rail group and stays put when the selection changes. See lib/teamColors.ts.
+  const { data: allTeams } = useTeams();
+  const colorMap = useMemo(
+    () => buildTeamColorMap((allTeams ?? []).map((t) => t.id)),
+    [allTeams],
+  );
 
   const teams: TeamComparisonRow[] = useMemo(() => data?.teams ?? [], [data?.teams]);
 
@@ -79,8 +105,6 @@ export function TeamComparisonPanel(): JSX.Element | null {
       return { best, worst };
     });
   }, [teams]);
-
-  if (!teamInsights) return null;
 
   if (isLoading) {
     return (
@@ -106,13 +130,14 @@ export function TeamComparisonPanel(): JSX.Element | null {
 
   return (
     <div className="space-y-3">
-      <div>
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Compare teams</h3>
-        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-          Flow metrics side by side across every team — spot throughput gaps and blockers, and see
-          where to rebalance. Best value in each row is green; the laggard is amber.
-        </p>
-      </div>
+      {/* No <h3> repeating the tab label — the caption alone carries the context the label
+          can't: WHICH teams are being compared (the tab is reachable from any 2+ team
+          selection, not just All-Teams). */}
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Flow metrics side by side across the {teamIds.length} teams in scope — spot throughput
+        gaps and blockers, and see where to rebalance. Best value in each row is green; the
+        laggard is amber. Same trailing-2-week window as the flow-metric header.
+      </p>
 
       <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
         <table className="w-full min-w-[32rem] border-collapse text-xs">
@@ -123,7 +148,16 @@ export function TeamComparisonPanel(): JSX.Element | null {
               </th>
               {teams.map((t) => (
                 <th key={t.teamId} className="px-3 py-2 text-right font-semibold text-gray-700 dark:text-gray-200">
-                  <div className="truncate">{t.teamName}</div>
+                  {/* The colour dot keys this column to its group in the Activity rail. Inline
+                      style, not a Tailwind class — the palette is a JS value. */}
+                  <div className="flex min-w-0 items-center justify-end gap-1.5">
+                    <span
+                      aria-hidden="true"
+                      className="inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: teamColorFor(colorMap, t.teamId) }}
+                    />
+                    <span className="truncate">{t.teamName}</span>
+                  </div>
                   <div className="text-[10px] font-normal text-gray-400">
                     {t.repoCount} repo{t.repoCount === 1 ? '' : 's'}
                   </div>

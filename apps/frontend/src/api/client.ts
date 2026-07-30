@@ -3,8 +3,6 @@ import type {
   AuthProvidersResponse,
   AddReviewCommentBody,
   AddReviewCommentResult,
-  AddressedCheckResponse,
-  PrAddressedCheckResponse,
   RequestReviewersBody,
   RequestReviewersResult,
   AiFixMergePreview,
@@ -42,10 +40,8 @@ import type {
   TeamMetricsDetailResponse,
   TeamMetricsResponse,
   TeamComparisonResponse,
-  CommentAssessmentResponse,
   AiUsageResponse,
   SprintReportResponse,
-  RetroReportResponse,
   BotWindowKind,
   BotAnalyticsResponse,
   BotThemesResponse,
@@ -182,6 +178,15 @@ function scopeParam(scope?: string): string {
 // empty/absent. Used by the per-repo Bots tab to scope bot analytics to one repo.
 function repoIdsParam(repoIds?: number[] | null): string {
   return repoIds && repoIds.length > 0 ? `repoIds=${repoIds.join(',')}` : '';
+}
+
+// Build the `teamId=` query fragment for the per-team bot-reviewer routes. OMITTED for the
+// NO_TEAM_KEY (0) default, matching the shared contract's "absent = 0" rule and keeping the
+// URL byte-identical to the pre-per-team one in the common case (so no cache/log churn for
+// accounts with no teams). 0 is a real, selectable key ("No team (default)" — also the
+// inheritance root every team falls back to), NOT "unset".
+function teamIdParam(teamId?: number | null): string {
+  return teamId != null && teamId > 0 ? `teamId=${teamId}` : '';
 }
 
 // Join query fragments (already URL-encoded, no leading separators) onto a base path.
@@ -434,7 +439,8 @@ export const api = {
       handle<{ status: string; benchmarkOptIn: boolean }>(r),
     ),
   // Team review-intelligence "Insights" (Pro; teamInsights capability) — the attention CARDS
-  // (+ sprint/retro/compare). The flow-metric HEADER moved OUT to the free /api/team-metrics.
+  // (+ the sprint report). The flow-metric HEADER moved OUT to the free /api/team-metrics, the
+  // Retro panel was deleted, and Compare moved to the free /api/team-metrics/compare.
   teamInsights: (scope?: string) =>
     get<TeamInsightsResponse>(withQuery('/api/pro/insights', scopeParam(scope))),
   // The team flow-metric header (DORA-ish tiles + trends) — CORE/free, now rendered in the Feed.
@@ -451,10 +457,17 @@ export const api = {
   // panel. Metrics-only; tiles render non-clickable there.
   repoTeamMetrics: (repoId: number) =>
     get<RepoTeamMetricsResponse>(`/api/pro/insights/repo/${repoId}/metrics`),
-  // Cross-team comparison (Insights "Compare" sub-tab; All-Teams scope). One TeamMetrics row
-  // per team so the SPA renders a compact metric×team matrix. No scope param — always all teams.
-  teamComparison: () =>
-    get<TeamComparisonResponse>('/api/pro/insights/team-comparison'),
+  // Cross-team comparison — one TeamMetrics row per team IN SCOPE, so the SPA renders a compact
+  // metric×team matrix. CORE/FREE and served beside the two routes above (it shares their
+  // trailing-14d window), NOT the old Pro `/api/pro/insights/team-comparison`: the panel moved
+  // out of Insights into the Feed's sub-tab bar, where it must render on every tier.
+  //
+  // `scope` is now load-bearing and MUST be sent: the route filters to the scope's teams, so two
+  // different team selections are two different responses. (The old route took no params — it
+  // always returned every team — which is why its query key was unscoped; a caller that keeps
+  // that key would serve one selection's columns to another.)
+  teamComparison: (scope?: string) =>
+    get<TeamComparisonResponse>(withQuery('/api/team-metrics/compare', scopeParam(scope))),
   // Month-to-date AI-usage rollup (credits, split by seam). Covers all account AI spend.
   aiUsage: () => get<AiUsageResponse>('/api/pro/ai-usage'),
   // The Insights "Sprint report" (Pro Haiku summary; activityDigest capability). `scope`
@@ -468,14 +481,9 @@ export const api = {
       withQuery('/api/pro/sprint-report/refresh', scopeParam(scope)),
       jsonBody('POST'),
     ).then((r) => handle<SprintReportResponse>(r)),
-  // The Insights "Retro" (Pro Haiku retrospective narrative of the window; activityDigest cap).
-  retroReport: (scope?: string) =>
-    get<RetroReportResponse>(withQuery('/api/pro/retro', scopeParam(scope))),
-  refreshRetroReport: (scope?: string) =>
-    fetch(
-      withQuery('/api/pro/retro/refresh', scopeParam(scope)),
-      jsonBody('POST'),
-    ).then((r) => handle<RetroReportResponse>(r)),
+  // (`retroReport` / `refreshRetroReport` were REMOVED with the Insights "Retro" panel and its
+  // `/api/pro/retro*` routes. The retrospective is now a quick-question pill in the ad-hoc chat,
+  // which needs no route of its own.)
   // Repo-scoped Claude review history (all runs per PR, newest-first). Gated on
   // config.claudeReviewEnabled; the response's `enabled` flag reflects that.
   repoClaudeReviews: (repoId: number) =>
@@ -543,38 +551,20 @@ export const api = {
   repoDigest: (repoId: number) =>
     get<RepoDigest>(`/api/pro/activity/digests/${repoId}`),
 
-  // ---- Comment-validity assessment (Pro; reuses the prSummary capability) ----
-  // Retained Haiku assessment of a review thread's root comment (cache read; free).
-  threadAssessment: (threadId: number) =>
-    get<CommentAssessmentResponse>(`/api/pro/threads/${threadId}/assessment`),
-  // Generate / regenerate the assessment (the billing path; credit-gated, $0-on-unchanged).
-  // Forwards the thread's already-hydrated root-comment diff hunk so the check has diff
-  // context even under lean storage (reviewComments.diffHunk is null in the DB there).
-  assessThread: (threadId: number, diffHunk?: string | null) =>
-    fetch(
-      `/api/pro/threads/${threadId}/assess`,
-      jsonBody('POST', diffHunk != null && diffHunk !== '' ? { diffHunk } : undefined),
-    ).then((r) => handle<CommentAssessmentResponse>(r)),
-
   // ---- "Was this TRULY addressed?" check (Pro; reuses the prSummary capability) ----
-  // Retained Haiku verdict + 0-100 confidence for a review thread / PR-level comment (cache read).
-  threadAddressed: (threadId: number) =>
-    get<AddressedCheckResponse>(`/api/pro/threads/${threadId}/addressed`),
-  checkThreadAddressed: (threadId: number) =>
-    fetch(`/api/pro/threads/${threadId}/addressed/check`, jsonBody('POST')).then((r) =>
-      handle<AddressedCheckResponse>(r),
-    ),
-  prCommentAddressed: (commentId: number) =>
-    get<AddressedCheckResponse>(`/api/pro/pr-comments/${commentId}/addressed`),
-  checkPrCommentAddressed: (commentId: number) =>
-    fetch(`/api/pro/pr-comments/${commentId}/addressed/check`, jsonBody('POST')).then((r) =>
-      handle<AddressedCheckResponse>(r),
-    ),
-  // PR-wide batch (JSON twin; the SSE stream is consumed via sse.ts in the hook).
-  prAddressedCheck: (prId: number) =>
-    fetch(`/api/pro/prs/${prId}/addressed/check`, jsonBody('POST')).then((r) =>
-      handle<PrAddressedCheckResponse>(r),
-    ),
+  // NOTHING is left here on purpose. The per-item one-offs were all callerless:
+  // `threadAssessment`/`assessThread` (the standalone comment-validity panel is gone — its
+  // `validity` row is the SAME row the annotations reader returns, so it renders through
+  // CommentAnnotations now) and `threadAddressed`/`checkThreadAddressed`/`prCommentAddressed`/
+  // `checkPrCommentAddressed` (dead before that change). Their per-item server routes
+  // (`/api/pro/{threads,pr-comments}/:id/addressed[/check]`) STAY registered as alternate
+  // writers into the same `upsertAnnotation` rows.
+  //
+  // `prAddressedCheck` went with them, and its removal was NOT cosmetic: the PR-wide sweep it
+  // posted to — `POST /api/pro/prs/:id/addressed/check` and its `/stream` twin — was deleted
+  // along with the "Check review" bar, so the method was calling a 404. Do not reintroduce a
+  // whole-PR batch here: that route was one billed LLM call per thread on a PR built to hold
+  // bot-flooded thread counts, which is exactly why it was cut.
 
   // ---- Comment annotations platform (Pro) ----
   // Every stored AI judgement about this PR's comments/threads, optionally narrowed to
@@ -586,12 +576,19 @@ export const api = {
         kinds && kinds.length > 0 ? `kinds=${kinds.join(',')}` : '',
       ),
     ),
-  // Generate one kind across the PR. `onlyStale` is the cheap refresh — regenerate just the
-  // annotations whose target has moved on since they were written.
-  runPrAnnotations: (prId: number, body: AnnotationRunBody) =>
-    fetch(`/api/pro/prs/${prId}/annotations/run`, jsonBody('POST', body)).then((r) =>
-      handle<AnnotationRunResponse>(r),
-    ),
+  // Generate annotations for the body's explicit `targets` (one comment / one thread — the
+  // per-item "Check review" button). This is now the ONLY run path: the SSE twin
+  // `…/annotations/run/stream` and the PR-wide sweep that needed its progress events are gone,
+  // and `AnnotationRunBody.onlyStale` (the sweep's "re-check stale" control) went with them.
+  //
+  // Pass `signal` — without it the server's `reply.raw.on('close')` abort never fires, so a
+  // cancelled run keeps billing to completion. A fat thread anchor still expands past
+  // COMBINED_CHUNK_SIZE into several LLM calls, so this is not hypothetical.
+  runPrAnnotations: (prId: number, body: AnnotationRunBody, signal?: AbortSignal) =>
+    fetch(`/api/pro/prs/${prId}/annotations/run`, {
+      ...jsonBody('POST', body),
+      ...(signal ? { signal } : {}),
+    }).then((r) => handle<AnnotationRunResponse>(r)),
 
   // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----
   // Aggregated retrieval signals shown BEFORE a run (Surface 1). Only fetched when
@@ -768,15 +765,37 @@ export const api = {
 
   // ---- Bot triage (CORE, deterministic, no AI) ----
   // Every distinct reviewer in the account joined with its automated/human classification
-  // (manual override + auto), volume, and a sample review body — the Settings "Review bots"
-  // detected-reviewers table.
-  botReviewers: () => get<DetectedReviewersResponse>('/api/bot-reviewers'),
-  // Two-way manual override of a reviewer's classification (mark automated / not-a-bot).
-  // Returns the new classification.
+  // (manual override + auto), volume, and a sample review body — the Bots rail's per-team
+  // "Settings" tab.
+  //
+  // `teamId` selects which team's classifications resolve: an explicit row for that team wins,
+  // else the team-0 (No team) default, else auto-detection. Absent/0 = NO_TEAM_KEY, i.e. the
+  // account default. Each returned row carries `teamId` + `inherited` so the tab can tell a real
+  // per-team override from the inherited default; the response echoes the resolved `teamId` so a
+  // caller can assert it matches the tab it asked for.
+  botReviewers: (teamId?: number | null) =>
+    get<DetectedReviewersResponse>(withQuery('/api/bot-reviewers', teamIdParam(teamId))),
+  // Two-way manual override of a reviewer's classification (mark automated / not-a-bot, and set
+  // its ReviewerRole). Returns the new classification.
+  //
+  // The team key rides in the BODY (`ReviewerOverrideBody.teamId`, absent = 0), not the query
+  // string, because it is part of the row's identity, not a filter. It MUST be a single team id
+  // the account owns — a union scope cannot own an override, and the route 404s an unknown or
+  // foreign team rather than writing a row keyed to another tenant's team.
   setReviewerOverride: (userId: number, body: ReviewerOverrideBody) =>
     fetch(`/api/bot-reviewers/${userId}`, jsonBody('PATCH', body)).then((r) =>
       handle<ReviewerClassification>(r),
     ),
+  // "Reset to default": drop this reviewer's explicit row for `teamId` so the team falls back to
+  // the team-0 default (or, if there is none, to auto-detection). NOT the same as marking them
+  // not-a-bot — that would write a fresh override saying "human". 204 → void. Passing 0 would
+  // delete the account default itself, which the tab must not offer for an inherited row (the
+  // Reset action is disabled there).
+  deleteReviewerOverride: (userId: number, teamId: number) =>
+    fetch(
+      withQuery(`/api/bot-reviewers/${userId}`, teamIdParam(teamId)),
+      jsonBody('DELETE'),
+    ).then((r) => handle<void>(r)),
   // Per-vendor bot ROI / utilisation analytics over the chosen window (threads / acted-on %
   // / untouched / verdict / trend). Cost fields come back null — the client overlays cost
   // from /api/pro/settings `bots.cost`.

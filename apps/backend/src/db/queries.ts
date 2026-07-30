@@ -94,6 +94,7 @@ import type {
   AutomatedReviewerKind,
   ReviewerClassification,
   ReviewerOverrideBody,
+  ReviewerRole,
   DetectedReviewer,
   DetectedReviewersResponse,
   ReviewProvenance,
@@ -154,12 +155,15 @@ import { enrichReviewerSuggestions } from '../github/reviewer-suggest.js';
 import { ensureRoutingPrFiles } from '../sync/routing-files.js';
 import {
   matchesAutomatedLoginPattern,
+  qualityCheckBotLogins,
   reviewBotKind,
   reviewBotLogins,
 } from '../sync/bot-detection.js';
 import {
   classifyReviewer,
+  defaultRoleFor,
   labelFor as labelForKind,
+  NO_TEAM_KEY,
   rowToClassification,
   type ReviewerEvidence,
 } from '../sync/reviewer-classify.js';
@@ -345,6 +349,21 @@ export async function deleteTeam(id: number, accountId: number): Promise<boolean
     await tx
       .delete(teamRepos)
       .where(and(eq(teamRepos.teamId, id), eq(teamRepos.accountId, accountId)))
+      .execute();
+    // bot_review_classification.team_id carries NO foreign key to `teams` — and cannot: 0 is the
+    // "No team" / inheritance-root sentinel, not a team id, so an FK would reject every default
+    // row. There is therefore no cascade, and the team's overrides must be deleted BY HAND, in
+    // this same transaction. Team ids are never recycled, so the harm isn't a new team silently
+    // inheriting them — it's orphan rows that keep steering the account-wide automated set (and
+    // the resolveClassifications precedence) forever, for a team that no longer exists.
+    await tx
+      .delete(botReviewClassification)
+      .where(
+        and(
+          eq(botReviewClassification.accountId, accountId),
+          eq(botReviewClassification.teamId, id),
+        ),
+      )
       .execute();
     await tx
       .delete(teams)
@@ -2172,9 +2191,14 @@ export async function getActivity(
   // Deterministic per-repo review-bot signal over these open PRs (no AI): threads a known
   // AI review bot opened, split by whether a later commit has acted on them. Empty map (0)
   // when the account runs no review bot — the headline stat then simply doesn't render.
+  // Classification team key: NO_TEAM_KEY (the account default). getActivity is repo-scoped only —
+  // it never sees a TeamScope, and teamRepos is many-to-many so a repo cannot be reduced to one
+  // team. Passing 0 explicitly (rather than leaving the predicate off) keeps the read
+  // deterministic; per-team overrides simply don't apply to this stat. `role: 'review'` — this is
+  // a REVIEW-bot acted-on rate; a linter's threads would inflate it.
   const botThreadCountsByPr = await buildBotThreadCounts(
     openPrs.map((pr) => pr.id),
-    await automatedReviewerUserIds(accountId),
+    await automatedReviewerUserIds(accountId, NO_TEAM_KEY, 'review'),
   );
 
   // Preserve listRepos order (stable, not jumpy across loads).
@@ -3656,9 +3680,15 @@ export async function getTeamInsights(
   // so it counts bot threads on merged PRs too — "this sprint's" volume, not just open work.
   // Grouped by AutomatedReviewerKind (vendors AND in-house-classified reviewers).
   {
-    const botIds = await automatedReviewerUserIds(accountId);
+    // Classification team key: NO_TEAM_KEY. getTeamInsights receives a resolved repo-id list, not
+    // a TeamScope (the Pro plugin resolves the scope before calling through ProHostQueries), so
+    // there is no team key on the wire to thread — passing 0 explicitly keeps the read
+    // deterministic and means the account default applies. `role: 'review'` — the bot_signal card
+    // is a REVIEW-bot signal-to-noise view; SonarQube volume in it is exactly the noise the role
+    // exists to remove.
+    const botIds = await automatedReviewerUserIds(accountId, NO_TEAM_KEY, 'review');
     if (botIds.length > 0) {
-      const kindMap = await classificationKindForUser(accountId);
+      const kindMap = await classificationKindForUser(accountId, NO_TEAM_KEY);
       const rows = await db
         .select({
           userId: reviewThreads.originalCommenterId,
@@ -3929,7 +3959,8 @@ export async function getTeamInsights(
     .slice(0, INSIGHT_CARD_CAP);
   // Item 5 — tag an untouched thread whose originating commenter is an automated reviewer so the
   // card can show a vendor pill (the thread came from a bot, not a human). Resolved once here.
-  const untouchedKindMap = await classificationKindForUser(accountId);
+  // NO_TEAM_KEY for the same reason as the bot_signal card above (no TeamScope reaches here).
+  const untouchedKindMap = await classificationKindForUser(accountId, NO_TEAM_KEY);
   for (const { t, ageHours } of threads) {
     addUser(t.originalCommenterId);
     addUser(t.authorId);
@@ -4203,7 +4234,13 @@ export async function getConsolidatedFeed(
   // Bot-only feed: resolve the automated-reviewer actor set (vendors + classified in-house /
   // Pierre — the SAME set the ROI panel counts, so it catches deepsource-io etc. that aren't
   // users.isBot). Empty → nobody's classified → an empty feed. Filtered IN SQL by getFeed.
-  const botActorIds = botsOnly ? await automatedReviewerUserIds(accountId) : null;
+  // `role: 'all'` — NOT 'review'. The bot feed must keep showing quality-check activity: the
+  // user confirmed a quality-check reviewer stays visible and reclassifiable, and a linter's
+  // threads are still things a human has to triage. The role only splits METRICS from the feed.
+  // NO_TEAM_KEY: the feed is repo-scoped (many-to-many teamRepos), with no TeamScope on the wire.
+  const botActorIds = botsOnly
+    ? await automatedReviewerUserIds(accountId, NO_TEAM_KEY, 'all')
+    : null;
   if (botsOnly && (botActorIds == null || botActorIds.length === 0)) {
     return {
       items: [],
@@ -5667,9 +5704,12 @@ export async function getPrDetail(
   // per-account classification map (keyed by the review author's user id). Pierre wins
   // when both apply. The human who posted a Pierre review is NEVER reclassified — the
   // 'pierre' kind lives only on the review row.
+  // NO_TEAM_KEY: a PR reaches here by id alone, and its repo can belong to several teams
+  // (teamRepos is many-to-many), so there is no single team key to resolve against. The account
+  // default applies — explicit, not an omitted predicate.
   const [provenanceByReview, prClassKind] = await Promise.all([
     getReviewerProvenanceForPr(accountId, id),
-    classificationKindForUser(accountId),
+    classificationKindForUser(accountId, NO_TEAM_KEY),
   ]);
   const reviewsOut: ReviewDetail[] = reviewRows.map((r) => {
     const pierre = provenanceByReview.get(r.id);
@@ -6343,7 +6383,12 @@ export async function getResolvableBotThreads(
   accountId: number,
   threadIds: number[] | null = null,
 ): Promise<{ id: number; threadNodeId: string }[]> {
-  const botIds = await automatedReviewerUserIds(accountId);
+  // `role: 'review'` — the bulk-resolve backlog covers review-bot threads only. Resolving a
+  // SonarQube finding does not mean a review comment was addressed, and the `likely_addressed`
+  // heuristic (a later commit touched the file) is a much weaker claim for a linter. This is the
+  // one exclusion a user might want reversed; it's cheap to make it a toggle later and expensive
+  // to un-ship. NO_TEAM_KEY: this getter is addressed by prId, with no TeamScope on the wire.
+  const botIds = await automatedReviewerUserIds(accountId, NO_TEAM_KEY, 'review');
   if (botIds.length === 0) return [];
   const preds = [
     eq(reviewThreads.prId, prId),
@@ -6409,6 +6454,10 @@ export async function getResolvableBotThreadsForScope(
   accountId: number,
   scopeRepoIds: number[] | null = null,
   threadIds: number[] | null = null,
+  // Which team's classification answers "is this an automated reviewer" (see
+  // classificationTeamKey). Defaults to the account default so an older caller — and the
+  // per-PR resolve path, which has no scope — keeps today's behaviour.
+  teamKey: number = NO_TEAM_KEY,
 ): Promise<{
   threads: ResolvableBotThreadRow[];
   totalEligible: number;
@@ -6424,7 +6473,10 @@ export async function getResolvableBotThreadsForScope(
   // An empty repo scope or an empty reviewed list both mean "nothing" — resolve/return nothing.
   if (scopeRepoIds != null && scopeRepoIds.length === 0) return empty;
   if (threadIds != null && threadIds.length === 0) return empty;
-  const botIds = await automatedReviewerUserIds(accountId);
+  // `role: 'review'` — same reasoning as the per-PR getResolvableBotThreads: the backlog is
+  // review-bot threads only. The two MUST agree, because the resolve route re-derives eligibility
+  // through this function and the per-PR route through that one.
+  const botIds = await automatedReviewerUserIds(accountId, teamKey, 'review');
   if (botIds.length === 0) return empty;
 
   const preds = [
@@ -6501,15 +6553,8 @@ export async function getResolvableBotThreadsForScope(
   // account's custom classification label → the vendor's pretty name (known vendors) → the
   // reviewer's display name/login. (Chose the full resolution over login-only: it's a few cheap
   // account-scoped maps and gives the same labels the ROI table shows — no drift.)
-  const kindMap = await classificationKindForUser(accountId);
-  const classLabel = new Map<number, string>();
-  for (const r of await db
-    .select({ id: botReviewClassification.authorUserId, label: botReviewClassification.label })
-    .from(botReviewClassification)
-    .where(eq(botReviewClassification.accountId, accountId))
-    .execute()) {
-    if (r.label != null && r.label.trim() !== '') classLabel.set(r.id, r.label.trim());
-  }
+  const kindMap = await classificationKindForUser(accountId, teamKey);
+  const classLabel = await classificationLabelMap(accountId, teamKey);
   const commenterIds = [...new Set(pageRows.flatMap((r) => (r.commenterId != null ? [r.commenterId] : [])))];
   const loginById = new Map<number, string>();
   if (commenterIds.length > 0) {
@@ -6570,9 +6615,12 @@ export async function getResolvableBotThreadsForScope(
 export async function getResolvableBotThreadPrs(
   accountId: number,
   scopeRepoIds: number[] | null = null,
+  // See getResolvableBotThreadsForScope — the LISTING must use the same team key as the resolve,
+  // or the client offers threads the server then refuses to resolve.
+  teamKey: number = NO_TEAM_KEY,
 ): Promise<{ prs: ResolvableThreadPr[]; totalThreads: number }> {
   if (scopeRepoIds != null && scopeRepoIds.length === 0) return { prs: [], totalThreads: 0 };
-  const botIds = await automatedReviewerUserIds(accountId);
+  const botIds = await automatedReviewerUserIds(accountId, teamKey, 'review');
   if (botIds.length === 0) return { prs: [], totalThreads: 0 };
 
   const preds = [
@@ -7022,36 +7070,172 @@ export async function upsertLocalReview(
 // Shared helpers below reuse the module-private emptyCounts/mapUser/reviewBotUserIds.
 // ════════════════════════════════════════════════════════════════════════════
 
-// The ACCOUNT-SCOPED set of automated-reviewer user ids = known vendor logins (the
-// global reviewBotUserIds set) ∪ this account's classification-store rows flagged
-// automated. getActivity / getTeamInsights' bot_signal / getResolvableBotThreads all
-// route through this so in-house-classified reviewers count alongside vendors.
-export async function automatedReviewerUserIds(accountId: number): Promise<number[]> {
-  const vendorIds = await reviewBotUserIds();
+// ── Per-TEAM classification resolution ─────────────────────────────────────────────────────
+//
+// `bot_review_classification` gained a `team_id` (migration 0042). Its unique index is now
+// (account_id, team_id, author_user_id), so an account can hold SEVERAL rows for one author and
+// the old "filter accountId, collapse one-per-author" reads are no longer deterministic: with a
+// team override present, Postgres hands rows back in heap order and that order FLIPS after any
+// UPDATE, so a bot would move in and out of the account-wide automated set — swinging
+// excludeBots, the feed bot lens, ROI, dedup and getActivity between page loads.
+//
+// THE RULE, enforced by every helper below: a read takes an explicit `teamKey` and filters on it.
+// Resolution is `the row for the requested team → the row at NO_TEAM_KEY (0) → auto-detection`.
+// Team 0 is BOTH the "No team" scope and the inheritance ROOT, which is why the migration needs
+// no fan-out and an account with no per-team overrides behaves exactly as it did before.
+//
+// A caller with a SINGLE team in scope passes that team id; a caller whose scope is 'all' /
+// 'none' / 'teams' / a multi-team set passes NO_TEAM_KEY — a union cannot own an override, and
+// picking one team's answer for a cross-team view would be arbitrary.
+
+// Resolve a TeamScope WIRE string ('all' | 'none' | 'teams' | 'teams:<ids>' | '<teamId>') to the
+// single classification team key. Only a bare positive integer (one team) resolves to itself;
+// every union/absent form is the account default. Deliberately PURE + ownership-free: every read
+// also binds `accountId`, so a foreign team id simply matches no rows and falls back to key 0 —
+// it can never disclose another tenant's classification. The WRITE path is different and DOES
+// verify ownership (setReviewerOverride → 404).
+export function classificationTeamKey(scope: string | null | undefined): number {
+  if (scope == null) return NO_TEAM_KEY;
+  const n = Number(scope);
+  if (!Number.isInteger(n) || n <= 0) return NO_TEAM_KEY;
+  return n;
+}
+
+// Which automated reviewers a metric counts. `'review'` = real AI code reviewers only (behaviour,
+// dedup, the cross-org benchmark); `'all'` = every automated reviewer including quality checks
+// (EXCLUSION sets + the feed, where a linter's threads must stay visible).
+//
+// Two entries in the `'all'` column are there for reasons worth stating, because both look like
+// oversights:
+//   • getBotAnalytics (ROI) asks for 'all' and then SPLITS the result by role into `vendors` vs
+//     `qualityChecks`, rather than filtering. A mis-roled bot therefore stays VISIBLE in its own
+//     section where the user can fix it, instead of vanishing from a panel that is the only place
+//     to reclassify it.
+//   • getBotOnlyReviewPrs asks for 'all' because it answers "did a human look at this before it
+//     merged". A PR reviewed only by SonarQube is precisely what it exists to flag; narrowing to
+//     'review' would leave it with no qualifying bot review and drop it from the list entirely.
+//
+// This parameter is REQUIRED on automatedReviewerUserIds precisely so every call site had to be
+// reviewed individually — confusing the two sets is the defect this feature is most likely to
+// ship. See the ReviewerRole comment in shared.
+export type ReviewerRoleFilter = 'review' | 'all';
+
+// The global user ids whose login is a known QUALITY-CHECK automation. Mirrors reviewBotUserIds.
+// Needed because the role seed only lands on a row once the LAZY classifier has run for that
+// reviewer (it runs on GET /api/bot-reviewers, not during sync) — without this, a SonarQube
+// account in an untouched install would count as a review bot in every metric.
+async function qualityCheckUserIds(): Promise<number[]> {
+  const logins = qualityCheckBotLogins();
+  if (logins.length === 0) return [];
+  const candidates = [...logins, ...logins.map((l) => `${l}[bot]`)];
+  const inList = sql.join(
+    candidates.map((c) => sql`${c}`),
+    sql`, `,
+  );
+  const rows = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(sql`lower(${users.githubLogin}) in (${inList})`)
+    .execute();
+  return rows.map((r) => r.id);
+}
+
+interface ResolvedClassificationRow {
+  automated: boolean;
+  kind: AutomatedReviewerKind | null;
+  label: string | null;
+  role: ReviewerRole;
+  source: string;
+  // The key the row actually came from — `teamKey` for a real per-team override, 0 for the
+  // inherited account default. Drives the UI's "Team override" vs "Inherited from default".
+  teamId: number;
+}
+
+// One row per author, resolved for `teamKey`. ONE query for both candidate keys; the requested
+// team's row is preferred in JS rather than by an ORDER BY, so the precedence is explicit and
+// cannot depend on storage order.
+async function resolveClassifications(
+  accountId: number,
+  teamKey: number,
+): Promise<Map<number, ResolvedClassificationRow>> {
+  const candidateKeys = teamKey === NO_TEAM_KEY ? [NO_TEAM_KEY] : [teamKey, NO_TEAM_KEY];
   const rows = await db
     .select({
       id: botReviewClassification.authorUserId,
+      teamId: botReviewClassification.teamId,
       automated: botReviewClassification.automated,
+      kind: botReviewClassification.kind,
+      label: botReviewClassification.label,
+      role: botReviewClassification.role,
       source: botReviewClassification.source,
     })
     .from(botReviewClassification)
-    .where(eq(botReviewClassification.accountId, accountId))
+    .where(
+      and(
+        eq(botReviewClassification.accountId, accountId),
+        inArray(botReviewClassification.teamId, candidateKeys),
+      ),
+    )
     .execute();
-  const set = new Set<number>(vendorIds);
+  const out = new Map<number, ResolvedClassificationRow>();
   for (const r of rows) {
-    if (r.automated) set.add(r.id);
-    // A manual "this is a human" override wins both directions — it removes even a
-    // known vendor login from this account's automated set.
-    else if (r.source === 'manual') set.delete(r.id);
+    const prev = out.get(r.id);
+    // The requested team's row always wins over the inherited team-0 row.
+    if (prev && prev.teamId === teamKey) continue;
+    if (prev && r.teamId !== teamKey) continue;
+    out.set(r.id, {
+      automated: r.automated,
+      kind: (r.kind as AutomatedReviewerKind | null) ?? null,
+      label: r.label,
+      role: (r.role as ReviewerRole | null) ?? 'review',
+      source: r.source,
+      teamId: r.teamId,
+    });
   }
-  return [...set];
+  return out;
 }
 
-// Map every automated reviewer (in this account) → its AutomatedReviewerKind, for
-// grouping analytics / bot_signal / dedup. A known vendor login wins; else the
-// classification-store kind; else 'in_house'.
+// The ACCOUNT-SCOPED, TEAM-RESOLVED set of automated-reviewer user ids = known vendor logins
+// (the global reviewBotUserIds set) ∪ this account's classification rows flagged automated,
+// narrowed by `role`. getActivity / getTeamInsights' bot_signal / getResolvableBotThreads all
+// route through this so in-house-classified reviewers count alongside vendors.
+export async function automatedReviewerUserIds(
+  accountId: number,
+  teamKey: number,
+  role: ReviewerRoleFilter,
+): Promise<number[]> {
+  const [vendorIds, qcIds, resolved] = await Promise.all([
+    reviewBotUserIds(),
+    role === 'review' ? qualityCheckUserIds() : Promise.resolve<number[]>([]),
+    resolveClassifications(accountId, teamKey),
+  ]);
+  const set = new Set<number>(vendorIds);
+  for (const [id, r] of resolved) {
+    if (r.automated) set.add(id);
+    // A manual "this is a human" override wins both directions — it removes even a
+    // known vendor login from this account's automated set.
+    else if (r.source === 'manual') set.delete(id);
+  }
+  if (role === 'all') return [...set];
+  // role === 'review': drop every reviewer whose RESOLVED role is quality_check. An explicit row
+  // is authoritative (a user may have flipped a linter back to 'review', or marked a vendor a
+  // quality check); otherwise the login seed decides.
+  const qcDefault = new Set(qcIds);
+  return [...set].filter((id) => {
+    const r = resolved.get(id);
+    if (r) return r.role !== 'quality_check';
+    return !qcDefault.has(id);
+  });
+}
+
+// Map every automated reviewer (in this account, resolved for `teamKey`) → its
+// AutomatedReviewerKind, for grouping analytics / bot_signal / dedup. A known vendor login wins;
+// else the classification-store kind; else 'in_house'. NOT role-filtered — callers narrow by the
+// id set from automatedReviewerUserIds, and the quality-check SECTION of the ROI panel needs the
+// kinds of the very rows the metrics exclude.
 export async function classificationKindForUser(
   accountId: number,
+  teamKey: number,
 ): Promise<Map<number, AutomatedReviewerKind>> {
   const map = new Map<number, AutomatedReviewerKind>();
   // Known vendors (global users table) resolved from the login → vendor kind.
@@ -7072,28 +7256,51 @@ export async function classificationKindForUser(
       if (kind) map.set(r.id, kind);
     }
   }
-  // Account classification store. A vendor login resolved above takes precedence for the
-  // kind; an automated row else contributes its stored kind (default in_house); a manual
+  // Account classification store, team-resolved. A vendor login resolved above takes precedence
+  // for the kind; an automated row else contributes its stored kind (default in_house); a manual
   // "this is a human" override removes the reviewer from the automated set entirely.
-  const crows = await db
-    .select({
-      id: botReviewClassification.authorUserId,
-      kind: botReviewClassification.kind,
-      automated: botReviewClassification.automated,
-      source: botReviewClassification.source,
-    })
-    .from(botReviewClassification)
-    .where(eq(botReviewClassification.accountId, accountId))
-    .execute();
-  for (const r of crows) {
+  for (const [id, r] of await resolveClassifications(accountId, teamKey)) {
     if (!r.automated) {
-      if (r.source === 'manual') map.delete(r.id);
+      if (r.source === 'manual') map.delete(id);
       continue;
     }
-    if (map.has(r.id)) continue;
-    map.set(r.id, (r.kind as AutomatedReviewerKind | null) ?? 'in_house');
+    if (map.has(id)) continue;
+    map.set(id, r.kind ?? 'in_house');
   }
   return map;
+}
+
+// The account's custom classification LABELS, team-resolved. Replaces the six hand-rolled
+// `select({id,label}).where(accountId)` reads that used to sit inline in the analytics getters —
+// every one of which silently returned two rows per author once a team override existed, and
+// kept whichever came last.
+async function classificationLabelMap(
+  accountId: number,
+  teamKey: number,
+): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  for (const [id, r] of await resolveClassifications(accountId, teamKey)) {
+    const label = r.label?.trim();
+    if (label) out.set(id, label);
+  }
+  return out;
+}
+
+// Resolved ReviewerRole per automated reviewer (explicit row → login seed → 'review'). Used where
+// a surface must SPLIT the two sets rather than filter to one — getBotAnalytics computes every
+// automated reviewer's row and then routes quality checks into their own excluded section.
+export async function reviewerRoleForUser(
+  accountId: number,
+  teamKey: number,
+): Promise<Map<number, ReviewerRole>> {
+  const [qcIds, resolved] = await Promise.all([
+    qualityCheckUserIds(),
+    resolveClassifications(accountId, teamKey),
+  ]);
+  const out = new Map<number, ReviewerRole>();
+  for (const id of qcIds) out.set(id, 'quality_check');
+  for (const [id, r] of resolved) out.set(id, r.role);
+  return out;
 }
 
 // Best-effort review-body / comment severity inference from the account's fingerprint
@@ -7223,8 +7430,15 @@ async function reviewerEvidence(
 // originated a thread), joined with its classification (manual + auto + vendor login
 // map), 90-day thread volume, and a sample review body. Runs the resolver for not-yet-
 // cached reviewers (which persists an auto row). Account-scoped.
+//
+// `teamKey` selects WHICH answer to show: an explicit row for that team → the team-0 default →
+// auto-detection. Each returned row carries the key it resolved under plus `inherited`, so the
+// per-team tab can distinguish a real override from the inherited default (and correctly disable
+// "Reset to default", which on an inherited row would be a no-op the user can't tell apart from
+// a real reset).
 export async function listDetectedReviewers(
   accountId: number,
+  teamKey: number = NO_TEAM_KEY,
 ): Promise<DetectedReviewersResponse> {
   const generatedAt = new Date().toISOString();
 
@@ -7260,7 +7474,7 @@ export async function listDetectedReviewers(
   for (const r of thAuthors) if (r.id != null) reviewerIds.add(r.id);
   const idSet = new Set<number>(reviewerIds);
   for (const r of commentAuthors) if (r.id != null) idSet.add(r.id);
-  if (idSet.size === 0) return { reviewers: [], generatedAt };
+  if (idSet.size === 0) return { reviewers: [], teamId: teamKey, generatedAt };
   const ids = [...idSet];
 
   const userRows = await db
@@ -7270,18 +7484,30 @@ export async function listDetectedReviewers(
     .execute();
   const userById = new Map(userRows.map((u) => [u.id, u]));
 
-  // Cached classification rows for these reviewers.
+  // Cached classification rows for these reviewers, for the REQUESTED team AND the team-0
+  // default — both keys in one query, with the requested team preferred in JS. Filtering on
+  // teamId is mandatory: since migration 0042 the unique index is (account, team, author), so an
+  // account-only filter returns SEVERAL rows per author and `new Map(...)` would silently keep
+  // whichever the storage engine listed last — an order that flips after any UPDATE on Postgres.
+  const candidateKeys = teamKey === NO_TEAM_KEY ? [NO_TEAM_KEY] : [teamKey, NO_TEAM_KEY];
   const clsRows = await db
     .select()
     .from(botReviewClassification)
     .where(
       and(
         eq(botReviewClassification.accountId, accountId),
+        inArray(botReviewClassification.teamId, candidateKeys),
         inArray(botReviewClassification.authorUserId, ids),
       ),
     )
     .execute();
-  const clsById = new Map(clsRows.map((c) => [c.authorUserId, c]));
+  const clsById = new Map<number, (typeof clsRows)[number]>();
+  for (const c of clsRows) {
+    const prev = clsById.get(c.authorUserId);
+    if (prev && prev.teamId === teamKey) continue;
+    if (prev && c.teamId !== teamKey) continue;
+    clsById.set(c.authorUserId, c);
+  }
 
   // 90-day thread volume per reviewer.
   const since = new Date(Date.now() - 90 * 86_400_000);
@@ -7330,9 +7556,17 @@ export async function listDetectedReviewers(
     const cached = clsById.get(id);
     let classification: ReviewerClassification;
     let isManualOverride = false;
+    // Where the answer came from: an explicit row for the REQUESTED team, or the inherited
+    // team-0 default (which is also what auto-detection persists under this key). `inherited`
+    // drives the "Team override" vs "Inherited from default" badge — and, crucially, whether
+    // "Reset to default" is offered: on an inherited row it would delete nothing.
+    let resolvedTeamId = teamKey;
+    let inherited = true;
     if (cached) {
       classification = rowToClassification(cached, u.githubLogin);
       isManualOverride = cached.source === 'manual';
+      resolvedTeamId = cached.teamId;
+      inherited = cached.teamId !== teamKey;
     } else if (reviewerIds.has(id)) {
       const evidence = await reviewerEvidence(accountId, id);
       classification = await classifyReviewer(
@@ -7344,7 +7578,14 @@ export async function listDetectedReviewers(
           isBot: u.isBot,
         },
         evidence,
+        // The lazy auto-classification always persists under the ACCOUNT DEFAULT (0), never
+        // under the viewed team: auto-detection is a property of the login, not of a team, and
+        // writing a team row here would fabricate an "override" the user never made — which
+        // would then shadow the default forever, including after they edited the default.
+        NO_TEAM_KEY,
       );
+      resolvedTeamId = NO_TEAM_KEY;
+      inherited = teamKey !== NO_TEAM_KEY;
     } else if (
       // Comment-only account. Skip the behavioral-evidence query (there are no reviews to
       // score). Still run the CHEAP hard-signal classifier for the few that clearly look
@@ -7365,7 +7606,10 @@ export async function listDetectedReviewers(
           isBot: u.isBot,
         },
         {},
+        NO_TEAM_KEY, // same reasoning as above — auto rows live at the account default
       );
+      resolvedTeamId = NO_TEAM_KEY;
+      inherited = teamKey !== NO_TEAM_KEY;
     } else {
       classification = {
         userId: u.id,
@@ -7373,10 +7617,15 @@ export async function listDetectedReviewers(
         automated: false,
         kind: null,
         label: u.githubLogin,
+        // A human's role is meaningless (callers must gate on `automated` first), but the field
+        // is non-optional, so the column default is what we report.
+        role: 'review',
         confidence: 'low',
         source: 'fingerprint',
         reasons: ['commented on PRs but has not submitted a review'],
       };
+      resolvedTeamId = NO_TEAM_KEY;
+      inherited = true;
     }
     reviewers.push({
       userId: id,
@@ -7385,6 +7634,8 @@ export async function listDetectedReviewers(
       avatarUrl: u.avatarUrl,
       classification,
       isManualOverride,
+      teamId: resolvedTeamId,
+      inherited,
       threadsLast90d: volById.get(id) ?? 0,
       sampleReviewBody: sampleById.get(id) ?? null,
     });
@@ -7397,13 +7648,21 @@ export async function listDetectedReviewers(
       b.threadsLast90d - a.threadsLast90d ||
       a.login.localeCompare(b.login),
   );
-  return { reviewers, generatedAt };
+  // Echo the resolved key so the client can assert the response matches the tab it asked for —
+  // the query key and the team picker can disagree for a frame while a switch is in flight.
+  return { reviewers, teamId: teamKey, generatedAt };
 }
 
 // WS1e — the two-way manual override. Upserts a source='manual' classification row for
-// (accountId, userId) that the auto resolver never overwrites. Returns the new
-// classification, or null when the user id is unknown (→ the route 404s). Account-scoped
-// (the upsert targets this account's row only; another account is never mutated).
+// (accountId, teamId, userId) that the auto resolver never overwrites. Returns the new
+// classification, or null when the user id is unknown OR the requested team is unknown/foreign
+// (→ the route 404s). Account-scoped: the upsert targets this account's row only.
+//
+// TEAM OWNERSHIP IS CHECKED HERE, and it is load-bearing. `team_id` carries no FK (0 is not a
+// team id), and the database will happily accept ANY integer — verified. Without this check a
+// caller could write classification rows keyed to another tenant's team id. The READ path needs
+// no such check (every read also binds accountId, so a foreign key simply matches nothing), but
+// a WRITE creates the row, so it must be rejected before the insert.
 export async function setReviewerOverride(
   accountId: number,
   userId: number,
@@ -7418,6 +7677,19 @@ export async function setReviewerOverride(
       .execute()
   )[0];
   if (!u) return null;
+  // Absent = NO_TEAM_KEY, the account default every team inherits. A union scope can never own an
+  // override, so the route only ever sends a single team id or 0.
+  const teamKey = body.teamId ?? NO_TEAM_KEY;
+  if (teamKey !== NO_TEAM_KEY) {
+    if (!Number.isInteger(teamKey) || teamKey < 0) return null;
+    const owned = await db
+      .select({ id: teams.id })
+      .from(teams)
+      .where(and(eq(teams.id, teamKey), eq(teams.accountId, accountId)))
+      .limit(1)
+      .execute();
+    if (!owned[0]) return null; // unknown or another tenant's team → 404
+  }
   const kind: AutomatedReviewerKind | null = body.automated ? body.kind ?? 'in_house' : null;
   // Default a MANUALLY-added bot's label to the account's own name — its display/full name
   // ("GopherBot"), falling back to the login — NOT the generic kind label ("In-house AI"),
@@ -7428,7 +7700,7 @@ export async function setReviewerOverride(
       ? 'manually tagged as an automated reviewer'
       : 'manually confirmed as a human',
   ];
-  const values = {
+  const base = {
     automated: body.automated,
     kind,
     label,
@@ -7437,24 +7709,106 @@ export async function setReviewerOverride(
     reasonsJson: reasons,
     updatedAt: new Date(),
   };
+  // LANDMINE — the INSERT values and the ON CONFLICT `set:` are DELIBERATELY separate objects,
+  // and `role` appears only where it should. An absent `body.role` must mean "leave the stored
+  // role alone": a shared object would put the insert's fallback into the update too, so an old
+  // client (or the "Not a bot" button, which sends no role) would silently un-mark a quality
+  // check every time anything else about the row was edited.
+  //
+  // On INSERT there is no row at THIS key — but that does NOT mean there is no stored role to
+  // preserve. A per-team row is normally BORN by editing an INHERITED one: the Bots→Settings tab
+  // renders the team-0 answer with an "inherited" badge and an Apply button that deliberately
+  // sends no `role`, so the very value the user is looking at lives at NO_TEAM_KEY. Seeding the
+  // insert from the login alone silently REVERSED that classification — an in-house quality check
+  // (a login outside the QUALITY_CHECK_BOTS seed) re-entered that team's ROI/behaviour/dedup sets
+  // on a label edit, and a seeded vendor the user had re-roled to 'review' dropped out of them.
+  // Resolve the INHERITED role first (`resolveClassifications` = explicit team row → team-0 row);
+  // the login seed only decides when nothing is stored under either key.
+  const inheritedRole =
+    body.role == null
+      ? (await resolveClassifications(accountId, teamKey)).get(userId)?.role
+      : undefined;
+  const insertRole: ReviewerRole = body.role ?? inheritedRole ?? defaultRoleFor(u.login);
+  const setValues = body.role == null ? base : { ...base, role: body.role };
   await db
     .insert(botReviewClassification)
-    .values({ accountId, authorUserId: userId, ...values })
+    .values({ accountId, teamId: teamKey, authorUserId: userId, role: insertRole, ...base })
     .onConflictDoUpdate({
-      target: [botReviewClassification.accountId, botReviewClassification.authorUserId],
-      set: values,
+      // The 3-column tuple — migration 0042 dropped the old (account_id, author_user_id) unique
+      // index. A stale 2-column target raises "no unique or exclusion constraint matching the ON
+      // CONFLICT specification" at RUNTIME, not at compile time.
+      target: [
+        botReviewClassification.accountId,
+        botReviewClassification.teamId,
+        botReviewClassification.authorUserId,
+      ],
+      set: setValues,
     })
     .execute();
+  // Echo the row as it now stands. On an UPDATE with no `body.role` the stored role is whatever
+  // it already was, so re-read rather than guessing.
+  const stored = (
+    await db
+      .select({ role: botReviewClassification.role })
+      .from(botReviewClassification)
+      .where(
+        and(
+          eq(botReviewClassification.accountId, accountId),
+          eq(botReviewClassification.teamId, teamKey),
+          eq(botReviewClassification.authorUserId, userId),
+        ),
+      )
+      .limit(1)
+      .execute()
+  )[0];
   return {
     userId,
     login: u.login,
     automated: body.automated,
     kind,
     label,
+    role: (stored?.role as ReviewerRole | null) ?? insertRole,
     confidence: 'high',
     source: 'manual',
     reasons,
   };
+}
+
+// "Reset to default" — drop this reviewer's EXPLICIT row for `teamKey` so the team falls back to
+// the team-0 default (or, failing that, to auto-detection). Returns false when the team is
+// unknown/foreign (→ 404) so a caller can never probe another tenant's team ids by deleting.
+//
+// Deliberately NOT the same as marking someone "not a bot": that writes a fresh manual override
+// saying "human", which a team would then be stuck with. Deleting at NO_TEAM_KEY is allowed (it
+// removes the account default itself and returns the reviewer to auto-detection) but the UI does
+// not offer it for an INHERITED row, where it would delete a different team's answer.
+export async function deleteReviewerOverride(
+  accountId: number,
+  userId: number,
+  teamKey: number,
+): Promise<boolean> {
+  if (!Number.isInteger(teamKey) || teamKey < 0) return false;
+  if (teamKey !== NO_TEAM_KEY) {
+    const owned = await db
+      .select({ id: teams.id })
+      .from(teams)
+      .where(and(eq(teams.id, teamKey), eq(teams.accountId, accountId)))
+      .limit(1)
+      .execute();
+    if (!owned[0]) return false;
+  }
+  await db
+    .delete(botReviewClassification)
+    .where(
+      and(
+        eq(botReviewClassification.accountId, accountId),
+        eq(botReviewClassification.teamId, teamKey),
+        eq(botReviewClassification.authorUserId, userId),
+      ),
+    )
+    .execute();
+  // Idempotent: deleting a row that isn't there is a successful reset, not a 404.
+  return true;
 }
 
 // WS7 — "only a bot reviewed this": PRs (merged in-window, or open-and-mergeable) in the
@@ -7486,10 +7840,17 @@ export async function getBotOnlyReviewPrs(
   // before it merges" signal, and merged PRs have already shipped. The drill-down LIST omits
   // this so the tab can offer merged behind a "Show merged" toggle.
   opts?: { openOnly?: boolean },
+  teamKey: number = NO_TEAM_KEY,
 ): Promise<BotOnlyReviewPr[]> {
   if (repoIds.length === 0) return [];
-  const automatedIds = new Set(await automatedReviewerUserIds(accountId));
-  const kindMap = await classificationKindForUser(accountId);
+  // `role: 'all'` — DELIBERATELY NOT narrowed to 'review', and this is the one metric where the
+  // obvious edit is wrong. This getter flags PRs NO HUMAN reviewed. Narrowing to review-role bots
+  // means a PR reviewed only by SonarQube has zero review-role bot reviews, fails the "at least
+  // one automated review" leg, and VANISHES from the list — hiding the risk instead of flagging
+  // it, the exact opposite of the banner's purpose ("needs a human before it merges"). The role
+  // narrowing belongs on ROI / behaviour / dedup / benchmark, not here.
+  const automatedIds = new Set(await automatedReviewerUserIds(accountId, teamKey, 'all'));
+  const kindMap = await classificationKindForUser(accountId, teamKey);
 
   // Pierre-verbatim posted review ids (these count as automated reviews; a human-curated
   // Pierre review counts as a human review). Keyed by reviews.databaseId == postedReviewId.
@@ -7678,9 +8039,14 @@ export async function getHumanReviewComments(
   accountId: number,
   window: BotWindowKind,
   scopeRepoIds?: number[] | null,
+  teamKey: number = NO_TEAM_KEY,
 ): Promise<{ comments: HumanReviewCommentRow[]; truncated: boolean }> {
   if (scopeRepoIds != null && scopeRepoIds.length === 0) return { comments: [], truncated: false };
-  const automatedIds = await automatedReviewerUserIds(accountId);
+  // `role: 'all'` — this set is used to EXCLUDE bots from the human Discussion-themes AI pass.
+  // Narrowing it to review-role bots would let every SonarQube comment through as "human" and
+  // leak lint output straight into the human themes summary (and pay for it). This is the site
+  // where the obvious edit is wrong; see the ReviewerRole note in shared.
+  const automatedIds = await automatedReviewerUserIds(accountId, teamKey, 'all');
 
   const nowMs = Date.now();
   const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
@@ -7848,12 +8214,16 @@ export async function getBotReviewComments(
   accountId: number,
   window: BotWindowKind,
   scopeRepoIds?: number[] | null,
+  teamKey: number = NO_TEAM_KEY,
 ): Promise<{ comments: BotReviewCommentRow[]; truncated: boolean }> {
   // Team scope resolved to no repos → nothing to summarize.
   if (scopeRepoIds != null && scopeRepoIds.length === 0) return { comments: [], truncated: false };
-  const automatedIds = await automatedReviewerUserIds(accountId);
+  // `role: 'review'` — the Pro "Themes" Haiku pass summarises what the REVIEW bots are saying.
+  // Excluding quality checks also saves real money: there is nothing to learn from summarising
+  // lint output, and it is the highest-volume comment source in most accounts.
+  const automatedIds = await automatedReviewerUserIds(accountId, teamKey, 'review');
   if (automatedIds.length === 0) return { comments: [], truncated: false };
-  const kindMap = await classificationKindForUser(accountId);
+  const kindMap = await classificationKindForUser(accountId, teamKey);
 
   const nowMs = Date.now();
   // Window resolution mirrors getBotAnalytics exactly (rolling_14 / 'sprint' both → 14d trailing).
@@ -7864,14 +8234,7 @@ export async function getBotReviewComments(
 
   // Per-reviewer label (custom classification label → vendor pretty name → login) — mirrors
   // getBotAnalytics.reviewerLabel exactly, so a bot reads the same here as in the ROI panel.
-  const classLabel = new Map<number, string>();
-  for (const r of await db
-    .select({ id: botReviewClassification.authorUserId, label: botReviewClassification.label })
-    .from(botReviewClassification)
-    .where(eq(botReviewClassification.accountId, accountId))
-    .execute()) {
-    if (r.label != null && r.label.trim() !== '') classLabel.set(r.id, r.label.trim());
-  }
+  const classLabel = await classificationLabelMap(accountId, teamKey);
   const loginById = new Map<number, string>();
   const rawLoginById = new Map<number, string>();
   for (const r of await db
@@ -8017,6 +8380,9 @@ export async function getBotAnalytics(
   // Team scope: null/undefined = all account repos; a repo-id list = only those; [] = no
   // repos in scope (e.g. the "No team" scope with everything assigned) → empty analytics.
   scopeRepoIds?: number[] | null,
+  // Which team's classification decides who is a bot, and with which ReviewerRole. Threaded from
+  // the route's `scope` (a single team id → that team; every union form → the account default).
+  teamKey: number = NO_TEAM_KEY,
 ): Promise<BotAnalyticsResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
@@ -8031,28 +8397,27 @@ export async function getBotAnalytics(
   const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0, botOnlyPrs: 0, overdueGraceMs: OVERDUE_GRACE_MS };
   // Team scope resolved to no repos → nothing to analyze.
   if (scopeRepoIds != null && scopeRepoIds.length === 0) {
-    return { enabled: true, generatedAt, window: win, vendors: [], totals: emptyTotals, suggestions: [] };
+    return { enabled: true, generatedAt, window: win, vendors: [], qualityChecks: [], totals: emptyTotals, suggestions: [] };
   }
   // Spread into each PR-joined WHERE to narrow to the scope's repos (empty = all repos).
   const repoScopeFilter =
     scopeRepoIds != null ? [inArray(pullRequests.repoId, scopeRepoIds)] : [];
-  const automatedIds = await automatedReviewerUserIds(accountId);
+  // `role: 'all'` here is NOT a leak of quality checks into the metrics: this getter computes a
+  // row for EVERY automated reviewer and then SPLITS them by role at the bottom — `vendors` (the
+  // metric surface: totals, verdicts, suggestions) vs `qualityChecks` (a collapsed
+  // "excluded from ROI" section, volume only). Computing both in one pass is why a mis-roled bot
+  // is discoverable in the UI instead of just vanishing.
+  const automatedIds = await automatedReviewerUserIds(accountId, teamKey, 'all');
   if (automatedIds.length === 0) {
-    return { enabled: true, generatedAt, window: win, vendors: [], totals: emptyTotals, suggestions: [] };
+    return { enabled: true, generatedAt, window: win, vendors: [], qualityChecks: [], totals: emptyTotals, suggestions: [] };
   }
-  const kindMap = await classificationKindForUser(accountId);
+  const kindMap = await classificationKindForUser(accountId, teamKey);
+  const roleMap = await reviewerRoleForUser(accountId, teamKey);
 
   // Per-REVIEWER identity (so in-house bots — all kind 'in_house' — separate into their own rows
   // instead of collapsing). Label preference: the account's custom classification label →
   // the vendor's pretty name (for known vendors) → the reviewer's login/display name.
-  const classLabel = new Map<number, string>();
-  for (const r of await db
-    .select({ id: botReviewClassification.authorUserId, label: botReviewClassification.label })
-    .from(botReviewClassification)
-    .where(eq(botReviewClassification.accountId, accountId))
-    .execute()) {
-    if (r.label != null && r.label.trim() !== '') classLabel.set(r.id, r.label.trim());
-  }
+  const classLabel = await classificationLabelMap(accountId, teamKey);
   const loginById = new Map<number, string>(); // display fallback (name || login)
   const rawLoginById = new Map<number, string>(); // the github login — the per-bot cost key
   if (automatedIds.length > 0) {
@@ -8371,6 +8736,12 @@ export async function getBotAnalytics(
 
   const suggestions: BotTuningSuggestion[] = [];
   const vendors: BotVendorAnalytics[] = [];
+  // Automated reviewers whose resolved ReviewerRole is 'quality_check' (SonarQube, Codecov, …).
+  // Same row shape, computed the same way, but kept OUT of `vendors`/`totals`/`suggestions`:
+  // their volume inflates thread counts and their untouched threads would earn them a `noisy`
+  // verdict for doing exactly their job. Surfaced as their own collapsed section so a user can
+  // still see the bot is running and can spot a mis-role.
+  const qualityChecks: BotVendorAnalytics[] = [];
   for (const [userId, acc] of byUser) {
     const comments = commentsByUser.get(userId) ?? 0;
     // Window activity = threads/comments (the volume math) OR a body-only submitted review.
@@ -8398,13 +8769,16 @@ export async function getBotAnalytics(
     // Not-addressed (untouched) threads that have aged past the account-wide normal response
     // window — the ones that are genuinely being ignored. This gates the noisy verdict.
     const overdueUntouched = overdueByUser.get(userId) ?? 0;
+    // The ROLE decides which array this row lands in. Everything above is computed identically
+    // for both — a quality check's numbers are real, they are just not REVIEW numbers.
+    const isQualityCheck = roleMap.get(userId) === 'quality_check';
     const trend: BotVendorTrendPoint[] = acc.weekly.map((w, i) => ({
       weekStart: new Date(trendFrom.getTime() + i * 7 * 86_400_000).toISOString(),
       threads: w.threads,
       actedOnPct: w.threads > 0 ? Math.round((w.actedOn / w.threads) * 100) : null,
       untouched: w.untouched,
     }));
-    vendors.push({
+    (isQualityCheck ? qualityChecks : vendors).push({
       // A stable per-reviewer row key (kind repeats across in-house bots, so the table can't key
       // on kind). `kind` still drives colour / cost / verdict; `label` is the per-bot name.
       key: `u${userId}`,
@@ -8434,6 +8808,9 @@ export async function getBotAnalytics(
     // Deterministic, ADVISORY tuning suggestions (§3h): a (reviewer, path-bucket) with volume
     // ≥ 5 and untouchedPct ≥ 70 → a "mostly noise" hint. No action attached — the reader tunes
     // the bot on its own platform (or resolves addressed threads via the confirm-gated flow).
+    // Quality checks are skipped: "most of SonarQube's findings in src/** went untouched" is the
+    // normal, expected state of a linter, so a suggestion there is pure noise about noise.
+    if (isQualityCheck) continue;
     for (const [pb, b] of acc.buckets) {
       if (b.volume < 5) continue;
       const untouchedPct = Math.round((b.untouched / b.volume) * 100);
@@ -8450,6 +8827,7 @@ export async function getBotAnalytics(
     }
   }
   vendors.sort((a, b) => b.threads - a.threads || b.comments - a.comments);
+  qualityChecks.sort((a, b) => b.threads - a.threads || b.comments - a.comments);
   suggestions.sort((a, b) => b.volume - a.volume);
 
   // Item 4b — bot-only OPEN PR count across ALL the account's repos, using the same broadened
@@ -8468,9 +8846,13 @@ export async function getBotAnalytics(
       scopeRepoIds ?? allRepoRows.map((r) => r.id),
       { from, to },
       { openOnly: true },
+      teamKey,
     )
   ).length;
 
+  // Totals sum `vendors` ONLY — quality checks are excluded by construction (they're in their own
+  // array). That is the point of the role: a linter's thread volume must not move the headline
+  // acted-on %, which is a claim about REVIEW throughput.
   const totalThreads = vendors.reduce((s, v) => s + v.threads, 0);
   const totalActedOn = vendors.reduce((s, v) => s + v.actedOn, 0);
   const totals = {
@@ -8484,7 +8866,7 @@ export async function getBotAnalytics(
     // verdict) once it's older than this. Exposed so the UI can state the rule ("overdue after 36h").
     overdueGraceMs: OVERDUE_GRACE_MS,
   };
-  return { enabled: true, generatedAt, window: win, vendors, totals, suggestions };
+  return { enabled: true, generatedAt, window: win, vendors, qualityChecks, totals, suggestions };
 }
 
 // ── Bot BEHAVIOUR analytics (EXPERIMENTAL, CORE, deterministic) ────────────────────────────
@@ -8586,6 +8968,8 @@ export async function getBotBehaviourAnalytics(
   window: BotWindowKind,
   // Team scope (mirrors getBotAnalytics): null = all account repos; a list = only those; [] = none.
   scopeRepoIds?: number[] | null,
+  // Classification team key (mirrors getBotAnalytics), threaded from the route's `scope`.
+  teamKey: number = NO_TEAM_KEY,
 ): Promise<BotBehaviourResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
@@ -8651,18 +9035,14 @@ export async function getBotBehaviourAnalytics(
     prsOpenedPerDay[dIdx]! += 1;
   }
 
-  const automatedIds = await automatedReviewerUserIds(accountId);
+  // `role: 'review'` — TTFR, follow-up rate and the coverage heatmap are all claims about REVIEW
+  // behaviour. A linter that fires on every push would flatten TTFR and dominate the heatmap.
+  const automatedIds = await automatedReviewerUserIds(accountId, teamKey, 'review');
   if (automatedIds.length === 0) return empty(prsOpenedPerDay);
-  const kindMap = await classificationKindForUser(accountId);
+  const kindMap = await classificationKindForUser(accountId, teamKey);
 
   // Identity (label + login) — mirrors getBotAnalytics.reviewerLabel exactly.
-  const classLabel = new Map<number, string>();
-  for (const r of await db
-    .select({ id: botReviewClassification.authorUserId, label: botReviewClassification.label })
-    .from(botReviewClassification)
-    .where(eq(botReviewClassification.accountId, accountId))
-    .execute())
-    if (r.label != null && r.label.trim() !== '') classLabel.set(r.id, r.label.trim());
+  const classLabel = await classificationLabelMap(accountId, teamKey);
   const loginById = new Map<number, string>();
   const rawLoginById = new Map<number, string>();
   for (const r of await db
@@ -9203,6 +9583,9 @@ export async function getBotBehaviourAnalytics(
 export async function getPrBotBehaviour(
   prId: number,
   accountId: number,
+  // NO_TEAM_KEY by default: this getter is addressed by prId and the PR's repo can sit in several
+  // teams (teamRepos is many-to-many), so there is no single team key to resolve against.
+  teamKey: number = NO_TEAM_KEY,
 ): Promise<PrBotBehaviourResponse | null> {
   const [pr] = await db
     .select({ id: pullRequests.id, openedAt: pullRequests.openedAt })
@@ -9212,18 +9595,15 @@ export async function getPrBotBehaviour(
     .execute();
   if (!pr) return null; // not the caller's PR → 404
 
-  const automatedIds = await automatedReviewerUserIds(accountId);
+  // `role: 'review'` — mirrors getBotBehaviourAnalytics, whose account-wide baseline this PR's
+  // numbers are compared against. If the two sets disagreed the "slower than typical" claim would
+  // be measured against a population the PR view doesn't contain.
+  const automatedIds = await automatedReviewerUserIds(accountId, teamKey, 'review');
   if (automatedIds.length === 0) return { enabled: true, prId, bots: [] };
-  const kindMap = await classificationKindForUser(accountId);
+  const kindMap = await classificationKindForUser(accountId, teamKey);
 
   // Identity (label + login) — same resolution as getBotBehaviourAnalytics / the ROI panel.
-  const classLabel = new Map<number, string>();
-  for (const r of await db
-    .select({ id: botReviewClassification.authorUserId, label: botReviewClassification.label })
-    .from(botReviewClassification)
-    .where(eq(botReviewClassification.accountId, accountId))
-    .execute())
-    if (r.label != null && r.label.trim() !== '') classLabel.set(r.id, r.label.trim());
+  const classLabel = await classificationLabelMap(accountId, teamKey);
   const loginById = new Map<number, string>();
   const rawLoginById = new Map<number, string>();
   for (const r of await db
@@ -9414,6 +9794,8 @@ export async function getBotOnlyPrs(
   // Team scope: null/undefined = all account repos; a repo-id list = only those; [] = no repos
   // in scope → empty (mirrors getBotAnalytics's early-out).
   scopeRepoIds?: number[] | null,
+  // Classification team key (mirrors getBotAnalytics — the COUNT and this LIST must agree).
+  teamKey: number = NO_TEAM_KEY,
 ): Promise<{ window: { kind: BotWindowKind; from: string; to: string }; prs: BotOnlyReviewPr[] }> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
@@ -9433,7 +9815,8 @@ export async function getBotOnlyPrs(
         .where(eq(repos.accountId, accountId))
         .execute()
     ).map((r) => r.id);
-  const prs = await getBotOnlyReviewPrs(accountId, repoIds, { from, to });
+  // No `openOnly` here: the LIST offers merged PRs behind a client-side "Show merged" toggle.
+  const prs = await getBotOnlyReviewPrs(accountId, repoIds, { from, to }, undefined, teamKey);
   return { window: win, prs };
 }
 
@@ -9506,9 +9889,15 @@ export async function getBenchmarkContributions(
   from: Date,
   to: Date,
 ): Promise<BenchmarkContributionAgg[]> {
-  const automatedIds = await automatedReviewerUserIds(accountId);
+  // `role: 'review'` — the HIGHEST data-integrity stake in this file. These rows leave the tenant
+  // and land in a CROSS-ORG benchmark, so shipping a linter's volume into a named review-bot
+  // cohort corrupts the shared dataset permanently, for everyone, and cannot be un-shipped.
+  // Quality checks were excluded ACCIDENTALLY until now (SonarQube resolved to `in_house`, which
+  // the kind filter below drops); this makes it deliberate and survives a user classifying
+  // SonarQube as a named vendor. NO_TEAM_KEY: the rollup is account-wide, not team-scoped.
+  const automatedIds = await automatedReviewerUserIds(accountId, NO_TEAM_KEY, 'review');
   if (automatedIds.length === 0) return [];
-  const kindMap = await classificationKindForUser(accountId);
+  const kindMap = await classificationKindForUser(accountId, NO_TEAM_KEY);
   const nowMs = Date.now();
 
   // Only KNOWN vendors are comparable across orgs — skip in_house/pierre/generic-vendor/unclassified.
@@ -9735,6 +10124,8 @@ export async function getBotVendorPrs(
   // Team scope: null/undefined = all account repos; [] = no repos → empty. Applied at the
   // final PR-metadata load (the single narrowing point), so the whole result stays scoped.
   scopeRepoIds?: number[] | null,
+  // Classification team key (mirrors getBotAnalytics — this list must reproduce ONE of its rows).
+  teamKey: number = NO_TEAM_KEY,
 ): Promise<BotVendorPrsResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
@@ -9760,7 +10151,9 @@ export async function getBotVendorPrs(
   } else {
     const userId = target.userId;
     key = `u${userId}`;
-    const kindMap = await classificationKindForUser(accountId);
+    // NOT role-filtered: the quality-check SECTION of the ROI panel offers the same drill-down,
+    // so narrowing here would make its rows un-openable.
+    const kindMap = await classificationKindForUser(accountId, teamKey);
     // Only a reviewer this account has CLASSIFIED as automated is a valid drill-down target —
     // an arbitrary (human / foreign / unknown) userId echoes its identity but lists nothing
     // (the empty vendorIds hits the `vendorIds.length === 0 → empty` guard below), preserving
@@ -9769,17 +10162,12 @@ export async function getBotVendorPrs(
     vendorIds = kindMap.has(userId) ? [userId] : [];
     // Per-reviewer identity — mirrors getBotAnalytics's reviewerLabel resolution: the account's
     // custom classification label → the vendor's pretty name (known vendors) → login/display name.
-    const [classRow] = await db
-      .select({ label: botReviewClassification.label })
-      .from(botReviewClassification)
-      .where(
-        and(
-          eq(botReviewClassification.accountId, accountId),
-          eq(botReviewClassification.authorUserId, userId),
-        ),
-      )
-      .limit(1)
-      .execute();
+    // TEAM-RESOLVED, via the same helper the five sibling analytics getters use. Filtering on
+    // teamId is mandatory: since migration 0042 the unique index is (account, team, author), so an
+    // account-only read returns SEVERAL rows per author once a team override exists and `limit(1)`
+    // with no ORDER BY picks whichever the storage engine hands back first — this drill-down would
+    // then show a different label from the ROI row it was opened from.
+    const classLabel = await classificationLabelMap(accountId, teamKey);
     const [userRow] = await db
       .select({ login: users.githubLogin, name: users.displayName })
       .from(users)
@@ -9787,7 +10175,7 @@ export async function getBotVendorPrs(
       .limit(1)
       .execute();
     login = userRow?.login ?? null;
-    const custom = classRow?.label?.trim();
+    const custom = classLabel.get(userId);
     if (custom) label = custom;
     else if (kindTyped !== 'in_house' && kindTyped !== 'pierre' && kindTyped !== 'vendor')
       label = labelForKind(kindTyped);
@@ -9902,7 +10290,9 @@ export async function getBotVendorPrs(
   const allThreadIds = [...perPr.values()].flatMap((a) => a.threadIds);
   const humanFollowSet = new Set<number>();
   if (allThreadIds.length > 0) {
-    const autoSet = new Set(await automatedReviewerUserIds(accountId));
+    // `role: 'all'` — this set answers "was the replier a HUMAN". A quality-check bot's reply is
+    // not human follow-through, so narrowing to review-role bots would count it as one.
+    const autoSet = new Set(await automatedReviewerUserIds(accountId, teamKey, 'all'));
     const fcRows = await db
       .select({
         threadId: reviewComments.threadId,
@@ -9959,9 +10349,16 @@ export async function getBotVendorPrs(
     .execute();
 
   // Bot-only flag: reuse the broadened rule (item 4a) over the candidate PRs' repos.
+  // `teamKey` is NOT optional here even though the parameter has a default: this drill-down is
+  // opened from a team-scoped ROI row, and the header above it renders `totals.botOnlyPrs` from
+  // /api/bot-analytics, which IS team-resolved. Omitting it evaluates the rule at NO_TEAM_KEY, so
+  // a reviewer a team marked human still counts as a bot here (and one automated only under a team
+  // override never does) — one screen, two contradictory bot-only answers.
   const repoIdSet = [...new Set(metaRows.map((m) => m.repoId))];
   const botOnlyIds = new Set(
-    (await getBotOnlyReviewPrs(accountId, repoIdSet, { from, to })).map((p) => p.prId),
+    (await getBotOnlyReviewPrs(accountId, repoIdSet, { from, to }, undefined, teamKey)).map(
+      (p) => p.prId,
+    ),
   );
 
   const prs: BotVendorPr[] = [];
@@ -10016,6 +10413,8 @@ export async function getBotVendorPrs(
 export async function getBotDedupClusters(
   prId: number,
   accountId: number,
+  // NO_TEAM_KEY by default — addressed by prId, and a repo can sit in several teams.
+  teamKey: number = NO_TEAM_KEY,
 ): Promise<BotDedupResponse | null> {
   const owned = (
     await db
@@ -10027,9 +10426,12 @@ export async function getBotDedupClusters(
   )[0];
   if (!owned) return null;
 
-  const automatedIds = await automatedReviewerUserIds(accountId);
+  // `role: 'review'` — a dedup cluster claims two REVIEWERS independently flagged the same line.
+  // "SonarQube and CodeRabbit both commented on line 42" is not cross-bot review consensus: one
+  // is a rule firing, the other is a judgement, and presenting them as agreement is misleading.
+  const automatedIds = await automatedReviewerUserIds(accountId, teamKey, 'review');
   if (automatedIds.length === 0) return { prId, clusters: [] };
-  const kindMap = await classificationKindForUser(accountId);
+  const kindMap = await classificationKindForUser(accountId, teamKey);
 
   const rows = await db
     .select({

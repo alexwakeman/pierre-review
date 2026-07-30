@@ -17,14 +17,15 @@ describe('tierFor — AI generation', () => {
     expect(tiers('POST', '/api/pro/insights/ask')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/sprint-report/refresh')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/prs/12/ai-fix')).toEqual(['ai', 'ai_hourly']);
-    expect(tiers('POST', '/api/pro/prs/12/addressed/check')).toEqual(['ai', 'ai_hourly']);
-    // The comment-annotations platform: the run POST is the only billing path.
+    // The surviving per-ITEM addressed checks (one thread / one PR comment). The PR-WIDE twins
+    // (`/api/pro/prs/:id/addressed/check` and its SSE stream) were removed — they were a second
+    // whole-PR sweep billing one call per target, up to 50.
+    expect(tiers('POST', '/api/pro/threads/12/addressed/check')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/pro/pr-comments/12/addressed/check')).toEqual(['ai', 'ai_hourly']);
+    // The comment-annotations platform: the run POST is the ONLY billing path, and now the only
+    // AI entry point the whole feature has (its SSE twin went with the PR-wide sweep bar), so it
+    // must not be left uncovered.
     expect(tiers('POST', '/api/pro/prs/12/annotations/run')).toEqual(['ai', 'ai_hourly']);
-    // Its SSE twin is a POST that BOTH starts the run and streams it — unlike the Claude
-    // Review / AI Fix `…/stream` GETs, which only subscribe to a run someone else started.
-    // Since the consolidated "Check review" button calls this one, it is now the primary
-    // billing entry point for the whole annotations feature and must not be left uncovered.
-    expect(tiers('POST', '/api/pro/prs/12/annotations/run/stream')).toEqual(['ai', 'ai_hourly']);
   });
 
   // Load-bearing: Claude Review kept its PRE-PLUGIN paths for frontend compatibility, so it does

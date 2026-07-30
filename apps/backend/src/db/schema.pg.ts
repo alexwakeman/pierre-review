@@ -748,12 +748,18 @@ export const botReviewClassification = pgTable(
     accountId: integer('account_id')
       .notNull()
       .references(() => accounts.id),
+    // NON-NULL sentinel 0 = "No team" AND the inheritance root; no FK to teams (0 is not a
+    // team id). See schema.sqlite.ts — a NULLable team key would not dedupe under the unique
+    // index in either dialect.
+    teamId: integer('team_id').notNull().default(0),
     authorUserId: integer('author_user_id')
       .notNull()
       .references(() => users.id),
     automated: boolean('automated').notNull(),
     kind: text('kind'), // AutomatedReviewerKind | null
     label: text('label'),
+    // See schema.sqlite.ts for the full rationale on both new columns.
+    role: text('role').notNull().default('review'),
     confidence: text('confidence').notNull(), // 'high'|'medium'|'low'
     source: text('source').notNull(), // ClassificationSource
     reasonsJson: jsonb('reasons_json').$type<string[]>(),
@@ -762,7 +768,12 @@ export const botReviewClassification = pgTable(
       .defaultNow(),
   },
   (t) => ({
-    accountUx: uniqueIndex('brc_account_author').on(t.accountId, t.authorUserId),
+    accountTeamUx: uniqueIndex('brc_account_team_author').on(
+      t.accountId,
+      t.teamId,
+      t.authorUserId,
+    ),
+    accountTeamIdx: index('brc_account_team_idx').on(t.accountId, t.teamId),
   }),
 );
 

@@ -352,6 +352,28 @@ export const CI_META: Record<
   unknown: null,
 };
 
+// Should the PR Overview's "Checks" row render at all?
+//
+// Two independent reasons to show it, and the gate must not fire without one of them — `Row`
+// always paints its uppercase label, so a row whose every child renders null is a bare "CHECKS"
+// heading next to an empty column.
+//
+//  1. There are check runs to list.
+//  2. CI is red but `checkRuns` did not hydrate (an expired/SAML-blocked token, a partial
+//     statusCheckRollup, a head pushed since the last sync). The row then exists ONLY to carry
+//     the CI-failure diagnosis — and that card is Pro (`CiAnalysisCard` returns null without the
+//     prSummary capability), so on the free tier this branch can never produce content and MUST
+//     NOT open the row. That is why the capability is an argument here rather than a detail of
+//     the card: the row's visibility depends on its child's.
+export function checksRowVisible(
+  checkCount: number,
+  ciStatus: CiStatus | null | undefined,
+  prSummary: boolean,
+): boolean {
+  if (checkCount > 0) return true;
+  return prSummary && (ciStatus === 'failure' || ciStatus === 'error');
+}
+
 // Per-check display: icon glyph + colour + short label.
 export const CHECK_STATE_META: Record<
   CheckRunState,

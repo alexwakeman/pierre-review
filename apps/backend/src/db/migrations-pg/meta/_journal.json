@@ -204,6 +204,13 @@
       "when": 1784729500000,
       "tag": "0028_branch_commit_detail",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1784729600000,
+      "tag": "0029_bot_classification_team",
+      "breakpoints": true
     }
   ]
 }

@@ -1,62 +1,49 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useFilters, type InsightsSubTab } from '../../store/filters.js';
-import { RetroView } from './RetroView.js';
 import { AdHocChatPanel } from './AdHocChatPanel.js';
-import { TeamComparisonPanel } from './TeamComparisonPanel.js';
 import { TrackUsage } from './TrackUsage.js';
 
-// The Pro "Insights" pane. Overview is now a SINGLE consolidated surface: the ad-hoc chat with
+// The Pro "Insights" pane. Overview is a SINGLE consolidated surface: the ad-hoc chat with
 // quick-question pills (the former Sprint-report card + the six-question preset carousel were
-// folded into the chat — a pill pre-fills the box, the user presses Ask). The attention cards that
-// used to sit beneath the AI panels moved to the CORE/free Feed "Needs attention" tab
-// (AttentionView). Retro = the retrospective narrative; Compare = the cross-team matrix (All-Teams
-// scope only). Everything here self-gates on the activityDigest capability inside its own panel.
+// folded into the chat — a pill pre-fills the box, the user presses Ask). The attention cards
+// that used to sit beneath the AI panels moved to the CORE/free Feed "Needs attention" tab
+// (AttentionView).
+//
+// The cross-team "Compare" sub-tab MOVED OUT to the Feed's sub-tab bar (see Activity/index.tsx).
+// It was gated here on `teamScope === 'teams'` — the All-Teams sentinel ONLY — so selecting an
+// explicit two-of-five teams made the tab silently vanish, which is the bug that move fixes. It
+// is also CORE/free now, and belongs beside the free flow-metric header whose window it shares.
 
-// InsightsSubTab lives in the store (filters.ts) — the last-active tab is remembered there. The
-// former 'Sprint' sub-tab was folded into Overview, so a stale stored/deep-linked 'sprint'
-// redirects to overview.
-const SUB_TABS: { key: InsightsSubTab; label: string }[] = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'retro', label: 'Retro' },
-];
-// The cross-team "Compare" sub-tab is only meaningful (and only shown) in All-Teams scope.
-const COMPARE_TAB: { key: InsightsSubTab; label: string } = { key: 'compare', label: 'Compare teams' };
+// InsightsSubTab lives in the store (filters.ts) — the last-active tab is remembered there.
+// SUB_TABS is the list of tabs that CURRENTLY exist; anything else stored or deep-linked (the
+// vestigial 'sprint', which was folded into Overview) normalizes back to Overview below.
+const SUB_TABS: { key: InsightsSubTab; label: string }[] = [{ key: 'overview', label: 'Overview' }];
 
-export function InsightsView({
-  initialSubTab,
-}: {
-  initialSubTab?: InsightsSubTab;
-} = {}): JSX.Element {
-  const teamScope = useFilters((s) => s.teamScope);
+// A one-item tablist is noise, so the bar only renders once there are ≥2 tabs. Written as a
+// derived guard rather than deleting the tab apparatus outright: the store field + the stale-value
+// redirect stay live and type-checked, and adding a sub-tab back re-shows the bar with no other
+// change. (Today SUB_TABS has exactly one entry, so the bar does not render at all.)
+const SHOW_SUB_TABS = SUB_TABS.length > 1;
 
-  // Internal sub-tab bar (Overview | Retro | Compare). The last-active tab is store-remembered
-  // (insightsSubTab) so a remount restores it; a deep-linked initialSubTab (e.g. the legacy 'retro'
-  // rail value) wins over the memory. Tab changes write BOTH the local state and the store.
+/**
+ * Normalize a stored/stale sub-tab to one that still exists. A membership test rather than the
+ * old chain of `=== 'sprint'` literals, so a value removed from the union in the future (the way
+ * 'compare' and 'retro' just were) cannot strand the pane on a tab that renders nothing.
+ */
+function normalizeSubTab(tab: InsightsSubTab | null): InsightsSubTab {
+  return SUB_TABS.some((t) => t.key === tab) ? (tab as InsightsSubTab) : 'overview';
+}
+
+export function InsightsView(): JSX.Element {
+  // The last-active tab is store-remembered (insightsSubTab) so a remount restores it; tab
+  // changes write BOTH the local state and the store.
   const storedSubTab = useFilters((s) => s.insightsSubTab);
   const setInsightsSubTab = useFilters((s) => s.setInsightsSubTab);
-  const [subTab, setSubTabLocal] = useState<InsightsSubTab>(() => {
-    const init = initialSubTab ?? storedSubTab ?? 'overview';
-    return init === 'sprint' ? 'overview' : init;
-  });
+  const [subTab, setSubTabLocal] = useState<InsightsSubTab>(() => normalizeSubTab(storedSubTab));
   const setSubTab = (tab: InsightsSubTab): void => {
     setSubTabLocal(tab);
     setInsightsSubTab(tab);
   };
-  useEffect(() => {
-    if (initialSubTab) setSubTab(initialSubTab);
-    // setSubTab is a stable pair of setters re-created per render; only initialSubTab matters.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialSubTab]);
-
-  // The Compare tab exists only in All-Teams scope. Show it there; if the scope leaves 'teams'
-  // while it's active, fall back to Overview so the tab strip never strands on a hidden tab.
-  const isAllTeams = teamScope === 'teams';
-  const subTabs = useMemo(() => (isAllTeams ? [...SUB_TABS, COMPARE_TAB] : SUB_TABS), [isAllTeams]);
-  useEffect(() => {
-    if (subTab === 'compare' && !isAllTeams) setSubTab('overview');
-    // The removed 'Sprint' sub-tab redirects to Overview (where its content now lives).
-    else if (subTab === 'sprint') setSubTab('overview');
-  }, [subTab, isAllTeams]);
 
   const [showUsage, setShowUsage] = useState(false);
 
@@ -85,40 +72,34 @@ export function InsightsView({
 
       {showUsage && <TrackUsage />}
 
-      {/* Internal sub-tab bar — Overview / Retro (+ Compare in All-Teams scope). */}
-      <div role="tablist" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
-        {subTabs.map(({ key, label }) => {
-          const on = key === subTab;
-          return (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={on}
-              onClick={() => setSubTab(key)}
-              className={`-mb-px rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
-                on
-                  ? 'border-gray-300 bg-white text-violet-600 dark:border-gray-700 dark:bg-gray-950 dark:text-violet-300'
-                  : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
-              }`}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
-
-      {subTab === 'overview' ? (
-        // Consolidated: JUST the ad-hoc chat (with quick-question pills). The Sprint report card +
-        // the "Sprint questions" preset carousel folded into it; the attention cards moved to the
-        // free Feed "Needs attention" tab.
-        <AdHocChatPanel />
-      ) : subTab === 'compare' ? (
-        // Cross-team comparison — only reachable in All-Teams scope (the tab is hidden otherwise).
-        <TeamComparisonPanel />
-      ) : (
-        <RetroView />
+      {SHOW_SUB_TABS && (
+        <div role="tablist" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
+          {SUB_TABS.map(({ key, label }) => {
+            const on = key === subTab;
+            return (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                onClick={() => setSubTab(key)}
+                className={`-mb-px rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
+                  on
+                    ? 'border-gray-300 bg-white text-violet-600 dark:border-gray-700 dark:bg-gray-950 dark:text-violet-300'
+                    : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       )}
+
+      {/* Consolidated: JUST the ad-hoc chat (with quick-question pills). The Sprint report card +
+          the "Sprint questions" preset carousel folded into it; the attention cards moved to the
+          free Feed "Needs attention" tab, and Compare to the free Feed sub-tab bar. */}
+      <AdHocChatPanel />
     </div>
   );
 }

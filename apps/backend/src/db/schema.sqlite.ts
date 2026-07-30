@@ -867,7 +867,7 @@ export const claudeReviewFindings = sqliteTable(
 
 // ---- Bot-Triage Platform (WS1 / WS6) ----
 // Account-scoped classification cache for automated reviewers. One row per
-// (account, author) — the layered resolver (sync/reviewer-classify.ts) writes AUTO
+// (account, TEAM, author) — the layered resolver (sync/reviewer-classify.ts) writes AUTO
 // rows; the override route writes MANUAL rows (source='manual', never overwritten by
 // auto). Merged with the global vendor login map on read, so known vendors need no
 // row. Account-scoped isolation: every read/write filters accountId.
@@ -878,12 +878,40 @@ export const botReviewClassification = sqliteTable(
     accountId: integer('account_id')
       .notNull()
       .references(() => accounts.id),
+    // Which TEAM's answer to "is this login a bot, and what kind" this row holds.
+    //
+    // NOT NULL with the sentinel 0 (`NO_TEAM_KEY` in shared), never nullable: a UNIQUE index
+    // over a NULLable column dedupes in NEITHER dialect (NULLs compare distinct), so a
+    // nullable key would silently allow duplicate rows per (account, author) and make the
+    // upsert's conflict target unreachable.
+    //
+    // 0 is BOTH the "No team" scope AND the inheritance ROOT — resolution is `explicit team
+    // row → the team-0 row → auto-detect`. That is why migration 0042 needs no backfill:
+    // every pre-existing account-global row is already at 0, i.e. already the default every
+    // team inherits, so behaviour is preserved byte-for-byte in every scope and a team created
+    // later inherits the account default for free.
+    //
+    // NO `.references(() => teams.id)` ON PURPOSE: 0 is not a team id, so an FK would reject
+    // every default row. The price is manual cleanup — `deleteTeam` must delete this table's
+    // rows for the team inside its transaction, or a recycled team id inherits a dead team's
+    // classifications.
+    teamId: integer('team_id').notNull().default(0),
     authorUserId: integer('author_user_id')
       .notNull()
       .references(() => users.id),
     automated: integer('automated', { mode: 'boolean' }).notNull(),
     kind: text('kind'), // AutomatedReviewerKind | null
     label: text('label'),
+    // ReviewerRole — 'review' (an AI code reviewer) | 'quality_check' (static analysis /
+    // coverage / lint). ORTHOGONAL to `kind`, which is vendor identity: a login keeps its brand
+    // while being marked a linter. `automated` stays TRUE for a quality check, so exclusion +
+    // the feed are unaffected; only the SCORING sets (behaviour, dedup, benchmark, and ROI —
+    // which splits rather than filters, see below) treat role='review' as the reviewer cohort.
+    // BOT-ONLY PRs DELIBERATELY DO NOT NARROW: that list answers "did a human look at this", and
+    // a PR reviewed only by SonarQube is exactly what it exists to surface — narrowing would drop
+    // it for having no review-role bot, hiding the risk instead of flagging it.
+    // NOT NULL DEFAULT 'review' so every existing row keeps today's meaning without a backfill.
+    role: text('role').notNull().default('review'),
     confidence: text('confidence').notNull(), // 'high'|'medium'|'low'
     source: text('source').notNull(), // ClassificationSource
     reasonsJson: text('reasons_json', { mode: 'json' }).$type<string[]>(),
@@ -892,7 +920,17 @@ export const botReviewClassification = sqliteTable(
       .default(sql`(unixepoch())`),
   },
   (t) => ({
-    accountUx: uniqueIndex('brc_account_author').on(t.accountId, t.authorUserId),
+    // The upsert conflict target for BOTH writers (reviewer-classify.ts persist() and
+    // setReviewerOverride). It replaced the 2-column `brc_account_author`; miss the swap in an
+    // onConflictDoUpdate and Postgres raises "there is no unique or exclusion constraint
+    // matching the ON CONFLICT specification" at RUNTIME, not at typecheck.
+    accountTeamUx: uniqueIndex('brc_account_team_author').on(
+      t.accountId,
+      t.teamId,
+      t.authorUserId,
+    ),
+    // Listing a single team's overrides (the per-team Bots settings tab).
+    accountTeamIdx: index('brc_account_team_idx').on(t.accountId, t.teamId),
   }),
 );
 
