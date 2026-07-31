@@ -211,6 +211,13 @@
       "when": 1784729600000,
       "tag": "0029_bot_classification_team",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1784729700000,
+      "tag": "0030_bot_cost_per_team",
+      "breakpoints": true
     }
   ]
 }

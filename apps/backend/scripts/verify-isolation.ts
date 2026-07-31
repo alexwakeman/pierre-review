@@ -502,6 +502,59 @@ check(
   ),
 );
 
+// ── Scoped reviewer listing + per-team COST (migration 0043) ────────────────────────────────
+// `?scoped=true` narrows the listing to the requested team's OWN repos (at key 0, the repos in
+// no team). The narrowing rides on getTeamRepoIds / getUnassignedRepoIds, both already checked
+// above — but the LISTING is the surface a tenant actually reads, and it is a NEW code path, so
+// both directions are asserted rather than inferred. Each negative is paired with a positive
+// control, because "returns nothing" is also what a broken query does.
+check(
+  'listDetectedReviewers(A, teamA, scoped) sees A’s reviewer (positive control)',
+  (await q.listDetectedReviewers(1, teamA.id, { scoped: true })).reviewers.some(
+    (r) => r.userId === botUser!.id,
+  ),
+);
+check(
+  'listDetectedReviewers(B, teamA, scoped) leaks nothing (foreign team resolves to no repos)',
+  (await q.listDetectedReviewers(2, teamA.id, { scoped: true })).reviewers.length === 0,
+);
+check(
+  'listDetectedReviewers(B, scoped) never surfaces A’s reviewer at B’s own keys',
+  !(await q.listDetectedReviewers(2, 0, { scoped: true })).reviewers.some(
+    (r) => r.userId === botUser!.id,
+  ),
+);
+// scopedRepoCount must be NULL when unscoped (it is "how many repos was this computed over",
+// and an unscoped listing computed over none) and a real count when scoped — otherwise the
+// client cannot tell "this team has no repos yet" from "this team has no bots yet".
+check(
+  'scopedRepoCount is null unscoped and a number scoped',
+  (await q.listDetectedReviewers(1, teamA.id)).scopedRepoCount === null &&
+    (await q.listDetectedReviewers(1, teamA.id, { scoped: true })).scopedRepoCount === 1,
+);
+
+// A COST-ONLY patch (no `automated`) is a WRITE and takes the same team-ownership gate as a
+// classification patch — it must not be able to attach a price to another tenant's team id.
+check(
+  'setReviewerOverride(A, cost-only, teamId=teamB) returns null (foreign team → 404)',
+  (await q.setReviewerOverride(1, botUser!.id, { costMonthlyUsd: 99, teamId: teamB.id })) === null,
+);
+check(
+  'setReviewerOverride(A, cost-only, teamId=teamA) succeeds (positive control)',
+  (await q.setReviewerOverride(1, botUser!.id, { costMonthlyUsd: 99, teamId: teamA.id })) !== null,
+);
+const costRows = await db.select().from(schema.botReviewClassification).execute();
+check(
+  'the cost landed on A’s own team row and nothing was written under B’s team id',
+  costRows.some(
+    (r) =>
+      r.accountId === 1 &&
+      r.teamId === teamA.id &&
+      r.authorUserId === botUser!.id &&
+      r.costMonthlyCents === 9900,
+  ) && !costRows.some((r) => r.teamId === teamB.id),
+);
+
 // Owner delete cascades team_repos (functional sanity, not IDOR) AND hand-deletes this team's
 // classification rows — there is no FK cascade for bot_review_classification.
 check('deleteTeam(teamA, A) returns true', (await q.deleteTeam(teamA.id, 1)) === true);

@@ -302,6 +302,13 @@
       "when": 1785100000000,
       "tag": "0042_bot_classification_team",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1785200000000,
+      "tag": "0043_bot_cost_per_team",
+      "breakpoints": true
     }
   ]
 }

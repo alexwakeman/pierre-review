@@ -173,6 +173,13 @@ export function defaultRoleFor(login: string): ReviewerRole {
 // after the migration ran.
 // (The parameter is role-LESS on purpose: a caller physically cannot hand in a role, so
 // landmine 2 above cannot be reintroduced by a future step in the resolution order.)
+//
+// LANDMINE 3 — `cost_monthly_cents` (migration 0043) MUST STAY OUT of `values`. Because that one
+// object is BOTH the insert and the ON CONFLICT `set:`, adding the column here would wipe a
+// user's per-team price on every auto-classification pass — and this function runs lazily from
+// listDetectedReviewers, so it would happen just by opening the Bots tab. `ReviewerClassification`
+// (the parameter type) carries no cost field, which is what makes the omission structural rather
+// than a rule to remember: there is nothing to spread in.
 async function persist(
   accountId: number,
   teamKey: number,

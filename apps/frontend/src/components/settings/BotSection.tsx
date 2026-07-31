@@ -1,7 +1,5 @@
 import { useState } from 'react';
-import { NO_TEAM_KEY } from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
-import { useDetectedReviewers } from '../../hooks/useBotTriage.js';
 import { Field, SaveButton, SectionShell, inputCls, type SectionProps } from './ui.js';
 
 // A checkbox row matching the modal's compact type scale.
@@ -29,19 +27,24 @@ function Toggle({
 
 // The ACCOUNT-WIDE "Review bots" settings surface (data-testid="bot-settings-section"): the
 // pro_settings-backed knobs only — in-house detection toggles + login allowlist, Limn attribution,
-// per-bot cost, and the Slack bot digest. Gated in SettingsModal on caps.botTriage (true whenever
-// the plugin is loaded — so this stays FREE, no paid flag); the Slack-digest toggle additionally
-// needs caps.slackDigest.
+// and the Slack bot digest. Gated in SettingsModal on caps.botTriage (true whenever the plugin is
+// loaded — so this stays FREE, no paid flag); the Slack-digest toggle additionally needs
+// caps.slackDigest.
 //
-// The per-reviewer CLASSIFICATION table moved OUT of here to the Bots rail's per-TEAM "Settings"
-// tab (Activity → Bots → Settings), because teams define bots differently — one org's
-// `githubactions[bot]` funnels an AI reviewer, another's is plain CI. What stayed is everything
-// that is genuinely account-level: a bot costs the same whichever team's repos it reviews (and
-// cost is keyed by LOGIN, so the ROI cost overlay still works per team), detection heuristics are
-// global policy, and Limn attribution is about Limn's own posted reviews.
+// TWO things moved OUT of here to the Bots rail's per-TEAM "Settings" tab (Activity → Bots →
+// Settings), for the same reason both times — the account is the wrong key:
+//   • the per-reviewer CLASSIFICATION table: teams define bots differently (one org's
+//     `githubactions[bot]` funnels an AI reviewer, another's is plain CI);
+//   • the per-bot monthly COST: a per-LOGIN map cannot express "$120 for Team A, $0 for Team B",
+//     and per-seat billing split across squads makes that ordinary. Cost now lives on the CORE
+//     `bot_review_classification` row (so it is free/OSS too), edited inline on the bot row.
+// The standalone cost editor that used to sit here — with its own add-a-login dropdown — is gone;
+// `ProSettingsUpdate.bots.cost` no longer exists, so there is no write path to the legacy blob.
+// `ProSettings.bots.cost` survives only as a deprecated READ that BotRoiPanel uses to fill in a
+// login plugin migration 0019 could not backfill. Retire both one release on.
 //
-// The split, in one sentence: "who is a bot HERE" is per team; "what it costs, how we detect it,
-// how we attribute it" is per account.
+// The split, in one sentence: "who is a bot HERE and what it costs HERE" is per team; "how we
+// detect it and how we attribute our own reviews" is per account.
 export function BotSection({ settings, save, saving }: SectionProps): JSX.Element {
   const caps = useProCapabilities();
   const b = settings.bots;
@@ -68,20 +71,9 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
   const [pierreFooter, setPierreFooter] = useState<boolean>(b.pierreFooter);
   const pierreDirty = tagPierre !== b.tagPierreReviews || pierreFooter !== b.pierreFooter;
 
-  // Per-BOT cost group (keyed by reviewer login, so in-house bots are costed individually).
-  const [cost, setCost] = useState<{ login: string; monthlyUsd: number }[]>(b.cost);
-  const costDirty = JSON.stringify(cost) !== JSON.stringify(b.cost);
-  // The detected automated reviewers drive the per-bot picker (login → display label). PINNED to
-  // NO_TEAM_KEY explicitly: cost is account-level, so its options must be the account default, not
-  // whichever team's tab happened to be viewed last (which is what an implicit key would give).
-  const { data: detected } = useDetectedReviewers(NO_TEAM_KEY);
-  const bots = (detected?.reviewers ?? []).filter((r) => r.classification.automated);
-  const botLabel = (login: string): string => {
-    const r = bots.find((x) => x.login === login);
-    return r ? r.classification.label?.trim() || r.displayName?.trim() || r.login : login;
-  };
-  const firstUnusedLogin = (): string =>
-    bots.find((r) => !cost.some((c) => c.login === r.login))?.login ?? '';
+  // (No cost group here any more — it is per TEAM, inline on each bot row in Activity → Bots →
+  // Settings. The old editor's `useDetectedReviewers(NO_TEAM_KEY)` fetch went with it, which also
+  // removes one of the account-wide callers of that hook.)
 
   // Slack bot digest (only meaningful when the account has a Slack digest configured).
   const [slackDigest, setSlackDigest] = useState<boolean>(b.slackDigest);
@@ -91,9 +83,11 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
     <div data-testid="bot-settings-section" className="space-y-4">
       <p className="rounded border border-gray-200 bg-gray-50 px-2.5 py-2 text-[11px] text-gray-500 dark:border-gray-800 dark:bg-gray-900/40 dark:text-gray-400">
         These settings are <span className="font-medium">account-wide</span>. Deciding{' '}
-        <span className="font-medium">who counts as a review bot</span> — and which reviewers are
-        quality checks rather than reviewers — is per <span className="font-medium">team</span>,
-        and lives in <span className="font-medium">Activity → Bots → Settings</span>.
+        <span className="font-medium">who counts as a review bot</span> — which reviewers are
+        quality checks rather than reviewers, and{' '}
+        <span className="font-medium">what each bot costs</span> — is per{' '}
+        <span className="font-medium">team</span>, and lives in{' '}
+        <span className="font-medium">Activity → Bots → Settings</span>.
       </p>
 
       <SectionShell
@@ -172,84 +166,13 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
         />
       </SectionShell>
 
-      <SectionShell
-        title="Per-bot cost (account-wide)"
-        desc="Optional monthly spend per bot (each in-house bot separately), used to show cost-per-acted-on in the Bot ROI panel. Keyed by login, so one bot has one cost even if teams classify it differently. Stays on your account."
-      >
-        {cost.length === 0 ? (
-          <p className="text-[11px] text-gray-400">No costs entered.</p>
-        ) : (
-          <ul className="space-y-1.5">
-            {cost.map((c, i) => {
-              // Options: every detected bot, plus this row's own login if it's no longer detected
-              // (so an existing entry never silently loses its selection).
-              const options: { login: string }[] = bots.some((r) => r.login === c.login)
-                ? bots
-                : [{ login: c.login }, ...bots];
-              return (
-                <li key={i} className="flex items-center gap-2">
-                  <select
-                    className={`${inputCls} w-auto`}
-                    value={c.login}
-                    onChange={(e) =>
-                      setCost((prev) =>
-                        prev.map((row, j) => (j === i ? { ...row, login: e.target.value } : row)),
-                      )
-                    }
-                    aria-label="Bot"
-                  >
-                    {options.map((r) => (
-                      <option key={r.login} value={r.login}>
-                        {botLabel(r.login)}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-[11px] text-gray-400">$</span>
-                  <input
-                    type="number"
-                    min={0}
-                    className={`${inputCls} w-24`}
-                    value={c.monthlyUsd}
-                    onChange={(e) =>
-                      setCost((prev) =>
-                        prev.map((row, j) =>
-                          j === i ? { ...row, monthlyUsd: Math.max(0, Number(e.target.value) || 0) } : row,
-                        ),
-                      )
-                    }
-                    aria-label="Monthly USD"
-                  />
-                  <span className="text-[11px] text-gray-400">/mo</span>
-                  <button
-                    type="button"
-                    onClick={() => setCost((prev) => prev.filter((_, j) => j !== i))}
-                    className="ml-auto text-gray-400 hover:text-red-500"
-                    aria-label="Remove"
-                    title="Remove"
-                  >
-                    ✕
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            disabled={firstUnusedLogin() === ''}
-            onClick={() => {
-              const login = firstUnusedLogin();
-              if (login !== '') setCost((prev) => [...prev, { login, monthlyUsd: 0 }]);
-            }}
-            className="rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            title={firstUnusedLogin() === '' ? 'No more detected bots to add' : 'Add a per-bot cost'}
-          >
-            Add bot cost
-          </button>
-          <SaveButton dirty={costDirty} saving={saving} onClick={() => save({ bots: { cost } })} />
-        </div>
-      </SectionShell>
+      {/* The "Per-bot cost (account-wide)" section that used to sit here — a list of
+          login+dollars rows with its own add-a-login dropdown, saved via the now-removed
+          `ProSettingsUpdate.bots.cost` — is GONE. Cost is per TEAM and edited inline on each bot
+          row in Activity → Bots → Settings, where the row already answers "is this a bot here".
+          Do not reinstate an account-wide editor beside it: two live writers to one price is how
+          the two silently disagree, which is why the update field was retired rather than
+          mirrored. */}
 
       {caps.slackDigest && (
         <SectionShell title="Slack bot digest" desc="Include a review-bot summary block in the Slack digest.">

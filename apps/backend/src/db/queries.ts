@@ -7149,11 +7149,31 @@ interface ResolvedClassificationRow {
   // The key the row actually came from — `teamKey` for a real per-team override, 0 for the
   // inherited account default. Drives the UI's "Team override" vs "Inherited from default".
   teamId: number;
+  // ⚠ COST RESOLVES FIELD-WISE; EVERY FIELD ABOVE RESOLVES ROW-WISE. The classification is one
+  // indivisible judgement, so an explicit team row wins WHOLESALE — but a row created merely to
+  // hold a role/label opinion carries NO cost opinion, and letting it win wholesale here would
+  // zero an inherited price the instant someone pressed Apply on an inherited row.
+  //
+  // So: this team's own `cost_monthly_cents` when it is NON-NULL, else the team-0 row's. In whole
+  // US DOLLARS (the wire unit; storage is integer cents). null = no cost anywhere in the chain —
+  // never "inherited", the chain has already been walked. 0 is a REAL value ("free here") and
+  // must BEAT an inherited $120, which is why every step below is `??` and never `||`.
+  costMonthlyUsd: number | null;
+  // The cost fell through from the team-0 default rather than this team's own row. Can
+  // legitimately disagree with the ROW-level `teamId` above (a real per-team classification
+  // override still using the account default's price) — see the shared `DetectedReviewer`
+  // comment. Always false at NO_TEAM_KEY: nothing sits above the inheritance root, so a UNION
+  // scope (which `classificationTeamKey` maps to 0) reports the account default as its OWN
+  // value, not as an inherited one.
+  costInherited: boolean;
 }
 
 // One row per author, resolved for `teamKey`. ONE query for both candidate keys; the requested
 // team's row is preferred in JS rather than by an ORDER BY, so the precedence is explicit and
 // cannot depend on storage order.
+//
+// Both candidate rows are kept for the length of the merge because the two axes disagree: the
+// classification takes the winning ROW, while `cost` is merged FIELD-wise across them.
 async function resolveClassifications(
   accountId: number,
   teamKey: number,
@@ -7168,6 +7188,7 @@ async function resolveClassifications(
       label: botReviewClassification.label,
       role: botReviewClassification.role,
       source: botReviewClassification.source,
+      costMonthlyCents: botReviewClassification.costMonthlyCents,
     })
     .from(botReviewClassification)
     .where(
@@ -7177,21 +7198,53 @@ async function resolveClassifications(
       ),
     )
     .execute();
-  const out = new Map<number, ResolvedClassificationRow>();
+  // Bucket by key first. At NO_TEAM_KEY the two buckets collapse (candidateKeys is [0] and the
+  // first branch claims every row), which is exactly why `costInherited` is false there.
+  type Row = (typeof rows)[number];
+  const ownByAuthor = new Map<number, Row>();
+  const rootByAuthor = new Map<number, Row>();
   for (const r of rows) {
-    const prev = out.get(r.id);
-    // The requested team's row always wins over the inherited team-0 row.
-    if (prev && prev.teamId === teamKey) continue;
-    if (prev && r.teamId !== teamKey) continue;
-    out.set(r.id, {
-      automated: r.automated,
-      kind: (r.kind as AutomatedReviewerKind | null) ?? null,
-      label: r.label,
-      role: (r.role as ReviewerRole | null) ?? 'review',
-      source: r.source,
-      teamId: r.teamId,
+    if (r.teamId === teamKey) ownByAuthor.set(r.id, r);
+    else if (r.teamId === NO_TEAM_KEY) rootByAuthor.set(r.id, r);
+  }
+  const out = new Map<number, ResolvedClassificationRow>();
+  for (const id of new Set([...ownByAuthor.keys(), ...rootByAuthor.keys()])) {
+    const own = ownByAuthor.get(id);
+    const root = rootByAuthor.get(id);
+    // ROW-level: the requested team's row always wins over the inherited team-0 row.
+    const winner = own ?? root;
+    if (!winner) continue; // unreachable — the id came from one of the two maps
+    // FIELD-level: `??` so a stored 0 ("free here") beats an inherited price instead of
+    // falling through to it. `||` here would be a one-character bug with no type error.
+    const ownCents = own?.costMonthlyCents ?? null;
+    const rootCents = root?.costMonthlyCents ?? null;
+    const cents = ownCents ?? rootCents;
+    out.set(id, {
+      automated: winner.automated,
+      kind: (winner.kind as AutomatedReviewerKind | null) ?? null,
+      label: winner.label,
+      role: (winner.role as ReviewerRole | null) ?? 'review',
+      source: winner.source,
+      teamId: winner.teamId,
+      costMonthlyUsd: cents == null ? null : cents / 100,
+      costInherited: ownCents == null && rootCents != null,
     });
   }
+  return out;
+}
+
+// The per-reviewer monthly cost that APPLIES at `teamKey`, resolved field-wise (this team's own
+// value → the team-0 default). Feeds the Bot-ROI rows, which used to carry `cost: null` and let
+// the client overlay a per-LOGIN map from `pro_settings.bots.cost` — a shape that physically
+// cannot express "$120 for Team A, $0 for Team B", so on a team tab it could only ever be wrong.
+// Cost is CORE/free: it is read from a core table, so an OSS/npx install can set and see it.
+export async function reviewerCostForUser(
+  accountId: number,
+  teamKey: number,
+): Promise<Map<number, { monthlyUsd: number | null; inherited: boolean }>> {
+  const out = new Map<number, { monthlyUsd: number | null; inherited: boolean }>();
+  for (const [id, r] of await resolveClassifications(accountId, teamKey))
+    out.set(id, { monthlyUsd: r.costMonthlyUsd, inherited: r.costInherited });
   return out;
 }
 
@@ -7436,37 +7489,108 @@ async function reviewerEvidence(
 // per-team tab can distinguish a real override from the inherited default (and correctly disable
 // "Reset to default", which on an inherited row would be a no-op the user can't tell apart from
 // a real reset).
+//
+// ── `opts.scoped` — OPT-IN repo narrowing, and it MUST stay opt-in ───────────────────────────
+// Scoped, the population is narrowed to the reviewers with a footprint in the REQUESTED TEAM'S
+// OWN repos (at NO_TEAM_KEY: the repos in NO team at all — the literal reading of "No team",
+// chosen deliberately). That is what the Bots→Settings team tab wants: only the bots relevant to
+// that team.
+//
+// ⚠ It is a FLAG and not a redefinition of teamKey 0 because FOUR production callers already read
+// this route at key 0 to mean "the whole account roster", and every one of them breaks if key 0
+// starts narrowing:
+//   • hooks/useBotColors.ts        — the account-wide bot COLOUR map
+//   • components/Activity/FeedView — per-row vendor tags + the inline "not a bot?" affordance
+//   • components/ThreadList        — the bulk "Resolve N addressed" count (the very mismatch its
+//                                    own comment says it exists to prevent)
+//   • components/settings/BotSection — the cost picker's options
+// The client query key MUST carry the flag too, or the two response shapes alias in cache.
+//
+// FOOTPRINT = any review, inline thread, or issue comment EVER (not windowed) in those repos.
+// An account with NO teams therefore sees everything on the No-Team tab, because every repo is
+// unassigned — which is the behaviour a single-team install needs. And an account where EVERY
+// repo is teamed sees everything there too: NO_TEAM_KEY is the inheritance root, so a 0-repo
+// scope degrades to the unscoped roster rather than leaving the root uneditable (see below).
 export async function listDetectedReviewers(
   accountId: number,
   teamKey: number = NO_TEAM_KEY,
+  opts: { scoped?: boolean } = {},
 ): Promise<DetectedReviewersResponse> {
   const generatedAt = new Date().toISOString();
 
-  const [revAuthors, thAuthors, commentAuthors] = await Promise.all([
-    db
-      .select({ id: reviews.authorId })
-      .from(reviews)
-      .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
-      .where(eq(pullRequests.accountId, accountId))
-      .execute(),
-    db
-      .select({ id: reviewThreads.originalCommenterId })
-      .from(reviewThreads)
-      .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
-      .where(eq(pullRequests.accountId, accountId))
-      .execute(),
-    // Issue-level PR commenters too. A comment-only automated account — e.g. golang's
-    // gopherbot, which posts issue comments but never a formal review or inline thread —
-    // would otherwise be invisible to this list AND to the Settings "Review bots" search
-    // (which filters this population), so it could never be classified. These take the CHEAP
-    // classification path below (no behavioral-evidence query — with no reviews there's none).
-    db
-      .select({ id: prComments.authorId })
-      .from(prComments)
-      .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
-      .where(eq(pullRequests.accountId, accountId))
-      .execute(),
-  ]);
+  // The repo narrowing. Both branches are already account-scoped (`getTeamRepoIds` binds
+  // teams.accountId; `getUnassignedRepoIds` binds repos.accountId), so a foreign/unknown team id
+  // resolves to [] and discloses nothing — same non-oracle property the read path relies on
+  // everywhere else.
+  const scoped = opts.scoped === true;
+  let scopeRepoIds: number[] | null = !scoped
+    ? null
+    : teamKey === NO_TEAM_KEY
+      ? await getUnassignedRepoIds(accountId)
+      : await getTeamRepoIds(teamKey, accountId);
+  // ⚠ THE INHERITANCE ROOT MUST NEVER GO DARK. At a real team, a 0-repo scope is a legitimate
+  // (and informative) empty listing — "assign repos to this team". At NO_TEAM_KEY it is not:
+  // key 0 is BOTH the untamed-repo scope AND the row every team falls back to for classification
+  // AND cost, and `classificationTeamKey` maps every union scope onto it. An account that did the
+  // ordinary thing — assign all of its repos to teams — has no unassigned repos, and a strictly
+  // scoped key 0 would then list NOTHING: no rows, no cost boxes, and (since the search-to-promote
+  // block lives on the non-empty path) no way to set an account-wide price or role at all, under
+  // an empty state telling the user to go assign more repos to teams. So the root DEGRADES to the
+  // unscoped account roster instead, and reports `scopedRepoCount: null` — which is exactly what
+  // that field means ("no scoping happened, so there is no count to quote"), and is what makes the
+  // UI drop both the "reviewers seen in this scope's N repos" caption and the team-only empty
+  // copy. Only key 0 gets this: a named team with no repos really does have nothing to show.
+  if (scoped && teamKey === NO_TEAM_KEY && scopeRepoIds != null && scopeRepoIds.length === 0) {
+    scopeRepoIds = null;
+  }
+  // NULL when the listing is not repo-scoped — deliberately NOT the account's repo count. The
+  // field exists to make an empty `reviewers` legible, and the one case it most needs to catch
+  // ("this team has no repos yet", the only 0) is exactly what a large account-wide number would
+  // disguise.
+  const scopedRepoCount: number | null = scopeRepoIds == null ? null : scopeRepoIds.length;
+  // Whether the listing ACTUALLY narrowed. Distinct from `scoped` (the request) because of the
+  // root degradation above: an unnarrowed listing has no "reviewer with no footprint in scope"
+  // to rescue, so the dormant scan below would only cost a query.
+  const repoScoped = scopeRepoIds != null;
+  // A scope that resolved to NO repos: every footprint query below would become
+  // `repo_id IN ()`. Skip them outright rather than relying on the dialects agreeing about an
+  // empty IN list — dormant-only rows (below) can still legitimately populate the response.
+  const noScopeRepos = scopeRepoIds != null && scopeRepoIds.length === 0;
+  const repoScopeFilter = scopeRepoIds != null && scopeRepoIds.length > 0
+    ? [inArray(pullRequests.repoId, scopeRepoIds)]
+    : [];
+
+  type AuthorIdRow = { id: number | null };
+  let revAuthors: AuthorIdRow[] = [];
+  let thAuthors: AuthorIdRow[] = [];
+  let commentAuthors: AuthorIdRow[] = [];
+  if (!noScopeRepos) {
+    [revAuthors, thAuthors, commentAuthors] = await Promise.all([
+      db
+        .select({ id: reviews.authorId })
+        .from(reviews)
+        .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+        .where(and(eq(pullRequests.accountId, accountId), ...repoScopeFilter))
+        .execute(),
+      db
+        .select({ id: reviewThreads.originalCommenterId })
+        .from(reviewThreads)
+        .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+        .where(and(eq(pullRequests.accountId, accountId), ...repoScopeFilter))
+        .execute(),
+      // Issue-level PR commenters too. A comment-only automated account — e.g. golang's
+      // gopherbot, which posts issue comments but never a formal review or inline thread —
+      // would otherwise be invisible to this list AND to the Settings "Review bots" search
+      // (which filters this population), so it could never be classified. These take the CHEAP
+      // classification path below (no behavioral-evidence query — with no reviews there's none).
+      db
+        .select({ id: prComments.authorId })
+        .from(prComments)
+        .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+        .where(and(eq(pullRequests.accountId, accountId), ...repoScopeFilter))
+        .execute(),
+    ]);
+  }
   // Reviewers = submitted a review OR opened an inline thread → the full evidence-based
   // classification. Comment-only ids join the candidate set but skip that expensive path.
   const reviewerIds = new Set<number>();
@@ -7474,7 +7598,102 @@ export async function listDetectedReviewers(
   for (const r of thAuthors) if (r.id != null) reviewerIds.add(r.id);
   const idSet = new Set<number>(reviewerIds);
   for (const r of commentAuthors) if (r.id != null) idSet.add(r.id);
-  if (idSet.size === 0) return { reviewers: [], teamId: teamKey, generatedAt };
+
+  // ── DORMANT-IN-SCOPE rows ──────────────────────────────────────────────────────────────────
+  // A scoped listing must not silently drop a classification the USER SET AT THIS KEY just
+  // because the reviewer has no footprint in the scoped repos: `automatedReviewerUserIds` /
+  // `classificationKindForUser` resolve by TEAM KEY and never by repo, so that row still governs
+  // every metric computed at this key, and governs again the moment a repo moves back into the
+  // team. "Set here but invisible while still steering everything" is the support question
+  // `dormantInScope` exists to pre-empt — the UI shows these dimmed, in their own section.
+  //
+  // ⚠ THE PREDICATE IS "A HUMAN SET SOMETHING HERE" — a manual classification OR a stored PRICE —
+  // and the narrowing it must not undo is load-bearing rather than cosmetic. Auto rows are ALSO
+  // persisted at NO_TEAM_KEY (see the lazy classify below), so an unfiltered scan would resurrect
+  // the entire account roster as "dormant" and negate the scoping outright. A manual row is a
+  // human judgement with intent behind it; a bare auto row is regenerable and carries none.
+  //
+  // ⚠ `source = 'manual'` ALONE IS NOT THAT PREDICATE, and assuming it was cost real money. A
+  // COST-ONLY patch deliberately does NOT stamp 'manual' (that would freeze the classification
+  // forever — see setReviewerOverride), so pricing an auto-detected bot creates a row whose source
+  // is `vendor_login`/`github_type`/`behavioral` — at ANY key, including a team's. Filtering on
+  // 'manual' therefore dropped exactly the rows that hold MONEY: a price typed on a team tab
+  // vanished from that tab the moment the bot's repo left the team, while still resolving at that
+  // key, with no surface left to audit or clear it; and a price typed at key 0 — the root every
+  // team inherits from — vanished from the No-team tab as soon as the account had no untamed
+  // repos, while driving every team's inherited cost. `cost_monthly_cents IS NOT NULL` keeps the
+  // narrowing (priced rows are a tiny subset of the roster, unlike auto rows) and closes both.
+  // NOT-NULL, not truthiness: a stored 0 is a real price ("free here") and must stay findable.
+  //
+  // ⚠⚠ AND THE CANDIDATES ARE THEN INTERSECTED WITH THE ACCOUNT'S OWN SYNCED POPULATION. Caught
+  // by verify:isolation: `bot_review_classification.author_user_id` points at the GLOBAL `users`
+  // table and `setReviewerOverride` writes a row for ANY user id, so an unfiltered dormant scan
+  // let a tenant write an override for an arbitrary id and then read that person's login, display
+  // name and avatar back out of this listing — a cross-tenant profile lookup over a global table,
+  // the exact shape `listUsers(accountId)` and the `/api/users/:id/stats` counts-only design both
+  // exist to prevent. A row for a reviewer this account has never synced also cannot govern
+  // anything (there is no activity for it to classify), so nothing real is lost.
+  const dormantIds = new Set<number>();
+  if (repoScoped) {
+    const storedHere = await db
+      .select({ id: botReviewClassification.authorUserId })
+      .from(botReviewClassification)
+      .where(
+        and(
+          eq(botReviewClassification.accountId, accountId),
+          eq(botReviewClassification.teamId, teamKey),
+          or(
+            eq(botReviewClassification.source, 'manual'),
+            isNotNull(botReviewClassification.costMonthlyCents),
+          ),
+        ),
+      )
+      .execute();
+    const candidates = storedHere.map((r) => r.id).filter((id) => !idSet.has(id));
+    if (candidates.length > 0) {
+      // Deliberately NOT repo-filtered: the question here is "does this account know this actor
+      // at all", the same predicate listUsers uses. Repo scoping is what made them a candidate.
+      const [seenRev, seenTh, seenCm] = await Promise.all([
+        db
+          .selectDistinct({ id: reviews.authorId })
+          .from(reviews)
+          .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+          .where(
+            and(eq(pullRequests.accountId, accountId), inArray(reviews.authorId, candidates)),
+          )
+          .execute(),
+        db
+          .selectDistinct({ id: reviewThreads.originalCommenterId })
+          .from(reviewThreads)
+          .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+          .where(
+            and(
+              eq(pullRequests.accountId, accountId),
+              inArray(reviewThreads.originalCommenterId, candidates),
+            ),
+          )
+          .execute(),
+        db
+          .selectDistinct({ id: prComments.authorId })
+          .from(prComments)
+          .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+          .where(
+            and(eq(pullRequests.accountId, accountId), inArray(prComments.authorId, candidates)),
+          )
+          .execute(),
+      ]);
+      const known = new Set<number>();
+      for (const rows of [seenRev, seenTh, seenCm])
+        for (const r of rows) if (r.id != null) known.add(r.id);
+      for (const id of candidates) {
+        if (!known.has(id)) continue;
+        dormantIds.add(id);
+        idSet.add(id);
+      }
+    }
+  }
+
+  if (idSet.size === 0) return { reviewers: [], teamId: teamKey, scopedRepoCount, generatedAt };
   const ids = [...idSet];
 
   const userRows = await db
@@ -7501,46 +7720,67 @@ export async function listDetectedReviewers(
       ),
     )
     .execute();
+  // ROW-level winner per author (the requested team's row over the inherited team-0 one) …
   const clsById = new Map<number, (typeof clsRows)[number]>();
+  // … and the two rows kept apart, because COST merges FIELD-wise across them: this team's
+  // `cost_monthly_cents` when non-null, else the team-0 default's. `??`, never `||` — a stored 0
+  // means "this team pays nothing for this bot" and must BEAT an inherited price.
+  const ownCostCents = new Map<number, number | null>();
+  const rootCostCents = new Map<number, number | null>();
   for (const c of clsRows) {
+    if (c.teamId === teamKey) ownCostCents.set(c.authorUserId, c.costMonthlyCents);
+    else if (c.teamId === NO_TEAM_KEY) rootCostCents.set(c.authorUserId, c.costMonthlyCents);
     const prev = clsById.get(c.authorUserId);
     if (prev && prev.teamId === teamKey) continue;
     if (prev && c.teamId !== teamKey) continue;
     clsById.set(c.authorUserId, c);
   }
 
-  // 90-day thread volume per reviewer.
+  // 90-day thread volume per reviewer. ⚠ TAKES THE REPO FILTER: without it a team tab would
+  // caption a bot "412 threads · 90d" for repos that only saw 12 of them.
   const since = new Date(Date.now() - 90 * 86_400_000);
-  const volRows = await db
-    .select({ id: reviewThreads.originalCommenterId, c: count() })
-    .from(reviewThreads)
-    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        inArray(reviewThreads.originalCommenterId, ids),
-        gte(reviewThreads.createdAt, since),
-      ),
-    )
-    .groupBy(reviewThreads.originalCommenterId)
-    .execute();
+  const volRows = noScopeRepos
+    ? []
+    : await db
+        .select({ id: reviewThreads.originalCommenterId, c: count() })
+        .from(reviewThreads)
+        .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+        .where(
+          and(
+            eq(pullRequests.accountId, accountId),
+            inArray(reviewThreads.originalCommenterId, ids),
+            gte(reviewThreads.createdAt, since),
+            ...repoScopeFilter,
+          ),
+        )
+        .groupBy(reviewThreads.originalCommenterId)
+        .execute();
   const volById = new Map<number, number>();
   for (const r of volRows) if (r.id != null) volById.set(r.id, r.c);
 
-  // Most-recent non-empty review body per reviewer (a small sample for the UI).
-  const sampleRows = await db
-    .select({ authorId: reviews.authorId, body: reviews.body, submittedAt: reviews.submittedAt })
-    .from(reviews)
-    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        inArray(reviews.authorId, ids),
-        isNotNull(reviews.body),
-      ),
-    )
-    .orderBy(desc(reviews.submittedAt))
-    .execute();
+  // Most-recent non-empty review body per reviewer (a small sample for the UI). ⚠ Also takes the
+  // repo filter — it is the row's "why we think this is a bot" evidence, so on a team tab it must
+  // be evidence from that team's own repos.
+  const sampleRows = noScopeRepos
+    ? []
+    : await db
+        .select({
+          authorId: reviews.authorId,
+          body: reviews.body,
+          submittedAt: reviews.submittedAt,
+        })
+        .from(reviews)
+        .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+        .where(
+          and(
+            eq(pullRequests.accountId, accountId),
+            inArray(reviews.authorId, ids),
+            isNotNull(reviews.body),
+            ...repoScopeFilter,
+          ),
+        )
+        .orderBy(desc(reviews.submittedAt))
+        .execute();
   const sampleById = new Map<number, string>();
   for (const r of sampleRows) {
     if (r.authorId == null) continue;
@@ -7627,6 +7867,13 @@ export async function listDetectedReviewers(
       resolvedTeamId = NO_TEAM_KEY;
       inherited = true;
     }
+    // FIELD-level cost merge, deliberately independent of the ROW-level resolution above: a row
+    // that exists only to carry a label/role opinion holds NO cost opinion, so letting the winning
+    // row decide would zero an inherited price. `??` so a stored 0 ("free here") wins over an
+    // inherited $120 instead of falling through to it.
+    const own = ownCostCents.get(id) ?? null;
+    const root = rootCostCents.get(id) ?? null;
+    const cents = own ?? root;
     reviewers.push({
       userId: id,
       login: u.githubLogin,
@@ -7636,6 +7883,13 @@ export async function listDetectedReviewers(
       isManualOverride,
       teamId: resolvedTeamId,
       inherited,
+      // Always false on an unscoped listing (nothing was narrowed, so nothing can be dormant
+      // "in scope") — see the shared type.
+      dormantInScope: dormantIds.has(id),
+      costMonthlyUsd: cents == null ? null : cents / 100,
+      // False at NO_TEAM_KEY by construction: `ownCostCents` claims every key-0 row there, so
+      // `own` is non-null whenever `root` is, and nothing sits above the inheritance root.
+      costInherited: own == null && root != null,
       threadsLast90d: volById.get(id) ?? 0,
       sampleReviewBody: sampleById.get(id) ?? null,
     });
@@ -7650,7 +7904,37 @@ export async function listDetectedReviewers(
   );
   // Echo the resolved key so the client can assert the response matches the tab it asked for —
   // the query key and the team picker can disagree for a frame while a switch is in flight.
-  return { reviewers, teamId: teamKey, generatedAt };
+  return { reviewers, teamId: teamKey, scopedRepoCount, generatedAt };
+}
+
+// The raw classification rows for ONE author at the requested key and at the inheritance root.
+// Both are returned separately (rather than pre-collapsed) because the two axes disagree: the
+// classification takes the winning ROW, cost merges FIELD-wise. At NO_TEAM_KEY the two are the
+// same row by construction.
+async function classificationRowsFor(
+  accountId: number,
+  userId: number,
+  teamKey: number,
+): Promise<{
+  own: typeof botReviewClassification.$inferSelect | null;
+  root: typeof botReviewClassification.$inferSelect | null;
+}> {
+  const candidateKeys = teamKey === NO_TEAM_KEY ? [NO_TEAM_KEY] : [teamKey, NO_TEAM_KEY];
+  const rows = await db
+    .select()
+    .from(botReviewClassification)
+    .where(
+      and(
+        eq(botReviewClassification.accountId, accountId),
+        inArray(botReviewClassification.teamId, candidateKeys),
+        eq(botReviewClassification.authorUserId, userId),
+      ),
+    )
+    .execute();
+  return {
+    own: rows.find((r) => r.teamId === teamKey) ?? null,
+    root: rows.find((r) => r.teamId === NO_TEAM_KEY) ?? null,
+  };
 }
 
 // WS1e — the two-way manual override. Upserts a source='manual' classification row for
@@ -7663,6 +7947,22 @@ export async function listDetectedReviewers(
 // caller could write classification rows keyed to another tenant's team id. The READ path needs
 // no such check (every read also binds accountId, so a foreign key simply matches nothing), but
 // a WRITE creates the row, so it must be rejected before the insert.
+//
+// ⚠ TWO PATCH KINDS, discriminated by the PRESENCE of `body.automated` (now optional):
+//
+//   automated present → a CLASSIFICATION opinion. Stamps source='manual' / confidence='high' /
+//     reasons, which is correct and load-bearing: classifyReviewer returns a manual row verbatim
+//     and never re-derives it, so a human judgement sticks.
+//
+//   automated ABSENT → a COST-ONLY patch, and it must touch NOTHING but the cost. Stamping the
+//     classification anyway would mean TYPING A PRICE froze that reviewer's classification
+//     forever — it would stop self-healing when the login later joins the vendor list or its
+//     behavioural score changes — and, on a team tab, would silently convert a merely-inherited
+//     row into a full row-level override nobody asked for. Pricing a bot is not an opinion about
+//     what it is. That path below is written so the classification columns appear ONLY in the
+//     INSERT branch (where NOT NULL leaves no choice) and are copied VERBATIM from the inherited
+//     row — never fabricated, never stamped 'manual'; the ON CONFLICT `set:` carries the cost and
+//     the timestamp and nothing else, so the "don't touch it" rule is structural, not a comment.
 export async function setReviewerOverride(
   accountId: number,
   userId: number,
@@ -7670,7 +7970,13 @@ export async function setReviewerOverride(
 ): Promise<ReviewerClassification | null> {
   const u = (
     await db
-      .select({ id: users.id, login: users.githubLogin, displayName: users.displayName })
+      .select({
+        id: users.id,
+        login: users.githubLogin,
+        displayName: users.displayName,
+        githubType: users.githubType,
+        isBot: users.isBot,
+      })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1)
@@ -7690,6 +7996,117 @@ export async function setReviewerOverride(
       .execute();
     if (!owned[0]) return null; // unknown or another tenant's team → 404
   }
+
+  // ⚠ THREE-STATE, AND THE NEIGHBOURING `role` LINE TEACHES THE WRONG IDIOM. `body.role` is read
+  // with `== null` a few lines below, and `== null` is TRUE for null — copying that here would
+  // turn "clear the cost" into "leave it alone" and the reset would silently stop working.
+  //   absent   → leave the stored cost alone
+  //   null     → CLEAR it, so this key inherits the team-0 default again
+  //   a number → set it; 0 is REAL ("this team pays nothing for this bot")
+  const hasCost = body.costMonthlyUsd !== undefined;
+  // Wire is DOLLARS, storage is integer CENTS — converted only here, at the store boundary.
+  // Negative money is meaningless; clamp rather than reject so a typo can't 500.
+  const costCents: number | null =
+    !hasCost || body.costMonthlyUsd == null
+      ? null
+      : Math.max(0, Math.round(body.costMonthlyUsd * 100));
+
+  // ── COST-ONLY PATCH ────────────────────────────────────────────────────────────────────────
+  if (body.automated === undefined) {
+    if (!hasCost) {
+      // No opinion of any kind. Unreachable through the route (it 400s an empty patch); return
+      // what is currently resolved rather than writing anything.
+      const resolved = (await classificationRowsFor(accountId, userId, teamKey)).own;
+      return resolved ? rowToClassification(resolved, u.login) : null;
+    }
+    let { own, root } = await classificationRowsFor(accountId, userId, teamKey);
+    if (!own && !root) {
+      // Nothing is classified anywhere for this login, so there is nothing to copy. Bootstrap the
+      // ACCOUNT DEFAULT through the real classifier's cheap evidence-free path — the same call
+      // listDetectedReviewers makes for a comment-only account. That keeps the row non-manual (so
+      // it still self-heals) instead of fabricating automated/confidence/source judgements here.
+      // Rare: by the time the UI can offer a price the listing has already classified the row.
+      await classifyReviewer(
+        accountId,
+        { id: u.id, githubLogin: u.login, githubType: u.githubType, isBot: u.isBot },
+        {},
+        NO_TEAM_KEY,
+      );
+      ({ own, root } = await classificationRowsFor(accountId, userId, teamKey));
+    }
+    const seed = own ?? root;
+    if (!seed) return null; // unreachable — classifyReviewer always persists on a non-manual path
+
+    // ── CLEARING A PRICE OFF A COST-CARRIER ROW → DROP THE ROW ────────────────────────────────
+    // `costCents === null` means "this key inherits again", and at a TEAM key a row whose source
+    // is not 'manual' exists ONLY because someone priced an inherited row: every classification
+    // patch stamps 'manual', and auto-classification only ever writes key 0. Its
+    // automated/kind/label/role are a verbatim COPY of the default's, written because those
+    // columns are NOT NULL — not because anyone had an opinion here.
+    //
+    // Leaving that copy behind once its price is gone is strictly worse than deleting it: it keeps
+    // winning ROW-level resolution, so later edits to the default silently stop reaching this team,
+    // and the tab badges a "team override" nobody made (which then offers a "Reset to default"
+    // button for a classification the user never set). Nothing is lost — every surviving column on
+    // it came from the very row it now falls back to. NEVER at NO_TEAM_KEY: the root row is also
+    // the auto-classification cache, and a null price there is an ordinary "no cost set".
+    if (costCents === null && teamKey !== NO_TEAM_KEY && (!own || own.source !== 'manual')) {
+      if (own) {
+        await db
+          .delete(botReviewClassification)
+          .where(
+            and(
+              eq(botReviewClassification.accountId, accountId),
+              eq(botReviewClassification.teamId, teamKey),
+              eq(botReviewClassification.authorUserId, userId),
+            ),
+          )
+          .execute();
+      }
+      // Echo what now applies here — the inherited default. (`root` is non-null: the bootstrap
+      // above guarantees it, and a cost-carrier row can only have been seeded from one.)
+      return root ? rowToClassification(root, u.login) : null;
+    }
+
+    const now = new Date();
+    await db
+      .insert(botReviewClassification)
+      .values({
+        accountId,
+        teamId: teamKey,
+        authorUserId: userId,
+        // INSERT ONLY, and copied VERBATIM off the inherited row: these columns are NOT NULL, so
+        // a brand-new team row cannot omit them. Copying (rather than stamping 'manual') is what
+        // keeps a non-manual classification re-derivable, and what stops a price from silently
+        // becoming a classification override. `role` IS seeded on purpose — row-level resolution
+        // means not seeding it REVERSES the classification (the exact opposite of `cost`, which
+        // must never be seeded).
+        automated: seed.automated,
+        kind: seed.kind,
+        label: seed.label,
+        role: seed.role,
+        confidence: seed.confidence,
+        source: seed.source,
+        reasonsJson: seed.reasonsJson,
+        costMonthlyCents: costCents,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          botReviewClassification.accountId,
+          botReviewClassification.teamId,
+          botReviewClassification.authorUserId,
+        ],
+        // THE COST AND THE TIMESTAMP, NOTHING ELSE. This object is the structural guarantee that
+        // a cost-only patch cannot stamp a classification — there is no `...base` to leak into.
+        set: { costMonthlyCents: costCents, updatedAt: now },
+      })
+      .execute();
+    const stored = (await classificationRowsFor(accountId, userId, teamKey)).own;
+    return stored ? rowToClassification(stored, u.login) : null;
+  }
+
+  // ── CLASSIFICATION PATCH (optionally carrying a cost) ──────────────────────────────────────
   const kind: AutomatedReviewerKind | null = body.automated ? body.kind ?? 'in_house' : null;
   // Default a MANUALLY-added bot's label to the account's own name — its display/full name
   // ("GopherBot"), falling back to the login — NOT the generic kind label ("In-house AI"),
@@ -7729,10 +8146,25 @@ export async function setReviewerOverride(
       ? (await resolveClassifications(accountId, teamKey)).get(userId)?.role
       : undefined;
   const insertRole: ReviewerRole = body.role ?? inheritedRole ?? defaultRoleFor(u.login);
-  const setValues = body.role == null ? base : { ...base, role: body.role };
+  // ⚠ COST IS SPREAD IN ONLY WHEN THE PATCH CARRIES ONE, and it is the OPPOSITE of `role` above:
+  //   • absent  → the key is omitted entirely. On INSERT that leaves the column at NULL, so a new
+  //     team row INHERITS the team-0 price. Seeding it from the inherited value instead would
+  //     freeze a copy and later edits to the default would stop reaching this team. On UPDATE it
+  //     leaves whatever was stored — so "Mark as quality check" can never wipe a price.
+  //   • present → written, including an explicit null (= clear it, inherit again) and 0 (= real,
+  //     "free here"). Which is why the guard above is `!== undefined` and not `!= null`.
+  const costPatch = hasCost ? { costMonthlyCents: costCents } : {};
+  const setValues = body.role == null ? { ...base, ...costPatch } : { ...base, role: body.role, ...costPatch };
   await db
     .insert(botReviewClassification)
-    .values({ accountId, teamId: teamKey, authorUserId: userId, role: insertRole, ...base })
+    .values({
+      accountId,
+      teamId: teamKey,
+      authorUserId: userId,
+      role: insertRole,
+      ...base,
+      ...costPatch,
+    })
     .onConflictDoUpdate({
       // The 3-column tuple — migration 0042 dropped the old (account_id, author_user_id) unique
       // index. A stale 2-column target raises "no unique or exclusion constraint matching the ON
@@ -7782,6 +8214,14 @@ export async function setReviewerOverride(
 // saying "human", which a team would then be stuck with. Deleting at NO_TEAM_KEY is allowed (it
 // removes the account default itself and returns the reviewer to auto-detection) but the UI does
 // not offer it for an INHERITED row, where it would delete a different team's answer.
+//
+// ⚠ IT TAKES THIS TEAM'S PRICE WITH IT. `cost_monthly_cents` lives on the row being deleted, so a
+// reset also reverts the cost to the inherited default. That cannot be avoided here — cost is the
+// one FIELD-wise column on an otherwise ROW-wise row, and there is no classification to keep
+// without the row — so the CALLER owns saying so: DetectedReviewersTable offers this button only
+// on a real manual classification override (a row that carries only a price has nothing to reset,
+// and clearing its box drops it via setReviewerOverride), names the cost in the label/tooltip when
+// one would go, and confirms before firing. Do not wire a new caller without doing the same.
 export async function deleteReviewerOverride(
   accountId: number,
   userId: number,
@@ -8413,6 +8853,12 @@ export async function getBotAnalytics(
   }
   const kindMap = await classificationKindForUser(accountId, teamKey);
   const roleMap = await reviewerRoleForUser(accountId, teamKey);
+  // SERVER-resolved per-team cost (field-wise: this team's row → the team-0 default). This used
+  // to be `null` here with the client overlaying a per-LOGIN map from `pro_settings.bots.cost` —
+  // a shape that cannot express "$120 for Team A, $0 for Team B", so on a team tab it could only
+  // ever be wrong. The client keeps a NULL-ONLY legacy fallback for costs plugin migration 0019
+  // could not attach to a classification row.
+  const costMap = await reviewerCostForUser(accountId, teamKey);
 
   // Per-REVIEWER identity (so in-house bots — all kind 'in_house' — separate into their own rows
   // instead of collapsing). Label preference: the account's custom classification label →
@@ -8772,6 +9218,8 @@ export async function getBotAnalytics(
     // The ROLE decides which array this row lands in. Everything above is computed identically
     // for both — a quality check's numbers are real, they are just not REVIEW numbers.
     const isQualityCheck = roleMap.get(userId) === 'quality_check';
+    const cost = costMap.get(userId);
+    const costMonthlyUsd = cost?.monthlyUsd ?? null;
     const trend: BotVendorTrendPoint[] = acc.weekly.map((w, i) => ({
       weekStart: new Date(trendFrom.getTime() + i * 7 * 86_400_000).toISOString(),
       threads: w.threads,
@@ -8799,8 +9247,18 @@ export async function getBotAnalytics(
       // The verdict uses OVERDUE untouched (aged past the norm), not raw untouched — so a bot
       // isn't flagged noisy for threads the team just hasn't gotten to within its normal window.
       verdict: botVerdict(acc.threads, actedOnPct, overdueUntouched),
-      costMonthlyUsd: null,
-      costPerActedOnUsd: null,
+      // `?? null` (never `||`): a resolved 0 is a REAL price ("this team pays nothing for this
+      // bot") and must survive as 0, not collapse to "unknown". $/acted-on is null whenever the
+      // price is unknown or nothing was acted on — dividing by 0 would print Infinity.
+      costMonthlyUsd: costMonthlyUsd,
+      costPerActedOnUsd:
+        costMonthlyUsd != null && acc.actedOn > 0 ? costMonthlyUsd / acc.actedOn : null,
+      // ⚠ An inherited price is ONE subscription seen from another team's vantage point, not
+      // extra spend — the UI labels it so, and cost is never summed across teams. Always false at
+      // NO_TEAM_KEY, which is also where every UNION scope ('all'/'none'/'teams'/'teams:a,b')
+      // lands via classificationTeamKey: a union has no requested team, so the account default it
+      // reports IS its own value, not an inherited one.
+      costInherited: cost?.inherited ?? false,
       dormant,
       lastActiveAt: lastActiveMs != null ? new Date(lastActiveMs).toISOString() : null,
       trend,

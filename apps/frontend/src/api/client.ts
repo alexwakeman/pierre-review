@@ -773,8 +773,15 @@ export const api = {
   // account default. Each returned row carries `teamId` + `inherited` so the tab can tell a real
   // per-team override from the inherited default; the response echoes the resolved `teamId` so a
   // caller can assert it matches the tab it asked for.
-  botReviewers: (teamId?: number | null) =>
-    get<DetectedReviewersResponse>(withQuery('/api/bot-reviewers', teamIdParam(teamId))),
+  // `scoped` is OPT-IN and narrows the listing to the reviewers seen in the requested team's OWN
+  // repos (at NO_TEAM_KEY: the repos in no team at all), and is what makes `scopedRepoCount` a
+  // number instead of null. It must stay opt-in: the four account-wide consumers (the bot colour
+  // map, the feed's vendor tag, the Threads-tab vendor filter) need the WHOLE roster, and a
+  // narrowed one would silently drop bots from surfaces that aren't about teams at all.
+  botReviewers: (teamId?: number | null, scoped = false) =>
+    get<DetectedReviewersResponse>(
+      withQuery('/api/bot-reviewers', teamIdParam(teamId), scoped ? 'scoped=true' : ''),
+    ),
   // Two-way manual override of a reviewer's classification (mark automated / not-a-bot, and set
   // its ReviewerRole). Returns the new classification.
   //
@@ -797,8 +804,9 @@ export const api = {
       jsonBody('DELETE'),
     ).then((r) => handle<void>(r)),
   // Per-vendor bot ROI / utilisation analytics over the chosen window (threads / acted-on %
-  // / untouched / verdict / trend). Cost fields come back null — the client overlays cost
-  // from /api/pro/settings `bots.cost`.
+  // / untouched / verdict / trend). Cost is now SERVER-resolved per team on each row
+  // (`costMonthlyUsd`/`costInherited`); the old client-side overlay from /api/pro/settings
+  // `bots.cost` survives only as a null-filling legacy fallback — see lib/botCost.ts.
   botAnalytics: (window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
     const r = repoIdsParam(repoIds);
     // A repo scope wins over the team scope (the per-repo Bots tab); omit `scope` then.

@@ -53,6 +53,16 @@ function parseIntList(raw?: string): number[] | null {
 // `teamId` rides in the BODY, not the query string, because it is part of the row's IDENTITY.
 // minimum 0 = NO_TEAM_KEY (the account default every team inherits); the query layer verifies
 // the id belongs to this account and 404s otherwise.
+//
+// ⚠ `automated` IS NO LONGER REQUIRED, and its absence is the discriminator for a COST-ONLY
+// patch (see setReviewerOverride). Re-adding `required: ['automated']` would make it impossible
+// to price a bot without also stamping a permanent manual classification on it.
+//
+// `costMonthlyUsd` MUST accept null — that is "clear the cost so this key inherits again", the
+// reset the empty cost box sends. A bare `{ type: 'number' }` would 400 it. Whole US dollars on
+// the wire; the store converts to integer cents. The upper bound is an input guard only (no
+// realistic bot subscription is $1M/month) — it costs nothing and keeps a fat-fingered paste out
+// of the column.
 const overrideSchema = {
   params: {
     type: 'object',
@@ -61,7 +71,6 @@ const overrideSchema = {
   },
   body: {
     type: 'object',
-    required: ['automated'],
     additionalProperties: false,
     properties: {
       automated: { type: 'boolean' },
@@ -69,28 +78,52 @@ const overrideSchema = {
       label: { type: ['string', 'null'] },
       role: { type: 'string', enum: ['review', 'quality_check'] },
       teamId: { type: 'integer', minimum: 0 },
+      costMonthlyUsd: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
     },
   },
 };
 
-// GET /api/bot-reviewers?teamId= — which team's classification answers to show. Absent = 0
-// (NO_TEAM_KEY, the account default). DELETE /api/bot-reviewers/:userId?teamId= reuses it for
-// "Reset to default". A string is used on the wire (query strings are untyped) and coerced by
-// the handler; the query layer rejects a non-integer / foreign team.
-const teamScopedReviewersSchema = {
+// GET /api/bot-reviewers?teamId=&scoped= — which team's classification answers to show. Absent
+// teamId = 0 (NO_TEAM_KEY, the account default).
+//
+// `scoped` is OPT-IN and narrows the listing to the reviewers with a footprint in the requested
+// team's OWN repos (at key 0: the repos in NO team). It CANNOT become the meaning of teamId=0:
+// four production callers already read this route at key 0 for the whole account roster (the bot
+// colour map, the feed's vendor tag, ThreadList's bulk "Resolve N addressed" count, and the cost
+// picker's options), and narrowing key 0 breaks all four. Only the Bots settings tab sends it —
+// and the client query key must carry it, or the two shapes alias in cache.
+const listReviewersSchema = {
   querystring: {
     type: 'object',
     additionalProperties: false,
-    properties: { teamId: { type: 'integer', minimum: 0 } },
+    properties: {
+      teamId: { type: 'integer', minimum: 0 },
+      scoped: { type: 'boolean', default: false },
+    },
   },
 };
+
+// DELETE /api/bot-reviewers/:userId?teamId= — "Reset to default". Deliberately NOT sharing
+// `listReviewersSchema`: `scoped` is a read-shape concern and has no meaning on a delete, so the
+// narrower schema keeps it from ever reaching this handler.
+//
+// ⚠ It is STRIPPED, not rejected (verified: `DELETE …?teamId=3&scoped=true` → 204, not 400).
+// Fastify's default ajv config sets `removeAdditional: true`, which turns
+// `additionalProperties: false` into "delete the extra keys" rather than "fail the request" —
+// for the querystring AND the body. So this schema is a filter, not a guard: never rely on
+// additionalProperties alone to REJECT a param (the PATCH's own 400 on an opinion-free body is a
+// handler check for exactly that reason).
 const deleteOverrideSchema = {
   params: {
     type: 'object',
     required: ['userId'],
     properties: { userId: { type: 'integer' } },
   },
-  ...teamScopedReviewersSchema,
+  querystring: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { teamId: { type: 'integer', minimum: 0 } },
+  },
 };
 
 // GET /api/bot-analytics?window= — the window is a closed 4-value set, safe to enum + default.
@@ -186,21 +219,33 @@ const scopeResolveSchema = {
 export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // Every distinct reviewer in the account (human + automated), classified, with 90-day
   // volume + a sample body — powers the Settings "Review bots" detected-reviewers table.
-  app.get('/api/bot-reviewers', { schema: teamScopedReviewersSchema }, async (req) => {
-    const { teamId } = req.query as { teamId?: number };
+  app.get('/api/bot-reviewers', { schema: listReviewersSchema }, async (req) => {
+    const { teamId, scoped } = req.query as { teamId?: number; scoped?: boolean };
     const resp: DetectedReviewersResponse = await listDetectedReviewers(
       accountIdOf(req),
       teamId ?? 0,
+      { scoped: scoped === true },
     );
     return resp;
   });
 
-  // Two-way manual override: force a reviewer automated (with kind/label) or back to human.
-  // Upserts a source='manual' classification the auto resolver never overwrites. 404 when the
-  // user id is unknown to this account's synced data.
+  // Two-way manual override: force a reviewer automated (with kind/label) or back to human, and/or
+  // set this team's monthly cost for it. Upserts a source='manual' classification the auto
+  // resolver never overwrites — EXCEPT on a cost-only patch, which touches only the price. 404
+  // when the user id is unknown to this account's synced data.
   app.patch('/api/bot-reviewers/:userId', { schema: overrideSchema }, async (req, reply) => {
     const { userId } = req.params as { userId: number };
     const body = req.body as ReviewerOverrideBody;
+    // An opinion-free patch is a client bug, not a no-op worth a 200: `automated` absent means
+    // "cost only", so with `costMonthlyUsd` absent too there is nothing to write. Rejecting it
+    // here keeps the query layer's own "unreachable" branch genuinely unreachable.
+    if (body.automated === undefined && body.costMonthlyUsd === undefined) {
+      reply.status(400);
+      return {
+        error: 'BadRequest',
+        message: 'Patch must carry `automated` (a classification) and/or `costMonthlyUsd`',
+      };
+    }
     // null covers BOTH an unknown user id and an unknown/foreign teamId — the same 404 on
     // purpose: distinguishing them would turn this route into an existence oracle over another
     // tenant's team ids.
@@ -228,8 +273,11 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Bot ROI / utilisation over a window (default rolling_14): per-vendor threads/acted-on/
-  // untouched + verdict + trend + deterministic tuning suggestions. Cost fields are null here
-  // (the client overlays per-vendor cost from Pro settings).
+  // untouched + verdict + trend + deterministic tuning suggestions. Cost is SERVER-resolved per
+  // team on each row (`costMonthlyUsd`/`costInherited`, from the core
+  // `bot_review_classification.cost_monthly_cents`) — a null here is FINAL, and the deprecated Pro
+  // per-login blob only ever points at a stranded price now. Note a UNION scope resolves at
+  // NO_TEAM_KEY, so its prices are the ACCOUNT DEFAULTS and must never be summed across teams.
   app.get('/api/bot-analytics', { schema: analyticsSchema }, async (req) => {
     const { window, scope, repoIds } = req.query as {
       window: BotWindowKind;

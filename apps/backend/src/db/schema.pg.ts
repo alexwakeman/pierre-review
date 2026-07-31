@@ -760,6 +760,11 @@ export const botReviewClassification = pgTable(
     label: text('label'),
     // See schema.sqlite.ts for the full rationale on both new columns.
     role: text('role').notNull().default('review'),
+    // Per-team monthly cost in INTEGER CENTS, nullable (NULL = inherit the team-0 value, 0 =
+    // explicitly free here). integer in BOTH dialects on purpose — `numeric` has no sqlite twin
+    // and node-postgres hands it back as a string. Full rationale, including why this ONE column
+    // resolves field-wise while the rest of the row resolves wholesale, in schema.sqlite.ts.
+    costMonthlyCents: integer('cost_monthly_cents'),
     confidence: text('confidence').notNull(), // 'high'|'medium'|'low'
     source: text('source').notNull(), // ClassificationSource
     reasonsJson: jsonb('reasons_json').$type<string[]>(),

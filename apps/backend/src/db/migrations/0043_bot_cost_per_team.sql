@@ -1,0 +1,40 @@
+-- Per-TEAM, per-bot monthly COST, SQLite / local mode.
+-- Postgres twin: migrations-pg/0030_bot_cost_per_team.sql.
+-- Data migration (the legacy backfill): packages/pro/migrations{,-pg}/0019_bot_cost_to_classification.sql.
+--
+-- One nullable column on `bot_review_classification`. Cost stops being an account-wide blob in
+-- the plugin's `pro_settings.bot_cost_json` and becomes a per-team value on the row that already
+-- answers "is this login a bot" for that team — because a per-login map physically cannot express
+-- "$120 for Team A, $0 for Team B", and teams genuinely differ (per-seat billing split across
+-- squads, an enterprise contract allocated by department, one team on the vendor's free tier).
+-- It also makes cost CORE/FREE: it now lives in a core table, so an OSS/npx install can set it.
+--
+-- INTEGER CENTS, not a real. The core schema has no float column at all (the only ones in the
+-- repo are in @pierre/pro, for MEASURED model spend). SQLite has no DECIMAL and REAL is a float64
+-- where $0.10 + $0.20 <> $0.30, and this number gets divided ($/acted-on) and printed with
+-- toFixed(2). pg `numeric` was rejected as the twin: no sqlite equivalent, and node-postgres
+-- returns it as a STRING, silently breaking the shared `number` wire type. The WIRE stays
+-- DOLLARS; conversion happens only at the store boundary.
+--
+-- NULLABLE WITH NO DEFAULT, and the nullability IS the feature:
+--   NULL → "no cost opinion at this key" → inherit the team-0 row (at team 0, simply unset).
+--   0    → "explicitly free HERE", and it must BEAT an inherited $120.
+-- So resolution uses `??` and never `||`. Every existing row lands at NULL, i.e. today's
+-- behaviour byte-for-byte (no cost has ever been stored in this table).
+--
+-- ⚠ THIS COLUMN RESOLVES FIELD-WISE; EVERY OTHER COLUMN ON THE ROW RESOLVES ROW-WISE. The
+-- classification (automated/kind/label/role/confidence/source/reasons) is one indivisible
+-- judgement, so an explicit team row wins WHOLESALE. Cost is not part of that judgement: a row
+-- created only to hold a role opinion carries no cost opinion, so row-level cost would zero an
+-- inherited price the moment someone pressed Apply on an inherited row. The mirror trap: a NEW
+-- team row must NOT seed cost from the inherited value (it would freeze a copy of the default and
+-- later edits to the team-0 price would stop reaching that team) — the exact OPPOSITE of `role`,
+-- which MUST be seeded or creating the row reverses the classification.
+--
+-- NO DATA MIGRATION HERE, deliberately. The legacy values live in `pro_settings.bot_cost_json`,
+-- a PLUGIN-owned table that DOES NOT EXIST on an OSS install — a core migration referencing it
+-- would fail and block boot, and SQLite has no conditional-DDL guard (no `DO $$`). The backfill
+-- therefore ships as plugin migration 0019, which runs after this one (index.ts runs core
+-- runMigrations() before bindProPlugin() → runPluginMigrations). Nothing is lost meanwhile: the
+-- blob is not dropped and keeps driving ROI through a read-time fallback.
+ALTER TABLE `bot_review_classification` ADD `cost_monthly_cents` integer;

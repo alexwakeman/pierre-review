@@ -14,6 +14,7 @@ import {
 import { useProSettings, useHasProSettings } from '../../hooks/useProSettings.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
 import { automatedReviewerMeta, relativeTime } from '../../lib/ui.js';
+import { DEFAULT_SOURCE_LABEL, formatCostInput, resolveVendorCost } from '../../lib/botCost.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
@@ -22,11 +23,20 @@ import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js
 // Bot ROI / utilisation panel — CORE/FREE (rendered in the Bots rail console). The analytics
 // route is CORE + deterministic (no AI): a per-vendor signal-to-noise table + a 12-week
 // thread-volume trend + keep/tune/noisy verdicts, plus deterministic, ADVISORY tuning suggestions
-// (which vendor × path is noisy — no action attached; tune the bot on its own platform). The
-// ONLY plugin-backed bit is the per-vendor $ cost overlay (entered in Settings → Review bots,
-// stored in pro_settings, overlaid CLIENT-side here since getBotAnalytics returns cost fields
-// null); its fetch is gated on plugin presence so the pure OSS path never calls /api/pro/settings
-// (the cost column just shows "—").
+// (which vendor × path is noisy — no action attached; tune the bot on its own platform).
+//
+// COST IS NOW SERVER-RESOLVED, per TEAM, on each analytics row (`costMonthlyUsd` /
+// `costPerActedOnUsd` / `costInherited`), read from the CORE `bot_review_classification` table —
+// so it is free/OSS too. The old client-side overlay from pro_settings `bots.cost` is gone: a
+// per-LOGIN map physically cannot express "$120 for Team A, $0 for Team B", so it could only ever
+// have been wrong on a team-scoped view. All that remains of it is `legacyOnlyUsd` — a POINTER at
+// a price plugin migration 0019 could not move onto a row, shown in the cell's tooltip and never
+// applied (see `resolveVendorCost`: filling a null from that blob silently resurrected prices the
+// user had deliberately CLEARED, with no write path left to remove them). Its fetch stays gated on
+// plugin presence so the pure OSS path never calls /api/pro/settings.
+//
+// ⚠ AN INHERITED PRICE IS LABELLED. Three teams inheriting one $120 tool is $120 of spend seen
+// three ways, not $360 — an unlabelled per-team cost column invites exactly that summing.
 
 const WINDOWS: { key: BotWindowKind; label: string }[] = [
   { key: 'rolling_7', label: '7d' },
@@ -94,18 +104,17 @@ function dur(ms: number | null): string {
   return `${days < 10 ? days.toFixed(1) : Math.round(days)}d`;
 }
 
-// Overlay the per-BOT monthly cost (from Pro settings, keyed by reviewer login) onto the analytics
-// rows, deriving $/acted-on-comment client-side. getBotAnalytics returns cost fields null by design
-// (core can't read pro_settings), so this is where the ROI figure actually lands.
-function withCost(
+// An analytics row plus its resolved cost. The server's per-team answer is FINAL — this only
+// attaches `legacyOnlyUsd`, an un-applied pointer at a price still stranded in the deprecated
+// per-login blob, so the table can offer to migrate it. See `resolveVendorCost` for why filling a
+// null from that blob was wrong (a deliberately CLEARED price is also null).
+type CostedVendor = BotVendorAnalytics & { legacyOnlyUsd: number | null };
+
+function withResolvedCost(
   vendors: BotVendorAnalytics[],
-  costByLogin: Map<string, number>,
-): BotVendorAnalytics[] {
-  return vendors.map((v) => {
-    const monthly = v.login != null ? costByLogin.get(v.login) ?? null : null;
-    const perActedOn = monthly != null && v.actedOn > 0 ? monthly / v.actedOn : null;
-    return { ...v, costMonthlyUsd: monthly, costPerActedOnUsd: perActedOn };
-  });
+  legacyCostByLogin: Map<string, number>,
+): CostedVendor[] {
+  return vendors.map((v) => ({ ...v, ...resolveVendorCost(v, legacyCostByLogin) }));
 }
 
 // One multi-series weekly line chart across vendors, over a unified weekly x-axis (the union
@@ -331,7 +340,7 @@ function VendorTable({
   onOpenVendor,
   overdueGraceMs,
 }: {
-  vendors: BotVendorAnalytics[];
+  vendors: CostedVendor[];
   botColor: BotColor;
   onOpenVendor: (key: string) => void;
   overdueGraceMs: number;
@@ -370,7 +379,10 @@ function VendorTable({
             <th className="px-2 py-1.5 text-right font-medium" title="Low-value / untouched share — the noise floor">
               Noise
             </th>
-            <th className="px-2 py-1.5 text-right font-medium" title="Monthly vendor cost ÷ acted-on threads (from Pro settings)">
+            <th
+              className="px-2 py-1.5 text-right font-medium"
+              title={`Monthly cost ÷ acted-on threads. The cost is per team — set it on the bot's row in Bots → Settings. A price marked "inh" is inherited from “${DEFAULT_SOURCE_LABEL}”: the same one subscription seen from this team's vantage point, so never add it up across teams.`}
+            >
               $/acted-on
             </th>
             <th className="px-2 py-1.5 text-center font-medium">Verdict</th>
@@ -468,8 +480,42 @@ function VendorTable({
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
                   {v.dormant ? dash : pct(v.noiseRatioPct)}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500" title={v.costMonthlyUsd != null ? `$${v.costMonthlyUsd}/mo` : 'Set a monthly cost in Settings → Review bots'}>
-                  {v.dormant ? dash : usd(v.costPerActedOnUsd)}
+                {/* The $/acted-on figure, plus WHERE its price came from. An unlabelled per-team
+                    cost column reads as per-team SPEND, so three teams inheriting one $120 tool
+                    would look like $360 — the "inh" marker is the only thing stopping that. */}
+                <td
+                  className="px-2 py-1.5 text-right tabular-nums text-gray-500"
+                  // Money is printed through the same formatter as the cost box in Bots →
+                  // Settings, so "45.50" there can't read back as "45.5" here.
+                  title={
+                    v.costMonthlyUsd == null
+                      ? v.legacyOnlyUsd != null
+                        ? // An UNAPPLIED pointer, never a price. The old account-wide list still
+                          // holds $X for this login, but nothing reads it any more — including
+                          // when the user deliberately CLEARED the price, which is indistinguishable
+                          // from "never migrated" on this row. So it is offered, not charged.
+                          `No monthly cost set for this bot. The old account-wide list still has $${formatCostInput(v.legacyOnlyUsd)}/mo for it — re-enter that on its row in Bots → Settings to use it.`
+                        : 'No monthly cost set for this bot — set one on its row in Bots → Settings.'
+                      : v.costInherited
+                        ? `$${formatCostInput(v.costMonthlyUsd)}/mo, inherited from “${DEFAULT_SOURCE_LABEL}” — this team has no price of its own. It is one subscription seen from here, not extra spend, so don't sum it across teams.`
+                        : `$${formatCostInput(v.costMonthlyUsd)}/mo, set for this team.`
+                  }
+                >
+                  {v.dormant ? (
+                    dash
+                  ) : (
+                    <>
+                      {usd(v.costPerActedOnUsd)}
+                      {/* Only qualify a figure that is actually shown. A priced bot with no
+                          acted-on threads renders "—", and "— inh" reads as a stray glyph; the
+                          cell's title still names the price and its source there. */}
+                      {v.costPerActedOnUsd != null && v.costInherited && (
+                        <span className="ml-0.5 align-super text-[9px] font-medium text-gray-400 dark:text-gray-500">
+                          inh
+                        </span>
+                      )}
+                    </>
+                  )}
                 </td>
                 <td className="px-2 py-1.5 text-center">
                   {v.dormant ? (
@@ -544,17 +590,20 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
   const { data, isLoading, isError } = useBotAnalytics(window, true, scope, repoScope);
   const botColor = useBotColors();
-  // Cost overlay is the one plugin-backed bit — gate the fetch on plugin presence so the OSS
-  // path never hits /api/pro/settings (which 404s without the plugin).
+  // The DEPRECATED per-login cost blob. Read ONLY to POINT AT a stranded price in the tooltip of
+  // a row the server resolved to null — never to fill that null (see `resolveVendorCost`). Still
+  // gated on plugin presence so the pure OSS path never hits /api/pro/settings (which 404s without
+  // the plugin) — and OSS installs have no legacy blob anyway, since cost only ever lived in the
+  // plugin's table before this.
   const { data: settings } = useProSettings(useHasProSettings());
 
-  const costByLogin = useMemo(
+  const legacyCostByLogin = useMemo(
     () => new Map((settings?.bots.cost ?? []).map((c) => [c.login, c.monthlyUsd])),
     [settings?.bots.cost],
   );
   const vendors = useMemo(
-    () => (data ? withCost(data.vendors, costByLogin) : []),
-    [data, costByLogin],
+    () => (data ? withResolvedCost(data.vendors, legacyCostByLogin) : []),
+    [data, legacyCostByLogin],
   );
   // Automated reviewers the user (or the migration's login seed) marked `role: 'quality_check'`.
   // The server computes their numbers identically but keeps them OUT of `vendors`/`totals`/
@@ -674,7 +723,10 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
         <div className="text-[11px] text-gray-400">
           “Acted on” = a later commit likely addressed the thread, it was resolved, or a human
           replied/resolved after the bot (approximate). Noise ratio = the untouched share of a
-          bot's threads. Set per-bot monthly cost in Settings → Review bots to see $/acted-on.
+          bot's threads. Set a bot's monthly cost on its row in{' '}
+          <span className="font-medium">Bots → Settings</span> to see $/acted-on — it is per team,
+          and a price marked <span className="font-medium">inh</span> is inherited from{' '}
+          <span className="font-medium">{DEFAULT_SOURCE_LABEL}</span> rather than extra spend.
         </div>
       </div>
     );

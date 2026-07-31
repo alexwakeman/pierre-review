@@ -300,6 +300,34 @@ export interface DetectedReviewer {
   // disables "Reset to default", which would otherwise be a no-op the user cannot tell apart
   // from a real override.
   inherited: boolean;
+  // The row exists ONLY as a stored classification for the requested team — the reviewer has no
+  // footprint at all in the repos this listing was scoped to (see `scopedRepoCount`). It is NOT
+  // dead: `automatedReviewerUserIds`/`classificationKindForUser` resolve by TEAM KEY and never
+  // by repo, so the row still governs the moment a repo moves back into the team (or any metric
+  // runs at that key). Surface it — dimmed, in its own collapsed section — rather than dropping
+  // it, because "set here but invisible while still steering everything" is the support question
+  // this flag exists to pre-empt. Always false on a listing that was not repo-scoped.
+  dormantInScope: boolean;
+  // The monthly spend that APPLIES to this reviewer for the requested team, in whole US DOLLARS
+  // (the wire unit; storage is integer cents on bot_review_classification.cost_monthly_cents —
+  // see that column's comment for why money is never a float here).
+  //
+  // null = no cost is set ANYWHERE in the chain (resolution already walked it, so null never
+  // means "inherited"). 0 is a REAL value meaning "this team pays nothing for this bot" — which
+  // is why every resolution step uses `??` and never `||`.
+  costMonthlyUsd: number | null;
+  // True when `costMonthlyUsd` came from the team-0 default rather than an explicit value on
+  // THIS team's row. Always false at NO_TEAM_KEY (nothing sits above it) and whenever the cost
+  // is null.
+  //
+  // ⚠ This can legitimately DISAGREE with the sibling `inherited` above, and that disagreement
+  // is the whole point: `inherited` is ROW-level (the entire classification came from the
+  // default — the explicit team row wins WHOLESALE), while `costInherited` is FIELD-level (only
+  // the cost fell through). A row with `inherited: false, costInherited: true` is a real
+  // per-team classification override still using the account default's price — the case that
+  // exists precisely so that pressing "Apply" on an inherited row (which creates a team row to
+  // hold a label/role opinion) cannot silently zero a price the user was looking at.
+  costInherited: boolean;
   threadsLast90d: number;
   sampleReviewBody: string | null;
 }
@@ -309,10 +337,39 @@ export interface DetectedReviewersResponse {
   // matches the tab it asked for before rendering (the query key and the picker can disagree
   // for a frame while a team switch is in flight).
   teamId: number;
+  // How many repos the listing was actually computed over: the requested team's members, or —
+  // at NO_TEAM_KEY — the repos in no team at all.
+  //
+  // NULL means the caller did NOT ask for a repo-scoped listing, so no scoping happened and the
+  // question "how many repos is this" has no answer to give. It must not report the account's
+  // repo count instead: the field exists to make `reviewers: []` legible, and the one case it
+  // most needs to catch — "this team has no repos yet", which is the only `0` — is exactly the
+  // case a large account-wide count would disguise. A number the client cannot attribute is
+  // worse than no number.
+  //
+  // Scoped, it disambiguates an empty `reviewers`, which otherwise means three different things
+  // with one appearance: "this team has no repos yet" (0 — go assign repos), "these repos have
+  // no detected reviewers yet" (> 0 — sync or wait), and "unknown/foreign team id" (also 0,
+  // deliberately indistinguishable from an owned-but-empty team so this id-addressed read stays
+  // free of an existence oracle).
+  scopedRepoCount: number | null;
   generatedAt: string;
 }
 export interface ReviewerOverrideBody {
-  automated: boolean;
+  // OPTIONAL, and its absence is the discriminator for a COST-ONLY patch.
+  //
+  // When present, this is a CLASSIFICATION opinion and the row is stamped
+  // `source: 'manual'` / `confidence: 'high'` — which is correct, and load-bearing: the
+  // classifier returns a manual row verbatim and never re-derives it, so a human judgement
+  // sticks.
+  //
+  // When ABSENT, the patch carries no classification opinion and the handler must NOT touch
+  // `automated` / `kind` / `source` / `confidence` / `reasonsJson`. Stamping them anyway would
+  // mean that TYPING A PRICE silently froze that reviewer's classification forever — it would
+  // stop self-healing when the login later joins the vendor list or its behavioural score
+  // changes — and, on a team tab, would convert a merely-inherited row into a full row-level
+  // override the user never asked for. Pricing a bot is not an opinion about what it is.
+  automated?: boolean;
   kind?: AutomatedReviewerKind | null;
   label?: string | null;
   // Absent = leave the stored role alone (an existing row keeps its role; a new row takes the
@@ -324,6 +381,28 @@ export interface ReviewerOverrideBody {
   // override, and an unowned/unknown id must 404 rather than write a row keyed to another
   // tenant's team.
   teamId?: number;
+  // Monthly spend for this bot at `teamId`, in whole US dollars. THREE-STATE, and the
+  // distinction is load-bearing — read it with `!== undefined`, NEVER with `!= null`:
+  //
+  //   absent   → leave the stored cost alone. What "Mark as quality check" / "Treat as review
+  //              bot" / "Not a bot" send, so a role edit can never wipe a price.
+  //   null     → CLEAR it, so this key inherits the team-0 default again. An empty cost box on
+  //              Apply means exactly this: on an inherited row it writes NULL and the row simply
+  //              keeps inheriting (harmless); on an overridden row it IS the reset.
+  //   a number → set it. 0 is real and means "this team pays nothing for this bot".
+  //
+  // ⚠ WRITE-PATH ASYMMETRY WITH `role`, and it is deliberate: creating a team row must SEED
+  // `role` from the inherited value (row-level resolution — not seeding would REVERSE the
+  // classification), but must NOT seed the cost (field-level resolution — seeding would FREEZE a
+  // copy of the default, and later edits to the team-0 price would silently stop reaching this
+  // team). Same goal, opposite implementation, because the two fields resolve differently.
+  //
+  // ⚠ THREE-STATE, AND THE NEIGHBOURING CODE TEACHES THE WRONG IDIOM. Test this field with
+  // `!== undefined`. The sibling `role` is read with `== null` two lines away in the same
+  // handler, and `== null` is TRUE for null — so copying that line turns "clear it" into "leave
+  // it alone", and the reset button stops working with nothing to show for it. The route schema
+  // must also accept `{ type: ['number', 'null'] }`, or "clear" 400s.
+  costMonthlyUsd?: number | null;
 }
 
 // ── WS2 Pierre-own-review provenance ────────────────────────────────
@@ -361,8 +440,25 @@ export interface BotVendorAnalytics {
   humanFollowThroughPct: number | null;
   noiseRatioPct: number | null;
   verdict: BotVerdict;
+  // SERVER-resolved (this is no longer overlaid client-side from pro_settings `bots.cost`): the
+  // monthly cost stored on `bot_review_classification.cost_monthly_cents` for the REQUESTED
+  // team, resolved FIELD-WISE — this team's row when its value is non-null, else the team-0
+  // default's. In US dollars (storage is integer cents).
+  //
+  // null = no cost known anywhere in the chain — never "inherited", the chain was already
+  // walked. 0 = known free. `costPerActedOnUsd` is `costMonthlyUsd / actedOn` (null when either
+  // side is missing or actedOn is 0).
+  //
+  // A per-login client map physically CANNOT express this (one login, different costs per team),
+  // which is why it moved server-side. Cost is CORE/free: it is read from a core table, so an
+  // OSS/npx install can set and see it.
   costMonthlyUsd: number | null;
   costPerActedOnUsd: number | null;
+  // The resolved cost came from the team-0 default rather than this team's own row. Drives the
+  // $/acted-on tooltip so an inherited price reads as ONE subscription seen from another team's
+  // vantage point — not as extra spend. (Three teams inheriting $120 is $120 of spend seen three
+  // ways; never sum cost across teams.)
+  costInherited: boolean;
   // Zero window activity (no threads, comments, OR submitted reviews in the window) — the row
   // survives on its 12-week trend so a paused/quiet bot doesn't silently vanish from the table.
   dormant: boolean;
@@ -1618,8 +1714,27 @@ export interface ProSettings {
     slackDigest: boolean;       // WS5
     autoResolve: boolean;       // WS6b master enable
     autoResolveDays: number;
-    // Per-BOT monthly cost, keyed by the reviewer's github LOGIN (not kind) — several in-house
-    // bots share kind 'in_house' but have wildly different ROI, so cost is tracked per bot.
+    /**
+     * @deprecated LEGACY, READ-ONLY. Per-BOT monthly cost keyed by github LOGIN, stored in the
+     * plugin-owned `pro_settings.bot_cost_json` blob — account-wide, and therefore unable to
+     * express "$120 for Team A, $0 for Team B".
+     *
+     * Superseded by the CORE `bot_review_classification.cost_monthly_cents` (per team, edited
+     * inline on the bot row in Activity → Bots → Settings). Plugin migration 0019 copies every
+     * entry it can match onto the team-0 row; it deliberately NEVER INSERTS a classification row
+     * (fabricating one would invent automated/confidence/source/reasons judgements nobody made,
+     * and a fabricated source='manual' row would permanently shadow auto-detection for that
+     * login).
+     *
+     * So this stays on the wire as the read-time fallback for the one case the backfill cannot
+     * cover: a costed login that had no classification row when 0019 ran. `BotRoiPanel` fills it
+     * in ONLY where the server-resolved `costMonthlyUsd` is null.
+     *
+     * RETIRE — this field, `bot_cost_json`, `parseCost`, and that fallback branch — one release
+     * after the one that ships per-team cost, gated on a manual
+     * `SELECT count(*) FROM pro_settings WHERE bot_cost_json IS NOT NULL` reaching zero. There is
+     * no write path any more (`ProSettingsUpdate.bots.cost` is gone), so the set can only shrink.
+     */
     cost: { login: string; monthlyUsd: number }[];  // WS3b
   };
 }
@@ -1645,11 +1760,20 @@ export interface ProSettingsUpdate {
   // projectKeys: an allowlist of project prefixes; [] / null clears it (→ heuristic detection).
   issue?: { provider?: IssueProvider | null; baseUrl?: string | null; projectKeys?: string[] | null };
   // Bot-Triage settings patch (WS8). Only present fields change.
+  //
+  // `cost` was REMOVED here on purpose: per-bot cost is now written per TEAM through
+  // `PATCH /api/bot-reviewers/:userId` (`ReviewerOverrideBody.costMonthlyUsd`). Two live writers
+  // to one price is how the two silently disagree, so this one was retired rather than mirrored.
+  // The read (`ProSettings.bots.cost`) survives as a deprecated legacy fallback — see there.
+  //
+  // Failure mode for a stale client that still sends `bots.cost`: the PUT body schema has
+  // `additionalProperties: false`, so the key is SILENTLY STRIPPED rather than 400'd. That is the
+  // right outcome (nothing changes, the request still succeeds) but it is silent, so it is
+  // written down here.
   bots?: {
     inhouseDetect?: boolean; autoTagHighConfidence?: boolean; loginAllowlist?: string[];
     deepDetect?: boolean; aiTiebreak?: boolean; tagPierreReviews?: boolean; pierreFooter?: boolean;
     slackDigest?: boolean; autoResolve?: boolean; autoResolveDays?: number;
-    cost?: { login: string; monthlyUsd: number }[];
   };
 }
 

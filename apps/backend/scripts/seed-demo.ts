@@ -778,26 +778,66 @@ await db
   ])
   .execute();
 
-// ---- bot-triage: manual classification override + mute/auto-triage rules ----
+// ---- bot-triage: classification rows + per-bot monthly COST ----
 // A MANUAL override tags Acme CI (id 10) as an in-house AI reviewer, so it shows as a
 // confirmed manual row in the Settings "Review bots" table AND joins the account's
 // automated set (analytics / dedup / bot_only_review) even though its login is not a known
 // vendor. Two rules follow: a 'hide' rule muting Copilot nitpicks under tests/, and an
 // 'auto_resolve' rule (7-day age gate) the standing job uses to clear old likely_addressed
 // CodeRabbit threads (→ #141's thread 40, ~22d old, is a candidate). Both tables are CORE.
+//
+// CodeRabbit + Copilot get rows too, purely so the demo has a COST to show. Cost lives on
+// `bot_review_classification.cost_monthly_cents` (per team; team 0 here — the demo seeds no
+// teams, so everything sits at the account default and the scoped "No team" tab shows the whole
+// roster). It replaced `pro_settings.bot_cost_json`, whose demo entries were the LEGACY
+// kind-keyed shape `parseCost` drops on read — so the demo's $/acted-on column has silently been
+// empty. These two rows are what `classifyReviewer` itself would persist for a known vendor
+// login (source 'vendor_login', NOT 'manual'), so auto-detection is unaffected: a non-manual row
+// still re-derives, and `persist()` never writes the cost column, so the price survives every
+// classification pass.
+//
+// Acme CI deliberately carries NO cost — the in-house agent has no vendor bill, and it keeps the
+// "no cost set" state on screen next to two priced rows.
 await db
   .insert(schema.botReviewClassification)
-  .values({
-    accountId: 1,
-    authorUserId: ACME_CI,
-    automated: true,
-    kind: 'in_house',
-    label: 'In-house AI',
-    confidence: 'high',
-    source: 'manual',
-    reasonsJson: ['manually confirmed as the in-house Acme CI review agent'],
-    updatedAt: now,
-  })
+  .values([
+    {
+      accountId: 1,
+      authorUserId: ACME_CI,
+      automated: true,
+      kind: 'in_house',
+      label: 'In-house AI',
+      confidence: 'high',
+      source: 'manual',
+      reasonsJson: ['manually confirmed as the in-house Acme CI review agent'],
+      updatedAt: now,
+    },
+    {
+      accountId: 1,
+      authorUserId: CODERABBIT,
+      automated: true,
+      kind: 'coderabbit',
+      label: 'CodeRabbit',
+      confidence: 'high',
+      source: 'vendor_login',
+      reasonsJson: ['login "coderabbitai" is a known CodeRabbit review bot'],
+      // $30/month, stored as integer CENTS (the wire unit is dollars).
+      costMonthlyCents: 3000,
+      updatedAt: now,
+    },
+    {
+      accountId: 1,
+      authorUserId: COPILOT,
+      automated: true,
+      kind: 'copilot',
+      label: 'Copilot',
+      confidence: 'high',
+      source: 'vendor_login',
+      reasonsJson: ['login "copilot-pull-request-reviewer" is a known Copilot review bot'],
+      costMonthlyCents: 1900, // $19/month
+      updatedAt: now,
+    },
+  ])
   .execute();
 
 // ===========================================================================
@@ -1474,10 +1514,16 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
       'manual', 30, 'jira', 'https://acme.atlassian.net',
       // bots: in-house detection ON, auto-tag high-confidence ON, allowlist matches acme-ci,
       // deep-detect + AI tie-break OFF, Pierre marker + footer ON, Slack bot digest ON,
-      // standing auto-resolve ON at a 7-day gate, per-vendor monthly cost for the ROI panel.
+      // standing auto-resolve ON at a 7-day gate.
+      //
+      // bot_cost_json is NULL. It used to seed `[{"kind":…}]` entries, which are the LEGACY
+      // kind-keyed shape `parseCost` drops on read — so the demo's cost column was empty either
+      // way. Per-bot cost now lives on `bot_review_classification.cost_monthly_cents` (seeded
+      // above for CodeRabbit + Copilot), which is per TEAM and CORE/free. There is no write path
+      // to this blob any more; it survives only as a read-time fallback.
       1, 1, 'acme-ci,*-ci', 0,
       0, 1, 1, 1,
-      1, 7, '[{"kind":"coderabbit","monthlyUsd":30},{"kind":"copilot","monthlyUsd":19}]',
+      1, 7, null,
       hoursAgo(48), hoursAgo(2),
     );
 

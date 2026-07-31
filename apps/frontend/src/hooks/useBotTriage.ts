@@ -31,9 +31,10 @@ const RESOLVE_CHUNK_SIZE = 25;
 // is account-scoped server-side; these are plain DB reads that refresh on the sync cadence.
 
 // Per-vendor bot ROI / utilisation analytics over the selected window. Keyed by window +
-// scope so either change refetches. Cost fields arrive null — the panel overlays cost
-// client-side from /api/pro/settings `bots.cost`. `enabled` lets the caller gate the fetch
-// (Pro panel). `scope` ('all' | 'none' | '<teamId>') narrows to a team's repos.
+// scope so either change refetches. Cost now arrives SERVER-resolved per team on each row
+// (`costMonthlyUsd`/`costPerActedOnUsd`/`costInherited`) — the client no longer overlays it from
+// pro_settings except as a null-filling legacy fallback (see lib/botCost.ts). `enabled` lets the
+// caller gate the fetch. `scope` ('all' | 'none' | '<teamId>') narrows to a team's repos.
 export function useBotAnalytics(
   window: BotWindowKind,
   enabled = true,
@@ -114,11 +115,38 @@ export function useBotOnlyPrs(
 // The `team:` key prefix is MANDATORY, for the same reason the `repo:`/`scope:` slots below carry
 // theirs: repo ids, team ids and this key are all bare integers from independent autoincrements,
 // so an un-prefixed slot would let team N alias some other N.
-export function useDetectedReviewers(teamId?: number | null, enabled = true) {
+//
+// `scoped` narrows the listing to the reviewers with a footprint in the requested team's OWN
+// repos (at team 0: the repos in no team), and is what turns `scopedRepoCount` from null into a
+// number. It is OPT-IN, taken by exactly one caller — the per-team Settings tab.
+//
+// ⚠ `scoped` IS IN THE QUERY KEY, and it has to be. The other consumers (useBotColors, FeedView's
+// vendor tag, ThreadList's vendor filter) all call this hook at team:0 to mean "the whole account
+// roster"; the two responses have the SAME shape and the same team key, so without this slot the
+// narrow listing would populate the cache entry those surfaces read and silently shrink their
+// roster — a bot losing its colour and its feed tag because someone opened a Settings tab. The
+// unscoped key is spelled out ('repos:all') rather than omitted so the distinction is legible in
+// the devtools cache list instead of being an absence.
+// Exported so the cache-separation rule is testable rather than a comment: a scoped listing and
+// an account-wide one must NEVER produce the same key. (test/botReviewerQueryKey.test.ts)
+export function detectedReviewersQueryKey(
+  teamId?: number | null,
+  scoped = false,
+): [string, string, string] {
   const key = teamId != null && teamId > 0 ? teamId : 0;
+  return ['bot-reviewers', `team:${key}`, scoped ? 'repos:team' : 'repos:all'];
+}
+
+export function useDetectedReviewers(
+  teamId?: number | null,
+  enabled = true,
+  opts?: { scoped?: boolean },
+) {
+  const key = teamId != null && teamId > 0 ? teamId : 0;
+  const scoped = opts?.scoped === true;
   return useQuery<DetectedReviewersResponse>({
-    queryKey: ['bot-reviewers', `team:${key}`],
-    queryFn: () => api.botReviewers(key),
+    queryKey: detectedReviewersQueryKey(teamId, scoped),
+    queryFn: () => api.botReviewers(key, scoped),
     enabled,
     staleTime: 60_000,
     gcTime: ACTIVITY_GC_TIME,
@@ -155,6 +183,12 @@ function invalidateReclassify(qc: ReturnType<typeof useQueryClient>): void {
 // Two-way manual override of a reviewer's classification (mark automated / not-a-bot, set its
 // vendor kind/label, set its ReviewerRole). The team key rides in the BODY (`teamId`, absent =
 // the account default) because it is part of the row's identity, not a filter.
+//
+// ⚠ ALSO THE COST-ONLY WRITE PATH, and the two must not be conflated. A body WITHOUT `automated`
+// carries no classification opinion (see `buildCostOnlyBody` in lib/botCost.ts) and the server
+// leaves automated/kind/source/confidence alone; a body WITH it stamps the row `source: 'manual'`,
+// which freezes that reviewer's classification forever. Never add `automated` to a cost edit to
+// "be explicit" — the absence IS the contract.
 export function useReviewerOverride() {
   const qc = useQueryClient();
   return useMutation<

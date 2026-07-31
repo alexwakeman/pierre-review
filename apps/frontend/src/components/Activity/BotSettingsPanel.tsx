@@ -4,12 +4,15 @@ import { useFilters } from '../../store/filters.js';
 import { useTeams } from '../../hooks/useTeams.js';
 import { DetectedReviewersTable } from '../settings/DetectedReviewersTable.js';
 
-// The Bots rail's "Settings" sub-tab — **who counts as a review bot HERE**.
+// The Bots rail's "Settings" sub-tab — **who counts as a review bot HERE, and what it costs
+// HERE**.
 //
 // Why per TEAM: teams define bots differently. One org funnels an AI reviewer through
 // `githubactions[bot]`; in another that same login is plain CI. A single account-wide answer
 // can't serve both, so the classification (automated? which vendor? review or quality check?)
-// is keyed by team.
+// is keyed by team — and so is the monthly cost, because per-seat billing split across squads,
+// an enterprise contract allocated by department, and one team on the vendor's free tier are all
+// ordinary and a per-login map cannot express any of them.
 //
 // "No team (default)" is a FIRST-CLASS key (shared's NO_TEAM_KEY = 0), not an absence. It is
 // simultaneously the No-team scope AND the inheritance ROOT: a team with no explicit row for a
@@ -17,12 +20,18 @@ import { DetectedReviewersTable } from '../settings/DetectedReviewersTable.js';
 // it always did, and a team created later inherits the account default for free.
 //
 // THE SPLIT, stated once so the two surfaces can't drift:
-//   • "who is a bot HERE"                      → per TEAM   (this tab)
-//   • "what it costs, how we detect it, how we
-//      attribute Limn's own reviews"           → per ACCOUNT (Settings → Review bots)
-// Cost is keyed by LOGIN and a bot costs the same whichever team's repos it reviews; detection
-// heuristics and Limn attribution are account-wide policy. Hence they stayed put, and both
-// surfaces carry a pointer at the other.
+//   • "who is a bot HERE, and what it costs HERE" → per TEAM   (this tab)
+//   • "how we DETECT bots, how we attribute
+//      Limn's own reviews, the Slack digest"      → per ACCOUNT (Settings → Review bots)
+// Detection heuristics and Limn attribution are global policy about our own behaviour, not
+// judgements about a particular team's tooling. Both surfaces carry a pointer at the other.
+//
+// ⚠ THE LISTING BELOW IS REPO-SCOPED to this team (see DetectedReviewersTable), which is what
+// makes its empty state legible — but a reviewer priced at the default can still be absent from
+// the TEAM tabs that inherit that price. That is why every inherited value names its source on the
+// row rather than merely saying "inherited". The No-team tab itself is exempt: it is the
+// inheritance ROOT, so the server degrades a 0-repo root scope back to the whole account roster
+// rather than leaving the row every team reads uneditable (listDetectedReviewers).
 //
 // Rendered ONLY from the cross-repo Bots rail (`repoId == null`). A per-repo Bots tab cannot
 // express a team key: `team_repos` is many-to-many, so one repo can sit in several teams and
@@ -62,6 +71,7 @@ export function BotSettingsPanel(): JSX.Element {
           <span className="text-sky-600 dark:text-sky-300">
             {teamName ?? 'No team (default)'}
           </span>
+          , and what it costs
         </h3>
         <label className="ml-auto flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
           <span>Team</span>
@@ -87,15 +97,20 @@ export function BotSettingsPanel(): JSX.Element {
         {teamId === NO_TEAM_KEY ? (
           <>
             This is the account <span className="font-medium">default</span>: every team that
-            hasn&apos;t set its own answer for a reviewer inherits from here. Editing it changes
-            those teams too.
+            hasn&apos;t set its own answer — or its own price — for a reviewer inherits from here.
+            Editing it changes those teams too. The list is scoped to the repos in{' '}
+            <span className="font-medium">no team</span> — unless there are none, in which case it
+            falls back to every reviewer in the account, so the row each team inherits from always
+            stays editable.
           </>
         ) : (
           <>
             Rows marked <span className="font-medium">inherited</span> are using the{' '}
             <span className="font-medium">No team (default)</span> answer. Editing one creates an
             override for this team only; <span className="font-medium">Reset to default</span>{' '}
-            removes it again.
+            removes it again. <span className="font-medium">Cost inherits separately</span> — a
+            team override can still be using the default&apos;s price until you type one here, and
+            clearing the box hands it back.
           </>
         )}
       </p>
@@ -103,11 +118,12 @@ export function BotSettingsPanel(): JSX.Element {
       <DetectedReviewersTable teamId={teamId} />
 
       <p className="border-t border-gray-200 pt-2.5 text-[11px] text-gray-400 dark:border-gray-800">
-        Per-bot <span className="font-medium">cost</span>, the{' '}
-        <span className="font-medium">detection</span> heuristics and{' '}
-        <span className="font-medium">Limn attribution</span> are account-wide, not per team — a
-        bot costs the same whichever team&apos;s repos it reviews. They live in{' '}
-        <span className="font-medium">Settings → Review bots (account-wide)</span>.
+        Bot <span className="font-medium">detection</span> heuristics, the{' '}
+        <span className="font-medium">Limn attribution</span> markers and the Slack bot digest are
+        account-wide policy, not per team — they live in{' '}
+        <span className="font-medium">Settings → Review bots (account-wide)</span>. Per-bot{' '}
+        <span className="font-medium">cost</span> used to live there too; it is set per team, on
+        the rows above.
       </p>
     </div>
   );

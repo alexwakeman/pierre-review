@@ -912,6 +912,38 @@ export const botReviewClassification = sqliteTable(
     // it for having no review-role bot, hiding the risk instead of flagging it.
     // NOT NULL DEFAULT 'review' so every existing row keeps today's meaning without a backfill.
     role: text('role').notNull().default('review'),
+    // What this bot COSTS per month at this team key, in INTEGER CENTS (migration 0043).
+    //
+    // 1. MONEY IS NEVER A FLOAT HERE. The core schema has no `real(` column at all (the only
+    //    float columns in the repo are in @pierre/pro, for MEASURED model spend, which genuinely
+    //    is one). SQLite has no DECIMAL and its REAL is a float64 where $0.10 + $0.20 !== $0.30,
+    //    and this value gets divided ($/acted-on) and formatted with toFixed(2). pg `numeric`
+    //    was rejected too: it has no sqlite twin AND node-postgres returns it as a STRING,
+    //    which would silently break the shared `number` wire type. integer↔integer is exact
+    //    parity for schema-parity.test.ts. The WIRE unit is DOLLARS; convert only at the store
+    //    boundary (Math.round(usd * 100) in, cents / 100 out).
+    //
+    // 2. NULLABILITY IS THE DESIGN. NULL = "no cost opinion at this key" → fall through to the
+    //    team-0 row (or, at team 0, simply unset). 0 = "explicitly free HERE" and must BEAT an
+    //    inherited $120. Hence every resolution step uses `??`, never `||` — a one-character bug
+    //    with no type error.
+    //
+    // 3. ⚠ THIS COLUMN RESOLVES FIELD-WISE WHILE EVERY OTHER COLUMN ON THE ROW RESOLVES
+    //    ROW-WISE. `automated`/`kind`/`label`/`role`/`confidence`/`source`/`reasons` are one
+    //    indivisible judgement, so an explicit team row wins WHOLESALE. Cost is not part of that
+    //    judgement: a row created merely to hold a role opinion carries no cost opinion, so
+    //    row-level cost would silently zero an inherited price the instant someone pressed
+    //    Apply on an inherited row. The mirror trap is just as real — a NEW team row must NOT
+    //    seed this from the inherited value (that freezes a copy of the default and later edits
+    //    to the team-0 price stop reaching this team), which is the exact OPPOSITE of what
+    //    `role` above requires.
+    //
+    // 4. NO INDEX, deliberately: it is never a predicate, only read off rows already fetched by
+    //    (account_id, team_id) via brc_account_team_idx.
+    //
+    // 5. reviewer-classify.ts persist() must keep this OUT of its shared insert/ON-CONFLICT
+    //    values object, or every auto-classification pass would wipe a user's price.
+    costMonthlyCents: integer('cost_monthly_cents'),
     confidence: text('confidence').notNull(), // 'high'|'medium'|'low'
     source: text('source').notNull(), // ClassificationSource
     reasonsJson: text('reasons_json', { mode: 'json' }).$type<string[]>(),
