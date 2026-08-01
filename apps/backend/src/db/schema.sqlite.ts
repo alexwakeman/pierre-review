@@ -19,6 +19,7 @@ import {
   real,
   index,
   uniqueIndex,
+  foreignKey,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import type {
@@ -139,6 +140,14 @@ export const repos = sqliteTable(
     ),
     nodeUx: uniqueIndex('repos_account_node').on(t.accountId, t.githubNodeId),
     accountIdx: index('repos_account_idx').on(t.accountId),
+    // NOT a lookup index — `id` is already the primary key, so this is redundant for reads. It
+    // exists solely as the PARENT KEY of `repo_reviewers`' composite FK
+    // `(repo_id, account_id) → repos(id, account_id)`, which is what makes tenancy structural for
+    // the one table whose repo id arrives in a request body. Both dialects require a unique index
+    // over the parent key columns before such an FK is legal (Postgres accepts a plain unique
+    // index — it does NOT need a named UNIQUE constraint; verified on 16.13). Drop it and the FK
+    // becomes unexpressible, so a cross-account write goes back to being one handler's predicate.
+    idAccountUx: uniqueIndex('repos_id_account').on(t.id, t.accountId),
   }),
 );
 
@@ -357,6 +366,11 @@ export const reviewThreads = sqliteTable(
   (t) => ({
     prIdx: index('thread_pr_idx').on(t.prId),
     nodeUx: uniqueIndex('thread_pr_node').on(t.prId, t.githubNodeId),
+    // "Which threads did this actor open?" — the per-repo reviewer FOOTPRINT counts
+    // (`RepoReviewerFootprint.threads`, on every bot listing) and migration 0042's backfill CTE
+    // both union on this column, and it had no index at all: every one of those was a full scan
+    // of `review_threads`. Added in 0042 (pg 0029).
+    originalCommenterIdx: index('thread_original_commenter_idx').on(t.originalCommenterId),
   }),
 );
 
@@ -866,103 +880,258 @@ export const claudeReviewFindings = sqliteTable(
 );
 
 // ---- Bot-Triage Platform (WS1 / WS6) ----
-// Account-scoped classification cache for automated reviewers. One row per
-// (account, TEAM, author) — the layered resolver (sync/reviewer-classify.ts) writes AUTO
-// rows; the override route writes MANUAL rows (source='manual', never overwritten by
-// auto). Merged with the global vendor login map on read, so known vendors need no
-// row. Account-scoped isolation: every read/write filters accountId.
-export const botReviewClassification = sqliteTable(
-  'bot_review_classification',
+// ── THE BOT STORE IS TWO TABLES, ONE PER GRAIN ──────────────────────────────────────────────
+// `repo_reviewers`    — (account, repo, author): the JUDGEMENT. Is this acting as an automated
+//                        reviewer HERE, is that reviewing or quality-checking, and how we know.
+// `account_reviewers` — (account, author):       the IDENTITY. What the bot IS, what it is
+//                        CALLED, and what we PAY for it.
+//
+// EVERY FACT ON THIS PAGE LIVES AT EXACTLY ONE OF THEM. That is the whole design, and it is worth
+// stating as a rule because the previous shape kept `kind`/`label`/`identity_source` on the
+// per-repo row and held them consistent BY CONVENTION — replicated across an actor's rows with no
+// constraint anywhere. That convention cost three standing obligations (a new repo row had to
+// seed three columns from its siblings; persist() had to gate on two different provenance flags;
+// and the account-wide identity was "a straight read of any one of them", which silently elects a
+// winner the moment two rows disagree) and it is exactly the hazard that moving cost out of the
+// row was meant to eliminate — left in place for three other columns.
+//
+// There is NO team key, NO inheritance, NO merge and NO DEDUPLICATION in either table.
+//
+// IF YOU ADD A FIELD, DECIDE ITS GRAIN FIRST. "Is this the same in every repo by definition?" is
+// the whole test: a login is one vendor everywhere (identity), but it can be a reviewer on one
+// repo and a quality gate on the next (judgement).
+//
+// A REVIEWER AS SEEN IN ONE REPO — this account's stored judgement about one actor in one repo.
+// One row per (account, repo, author), and THAT ROW IS THE BOT OBJECT: is it automated, what is
+// it for (`role`), and the provenance of that answer.
+//
+// WHY THE REPO IS THE KEY. A bot is installed per repository — GitHub Apps are installed on
+// repos, CI configs live in repos — whereas a team is a bag of repos someone can re-bag tomorrow.
+// The previous design keyed this judgement on a team, so the answer moved when team membership
+// was edited, and it needed an inheritance chain (`team row → team-0 default → auto-detect`)
+// whose null-means-inherit rules leaked into every read and every write path. Keying on the repo
+// removes the chain outright: exactly one row per repo, nothing to fall back to, nothing to merge.
+//
+// THERE IS NO DEDUPLICATION ANYWHERE, deliberately. A vendor running on six repos is six rows and
+// renders as six entries — in the team view and in the Feed bot summary alike. Within one repo
+// there is nothing to dedupe, because the key already is (repo, actor).
+//
+// WHY `repo_reviewers` AND NOT `repo_bots`: a row may legitimately say `automated: false` — a
+// human someone corrected off the bot list — so "bots" would be a lie for a real, load-bearing
+// subset of the table. `repo_reviewers` reads exactly as its key: reviewers, per repo.
+//
+// DETECTION DERIVES ONCE PER ACTOR AND WRITES THE SAME VERDICT TO EVERY REPO ROW of that actor
+// (sync/reviewer-classify.ts). Every strong signal — a known vendor login, `users.githubType`,
+// app attribution, the branded-marker fingerprint — is a property of the ACTOR and is
+// repo-independent, so deriving per repo would multiply the work AND the billed Haiku tie-break
+// for an identical answer, and would weaken the behavioural score by computing it on a thin
+// per-repo slice. The rows stay independently overridable: only a HUMAN edit should ever make two
+// of an actor's rows disagree.
+//
+// NOTE THE ASYMMETRY WITH IDENTITY, because it is why the two grains are not one table: this is a
+// derivation that happens once and is COPIED to N rows, so two rows CAN legitimately differ (a
+// human overrode one). Identity is a fact that IS one value, so it gets one row.
+//
+// ── IT CARRIES NO IDENTITY, AND THAT IS THE POINT ───────────────────────────────────────────
+// `kind`, `label` and `identity_source` USED TO BE COLUMNS HERE, replicated across an actor's
+// rows and held consistent only by convention. They now live once, on `account_reviewers`.
+//
+// THE FAILURE THAT MOVE MAKES UNREPRESENTABLE, because it is not hypothetical: CodeRabbit is
+// detected on api, web and infra; a user clicks "Not a bot" on web ONLY; that row's `kind` goes
+// null and is the most recently updated; identity resolution reports kind=null account-wide; and
+// useBotColors (which filters on kind != null) drops CodeRabbit's brand colour and vendor name on
+// api and infra — repos the user never touched. A most-recently-updated tie-break does not fix
+// it: it picks a winner, but it cannot make the losing rows editable or even visible. With
+// identity at its own grain there is no losing row: one storage location, no election.
+//
+// The write side mirrors it exactly (packages/shared/src/types.ts): per-repo writes carry ONLY
+// the judgement (`automated`, `role`); `kind`/`label` are an ACTOR-keyed write, as cost is. DO
+// NOT MERGE THEM BACK into one body with a `repoId` — that is the shape this replaced.
+export const repoReviewers = sqliteTable(
+  'repo_reviewers',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
     accountId: integer('account_id')
       .notNull()
-      .references(() => accounts.id),
-    // Which TEAM's answer to "is this login a bot, and what kind" this row holds.
-    //
-    // NOT NULL with the sentinel 0 (`NO_TEAM_KEY` in shared), never nullable: a UNIQUE index
-    // over a NULLable column dedupes in NEITHER dialect (NULLs compare distinct), so a
-    // nullable key would silently allow duplicate rows per (account, author) and make the
-    // upsert's conflict target unreachable.
-    //
-    // 0 is BOTH the "No team" scope AND the inheritance ROOT — resolution is `explicit team
-    // row → the team-0 row → auto-detect`. That is why migration 0042 needs no backfill:
-    // every pre-existing account-global row is already at 0, i.e. already the default every
-    // team inherits, so behaviour is preserved byte-for-byte in every scope and a team created
-    // later inherits the account default for free.
-    //
-    // NO `.references(() => teams.id)` ON PURPOSE: 0 is not a team id, so an FK would reject
-    // every default row. The price is manual cleanup — `deleteTeam` must delete this table's
-    // rows for the team inside its transaction, or a recycled team id inherits a dead team's
-    // classifications.
-    teamId: integer('team_id').notNull().default(0),
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // NOTE THE MISSING `.references()`: this column's foreign key is the COMPOSITE one declared
+    // in the table config below, `(repo_id, account_id) → repos(id, account_id)`, and a
+    // single-column FK here as well would be a second, weaker constraint saying nearly the same
+    // thing. See that declaration for why it is composite (tenancy) and why it cascades.
+    repoId: integer('repo_id').notNull(),
+    // No cascade: `users` is GLOBAL storage shared by every account and is never deleted.
     authorUserId: integer('author_user_id')
       .notNull()
       .references(() => users.id),
     automated: integer('automated', { mode: 'boolean' }).notNull(),
-    kind: text('kind'), // AutomatedReviewerKind | null
-    label: text('label'),
-    // ReviewerRole — 'review' (an AI code reviewer) | 'quality_check' (static analysis /
-    // coverage / lint). ORTHOGONAL to `kind`, which is vendor identity: a login keeps its brand
-    // while being marked a linter. `automated` stays TRUE for a quality check, so exclusion +
-    // the feed are unaffected; only the SCORING sets (behaviour, dedup, benchmark, and ROI —
-    // which splits rather than filters, see below) treat role='review' as the reviewer cohort.
-    // BOT-ONLY PRs DELIBERATELY DO NOT NARROW: that list answers "did a human look at this", and
-    // a PR reviewed only by SonarQube is exactly what it exists to surface — narrowing would drop
-    // it for having no review-role bot, hiding the risk instead of flagging it.
-    // NOT NULL DEFAULT 'review' so every existing row keeps today's meaning without a backfill.
+    // ReviewerRole — 'review' (an AI code reviewer) | 'quality_check' (static analysis / coverage
+    // / lint). Just a FLAG ON THIS OBJECT, orthogonal to `kind` (vendor identity): a login keeps
+    // its brand while being marked a linter, and it may honestly be a reviewer in one repo and a
+    // quality gate in another. `automated` stays TRUE for a quality check, so exclusion + the feed
+    // are unaffected; only the SCORING sets (behaviour, dedup, benchmark, ROI) treat 'review' as
+    // the reviewer cohort. BOT-ONLY PRs DELIBERATELY DO NOT NARROW: that list answers "did a human
+    // look at this", and a PR reviewed only by SonarQube is exactly what it exists to surface.
+    // NOT NULL DEFAULT 'review' so a row written by an older code path still means something.
     role: text('role').notNull().default('review'),
-    // What this bot COSTS per month at this team key, in INTEGER CENTS (migration 0043).
-    //
-    // 1. MONEY IS NEVER A FLOAT HERE. The core schema has no `real(` column at all (the only
-    //    float columns in the repo are in @pierre/pro, for MEASURED model spend, which genuinely
-    //    is one). SQLite has no DECIMAL and its REAL is a float64 where $0.10 + $0.20 !== $0.30,
-    //    and this value gets divided ($/acted-on) and formatted with toFixed(2). pg `numeric`
-    //    was rejected too: it has no sqlite twin AND node-postgres returns it as a STRING,
-    //    which would silently break the shared `number` wire type. integer↔integer is exact
-    //    parity for schema-parity.test.ts. The WIRE unit is DOLLARS; convert only at the store
-    //    boundary (Math.round(usd * 100) in, cents / 100 out).
-    //
-    // 2. NULLABILITY IS THE DESIGN. NULL = "no cost opinion at this key" → fall through to the
-    //    team-0 row (or, at team 0, simply unset). 0 = "explicitly free HERE" and must BEAT an
-    //    inherited $120. Hence every resolution step uses `??`, never `||` — a one-character bug
-    //    with no type error.
-    //
-    // 3. ⚠ THIS COLUMN RESOLVES FIELD-WISE WHILE EVERY OTHER COLUMN ON THE ROW RESOLVES
-    //    ROW-WISE. `automated`/`kind`/`label`/`role`/`confidence`/`source`/`reasons` are one
-    //    indivisible judgement, so an explicit team row wins WHOLESALE. Cost is not part of that
-    //    judgement: a row created merely to hold a role opinion carries no cost opinion, so
-    //    row-level cost would silently zero an inherited price the instant someone pressed
-    //    Apply on an inherited row. The mirror trap is just as real — a NEW team row must NOT
-    //    seed this from the inherited value (that freezes a copy of the default and later edits
-    //    to the team-0 price stop reaching this team), which is the exact OPPOSITE of what
-    //    `role` above requires.
-    //
-    // 4. NO INDEX, deliberately: it is never a predicate, only read off rows already fetched by
-    //    (account_id, team_id) via brc_account_team_idx.
-    //
-    // 5. reviewer-classify.ts persist() must keep this OUT of its shared insert/ON-CONFLICT
-    //    values object, or every auto-classification pass would wipe a user's price.
-    costMonthlyCents: integer('cost_monthly_cents'),
     confidence: text('confidence').notNull(), // 'high'|'medium'|'low'
-    source: text('source').notNull(), // ClassificationSource
+    source: text('source').notNull(), // ClassificationSource — 'manual' is never re-derived
     reasonsJson: text('reasons_json', { mode: 'json' }).$type<string[]>(),
     updatedAt: integer('updated_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
   },
   (t) => ({
-    // The upsert conflict target for BOTH writers (reviewer-classify.ts persist() and
-    // setReviewerOverride). It replaced the 2-column `brc_account_author`; miss the swap in an
-    // onConflictDoUpdate and Postgres raises "there is no unique or exclusion constraint
+    // The upsert conflict target for BOTH writers (reviewer-classify.ts persist() and the
+    // override route). `account_id` is redundant with `repo_id` (a repo has one account) but is
+    // kept in the key so the isolation predicate and the conflict target are the same columns —
+    // miss it in an onConflictDoUpdate and Postgres raises "no unique or exclusion constraint
     // matching the ON CONFLICT specification" at RUNTIME, not at typecheck.
-    accountTeamUx: uniqueIndex('brc_account_team_author').on(
+    accountRepoAuthorUx: uniqueIndex('repo_reviewers_account_repo_author').on(
       t.accountId,
-      t.teamId,
+      t.repoId,
       t.authorUserId,
     ),
-    // Listing a single team's overrides (the per-team Bots settings tab).
-    accountTeamIdx: index('brc_account_team_idx').on(t.accountId, t.teamId),
+    // Listing one repo's reviewers (the per-repo Bots settings list).
+    accountRepoIdx: index('repo_reviewers_account_repo_idx').on(t.accountId, t.repoId),
+    // Reaching every row of ONE actor: what "derive once per actor, write the verdict to each of
+    // its repo rows" walks, and the join key from `account_reviewers` back to this table. It is
+    // NOT what an identity write fans out over any more — there is nothing to fan out.
+    accountAuthorIdx: index('repo_reviewers_account_author_idx').on(t.accountId, t.authorUserId),
+    // ── TENANCY AS A CONSTRAINT, NOT A CONVENTION ────────────────────────────────────────
+    // `repo_id` is the FIRST column in this schema that arrives in a REQUEST BODY rather than
+    // from sync (the override names the repo row it edits). A plain `repo_id → repos(id)` FK
+    // accepts (account 2, repo 10) where repo 10 belongs to account 1 — both halves are
+    // individually valid — so the only thing between that and a row written into another
+    // tenant's repo would be one hand-written predicate in one handler.
+    //
+    // The composite FK makes the pair itself the thing that must exist. Verified by insertion in
+    // BOTH dialects: the cross-account row is rejected ("FOREIGN KEY constraint failed" /
+    // "violates foreign key constraint"), and it needs the `repos_id_account` unique index that
+    // exists for exactly this purpose.
+    //
+    // CASCADE, matching team_repos (the closest analogue). Core has no cascades on the PR subtree
+    // because deleteRepo unwinds that by hand, but these rows are pure per-repo metadata with
+    // nothing downstream: a repo's bot objects should die with the repo, and without the cascade
+    // deleteRepo hits a foreign-key violation (local mode opens SQLite with `foreign_keys=ON`)
+    // the moment a repo with a classified reviewer is removed.
+    //
+    // THE `name` IS REAL, NOT DECORATION — the hand-written migrations SPELL IT (`CONSTRAINT
+    // "repo_reviewers_repo_account_fk" FOREIGN KEY …`) in both dialects, so the declaration and
+    // the emitted DDL say the same thing. It previously did not: the SQL named nothing, so
+    // Postgres auto-named the constraint `repo_reviewers_repo_id_account_id_fkey` and a grep for
+    // the name in this file found no live constraint anywhere. In Postgres the name is what the
+    // violation message quotes; SQLite parses and stores it but never reports it (its error is
+    // the bare "FOREIGN KEY constraint failed" and `PRAGMA foreign_key_list` has no name column),
+    // so on that side it is documentation that at least matches the stored DDL.
+    repoAccountFk: foreignKey({
+      name: 'repo_reviewers_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// WHAT AN AUTOMATED REVIEWER IS — one row per (account, actor), NEVER per repo. The ACTOR GRAIN:
+// what the bot IS (`kind`), what it is CALLED (`label`), who decided that (`identity_source`),
+// and what we PAY for it (`monthly_cents`).
+//
+// THESE ARE THE SAME IN EVERY REPO BY DEFINITION, which is the entire membership rule. A login is
+// one vendor everywhere: CodeRabbit does not stop being CodeRabbit on the infra repo. And you buy
+// ONE subscription from a vendor — six repos running CodeRabbit is $120, not $720 — so a per-repo
+// price is a number that is wrong by construction the moment anyone sums it.
+//
+// ── THE NAME ────────────────────────────────────────────────────────────────────────────────
+// `account_reviewers` is named for its KEY, exactly as `repo_reviewers` is, so the two table
+// names ARE the statement of the model: one row per (account, author) here, one per (account,
+// repo, author) there. Read them side by side and the grain of any fact is obvious from which
+// file it is in.
+//
+// It is deliberately NOT named after any of the facts it holds. `reviewer_identities` would make
+// `monthly_cents` look like a stray column someone bolted on; `reviewer_costs` (which this
+// replaces) made `kind`/`label` look the same way. This table is defined by its GRAIN, not by its
+// contents, and the next actor-level fact — a vendor's plan tier, a contract end date — belongs
+// here without renaming anything.
+//
+// ── WHY COST IS IN HERE RATHER THAN IN A THIRD TABLE ────────────────────────────────────────
+// Cost is simply another actor-level property. A separate `reviewer_costs` table alongside this
+// one would key on the same two columns and be joined at every call site, i.e. it would be this
+// table with extra steps. ONE TABLE PER GRAIN is the clearest possible statement of the model,
+// and it is the same reason `kind`/`label` are here rather than replicated across repo rows.
+//
+// ── `monthly_cents` IS NULLABLE, AND THAT IS SAFE HERE IN A WAY IT WAS NOT BEFORE ───────────
+// When cost had its own table, NOT NULL was the point: "no price" was "no row", so clearing a
+// price was a DELETE and there was no third state. Folding it into a row that ALSO carries
+// identity means the row can exist for reasons that have nothing to do with money, so the column
+// must be nullable — an actor with a `kind` and no price is completely ordinary.
+//
+// DO NOT REINTRODUCE THE OLD FEAR. The bug class that made nullable money dangerous was
+// nullable-means-INHERIT: NULL meant "fall through to the team-0 row", so 0 ("free HERE") and
+// NULL ("ask my parent") had to be distinguished with `??` and never `||`, one character from a
+// silent wrong price. THERE IS NO INHERITANCE ANYWHERE ANY MORE. NULL means exactly "no price
+// set" and 0 means "free" — two states, no chain, no fallback, nothing to resolve. `||` is still
+// wrong (it would turn a real 0 into "unset" for display), but it is now wrong in the ordinary,
+// visible way that any falsy-vs-nullish mistake is, not in the way that silently bills a repo the
+// wrong number. Clearing a price is `SET monthly_cents = NULL`, not a DELETE — deleting the row
+// would take the identity with it.
+//
+// ⚠ RENDERING RULE, and it is the client's job because no schema can enforce it: a bot listing is
+// one row per (repo, actor), so joining this price onto all six CodeRabbit rows and summing the
+// column is both easy and wrong. Render it ONCE per actor and DEDUPE BY `author_user_id` before
+// any total, average or $/acted-on. Stated again with the wire type
+// (`ReviewerIdentity.costMonthlyUsd` in packages/shared/src/types.ts).
+//
+// MONEY IS NEVER A FLOAT HERE. SQLite has no DECIMAL and its REAL is a float64 where
+// $0.10 + $0.20 !== $0.30, and this value gets divided ($/acted-on) and printed with toFixed(2).
+// pg `numeric` was rejected as the twin: no sqlite equivalent, and node-postgres returns it as a
+// STRING, which would silently break the shared `number` wire type. integer↔integer is exact
+// parity for schema-parity.test.ts (which canonicalises int vs float precisely to catch this).
+// The WIRE unit is DOLLARS; convert only at the store boundary. The ROUNDING RULE is fixed and
+// identical in both dialects — cents = floor(usd × 100 + 0.5) evaluated in IEEE-754 binary64 —
+// see the migrations for why anything computed in pg `numeric` disagrees with SQLite on $1.005.
+//
+// It is CORE, not Pro: an OSS/npx install can set and see a price. The legacy account-wide blob
+// it replaces (`pro_settings.bot_cost_json`) is plugin-owned and stays put — see plugin
+// migration 0019.
+export const accountReviewers = sqliteTable(
+  'account_reviewers',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // No cascade: `users` is GLOBAL storage shared by every account and is never deleted.
+    authorUserId: integer('author_user_id')
+      .notNull()
+      .references(() => users.id),
+    // Vendor identity — drives BOT_VENDOR_META / automatedReviewerMeta() colour + brand name.
+    // NULL when this actor is not automated anywhere.
+    kind: text('kind'), // AutomatedReviewerKind | null
+    // A human-set display name. NULL ⇒ fall back to the vendor's brand name, then the login.
+    label: text('label'),
+    // Provenance of `kind` + `label` ONLY — 'auto' (the classifier derived them) | 'manual' (a
+    // human named this thing and the classifier must leave it alone).
+    //
+    // IT IS NOT THE SAME FIELD AS `repo_reviewers.source`, and the split is the reason both are
+    // now trivially correct. "This is actually Greptile, not CodeRabbit" is an ACTOR-wide
+    // identity correction; "not a bot HERE" is a per-repo judgement. They live on different
+    // tables, so neither edit can reach the other's rows — where the previous shape needed
+    // persist() to gate two provenance flags against columns sitting side by side.
+    identitySource: text('identity_source', { enum: ['auto', 'manual'] })
+      .notNull()
+      .default('auto'),
+    // NULL = no price set. 0 = free. See the nullability note above the table.
+    monthlyCents: integer('monthly_cents'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    // Upsert conflict target AND the isolation predicate — one row per actor per account, which
+    // IS the table. Both identity writes and cost writes use it as their ON CONFLICT target.
+    accountAuthorUx: uniqueIndex('account_reviewers_account_author').on(
+      t.accountId,
+      t.authorUserId,
+    ),
   }),
 );
 

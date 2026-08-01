@@ -21,10 +21,12 @@ let fingerprintReview: any;
 
 const DAY = 24 * 60 * 60 * 1000;
 const MIN = 60 * 1000;
-// The classification team key sentinel (shared's NO_TEAM_KEY): 0 = "No team" AND the inheritance
-// root. Every classifyReviewer call passes it EXPLICITLY — since migration 0042 the unique index
-// is (account_id, team_id, author_user_id), so a read with no team predicate is non-deterministic.
-const NO_TEAM = 0;
+// THE ROW IS THE BOT OBJECT, so every classifyReviewer call names the REPO ROWS its verdict
+// should land on. There is no sentinel: `NO_TEAM_KEY` used to stand in here for "no team to
+// give", which quietly also meant "the inheritance root every team reads". A repo id means one
+// thing. Most tests below use a single scope repo; the fan-out across several is covered in
+// db/bot-reviewer-grains.test.ts.
+let SCOPE: number[] = [];
 
 // user id by login, populated in beforeAll.
 const uid: Record<string, number> = {};
@@ -84,24 +86,43 @@ beforeAll(async () => {
   await addUser('sam-rivers'); // no evidence at all
   await addUser('robo-reviewer'); // behavioral-compute subject
   await addUser('sonarqubecloud', { isBot: true, githubType: 'Bot' }); // quality-check seed subject
-  await addUser('per-team-bot', { isBot: true, githubType: 'Bot' }); // per-team override subject
+  await addUser('per-repo-bot', { isBot: true, githubType: 'Bot' }); // per-repo override subject
+
+  // One repo for the resolution-order block to write its rows into. A judgement has to land
+  // somewhere, and a row keyed to a repo that does not exist is rejected by the composite FK
+  // `(repo_id, account_id) → repos(id, account_id)`.
+  const [clsRepo] = await db
+    .insert(schema.repos)
+    .values({ accountId: 1, owner: 'acme', name: 'classify', githubNodeId: 'R_classify' })
+    .returning()
+    .execute();
+  SCOPE = [clsRepo.id];
 });
 
 afterAll(() => closeDb?.());
 
 describe('classifyReviewer resolution order', () => {
   it('2. known vendor login → vendor kind, high, vendor_login (+ persisted)', async () => {
-    const c = await classifyReviewer(1, userArg('coderabbitai', { isBot: true }), {}, NO_TEAM);
+    const c = await classifyReviewer(1, userArg('coderabbitai', { isBot: true }), {}, SCOPE);
     expect(c.automated).toBe(true);
     expect(c.kind).toBe('coderabbit');
     expect(c.confidence).toBe('high');
     expect(c.source).toBe('vendor_login');
-    // persisted to the classification store (small test DB → a full scan is fine)
-    const persisted = (
-      await db.select().from(schema.botReviewClassification).execute()
+    // Persisted at BOTH grains: the JUDGEMENT on the repo row, the IDENTITY on the actor row.
+    // (Small test DB → a full scan is fine.)
+    const judgement = (
+      await db.select().from(schema.repoReviewers).execute()
     ).find((r: any) => r.authorUserId === uid['coderabbitai']! && r.accountId === 1);
-    expect(persisted).toBeDefined();
-    expect(persisted.source).toBe('vendor_login');
+    expect(judgement).toBeDefined();
+    expect(judgement.source).toBe('vendor_login');
+    expect(judgement.repoId).toBe(SCOPE[0]);
+    const identity = (
+      await db.select().from(schema.accountReviewers).execute()
+    ).find((r: any) => r.authorUserId === uid['coderabbitai']! && r.accountId === 1);
+    expect(identity).toBeDefined();
+    expect(identity.kind).toBe('coderabbit');
+    // The classifier wrote it, so the provenance stays 'auto' — it must keep self-healing.
+    expect(identity.identitySource).toBe('auto');
   });
 
   it("3. githubType==='Bot' with no marker → in_house, high, github_type", async () => {
@@ -109,7 +130,7 @@ describe('classifyReviewer resolution order', () => {
       1,
       userArg('claude-bot-type', { isBot: true, githubType: 'Bot' }),
       { fingerprint: { marked: false, tool: null, markers: [] } },
-      NO_TEAM,
+      SCOPE,
     );
     expect(c.automated).toBe(true);
     expect(c.kind).toBe('in_house');
@@ -123,7 +144,7 @@ describe('classifyReviewer resolution order', () => {
       1,
       userArg('branded-bot-type', { isBot: true, githubType: 'Bot' }),
       { fingerprint: fp },
-      NO_TEAM,
+      SCOPE,
     );
     expect(c.kind).toBe('coderabbit');
     expect(c.source).toBe('github_type');
@@ -140,7 +161,7 @@ describe('classifyReviewer resolution order', () => {
       1,
       userArg('pierre-poster', { githubType: 'User' }),
       { fingerprint: fp },
-      NO_TEAM,
+      SCOPE,
     );
     expect(c.automated).toBe(true);
     expect(c.kind).toBe('pierre');
@@ -161,7 +182,7 @@ describe('classifyReviewer resolution order', () => {
           commentsPerReview: 4,
         },
       },
-      NO_TEAM,
+      SCOPE,
     );
     expect(c.automated).toBe(true);
     expect(c.kind).toBe('in_house');
@@ -183,7 +204,7 @@ describe('classifyReviewer resolution order', () => {
           commentsPerReview: 1,
         },
       },
-      NO_TEAM,
+      SCOPE,
     );
     expect(c.automated).toBe(false);
     expect(c.kind).toBeNull();
@@ -191,40 +212,73 @@ describe('classifyReviewer resolution order', () => {
   });
 
   it('otherwise → human (weak): no evidence → automated:false, low', async () => {
-    const c = await classifyReviewer(1, userArg('sam-rivers'), {}, NO_TEAM);
+    const c = await classifyReviewer(1, userArg('sam-rivers'), {}, SCOPE);
     expect(c.automated).toBe(false);
     expect(c.confidence).toBe('low');
   });
 });
 
-describe('manual override wins + is never overwritten by auto', () => {
-  it('1. a source=manual "human" row beats the vendor-login signal', async () => {
-    // qodo-ai is a KNOWN vendor login, but a manual override says "this is a human".
+describe('a MANUAL row is never re-derived — per grain, per repo', () => {
+  it('a manual "human" judgement survives a pass that would say "known vendor"', async () => {
+    // qodo-ai is a KNOWN vendor login, so every classification pass wants to call it a bot. A
+    // human said otherwise IN THIS REPO, and persist() must decline to write that row.
+    //
+    // NOTE WHAT IS NOT HERE ANY MORE: classifyReviewer used to short-circuit on a manual row and
+    // return it verbatim. Under the repo grain the derivation always runs — it has to, because
+    // the SAME actor's other repos must keep updating — and the decision to skip moved into the
+    // write. So the RETURN value below is the derived verdict; the STORED row is what the manual
+    // flag protects, and that is what this asserts.
     await db
-      .insert(schema.botReviewClassification)
+      .insert(schema.repoReviewers)
       .values({
         accountId: 1,
-        teamId: NO_TEAM,
+        repoId: SCOPE[0]!,
         authorUserId: uid['qodo-ai']!,
         automated: false,
-        kind: null,
-        label: 'A human',
+        role: 'review',
         confidence: 'high',
         source: 'manual',
         reasonsJson: ['user marked as human'],
         updatedAt: new Date(),
       })
       .execute();
-    const c = await classifyReviewer(1, userArg('qodo-ai', { isBot: true }), {}, NO_TEAM);
-    expect(c.automated).toBe(false);
-    expect(c.source).toBe('manual');
-    expect(c.label).toBe('A human');
-    // and the stored row is untouched (still manual, still automated=false)
-    const row = (
-      await db.select().from(schema.botReviewClassification).execute()
-    ).find((r: any) => r.authorUserId === uid['qodo-ai']! && r.accountId === 1);
+    await classifyReviewer(1, userArg('qodo-ai', { isBot: true }), {}, SCOPE);
+    const row = (await db.select().from(schema.repoReviewers).execute()).find(
+      (r: any) => r.authorUserId === uid['qodo-ai']! && r.accountId === 1,
+    );
     expect(row.source).toBe('manual');
     expect(row.automated).toBe(false);
+  });
+
+  it('a manual IDENTITY survives the same pass — and the judgement still re-derives', async () => {
+    // The two flags live on two tables precisely so this pair is expressible. Gating identity on
+    // the ROW's `source` would revert a human's vendor correction; gating the judgement on
+    // `identity_source` would freeze auto-detection on every one of the actor's repos.
+    await db
+      .insert(schema.accountReviewers)
+      .values({
+        accountId: 1,
+        authorUserId: uid['coderabbitai']!,
+        kind: 'greptile',
+        label: 'Actually Greptile',
+        identitySource: 'manual',
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [schema.accountReviewers.accountId, schema.accountReviewers.authorUserId],
+        set: { kind: 'greptile', label: 'Actually Greptile', identitySource: 'manual' },
+      })
+      .execute();
+    await classifyReviewer(1, userArg('coderabbitai', { isBot: true }), {}, SCOPE);
+    const identity = (await db.select().from(schema.accountReviewers).execute()).find(
+      (r: any) => r.authorUserId === uid['coderabbitai']! && r.accountId === 1,
+    );
+    expect(identity.kind).toBe('greptile'); // the human's correction stands
+    expect(identity.label).toBe('Actually Greptile');
+    const judgement = (await db.select().from(schema.repoReviewers).execute()).find(
+      (r: any) => r.authorUserId === uid['coderabbitai']! && r.accountId === 1,
+    );
+    expect(judgement.source).toBe('vendor_login'); // …and the repo row still re-derived
   });
 });
 
@@ -352,38 +406,35 @@ describe('computeBehavioralSignals', () => {
 
   it('feeds classifyReviewer → this reviewer lands in the MEDIUM automated band', async () => {
     const sig = await computeBehavioralSignals(1, uid['robo-reviewer']!);
-    const c = await classifyReviewer(1, userArg('robo-reviewer'), { behavioral: sig }, NO_TEAM);
+    const c = await classifyReviewer(1, userArg('robo-reviewer'), { behavioral: sig }, SCOPE);
     expect(c.automated).toBe(true);
     expect(c.confidence).toBe('medium');
     expect(c.source).toBe('behavioral');
   });
 });
 
-// ── Per-TEAM classification + the quality-check ROLE (migration 0042) ────────────────────────
-// `bot_review_classification` gained (team_id, role) and its unique index became the 3-column
-// (account_id, team_id, author_user_id). These cover the four things most likely to break:
-// the upsert's conflict target, the team override → team-0 → auto-detect resolution order, the
-// role seed surviving a re-sync, and deleteTeam's hand-rolled cleanup (there is no FK cascade).
-describe('per-team classification + quality-check role', () => {
+// ── The quality-check ROLE, at the repo grain (migrations 0042/0043) ────────────────────────
+// The role is a per-(repo, actor) flag, so these cover the three things most likely to break: the
+// upsert's conflict target (now the 3-column `repo_reviewers_account_repo_author`), the role seed
+// surviving a re-sync, and the role narrowing the METRIC set without touching the exclusion set.
+//
+// The per-repo divergence / identity-constancy cases live in db/bot-reviewer-grains.test.ts; this
+// file stays focused on the classifier itself.
+describe('quality-check role', () => {
   let q: any;
   beforeAll(async () => {
     q = await import('../db/queries.js');
-    // listDetectedReviewers only surfaces actors seen in THIS account's synced data, so the
-    // per-team override subject needs a real review or it never appears in the roster and the
-    // teamId/inherited assertions below would pass vacuously on `undefined`.
-    const [repo] = await db
-      .insert(schema.repos)
-      .values({ accountId: 1, owner: 'acme', name: 'team-svc', githubNodeId: 'R_team' })
-      .returning()
-      .execute();
+    // The listing only surfaces actors seen in THIS account's synced data, and a judgement write
+    // needs a real footprint, so the subject needs a real review or the assertions below pass
+    // vacuously on `undefined`.
     const [pr] = await db
       .insert(schema.pullRequests)
       .values({
-        githubNodeId: 'PR_team_1',
+        githubNodeId: 'PR_role_1',
         accountId: 1,
-        repoId: repo.id,
-        number: 1,
-        title: 'team',
+        repoId: SCOPE[0]!,
+        number: 991,
+        title: 'role',
         state: 'open',
         isDraft: false,
         openedAt: new Date(Date.now() - DAY),
@@ -394,9 +445,19 @@ describe('per-team classification + quality-check role', () => {
     await db
       .insert(schema.reviews)
       .values({
-        githubNodeId: 'RV_team_1',
+        githubNodeId: 'RV_role_1',
         prId: pr.id,
-        authorId: uid['per-team-bot']!,
+        authorId: uid['per-repo-bot']!,
+        state: 'commented',
+        submittedAt: new Date(Date.now() - DAY),
+      })
+      .execute();
+    await db
+      .insert(schema.reviews)
+      .values({
+        githubNodeId: 'RV_role_2',
+        prId: pr.id,
+        authorId: uid['sonarqubecloud']!,
         state: 'commented',
         submittedAt: new Date(Date.now() - DAY),
       })
@@ -404,15 +465,20 @@ describe('per-team classification + quality-check role', () => {
   });
 
   it('the ON CONFLICT target matches the 3-column unique index (upsert, not duplicate)', async () => {
-    // Classifying the SAME reviewer twice under the SAME team must UPDATE, not insert a second
-    // row — and must not raise "no unique or exclusion constraint matching the ON CONFLICT
-    // specification", which is what a stale 2-column target produces at runtime.
-    await classifyReviewer(1, userArg('sonarqubecloud', { isBot: true, githubType: 'Bot' }), {}, NO_TEAM);
-    await classifyReviewer(1, userArg('sonarqubecloud', { isBot: true, githubType: 'Bot' }), {}, NO_TEAM);
-    const rows = (await db.select().from(schema.botReviewClassification).execute()).filter(
+    // Classifying the SAME reviewer twice over the SAME repo must UPDATE, not insert a second row
+    // — and must not raise "no unique or exclusion constraint matching the ON CONFLICT
+    // specification", which is what a stale target produces at RUNTIME (it type-checks fine).
+    await classifyReviewer(1, userArg('sonarqubecloud', { isBot: true, githubType: 'Bot' }), {}, SCOPE);
+    await classifyReviewer(1, userArg('sonarqubecloud', { isBot: true, githubType: 'Bot' }), {}, SCOPE);
+    const rows = (await db.select().from(schema.repoReviewers).execute()).filter(
       (r: any) => r.accountId === 1 && r.authorUserId === uid['sonarqubecloud']!,
     );
     expect(rows).toHaveLength(1);
+    // …and the identity upsert likewise (2-column target on `account_reviewers`).
+    const idRows = (await db.select().from(schema.accountReviewers).execute()).filter(
+      (r: any) => r.accountId === 1 && r.authorUserId === uid['sonarqubecloud']!,
+    );
+    expect(idRows).toHaveLength(1);
   });
 
   it('seeds a known quality-check login with role=quality_check, still automated', async () => {
@@ -420,7 +486,7 @@ describe('per-team classification + quality-check role', () => {
       1,
       userArg('sonarqubecloud', { isBot: true, githubType: 'Bot' }),
       {},
-      NO_TEAM,
+      SCOPE,
     );
     // automated STAYS true — excludeBots / the feed bot lens / the per-row vendor tag all keep
     // working. Only the METRIC sets narrow by role.
@@ -428,20 +494,20 @@ describe('per-team classification + quality-check role', () => {
     expect(c.role).toBe('quality_check');
   });
 
-  it('the role SURVIVES a re-classification pass (the backfill is not erased)', async () => {
+  it('the role SURVIVES a re-classification pass (the seed is not erased)', async () => {
     // The regression this guards: persist() shares ONE values object between the insert and the
-    // ON CONFLICT set:, so a role copied off the in-memory classification would be rewritten
-    // from a stale default on the next sync — putting SonarQube back into the review-bot metrics.
-    await classifyReviewer(1, userArg('sonarqubecloud', { isBot: true, githubType: 'Bot' }), {}, NO_TEAM);
-    const [row] = (await db.select().from(schema.botReviewClassification).execute()).filter(
+    // ON CONFLICT set:, so a role copied off the in-memory classification would be rewritten from
+    // a stale default on the next sync — putting SonarQube back into the review-bot metrics.
+    await classifyReviewer(1, userArg('sonarqubecloud', { isBot: true, githubType: 'Bot' }), {}, SCOPE);
+    const [row] = (await db.select().from(schema.repoReviewers).execute()).filter(
       (r: any) => r.accountId === 1 && r.authorUserId === uid['sonarqubecloud']!,
     );
     expect(row.role).toBe('quality_check');
   });
 
   it('a quality_check reviewer is EXCLUDED from the metric set but present in the full set', async () => {
-    const reviewOnly = await q.automatedReviewerUserIds(1, NO_TEAM, 'review');
-    const all = await q.automatedReviewerUserIds(1, NO_TEAM, 'all');
+    const reviewOnly = await q.automatedReviewerUserIds(1, SCOPE, 'review');
+    const all = await q.automatedReviewerUserIds(1, SCOPE, 'all');
     expect(all).toContain(uid['sonarqubecloud']!);
     expect(reviewOnly).not.toContain(uid['sonarqubecloud']!);
     // …and a real review bot is in BOTH (the role filter is not a blanket narrowing).
@@ -449,199 +515,32 @@ describe('per-team classification + quality-check role', () => {
     expect(reviewOnly).toContain(uid['coderabbitai']!);
   });
 
-  it('a TEAM override beats the team-0 default; other teams still inherit team 0', async () => {
-    const [team] = await db
-      .insert(schema.teams)
-      .values({ accountId: 1, name: 'platform' })
-      .returning()
-      .execute();
-    const [otherTeam] = await db
-      .insert(schema.teams)
-      .values({ accountId: 1, name: 'web' })
-      .returning()
-      .execute();
-    const userId = uid['per-team-bot']!;
-    // The account default says "automated".
-    await q.setReviewerOverride(1, userId, { automated: true, kind: 'in_house', label: 'Kimi' });
-    // The platform team says "this is a human" (erxes' githubactions[bot] case in miniature).
-    await q.setReviewerOverride(1, userId, { automated: false, teamId: team.id });
-
-    expect(await q.automatedReviewerUserIds(1, NO_TEAM, 'all')).toContain(userId);
-    expect(await q.automatedReviewerUserIds(1, team.id, 'all')).not.toContain(userId);
-    // A team with no explicit row inherits the team-0 default — the whole point of the sentinel.
-    expect(await q.automatedReviewerUserIds(1, otherTeam.id, 'all')).toContain(userId);
-
-    // The listing reports which key each row resolved under, so the tab can label it.
-    const teamList = await q.listDetectedReviewers(1, team.id);
-    const teamRow = teamList.reviewers.find((r: any) => r.userId === userId);
-    expect(teamList.teamId).toBe(team.id);
-    expect(teamRow.teamId).toBe(team.id);
-    expect(teamRow.inherited).toBe(false);
-    const otherList = await q.listDetectedReviewers(1, otherTeam.id);
-    const otherRow = otherList.reviewers.find((r: any) => r.userId === userId);
-    expect(otherRow.teamId).toBe(NO_TEAM);
-    expect(otherRow.inherited).toBe(true);
-
-    // "Reset to default" drops the team row → the team inherits again.
-    expect(await q.deleteReviewerOverride(1, userId, team.id)).toBe(true);
-    expect(await q.automatedReviewerUserIds(1, team.id, 'all')).toContain(userId);
+  it('reviewerRoleForUser reports the role folded over the requested repos', async () => {
+    expect((await q.reviewerRoleForUser(1, SCOPE)).get(uid['sonarqubecloud']!)).toBe(
+      'quality_check',
+    );
+    expect((await q.reviewerRoleForUser(1, SCOPE)).get(uid['coderabbitai']!)).toBe('review');
   });
 
-  it('an absent `role` in an override leaves the stored role ALONE', async () => {
-    const userId = uid['sonarqubecloud']!;
-    // Mark it automated with an explicit quality_check role…
-    await q.setReviewerOverride(1, userId, {
-      automated: true,
-      kind: 'in_house',
+  it('a manual role edit in one repo pins that row and nothing else', async () => {
+    const userId = uid['per-repo-bot']!;
+    await classifyReviewer(1, userArg('per-repo-bot', { isBot: true, githubType: 'Bot' }), {}, SCOPE);
+    expect(await q.automatedReviewerUserIds(1, SCOPE, 'review')).toContain(userId);
+    const patched = await q.setRepoReviewerJudgement(1, userId, {
+      repoId: SCOPE[0]!,
       role: 'quality_check',
     });
-    // …then edit something else with NO role in the body (what "Not a bot"/an old client sends).
-    const after = await q.setReviewerOverride(1, userId, { automated: true, label: 'Sonar' });
-    expect(after.role).toBe('quality_check');
-  });
-
-  it('rejects a foreign / unknown teamId on the WRITE path (→ 404), and on delete', async () => {
-    // Account 2 owns this team; account 1 must not be able to key a row to it. There is no FK on
-    // team_id (0 isn't a team id), so the DATABASE would happily accept the write.
-    const [foreign] = await db
-      .insert(schema.teams)
-      .values({ accountId: 2, name: 'acct2-team' })
-      .returning()
-      .execute();
-    const userId = uid['per-team-bot']!;
-    expect(await q.setReviewerOverride(1, userId, { automated: true, teamId: foreign.id })).toBeNull();
-    expect(await q.setReviewerOverride(1, userId, { automated: true, teamId: 999_999 })).toBeNull();
-    expect(await q.deleteReviewerOverride(1, userId, foreign.id)).toBe(false);
-    // MUTATION-CHECK: the assertions above would pass vacuously if the write simply did nothing,
-    // so prove no row was created under the foreign key.
-    const leaked = (await db.select().from(schema.botReviewClassification).execute()).filter(
-      (r: any) => r.teamId === foreign.id,
+    expect(patched?.role).toBe('quality_check');
+    // The role narrows the reviewer cohort …
+    expect(await q.automatedReviewerUserIds(1, SCOPE, 'review')).not.toContain(userId);
+    // … but never the exclusion set: a linter's threads still have to be visible and triageable.
+    expect(await q.automatedReviewerUserIds(1, SCOPE, 'all')).toContain(userId);
+    // …and it survives the next classification pass, because the row is now a human judgement.
+    await classifyReviewer(1, userArg('per-repo-bot', { isBot: true, githubType: 'Bot' }), {}, SCOPE);
+    const [row] = (await db.select().from(schema.repoReviewers).execute()).filter(
+      (r: any) => r.accountId === 1 && r.authorUserId === userId,
     );
-    expect(leaked).toHaveLength(0);
-    // …and prove the same call SUCCEEDS for a team account 1 does own (so the 404 is about
-    // ownership, not about the parameter being ignored).
-    const [own] = await db
-      .insert(schema.teams)
-      .values({ accountId: 1, name: 'owned' })
-      .returning()
-      .execute();
-    expect(await q.setReviewerOverride(1, userId, { automated: true, teamId: own.id })).not.toBeNull();
-  });
-
-  // The Bots→Settings tab renders a team's INHERITED (team-0) answer with an "inherited" badge
-  // and an Apply button that deliberately sends NO `role` ("absent means leave the stored role
-  // alone"). That Apply is an INSERT at the team key, so the insert's role fallback — not the ON
-  // CONFLICT set: — decides, and seeding it from the login alone silently reversed the user's
-  // explicit classification. Both directions are pinned, because the login seed gets each one
-  // wrong in the opposite way.
-  it('editing an INHERITED quality check on a team tab does not promote it back to a review bot', async () => {
-    // A login OUTSIDE the QUALITY_CHECK_BOTS seed — so defaultRoleFor() says 'review' and only
-    // the inherited row carries the truth.
-    const userId = await addUser('acme-lint-bot', { isBot: true, githubType: 'Bot' });
-    const [team] = await db
-      .insert(schema.teams)
-      .values({ accountId: 1, name: 'inherit-qc' })
-      .returning()
-      .execute();
-
-    // Account default: an in-house quality check.
-    await q.setReviewerOverride(1, userId, {
-      automated: true,
-      kind: 'in_house',
-      label: 'Acme Lint',
-      role: 'quality_check',
-    });
-    // MUTATION-CHECK: the team must genuinely INHERIT quality_check first, or the assertion
-    // after the Apply would pass without the fix ever mattering.
-    expect((await q.reviewerRoleForUser(1, team.id)).get(userId)).toBe('quality_check');
-    expect(await q.automatedReviewerUserIds(1, team.id, 'review')).not.toContain(userId);
-
-    // Exactly what DetectedReviewersTable's Apply sends for an inherited row: no `role`.
-    const after = await q.setReviewerOverride(1, userId, {
-      automated: true,
-      kind: 'in_house',
-      label: 'Acme Lint v2',
-      teamId: team.id,
-    });
-    expect(after.role).toBe('quality_check');
-    expect((await q.reviewerRoleForUser(1, team.id)).get(userId)).toBe('quality_check');
-    // …and it stays OUT of the team's ROI / behaviour / dedup / benchmark set.
-    expect(await q.automatedReviewerUserIds(1, team.id, 'review')).not.toContain(userId);
-    // The account default is untouched by the team-level edit.
-    expect((await q.reviewerRoleForUser(1, NO_TEAM)).get(userId)).toBe('quality_check');
-  });
-
-  it('the MIRROR case: an inherited re-roled vendor is not demoted to quality_check', async () => {
-    // A login INSIDE the seed, explicitly re-roled to 'review' at the account default. Here the
-    // login seed says 'quality_check', so an unfixed insert drops it OUT of the team's metrics.
-    const userId = await addUser('codecov', { isBot: true, githubType: 'Bot' });
-    const [team] = await db
-      .insert(schema.teams)
-      .values({ accountId: 1, name: 'inherit-review' })
-      .returning()
-      .execute();
-
-    await q.setReviewerOverride(1, userId, {
-      automated: true,
-      kind: 'in_house',
-      label: 'Codecov',
-      role: 'review',
-    });
-    expect((await q.reviewerRoleForUser(1, team.id)).get(userId)).toBe('review');
-    expect(await q.automatedReviewerUserIds(1, team.id, 'review')).toContain(userId);
-
-    const after = await q.setReviewerOverride(1, userId, {
-      automated: true,
-      kind: 'in_house',
-      label: 'Codecov CI',
-      teamId: team.id,
-    });
-    expect(after.role).toBe('review');
-    expect((await q.reviewerRoleForUser(1, team.id)).get(userId)).toBe('review');
-    expect(await q.automatedReviewerUserIds(1, team.id, 'review')).toContain(userId);
-  });
-
-  it('with NOTHING stored anywhere, a fresh team override still falls back to the login seed', async () => {
-    // Guards the fix from over-reaching: the inherited lookup must not swallow the seed when
-    // there is no team-0 row at all.
-    const seeded = await addUser('coveralls', { isBot: true, githubType: 'Bot' });
-    const plain = await addUser('acme-inhouse-bot', { isBot: true, githubType: 'Bot' });
-    const [team] = await db
-      .insert(schema.teams)
-      .values({ accountId: 1, name: 'no-default' })
-      .returning()
-      .execute();
-    const qc = await q.setReviewerOverride(1, seeded, {
-      automated: true,
-      kind: 'in_house',
-      teamId: team.id,
-    });
-    expect(qc.role).toBe('quality_check');
-    const rev = await q.setReviewerOverride(1, plain, {
-      automated: true,
-      kind: 'in_house',
-      teamId: team.id,
-    });
-    expect(rev.role).toBe('review');
-  });
-
-  it('deleteTeam removes that team’s classification rows (no FK cascade exists)', async () => {
-    const [team] = await db
-      .insert(schema.teams)
-      .values({ accountId: 1, name: 'doomed' })
-      .returning()
-      .execute();
-    const userId = uid['per-team-bot']!;
-    await q.setReviewerOverride(1, userId, { automated: false, teamId: team.id });
-    const before = (await db.select().from(schema.botReviewClassification).execute()).filter(
-      (r: any) => r.teamId === team.id,
-    );
-    expect(before).toHaveLength(1); // the check below would be vacuous without this
-
-    expect(await q.deleteTeam(team.id, 1)).toBe(true);
-    const after = (await db.select().from(schema.botReviewClassification).execute()).filter(
-      (r: any) => r.teamId === team.id,
-    );
-    expect(after).toHaveLength(0);
+    expect(row.role).toBe('quality_check');
+    expect(row.source).toBe('manual');
   });
 });

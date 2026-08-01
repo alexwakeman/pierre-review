@@ -35,7 +35,8 @@ const {
   repos,
   aiUsage,
   myTurnDismissals,
-  botReviewClassification,
+  repoReviewers,
+  accountReviewers,
   teams,
   teamRepos,
   benchmarkContributions,
@@ -117,11 +118,14 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .delete(myTurnDismissals)
       .where(eq(myTurnDismissals.accountId, accountId))
       .execute();
-    // Manual + auto automated-reviewer classifications.
-    await tx
-      .delete(botReviewClassification)
-      .where(eq(botReviewClassification.accountId, accountId))
-      .execute();
+    // The bot object, at BOTH grains. `repo_reviewers` cascades from `repos` (and from
+    // `accounts`), but it is deleted explicitly here for the same reason `teamRepos` is — the txn
+    // ordering must not depend on the dialect's FK timing, and the checklist below iterates every
+    // accountId-bearing table regardless of what a cascade would have done.
+    // `account_reviewers` carries the actor's identity AND its recorded PRICE, so leaving it
+    // behind would survive an erasure the user was told was complete.
+    await tx.delete(repoReviewers).where(eq(repoReviewers.accountId, accountId)).execute();
+    await tx.delete(accountReviewers).where(eq(accountReviewers.accountId, accountId)).execute();
     // Any aggregate rows contributed to the cross-org benchmark. Consent was the basis for
     // these, so withdrawal-by-deletion must remove them too.
     await tx
@@ -167,11 +171,11 @@ export function accountScopedTables(): {
     { name: 'claudeReviews', col: claudeReviews.accountId, table: claudeReviews },
     { name: 'aiUsage', col: aiUsage.accountId, table: aiUsage },
     { name: 'myTurnDismissals', col: myTurnDismissals.accountId, table: myTurnDismissals },
-    {
-      name: 'botReviewClassification',
-      col: botReviewClassification.accountId,
-      table: botReviewClassification,
-    },
+    // Both grains of the bot object (migrations 0042/0043) replace the single
+    // `botReviewClassification` entry that used to sit here. BOTH must be listed: the judgement
+    // rows carry accountId, and so does the identity row that holds the price.
+    { name: 'repoReviewers', col: repoReviewers.accountId, table: repoReviewers },
+    { name: 'accountReviewers', col: accountReviewers.accountId, table: accountReviewers },
     { name: 'teams', col: teams.accountId, table: teams },
     // teamRepos has its own accountId (not only teamId) — it must be on the checklist, or a
     // membership row could survive an erasure carrying this account's id.

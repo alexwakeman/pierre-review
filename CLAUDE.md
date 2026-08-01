@@ -330,7 +330,7 @@ fixture tests (see Conventions).
 
 ### Data model (`src/db/schema.sqlite.ts` + its `schema.pg.ts` twin are authoritative)
 
-26 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
+27 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
 `users` + `commitFiles` global). The core entities:
 
 - **`accounts`** — a tenant. Local mode has exactly one (`id 1`, `isLocal=true`,
@@ -394,32 +394,49 @@ fixture tests (see Conventions).
   re-sync, and a real FK would drag this table into both delete paths). In
   `accountScopedTables()` + explicitly erased; NOT in the Art. 15 export (unlike
   `autoMergeRequests`) — if that was a decision rather than an omission it isn't recorded anywhere.
-- **`botReviewClassification`** — the **Bot-Triage** classification table (CORE,
-  `accountId`-scoped). Stores manual + auto automated-reviewer classifications; a manual row
-  wins the resolution order. Since migration `0042` (pg `0029`) it is **PER TEAM**: `team_id`
-  (NOT NULL, **default 0**) + `role` (`ReviewerRole` `'review'|'quality_check'`, NOT NULL
-  default `'review'`), unique `(accountId, teamId, authorUserId)` (the old 2-column
-  `brc_account_author` is DROPPED) + an `(accountId, teamId)` listing index. `team_id` carries
-  **no FK** — 0 is the `NO_TEAM_KEY` sentinel, not a team id, so an FK would reject every
-  default row; `deleteTeam` deletes this table's rows by hand inside its transaction.
-  Migration `0043` (pg `0030`) added **`cost_monthly_cents`** (INTEGER, **nullable, no default**)
-  — the per-team monthly price of that bot, which moved here out of the plugin's account-wide
-  `pro_settings.bot_cost_json` blob (backfilled by plugin migration `0019`), making cost CORE/free.
-  INTEGER CENTS in BOTH dialects on purpose: pg `numeric` has no sqlite twin and node-postgres
-  returns it as a STRING (silently breaking the shared `number` wire type), while REAL is a float64
-  that can't hold money; the WIRE is DOLLARS, converted only at the store boundary.
-  **The nullability IS the feature** — NULL = "no cost opinion at this key" → inherit the team-0
-  row; `0` = "explicitly free HERE" and must BEAT an inherited price, so resolution is `??` and
-  **never `||`**. ⚠ **This column resolves FIELD-wise while every other column on the row resolves
-  ROW-wise**: the classification is one indivisible judgement so an explicit team row wins
-  wholesale, but a row created only to hold a role opinion carries no cost opinion. The mirror
-  trap: creating a team row **must SEED `role`** (not seeding it reverses the classification) and
-  **must NOT seed `cost`** (seeding it freezes a copy of the default and later edits to the team-0
-  price stop reaching that team). See **Per-team bot classification** below. The plugin-owned
-  `pro_settings` gained 11 `bot_*` columns (its `bot_cost_json` now a deprecated READ-only legacy
-  source — `ProSettingsUpdate.bots.cost` was REMOVED, there is no write path left; Pierre
-  tag/footer toggles, Slack digest —
-  its now-vestigial `bot_auto_resolve*` columns backed the removed mute feature). See
+- **`repoReviewers`** + **`accountReviewers`** — the **Bot-Triage** tables (CORE,
+  `accountId`-scoped). **A BOT IS A PER-REPO OBJECT, and the two tables are its TWO GRAINS** —
+  the whole point of the split is that each fact lives at exactly one of them:
+  - **`repoReviewers` (accountId, repoId, authorUserId) = the JUDGEMENT** — `automated`, `role`
+    (`ReviewerRole` `'review'|'quality_check'`, NOT NULL default `'review'`), `confidence`,
+    `source`, `reasonsJson`. Unique `(accountId, repoId, authorUserId)` + `(accountId, repoId)` /
+    `(accountId, authorUserId)` listing indexes. **Tenancy is STRUCTURAL**: `repo_id` is the first
+    column that arrives in a REQUEST BODY, so the FK is **COMPOSITE** against `repos(id,
+    account_id)` (parent key = the `repos_id_account` unique index), NAMED
+    `repo_reviewers_repo_account_fk` so the violation message is greppable — a cross-account
+    `(account, repo)` pair fails in the DATABASE, in every code path.
+  - **`accountReviewers` (accountId, authorUserId) = the IDENTITY** — `kind`, `label`,
+    `identitySource`, `monthlyCents`. Unique `(accountId, authorUserId)`.
+
+  ⚠ **DO NOT COLLAPSE THE SPLIT.** A login is one vendor everywhere, so `kind`/`label` are ACTOR
+  facts. When they lived on repo rows, clicking "Not a bot" in ONE repo nulled the kind, identity
+  resolution picked that row up, and CodeRabbit lost its brand colour and vendor name in every
+  repo the user never touched — with no surface able to undo it. Colour and vendor name key on the
+  ACTOR; the judgement is per repo.
+
+  **There is NO team key, NO inheritance, NO merge and NO DEDUPLICATION.** A vendor running in six
+  repos is **six rows sharing one identity**, and that is the INTENDED display — in the team view
+  and the Feed bot summary alike. A repo view is simply the same list with one group. (`NO_TEAM_KEY`,
+  `inherited`, `costInherited`, `dormantInScope`, `scoped`, `scopedRepoCount` and the three-state
+  cost protocol are all GONE, along with `bot_review_classification` itself.)
+
+  **`monthlyCents`** (INTEGER, nullable) is the bot's monthly price, moved out of the plugin's
+  account-wide `pro_settings.bot_cost_json` blob (backfilled by plugin migration `0019`), making
+  cost CORE/free. INTEGER CENTS in BOTH dialects on purpose: pg `numeric` has no sqlite twin and
+  node-postgres returns it as a STRING (silently breaking the shared `number` wire type), while
+  REAL is a float64 that can't hold money; the WIRE is DOLLARS, converted only at the store
+  boundary. **TWO states, not three** — NULL = "no price set", `0` = "recorded as free"; nothing
+  inherits, so there is no chain behind the `??`. ⚠ **You buy ONE subscription from a vendor**, so
+  cost is deliberately not per repo and **must never be summed across rows**: six repos running
+  CodeRabbit is $120, not $720 (the client's `monthlyCostTotal` sums DISTINCT actors). ⚠ Clearing
+  a price is a **column write, never a row delete** — the row also carries the vendor identity.
+  ⚠ The value is **CLAMPED to the int4 cents ceiling** (`$21,474,836.47`) in the query layer AND
+  bounded by the route schema: above it Postgres RAISES `integer out of range` while SQLite's
+  64-bit integers accept it happily, so an unbounded field means the same request succeeds locally
+  and 500s in cloud. The plugin-owned `pro_settings` keeps its 11 `bot_*` columns (its
+  `bot_cost_json` now a deprecated READ-only legacy source — `ProSettingsUpdate.bots.cost` was
+  REMOVED, there is no write path left; Pierre tag/footer toggles, Slack digest — its
+  now-vestigial `bot_auto_resolve*` columns backed the removed mute feature). See
   **Bot-Triage Platform** below. (The old `botMuteRules` table / `/api/bot-mute-rules` mute +
   auto-triage-cron feature was **removed** — see the note below; migration `0029` still creates
   the now-orphaned `bot_mute_rules` table in existing DBs but no code binds it.)
@@ -448,14 +465,14 @@ file maps to a `client.ts` method.
 | `GET /api/prs/:id/checks/:jobId/logs?tail` \| `?startByte&endByte` | a live WINDOW of an Actions job log (never stored) → `CheckLogsResponse`. Offsets are SOURCE bytes (the `\r\n` normalisation is display-only), `endByte` EXCLUSIVE, `hasMore` = "more exists ABOVE this window" — so feeding a response's `startByte` back as the next `endByte` abuts exactly. Every path is capped at `MAX_LOG_BYTES` (8 MiB) via a rolling buffer (~2×cap peak) even when the source ignores `Range`. Serves PASSING checks too — see **Merge, CI logs & trunk status** |
 | `GET /api/branch-status?repoIds` | **default-branch health** per repo in scope → `BranchStatusResponse` (head snapshot + failing checks + the recent trunk commits, each with its own CI state, failing checks and originating `prNumber`/`prId`). Pure DB read off what the branch sync persisted — never a live GitHub call, hence the plain `read` tier. Repos with nothing synced still appear, with nulls. **Informational only:** nothing here feeds attention counts, badges or My Turn |
 | `POST /api/prs/:id/resolve-bot-threads {threadIds}` | **bulk-resolve** the review-bot threads a later commit likely addressed → `{resolved,failed,results[]}`. Server RE-DERIVES eligibility (owned + review-bot-originated + `likely_addressed`) ∩ the client's reviewed list, then GitHub-resolves each (shares the `bot-triage/resolve.ts` `resolveThreadsOnGitHub` helper with the scope-wide resolve route); never auto/blind — user-initiated + confirm-gated only. Core |
-| `GET /api/bot-reviewers?teamId&scoped` · `PATCH /api/bot-reviewers/:userId {automated?,…,role?,teamId?,costMonthlyUsd?}` · `DELETE /api/bot-reviewers/:userId?teamId` | **Bot-Triage** (CORE), now **PER TEAM**: detected automated reviewers resolved for `teamId` → `DetectedReviewersResponse` (echoes the resolved `teamId`; each `DetectedReviewer` carries `teamId` + `inherited`) · two-way manual override, also setting the `ReviewerRole` **and the per-team `costMonthlyUsd`** → `ReviewerClassification` · **"Reset to default"** = drop the explicit row for that team (204, idempotent). `teamId` absent = `NO_TEAM_KEY` (0) = the account default every team inherits; resolution is **explicit team row → the team-0 row → auto-detect**. The team key rides in the **body** on PATCH (it is part of the row's IDENTITY, not a filter) and the query string on GET/DELETE. **Ownership is checked on the WRITE paths only** (`setReviewerOverride`/`deleteReviewerOverride` → null/false → 404): `team_id` has no FK, so the DB accepts any integer and a caller could otherwise key a row to another tenant's team. Reads need no check — every read also binds `accountId`, so a foreign key matches nothing (and 404-vs-200 would be an existence oracle over another tenant's team ids). An absent `role` means **leave the stored role alone** so an old client can't silently un-mark a quality check. **`automated` is OPTIONAL and its ABSENCE marks a COST-ONLY patch** — the write then sets `cost_monthly_cents` + `updated_at` and NOTHING else (the `set:` object carries no `...base`, so it structurally cannot stamp `source:'manual'` on an auto-detected row); a patch carrying no opinion at all 400s in the handler. `costMonthlyUsd` is WIRE DOLLARS (storage is integer cents) and **must accept `null`** = "clear it, inherit again"; `0` is real ("free here") and BEATS an inherited price. **`scoped=true` (OPT-IN)** narrows the listing to reviewers with a footprint in that team's OWN repos (at key 0: the repos in no team) and is what turns **`scopedRepoCount`** from `null` into a number — `null` means the caller did not ask for a repo-scoped listing, never "0 repos". It MUST stay opt-in: four account-wide consumers read this route at key 0 for the WHOLE roster (`useBotColors`, FeedView's vendor tag, ThreadList's vendor filter, plus the ROI legacy fill), and the client query key MUST carry the flag or the narrow response aliases their cache entry. ⚠ `additionalProperties:false` **strips** unknown params here, it does not reject them (Fastify's ajv default `removeAdditional:true`) — the DELETE's separate schema is a filter, not a guard |
-| `GET /api/bot-analytics?window=` | **Bot-ROI** (CORE): per-`AutomatedReviewerKind` volume/actedOn%/untouched/oldest/humanFollowThrough/noiseRatio/`verdict`(keep\|tune\|**noisy**) + ≤12wk trend + tuning suggestions → `BotAnalyticsResponse`. **Cost is now SERVER-resolved per team** (`costMonthlyUsd` / `costPerActedOnUsd` / `costInherited`, from `bot_review_classification.cost_monthly_cents` via `reviewerCostForUser`) — it used to be a hard `cost=null` the client overlaid from `pro_settings.bot_cost_json`, a per-LOGIN map that physically cannot express "$120 for Team A, $0 for Team B" and so could only ever be wrong on a team tab. The client keeps a **null-only legacy fallback** (it fills a row ONLY where the server-resolved cost is null, badged `acct`), because plugin migration `0019` deliberately never INSERTS a classification row, so a costed login that was never classified stays in the blob. `costInherited` is **always false at `NO_TEAM_KEY`**, which every union scope maps to — so a union reports the ACCOUNT DEFAULT as its own value; the UI must label it as such and must **never sum cost across teams** (three teams inheriting $120 is $120 seen three ways, not $360). **Role split:** the getter computes a row for EVERY automated reviewer, then routes `role:'quality_check'` ones into **`qualityChecks[]`** — same shape, kept OUT of `vendors`/`totals`/`suggestions` (a linter's volume must not move an acted-on % that claims to be about REVIEW throughput, and its untouched threads would earn a `noisy` verdict for doing its job), rendered as a collapsed "excluded from ROI" section so a mis-role is discoverable instead of the bot appearing to vanish. Classification is **team-resolved** from the route's `scope` via `classificationTeamKey` (a bare team id → that team; every union form → the account default). **Response-time-gated verdict:** the verdict keys on `overdueUntouched` (untouched threads older than a **fixed 36h grace window**, `totals.overdueGraceMs`), NOT raw `untouched` — so a bot isn't flagged noisy for threads still inside the grace window. (A MEASURED reply-time norm was tried but the sample is intrinsically fast — only threads someone engaged with draw a reply — so a flat cutoff is the fair gate.) Each row also carries `medianAddressedMs` (that bot's own median **time-to-ADDRESSED** — the earliest of a human reply, a resolve, or the addressing commit for a `likely_addressed` thread, computed read-time from `commits`/`commitFiles` for just those threads' PRs; display-only). ('kill' was renamed 'noisy'.) Vendor rows carry `dormant`+`lastActiveAt`: ANY trend-span footprint (threads, comments, or body-only reviews) keeps a quiet reviewer visible as a DORMANT row (zeroed window counts + trend + last-active chip) instead of vanishing; body-only reviews count as window activity for emission/dormancy but never enter the volume math |
+| `GET /api/bot-reviewers?scope&repoIds` · `PATCH /api/bot-reviewers/:userId {repoId, automated?, role?}` · `PATCH /api/bot-reviewers/:userId/identity {kind?, label?}` · `PUT /api/bot-reviewers/:userId/cost {monthlyUsd}` | **Bot-Triage** (CORE) — **THREE write routes at TWO GRAINS**, and the grain of each is the thing to hold onto. The LISTING returns both: one `rows` entry per **(repo, actor)** with a footprint in the scoped repos + one `reviewers` entry per distinct **actor** + the `repoIds` it covered → `DetectedReviewersResponse`. Scope resolves exactly as `/api/bot-analytics` does (an explicit `repoIds` WINS over `scope`); absent = every watched repo. ⚠ **A vendor in six repos is SIX rows sharing ONE identity — the intended display, not a duplicate to collapse.** · **`PATCH :userId`** = the per-repo **JUDGEMENT** (`repo_reviewers`). `repoId` is REQUIRED and rides in the BODY (it is part of the row's identity); both other fields are OPTIONAL (absent = leave it alone) but a body carrying NEITHER 400s. ⚠ It must NEVER touch `kind`/`label`/`identity_source` — that is what stops "Not a bot on web" blanking CodeRabbit's brand colour on api and infra. ⚠ **Either field stamps `source:'manual'`**, including a role-only patch, so pinning a role also pins `automated` for that repo — deliberate: not stamping it would let the next classification pass re-derive `role` from the login seed and silently revert the edit. · **`PATCH …/identity`** = the account-wide **IDENTITY** (`account_reviewers`), stamping `identity_source:'manual'`. ⚠ It must NEVER touch `automated`/`role`/`source`/`confidence`/`reasons_json`, NOR `monthly_cents` (a vendor correction must not wipe a price — the `set:` object is the structural guarantee). · **`PUT …/cost`** = the account-wide **PRICE**. `monthlyUsd` is REQUIRED and NULLABLE so `undefined` is not a third meaning: a number sets it (**0 is real** — "we pay nothing"), null CLEARS it — a **column write, never a row delete**, because the row also carries the identity. Bounds are NOT cosmetic: `[0, 21474836.47]` + `multipleOf:0.01`, the int4-cents ceiling where the dialects stop agreeing (pg RAISES `integer out of range`, sqlite accepts it) — ajv 400s, and the query layer clamps as the backstop for every other caller. **THE SEPARATION IS ENFORCED IN THE HANDLERS**, not merely documented: each calls exactly ONE query-layer function and each of those writes exactly ONE table (`additionalProperties:false` only STRIPS unknown keys — Fastify's ajv runs `removeAdditional:true` — so it is not the guard). The identity and cost routes **404 when the actor has no `repo_reviewers` row anywhere in the account** (the write would land, but the listing is row-driven, so nothing could ever display, edit or clear it); the judgement route 404s on an unknown user, an unknown/foreign repo, OR **no footprint in that repo** — the same status for all three deliberately, since distinguishing them would be an existence oracle over another tenant's repo ids and the GLOBAL `users` table. (The old `DELETE /api/bot-reviewers/:userId` "Reset to default" route is GONE with the inheritance root, replaced by a per-grain pair — `DELETE …/judgement?repoId=` → **204**, `DELETE …/identity` → **200** with the re-derived identity; see **Two grains**.) |
+| `GET /api/bot-analytics?window=` | **Bot-ROI** (CORE): per-`AutomatedReviewerKind` volume/actedOn%/untouched/oldest/humanFollowThrough/noiseRatio/`verdict`(keep\|tune\|**noisy**) + ≤12wk trend + tuning suggestions → `BotAnalyticsResponse`. **Cost is SERVER-resolved per ACTOR** (`costMonthlyUsd` / `costPerActedOnUsd`, from `account_reviewers.monthly_cents` via `reviewerCostForUser` — which takes NO repo scope, because a price is an actor fact) — it used to be a hard `cost=null` the client overlaid from `pro_settings.bot_cost_json`, a per-LOGIN map that could not be edited or cleared from the row that displayed it. The client keeps a **null-only legacy fallback** (it fills a row ONLY where the server-resolved cost is null, badged `acct`), because plugin migration `0019` deliberately never INSERTS a bot row, so a costed login with no `repo_reviewers` row anywhere stays stranded in the blob. ⚠ **Never sum cost across rows, repos or scopes**: you buy one subscription from a vendor, so a bot in six repos is $120 of spend seen six ways, not $720 (the client's `monthlyCostTotal` sums DISTINCT actors for exactly this reason). (`costInherited` is GONE — the price either exists for this actor or it does not.) **Role split:** the getter computes a row for EVERY automated reviewer, then routes `role:'quality_check'` ones into **`qualityChecks[]`** — same shape, kept OUT of `vendors`/`totals`/`suggestions` (a linter's volume must not move an acted-on % that claims to be about REVIEW throughput, and its untouched threads would earn a `noisy` verdict for doing its job), rendered as a collapsed "excluded from ROI" section so a mis-role is discoverable instead of the bot appearing to vanish. Classification is **repo-resolved** from the route's own `scope`/`repoIds` — **ONE scope drives both the metrics and the "is this login a bot here" judgement**, so the two cannot disagree (under the team grain the classification key was a SEPARATE argument every caller had to remember). **Response-time-gated verdict:** the verdict keys on `overdueUntouched` (untouched threads older than a **fixed 36h grace window**, `totals.overdueGraceMs`), NOT raw `untouched` — so a bot isn't flagged noisy for threads still inside the grace window. (A MEASURED reply-time norm was tried but the sample is intrinsically fast — only threads someone engaged with draw a reply — so a flat cutoff is the fair gate.) Each row also carries `medianAddressedMs` (that bot's own median **time-to-ADDRESSED** — the earliest of a human reply, a resolve, or the addressing commit for a `likely_addressed` thread, computed read-time from `commits`/`commitFiles` for just those threads' PRs; display-only). ('kill' was renamed 'noisy'.) Vendor rows carry `dormant`+`lastActiveAt`: ANY trend-span footprint (threads, comments, or body-only reviews) keeps a quiet reviewer visible as a DORMANT row (zeroed window counts + trend + last-active chip) instead of vanishing; body-only reviews count as window activity for emission/dormancy but never enter the volume math |
 | `GET /api/bot-behaviour?window&scope&repoIds` | **Bot BEHAVIOUR** (CORE, deterministic, **EXPERIMENTAL**): per bot over the window (+ a 12wk trend), the common review-bot gripes — **TTFR** (median/p90 + distribution + `ttfrTrend`; clock start = `pr_ready_for_review` when observed else `pullRequests.openedAt`), **LoC-to-comments** ratio (diff size ÷ the bot's comment count), a **week×hour activity heatmap** (`activityHeatmap` length-168, `dow*24+hour`, dow 0=Sunday — coverage / rate-limit INFERENCE, from review/comment timestamps NOT commit-push time, labelled inferred/UTC), and **post-first-review follow-up** (rate/avg/dist) → `BotBehaviourResponse`. Same window/scope/repoIds resolution as `/api/bot-analytics`; reuses the ROI identity helpers (`automatedReviewerUserIds`/`classificationKindForUser`/`u<userId>` key). Powers the Bots "**Behaviour**" inner sub-tab (`BotBehaviourPanel`), kept SEPARATE from the ROI panel so it can mature independently. **Anomaly detection (deterministic, self-baseline):** each bot's weekly series (TTFR/volume/follow-up) + a daily strip are judged against the BOT'S OWN robust baseline (median ± MAD, spike-resistant, ≥4 weeks or "building baseline"); TTFR flags only slower-than-typical weeks, volume+follow-up either direction; a silence-run detector flags coverage gaps for a normally-regular bot (run ≥ max(3, 3·median-gap) days, leading run ignored, trailing kept). `trend` points carry `*Anomaly` flags + an `anomalies[]` evidence list (observed vs typical) + `dailyActivity`/`silentRuns`. UI = **markers on the charts** (`LineChart` `pointFlags` ring + a new `DayStrip` with silent runs underlined in the anomaly colour). Also returns **`repoBotDirs`** (per bot × repo × directory) powering the merged **"Where bots work"** grouped+stacked chart (`BotRepoWorkChart`, custom SVG — X = bot; a bar per repo; each stacked by top-level directory + an 'other' tail; actual volumes; single-repo scope → one bar per bot). It REPLACED the two separate `repoPresence` (repo×bot "operate") + `repoAreas` (repo×area "work") charts/fields. No new AI/credit surface, no `apiVersion` bump |
 | `GET /api/prs/:id/bot-behaviour` | **PR-scoped Bot behaviour** (CORE, deterministic, **EXPERIMENTAL**): for ONE PR, each automated reviewer's on-PR touch timeline (first review + follow-ups) + how it compares to that bot's OWN typical (an 84-day account-wide robust baseline via `getPrBotBehaviour`) → `PrBotBehaviourResponse`. Flags this PR's TTFR when anomalously slower than typical + follow-ups above typical. Account-scoped → 404 for a foreign PR; empty `bots` when none touched it. Powers the PrDetail "**Bot activity**" tab (`PrBotBehaviourTab`, presence-gated — shown only when a bot touched the PR, NOT Pro) + a ⚠ tab-label badge + a ChecksTab Overview "N bots slower than typical — view" caution that opens the tab. Reuses the ROI identity helpers + the `ANOMALY_Z`/`MIN_BASELINE_POINTS` constants |
 | `GET /api/prs/:id/bot-dedup` | **cross-bot dedup** (CORE): automated-reviewer threads grouped by `(path, line±window)` across distinct kinds → consensus/conflict clusters → `BotDedupResponse` |
 | `GET /api/bot-analytics/bot-only-prs?window&scope&repoIds` | the PR list behind `totals.botOnlyPrs` ("only a bot reviewed these") → `BotOnlyPrsResponse` (CORE; `BotOnlyPrItem` carries `repoId`/`openedAt`/`updatedAt`/`state`). **The COUNT (`totals.botOnlyPrs`, banner + ROI stat) is OPEN-only** — `getBotOnlyReviewPrs(…,{openOnly:true})` restricts to open+mergeable, dropping merged-in-window (the banner is a "needs a human before it merges" signal; open PRs are a live, unwindowed snapshot). The LIST route still returns merged (no `openOnly`) so the drill-down `BotOnlyPrsDetail` can **default to OPEN rows** (caption "N open" ≡ the banner) with a **"Show merged (M)" checkbox** that adds merged (client-side filter on `state`; caption → "N open · M merged"). Sortable table (Age/Updated cols + cross-repo repo-filter dropdown). Both BotsView's amber caution AND the Bot-ROI "N bot-only open PRs" stat open this TAB. (`getTeamInsights`'s `bot_only_review` card still counts open+merged — a separate Pro surface.) |
-| `GET /api/bot-analytics/vendor/:key/prs?window&scope&repoIds` | per-REVIEWER Bot-PRs drill-down; `key` = the analytics row identity `u<userId>` \| `'pierre'` (invalid → 400) → `BotVendorPrsResponse` (+`key`/`login`). Replaced the old kind-keyed `/:kind/prs` (removed — two in-house bots no longer merge). **Team-resolved, and it must be:** it is opened FROM a team-scoped ROI row, so both the header label (an account-only `limit(1)` with no `ORDER BY` picked whichever row storage handed back) and the per-PR `botOnly` badge (whose `teamKey` parameter defaults to `NO_TEAM_KEY` — omit it and one screen shows two contradictory bot-only answers) take the scope's key. Pinned by `db/bot-vendor-prs-team.test.ts` |
-| `GET /api/bot-threads/resolvable?scope&repoIds` · `POST /api/bot-threads/resolve {threadIds,repoIds?}` | **scope-wide review & resolve** of `likely_addressed` bot threads (CORE): the listing is now **UNCAPPED + PR-centric** (`getResolvableBotThreadPrs` → `ResolvableThreadPrsResponse{prs[],totalThreads}`) — **one row PER PR carrying ALL its resolvable thread ids** (`threadIds`) + `resolvableCount` (=`threadIds.length`=`botThreadCounts.likely_addressed`, now equal since uncapped) + a bot-only `botThreadCounts` mix + per-PR `confidenceCounts`/`highConfidenceThreadIds` (the deterministic addressed-confidence breakdown of the resolvable ids) + `repoId`/`authorId`/`ciStatus`/`openedAt`/`updatedAt`. Replaces the old 500-capped grouped-`threads` shape. The confirm-gated resolve still RE-DERIVES eligibility ∩ the explicit ids via `getResolvableBotThreadsForScope` (kept for that path; still 500/POST, client chunks 25 ids/POST for progress) so "Select all" resolves the WHOLE backlog. UI (`BotThreadsDetail`): a **SORTABLE tabular** list (PR/repo/author/age/updated/CI/resolvable/**confidence** — the per-PR High/Medium/Low addressed-confidence mix, sorted by a grade-weighted score), **PRs DESELECTED by default** with per-row checkboxes + **Select-all (across all pages) / Clear** (both greyed when the visible/**filtered** selection is empty), a **"High-confidence only"** toggle that FILTERS the list to PRs with a high-confidence resolvable thread AND scopes Select-all/counts/resolve to that subset (was invisible when it only narrowed the hidden resolve set), resolve pinned TOP with a **Stop** control (halts cleanly between chunks via `shouldStop`), a cross-repo **repo-filter dropdown** + Repo column, and **client-side pagination** (50/PR page; selection & Select-all span pages). All five Activity drill-down overlay tabs are `max-w-[100rem]` (widened from `max-w-6xl`). Clicking a PR row opens its detail Threads tab with the `likely_addressed` state pill preset (not back to the Bots pane). BotRoiPanel's `ResolveBacklogBanner` (reads `totalThreads`) opens the `bot-threads` TAB. Both use `role:'review'` (a linter's finding is not a review comment, and `likely_addressed` is a much weaker claim for one). **KNOWN GAP:** the LISTING is team-resolved from `scope`, but the **RESOLVE re-derives at `NO_TEAM_KEY`** — `ScopeResolveBotThreadsBody` carries only `threadIds`/`repoIds` and no scope. So a reviewer marked automated ONLY under a per-team override has its threads offered and then found ineligible (resolves 0). Conservative — it never resolves something it shouldn't; the fix needs `scope?: string` on that shared body type |
+| `GET /api/bot-analytics/vendor/:key/prs?window&scope&repoIds` | per-REVIEWER Bot-PRs drill-down; `key` = the analytics row identity `u<userId>` \| `'pierre'` (invalid → 400) → `BotVendorPrsResponse` (+`key`/`login`). Replaced the old kind-keyed `/:kind/prs` (removed — two in-house bots no longer merge). **Repo-scope-resolved, and it must be:** it is opened FROM a scoped ROI row, so the header label and the per-PR `botOnly` badge both take the SAME `repoIds` the row was computed at — one screen cannot show two contradictory bot-only answers. The getter no longer carries a second classification-key parameter at all, which is what makes that structural rather than a convention |
+| `GET /api/bot-threads/resolvable?scope&repoIds` · `POST /api/bot-threads/resolve {threadIds,repoIds?}` | **scope-wide review & resolve** of `likely_addressed` bot threads (CORE): the listing is now **UNCAPPED + PR-centric** (`getResolvableBotThreadPrs` → `ResolvableThreadPrsResponse{prs[],totalThreads}`) — **one row PER PR carrying ALL its resolvable thread ids** (`threadIds`) + `resolvableCount` (=`threadIds.length`=`botThreadCounts.likely_addressed`, now equal since uncapped) + a bot-only `botThreadCounts` mix + per-PR `confidenceCounts`/`highConfidenceThreadIds` (the deterministic addressed-confidence breakdown of the resolvable ids) + `repoId`/`authorId`/`ciStatus`/`openedAt`/`updatedAt`. Replaces the old 500-capped grouped-`threads` shape. The confirm-gated resolve still RE-DERIVES eligibility ∩ the explicit ids via `getResolvableBotThreadsForScope` (kept for that path; still 500/POST, client chunks 25 ids/POST for progress) so "Select all" resolves the WHOLE backlog. UI (`BotThreadsDetail`): a **SORTABLE tabular** list (PR/repo/author/age/updated/CI/resolvable/**confidence** — the per-PR High/Medium/Low addressed-confidence mix, sorted by a grade-weighted score), **PRs DESELECTED by default** with per-row checkboxes + **Select-all (across all pages) / Clear** (both greyed when the visible/**filtered** selection is empty), a **"High-confidence only"** toggle that FILTERS the list to PRs with a high-confidence resolvable thread AND scopes Select-all/counts/resolve to that subset (was invisible when it only narrowed the hidden resolve set), resolve pinned TOP with a **Stop** control (halts cleanly between chunks via `shouldStop`), a cross-repo **repo-filter dropdown** + Repo column, and **client-side pagination** (50/PR page; selection & Select-all span pages). All five Activity drill-down overlay tabs are `max-w-[100rem]` (widened from `max-w-6xl`). Clicking a PR row opens its detail Threads tab with the `likely_addressed` state pill preset (not back to the Bots pane). BotRoiPanel's `ResolveBacklogBanner` (reads `totalThreads`) opens the `bot-threads` TAB. Both use `role:'review'` (a linter's finding is not a review comment, and `likely_addressed` is a much weaker claim for one). **The old KNOWN GAP is CLOSED:** the listing was team-resolved from `scope` while the RESOLVE re-derived at `NO_TEAM_KEY` (`ScopeResolveBotThreadsBody` carries only `threadIds`/`repoIds` and no scope, and it is a frozen shared type), so a reviewer marked automated only under a per-team override had its threads offered and then found ineligible — the route resolved 0. The judgement scope is now derived from `repoIds`, the very field the body already carries, so the listing and the resolve evaluate the same rule by construction |
 | `GET /api/open-prs?repoIds&userIds` | currently-open PRs (ignores date range) |
 | `GET /api/threads/:id` | single thread detail |
 | `GET/POST /api/repos`, `DELETE /api/repos/:id` | manage watched repos (delete → 409 if syncing, else 204) |
@@ -741,9 +758,9 @@ Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claud
   `<CommentAnnotations>` can express a thread: `simplify` per comment, `validity` on the root,
   `addressed` on the thread; each rewrite is sublabelled with whose comment it rewrites since it is
   no longer adjacent to it). The bulk-resolve OFFER now goes through `ThreadList/resolvable.ts`,
-  which consults the account-default (`NO_TEAM_KEY`) `useDetectedReviewers` classification —
-  matching what the server re-derives, since classifying by vendor login alone offered a count the
-  server then refused, leaving a dead button with an unchanged count. Arriving from the
+  which consults the unscoped `useDetectedReviewers` listing filtered to the PR's OWN `repoId` —
+  matching what the server re-derives (a bot is judged per repo), since classifying by vendor login
+  alone offered a count the server then refused, leaving a dead button with an unchanged count. Arriving from the
   `bot-threads` tab presets `{likely_addressed}` via
   `openPrThreadsFiltered`. **Landmine:** `threadStateFilter` is a GLOBAL store field reset only in
   the selection actions — PrDetail applies it only when `selectedPrId === prId` (mirroring App's
@@ -1101,7 +1118,8 @@ tab exists only where it means something):
 - **Feed** — `Feed` | `Themes` (Pro, `activityDigest`) | **`Compare teams`** (CORE/free, shown at
   **2+ teams in scope**, `TeamComparisonPanel`). Only Themes carries a "pro" pill.
 - **Bots** (`BotsView`) — `ROI` | `Behaviour` | `Themes` (Pro, cross-repo only) | **`Settings`**
-  (CORE/free, cross-repo only — the per-team classification tab, see below).
+  (CORE/free — the per-REPO classification tab, see below; it now shows in the per-repo Bots tab
+  too, where it is simply the same list narrowed to one group).
 - **Insights** — the bar **no longer renders**: `SUB_TABS` is down to `Overview` alone (Retro is
   deleted, Compare moved to the Feed, Sprint folded into Overview long ago), and the bar is guarded
   on `SUB_TABS.length > 1`. The apparatus is kept live and type-checked, with a `normalizeSubTab`
@@ -1153,8 +1171,9 @@ app-attribution}.ts`), resolution order: **manual override > known vendor login 
 auto-badges) > opt-in Haiku tie-break** (settings-gated OFF — the only AI, for the medium band).
 `users.githubType` is captured from the GraphQL author `__typename`; `AUTOMATED_LOGIN_PATTERNS` + a
 per-account allowlist catch service-account PATs. Classifications live in the CORE account-scoped
-`bot_review_classification` (manual + auto rows, uniq `(accountId, teamId, authorUserId)` since
-migration `0042` — see **Per-team bot classification** below). New shared type
+`repo_reviewers` (manual + auto rows, uniq `(accountId, repoId, authorUserId)` since migration
+`0042`), with the actor's vendor identity split out into `account_reviewers` by `0043` — see
+**Two grains** below. New shared type
 **`AutomatedReviewerKind = ReviewBotKind | 'in_house' | 'pierre'`** (widens `BotSignalVendorStat.kind`).
 **Pierre's own review is tagged bot-derived PER-REVIEW** (not per-account): a compute-on-read join
 `claudeReviews.postedReviewId = reviews.databaseId` (both TEXT) sets `provenance` = `ai_verbatim`
@@ -1186,45 +1205,110 @@ still creates an orphan table; `pro_settings.bot_auto_resolve*` columns are now 
 **"Only a bot reviewed this" risk flag:** a `bot_only_review` Insights card (`getBotOnlyReviewPrs`;
 Pierre-verbatim counts as bot-derived) + a `ChecksTab` caution. **Settings:** the account-wide
 "Review bots" section (`BotSection`) backed by `pro_settings`'s 11 `bot_*` columns — the per-reviewer
-`DetectedReviewersTable` MOVED out of it to the per-team Bots tab (below). Deterministic tuning suggestions on the ROI panel are **advisory only** (no mute action).
+`DetectedReviewersTable` MOVED out of it to the Bots **Settings** sub-tab (below), which now shows
+in the per-repo Bots tab too — a single-repo view is the same list with one group. Deterministic tuning suggestions on the ROI panel are **advisory only** (no mute action).
 **Tiers:** detection/analytics/dedup/resolve are **CORE (free)**; the analytics PANELS, Slack block,
 and Pierre tag/footer are **PRO** (gated on the existing `teamInsights`/`slackDigest` caps — no new
 cap). **Migrations:** core `0027` (`users.github_type`), `0028` (`bot_review_classification`), `0029`
-(`bot_mute_rules`, now orphaned), `0042` (pg `0029`: `team_id` + `role` + the unique-index swap),
-`0043` (pg `0030`: `cost_monthly_cents`), pg baseline `0016`; pro `0009` (`pro_settings` + 11
-`bot_*` columns), pro `0019` (the `bot_cost_json` → `cost_monthly_cents` data migration).
+(`bot_mute_rules`, now orphaned), `0042` (pg `0029`: RE-KEY to `repo_reviewers`, per repo, and
+DROP `bot_review_classification`), `0043` (pg `0030`: NORMALISE the actor grain out into
+`account_reviewers`, cost folded in as `monthly_cents`), pg baseline `0016`; pro `0009`
+(`pro_settings` + 11 `bot_*` columns), pro `0019` (the `bot_cost_json` → `monthly_cents` data
+migration).
 **Landmines:** (1) Pierre = **per-review** provenance — the human
 author is never reclassified; (2) resolving bot threads is ALWAYS user-initiated + confirm-gated over
 **only `likely_addressed`** threads, never a merge (no automatic/cron path exists); (3) `apiVersion` **STAYS 11** (`PostReviewArgs` gained only
 OPTIONAL back-compat fields — no new `ProContext` seam); (4) the frontend must use `automatedReviewerMeta()`,
-NOT `BOT_VENDOR_META[kind]`, for an `AutomatedReviewerKind`; (5) `getBotAnalytics` **now server-resolves
-cost per team** (it used to return a hard `cost=null` for the client to overlay from `pro_settings`) —
+NOT `BOT_VENDOR_META[kind]`, for an `AutomatedReviewerKind`; (5) `getBotAnalytics` **server-resolves
+cost per ACTOR** (it used to return a hard `cost=null` for the client to overlay from `pro_settings`) —
 the client-side overlay survives ONLY as a null-only fallback for logins plugin migration `0019`
-could not match, and `costInherited` is always false at `NO_TEAM_KEY`, so a union scope's price is
-the ACCOUNT DEFAULT and must never be summed across teams.
+could not attach to a bot row, and the price must **never be summed across rows, repos or scopes**
+(one subscription per vendor); (6) a **JUDGEMENT write may never touch identity and an IDENTITY
+write may never touch judgement** — the guarantee is that each route calls exactly ONE query-layer
+function and each of those writes exactly ONE table, NOT `additionalProperties:false` (ajv runs
+`removeAdditional:true`, so it strips unknown keys rather than rejecting them).
 
-**Per-team bot classification + the quality-check ROLE (CORE, deterministic; migrations `0042` /
-pg `0029`).** Two orthogonal additions to `bot_review_classification`.
+**Two grains: `repo_reviewers` + `account_reviewers` — the quality-check ROLE, and the split that
+kills the vendor-identity bug (CORE, deterministic; migrations `0042`/`0043`, pg `0029`/`0030`).**
+The two migrations are ONE change in two steps, and are best read together:
 
-**1. `team_id` — "who is a bot" became a PER-TEAM answer.** One org funnels an AI reviewer through
-`githubactions[bot]`; in another that login is plain CI. Resolution is **explicit team row → the
-team-0 row → auto-detect**; **team 0 (`NO_TEAM_KEY` in shared) is BOTH the "No team" scope AND the
-inheritance root**, which is why the migration needs no backfill or fan-out (every pre-existing
-account-global row is already the default) and a team created later inherits for free. The UI is
-the Bots rail's per-team **Settings** tab (`BotSettingsPanel` → `DetectedReviewersTable`, cross-repo
-only — `team_repos` is many-to-many, so a repo tab cannot express a team key), with an "inherited"
-badge and a **Reset to default** action (`DELETE /api/bot-reviewers/:userId`) that is disabled on an
-inherited row, where it would delete nothing indistinguishably from a reset that worked.
-**The division:** *who is a bot HERE* **and what it COSTS here** are per **team**; *how we detect it
-and how we attribute Limn's own reviews* stays per **account** (`BotSection` in the Settings modal).
-Cost moved (migration `0043` / pg `0030`): the old account-wide per-LOGIN `bot_cost_json` map could
-not express "$120 for Team A, $0 for Team B", and teams genuinely differ (per-seat billing split
-across squads, an enterprise contract allocated by department, one team on the vendor's free tier).
-It is edited INLINE on the reviewer row (`DetectedReviewersTable`'s `CostEditor`, a cost-only PATCH);
-`BotSection`'s "Per-bot cost (account-wide)" picker is DELETED — do not reinstate it. Moving the table out of
-that modal also closed a real gap: it was gated on `caps.botTriage`, so an OSS (plugin-absent) `npx`
-user could not classify a reviewer at all.
+```
+0042 / pg 0029  RE-KEY     (account, author)        →  (account, REPO, author)   columns unchanged
+0043 / pg 0030  NORMALISE  the actor-grain columns  →  their own table `account_reviewers`
+```
 
+**1. A BOT IS A PER-REPO OBJECT.** One repo funnels an AI reviewer through `githubactions[bot]`; in
+the next that login is plain CI. A bot is INSTALLED per repository — GitHub Apps are installed on
+repos, CI configs live in repos — so the repo is what the answer is actually about. This REPLACED a
+per-TEAM key with an inheritance chain (team row → team-0 default → auto-detect). Two things were
+wrong with it: the answer MOVED when someone re-bagged a team's repos (a team is a bag of repos
+someone can re-bag tomorrow), and null-means-inherit leaked into every read, every write body and
+every badge on the row. **There is now no team key, no default row, no inheritance, no merge — and
+NO DEDUPLICATION.** A vendor running in six repos is six rows, shown six times, grouped by repo,
+in the team view and the Feed bot summary alike; a repo view is the same list with one group. That
+was asked directly and answered directly: it is the intended display, not a duplicate to collapse.
+The backfill is ASYMMETRIC on purpose — MANUAL rows fan out to every repo in the account (a human
+judgement is the only thing here that cannot be regenerated, and it was made account-wide), AUTO
+rows land only where the actor has a real FOOTPRINT (a review, an inline thread or a PR comment
+there), because a row for a repo the reviewer has never touched is not a bot object but a fabricated
+one. `repo_id` is the first column that arrives in a REQUEST BODY, so tenancy is a COMPOSITE FK
+against `repos(id, account_id)` — the cross-account insert fails in the database, in every code path.
+
+**2. THE ONE THING THAT IS *NOT* PER REPO — and the split is load-bearing, do not collapse it.**
+A login is one vendor everywhere, so WHO the bot is (`kind`, `label`) and WHAT IT COSTS
+(`monthly_cents`) are ACTOR facts, stored once per (account, actor) in `account_reviewers`. Keeping
+them on repo rows produced the bug this whole refactor exists to kill: marking CodeRabbit "not a
+bot" in ONE repo nulled that row's kind, that row was the most recently updated, identity resolution
+reported `kind=null` account-wide, and **CodeRabbit lost its brand colour and vendor name in every
+repo the user never touched** — with no surface anywhere able to undo it. A most-recently-updated
+tie-break picks a winner but cannot make the losing rows editable or even visible. Colour and vendor
+name key on the ACTOR; the judgement is per repo. `useBotColors` therefore builds from
+`data.reviewers` (never from `rows`) and keeps its query UNSCOPED.
+
+**3. THE WRITE SURFACE IS SPLIT BY KEY, mirroring the read shape** — three routes at two grains
+(full contract in the HTTP API table): `PATCH :userId {repoId, automated?, role?}` → `repo_reviewers`;
+`PATCH …/identity {kind?, label?}` → `account_reviewers`; `PUT …/cost {monthlyUsd}` →
+`account_reviewers.monthly_cents`. Two small bodies keyed differently make the whole bug class
+unrepresentable — **do not merge them back into one body with a `repoId`.** The classifier writes
+BOTH grains and honours each table's OWN provenance flag (`identity_source` for kind/label,
+`repo_reviewers.source` for automated/role), which is what lets a manual "not a bot" on `web`
+coexist with fresh auto verdicts on `api` and `infra`: there is **no "manual override wins" early
+return** any more — the derivation always runs and `persist` declines only the rows a human owns.
+**The division:** *is this login a bot HERE* is per **repo**; *who the bot is and what it costs* is
+per **actor**; *how we detect bots and how we attribute Limn's own reviews* stays per **account**
+(`BotSection` in the Settings modal). Cost moved out of the plugin's account-wide per-LOGIN
+`bot_cost_json` blob, which could not be edited or cleared from the surface that displayed it; it is
+edited INLINE on the actor card (`DetectedReviewersTable`), and `BotSection`'s "Per-bot cost
+(account-wide)" picker is DELETED — do not reinstate it. Moving the table out of that modal also
+closed a real gap: it was gated on `caps.botTriage`, so an OSS (plugin-absent) `npx` user could not
+classify a reviewer at all.
+
+**RESETTING TO AUTO — two routes, one per grain, and the asymmetry between them is the point.**
+`DELETE /api/bot-reviewers/:userId/judgement?repoId=` **DELETES** the one `repo_reviewers` row;
+`DELETE /api/bot-reviewers/:userId/identity` **UPDATES** `account_reviewers` (kind/label null,
+`identity_source` back to `'auto'`) and never deletes the row, because that row also holds
+`monthly_cents` and losing a price as a side effect of un-naming a vendor is exactly the coupling
+the two-grain split exists to remove.
+
+Deleting is the right form for a judgement precisely because the row is DERIVED FROM ACTIVITY: the
+listing's lazy pass fires on a MISSING row, so the next pass rebuilds it with a fresh auto verdict.
+A rewrite-in-place would leave the human's `automated`/`role` values sitting under an auto label —
+mutation-proven, and the reason the delete is not a leak. The identity reset conversely re-derives
+IMMEDIATELY (`classifyReviewer(…, [])` — the empty repo list is load-bearing: `persist()` guards its
+whole judgement branch on `repoIds.length > 0`, so not one statement reaches `repo_reviewers`),
+because the lazy pass only triggers on a missing REPO row and a clear-only identity reset would
+otherwise leave the bot nameless and colourless indefinitely — "Reset name" reading as "delete the
+vendor". Order matters too: clear before derive, or `persist` skips the still-`manual` row.
+
+⚠ **Without these, touching any row pinned it forever** — `source: 'manual'` means detection never
+re-derives, and flipping the value back by hand leaves it just as pinned. That is also what makes
+the trade below acceptable.
+
+⚠ **A role-only judgement patch stamps `source: 'manual'`**, which also pins `automated` for that
+repo. The alternative — leaving `source` alone — lets the next classification pass re-derive `role`
+from the login seed and silently revert the user's edit. The visible, undoable pin was chosen over
+an edit that quietly disappears. (This is NOT the old "typing a price froze the classification"
+trap: price is on the other table now and cannot reach this row.)
 **2. `role: ReviewerRole = 'review' | 'quality_check'`** — WHAT an automation is FOR, **orthogonal
 to `AutomatedReviewerKind`** (WHO it is). SonarQube / Codecov / Hound post review comments and ARE
 automated, but they are not reviewing, and counting them as reviewers is what makes the ROI numbers
@@ -1236,8 +1320,9 @@ member: a login would have to give up its brand identity to be marked a linter, 
 `in_house|pierre|vendor`, so a new member would sail through and ship linters into the **cross-org
 benchmark** as a named review-bot cohort — data that leaves the tenant and cannot be un-shipped.
 A quality check stays `automated: true`, so `excludeBots`, the feed bot lens and the vendor tag are
-unchanged. **The role splits exactly two sets** (`automatedReviewerUserIds(accountId, teamKey, role)`
-takes the filter POSITIONALLY and REQUIRED, so every call site had to be re-read):
+unchanged. **The role splits exactly two sets** (`automatedReviewerUserIds(accountId, repoIds, role)`
+takes the filter POSITIONALLY and REQUIRED, so every call site had to be re-read; `repoIds: null` =
+no scope, `[]` = a scope that resolved to NO repos and therefore has no bot objects at all):
 
 | `role: 'review'` — SCORING | `role: 'all'` — EXCLUSION / visibility |
 |---|---|
@@ -1643,8 +1728,10 @@ decision (each would touch the root lockfile, which is why neither was taken uni
 
 The backend suite itself is **54 files / 514 tests** and DOES run in CI (this batch added
 `db/team-comparison.test.ts` — every `TeamScope` wire form + two-way account scoping with a seeded
-second account so the negative check isn't vacuous — and `db/bot-vendor-prs-team.test.ts`, which
-pins the per-team label + `botOnly` resolution of the vendor drill-down); `vitest.config.ts` raises
+second account so the negative check isn't vacuous — and `db/bot-reviewer-grains.test.ts`, which
+pins the two grains in PAIRS: what an edit at one grain does, and that the OTHER grain is
+untouched. The three team-keyed bot suites — `bot-cost-per-team`, `bot-vendor-prs-team`,
+`detected-reviewers-scope` — were DELETED with the grain they tested); `vitest.config.ts` raises
 `hookTimeout` to 30s because a dozen suites migrate a throwaway SQLite DB in `beforeAll` and lost
 the 10s default under parallel load — failures that look exactly like real regressions (a
 different subset each run, always in a hook, never an assertion).
@@ -1665,36 +1752,36 @@ different subset each run, always in a hook, never an assertion).
 - **Per-account isolation is load-bearing.** Every list/feed query filters by `accountId`;
   every id-addressed read/write scopes ownership (→ 404). New id-routes: run
   `verify:isolation`. Tokens come from `getAccessToken`, never a module cache.
-- **A UNIQUE index over a NULLable column dedupes in NEITHER dialect** (NULLs compare distinct),
-  which is why `bot_review_classification.team_id` is `NOT NULL DEFAULT 0` and not a nullable
-  "no team". A nullable key would silently allow duplicate rows per `(account, author)` AND leave
-  the upsert's conflict target unreachable.
+- **A fact lives at exactly ONE grain — never denormalise one onto the other.** `kind`/`label`
+  once sat REPLICATED on every one of an actor's repo rows, held consistent only by convention. It
+  carried three standing obligations (a new repo row had to SEED all three from its siblings;
+  `persist` had to gate on TWO provenance flags in one row; "the account-wide identity" was a read
+  of *any one of them*, which elects a winner the moment two disagree) and one live bug — see
+  **Two grains** above. Judgement → `repo_reviewers`; identity + price → `account_reviewers`.
 - **When a unique index CHANGES, every `onConflictDoUpdate` on that table must change with it.**
-  Migration `0042` dropped `brc_account_author` for the 3-column `brc_account_team_author`, so both
-  writers (`reviewer-classify.ts` `persist`, `queries.ts` `setReviewerOverride`) take the 3-column
-  target. A stale 2-column target **type-checks perfectly** and raises "no unique or exclusion
-  constraint matching the ON CONFLICT specification" at RUNTIME, in both dialects, only when a
-  classification is actually written.
-- **Every read of a per-team table needs an EXPLICIT team predicate.** Ten reads of
-  `bot_review_classification` collapsed it one-row-per-author (`new Map(rows.map(…))`, `limit(1)`,
-  no `ORDER BY`), relying on the old unique key to guarantee one row. With a per-team override
-  present they returned rows in **heap order — which flips after any UPDATE on Postgres** — so a
-  bot moved in and out of the ACCOUNT-WIDE automated set between page loads, swinging `excludeBots`,
-  the feed lens, ROI, dedup and `getActivity`. Go through `resolveClassifications` /
-  `classificationKindForUser` / `classificationLabelMap` / `reviewerRoleForUser`, which take
-  `teamKey` and prefer the requested team's row **in JS**, never by an `ORDER BY`.
-- **An INSERT at a new team key must inherit the RESOLVED value, not re-derive it from the seed.**
-  A per-team row is normally BORN by editing an inherited one (the tab renders the team-0 answer and
-  Apply deliberately sends no `role`), so seeding `role` from the login alone silently REVERSED the
-  classification the user was looking at. `setReviewerOverride` resolves the inherited role first;
-  the login seed only decides when nothing is stored under either key.
+  Migration `0042` dropped `brc_account_author` for the 3-column `repo_reviewers_account_repo_author`,
+  so `reviewer-classify.ts` `persist` and `queries.ts` `setRepoReviewerJudgement` both take the
+  3-column target (and the two identity writers take the 2-column `account_reviewers_account_author`).
+  A stale target **type-checks perfectly** and raises "no unique or exclusion constraint matching
+  the ON CONFLICT specification" at RUNTIME, in both dialects, only when a row is actually written.
+- **Every read of the judgement table needs an EXPLICIT repo predicate**, and a multi-repo scope is
+  a **UNION fold, not an intersection** — a bot automated in ANY in-scope repo is automated for that
+  scope, and a manual "this is a human" only wins when NO in-scope repo calls it automated. Reads
+  that collapsed the old table one-row-per-author (`new Map(rows.map(…))`, `limit(1)`, no
+  `ORDER BY`) relied on a unique key that no longer exists; with several repo rows present they
+  returned rows in **heap order — which flips after any UPDATE on Postgres**. Go through
+  `resolveJudgements` (repo grain) / `resolveIdentities` (actor grain) and the helpers over them
+  (`automatedReviewerUserIds` / `classificationKindForUser` / `reviewerRoleForUser` take a repo
+  scope; `classificationLabelMap` / `reviewerCostForUser` take NONE, because they are actor facts).
 - **Landmine — `persist()` shares ONE values object between insert and `set:`.** That is
   deliberate (they must agree), but it means anything in it OVERWRITES the stored column on every
   auto pass. `role` is therefore DERIVED there from the local quality-check list rather than
   round-tripped off the caller's classification — otherwise migration `0042`'s backfill would be
   re-written from a stale default on the next classification pass, putting SonarQube straight back
   into the review-bot metrics. (The parameter is role-LESS on purpose, so this cannot be
-  reintroduced by a future step in the resolution order.)
+  reintroduced by a future step in the resolution order.) `persist` reads the stored rows and
+  NARROWS the write list to the repos no human owns — read-then-narrow rather than a `setWhere`,
+  because drizzle spells that clause differently per dialect and `db` is pg-typed.
 - **"Is this multi-team?" has no correct shorthand — use `teamIdsInScope` / `isMultiTeamScope`.**
   `TeamScope` is `'all' | 'none' | 'teams' | number | number[]`, and `teamSetToScope`
   canonicalises a **full** selection to the `'teams'` sentinel and a **one-team** selection to a
@@ -1945,12 +2032,18 @@ default-branch columns + `branch_commits`; `0040` (pg `0027`) `pull_requests.rev
 `0041` (pg `0028`) `branch_commits.failing_checks` + `.pr_number` + the
 `(account_id, repo_id, number)` PR index the commit→PR resolution needs — all additive and
 nullable, so there is no backfill (the branch sync re-upserts the same window every tick, and the
-read resolves null → `[]`/null meanwhile). `0042` (pg `0029`) adds
-`bot_review_classification.team_id` + `.role`, **swaps** the unique index
-`brc_account_author` → `brc_account_team_author` and adds `(account_id, team_id)`, then re-roles
-AUTO rows for the known quality-check logins in place (MANUAL rows are never touched; both new
-columns carry constant defaults, so every existing row lands at `(0,'review')` = today's behaviour
-with no fan-out). `0043` (pg `0030`) adds the nullable `bot_review_classification.cost_monthly_cents`
+read resolves null → `[]`/null meanwhile). `0042`/`0043` (pg `0029`/`0030`) are ONE
+change in two steps — read them together. **`0042` RE-KEYS** the bot object from (account, author)
+to **(account, REPO, author)**: it creates `repo_reviewers` with the composite FK against
+`repos(id, account_id)` (its parent key, the new `repos_id_account` unique index), fans the old
+rows out — MANUAL to every repo in the account, AUTO only where the actor has a real FOOTPRINT —
+re-roles AUTO rows for the known quality-check logins, and **DROPS `bot_review_classification`**
+(a second, differently-keyed answer to the same question left in every database is exactly how two
+surfaces disagree). **`0043` NORMALISES** the actor-grain columns out into **`account_reviewers`**
+(one row per (account, actor): `kind`, `label`, `identity_source`, plus `monthly_cents` folded in
+rather than given a third table), lifting them off the most authoritative repo row — prefer MANUAL,
+then most recently updated — and then DROPS `kind`/`label`/`identity_source` from `repo_reviewers`.
+After that a repo row can say nothing about WHO the actor is. `monthly_cents` is nullable
 — additive, no backfill in CORE **deliberately**: the legacy values live in the PLUGIN-owned
 `pro_settings.bot_cost_json`, which does not exist on an OSS install (and sqlite has no `DO $$`
 conditional-DDL guard), so the data migration ships as plugin `0019`, which runs after it
@@ -1975,8 +2068,9 @@ or it SILENTLY skips** — `0038`–`0043` and pg `0025`–`0030` are registered
 discovered by filename sort and have NO journal — that requirement is core-only). The Postgres
 baseline (`migrations-pg/`) is a squash — cloud starts empty (synced data is regenerable; no
 SQLite→Postgres migration). **Postgres was PROVEN once, ON THIS BRANCH, by hand:** every core and
-plugin migration was replayed from empty against a real Postgres, including the unique-index SWAP
-(pg `0016` creates the 2-column index, `0029` drops it and builds the 3-column one) — which retired
+plugin migration was replayed from empty against a real Postgres, including the RE-KEY + NORMALISE pair
+(pg `0029` builds `repo_reviewers` and drops `bot_review_classification`; `0030` splits
+`account_reviewers` out and drops the three identity columns) — which retired
 the standing "the pg twins are exercised by nothing" gap for the migrations that existed then. It is
 a POINT-IN-TIME result, not a guarantee: nothing automated re-checks it, the suite still runs on
 SQLite only, and the next pg twin someone hand-writes is unverified until they repeat the run (see
@@ -1985,11 +2079,17 @@ gotcha there — it leaves drizzle's own `drizzle` schema behind and the migrato
 **Known gaps on this branch:**
 - **PrDetail still classifies bots CLIENT-SIDE by LOGIN** — `ChecksTab`'s "Bots" chips group
   threads by `botVendorMeta(user)` and `ThreadList`'s vendor filter by `threadBotKind`, both
-  login→`ReviewBotKind` only. A per-team classification and the `quality_check` role never reach
+  login→`ReviewBotKind` only. A stored per-REPO judgement and the `quality_check` role never reach
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
-- **The scope-wide bot-thread resolve re-derives at `NO_TEAM_KEY`** because its request type
-  carries no scope (see the routes table).
+- _(RESOLVED on this branch: the scope-wide bot-thread resolve no longer re-derives at a different
+  key than the listing offered — both now derive the judgement scope from `repoIds`. The missing
+  "Reset to auto" affordance is also resolved — see the two DELETE routes under **Two grains**.)_
+- **A manually-RENAMED actor that is automated in no repo loses its identity-reset control**, because
+  `actorSummaries` skips an actor with no automated row and the account-wide card is the only home of
+  "Reset name to auto". Recoverable, not a pin: the row stays visible in the per-repo
+  `markedNotBots` bucket, and resetting or re-promoting it there brings the actor and its control
+  back. Documented at the bucket's declaration so nobody tidies it away.
 - **`SprintReportCard` has no importer**, yet the plugin's AI-policy sweep (`*/5`) still calls
   `refreshSprintReport` for every account not on `manual` — real spend for a card nothing renders.
   (`PresetPromptPanel` is also importer-less, but its server side is deliberately kept.)

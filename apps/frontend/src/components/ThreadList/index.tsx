@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { DerivedState, ReviewBotKind, ThreadDetail, User } from '@pierre-review/shared';
-import { DERIVED_STATES, NO_TEAM_KEY } from '@pierre-review/shared';
+import { DERIVED_STATES } from '@pierre-review/shared';
 import { useMyTurn } from '../../hooks/useTriage.js';
 import { useResolveBotThreads } from '../../hooks/usePrWrites.js';
 import { useDetectedReviewers, usePrBotDedup } from '../../hooks/useBotTriage.js';
@@ -112,23 +112,30 @@ export function ThreadList({
   // another pill is active.
   const stateCounts = useMemo(() => rollupCounts(threads), [threads]);
 
-  // The account-default reviewer classifications (NO_TEAM_KEY) — the SAME answers
-  // getResolvableBotThreads re-derives eligibility from, so the offered count matches what the
-  // resolve will accept (see resolvable.ts). Fetched only when a vendor filter is active,
-  // because the resolve control only renders there: a PR opened without touching the Bots chip
-  // costs no extra request. The key is shared with the Bots tab, so it is usually warm.
-  const { data: detected } = useDetectedReviewers(NO_TEAM_KEY, botFilter != null);
+  // The reviewer JUDGEMENTS — the SAME answers `getResolvableBotThreads` re-derives eligibility
+  // from, so the offered count matches what the resolve will accept (see resolvable.ts). Fetched
+  // only when a vendor filter is active, because the resolve control only renders there: a PR
+  // opened without touching the Bots chip costs no extra request.
+  //
+  // ⚠ THE ACCOUNT-WIDE LISTING IS FETCHED AND FILTERED TO THIS PR'S REPO, rather than a
+  // repo-scoped request. Two reasons, both load-bearing:
+  //   • a bot is a PER-REPO object now, so "is this login a review bot" has no answer until a
+  //     repo is named — reading another repo's row here would offer threads the server refuses;
+  //   • the unscoped key is the ONE entry FeedView and useBotColors already keep warm, so a PR
+  //     open costs no fetch, where a `repo:<id>` key would be cold on every new repo.
+  // `repoId` is optional on this component (a thread list can be rendered without one); with no
+  // repo the map is left null, which resolvable.ts treats as "listing not loaded" — it keeps the
+  // vendor-login fallback rather than silently offering or refusing threads on no evidence.
+  const { data: detected } = useDetectedReviewers(undefined, null, botFilter != null);
   const reviewerRoles = useMemo(() => {
-    if (detected == null) return null;
+    if (detected == null || repoId == null) return null;
     const m = new Map<number, ReviewerRoleInfo>();
-    for (const r of detected.reviewers) {
-      m.set(r.userId, {
-        automated: r.classification.automated,
-        role: r.classification.role,
-      });
+    for (const r of detected.rows) {
+      if (r.repoId !== repoId) continue;
+      m.set(r.userId, { automated: r.automated, role: r.role });
     }
     return m;
-  }, [detected]);
+  }, [detected, repoId]);
 
   // The bot threads a later commit has LIKELY ADDRESSED — the set the bulk "clear backlog"
   // action can safely resolve (matches the server's getResolvableBotThreads eligibility).

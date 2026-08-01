@@ -161,13 +161,10 @@ export interface FilterState {
   // cannot express a team key. BotsView's effectiveTab fallback must degrade a stale 'settings'
   // to 'roi' there. Transient, URL-silent.
   botsInnerTab: 'roi' | 'behaviour' | 'themes' | 'settings';
-  // Which TEAM the Bots "Settings" tab is editing. null = not chosen this session; the panel
-  // derives its initial value from the FilterBar teamScope (a single team → that team, 'none' →
-  // NO_TEAM_KEY) and falls back to NO_TEAM_KEY. NOT `number` with a 0 default: 0 is the
-  // FIRST-CLASS "No team (default)" key (shared's NO_TEAM_KEY — simultaneously the No-team scope
-  // and the inheritance root), so "the user picked No team" and "the user hasn't picked" must
-  // stay distinguishable. Transient, URL-silent (like repoConsoleTabs / insightsSubTab).
-  botSettingsTeamId: number | null;
+  // (There is no `botSettingsTeamId` any more. The Bots "Settings" tab used to carry its own team
+  // picker because the judgement was keyed per team; a bot is a per-REPO object now, so the panel
+  // just reads the FilterBar's repo/team scope like every other Bots panel.)
+  //
   // Which inner sub-tab the cross-repo Feed rail shows: 'feed' (the metrics header + consolidated
   // feed), 'themes' (the Pro "Discussion themes" AI summary), or 'compare' (the CORE/free
   // cross-team comparison matrix, moved here from Insights — shown only when 2+ teams are in
@@ -371,11 +368,8 @@ export interface FilterState {
   setFeedIsolatedPrId: (id: number | null) => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
-  // Switch the Bots view's inner sub-tab (ROI / experimental Behaviour / Themes / per-team Settings).
+  // Switch the Bots view's inner sub-tab (ROI / experimental Behaviour / Themes / Settings).
   setBotsInnerTab: (v: 'roi' | 'behaviour' | 'themes' | 'settings') => void;
-  // Set which team the Bots "Settings" tab edits (0 = No team / the account default every team
-  // inherits — shared's NO_TEAM_KEY; null = fall back to deriving it from the FilterBar scope).
-  setBotSettingsTeamId: (id: number | null) => void;
   setFeedInnerTab: (v: 'feed' | 'themes' | 'compare') => void;
   // Persist the ad-hoc chat's live draft + last result across Insights remounts.
   setSprintChatDraft: (
@@ -624,7 +618,6 @@ function freshDefaults(): FilterData {
     feedIsolatedPrId: null,
     botAnalyticsWindow: 'rolling_14',
     botsInnerTab: 'roi',
-    botSettingsTeamId: null,
     feedInnerTab: 'feed',
     sprintChatDraft: { question: '', wantChart: false, wantBots: false },
     sprintChatResults: {},
@@ -721,7 +714,6 @@ export const useFilters = create<FilterState>((set, get) => ({
   setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setBotsInnerTab: (v) => set({ botsInnerTab: v }),
-  setBotSettingsTeamId: (id) => set({ botSettingsTeamId: id }),
   setFeedInnerTab: (v) => set({ feedInnerTab: v }),
   setSprintChatDraft: (patch) =>
     set((s) => ({ sprintChatDraft: { ...s.sprintChatDraft, ...patch } })),

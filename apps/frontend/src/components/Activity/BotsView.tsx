@@ -47,20 +47,19 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // it's unavailable but the shared scalar still points at it, fall back to ROI.
   const { activityDigest } = useProCapabilities();
   const showThemes = repoId == null && activityDigest;
-  // "Settings" (the per-TEAM "who counts as a review bot here" tab) is cross-repo ONLY: a
-  // per-repo Bots tab cannot express a team key, because team_repos is many-to-many and one repo
-  // can sit in several teams. It is CORE/free — unlike Themes it has no capability gate, which
-  // also fixes an OSS gap: reviewer classification used to live behind SettingsModal's
+  // "Settings" ("who counts as a review bot here") shows in BOTH views now. It used to be
+  // cross-repo ONLY because the judgement was keyed per TEAM and a repo tab cannot express a team
+  // key (team_repos is many-to-many, so one repo sits in several teams). A bot is a per-REPO
+  // object, so a single-repo view is simply the same list with one group — there is nothing left
+  // for a repo tab to be unable to say. It is CORE/free — unlike Themes it has no capability gate,
+  // which also fixes an OSS gap: reviewer classification used to live behind SettingsModal's
   // caps.botTriage, so an `npx` user could not classify a reviewer at all.
-  const showSettings = repoId == null;
-  // DERIVE the visible tab; never write a correction back to the store. Both optional tabs share
-  // one scalar with the per-repo console, so it can legitimately hold a key that isn't rendered
-  // here — writing a "fix" would permanently forget the user's choice for the view that DOES
-  // render it.
-  const effectiveTab =
-    (innerTab === 'themes' && !showThemes) || (innerTab === 'settings' && !showSettings)
-      ? 'roi'
-      : innerTab;
+  //
+  // DERIVE the visible tab; never write a correction back to the store. `themes` is still
+  // optional and shares one scalar with the per-repo console, so it can legitimately hold a key
+  // that isn't rendered here — writing a "fix" would permanently forget the user's choice for the
+  // view that DOES render it.
+  const effectiveTab = innerTab === 'themes' && !showThemes ? 'roi' : innerTab;
 
   return (
     <div className="space-y-3" data-testid="bots-view">
@@ -80,7 +79,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           { key: 'roi', label: 'ROI' },
           { key: 'behaviour', label: 'Behaviour' },
           ...(showThemes ? [{ key: 'themes', label: 'Themes' } as const] : []),
-          ...(showSettings ? [{ key: 'settings', label: 'Settings' } as const] : []),
+          { key: 'settings', label: 'Settings' },
         ] as const).map((t) => {
           const on = effectiveTab === t.key;
           return (
@@ -105,17 +104,6 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
       {/* "Showing only #N" when the bot feed is isolated to one PR (e.g. from the Bot-only-PRs
           "Show in feed", which lands here). Kept OUTSIDE the sub-tab switch so its Clear — the
           only in-view way to un-isolate the bot feed — is always reachable. Self-hides otherwise. */}
-      {/* The shared sub-tab scalar can still say 'settings' while a PER-REPO Bots tab is showing,
-          where that tab isn't offered. effectiveTab silently degrades to ROI; say why, or the
-          switch reads as the tab having been lost. */}
-      {innerTab === 'settings' && !showSettings && (
-        <p className="text-[11px] text-gray-400">
-          Bot settings are per <span className="font-medium">team</span>, not per repo (a repo can
-          belong to several teams) — open the cross-repo <span className="font-medium">Bots</span>{' '}
-          rail entry to edit them.
-        </p>
-      )}
-
       <FeedIsolationBanner />
 
       {effectiveTab === 'behaviour' ? (
@@ -123,7 +111,9 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
       ) : effectiveTab === 'themes' ? (
         <BotThemesPanel />
       ) : effectiveTab === 'settings' ? (
-        <BotSettingsPanel />
+        /* A per-repo Bots tab narrows the list to that repo's own group; cross-repo passes
+           nothing and gets every in-scope repo. */
+        <BotSettingsPanel repoId={repoId} />
       ) : (
         <>
           {/* Governance caution: PRs whose only review came from an automated reviewer — no human

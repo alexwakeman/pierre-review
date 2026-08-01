@@ -8,8 +8,9 @@ import type {
   ResolvableThreadPrsResponse,
   BotWindowKind,
   DetectedReviewersResponse,
-  ReviewerClassification,
-  ReviewerOverrideBody,
+  RepoReviewerJudgementBody,
+  ReviewerCostBody,
+  ReviewerIdentityBody,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { ACTIVITY_GC_TIME } from './useActivity.js';
@@ -31,9 +32,10 @@ const RESOLVE_CHUNK_SIZE = 25;
 // is account-scoped server-side; these are plain DB reads that refresh on the sync cadence.
 
 // Per-vendor bot ROI / utilisation analytics over the selected window. Keyed by window +
-// scope so either change refetches. Cost now arrives SERVER-resolved per team on each row
-// (`costMonthlyUsd`/`costPerActedOnUsd`/`costInherited`) — the client no longer overlays it from
-// pro_settings except as a null-filling legacy fallback (see lib/botCost.ts). `enabled` lets the
+// scope so either change refetches. Cost arrives SERVER-resolved on each row from the ACTOR's
+// `account_reviewers` price (`costMonthlyUsd`/`costPerActedOnUsd`) — account-wide even though the
+// row is scoped, so never sum it across rows. The client no longer overlays it from pro_settings
+// except as an un-applied legacy pointer (see lib/botCost.ts). `enabled` lets the
 // caller gate the fetch. `scope` ('all' | 'none' | '<teamId>') narrows to a team's repos.
 export function useBotAnalytics(
   window: BotWindowKind,
@@ -103,50 +105,41 @@ export function useBotOnlyPrs(
   });
 }
 
-// Every distinct reviewer in the account joined with its automated/human classification,
-// volume and a sample review body — the per-team Bots "Settings" tab, and (at the account
-// default) the per-bot cost picker, the feed's vendor tag and the bot colour map.
+// The bot-reviewer listing: one IDENTITY per actor (kind / label / price — account-wide) plus one
+// JUDGEMENT row per (repo, actor) (automated / role — this repo only), plus the repo ids covered.
+// Feeds the Bots "Settings" list, the feed's vendor tag, ThreadList's resolve count and the bot
+// colour map.
 //
-// `teamId` selects WHICH team's answers to show: an explicit row for that team → the team-0
-// default → auto-detection. `null`/absent/0 = NO_TEAM_KEY, the account default — which is the
-// right answer for every account-wide consumer, so the existing zero-arg call sites keep working
-// and keep meaning what they meant.
+// ⚠ CALL IT WITH NO ARGUMENTS FOR THE ACCOUNT-WIDE ROSTER. `scope`/`repoIds` narrow it exactly
+// like /api/bot-analytics (repoIds wins when present). The account-wide consumers — useBotColors,
+// FeedView's vendor tag, ThreadList's vendor filter — need the WHOLE roster and pass nothing;
+// they filter `rows` client-side when they want one repo, which also keeps them on the single
+// warm cache entry instead of one per repo.
 //
-// The `team:` key prefix is MANDATORY, for the same reason the `repo:`/`scope:` slots below carry
-// theirs: repo ids, team ids and this key are all bare integers from independent autoincrements,
-// so an un-prefixed slot would let team N alias some other N.
-//
-// `scoped` narrows the listing to the reviewers with a footprint in the requested team's OWN
-// repos (at team 0: the repos in no team), and is what turns `scopedRepoCount` from null into a
-// number. It is OPT-IN, taken by exactly one caller — the per-team Settings tab.
-//
-// ⚠ `scoped` IS IN THE QUERY KEY, and it has to be. The other consumers (useBotColors, FeedView's
-// vendor tag, ThreadList's vendor filter) all call this hook at team:0 to mean "the whole account
-// roster"; the two responses have the SAME shape and the same team key, so without this slot the
-// narrow listing would populate the cache entry those surfaces read and silently shrink their
-// roster — a bot losing its colour and its feed tag because someone opened a Settings tab. The
-// unscoped key is spelled out ('repos:all') rather than omitted so the distinction is legible in
-// the devtools cache list instead of being an absence.
-// Exported so the cache-separation rule is testable rather than a comment: a scoped listing and
-// an account-wide one must NEVER produce the same key. (test/botReviewerQueryKey.test.ts)
+// ⚠ THE SCOPE IS IN THE QUERY KEY, and it has to be. The narrow and wide responses have the SAME
+// SHAPE, so without a distinct key a scoped listing would populate the entry those account-wide
+// surfaces read and silently shrink their roster — a bot losing its colour and its feed tag
+// because someone opened the Settings tab. NAMESPACE the slot (`repo:` vs `scope:`): a bare
+// repoId and a numeric teamId are both plain integer strings from independent autoincrements, so
+// an un-prefixed slot would let repo N alias team N.
+// Exported so the cache-separation rule is testable rather than a comment.
+// (test/botReviewerQueryKey.test.ts)
 export function detectedReviewersQueryKey(
-  teamId?: number | null,
-  scoped = false,
-): [string, string, string] {
-  const key = teamId != null && teamId > 0 ? teamId : 0;
-  return ['bot-reviewers', `team:${key}`, scoped ? 'repos:team' : 'repos:all'];
+  scope?: string,
+  repoIds?: number[] | null,
+): [string, string] {
+  const repoKey = repoIds && repoIds.length > 0 ? [...repoIds].sort((a, b) => a - b).join(',') : null;
+  return ['bot-reviewers', repoKey != null ? `repo:${repoKey}` : `scope:${scope ?? 'all'}`];
 }
 
 export function useDetectedReviewers(
-  teamId?: number | null,
+  scope?: string,
+  repoIds?: number[] | null,
   enabled = true,
-  opts?: { scoped?: boolean },
 ) {
-  const key = teamId != null && teamId > 0 ? teamId : 0;
-  const scoped = opts?.scoped === true;
   return useQuery<DetectedReviewersResponse>({
-    queryKey: detectedReviewersQueryKey(teamId, scoped),
-    queryFn: () => api.botReviewers(key, scoped),
+    queryKey: detectedReviewersQueryKey(scope, repoIds),
+    queryFn: () => api.botReviewers(scope, repoIds),
     enabled,
     staleTime: 60_000,
     gcTime: ACTIVITY_GC_TIME,
@@ -159,8 +152,10 @@ export function useDetectedReviewers(
 // acted-on stats, the bot feed and each PR's cached detail (its Bots chip + Bot-activity tab).
 // The old hook invalidated only two of these, which read as "the setting didn't take".
 const RECLASSIFY_INVALIDATE_KEYS = [
-  // A PREFIX, deliberately: editing the team-0 default shifts every team that inherits it, so
-  // every ['bot-reviewers', 'team:*'] entry must refetch, not just the one that was edited.
+  // A PREFIX, deliberately: an identity or price edit is account-wide, so every
+  // ['bot-reviewers', 'scope:*' | 'repo:*'] entry must refetch, not just the one on screen. A
+  // per-repo judgement edit only moves one entry, but it is cheap to over-invalidate and
+  // expensive to under-invalidate (a settings change that "didn't take" until reload).
   'bot-reviewers',
   'bot-analytics',
   'bot-behaviour',
@@ -180,36 +175,83 @@ function invalidateReclassify(qc: ReturnType<typeof useQueryClient>): void {
   }
 }
 
-// Two-way manual override of a reviewer's classification (mark automated / not-a-bot, set its
-// vendor kind/label, set its ReviewerRole). The team key rides in the BODY (`teamId`, absent =
-// the account default) because it is part of the row's identity, not a filter.
+// ── THE THREE WRITE HOOKS, AT TWO GRAINS ────────────────────────────────────────────────────
+// One hook per route, deliberately NOT one hook with an optional-field body. The predecessor was
+// a single mutation whose body could carry a repo judgement AND a vendor identity AND a price,
+// and the failure it produced is worth restating: marking CodeRabbit "not a bot" in ONE repo also
+// wrote `kind: null` at the ACTOR grain, so it lost its brand colour and vendor name in every
+// other repo — ones the user never touched, with no surface to undo it from. Three hooks means a
+// call site has to NAME the grain it is editing. DO NOT MERGE THEM BACK.
+
+// PER REPO: is this actor automated HERE, and is it reviewing or quality-checking HERE.
+// `repoId` is required — the row is the object. Stamps the ROW's `source: 'manual'`, which the
+// classifier then never re-derives.
 //
-// ⚠ ALSO THE COST-ONLY WRITE PATH, and the two must not be conflated. A body WITHOUT `automated`
-// carries no classification opinion (see `buildCostOnlyBody` in lib/botCost.ts) and the server
-// leaves automated/kind/source/confidence alone; a body WITH it stamps the row `source: 'manual'`,
-// which freezes that reviewer's classification forever. Never add `automated` to a cost edit to
-// "be explicit" — the absence IS the contract.
-export function useReviewerOverride() {
+// ⚠ It carries no kind/label/cost. Naming a vendor and pricing it are the other two hooks.
+export function useRepoReviewerJudgement() {
   const qc = useQueryClient();
-  return useMutation<
-    ReviewerClassification,
-    Error,
-    { userId: number; body: ReviewerOverrideBody }
-  >({
-    mutationFn: ({ userId, body }) => api.setReviewerOverride(userId, body),
+  // `void` result: the reply body is never read — the invalidation below refetches the listing,
+  // which is the only surface any of this renders from. See api.setRepoReviewerJudgement.
+  return useMutation<void, Error, { userId: number; body: RepoReviewerJudgementBody }>({
+    mutationFn: ({ userId, body }) => api.setRepoReviewerJudgement(userId, body),
     onSuccess: () => invalidateReclassify(qc),
   });
 }
 
-// "Reset to default": drop this reviewer's explicit row for one team so it inherits the account
-// default again. NOT the same as "Not a bot", which writes a fresh override saying "human" that
-// the team would then be stuck with. Only offered for a row the listing reported as a real team
-// override (`inherited === false`) — on an inherited row it deletes nothing and the user cannot
-// tell that apart from a reset that worked.
-export function useDeleteReviewerOverride() {
+// ACCOUNT-WIDE: who this actor IS — vendor kind and display label. One row per (account, actor),
+// so there is nowhere for a divergent copy to live. Stamps `identity_source: 'manual'`, including
+// on a clear, or the next classification pass reinstates the kind the user just rejected.
+//
+// ⚠ It must never carry `automated`/`role`: stamping the row-level `source` from here would
+// freeze auto-classification on every one of that actor's repos.
+export function useReviewerIdentity() {
   const qc = useQueryClient();
-  return useMutation<void, Error, { userId: number; teamId: number }>({
-    mutationFn: ({ userId, teamId }) => api.deleteReviewerOverride(userId, teamId),
+  return useMutation<void, Error, { userId: number; body: ReviewerIdentityBody }>({
+    mutationFn: ({ userId, body }) => api.setReviewerIdentity(userId, body),
+    onSuccess: () => invalidateReclassify(qc),
+  });
+}
+
+// ── AND THE TWO WAYS BACK TO AUTO, ONE PER GRAIN ────────────────────────────────────────────
+// Without these, every write above is PERMANENT: a manual edit pins the row against
+// re-derivation, and flipping the value back by hand leaves it pinned on the new value. They are
+// two hooks for the same reason the writes are two — their blast radii differ by an order of
+// magnitude, and a single hook with an optional repoId would put "this row" and "this bot
+// everywhere" one argument apart.
+
+// PER REPO: forget the human judgement on ONE row so detection re-derives it. Offer it only where
+// `RepoReviewer.isManualOverride` is true — on an already-auto row it is a no-op that looks like a
+// broken button. Touches no identity and no price.
+export function useResetRepoReviewerJudgement() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { userId: number; repoId: number }>({
+    mutationFn: ({ userId, repoId }) => api.resetRepoReviewerJudgement(userId, repoId),
+    // The same invalidation set as a judgement WRITE: the row comes back re-derived, which can
+    // move the actor in or out of the automated cohort for that repo, so every downstream surface
+    // shifts exactly as it does on a write.
+    onSuccess: () => invalidateReclassify(qc),
+  });
+}
+
+// ACCOUNT-WIDE: forget the human's vendor naming so detection names it again, in every repo.
+// Offer it only when `ReviewerIdentity.identitySource === 'manual'`.
+//
+// ⚠ THE PRICE SURVIVES — it shares the row but is not a classification opinion. The UI must say
+// so; "reset" reads as "delete everything" otherwise.
+export function useResetReviewerIdentity() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { userId: number }>({
+    mutationFn: ({ userId }) => api.resetReviewerIdentity(userId),
+    onSuccess: () => invalidateReclassify(qc),
+  });
+}
+
+// ACCOUNT-WIDE: what this actor costs per month. A number sets (0 is a real price meaning "free"),
+// null clears. One subscription, one price — never per repo.
+export function useReviewerCost() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { userId: number; body: ReviewerCostBody }>({
+    mutationFn: ({ userId, body }) => api.setReviewerCost(userId, body),
     onSuccess: () => invalidateReclassify(qc),
   });
 }

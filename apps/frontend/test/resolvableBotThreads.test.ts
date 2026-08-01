@@ -2,8 +2,9 @@
 //
 // The regression this pins: the button offers a COUNT and then asks the user to confirm
 // resolving exactly that many threads on GitHub, but the client derived the set from the vendor
-// LOGIN (`reviewBotKind`) while `POST /api/prs/:id/resolve-bot-threads` re-derives it from
-// `bot_review_classification` via `automatedReviewerUserIds(accountId, NO_TEAM_KEY, 'review')`.
+// LOGIN (`reviewBotKind`) while `POST /api/prs/:id/resolve-bot-threads` re-derives it from the
+// stored judgement via `automatedReviewerUserIds(accountId, [pr.repoId], 'review')` — the PR's OWN
+// repo, since a bot is judged per repo.
 // Once a login is marked "quality check" (which the shared type deliberately keeps flippable for
 // deepsource-io / github-code-quality / github-advanced-security, all of which stay in
 // REVIEW_BOTS) or "not a bot", the server drops it and answers {resolved:0,failed:0} — and the

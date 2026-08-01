@@ -7,7 +7,7 @@ import type {
   DerivedState,
   EventType,
   FeedAffectedThread,
-  ReviewerClassification,
+  ReviewerIdentity,
   ReviewState,
   User,
 } from '@pierre-review/shared';
@@ -16,7 +16,7 @@ import {
   useFeedHasNew,
   useMarkFeedSeen,
 } from '../../hooks/useConsolidatedFeed.js';
-import { useDetectedReviewers, useReviewerOverride } from '../../hooks/useBotTriage.js';
+import { useDetectedReviewers, useRepoReviewerJudgement } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
@@ -95,9 +95,12 @@ type AutomatedTag = { userId: number | null; kind: AutomatedReviewerKind; label:
 // SAME distinct colour in the feed as in the Bots ROI console / per-repo Bots tab.
 type BotColorFn = (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
 
+// ⚠ THE VENDOR NAME AND COLOUR COME FROM THE ACTOR GRAIN (`ReviewerIdentity`), never from a
+// per-repo judgement row. A feed is cross-repo, so reading them off whichever repo's row happened
+// to be in hand would render the same bot under two names in one scroll.
 function automatedTagFor(
   actorUser: User | undefined,
-  classificationByUserId: Map<number, ReviewerClassification>,
+  identityByUserId: Map<number, ReviewerIdentity>,
   botColor: BotColorFn,
 ): AutomatedTag | null {
   // Known review-bot vendor (CodeRabbit/Copilot/…) by login — the v1 path, still first.
@@ -113,13 +116,16 @@ function automatedTagFor(
   // Otherwise, an account-classified automated reviewer (in-house AI / Pierre) — widened
   // from the login-only path so those tags surface in the feed too.
   if (actorUser) {
-    const c = classificationByUserId.get(actorUser.id);
-    if (c && c.automated && c.kind != null) {
+    // `kind != null` IS the "automated somewhere" test at this grain: the identity row carries a
+    // vendor kind only while the actor is automated in at least one repo, and a cross-repo feed
+    // has no single repo whose judgement it could consult instead.
+    const id = identityByUserId.get(actorUser.id);
+    if (id && id.kind != null) {
       return {
         userId: actorUser.id,
-        kind: c.kind,
-        label: c.label,
-        color: botColor({ login: actorUser.githubLogin, kind: c.kind }),
+        kind: id.kind,
+        label: id.label,
+        color: botColor({ login: actorUser.githubLogin, kind: id.kind }),
       };
     }
   }
@@ -217,32 +223,39 @@ export function FeedView({
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
   const { claudeReview: claudeReviewEnabled } = useProCapabilities();
 
-  // Detected-reviewer classifications (CORE / free) → the actor→kind map that lets in-house
-  // AI / Pierre actors carry a vendor tag (login-based vendors don't need it). The inline
-  // "not a bot?" override reclassifies an actor as human (automated:false); on success the
-  // detected-reviewers query invalidates and the tag drops.
+  // Detected-reviewer IDENTITIES (CORE / free) → the actor→kind map that lets in-house AI /
+  // Pierre actors carry a vendor tag (login-based vendors don't need it). Account-wide listing on
+  // purpose: the feed is cross-repo, and this is the same cache entry useBotColors reads.
   const { data: detectedReviewers } = useDetectedReviewers();
   // Account-wide per-bot colour resolver (shares the detected-reviewers cache above — no extra
   // fetch). Gives in-house bots a distinct, consistent colour in the feed pills + row tags.
   const botColor = useBotColors();
-  const reviewerOverride = useReviewerOverride();
-  const { mutate: overrideMutate } = reviewerOverride;
-  const classificationByUserId = useMemo(() => {
-    const m = new Map<number, ReviewerClassification>();
+  const judgement = useRepoReviewerJudgement();
+  const { mutate: judgementMutate } = judgement;
+  const identityByUserId = useMemo(() => {
+    const m = new Map<number, ReviewerIdentity>();
     for (const r of detectedReviewers?.reviewers ?? []) {
-      if (r.classification.automated && r.classification.kind != null) m.set(r.userId, r.classification);
+      if (r.kind != null) m.set(r.userId, r);
     }
     return m;
   }, [detectedReviewers]);
-  const overridePendingUserId = reviewerOverride.isPending
-    ? reviewerOverride.variables?.userId ?? null
+  const overridePendingUserId = judgement.isPending
+    ? judgement.variables?.userId ?? null
     : null;
   // Stable across renders so a memoised row's props don't churn.
+  //
+  // ⚠ "not a bot?" IS A PER-REPO JUDGEMENT and takes the CARD's repo. The bot object is
+  // (repo, actor), so this clears the flag for the repo the user is looking at and leaves the
+  // other repos alone — which is what the button's title has to say, because the old
+  // account-wide version silently un-botted a vendor everywhere from a single feed card.
+  // It writes NO kind/label: the vendor tag survives, and the row simply stops being automated
+  // here. (The tag will still show if the actor is automated in another repo — that is the model
+  // working, not a stale render.)
   const markNotBot = useCallback(
-    (userId: number): void => {
-      overrideMutate({ userId, body: { automated: false } });
+    (userId: number, repoId: number): void => {
+      judgementMutate({ userId, body: { repoId, automated: false } });
     },
-    [overrideMutate],
+    [judgementMutate],
   );
   // The one-shot flash signal — set ONLY by a real browser Back (navigateBack), so an
   // ordinary return to Activity (e.g. clicking the Activity tab chip) never flashes.
@@ -442,7 +455,7 @@ export function FeedView({
     if (!botsMode) return [] as Vendor[];
     const resolve = (aid: number, count: number): Vendor => {
       const u = usersById.get(aid);
-      const tag = automatedTagFor(u, classificationByUserId, botColor);
+      const tag = automatedTagFor(u, identityByUserId, botColor);
       const label = tag?.label?.trim() ? tag.label : userLabel(u, aid);
       return { actorId: aid, label, color: tag?.color ?? '#6b7280', count };
     };
@@ -471,7 +484,7 @@ export function FeedView({
       m.set(aid, resolve(aid, 1));
     }
     return [...m.values()].sort((a, b) => b.count - a.count);
-  }, [botsMode, counts, items, usersById, classificationByUserId, botColor]);
+  }, [botsMode, counts, items, usersById, identityByUserId, botColor]);
   // Per-state counts for the pill badges — independent of the active pills. byThreadState
   // populates server-side for every feed view (thread-bearing items only), so the same row
   // works in and out of botsMode.
@@ -1133,7 +1146,7 @@ export function FeedView({
               key={item.id}
               item={item}
               usersById={usersById}
-              classificationByUserId={classificationByUserId}
+              identityByUserId={identityByUserId}
               botColor={botColor}
               overridePendingUserId={overridePendingUserId}
               onNotBot={markNotBot}
@@ -1457,10 +1470,11 @@ const BODY_COLLAPSED_MAX = 160;
 type FeedRowProps = {
   item: ConsolidatedFeedItem;
   usersById: Map<number, User>;
-  classificationByUserId: Map<number, ReviewerClassification>;
+  identityByUserId: Map<number, ReviewerIdentity>;
   botColor: BotColorFn;
   overridePendingUserId: number | null;
-  onNotBot: (userId: number) => void;
+  // (userId, repoId) — the judgement is per repo, so the card must pass its own repo.
+  onNotBot: (userId: number, repoId: number) => void;
   flash: boolean;
   expanded: boolean;
   onToggleExpanded: (id: string) => void;
@@ -1475,7 +1489,7 @@ type FeedRowProps = {
 function FeedRowImpl({
   item,
   usersById,
-  classificationByUserId,
+  identityByUserId,
   botColor,
   overridePendingUserId,
   onNotBot,
@@ -1493,8 +1507,8 @@ function FeedRowImpl({
   // Derived, memoised per row so props into this memoised component stay stable.
   const actorUser = item.actorId != null ? usersById.get(item.actorId) : undefined;
   const automatedTag = useMemo(
-    () => automatedTagFor(actorUser, classificationByUserId, botColor),
-    [actorUser, classificationByUserId, botColor],
+    () => automatedTagFor(actorUser, identityByUserId, botColor),
+    [actorUser, identityByUserId, botColor],
   );
   const overridePending =
     automatedTag?.userId != null && overridePendingUserId === automatedTag.userId;
@@ -1636,11 +1650,11 @@ function FeedRowImpl({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (automatedTag.userId != null) onNotBot(automatedTag.userId);
+                    if (automatedTag.userId != null) onNotBot(automatedTag.userId, item.repoId);
                   }}
                   disabled={overridePending}
                   className="text-[9px] text-gray-400 underline underline-offset-2 opacity-0 transition-opacity hover:text-gray-600 disabled:opacity-40 group-hover/bot:opacity-100 dark:hover:text-gray-200"
-                  title="Not a bot? Reclassify this reviewer as human"
+                  title="Not a bot? Stop treating this reviewer as automated IN THIS REPO. Its other repos are unaffected, and it keeps its vendor name everywhere."
                 >
                   {overridePending ? 'saving…' : 'not a bot?'}
                 </button>
@@ -1849,7 +1863,7 @@ const FeedRow = memo(
     a.replyOpen === b.replyOpen &&
     a.overridePendingUserId === b.overridePendingUserId &&
     a.usersById === b.usersById &&
-    a.classificationByUserId === b.classificationByUserId &&
+    a.identityByUserId === b.identityByUserId &&
     a.botColor === b.botColor &&
     a.onOpen === b.onOpen &&
     a.onOpenThread === b.onOpenThread &&

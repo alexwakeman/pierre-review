@@ -8,12 +8,13 @@ import type {
   BotWindowKind,
   DetectedReviewersResponse,
   ResolveBotThreadsResult,
-  ReviewerOverrideBody,
+  ReviewerCostBody,
+  ReviewerIdentity,
+  ReviewerIdentityBody,
+  RepoReviewerJudgementBody,
   ScopeResolveBotThreadsBody,
 } from '@pierre-review/shared';
 import {
-  classificationTeamKey,
-  deleteReviewerOverride,
   getBotAnalytics,
   getBotBehaviourAnalytics,
   getBotOnlyPrs,
@@ -22,8 +23,12 @@ import {
   getResolvableBotThreadPrs,
   getResolvableBotThreadsForScope,
   listDetectedReviewers,
+  resetRepoReviewerJudgement,
+  resetReviewerIdentity,
   resolveScopeRepoIds,
-  setReviewerOverride,
+  setRepoReviewerJudgement,
+  setReviewerCost,
+  setReviewerIdentity,
   SCOPE_RESOLVE_THREAD_CAP,
 } from '../../db/queries.js';
 import { resolveThreadsOnGitHub } from '../../bot-triage/resolve.js';
@@ -40,30 +45,77 @@ function parseIntList(raw?: string): number[] | null {
   return ids.length > 0 ? ids : null;
 }
 
-// PATCH /api/bot-reviewers/:userId — the two-way manual override. `kind`/`label` are left as
-// open strings (nullable) rather than an enum: AutomatedReviewerKind is defined in the
-// types-only shared package the backend can't import at runtime, and the query layer coerces
-// an unknown kind to a sensible default, so pinning the vendor list here would only add drift.
+// ── THE WRITE SURFACE IS SPLIT BY KEY, MIRRORING THE READ SHAPE ─────────────────────────────
+// THREE routes at TWO grains, and the grain of each is the thing to hold onto:
 //
-// `role` IS a closed 2-value set, so it's enumerated (an unknown role would land in a NOT NULL
-// column that the metric split branches on). It is OPTIONAL and absent means "leave the stored
-// role alone" — an old client that only knows automated/kind must not be able to silently
-// un-mark a quality check.
+//   PATCH /api/bot-reviewers/:userId          RepoReviewerJudgementBody   per (repo, actor)
+//   PATCH /api/bot-reviewers/:userId/identity ReviewerIdentityBody        per actor
+//   PUT   /api/bot-reviewers/:userId/cost     ReviewerCostBody            per actor
 //
-// `teamId` rides in the BODY, not the query string, because it is part of the row's IDENTITY.
-// minimum 0 = NO_TEAM_KEY (the account default every team inherits); the query layer verifies
-// the id belongs to this account and 404s otherwise.
+// …and TWO RESETS, one per grain, which mirror the first two exactly:
 //
-// ⚠ `automated` IS NO LONGER REQUIRED, and its absence is the discriminator for a COST-ONLY
-// patch (see setReviewerOverride). Re-adding `required: ['automated']` would make it impossible
-// to price a bot without also stamping a permanent manual classification on it.
+//   DELETE /api/bot-reviewers/:userId/judgement?repoId=  back to auto, ONE repo
+//   DELETE /api/bot-reviewers/:userId/identity           back to auto, the actor EVERYWHERE
 //
-// `costMonthlyUsd` MUST accept null — that is "clear the cost so this key inherits again", the
-// reset the empty cost box sends. A bare `{ type: 'number' }` would 400 it. Whole US dollars on
-// the wire; the store converts to integer cents. The upper bound is an input guard only (no
-// realistic bot subscription is $1M/month) — it costs nothing and keeps a fat-fingered paste out
-// of the column.
-const overrideSchema = {
+// ⚠ THE RESETS ARE NOT OPTIONAL POLISH. A manual write pins the row against re-derivation, and
+// flipping the value back by hand leaves it just as pinned — so without a way back to auto, every
+// edit here is permanent. That is also what makes the role-only patch's `source: 'manual'` stamp
+// (which pins `automated` for that repo as a side effect) the right trade rather than a trap: the
+// pin is visible AND undoable in the same place. `RepoReviewer.isManualOverride` and
+// `ReviewerIdentity.identitySource` exist to drive exactly these two affordances.
+//
+// ⚠ DO NOT MERGE THEM BACK INTO ONE BODY WITH A `repoId`. That was the predecessor: identity was
+// WRITTEN per repo and READ per actor, so clicking "Not a bot" on ONE repo nulled the kind, that
+// row was the most recently updated, identity resolution reported kind=null account-wide, and
+// CodeRabbit lost its brand colour and vendor name on the repos the user never touched — with no
+// surface anywhere to undo it. A most-recently-updated tie-break picks a winner but cannot make
+// the losing rows editable or even visible. Two small bodies keyed differently make the whole
+// class unrepresentable, and the SEPARATION IS ENFORCED IN THE HANDLERS (each calls exactly one
+// query-layer function, and each of those writes exactly one table), not merely documented.
+
+// PATCH /api/bot-reviewers/:userId — the per-repo JUDGEMENT.
+//
+// `repoId` is REQUIRED: the row IS the object, so a judgement with no repo has no row to land on.
+// It rides in the BODY rather than the query string because it is part of the row's identity. The
+// query layer verifies the repo belongs to the caller and 404s otherwise (the composite FK
+// `(repo_id, account_id) → repos(id, account_id)` would also reject it, but a constraint
+// violation is a 500 and this must be a 404).
+//
+// `role` IS a closed 2-value set, so it is enumerated (an unknown role would land in a NOT NULL
+// column the metric split branches on). Both fields are OPTIONAL — absent means "leave the stored
+// value alone", so an old client that only knows `automated` cannot silently un-mark a quality
+// check — but the handler rejects a body carrying NEITHER (there would be nothing to write).
+//
+// ⚠ THERE IS NO `kind` / `label` / `costMonthlyUsd` HERE, and `additionalProperties:false` is not
+// what keeps them out — Fastify's ajv runs with `removeAdditional:true`, so unknown keys are
+// STRIPPED, not rejected. What keeps them out is that the handler calls
+// `setRepoReviewerJudgement`, which issues no statement against `account_reviewers` at all.
+const judgementSchema = {
+  params: {
+    type: 'object',
+    required: ['userId'],
+    properties: { userId: { type: 'integer' } },
+  },
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['repoId'],
+    properties: {
+      repoId: { type: 'integer', minimum: 1 },
+      automated: { type: 'boolean' },
+      role: { type: 'string', enum: ['review', 'quality_check'] },
+    },
+  },
+};
+
+// PATCH /api/bot-reviewers/:userId/identity — WHO this actor is, account-wide. NO `repoId`.
+//
+// `kind` is left an open nullable string rather than an enum: AutomatedReviewerKind lives in the
+// types-only shared package the backend cannot import at runtime, and the query layer coerces an
+// unknown kind to a sensible default, so pinning the vendor list here would only add drift.
+// Both fields accept null — that is "clear it" (still a human statement, so `identity_source`
+// still becomes 'manual', or the next classification pass reinstates the kind the user rejected).
+const identitySchema = {
   params: {
     type: 'object',
     required: ['userId'],
@@ -73,47 +125,20 @@ const overrideSchema = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      automated: { type: 'boolean' },
       kind: { type: ['string', 'null'] },
       label: { type: ['string', 'null'] },
-      role: { type: 'string', enum: ['review', 'quality_check'] },
-      teamId: { type: 'integer', minimum: 0 },
-      costMonthlyUsd: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
     },
   },
 };
 
-// GET /api/bot-reviewers?teamId=&scoped= — which team's classification answers to show. Absent
-// teamId = 0 (NO_TEAM_KEY, the account default).
+// DELETE /api/bot-reviewers/:userId/judgement?repoId= — return ONE repo row to auto.
 //
-// `scoped` is OPT-IN and narrows the listing to the reviewers with a footprint in the requested
-// team's OWN repos (at key 0: the repos in NO team). It CANNOT become the meaning of teamId=0:
-// four production callers already read this route at key 0 for the whole account roster (the bot
-// colour map, the feed's vendor tag, ThreadList's bulk "Resolve N addressed" count, and the cost
-// picker's options), and narrowing key 0 breaks all four. Only the Bots settings tab sends it —
-// and the client query key must carry it, or the two shapes alias in cache.
-const listReviewersSchema = {
-  querystring: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      teamId: { type: 'integer', minimum: 0 },
-      scoped: { type: 'boolean', default: false },
-    },
-  },
-};
-
-// DELETE /api/bot-reviewers/:userId?teamId= — "Reset to default". Deliberately NOT sharing
-// `listReviewersSchema`: `scoped` is a read-shape concern and has no meaning on a delete, so the
-// narrower schema keeps it from ever reaching this handler.
-//
-// ⚠ It is STRIPPED, not rejected (verified: `DELETE …?teamId=3&scoped=true` → 204, not 400).
-// Fastify's default ajv config sets `removeAdditional: true`, which turns
-// `additionalProperties: false` into "delete the extra keys" rather than "fail the request" —
-// for the querystring AND the body. So this schema is a filter, not a guard: never rely on
-// additionalProperties alone to REJECT a param (the PATCH's own 400 on an opinion-free body is a
-// handler check for exactly that reason).
-const deleteOverrideSchema = {
+// `repoId` rides in the QUERY STRING rather than a body: a DELETE body is stripped by enough
+// intermediaries (and by some fetch implementations) that it is not a place to put a required
+// field. It is required for the same reason it is required on the PATCH — the row is the object,
+// and a reset with no repo has no row to land on. Blast radius: ONE repo, which is why this and
+// the identity reset below are separate routes rather than one with an optional `repoId`.
+const judgementResetSchema = {
   params: {
     type: 'object',
     required: ['userId'],
@@ -122,7 +147,73 @@ const deleteOverrideSchema = {
   querystring: {
     type: 'object',
     additionalProperties: false,
-    properties: { teamId: { type: 'integer', minimum: 0 } },
+    required: ['repoId'],
+    properties: { repoId: { type: 'integer', minimum: 1 } },
+  },
+};
+
+// DELETE /api/bot-reviewers/:userId/identity — return the ACTOR's identity to auto. NO `repoId`
+// and no query string at all: identity is a singleton per actor, so there is nothing to scope.
+const identityResetSchema = {
+  params: {
+    type: 'object',
+    required: ['userId'],
+    properties: { userId: { type: 'integer' } },
+  },
+};
+
+// PUT /api/bot-reviewers/:userId/cost — what this actor costs, account-wide.
+//
+// `monthlyUsd` is REQUIRED and NULLABLE precisely so `undefined` is not a third meaning: a number
+// sets the price (0 is real — "we pay nothing"), null clears it.
+//
+// ⚠ THE BOUNDS ARE NOT COSMETIC. Storage is int4 CENTS in both dialects, and 21474836.47 is where
+// the dialects STOP AGREEING: Postgres RAISES `integer out of range` (a 500) above it while
+// SQLite's 64-bit integers accept the value happily — so an unbounded field means the same
+// request succeeds locally and 500s in cloud, leaving a number cloud can never represent.
+// (Measured: monthlyUsd 99999999999 stored 2147483647 on pg and 9999999999900 on sqlite.) ajv
+// 400s out-of-range here; the query layer ALSO clamps, as the backstop for every other caller.
+//
+// `multipleOf: 0.01` rejects a fractional-cent price like $1.005, which nothing downstream can
+// print and which the two rounding paths were measured disagreeing about. (Non-finite values
+// cannot survive JSON.parse, and `type: number` rejects them anyway.)
+const costSchema = {
+  params: {
+    type: 'object',
+    required: ['userId'],
+    properties: { userId: { type: 'integer' } },
+  },
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['monthlyUsd'],
+    properties: {
+      monthlyUsd: {
+        type: ['number', 'null'],
+        minimum: 0,
+        maximum: 21474836.47,
+        multipleOf: 0.01,
+      },
+    },
+  },
+};
+
+// GET /api/bot-reviewers?scope=&repoIds= — the bot listing, at both grains. The repo scope
+// resolves exactly as the analytics routes do (an explicit `repoIds` wins over `scope`); absent
+// = every repo the account watches.
+//
+// It replaced a `teamId` + opt-in `scoped` pair whose whole design existed to work around the
+// team grain (key 0 was both "the No-team scope" and "the inheritance root", so narrowing it
+// would have blinded four production callers). Under the repo grain a scope is just a set of
+// repos, and the response echoes the ids it covered.
+const listReviewersSchema = {
+  querystring: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      scope: { type: 'string' },
+      repoIds: { type: 'string' },
+    },
   },
 };
 
@@ -217,67 +308,183 @@ const scopeResolveSchema = {
 // per-PR cross-bot dedup, and the confirm-gated scope-wide bot-thread resolve. Every handler is
 // account-scoped via accountIdOf(req); id-addressed reads/writes verify ownership → 404. No AI.
 export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
-  // Every distinct reviewer in the account (human + automated), classified, with 90-day
-  // volume + a sample body — powers the Settings "Review bots" detected-reviewers table.
+  // The bot listing at BOTH grains: one `rows` entry per (repo, actor) with a footprint in the
+  // scoped repos, one `reviewers` entry per distinct actor. Powers the Settings "Review bots"
+  // table. ⚠ A vendor on six repos is SIX rows sharing ONE identity — that is the intended
+  // display, not a duplicate to collapse.
   app.get('/api/bot-reviewers', { schema: listReviewersSchema }, async (req) => {
-    const { teamId, scoped } = req.query as { teamId?: number; scoped?: boolean };
-    const resp: DetectedReviewersResponse = await listDetectedReviewers(
-      accountIdOf(req),
-      teamId ?? 0,
-      { scoped: scoped === true },
-    );
+    const { scope, repoIds } = req.query as { scope?: string; repoIds?: string };
+    const accountId = accountIdOf(req);
+    // An explicit repoIds list (the per-repo Bots tab) wins over the team scope — same resolution
+    // as every analytics route below, so one selection cannot mean two things.
+    const explicit = parseIntList(repoIds);
+    const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
+    const resp: DetectedReviewersResponse = await listDetectedReviewers(accountId, scopeRepoIds);
     return resp;
   });
 
-  // Two-way manual override: force a reviewer automated (with kind/label) or back to human, and/or
-  // set this team's monthly cost for it. Upserts a source='manual' classification the auto
-  // resolver never overwrites — EXCEPT on a cost-only patch, which touches only the price. 404
-  // when the user id is unknown to this account's synced data.
-  app.patch('/api/bot-reviewers/:userId', { schema: overrideSchema }, async (req, reply) => {
+  // ── PER-REPO JUDGEMENT ────────────────────────────────────────────────────────────────────
+  // Force a reviewer automated, or back to human, IN ONE REPO; and/or set its role there. Upserts
+  // a `source='manual'` row the auto resolver never re-derives — for that repo only, so the same
+  // actor keeps updating automatically everywhere else.
+  //
+  // ⚠ IT WRITES NOTHING AT THE ACTOR GRAIN. No kind, no label, no price. That is what stops "Not
+  // a bot on web" from blanking CodeRabbit's brand colour on api and infra.
+  //
+  // 404 covers an unknown user id, an unknown/foreign repo id, AND an actor with no footprint in
+  // that repo — deliberately the same status for all three: distinguishing them would turn this
+  // route into an existence oracle over another tenant's repo ids and over the GLOBAL users table.
+  app.patch('/api/bot-reviewers/:userId', { schema: judgementSchema }, async (req, reply) => {
     const { userId } = req.params as { userId: number };
-    const body = req.body as ReviewerOverrideBody;
-    // An opinion-free patch is a client bug, not a no-op worth a 200: `automated` absent means
-    // "cost only", so with `costMonthlyUsd` absent too there is nothing to write. Rejecting it
-    // here keeps the query layer's own "unreachable" branch genuinely unreachable.
-    if (body.automated === undefined && body.costMonthlyUsd === undefined) {
+    const body = req.body as RepoReviewerJudgementBody;
+    // An opinion-free patch is a client bug, not a no-op worth a 200: with neither field there is
+    // nothing to write, and writing a `source='manual'` row anyway would freeze auto-detection
+    // for that repo on the strength of an empty request.
+    if (body.automated === undefined && body.role === undefined) {
       reply.status(400);
       return {
         error: 'BadRequest',
-        message: 'Patch must carry `automated` (a classification) and/or `costMonthlyUsd`',
+        message: 'Patch must carry `automated` and/or `role`',
       };
     }
-    // null covers BOTH an unknown user id and an unknown/foreign teamId — the same 404 on
-    // purpose: distinguishing them would turn this route into an existence oracle over another
-    // tenant's team ids.
-    const classification = await setReviewerOverride(accountIdOf(req), userId, body);
+    const classification = await setRepoReviewerJudgement(accountIdOf(req), userId, body);
     if (!classification) {
       reply.status(404);
-      return { error: 'NotFound', message: `Reviewer ${userId} not found` };
+      return { error: 'NotFound', message: `Reviewer ${userId} not found in repo ${body.repoId}` };
     }
     return classification;
   });
 
-  // "Reset to default": drop this reviewer's explicit row for `teamId` so the team inherits the
-  // account default (or auto-detection). Idempotent — deleting a row that isn't there is a
-  // successful reset. 404 only for an unknown/foreign team.
-  app.delete('/api/bot-reviewers/:userId', { schema: deleteOverrideSchema }, async (req, reply) => {
+  // ── PER-REPO JUDGEMENT — RESET ────────────────────────────────────────────────────────────
+  // Return ONE repo row to auto: delete the stored judgement so the next classification pass
+  // re-derives it from scratch (the listing recreates a pair with no row — see
+  // resetRepoReviewerJudgement for why deleting is the right form and what happens when the
+  // actor has no footprint left there).
+  //
+  // ⚠ BLAST RADIUS: ONE REPO. It is the undo for the button on one row, and the UI offers it only
+  // where `isManualOverride` is true — a control that resets an already-auto row would appear to
+  // do nothing.
+  //
+  // ⚠ IT TOUCHES NEITHER THE ACTOR'S IDENTITY NOR ITS PRICE. Different table, no statement.
+  //
+  // Same 404 rule as the PATCH twin, and the same reason: one status for unknown user / unknown
+  // or foreign repo / no row to reset, so it is never an existence oracle.
+  app.delete(
+    '/api/bot-reviewers/:userId/judgement',
+    { schema: judgementResetSchema },
+    async (req, reply) => {
+      const { userId } = req.params as { userId: number };
+      const { repoId } = req.query as { repoId: number };
+      const ok = await resetRepoReviewerJudgement(accountIdOf(req), userId, repoId);
+      if (!ok) {
+        reply.status(404);
+        return {
+          error: 'NotFound',
+          message: `No stored judgement for reviewer ${userId} in repo ${repoId}`,
+        };
+      }
+      // 204: the row is GONE, so there is nothing to echo. The client refetches the listing,
+      // which is where the re-derived row appears.
+      reply.status(204);
+      return null;
+    },
+  );
+
+  // ── ACTOR IDENTITY ────────────────────────────────────────────────────────────────────────
+  // WHO this actor is, account-wide: vendor `kind` and display `label`, stamping
+  // `identity_source: 'manual'` so the classifier leaves them alone.
+  //
+  // ⚠ IT WRITES NOTHING AT THE REPO GRAIN — no `automated`, `role`, `source`, `confidence` or
+  // `reasons`. Naming a vendor is not a judgement about how it behaves in any given repo, and
+  // stamping the row-level `source` from here would freeze auto-classification on every one of
+  // that actor's repos.
+  //
+  // 404 when the actor has no `repo_reviewers` row anywhere in the account. The storage would
+  // happily take the write (the two tables are keyed independently) — and the listing is
+  // row-driven, so the result would be an identity nothing could ever display, edit or clear.
+  app.patch(
+    '/api/bot-reviewers/:userId/identity',
+    { schema: identitySchema },
+    async (req, reply) => {
+      const { userId } = req.params as { userId: number };
+      const body = req.body as ReviewerIdentityBody;
+      if (body.kind === undefined && body.label === undefined) {
+        reply.status(400);
+        return { error: 'BadRequest', message: 'Patch must carry `kind` and/or `label`' };
+      }
+      const identity = await setReviewerIdentity(accountIdOf(req), userId, body);
+      if (!identity) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Reviewer ${userId} not found` };
+      }
+      const resp: ReviewerIdentity = identity;
+      return resp;
+    },
+  );
+
+  // ── ACTOR IDENTITY — RESET ────────────────────────────────────────────────────────────────
+  // Hand `kind` + `label` back to detection: clear them, set `identity_source: 'auto'`, and
+  // re-derive immediately so the auto answer lands in this response.
+  //
+  // ⚠ BLAST RADIUS: THE BOT EVERYWHERE. Identity is a singleton per actor, so this changes how it
+  // renders in every repo — which is why it is a different control, in a different place, from the
+  // per-repo reset above. The UI offers it only when `identitySource === 'manual'`.
+  //
+  // ⚠ IT KEEPS THE PRICE. The row also carries `monthly_cents`, and a price is not a
+  // classification opinion — clearing it because someone un-named a vendor is the coupling the
+  // two-table split exists to remove. The UI says so in words, because "reset" reads as "delete
+  // everything" otherwise.
+  //
+  // ⚠ AND IT TOUCHES NO REPO ROW — see resetReviewerIdentity: the re-derivation runs with an
+  // empty repo list, so no statement reaches `repo_reviewers`.
+  //
+  // Same 404 rule as the PATCH twin: no `repo_reviewers` row anywhere in the account.
+  app.delete(
+    '/api/bot-reviewers/:userId/identity',
+    { schema: identityResetSchema },
+    async (req, reply) => {
+      const { userId } = req.params as { userId: number };
+      const identity = await resetReviewerIdentity(accountIdOf(req), userId);
+      if (!identity) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Reviewer ${userId} not found` };
+      }
+      // Echoed, unlike the judgement reset: the row still exists (it still holds the price), and
+      // this is the re-derived identity the caller asked to fall back to.
+      const resp: ReviewerIdentity = identity;
+      return resp;
+    },
+  );
+
+  // ── ACTOR COST ────────────────────────────────────────────────────────────────────────────
+  // What this actor costs per month, account-wide. A number sets it (0 is real: "we pay
+  // nothing"); null CLEARS it — a column write, never a row delete, because the row also carries
+  // the vendor identity.
+  //
+  // ⚠ You buy ONE subscription from a vendor, so this is deliberately NOT per repo: six repos
+  // running CodeRabbit is $120, not $720. The rendering rule the schema cannot enforce (dedupe by
+  // userId before any total) is the client's, and is restated on `ReviewerIdentity.costMonthlyUsd`.
+  //
+  // Same 404 rule as the identity route: no `repo_reviewers` row ⇒ no price to attach.
+  app.put('/api/bot-reviewers/:userId/cost', { schema: costSchema }, async (req, reply) => {
     const { userId } = req.params as { userId: number };
-    const { teamId } = req.query as { teamId?: number };
-    const ok = await deleteReviewerOverride(accountIdOf(req), userId, teamId ?? 0);
-    if (!ok) {
+    const { monthlyUsd } = req.body as ReviewerCostBody;
+    const identity = await setReviewerCost(accountIdOf(req), userId, monthlyUsd);
+    if (!identity) {
       reply.status(404);
-      return { error: 'NotFound', message: `Team ${teamId} not found` };
+      return { error: 'NotFound', message: `Reviewer ${userId} not found` };
     }
-    reply.status(204);
-    return null;
+    const resp: ReviewerIdentity = identity;
+    return resp;
   });
 
   // Bot ROI / utilisation over a window (default rolling_14): per-vendor threads/acted-on/
-  // untouched + verdict + trend + deterministic tuning suggestions. Cost is SERVER-resolved per
-  // team on each row (`costMonthlyUsd`/`costInherited`, from the core
-  // `bot_review_classification.cost_monthly_cents`) — a null here is FINAL, and the deprecated Pro
-  // per-login blob only ever points at a stranded price now. Note a UNION scope resolves at
-  // NO_TEAM_KEY, so its prices are the ACCOUNT DEFAULTS and must never be summed across teams.
+  // untouched + verdict + trend + deterministic tuning suggestions. Cost is SERVER-resolved from
+  // the core `account_reviewers.monthly_cents` — a null here is FINAL, and the deprecated Pro
+  // per-login blob only ever points at a stranded price now.
+  //
+  // ⚠ The price is ACTOR-grain on a SCOPED row: never sum it across rows, repos or scopes. A
+  // vendor on six repos is $120 of spend seen six ways, not $720.
   app.get('/api/bot-analytics', { schema: analyticsSchema }, async (req) => {
     const { window, scope, repoIds } = req.query as {
       window: BotWindowKind;
@@ -288,14 +495,13 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     // An explicit repoIds list (the per-repo Bots tab) wins over the team scope.
     const explicit = parseIntList(repoIds);
     const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
-    // The classification key comes from the SAME scope the repo ids do — a single team id
-    // resolves to that team's answers, every union form ('all'/'none'/'teams'/'teams:a,b') to
-    // the account default. A repo scope carries no team (teamRepos is many-to-many).
+    // ONE scope drives both the metrics AND the "is this login a bot here" judgement — the getter
+    // derives the second from the first, so the two cannot disagree. (They could under the
+    // previous shape: the classification key was a SEPARATE argument a caller had to remember.)
     const resp: BotAnalyticsResponse = await getBotAnalytics(
       accountId,
       window,
       scopeRepoIds,
-      classificationTeamKey(scope),
     );
     return resp;
   });
@@ -317,7 +523,6 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
       accountId,
       window,
       scopeRepoIds,
-      classificationTeamKey(scope),
     );
     return resp;
   });
@@ -339,7 +544,6 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
       accountId,
       window,
       scopeRepoIds,
-      classificationTeamKey(scope),
     );
     const resp: BotOnlyPrsResponse = { window: win, prs, generatedAt: new Date().toISOString() };
     return resp;
@@ -374,7 +578,6 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
       target,
       window,
       scopeRepoIds,
-      classificationTeamKey(scope),
     );
     return resp;
   });
@@ -403,7 +606,6 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     const { prs, totalThreads } = await getResolvableBotThreadPrs(
       accountId,
       scopeRepoIds,
-      classificationTeamKey(scope),
     );
     const resp: ResolvableThreadPrsResponse = {
       prs,
@@ -426,17 +628,16 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
       const noop: ResolveBotThreadsResult = { resolved: 0, failed: 0, results: [] };
       return noop;
     }
-    // KNOWN GAP, deliberate and documented: the re-derive runs at NO_TEAM_KEY (the account
-    // default) because `ScopeResolveBotThreadsBody` carries `threadIds`/`repoIds` and no
-    // `scope` — it is a frozen shared type. So if a reviewer is marked automated ONLY under a
-    // per-team override, the team-scoped listing offers its threads but this route finds them
-    // ineligible and resolves 0 (it never resolves something it shouldn't — the failure is
-    // conservative). Fixing it properly needs `scope?: string` on that body type.
+    // The KNOWN GAP this used to carry is CLOSED. Under the team grain the re-derive ran at the
+    // account default (`ScopeResolveBotThreadsBody` carries `threadIds`/`repoIds` and no `scope`,
+    // and it is a frozen shared type), so a reviewer marked automated only under a per-team
+    // override had its threads offered by the listing and then found ineligible here — the route
+    // resolved 0. The judgement scope is now derived from `repoIds`, the very field the body
+    // already carries, so the listing and the resolve evaluate the same rule by construction.
     const { threads: eligible } = await getResolvableBotThreadsForScope(
       accountId,
       repoIds ?? null,
       threadIds,
-      classificationTeamKey(null),
     );
     const result = await resolveThreadsOnGitHub(
       accountId,

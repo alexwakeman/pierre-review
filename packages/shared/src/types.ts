@@ -256,21 +256,67 @@ export type ClassificationSource =
 // does not, because a linter's approval is not a human's.
 export type ReviewerRole = 'review' | 'quality_check';
 
-// The classification TEAM key sentinel. `bot_review_classification.team_id` is NOT NULL and
-// defaults to this, because a UNIQUE index over a NULLable column dedupes in NEITHER dialect
-// (NULLs compare distinct), so a nullable team key would silently permit duplicate rows per
-// (account, author).
+// A BOT IS A PER-REPO OBJECT. Everything below keys on (repo, actor); there is no team key, no
+// inheritance chain, no merge and NO DEDUPLICATION anywhere.
 //
-// 0 is deliberately BOTH "the No-team scope" AND the inheritance ROOT: resolution is
-// `explicit team row → the team-0 row → auto-detect`. That is why the migration needs no
-// backfill (every pre-existing account-global row is already the default every team inherits)
-// and why a team created LATER inherits the account default automatically. Surface it in the UI
-// as "No team (default)" so the conflation is visible rather than surprising.
+// WHY THE REPO AND NOT A TEAM. A bot is installed per repository — GitHub Apps are installed on
+// repos, CI configs live in repos — while a team is a bag of repos that someone can re-bag
+// tomorrow. Keying the judgement on a team made the answer move when team membership was edited,
+// and it forced an inheritance chain (`team row → default row → auto-detect`) whose
+// null-means-inherit rules leaked into every read type on this page.
 //
-// It carries no FK to `teams` — 0 is not a team id, so a FK would reject every default row.
-// The cost of that is manual cleanup: deleteTeam must delete this table's rows for the team.
-export const NO_TEAM_KEY = 0;
+// A vendor running on six repos is SIX ROWS and is meant to render as six entries — in the team
+// view and in the Feed bot summary alike. Within one repo there is nothing to dedupe, because the
+// key already is (repo, actor).
+//
+// ── THE GOVERNING DISTINCTION: IDENTITY IS SINGLETON, JUDGEMENT IS PER REPO ─────────────────
+// IDENTITY is a property of the ACTOR and is the same in every repo BY DEFINITION — what this bot
+// IS (`kind`), what it is CALLED (`label`), what we PAY for it (`costMonthlyUsd`), and who
+// decided those (`identitySource`). A login is one vendor everywhere.
+// JUDGEMENT is a property of the (repo, actor) PAIR — whether it is acting as an automated
+// reviewer HERE (`automated`), whether that is reviewing or quality-checking (`role`), and the
+// provenance of THAT answer (`confidence`/`source`/`reasons`).
+//
+// THE STORAGE IS NORMALISED ON THE SAME LINE, which is what makes everything below cheap to hold
+// in your head: `account_reviewers` (account, author) holds identity + price, `repo_reviewers`
+// (account, repo, author) holds the judgement. Every fact lives at exactly ONE grain.
+//
+// That was NOT true of an earlier draft, and the difference is the whole point. There, identity
+// sat on the per-repo row, REPLICATED across an actor's rows and held consistent only by
+// convention — which meant a new repo row had to seed three columns from its siblings, persist()
+// had to gate on two different provenance flags in the same row, and this file had to describe
+// `ReviewerIdentity` as "a straight read of any one of them", i.e. an election with no ballot.
+// One row per fact deletes all three problems rather than documenting them.
+//
+// The READ shape is normalised on that line — `ReviewerIdentity` (one per actor) vs `RepoReviewer`
+// (one per repo) — AND SO IS THE WRITE SHAPE: `ReviewerIdentityBody` and `ReviewerCostBody` are
+// actor-keyed, `RepoReviewerJudgementBody` is repo-keyed. Half-implementing it is worse than not
+// splitting at all: a field written at one grain and read at the other produces an edit the user
+// cannot see, on rows they never touched (see ReviewerIdentity for the worked example).
+//
+// IF YOU ADD A FIELD, DECIDE ITS GRAIN FIRST. "Is this the same in every repo by definition?" is
+// the whole test — then put it on both sides of the same line: one table, one read type, one
+// write body.
 
+// The stored VERDICT about one actor: what the classifier decided, written verbatim to each of
+// that actor's repo rows.
+//
+// IT IS DERIVED ONCE PER ACTOR, NOT ONCE PER REPO — hence no `repoId` here. Every strong signal
+// (vendor login, `users.githubType`, app attribution, the branded-marker fingerprint) is a
+// property of the ACTOR and is repo-independent, so per-repo derivation would multiply the work
+// and the BILLED Haiku tie-break for an identical answer, and would weaken the behavioural score
+// by computing it on a thin per-repo slice. The rows stay independently overridable: only a HUMAN
+// edit should ever make two of an actor's rows disagree.
+//
+// ⚠ IT SPANS BOTH GRAINS — the one place in this contract that legitimately does, because the
+// classifier is the writer for both. Persisting it is therefore TWO statements against TWO
+// tables, each honouring its own table's provenance flag:
+//   `account_reviewers`  kind/label       skip when that row's `identity_source` is 'manual'
+//   `repo_reviewers`     automated/role   skip when that row's `source`          is 'manual'
+// They no longer sit side by side in one row, so confusing them takes a genuine mistake rather
+// than a slip — but the failure it prevents is unchanged: gate on one flag for both and a
+// human's vendor correction is reverted by the next pass, or a per-repo "not a bot" freezes the
+// vendor identity account-wide.
 export interface ReviewerClassification {
   userId: number;
   login: string;
@@ -285,124 +331,254 @@ export interface ReviewerClassification {
   source: ClassificationSource;
   reasons: string[];
 }
-export interface DetectedReviewer {
+
+// WHO an automated reviewer IS, account-wide. Served ONCE per actor and joined to the repo rows
+// by `userId` — see the normalisation note above: a bot's colour and display name must key on the
+// actor or the same vendor renders differently from one repo to the next.
+//
+// IT IS A STRAIGHT READ OF ONE ROW — `account_reviewers`, keyed (accountId, userId). There is
+// nothing to resolve, because there is nothing to disagree.
+//
+// TWO EARLIER DRAFTS GOT THIS WRONG IN THE SAME PLACE and the note is kept so neither comes back.
+// The first allowed per-repo identity EDITS and promised a tie-break here ("manual beats auto,
+// most recently updated wins"). The second removed the per-repo write but left the columns
+// REPLICATED on the repo rows, so this object was "a straight read of any one of them" — which is
+// still a tie-break, just an unwritten one that silently elects a winner the moment two rows
+// differ. A tie-break picks a winner but cannot make the losing rows editable or even visible:
+// mark CodeRabbit "not a bot" on `web` only, that row's kind goes null and is newest, identity
+// reports kind=null account-wide, useBotColors filters on kind != null, and CodeRabbit loses its
+// brand colour and vendor name on `api` and `infra` — repos the user never touched, with no
+// surface anywhere to undo it. One row per fact is what makes that unrepresentable.
+export interface ReviewerIdentity {
   userId: number;
   login: string;
   displayName: string | null;
   avatarUrl: string | null;
-  classification: ReviewerClassification;
-  isManualOverride: boolean;
-  // The team key this row RESOLVED under (see NO_TEAM_KEY) — the requested team when an
-  // explicit row exists there, else 0.
-  teamId: number;
-  // True when `classification` came from the team-0 default (or from auto-detection) rather
-  // than an explicit row for the REQUESTED team. Drives the "Inherited from default" badge and
-  // disables "Reset to default", which would otherwise be a no-op the user cannot tell apart
-  // from a real override.
-  inherited: boolean;
-  // The row exists ONLY as a stored classification for the requested team — the reviewer has no
-  // footprint at all in the repos this listing was scoped to (see `scopedRepoCount`). It is NOT
-  // dead: `automatedReviewerUserIds`/`classificationKindForUser` resolve by TEAM KEY and never
-  // by repo, so the row still governs the moment a repo moves back into the team (or any metric
-  // runs at that key). Surface it — dimmed, in its own collapsed section — rather than dropping
-  // it, because "set here but invisible while still steering everything" is the support question
-  // this flag exists to pre-empt. Always false on a listing that was not repo-scoped.
-  dormantInScope: boolean;
-  // The monthly spend that APPLIES to this reviewer for the requested team, in whole US DOLLARS
-  // (the wire unit; storage is integer cents on bot_review_classification.cost_monthly_cents —
-  // see that column's comment for why money is never a float here).
+  // Vendor identity — drives BOT_VENDOR_META / automatedReviewerMeta() colour + brand name.
+  // null when this actor is not automated in any repo.
+  kind: AutomatedReviewerKind | null;
+  // Display name: a human-set label → the vendor's brand name → the login.
+  label: string;
+  // Provenance of `kind` + `label` ONLY, and deliberately NOT the same field as
+  // `RepoReviewer.source`: identity and judgement are corrected independently, at different
+  // grains, and they now live on different TABLES. 'manual' ⇒ a human named this thing and the
+  // classifier will not re-derive it; 'auto' ⇒ detection owns it.
   //
-  // null = no cost is set ANYWHERE in the chain (resolution already walked it, so null never
-  // means "inherited"). 0 is a REAL value meaning "this team pays nothing for this bot" — which
-  // is why every resolution step uses `??` and never `||`.
+  // IT DRIVES THE "RESET IDENTITY TO AUTO" AFFORDANCE, and that affordance is now a route rather
+  // than a promise this type makes on its own: `DELETE /api/bot-reviewers/:userId/identity`
+  // clears `kind`/`label`, sets this back to 'auto', and re-derives, all account-wide. Show the
+  // control ONLY when this is 'manual' — on an 'auto' identity it would appear to do nothing.
+  //
+  // ⚠ TWO THINGS THAT RESET MUST NOT DO, both enforced server-side and both worth stating where
+  // the flag is read: it must not reset six repos' `automated` verdicts (that is the OTHER grain
+  // — `DELETE …/judgement?repoId=`, one repo at a time), and it must not clear `costMonthlyUsd`.
+  // A price shares this row but is not a classification opinion; losing it as a side effect of
+  // un-naming a vendor is the coupling the two-table split exists to remove. Say so in the UI
+  // copy — "reset" reads as "delete everything" otherwise.
+  identitySource: 'auto' | 'manual';
+  // The monthly price recorded for this actor, in whole US DOLLARS (the wire unit; storage is
+  // integer cents in `account_reviewers.monthly_cents` — see that column for why money is never
+  // a float, and for the fixed rounding rule the two dialects share).
+  //
+  // ⚠ RENDERING RULE, and it is the client's job because no schema can enforce it: this price
+  // belongs to the ACTOR. You buy ONE subscription from a vendor, so six repos running CodeRabbit
+  // is $120, not $720. Storing it at the actor grain removed the STORAGE hazard — there is no
+  // per-repo cell to hold a divergent copy — but NOT the display one: a bot listing is one row
+  // per (repo, actor), and joining this price onto all six rows and summing the column is both
+  // easy and wrong. So: render it ONCE per actor (on the identity, not on each repo row), and
+  // DEDUPE BY `userId` before any total, average or $/acted-on. Same caveat, spelled out again,
+  // on BotVendorAnalytics.costMonthlyUsd.
+  //
+  // null = NO PRICE SET (`monthly_cents IS NULL`). 0 is a real, deliberate price meaning "we pay
+  // nothing for this". TWO STATES, and NOTHING INHERITS — so `??` vs `||` is an ordinary display
+  // bug here, not the silent wrong-price trap it was under the old team-inheritance chain, where
+  // null meant "ask my parent".
   costMonthlyUsd: number | null;
-  // True when `costMonthlyUsd` came from the team-0 default rather than an explicit value on
-  // THIS team's row. Always false at NO_TEAM_KEY (nothing sits above it) and whenever the cost
-  // is null.
+}
+
+// How much of this actor is actually visible IN ONE REPO. Counts are over a rolling 90-day
+// window; `lastActiveAt` is ALL-TIME, so a long-dormant bot still reports when it last ran.
+//
+// It is what makes a stale row legible without a flag: a row whose counts are all 0 is a
+// judgement someone recorded for a repo this reviewer no longer touches. That used to need a
+// `dormantInScope` boolean because a team-keyed row had no repo to point at; a per-repo row does,
+// and the numbers say it plainly.
+export interface RepoReviewerFootprint {
+  reviews: number;   // reviews submitted on this repo's PRs
+  threads: number;   // inline review threads opened
+  comments: number;  // issue-level PR comments
+  lastActiveAt: string | null; // ISO-8601; most recent of the three, all-time
+}
+
+// THE BOT OBJECT: one actor's judgement in one repo — the wire form of a `repo_reviewers` row.
+// Join to `ReviewerIdentity` on `userId` for the vendor kind, label and price.
+//
+// IT CARRIES NO `kind`, `label` OR `costMonthlyUsd` BY DESIGN, and — since 0043 — none of them is
+// a column on the row it mirrors either, so the type and the table now say the same thing. Those
+// are actor-grain; put them here and a renderer reads them off whichever row it happens to hold,
+// which is how the same vendor comes out orange in one repo and blue in the next, and how a $120
+// subscription totals $720 across six rows.
+// The write side mirrors the same split — see RepoReviewerJudgementBody vs ReviewerIdentityBody.
+export interface RepoReviewer {
+  repoId: number;
+  userId: number;
+  automated: boolean;
+  // 'review' | 'quality_check' — see ReviewerRole. A FLAG ON THIS OBJECT, not a separate kind:
+  // a login keeps its brand while being marked a linter, and it may legitimately be a reviewer in
+  // one repo and a quality gate in another.
+  role: ReviewerRole;
+  confidence: ClassificationConfidence;
+  source: ClassificationSource;
+  reasons: string[];
+  // `source === 'manual'` — the row is a human judgement the classifier will not re-derive.
+  // Kept as its own field because it drives the "Reset to auto" affordance, and reading it off
+  // `source` at every call site is how one of them ends up wrong.
   //
-  // ⚠ This can legitimately DISAGREE with the sibling `inherited` above, and that disagreement
-  // is the whole point: `inherited` is ROW-level (the entire classification came from the
-  // default — the explicit team row wins WHOLESALE), while `costInherited` is FIELD-level (only
-  // the cost fell through). A row with `inherited: false, costInherited: true` is a real
-  // per-team classification override still using the account default's price — the case that
-  // exists precisely so that pressing "Apply" on an inherited row (which creates a team row to
-  // hold a label/role opinion) cannot silently zero a price the user was looking at.
-  costInherited: boolean;
-  threadsLast90d: number;
+  // THE AFFORDANCE IS `DELETE /api/bot-reviewers/:userId/judgement?repoId=`, which deletes THIS
+  // ROW so the next listing re-derives the pair from activity. Show it only when this is true —
+  // resetting an already-auto row is a no-op that looks like a broken button. It is the only way
+  // back: flipping `automated` back by hand re-stamps `source: 'manual'`, so the row stays pinned
+  // against re-derivation, just pinned on a different value.
+  //
+  // ⚠ BLAST RADIUS IS ONE REPO, and the UI must make that unmissable next to the identity reset,
+  // which affects the bot EVERYWHERE. This one touches no `kind`, no `label` and no
+  // `costMonthlyUsd` — different grain, different table, different route.
+  isManualOverride: boolean;
+  footprint: RepoReviewerFootprint;
+  // A short excerpt of a review this reviewer posted IN THIS REPO — the evidence a user reads
+  // before deciding what the thing is. Null when it has posted no review body here.
   sampleReviewBody: string | null;
 }
+
 export interface DetectedReviewersResponse {
-  reviewers: DetectedReviewer[];
-  // The team key this listing was resolved for — echoed so the client can assert the response
-  // matches the tab it asked for before rendering (the query key and the picker can disagree
-  // for a frame while a team switch is in flight).
-  teamId: number;
-  // How many repos the listing was actually computed over: the requested team's members, or —
-  // at NO_TEAM_KEY — the repos in no team at all.
-  //
-  // NULL means the caller did NOT ask for a repo-scoped listing, so no scoping happened and the
-  // question "how many repos is this" has no answer to give. It must not report the account's
-  // repo count instead: the field exists to make `reviewers: []` legible, and the one case it
-  // most needs to catch — "this team has no repos yet", which is the only `0` — is exactly the
-  // case a large account-wide count would disguise. A number the client cannot attribute is
-  // worse than no number.
-  //
-  // Scoped, it disambiguates an empty `reviewers`, which otherwise means three different things
-  // with one appearance: "this team has no repos yet" (0 — go assign repos), "these repos have
-  // no detected reviewers yet" (> 0 — sync or wait), and "unknown/foreign team id" (also 0,
-  // deliberately indistinguishable from an owned-but-empty team so this id-addressed read stays
-  // free of an existence oracle).
-  scopedRepoCount: number | null;
+  // One entry per ACTOR (see ReviewerIdentity) — the identity + price side of the join.
+  reviewers: ReviewerIdentity[];
+  // One entry per (repo, actor) — the judgement side. Several rows may share a `userId`; that is
+  // the intended display, not a duplicate to collapse.
+  rows: RepoReviewer[];
+  // The repos this listing actually covered, in the order the client should render them. It makes
+  // an empty `rows` legible, which is the whole reason it is here: `[]` means "no repos in scope
+  // — go add or assign some", while a non-empty list with no rows means "these repos have no
+  // detected reviewers yet — sync or wait". A count alone could not tell those apart.
+  repoIds: number[];
   generatedAt: string;
 }
-export interface ReviewerOverrideBody {
-  // OPTIONAL, and its absence is the discriminator for a COST-ONLY patch.
+
+// ── THE WRITE SURFACE IS SPLIT BY KEY, MIRRORING THE READ SHAPE ─────────────────────────────
+// THREE bodies, at TWO grains, and the grain of each is the thing to hold onto:
+//
+//   PATCH /api/bot-reviewers/:userId          RepoReviewerJudgementBody   per (repo, actor)
+//   PATCH /api/bot-reviewers/:userId/identity ReviewerIdentityBody        per actor
+//   PUT   /api/bot-reviewers/:userId/cost     ReviewerCostBody            per actor
+//
+// Plus TWO RESETS, bodyless, one per grain — the way back to auto, without which every edit above
+// is permanent (a manual write pins the row against re-derivation, and flipping the value back by
+// hand leaves it pinned on the new value):
+//
+//   DELETE /api/bot-reviewers/:userId/judgement?repoId=   → 204, ONE repo back to auto
+//   DELETE /api/bot-reviewers/:userId/identity            → ReviewerIdentity, the actor
+//                                                           EVERYWHERE back to auto, PRICE KEPT
+//
+// They are two routes for the same reason the writes are: their blast radii differ by an order of
+// magnitude, so a single reset with an optional `repoId` would make "reset this row" and "reset
+// this bot in every repo" one keystroke apart. See `RepoReviewer.isManualOverride` and
+// `ReviewerIdentity.identitySource` for when each is offered.
+//
+// WHY THEY ARE NOT ONE BODY. The predecessor was a single body with a REQUIRED `repoId` that also
+// carried `kind` and `label` — so identity was WRITTEN per repo and READ per actor, which is the
+// exact divergence the normalised read shape exists to prevent, reintroduced from the other side.
+// The handler wrote kind and label unconditionally with source 'manual', so: CodeRabbit is
+// detected on api, web and infra; the user clicks "Not a bot" on web ONLY; that row gets
+// kind=null, source=manual and the newest updated_at; identity resolution reports kind=null
+// account-wide; useBotColors filters on kind != null and CodeRabbit loses its brand colour and
+// vendor name on api and infra — repos the user never touched, with no surface to fix it from.
+//
+// A most-recently-updated tie-break was the proposed mitigation and it is not one: it chooses a
+// winner, but the losing rows remain uneditable and invisible. Two small bodies keyed differently
+// makes the whole class unrepresentable. DO NOT MERGE THEM BACK.
+
+// PATCH /api/bot-reviewers/:userId — the JUDGEMENT for one actor in ONE repo. Nothing here
+// describes what the actor IS; it says how it is BEHAVING HERE.
+export interface RepoReviewerJudgementBody {
+  // WHICH repo row this edits. REQUIRED — the row is the object, and a judgement with no repo has
+  // no row to land on. The repo must belong to the calling account; an unowned or unknown id must
+  // 404 rather than write a row keyed into another tenant's repo. (The composite FK
+  // `(repo_id, account_id) → repos(id, account_id)` makes that structural rather than a check
+  // this route could forget — but return the 404 anyway, a constraint violation is a 500.)
+  repoId: number;
+  // Present ⇒ a human judgement: stamp the ROW's `source: 'manual'` / `confidence: 'high'`, which
+  // is load-bearing — the classifier returns a manual row verbatim and never re-derives it.
   //
-  // When present, this is a CLASSIFICATION opinion and the row is stamped
-  // `source: 'manual'` / `confidence: 'high'` — which is correct, and load-bearing: the
-  // classifier returns a manual row verbatim and never re-derives it, so a human judgement
-  // sticks.
-  //
-  // When ABSENT, the patch carries no classification opinion and the handler must NOT touch
-  // `automated` / `kind` / `source` / `confidence` / `reasonsJson`. Stamping them anyway would
-  // mean that TYPING A PRICE silently froze that reviewer's classification forever — it would
-  // stop self-healing when the login later joins the vendor list or its behavioural score
-  // changes — and, on a team tab, would convert a merely-inherited row into a full row-level
-  // override the user never asked for. Pricing a bot is not an opinion about what it is.
+  // ⚠ It must NOT touch `kind`/`label`/`identity_source`. "Not a bot in this repo" is not a claim
+  // about who the vendor is, and writing identity from here is precisely the colour bug above.
   automated?: boolean;
-  kind?: AutomatedReviewerKind | null;
-  label?: string | null;
   // Absent = leave the stored role alone (an existing row keeps its role; a new row takes the
-  // 'review' column default), so an old client that only knows `automated`/`kind` cannot
-  // silently un-mark a quality check.
+  // 'review' column default), so an old client that only knows `automated` cannot silently un-mark
+  // a quality check.
   role?: ReviewerRole;
-  // Which team this override belongs to; absent = NO_TEAM_KEY (0), the account default every
-  // team inherits. MUST be a SINGLE team id the account owns — a union scope cannot own an
-  // override, and an unowned/unknown id must 404 rather than write a row keyed to another
-  // tenant's team.
-  teamId?: number;
-  // Monthly spend for this bot at `teamId`, in whole US dollars. THREE-STATE, and the
-  // distinction is load-bearing — read it with `!== undefined`, NEVER with `!= null`:
-  //
-  //   absent   → leave the stored cost alone. What "Mark as quality check" / "Treat as review
-  //              bot" / "Not a bot" send, so a role edit can never wipe a price.
-  //   null     → CLEAR it, so this key inherits the team-0 default again. An empty cost box on
-  //              Apply means exactly this: on an inherited row it writes NULL and the row simply
-  //              keeps inheriting (harmless); on an overridden row it IS the reset.
-  //   a number → set it. 0 is real and means "this team pays nothing for this bot".
-  //
-  // ⚠ WRITE-PATH ASYMMETRY WITH `role`, and it is deliberate: creating a team row must SEED
-  // `role` from the inherited value (row-level resolution — not seeding would REVERSE the
-  // classification), but must NOT seed the cost (field-level resolution — seeding would FREEZE a
-  // copy of the default, and later edits to the team-0 price would silently stop reaching this
-  // team). Same goal, opposite implementation, because the two fields resolve differently.
-  //
-  // ⚠ THREE-STATE, AND THE NEIGHBOURING CODE TEACHES THE WRONG IDIOM. Test this field with
-  // `!== undefined`. The sibling `role` is read with `== null` two lines away in the same
-  // handler, and `== null` is TRUE for null — so copying that line turns "clear it" into "leave
-  // it alone", and the reset button stops working with nothing to show for it. The route schema
-  // must also accept `{ type: ['number', 'null'] }`, or "clear" 400s.
-  costMonthlyUsd?: number | null;
+}
+
+// PATCH /api/bot-reviewers/:userId/identity — WHO this actor is, account-wide. NO `repoId`: it is
+// an upsert of the ONE `account_reviewers` row for (account, userId), which is why the actor-grain
+// columns cannot diverge — there is nowhere for a second copy to live. (An earlier draft wrote
+// every repo row of the actor instead, keeping N copies in step by hand; the row count changed,
+// the guarantee did not improve, and the seeding rule it forced on new repo rows is gone with it.)
+// It also stamps `identity_source: 'manual'`.
+//
+// ⚠ IT MUST NOT TOUCH `automated` / `role` / `source` / `confidence` / `reasons_json`. Those are
+// on the other table now, so this is a rule about which STATEMENT you write, not which columns
+// you list: naming a vendor is not a judgement about how it behaves in any given repo, and
+// stamping the row-level `source` from here would freeze auto-classification on every one of that
+// actor's repos — the same mistake as "typing a price froze the classification", one field over.
+//
+// ⚠ AND THE OTHER DIRECTION: an actor with NO `repo_reviewers` row anywhere in the account must
+// 404 rather than silently create an identity row. The storage would happily take it — the two
+// tables are keyed independently — which is exactly why the rule has to be enforced in the route.
+// It is the same rule plugin migration 0019 enforces for price (no bot row ⇒ no import): the
+// listing is row-driven, so a value keyed to an actor with no rows can never be displayed, edited
+// or cleared. Unreachable, un-clearable data.
+export interface ReviewerIdentityBody {
+  // Absent = leave it. null = clear it back to "no vendor identity" (still a human statement, so
+  // `identity_source` still becomes 'manual' — otherwise the next classification pass reinstates
+  // the kind the user just rejected).
+  kind?: AutomatedReviewerKind | null;
+  // Absent = leave it. null = clear the human label, so display falls back to the vendor's brand
+  // name and then the login.
+  label?: string | null;
+}
+
+// PUT /api/bot-reviewers/:userId/cost — set or clear what this actor costs, account-wide.
+//
+// TWO STATES ONLY:
+//   a number → write it to `account_reviewers.monthly_cents`. 0 is real: "we pay nothing".
+//   null     → write NULL. There is nothing to fall back to; the price is simply unset.
+// It is a required field precisely so `undefined` is not a third meaning.
+//
+// ⚠ CLEARING IS A COLUMN WRITE, NOT A ROW DELETE. Cost shares its row with the actor's identity
+// now, so `DELETE FROM account_reviewers` would take the vendor kind and label with it. The
+// nullable column is what makes the two states expressible on a row that exists for other
+// reasons; there is no inheritance behind NULL, so it means exactly "no price set" and nothing
+// else. (When cost had its own table, NOT NULL + delete-to-clear was the right shape — do not
+// carry that reflex over.)
+//
+// ⚠ ROUNDING IS FIXED AND SHARED WITH THE MIGRATIONS: cents = floor(usd × 100 + 0.5) in binary64.
+// Do not reach for a "more exact" decimal rounding on one side — a fractional-cent price like
+// $1.005 lands on 100 under this rule and 101 under exact-decimal rounding, and the two backfill
+// paths were measured disagreeing on exactly that value before the rule was pinned. Rejecting
+// non-integer-cent input here (below) is what keeps the question academic for new writes; the
+// rule exists because the legacy blob is full of values written before that validation existed.
+//
+// ⚠ BOUNDED: a finite number in [0, 21474836.47]. Storage is int4 CENTS in both dialects
+// (`Math.round(usd * 100)` must land in int4), and that ceiling is not cosmetic — it is where the
+// two dialects stop agreeing. Postgres RAISES `integer out of range` (a 500) on anything above it
+// while SQLite's 64-bit integers accept the value happily, so an unbounded field means the same
+// request succeeds locally and 500s in cloud, leaving a number cloud can never represent. The
+// route must CLAMP or 400 — do not leave it to the driver. (Measured: monthlyUsd 99999999999
+// stored 2147483647 on pg and 9999999999900 on sqlite before both migration paths were clamped.)
+// Reject non-finite and non-integer-cent values here too: NaN/Infinity survive JSON.parse of a
+// hand-rolled body, and $1.005 is a price nothing downstream can print.
+export interface ReviewerCostBody {
+  monthlyUsd: number | null;
 }
 
 // ── WS2 Pierre-own-review provenance ────────────────────────────────
@@ -440,25 +616,22 @@ export interface BotVendorAnalytics {
   humanFollowThroughPct: number | null;
   noiseRatioPct: number | null;
   verdict: BotVerdict;
-  // SERVER-resolved (this is no longer overlaid client-side from pro_settings `bots.cost`): the
-  // monthly cost stored on `bot_review_classification.cost_monthly_cents` for the REQUESTED
-  // team, resolved FIELD-WISE — this team's row when its value is non-null, else the team-0
-  // default's. In US dollars (storage is integer cents).
+  // SERVER-resolved (no longer overlaid client-side from pro_settings `bots.cost`): this actor's
+  // monthly price from `account_reviewers.monthly_cents`, in US dollars (storage is integer cents).
   //
-  // null = no cost known anywhere in the chain — never "inherited", the chain was already
-  // walked. 0 = known free. `costPerActedOnUsd` is `costMonthlyUsd / actedOn` (null when either
-  // side is missing or actedOn is 0).
+  // IT IS AN ACCOUNT-WIDE PRICE ON A SCOPED ROW, and that is the trap worth naming: this row
+  // aggregates one reviewer over whatever scope was requested, but the price is ONE SUBSCRIPTION.
+  // Never sum or multiply it across rows, repos or scopes — a vendor on six repos is $120 of
+  // spend seen six ways, not $720. There is no inheritance to disclose any more (that is why the
+  // old `costInherited` companion is gone): the price either exists for this actor or it does not.
   //
-  // A per-login client map physically CANNOT express this (one login, different costs per team),
-  // which is why it moved server-side. Cost is CORE/free: it is read from a core table, so an
-  // OSS/npx install can set and see it.
+  // null = no price recorded. 0 = recorded as free. `costPerActedOnUsd` is
+  // `costMonthlyUsd / actedOn` (null when either side is missing or actedOn is 0) and inherits
+  // the same caveat — under a narrow scope it divides a whole subscription by part of its work.
+  //
+  // Cost is CORE/free: it is read from a core table, so an OSS/npx install can set and see it.
   costMonthlyUsd: number | null;
   costPerActedOnUsd: number | null;
-  // The resolved cost came from the team-0 default rather than this team's own row. Drives the
-  // $/acted-on tooltip so an inherited price reads as ONE subscription seen from another team's
-  // vantage point — not as extra spend. (Three teams inheriting $120 is $120 of spend seen three
-  // ways; never sum cost across teams.)
-  costInherited: boolean;
   // Zero window activity (no threads, comments, OR submitted reviews in the window) — the row
   // survives on its 12-week trend so a paused/quiet bot doesn't silently vanish from the table.
   dormant: boolean;
@@ -1715,23 +1888,26 @@ export interface ProSettings {
     autoResolve: boolean;       // WS6b master enable
     autoResolveDays: number;
     /**
-     * @deprecated LEGACY, READ-ONLY. Per-BOT monthly cost keyed by github LOGIN, stored in the
-     * plugin-owned `pro_settings.bot_cost_json` blob — account-wide, and therefore unable to
-     * express "$120 for Team A, $0 for Team B".
+     * @deprecated LEGACY, READ-ONLY. Per-bot monthly cost stored in the plugin-owned
+     * `pro_settings.bot_cost_json` blob, superseded by `account_reviewers.monthly_cents` in CORE
+     * (one row per (account, actor), nullable — NULL is "no price set", 0 is "free" — edited on
+     * the bot row in Activity → Bots → Settings). Cost became CORE/free in the move: an OSS/npx
+     * install can now set and see a price.
      *
-     * Superseded by the CORE `bot_review_classification.cost_monthly_cents` (per team, edited
-     * inline on the bot row in Activity → Bots → Settings). Plugin migration 0019 copies every
-     * entry it can match onto the team-0 row; it deliberately NEVER INSERTS a classification row
-     * (fabricating one would invent automated/confidence/source/reasons judgements nobody made,
-     * and a fabricated source='manual' row would permanently shadow auto-detection for that
-     * login).
+     * Plugin migration 0019 copies what it can into that column. Unlike its predecessor it writes
+     * nothing but the price: cost sits on the actor's own identity row, so importing one
+     * fabricates no classification judgement.
      *
-     * So this stays on the wire as the read-time fallback for the one case the backfill cannot
-     * cover: a costed login that had no classification row when 0019 ran. `BotRoiPanel` fills it
-     * in ONLY where the server-resolved `costMonthlyUsd` is null.
+     * IT CANNOT COPY EVERYTHING, which is why this field survives on the wire. The blob has had
+     * TWO shapes: entries keyed by `login` (migratable — join `users` on the login) and older
+     * entries keyed by vendor `kind` (NOT migratable — a kind names a brand, not an actor, so
+     * there is no `author_user_id` to key a row on, and the kind→login map lives in this file,
+     * not in SQL). Kind-keyed entries stay in the blob and keep driving the ROI panel through the
+     * read-time fallback, which fills a row ONLY where the server-resolved `costMonthlyUsd` is
+     * null.
      *
-     * RETIRE — this field, `bot_cost_json`, `parseCost`, and that fallback branch — one release
-     * after the one that ships per-team cost, gated on a manual
+     * RETIRE — this field, `bot_cost_json`, `parseCost` and that fallback branch — one release
+     * after the one that ships `account_reviewers`, gated on a manual
      * `SELECT count(*) FROM pro_settings WHERE bot_cost_json IS NOT NULL` reaching zero. There is
      * no write path any more (`ProSettingsUpdate.bots.cost` is gone), so the set can only shrink.
      */
@@ -1761,9 +1937,10 @@ export interface ProSettingsUpdate {
   issue?: { provider?: IssueProvider | null; baseUrl?: string | null; projectKeys?: string[] | null };
   // Bot-Triage settings patch (WS8). Only present fields change.
   //
-  // `cost` was REMOVED here on purpose: per-bot cost is now written per TEAM through
-  // `PATCH /api/bot-reviewers/:userId` (`ReviewerOverrideBody.costMonthlyUsd`). Two live writers
-  // to one price is how the two silently disagree, so this one was retired rather than mirrored.
+  // `cost` was REMOVED here on purpose: per-bot cost is now written through
+  // `PUT /api/bot-reviewers/:userId/cost` (`ReviewerCostBody`) into core `account_reviewers`.
+  // Two live writers to one price is how the two silently disagree, so this one was
+  // retired rather than mirrored.
   // The read (`ProSettings.bots.cost`) survives as a deprecated legacy fallback — see there.
   //
   // Failure mode for a stale client that still sends `bots.cost`: the PUT body schema has

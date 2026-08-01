@@ -1,12 +1,12 @@
 // The detected-reviewers cache key.
 //
-// The regression this exists for is silent and off-screen: FOUR surfaces read this route at team
-// key 0 to mean "the whole account roster" — the bot colour map (useBotColors), the feed's vendor
-// tag (FeedView), ThreadList's vendor filter, and any future account-wide consumer — while the
-// per-team Bots → Settings tab reads it SCOPED to one team's repos. The two responses have the
-// same TypeScript shape and the same team key, so if the scoped flag is missing from the key the
-// narrow listing populates the entry those four read and they quietly lose bots: a reviewer's
-// colour reverts to neutral gray and its feed tag disappears, with no error anywhere.
+// The regression this exists for is silent and off-screen: THREE surfaces read this route with NO
+// scope to mean "the whole account roster" — the bot colour map (useBotColors), the feed's vendor
+// tag (FeedView) and ThreadList's resolve-eligibility map — while the Bots → Settings list reads
+// it NARROWED to the repos in view. The two responses have the same TypeScript shape, so if the
+// scope is missing from the key the narrow listing populates the entry those three read and they
+// quietly lose bots: a reviewer's colour reverts to neutral gray and its feed tag disappears, with
+// no error anywhere.
 //
 // Run from the workspace that HAS vitest:
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
@@ -14,43 +14,57 @@ import { describe, expect, it } from 'vitest';
 import { detectedReviewersQueryKey } from '../src/hooks/useBotTriage.js';
 
 describe('detectedReviewersQueryKey', () => {
-  it('scoped and unscoped listings of the SAME team never share a key', () => {
-    expect(detectedReviewersQueryKey(3, true)).not.toEqual(detectedReviewersQueryKey(3, false));
+  it('a repo-scoped listing never shares a key with the account-wide one', () => {
+    expect(detectedReviewersQueryKey(undefined, [4])).not.toEqual(detectedReviewersQueryKey());
   });
 
-  it('the account default is no exception — team 0 scoped ≠ team 0 unscoped', () => {
-    // This is the dangerous pair: every account-wide consumer sits at team 0, and the Settings
-    // tab's "No team (default)" tab is ALSO team 0 — just scoped to the unteamed repos.
-    expect(detectedReviewersQueryKey(0, true)).not.toEqual(detectedReviewersQueryKey(0, false));
+  it('a team-scoped listing never shares a key with the account-wide one', () => {
+    expect(detectedReviewersQueryKey('3')).not.toEqual(detectedReviewersQueryKey());
   });
 
-  it('every zero-ish team key collapses to the same unscoped entry the four callers share', () => {
-    const target = detectedReviewersQueryKey(0, false);
-    expect(detectedReviewersQueryKey(undefined, false)).toEqual(target);
-    expect(detectedReviewersQueryKey(null, false)).toEqual(target);
-    // Defaulted `scoped` — the zero-arg call the account-wide consumers make.
-    expect(detectedReviewersQueryKey()).toEqual(target);
+  it('every "no scope" spelling collapses to the one entry the three callers share', () => {
+    const target = detectedReviewersQueryKey();
+    expect(detectedReviewersQueryKey(undefined, null)).toEqual(target);
+    expect(detectedReviewersQueryKey(undefined, [])).toEqual(target);
+    // 'all' IS the default scope on the wire, so it must not open a second cache entry.
+    expect(detectedReviewersQueryKey('all')).toEqual(target);
   });
 
-  it('different teams never share a key', () => {
-    expect(detectedReviewersQueryKey(3, true)).not.toEqual(detectedReviewersQueryKey(4, true));
+  it('different repo scopes never share a key', () => {
+    expect(detectedReviewersQueryKey(undefined, [4])).not.toEqual(
+      detectedReviewersQueryKey(undefined, [9]),
+    );
+  });
+
+  it('repo id order does not open a second entry (the same set is one key)', () => {
+    expect(detectedReviewersQueryKey(undefined, [9, 4])).toEqual(
+      detectedReviewersQueryKey(undefined, [4, 9]),
+    );
+  });
+
+  // A repo scope is the more specific selection and WINS on the wire (api.botReviewers drops
+  // `scope` when repoIds are present), so the key must not vary with the scope it ignored — two
+  // keys for one request would double-fetch and split the cache.
+  it('a repo scope wins over a team scope, exactly as the request does', () => {
+    expect(detectedReviewersQueryKey('3', [4])).toEqual(detectedReviewersQueryKey('9', [4]));
   });
 
   it('keeps the "bot-reviewers" prefix so the reclassify invalidation still sweeps every entry', () => {
-    // RECLASSIFY_INVALIDATE_KEYS invalidates by the bare prefix, deliberately: editing the team-0
-    // default shifts every team that inherits it. A key that renamed the prefix would strand
-    // stale rows on every other tab.
+    // RECLASSIFY_INVALIDATE_KEYS invalidates by the bare prefix, deliberately: an identity or
+    // price edit is account-wide, so every scoped entry must refetch too.
     for (const k of [
-      detectedReviewersQueryKey(0, false),
-      detectedReviewersQueryKey(0, true),
-      detectedReviewersQueryKey(7, true),
+      detectedReviewersQueryKey(),
+      detectedReviewersQueryKey('3'),
+      detectedReviewersQueryKey(undefined, [7]),
     ]) {
       expect(k[0]).toBe('bot-reviewers');
     }
   });
 
-  it('namespaces the team slot, so a team id can never alias a bare integer from another axis', () => {
-    // Repo ids, team ids and window keys are all independent autoincrements/plain integers.
-    expect(detectedReviewersQueryKey(7, true)[1]).toBe('team:7');
+  it('namespaces the scope slot, so a repo id can never alias a numeric team id', () => {
+    // Repo ids and team ids are independent autoincrements, so both are bare integer strings.
+    expect(detectedReviewersQueryKey('7')[1]).toBe('scope:7');
+    expect(detectedReviewersQueryKey(undefined, [7])[1]).toBe('repo:7');
+    expect(detectedReviewersQueryKey('7')).not.toEqual(detectedReviewersQueryKey(undefined, [7]));
   });
 });

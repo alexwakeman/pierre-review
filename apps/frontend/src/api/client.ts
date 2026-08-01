@@ -53,8 +53,9 @@ import type {
   BotDedupResponse,
   PrBotBehaviourResponse,
   DetectedReviewersResponse,
-  ReviewerClassification,
-  ReviewerOverrideBody,
+  RepoReviewerJudgementBody,
+  ReviewerIdentityBody,
+  ReviewerCostBody,
   MeResponse,
   MergersResponse,
   MergePrBody,
@@ -180,14 +181,9 @@ function repoIdsParam(repoIds?: number[] | null): string {
   return repoIds && repoIds.length > 0 ? `repoIds=${repoIds.join(',')}` : '';
 }
 
-// Build the `teamId=` query fragment for the per-team bot-reviewer routes. OMITTED for the
-// NO_TEAM_KEY (0) default, matching the shared contract's "absent = 0" rule and keeping the
-// URL byte-identical to the pre-per-team one in the common case (so no cache/log churn for
-// accounts with no teams). 0 is a real, selectable key ("No team (default)" — also the
-// inheritance root every team falls back to), NOT "unset".
-function teamIdParam(teamId?: number | null): string {
-  return teamId != null && teamId > 0 ? `teamId=${teamId}` : '';
-}
+// (`teamIdParam` lived here for the per-TEAM bot-reviewer routes. A bot is a per-REPO object now
+// — no team key, no inheritance root — so the bot-reviewer routes scope with `scope`/`repoIds`
+// like every other bot route, and the helper had no callers left.)
 
 // Join query fragments (already URL-encoded, no leading separators) onto a base path.
 function withQuery(base: string, ...parts: (string | undefined)[]): string {
@@ -284,8 +280,8 @@ export const api = {
   mergers: () => get<MergersResponse>('/api/mergers'),
   // `setUserBot` was removed with `PATCH /api/users/:id`: it wrote the GLOBAL users row with
   // no ownership check, so one tenant could permanently reclassify a login for everyone. It
-  // had no caller. Bot classification is `setReviewerClassification` below, which writes the
-  // account-scoped bot_review_classification table.
+  // had no caller. Bot classification is `setRepoReviewerJudgement` below, which writes the
+  // account-scoped, per-repo `repo_reviewers` table.
 
   timeline: (search: string) =>
     get<TimelineResponse>(`/api/timeline${search ? `?${search}` : ''}`),
@@ -764,49 +760,91 @@ export const api = {
     ),
 
   // ---- Bot triage (CORE, deterministic, no AI) ----
-  // Every distinct reviewer in the account joined with its automated/human classification
-  // (manual override + auto), volume, and a sample review body — the Bots rail's per-team
-  // "Settings" tab.
   //
-  // `teamId` selects which team's classifications resolve: an explicit row for that team wins,
-  // else the team-0 (No team) default, else auto-detection. Absent/0 = NO_TEAM_KEY, i.e. the
-  // account default. Each returned row carries `teamId` + `inherited` so the tab can tell a real
-  // per-team override from the inherited default; the response echoes the resolved `teamId` so a
-  // caller can assert it matches the tab it asked for.
-  // `scoped` is OPT-IN and narrows the listing to the reviewers seen in the requested team's OWN
-  // repos (at NO_TEAM_KEY: the repos in no team at all), and is what makes `scopedRepoCount` a
-  // number instead of null. It must stay opt-in: the four account-wide consumers (the bot colour
-  // map, the feed's vendor tag, the Threads-tab vendor filter) need the WHOLE roster, and a
-  // narrowed one would silently drop bots from surfaces that aren't about teams at all.
-  botReviewers: (teamId?: number | null, scoped = false) =>
-    get<DetectedReviewersResponse>(
-      withQuery('/api/bot-reviewers', teamIdParam(teamId), scoped ? 'scoped=true' : ''),
-    ),
-  // Two-way manual override of a reviewer's classification (mark automated / not-a-bot, and set
-  // its ReviewerRole). Returns the new classification.
+  // ⚠ THREE ROUTES AT TWO GRAINS, and mixing them up is the bug this shape exists to prevent.
+  // A bot is a PER-REPO object; who the vendor IS (and what it costs) is a PER-ACCOUNT fact:
   //
-  // The team key rides in the BODY (`ReviewerOverrideBody.teamId`, absent = 0), not the query
-  // string, because it is part of the row's identity, not a filter. It MUST be a single team id
-  // the account owns — a union scope cannot own an override, and the route 404s an unknown or
-  // foreign team rather than writing a row keyed to another tenant's team.
-  setReviewerOverride: (userId: number, body: ReviewerOverrideBody) =>
-    fetch(`/api/bot-reviewers/${userId}`, jsonBody('PATCH', body)).then((r) =>
-      handle<ReviewerClassification>(r),
+  //   PATCH /api/bot-reviewers/:userId           the JUDGEMENT in one repo  (automated / role)
+  //   PATCH /api/bot-reviewers/:userId/identity   WHO it is, everywhere     (kind / label)
+  //   PUT   /api/bot-reviewers/:userId/cost       what it costs, everywhere (monthlyUsd)
+  //
+  // The judgement call must never carry kind/label, and the identity call must never carry
+  // automated/role — see `ReviewerIdentity` in shared for the worked example (marking CodeRabbit
+  // "not a bot" in ONE repo used to null its kind account-wide, so it lost its brand colour and
+  // vendor name in repos the user never touched).
+
+  // The listing: one identity per ACTOR + one judgement row per (repo, actor), plus the repo ids
+  // the listing covered, in render order.
+  //
+  // `scope` ('all' | 'none' | '<teamId>') and `repoIds` resolve exactly as they do for
+  // /api/bot-analytics — repoIds WINS when present (a specific repo is the more specific
+  // selection). Both absent = every watched repo, which is what the ACCOUNT-WIDE consumers want
+  // (the bot colour map, the feed's vendor tag, the Threads-tab vendor filter): they need the
+  // whole roster, and a narrowed one would silently drop bots from surfaces that aren't about
+  // scope at all. The scoped/unscoped responses MUST NOT share a cache key — see
+  // detectedReviewersQueryKey.
+  botReviewers: (scope?: string, repoIds?: number[] | null) => {
+    const r = repoIdsParam(repoIds);
+    const s = r ? '' : scopeParam(scope);
+    return get<DetectedReviewersResponse>(withQuery('/api/bot-reviewers', s, r));
+  },
+  // The JUDGEMENT for one actor in ONE repo: is it automated here, and is it reviewing or
+  // quality-checking. `repoId` is REQUIRED — the row IS the object, so a judgement with no repo
+  // has no row to land on; an unowned/unknown repo 404s.
+  //
+  // ⚠ NO `kind`/`label` EVER. "Not a bot in this repo" is not a claim about who the vendor is.
+  //
+  // ⚠ THE RESPONSE BODY IS DELIBERATELY UNTYPED (`void`) ON ALL THREE WRITES. Nothing reads it:
+  // each mutation invalidates the listing and every surface downstream of it, so the REFETCH is
+  // the source of truth. Declaring a shape here would be a second, unverified copy of the wire
+  // contract — and it was already wrong once (this route answers with the classifier's own
+  // object, not the row). `handle` still surfaces a non-2xx as an ApiError, which is the only
+  // thing a caller actually needs from the reply.
+  setRepoReviewerJudgement: (userId: number, body: RepoReviewerJudgementBody) =>
+    fetch(`/api/bot-reviewers/${userId}`, jsonBody('PATCH', body)).then((r) => handle<void>(r)),
+  // THE WAY BACK TO AUTO for ONE repo row: deletes the stored judgement so the next listing
+  // re-derives it. It is the only way back — flipping `automated` by hand re-stamps
+  // `source: 'manual'`, leaving the row just as pinned. 204, so nothing to read; the listing
+  // refetch is where the re-derived row shows up. 404 when there is no stored row to reset.
+  //
+  // ⚠ ONE REPO. Its sibling below resets the bot EVERYWHERE — keep the two visibly distinct at
+  // every call site, exactly as the two PATCHes are.
+  resetRepoReviewerJudgement: (userId: number, repoId: number) =>
+    fetch(`/api/bot-reviewers/${userId}/judgement?repoId=${repoId}`, jsonBody('DELETE')).then((r) =>
+      handle<void>(r),
     ),
-  // "Reset to default": drop this reviewer's explicit row for `teamId` so the team falls back to
-  // the team-0 default (or, if there is none, to auto-detection). NOT the same as marking them
-  // not-a-bot — that would write a fresh override saying "human". 204 → void. Passing 0 would
-  // delete the account default itself, which the tab must not offer for an inherited row (the
-  // Reset action is disabled there).
-  deleteReviewerOverride: (userId: number, teamId: number) =>
-    fetch(
-      withQuery(`/api/bot-reviewers/${userId}`, teamIdParam(teamId)),
-      jsonBody('DELETE'),
-    ).then((r) => handle<void>(r)),
+  // WHO this actor is, account-wide — an upsert of its one `account_reviewers` row. No repoId:
+  // there is nowhere for a second copy of a vendor identity to live, which is the whole point.
+  // Stamps `identity_source: 'manual'`, including when clearing (`kind: null`), or the next
+  // classification pass reinstates the kind the user just rejected. 404s for an actor with no
+  // judgement row anywhere — an identity nothing lists is unreachable, un-editable data.
+  setReviewerIdentity: (userId: number, body: ReviewerIdentityBody) =>
+    fetch(`/api/bot-reviewers/${userId}/identity`, jsonBody('PATCH', body)).then((r) =>
+      handle<void>(r),
+    ),
+  // THE WAY BACK TO AUTO for the actor's identity, ACCOUNT-WIDE: clears the human-set kind/label,
+  // sets `identity_source` back to 'auto', and re-derives in the same request.
+  //
+  // ⚠ IT KEEPS THE PRICE. `monthly_cents` shares that row but is not a classification opinion, so
+  // it survives — say so in the UI copy, because "reset" otherwise reads as "delete everything".
+  //
+  // ⚠ AND IT TOUCHES NO REPO ROW: `automated`/`role` are the other grain (the judgement reset
+  // above, one repo at a time).
+  resetReviewerIdentity: (userId: number) =>
+    fetch(`/api/bot-reviewers/${userId}/identity`, jsonBody('DELETE')).then((r) => handle<void>(r)),
+  // What this actor costs, account-wide. `monthlyUsd` is REQUIRED: a number sets it (0 is a real
+  // price — "we pay nothing"), null clears it. PUT, not PATCH, because there is exactly one field
+  // and no "leave it alone" state to express.
+  //
+  // ⚠ CLEARING IS A COLUMN WRITE, NOT A ROW DELETE — cost shares its row with the vendor identity,
+  // so deleting the row would take the kind and label with it.
+  setReviewerCost: (userId: number, body: ReviewerCostBody) =>
+    fetch(`/api/bot-reviewers/${userId}/cost`, jsonBody('PUT', body)).then((r) => handle<void>(r)),
   // Per-vendor bot ROI / utilisation analytics over the chosen window (threads / acted-on %
-  // / untouched / verdict / trend). Cost is now SERVER-resolved per team on each row
-  // (`costMonthlyUsd`/`costInherited`); the old client-side overlay from /api/pro/settings
-  // `bots.cost` survives only as a null-filling legacy fallback — see lib/botCost.ts.
+  // / untouched / verdict / trend). Cost is SERVER-resolved onto each row from the actor's
+  // `account_reviewers` price (`costMonthlyUsd`); the old client-side overlay from
+  // /api/pro/settings `bots.cost` survives only as an un-applied legacy POINTER — see
+  // lib/botCost.ts. The price is ACCOUNT-WIDE even on a scoped row: never sum it across rows.
   botAnalytics: (window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
     const r = repoIdsParam(repoIds);
     // A repo scope wins over the team scope (the per-repo Bots tab); omit `scope` then.

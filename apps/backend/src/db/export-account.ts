@@ -35,7 +35,8 @@ const {
   teamRepos,
   aiUsage,
   myTurnDismissals,
-  botReviewClassification,
+  repoReviewers,
+  accountReviewers,
   benchmarkContributions,
   autoMergeRequests,
 } = schema;
@@ -69,7 +70,10 @@ export interface AccountExport {
   events: Record<string, unknown>[];
   aiUsage: Record<string, unknown>[];
   dismissals: Record<string, unknown>[];
-  botClassifications: Record<string, unknown>[];
+  /** The bot object's JUDGEMENT grain: one row per (repo, automated reviewer). */
+  repoReviewers: Record<string, unknown>[];
+  /** Its IDENTITY grain: one row per reviewer — vendor kind, label, and the recorded price. */
+  accountReviewers: Record<string, unknown>[];
   benchmarkContributions: Record<string, unknown>[];
   /** Armed / recently-resolved "merge when ready" intents (auto_merge_requests). */
   autoMergeRequests: Record<string, unknown>[];
@@ -140,7 +144,8 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     teamRepoRows,
     usageRows,
     dismissalRows,
-    classificationRows,
+    repoReviewerRows,
+    accountReviewerRows,
     benchmarkRows,
     autoMergeRows,
   ] = await Promise.all([
@@ -165,10 +170,18 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       .from(myTurnDismissals)
       .where(eq(myTurnDismissals.accountId, accountId))
       .execute(),
+    // The bot object at BOTH grains — the per-repo judgements the user (or the classifier) made,
+    // and the per-actor identity + recorded price. Art. 15 covers both: one records decisions
+    // about this account's data, the other a number the user typed in.
     db
       .select()
-      .from(botReviewClassification)
-      .where(eq(botReviewClassification.accountId, accountId))
+      .from(repoReviewers)
+      .where(eq(repoReviewers.accountId, accountId))
+      .execute(),
+    db
+      .select()
+      .from(accountReviewers)
+      .where(eq(accountReviewers.accountId, accountId))
       .execute(),
     db
       .select()
@@ -218,7 +231,8 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     events: capped('events', eventRows),
     aiUsage: usageRows,
     dismissals: dismissalRows,
-    botClassifications: classificationRows,
+    repoReviewers: repoReviewerRows,
+    accountReviewers: accountReviewerRows,
     benchmarkContributions: benchmarkRows,
     autoMergeRequests: autoMergeRows,
   };

@@ -46,8 +46,8 @@ const statsSchema = {
 // `isBot` + sticky `isBotOverridden` flags to the global row with no ownership check, so one
 // account could permanently reclassify any enumerable user id for every other tenant. It had
 // no frontend caller — bot classification goes through the account-scoped
-// `PATCH /api/bot-reviewers/:userId` (api/routes/bot-triage.ts), which writes the per-account
-// `bot_review_classification` table. See the note in db/queries.ts.
+// `PATCH /api/bot-reviewers/:userId` (api/routes/bot-triage.ts), which writes the per-account,
+// per-repo `repo_reviewers` table. See the note in db/queries.ts.
 export async function userRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/users', async (req) => listUsers(accountIdOf(req)));
 

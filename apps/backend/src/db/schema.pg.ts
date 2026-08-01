@@ -24,6 +24,7 @@ import {
   doublePrecision,
   index,
   uniqueIndex,
+  foreignKey,
 } from 'drizzle-orm/pg-core';
 import type {
   BranchCheckRun,
@@ -118,6 +119,10 @@ export const repos = pgTable(
     ),
     nodeUx: uniqueIndex('repos_account_node').on(t.accountId, t.githubNodeId),
     accountIdx: index('repos_account_idx').on(t.accountId),
+    // Parent key for `repo_reviewers`' composite FK — not a lookup index. Postgres accepts a
+    // plain UNIQUE INDEX here (a named UNIQUE CONSTRAINT is not required; verified on 16.13),
+    // which is what lets this be the same DDL as the sqlite twin. See schema.sqlite.ts.
+    idAccountUx: uniqueIndex('repos_id_account').on(t.id, t.accountId),
   }),
 );
 
@@ -314,6 +319,10 @@ export const reviewThreads = pgTable(
   (t) => ({
     prIdx: index('thread_pr_idx').on(t.prId),
     nodeUx: uniqueIndex('thread_pr_node').on(t.prId, t.githubNodeId),
+    // "Which threads did this actor open?" — the per-repo reviewer footprint counts and migration
+    // pg 0029's backfill CTE both union on this column, which had no index at all. See the sqlite
+    // twin. Added in pg 0029 (sqlite 0042).
+    originalCommenterIdx: index('thread_original_commenter_idx').on(t.originalCommenterId),
   }),
 );
 
@@ -739,32 +748,39 @@ export const claudeReviewFindings = pgTable(
 );
 
 // ---- Bot-Triage Platform (WS1 / WS6) ----
-// Account-scoped classification cache for automated reviewers — the pg twin of
-// schema.sqlite.ts botReviewClassification. Kept in sync by hand (schema-parity.test.ts).
-export const botReviewClassification = pgTable(
-  'bot_review_classification',
+// ── THE BOT STORE IS TWO TABLES, ONE PER GRAIN ──────────────────────────────────────────────
+// `repo_reviewers`    — (account, repo, author): the JUDGEMENT (automated / role + provenance).
+// `account_reviewers` — (account, author):       the IDENTITY (kind / label / price + provenance).
+// Every fact lives at exactly one of them; no team key, no inheritance, no merge, no dedup.
+// Full rationale in the sqlite twin — these two are kept in sync BY HAND (schema-parity.test.ts).
+//
+// A reviewer as seen in ONE REPO — the pg twin of schema.sqlite.ts repoReviewers. One row per
+// (account, repo, author) and THAT ROW IS THE BOT OBJECT. See the sqlite twin for why the repo
+// (not a team) is the key, why there is no deduplication, and why detection derives once per
+// ACTOR and copies the same verdict to each of its repo rows (a copy CAN legitimately diverge
+// when a human overrides one repo — which is precisely why identity, a fact that IS one value,
+// does not live here).
+//
+// IT CARRIES NO `kind`/`label`/`identity_source`. Those were columns here, replicated across an
+// actor's rows and held consistent only by convention; editing one is how CodeRabbit lost its
+// brand colour in the repos nobody touched. They are now one row on `account_reviewers`.
+export const repoReviewers = pgTable(
+  'repo_reviewers',
   {
     id: serial('id').primaryKey(),
     accountId: integer('account_id')
       .notNull()
-      .references(() => accounts.id),
-    // NON-NULL sentinel 0 = "No team" AND the inheritance root; no FK to teams (0 is not a
-    // team id). See schema.sqlite.ts — a NULLable team key would not dedupe under the unique
-    // index in either dialect.
-    teamId: integer('team_id').notNull().default(0),
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // No `.references()` here on purpose: the FK is the COMPOSITE one in the table config below,
+    // `(repo_id, account_id) → repos(id, account_id)`. See the sqlite twin.
+    repoId: integer('repo_id').notNull(),
+    // No cascade: `users` is GLOBAL storage shared by every account and is never deleted.
     authorUserId: integer('author_user_id')
       .notNull()
       .references(() => users.id),
     automated: boolean('automated').notNull(),
-    kind: text('kind'), // AutomatedReviewerKind | null
-    label: text('label'),
-    // See schema.sqlite.ts for the full rationale on both new columns.
+    // ReviewerRole — 'review' | 'quality_check'. A flag on this object, orthogonal to `kind`.
     role: text('role').notNull().default('review'),
-    // Per-team monthly cost in INTEGER CENTS, nullable (NULL = inherit the team-0 value, 0 =
-    // explicitly free here). integer in BOTH dialects on purpose — `numeric` has no sqlite twin
-    // and node-postgres hands it back as a string. Full rationale, including why this ONE column
-    // resolves field-wise while the rest of the row resolves wholesale, in schema.sqlite.ts.
-    costMonthlyCents: integer('cost_monthly_cents'),
     confidence: text('confidence').notNull(), // 'high'|'medium'|'low'
     source: text('source').notNull(), // ClassificationSource
     reasonsJson: jsonb('reasons_json').$type<string[]>(),
@@ -773,12 +789,74 @@ export const botReviewClassification = pgTable(
       .defaultNow(),
   },
   (t) => ({
-    accountTeamUx: uniqueIndex('brc_account_team_author').on(
+    accountRepoAuthorUx: uniqueIndex('repo_reviewers_account_repo_author').on(
       t.accountId,
-      t.teamId,
+      t.repoId,
       t.authorUserId,
     ),
-    accountTeamIdx: index('brc_account_team_idx').on(t.accountId, t.teamId),
+    accountRepoIdx: index('repo_reviewers_account_repo_idx').on(t.accountId, t.repoId),
+    // Also the join key from `account_reviewers` back to this table.
+    accountAuthorIdx: index('repo_reviewers_account_author_idx').on(t.accountId, t.authorUserId),
+    // Tenancy as a constraint: `repo_id` arrives in a REQUEST BODY, and a single-column FK would
+    // accept (account 2, repo 10) where repo 10 belongs to account 1. Verified by insertion —
+    // Postgres rejects the pair with "violates foreign key constraint
+    // \"repo_reviewers_repo_account_fk\"". CASCADE matches team_repos. See schema.sqlite.ts.
+    //
+    // The `name` is REAL: migration 0029 spells `CONSTRAINT "repo_reviewers_repo_account_fk"`, so
+    // this declaration matches the constraint Postgres actually holds. Before that the SQL named
+    // nothing and pg auto-named it `repo_reviewers_repo_id_account_id_fkey`, i.e. the name here
+    // matched nothing in any live database.
+    repoAccountFk: foreignKey({
+      name: 'repo_reviewers_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// WHAT AN AUTOMATED REVIEWER IS — one row per (account, actor), NEVER per repo — the pg twin of
+// schema.sqlite.ts accountReviewers. The ACTOR GRAIN: kind, label, identity provenance, price.
+// These are the same in every repo BY DEFINITION (a login is one vendor everywhere; you buy one
+// subscription, so six repos running CodeRabbit is $120, not $720).
+//
+// NAMED FOR ITS KEY, exactly as `repo_reviewers` is — not `reviewer_identities` (which would make
+// `monthly_cents` look like a stray) and not `reviewer_costs` (which made `kind`/`label` look the
+// same way). One table per grain; the next actor-level fact belongs here without a rename.
+//
+// `monthly_cents` is NULLABLE here where the old standalone cost table made it NOT NULL: this row
+// exists for identity reasons too, so "no price" can no longer be "no row". That is SAFE because
+// nothing inherits any more — NULL is "no price set", 0 is "free", and there is no fallback chain
+// behind either. `integer` in BOTH dialects: `numeric` has no sqlite twin AND node-postgres hands
+// it back as a STRING, breaking the shared `number` wire type. Full rationale in the sqlite twin.
+export const accountReviewers = pgTable(
+  'account_reviewers',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // No cascade: `users` is GLOBAL storage and is never deleted.
+    authorUserId: integer('author_user_id')
+      .notNull()
+      .references(() => users.id),
+    kind: text('kind'), // AutomatedReviewerKind | null
+    label: text('label'),
+    // Provenance of `kind` + `label` ONLY — a different field from `repo_reviewers.source`, and
+    // now on a different TABLE, so neither edit can reach the other's rows.
+    identitySource: text('identity_source', { enum: ['auto', 'manual'] })
+      .notNull()
+      .default('auto'),
+    // NULL = no price set. 0 = free. Nothing inherits; see the sqlite twin.
+    monthlyCents: integer('monthly_cents'),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountAuthorUx: uniqueIndex('account_reviewers_account_author').on(
+      t.accountId,
+      t.authorUserId,
+    ),
   }),
 );
 

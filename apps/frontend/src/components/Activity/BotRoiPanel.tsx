@@ -14,7 +14,8 @@ import {
 import { useProSettings, useHasProSettings } from '../../hooks/useProSettings.js';
 import { useFilters, scopeToParam } from '../../store/filters.js';
 import { automatedReviewerMeta, relativeTime } from '../../lib/ui.js';
-import { DEFAULT_SOURCE_LABEL, formatCostInput, resolveVendorCost } from '../../lib/botCost.js';
+import { formatCostInput, resolveVendorCost } from '../../lib/botCost.js';
+import { mixedRoleRowKeys } from '../../lib/botReviewers.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
@@ -25,18 +26,19 @@ import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js
 // thread-volume trend + keep/tune/noisy verdicts, plus deterministic, ADVISORY tuning suggestions
 // (which vendor × path is noisy — no action attached; tune the bot on its own platform).
 //
-// COST IS NOW SERVER-RESOLVED, per TEAM, on each analytics row (`costMonthlyUsd` /
-// `costPerActedOnUsd` / `costInherited`), read from the CORE `bot_review_classification` table —
-// so it is free/OSS too. The old client-side overlay from pro_settings `bots.cost` is gone: a
-// per-LOGIN map physically cannot express "$120 for Team A, $0 for Team B", so it could only ever
-// have been wrong on a team-scoped view. All that remains of it is `legacyOnlyUsd` — a POINTER at
-// a price plugin migration 0019 could not move onto a row, shown in the cell's tooltip and never
-// applied (see `resolveVendorCost`: filling a null from that blob silently resurrected prices the
-// user had deliberately CLEARED, with no write path left to remove them). Its fetch stays gated on
-// plugin presence so the pure OSS path never calls /api/pro/settings.
+// COST IS SERVER-RESOLVED, per ACTOR, on each analytics row (`costMonthlyUsd` /
+// `costPerActedOnUsd`), read from the CORE `account_reviewers.monthly_cents` — so it is free/OSS
+// too. The old client-side overlay from pro_settings `bots.cost` is gone: a per-LOGIN map could
+// not be edited or cleared from the surface that displayed it. All that remains of it is
+// `legacyOnlyUsd` — a POINTER at a price plugin migration 0019 could not move onto a row, shown in
+// the cell's tooltip and never applied (see `resolveVendorCost`: filling a null from that blob
+// silently resurrected prices the user had deliberately CLEARED, with no write path left to remove
+// them). Its fetch stays gated on plugin presence so the pure OSS path never calls
+// /api/pro/settings.
 //
-// ⚠ AN INHERITED PRICE IS LABELLED. Three teams inheriting one $120 tool is $120 of spend seen
-// three ways, not $360 — an unlabelled per-team cost column invites exactly that summing.
+// ⚠ ONE PRICE PER BOT, NEVER PER ROW. You buy one subscription from a vendor, so a bot running in
+// six repos is $120 of spend seen six ways, not $720. Nothing here may sum cost across rows — see
+// `monthlyCostTotal` in lib/botReviewers.ts, which sums DISTINCT actors for exactly this reason.
 
 const WINDOWS: { key: BotWindowKind; label: string }[] = [
   { key: 'rolling_7', label: '7d' },
@@ -104,10 +106,15 @@ function dur(ms: number | null): string {
   return `${days < 10 ? days.toFixed(1) : Math.round(days)}d`;
 }
 
-// An analytics row plus its resolved cost. The server's per-team answer is FINAL — this only
-// attaches `legacyOnlyUsd`, an un-applied pointer at a price still stranded in the deprecated
-// per-login blob, so the table can offer to migrate it. See `resolveVendorCost` for why filling a
-// null from that blob was wrong (a deliberately CLEARED price is also null).
+// An analytics row plus its resolved cost. The server's answer is FINAL — this only attaches
+// `legacyOnlyUsd`, an un-applied pointer at a price still stranded in the deprecated per-login
+// blob, so the table can offer to migrate it. See `resolveVendorCost` for why filling a null from
+// that blob was wrong (a deliberately CLEARED price is also null).
+//
+// ⚠ THE PRICE ON THESE ROWS IS PER ACTOR, NOT PER ROW. One reviewer = one row here, so the column
+// is safe to READ — but it is the same account-wide subscription the per-repo Settings list shows
+// once, so it must never be summed with anything (across rows, scopes, or the quality-check
+// table below).
 type CostedVendor = BotVendorAnalytics & { legacyOnlyUsd: number | null };
 
 function withResolvedCost(
@@ -255,6 +262,36 @@ function TuningSuggestions({
 }
 
 /**
+ * The marker for a bot whose ROLE is not the same in every repo in scope.
+ *
+ * ⚠ THIS IS A LEGITIMATE STATE, NOT A SERVER BUG — and it is the one thing the per-repo model
+ * costs this panel. `role` is a `repo_reviewers` column, so `githubactions` can be a review bot in
+ * `api` and a quality gate in `infra`. Under a multi-repo scope the server has to put that
+ * reviewer's AGGREGATE somewhere, and whichever list it lands in, that row covers only part of the
+ * bot's work — a verdict computed from it is a verdict about a subset.
+ *
+ * THE PANEL LABELS IT RATHER THAN RECONCILING IT, deliberately. Three alternatives were worse:
+ * merging the two rows would sum thread counts across a split the user made on purpose; picking a
+ * "dominant" role would silently discard the other repos; and splitting the row per repo would
+ * turn the ROI table into the per-repo Settings list, which is a different screen answering a
+ * different question ("is this bot worth it" vs "what is this bot HERE"). So the row stays whole,
+ * says so, and points at the screen where roles actually live.
+ *
+ * The keying is on the analytics row `key` (`u<userId>` / 'pierre'), never `login`: `login` is
+ * nullable on an analytics row and two unresolved logins would both be null and falsely collide.
+ */
+function MixedRoleChip(): JSX.Element {
+  return (
+    <span
+      className="ml-1.5 inline-block rounded border border-amber-300 px-1 py-px text-[10px] text-amber-600 dark:border-amber-800 dark:text-amber-400"
+      title="This bot is a review bot in some repos and a quality check in others, so this row covers only part of its work. Its role is set per repo in Bots → Settings."
+    >
+      mixed role
+    </span>
+  );
+}
+
+/**
  * Automated reviewers roled `quality_check` — coverage/quality gates (SonarQube, Codecov,
  * CodeClimate, …) rather than code reviewers.
  *
@@ -270,9 +307,12 @@ function TuningSuggestions({
 function QualityCheckSection({
   rows,
   botColor,
+  mixedRoleKeys,
 }: {
   rows: BotVendorAnalytics[];
   botColor: (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
+  /** Row keys that ALSO appear in the ROI table — see MixedRoleChip. */
+  mixedRoleKeys: Set<string>;
 }): JSX.Element | null {
   if (rows.length === 0) return null;
   return (
@@ -317,6 +357,7 @@ function QualityCheckSection({
                           dormant
                         </span>
                       )}
+                      {mixedRoleKeys.has(v.key) && <MixedRoleChip />}
                     </span>
                   </td>
                   <td className="py-1 pr-3 text-right tabular-nums">{v.threads}</td>
@@ -339,11 +380,14 @@ function VendorTable({
   botColor,
   onOpenVendor,
   overdueGraceMs,
+  mixedRoleKeys,
 }: {
   vendors: CostedVendor[];
   botColor: BotColor;
   onOpenVendor: (key: string) => void;
   overdueGraceMs: number;
+  /** Row keys that ALSO appear in the quality-check section — see MixedRoleChip. */
+  mixedRoleKeys: Set<string>;
 }): JSX.Element {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
@@ -381,7 +425,7 @@ function VendorTable({
             </th>
             <th
               className="px-2 py-1.5 text-right font-medium"
-              title={`Monthly cost ÷ acted-on threads. The cost is per team — set it on the bot's row in Bots → Settings. A price marked "inh" is inherited from “${DEFAULT_SOURCE_LABEL}”: the same one subscription seen from this team's vantage point, so never add it up across teams.`}
+              title="Monthly cost ÷ acted-on threads. The cost belongs to the BOT, account-wide — set it once in Bots → Settings. Under a narrowed scope this divides a whole subscription by part of that bot's work, so read it as a rate, not as spend, and never add it up across scopes."
             >
               $/acted-on
             </th>
@@ -414,6 +458,7 @@ function VendorTable({
                   {v.reviewers > 1 && (
                     <span className="ml-1 text-gray-400">×{v.reviewers}</span>
                   )}
+                  {mixedRoleKeys.has(v.key) && <MixedRoleChip />}
                   {v.dormant && (
                     <span
                       className="ml-1.5 inline-block rounded border border-gray-300 px-1 py-px text-[10px] text-gray-400 dark:border-gray-700 dark:text-gray-500"
@@ -480,9 +525,11 @@ function VendorTable({
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
                   {v.dormant ? dash : pct(v.noiseRatioPct)}
                 </td>
-                {/* The $/acted-on figure, plus WHERE its price came from. An unlabelled per-team
-                    cost column reads as per-team SPEND, so three teams inheriting one $120 tool
-                    would look like $360 — the "inh" marker is the only thing stopping that. */}
+                {/* The $/acted-on figure. The price is ACTOR-grain — one subscription per vendor,
+                    whatever number of repos it runs in — so the tooltip says so on every row. The
+                    predecessor's per-team column needed an "inh" marker to stop three teams
+                    inheriting one $120 tool reading as $360; there is no inheritance left to
+                    label, only a rule about not summing across rows. */}
                 <td
                   className="px-2 py-1.5 text-right tabular-nums text-gray-500"
                   // Money is printed through the same formatter as the cost box in Bots →
@@ -494,11 +541,9 @@ function VendorTable({
                           // holds $X for this login, but nothing reads it any more — including
                           // when the user deliberately CLEARED the price, which is indistinguishable
                           // from "never migrated" on this row. So it is offered, not charged.
-                          `No monthly cost set for this bot. The old account-wide list still has $${formatCostInput(v.legacyOnlyUsd)}/mo for it — re-enter that on its row in Bots → Settings to use it.`
-                        : 'No monthly cost set for this bot — set one on its row in Bots → Settings.'
-                      : v.costInherited
-                        ? `$${formatCostInput(v.costMonthlyUsd)}/mo, inherited from “${DEFAULT_SOURCE_LABEL}” — this team has no price of its own. It is one subscription seen from here, not extra spend, so don't sum it across teams.`
-                        : `$${formatCostInput(v.costMonthlyUsd)}/mo, set for this team.`
+                          `No monthly cost set for this bot. The old account-wide list still has $${formatCostInput(v.legacyOnlyUsd)}/mo for it — re-enter it in Bots → Settings to use it.`
+                        : 'No monthly cost set for this bot — set one in Bots → Settings.'
+                      : `$${formatCostInput(v.costMonthlyUsd)}/mo for this bot, account-wide. One subscription however many repos it runs in.`
                   }
                 >
                   {v.dormant ? (
@@ -506,14 +551,6 @@ function VendorTable({
                   ) : (
                     <>
                       {usd(v.costPerActedOnUsd)}
-                      {/* Only qualify a figure that is actually shown. A priced bot with no
-                          acted-on threads renders "—", and "— inh" reads as a stray glyph; the
-                          cell's title still names the price and its source there. */}
-                      {v.costPerActedOnUsd != null && v.costInherited && (
-                        <span className="ml-0.5 align-super text-[9px] font-medium text-gray-400 dark:text-gray-500">
-                          inh
-                        </span>
-                      )}
                     </>
                   )}
                 </td>
@@ -616,6 +653,12 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   // Volume only: no verdict, no noise ratio, no $/acted-on, because those are the ROI judgements
   // that were deliberately withheld.
   const qualityChecks = data?.qualityChecks ?? [];
+  // Reviewers present in BOTH lists — legitimate now that `role` is per repo. See MixedRoleChip
+  // for why the panel labels this rather than merging or electing a role.
+  const mixedRoleKeys = useMemo(
+    () => mixedRoleRowKeys(vendors, qualityChecks),
+    [vendors, qualityChecks],
+  );
 
   const header = (
     // The "Review-bot ROI" heading was dropped (the rail line already has a header); just the
@@ -663,7 +706,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             {qualityChecks.length > 0 && ' Quality checks are listed separately below.'}
           </div>
         </div>
-        <QualityCheckSection rows={qualityChecks} botColor={botColor} />
+        <QualityCheckSection rows={qualityChecks} botColor={botColor} mixedRoleKeys={mixedRoleKeys} />
       </div>
     );
   } else {
@@ -704,6 +747,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           botColor={botColor}
           onOpenVendor={(key) => openBotPrsDetail(key, repoId ?? null)}
           overdueGraceMs={t.overdueGraceMs}
+          mixedRoleKeys={mixedRoleKeys}
         />
         {/* Bot-effectiveness charts (per vendor) — all always visible: raw weekly volume, the
             volume-independent effectiveness + verdict, and the acted-on vs untouched split. */}
@@ -719,14 +763,14 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           </ChartCard>
         </div>
         <TuningSuggestions suggestions={data.suggestions} />
-        <QualityCheckSection rows={qualityChecks} botColor={botColor} />
+        <QualityCheckSection rows={qualityChecks} botColor={botColor} mixedRoleKeys={mixedRoleKeys} />
         <div className="text-[11px] text-gray-400">
           “Acted on” = a later commit likely addressed the thread, it was resolved, or a human
           replied/resolved after the bot (approximate). Noise ratio = the untouched share of a
-          bot's threads. Set a bot's monthly cost on its row in{' '}
-          <span className="font-medium">Bots → Settings</span> to see $/acted-on — it is per team,
-          and a price marked <span className="font-medium">inh</span> is inherited from{' '}
-          <span className="font-medium">{DEFAULT_SOURCE_LABEL}</span> rather than extra spend.
+          bot's threads. Set a bot's monthly cost in{' '}
+          <span className="font-medium">Bots → Settings</span> to see $/acted-on — the price is per{' '}
+          <span className="font-medium">bot</span>, account-wide (one subscription, however many
+          repos it runs in), so don't add it up across repos or scopes.
         </div>
       </div>
     );

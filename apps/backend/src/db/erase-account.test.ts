@@ -129,15 +129,31 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
     .insert(s.myTurnDismissals)
     .values({ accountId, kind: 'thread', refId: 900 + accountId, dismissedAt: new Date() })
     .execute();
+  // The bot object at BOTH grains (migrations 0042/0043). Both carry accountId, so both must be
+  // on the erasure checklist — and `account_reviewers` holds the reviewer's recorded PRICE, which
+  // surviving an erasure the user was told was complete is exactly the failure the checklist
+  // exists to catch.
   await db
-    .insert(s.botReviewClassification)
+    .insert(s.repoReviewers)
+    .values({
+      accountId,
+      repoId: repo.id,
+      authorUserId: user.id,
+      automated: true,
+      role: 'review',
+      confidence: 'high',
+      source: 'manual',
+    })
+    .execute();
+  await db
+    .insert(s.accountReviewers)
     .values({
       accountId,
       authorUserId: user.id,
-      automated: true,
       kind: 'coderabbit',
-      confidence: 'high',
-      source: 'manual',
+      label: 'CodeRabbit',
+      identitySource: 'manual',
+      monthlyCents: 3000,
     })
     .execute();
   const team = (

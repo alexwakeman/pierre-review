@@ -1,407 +1,192 @@
 import { useMemo, useState } from 'react';
-import type { AutomatedReviewerKind, DetectedReviewer, ReviewerRole } from '@pierre-review/shared';
-import { NO_TEAM_KEY } from '@pierre-review/shared';
+import type {
+  AutomatedReviewerKind,
+  RepoReviewer,
+  ReviewerIdentity,
+} from '@pierre-review/shared';
 import { automatedReviewerMeta, BOT_VENDOR_META } from '../../lib/ui.js';
 import {
-  buildCostOnlyBody,
   costEditOutcome,
   costStateOf,
-  emptyStateCopy,
-  emptyStateFor,
+  buildCostBody,
   formatCostInput,
   parseCostInput,
-  resetOverrideOffer,
-  DEFAULT_SOURCE_LABEL,
   type CostState,
 } from '../../lib/botCost.js';
 import {
-  useDeleteReviewerOverride,
+  actorSummaries,
+  emptyStateCopy,
+  groupRowsByRepo,
+  humanCandidates,
+  identityIndex,
+  monthlyCostTotal,
+  reviewerListEmptyKind,
+  type ActorSummary,
+  type RepoReviewerGroup,
+} from '../../lib/botReviewers.js';
+import {
   useDetectedReviewers,
-  useReviewerOverride,
+  useRepoReviewerJudgement,
+  useResetRepoReviewerJudgement,
+  useResetReviewerIdentity,
+  useReviewerCost,
+  useReviewerIdentity,
 } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
+import { useRepos } from '../../hooks/useTimeline.js';
 import { SectionShell, inputCls } from './ui.js';
 
 const ALL_KINDS = Object.keys(BOT_VENDOR_META) as AutomatedReviewerKind[];
 const MAX_SEARCH_MATCHES = 8;
 
-// The account's automated reviewers, plus a search box to promote any human reviewer to a bot.
-// CORE — the two-way override (mark automated / not-a-bot), the vendor kind/label, the
-// ReviewerRole and the per-team monthly COST all PATCH /api/bot-reviewers.
+// The shared `inputCls` carries `w-full`, and Tailwind emits `.w-full` AFTER `.w-32`/`.w-auto`,
+// so appending a width to it does nothing — the vendor picker and label box stretched edge to edge
+// and the row read as a form, not a list. This is the same chrome with the width left off.
+const FIELD_CLS =
+  'rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100';
+
+// The bot-reviewer settings surface. CORE (free) — no capability gate.
 //
-// `teamId` is the TEAM whose answers are being edited (NO_TEAM_KEY = "No team (default)", which
-// is BOTH the No-team scope and the inheritance root every other team falls back to). A row the
-// server reports as `inherited` came from the default rather than an explicit row for this team;
-// editing it CREATES a team override, and "Reset to default" (only offered on a real override)
-// removes it again.
+// ── ONE OBJECT PER (REPO, ACTOR), AND NO DEDUPLICATION ──────────────────────────────────────
+// The list below is grouped BY REPO and a vendor running in six repos appears six times, once per
+// group. That is the intended display, not a bug to collapse: a bot is installed per repository,
+// so "is `githubactions` a review bot?" only has an answer once a repo is named. A single-repo
+// view is the same list with one group.
 //
-// ⚠ TWO INHERITANCE AXES, resolved differently, shown separately on every row:
-//   • the CLASSIFICATION (`inherited`) is ROW-level — an explicit team row wins WHOLESALE;
-//   • the COST (`costInherited`) is FIELD-level — a team row created to hold a role opinion still
-//     uses the default's price until someone types one here.
-// A row can legitimately be `inherited: false, costInherited: true`, so the two badges are
-// rendered independently rather than being folded into one "inherited" chip.
+// ── TWO EDIT GRAINS, AND THE UI HAS TO MAKE THE DIFFERENCE UNMISSABLE ───────────────────────
+// This screen is the only place both grains are editable, so it is the only place a user can
+// mistake one for the other — and one direction of that mistake is the expensive one:
 //
-// Two lists, because a quality check is not a reviewer: **Review bots** (AI code reviewers — the
-// ones every metric counts) and **Quality checks** (static analysis / coverage / lint — still
-// automated, still visible in the feed, but excluded from ROI, behaviour, dedup and the
-// benchmark). The role is a SEPARATE control from the vendor kind: they are orthogonal axes, so
-// DeepSource can be marked a quality check without losing its brand identity or colour.
+//   PER REPO   automated / role      → the buttons on each repo row. Local, obvious, reversible.
+//   EVERYWHERE vendor kind / label / price → the "in every repo" section at the TOP.
 //
-// Only automated reviewers are listed by default (an account can have dozens of human
-// maintainers — the full list is unusable); the search below finds a person by login/name and
-// marks them a bot, after which they move into the list where kind/label/role/cost are editable.
+// A user editing a repo row expects a local change and gets one. A user editing a vendor name or
+// a price inside a repo group would expect a local change and get a global one — six rows renamed
+// from a control that looked like it belonged to one. It reads as unrecoverable even though it is
+// not, because there is no per-repo copy to "put back". So the account-wide controls do NOT live
+// on the repo rows at all: they are lifted into their own section, with their own banner, and the
+// repo rows show the vendor identity READ-ONLY as a coloured chip.
+//
+// ── WHY IDENTITY IS ACTOR-GRAIN IN THE FIRST PLACE ──────────────────────────────────────────
+// A login is one vendor everywhere, so colour and vendor name key on the ACTOR. When they lived on
+// the repo rows, clicking "Not a bot" in ONE repo nulled that row's kind, identity resolution
+// picked it up, and CodeRabbit lost its brand colour and vendor name in the repos the user never
+// touched — with no surface to undo it from.
+//
+// ── COST RENDERS ONCE PER ACTOR ─────────────────────────────────────────────────────────────
+// You buy one subscription. Six CodeRabbit repo rows each showing $120 (and totalling $720) is the
+// display bug the storage split cannot prevent, so the price is shown exactly once, in the
+// account-wide section, and the total comes from `monthlyCostTotal`, which dedupes by userId.
+//
+// ── EVERY EDIT HAS A WAY BACK, AND THE TWO WAYS BACK ARE NOT INTERCHANGEABLE ─────────────────
+// A manual write pins its row against re-derivation, so an edit with no reset is permanent —
+// flipping the value back by hand re-stamps 'manual' and leaves it just as frozen. So each grain
+// gets its own reset, and each is offered ONLY where it applies:
+//
+//   "Reset to auto"  on a repo row, only when `row.isManualOverride`   → ONE repo
+//   "Reset to auto"  on an actor card, only when `identitySource === 'manual'` → EVERY repo
+//
+// Gating them on those flags is not tidiness: a reset control on an already-auto row does nothing,
+// and a control that appears to do nothing is indistinguishable from a broken one. The blast
+// radii differ by an order of magnitude, so they are labelled and placed differently — the
+// per-repo one sits inline with the other per-repo buttons, the account-wide one inside the
+// banded "in every repo" section — and the account-wide one states IN THE UI that the price is
+// kept, because "reset" reads as "delete everything" otherwise.
 export function DetectedReviewersTable({
-  teamId = NO_TEAM_KEY,
-}: { teamId?: number } = {}): JSX.Element {
-  // SCOPED: this tab asks for the reviewers seen in THIS team's own repos (at team 0, the repos
-  // in no team), which is what makes `scopedRepoCount` a number and lets the empty state say
-  // whether the team has no repos or the repos have no bots. The flag is opt-in and lives in the
-  // query key — the account-wide consumers (bot colours, feed tags, thread filter) must keep
-  // getting the unnarrowed roster.
-  const q = useDetectedReviewers(teamId, true, { scoped: true });
+  scope,
+  repoIds,
+}: { scope?: string; repoIds?: number[] | null } = {}): JSX.Element {
+  const q = useDetectedReviewers(scope, repoIds);
+  const { data: repos } = useRepos();
+  // Account-wide colour resolver (its own unscoped listing — deliberately NOT this component's
+  // possibly-narrowed data, or a bot would change colour when you narrow the scope).
   const botColor = useBotColors();
-  const override = useReviewerOverride();
-  const resetOverride = useDeleteReviewerOverride();
-  const [drafts, setDrafts] = useState<
-    Record<number, { kind: AutomatedReviewerKind; label: string }>
-  >({});
+
+  const judgement = useRepoReviewerJudgement();
+  const identity = useReviewerIdentity();
+  const cost = useReviewerCost();
+  const resetJudgement = useResetRepoReviewerJudgement();
+  const resetIdentity = useResetReviewerIdentity();
+  const busy =
+    judgement.isPending ||
+    identity.isPending ||
+    cost.isPending ||
+    resetJudgement.isPending ||
+    resetIdentity.isPending;
+
   const [query, setQuery] = useState('');
 
-  const rowDraft = (r: DetectedReviewer): { kind: AutomatedReviewerKind; label: string } =>
-    drafts[r.userId] ?? { kind: r.classification.kind ?? 'in_house', label: r.classification.label };
-  const patchDraft = (
-    r: DetectedReviewer,
-    patch: Partial<{ kind: AutomatedReviewerKind; label: string }>,
-  ): void => setDrafts((prev) => ({ ...prev, [r.userId]: { ...rowDraft(r), ...patch } }));
+  const rows = useMemo(() => q.data?.rows ?? [], [q.data]);
+  const reviewers = useMemo(() => q.data?.reviewers ?? [], [q.data]);
+  const listRepoIds = useMemo(() => q.data?.repoIds ?? [], [q.data]);
 
-  const busy = override.isPending || resetOverride.isPending;
-  const reviewers = q.data?.reviewers ?? [];
-  const scopedRepoCount = q.data?.scopedRepoCount ?? null;
-  const automated = reviewers.filter((r) => r.classification.automated === true);
-  const humans = reviewers.filter((r) => r.classification.automated !== true);
-  // Rows that exist ONLY as a stored classification for this team — no footprint in its repos.
-  // They are pulled out of the two main lists (they'd read as active bots) but NOT dropped: they
-  // still govern the moment a repo moves back into the team, so hiding one produces exactly the
-  // "set somewhere I can't find" support question this flag exists to pre-empt.
-  const dormantHere = automated.filter((r) => r.dormantInScope);
-  const live = automated.filter((r) => !r.dormantInScope);
-  // The role split. `role` is meaningless on a human (callers must gate on `automated` first),
-  // which is why it is only read inside the automated subset.
-  const reviewBots = live.filter((r) => r.classification.role !== 'quality_check');
-  const qualityChecks = live.filter((r) => r.classification.role === 'quality_check');
+  const identityById = useMemo(() => identityIndex(reviewers), [reviewers]);
+  const groups = useMemo(() => groupRowsByRepo(rows, listRepoIds), [rows, listRepoIds]);
+  const actors = useMemo(
+    () => actorSummaries(reviewers, rows, listRepoIds),
+    [reviewers, rows, listRepoIds],
+  );
+  const costTotal = useMemo(() => monthlyCostTotal(reviewers, rows), [reviewers, rows]);
+  const repoName = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of repos ?? []) m.set(r.id, r.fullName);
+    return m;
+  }, [repos]);
 
-  // Only surface the (potentially huge) human list once the user types — that's the whole point.
-  const trimmedQuery = query.trim().toLowerCase();
-  const matches = useMemo(() => {
-    if (trimmedQuery === '') return [];
-    return humans
-      .filter((h) => `${h.login} ${h.displayName ?? ''}`.toLowerCase().includes(trimmedQuery))
-      .slice(0, MAX_SEARCH_MATCHES);
-  }, [humans, trimmedQuery]);
+  const matches = useMemo(
+    () => humanCandidates(reviewers, rows, query, MAX_SEARCH_MATCHES, listRepoIds),
+    [reviewers, rows, query, listRepoIds],
+  );
 
-  // Every write carries the team key — omit it and the edit silently lands on the account
-  // default instead of the team being viewed.
-  const applyRole = (r: DetectedReviewer, role: ReviewerRole): void => {
-    const d = rowDraft(r);
-    override.mutate({
-      userId: r.userId,
-      // NO `costMonthlyUsd`: absent means "leave the stored cost alone", so re-roling a bot can
-      // never wipe the price someone typed next to it.
-      body: { automated: true, kind: d.kind, label: d.label, role, teamId },
-    });
-  };
+  const emptyKind = reviewerListEmptyKind(listRepoIds, rows);
 
-  // Promote a human to an automated reviewer with a sensible default kind; on success the
-  // detected-reviewers query refetches and the row re-appears in the bot list, where the exact
-  // vendor kind + label + role + cost are editable inline.
-  const promote = (r: DetectedReviewer): void => {
-    override.mutate({ userId: r.userId, body: { automated: true, kind: 'in_house', teamId } });
-    setQuery('');
-  };
-
-  const renderRow = (r: DetectedReviewer): JSX.Element => {
-    const c = r.classification;
-    const d = rowDraft(r);
-    const meta = automatedReviewerMeta(c.kind ?? 'in_house');
-    // Per-bot colour (brand-aware hybrid) so multiple in-house bots read distinctly,
-    // matching their colour in the Bots ROI console + feed.
-    const color = botColor({ login: r.login, kind: c.kind ?? 'in_house' });
-    const isQuality = c.role === 'quality_check';
-    // Whether "Reset to default" is offered here, and whether pressing it would take a price with
-    // it (it deletes the whole row, cost column included). See `resetOverrideOffer`.
-    const reset = resetOverrideOffer(r, teamId);
-    return (
-      <li key={r.userId} className={`flex flex-col gap-1.5 px-2.5 py-2 ${r.dormantInScope ? 'opacity-60' : ''}`}>
-        <div className="flex items-center gap-2">
-          {r.avatarUrl != null && (
-            <img src={r.avatarUrl} alt="" className="h-5 w-5 shrink-0 rounded-full" />
-          )}
-          <span
-            className="truncate text-xs font-medium text-gray-800 dark:text-gray-100"
-            title={r.sampleReviewBody ?? undefined}
-          >
-            {r.login}
-            {r.displayName != null && r.displayName !== r.login && (
-              <span className="ml-1 font-normal text-gray-400">{r.displayName}</span>
-            )}
-          </span>
-          <span className="ml-auto shrink-0 text-[10px] text-gray-400">
-            {r.threadsLast90d} threads · 90d
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span
-            className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-            style={{ color, backgroundColor: `${color}1a` }}
-          >
-            <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
-            {meta.label}
-          </span>
-          {c.confidence !== 'high' && (
-            <span className="text-[10px] text-amber-500" title={c.reasons.join(' · ')}>
-              likely ({c.confidence})
-            </span>
-          )}
-          {r.isManualOverride ? (
-            <span className="rounded bg-sky-50 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-sky-600 dark:bg-sky-950 dark:text-sky-300">
-              manual
-            </span>
-          ) : (
-            <span
-              className="text-[9px] uppercase tracking-wide text-gray-300 dark:text-gray-600"
-              title={c.reasons.join(' · ')}
-            >
-              {c.source.replace(/_/g, ' ')}
-            </span>
-          )}
-          {/* Where this CLASSIFICATION came from (row-level). Only meaningful once a TEAM (not the
-              default) is being viewed — at NO_TEAM_KEY every row IS the default, so the badge
-              would be noise. It NAMES its source rather than just saying "inherited": since this
-              tab now lists only the team's own repos, the No-team row that governs it can be
-              invisible from here, and "where was that set?" has to be answerable on the row. */}
-          {teamId !== NO_TEAM_KEY &&
-            (r.inherited ? (
-              <span
-                className="rounded border border-dashed border-gray-300 px-1 py-0.5 text-[9px] uppercase tracking-wide text-gray-400 dark:border-gray-600"
-                title={`This classification comes from the “${DEFAULT_SOURCE_LABEL}” row, not from this team. Editing it here creates an override for this team only.`}
-              >
-                inherited · {DEFAULT_SOURCE_LABEL}
-              </span>
-            ) : (
-              <span className="rounded bg-violet-50 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-violet-600 dark:bg-violet-950 dark:text-violet-300">
-                team override
-              </span>
-            ))}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          <select
-            className={`${inputCls} w-auto py-0.5`}
-            value={d.kind}
-            onChange={(e) => patchDraft(r, { kind: e.target.value as AutomatedReviewerKind })}
-            aria-label="Reviewer kind"
-          >
-            {ALL_KINDS.map((k) => (
-              <option key={k} value={k}>
-                {automatedReviewerMeta(k).label}
-              </option>
-            ))}
-          </select>
-          <input
-            className={`${inputCls} w-28 py-0.5`}
-            value={d.label}
-            placeholder="Label"
-            onChange={(e) => patchDraft(r, { label: e.target.value })}
-            aria-label="Reviewer label"
-          />
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              override.mutate({
-                userId: r.userId,
-                // NO `role` — absent means "leave the stored role alone", so editing the kind or
-                // label of a quality check can never silently promote it back to a review bot.
-                // NO `costMonthlyUsd` either, for the mirror reason: absent leaves the price be.
-                body: { automated: true, kind: d.kind, label: d.label, teamId },
-              })
-            }
-            className="rounded bg-sky-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:opacity-40"
-          >
-            Apply
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => applyRole(r, isQuality ? 'review' : 'quality_check')}
-            title={
-              isQuality
-                ? 'Treat this as a real AI code reviewer again — it re-enters the ROI, behaviour and dedup metrics.'
-                : 'Static analysis / coverage / lint. Stays visible in the feed, but is excluded from the review-bot metrics.'
-            }
-            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-          >
-            {isQuality ? 'Treat as review bot' : 'Mark as quality check'}
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              override.mutate({ userId: r.userId, body: { automated: false, kind: null, teamId } })
-            }
-            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-          >
-            Not a bot
-          </button>
-          {/* Only on a REAL team CLASSIFICATION override, i.e. a MANUAL row stored at this team.
-              Two guards, for two different reasons:
-                • `!r.inherited` — on an inherited row this would delete nothing, and a silent
-                  no-op is indistinguishable from a reset that worked;
-                • `r.isManualOverride` — a team row created by a COST-ONLY patch is not a
-                  classification opinion at all (it copies the default's verbatim; see
-                  `buildCostOnlyBody`). Offering "Reset to default" there is offering a control
-                  whose ONLY effect is deleting the price — named nowhere in its label. That row's
-                  reset is the cost box's own Clear, which drops the row server-side.
-              ⚠ It DOES take this team's own price with it (cost lives on the row being deleted),
-              so the label and the confirm below have to say so — the earlier comment here claimed
-              the opposite and the button destroyed a typed price silently. */}
-          {reset.show && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                // Confirm ONLY when a price would actually be destroyed: on a row that inherits
-                // its cost (or has none) the reset is purely a classification change and a dialog
-                // would be noise.
-                if (
-                  reset.dropsCostUsd != null &&
-                  !window.confirm(
-                    `Reset ${r.login} to the “${DEFAULT_SOURCE_LABEL}” answer?\n\nThis team’s $${formatCostInput(reset.dropsCostUsd)}/mo price is stored on the same row and will go with it — the row falls back to the default’s price.`,
-                  )
-                )
-                  return;
-                resetOverride.mutate({ userId: r.userId, teamId });
-              }}
-              title={
-                reset.dropsCostUsd != null
-                  ? `Remove this team's override so it inherits the “${DEFAULT_SOURCE_LABEL}” classification again — including this team's own $${formatCostInput(reset.dropsCostUsd)}/mo price, which is stored on the same row.`
-                  : `Remove this team's override so it inherits the “${DEFAULT_SOURCE_LABEL}” classification again.`
-              }
-              className="rounded border border-violet-300 px-2 py-0.5 text-[11px] font-medium text-violet-600 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-950"
-            >
-              {reset.dropsCostUsd != null ? 'Reset to default (incl. price)' : 'Reset to default'}
-            </button>
-          )}
-        </div>
-
-        <CostEditor
-          key={`${teamId}:${r.userId}`}
-          reviewer={r}
-          teamId={teamId}
-          busy={busy}
-          onApply={(value) =>
-            override.mutate({ userId: r.userId, body: buildCostOnlyBody(teamId, value) })
-          }
-        />
-      </li>
-    );
-  };
-
-  const listCls =
-    'divide-y divide-gray-100 rounded border border-gray-200 dark:divide-gray-800 dark:border-gray-700';
-
-  // The empty list means three different things and looks like one — `scopedRepoCount` is the
-  // only thing that separates them, and null means it wasn't scoped at all (so no count may be
-  // quoted). See `emptyStateFor`.
-  //
-  // ⚠ NONE OF THIS COPY MAY POINT AT THE SEARCH BOX. The search-to-promote block lives inside the
-  // non-empty branch below, and hoisting it would not help: it filters the SAME `reviewers` array,
-  // so on an empty list it would render a box that can never match anybody. An empty list has
-  // exactly one honest instruction — wait for a sync (or, for a team with no repos, assign some).
-  //
-  // 'no-repos' cannot occur at NO_TEAM_KEY: the server degrades a 0-repo root scope to the
-  // unscoped roster (it is the inheritance root and must stay editable), so the count comes back
-  // null → 'unscoped'. That is why this branch may safely say "this team".
-  const emptyBody = emptyStateCopy(emptyStateFor(scopedRepoCount), scopedRepoCount);
+  const anyError =
+    judgement.error ?? identity.error ?? cost.error ?? resetJudgement.error ?? resetIdentity.error;
 
   return (
     <SectionShell
       title="Review bots"
-      // No "search below" here either: this description renders above the EMPTY state too, where
-      // the search block is not on screen. The block carries its own explanation where it lives.
-      desc="Reviewers we treat as an AI/automated reviewer, and what each costs this team. Override any row — a manual choice sticks."
+      desc="Which reviewers we treat as automated — set per repo, because a bot is installed per repo. Who each bot is, and what it costs, is set once for the whole account."
     >
       {q.isLoading ? (
         <p className="py-3 text-center text-[11px] text-gray-400">Loading…</p>
       ) : q.isError ? (
         <p className="py-3 text-center text-[11px] text-red-500">{(q.error as Error).message}</p>
-      ) : reviewers.length === 0 ? (
-        <p className="py-3 text-center text-[11px] text-gray-400">{emptyBody}</p>
+      ) : emptyKind != null ? (
+        <p className="py-3 text-center text-[11px] text-gray-400">
+          {emptyStateCopy(emptyKind, listRepoIds.length)}
+        </p>
       ) : (
         <>
-          {/* State the scope on the NON-empty path too: these rows are the reviewers seen in this
-              team's repos, not the account's whole roster, and a user comparing two tabs needs to
-              know why a bot is missing from one. Omitted entirely when the count is null. */}
-          {scopedRepoCount != null && (
-            <p className="text-[10px] text-gray-400">
-              Reviewers seen in this {teamId === NO_TEAM_KEY ? 'scope' : 'team'}&apos;s{' '}
-              <span className="tabular-nums">{scopedRepoCount}</span> repo
-              {scopedRepoCount === 1 ? '' : 's'}.
-            </p>
-          )}
+          <AccountWideSection
+            actors={actors}
+            costTotal={costTotal}
+            botColor={botColor}
+            busy={busy}
+            onSaveIdentity={(userId, kind, label) =>
+              identity.mutate({ userId, body: { kind, label: label.trim() === '' ? null : label } })
+            }
+            onSaveCost={(userId, monthlyUsd) =>
+              cost.mutate({ userId, body: buildCostBody(monthlyUsd) })
+            }
+            onResetIdentity={(userId) => resetIdentity.mutate({ userId })}
+          />
 
-          {reviewBots.length === 0 ? (
-            <p className="py-2 text-center text-[11px] text-gray-400">
-              No review bots yet — search below to mark one.
-            </p>
-          ) : (
-            <ul className={listCls}>{reviewBots.map(renderRow)}</ul>
-          )}
+          <PerRepoSection
+            groups={groups}
+            repoName={repoName}
+            identityById={identityById}
+            botColor={botColor}
+            busy={busy}
+            onJudge={(userId, body) => judgement.mutate({ userId, body })}
+            onResetJudgement={(userId, repoId) => resetJudgement.mutate({ userId, repoId })}
+          />
 
-          {/* Quality checks get their OWN section rather than being hidden: a mis-role must be
-              discoverable ("why did SonarQube vanish?") and the reviewer stays reclassifiable. */}
-          {qualityChecks.length > 0 && (
-            <div className="mt-3 space-y-1.5">
-              <div className="flex flex-wrap items-baseline gap-1.5">
-                <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-                  Quality checks
-                </h4>
-                <span className="text-[10px] text-gray-400">
-                  Static analysis, coverage and lint. Still automated and still shown in the feed —
-                  but excluded from the review-bot metrics (ROI, behaviour, dedup, benchmark), so
-                  their volume can&apos;t make your reviewers look noisy.
-                </span>
-              </div>
-              <ul className={listCls}>{qualityChecks.map(renderRow)}</ul>
-            </div>
-          )}
-
-          {/* Set here, invisible here. A stored row for a reviewer with no footprint in this
-              scope's repos is NOT dead — classification and cost resolve by TEAM KEY, never by
-              repo, so it governs again the instant a repo moves back in. Collapsed and dimmed so
-              it doesn't pad the live lists, but present so the setting is findable. */}
-          {dormantHere.length > 0 && (
-            <details className="mt-3 rounded border border-gray-200 dark:border-gray-700">
-              <summary className="cursor-pointer select-none px-2.5 py-1.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">
-                Set here but not active ({dormantHere.length})
-              </summary>
-              <div className="border-t border-gray-200 dark:border-gray-700">
-                <p className="px-2.5 py-1.5 text-[10px] text-gray-400">
-                  These reviewers have a stored setting for this{' '}
-                  {teamId === NO_TEAM_KEY ? 'scope' : 'team'} but no activity in its repos. The
-                  setting still applies — it takes effect again as soon as one of their repos is in
-                  scope.
-                </p>
-                <ul className={listCls}>{dormantHere.map(renderRow)}</ul>
-              </div>
-            </details>
-          )}
-
-          {/* Search-to-promote: find a human reviewer by login/name and mark them a review bot.
-              We never render the full human list — only matches once a query is typed. */}
-          <div className="mt-1 space-y-1.5">
+          {/* Search-to-promote: find a reviewer we currently treat as human and mark them
+              automated IN A NAMED REPO. The repo buttons are the whole point — a judgement with
+              no repo has no row to land on, and offering only the repos where they actually have
+              a footprint stops the UI fabricating bot objects for repos they have never touched. */}
+          <div className="mt-3 space-y-1.5 border-t border-gray-200 pt-3 dark:border-gray-800">
             <label className="flex flex-col gap-1 text-xs">
               <span className="font-medium text-gray-600 dark:text-gray-300">Add a review bot</span>
               <input
@@ -412,40 +197,58 @@ export function DetectedReviewersTable({
                 aria-label="Search reviewers to mark as a review bot"
               />
             </label>
-            {trimmedQuery === '' ? (
+            {query.trim() === '' ? (
               <p className="text-[10px] text-gray-400">
-                Type a reviewer&apos;s name to mark them as a bot. They default to In-house AI — set
-                the exact vendor above once added (or pick{' '}
-                <span className="font-medium">Vendor</span> for a proprietary tool that isn&apos;t
-                your own), and use <span className="font-medium">Mark as quality check</span> for a
-                linter or coverage tool.
+                Type a reviewer&apos;s name, then pick the repo to mark them automated in. They join
+                that repo&apos;s <span className="font-medium">Review bots</span> list; set the
+                vendor and price once, above.
               </p>
             ) : matches.length === 0 ? (
-              <p className="text-[10px] text-gray-400">No matching reviewers.</p>
+              <p className="text-[10px] text-gray-400">
+                No matching reviewers we currently treat as human.
+              </p>
             ) : (
-              <ul className={listCls}>
-                {matches.map((r) => (
-                  <li key={r.userId} className="flex items-center gap-2 px-2.5 py-1.5">
-                    {r.avatarUrl != null && (
-                      <img src={r.avatarUrl} alt="" className="h-5 w-5 shrink-0 rounded-full" />
-                    )}
-                    <span className="truncate text-xs font-medium text-gray-800 dark:text-gray-100">
-                      {r.login}
-                      {r.displayName != null && r.displayName !== r.login && (
-                        <span className="ml-1 font-normal text-gray-400">{r.displayName}</span>
+              <ul className="divide-y divide-gray-100 rounded border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
+                {matches.map((m) => (
+                  <li key={m.identity.userId} className="flex flex-col gap-1 px-2.5 py-1.5">
+                    <div className="flex items-center gap-2">
+                      {m.identity.avatarUrl != null && (
+                        <img src={m.identity.avatarUrl} alt="" className="h-5 w-5 shrink-0 rounded-full" />
                       )}
-                    </span>
-                    <span className="ml-auto shrink-0 text-[10px] text-gray-400">
-                      {r.threadsLast90d} · 90d
-                    </span>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => promote(r)}
-                      className="shrink-0 rounded bg-sky-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:opacity-40"
-                    >
-                      Treat as review bot
-                    </button>
+                      <span className="truncate text-xs font-medium text-gray-800 dark:text-gray-100">
+                        {m.identity.login}
+                        {m.identity.displayName != null &&
+                          m.identity.displayName !== m.identity.login && (
+                            <span className="ml-1 font-normal text-gray-400">
+                              {m.identity.displayName}
+                            </span>
+                          )}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 pl-7">
+                      <span className="text-[10px] text-gray-400">Treat as a review bot in</span>
+                      {m.repoIds.map((rid) => (
+                        <button
+                          key={rid}
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            judgement.mutate({
+                              userId: m.identity.userId,
+                              // No `role`: absent takes the column's 'review' default. No
+                              // kind/label either — naming the vendor is the other grain, and
+                              // doing it from here would be an account-wide write behind a
+                              // per-repo-looking button.
+                              body: { repoId: rid, automated: true },
+                            });
+                            setQuery('');
+                          }}
+                          className="rounded bg-sky-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:opacity-40"
+                        >
+                          {repoName.get(rid) ?? `repo #${rid}`}
+                        </button>
+                      ))}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -453,63 +256,574 @@ export function DetectedReviewersTable({
           </div>
         </>
       )}
-      {override.isError && (
-        <p className="text-[11px] text-red-500">{(override.error as Error).message}</p>
-      )}
-      {resetOverride.isError && (
-        <p className="text-[11px] text-red-500">{(resetOverride.error as Error).message}</p>
-      )}
+      {anyError != null && <p className="text-[11px] text-red-500">{anyError.message}</p>}
     </SectionShell>
   );
 }
 
-// ── Inline per-team cost ────────────────────────────────────────────────────────────────────
+// ── The account-wide half ───────────────────────────────────────────────────────────────────
 
-// Per-state input chrome. The three states MUST be distinguishable at a glance, because the same
-// gesture (emptying the box) means something different in each:
-//   inherited → dashed + muted italic: the number shown is real and applies, but it lives
-//               elsewhere, so it reads as a quotation rather than a local value;
-//   set       → solid violet, matching the "team override" classification badge above it;
-//   none      → plain, empty, with a "—" placeholder so an empty box never reads as "$0".
+type BotColorFn = (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
+
+/**
+ * Vendor identity + price, ONE CARD PER ACTOR, above every repo group.
+ *
+ * ⚠ ITS PLACEMENT IS THE SAFETY MECHANISM. These fields are the same in every repo by definition,
+ * so an editor for them sitting inside a repo group would look local and act global. Lifting them
+ * out — with a banner that says so, and a per-card count of the repos affected — is what makes the
+ * scope legible BEFORE the edit rather than surprising after it.
+ */
+function AccountWideSection({
+  actors,
+  costTotal,
+  botColor,
+  busy,
+  onSaveIdentity,
+  onSaveCost,
+  onResetIdentity,
+}: {
+  actors: ActorSummary[];
+  costTotal: ReturnType<typeof monthlyCostTotal>;
+  botColor: BotColorFn;
+  busy: boolean;
+  onSaveIdentity: (userId: number, kind: AutomatedReviewerKind, label: string) => void;
+  onSaveCost: (userId: number, monthlyUsd: number | null) => void;
+  onResetIdentity: (userId: number) => void;
+}): JSX.Element | null {
+  if (actors.length === 0) return null;
+  return (
+    <section className="space-y-1.5">
+      <div className="flex flex-wrap items-baseline gap-1.5">
+        <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+          These bots, in every repo
+        </h4>
+        <span className="text-[10px] text-gray-400">
+          Vendor and price are properties of the bot, not of a repo — one subscription however many
+          repos it runs in.
+        </span>
+      </div>
+      {/* Not a subtle hint: this is the one section whose edits reach rows the user is not
+          looking at, so it is banded and says so in plain words. */}
+      <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+        Changes here apply <span className="font-semibold">everywhere</span> — in every repo this
+        bot runs in, including ones not shown below. To change what a bot is in{' '}
+        <span className="font-semibold">one</span> repo, use the buttons on its row further down.
+      </p>
+      <ul className="divide-y divide-gray-100 rounded border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
+        {actors.map((a) => (
+          <ActorCard
+            key={a.identity.userId}
+            actor={a}
+            botColor={botColor}
+            busy={busy}
+            onSaveIdentity={onSaveIdentity}
+            onSaveCost={onSaveCost}
+            onResetIdentity={onResetIdentity}
+          />
+        ))}
+      </ul>
+      <p className="text-[10px] text-gray-400">
+        {costTotal.totalUsd == null ? (
+          <>No monthly prices set yet — add one per bot above to get $/acted-on in the ROI table.</>
+        ) : (
+          <>
+            <span className="font-medium tabular-nums text-gray-600 dark:text-gray-300">
+              ${formatCostInput(costTotal.totalUsd)}/mo
+            </span>{' '}
+            across {costTotal.pricedActors} bot{costTotal.pricedActors === 1 ? '' : 's'}
+            {costTotal.unpricedActors > 0 && (
+              <> · {costTotal.unpricedActors} with no price set</>
+            )}
+            .{' '}
+            {/* The dedupe is invisible unless it is stated: a reader counting rows below will get
+                a bigger number, and "the total is wrong" is the support question this pre-empts. */}
+            <span className="text-gray-400">
+              Counted once per bot, not once per repo.
+            </span>
+          </>
+        )}
+      </p>
+    </section>
+  );
+}
+
+function ActorCard({
+  actor,
+  botColor,
+  busy,
+  onSaveIdentity,
+  onSaveCost,
+  onResetIdentity,
+}: {
+  actor: ActorSummary;
+  botColor: BotColorFn;
+  busy: boolean;
+  onSaveIdentity: (userId: number, kind: AutomatedReviewerKind, label: string) => void;
+  onSaveCost: (userId: number, monthlyUsd: number | null) => void;
+  onResetIdentity: (userId: number) => void;
+}): JSX.Element {
+  const id = actor.identity;
+  // A newly-promoted actor has no vendor named yet (`kind: null`). Default the picker to In-house
+  // AI rather than leaving it blank — that is the honest guess for an unrecognised automation, and
+  // nothing is written until Save.
+  const serverKind: AutomatedReviewerKind = id.kind ?? 'in_house';
+  const [kind, setKind] = useState<AutomatedReviewerKind>(serverKind);
+  const [label, setLabel] = useState(id.label);
+  // Re-seed from the server when it changes under us (a save, or a refetch). Adjusting state
+  // during render off a "previous props" marker is React's own documented alternative to a sync
+  // effect — it avoids the extra render pass where the fields still show the old values.
+  // The separator is U+001F (unit separator), NOT a literal NUL. A NUL byte in a source file
+  // makes the WHOLE FILE binary to file(1), and grep/ripgrep skip binary files by default — so
+  // this component silently stopped matching any repo-wide search, which is how a reviewer
+  // concluded its buttons were unwired. In a codebase navigated by grep, an ungreppable file is
+  // a real hazard. U+001F is equally impossible in a vendor kind or a GitHub display name.
+  const SEP = '\u001f';
+  const [seed, setSeed] = useState(`${serverKind}${SEP}${id.label}`);
+  const nextSeed = `${serverKind}${SEP}${id.label}`;
+  if (seed !== nextSeed) {
+    setSeed(nextSeed);
+    setKind(serverKind);
+    setLabel(id.label);
+  }
+
+  const color = botColor({ login: id.login, kind: serverKind });
+  const identityDirty = kind !== serverKind || label !== id.label;
+  const repoCount = actor.repoIds.length;
+
+  return (
+    <li className="flex flex-col gap-1.5 px-2.5 py-2">
+      <div className="flex items-center gap-2">
+        {id.avatarUrl != null && (
+          <img src={id.avatarUrl} alt="" className="h-5 w-5 shrink-0 rounded-full" />
+        )}
+        <span className="truncate text-xs font-medium text-gray-800 dark:text-gray-100">
+          {id.login}
+          {id.displayName != null && id.displayName !== id.login && (
+            <span className="ml-1 font-normal text-gray-400">{id.displayName}</span>
+          )}
+        </span>
+        <span
+          className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+          style={{ color, backgroundColor: `${color}1a` }}
+        >
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+          {automatedReviewerMeta(serverKind).label}
+        </span>
+        {id.identitySource === 'manual' && (
+          <span className="shrink-0 rounded bg-sky-50 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-sky-600 dark:bg-sky-950 dark:text-sky-300">
+            named by you
+          </span>
+        )}
+        {/* The blast radius of the controls below, on the control itself. "6 repos" next to a
+            rename is the difference between an informed edit and a surprise. */}
+        <span className="ml-auto shrink-0 text-[10px] text-gray-400">
+          {repoCount} repo{repoCount === 1 ? '' : 's'}
+          {actor.reviewRepoCount > 0 && actor.qualityRepoCount > 0 && (
+            <span title="Roled differently in different repos — that is allowed; the role is per repo.">
+              {' '}
+              · {actor.reviewRepoCount} review / {actor.qualityRepoCount} quality
+            </span>
+          )}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <select
+          className={`${FIELD_CLS} w-auto py-0.5`}
+          value={kind}
+          onChange={(e) => setKind(e.target.value as AutomatedReviewerKind)}
+          aria-label={`Vendor for ${id.login} (all repos)`}
+        >
+          {ALL_KINDS.map((k) => (
+            <option key={k} value={k}>
+              {automatedReviewerMeta(k).label}
+            </option>
+          ))}
+        </select>
+        <input
+          className={`${FIELD_CLS} w-40 py-0.5`}
+          value={label}
+          placeholder="Label"
+          onChange={(e) => setLabel(e.target.value)}
+          aria-label={`Display label for ${id.login} (all repos)`}
+        />
+        <button
+          type="button"
+          disabled={busy || !identityDirty}
+          onClick={() => onSaveIdentity(id.userId, kind, label)}
+          title={`Rename this bot in all ${repoCount} repo${repoCount === 1 ? '' : 's'}. It does not change whether it counts as a bot anywhere.`}
+          className="rounded bg-sky-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:opacity-40"
+        >
+          Save for all repos
+        </button>
+        {/* THE WAY BACK, and it is shown ONLY on a manually-named bot. On an auto identity there
+            is nothing to reset, and a control that does nothing reads as a broken one. It is the
+            only way back: re-typing the auto name by hand would just re-stamp "named by you".
+
+            ⚠ ITS BLAST RADIUS IS THE WHOLE ACCOUNT — hence the repo count in the label, and hence
+            its home in this banded section rather than on a repo row. The per-repo reset (one row,
+            one repo) lives on the rows below and is worded to match. */}
+        {id.identitySource === 'manual' && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onResetIdentity(id.userId)}
+            title={`Forget the vendor and label you set and let detection name this bot again, in all ${repoCount} repo${repoCount === 1 ? '' : 's'}. The monthly price is kept, and no repo's bot / not-a-bot verdict changes.`}
+            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            Reset name to auto
+          </button>
+        )}
+      </div>
+      {/* Stated on screen, not only in a tooltip: "reset" reads as "delete everything", and the
+          one thing a user is afraid of losing here is the number they typed into the box below. */}
+      {id.identitySource === 'manual' && (
+        <p className="text-[10px] text-gray-400">
+          Reset hands the vendor and label back to detection in all {repoCount} repo
+          {repoCount === 1 ? '' : 's'} —{' '}
+          <span className="font-medium text-gray-500 dark:text-gray-300">the price is kept</span>,
+          and no repo&apos;s bot / not-a-bot verdict changes.
+        </p>
+      )}
+
+      <CostEditor
+        // Remount on a userId change so a half-typed number can never survive onto another bot.
+        key={id.userId}
+        login={id.login}
+        costMonthlyUsd={id.costMonthlyUsd}
+        repoCount={repoCount}
+        busy={busy}
+        onApply={(v) => onSaveCost(id.userId, v)}
+      />
+    </li>
+  );
+}
+
+// ── The per-repo half ───────────────────────────────────────────────────────────────────────
+
+/**
+ * One group per repo, in the server's order. A vendor in six repos appears in six groups — that
+ * is the model, stated as a layout.
+ *
+ * Quality checks get their own sub-list rather than being hidden: a mis-role must be discoverable
+ * ("why did SonarQube vanish?"), and the row stays re-rolable in place. The split is per repo, so
+ * the same login can sit under Review bots here and Quality checks in the next group; nothing
+ * compares the two.
+ */
+function PerRepoSection({
+  groups,
+  repoName,
+  identityById,
+  botColor,
+  busy,
+  onJudge,
+  onResetJudgement,
+}: {
+  groups: RepoReviewerGroup[];
+  repoName: Map<number, string>;
+  identityById: Map<number, ReviewerIdentity>;
+  botColor: BotColorFn;
+  busy: boolean;
+  onJudge: (userId: number, body: { repoId: number; automated?: boolean; role?: 'review' | 'quality_check' }) => void;
+  onResetJudgement: (userId: number, repoId: number) => void;
+}): JSX.Element {
+  return (
+    <section className="mt-4 space-y-2">
+      <div className="flex flex-wrap items-baseline gap-1.5">
+        <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">Repo by repo</h4>
+        <span className="text-[10px] text-gray-400">
+          A bot is installed per repository, so this is where &ldquo;is it a bot here, and is it
+          reviewing or quality-checking here&rdquo; is answered. The same vendor appears once per
+          repo — that is intended.
+        </span>
+      </div>
+      <p className="rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] text-gray-500 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-400">
+        Changes below apply to <span className="font-semibold">that repo only</span>. The vendor
+        name and price shown on each row are the bot&apos;s account-wide identity — edit them in the
+        section above.
+      </p>
+      {groups.map((g) => (
+        <div key={g.repoId} className="rounded border border-gray-200 dark:border-gray-700">
+          <div className="flex flex-wrap items-baseline gap-1.5 border-b border-gray-200 px-2.5 py-1.5 dark:border-gray-700">
+            <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+              {repoName.get(g.repoId) ?? `repo #${g.repoId}`}
+            </span>
+            <span className="text-[10px] text-gray-400">
+              {g.reviewBots.length} review bot{g.reviewBots.length === 1 ? '' : 's'}
+              {g.qualityChecks.length > 0 && ` · ${g.qualityChecks.length} quality check${g.qualityChecks.length === 1 ? '' : 's'}`}
+            </span>
+          </div>
+          {g.reviewBots.length === 0 &&
+          g.qualityChecks.length === 0 &&
+          g.markedNotBots.length === 0 ? (
+            <p className="px-2.5 py-2 text-[11px] text-gray-400">
+              No automated reviewers detected here yet — they appear once one has reviewed or
+              commented on a PR we&apos;ve synced.
+            </p>
+          ) : (
+            <>
+              <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                {g.reviewBots.map((r) => (
+                  <RepoReviewerRow
+                    key={r.userId}
+                    row={r}
+                    identity={identityById.get(r.userId)}
+                    botColor={botColor}
+                    busy={busy}
+                    onJudge={onJudge}
+                    onResetJudgement={onResetJudgement}
+                  />
+                ))}
+              </ul>
+              {g.qualityChecks.length > 0 && (
+                <div className="border-t border-gray-200 dark:border-gray-700">
+                  <p className="px-2.5 py-1 text-[10px] uppercase tracking-wide text-gray-400">
+                    Quality checks — excluded from the review-bot metrics
+                  </p>
+                  <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {g.qualityChecks.map((r) => (
+                      <RepoReviewerRow
+                        key={r.userId}
+                        row={r}
+                        identity={identityById.get(r.userId)}
+                        botColor={botColor}
+                        busy={busy}
+                        onJudge={onJudge}
+                        onResetJudgement={onResetJudgement}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {/* ⚠ THE ROWS SOMEONE DISMISSED, KEPT VISIBLE. "Not a bot here" writes a manual row
+                  the classifier honours forever; before this sub-list existed the row simply left
+                  the screen, so the pin was permanent AND unreachable — the search box could only
+                  offer to re-promote it (another manual write), never to hand it back to detection.
+                  Only DELIBERATE dismissals appear here (groupRowsByRepo filters on
+                  isManualOverride); every ordinary human commenter also has a not-automated row
+                  and listing those would bury these under the contributor roster. */}
+              {g.markedNotBots.length > 0 && (
+                <div className="border-t border-gray-200 dark:border-gray-700">
+                  <p className="px-2.5 py-1 text-[10px] uppercase tracking-wide text-gray-400">
+                    Marked &ldquo;not a bot&rdquo; here by you — detection leaves these alone
+                  </p>
+                  <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {g.markedNotBots.map((r) => (
+                      <RepoReviewerRow
+                        key={r.userId}
+                        row={r}
+                        identity={identityById.get(r.userId)}
+                        botColor={botColor}
+                        busy={busy}
+                        onJudge={onJudge}
+                        onResetJudgement={onResetJudgement}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+/**
+ * One judgement row: this actor, in this repo.
+ *
+ * ⚠ THE VENDOR CHIP IS READ-ONLY HERE, ON PURPOSE. Its kind, label and colour come from the
+ * ACTOR's identity (see the section above) — rendering an editor for them on a row inside a repo
+ * group is exactly the footgun this layout exists to remove.
+ */
+function RepoReviewerRow({
+  row,
+  identity,
+  botColor,
+  busy,
+  onJudge,
+  onResetJudgement,
+}: {
+  row: RepoReviewer;
+  identity: ReviewerIdentity | undefined;
+  botColor: BotColorFn;
+  busy: boolean;
+  onJudge: (userId: number, body: { repoId: number; automated?: boolean; role?: 'review' | 'quality_check' }) => void;
+  onResetJudgement: (userId: number, repoId: number) => void;
+}): JSX.Element {
+  const kind: AutomatedReviewerKind = identity?.kind ?? 'in_house';
+  const color = botColor({ login: identity?.login, kind });
+  const isQuality = row.role === 'quality_check';
+  const f = row.footprint;
+  return (
+    <li className="flex flex-col gap-1 px-2.5 py-2">
+      <div className="flex items-center gap-2">
+        {identity?.avatarUrl != null && (
+          <img src={identity.avatarUrl} alt="" className="h-5 w-5 shrink-0 rounded-full" />
+        )}
+        <span
+          className="truncate text-xs font-medium text-gray-800 dark:text-gray-100"
+          title={row.sampleReviewBody ?? undefined}
+        >
+          {identity?.login ?? `user #${row.userId}`}
+        </span>
+        <span
+          className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+          style={{ color, backgroundColor: `${color}1a` }}
+          title="The bot's account-wide vendor identity — edit it in “These bots, in every repo”."
+        >
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+          {identity?.label ?? automatedReviewerMeta(kind).label}
+        </span>
+        {row.confidence !== 'high' && (
+          <span className="shrink-0 text-[10px] text-amber-500" title={row.reasons.join(' · ')}>
+            likely ({row.confidence})
+          </span>
+        )}
+        {row.isManualOverride ? (
+          <span className="shrink-0 rounded bg-sky-50 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-sky-600 dark:bg-sky-950 dark:text-sky-300">
+            manual
+          </span>
+        ) : (
+          <span
+            className="shrink-0 text-[9px] uppercase tracking-wide text-gray-300 dark:text-gray-600"
+            title={row.reasons.join(' · ')}
+          >
+            {row.source.replace(/_/g, ' ')}
+          </span>
+        )}
+        {/* The per-repo footprint. It is what makes a stale row legible without a flag: all-zero
+            counts mean "a judgement recorded for a repo this reviewer no longer touches", which
+            used to need a `dormantInScope` boolean back when a row had no repo to point at. */}
+        <span
+          className="ml-auto shrink-0 text-[10px] text-gray-400"
+          title="Reviews / inline threads / PR comments in this repo over the last 90 days"
+        >
+          {f.reviews}r · {f.threads}t · {f.comments}c
+          <span className="ml-1 text-gray-300 dark:text-gray-600">90d</span>
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {/* A row in the "marked not a bot" bucket needs the OPPOSITE control — the two below both
+            assume `automated`, and offering "Not a bot here" on a row that already says so is a
+            button that changes nothing but the timestamp. */}
+        {row.automated ? (
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                onJudge(row.userId, {
+                  repoId: row.repoId,
+                  // `automated: true` is sent alongside the role so the row is stamped a human
+                  // judgement in one write. It is already true on this branch, so it changes
+                  // nothing but the provenance — which is the point of pressing a button.
+                  automated: true,
+                  role: isQuality ? 'review' : 'quality_check',
+                })
+              }
+              title={
+                isQuality
+                  ? 'In this repo, treat it as a real AI code reviewer again — it re-enters the ROI, behaviour and dedup metrics here.'
+                  : 'In this repo, treat it as static analysis / coverage / lint. Stays visible in the feed, but is excluded from the review-bot metrics here.'
+              }
+              className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              {isQuality ? 'Treat as review bot here' : 'Mark as quality check here'}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onJudge(row.userId, { repoId: row.repoId, automated: false })}
+              title="In this repo, stop treating this reviewer as automated. Its other repos are unaffected, and it keeps its vendor name and price everywhere."
+              className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Not a bot here
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onJudge(row.userId, { repoId: row.repoId, automated: true })}
+            title="In this repo, treat this reviewer as automated again. Its other repos are unaffected."
+            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            Treat as a review bot here
+          </button>
+        )}
+        {/* THE WAY BACK for this row, shown ONLY once a human has pinned it. The two buttons above
+            both stamp the row `manual`, which is what stops the next detection pass silently
+            reverting the edit — and also what makes it permanent without this. Note that pressing
+            one of them AGAIN does not undo anything: the row stays pinned, just on the new value.
+
+            ⚠ ONE REPO. The account-wide reset (vendor name, every repo) is in the section at the
+            top; the label says "here" for the same reason the buttons above do. */}
+        {row.isManualOverride && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onResetJudgement(row.userId, row.repoId)}
+            title="Forget your judgement for this repo and let detection decide again here. Its other repos are unaffected, and its vendor name and price are untouched."
+            className="rounded border border-dashed border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+          >
+            Reset to auto here
+          </button>
+        )}
+      </div>
+      {/* On screen rather than only on hover: the reset is the half of the model that is not
+          guessable from the buttons, and the scope difference from the account-wide reset above is
+          the thing a user must not get wrong. */}
+      {row.isManualOverride && (
+        <p className="text-[10px] text-gray-400">
+          Set by you — detection will not change it here until you reset. Resetting affects{' '}
+          <span className="font-medium text-gray-500 dark:text-gray-300">this repo only</span>, and
+          keeps the bot&apos;s vendor name and price.
+        </p>
+      )}
+    </li>
+  );
+}
+
+// ── The price ───────────────────────────────────────────────────────────────────────────────
+
+// Per-state input chrome. The two states must be distinguishable at a glance, because emptying the
+// box means something different in each: on a priced bot it CLEARS, on an unpriced one it does
+// nothing.
 const COST_INPUT_CLS: Record<CostState, string> = {
-  // Muted, but NOT to the point of unreadable in dark mode: the number in this box is a real
-  // price that applies to this team, so it has to stay legible — the italic + dashed border are
-  // what carry "it lives elsewhere", not a near-invisible text colour.
-  inherited:
-    'border-dashed border-gray-300 italic text-gray-500 dark:border-gray-600 dark:text-gray-400',
   set: 'border-violet-400 text-gray-800 dark:border-violet-600 dark:text-gray-100',
   none: 'border-gray-300 text-gray-800 dark:border-gray-700 dark:text-gray-100',
 };
 
 /**
- * The monthly cost box on one reviewer row, for the team being viewed.
+ * One bot's monthly price.
  *
- * ⚠ IT SENDS A COST-ONLY BODY (`buildCostOnlyBody` — no `automated`). Typing a price is not a
- * statement about whether the reviewer is a bot, and sending one would stamp the row manual,
- * permanently freezing its classification and converting an inherited row into a full row-level
- * override. That is why cost has its OWN apply button rather than riding the row's "Apply".
+ * ⚠ ACCOUNT-WIDE, AND RENDERED EXACTLY ONCE. It lives on the actor card, never on a repo row: the
+ * price is one subscription, so six repo rows each showing $120 would total $720 against an
+ * invoice that says $120. The repo count is printed next to the control so the scope is visible
+ * before the edit, not inferred after it.
  *
- * Local draft state, remounted per `${teamId}:${userId}` by the caller's `key`, so switching team
- * tabs always re-seeds from that team's resolved value instead of carrying a half-typed number
- * across a scope change.
+ * ⚠ 0 IS A PRICE ("we pay nothing"), EMPTY IS NO PRICE. `parseCostInput` keeps them apart —
+ * `Number('')` is 0, which is exactly the trap.
  */
 function CostEditor({
-  reviewer,
-  teamId,
+  login,
+  costMonthlyUsd,
+  repoCount,
   busy,
   onApply,
 }: {
-  reviewer: DetectedReviewer;
-  teamId: number;
+  login: string;
+  costMonthlyUsd: number | null;
+  repoCount: number;
   busy: boolean;
   onApply: (value: number | null) => void;
 }): JSX.Element {
-  const state = costStateOf(reviewer);
-  const serverText = formatCostInput(reviewer.costMonthlyUsd);
+  const state = costStateOf({ costMonthlyUsd });
+  const serverText = formatCostInput(costMonthlyUsd);
   const [text, setText] = useState(serverText);
-  // Re-seed when the server value changes under us (a successful save, or a refetch). Adjusting
-  // state during render off a "previous props" marker is React's own documented alternative to a
-  // sync effect — it avoids the extra render pass where the box still shows the old number.
   const [seededFrom, setSeededFrom] = useState(serverText);
   if (seededFrom !== serverText) {
     setSeededFrom(serverText);
@@ -517,39 +831,26 @@ function CostEditor({
   }
 
   const parsed = parseCostInput(text);
-  const outcome = parsed.ok
-    ? costEditOutcome(state, reviewer.costMonthlyUsd, parsed.value)
-    : null;
-  const atDefault = teamId === NO_TEAM_KEY;
+  const outcome = parsed.ok ? costEditOutcome(costMonthlyUsd, parsed.value) : null;
 
-  // What the button would do / why it can't. This is the "say so rather than making the user
-  // guess" requirement: emptying the box on an inherited row is a legitimate action that changes
-  // nothing, and silence there is indistinguishable from a broken control.
+  // What the button would do / why it can't. The one no-op outcome is exactly the case where a
+  // user who clicked and saw nothing needs the explanation on screen, not on hover.
   let hint: string;
   if (!parsed.ok) hint = parsed.error;
   else if (outcome == null) hint = '';
   else
     switch (outcome.kind) {
       case 'set':
-        hint = atDefault
-          ? 'Sets the default price — every team without its own price uses it.'
-          : state === 'inherited'
-            ? `Pins this price to this team; it stops following ${DEFAULT_SOURCE_LABEL}.`
-            : 'Sets this team’s own price.';
+        hint = `Sets this bot’s price across all ${repoCount} repo${repoCount === 1 ? '' : 's'} — it is one subscription.`;
         break;
-      case 'reset':
-        hint = atDefault
-          ? 'Clears the default price. Teams with no price of their own will show no cost.'
-          : `Clears this team’s price so it inherits ${DEFAULT_SOURCE_LABEL} again.`;
+      case 'clear':
+        hint = 'Clears the price. $/acted-on stops showing for this bot.';
         break;
       case 'unchanged':
         hint = 'Unchanged.';
         break;
-      case 'already-inheriting':
-        hint = `Already inheriting ${DEFAULT_SOURCE_LABEL} — clearing the box changes nothing. Type a number to set this team’s own price.`;
-        break;
       case 'no-cost':
-        hint = 'No cost set anywhere. Type a number to add one.';
+        hint = 'No price set. Type a number to add one (0 means “free”).';
         break;
     }
 
@@ -561,8 +862,8 @@ function CostEditor({
         type="text"
         inputMode="decimal"
         // Not `type="number"`: a number input in several browsers reports '' for a partially-typed
-        // or invalid value, which would be indistinguishable from the CLEAR gesture — and clear
-        // means "inherit again". Parsing the raw text keeps the three states honest.
+        // or invalid value, which would be indistinguishable from the CLEAR gesture. Parsing the
+        // raw text keeps the two states honest.
         className={`w-20 rounded border bg-white px-1.5 py-0.5 text-[11px] tabular-nums outline-none focus:border-sky-400 dark:bg-gray-800 ${COST_INPUT_CLS[state]}`}
         value={text}
         placeholder="—"
@@ -572,44 +873,12 @@ function CostEditor({
             onApply(parsed.value);
           }
         }}
-        aria-label={`Monthly cost in US dollars for ${reviewer.login}`}
-        title={
-          state === 'inherited'
-            ? `Inherited from “${DEFAULT_SOURCE_LABEL}”. Type a number to set a price for this team only.`
-            : undefined
-        }
+        aria-label={`Monthly cost in US dollars for ${login}, all repos`}
       />
       <span className="text-[11px] text-gray-400">/mo</span>
-
-      {/* The cost's OWN provenance badge, independent of the classification badge above: cost
-          resolves field-wise, so a real team override can still be quoting the default's price. */}
-      {state === 'inherited' ? (
-        <span
-          className="rounded border border-dashed border-gray-300 px-1 py-0.5 text-[9px] uppercase tracking-wide text-gray-400 dark:border-gray-600"
-          title={`This price is set on the “${DEFAULT_SOURCE_LABEL}” row and applies here because this team has none of its own.`}
-        >
-          inherited · {DEFAULT_SOURCE_LABEL}
-        </span>
-      ) : state === 'set' ? (
-        <span
-          className={
-            atDefault
-              ? 'rounded bg-sky-50 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-sky-600 dark:bg-sky-950 dark:text-sky-300'
-              : 'rounded bg-violet-50 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-violet-600 dark:bg-violet-950 dark:text-violet-300'
-          }
-          title={
-            atDefault
-              ? 'The default price. Every team without its own price inherits this.'
-              : 'A price set on this team’s own row — it does not follow the default.'
-          }
-        >
-          {atDefault ? 'default price' : 'this team'}
-        </span>
-      ) : (
-        <span className="text-[9px] uppercase tracking-wide text-gray-300 dark:text-gray-600">
-          no cost
-        </span>
-      )}
+      <span className="text-[9px] uppercase tracking-wide text-gray-400" title="One subscription, however many repos this bot runs in.">
+        all repos
+      </span>
 
       <button
         type="button"
@@ -620,16 +889,10 @@ function CostEditor({
         title={hint}
         className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
       >
-        {outcome?.kind === 'reset' ? 'Clear' : 'Save cost'}
+        {outcome?.kind === 'clear' ? 'Clear' : 'Save cost'}
       </button>
 
-      <span
-        className={`text-[10px] ${parsed.ok ? 'text-gray-400' : 'text-red-500'}`}
-        // Not a title-only hint: the two no-op outcomes are exactly the case where a user who
-        // clicked and saw nothing needs the explanation on screen, not on hover.
-      >
-        {hint}
-      </span>
+      <span className={`text-[10px] ${parsed.ok ? 'text-gray-400' : 'text-red-500'}`}>{hint}</span>
     </div>
   );
 }

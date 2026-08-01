@@ -778,63 +778,95 @@ await db
   ])
   .execute();
 
-// ---- bot-triage: classification rows + per-bot monthly COST ----
-// A MANUAL override tags Acme CI (id 10) as an in-house AI reviewer, so it shows as a
-// confirmed manual row in the Settings "Review bots" table AND joins the account's
-// automated set (analytics / dedup / bot_only_review) even though its login is not a known
-// vendor. Two rules follow: a 'hide' rule muting Copilot nitpicks under tests/, and an
-// 'auto_resolve' rule (7-day age gate) the standing job uses to clear old likely_addressed
-// CodeRabbit threads (→ #141's thread 40, ~22d old, is a candidate). Both tables are CORE.
+// ---- bot-triage: the bot object, at BOTH grains ----
+// A BOT IS A PER-REPO OBJECT (`repo_reviewers`, keyed (account, repo, author)) with a SINGLE
+// account-wide identity (`account_reviewers`, keyed (account, author)). The demo seeds both, and
+// the split is visible on screen: CodeRabbit appears once per repo in the Bots listing — THREE
+// rows, which is the intended display, not a duplicate to collapse — while its vendor colour,
+// name and $30/month price are read once from its identity row.
 //
-// CodeRabbit + Copilot get rows too, purely so the demo has a COST to show. Cost lives on
-// `bot_review_classification.cost_monthly_cents` (per team; team 0 here — the demo seeds no
-// teams, so everything sits at the account default and the scoped "No team" tab shows the whole
-// roster). It replaced `pro_settings.bot_cost_json`, whose demo entries were the LEGACY
-// kind-keyed shape `parseCost` drops on read — so the demo's $/acted-on column has silently been
-// empty. These two rows are what `classifyReviewer` itself would persist for a known vendor
-// login (source 'vendor_login', NOT 'manual'), so auto-detection is unaffected: a non-manual row
-// still re-derives, and `persist()` never writes the cost column, so the price survives every
-// classification pass.
+// ⚠ ROWS ARE ONLY SEEDED WHERE THE ACTOR ACTUALLY HAS A FOOTPRINT, mirroring the rule the real
+// listing enforces: a row for a repo a reviewer never touched is not a bot object, it is an
+// invented one. Acme CI reviews on WEB and API; CodeRabbit and Copilot are on all three.
 //
-// Acme CI deliberately carries NO cost — the in-house agent has no vendor bill, and it keeps the
+// A MANUAL row tags Acme CI (id 10) as an in-house AI reviewer on WEB, so the table shows a
+// confirmed human judgement next to auto-detected ones — and, because the two grains are gated on
+// separate provenance flags, re-running detection would leave that one row alone while refreshing
+// API's. The two vendors' rows are exactly what `classifyReviewer` itself would persist for a
+// known vendor login (source 'vendor_login', NOT 'manual'), so auto-detection is unaffected.
+//
+// Acme CI deliberately carries NO price — the in-house agent has no vendor bill, and it keeps the
 // "no cost set" state on screen next to two priced rows.
+const demoJudgement = (
+  authorUserId: number,
+  repoIds: number[],
+  extra: { source: string; reasons: string[]; manualRepoIds?: number[] },
+) =>
+  repoIds.map((repoId) => ({
+    accountId: 1,
+    repoId,
+    authorUserId,
+    automated: true,
+    role: 'review',
+    confidence: 'high',
+    source: extra.manualRepoIds?.includes(repoId) ? 'manual' : extra.source,
+    reasonsJson: extra.reasons,
+    updatedAt: now,
+  }));
+
 await db
-  .insert(schema.botReviewClassification)
+  .insert(schema.repoReviewers)
+  .values([
+    ...demoJudgement(ACME_CI, [WEB, API], {
+      source: 'behavioral',
+      reasons: ['manually confirmed as the in-house Acme CI review agent'],
+      manualRepoIds: [WEB],
+    }),
+    ...demoJudgement(CODERABBIT, [WEB, API, INFRA], {
+      source: 'vendor_login',
+      reasons: ['login "coderabbitai" is a known CodeRabbit review bot'],
+    }),
+    ...demoJudgement(COPILOT, [WEB, API, INFRA], {
+      source: 'vendor_login',
+      reasons: ['login "copilot-pull-request-reviewer" is a known Copilot review bot'],
+    }),
+  ])
+  .execute();
+
+// Identity + price: ONE row per actor, never per repo. You buy one subscription from a vendor, so
+// three repos running CodeRabbit is $30/month, not $90 — storing the price here is what makes that
+// unrepresentable. Money is integer CENTS in both dialects (the wire unit is dollars).
+await db
+  .insert(schema.accountReviewers)
   .values([
     {
       accountId: 1,
       authorUserId: ACME_CI,
-      automated: true,
       kind: 'in_house',
       label: 'In-house AI',
-      confidence: 'high',
-      source: 'manual',
-      reasonsJson: ['manually confirmed as the in-house Acme CI review agent'],
+      // A human named this one, so the classifier must leave the kind/label alone. Note this is a
+      // DIFFERENT flag from the WEB judgement row's `source: 'manual'` above — same demo actor,
+      // two independent provenances, which is the whole point of the two tables.
+      identitySource: 'manual',
+      monthlyCents: null,
       updatedAt: now,
     },
     {
       accountId: 1,
       authorUserId: CODERABBIT,
-      automated: true,
       kind: 'coderabbit',
       label: 'CodeRabbit',
-      confidence: 'high',
-      source: 'vendor_login',
-      reasonsJson: ['login "coderabbitai" is a known CodeRabbit review bot'],
-      // $30/month, stored as integer CENTS (the wire unit is dollars).
-      costMonthlyCents: 3000,
+      identitySource: 'auto',
+      monthlyCents: 3000, // $30/month
       updatedAt: now,
     },
     {
       accountId: 1,
       authorUserId: COPILOT,
-      automated: true,
       kind: 'copilot',
       label: 'Copilot',
-      confidence: 'high',
-      source: 'vendor_login',
-      reasonsJson: ['login "copilot-pull-request-reviewer" is a known Copilot review bot'],
-      costMonthlyCents: 1900, // $19/month
+      identitySource: 'auto',
+      monthlyCents: 1900, // $19/month
       updatedAt: now,
     },
   ])
@@ -1518,9 +1550,10 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
       //
       // bot_cost_json is NULL. It used to seed `[{"kind":…}]` entries, which are the LEGACY
       // kind-keyed shape `parseCost` drops on read — so the demo's cost column was empty either
-      // way. Per-bot cost now lives on `bot_review_classification.cost_monthly_cents` (seeded
-      // above for CodeRabbit + Copilot), which is per TEAM and CORE/free. There is no write path
-      // to this blob any more; it survives only as a read-time fallback.
+      // way. Per-bot cost now lives on `account_reviewers.monthly_cents` (seeded above for
+      // CodeRabbit + Copilot), which is per ACTOR — one price per vendor, whatever number of
+      // repos it runs in — and CORE/free. There is no write path to this blob any more; it
+      // survives only as a read-time fallback.
       1, 1, 'acme-ci,*-ci', 0,
       0, 1, 1, 1,
       1, 7, null,
@@ -1759,8 +1792,9 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
 console.log('Seeded demo data into', config.dbPath);
 console.log('  repos: acme/web-app (1), acme/api (2), acme/infrastructure (3)');
 console.log('  me: Morgan Diaz (account 1 → users.id 1)');
-console.log('  bot-triage: CodeRabbit(8) + Copilot(9) vendors, Acme CI(10) in-house (manual);');
-console.log('    #113 Copilot/CodeRabbit dedup, #116 bot-only review, mute + auto_resolve rules');
+console.log('  bot-triage: 8 repo_reviewers rows over 3 actors + 3 account_reviewers identities;');
+console.log('    CodeRabbit(8) $30 + Copilot(9) $19 on all 3 repos, Acme CI(10) on web+manual/api;');
+console.log('    #113 Copilot/CodeRabbit dedup, #116 bot-only review');
 console.log('  PR-detail / Claude shot: ?pr=113 · AI-fix shot: ?pr=114 (failing CI)');
 console.log('  curated PRs:', PRS.length, `(ids 101–116 recent + 120–134 mid-range + 140–142 stale)`);
 console.log('  open PRs:', prRows.filter((p) => p.state === 'open').map((p) => p.id).join(', '));
