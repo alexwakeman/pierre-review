@@ -77,6 +77,25 @@ async function seed(accountId: number, tag: string) {
 const A = await seed(1, 'A');
 const B = await seed(2, 'B');
 
+// ── WORKSPACES MUST EXIST BEFORE ANYTHING SCOPED RUNS ───────────────────────────
+// ⚠ THE SCRIPT INSERTS ITS ACCOUNTS DIRECTLY, AFTER MIGRATING AN EMPTY DB, so migration 0044's
+// Default backfill (which walks the accounts that existed at migration time) never sees them and
+// neither account gets a Default workspace. Without this call half the assertions below would be
+// asserting over an account with NO workspace at all — every listing empty, every write a no-op,
+// every negative check passing for the wrong reason. It is the single largest vacuity risk in
+// this file.
+const defaultA = await q.ensureDefaultWorkspace(1);
+const defaultB = await q.ensureDefaultWorkspace(2);
+// The membership repair is what puts the seeded repos INTO those workspaces (they were inserted
+// straight into `repos`, bypassing upsertRepo's in-transaction membership insert). Every scoped
+// read below resolves through it, so run it once up front rather than relying on a side effect.
+await q.ensureRepoMemberships(1);
+await q.ensureRepoMemberships(2);
+// The scope object every bot getter now takes: `workspaceId` decides who counts as a bot,
+// `repoIds` narrows which data is measured.
+const scopeA = await q.resolveWorkspaceScope(1, defaultA);
+const scopeB = await q.resolveWorkspaceScope(2, defaultB);
+
 const from = new Date(now.getTime() - 30 * 86_400_000);
 const to = new Date(now.getTime() + 86_400_000);
 const win = {
@@ -130,8 +149,8 @@ check('getOpenPrs(A, repoIds=[B.repo]) leaks nothing', opCross.length === 0);
 
 const reposA = await q.listRepos(1);
 check("listRepos(A) returns only A's repo", reposA.length === 1 && reposA[0]!.id === A.repoId);
-const nodesA = await q.getWatchedRepoNodeIds(1);
-check("getWatchedRepoNodeIds(A) excludes B's node", nodesA.has(A.nodeId) && !nodesA.has(B.nodeId));
+const nodesA = await q.getAddedRepoNodeIds(1);
+check("getAddedRepoNodeIds(A) excludes B's node", nodesA.has(A.nodeId) && !nodesA.has(B.nodeId));
 
 check('getPrDetail(A.pr, A) returns the PR', (await q.getPrDetail(A.prId, 1))?.id === A.prId);
 check('getPrDetail(B.pr, A) returns null (IDOR blocked)', (await q.getPrDetail(B.prId, 1)) === null);
@@ -160,11 +179,14 @@ check(
 const mergersA = await q.getMergers(1);
 check("getMergers(A) excludes B's repo", !mergersA.some((m) => m.repoId === B.repoId));
 
-// Activity Feed: watch both repos, then each account's feed must contain only its own
-// watched-repo events (cross-account IDOR).
-await db.update(repos).set({ inboxWatch: true }).where(eq(repos.id, A.repoId)).execute();
-await db.update(repos).set({ inboxWatch: true }).where(eq(repos.id, B.repoId)).execute();
-const feedA = await q.getFeed(1, { daysBefore: 14, watchedOnly: true });
+// Activity Feed: each account's feed must contain only its own events (cross-account IDOR).
+//
+// This used to flip `inboxWatch: true` on BOTH repos first, because `getFeed` took a
+// `watchedOnly` flag and would otherwise have returned nothing — which would have made the
+// "excludes B's events" check pass VACUOUSLY, for the wrong reason. That axis is gone: every
+// repo of an account is live, so both repos' events are in scope by construction and the only
+// thing that can be excluding B's row here is the accountId predicate.
+const feedA = await q.getFeed(1, { daysBefore: 14 });
 check(
   "getFeed(A) returns only A's events",
   feedA.events.length === 1 && feedA.events[0]!.prId === A.prId,
@@ -172,7 +194,7 @@ check(
 check("getFeed(A) excludes B's events", !feedA.events.some((e) => e.repoId === B.repoId));
 
 // Activity aggregate: each account's activity console must contain only its own repos.
-const activityB = await q.getActivity(2, null);
+const activityB = await q.getActivity(2, scopeB);
 check(
   "getActivity(B) returns only B's repo",
   activityB.repos.length === 1 && activityB.repos[0]!.repoId === B.repoId,
@@ -181,7 +203,8 @@ check(
   "getActivity(B) excludes A's repo",
   !activityB.repos.some((r) => r.repoId === A.repoId),
 );
-const activityCross = await q.getActivity(2, [A.repoId]);
+// The transposed scope again: B's own workspace, narrowed to A's repo id off the wire.
+const activityCross = await q.getActivity(2, { workspaceId: defaultB, repoIds: [A.repoId] });
 check(
   "getActivity(B, repoIds=[A.repo]) leaks nothing",
   !activityCross.repos.some((r) => r.repoId === A.repoId),
@@ -189,7 +212,7 @@ check(
 
 // Consolidated Feed: A's stream must reference only A's repos/PRs (it composes
 // getMyTurn + getFeed + the unresolved-threads reader, all accountId-scoped).
-const cfA = await q.getConsolidatedFeed(1);
+const cfA = await q.getConsolidatedFeed(1, { workspaceId: defaultA });
 check(
   "getConsolidatedFeed(A) references only A's repos",
   !cfA.items.some((i) => i.repoId === B.repoId || i.prId === B.prId),
@@ -232,234 +255,585 @@ const rbtCross = await q.getResolvableBotThreads(A.prId, 2);
 check('getResolvableBotThreads(A.pr, B) leaks nothing (IDOR blocked)', rbtCross.length === 0);
 
 // Scope-wide variant (item 3 "clear the stale-bot backlog"): getResolvableBotThreadsForScope
-// generalizes the per-PR getter to the whole account / a repo set. Same PR→account ownership
-// join, so A sees its seeded thread and B sees nothing even when handed A's repo ids. The
-// threadIds=[] "resolve nothing" landmine is preserved across the scope variant too.
-const scopeOwn = await q.getResolvableBotThreadsForScope(1, null);
+// generalizes the per-PR getter to a whole workspace. Same PR→account ownership join, so A sees
+// its seeded thread and B sees nothing even when handed A's repo ids. The threadIds=[] "resolve
+// nothing" landmine is preserved across the scope variant too.
+const scopeOwn = await q.getResolvableBotThreadsForScope(1, scopeA);
 check(
-  'getResolvableBotThreadsForScope(A, null scope) includes A’s seeded bot thread',
+  'getResolvableBotThreadsForScope(A, A’s workspace) includes A’s seeded bot thread',
   scopeOwn.threads.some((t) => t.threadNodeId === 'RT_iso_A') && scopeOwn.totalEligible >= 1,
 );
-const scopeCross = await q.getResolvableBotThreadsForScope(2, [A.repoId]);
+// The transposed scope: account B's OWN workspace, narrowed to A's repo id. `repoIds` arrives off
+// the wire, so this is exactly the shape a hand-edited URL produces.
+const scopeCross = await q.getResolvableBotThreadsForScope(2, {
+  workspaceId: defaultB,
+  repoIds: [A.repoId],
+});
 check(
   'getResolvableBotThreadsForScope(B, A.repo) leaks nothing (IDOR blocked)',
   scopeCross.threads.length === 0 && scopeCross.totalEligible === 0,
 );
-const scopeEmptySel = await q.getResolvableBotThreadsForScope(1, null, []);
+const scopeEmptySel = await q.getResolvableBotThreadsForScope(1, scopeA, []);
 check(
   'getResolvableBotThreadsForScope(A, threadIds=[]) resolves nothing (landmine preserved)',
   scopeEmptySel.threads.length === 0 && scopeEmptySel.totalEligible === 0,
 );
 
-// ── Bot-Triage Platform: the bot object, at BOTH grains ─────────────────────────
-// `repo_reviewers` (account, repo, author) holds the JUDGEMENT; `account_reviewers`
-// (account, author) holds the IDENTITY + price. Both are account-scoped, both are reachable
-// from the wire as WRITE surfaces, so both get directional checks here and again below.
+// ── THE BOT OBJECT: `workspace_reviewers`, ONE row per (account, workspace, actor) ───────────
+// The 0042/0043 two-table split is GONE: judgement, vendor identity and price now share a row.
+// That removes a table boundary which used to make "a judgement write cannot touch identity" a
+// database fact, so everything below tests it as CODE DISCIPLINE instead — which is precisely why
+// each pair is written out rather than assumed.
+//
+// `workspaceId` arrives in a REQUEST BODY, so it is a first-class attack surface: every write is
+// probed in BOTH directions (a foreign workspace id, and a foreign actor).
 
-// A manual per-repo judgement on account 1 for the bot reviewer (originator of RT_iso_A).
-const ovA = await q.setRepoReviewerJudgement(1, botUser!.id, {
-  repoId: A.repoId,
+// Read a stored row directly. Reading the RETURN VALUE of the write under test would prove only
+// that the function returns what it says it wrote; the row scan is what proves what landed.
+async function reviewerRow(
+  accountId: number,
+  workspaceId: number,
+  userId: number,
+): Promise<Record<string, unknown> | undefined> {
+  const rows = await db.select().from(schema.workspaceReviewers).execute();
+  return (rows as Record<string, unknown>[]).find(
+    (r) =>
+      r.accountId === accountId && r.workspaceId === workspaceId && r.authorUserId === userId,
+  );
+}
+
+// A manual judgement on account 1 for the bot reviewer (originator of RT_iso_A).
+const ovA = await q.setWorkspaceReviewer(1, botUser!.id, {
+  workspaceId: defaultA,
   automated: true,
 });
 check(
-  'setRepoReviewerJudgement(A, A.repo, botUser) writes a manual judgement',
+  'setWorkspaceReviewer(A, A’s workspace, botUser) writes a manual judgement',
   ovA?.source === 'manual' && ovA?.automated === true,
 );
-// The IDENTITY is a SEPARATE write at a SEPARATE grain — and the judgement above must not have
-// touched it (a per-repo write that set kind/label is the exact bug the split exists to kill).
-const idA = await q.setReviewerIdentity(1, botUser!.id, {
+// A judgement-only patch must NOT stamp the identity provenance flag. With one table this is the
+// only thing left separating "not a bot here" from "un-name the vendor".
+check(
+  'the judgement write left identity provenance on auto',
+  ovA?.identitySource === 'auto',
+);
+const idA = await q.setWorkspaceReviewer(1, botUser!.id, {
+  workspaceId: defaultA,
   kind: 'coderabbit',
   label: 'CodeRabbit',
 });
 check(
-  'setReviewerIdentity(A, botUser) writes the actor-grain identity',
+  'setWorkspaceReviewer(A, kind/label) writes the identity and stamps identitySource manual',
   idA?.kind === 'coderabbit' && idA?.identitySource === 'manual',
 );
-
-// listDetectedReviewers is account-scoped: A sees the bot (it originated a thread), B doesn't.
-const drA = await q.listDetectedReviewers(1);
 check(
-  'listDetectedReviewers(A) includes A’s bot reviewer at both grains',
-  drA.reviewers.some((r: { userId: number }) => r.userId === botUser!.id) &&
-    drA.rows.some(
-      (r: { userId: number; repoId: number }) =>
-        r.userId === botUser!.id && r.repoId === A.repoId,
-    ),
+  'the identity write left the judgement provenance manual and automated true',
+  idA?.source === 'manual' && idA?.automated === true,
 );
-const drB = await q.listDetectedReviewers(2);
+
+// listDetectedReviewers is workspace-scoped: A sees the bot (it originated a thread), B doesn't.
+const drA = await q.listDetectedReviewers(1, scopeA);
+check(
+  'listDetectedReviewers(A) includes A’s bot reviewer and echoes the resolved workspace',
+  drA.reviewers.some((r: { userId: number }) => r.userId === botUser!.id) &&
+    drA.workspaceId === defaultA,
+);
+const drB = await q.listDetectedReviewers(2, scopeB);
 check(
   "listDetectedReviewers(B) excludes A's reviewer (IDOR blocked)",
-  !drB.reviewers.some((r: { userId: number }) => r.userId === botUser!.id) &&
-    !drB.rows.some((r: { userId: number }) => r.userId === botUser!.id),
+  !drB.reviewers.some((r: { userId: number }) => r.userId === botUser!.id),
 );
-// …including when B explicitly NAMES A's repo id. `repoIds` arrives off the wire, so the listing
-// INTERSECTS it with the caller's own repos. Without that intersection this is a straight
+// …including when B explicitly NAMES A's repo id. `repoIds` arrives off the wire, so the scope is
+// intersected with the WORKSPACE's membership. Without that intersection this is a straight
 // cross-tenant read of another account's bot rows — and, because `author_user_id` points at the
 // GLOBAL `users` table, of its contributors' logins, display names and avatars.
-const drCross = await q.listDetectedReviewers(2, [A.repoId]);
+const drCross = await q.listDetectedReviewers(2, {
+  workspaceId: defaultB,
+  repoIds: [A.repoId],
+});
 check(
   'listDetectedReviewers(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)',
-  drCross.rows.length === 0 && drCross.repoIds.length === 0,
+  drCross.reviewers.length === 0 && drCross.repoIds.length === 0,
 );
 check(
-  'listDetectedReviewers(A, repoIds=[A.repo]) DOES return A’s row (the scan above is not vacuous)',
-  (await q.listDetectedReviewers(1, [A.repoId])).rows.some(
-    (r: { userId: number }) => r.userId === botUser!.id,
-  ),
+  'listDetectedReviewers(A, repoIds=[A.repo]) DOES return A’s reviewer (the scan above is not vacuous)',
+  (
+    await q.listDetectedReviewers(1, { workspaceId: defaultA, repoIds: [A.repoId] })
+  ).reviewers.some((r: { userId: number }) => r.userId === botUser!.id),
 );
 
-// ── THE TWO GRAINS MUST NOT REACH EACH OTHER (the whole point of the split) ──────
-// A per-repo "not a bot" must not null the ACTOR's vendor kind. That was the shipped bug:
-// CodeRabbit detected on three repos, a user clicks "Not a bot" on ONE, identity resolution
-// picks that row up, and the vendor loses its brand colour and name on repos nobody touched.
-await q.setRepoReviewerJudgement(1, botUser!.id, { repoId: A.repoId, automated: false });
+// ── THE TWO PROVENANCE FLAGS MUST NOT REACH EACH OTHER ──────────────────────────
+// A "not a bot" must not null the vendor kind. That WAS the shipped bug behind the old two-table
+// split, and the merged row can no longer prevent it with a constraint — only the narrowed `set:`
+// object can, so it is asserted on the stored row.
+await q.setWorkspaceReviewer(1, botUser!.id, { workspaceId: defaultA, automated: false });
+const afterNotBot = await reviewerRow(1, defaultA, botUser!.id);
 check(
-  'a per-repo "not a bot" leaves the ACTOR identity (kind/label) untouched',
-  (await q.listDetectedReviewers(1)).reviewers.find(
-    (r: { userId: number }) => r.userId === botUser!.id,
-  )?.kind === 'coderabbit',
+  'a "not a bot" judgement leaves kind, label AND identitySource untouched',
+  afterNotBot?.automated === false &&
+    afterNotBot?.kind === 'coderabbit' &&
+    afterNotBot?.label === 'CodeRabbit' &&
+    afterNotBot?.identitySource === 'manual',
 );
-// …and the mirror: an identity edit must not restate any repo's judgement.
-await q.setReviewerIdentity(1, botUser!.id, { label: 'CodeRabbit (renamed)' });
+// …and the mirror: an identity edit must not restate the judgement.
+await q.setWorkspaceReviewer(1, botUser!.id, {
+  workspaceId: defaultA,
+  label: 'CodeRabbit (renamed)',
+});
+const afterRename = await reviewerRow(1, defaultA, botUser!.id);
 check(
-  'an identity edit leaves the per-repo judgement untouched',
-  (await q.listDetectedReviewers(1)).rows.find(
-    (r: { userId: number; repoId: number }) =>
-      r.userId === botUser!.id && r.repoId === A.repoId,
-  )?.automated === false,
+  'an identity edit leaves automated/role/source untouched',
+  afterRename?.automated === false &&
+    afterRename?.source === 'manual' &&
+    afterRename?.label === 'CodeRabbit (renamed)',
 );
 // Restore the automated verdict for the analytics checks below.
-await q.setRepoReviewerJudgement(1, botUser!.id, { repoId: A.repoId, automated: true });
+await q.setWorkspaceReviewer(1, botUser!.id, { workspaceId: defaultA, automated: true });
 
-// A judgement write naming ANOTHER tenant's repo must 404 rather than land. The composite FK
-// `(repo_id, account_id) → repos(id, account_id)` would also reject it, but a constraint
-// violation is a 500 — the query layer's own ownership check is what makes it a 404, and this
-// pair is what proves the check exists rather than the FK carrying it.
+// A write naming ANOTHER tenant's WORKSPACE must 404 rather than land. The composite FK
+// `(workspace_id, account_id) → workspaces(id, account_id)` would also reject it, but a constraint
+// violation is a 500 — the query layer's own ownership check is what makes it a 404, and this pair
+// is what proves the check exists rather than the FK carrying it.
 check(
-  'setRepoReviewerJudgement(B, A.repo) returns null (foreign repo → 404)',
-  (await q.setRepoReviewerJudgement(2, botUser!.id, {
-    repoId: A.repoId,
+  'setWorkspaceReviewer(A, B’s workspace) returns null (foreign workspace → 404)',
+  (await q.setWorkspaceReviewer(1, botUser!.id, {
+    workspaceId: defaultB,
     automated: false,
   })) === null,
 );
-const aStill = (await q.listDetectedReviewers(1)).rows.find(
-  (r: { userId: number; repoId: number }) => r.userId === botUser!.id && r.repoId === A.repoId,
+check(
+  'setWorkspaceReviewer(B, A’s workspace) returns null (foreign workspace → 404)',
+  (await q.setWorkspaceReviewer(2, botUser!.id, {
+    workspaceId: defaultA,
+    automated: false,
+  })) === null,
 );
 check(
-  "account 2's attempted write leaves account 1's judgement intact",
-  aStill?.automated === true,
+  "account 2's attempted write left account 1's judgement intact",
+  (await reviewerRow(1, defaultA, botUser!.id))?.automated === true,
 );
-// Direct row scan: no repo_reviewers row may exist under account 2 for A's repo.
+// Direct row scan: no workspace_reviewers row may exist under account 2 at all yet.
 check(
-  'no repo_reviewers row was written for account 2 against A’s repo',
-  !(await db.select().from(schema.repoReviewers).execute()).some(
-    (r: { accountId: number; repoId: number }) => r.accountId === 2 && r.repoId === A.repoId,
+  'no workspace_reviewers row was written for account 2',
+  !((await db.select().from(schema.workspaceReviewers).execute()) as { accountId: number }[]).some(
+    (r) => r.accountId === 2,
   ),
 );
-// ⚠ THE CROSS-ACCOUNT CHECKS ABOVE ARE COVERED THREE TIMES OVER (the repo-ownership check, the
-// footprint gate, and the composite FK), which makes each one individually unfalsifiable — a
-// mutation run removing any single guard still passes. The ANTI-FABRICATION rule is the one this
-// pair actually pins, and it is same-account, so no other guard can stand in for it: an actor
-// with no review, thread or comment in a repo must not get a row there. It matters because a row
-// IS the bot object and the listing is row-driven — a fabricated pair would render a stranger's
-// login, display name and avatar (from the GLOBAL `users` table) inside this account's settings.
+
+// ⚠ THE CROSS-ACCOUNT CHECKS ABOVE ARE COVERED SEVERAL TIMES OVER (the workspace-ownership check,
+// the footprint gate, and the composite FK), which makes each one individually unfalsifiable — a
+// mutation run removing any single guard still passes. The two SAME-ACCOUNT rules below are the
+// ones nothing else can stand in for.
+//
+// 1. ANTI-FABRICATION. An actor with no review, thread or comment anywhere in the workspace must
+//    not get a row. It matters because a row IS the bot object and the listing is row-driven — a
+//    fabricated pair would render a stranger's login, display name and avatar (from the GLOBAL
+//    `users` table) inside this account's settings.
 const [ghostUser] = await db
   .insert(schema.users)
-  .values({ githubLogin: 'never-touched-this-repo', githubNodeId: 'U_ghost', isBot: false })
+  .values({ githubLogin: 'never-touched-this-workspace', githubNodeId: 'U_ghost', isBot: false })
   .returning()
   .execute();
 check(
-  'setRepoReviewerJudgement(A, A.repo, an actor with NO footprint there) returns null',
-  (await q.setRepoReviewerJudgement(1, ghostUser!.id, {
-    repoId: A.repoId,
+  'setWorkspaceReviewer(A, an actor with NO footprint in the workspace) returns null',
+  (await q.setWorkspaceReviewer(1, ghostUser!.id, {
+    workspaceId: defaultA,
     automated: true,
   })) === null,
 );
 check(
-  'no repo_reviewers row was fabricated for that actor',
-  !(await db.select().from(schema.repoReviewers).execute()).some(
-    (r: { authorUserId: number }) => r.authorUserId === ghostUser!.id,
-  ),
+  'no workspace_reviewers row was fabricated for that actor (the return value alone proves nothing)',
+  (await reviewerRow(1, defaultA, ghostUser!.id)) === undefined,
 );
 
-// ── THE RESETS ARE WRITES TOO, AND THEY DELETE ──────────────────────────────────
-// DELETE /api/bot-reviewers/:userId/judgement?repoId= is the way back to auto for ONE repo row,
-// and it is the most dangerous shape in this file: an unscoped DELETE would remove another
-// tenant's judgement AND report success. `accountId` is in the predicate, so B matches no row —
-// the row scan below is what proves that rather than the return value, which a swallowed write
-// would also produce.
+// 2. MISMATCHED SCOPE — new under the workspace model, and a wider surface than before.
+//    `listDetectedReviewers` is the ONE function that WRITES rows keyed to `workspaceId` off a
+//    footprint derived from `repoIds`, so a transposed pair does not merely read the wrong repos:
+//    it fabricates bot objects in a workspace the actor has never touched. A's second workspace is
+//    EMPTY, so a row keyed to it can only have come from A.repoId leaking through the narrowing.
+// ⚠ THE SECOND WORKSPACE MUST OWN A REPO OF ITS OWN, or this whole sub-block is VACUOUS. With an
+// EMPTY second workspace, "the narrowing was bounded by the membership" and "the narrowing was
+// ignored entirely" produce the SAME answer — the empty set — so a mutation dropping the
+// intersection passes. MEASURED: it did. The other repo is what makes the two outcomes different
+// ([] vs [otherRepo]).
+const wsOtherA = await q.createWorkspace(1, 'Other A');
+const [otherRepoA] = await db
+  .insert(repos)
+  .values({ accountId: 1, owner: 'orgA', name: 'repoA2', githubNodeId: 'R_A2' })
+  .returning()
+  .execute();
+await q.assignReposToWorkspace(wsOtherA.id, 1, [otherRepoA!.id]);
+const beforeMismatch = (
+  (await db.select().from(schema.workspaceReviewers).execute()) as { workspaceId: number }[]
+).length;
+const mismatched = await q.listDetectedReviewers(1, {
+  workspaceId: wsOtherA.id,
+  repoIds: [A.repoId], // a repo of A's DEFAULT workspace, not of wsOtherA
+});
 check(
-  'resetRepoReviewerJudgement(B, A.repo) returns false (foreign row → 404)',
-  (await q.resetRepoReviewerJudgement(2, botUser!.id, A.repoId)) === false,
+  'listDetectedReviewers(A, wsOther, repoIds=[a repo of another workspace]) returns nothing',
+  mismatched.reviewers.length === 0 && mismatched.repoIds.length === 0,
 );
 check(
-  "account 1's judgement row SURVIVED account 2's reset attempt",
-  (await db.select().from(schema.repoReviewers).execute()).some(
-    (r: { accountId: number; authorUserId: number; repoId: number }) =>
-      r.accountId === 1 && r.authorUserId === botUser!.id && r.repoId === A.repoId,
-  ),
+  'and it wrote NO row keyed to the other workspace (anti-fabrication under a transposed scope)',
+  (await reviewerRow(1, wsOtherA.id, botUser!.id)) === undefined &&
+    ((await db.select().from(schema.workspaceReviewers).execute()) as unknown[]).length ===
+      beforeMismatch,
 );
-// The positive control, and the anti-vacuity guard for the pair above: the OWNER's reset does
-// delete the row.
+// The same transposition through the RESOLVER must bound itself the same way — that is where the
+// intersection is contractual; the check above is the defence in depth behind it. The assertion is
+// deliberately on BOTH sides: not merely "empty", but "empty AND not the workspace's own repo",
+// which is what a dropped intersection would return.
+const boundedScope = await q.resolveWorkspaceScope(1, wsOtherA.id, [A.repoId]);
 check(
-  'resetRepoReviewerJudgement(A, A.repo) returns true and removes the row',
-  (await q.resetRepoReviewerJudgement(1, botUser!.id, A.repoId)) === true &&
-    !(await db.select().from(schema.repoReviewers).execute()).some(
-      (r: { accountId: number; authorUserId: number; repoId: number }) =>
-        r.accountId === 1 && r.authorUserId === botUser!.id && r.repoId === A.repoId,
+  'resolveWorkspaceScope(A, wsOther, narrow=[a repo of another workspace]) yields NO repos',
+  boundedScope.workspaceId === wsOtherA.id &&
+    boundedScope.repoIds.length === 0 &&
+    !boundedScope.repoIds.includes(otherRepoA!.id),
+);
+// The positive control: the SAME resolver call with the workspace's OWN repo does return it, so
+// the check above is not passing because narrowing always yields nothing.
+const boundedOwn = await q.resolveWorkspaceScope(1, wsOtherA.id, [otherRepoA!.id]);
+check(
+  'resolveWorkspaceScope(A, wsOther, narrow=[its own repo]) DOES return it (positive control)',
+  boundedOwn.repoIds.length === 1 && boundedOwn.repoIds[0] === otherRepoA!.id,
+);
+
+// ── THE RESETS ARE WRITES TOO ───────────────────────────────────────────────────
+// DELETE /api/bot-reviewers/:userId/{judgement,identity}?workspaceId= are the way back to auto.
+// Unscoped they would rewrite another tenant's row AND report success; `accountId` is in the
+// predicate, so B matches nothing — and the row scan, not the return value, is what proves it.
+check(
+  'resetWorkspaceReviewerJudgement(B, A’s workspace) returns null (foreign workspace → 404)',
+  (await q.resetWorkspaceReviewerJudgement(2, botUser!.id, defaultA)) === null,
+);
+check(
+  "account 1's row SURVIVED account 2's reset attempt, still manual",
+  (await reviewerRow(1, defaultA, botUser!.id))?.source === 'manual',
+);
+// ⚠ DIRTY THE ROW TO A NON-MANUAL, NON-DERIVED STATE BEFORE THE IDENTITY RESET, or the "left the
+// judgement untouched" check below is vacuous twice over: a `source: 'manual'` row is skipped by
+// the classifier anyway, and an identical rewrite is invisible because sqlite stores `updated_at`
+// at one-second granularity.
+await db
+  .update(schema.workspaceReviewers)
+  .set({ automated: false, role: 'quality_check', source: 'behavioral' })
+  .where(
+    and(
+      eq(schema.workspaceReviewers.accountId, 1),
+      eq(schema.workspaceReviewers.workspaceId, defaultA),
+      eq(schema.workspaceReviewers.authorUserId, botUser!.id),
     ),
-);
-// …and a reset must not reach the ACTOR grain: the vendor identity written above is still there,
-// LABEL INCLUDED (a mutation that nulled only the label slipped past a kind-only assertion).
+  )
+  .execute();
 check(
-  'a judgement reset leaves the ACTOR identity (kind AND label) untouched',
-  (await db.select().from(schema.accountReviewers).execute()).some(
-    (r: {
-      accountId: number;
-      authorUserId: number;
-      kind: string | null;
-      label: string | null;
-      identitySource: string;
-    }) =>
-      r.accountId === 1 &&
-      r.authorUserId === botUser!.id &&
-      r.kind === 'coderabbit' &&
-      r.label === 'CodeRabbit (renamed)' &&
-      r.identitySource === 'manual',
-  ),
+  'resetWorkspaceReviewerIdentity(B, A’s workspace) returns null (foreign workspace → 404)',
+  (await q.resetWorkspaceReviewerIdentity(2, botUser!.id, defaultA)) === null,
+);
+// Positive control — and it must come back AUTO-DERIVED, not merely blanked: the reset re-runs the
+// classifier identity-half-only in the same request, so the vendor's own label returns in place of
+// the human's 'CodeRabbit (renamed)'. A clear-only reset would leave kind null forever and read as
+// "delete the vendor".
+const resetIdA = await q.resetWorkspaceReviewerIdentity(1, botUser!.id, defaultA);
+check(
+  'resetWorkspaceReviewerIdentity(A) re-derives the vendor and hands provenance back to auto',
+  resetIdA?.identitySource === 'auto' &&
+    resetIdA?.kind === 'coderabbit' &&
+    resetIdA?.label === 'CodeRabbit',
+);
+// …and it touched NEITHER half of the judgement. The row must still carry the DIRTIED values
+// above — a judgement re-derivation would have put them back to automated/review, which is exactly
+// what makes this falsifiable.
+const afterIdReset = await reviewerRow(1, defaultA, botUser!.id);
+check(
+  'the identity reset left the judgement columns untouched',
+  afterIdReset?.automated === false &&
+    afterIdReset?.role === 'quality_check' &&
+    afterIdReset?.source === 'behavioral',
+);
+// The judgement reset is the mirror: it re-derives automated/role and must not disturb the
+// identity it now shares a row with.
+const resetJA = await q.resetWorkspaceReviewerJudgement(1, botUser!.id, defaultA);
+check(
+  'resetWorkspaceReviewerJudgement(A) re-derives the judgement from the vendor login',
+  resetJA?.automated === true && resetJA?.source !== 'manual',
+);
+check(
+  'a judgement reset leaves the vendor identity (kind AND label) intact',
+  resetJA?.kind === 'coderabbit' && resetJA?.label === 'CodeRabbit',
 );
 // Restore the manual automated verdict for the analytics checks below.
-await q.setRepoReviewerJudgement(1, botUser!.id, { repoId: A.repoId, automated: true });
+await q.setWorkspaceReviewer(1, botUser!.id, { workspaceId: defaultA, automated: true });
 
-// getBotAnalytics is account-scoped: A surfaces the bot's thread; B surfaces nothing.
-const anA = await q.getBotAnalytics(1, 'rolling_30');
+// ── COST: THE ONE COLUMN NOTHING DERIVES ────────────────────────────────────────
+// A price is money the user typed, so it takes the same ownership gate as everything else on the
+// row AND one more rule the others do not have: it is PER WORKSPACE, so a write must name exactly
+// one row and leave the same actor's rows in other workspaces byte-identical.
+check(
+  'setReviewerCost(B, A’s workspace) returns null (foreign workspace → 404)',
+  (await q.setReviewerCost(2, botUser!.id, defaultA, 99)) === null,
+);
+check(
+  'setReviewerCost(A, A’s workspace) succeeds (positive control)',
+  (await q.setReviewerCost(1, botUser!.id, defaultA, 99)) !== null,
+);
+const costRows = (await db.select().from(schema.workspaceReviewers).execute()) as {
+  accountId: number;
+  workspaceId: number;
+  authorUserId: number;
+  monthlyCents: number | null;
+}[];
+check(
+  'the price landed on A’s own row and nothing was written under account 2',
+  costRows.some(
+    (r) =>
+      r.accountId === 1 &&
+      r.workspaceId === defaultA &&
+      r.authorUserId === botUser!.id &&
+      r.monthlyCents === 9900,
+  ) && !costRows.some((r) => r.accountId === 2),
+);
+// The int4 CLAMP. Unbounded, Postgres RAISES `integer out of range` (a 500) while SQLite's 64-bit
+// integers accept the value happily — the same request succeeding locally and 500ing in cloud is
+// the divergence class this is here to keep closed.
+check(
+  'setReviewerCost clamps to the int4 cents ceiling (no dialect divergence)',
+  (await q.setReviewerCost(1, botUser!.id, defaultA, 99_999_999_999))?.costMonthlyUsd ===
+    21474836.47,
+);
+check(
+  'setReviewerCost(null) clears the price without deleting the row or its identity',
+  (await q.setReviewerCost(1, botUser!.id, defaultA, null))?.costMonthlyUsd === null &&
+    (await reviewerRow(1, defaultA, botUser!.id))?.kind === 'coderabbit',
+);
+// 0 is a REAL price ("we pay nothing"), not "unset" — a `||` anywhere on this path collapses it.
+check(
+  'setReviewerCost(0) stores a real zero, distinct from null',
+  (await q.setReviewerCost(1, botUser!.id, defaultA, 0))?.costMonthlyUsd === 0,
+);
+
+// ── WORKSPACE CRUD (CORE) ───────────────────────────────────────────────────────
+// `workspaces` + `workspace_repos` are account-scoped; every getter/writer filters accountId and
+// every id-addressed mutator verifies ownership → false/empty/'not_found' for a foreign workspace.
+const wsA = await q.createWorkspace(1, 'Workspace A');
+await q.assignReposToWorkspace(wsA.id, 1, [A.repoId]);
+const wsB = await q.createWorkspace(2, 'Workspace B');
+await q.assignReposToWorkspace(wsB.id, 2, [B.repoId]);
+
+const listA = await q.listWorkspaces(1);
+check(
+  "listWorkspaces(A) returns A's own workspaces with the Default first",
+  listA.length >= 2 && listA[0]!.isDefault === true && listA.some((w) => w.id === wsA.id),
+);
+check(
+  "listWorkspaces(A) excludes B's workspaces",
+  !listA.some((w) => w.id === wsB.id || w.id === defaultB),
+);
+check(
+  "listWorkspaces(A) never surfaces B's repo in any membership",
+  !listA.some((w) => w.repoIds.includes(B.repoId)),
+);
+check(
+  'getWorkspaceRepoIds(wsA, A) returns A.repo',
+  (await q.getWorkspaceRepoIds(wsA.id, 1)).length === 1,
+);
+check(
+  'getWorkspaceRepoIds(wsA, B) leaks nothing (IDOR blocked)',
+  (await q.getWorkspaceRepoIds(wsA.id, 2)).length === 0,
+);
+
+// B cannot rename / delete / assign into A's workspace.
+check(
+  'renameWorkspace(wsA, B) returns false (IDOR blocked)',
+  (await q.renameWorkspace(wsA.id, 2, 'hacked')) === false,
+);
+check(
+  "A's workspace name survives B's rename attempt",
+  (await q.listWorkspaces(1)).find((w) => w.id === wsA.id)!.name === 'Workspace A',
+);
+await q.assignReposToWorkspace(wsA.id, 2, [B.repoId]);
+check(
+  "B's assign into A's workspace is a no-op",
+  (await q.getWorkspaceRepoIds(wsA.id, 1)).length === 1 &&
+    (await q.getWorkspaceRepoIds(wsA.id, 1))[0] === A.repoId,
+);
+// …and A naming B's REPO is a no-op too — the repo-ownership filter, not the FK, is what keeps
+// this a silent drop rather than a 500.
+await q.assignReposToWorkspace(wsA.id, 1, [B.repoId]);
+check(
+  "A's assign of B's repo is dropped (repo ownership filter)",
+  !(await q.getWorkspaceRepoIds(wsA.id, 1)).includes(B.repoId) &&
+    (await q.getWorkspaceRepoIds(wsB.id, 2)).includes(B.repoId),
+);
+check(
+  "deleteWorkspace(wsA, B) returns 'not_found' (IDOR blocked)",
+  (await q.deleteWorkspace(wsA.id, 2)) === 'not_found',
+);
+check(
+  "A's workspace survives B's delete attempt",
+  (await q.listWorkspaces(1)).some((w) => w.id === wsA.id),
+);
+// The Default is NOT deletable — a distinct state from "not yours", because the route must render
+// a 409 rather than a 404.
+check(
+  "deleteWorkspace(A's default, A) returns 'is_default'",
+  (await q.deleteWorkspace(defaultA, 1)) === 'is_default',
+);
+
+// THE MISMATCHED-SCOPE CASE. A stale bookmark, a shared URL, or a hand-edited `?workspace=` can
+// name another tenant's id. It must resolve to the CALLER's own Default — never 404 (an existence
+// oracle over another tenant's workspace ids) and never to B's repos.
+const mismatchedScope = await q.resolveWorkspaceScope(1, defaultB);
+check(
+  "resolveWorkspaceScope(A, B's workspace id) resolves to A's OWN default",
+  mismatchedScope.workspaceId === defaultA,
+);
+check(
+  "resolveWorkspaceScope(A, B's workspace id) yields NONE of B's repos",
+  !mismatchedScope.repoIds.includes(B.repoId),
+);
+const mismatchedScopeB = await q.resolveWorkspaceScope(2, wsA.id);
+check(
+  "resolveWorkspaceScope(B, A's workspace id) resolves to B's OWN default (blocked both ways)",
+  mismatchedScopeB.workspaceId === defaultB && !mismatchedScopeB.repoIds.includes(A.repoId),
+);
+check(
+  'resolveWorkspaceScope(A, garbage) also resolves to the default rather than throwing',
+  (await q.resolveWorkspaceScope(1, 'not-a-number')).workspaceId === defaultA,
+);
+// The repo → workspace direction is ownership-bound too: a foreign repo yields null, never
+// another tenant's workspace id.
+check(
+  'workspaceScopeForRepo(A, A.repo) resolves A’s own workspace',
+  (await q.workspaceScopeForRepo(1, A.repoId))?.repoIds[0] === A.repoId,
+);
+check(
+  'workspaceScopeForRepo(A, B.repo) returns null (IDOR blocked)',
+  (await q.workspaceScopeForRepo(1, B.repoId)) === null,
+);
+
+// ── THE DELETE CASCADE MUST NOT EAT PRICES ──────────────────────────────────────
+// `workspace_reviewers` cascades from `workspaces`, so a bare DELETE would destroy every manual
+// judgement, every manual vendor name and every `monthly_cents` in the workspace — money the user
+// typed — while the repos survive. deleteWorkspace re-homes both first. Seed a priced reviewer row
+// in wsA (the actor has a footprint via A.repo, which is a member of wsA right now) and delete it.
+await q.setWorkspaceReviewer(1, botUser!.id, { workspaceId: wsA.id, automated: true });
+await q.setReviewerCost(1, botUser!.id, wsA.id, 42);
+check(
+  'the doomed workspace really holds a priced reviewer row (the check below is not vacuous)',
+  (await reviewerRow(1, wsA.id, botUser!.id))?.monthlyCents === 4200,
+);
+// Default already holds a row for this actor, at price 0 — so this is also the COLLISION case, and
+// the rule is that Default's existing row WINS and is left untouched.
+check(
+  "Default's own row for that actor is the collision foil",
+  (await reviewerRow(1, defaultA, botUser!.id))?.monthlyCents === 0,
+);
+// ⚠ THE COLLISION CASE ALONE CANNOT PROVE THE RE-HOME HAPPENED. When Default already holds a row,
+// "re-homed then skipped on conflict" and "never re-homed at all" leave identical state, so a
+// mutation deleting the whole re-home loop passes. A SECOND actor, priced in wsA and ABSENT from
+// Default, is the only thing that distinguishes them: after the delete its price must be sitting
+// in Default. Without this, the money-loss failure mode §1.2 exists to close is untested.
+const [bot2] = await db
+  .insert(schema.users)
+  .values({ githubLogin: 'greptileai', githubNodeId: 'U_gr', isBot: true })
+  .returning()
+  .execute();
+await db
+  .insert(schema.reviewThreads)
+  .values({
+    githubNodeId: 'RT_iso_A2',
+    prId: A.prId,
+    path: 'y.ts',
+    line: 2,
+    isResolved: false,
+    isOutdated: false,
+    derivedState: 'untouched',
+    originalCommenterId: bot2!.id,
+    createdAt: now,
+  })
+  .execute();
+await q.setWorkspaceReviewer(1, bot2!.id, { workspaceId: wsA.id, automated: true, });
+await q.setWorkspaceReviewer(1, bot2!.id, { workspaceId: wsA.id, label: 'Greptile (ours)' });
+await q.setReviewerCost(1, bot2!.id, wsA.id, 7);
+check(
+  'the second actor is priced in wsA and ABSENT from Default (the re-home check is falsifiable)',
+  (await reviewerRow(1, wsA.id, bot2!.id))?.monthlyCents === 700 &&
+    (await reviewerRow(1, defaultA, bot2!.id)) === undefined,
+);
+check("deleteWorkspace(wsA, A) returns 'deleted'", (await q.deleteWorkspace(wsA.id, 1)) === 'deleted');
+check(
+  "wsA's repo was re-homed to Default rather than orphaned",
+  (await q.getWorkspaceRepoIds(defaultA, 1)).includes(A.repoId),
+);
+check(
+  "Default's pre-existing reviewer row survived the re-home unchanged (collision: Default wins)",
+  (await reviewerRow(1, defaultA, botUser!.id))?.monthlyCents === 0,
+);
+check(
+  "the NON-colliding actor's manual label AND price were re-homed into Default, not cascaded away",
+  (await reviewerRow(1, defaultA, bot2!.id))?.monthlyCents === 700 &&
+    (await reviewerRow(1, defaultA, bot2!.id))?.label === 'Greptile (ours)',
+);
+check(
+  'no reviewer row is left keyed to the deleted workspace',
+  (await reviewerRow(1, wsA.id, botUser!.id)) === undefined &&
+    (await reviewerRow(1, wsA.id, bot2!.id)) === undefined,
+);
+check(
+  'no membership row is left keyed to the deleted workspace',
+  (await q.getWorkspaceRepoIds(wsA.id, 1)).length === 0,
+);
+
+// ── Bot analytics, all taking a BotScope ────────────────────────────────────────
+// `workspaceId` decides who counts as a bot, `repoIds` narrows what is measured. The single object
+// is what stops a caller measuring one workspace's data through another's verdicts.
+const scopeANow = await q.resolveWorkspaceScope(1, defaultA);
+const anA = await q.getBotAnalytics(1, 'rolling_30', scopeANow);
 check(
   'getBotAnalytics(A) surfaces the account-1 bot thread',
   anA.vendors.some((v) => v.kind === 'coderabbit'),
 );
-const anB = await q.getBotAnalytics(2, 'rolling_30');
+const anB = await q.getBotAnalytics(2, 'rolling_30', scopeB);
 check('getBotAnalytics(B) surfaces no vendors (IDOR blocked)', anB.vendors.length === 0);
+// The transposed scope: B's own workspace narrowed to A's repo.
+const anCross = await q.getBotAnalytics(2, 'rolling_30', {
+  workspaceId: defaultB,
+  repoIds: [A.repoId],
+});
+check(
+  'getBotAnalytics(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)',
+  anCross.vendors.length === 0,
+);
 
-// getBotVendorPrs (item 6 — the per-REVIEWER drill-down) is account-scoped by the PR join: A's
-// owner call surfaces its own bot's PR; the SAME userId under account B leaks nothing (the
-// vendor's threads/comments bind pullRequests.accountId, and botUser isn't automated for B).
-const vpA = await q.getBotVendorPrs(1, { userId: botUser!.id }, 'rolling_30');
+// getBotVendorPrs (the per-REVIEWER drill-down) is account-scoped by the PR join: A's owner call
+// surfaces its own bot's PR; the SAME userId under account B leaks nothing.
+const vpA = await q.getBotVendorPrs(1, { userId: botUser!.id }, 'rolling_30', scopeANow);
 check('getBotVendorPrs(A, botUser) surfaces A’s PR', vpA.prs.some((p) => p.prId === A.prId));
 check('getBotVendorPrs(A, botUser) echoes the per-reviewer key', vpA.key === `u${botUser!.id}`);
-const vpCross = await q.getBotVendorPrs(2, { userId: botUser!.id }, 'rolling_30');
+const vpCross = await q.getBotVendorPrs(2, { userId: botUser!.id }, 'rolling_30', {
+  workspaceId: defaultB,
+  repoIds: [A.repoId],
+});
 check('getBotVendorPrs(B, A’s botUser) leaks nothing (IDOR blocked)', vpCross.prs.length === 0);
 
-// getBotOnlyPrs (the caption's expandable list) is account-scoped: the owner call resolves
-// its own repos and never contains another account's PR; a cross-account call passing the
-// OTHER account's repo ids returns nothing (getBotOnlyReviewPrs binds pullRequests.accountId).
-const boA = await q.getBotOnlyPrs(1, 'rolling_30');
+// getBotOnlyPrs (the caption's expandable list) is account-scoped: the owner call resolves its own
+// repos and never contains another account's PR; a cross-account call passing the OTHER account's
+// repo ids returns nothing (getBotOnlyReviewPrs binds pullRequests.accountId).
+const boA = await q.getBotOnlyPrs(1, 'rolling_30', scopeANow);
 check(
   "getBotOnlyPrs(A) returns a list, never B's PR",
   Array.isArray(boA.prs) && !boA.prs.some((p) => p.prId === B.prId),
 );
-const boCrossA = await q.getBotOnlyPrs(2, 'rolling_30', [A.repoId]);
+const boCrossA = await q.getBotOnlyPrs(2, 'rolling_30', {
+  workspaceId: defaultB,
+  repoIds: [A.repoId],
+});
 check('getBotOnlyPrs(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)', boCrossA.prs.length === 0);
-const boCrossB = await q.getBotOnlyPrs(1, 'rolling_30', [B.repoId]);
+const boCrossB = await q.getBotOnlyPrs(1, 'rolling_30', {
+  workspaceId: defaultA,
+  repoIds: [B.repoId],
+});
 check('getBotOnlyPrs(A, repoIds=[B.repo]) leaks nothing (IDOR blocked)', boCrossB.prs.length === 0);
 
 // getBotDedupClusters: A resolves its PR; B gets null (ownership → 404).
@@ -472,298 +846,28 @@ check(
   (await q.getBotDedupClusters(A.prId, 2)) === null,
 );
 
-// ── Teams (CORE): teams + team_repos are account-scoped; every getter/writer filters
-// accountId, and id-addressed mutators verify ownership → false/empty for a foreign team ──
-const teamA = await q.createTeam(1, 'Team A');
-await q.assignReposToTeam(teamA.id, 1, [A.repoId]);
-const teamB = await q.createTeam(2, 'Team B');
-await q.assignReposToTeam(teamB.id, 2, [B.repoId]);
-
-const listA = await q.listTeams(1);
+// ── Cross-WORKSPACE comparison ──────────────────────────────────────────────────
+// getWorkspaceComparison takes NO scope at all — it compares the caller's whole roster — so the
+// ONLY isolation surface is `listWorkspaces(accountId)` plus the accountId inside each metric read.
+// A leak would show as another tenant's workspace row, or as its PRs inside the caller's numbers.
+// Landmine: B must already own a workspace WITH a repo, or the negative check passes on an empty
+// account and is VACUOUS. wsB is seeded above — do not reorder.
+const { getWorkspaceComparisonRows } = await import('../src/db/workspace-comparison.js');
+const cmpA = await getWorkspaceComparisonRows(1);
+const cmpB = await getWorkspaceComparisonRows(2);
 check(
-  "listTeams(A) returns only A's team, with A's repo",
-  listA.length === 1 &&
-    listA[0]!.id === teamA.id &&
-    listA[0]!.repoIds.length === 1 &&
-    listA[0]!.repoIds[0] === A.repoId,
+  "getWorkspaceComparisonRows(A) returns A's own workspaces only",
+  cmpA.length > 0 && !cmpA.some((r) => r.workspaceId === wsB.id || r.workspaceId === defaultB),
 );
 check(
-  "listTeams(A) excludes B's team",
-  !(await q.listTeams(1)).some((t) => t.id === teamB.id),
+  "getWorkspaceComparisonRows(B) returns B's own workspaces only (blocked both ways)",
+  cmpB.length > 0 && !cmpB.some((r) => r.workspaceId === defaultA),
 );
 check(
-  'getTeamRepoIds(teamA, A) returns A.repo',
-  (await q.getTeamRepoIds(teamA.id, 1)).length === 1,
-);
-check(
-  'getTeamRepoIds(teamA, B) leaks nothing (IDOR blocked)',
-  (await q.getTeamRepoIds(teamA.id, 2)).length === 0,
+  "getWorkspaceComparisonRows(B) counts only B's repos",
+  cmpB.reduce((n, r) => n + r.repoCount, 0) === 1,
 );
 
-// B cannot rename / delete / assign into / remove from A's team.
-check(
-  'renameTeam(teamA, B) returns false (IDOR blocked)',
-  (await q.renameTeam(teamA.id, 2, 'hacked')) === false,
-);
-check(
-  "A's team name survives B's rename attempt",
-  (await q.listTeams(1))[0]!.name === 'Team A',
-);
-await q.assignReposToTeam(teamA.id, 2, [B.repoId]);
-await q.assignReposToTeam(teamA.id, 2, [A.repoId]);
-check(
-  "B's assign into A's team is a no-op",
-  (await q.getTeamRepoIds(teamA.id, 1)).length === 1 &&
-    (await q.getTeamRepoIds(teamA.id, 1))[0] === A.repoId,
-);
-check(
-  'removeRepoFromTeam(teamA, A.repo, B) returns false (IDOR blocked)',
-  (await q.removeRepoFromTeam(teamA.id, A.repoId, 2)) === false,
-);
-check(
-  "A.repo survives B's remove attempt",
-  (await q.getTeamRepoIds(teamA.id, 1)).length === 1,
-);
-check(
-  'deleteTeam(teamA, B) returns false (IDOR blocked)',
-  (await q.deleteTeam(teamA.id, 2)) === false,
-);
-check("A's team survives B's delete attempt", (await q.listTeams(1)).length === 1);
-
-// resolveScopeRepoIds honours ownership: A resolves its team; B resolving A's team → [].
-check(
-  "resolveScopeRepoIds(A, '<teamA>') resolves A's repos",
-  JSON.stringify(await q.resolveScopeRepoIds(1, String(teamA.id))) ===
-    JSON.stringify([A.repoId]),
-);
-check(
-  "resolveScopeRepoIds(B, '<teamA>') leaks nothing (IDOR blocked)",
-  (await q.resolveScopeRepoIds(2, String(teamA.id)))!.length === 0,
-);
-// Multi-team set scope 'teams:<ids>' (the new resolver path) resolves the union of just those
-// teams, ownership-scoped: A gets A's repos; B resolving a set that names A's team → [] (IDOR).
-check(
-  "resolveScopeRepoIds(A, 'teams:<teamA>') resolves A's repos (set path)",
-  JSON.stringify(await q.resolveScopeRepoIds(1, `teams:${teamA.id}`)) ===
-    JSON.stringify([A.repoId]),
-);
-check(
-  "resolveScopeRepoIds(B, 'teams:<teamA>') leaks nothing (multi-team IDOR blocked)",
-  (await q.resolveScopeRepoIds(2, `teams:${teamA.id}`))!.length === 0,
-);
-check("resolveScopeRepoIds(A, 'all') is null", (await q.resolveScopeRepoIds(1, 'all')) === null);
-check(
-  "resolveScopeRepoIds(A, 'none') excludes A's assigned repo",
-  !(await q.resolveScopeRepoIds(1, 'none'))!.includes(A.repoId),
-);
-check(
-  'getUnassignedRepoIds(A) is empty (A.repo is in a team)',
-  (await q.getUnassignedRepoIds(1)).length === 0,
-);
-// 'teams' scope = the account's UNION of team repos, ownership-scoped (cross-team monitoring).
-check(
-  "resolveScopeRepoIds(A, 'teams') is A's team-repo union",
-  JSON.stringify(await q.resolveScopeRepoIds(1, 'teams')) === JSON.stringify([A.repoId]),
-);
-check(
-  "resolveScopeRepoIds(B, 'teams') is B's own union only (no A leak)",
-  JSON.stringify(await q.resolveScopeRepoIds(2, 'teams')) === JSON.stringify([B.repoId]),
-);
-
-// getTeamComparison selects TEAMS, not repo ids, so it does NOT go through resolveScopeRepoIds
-// above — it owns its own scope parser and its own `listTeams(accountId)` filter. That makes it a
-// separate ownership surface that the checks above do not cover, and it is CORE/free (reachable
-// from the Feed's "Compare teams" tab by every tier), so it gets its own pair here.
-// Landmine: teamB must already exist, or the negative check passes on an empty account and is
-// VACUOUS. It is seeded at the top of this block — do not reorder.
-const { getTeamComparisonRows } = await import('../src/db/team-comparison.js');
-check(
-  "getTeamComparisonRows(A, 'teams:<teamA>') returns A's own team",
-  (await getTeamComparisonRows(1, `teams:${teamA.id}`)).length === 1,
-);
-check(
-  "getTeamComparisonRows(B, 'teams:<teamA>') leaks nothing (IDOR blocked)",
-  (await getTeamComparisonRows(2, `teams:${teamA.id}`)).length === 0,
-);
-check(
-  "getTeamComparisonRows(B, 'all') returns only B's own teams",
-  (await getTeamComparisonRows(2, 'all')).every((r) => r.teamId === teamB.id),
-);
-
-// ── The ACTOR grain: `account_reviewers` (migration 0043) ───────────────────────
-// This table is keyed (account_id, author_user_id) ONLY. It has no repo column, so it carries
-// NO structural tenancy at all — unlike `repo_reviewers`, whose composite FK
-// `(repo_id, account_id) → repos(id, account_id)` rejects a cross-account row in the database
-// itself. Everything that stops one tenant writing (or reading back) another's reviewer identity
-// and PRICE is the query layer, and this block is the only thing checking it.
-//
-// THE GATE IS "does this actor have a repo_reviewers row in THIS account". It is not a formality:
-// `author_user_id` points at the GLOBAL `users` table, so an ungated identity write plus a read
-// back through the listing would be a cross-tenant profile lookup — the same shape
-// `listUsers(accountId)` and the counts-only `/api/users/:id/stats` exist to prevent. It is also
-// what keeps the data reachable: the listing is row-driven, so an identity keyed to an actor with
-// no rows could never be displayed, edited or cleared.
-//
-// MUTATION-CHECK (per the standing note that a new isolation check can be VACUOUS): every
-// negative below would also pass if the write silently did nothing, so each is paired with a
-// POSITIVE control — the same call from the OWNING account must succeed — plus a direct row scan
-// proving nothing landed under the other tenant's id.
-//
-// `soloUser` is an actor account 2 has NEVER synced. Account 2 owns a repo, so it passes every
-// account-level check; the only thing standing between it and an identity row for a stranger is
-// the repo-row gate.
-const [soloUser] = await db
-  .insert(schema.users)
-  .values({ githubLogin: 'stranger-bot', githubNodeId: 'U_stranger', isBot: true })
-  .returning()
-  .execute();
-
-check(
-  'setReviewerIdentity(B, A’s botUser) returns null (no repo row in B → 404)',
-  (await q.setReviewerIdentity(2, botUser!.id, { kind: 'greptile' })) === null,
-);
-check(
-  'setReviewerIdentity(B, an actor B never synced) returns null (no repo row → 404)',
-  (await q.setReviewerIdentity(2, soloUser!.id, { kind: 'greptile' })) === null,
-);
-check(
-  'setReviewerIdentity(A, A’s botUser) succeeds (positive control — the 404s are about the gate)',
-  (await q.setReviewerIdentity(1, botUser!.id, { kind: 'coderabbit' })) !== null,
-);
-check(
-  'no account_reviewers row was written under account 2',
-  !(await db.select().from(schema.accountReviewers).execute()).some(
-    (r: { accountId: number }) => r.accountId === 2,
-  ),
-);
-check(
-  'A’s own identity row WAS written (the scan above is not vacuous)',
-  (await db.select().from(schema.accountReviewers).execute()).some(
-    (r: { accountId: number; authorUserId: number }) =>
-      r.accountId === 1 && r.authorUserId === botUser!.id,
-  ),
-);
-
-// ── THE IDENTITY RESET TAKES THE SAME GATE ──────────────────────────────────────
-// DELETE /api/bot-reviewers/:userId/identity hands `kind`/`label` back to detection ACCOUNT-WIDE.
-// Ungated it would be a write against a row keyed to an actor the caller has never synced — and,
-// since `author_user_id` points at the GLOBAL `users` table, a read back of a stranger's profile.
-// Snapshot BEFORE the rejected attempts — comparing two reads taken after them would assert
-// nothing at all.
-const idRowsBeforeReset = JSON.stringify(
-  await db.select().from(schema.accountReviewers).execute(),
-);
-check(
-  'resetReviewerIdentity(B, A’s botUser) returns null (no repo row in B → 404)',
-  (await q.resetReviewerIdentity(2, botUser!.id)) === null,
-);
-check(
-  'resetReviewerIdentity(B, an actor B never synced) returns null (no repo row → 404)',
-  (await q.resetReviewerIdentity(2, soloUser!.id)) === null,
-);
-check(
-  "account 2's reset attempts changed NO account_reviewers row",
-  idRowsBeforeReset ===
-    JSON.stringify(await db.select().from(schema.accountReviewers).execute()),
-);
-// ⚠ DIRTY A'S REPO ROW TO A NON-MANUAL, NON-DERIVED STATE FIRST, or the "left the judgement
-// untouched" check below is vacuous twice over: a `source: 'manual'` row is skipped by the
-// classifier anyway, and an identical rewrite is invisible because sqlite stores `updated_at` at
-// one-second granularity. MEASURED: a mutation handing the re-derivation the actor's real repo
-// ids (i.e. the identity reset reaching into the judgement grain) survived until this existed.
-await db
-  .update(schema.repoReviewers)
-  .set({ automated: false, role: 'quality_check', source: 'behavioral' })
-  .where(
-    and(
-      eq(schema.repoReviewers.accountId, 1),
-      eq(schema.repoReviewers.authorUserId, botUser!.id),
-      eq(schema.repoReviewers.repoId, A.repoId),
-    ),
-  )
-  .execute();
-
-// Positive control — and it must come back AUTO-DERIVED, not merely blanked: the classifier is
-// re-run identity-only (empty repo list) inside the reset, so the vendor's own label returns in
-// place of the human's 'CodeRabbit (renamed)'.
-const resetA = await q.resetReviewerIdentity(1, botUser!.id);
-check(
-  'resetReviewerIdentity(A, A’s botUser) re-derives the vendor and hands provenance back to auto',
-  resetA?.identitySource === 'auto' &&
-    resetA?.kind === 'coderabbit' &&
-    resetA?.label === 'CodeRabbit',
-);
-// …and it touched NO repo row (the re-derivation runs with an empty repo list by construction).
-// The row must still carry the DIRTIED values above — a re-derivation would have put them back to
-// automated/review/github_type, which is exactly what makes this check falsifiable.
-check(
-  'the identity reset left A’s per-repo judgement untouched',
-  (await db.select().from(schema.repoReviewers).execute()).some(
-    (r: {
-      accountId: number;
-      authorUserId: number;
-      repoId: number;
-      automated: boolean;
-      role: string;
-      source: string;
-    }) =>
-      r.accountId === 1 &&
-      r.authorUserId === botUser!.id &&
-      r.repoId === A.repoId &&
-      r.automated === false &&
-      r.role === 'quality_check' &&
-      r.source === 'behavioral',
-  ),
-);
-// Restore the automated verdict — later checks in this file read the bot roster.
-await q.setRepoReviewerJudgement(1, botUser!.id, { repoId: A.repoId, automated: true });
-
-// ── COST takes the SAME gate, and it is a separate route ────────────────────────
-// A price is an actor-grain fact on the same row, but a different write. Gating one and not the
-// other is exactly the kind of half-implementation this refactor exists to remove.
-check(
-  'setReviewerCost(B, A’s botUser) returns null (no repo row in B → 404)',
-  (await q.setReviewerCost(2, botUser!.id, 99)) === null,
-);
-check(
-  'setReviewerCost(A, A’s botUser) succeeds (positive control)',
-  (await q.setReviewerCost(1, botUser!.id, 99)) !== null,
-);
-const costRows = await db.select().from(schema.accountReviewers).execute();
-check(
-  'the price landed on A’s own row and nothing was written under account 2',
-  costRows.some(
-    (r: { accountId: number; authorUserId: number; monthlyCents: number | null }) =>
-      r.accountId === 1 && r.authorUserId === botUser!.id && r.monthlyCents === 9900,
-  ) && !costRows.some((r: { accountId: number }) => r.accountId === 2),
-);
-// The int4 CLAMP. Unbounded, Postgres RAISES `integer out of range` (a 500) while SQLite's
-// 64-bit integers accept the value happily — the same request succeeding locally and 500ing in
-// cloud is the divergence class this is here to keep closed.
-check(
-  'setReviewerCost clamps to the int4 cents ceiling (no dialect divergence)',
-  (await q.setReviewerCost(1, botUser!.id, 99_999_999_999))?.costMonthlyUsd === 21474836.47,
-);
-check(
-  'setReviewerCost(null) clears the price without deleting the identity row',
-  (await q.setReviewerCost(1, botUser!.id, null))?.costMonthlyUsd === null &&
-    (await q.setReviewerCost(1, botUser!.id, null))?.kind === 'coderabbit',
-);
-// 0 is a REAL price ("we pay nothing"), not "unset" — a `||` anywhere on this path collapses it.
-check(
-  'setReviewerCost(0) stores a real zero, distinct from null',
-  (await q.setReviewerCost(1, botUser!.id, 0))?.costMonthlyUsd === 0,
-);
-
-// Owner delete cascades team_repos (functional sanity, not IDOR). Note what is NOT here any
-// more: deleting a team used to have to hand-delete its bot classification rows, because
-// `bot_review_classification.team_id` carried no FK. A bot is a per-repo object now, so a team
-// owns no bot state at all and there is nothing to clean up.
-check('deleteTeam(teamA, A) returns true', (await q.deleteTeam(teamA.id, 1)) === true);
-check(
-  "teamA's membership is gone after delete (cascade)",
-  (await q.getTeamRepoIds(teamA.id, 1)).length === 0,
-);
 
 // Cross-org benchmark contributions (Phase 0): the consent roster respects the opt-in flag +
 // excludes local accounts, and WITHDRAWAL (delete) is account-scoped — it must never touch
@@ -801,7 +905,12 @@ await db
     { accountId: 2, repoId: B.repoId, prId: B.prId, kind: 'pr', refId: B.prId, body: 'isolationsearchtoken beta payload', createdAt: now },
   ])
   .execute();
-const searchOwn = await searchPrs(1, { query: 'isolationsearchtoken', repoIds: null, limit: 50, offset: 0 });
+const searchOwn = await searchPrs(1, {
+  query: 'isolationsearchtoken',
+  repoIds: scopeA.repoIds,
+  limit: 50,
+  offset: 0,
+});
 check(
   'searchPrs(A) returns only A’s hits',
   searchOwn.total === 1 && searchOwn.hits.every((h) => h.repoId === A.repoId && h.prId === A.prId),

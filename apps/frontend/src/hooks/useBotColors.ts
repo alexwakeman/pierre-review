@@ -3,38 +3,39 @@ import type { AutomatedReviewerKind } from '@pierre-review/shared';
 import { useDetectedReviewers } from './useBotTriage.js';
 import { buildBotColorMap, resolveBotColor } from '../lib/ui.js';
 
-// A stable, account-wide "which colour is this bot" resolver (brand-aware hybrid — see
+// A stable "which colour is this bot" resolver for ONE WORKSPACE (brand-aware hybrid — see
 // buildBotColorMap): known vendors + Pierre keep their brand colour; every in-house / unbranded
-// bot gets a DISTINCT palette colour. Backed by the CORE detected-reviewers roster
-// (`['bot-reviewers']`), so it's free wherever that query is already loaded (the feed, settings)
-// and one shared cached fetch elsewhere. Because the map is built from the whole account roster
-// (not the bots in one view), a given bot resolves to the SAME colour across every surface + the
-// per-repo Bots tab. Degrades to brand-by-kind before the roster loads (a branded bot never
-// flashes; an in-house bot shows the neutral gray until its palette hue lands).
+// bot gets a DISTINCT palette colour. Backed by the CORE detected-reviewers listing
+// (`['bot-reviewers', 'ws:<id>', 'all']`), so it's free wherever that query is already loaded (the
+// feed, the Bots settings tab) and one shared cached fetch elsewhere. Degrades to brand-by-kind
+// before the listing loads (a branded bot never flashes; an in-house bot shows the neutral gray
+// until its palette hue lands).
 //
-// ⚠ COLOUR AND VENDOR NAME KEY ON THE ACTOR, NEVER ON A REPO ROW. `kind` is served ONCE per actor
-// on `ReviewerIdentity` (from `account_reviewers`) precisely so this map has one answer per login.
-// The bug that shaped this: when `kind` sat on the per-repo rows, marking CodeRabbit "not a bot"
-// in ONE repo nulled that row's kind, identity resolution picked the edited row as the winner,
-// this filter (`kind != null`) dropped the login, and CodeRabbit rendered as an unbranded gray
-// in `api` and `infra` — repos the user never touched. So: build from `data.reviewers` (the actor
-// grain). NEVER rebuild this from `data.rows`, and never scope the query to a repo — one bot must
-// not be orange in one repo and blue in the next.
+// ⚠ THE MAP IS BUILT FROM THE ACTIVE WORKSPACE'S REVIEWERS, AND THE ARGUMENT IS REQUIRED.
+// This hook used to be called with NO arguments, deliberately, because vendor identity lived in an
+// account-wide table and there was exactly one answer per login. Identity is now a PER-WORKSPACE
+// fact on the `workspace_reviewers` row, so an unscoped call resolves to whatever the server
+// defaults to — and every bot on screen would be painted from some other workspace's identities,
+// or lose its brand entirely. The old rule ("build from `reviewers`, never from `rows`") retired
+// with the rows/reviewers split; the rule now is: BUILD FROM THE REVIEWERS OF THE ACTIVE
+// WORKSPACE. `workspaceId` is a required (nullable) parameter so that is a compile error, not
+// something a grep has to catch.
 //
-// The hook is called with NO arguments on purpose: the unscoped listing is the account-wide
-// roster, and it is the same cache entry FeedView and ThreadList read.
-export function useBotColors(): (bot: {
+// It deliberately does NOT narrow by repo. Within a workspace a bot must be the same colour on
+// every surface — the per-repo Bots tab, a feed card's vendor tag, a thread's vendor filter — so
+// the listing is fetched unnarrowed (`repoIds` omitted) and every consumer shares that one warm
+// entry. Colour keys on the actor WITHIN the workspace; it never keys on a repo.
+export function useBotColors(workspaceId: number | null): (bot: {
   login?: string | null;
   kind: AutomatedReviewerKind;
 }) => string {
-  const { data } = useDetectedReviewers();
+  const { data } = useDetectedReviewers(workspaceId);
   const colorMap = useMemo(
     () =>
       buildBotColorMap(
         (data?.reviewers ?? [])
-          // An identity with a null `kind` is an actor that is automated in no repo (or whose
-          // vendor nobody has named) — it has no brand to claim, and including it would let it
-          // take a palette slot from a bot that does.
+          // A reviewer with a null `kind` has no vendor identity in this workspace — no brand to
+          // claim, and including it would let it take a palette slot from a bot that does.
           .filter((r) => r.kind != null)
           .map((r) => ({ login: r.login, kind: r.kind as AutomatedReviewerKind })),
       ),

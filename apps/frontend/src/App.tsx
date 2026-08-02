@@ -128,6 +128,13 @@ export default function App(): JSX.Element {
   // A full-main overlay (a pr-detail PR, the Activity console, or a drill-down: metrics /
   // bot-PRs) covers the warm full board. Drives the `inert` a11y treatment. pr-focus is NOT
   // an overlay — it replaces the board slot, so it doesn't set this.
+  //
+  // Note the axis: these are TABS. The Activity console's own RAIL entries — Insights, Feed,
+  // Bots, Compare workspaces, Needs attention, and each repo — are not tabs and get no branch
+  // here; they are `filters.activityRepoId` values rendered inside <ActivityView/>, which is
+  // already covered by `inboxActive`. Compare workspaces in particular is a rail line
+  // (`activityRepoId === 'compare'`), NOT a drill-down tab: there is no 'compare' TabKind and
+  // nothing to add to this list for it.
   const overlayActive =
     prDetailId != null ||
     inboxActive ||
@@ -462,7 +469,8 @@ export default function App(): JSX.Element {
             <UserActivityDetail />
           </div>
         )}
-        {/* Cross-team search results — a sibling full-main overlay. */}
+        {/* Cross-repo search results (scoped to the active workspace) — a sibling full-main
+            overlay. */}
         {searchActive && (
           <div
             data-testid="search-overlay"

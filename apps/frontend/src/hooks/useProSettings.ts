@@ -11,7 +11,7 @@ import { useProCapabilities } from './useTriage.js';
 export function useHasProSettings(): boolean {
   const caps = useProCapabilities();
   return (
-    caps.teamInsights ||
+    caps.workspaceInsights ||
     caps.activityDigest ||
     caps.slackDigest ||
     caps.issueLinks ||
@@ -54,9 +54,14 @@ export function useUpdateProSettings() {
       // the new window through immediately so the Insights UI reflects Save without waiting for a
       // sync. The sprint report refetch is a cheap CACHED read (no regeneration/billing); when the
       // window moved it comes back flagged `stale`, surfacing the Regenerate prompt.
+      // ⚠ These three are keys this file does NOT own (useWorkspaceInsights /
+      // useWorkspaceMetricsDetail / useSprintReport). They are bare literals, so a rename there is
+      // silent here: the mutation succeeds, the invalidation targets a key nobody uses, and the UI
+      // reads "the setting didn't take". They are PREFIXES, which is what makes them still sweep
+      // every workspace's `['<name>', 'ws:<id>']` slot.
       if (patch.sprint) {
-        void qc.invalidateQueries({ queryKey: ['team-insights'] });
-        void qc.invalidateQueries({ queryKey: ['team-metrics-detail'] });
+        void qc.invalidateQueries({ queryKey: ['workspace-insights'] });
+        void qc.invalidateQueries({ queryKey: ['workspace-metrics-detail'] });
         void qc.invalidateQueries({ queryKey: ['sprint-report'] });
       }
     },

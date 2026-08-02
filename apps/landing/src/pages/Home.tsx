@@ -411,8 +411,8 @@ export default function Home(): JSX.Element {
                   </span>
                 </div>
                 <p className="text-body-sm">
-                  The intelligence layer — AI summaries, team Insights, flow metrics, Slack
-                  digests, My Turn.
+                  The intelligence layer — AI summaries, Workspace Insights, flow metrics,
+                  Slack digests, My Turn.
                 </p>
               </div>
             </div>

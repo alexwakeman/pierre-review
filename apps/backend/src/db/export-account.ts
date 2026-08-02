@@ -31,12 +31,11 @@ const {
   reviewComments,
   prComments,
   events,
-  teams,
-  teamRepos,
+  workspaces,
+  workspaceRepos,
+  workspaceReviewers,
   aiUsage,
   myTurnDismissals,
-  repoReviewers,
-  accountReviewers,
   benchmarkContributions,
   autoMergeRequests,
 } = schema;
@@ -61,7 +60,12 @@ export interface AccountExport {
   };
   account: Record<string, unknown>;
   repositories: Record<string, unknown>[];
-  teams: Record<string, unknown>[];
+  /**
+   * The account's workspaces, each with the repo ids that belong to it. Replaces the old `teams`
+   * collection: a repo now sits in exactly one workspace, so `repoIds` is a partition of
+   * `repositories` rather than an arbitrary many-to-many slice.
+   */
+  workspaces: Record<string, unknown>[];
   pullRequests: Record<string, unknown>[];
   reviews: Record<string, unknown>[];
   reviewThreads: Record<string, unknown>[];
@@ -70,10 +74,20 @@ export interface AccountExport {
   events: Record<string, unknown>[];
   aiUsage: Record<string, unknown>[];
   dismissals: Record<string, unknown>[];
-  /** The bot object's JUDGEMENT grain: one row per (repo, automated reviewer). */
-  repoReviewers: Record<string, unknown>[];
-  /** Its IDENTITY grain: one row per reviewer — vendor kind, label, and the recorded price. */
-  accountReviewers: Record<string, unknown>[];
+  /**
+   * THE BOT OBJECT — one row per (workspace, automated reviewer), replacing the old
+   * `repoReviewers` + `accountReviewers` pair now that judgement, identity and price share a key.
+   *
+   * IT IS IN THE EXPORT DELIBERATELY, and this comment is the record of that decision. Art. 15
+   * covers it three times over: `automated`/`role` are classification DECISIONS made about the
+   * subject's data (some of them by the subject — `source: 'manual'`), `kind`/`label` are a vendor
+   * name the subject may have typed, and `monthlyCents` is a PRICE the subject entered by hand and
+   * that nothing else in the system can regenerate. It is the one collection here that is not a
+   * cache of GitHub. There is no credential on the table, so nothing is withheld from it.
+   * (Contrast `branchCommits`, which is absent from this export with no decision recorded
+   * anywhere — an omission, not a choice. This one is a choice.)
+   */
+  workspaceReviewers: Record<string, unknown>[];
   benchmarkContributions: Record<string, unknown>[];
   /** Armed / recently-resolved "merge when ready" intents (auto_merge_requests). */
   autoMergeRequests: Record<string, unknown>[];
@@ -120,7 +134,6 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     .from(repos)
     .where(eq(repos.accountId, accountId))
     .execute();
-  const repoIds = repoRows.map((r) => r.id);
 
   const prRows = capped(
     'pullRequests',
@@ -140,12 +153,11 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     reviewCommentRows,
     prCommentRows,
     eventRows,
-    teamRows,
-    teamRepoRows,
+    workspaceRows,
+    workspaceRepoRows,
     usageRows,
     dismissalRows,
-    repoReviewerRows,
-    accountReviewerRows,
+    workspaceReviewerRows,
     benchmarkRows,
     autoMergeRows,
   ] = await Promise.all([
@@ -160,28 +172,53 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       db.select().from(prComments).where(inArray(prComments.prId, ids)).execute(),
     ),
     db.select().from(events).where(eq(events.accountId, accountId)).execute(),
-    db.select().from(teams).where(eq(teams.accountId, accountId)).execute(),
-    repoIds.length === 0
-      ? Promise.resolve([])
-      : db.select().from(teamRepos).where(inArray(teamRepos.repoId, repoIds)).execute(),
+    // Workspaces + their memberships. Explicit column lists, per this file's rule: adding a
+    // column to either table must be a deliberate decision to export it, not a side effect.
+    db
+      .select({
+        id: workspaces.id,
+        accountId: workspaces.accountId,
+        name: workspaces.name,
+        isDefault: workspaces.isDefault,
+        createdAt: workspaces.createdAt,
+      })
+      .from(workspaces)
+      .where(eq(workspaces.accountId, accountId))
+      .execute(),
+    // Scoped by accountId rather than by the repo id list: the membership table carries its own
+    // accountId, so this needs no `IN ()` guard and cannot be skewed by the pullRequests cap.
+    db
+      .select({ workspaceId: workspaceRepos.workspaceId, repoId: workspaceRepos.repoId })
+      .from(workspaceRepos)
+      .where(eq(workspaceRepos.accountId, accountId))
+      .execute(),
     db.select().from(aiUsage).where(eq(aiUsage.accountId, accountId)).execute(),
     db
       .select()
       .from(myTurnDismissals)
       .where(eq(myTurnDismissals.accountId, accountId))
       .execute(),
-    // The bot object at BOTH grains — the per-repo judgements the user (or the classifier) made,
-    // and the per-actor identity + recorded price. Art. 15 covers both: one records decisions
-    // about this account's data, the other a number the user typed in.
+    // THE BOT OBJECT, one row per (workspace, reviewer). See the payload field's comment for why
+    // it is Art. 15 material: classification decisions, a vendor name and a price the user typed.
     db
-      .select()
-      .from(repoReviewers)
-      .where(eq(repoReviewers.accountId, accountId))
-      .execute(),
-    db
-      .select()
-      .from(accountReviewers)
-      .where(eq(accountReviewers.accountId, accountId))
+      .select({
+        id: workspaceReviewers.id,
+        accountId: workspaceReviewers.accountId,
+        workspaceId: workspaceReviewers.workspaceId,
+        authorUserId: workspaceReviewers.authorUserId,
+        automated: workspaceReviewers.automated,
+        role: workspaceReviewers.role,
+        confidence: workspaceReviewers.confidence,
+        source: workspaceReviewers.source,
+        reasonsJson: workspaceReviewers.reasonsJson,
+        kind: workspaceReviewers.kind,
+        label: workspaceReviewers.label,
+        identitySource: workspaceReviewers.identitySource,
+        monthlyCents: workspaceReviewers.monthlyCents,
+        updatedAt: workspaceReviewers.updatedAt,
+      })
+      .from(workspaceReviewers)
+      .where(eq(workspaceReviewers.accountId, accountId))
       .execute(),
     db
       .select()
@@ -219,9 +256,9 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       hasStoredGithubToken: Boolean(account.hasStoredGithubToken),
     },
     repositories: repoRows,
-    teams: teamRows.map((t) => ({
-      ...t,
-      repoIds: teamRepoRows.filter((tr) => tr.teamId === t.id).map((tr) => tr.repoId),
+    workspaces: workspaceRows.map((w) => ({
+      ...w,
+      repoIds: workspaceRepoRows.filter((wr) => wr.workspaceId === w.id).map((wr) => wr.repoId),
     })),
     pullRequests: prRows,
     reviews: capped('reviews', reviewRows),
@@ -231,8 +268,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     events: capped('events', eventRows),
     aiUsage: usageRows,
     dismissals: dismissalRows,
-    repoReviewers: repoReviewerRows,
-    accountReviewers: accountReviewerRows,
+    workspaceReviewers: workspaceReviewerRows,
     benchmarkContributions: benchmarkRows,
     autoMergeRequests: autoMergeRows,
   };

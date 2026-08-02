@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 
 // Per-repo collapse state for the Pro digest cards (the Feed collection + the single-repo
-// console). Persisted to localStorage so a repo whose digest you collapsed (redundant even
-// though watched) stays collapsed across reloads. Mirrors the timeline's collapsed-rows.
+// console). Persisted to localStorage so a repo whose digest you collapsed (because its summary
+// is redundant to you) stays collapsed across reloads. Mirrors the timeline's collapsed-rows.
 const KEY = 'pierre:collapsedDigests';
 
 function load(): Set<number> {
@@ -131,7 +131,7 @@ export const useSprintReportUi = create<SprintReportUiState>((set, get) => {
   };
 });
 
-// The Feed's "Open PRs" panel (team-grouped open PRs above the cross-repo feed). COLLAPSED
+// The Feed's "Open PRs" panel (the workspace's open PRs, grouped PER REPO, above the feed). COLLAPSED
 // BY DEFAULT — it's a filter affordance, not primary content — and its open/closed choice is
 // persisted so it survives navigating away from the Feed and back, and across reloads.
 const FEED_OPEN_PRS_KEY = 'pierre:feedOpenPrsPanel';

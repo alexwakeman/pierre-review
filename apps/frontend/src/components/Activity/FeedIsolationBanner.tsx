@@ -1,5 +1,5 @@
 import { useFilters } from '../../store/filters.js';
-import { useSearchOpenPrs } from '../../hooks/useTriage.js';
+import { useWorkspaceOpenPrs } from '../../hooks/useTriage.js';
 
 // The single-PR feed-isolation banner ("Showing only #N …"). Rendered in the per-repo Activity
 // console directly UNDER the repo summary header (RepoFeedHeader) — the only place the feed can
@@ -9,9 +9,11 @@ import { useSearchOpenPrs } from '../../hooks/useTriage.js';
 export function FeedIsolationBanner(): JSX.Element | null {
   const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
   const setFeedIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
-  // Member-AGNOSTIC open-PRs cache (shared with FeedView / FeedOpenPrsPanel — Members is a
-  // Timeline-only filter) resolves the isolated PR's number + title for the label.
-  const { data: openPrsData } = useSearchOpenPrs();
+  // WORKSPACE-WIDE open-PRs cache (shared with FeedOpenPrsPanel) resolves the isolated PR's number
+  // + title for the label. Deliberately NOT the timeline-scoped `useSearchOpenPrs`: Members AND
+  // the repo picker are both Timeline-only filters, and a board narrowed to other repos would hide
+  // the very PR this banner is naming — leaving it stuck on the generic "the selected PR".
+  const { data: openPrsData } = useWorkspaceOpenPrs();
   if (feedIsolatedPrId == null) return null;
   const isolatedPr = openPrsData?.prs.find((p) => p.id === feedIsolatedPrId) ?? null;
   return (

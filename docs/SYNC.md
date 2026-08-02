@@ -142,9 +142,18 @@ comments, commits, review requests, and timeline events) in **one transaction**
   deterministic **`dedupeKey`** (e.g. `pr_opened:<prNodeId>`).
 - Under multi-tenancy the conflict targets are **composite** —
   `(accountId, githubNodeId)`, `(accountId, dedupeKey)`, child tables
-  `(prId, githubNodeId)` — so two accounts can watch the same repo without colliding.
+  `(prId, githubNodeId)` — so two accounts can track the same repo without colliding.
 - **Derived thread state** is computed here (`deriveThreadState`, using the commit
   SHAs + changed files gathered above) and stored on `reviewThreads.derivedState`.
+- `upsertRepo()` (the repo row itself, not the PR subtree) is likewise a
+  `runTransaction`: it writes the repo **and** its `workspace_repos` membership row,
+  targeting the account's **Default** workspace, `ON CONFLICT (account_id, repo_id) DO
+  NOTHING`. ⚠ The `DO NOTHING` is load-bearing — a re-sync of an existing repo must
+  never move it out of the workspace a human put it in. Membership is all it writes: there
+  is no second visibility axis to set (`repos.inbox_watch` and the whole "watched" concept
+  were dropped in migration `0046` / pg `0033` — every repo in a workspace is fully live).
+  A repo with no membership row would be invisible to every workspace-scoped read, which is
+  why the read path also repairs the diff (`ensureRepoMemberships`).
 - Only **substantive** reviews emit a `review_submitted` event (an empty "commented"
   review is GitHub's wrapper around inline comments and would duplicate them).
 - `reviewRequests` are *reconciled* (delete + reinsert per PR) since GitHub drops a

@@ -31,7 +31,7 @@ import {
   type TabMeta,
   type TimelineMode,
 } from '../../store/pinnedTabs.js';
-import { escapeHtml, indexUsers, userLabel, watchedGlyphHtml } from '../../lib/ui.js';
+import { escapeHtml, indexUsers, userLabel } from '../../lib/ui.js';
 import { SkeletonBlock, SkeletonLine } from '../Skeleton.js';
 import { renderPrBar, prClassName, prTooltip } from './prBar.js';
 import { renderUserLabel } from './userRow.js';
@@ -2376,11 +2376,11 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       const repoMeta = reposById.get(rid);
       const repoName = repoMeta?.fullName ?? `repo ${rid}`;
       // Repo-header label is an HTML string (vis renders it via innerHTML, sanitizer
-      // disabled — see VIS_OPTIONS) so a watched repo gets a small eye next to its
-      // name. The name is GitHub-controlled, so escape it; the glyph SVG is static.
-      const repoContent = repoMeta?.inboxWatch
-        ? `${escapeHtml(repoName)}${watchedGlyphHtml()}`
-        : escapeHtml(repoName);
+      // disabled — see VIS_OPTIONS). The name is GitHub-controlled, so it MUST stay
+      // escaped even though nothing else is interpolated any more. Every repo now
+      // renders identically: "watched" is gone, the workspace is the scope, so there
+      // is no per-repo state left for this label to carry.
+      const repoContent = escapeHtml(repoName);
       groups.push({
         id: `repo:${rid}`,
         content: repoContent,

@@ -8,7 +8,8 @@ import {
 } from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { workspaceKey } from '../../hooks/useActivity.js';
+import { useFilters } from '../../store/filters.js';
 import {
   useSprintChat,
   useSprintChatHistory,
@@ -24,9 +25,9 @@ import { SummaryMarkdown } from './prRefTable.js';
 import { AdHocChart } from './AdHocChart.js';
 
 // The ad-hoc "Ask about the sprint" box (Pro Haiku). A free-text question — with @-mentions of
-// teammates in the scope — answered from the SAME data behind the Sprint summary. Two opt-in
+// people in the active Workspace — answered from the SAME data behind the Sprint summary. Two opt-in
 // toggles: add a chart (a second, best-effort Haiku pass) and include bot-performance data. The
-// current prompt can be pinned (server-stored per scope) and re-run later. Every answer is also
+// current prompt can be pinned (server-stored per Workspace) and re-run later. Every answer is also
 // persisted to the account's chat HISTORY (collapsible, paginated below) so past questions re-open
 // for free. The live question + answer are held in the STORE (not component state) so they survive
 // the Insights panel unmounting (e.g. clicking a PR then returning). Gated on the activityDigest
@@ -134,12 +135,14 @@ function HistoryRow({
           : 'border-gray-200 dark:border-gray-800'
       }`}
     >
+      {/* No scope tooltip: the history query is keyed to the active Workspace (`ws:<id>`), so every
+          row in this list was already grounded in it. The old `item.scope !== 'all'` title read the
+          deleted 'all' sentinel and could only ever be noise here. */}
       <button
         type="button"
         onClick={onSelect}
         className="flex min-w-0 flex-1 items-start gap-2 px-2 py-1.5 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-900/40"
         aria-current={selected}
-        title={item.scope !== 'all' ? `scope ${item.scope}` : undefined}
       >
         <span className="min-w-0 flex-1 truncate font-medium text-gray-700 dark:text-gray-200">
           {item.wantChart && <span aria-hidden="true">📊 </span>}
@@ -170,14 +173,19 @@ function HistoryRow({
 
 export function AdHocChatPanel(): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
-  const teamScope = useFilters((s) => s.teamScope);
-  const scope = scopeToParam(teamScope);
+  // The ACTIVE WORKSPACE is the whole scope — a plain id, no sentinel, nothing to canonicalise.
+  // `scopeKey` (`ws:<id>`) is only ever a CLIENT-SIDE Record key (the per-workspace answer stashed
+  // in the store); the wire scope is stamped by the hooks below, which take the id itself. It MUST
+  // come from `workspaceKey`, not a hand-rolled `String(workspaceId)` — that is the same
+  // vocabulary the plugin persists in `scope_key`, so a legacy '3' can never alias workspace 3.
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const scopeKey = workspaceKey(workspaceId);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
 
   // Live chat state lives in the STORE so it survives this panel unmounting/remounting.
   const draft = useFilters((s) => s.sprintChatDraft);
   const setDraft = useFilters((s) => s.setSprintChatDraft);
-  const storedResult = useFilters((s) => s.sprintChatResults[scope] ?? null);
+  const storedResult = useFilters((s) => s.sprintChatResults[scopeKey] ?? null);
   const setStoredResult = useFilters((s) => s.setSprintChatResult);
   const { question, wantChart, wantBots } = draft;
 
@@ -189,24 +197,27 @@ export function AdHocChatPanel(): JSX.Element | null {
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
   const answerRef = useRef<HTMLDivElement | null>(null);
 
-  const chat = useSprintChat();
-  const { data: candidates } = useScopeMentionCandidates(scope, activityDigest);
-  const pinned = usePinnedPrompts(scope, activityDigest);
-  const createPin = useCreatePinnedPrompt(scope);
-  const deletePin = useDeletePinnedPrompt(scope);
-  const history = useSprintChatHistory(historyPage, scope, activityDigest && historyOpen);
+  // Every hook here takes the WORKSPACE ID and stamps the wire scope itself — the panel cannot
+  // forget it, and an unscoped generation (which the server would answer for the account's Default)
+  // is unrepresentable rather than merely discouraged.
+  const chat = useSprintChat(workspaceId);
+  const { data: candidates } = useScopeMentionCandidates(workspaceId, activityDigest);
+  const pinned = usePinnedPrompts(workspaceId, activityDigest);
+  const createPin = useCreatePinnedPrompt(workspaceId);
+  const deletePin = useDeletePinnedPrompt(workspaceId);
+  const history = useSprintChatHistory(historyPage, workspaceId, activityDigest && historyOpen);
 
-  // Everything in this panel is keyed to the current team scope. When the scope changes: reset the
-  // history page (so you don't land on an out-of-range page of the previous context), and clear the
+  // Everything in this panel is keyed to the active Workspace. When it changes: reset the history
+  // page (so you don't land on an out-of-range page of the previous context), and clear the
   // transient mutation UI (a stale error / in-flight state) + the history-row selection — the
-  // answer itself is already per-scope (sprintChatResults[scope]), so a context switch shows THIS
-  // context's answer or nothing, never the previous team's.
+  // answer itself is already per-workspace (sprintChatResults[scopeKey]), so a switch shows THIS
+  // Workspace's answer or nothing, never the previous one's.
   useEffect(() => {
     setHistoryPage(0);
     chat.reset();
     setSelectedHistoryId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope]);
+  }, [scopeKey]);
 
   const usage = useAiUsage(activityDigest);
   const outOfCredits =
@@ -225,25 +236,30 @@ export function AdHocChatPanel(): JSX.Element | null {
   if (!activityDigest) return null;
 
   const trimmed = question.trim();
-  const canAsk = trimmed !== '' && !chat.isPending && !outOfCredits;
+  // `workspaceId != null` is part of the gate, not a nicety: this is the BILLING path, and an
+  // unscoped Ask would be grounded in the account's Default workspace and then stashed under the
+  // `ws:pending` key — a plausible-looking answer about repos the user isn't looking at.
+  const canAsk = trimmed !== '' && workspaceId != null && !chat.isPending && !outOfCredits;
 
   const ask = (q: string, chart: boolean, bots: boolean): void => {
     const text = q.trim();
-    if (text === '' || outOfCredits) return;
+    if (text === '' || workspaceId == null || outOfCredits) return;
     // A fresh Ask supersedes any picked history item, so the top panel shows the live answer.
     setSelectedHistoryId(null);
     // Persist the answer into the store on success so it survives a remount; the mutation's own
     // data is component-local and would be lost when the panel unmounts.
     chat.mutate(
-      { question: text, scope, wantChart: chart, wantBots: bots },
-      // Mirror the answer into the per-scope store so it survives a remount AND is the single source
-      // the panel reads (keyed to the scope it was asked in).
-      { onSuccess: (data) => setStoredResult(scope, data) },
+      // No `scope` here on purpose — `useSprintChat` stamps it from the workspace id it was given,
+      // and the mutation variable's type (`Omit<SprintChatBody,'scope'>`) makes that structural.
+      { question: text, wantChart: chart, wantBots: bots },
+      // Mirror the answer into the per-workspace store so it survives a remount AND is the single
+      // source the panel reads (keyed to the Workspace it was asked in).
+      { onSuccess: (data) => setStoredResult(scopeKey, data) },
     );
   };
 
   // Load a past question's STORED answer into the TOP answer panel (free — no re-run). Map the
-  // history item to the response shape and stash it under the current scope; reset() clears any
+  // history item to the response shape and stash it under the current Workspace; reset() clears any
   // stale error/in-flight banner from a prior Ask.
   const selectHistory = (item: SprintChatHistoryItem): void => {
     const mapped: SprintChatResponse = {
@@ -255,7 +271,7 @@ export function AdHocChatPanel(): JSX.Element | null {
       generatedAt: item.createdAt,
     };
     chat.reset();
-    setStoredResult(scope, mapped);
+    setStoredResult(scopeKey, mapped);
     setSelectedHistoryId(item.id);
   };
 
@@ -276,13 +292,14 @@ export function AdHocChatPanel(): JSX.Element | null {
     createPin.mutate({ text: trimmed, wantChart, wantBots });
   };
 
-  // The visible answer for THIS scope. onSuccess mirrors each answer into sprintChatResults[scope],
-  // so the per-scope store entry is the single source — a context switch shows that context's
-  // answer (or nothing), never the previous team's, and there's no stale mutation-data flash.
+  // The visible answer for THIS Workspace. onSuccess mirrors each answer into
+  // sprintChatResults[scopeKey], so the per-workspace store entry is the single source — a switch
+  // shows that Workspace's answer (or nothing), never the previous one's, and there is no stale
+  // mutation-data flash.
   const result = storedResult;
   const answer = result?.answer ?? null;
   const pins = pinned.data?.prompts ?? [];
-  // Don't offer to pin a question that's already saved verbatim for this scope.
+  // Don't offer to pin a question that's already saved verbatim for this Workspace.
   const alreadyPinned = pins.some((p) => p.text === trimmed);
 
   const historyItems = history.data?.items ?? [];
@@ -303,8 +320,8 @@ export function AdHocChatPanel(): JSX.Element | null {
         </span>
       </div>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        Pick a question below or type your own — answered from this scope&apos;s sprint data (runs
-        the Haiku model). Type <span className="font-mono">@</span> to mention a teammate.
+        Pick a question below or type your own — answered from this Workspace&apos;s sprint data
+        (runs the Haiku model). Type <span className="font-mono">@</span> to mention someone.
       </p>
 
       {/* Quick-question pills — clicking one fills the box AND fires the Ask immediately. These

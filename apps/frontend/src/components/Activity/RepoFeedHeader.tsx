@@ -45,7 +45,7 @@ export function RepoFeedHeader({ repo }: { repo: ActivityRepo }): JSX.Element {
       <ThreadStateBar counts={repo.threadTotals} />
 
       {/* This repo's default branch: CI state + (expandable) what recently landed on trunk.
-          Pinned to THIS repo rather than following the FilterBar scope, and `compact` so it
+          Pinned to THIS repo rather than following the Workspace/FilterBar scope, and `compact` so it
           drops the redundant repo-name column and the strip's own scroll. Renders nothing
           until the repo has been branch-synced. */}
       <BranchStatusPanel repoIds={[repo.repoId]} compact />

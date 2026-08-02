@@ -84,6 +84,12 @@ repositories you want to watch from the in-app picker; the app syncs their PR
 activity (full backfill on first sync, incremental every few minutes thereafter)
 into your local DB and renders it as a timeline.
 
+Repos are grouped into **Workspaces**, and the selected workspace is the scope for
+everything — the feed, the timeline, the metrics, the review-bot settings. Every
+repo belongs to exactly one workspace; new ones land in **Default** (renameable, not
+deletable), and you can create more and move repos between them from *Manage repos &
+workspaces*.
+
 To keep the database small and backfills fast, bulky text — PR/comment/review
 bodies and diff hunks — isn't stored; it's fetched from GitHub (using your `gh`
 token) the first time you open a PR and cached in your browser, so re-opening an

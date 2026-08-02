@@ -22,6 +22,9 @@ let db: any;
 let schema: any;
 let closeDb: (() => void) | undefined;
 let q: any;
+// BotScope { workspaceId, repoIds } — `workspaceId` decides who counts as a bot, `repoIds`
+// narrows the measured data. Resolved through the production resolver in beforeAll.
+let scope: any;
 
 const DAY = 24 * 60 * 60 * 1000;
 const now = Math.floor(Date.now() / 1000) * 1000;
@@ -40,7 +43,7 @@ beforeAll(async () => {
 
   const [repo] = await db
     .insert(repos)
-    .values({ accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_ad', inboxWatch: true })
+    .values({ accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_ad' })
     .returning()
     .execute();
   const [pr] = await db
@@ -102,13 +105,26 @@ beforeAll(async () => {
       resolvedAt: new Date(now - 5 * DAY),
     })
     .execute();
+
+  // ⚠ Resolve the scope through `resolveWorkspaceScope`, never by hand-building
+  // `{workspaceId, repoIds}`. That call is what runs `ensureRepoMemberships`, which puts a repo
+  // inserted straight into `repos` (bypassing upsertRepo's in-transaction membership insert) into
+  // the account's Default workspace. Hand-build it and the repair never runs, the seeded repo
+  // belongs to NO workspace, and every assertion below reads an empty scope — passing, or failing,
+  // for the wrong reason.
+  scope = await q.resolveWorkspaceScope(1, null);
 });
 
 afterAll(() => closeDb?.());
 
 describe('getBotAnalytics time-to-addressed (reply | resolve | commit)', () => {
+  it('the seeded repo really is in the resolved scope (the assertion below is not vacuous)', async () => {
+    expect(scope.workspaceId).toBeGreaterThan(0);
+    expect(scope.repoIds).toHaveLength(1);
+  });
+
   it('counts a commit-addressed thread AND a resolved thread — neither had a human reply', async () => {
-    const resp = await q.getBotAnalytics(1, 'rolling_14');
+    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
     const v = resp.vendors.find((x: { kind: string }) => x.kind === 'deepsource')!;
     // median(3d commit-addressed, 1d resolved) = 2d — both mechanisms contributed a sample.
     expect(v.medianAddressedMs).toBe(2 * DAY);

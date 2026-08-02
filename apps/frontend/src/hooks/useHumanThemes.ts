@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { HumanThemesResponse, BotWindowKind } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { workspaceKey } from './useActivity.js';
 
-// The Feed "Discussion themes" AI summary (Pro Haiku) — the human sibling of useBotThemes. Cached per
-// (window, team scope). Only fetched when the AI-summary capability is on (`enabled`); absent the
-// plugin the route 404s. `scope` ('all' | 'none' | '<teamId>') is the current Team.
-export function useHumanThemes(window: BotWindowKind, enabled: boolean, scope?: string) {
+// The Feed "Discussion themes" AI summary (Pro Haiku) — the human sibling of useBotThemes. Cached
+// per (window, WORKSPACE). Only fetched when the AI-summary capability is on (`enabled`); absent
+// the plugin the route 404s. The `ws:<id>` segment matches the plugin's persisted `scope_key`.
+export function useHumanThemes(
+  window: BotWindowKind,
+  enabled: boolean,
+  workspaceId: number | null,
+) {
   return useQuery<HumanThemesResponse>({
-    queryKey: ['human-themes', window, `scope:${scope ?? 'all'}`],
-    queryFn: () => api.humanThemes(window, scope),
+    queryKey: ['human-themes', window, workspaceKey(workspaceId)],
+    queryFn: workspaceId == null ? skipToken : () => api.humanThemes(window, workspaceId),
     enabled,
     staleTime: 60_000,
   });
@@ -17,8 +22,9 @@ export function useHumanThemes(window: BotWindowKind, enabled: boolean, scope?: 
 
 const NOTICE_MS = 5000;
 
-// Generate/regenerate the human-themes report (the only billing path). Mirrors useRefreshBotThemes.
-export function useRefreshHumanThemes(window: BotWindowKind, scope?: string) {
+// Generate/regenerate the human-themes report (the only billing path). Mirrors useRefreshBotThemes,
+// including the rule that the `setQueryData` key is built exactly like the read's.
+export function useRefreshHumanThemes(window: BotWindowKind, workspaceId: number | null) {
   const qc = useQueryClient();
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
@@ -27,15 +33,20 @@ export function useRefreshHumanThemes(window: BotWindowKind, scope?: string) {
     return () => globalThis.clearTimeout(t);
   }, [notice]);
   const mutation = useMutation({
-    mutationFn: () => api.humanThemesRefresh(window, scope),
+    // Refuses on an unresolved workspace — see useRefreshBotThemes for why a mutation cannot
+    // simply be gated the way the read is.
+    mutationFn: () => {
+      if (workspaceId == null) throw new Error('No workspace selected');
+      return api.humanThemesRefresh(window, workspaceId);
+    },
     onSuccess: (data) => {
-      qc.setQueryData(['human-themes', window, `scope:${scope ?? 'all'}`], data);
+      qc.setQueryData(['human-themes', window, workspaceKey(workspaceId)], data);
       void qc.invalidateQueries({ queryKey: ['ai-usage'] });
       setNotice(
         data.creditsExhausted
           ? 'Out of AI credits this month — the summary resumes on the 1st.'
           : data.empty
-            ? 'No human review comments in this scope / window yet.'
+            ? 'No human review comments in this workspace / window yet.'
             : data.throttled
               ? 'A summary is already generating — showing the latest shortly.'
               : null,

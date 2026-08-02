@@ -104,7 +104,7 @@ function render(
   if (total === 0) {
     lines.push(`  ${green('All clear — nothing needs your attention.')}`);
     if (repoCount === 0) {
-      lines.push(`  ${dim('No repos watched yet — run `pierre` to add some.')}`);
+      lines.push(`  ${dim('No repos added yet — run `pierre` to add some.')}`);
     }
     lines.push('');
     return { output: lines.join('\n') + '\n', keys };
@@ -214,13 +214,15 @@ function render(
     lines.push('');
   }
 
-  // 5. New open PRs by others in repos you've Watched.
+  // 5. New open PRs by others, opened since the repo was ADDED. The wire field keeps its
+  // historical `watchedRepoPrs` name (the stored dismissal kind pins it — see shared/types.ts);
+  // the section is "New PRs".
   if (data.watchedRepoPrs.length > 0) {
-    section('New in watched repos', data.watchedRepoPrs.length);
+    section('New PRs', data.watchedRepoPrs.length);
     for (const it of data.watchedRepoPrs) {
       const author = loginOf(it.authorId);
       row(
-        `watched:${it.prId}`,
+        `newpr:${it.prId}`,
         `${it.repoFullName}#${it.number}`,
         it.githubUrl,
         it.title,

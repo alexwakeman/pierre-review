@@ -2,17 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 
 // Repo filter for a Flow-metric drill-down list — matches the header FilterBar dropdowns
-// (pill trigger + popover + checkbox rows). "All team repos" flattens the list across every
-// repo; ticking individual repos filters to just those. The selection is `null` = all (the
-// canonical "everything" state) or an explicit id array. Multi-select; each metric tab owns
-// its own selection (the parent keys this per TeamMetricKey).
+// (pill trigger + popover + checkbox rows). "All Workspace repos" flattens the list across every
+// repo the drill-down covers; ticking individual repos filters to just those. The selection is
+// `null` = all (the canonical "everything" state) or an explicit id array. Multi-select; each
+// metric tab owns its own selection (the parent keys this per WorkspaceMetricKey).
 export function MetricRepoFilter({
   repos,
   selected,
   onChange,
 }: {
   repos: { id: number; fullName: string }[]; // the repos with data in the drill-down
-  selected: number[] | null; // null = all team repos
+  selected: number[] | null; // null = every repo in the drill-down (i.e. the whole Workspace)
   onChange: (sel: number[] | null) => void;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -55,7 +55,7 @@ export function MetricRepoFilter({
           aria-expanded={open}
           className={`inline-flex items-center gap-1 py-0.5 pl-2.5 ${isAll ? 'pr-2.5' : 'pr-1'}`}
         >
-          {isAll ? 'All team repos' : `Repos (${shown}/${total})`}
+          {isAll ? 'All Workspace repos' : `Repos (${shown}/${total})`}
           <span aria-hidden className="text-[9px]">
             ▾
           </span>
@@ -64,8 +64,8 @@ export function MetricRepoFilter({
           <button
             type="button"
             onClick={() => onChange(null)}
-            title="Show all team repos"
-            aria-label="Show all team repos"
+            title="Show all Workspace repos"
+            aria-label="Show all Workspace repos"
             className="py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
           >
             ✕
@@ -81,7 +81,7 @@ export function MetricRepoFilter({
         >
           <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800">
             <input type="checkbox" checked={isAll} onChange={() => onChange(null)} />
-            <span className="text-gray-800 dark:text-gray-100">All team repos</span>
+            <span className="text-gray-800 dark:text-gray-100">All Workspace repos</span>
           </label>
           <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
           <div className="max-h-72 overflow-y-auto">

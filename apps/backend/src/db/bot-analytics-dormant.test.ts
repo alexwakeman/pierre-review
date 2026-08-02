@@ -18,6 +18,9 @@ let db: any;
 let schema: any;
 let closeDb: (() => void) | undefined;
 let q: any;
+// BotScope { workspaceId, repoIds } — `workspaceId` decides who counts as a bot, `repoIds`
+// narrows the measured data. Resolved through the production resolver in beforeAll.
+let scope: any;
 
 const DAY = 24 * 60 * 60 * 1000;
 // Second-aligned: sqlite stores mode:'timestamp' as epoch SECONDS, so a millisecond-bearing
@@ -41,7 +44,7 @@ beforeAll(async () => {
   // account 1 exists (migration 0008). One repo + one PR.
   const [repo] = await db
     .insert(repos)
-    .values({ accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_bd', inboxWatch: true })
+    .values({ accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_bd' })
     .returning()
     .execute();
   const [pr] = await db
@@ -113,13 +116,21 @@ beforeAll(async () => {
       submittedAt: reviewAt,
     })
     .execute();
+
+  // ⚠ Resolve the scope through `resolveWorkspaceScope`, never by hand-building
+  // `{workspaceId, repoIds}` — that call runs `ensureRepoMemberships`, which is what puts a repo
+  // inserted straight into `repos` into the account's Default workspace. Hand-build it and the
+  // seeded repo belongs to no workspace, `getBotAnalytics` short-circuits on the empty scope, and
+  // "vendors is empty" would look like a dormancy bug rather than a missing membership.
+  scope = await q.resolveWorkspaceScope(1, null);
 });
 
 afterAll(() => closeDb?.());
 
 describe('getBotAnalytics dormant emission', () => {
   it('rolling_14: zero window activity → a dormant row riding the trend, not a dropped one', async () => {
-    const resp = await q.getBotAnalytics(1, 'rolling_14');
+    expect(scope.repoIds).toHaveLength(1); // the emptiness below must be dormancy, not an empty scope
+    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
     expect(resp.vendors).toHaveLength(2);
     const v = resp.vendors.find((x: { kind: string }) => x.kind === 'coderabbit')!;
     expect(v.dormant).toBe(true);
@@ -134,7 +145,7 @@ describe('getBotAnalytics dormant emission', () => {
   });
 
   it('rolling_14: a reviews-ONLY bot (zero threads ever) survives as dormant on the review alone', async () => {
-    const resp = await q.getBotAnalytics(1, 'rolling_14');
+    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
     const v = resp.vendors.find((x: { kind: string }) => x.kind === 'greptile')!;
     expect(v).toBeDefined();
     expect(v.dormant).toBe(true);
@@ -144,7 +155,7 @@ describe('getBotAnalytics dormant emission', () => {
   });
 
   it('rolling_30: a body-only review is window activity → non-dormant, volume math unchanged', async () => {
-    const resp = await q.getBotAnalytics(1, 'rolling_30');
+    const resp = await q.getBotAnalytics(1, 'rolling_30', scope);
     expect(resp.vendors).toHaveLength(2);
     for (const v of resp.vendors) {
       expect(v.dormant).toBe(false);

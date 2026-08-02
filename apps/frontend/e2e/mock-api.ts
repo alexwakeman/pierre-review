@@ -17,6 +17,9 @@ import type {
   TimelineResponse,
   User,
   WatchedRepoPrItem,
+  Workspace,
+  WorkspacesResponse,
+  DetectedReviewersResponse,
 } from '@pierre-review/shared';
 
 // Deterministic, self-contained API fixtures for the My Turn / Feed / Focus-mode
@@ -35,6 +38,28 @@ const ALICE: User = { id: 2, githubLogin: 'alice', displayName: 'Alice', avatarU
 const BOB: User = { id: 3, githubLogin: 'bob', displayName: 'Bob', avatarUrl: null, isBot: false };
 const USERS: User[] = [ME, ALICE, BOB];
 
+// ── THE WORKSPACE COMES FIRST, AND THE WHOLE CONSOLE DEPENDS ON IT ─────────────────────────────
+// A workspace is the app's ONLY scope. The store starts with `workspaceId: null` and NOTHING
+// workspace-scoped renders or fetches until `GET /api/workspaces` lands and the sync effect fills
+// it in (every scoped hook holds itself idle with `skipToken`). So this fixture is not decoration:
+// without it the Activity console — the default landing view — stays permanently empty and every
+// spec in this directory fails with no useful message.
+//
+// One workspace, `isDefault: true`, owning the single repo. That mirrors a real fresh account:
+// the Default workspace is auto-created server-side, is where new repos land, and is renameable
+// but not deletable. The Compare-workspaces rail line is gated on `workspaces.length >= 2`, so a
+// one-workspace fixture also keeps it correctly hidden.
+const WORKSPACE: Workspace = {
+  id: 1,
+  name: 'Default',
+  repoIds: [10],
+  repoCount: 1,
+  isDefault: true,
+  createdAt: iso(60),
+};
+
+const WORKSPACES: WorkspacesResponse = { workspaces: [WORKSPACE] };
+
 const REPO: Repo = {
   id: 10,
   owner: 'acme',
@@ -45,7 +70,11 @@ const REPO: Repo = {
   lastIncrementalSyncAt: iso(0),
   lastSyncStatus: 'ok',
   lastSyncError: null,
-  inboxWatch: true,
+  // A repo belongs to EXACTLY ONE workspace (`workspace_repos`, UNIQUE (account_id, repo_id)) and
+  // the id is on the wire because it is the client's only repo→workspace mapping: surfaces
+  // holding just a repoId (PR detail, ThreadList's bulk-resolve offer, a restored tab) must name
+  // the PR's OWN workspace when they ask for a bot judgement, not the selected one.
+  workspaceId: WORKSPACE.id,
 };
 
 // 5 open PRs in one repo by two authors. 101/102/103 are the My Turn inbox (awaiting
@@ -164,25 +193,41 @@ const ME_RESPONSE: MeResponse = {
     watchedRepoPrs: WATCHED_IDS.length,
     claudeReviewsToAction: 0,
   },
+  feedLastSeenAt: null,
+  newFeedItems: 0,
   deploymentMode: 'local',
   // Pro tier for e2e: all AI features (digests, Claude Review, AI Fix) stay off so the console
   // renders without the AI panels/tabs. "My Turn" is CORE / free now (not a Pro capability), so
-  // the Feed's isMyTurn cards/toggle render regardless of these flags.
+  // the Feed's isMyTurn cards/toggle render regardless of these flags. `workspaceInsights` (the
+  // former `teamInsights`) off keeps the Insights rail line hidden.
   pro: {
     activityDigest: false,
     reviewMemory: false,
     aiAnalysis: false,
     prSummary: false,
     aiFix: false,
-    teamInsights: false,
+    workspaceInsights: false,
     claudeReview: false,
     slackDigest: false,
     issueLinks: false,
     botTriage: false,
   },
+  benchmarkOptIn: false,
   authNotices: [],
   // AI balances (summary turns + agent credits). Unmetered/none for the e2e local tier.
   aiUsage: null,
+};
+
+// The workspace's bot listing — ONE `WorkspaceReviewer` row per actor, judgement + identity +
+// price + evidence together. Empty here (the fixtures have no bots), but it must be a real
+// `DetectedReviewersResponse` and not the catch-all `{}`: `useBotColors` and the feed's vendor tag
+// read `reviewers`, and `reviewerListEmptyKind` reads `repoIds` to tell "this workspace has no
+// repos" from "nothing detected yet".
+const DETECTED_REVIEWERS: DetectedReviewersResponse = {
+  workspaceId: WORKSPACE.id,
+  reviewers: [],
+  repoIds: [REPO.id],
+  generatedAt: iso(0),
 };
 
 function myTurnPr(id: number): MyTurnPr {
@@ -404,6 +449,8 @@ const THREAD_5001: ThreadDetail = {
   isResolved: false,
   isOutdated: false,
   derivedState: 'replied_unresolved',
+  addressedConfidence: 'low',
+  addressedReason: null,
   originalCommenterId: BOB.id,
   createdAt: iso(1),
   comments: [
@@ -478,6 +525,15 @@ function json(route: Route, body: unknown): Promise<void> {
 // modules under paths like `/app/src/api/client.ts` that a glob would wrongly capture
 // (returning JSON for a JS module breaks the app boot). Matched by pathname, so the
 // member-filtered timeline, the search timeline, etc. all resolve to the same fixture.
+//
+// ⚠ MATCHING IGNORES THE QUERY STRING, AND THAT IS DELIBERATE UNDER WORKSPACES. Every scoped
+// route now carries `?workspace=<id>` (plus an optional `repoIds` narrowing WITHIN it), and the
+// SPA emits it on `/api/timeline`, `/api/open-prs`, `/api/activity`, `/api/activity/feed`,
+// `/api/branch-status`, `/api/bot-*` and the metric routes. There is exactly one workspace in
+// these fixtures, so one response per pathname is the right answer for every scope the app can
+// ask for — and matching on the pathname keeps it that way whether or not a given surface has
+// resolved its workspace yet. If a spec ever needs two workspaces to differ, read
+// `new URL(route.request().url()).searchParams.get('workspace')` here and branch on it.
 export async function installMockApi(page: Page): Promise<void> {
   await page.route(
     (url) => url.pathname.startsWith('/api/'),
@@ -495,6 +551,13 @@ export async function installMockApi(page: Page): Promise<void> {
         return json(route, { suggestedReviewers: [], users: [] });
 
       if (path.endsWith('/api/me')) return json(route, ME_RESPONSE);
+      // ⚠ MUST BE SERVED, not left to the catch-all. `workspaceId` starts null in the store and
+      // every workspace-scoped query holds itself idle until this response resolves it — a `{}`
+      // here leaves the Activity console (the default landing view) permanently blank.
+      if (path.endsWith('/api/workspaces')) return json(route, WORKSPACES);
+      // The workspace's bot listing. Shape matters even while empty: consumers read `.reviewers`
+      // and `.repoIds` off it.
+      if (path.endsWith('/api/bot-reviewers')) return json(route, DETECTED_REVIEWERS);
       if (path.endsWith('/api/my-turn')) return json(route, MY_TURN);
       // The consolidated Feed (new) — MUST precede the generic `/api/feed` check below,
       // since `/api/activity/feed` also contains the substring `/api/feed`.
@@ -520,4 +583,13 @@ export async function installMockApi(page: Page): Promise<void> {
   );
 }
 
-export const fixtures = { PRS, INBOX_IDS, REPO, USERS, FEED, CONSOLIDATED_FEED, ACTIVITY };
+export const fixtures = {
+  PRS,
+  INBOX_IDS,
+  REPO,
+  USERS,
+  FEED,
+  CONSOLIDATED_FEED,
+  ACTIVITY,
+  WORKSPACE,
+};

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { EventType, PrStatus, ReviewState, TimelineQuery } from '@pierre-review/shared';
 import { config } from '../../config.js';
-import { getTimeline, type TimelineFilters } from '../../db/queries.js';
+import { getTimeline, resolveWorkspaceScope, type TimelineFilters } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -29,6 +29,8 @@ const REVIEW_FILTER_STATES: ReviewState[] = [
   'dismissed',
 ];
 
+// `repoIds` → the `narrow` argument of `resolveWorkspaceScope` (never a scope in its own right);
+// `prIds`/`userIds`/`allowBotIds` keep their own meanings. Empty/absent → null = no narrowing.
 function parseIntList(raw: string | undefined): number[] | null {
   if (!raw) return null;
   const ids = raw
@@ -111,8 +113,20 @@ export async function timelineRoutes(app: FastifyInstance): Promise<void> {
   // still gets a bound rather than an unbounded one.
   const maxSpanDays = config.retentionDays > 0 ? config.retentionDays : 365;
 
+  // `?workspace=<id>` is the board's scope; `?repoIds=` only narrows WITHIN it.
+  //
+  // The board carried repo ids alone while `null` meant "every repo of the account". Under a
+  // workspace scope that is two bugs: an EMPTY workspace sends no ids and the server would render
+  // the whole account, and two workspaces both sending no ids produce the same query string, so
+  // React Query serves one board under the other's cache key. `resolveWorkspaceScope` returns
+  // `membership ∩ (?repoIds= ?? membership)` — always a concrete array, `[]` for an empty
+  // workspace, which `getTimeline` renders as an empty board rather than everything.
+  //
+  // ⚠ The pr-focus (`prIds`) branch inside `getTimeline` deliberately BYPASSES the repo scope: an
+  // isolate tab must load its subject PR even when the board's repo filter would hide it.
+  // Ownership is still bound by `accountId`, so that is a scope bypass, never a tenancy one.
   app.get('/api/timeline', async (req) => {
-    const q = req.query as TimelineQuery;
+    const q = req.query as TimelineQuery & { workspace?: string };
     const now = new Date();
     const window = clampWindow(
       parseDate(q.from, new Date(now.getTime() - 14 * DAY_MS)),
@@ -120,11 +134,13 @@ export async function timelineRoutes(app: FastifyInstance): Promise<void> {
       now,
       maxSpanDays,
     );
+    const accountId = accountIdOf(req);
+    const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
     const filters: TimelineFilters = {
-      accountId: accountIdOf(req),
+      accountId,
       from: window.from,
       to: window.to,
-      repoIds: parseIntList(q.repoIds),
+      repoIds: scope.repoIds,
       prIds: parseIntList(q.prIds),
       userIds: parseIntList(q.userIds),
       types: parseTypes(q.types),

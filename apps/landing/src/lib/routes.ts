@@ -49,13 +49,13 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
       'The free, open-core tier in full: the cross-repo Activity feed, the repo→contributor timeline, per-repo consoles, derived thread states, PR detail with real write actions, and the open-PR strip. Free, forever.',
   },
   '/pro': {
-    title: `${SITE_NAME} Pro — AI summaries, team insights & agentic review`,
+    title: `${SITE_NAME} Pro — AI summaries, workspace insights & agentic review`,
     description:
-      'The intelligence layer: per-repo AI digests, sprint reports, team Insights, DORA-style flow metrics, My-Turn triage, Slack digests, Jira/Linear links — plus Claude Review and AI Fix with a human hand on the wheel.',
+      'The intelligence layer: per-repo AI digests, sprint reports, Workspace Insights, DORA-style flow metrics, My-Turn triage, Slack digests, Jira/Linear links — plus Claude Review and AI Fix with a human hand on the wheel.',
   },
   '/pricing': {
     title: `Pricing — ${SITE_NAME} is open-core and free. Pro is $15/month`,
-    description: `The ${SITE_NAME} dashboard is free, local-first, and yours forever. Pro adds AI summaries, team Insights, flow metrics, Slack digests and My Turn — for $15 a month.`,
+    description: `The ${SITE_NAME} dashboard is free, local-first, and yours forever. Pro adds AI summaries, Workspace Insights, flow metrics, Slack digests and My Turn — for $15 a month.`,
   },
   '/how-it-works': {
     title: 'How it works — sync, architecture & roadmap',

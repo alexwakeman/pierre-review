@@ -3,12 +3,35 @@
 > ⚠️ **HISTORICAL DESIGN DOC — the plan, not the shipped state.** This is the original
 > open-core design (2026-06-29) and it has been **built and evolved substantially** since.
 > For the current architecture, **CLAUDE.md is authoritative** (see "Open-core Pro plugin").
-> Notable drift to keep in mind while reading: the **contract `apiVersion` is now 11** (not 1);
-> the "Inbox" tab shipped as the **Activity** console; and **My Turn / "FYI" feed participation
-> is CORE / free on every tier** (`feed/my-turn.ts`) — it is **not** a Pro capability (an
-> earlier iteration gated it behind a `feedMyTurn` cap + `registerFyiProvider` seam; both were
-> removed). The current Pro capability set is `activityDigest, reviewMemory, aiAnalysis,
-> prSummary, aiFix, teamInsights, claudeReview, slackDigest, issueLinks`.
+> Notable drift to keep in mind while reading:
+>
+> - The **contract `apiVersion` is now 14** (not 1). Four literals must agree —
+>   `pro/contract.ts`, `packages/pro/src/index.ts`, `packages/pro/src/contract-types.ts` and
+>   **`pro/bind.ts`'s runtime gate**; a half-bump silently degrades the whole plugin to OSS mode.
+> - The "Inbox" tab shipped as the **Activity** console.
+> - **My Turn / "FYI" feed participation is CORE / free on every tier** (`feed/my-turn.ts`) — it is
+>   **not** a Pro capability (an earlier iteration gated it behind a `feedMyTurn` cap +
+>   `registerFyiProvider` seam; both were removed).
+> - **Teams became Workspaces, and a Workspace is the only scope there is.** `TeamScope` (its five
+>   wire forms and every canonicaliser) is deleted; the wire parameter is `?workspace=<integer>` and
+>   scoped `ProContext` getters take `BotScopeWire { workspaceId, repoIds }`. A repo belongs to
+>   **exactly one** workspace. The capability `teamInsights` was renamed **`workspaceInsights`**,
+>   and `ctx.queries` gained `workspaceScopeForRepo` (repo → workspace) and `defaultWorkspaceId`
+>   (for the two account-wide crons, which now cover the Default workspace only). Inside the plugin,
+>   `insights/scope.ts` became `insights/workspace-scope.ts` and the persisted `scope_key`
+>   **vocabulary** — not the column name — moved to `ws:<workspaceId>` (plugin migration `0020`).
+> - The current Pro capability set is `activityDigest, reviewMemory, aiAnalysis, prSummary, aiFix,
+>   workspaceInsights, claudeReview, slackDigest, issueLinks` (+ `botTriage`).
+> - **The "watched" concept is GONE.** `repos.inbox_watch` / `inbox_watch_started_at` were dropped
+>   (migration `0046`, pg `0033`), along with `WatchedBadge`, the per-repo watch toggle and
+>   `setRepoInboxWatch`. Everything below that reads "watched repos" — the digest scope, the Inbox
+>   per-repo sections, `getFeed`, `listRepos`' `Repo.inboxWatch` field — now means **the selected
+>   Workspace's repos**: a Workspace IS the scope, and every repo in one is fully live (Feed,
+>   Activity, My Turn, Bots). The one thing the watch window really bought — adding a repo with 400
+>   open PRs must not dump them all into My Turn — survives as My Turn's cutoff on `repos.created_at`
+>   (`getAddedRepoActionablePrIds`, the function this doc still calls `getWatchedActionablePrIds`).
+>   The wire field `MyTurnResponse.watchedRepoPrs` and the `watched_repo_pr` dismissal enum keep
+>   their names; the concept behind them is "new PRs in your repos".
 
 **Prepared:** 2026-06-29
 **Source:** 12-agent design workflow (Understand → Design → Synthesize; Inbox UX explored 3 ways and judged).

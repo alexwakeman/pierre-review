@@ -7,7 +7,7 @@ import {
 import { useMemo } from 'react';
 import type { ConsolidatedFeedItem, ConsolidatedFeedResponse, User } from '@pierre-review/shared';
 import { api } from '../api/client.js';
-import { ACTIVITY_GC_TIME } from './useActivity.js';
+import { ACTIVITY_GC_TIME, workspaceKey } from './useActivity.js';
 
 // Record that the cross-repo Activity Feed has been viewed (server-side "seen" marker).
 // On success, refresh /api/me so the Welcome-back banner's "new since last seen" count
@@ -25,8 +25,25 @@ export function useMarkFeedSeen() {
 // and its memory bounded on large accounts.
 export const FEED_PAGE_SIZE = 50;
 
-/** Build the /api/activity/feed query string from the active repo + member + bot scope. */
+/**
+ * Build the /api/activity/feed query string from the active WORKSPACE + repo + member + bot scope.
+ *
+ * ⚠ `workspace` is not interchangeable with `repoIds`, and the bots-only path is why: the server
+ * resolves "which logins count as automated reviewers" from the WORKSPACE, while `repoIds` only
+ * narrows which data is measured. The two deliberately disagree on the single-PR isolation path
+ * (`prId`), which reaches a PR whose repo may be outside the current narrowing entirely.
+ *
+ * ⚠ `repoIds` IS EMITTED WHENEVER IT IS NON-NULL, INCLUDING WHEN EMPTY — see activitySearch in
+ * useActivity.ts for why dropping an empty array is a scope bug rather than a tidy-up.
+ *
+ * ⚠ `repoIds` IS AN EXPLICIT CALLER SCOPE, NEVER THE FILTERBAR'S REPO PICKER. The feed is an
+ * Activity surface, so it covers the WHOLE active workspace; the only legitimate narrowing is the
+ * per-repo console passing its own `[repoId]`. `filters.repoIds` is a TIMELINE-board filter whose
+ * picker is not mounted while Activity is the active tab — routing it here would leave the feed
+ * silently scoped with no visible control to widen it again.
+ */
 function feedSearch(
+  workspaceId: number | null,
   repoIds: number[] | null,
   userIds: number[] | null,
   excludeBots: boolean,
@@ -37,7 +54,8 @@ function feedSearch(
   includeAllCommits: boolean,
 ): string {
   const p = new URLSearchParams();
-  if (repoIds && repoIds.length > 0) p.set('repoIds', repoIds.join(','));
+  if (workspaceId != null) p.set('workspace', String(workspaceId));
+  if (repoIds) p.set('repoIds', repoIds.join(','));
   if (userIds && userIds.length > 0) p.set('userIds', userIds.join(','));
   // Isolate to a single PR (the Feed "open PRs" panel). Only emitted when set.
   if (prId != null) p.set('prId', String(prId));
@@ -61,13 +79,17 @@ function feedSearch(
 // The consolidated Feed (the Activity "Feed" entry): one chronological stream across the
 // scoped repos merging My Turn actionables + the activity feed. Paginated with
 // useInfiniteQuery: page 0 loads the first FEED_PAGE_SIZE; "Load more" fetches the next
-// page by offset (never re-fetching earlier pages). Repo/member scope is folded into the
-// query key so a FilterBar change (or a rail repo select, which passes a single-id
-// repoIds) resets to page 0 and refetches. Snapshot intent — `staleTime: Infinity` +
+// page by offset (never re-fetching earlier pages). WORKSPACE + any explicit repo scope is folded
+// into the query key so a WorkspaceSelector change (or a rail repo select, which passes a
+// single-id repoIds) resets to page 0 and refetches. Snapshot intent — `staleTime: Infinity` +
 // `refetchOnMount: false`; the rail "Refresh" invalidates the `['consolidated-feed']`
-// prefix; `placeholderData: keep` keeps the previous list on screen while a new scope
-// loads (dim, never blank).
+// prefix (a PREFIX, so it sweeps every workspace's slot); `placeholderData: keep` keeps the
+// previous list on screen while a new scope loads (dim, never blank).
+//
+// `workspaceId` is required and nullable: `null` means the store has not resolved a workspace yet,
+// and the fetch is DISABLED until it has — nothing workspace-scoped may render off the wrong one.
 export function useConsolidatedFeed(opts: {
+  workspaceId: number | null;
   repoIds: number[] | null;
   userIds: number[] | null;
   excludeBots?: boolean;
@@ -79,6 +101,7 @@ export function useConsolidatedFeed(opts: {
   enabled?: boolean;
 }) {
   const search = feedSearch(
+    opts.workspaceId,
     opts.repoIds,
     opts.userIds,
     opts.excludeBots ?? false,
@@ -89,7 +112,7 @@ export function useConsolidatedFeed(opts: {
     opts.includeAllCommits ?? false,
   );
   const query = useInfiniteQuery<ConsolidatedFeedResponse>({
-    queryKey: ['consolidated-feed', search],
+    queryKey: ['consolidated-feed', workspaceKey(opts.workspaceId), search],
     initialPageParam: 0,
     queryFn: ({ pageParam }) => {
       const p = new URLSearchParams(search);
@@ -102,7 +125,7 @@ export function useConsolidatedFeed(opts: {
       const total = allPages[0]?.total ?? 0;
       return loaded < total ? loaded : undefined;
     },
-    enabled: opts.enabled ?? true,
+    enabled: (opts.enabled ?? true) && opts.workspaceId != null,
     staleTime: Infinity,
     // Survive the Activity console's unmount-on-tab-switch (see ACTIVITY_GC_TIME) so a
     // switch-away-and-back repaints the loaded feed pages instantly instead of cold-loading.
@@ -156,6 +179,9 @@ export function useConsolidatedFeed(opts: {
 // when nobody's looking; new data only lands on the 5-min sync anyway. Returns `hasNew` +
 // `refresh` (invalidate the loaded feed → the banner clears as items[0]/total catch up).
 export function useFeedHasNew(opts: {
+  // MUST be the same workspace the loaded feed was fetched under — the head poll compares its
+  // newest item against `loadedLatestId`, so a head from another scope is a guaranteed false fire.
+  workspaceId: number | null;
   repoIds: number[] | null;
   userIds: number[] | null;
   excludeBots?: boolean;
@@ -176,6 +202,7 @@ export function useFeedHasNew(opts: {
 }): { hasNew: boolean; refresh: () => void } {
   const qc = useQueryClient();
   const search = feedSearch(
+    opts.workspaceId,
     opts.repoIds,
     opts.userIds,
     opts.excludeBots ?? false,
@@ -186,14 +213,14 @@ export function useFeedHasNew(opts: {
     opts.includeAllCommits ?? false,
   );
   const head = useQuery<ConsolidatedFeedResponse>({
-    queryKey: ['feed-head', search],
+    queryKey: ['feed-head', workspaceKey(opts.workspaceId), search],
     queryFn: () => {
       const p = new URLSearchParams(search);
       p.set('limit', '1');
       p.set('offset', '0');
       return api.consolidatedFeed(p.toString());
     },
-    enabled: opts.enabled ?? true,
+    enabled: (opts.enabled ?? true) && opts.workspaceId != null,
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,
     staleTime: 30_000,

@@ -32,10 +32,10 @@ import type {
   InsightKind,
   InsightSeverity,
   ReviewerSuggestion,
-  TeamInsightsResponse,
-  TeamMetrics,
-  TeamMetricStat,
-  TeamMetricsDetail,
+  WorkspaceInsightsResponse,
+  WorkspaceMetrics,
+  WorkspaceMetricStat,
+  WorkspaceMetricsDetail,
   SprintComparisonMode,
   MetricPr,
   FeedEvent,
@@ -63,7 +63,7 @@ import type {
   PrStatus,
   ReasonTag,
   Repo,
-  Team,
+  Workspace,
   RepoInsights,
   RepoMergers,
   ReviewDetail,
@@ -96,10 +96,10 @@ import type {
   ClassificationConfidence,
   ClassificationSource,
   ReviewerClassification,
-  ReviewerIdentity,
-  ReviewerIdentityBody,
-  RepoReviewer,
-  RepoReviewerJudgementBody,
+  ReviewerFootprint,
+  RepoReviewerFootprintEntry,
+  WorkspaceReviewer,
+  WorkspaceReviewerPatchBody,
   ReviewerRole,
   DetectedReviewersResponse,
   ReviewProvenance,
@@ -199,14 +199,19 @@ const {
   claudeReviews,
   claudeReviewFindings,
   ciStatusEvents,
-  // The two grains of the bot object (migrations 0042/0043). `repoReviewers` (account, repo,
-  // author) holds the JUDGEMENT; `accountReviewers` (account, author) holds the IDENTITY + price.
-  // They replaced the single `bot_review_classification` table — never reach for one when the
-  // fact you want lives at the other's grain (see the shared types for the full rule).
-  repoReviewers,
-  accountReviewers,
-  teams,
-  teamRepos,
+  // THE ONE SCOPE (migrations 0044/0045). `workspaces` + `workspace_repos` replace the old
+  // `teams`/`team_repos` many-to-many: a repo belongs to EXACTLY ONE workspace, as a database
+  // fact (`workspace_repos`, UNIQUE (account_id, repo_id)), so there is no scope grammar left to
+  // parse and no "belongs to nothing" state.
+  workspaces,
+  workspaceRepos,
+  // THE BOT OBJECT: one row per (account, WORKSPACE, actor), carrying the judgement, the vendor
+  // identity AND the price. It replaced the two-grain `repo_reviewers` / `account_reviewers` pair
+  // — those existed only because judgement and identity sat at different grains, and with one
+  // workspace as the only scope they are facts about the same key. The two PROVENANCE FLAGS
+  // (`source` for automated/role/confidence/reasons, `identity_source` for kind/label) are what
+  // now keep the halves apart; `monthly_cents` has exactly one writer (`setReviewerCost`).
+  workspaceReviewers,
   benchmarkContributions,
   autoMergeRequests,
 } = schema;
@@ -235,14 +240,29 @@ function mapUser(u: typeof users.$inferSelect): User {
   };
 }
 
+// ⚠ EVERY REPO CARRIES ITS `workspaceId`, and it is never absent: the client has no other
+// repo→workspace mapping, and the surfaces that hold only a repoId (PR detail, ThreadList's
+// bulk-resolve offer, a restored tab, a search hit) must name the PR's OWN workspace rather than
+// the selected one. A repo whose membership row is somehow missing is REPAIRED into the account's
+// Default before this listing returns — `ensureRepoMemberships` is the read-side half of the
+// invariant `sync/upsert.ts` writes (see the workspace_repos comment in schema.sqlite.ts).
 export async function listRepos(accountId: number): Promise<Repo[]> {
-  const rows = await db
-    .select()
-    .from(repos)
-    .leftJoin(syncState, eq(syncState.repoId, repos.id))
-    .where(eq(repos.accountId, accountId))
-    .orderBy(asc(repos.owner), asc(repos.name))
-    .execute();
+  await ensureRepoMemberships(accountId);
+  const [rows, memberRows] = await Promise.all([
+    db
+      .select()
+      .from(repos)
+      .leftJoin(syncState, eq(syncState.repoId, repos.id))
+      .where(eq(repos.accountId, accountId))
+      .orderBy(asc(repos.owner), asc(repos.name))
+      .execute(),
+    db
+      .select({ repoId: workspaceRepos.repoId, workspaceId: workspaceRepos.workspaceId })
+      .from(workspaceRepos)
+      .where(eq(workspaceRepos.accountId, accountId))
+      .execute(),
+  ]);
+  const workspaceByRepo = new Map(memberRows.map((m) => [m.repoId, m.workspaceId]));
 
   return rows.map((r) => ({
     id: r.repos.id,
@@ -254,7 +274,9 @@ export async function listRepos(accountId: number): Promise<Repo[]> {
     lastIncrementalSyncAt: iso(r.sync_state?.lastIncrementalSyncAt ?? null),
     lastSyncStatus: r.sync_state?.lastSyncStatus ?? null,
     lastSyncError: r.sync_state?.lastSyncError ?? null,
-    inboxWatch: r.repos.inboxWatch,
+    // The repair above guarantees a row; the `?? 0` is only there because TypeScript cannot see
+    // that. A 0 here would mean the repair itself failed, which is a bug, not a state.
+    workspaceId: workspaceByRepo.get(r.repos.id) ?? 0,
   }));
 }
 
@@ -262,9 +284,11 @@ export async function getRepo(id: number, accountId: number): Promise<Repo | nul
   return (await listRepos(accountId)).find((r) => r.id === id) ?? null;
 }
 
-// Node IDs of every watched repo. Used to drop already-tracked repos from live
-// search results (a GitHub search hit exposes the same GraphQL `id`).
-export async function getWatchedRepoNodeIds(accountId: number): Promise<Set<string>> {
+// Node IDs of every repo ALREADY ADDED to this account. Two callers: dropping already-tracked
+// repos out of live GitHub search results (a search hit exposes the same GraphQL `id`), and
+// counting against the per-account repo cap. There is no second visibility axis to filter on —
+// every repo in a workspace is fully live.
+export async function getAddedRepoNodeIds(accountId: number): Promise<Set<string>> {
   const rows = await db
     .select({ nodeId: repos.githubNodeId })
     .from(repos)
@@ -273,199 +297,369 @@ export async function getWatchedRepoNodeIds(accountId: number): Promise<Set<stri
   return new Set(rows.map((r) => r.nodeId));
 }
 
-// ---- Teams (CORE) ----
-// Named groupings of an account's repos. Every read/write is accountId-scoped; id-addressed
-// mutators verify ownership and return false/empty for another account's team (→ 404 at the
-// route). A repo may belong to several teams (the team_repos join allows overlap). Assigning a
-// repo to a team auto-Watches it (inboxWatch=true) so team activity flows into the inbox.
+// ---- Workspaces (CORE) ----
+// A named grouping of an account's repos, and THE ONE SCOPE THIS APP HAS. Every read/write is
+// accountId-scoped; id-addressed mutators verify ownership and return false/'not_found'/empty for
+// another account's workspace (→ 404 at the route).
+//
+// A repo belongs to EXACTLY ONE workspace — a database fact (`workspace_repos`, UNIQUE
+// (account_id, repo_id)) — so assigning it elsewhere is a MOVE and there is no "belongs to
+// nothing" state. That is what retired the whole scope grammar this block used to carry: 'all' /
+// 'none' / 'teams' / '<id>' / 'teams:<ids>', five branches with three server parsers, whose
+// answers could disagree. There is one workspace id and nothing to parse.
+//
+// TWO INVARIANTS ARE REPAIRED ON READ rather than merely asserted, because both fail silently:
+//   • every account has exactly one `is_default` workspace  (`ensureDefaultWorkspace`)
+//   • every repo has exactly one membership row             (`ensureRepoMemberships`)
+// A repo with no membership row is invisible to every workspace-scoped read — no PRs, no feed
+// rows, no bots, no error.
+//
+// ⚠ MEMBERSHIP IS THE ONLY THING THESE WRITES TOUCH — none of them UPDATEs `repos`. There used to
+// be a second visibility axis ("watched"), and assignment silently switched it on for every id it
+// touched; that was defensible while assignment was an explicit user gesture, but a repo can no
+// longer be un-assigned, only MOVED, so the same write is now reached by `deleteWorkspace`, by the
+// PATCH drop path and by the membership repair — none of which is a user gesture about visibility.
+// The axis is gone: every repo in a workspace is fully live (Feed, Activity, My Turn, Bots), so
+// there is nothing left for a re-home to smuggle in.
 
-function mapTeam(
-  t: typeof teams.$inferSelect,
+function mapWorkspace(
+  w: typeof workspaces.$inferSelect,
   repoIds: number[],
-): Team {
+): Workspace {
   return {
-    id: t.id,
-    name: t.name,
+    id: w.id,
+    name: w.name,
     repoIds,
     repoCount: repoIds.length,
-    createdAt: t.createdAt.toISOString(),
+    isDefault: w.isDefault,
+    createdAt: w.createdAt.toISOString(),
   };
 }
 
-// All teams for an account, each carrying its member repo ids (join team_repos). Ordered by
-// name for a stable UI.
-export async function listTeams(accountId: number): Promise<Team[]> {
-  const teamRows = await db
-    .select()
-    .from(teams)
-    .where(eq(teams.accountId, accountId))
-    .orderBy(asc(teams.name))
+// The account's default workspace id, creating the row if absent. Called at account creation
+// (ensureLocalAccount / upsertCloudAccount) and defensively from listWorkspaces /
+// resolveWorkspaceScope — i.e. on effectively every request — so it must be genuinely
+// CONCURRENT-SAFE, not merely re-runnable:
+//   • INSERT … ON CONFLICT DO NOTHING, then re-SELECT. Two simultaneous callers must both come
+//     back with the winner's id; a plain SELECT-then-INSERT 500s the loser. The partial unique
+//     index `workspaces_one_default` (created in migration 0044 / pg 0031, not in the drizzle
+//     table config) is what makes the conflict reachable for the is_default half; the
+//     (account_id, name) unique covers the rest. The conflict target is deliberately UNSPELLED —
+//     either index may be the one that fires, and a bare `ON CONFLICT DO NOTHING` covers both in
+//     both dialects.
+//   • It carries the SAME three-level name fallback the migration uses, because
+//     `workspaces_account_name` is unique and an account whose team was literally called "Default"
+//     migrated to a NON-default workspace holding that name. A bare INSERT … name='Default' would
+//     then collide on every request for that account, forever.
+export async function ensureDefaultWorkspace(accountId: number): Promise<number> {
+  const readDefault = async (): Promise<number | null> => {
+    const row = (
+      await db
+        .select({ id: workspaces.id })
+        .from(workspaces)
+        .where(and(eq(workspaces.accountId, accountId), eq(workspaces.isDefault, true)))
+        .limit(1)
+        .execute()
+    )[0];
+    return row?.id ?? null;
+  };
+
+  const existing = await readDefault();
+  if (existing != null) return existing;
+
+  const taken = new Set(
+    (
+      await db
+        .select({ name: workspaces.name })
+        .from(workspaces)
+        .where(eq(workspaces.accountId, accountId))
+        .execute()
+    ).map((r) => r.name),
+  );
+  // The third form embeds the account id, so it cannot collide with the first two for the same
+  // account — the same ladder migration 0044 step 2 walks.
+  const name = !taken.has('Default')
+    ? 'Default'
+    : !taken.has('Default workspace')
+      ? 'Default workspace'
+      : `Default (workspace ${accountId})`;
+
+  await db
+    .insert(workspaces)
+    .values({ accountId, name, isDefault: true })
+    .onConflictDoNothing()
     .execute();
-  if (teamRows.length === 0) return [];
-  const memberRows = await db
-    .select({ teamId: teamRepos.teamId, repoId: teamRepos.repoId })
-    .from(teamRepos)
-    .where(eq(teamRepos.accountId, accountId))
-    .execute();
-  const byTeam = new Map<number, number[]>();
-  for (const m of memberRows) {
-    const arr = byTeam.get(m.teamId) ?? [];
-    arr.push(m.repoId);
-    byTeam.set(m.teamId, arr);
-  }
-  return teamRows.map((t) => mapTeam(t, byTeam.get(t.id) ?? []));
+
+  const after = await readDefault();
+  if (after != null) return after;
+  // Unreachable unless the partial unique index is missing from the database (a migration that
+  // never ran), in which case failing loudly beats handing every caller a wrong scope.
+  throw new Error(
+    `ensureDefaultWorkspace: no default workspace for account ${accountId} after insert`,
+  );
 }
 
-// Create a team (unique per (accountId, name)). Throws on a duplicate name — the caller maps
-// the unique-constraint failure to a 400. Returns the fresh Team (no repos yet).
-export async function createTeam(accountId: number, name: string): Promise<Team> {
+// Insert a Default membership row for every repo of the account that has none. Portable
+// anti-join: two SELECTs diffed in JS (the shape the old `getUnassignedRepoIds` used) — no
+// correlated subquery, so it stays on the async surface both dialects share.
+//
+// ⚠ IT IS A WRITE ON ESSENTIALLY EVERY GET, so two things are mandatory. The insert carries
+// `ON CONFLICT (account_id, repo_id) DO NOTHING` because concurrent requests WILL race the unique.
+// And it MUST NOT touch the `repos` row at all: repairing a membership is not a user gesture, so
+// anything it changed about the repo itself would be a behaviour change smuggled in by a repair.
+//
+// It only reaches `ensureDefaultWorkspace` when there is actually something to repair, so the
+// steady state is two cheap SELECTs and no write at all.
+export async function ensureRepoMemberships(accountId: number): Promise<void> {
+  const [repoRows, memberRows] = await Promise.all([
+    db.select({ id: repos.id }).from(repos).where(eq(repos.accountId, accountId)).execute(),
+    db
+      .select({ repoId: workspaceRepos.repoId })
+      .from(workspaceRepos)
+      .where(eq(workspaceRepos.accountId, accountId))
+      .execute(),
+  ]);
+  const have = new Set(memberRows.map((r) => r.repoId));
+  const missing = repoRows.map((r) => r.id).filter((id) => !have.has(id));
+  if (missing.length === 0) return;
+  const defaultId = await ensureDefaultWorkspace(accountId);
+  for (const repoId of missing) {
+    await db
+      .insert(workspaceRepos)
+      .values({ accountId, workspaceId: defaultId, repoId })
+      .onConflictDoNothing({
+        target: [workspaceRepos.accountId, workspaceRepos.repoId],
+      })
+      .execute();
+  }
+}
+
+// All workspaces for an account, each carrying its member repo ids. DEFAULT FIRST, then by name:
+// the default is where users land and where everything is re-homed, so it belongs at the top of
+// every picker. Repairs both invariants before reading.
+export async function listWorkspaces(accountId: number): Promise<Workspace[]> {
+  await ensureDefaultWorkspace(accountId);
+  await ensureRepoMemberships(accountId);
+  const [wsRows, memberRows] = await Promise.all([
+    db.select().from(workspaces).where(eq(workspaces.accountId, accountId)).execute(),
+    db
+      .select({ workspaceId: workspaceRepos.workspaceId, repoId: workspaceRepos.repoId })
+      .from(workspaceRepos)
+      .innerJoin(repos, eq(repos.id, workspaceRepos.repoId))
+      .where(eq(workspaceRepos.accountId, accountId))
+      .orderBy(asc(repos.owner), asc(repos.name))
+      .execute(),
+  ]);
+  const byWorkspace = new Map<number, number[]>();
+  for (const m of memberRows) {
+    const arr = byWorkspace.get(m.workspaceId) ?? [];
+    arr.push(m.repoId);
+    byWorkspace.set(m.workspaceId, arr);
+  }
+  return wsRows
+    .slice()
+    .sort(
+      (a, b) => Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name),
+    )
+    .map((w) => mapWorkspace(w, byWorkspace.get(w.id) ?? []));
+}
+
+// Create a workspace (unique per (accountId, name)). ALWAYS `isDefault: false` —
+// `ensureDefaultWorkspace` is the only writer of `true`. Throws on a duplicate name; the caller
+// maps the unique-constraint failure to a 400. Returns the fresh Workspace (no repos yet: a repo
+// is MOVED in, never created into one).
+export async function createWorkspace(accountId: number, name: string): Promise<Workspace> {
   const [row] = await db
-    .insert(teams)
-    .values({ accountId, name })
+    .insert(workspaces)
+    .values({ accountId, name, isDefault: false })
     .returning()
     .execute();
-  return mapTeam(row!, []);
+  return mapWorkspace(row!, []);
 }
 
-// Rename a team (account-scoped → false/404 for a team this account doesn't own). Returns
-// false when nothing was updated (unknown/foreign team).
-export async function renameTeam(
+// Rename a workspace (account-scoped → false/404 for one this account doesn't own). THE DEFAULT
+// IS RENAMEABLE: it is not deletable, which is a different thing — a user who wants to call their
+// primary workspace "Platform" is not asking to remove the fallback everything re-homes into.
+export async function renameWorkspace(
   id: number,
   accountId: number,
   name: string,
 ): Promise<boolean> {
   const updated = await db
-    .update(teams)
+    .update(workspaces)
     .set({ name })
-    .where(and(eq(teams.id, id), eq(teams.accountId, accountId)))
-    .returning({ id: teams.id })
+    .where(and(eq(workspaces.id, id), eq(workspaces.accountId, accountId)))
+    .returning({ id: workspaces.id })
     .execute();
   return updated.length > 0;
 }
 
-// Delete a team (account-scoped). The team_repos rows cascade via FK, but we also delete them
-// explicitly first so the txn ordering is dialect-agnostic (Postgres enforces FKs immediately;
-// SQLite only when foreign_keys=ON). Returns false for an unknown/foreign team.
-export async function deleteTeam(id: number, accountId: number): Promise<boolean> {
-  const owned = await db
-    .select({ id: teams.id })
-    .from(teams)
-    .where(and(eq(teams.id, id), eq(teams.accountId, accountId)))
-    .limit(1)
-    .execute();
-  if (!owned[0]) return false;
+// Delete a workspace. THREE-STATE, not boolean: the route must tell "not yours" (404) from
+// "that's the default" (409).
+//
+// ⚠ RE-HOMING THE REVIEWER ROWS IS NOT OPTIONAL. Two cascades fire from `workspaces`, and only one
+// of them is recoverable. `workspace_repos` losing its rows leaves the repos invisible until the
+// next repair pass moves them to Default — the right end state by the wrong route. But
+// `workspace_reviewers` cascading destroys every `source='manual'` verdict, every
+// `identity_source='manual'` vendor name and every `monthly_cents` in the workspace — money the
+// user typed — while the repos survive, with no warning and no undo. Under the old model deleting
+// a team touched no classification at all (`repo_reviewers` keyed on repo, `account_reviewers` on
+// account); one workspace-keyed row created this failure mode and this is where it is closed.
+//
+// ⚠ ON A COLLISION, DEFAULT'S EXISTING ROW WINS AND IS LEFT UNTOUCHED. Price is per workspace, so
+// the deleted workspace's row and Default's row for the same actor may hold different numbers, and
+// the `DO NOTHING` below is what decides it — the collision rule, not an optimisation. Deleting a
+// workspace is an explicit destructive act the user confirmed, so discarding its price with its row
+// is the expected cost; silently OVERWRITING a price the user set in Default, as a side effect of
+// deleting a DIFFERENT workspace, would be strictly worse and would have no undo.
+//
+// The repo re-home is MEMBERSHIP ONLY — no `repos` UPDATE, so nothing about the repos themselves
+// changes as a side effect of deleting the workspace that held them.
+export async function deleteWorkspace(
+  id: number,
+  accountId: number,
+): Promise<'deleted' | 'not_found' | 'is_default'> {
+  const owned = (
+    await db
+      .select({ id: workspaces.id, isDefault: workspaces.isDefault })
+      .from(workspaces)
+      .where(and(eq(workspaces.id, id), eq(workspaces.accountId, accountId)))
+      .limit(1)
+      .execute()
+  )[0];
+  if (!owned) return 'not_found';
+  if (owned.isDefault) return 'is_default';
+
+  const defaultId = await ensureDefaultWorkspace(accountId);
+  const [memberRows, reviewerRows] = await Promise.all([
+    db
+      .select({ repoId: workspaceRepos.repoId })
+      .from(workspaceRepos)
+      .where(and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.workspaceId, id)))
+      .execute(),
+    db
+      .select()
+      .from(workspaceReviewers)
+      .where(
+        and(eq(workspaceReviewers.accountId, accountId), eq(workspaceReviewers.workspaceId, id)),
+      )
+      .execute(),
+  ]);
+
   await runTransaction(async (tx) => {
+    // 1. Repos → Default. A plain UPDATE cannot collide: UNIQUE (account_id, repo_id) means the
+    //    repo has exactly this one membership row, so re-pointing it is always legal.
+    for (const m of memberRows) {
+      await tx
+        .update(workspaceRepos)
+        .set({ workspaceId: defaultId })
+        .where(
+          and(
+            eq(workspaceRepos.accountId, accountId),
+            eq(workspaceRepos.repoId, m.repoId),
+          ),
+        )
+        .execute();
+    }
+    // 2. Reviewer rows → Default. An UPDATE here WOULD collide (Default may already hold a row
+    //    for the same actor), so it is an insert-with-DO-NOTHING plus a delete of the leftovers:
+    //    Default keeps whatever it had, judgement, identity and price alike.
+    for (const r of reviewerRows) {
+      await tx
+        .insert(workspaceReviewers)
+        .values({
+          accountId,
+          workspaceId: defaultId,
+          authorUserId: r.authorUserId,
+          automated: r.automated,
+          role: r.role,
+          confidence: r.confidence,
+          source: r.source,
+          reasonsJson: r.reasonsJson,
+          kind: r.kind,
+          label: r.label,
+          identitySource: r.identitySource,
+          monthlyCents: r.monthlyCents,
+          updatedAt: r.updatedAt,
+        })
+        .onConflictDoNothing({
+          target: [
+            workspaceReviewers.accountId,
+            workspaceReviewers.workspaceId,
+            workspaceReviewers.authorUserId,
+          ],
+        })
+        .execute();
+    }
     await tx
-      .delete(teamRepos)
-      .where(and(eq(teamRepos.teamId, id), eq(teamRepos.accountId, accountId)))
+      .delete(workspaceReviewers)
+      .where(
+        and(eq(workspaceReviewers.accountId, accountId), eq(workspaceReviewers.workspaceId, id)),
+      )
       .execute();
-    // NOTHING TO CLEAN UP FOR BOT CLASSIFICATIONS ANY MORE, and the deletion that used to be here
-    // is worth naming so nobody re-adds it: `bot_review_classification` was keyed on a `team_id`
-    // with no FK (0 was the "No team" sentinel, so an FK would have rejected every default row),
-    // which meant deleting a team left orphan rows steering the account-wide automated set
-    // forever unless they were hand-deleted in this transaction. A bot is a PER-REPO object now
-    // — `repo_reviewers` is keyed (account, repo, author) and cascades from `repos` — so a team
-    // is once again just a bag of repos with no bot state of its own.
+    // 3. Belt-and-braces: step 1 already emptied this, and the FK cascades — but the explicit
+    //    delete keeps the ordering dialect-agnostic (Postgres enforces FKs immediately; SQLite
+    //    only with foreign_keys=ON).
     await tx
-      .delete(teams)
-      .where(and(eq(teams.id, id), eq(teams.accountId, accountId)))
+      .delete(workspaceRepos)
+      .where(and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.workspaceId, id)))
+      .execute();
+    await tx
+      .delete(workspaces)
+      .where(and(eq(workspaces.id, id), eq(workspaces.accountId, accountId)))
       .execute();
   });
-  return true;
+  return 'deleted';
 }
 
-// The member repo ids of a team, account-scoped (foreign/unknown team → empty array). The FK
-// on team_repos.repoId guarantees these are live repo ids.
-export async function getTeamRepoIds(
-  teamId: number,
+// The member repo ids of a workspace, account-scoped (foreign/unknown workspace → empty array).
+// Ordered owner/name so `DetectedReviewersResponse.repoIds` and every scope that derives from it
+// are in RENDER order rather than insertion order.
+export async function getWorkspaceRepoIds(
+  workspaceId: number,
   accountId: number,
 ): Promise<number[]> {
-  // Ownership is enforced via the accountId predicate on team_repos (denormalized) — a foreign
-  // team's rows carry a different accountId and are filtered out.
   const rows = await db
-    .select({ repoId: teamRepos.repoId })
-    .from(teamRepos)
-    .innerJoin(teams, eq(teams.id, teamRepos.teamId))
-    .where(and(eq(teamRepos.teamId, teamId), eq(teams.accountId, accountId)))
+    .select({ repoId: workspaceRepos.repoId })
+    .from(workspaceRepos)
+    .innerJoin(repos, eq(repos.id, workspaceRepos.repoId))
+    .where(
+      and(
+        eq(workspaceRepos.accountId, accountId),
+        eq(workspaceRepos.workspaceId, workspaceId),
+      ),
+    )
+    .orderBy(asc(repos.owner), asc(repos.name))
     .execute();
   return rows.map((r) => r.repoId);
 }
 
-// The UNION of every team's member repos for the account, deduped (→ scope 'teams', cross-team
-// monitoring). Differs from 'all' (which is every account repo, incl. repos in no team): this is
-// strictly the repos assigned to at least one team. Empty when the account has no team repos.
-export async function getAllTeamRepoIds(accountId: number): Promise<number[]> {
-  const rows = await db
-    .select({ repoId: teamRepos.repoId })
-    .from(teamRepos)
-    .where(eq(teamRepos.accountId, accountId))
-    .execute();
-  return [...new Set(rows.map((r) => r.repoId))];
-}
-
-// The UNION of the member repos of a SPECIFIC set of teams, account-scoped + deduped (→ a
-// multi-team scope `teams:<ids>`). IDOR-safe via the denormalized teamRepos.accountId predicate —
-// a foreign team's ids contribute nothing. Empty list → empty result.
-export async function getTeamsRepoIds(
-  teamIds: number[],
-  accountId: number,
-): Promise<number[]> {
-  if (teamIds.length === 0) return [];
-  const rows = await db
-    .select({ repoId: teamRepos.repoId })
-    .from(teamRepos)
-    .where(and(eq(teamRepos.accountId, accountId), inArray(teamRepos.teamId, teamIds)))
-    .execute();
-  return [...new Set(rows.map((r) => r.repoId))];
-}
-
-// Parse a multi-team scope wire string 'teams:<ids>' → the team-id list (deduped, sorted), or null
-// when it isn't a team-set token. The canonical form the client emits (scopeToParam).
-function parseTeamSetScope(scope: string): number[] | null {
-  if (!scope.startsWith('teams:')) return null;
-  const ids = scope
-    .slice('teams:'.length)
-    .split(',')
-    .map((x) => Number.parseInt(x, 10))
-    .filter((n) => Number.isInteger(n) && n > 0);
-  return ids.length ? [...new Set(ids)].sort((a, b) => a - b) : null;
-}
-
-// Repo ids owned by the account that belong to NO team (the "unassigned" bucket → scope 'none').
-// Filtered in JS against the (small, ≤ per-account cap) assigned set — no subquery, so it stays
-// on the portable async surface both dialects share.
-export async function getUnassignedRepoIds(accountId: number): Promise<number[]> {
-  const [repoRows, assignedRows] = await Promise.all([
-    db.select({ id: repos.id }).from(repos).where(eq(repos.accountId, accountId)).execute(),
-    db
-      .select({ repoId: teamRepos.repoId })
-      .from(teamRepos)
-      .where(eq(teamRepos.accountId, accountId))
-      .execute(),
-  ]);
-  const assigned = new Set(assignedRows.map((r) => r.repoId));
-  return repoRows.map((r) => r.id).filter((id) => !assigned.has(id));
-}
-
-// Assign repos to a team (idempotent). Only repos the account actually owns are assigned (a
-// foreign repoId is silently dropped — no cross-account leakage). Each assigned repo is
-// auto-Watched (inboxWatch=true) so its activity flows into the inbox. No-op for a
-// foreign/unknown team.
-export async function assignReposToTeam(
-  teamId: number,
+// MOVE repos into a workspace — not "add". The UNIQUE (account_id, repo_id) makes that structural:
+// the upsert re-points the repo's one membership row, so a repo already elsewhere is relocated and
+// no code path can produce a second row. Only repos the account actually owns are touched (a
+// foreign repoId is silently dropped — no cross-account leakage). No-op for a foreign/unknown
+// workspace.
+//
+// ⚠ IT WRITES `workspace_repos` AND NOTHING ELSE — no `repos` UPDATE. It is reached from paths
+// that are not user gestures (`deleteWorkspace`, the PATCH drop path, the membership repair), so
+// anything it changed about the repo row itself would fire on all of them. There is no second
+// visibility flag to set: a repo in a workspace is fully live by virtue of being there.
+export async function assignReposToWorkspace(
+  workspaceId: number,
   accountId: number,
   repoIds: number[],
 ): Promise<void> {
-  // Verify team ownership first.
-  const owned = await db
-    .select({ id: teams.id })
-    .from(teams)
-    .where(and(eq(teams.id, teamId), eq(teams.accountId, accountId)))
-    .limit(1)
-    .execute();
-  if (!owned[0]) return;
+  const owned = (
+    await db
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(and(eq(workspaces.id, workspaceId), eq(workspaces.accountId, accountId)))
+      .limit(1)
+      .execute()
+  )[0];
+  if (!owned) return;
   if (repoIds.length === 0) return;
-  // Keep only repos this account owns (defends the FK + the isolation invariant).
+  // Keep only repos this account owns (defends the composite FK + the isolation invariant).
   const ownedRepos = await db
     .select({ id: repos.id })
     .from(repos)
@@ -476,66 +670,153 @@ export async function assignReposToTeam(
   await runTransaction(async (tx) => {
     for (const repoId of validIds) {
       await tx
-        .insert(teamRepos)
-        .values({ accountId, teamId, repoId })
-        .onConflictDoNothing({
-          target: [teamRepos.teamId, teamRepos.repoId],
+        .insert(workspaceRepos)
+        .values({ accountId, workspaceId, repoId })
+        .onConflictDoUpdate({
+          // (account_id, repo_id) — the unique that makes this a MOVE. A stale target
+          // type-checks perfectly and raises "no unique or exclusion constraint matching the
+          // ON CONFLICT specification" at RUNTIME, in both dialects, only on a real write.
+          target: [workspaceRepos.accountId, workspaceRepos.repoId],
+          set: { workspaceId },
         })
         .execute();
     }
-    // Auto-watch every assigned repo (idempotent). Stamp the watch-start only when unset so a
-    // re-assign preserves the original window (mirrors setRepoInboxWatch).
-    await tx
-      .update(repos)
-      .set({
-        inboxWatch: true,
-        inboxWatchStartedAt: sql`coalesce(${repos.inboxWatchStartedAt}, ${tsBound(new Date())})`,
-      })
-      .where(and(eq(repos.accountId, accountId), inArray(repos.id, validIds)))
-      .execute();
   });
 }
 
-// Remove one repo from a team (account-scoped). Returns false when nothing was removed
-// (foreign/unknown team or the repo wasn't a member). Does NOT un-Watch the repo — a repo can
-// be watched independently of team membership.
-export async function removeRepoFromTeam(
-  teamId: number,
-  repoId: number,
+// Membership-only re-home: no `repos` UPDATE at all. Used by
+// the PATCH drop path (ids removed from a workspace's membership go to Default, because there is
+// no "no workspace" state to drop them into).
+export async function rehomeReposToDefault(
   accountId: number,
-): Promise<boolean> {
-  const removed = await db
-    .delete(teamRepos)
+  repoIds: number[],
+): Promise<void> {
+  if (repoIds.length === 0) return;
+  const defaultId = await ensureDefaultWorkspace(accountId);
+  const ownedRepos = await db
+    .select({ id: repos.id })
+    .from(repos)
+    .where(and(eq(repos.accountId, accountId), inArray(repos.id, repoIds)))
+    .execute();
+  if (ownedRepos.length === 0) return;
+  await db
+    .update(workspaceRepos)
+    .set({ workspaceId: defaultId })
     .where(
       and(
-        eq(teamRepos.teamId, teamId),
-        eq(teamRepos.repoId, repoId),
-        eq(teamRepos.accountId, accountId),
+        eq(workspaceRepos.accountId, accountId),
+        inArray(
+          workspaceRepos.repoId,
+          ownedRepos.map((r) => r.id),
+        ),
       ),
     )
-    .returning({ id: teamRepos.id })
     .execute();
-  return removed.length > 0;
 }
 
-// The single scope resolver. A `scope` wire value ('all' | 'none' | 'teams' | '<teamId>' |
-// 'teams:<ids>') resolves to the concrete repo-id set to compute over: 'all' → null (means "every
-// account repo", the callers' existing default), 'none' → the unassigned repos, 'teams' → the UNION
-// of every team's repos (cross-team monitoring), 'teams:<ids>' → the union of just those teams, a
-// numeric string → that team's repos (ownership-checked; an unknown/foreign team → empty array).
-// Reuse this everywhere a scope needs turning into repo ids.
-export async function resolveScopeRepoIds(
+// Every bot getter needs TWO different things, and the old single `repoIds: number[] | null`
+// conflated them: the WORKSPACE decides who counts as a bot, the REPO LIST narrows which data is
+// measured. One object with two named fields, so a call site cannot transpose a number and a
+// number[] and cannot forget which one the verdict comes from.
+//
+// ⚠ `null` IS GONE. `[]` keeps its one meaning — "no repos in scope ⇒ empty result" — and it is
+// now an ordinary state (a freshly created workspace), not an edge case. Its predecessor's `null`
+// meant "every repo of the account", which is precisely what a workspace scope must never silently
+// widen to.
+//
+// A BotScope is only ever constructed by `resolveWorkspaceScope`, whose contract guarantees
+// `repoIds ⊆ the workspace's membership`. The ONE genuine account-wide sweep — the cross-org
+// benchmark rollup — has its own explicitly named helpers instead of a null sentinel
+// (`automatedReviewerUserIdsForAccount` / `classificationKindForUserForAccount`).
+export interface BotScope {
+  workspaceId: number; // the JUDGEMENT grain — always exactly one
+  repoIds: number[]; // the DATA narrowing — always concrete. [] = this workspace is empty.
+}
+
+// THE ONE SCOPE RESOLVER. `raw` is the wire `?workspace=` value. Unknown, unparseable, or another
+// tenant's id ⇒ the account's DEFAULT workspace. It never throws, never 404s and is never an
+// existence oracle (every id yields the same response shape, and the resolved id is always one the
+// caller owns); the resolved id is echoed on every scoped response so a client can correct a stale
+// bookmark.
+//
+// ⚠ IT IS ALSO THE ONE PLACE THE `?repoIds=` NARROWING IS BOUNDED. `narrow` is the caller's
+// explicit list; the returned `repoIds` is ALWAYS `membership ∩ (narrow ?? membership)`. Under the
+// old model an explicit list REPLACED the scope and was only intersected with the ACCOUNT's repos,
+// which was sufficient while the judgement grain was the repo. It no longer is:
+// `?workspace=5&repoIds=<a repo of workspace 9>` would otherwise pass the account check, and the
+// listing would enumerate footprints over workspace-9 repos while the lazy classifier writes rows
+// keyed to workspace 5 for actors with ZERO footprint there — fabricating exactly the rows the
+// anti-fabrication gate exists to forbid, and making `getBotAnalytics(ws5, repos-of-ws9)` measure
+// one workspace's data through another's verdicts. Doing it here, once, is what stops it being a
+// per-route convention fourteen handlers must remember.
+export async function resolveWorkspaceScope(
   accountId: number,
-  scope: string,
-): Promise<number[] | null> {
-  if (scope === 'all') return null;
-  if (scope === 'none') return getUnassignedRepoIds(accountId);
-  if (scope === 'teams') return getAllTeamRepoIds(accountId);
-  const teamSet = parseTeamSetScope(scope);
-  if (teamSet) return getTeamsRepoIds(teamSet, accountId);
-  const teamId = Number(scope);
-  if (!Number.isInteger(teamId) || teamId <= 0) return [];
-  return getTeamRepoIds(teamId, accountId);
+  raw: string | number | undefined | null,
+  narrow?: number[] | null,
+): Promise<BotScope> {
+  await ensureRepoMemberships(accountId);
+  const requested =
+    typeof raw === 'number' ? raw : raw == null ? Number.NaN : Number.parseInt(String(raw), 10);
+  let workspaceId: number | null = null;
+  if (Number.isInteger(requested) && requested > 0) {
+    const owned = (
+      await db
+        .select({ id: workspaces.id })
+        .from(workspaces)
+        .where(and(eq(workspaces.id, requested), eq(workspaces.accountId, accountId)))
+        .limit(1)
+        .execute()
+    )[0];
+    if (owned) workspaceId = owned.id;
+  }
+  if (workspaceId == null) workspaceId = await ensureDefaultWorkspace(accountId);
+  const membership = await getWorkspaceRepoIds(workspaceId, accountId);
+  const repoIds =
+    narrow == null ? membership : membership.filter((id) => narrow.includes(id));
+  return { workspaceId, repoIds };
+}
+
+// The repo → workspace direction, as a ready-made scope. Needed by the two plugin call sites that
+// hold only a `repoId` (the per-repo Insights metrics route) and by nothing else. Ownership-bound:
+// a foreign/unknown repo yields null, never another tenant's workspace id.
+export async function workspaceScopeForRepo(
+  accountId: number,
+  repoId: number,
+): Promise<BotScope | null> {
+  const row = (
+    await db
+      .select({ workspaceId: workspaceRepos.workspaceId })
+      .from(workspaceRepos)
+      .where(
+        and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.repoId, repoId)),
+      )
+      .limit(1)
+      .execute()
+  )[0];
+  if (row) return { workspaceId: row.workspaceId, repoIds: [repoId] };
+  // No membership row yet (a repo added microseconds ago, or a repair that has not run). Confirm
+  // ownership before repairing, so this cannot be used to probe another tenant's repo ids.
+  const ownedRepo = (
+    await db
+      .select({ id: repos.id })
+      .from(repos)
+      .where(and(eq(repos.id, repoId), eq(repos.accountId, accountId)))
+      .limit(1)
+      .execute()
+  )[0];
+  if (!ownedRepo) return null;
+  await ensureRepoMemberships(accountId);
+  const repaired = (
+    await db
+      .select({ workspaceId: workspaceRepos.workspaceId })
+      .from(workspaceRepos)
+      .where(
+        and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.repoId, repoId)),
+      )
+      .limit(1)
+      .execute()
+  )[0];
+  return repaired ? { workspaceId: repaired.workspaceId, repoIds: [repoId] } : null;
 }
 
 /**
@@ -768,8 +1049,9 @@ export async function getUserStats(
 // and have that classification apply to EVERY tenant watching that login — permanently,
 // since `isBotOverridden` suppresses later auto-detection. Nothing in the frontend called it
 // (only `listUsers` is used); bot classification is done by the account-scoped
-// `PATCH /api/bot-reviewers/:userId`, which writes the per-account, per-repo `repo_reviewers`
-// table. Deleting the route was therefore strictly better than adding a predicate to it.
+// `PATCH /api/bot-reviewers/:userId`, which writes the per-(account, workspace, actor)
+// `workspace_reviewers` row. Deleting the route was therefore strictly better than adding a
+// predicate to it.
 // If a global override is ever wanted again, it needs to be an operator action, not an API.
 
 export interface TimelineFilters {
@@ -1293,9 +1575,10 @@ export async function getTimeline(
   };
 }
 
-// ---- watched-repo activity Feed (My Turn panel) ----
+// ---- recent-activity Feed (My Turn panel) ----
 
-// Recent activity across the account's WATCHED repos (inboxWatch=true), newest first,
+// Recent activity across the account's repos (narrowed by `repoIds` when the caller has a
+// scope), newest first,
 // over the last `daysBefore` days. Commit pushes are excluded (too noisy); draft→ready
 // and reopened are included (emitted during sync). Each row is denormalized into a
 // render-ready FeedEvent (repo name, PR number/title/state, review verdict, comment
@@ -1307,8 +1590,6 @@ export interface FeedFilters {
   repoIds?: number[] | null;
   // Filters events by actor (member filter); null / empty → all actors.
   userIds?: number[] | null;
-  // Legacy /api/feed IndexedDB-mirror semantics only: restrict to inbox-watched repos.
-  watchedOnly?: boolean;
   // Single-PR isolation: scope to this PR's events AND drop the `daysBefore` window (the
   // scan is one PR, so its full history is cheap). Lets the Feed's per-PR filter show an
   // old PR's opened event + all activity, not just the last `daysBefore` days.
@@ -1323,7 +1604,7 @@ export async function getFeed(
   accountId: number,
   opts: FeedFilters = {},
 ): Promise<FeedResponse> {
-  const { daysBefore = 14, repoIds = null, userIds = null, watchedOnly = false, prId = null, botActorIds = null } = opts;
+  const { daysBefore = 14, repoIds = null, userIds = null, prId = null, botActorIds = null } = opts;
   // Isolated to one PR → no time window (epoch 0); otherwise the rolling `daysBefore` window.
   const since = prId != null ? new Date(0) : new Date(Date.now() - daysBefore * 24 * 60 * 60 * 1000);
   const conds: SQL[] = [
@@ -1332,7 +1613,6 @@ export async function getFeed(
     ne(events.type, 'commit_pushed'),
   ];
   if (prId != null) conds.push(eq(events.prId, prId));
-  if (watchedOnly) conds.push(eq(repos.inboxWatch, true));
   if (repoIds) conds.push(inArray(events.repoId, repoIds));
   if (userIds && userIds.length > 0) conds.push(inArray(events.actorId, userIds));
   // Bot feed: restrict to the automated-reviewer actor set (before the cap). An empty set
@@ -1516,7 +1796,7 @@ export async function getOpenPrs(filters: OpenPrsFilters): Promise<TimelinePr[]>
   });
 }
 
-// ---- insights (per-repo sprint/team stats) ----
+// ---- insights (per-repo sprint stats) ----
 
 export interface InsightsFilters {
   accountId: number;
@@ -1571,8 +1851,8 @@ function buildOpenDurationTrend(
 /**
  * Per-repo snapshot for the Insights panel. Counts (open/draft/stalled) are current
  * state; merged is a 7-day window; time-to-first-review is a median over PRs opened
- * in the last 30 days that got a review. Per-repo only — no team aggregation yet.
- * Scoped to the account; `repoIds` narrows to the watched-repo selection.
+ * in the last 30 days that got a review. Per-repo only — no workspace aggregation yet.
+ * Scoped to the account; `repoIds` narrows to the caller's repo selection.
  */
 export async function getInsights(filters: InsightsFilters): Promise<InsightsResponse> {
   const { accountId, repoIds } = filters;
@@ -2000,7 +2280,7 @@ export async function getRepoAnalytics(
   }
 
   // ---- CI recovery + failure reasons (from the ci_status_events transition log) ----
-  // Port of the cross-repo walk in getTeamMetrics, SCOPED to this single repo and WEEKLY-
+  // Port of the cross-repo walk in getWorkspaceMetrics, SCOPED to this single repo and WEEKLY-
   // bucketed over the 84-day window. Walk each PR's events in time order: a red streak opens
   // on the first failure and closes on the next success → a resolution duration, bucketed by
   // resolution week. Failing-check names tally into the by-stage reason breakdown. No events →
@@ -2150,30 +2430,33 @@ const ACTIVITY_ATTENTION_REASONS = new Set<ReasonTag>([
   'untouched_threads',
 ]);
 
-// The Activity aggregate: per WATCHED repo, current-state stats + a per-repo thread
+// The Activity aggregate: per repo, current-state stats + a per-repo thread
 // total + maintainer ids + attention/unread flags + the open PRs (caller groups by
-// author). Scoped to the account's WATCHED repos (inboxWatch); a passed `repoIds` further
-// narrows WITHIN watched. Composes EXISTING accountId-scoped readers — getInsights /
-// getOpenPrs / getMergers / listRepos — so isolation + triage logic stay single-sourced.
-// The one genuinely new aggregation is `threadTotals` (sum each open PR's threadCounts
-// per repo). Every watched repo is included (a quiet repo → empty prs, zeroed stats).
+// author). Scoped to the account's repos ∩ `scope.repoIds` — i.e. the whole selected
+// workspace, with no second visibility axis. Composes
+// EXISTING accountId-scoped readers — getInsights / getOpenPrs / getMergers / listRepos — so
+// isolation + triage logic stay single-sourced. The one genuinely new aggregation is
+// `threadTotals` (sum each open PR's threadCounts per repo). Every repo in scope is
+// included (a quiet repo → empty prs, zeroed stats).
+//
+// It takes a full `BotScope` rather than a repo list because its acted-on bot stat needs the
+// WORKSPACE to know who counts as a review bot; `scope.repoIds` only narrows the data.
 export async function getActivity(
   accountId: number,
-  repoIds: number[] | null,
+  scope: BotScope,
   userIds: number[] | null = null,
 ): Promise<ActivityResponse> {
   const reposAll = await listRepos(accountId);
-  const watched = reposAll.filter((r) => r.inboxWatch);
-  const reposScoped = repoIds ? watched.filter((r) => repoIds.includes(r.id)) : watched;
+  const reposScoped = reposAll.filter((r) => scope.repoIds.includes(r.id));
   const scopedIds = reposScoped.map((r) => r.id);
 
-  // No watched repos in scope → a valid empty response (also avoids an inArray([]) below).
+  // No repos in scope → a valid empty response (also avoids an inArray([]) below).
   if (scopedIds.length === 0) return { repos: [], generatedAt: new Date().toISOString() };
 
   // The compact-header `stats` stay REPO-scoped (repo health: open/draft/merged/stalled/
   // median-first-review) — filtering them by member would misreport repo throughput. The
   // PR cards + thread bar reflect the member filter via getOpenPrs' userIds. Pass the
-  // watched-scoped ids (never the raw repoIds) so downstream readers stay watched-only.
+  // ids that survived the ownership intersection, never the raw `scope.repoIds`.
   const [insights, openPrs, mergers] = await Promise.all([
     getInsights({ accountId, repoIds: scopedIds }),
     getOpenPrs({ accountId, repoIds: scopedIds, userIds }),
@@ -2191,14 +2474,13 @@ export async function getActivity(
 
   // Deterministic per-repo review-bot signal over these open PRs (no AI): threads a known
   // AI review bot opened, split by whether a later commit has acted on them. Empty map (0)
-  // when the account runs no review bot — the headline stat then simply doesn't render.
-  // Repo scope = `scopedIds`, the very repos this response is about — one of the seven call
-  // sites that used to hardcode NO_TEAM_KEY because it had no team to give, and is simply
-  // CORRECT now: the stat is per-repo, so the judgement should be too. `role: 'review'` — this is
-  // a REVIEW-bot acted-on rate; a linter's threads would inflate it.
+  // when the workspace runs no review bot — the headline stat then simply doesn't render.
+  // The judgement comes from `scope.workspaceId`, the same workspace the repos in this response
+  // belong to. `role: 'review'` — this is a REVIEW-bot acted-on rate; a linter's threads would
+  // inflate it.
   const botThreadCountsByPr = await buildBotThreadCounts(
     openPrs.map((pr) => pr.id),
-    await automatedReviewerUserIds(accountId, scopedIds, 'review'),
+    await automatedReviewerUserIds(accountId, scope.workspaceId, 'review'),
   );
 
   // Preserve listRepos order (stable, not jumpy across loads).
@@ -2376,7 +2658,14 @@ export function coalesceEventComments(
 }
 
 export interface ConsolidatedFeedFilters {
-  // null / omitted → ALL the account's repos; a list → scope to those repo ids.
+  // WHICH WORKSPACE'S JUDGEMENT the bot-only feed uses. REQUIRED, and required rather than
+  // optional deliberately: the bots-only path resolves an automated-reviewer set, and that answer
+  // is a workspace fact. An optional field here would have every call site quietly fall back to
+  // some default workspace's verdicts while the rows on screen came from another's repos. The
+  // route resolves it via `resolveWorkspaceScope` (absent / unknown / foreign ⇒ Default).
+  workspaceId: number;
+  // null / omitted → ALL the account's repos; a list → scope to those repo ids. The route
+  // passes `scope.repoIds`, already bounded by the workspace's membership.
   repoIds?: number[] | null;
   // Member filter: null / empty → all actors; a list → only those actors.
   userIds?: number[] | null;
@@ -2808,7 +3097,7 @@ export async function markFeedSeen(accountId: number): Promise<Date> {
   return now;
 }
 
-// ---- Team review-intelligence "Insights" (Pro; teamInsights) ----
+// ---- Workspace review-intelligence "Insights" (Pro; workspaceInsights) ----
 
 const INSIGHT_STALLED_REVIEW_HOURS = 24;
 const INSIGHT_UNTOUCHED_THREAD_HOURS = 24; // "> 1 day"
@@ -2826,17 +3115,17 @@ function topLevelDir(path: string): string {
   return i === -1 ? '.' : path.slice(0, i);
 }
 
-const TEAM_METRICS_WINDOW_DAYS = 84; // 12 weeks of weekly chart history
-const TEAM_METRICS_WEEK_MS = 7 * 86_400_000;
+const WORKSPACE_METRICS_WINDOW_DAYS = 84; // 12 weeks of weekly chart history
+const WORKSPACE_METRICS_WEEK_MS = 7 * 86_400_000;
 // A cur-vs-prev stat comparison needs at least this many items on BOTH sides to be worth a
 // trend read. Below it (typical early in a sprint — often a single carryover PR) the stat is
 // flagged low-confidence: the tile drops the delta arrow and the AI report states the raw "so
 // far" figure without a percentage / "cliff" / "spike". This is what stops a day-1 report from
 // claiming "merges collapsed 99%" off a 1-vs-N sample.
-const TEAM_METRIC_MIN_SAMPLE = 3;
+const WORKSPACE_METRIC_MIN_SAMPLE = 3;
 
 // The comparison window handed in by the Pro layer (getComparisonWindow). fromMs/toMs drive the
-// cur/prev math; `mode` is passed straight through onto TeamMetrics.comparisonMode so the UI + AI
+// cur/prev math; `mode` is passed straight through onto WorkspaceMetrics.comparisonMode so the UI + AI
 // report label value/previous correctly. A rolling_N window has toMs === now (elapsed === full →
 // "previous" is the immediately-preceding N days); a sprint window has toMs in the future.
 type MetricsWindow = { fromMs: number; toMs: number; mode?: SprintComparisonMode };
@@ -2848,7 +3137,7 @@ function medianOf(xs: number[]): number | null {
   return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
 }
 
-// Team-wide DORA-ish flow metrics across the watched repos (NO AI). Best-effort DORA
+// Workspace-wide DORA-ish flow metrics across the scoped repos (NO AI). Best-effort DORA
 // mapping from synced PR/CI data: deploy frequency = merges; lead time = open→merge;
 // change-failure (inverted) = merged-PR CI success; time-to-restore is a PROXY off the
 // current snapshot (open PRs red on CI + how long they've sat) since no CI-state history
@@ -2857,7 +3146,7 @@ function medianOf(xs: number[]): number | null {
 // equal-length one, aligned to the configured sprint `window` (default trailing 14d). The
 // DB fetch spans max(12 weeks, both sprints) so the "previous" tiles aren't starved. Weekly
 // series (aligned to `weekBuckets`) feed the same chart toolkit the per-repo analytics use.
-export async function getTeamMetrics(
+export async function getWorkspaceMetrics(
   accountId: number,
   repoIds: number[],
   nowMs: number,
@@ -2865,11 +3154,11 @@ export async function getTeamMetrics(
   // the SAME slice of the immediately-preceding one. Undefined → the legacy trailing-14d default.
   // The CHART window is a fixed 12 weeks regardless.
   window?: MetricsWindow,
-): Promise<TeamMetrics | null> {
+): Promise<WorkspaceMetrics | null> {
   if (repoIds.length === 0) return null;
 
   // Charts: a fixed 12-week window ending now, INDEPENDENT of the sprint window.
-  const chartWindowStartMs = nowMs - TEAM_METRICS_WINDOW_DAYS * 86_400_000;
+  const chartWindowStartMs = nowMs - WORKSPACE_METRICS_WINDOW_DAYS * 86_400_000;
 
   // Sprint tiles: this sprint SO FAR (curLo..curHi, never counting the future) vs the SAME
   // elapsed slice of the immediately-preceding sprint. ELAPSED-MATCHED: `prevHi` tracks how far
@@ -2918,14 +3207,14 @@ export async function getTeamMetrics(
     )
     .execute();
 
-  const nBuckets = Math.max(1, Math.round((nowMs - chartWindowStartMs) / TEAM_METRICS_WEEK_MS));
+  const nBuckets = Math.max(1, Math.round((nowMs - chartWindowStartMs) / WORKSPACE_METRICS_WEEK_MS));
   const weekBuckets: string[] = [];
   for (let i = 0; i < nBuckets; i++)
-    weekBuckets.push(new Date(chartWindowStartMs + i * TEAM_METRICS_WEEK_MS).toISOString());
+    weekBuckets.push(new Date(chartWindowStartMs + i * WORKSPACE_METRICS_WEEK_MS).toISOString());
   const bi = (ms: number): number =>
     Math.max(
       0,
-      Math.min(nBuckets - 1, Math.floor((ms - chartWindowStartMs) / TEAM_METRICS_WEEK_MS)),
+      Math.min(nBuckets - 1, Math.floor((ms - chartWindowStartMs) / WORKSPACE_METRICS_WEEK_MS)),
     );
   const zeros = (): number[] => new Array<number>(nBuckets).fill(0);
 
@@ -3218,19 +3507,19 @@ export async function getTeamMetrics(
   };
 
   // Wrap each cur/prev pair with its sample sizes + a low-confidence flag (either side below
-  // TEAM_METRIC_MIN_SAMPLE). For counts the sample IS the value; for medians/percentages it's
+  // WORKSPACE_METRIC_MIN_SAMPLE). For counts the sample IS the value; for medians/percentages it's
   // the number of items that fed the statistic.
   const stat = (
     value: number | null,
     previous: number | null,
     curN: number,
     prevN: number,
-  ): TeamMetricStat => ({
+  ): WorkspaceMetricStat => ({
     value,
     previous,
     sampleSize: curN,
     previousSampleSize: prevN,
-    lowConfidence: curN < TEAM_METRIC_MIN_SAMPLE || prevN < TEAM_METRIC_MIN_SAMPLE,
+    lowConfidence: curN < WORKSPACE_METRIC_MIN_SAMPLE || prevN < WORKSPACE_METRIC_MIN_SAMPLE,
   });
 
   const elapsedDays = elapsedMs / 86_400_000;
@@ -3274,27 +3563,28 @@ export async function getTeamMetrics(
   };
 }
 
-// CORE/free wrapper around getTeamMetrics: resolves the scope (a concrete repo-id list, or
-// null/undefined → the WATCHED set) the SAME way getTeamInsights does, then computes the
-// flow-metric header. Lets the core /api/team-metrics route serve the Feed's now-free metrics
-// (moved out of the Pro Insights pane) without the Pro insights bundle.
-export async function getTeamMetricsForScope(
+// CORE/free wrapper around getWorkspaceMetrics: narrows the workspace's repos to the ones this
+// account really owns, then computes the flow-metric header. Lets the core
+// /api/workspace-metrics route serve the Feed's now-free metrics (moved out of the Pro Insights
+// pane) without the Pro insights bundle.
+//
+// ⚠ `repoIds` IS REQUIRED AND CONCRETE — no `null` "means every repo" fallback. `[]` is a
+// legal, explicitly-supported state (an empty workspace) and returns null; a nullable parameter
+// here would silently widen an empty workspace to every repo the account has added, which is the
+// exact opposite of what the caller asked for.
+export async function getWorkspaceMetricsForScope(
   accountId: number,
-  scopeRepoIds?: number[] | null,
-): Promise<TeamMetrics | null> {
-  if (scopeRepoIds != null && scopeRepoIds.length === 0) return null;
-  const watched = await db
+  repoIds: number[],
+): Promise<WorkspaceMetrics | null> {
+  if (repoIds.length === 0) return null;
+  const owned = await db
     .select({ id: repos.id })
     .from(repos)
-    .where(
-      scopeRepoIds != null
-        ? and(eq(repos.accountId, accountId), inArray(repos.id, scopeRepoIds))
-        : and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)),
-    )
+    .where(and(eq(repos.accountId, accountId), inArray(repos.id, repoIds)))
     .execute();
-  return getTeamMetrics(
+  return getWorkspaceMetrics(
     accountId,
-    watched.map((r) => r.id),
+    owned.map((r) => r.id),
     Date.now(),
     undefined,
   );
@@ -3308,20 +3598,20 @@ export async function getTeamMetricsForScope(
 const METRIC_DETAIL_CAP = 500;
 
 // The per-metric PR lists behind the 6 flow-metric tiles (the drill-down). A heavier,
-// on-demand read than getTeamMetrics — loaded only when a tile is clicked — over the
-// WATCHED repos + the current sprint. Returns the PRs behind each tile with the
+// on-demand read than getWorkspaceMetrics — loaded only when a tile is clicked — over the
+// workspace's repos + the current sprint. Returns the PRs behind each tile with the
 // metric-specific figures, so the user can see WHERE issues cluster.
-export async function getTeamMetricsDetail(
+export async function getWorkspaceMetricsDetail(
   accountId: number,
   // The comparison window (epoch millis); undefined → legacy default lookback. The lower bound
   // uses window.fromMs; `now` remains the upper bound. `mode` is unused here (a current-window PR
-  // list, no cur/prev split) but accepted so callers pass the same object as getTeamMetrics.
-  window?: MetricsWindow,
-  // Optional explicit repo scope (per-team AI). When provided (non-null) these exact repos are
-  // used INSTEAD of the account's watched set; null/undefined keeps the watched-set default. An
-  // empty array (e.g. a scope that resolved to no repos) → the empty result.
-  scopeRepoIds?: number[] | null,
-): Promise<TeamMetricsDetail> {
+  // list, no cur/prev split) but accepted so callers pass the same object as getWorkspaceMetrics.
+  window: MetricsWindow | undefined,
+  // The workspace's repos. REQUIRED and CONCRETE: `[]` is a legal state (an empty workspace) and
+  // yields the empty result. There is no null "means every repo" fallback — see
+  // getWorkspaceMetricsForScope for why that widening is the bug this parameter shape prevents.
+  repoIds: number[],
+): Promise<WorkspaceMetricsDetail> {
   const now = Date.now();
   const sprintFromMs = window?.fromMs ?? now - INSIGHT_SPRINT_DAYS * 86_400_000;
   const sprintFrom = new Date(sprintFromMs);
@@ -3329,7 +3619,7 @@ export async function getTeamMetricsDetail(
     from: sprintFrom.toISOString(),
     to: new Date(window?.toMs ?? now).toISOString(),
   };
-  const empty: TeamMetricsDetail = {
+  const empty: WorkspaceMetricsDetail = {
     sprint,
     openPrs: [],
     merges: [],
@@ -3341,20 +3631,16 @@ export async function getTeamMetricsDetail(
     users: [],
   };
 
-  // An explicit empty scope short-circuits (also dodges the empty-array inArray pitfall below).
-  if (scopeRepoIds != null && scopeRepoIds.length === 0) return empty;
-  const watched = await db
+  // An empty workspace short-circuits (also dodges the empty-array inArray pitfall below).
+  if (repoIds.length === 0) return empty;
+  const scoped = await db
     .select({ id: repos.id, owner: repos.owner, name: repos.name })
     .from(repos)
-    .where(
-      scopeRepoIds != null
-        ? and(eq(repos.accountId, accountId), inArray(repos.id, scopeRepoIds))
-        : and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)),
-    )
+    .where(and(eq(repos.accountId, accountId), inArray(repos.id, repoIds)))
     .execute();
-  const repoIds = watched.map((r) => r.id);
-  if (repoIds.length === 0) return empty;
-  const repoName = new Map(watched.map((r) => [r.id, `${r.owner}/${r.name}`]));
+  const scopedRepoIds = scoped.map((r) => r.id);
+  if (scopedRepoIds.length === 0) return empty;
+  const repoName = new Map(scoped.map((r) => [r.id, `${r.owner}/${r.name}`]));
   const ghUrl = (repoId: number, number: number): string =>
     `https://github.com/${repoName.get(repoId)}/pull/${number}`;
 
@@ -3372,7 +3658,7 @@ export async function getTeamMetricsDetail(
     .where(
       and(
         eq(ciStatusEvents.accountId, accountId),
-        inArray(ciStatusEvents.repoId, repoIds),
+        inArray(ciStatusEvents.repoId, scopedRepoIds),
         gte(ciStatusEvents.observedAt, recoveryWindow),
       ),
     )
@@ -3427,7 +3713,7 @@ export async function getTeamMetricsDetail(
     .where(
       and(
         eq(pullRequests.accountId, accountId),
-        inArray(pullRequests.repoId, repoIds),
+        inArray(pullRequests.repoId, scopedRepoIds),
         or(
           eq(pullRequests.state, 'open'),
           gte(pullRequests.mergedAt, sprintFrom),
@@ -3602,18 +3888,19 @@ export async function getTeamMetricsDetail(
   };
 }
 
-// Compute the team review-intelligence cards from already-synced data — NO AI. WATCHED
-// repos (`inboxWatch`) are the team; "sprint" is the trailing 2 weeks. Runs on read (the
-// client refetches on the sync cadence); every query is account-scoped + bounded (watched
-// repos, open PRs, the sprint window, per-kind caps).
-export async function getTeamInsights(
+// Compute the workspace review-intelligence cards from already-synced data — NO AI. The
+// workspace's repos are the scope; "sprint" is the trailing 2 weeks. Runs on read (the client
+// refetches on the sync cadence); every query is account-scoped + bounded (the workspace's repos,
+// open PRs, the sprint window, per-kind caps).
+//
+// It takes a full `BotScope` rather than a repo list because its `bot_signal` and
+// `bot_only_review` cards need the WORKSPACE to know who counts as an automated reviewer;
+// `scope.repoIds` only narrows the data.
+export async function getWorkspaceInsights(
   accountId: number,
-  window?: MetricsWindow,
-  // Optional explicit repo scope (per-team AI). When provided (non-null) these exact repos are
-  // used INSTEAD of the account's watched set (both for the cards AND the forwarded team
-  // metrics); null/undefined keeps the watched-set default. An empty array → no repos.
-  scopeRepoIds?: number[] | null,
-): Promise<TeamInsightsResponse> {
+  window: MetricsWindow | undefined,
+  scope: BotScope,
+): Promise<WorkspaceInsightsResponse> {
   const now = Date.now();
   const generatedAt = new Date(now);
   // The Insights window: the configured SPRINT when provided (its `to` may be in the future for
@@ -3630,21 +3917,17 @@ export async function getTeamInsights(
     if (id != null) userIdSet.add(id);
   };
 
-  const watched =
-    scopeRepoIds != null && scopeRepoIds.length === 0
-      ? [] // explicit empty scope → no repos (dodges the empty-array inArray pitfall)
+  const scopedRepos =
+    scope.repoIds.length === 0
+      ? [] // an empty workspace → no repos (also dodges the empty-array inArray pitfall)
       : await db
           .select({ id: repos.id, owner: repos.owner, name: repos.name })
           .from(repos)
-          .where(
-            scopeRepoIds != null
-              ? and(eq(repos.accountId, accountId), inArray(repos.id, scopeRepoIds))
-              : and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)),
-          )
+          .where(and(eq(repos.accountId, accountId), inArray(repos.id, scope.repoIds)))
           .execute();
-  const repoName = new Map(watched.map((r) => [r.id, `${r.owner}/${r.name}`]));
-  const repoIds = watched.map((r) => r.id);
-  const finish = async (): Promise<TeamInsightsResponse> => {
+  const repoName = new Map(scopedRepos.map((r) => [r.id, `${r.owner}/${r.name}`]));
+  const repoIds = scopedRepos.map((r) => r.id);
+  const finish = async (): Promise<WorkspaceInsightsResponse> => {
     const kindRank: Record<InsightKind, number> = {
       bot_signal: 0, // the flagship "layer above your review bot" summary, leads its severity tier
       bot_only_review: 1, // the governance "only a bot reviewed this" risk, right after
@@ -3661,7 +3944,7 @@ export async function getTeamInsights(
       userIdSet.size > 0
         ? await db.select().from(users).where(inArray(users.id, [...userIdSet])).execute()
         : [];
-    const metrics = await getTeamMetrics(accountId, repoIds, now, window);
+    const metrics = await getWorkspaceMetrics(accountId, repoIds, now, window);
     return {
       enabled: true,
       generatedAt: generatedAt.toISOString(),
@@ -3680,15 +3963,13 @@ export async function getTeamInsights(
   // so it counts bot threads on merged PRs too — "this sprint's" volume, not just open work.
   // Grouped by AutomatedReviewerKind (vendors AND in-house-classified reviewers).
   {
-    // Repo scope = the very `repoIds` this card is computed over. getTeamInsights is handed a
-    // RESOLVED repo-id list (the Pro plugin resolves the scope before calling through
-    // ProHostQueries), which is exactly the scope a per-repo judgement wants — so this call site
-    // used to hardcode a team key it did not have, and now says what it means. `role: 'review'` —
-    // the bot_signal card is a REVIEW-bot signal-to-noise view; SonarQube volume in it is exactly
-    // the noise the role exists to remove.
-    const botIds = await automatedReviewerUserIds(accountId, repoIds, 'review');
+    // The judgement comes from `scope.workspaceId` — the workspace whose repos this card is
+    // computed over, so the metric and the "is this login a bot here" answer cannot disagree.
+    // `role: 'review'` — the bot_signal card is a REVIEW-bot signal-to-noise view; SonarQube
+    // volume in it is exactly the noise the role exists to remove.
+    const botIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
     if (botIds.length > 0) {
-      const kindMap = await classificationKindForUser(accountId, repoIds);
+      const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
       const rows = await db
         .select({
           userId: reviewThreads.originalCommenterId,
@@ -3762,11 +4043,12 @@ export async function getTeamInsights(
   }
 
   // ── bot_only_review card (WS7, deterministic, no AI) ────────────────────────
-  // "Only a bot reviewed this" — PRs (merged, or open-and-mergeable) in the team's repos
+  // "Only a bot reviewed this" — PRs (merged, or open-and-mergeable) in the workspace's repos
   // whose ONLY reviews came from automated reviewers (incl. Pierre-verbatim) with no human
-  // review. Computed here (BEFORE the open-PR guard) like bot_signal so merged PRs count.
+  // review. Computed here (BEFORE the open-PR guard) like bot_signal so merged PRs count. It
+  // takes the same `scope` as the bot_signal card, so both cards judge by the same workspace.
   {
-    const botOnly = await getBotOnlyReviewPrs(accountId, repoIds, {
+    const botOnly = await getBotOnlyReviewPrs(accountId, scope, {
       from: sprintFrom,
       to: sprintTo,
     });
@@ -3794,7 +4076,7 @@ export async function getTeamInsights(
   const ghUrl = (repoId: number, number: number): string =>
     `https://github.com/${repoName.get(repoId)}/pull/${number}`;
 
-  // Open, non-draft PRs in the team's repos that are NOT ultra-stale — i.e. have a real ACTIVITY
+  // Open, non-draft PRs in the workspace's repos that are NOT ultra-stale — i.e. have a real ACTIVITY
   // EVENT (open/commit/comment/review) within the last INSIGHT_MAX_STALE_DAYS. We key off the
   // events feed, NOT pullRequests.updatedAt: GitHub bumps updatedAt on non-substantive base/label
   // syncs, so an abandoned PR can still show a "today" updatedAt — the events feed is the honest
@@ -3868,7 +4150,7 @@ export async function getTeamInsights(
     .execute())
     reviewedPrIds.add(r.prId);
 
-  // Sprint review load per reviewer (reviews submitted on team PRs in the window).
+  // Sprint review load per reviewer (reviews submitted on the workspace's PRs in the window).
   const reviewsThisSprint = new Map<number, number>();
   for (const r of await db
     .select({ authorId: reviews.authorId })
@@ -3959,9 +4241,9 @@ export async function getTeamInsights(
     .slice(0, INSIGHT_CARD_CAP);
   // Item 5 — tag an untouched thread whose originating commenter is an automated reviewer so the
   // card can show a vendor pill (the thread came from a bot, not a human). Resolved once here.
-  // Repo-scoped to the same `repoIds` as the bot_signal card above — these cards are drawn from
-  // those repos' threads, so the judgement that tags them must come from those repos' rows.
-  const untouchedKindMap = await classificationKindForUser(accountId, repoIds);
+  // Same workspace as the bot_signal card above — these cards are drawn from that workspace's
+  // threads, so the judgement that tags them must come from that workspace's rows.
+  const untouchedKindMap = await classificationKindForUser(accountId, scope.workspaceId);
   for (const { t, ageHours } of threads) {
     addUser(t.originalCommenterId);
     addUser(t.authorId);
@@ -4163,14 +4445,15 @@ export function computeFeedCounts(
   return counts;
 }
 
-// The consolidated Feed. Scoped to the account's WATCHED repos (inboxWatch); a passed
-// `repoIds` further narrows WITHIN watched (null → all watched). One flat, newest-first
+// The consolidated Feed. Scoped to the account's repos; a passed `repoIds` (the selected
+// workspace) narrows WITHIN them — null → every repo the account has added. One flat, newest-first
 // stream of real activity, each row flagged isMyTurn by participation (CORE; feed/my-turn.ts).
 export async function getConsolidatedFeed(
   accountId: number,
-  opts: ConsolidatedFeedFilters = {},
+  opts: ConsolidatedFeedFilters,
 ): Promise<ConsolidatedFeedResponse> {
   const {
+    workspaceId,
     repoIds = null,
     userIds = null,
     prId = null,
@@ -4183,12 +4466,14 @@ export async function getConsolidatedFeed(
     includeAllCommits = false,
   } = opts;
 
-  // Restrict to the account's WATCHED repos; a passed repoIds narrows within them. An
-  // out-of-scope / empty selection → a valid empty page (also avoids an inArray([]) below).
-  // EXCEPTION — single-PR isolation (prId) bypasses the watched∩filter narrowing entirely:
-  // "Show in feed" promises the PR's history, and its repo may be unwatched (the bot-only
-  // list scopes to ALL account repos) or hidden by the FilterBar. Ownership still gates it —
-  // a foreign/unknown prId is an empty page, never a leak.
+  // Restrict to the repos this account owns; a passed repoIds narrows within them. The
+  // intersection is the isolation guard, not a filter — a foreign repoId can never widen the
+  // scan. An out-of-scope / empty selection → a valid empty page (also avoids an inArray([])
+  // below).
+  // EXCEPTION — single-PR isolation (prId) bypasses the narrowing entirely: "Show in feed"
+  // promises the PR's history, and its repo may be outside the selected workspace (the bot-only
+  // list scopes to ALL account repos). Ownership still gates it — a foreign/unknown prId is an
+  // empty page, never a leak.
   const emptyResponse = (): ConsolidatedFeedResponse => ({
     items: [],
     users: [],
@@ -4208,8 +4493,10 @@ export async function getConsolidatedFeed(
     if (!ownedPr) return emptyResponse();
     effectiveRepoIds = [ownedPr.repoId];
   } else {
-    const watchedIds = (await listRepos(accountId)).filter((r) => r.inboxWatch).map((r) => r.id);
-    effectiveRepoIds = repoIds ? repoIds.filter((id) => watchedIds.includes(id)) : watchedIds;
+    const accountRepoIds = (await listRepos(accountId)).map((r) => r.id);
+    effectiveRepoIds = repoIds
+      ? repoIds.filter((id) => accountRepoIds.includes(id))
+      : accountRepoIds;
   }
   if (effectiveRepoIds.length === 0) return emptyResponse();
   const allowBots = new Set(allowBotIds ?? []);
@@ -4238,12 +4525,14 @@ export async function getConsolidatedFeed(
   // `role: 'all'` — NOT 'review'. The bot feed must keep showing quality-check activity: the
   // user confirmed a quality-check reviewer stays visible and reclassifiable, and a linter's
   // threads are still things a human has to triage. The role only splits METRICS from the feed.
-  // Repo scope = `effectiveRepoIds`, the exact repos this feed page is drawn from (the watched
-  // set ∩ the FilterBar selection, or the single isolated PR's repo). Another of the seven sites
-  // that hardcoded a team key for want of one; the feed was always repo-scoped, and now the
-  // judgement is too.
+  //
+  // The judgement comes from `workspaceId`, not from `effectiveRepoIds`. They agree in the normal
+  // case (the route intersects the narrowing with the workspace's membership), and they
+  // deliberately do NOT in the single-PR isolation branch below, which reaches a PR whose repo may
+  // sit outside the selected workspace — the workspace still owns "is this login a bot", which is what
+  // keeps the vendor tag on an isolated PR's rows consistent with the rest of the app.
   const botActorIds = botsOnly
-    ? await automatedReviewerUserIds(accountId, effectiveRepoIds, 'all')
+    ? await automatedReviewerUserIds(accountId, workspaceId, 'all')
     : null;
   if (botsOnly && (botActorIds == null || botActorIds.length === 0)) {
     return {
@@ -4705,7 +4994,10 @@ export async function getCompletedDismissals(
 
   const reviewDismissals = dismissals.filter((d) => d.kind === 'review_request');
   const threadDismissals = dismissals.filter((d) => d.kind === 'thread');
-  const watchedDismissals = dismissals.filter((d) => d.kind === 'watched_repo_pr');
+  // NB the STORED kind string stays `watched_repo_pr`: it is a value in
+  // `my_turn_dismissals.kind` (and in the shared wire union), so renaming it would strand every
+  // existing dismissal. The section it belongs to is now "New PRs".
+  const newRepoPrDismissals = dismissals.filter((d) => d.kind === 'watched_repo_pr');
   const approvedDismissals = dismissals.filter((d) => d.kind === 'pr_approved');
   const claudeDismissals = dismissals.filter((d) => d.kind === 'claude_review');
   const items: DismissedItem[] = [];
@@ -4753,9 +5045,9 @@ export async function getCompletedDismissals(
     }
   }
 
-  // watched_repo_pr dismissals → their PRs (account-scoped). Same shape as a
-  // review_request dismissal, just a different kind tag.
-  if (watchedDismissals.length > 0) {
+  // "New PRs" (stored kind `watched_repo_pr`) dismissals → their PRs (account-scoped). Same
+  // shape as a review_request dismissal, just a different kind tag.
+  if (newRepoPrDismissals.length > 0) {
     const prRows = await db
       .select()
       .from(pullRequests)
@@ -4765,21 +5057,21 @@ export async function getCompletedDismissals(
           eq(pullRequests.accountId, accountId),
           inArray(
             pullRequests.id,
-            watchedDismissals.map((d) => d.refId),
+            newRepoPrDismissals.map((d) => d.refId),
           ),
         ),
       )
       .execute();
     const byId = new Map(prRows.map((r) => [r.pull_requests.id, r]));
-    for (const d of watchedDismissals) {
+    for (const d of newRepoPrDismissals) {
       const row = byId.get(d.refId);
       if (!row) continue;
       const { pull_requests: pr, repos: repo } = row;
       if (pr.authorId != null) referencedUsers.add(pr.authorId);
-      // Restorable if still eligible for the watched section, OR if it has since
+      // Restorable if still eligible for the "New PRs" section, OR if it has since
       // become a review request (restoring then surfaces it under "Awaiting review").
       const restorable =
-        actionable.watchedPrIds.has(pr.id) ||
+        actionable.newRepoPrIds.has(pr.id) ||
         actionable.reviewRequestPrIds.has(pr.id);
       items.push({
         kind: 'watched_repo_pr',
@@ -4980,30 +5272,31 @@ function summariseNew(n: NewSinceLastViewed): string {
   return parts.join(' · ');
 }
 
-// Watched-repo inbox eligibility, IGNORING dismissals and the cross-section dedupe:
-// the set of open-PR ids that qualify for the "New PRs in watched repos" section
-// (repo watched, opened on/after the watch began, authored by a non-bot human other
-// than you, non-draft). Shared by getMyTurn (which then layers dismissals + dedupe)
-// and getActionableActivityIds (restorability of a Done entry).
-async function getWatchedActionablePrIds(
+// "New PRs" inbox eligibility, IGNORING dismissals and the cross-section dedupe: the set of
+// open-PR ids that qualify for the section (opened on/after the repo was ADDED to the account,
+// authored by a non-bot human other than you, non-draft). Shared by getMyTurn (which then layers
+// dismissals + dedupe) and getActionableActivityIds (restorability of a Done entry).
+//
+// ⚠ `repos.createdAt` IS THE CLOCK, and it is the load-bearing part of this function. Without a
+// cutoff, adding a repo with 400 open PRs dumps all 400 into My Turn on day one. It replaced a
+// separate `inboxWatchStartedAt` stamped by the retired "watched" toggle; `createdAt` is NOT NULL,
+// so unlike that column it can never be missing and there is no "no cutoff → show nothing"
+// defensive branch to port.
+async function getAddedRepoActionablePrIds(
   accountId: number,
   localUserId: number,
   open: TimelinePr[],
   openRows: PrRow[],
 ): Promise<Set<number>> {
-  const watchedRepos = await db
-    .select({ repoId: repos.id, startedAt: repos.inboxWatchStartedAt })
+  const repoRows = await db
+    .select({ repoId: repos.id, addedAt: repos.createdAt })
     .from(repos)
-    .where(and(eq(repos.accountId, accountId), eq(repos.inboxWatch, true)))
+    .where(eq(repos.accountId, accountId))
     .execute();
-  const watchStartByRepo = new Map<number, Date>();
-  for (const w of watchedRepos) {
-    // A watched row should always carry a start; if it somehow doesn't, treat the
-    // repo as not-watched (show nothing) rather than flooding the inbox.
-    if (w.startedAt != null) watchStartByRepo.set(w.repoId, w.startedAt);
-  }
+  const addedAtByRepo = new Map<number, Date>();
+  for (const r of repoRows) addedAtByRepo.set(r.repoId, r.addedAt);
   const out = new Set<number>();
-  if (watchStartByRepo.size === 0) return out;
+  if (addedAtByRepo.size === 0) return out;
   const botUserIds = new Set(
     (
       await db
@@ -5015,13 +5308,15 @@ async function getWatchedActionablePrIds(
   );
   const rowById = new Map(openRows.map((p) => [p.id, p]));
   for (const t of open) {
-    const startedAt = watchStartByRepo.get(t.repoId);
-    if (startedAt == null) continue;
+    // A PR whose repo isn't in this account's set can't reach here (open/openRows are
+    // account-scoped), but the lookup still gates: no repo row, no cutoff, no entry.
+    const addedAt = addedAtByRepo.get(t.repoId);
+    if (addedAt == null) continue;
     if (t.authorId == null || t.authorId === localUserId) continue;
     if (botUserIds.has(t.authorId)) continue;
     const m = rowById.get(t.id);
     if (!m || m.isDraft) continue;
-    if (m.openedAt.getTime() >= startedAt.getTime()) out.add(t.id);
+    if (m.openedAt.getTime() >= addedAt.getTime()) out.add(t.id);
   }
   return out;
 }
@@ -5030,11 +5325,11 @@ async function getWatchedActionablePrIds(
 // COULD be in "My Turn" if nothing were dismissed. The single source of truth for
 // whether a dismissed "Done" entry is restorable: removing its dismissal returns it
 // to the inbox iff its ref is still in the matching set here. Reuses the same
-// building blocks getMyTurn does (reviewRequestedFromMe, getWatchedActionablePrIds,
+// building blocks getMyTurn does (reviewRequestedFromMe, getAddedRepoActionablePrIds,
 // getThreadsAwaiting, getUnactionedClaudeReviews) so the two never drift.
 async function getActionableActivityIds(accountId: number): Promise<{
   reviewRequestPrIds: Set<number>;
-  watchedPrIds: Set<number>;
+  newRepoPrIds: Set<number>;
   approvedPrIds: Set<number>;
   threadIds: Set<number>;
   claudeReviewIds: Set<number>;
@@ -5042,7 +5337,7 @@ async function getActionableActivityIds(accountId: number): Promise<{
   const localUserId = await getAccountUserId(accountId);
   const empty = {
     reviewRequestPrIds: new Set<number>(),
-    watchedPrIds: new Set<number>(),
+    newRepoPrIds: new Set<number>(),
     approvedPrIds: new Set<number>(),
     threadIds: new Set<number>(),
     claudeReviewIds: new Set<number>(),
@@ -5059,7 +5354,7 @@ async function getActionableActivityIds(accountId: number): Promise<{
   const reviewRequestPrIds = new Set(
     open.filter((t) => t.reviewRequestedFromMe).map((t) => t.id),
   );
-  const watchedPrIds = await getWatchedActionablePrIds(
+  const newRepoPrIds = await getAddedRepoActionablePrIds(
     accountId,
     localUserId,
     open,
@@ -5088,7 +5383,7 @@ async function getActionableActivityIds(accountId: number): Promise<{
     ? new Set((await getUnactionedClaudeReviews(accountId)).map((c) => c.reviewId))
     : new Set<number>();
 
-  return { reviewRequestPrIds, watchedPrIds, approvedPrIds, threadIds, claudeReviewIds };
+  return { reviewRequestPrIds, newRepoPrIds, approvedPrIds, threadIds, claudeReviewIds };
 }
 
 export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
@@ -5135,15 +5430,16 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
   // Dismissed Claude-review run ids. Keyed by run id (not PR id): a fresh run gets
   // a new id, so it naturally re-appears without a timestamp comparison.
   const claudeDismissedIds = new Set<number>();
-  // Dismissed watched-repo PR ids. Sticky: a dismissal removes that PR from the
-  // watched section for good (no timestamp comparison — acknowledging a new PR).
-  const watchedDismissedIds = new Set<number>();
+  // Dismissed "New PRs" ids (stored kind `watched_repo_pr` — a DB enum value, kept for the
+  // existing rows). Sticky: a dismissal removes that PR from the section for good (no timestamp
+  // comparison — it acknowledges a new PR).
+  const newRepoPrDismissedIds = new Set<number>();
   for (const d of dismissals) {
     if (d.kind === 'review_request') reviewDismissedAt.set(d.refId, d.dismissedAt);
     else if (d.kind === 'thread') threadDismissedAt.set(d.refId, d.dismissedAt);
     else if (d.kind === 'pr_approved') approvedDismissedAt.set(d.refId, d.dismissedAt);
     else if (d.kind === 'claude_review') claudeDismissedIds.add(d.refId);
-    else if (d.kind === 'watched_repo_pr') watchedDismissedIds.add(d.refId);
+    else if (d.kind === 'watched_repo_pr') newRepoPrDismissedIds.add(d.refId);
   }
 
   const meta = (prId: number) =>
@@ -5225,12 +5521,11 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
       summary: summariseNew(t.newSinceLastViewed!),
     }));
 
-  // 2b. New open PRs in repos you've Watched. Built AFTER awaitingReview + yourPrs
-  //     so those PRs aren't shown twice. Eligibility (opened on/after the watch
-  //     began, by a non-bot human other than you, non-draft) is the shared
-  //     getWatchedActionablePrIds; here we layer the cross-section dedupe + sticky
-  //     dismissals on top.
-  const watchedEligible = await getWatchedActionablePrIds(
+  // 2b. New open PRs in your repos. Built AFTER awaitingReview + yourPrs so those PRs
+  //     aren't shown twice. Eligibility (opened on/after the repo was ADDED, by a non-bot
+  //     human other than you, non-draft) is the shared getAddedRepoActionablePrIds; here we
+  //     layer the cross-section dedupe + sticky dismissals on top.
+  const newRepoPrEligible = await getAddedRepoActionablePrIds(
     accountId,
     localUserId,
     open,
@@ -5241,12 +5536,13 @@ export async function getMyTurn(accountId: number): Promise<MyTurnResponse> {
     ...yourPrs.map((i) => i.prId),
     ...approvedPrs.map((i) => i.prId),
   ]);
+  // The response field keeps its wire name (`MyTurnResponse.watchedRepoPrs`).
   const watchedRepoPrs = open
     .filter(
       (t) =>
-        watchedEligible.has(t.id) &&
+        newRepoPrEligible.has(t.id) &&
         !inOtherSections.has(t.id) &&
-        !watchedDismissedIds.has(t.id),
+        !newRepoPrDismissedIds.has(t.id),
     )
     .map((t) => toMyTurnPr(t))
     .sort((a, b) => b.openedAt.localeCompare(a.openedAt));
@@ -5708,12 +6004,16 @@ export async function getPrDetail(
   // per-account classification map (keyed by the review author's user id). Pierre wins
   // when both apply. The human who posted a Pierre review is NEVER reclassified — the
   // 'pierre' kind lives only on the review row.
-  // Repo scope = THIS PR's repo, already joined above. Addressed-by-prId used to mean "no scope
-  // to give" under the team key (a repo can sit in several teams, so there was no single answer);
-  // under the repo grain the PR names its own scope exactly.
+  // The judgement scope is THIS PR's own workspace, resolved from its repo — never the caller's
+  // currently-selected one. A PR can be opened from another workspace via `?pr=`, a restored tab
+  // or a search hit, and tagging its reviews with a different workspace's verdicts is how the
+  // same review reads "CodeRabbit" on one screen and "unclassified" on the next.
+  const prScope = await workspaceScopeForRepo(accountId, pr.repoId);
   const [provenanceByReview, prClassKind] = await Promise.all([
     getReviewerProvenanceForPr(accountId, id),
-    classificationKindForUser(accountId, [pr.repoId]),
+    prScope
+      ? classificationKindForUser(accountId, prScope.workspaceId)
+      : Promise.resolve(new Map<number, AutomatedReviewerKind>()),
   ]);
   const reviewsOut: ReviewDetail[] = reviewRows.map((r) => {
     const pierre = provenanceByReview.get(r.id);
@@ -6028,7 +6328,7 @@ export async function getMentionCandidates(
     .map((x) => x.user);
 }
 
-// @mention candidates scoped to a REPO SET (a Team / the FilterBar-visible repos) rather than one
+// @mention candidates scoped to a REPO SET (a Workspace / the FilterBar-visible repos) rather than one
 // PR — powers the ad-hoc Insights "Ask about the sprint" box, whose questions span the whole
 // scope. `repoIds` null = every repo the account owns (the 'all' scope). People = whoever has
 // MERGED (maintainers, rank 0) or OPENED (rank 1) a PR in the scope's repos; self + bots excluded.
@@ -6197,41 +6497,19 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       await tx.delete(claudeReviews).where(inArray(claudeReviews.prId, prIds)).execute();
       await tx.delete(pullRequests).where(eq(pullRequests.repoId, id)).execute();
     }
-    // Team membership rows reference this repo (FK is ON DELETE cascade, but delete them
-    // explicitly so the ordering is dialect-agnostic and can't FK-fail if foreign_keys is off).
-    await tx.delete(teamRepos).where(eq(teamRepos.repoId, id)).execute();
+    // The workspace membership row references this repo (the composite FK is ON DELETE cascade,
+    // but delete it explicitly so the ordering is dialect-agnostic and can't FK-fail if
+    // foreign_keys is off).
+    //
+    // ⚠ IT DOES NOT TOUCH `workspace_reviewers`. That row keys on (workspace, actor), not on the
+    // repo, so removing one repo from a workspace does not invalidate a judgement about a
+    // reviewer that may still cover the workspace's other repos — and a stored row whose
+    // footprint has gone must stay visible and editable (its counts simply read zero).
+    await tx.delete(workspaceRepos).where(eq(workspaceRepos.repoId, id)).execute();
     await tx.delete(syncState).where(eq(syncState.repoId, id)).execute();
     await tx.delete(repos).where(eq(repos.id, id)).execute();
   });
   return true;
-}
-
-// Toggle a repo's "Watch for inbox" flag (account-scoped → false/404 if not owned).
-// First watch stamps inboxWatchStartedAt = now; unwatch keeps it; re-watch keeps the
-// original (so the same PR window is restored). Returns false if the repo isn't found.
-export async function setRepoInboxWatch(
-  accountId: number,
-  repoId: number,
-  watch: boolean,
-): Promise<boolean> {
-  // Single atomic UPDATE (no read-then-write). On watch, COALESCE stamps the start
-  // only when it's currently unset, so concurrent toggles can't overwrite the
-  // original watch window; on unwatch, started_at is left untouched. Scoped by
-  // accountId → returns false (→ 404) for a repo this account doesn't own.
-  const updated = await db
-    .update(repos)
-    .set(
-      watch
-        ? {
-            inboxWatch: true,
-            inboxWatchStartedAt: sql`coalesce(${repos.inboxWatchStartedAt}, ${tsBound(new Date())})`,
-          }
-        : { inboxWatch: false },
-    )
-    .where(and(eq(repos.id, repoId), eq(repos.accountId, accountId)))
-    .returning({ id: repos.id })
-    .execute();
-  return updated.length > 0;
 }
 
 // ---- Claude Review reads (CORE-owned surfaces only) ----
@@ -6391,13 +6669,12 @@ export async function getResolvableBotThreads(
   // SonarQube finding does not mean a review comment was addressed, and the `likely_addressed`
   // heuristic (a later commit touched the file) is a much weaker claim for a linter. This is the
   // one exclusion a user might want reversed; it's cheap to make it a toggle later and expensive
-  // to un-ship. Repo scope = the PR's own repo, resolved from the ownership-bound lookup (a
-  // foreign/unknown prId yields `[]`, so nothing is ever classed automated for it).
-  const botIds = await automatedReviewerUserIds(
-    accountId,
-    await repoScopeForPr(accountId, prId),
-    'review',
-  );
+  // to un-ship. The judgement comes from the PR's OWN workspace, resolved from the
+  // ownership-bound lookup (a foreign/unknown prId yields null, so nothing is ever classed
+  // automated for it).
+  const prScope = await botScopeForPr(accountId, prId);
+  if (!prScope) return [];
+  const botIds = await automatedReviewerUserIds(accountId, prScope.workspaceId, 'review');
   if (botIds.length === 0) return [];
   const preds = [
     eq(reviewThreads.prId, prId),
@@ -6433,12 +6710,12 @@ export async function getResolvableBotThreads(
 // N most recent". Enriched with the per-thread root-comment excerpt + a resolved bot label for
 // the review list; the node id stays server-side (the resolve helper needs it, the client doesn't).
 //
-// scopeRepoIds: null/undefined = the whole account; [] = an empty scope (resolve nothing);
-// a non-empty list = only those repos. threadIds: identical semantics to the per-PR getter —
-// null/undefined = unfiltered, [] = resolve nothing (the load-bearing landmine), a non-empty
-// list = the exact reviewed set (the confirm-gated resolve path). On the resolve path (threadIds
-// present) the page cap is NOT applied — the inArray already bounds the result to ≤ the caller's
-// list — so a re-derive never silently drops a requested-and-eligible id.
+// `scope`: the workspace decides who counts as a bot, `scope.repoIds` narrows which threads are
+// considered. `[]` = an empty workspace (resolve nothing). threadIds: identical semantics to the
+// per-PR getter — null/undefined = unfiltered, [] = resolve nothing (the load-bearing landmine),
+// a non-empty list = the exact reviewed set (the confirm-gated resolve path). On the resolve path
+// (threadIds present) the page cap is NOT applied — the inArray already bounds the result to
+// ≤ the caller's list — so a re-derive never silently drops a requested-and-eligible id.
 export const SCOPE_RESOLVE_THREAD_CAP = 500;
 
 export interface ResolvableBotThreadRow {
@@ -6461,7 +6738,7 @@ export interface ResolvableBotThreadRow {
 
 export async function getResolvableBotThreadsForScope(
   accountId: number,
-  scopeRepoIds: number[] | null = null,
+  scope: BotScope,
   threadIds: number[] | null = null,
 ): Promise<{
   threads: ResolvableBotThreadRow[];
@@ -6475,19 +6752,19 @@ export async function getResolvableBotThreadsForScope(
     totalEligible: 0,
     botCountsByPr: new Map<number, ThreadStateCounts>(),
   };
-  // An empty repo scope or an empty reviewed list both mean "nothing" — resolve/return nothing.
-  if (scopeRepoIds != null && scopeRepoIds.length === 0) return empty;
+  // An empty workspace or an empty reviewed list both mean "nothing" — resolve/return nothing.
+  if (scope.repoIds.length === 0) return empty;
   if (threadIds != null && threadIds.length === 0) return empty;
   // `role: 'review'` — same reasoning as the per-PR getResolvableBotThreads: the backlog is
   // review-bot threads only. The two MUST agree, because the resolve route re-derives eligibility
   // through this function and the per-PR route through that one.
   //
-  // The judgement scope is `scopeRepoIds` itself — the SAME repos the thread query below filters
-  // on. That CLOSES the known gap the old team-keyed signature left open: the scope-wide resolve
-  // body carries `repoIds` but no team, so the re-derive ran at the account default and would
-  // find a per-team-only bot ineligible, resolving 0 for threads the listing had just offered.
-  // `null` here is a genuine account-wide sweep (no repo scope was requested).
-  const botIds = await automatedReviewerUserIds(accountId, scopeRepoIds, 'review');
+  // The judgement scope is `scope.workspaceId`, and the LISTING resolves the identical one — which
+  // is what keeps the offer and the re-derive from disagreeing. Under the old team key the resolve
+  // body carried `repoIds` but no team, so the re-derive ran at the account default and found a
+  // per-team-only bot ineligible, resolving 0 for threads the listing had just offered. One
+  // workspace id on both sides cannot disagree with itself.
+  const botIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
   if (botIds.length === 0) return empty;
 
   const preds = [
@@ -6497,7 +6774,7 @@ export async function getResolvableBotThreadsForScope(
     eq(reviewThreads.isResolved, false),
     isNotNull(reviewThreads.githubNodeId),
   ];
-  if (scopeRepoIds != null) preds.push(inArray(pullRequests.repoId, scopeRepoIds));
+  preds.push(inArray(pullRequests.repoId, scope.repoIds));
   if (threadIds != null) preds.push(inArray(reviewThreads.id, threadIds));
   const where = and(...preds);
 
@@ -6564,8 +6841,8 @@ export async function getResolvableBotThreadsForScope(
   // account's custom classification label → the vendor's pretty name (known vendors) → the
   // reviewer's display name/login. (Chose the full resolution over login-only: it's a few cheap
   // account-scoped maps and gives the same labels the ROI table shows — no drift.)
-  const kindMap = await classificationKindForUser(accountId, scopeRepoIds);
-  const classLabel = await classificationLabelMap(accountId);
+  const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
+  const classLabel = await classificationLabelMap(accountId, scope.workspaceId);
   const commenterIds = [...new Set(pageRows.flatMap((r) => (r.commenterId != null ? [r.commenterId] : [])))];
   const loginById = new Map<number, string>();
   if (commenterIds.length > 0) {
@@ -6625,13 +6902,13 @@ export async function getResolvableBotThreadsForScope(
 // thousands of threads. Account-scoped (binds pullRequests.accountId).
 export async function getResolvableBotThreadPrs(
   accountId: number,
-  scopeRepoIds: number[] | null = null,
+  scope: BotScope,
 ): Promise<{ prs: ResolvableThreadPr[]; totalThreads: number }> {
-  if (scopeRepoIds != null && scopeRepoIds.length === 0) return { prs: [], totalThreads: 0 };
-  // Same repo scope as getResolvableBotThreadsForScope, and it MUST stay the same: the LISTING
-  // offers thread ids that the resolve route re-derives through that function, so a scope that
-  // differs here would offer threads the server then refuses to resolve.
-  const botIds = await automatedReviewerUserIds(accountId, scopeRepoIds, 'review');
+  if (scope.repoIds.length === 0) return { prs: [], totalThreads: 0 };
+  // Same workspace as getResolvableBotThreadsForScope, and it MUST stay the same: the LISTING
+  // offers thread ids that the resolve route re-derives through that function, so a judgement
+  // scope that differs here would offer threads the server then refuses to resolve.
+  const botIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
   if (botIds.length === 0) return { prs: [], totalThreads: 0 };
 
   const preds = [
@@ -6640,8 +6917,8 @@ export async function getResolvableBotThreadPrs(
     eq(reviewThreads.derivedState, 'likely_addressed'),
     eq(reviewThreads.isResolved, false),
     isNotNull(reviewThreads.githubNodeId),
+    inArray(pullRequests.repoId, scope.repoIds),
   ];
-  if (scopeRepoIds != null) preds.push(inArray(pullRequests.repoId, scopeRepoIds));
 
   const rows = await db
     .select({
@@ -7081,32 +7358,32 @@ export async function upsertLocalReview(
 // Shared helpers below reuse the module-private emptyCounts/mapUser/reviewBotUserIds.
 // ════════════════════════════════════════════════════════════════════════════
 
-// ── PER-REPO judgement + PER-ACTOR identity resolution ─────────────────────────────────────
+// ── WORKSPACE-GRAIN reviewer resolution ────────────────────────────────────────────────────
 //
-// A BOT IS A PER-REPO OBJECT (migrations 0042/0043). `repo_reviewers` (account, repo, author)
-// holds the JUDGEMENT — automated / role / confidence / source / reasons. `account_reviewers`
-// (account, author) holds the IDENTITY — kind / label / identity_source / monthly_cents. Every
-// fact lives at exactly ONE grain, so there is nothing here to merge, inherit or deduplicate.
+// A BOT IS A PER-WORKSPACE OBJECT (migrations 0044/0045). ONE `workspace_reviewers` row per
+// (account, workspace, actor) carries all three facts: the JUDGEMENT (automated / role /
+// confidence / source / reasons), the IDENTITY (kind / label / identity_source) and the PRICE
+// (monthly_cents). They used to live in two tables at two grains — the judgement per repo, the
+// identity per account — and the split existed only because of that mismatch. With the workspace
+// as the only scope they are facts about the same key, so a second table would key on the
+// identical three columns and be joined at every call site.
 //
-// THE RULE every helper below follows: a JUDGEMENT read takes an explicit REPO SCOPE
-// (`repoIds`), an IDENTITY read takes none. `repoIds === null` means "no repo scope at all" —
-// an account-wide sweep — and every caller that passes it states WHY at the call site. It is
-// deliberately not a sentinel with a second meaning: its predecessor `NO_TEAM_KEY` was both
-// "the No-team scope" AND "the inheritance root", which is precisely how one team's override
-// came to steer account-wide reads, and how seven callers with no team to give ended up
-// hardcoding a key that quietly meant something else.
+// ⚠ THERE IS NO FOLD ANY MORE. Its predecessor read six repo rows and unioned them into one
+// answer per actor (automated if ANY row said so; a manual "this is a human" winning only when
+// nothing in scope disagreed). One row per (workspace, actor) IS the answer, so every helper below
+// is a straight read. Nothing here merges, inherits or deduplicates — the only union rule left in
+// the file is the explicitly-named account-wide sweep the cross-org benchmark needs, and it is a
+// separate function precisely so no ordinary read can reach it by accident.
 //
-// ⚠ UNION SEMANTICS, stated once because four helpers depend on it. Over a scope of several
-// repos an actor is AUTOMATED when ANY in-scope row says so. That is the only rule under which
-// a scope holding repo A (where CodeRabbit is a bot) and repo B (where someone clicked "Not a
-// bot") still surfaces the threads CodeRabbit really did post on A. The mirror rule: a manual
-// "this is a human" removes an actor from the set only when NO in-scope row calls it automated
-// — otherwise one repo's correction would blank a vendor account-wide, which is the exact class
-// of bug the two-table split exists to make unrepresentable.
+// THE RULE every helper follows: it takes ONE `workspaceId`. There is no `null` scope, no
+// sentinel, and no "no scope at all" — those were the shapes that let one team's override steer
+// account-wide reads. `BotScope.repoIds` narrows the DATA a getter measures; it never decides who
+// counts as a bot.
 //
-// ⚠ AN EMPTY `repoIds` IS NOT "EVERY REPO". `[]` is a scope that resolved to no repos (a team
-// with none assigned yet) and must return nothing; `null` is the absence of scoping. Collapsing
-// the two is a one-character mistake that silently widens a narrow read to the whole account.
+// ⚠ THE TWO PROVENANCE FLAGS ARE STILL TWO FLAGS. `source` owns automated/role/confidence/
+// reasons; `identity_source` owns kind/label. Inside one row that separation is code discipline
+// (a narrowed `set:` object) rather than a table boundary, and it is what stops "not a bot here"
+// from also un-naming the vendor. `monthly_cents` is owned by neither and has exactly one writer.
 
 // Which automated reviewers a metric counts. `'review'` = real AI code reviewers only (behaviour,
 // dedup, the cross-org benchmark); `'all'` = every automated reviewer including quality checks
@@ -7121,10 +7398,13 @@ export async function upsertLocalReview(
 //   • getBotOnlyReviewPrs asks for 'all' because it answers "did a human look at this before it
 //     merged". A PR reviewed only by SonarQube is precisely what it exists to flag; narrowing to
 //     'review' would leave it with no qualifying bot review and drop it from the list entirely.
+//     ⚠ BOT-ONLY PRs ARE IN THE `'all'` COLUMN, NOT THE `'review'` ONE. The scoring sets narrow
+//     because a linter's volume makes a reviewer's numbers lie; this RISK set does not, because a
+//     linter's approval is not a human's.
 //
-// This parameter is REQUIRED on automatedReviewerUserIds precisely so every call site had to be
-// reviewed individually — confusing the two sets is the defect this feature is most likely to
-// ship. See the ReviewerRole comment in shared.
+// This parameter is REQUIRED and POSITIONAL on automatedReviewerUserIds precisely so every call
+// site had to be reviewed individually — confusing the two sets is the defect this feature is most
+// likely to ship. See the ReviewerRole comment in shared.
 export type ReviewerRoleFilter = 'review' | 'all';
 
 // The global user ids whose login is a known QUALITY-CHECK automation. Mirrors reviewBotUserIds.
@@ -7147,47 +7427,85 @@ async function qualityCheckUserIds(): Promise<number[]> {
   return rows.map((r) => r.id);
 }
 
-// One actor's judgement FOLDED OVER A REPO SCOPE by the union rule above. It is not a row: a
-// scope of six repos is six rows, and this is what they add up to for a metric that has one
-// answer per actor. Per-ROW facts (which repo, the confidence, the reasons) are served by
-// listDetectedReviewers, which never folds.
-interface ResolvedJudgement {
-  // Automated in AT LEAST ONE in-scope repo.
+// One actor's stored row in one workspace, as every helper below reads it. It is a ROW, not a
+// fold: `resolveJudgements` (per-repo, unioned) and `resolveIdentities` (per-account) merged into
+// this the moment both facts landed on the same key.
+interface ResolvedReviewer {
   automated: boolean;
-  // 'review' when any in-scope row roles it a reviewer. A login that lints one repo and reviews
-  // another belongs in the reviewer cohort — the role exists to keep a pure linter's volume out
-  // of REVIEWER scores, not to demote something that genuinely reviews somewhere.
   role: ReviewerRole;
-  // A human explicitly said "not a bot" in at least one in-scope repo. Only consulted when
-  // `automated` is false everywhere in scope (see the union rule).
+  // `source === 'manual' && !automated` — a human said "this is a person". Kept as its own field
+  // because it is the one judgement that must beat a known vendor login.
   manualHuman: boolean;
+  confidence: ClassificationConfidence;
+  source: ClassificationSource;
+  reasons: string[];
+  kind: AutomatedReviewerKind | null;
+  label: string | null;
+  identitySource: 'auto' | 'manual';
+  monthlyCents: number | null;
 }
 
-// Every actor with a `repo_reviewers` row in scope, folded. ONE query; the fold is explicit in JS
-// rather than an aggregate so the precedence is readable and cannot depend on storage order.
-async function resolveJudgements(
+// ONE read of ONE row per actor in ONE workspace. The `workspace_reviewers_account_workspace_idx`
+// index serves it directly.
+async function resolveWorkspaceReviewers(
   accountId: number,
-  repoIds: number[] | null,
-): Promise<Map<number, ResolvedJudgement>> {
-  // `[]` = a scope that resolved to no repos. Return nothing rather than emitting `repo_id IN ()`
-  // and relying on the two dialects agreeing about an empty IN list.
-  if (repoIds != null && repoIds.length === 0) return new Map();
+  workspaceId: number,
+): Promise<Map<number, ResolvedReviewer>> {
   const rows = await db
-    .select({
-      id: repoReviewers.authorUserId,
-      automated: repoReviewers.automated,
-      role: repoReviewers.role,
-      source: repoReviewers.source,
-    })
-    .from(repoReviewers)
+    .select()
+    .from(workspaceReviewers)
     .where(
       and(
-        eq(repoReviewers.accountId, accountId),
-        ...(repoIds != null ? [inArray(repoReviewers.repoId, repoIds)] : []),
+        eq(workspaceReviewers.accountId, accountId),
+        eq(workspaceReviewers.workspaceId, workspaceId),
       ),
     )
     .execute();
-  const out = new Map<number, ResolvedJudgement>();
+  const out = new Map<number, ResolvedReviewer>();
+  for (const r of rows) out.set(r.authorUserId, mapResolvedReviewer(r));
+  return out;
+}
+
+function mapResolvedReviewer(
+  r: typeof workspaceReviewers.$inferSelect,
+): ResolvedReviewer {
+  return {
+    automated: r.automated,
+    role: (r.role as ReviewerRole | null) ?? 'review',
+    manualHuman: r.source === 'manual' && !r.automated,
+    confidence: r.confidence as ClassificationConfidence,
+    source: r.source as ClassificationSource,
+    reasons: r.reasonsJson ?? [],
+    kind: (r.kind as AutomatedReviewerKind | null) ?? null,
+    label: r.label,
+    identitySource: r.identitySource,
+    monthlyCents: r.monthlyCents,
+  };
+}
+
+// THE ACCOUNT-WIDE SWEEP — every workspace's rows, UNIONED per actor. It exists for exactly one
+// caller (the cross-org benchmark rollup, which contributes the tenant's whole footprint and has
+// no legal single workspace to name) and is a named function rather than a null sentinel so no
+// ordinary read can reach it by accident.
+//
+// The union rule is the old multi-repo one, lifted: automated in ANY workspace ⇒ automated;
+// `role: 'review'` in any workspace ⇒ 'review' (a login that lints one workspace and reviews
+// another belongs in the reviewer cohort); a manual "this is a human" only counts when NO
+// workspace calls the actor automated.
+async function resolveReviewersForAccount(
+  accountId: number,
+): Promise<Map<number, { automated: boolean; role: ReviewerRole; manualHuman: boolean }>> {
+  const rows = await db
+    .select({
+      id: workspaceReviewers.authorUserId,
+      automated: workspaceReviewers.automated,
+      role: workspaceReviewers.role,
+      source: workspaceReviewers.source,
+    })
+    .from(workspaceReviewers)
+    .where(eq(workspaceReviewers.accountId, accountId))
+    .execute();
+  const out = new Map<number, { automated: boolean; role: ReviewerRole; manualHuman: boolean }>();
   for (const r of rows) {
     const role = (r.role as ReviewerRole | null) ?? 'review';
     const manualHuman = r.source === 'manual' && !r.automated;
@@ -7203,46 +7521,13 @@ async function resolveJudgements(
   return out;
 }
 
-// WHO each automated reviewer IS, account-wide — a straight read of `account_reviewers`, keyed
-// (accountId, authorUserId). NO REPO SCOPE, and that is the whole point of the second table: a
-// login is one vendor everywhere, so scoping identity is what made CodeRabbit lose its brand
-// colour on the repos a user never touched (see ReviewerIdentity in shared for the worked case).
-interface ResolvedIdentity {
-  kind: AutomatedReviewerKind | null;
-  label: string | null;
-  identitySource: 'auto' | 'manual';
-  monthlyCents: number | null;
-}
-
-async function resolveIdentities(accountId: number): Promise<Map<number, ResolvedIdentity>> {
-  const rows = await db
-    .select({
-      id: accountReviewers.authorUserId,
-      kind: accountReviewers.kind,
-      label: accountReviewers.label,
-      identitySource: accountReviewers.identitySource,
-      monthlyCents: accountReviewers.monthlyCents,
-    })
-    .from(accountReviewers)
-    .where(eq(accountReviewers.accountId, accountId))
-    .execute();
-  const out = new Map<number, ResolvedIdentity>();
-  for (const r of rows) {
-    out.set(r.id, {
-      kind: (r.kind as AutomatedReviewerKind | null) ?? null,
-      label: r.label,
-      identitySource: r.identitySource,
-      monthlyCents: r.monthlyCents,
-    });
-  }
-  return out;
-}
-
-// The repo scope for a getter addressed by prId: the ONE repo that PR lives in. Ownership-bound,
-// so a foreign/unknown prId yields `[]` — a scope of no repos, which resolves to no judgements.
-// That is the conservative answer (nothing is classified as a bot) and it never discloses whether
-// the PR exists.
-async function repoScopeForPr(accountId: number, prId: number): Promise<number[]> {
+// The bot scope for a getter addressed by prId: the PR's repo, and the workspace that repo belongs
+// to. Ownership-bound, so a foreign/unknown prId yields null — the conservative answer (nothing is
+// classified as a bot) that never discloses whether the PR exists.
+export async function botScopeForPr(
+  accountId: number,
+  prId: number,
+): Promise<BotScope | null> {
   const row = (
     await db
       .select({ repoId: pullRequests.repoId })
@@ -7251,12 +7536,12 @@ async function repoScopeForPr(accountId: number, prId: number): Promise<number[]
       .limit(1)
       .execute()
   )[0];
-  return row ? [row.repoId] : [];
+  if (!row) return null;
+  return workspaceScopeForRepo(accountId, row.repoId);
 }
 
-// Every repo this account watches — the default scope for the reviewer LISTING, which must cover
-// the whole account when the caller names no scope. Deliberately not `null`: the listing echoes
-// the repos it covered (`DetectedReviewersResponse.repoIds`), so it needs the actual ids.
+// Every repo this account owns. Still needed by erase/export and by the membership repair — it is
+// deliberately NOT a scope: a workspace-scoped read never reaches for it.
 export async function accountRepoIds(accountId: number): Promise<number[]> {
   const rows = await db
     .select({ id: repos.id })
@@ -7267,59 +7552,77 @@ export async function accountRepoIds(accountId: number): Promise<number[]> {
   return rows.map((r) => r.id);
 }
 
-// The monthly price recorded for each actor, in whole US DOLLARS (storage is integer cents).
-// ACTOR-GRAIN: no repo scope, because you buy ONE subscription from a vendor — six repos running
-// CodeRabbit is $120, not $720.
+// The monthly price recorded for each actor IN THIS WORKSPACE, in whole US DOLLARS (storage is
+// integer cents). NULL = no price set; 0 = "recorded as free". Nothing inherits, so there is no
+// chain behind a `??`.
 //
-// ⚠ The caller owns the rendering rule the schema cannot enforce: never sum this across repo
-// rows. Dedupe by userId first. (BotVendorAnalytics rows are already one per actor, so joining it
-// there is safe; a per-(repo, actor) listing is not.)
+// ⚠ THE CALLER OWNS THE RENDERING RULE THE SCHEMA CANNOT ENFORCE. Within one workspace there is
+// exactly one row per actor, so a total over this map is a plain sum. ACROSS workspaces it must
+// never be summed: six workspaces each listing a $120 CodeRabbit is either six subscriptions or
+// one seen six ways, and the app must not assert which.
 //
 // Cost is CORE/free: it is read from a core table, so an OSS/npx install can set and see it.
 export async function reviewerCostForUser(
   accountId: number,
+  workspaceId: number,
 ): Promise<Map<number, number | null>> {
   const out = new Map<number, number | null>();
-  for (const [id, r] of await resolveIdentities(accountId))
+  for (const [id, r] of await resolveWorkspaceReviewers(accountId, workspaceId))
     out.set(id, r.monthlyCents == null ? null : r.monthlyCents / 100);
   return out;
 }
 
-// The ACCOUNT-SCOPED, REPO-RESOLVED set of automated-reviewer user ids = known vendor logins (the
-// global reviewBotUserIds set) ∪ this account's in-scope `repo_reviewers` rows flagged automated,
-// narrowed by `role`. getActivity / getTeamInsights' bot_signal / getResolvableBotThreads all
+// The set of automated-reviewer user ids for ONE workspace = known vendor logins (the global
+// reviewBotUserIds set) ∪ this workspace's `workspace_reviewers` rows flagged automated, narrowed
+// by `role`. getActivity / getWorkspaceInsights' bot_signal / the resolvable-thread getters all
 // route through this so in-house-classified reviewers count alongside vendors.
-//
-// `repoIds === null` = account-wide (no scope). See the union rule at the top of this section.
 export async function automatedReviewerUserIds(
   accountId: number,
-  repoIds: number[] | null,
+  workspaceId: number,
   role: ReviewerRoleFilter,
 ): Promise<number[]> {
-  // `[]` = a scope that resolved to no repos, so there are no bot OBJECTS in it — not even the
-  // global vendor-login fallback, which exists to stand in for a missing row and has no row to
-  // stand in for here. Every caller that can produce an empty scope already early-outs, so this
-  // is belt-and-braces; without it an empty scope would return the whole vendor list, which reads
-  // as "every known bot is active in these zero repos".
-  if (repoIds != null && repoIds.length === 0) return [];
   const [vendorIds, qcIds, resolved] = await Promise.all([
     reviewBotUserIds(),
     role === 'review' ? qualityCheckUserIds() : Promise.resolve<number[]>([]),
-    resolveJudgements(accountId, repoIds),
+    resolveWorkspaceReviewers(accountId, workspaceId),
   ]);
+  return narrowAutomatedIds(vendorIds, qcIds, resolved, role);
+}
+
+// The UNION over every one of the account's workspaces. Benchmark-only (see
+// resolveReviewersForAccount); a login automated in ANY workspace counts.
+export async function automatedReviewerUserIdsForAccount(
+  accountId: number,
+  role: ReviewerRoleFilter,
+): Promise<number[]> {
+  const [vendorIds, qcIds, resolved] = await Promise.all([
+    reviewBotUserIds(),
+    role === 'review' ? qualityCheckUserIds() : Promise.resolve<number[]>([]),
+    resolveReviewersForAccount(accountId),
+  ]);
+  return narrowAutomatedIds(vendorIds, qcIds, resolved, role);
+}
+
+// The shared tail of the two functions above: apply the stored verdicts over the vendor-login
+// seed, then narrow by role. Split out so the workspace read and the account-wide union cannot
+// drift apart on the part that is genuinely identical.
+function narrowAutomatedIds(
+  vendorIds: number[],
+  qcIds: number[],
+  resolved: Map<number, { automated: boolean; role: ReviewerRole; manualHuman: boolean }>,
+  role: ReviewerRoleFilter,
+): number[] {
   const set = new Set<number>(vendorIds);
   for (const [id, r] of resolved) {
     if (r.automated) set.add(id);
-    // A manual "this is a human" override wins both directions — it removes even a known vendor
-    // login from this account's automated set. It only reaches this branch when NO in-scope repo
-    // calls the actor automated (union rule), so one repo's correction cannot blank a vendor that
-    // is still a bot elsewhere in the same scope.
+    // A manual "this is a human" wins both directions — it removes even a known vendor login from
+    // this account's automated set.
     else if (r.manualHuman) set.delete(id);
   }
   if (role === 'all') return [...set];
-  // role === 'review': drop every reviewer whose RESOLVED role is quality_check. An explicit row
-  // is authoritative (a user may have flipped a linter back to 'review', or marked a vendor a
-  // quality check); otherwise the login seed decides.
+  // role === 'review': drop every reviewer whose stored role is quality_check. An explicit row is
+  // authoritative (a user may have flipped a linter back to 'review', or marked a vendor a quality
+  // check); otherwise the login seed decides.
   const qcDefault = new Set(qcIds);
   return [...set].filter((id) => {
     const r = resolved.get(id);
@@ -7328,81 +7631,132 @@ export async function automatedReviewerUserIds(
   });
 }
 
-// Map every automated reviewer (in this account, judged over `repoIds`) → its
-// AutomatedReviewerKind, for grouping analytics / bot_signal / dedup. A known vendor login wins;
-// else the ACTOR's stored kind; else 'in_house'. NOT role-filtered — callers narrow by the id set
-// from automatedReviewerUserIds, and the quality-check SECTION of the ROI panel needs the kinds of
-// the very rows the metrics exclude.
+// Map every automated reviewer in ONE workspace → its AutomatedReviewerKind, for grouping
+// analytics / bot_signal / dedup. A known vendor login wins; else the stored kind; else
+// 'in_house'. NOT role-filtered — callers narrow by the id set from automatedReviewerUserIds, and
+// the quality-check SECTION of the ROI panel needs the kinds of the very rows the metrics exclude.
 //
-// ⚠ THE KIND COMES FROM `account_reviewers`, NEVER FROM A REPO ROW. That is why the same vendor
-// renders in one colour everywhere; the repo scope here decides only WHICH actors are automated.
+// ⚠ IDENTITY IS PER WORKSPACE NOW. The same login may legitimately be named `coderabbit` in one
+// workspace and left unnamed in another; nothing reconciles them and nothing is meant to. A colour
+// or label lookup must therefore be built from the ACTIVE workspace's answer.
 export async function classificationKindForUser(
   accountId: number,
-  repoIds: number[] | null,
+  workspaceId: number,
 ): Promise<Map<number, AutomatedReviewerKind>> {
-  const map = new Map<number, AutomatedReviewerKind>();
-  // `[]` = no repos in scope → no bot objects, same rule as automatedReviewerUserIds. The two
-  // MUST agree: callers pair the id set with this kind map, and a kind for an id the set omits
-  // (or vice versa) is how a bot shows up in one half of a panel and not the other.
-  if (repoIds != null && repoIds.length === 0) return map;
-  // Known vendors (global users table) resolved from the login → vendor kind.
-  const logins = reviewBotLogins();
-  if (logins.length > 0) {
-    const candidates = [...logins, ...logins.map((l) => `${l}[bot]`)];
-    const inList = sql.join(
-      candidates.map((c) => sql`${c}`),
-      sql`, `,
-    );
-    const vrows = await db
-      .select({ id: users.id, login: users.githubLogin })
-      .from(users)
-      .where(sql`lower(${users.githubLogin}) in (${inList})`)
-      .execute();
-    for (const r of vrows) {
-      const kind = reviewBotKind(r.login);
-      if (kind) map.set(r.id, kind);
-    }
-  }
-  const [judgements, identities] = await Promise.all([
-    resolveJudgements(accountId, repoIds),
-    resolveIdentities(accountId),
-  ]);
-  for (const [id, r] of judgements) {
+  const resolved = await resolveWorkspaceReviewers(accountId, workspaceId);
+  const map = await vendorLoginKindMap();
+  for (const [id, r] of resolved) {
     if (!r.automated) {
-      // Same union rule as automatedReviewerUserIds: a manual "human" only unmakes the vendor
-      // kind when nothing in scope calls this actor automated.
+      // A manual "this is a human" unmakes even a vendor login's kind.
       if (r.manualHuman) map.delete(id);
       continue;
     }
     if (map.has(id)) continue;
-    map.set(id, identities.get(id)?.kind ?? 'in_house');
+    map.set(id, r.kind ?? 'in_house');
   }
   return map;
 }
 
-// The account's custom reviewer LABELS. ACTOR-GRAIN, so no repo scope — a human-set display name
-// is part of the actor's identity and must read the same in every repo. Replaces the six
-// hand-rolled inline reads that used to sit in the analytics getters.
-async function classificationLabelMap(accountId: number): Promise<Map<number, string>> {
+// The ACCOUNT-WIDE kind map — the second helper the cross-org benchmark needs, and the single
+// highest data-integrity stake in this file: the value decides what leaves the tenant into a
+// CROSS-ORG benchmark and cannot be un-shipped.
+//
+// ⚠ IDENTITY IS PER WORKSPACE, so an actor can legitimately be `coderabbit` in A and null in B.
+// THE TIE-BREAK IS WRITTEN, NOT INCIDENTAL: a NON-NULL vendor kind in any workspace WINS, and ties
+// among non-null kinds are broken by the LOWEST workspace id. A known vendor login still wins over
+// everything, and a manual "this is a human" in every workspace still removes the actor.
+// (`vendorKindOf` at the call site drops in_house/pierre/vendor, so only real vendor kinds are
+// ever emitted.)
+export async function classificationKindForUserForAccount(
+  accountId: number,
+): Promise<Map<number, AutomatedReviewerKind | null>> {
+  const rows = await db
+    .select({
+      id: workspaceReviewers.authorUserId,
+      workspaceId: workspaceReviewers.workspaceId,
+      automated: workspaceReviewers.automated,
+      source: workspaceReviewers.source,
+      kind: workspaceReviewers.kind,
+    })
+    .from(workspaceReviewers)
+    .where(eq(workspaceReviewers.accountId, accountId))
+    .orderBy(asc(workspaceReviewers.workspaceId))
+    .execute();
+
+  const vendorMap = await vendorLoginKindMap();
+  const out = new Map<number, AutomatedReviewerKind | null>(vendorMap);
+  // Ordered by workspaceId asc, so "first non-null wins" IS "lowest workspace id breaks ties".
+  const stored = new Map<number, AutomatedReviewerKind | null>();
+  const automatedAnywhere = new Set<number>();
+  const manualHumanEverywhere = new Map<number, boolean>();
+  for (const r of rows) {
+    if (r.automated) automatedAnywhere.add(r.id);
+    const manualHuman = r.source === 'manual' && !r.automated;
+    manualHumanEverywhere.set(r.id, (manualHumanEverywhere.get(r.id) ?? false) || manualHuman);
+    const kind = (r.kind as AutomatedReviewerKind | null) ?? null;
+    if (kind != null && stored.get(r.id) == null) stored.set(r.id, kind);
+    else if (!stored.has(r.id)) stored.set(r.id, null);
+  }
+  for (const [id, kind] of stored) {
+    if (!automatedAnywhere.has(id)) {
+      if (manualHumanEverywhere.get(id)) out.delete(id);
+      continue;
+    }
+    if (out.has(id)) continue;
+    out.set(id, kind ?? 'in_house');
+  }
+  return out;
+}
+
+// Known vendor logins (the GLOBAL users table) → their vendor kind. The seed both kind maps start
+// from; a login is one vendor everywhere, which is a fact about the LOGIN, not about a workspace.
+async function vendorLoginKindMap(): Promise<Map<number, AutomatedReviewerKind>> {
+  const map = new Map<number, AutomatedReviewerKind>();
+  const logins = reviewBotLogins();
+  if (logins.length === 0) return map;
+  const candidates = [...logins, ...logins.map((l) => `${l}[bot]`)];
+  const inList = sql.join(
+    candidates.map((c) => sql`${c}`),
+    sql`, `,
+  );
+  const rows = await db
+    .select({ id: users.id, login: users.githubLogin })
+    .from(users)
+    .where(sql`lower(${users.githubLogin}) in (${inList})`)
+    .execute();
+  for (const r of rows) {
+    const kind = reviewBotKind(r.login);
+    if (kind) map.set(r.id, kind);
+  }
+  return map;
+}
+
+// The workspace's custom reviewer LABELS. WORKSPACE-GRAIN now — a human-set display name lives on
+// the same row as everything else, so the same login may carry a different name in another
+// workspace. Replaces the six hand-rolled inline reads that used to sit in the analytics getters.
+async function classificationLabelMap(
+  accountId: number,
+  workspaceId: number,
+): Promise<Map<number, string>> {
   const out = new Map<number, string>();
-  for (const [id, r] of await resolveIdentities(accountId)) {
+  for (const [id, r] of await resolveWorkspaceReviewers(accountId, workspaceId)) {
     const label = r.label?.trim();
     if (label) out.set(id, label);
   }
   return out;
 }
 
-// Resolved ReviewerRole per automated reviewer, folded over `repoIds` (explicit row → login seed
-// → 'review'). Used where a surface must SPLIT the two sets rather than filter to one —
+// Resolved ReviewerRole per automated reviewer in ONE workspace (explicit row → login seed →
+// 'review'). Used where a surface must SPLIT the two sets rather than filter to one —
 // getBotAnalytics computes every automated reviewer's row and then routes quality checks into
 // their own excluded section.
 export async function reviewerRoleForUser(
   accountId: number,
-  repoIds: number[] | null,
+  workspaceId: number,
 ): Promise<Map<number, ReviewerRole>> {
   const [qcIds, resolved] = await Promise.all([
     qualityCheckUserIds(),
-    resolveJudgements(accountId, repoIds),
+    resolveWorkspaceReviewers(accountId, workspaceId),
   ]);
   const out = new Map<number, ReviewerRole>();
   for (const id of qcIds) out.set(id, 'quality_check');
@@ -7438,7 +7792,7 @@ const OVERDUE_GRACE_MS = 36 * 60 * 60 * 1000;
 // keep / tune / noisy verdict (deterministic rule-of-thumb, no AI): high volume + low
 // acted-on + a high share of OVERDUE-untouched threads (untouched AND aged past the account-
 // wide normal response window) → noisy; moderate low acted-on → tune; else keep. The overdue
-// gate is what stops a bot being called noisy for threads the team simply hasn't reached yet.
+// gate is what stops a bot being called noisy for threads the workspace simply hasn't reached yet.
 function botVerdict(threads: number, actedOnPct: number | null, overdueUntouched: number): BotVerdict {
   const overdueRatio = threads > 0 ? overdueUntouched / threads : 0;
   const highVolume = threads >= 10;
@@ -7533,64 +7887,73 @@ async function reviewerEvidence(
   };
 }
 
-// WS1/WS8 — THE BOT LISTING, at both grains. One `RepoReviewer` row per (repo, actor) that has
-// a footprint in the scoped repos (or already carries a stored judgement there), plus one
-// `ReviewerIdentity` per distinct actor in those rows. Runs the resolver for not-yet-classified
-// actors (which persists rows). Account-scoped.
+// THE BOT LISTING — one `WorkspaceReviewer` per actor with a footprint in the scoped repos (or
+// already carrying a stored row in this workspace). Judgement, identity, price and evidence all
+// ride on the one object, because with the workspace as the only scope they are facts about the
+// same key. Runs the lazy resolver for not-yet-classified actors (which persists rows).
+// Account-scoped.
 //
-// ⚠ THERE IS NO DEDUPLICATION, AND THAT IS THE INTENDED DISPLAY. A vendor running on six repos is
-// six `rows` entries sharing one `reviewers` entry. Collapsing them would throw away the only
-// thing the repo grain buys — that the judgement can legitimately differ per repo — and the
-// client is expected to render the repeat.
+// ⚠ THERE IS NOTHING LEFT TO DEDUPLICATE. Its predecessor returned one `rows` entry per (repo,
+// actor) plus one `reviewers` entry per actor, and a vendor running on six repos appeared six
+// times ON PURPOSE, because the judgement could legitimately differ per repo. It cannot any more:
+// one workspace, one row, one card. What the six repos still buy is `repoFootprints[]` — the blast
+// radius of an edit that is workspace-wide by design.
 //
 // ── SCOPE ───────────────────────────────────────────────────────────────────────────────────
-// `repoIds === null` = every repo this account watches. An explicit list is INTERSECTED with the
-// account's own repos before it reaches a query: the ids arrive in a request query string, and
-// the intersection is what makes a foreign id resolve to nothing rather than to another tenant's
-// rows. The response echoes the ids actually covered (`repoIds`), which is what makes an empty
-// `rows` legible — `[]` means "no repos in scope", a non-empty list with no rows means "these
-// repos have no reviewers yet".
+// `scope.workspaceId` decides the VERDICT; `scope.repoIds` narrows the FOOTPRINT display and drops
+// reviewers with no footprint in those repos. They can no longer disagree because they answer
+// different questions — and `scope` came from `resolveWorkspaceScope`, so the narrowing is already
+// bounded by the workspace's membership. That bound is what stops
+// `?workspace=5&repoIds=<repo of workspace 9>` from enumerating one workspace's footprints while
+// the lazy classifier writes rows keyed to another.
 //
-// This REPLACED an opt-in `scoped` flag over a team key, whose whole design existed to work
-// around the team grain: key 0 was both "the No-team scope" and "the inheritance root", so
-// narrowing it would have blinded four production callers, and a 0-repo root scope had to
-// silently degrade to the unscoped roster to keep the account default editable. None of that
-// survives the repo grain — there is no root, nothing inherits, and a scope is just a set of
-// repos.
+// The response echoes the repos it covered (`repoIds`), which is what makes an empty `reviewers`
+// legible: `[]` means "this workspace has no repos — go move some in", a non-empty list with no
+// reviewers means "these repos have no reviewers yet".
+//
+// ⚠ THE PER-REPO BOTS TAB DOES NOT USE THE NARROWING. It fetches the WORKSPACE listing and filters
+// client-side, so each card can show its full `repoFootprints[]`. Server-side narrowing would
+// leave exactly one entry in that array and reduce the blast-radius disclosure to a line of copy
+// asserting something the UI cannot show.
 //
 // ── FOOTPRINT ───────────────────────────────────────────────────────────────────────────────
-// A row EXISTS for (repo, actor) when the actor ever submitted a review, opened an inline thread
-// or left an issue comment on one of that repo's PRs. Rows are NEVER fabricated for a repo an
-// actor has not touched: a row for such a pair is not a bot object, it is an invented one — and,
-// because `author_user_id` points at the GLOBAL `users` table, inventing one would turn this
+// An actor is LISTED when they ever submitted a review, opened an inline thread or left an issue
+// comment on a PR in one of the scoped repos. Rows are NEVER fabricated for an actor with no
+// footprint anywhere in the workspace: such a row is not a bot object, it is an invented one —
+// and, because `author_user_id` points at the GLOBAL `users` table, inventing one would turn this
 // listing into a cross-tenant profile lookup (the exact shape `listUsers(accountId)` exists to
-// prevent). An actor with a stored row but no remaining footprint still lists, with zeroed
-// counts: that is a judgement someone recorded for a repo the reviewer no longer touches, and the
+// prevent). An actor with a stored row but no remaining footprint still lists, with zeroed counts:
+// that is a judgement someone recorded for a workspace the reviewer no longer touches, and the
 // numbers say so without needing a flag.
 //
 // The COUNTS are a rolling 90 days (so the caption reflects current volume); `lastActiveAt` is
 // ALL-TIME, so a long-dormant bot still reports when it last ran.
 export async function listDetectedReviewers(
   accountId: number,
-  repoIds: number[] | null = null,
+  scope: BotScope,
 ): Promise<DetectedReviewersResponse> {
   const generatedAt = new Date().toISOString();
-
-  const owned = await accountRepoIds(accountId);
-  // The intersection, not the caller's list: `repoIds` comes off the wire.
-  const scopeRepoIds =
-    repoIds == null ? owned : owned.filter((id) => repoIds.includes(id));
+  const { workspaceId } = scope;
+  // ⚠ RE-INTERSECT, even though `resolveWorkspaceScope` already did. This is the ONE function that
+  // WRITES rows keyed to `workspaceId` off a footprint derived from `repoIds`, so a transposed
+  // scope here does not merely read the wrong repos — it FABRICATES bot objects in a workspace the
+  // actor has never touched, which the anti-fabrication rule exists to forbid. Holding that
+  // invariant one caller away (a convention every future call site must remember) is what turns a
+  // one-line mistake into stored, displayed, editable junk. Two cheap reads make it structural.
+  const membership = new Set(await getWorkspaceRepoIds(workspaceId, accountId));
+  const scopeRepoIds = scope.repoIds.filter((id) => membership.has(id));
   if (scopeRepoIds.length === 0) {
-    return { reviewers: [], rows: [], repoIds: scopeRepoIds, generatedAt };
+    return { workspaceId, reviewers: [], repoIds: scopeRepoIds, generatedAt };
   }
 
   const since90 = new Date(Date.now() - 90 * 86_400_000);
   const scopePred = inArray(pullRequests.repoId, scopeRepoIds);
 
-  // ── FOOTPRINT: three sources × (all-time last activity, 90-day count) ──────────────────────
+  // ── FOOTPRINT: three sources × (all-time last activity, 90-day count), per (repo, actor) ────
   // Six grouped queries rather than one clever aggregate: `count(*) FILTER (WHERE …)` is not
   // portable, and a settings listing is not a hot path. Each binds pullRequests.accountId, so
-  // tenancy holds even before the repo scope narrows.
+  // tenancy holds even before the repo scope narrows. Grouping stays per (repo, actor) because the
+  // card needs BOTH the workspace total and the per-repo breakdown.
   const [revLast, revCount, thLast, thCount, cmLast, cmCount] = await Promise.all([
     db
       .select({
@@ -7736,58 +8099,87 @@ export async function listDetectedReviewers(
   for (const r of thCount) if (r.userId != null) touch(r.repoId, r.userId).threads = r.c;
   for (const r of cmCount) if (r.userId != null) touch(r.repoId, r.userId).comments = r.c;
 
-  // ── STORED JUDGEMENTS in scope ────────────────────────────────────────────────────────────
+  // ── STORED ROWS in this workspace ─────────────────────────────────────────────────────────
   // A stored row with no surviving footprint still lists (zeroed counts): the judgement is still
-  // steering every metric computed over this repo, and a row that governs but cannot be seen is
-  // the support question this listing exists to pre-empt.
+  // steering every metric computed over this workspace, and a row that governs but cannot be seen
+  // is the support question this listing exists to pre-empt.
   const storedRows = await db
     .select()
-    .from(repoReviewers)
-    .where(and(eq(repoReviewers.accountId, accountId), inArray(repoReviewers.repoId, scopeRepoIds)))
+    .from(workspaceReviewers)
+    .where(
+      and(
+        eq(workspaceReviewers.accountId, accountId),
+        eq(workspaceReviewers.workspaceId, workspaceId),
+      ),
+    )
     .execute();
-  const storedByPair = new Map<string, (typeof storedRows)[number]>();
-  for (const r of storedRows) {
-    storedByPair.set(pairKey(r.repoId, r.authorUserId), r);
-    touch(r.repoId, r.authorUserId);
+  const storedByUser = new Map(storedRows.map((r) => [r.authorUserId, r]));
+
+  // Aggregate the per-(repo, actor) footprints into per-actor totals + the per-repo breakdown.
+  interface ActorFoot {
+    userId: number;
+    total: { reviews: number; threads: number; comments: number; lastActiveAt: Date | null };
+    perRepo: Foot[];
+    reviewerAnywhere: boolean;
+  }
+  const actors = new Map<number, ActorFoot>();
+  const touchActor = (userId: number): ActorFoot => {
+    let a = actors.get(userId);
+    if (!a) {
+      a = {
+        userId,
+        total: { reviews: 0, threads: 0, comments: 0, lastActiveAt: null },
+        perRepo: [],
+        reviewerAnywhere: false,
+      };
+      actors.set(userId, a);
+    }
+    return a;
+  };
+  for (const f of foot.values()) {
+    const a = touchActor(f.userId);
+    a.total.reviews += f.reviews;
+    a.total.threads += f.threads;
+    a.total.comments += f.comments;
+    a.total.lastActiveAt = laterOf(a.total.lastActiveAt, f.lastActiveAt);
+    a.reviewerAnywhere = a.reviewerAnywhere || f.reviewerHere;
+    a.perRepo.push(f);
+  }
+  // A stored row with no footprint left anywhere in the workspace still gets an (empty) actor.
+  for (const r of storedRows) touchActor(r.authorUserId);
+
+  if (actors.size === 0) {
+    return { workspaceId, reviewers: [], repoIds: scopeRepoIds, generatedAt };
   }
 
-  if (foot.size === 0) return { reviewers: [], rows: [], repoIds: scopeRepoIds, generatedAt };
-
-  const userIds = [...new Set([...foot.values()].map((f) => f.userId))];
+  const userIds = [...actors.keys()];
   const userRows = await db.select().from(users).where(inArray(users.id, userIds)).execute();
   const userById = new Map(userRows.map((u) => [u.id, u]));
 
-  // ── LAZY CLASSIFICATION — ONCE PER ACTOR, WRITTEN TO EVERY ONE OF ITS REPO ROWS ────────────
-  // Deriving per repo would multiply the work (and the BILLED Haiku tie-break) for an identical
-  // answer, and would weaken the behavioural score by computing it on a thin per-repo slice.
-  // Every strong signal — vendor login, users.githubType, app attribution, the branded-marker
-  // fingerprint — is a property of the ACTOR. `classifyReviewer` therefore takes the actor's WHOLE
-  // in-scope repo list and fans one verdict out; it honours each table's own provenance flag
-  // (identity_source for kind/label, repo_reviewers.source for automated/role), so a manual edge
-  // in ONE repo survives while the others update.
+  // ── LAZY CLASSIFICATION — ONCE PER ACTOR, PER WORKSPACE ───────────────────────────────────
+  // The trigger is "an actor with a footprint in this workspace and NO stored row for it" — one
+  // derivation per actor instead of one per repo, which makes this page strictly cheaper than its
+  // predecessor. Every strong signal (vendor login, users.githubType, app attribution, the
+  // branded-marker fingerprint) is a property of the ACTOR, so per-repo derivation only ever
+  // multiplied the work — and the BILLED Haiku tie-break — for an identical answer.
   //
-  // An actor is (re)classified only when at least one of its in-scope pairs has NO stored row —
-  // an actor whose rows all exist is left alone, which keeps opening this page cheap.
-  const pairsByUser = new Map<number, Foot[]>();
-  for (const f of foot.values()) {
-    const arr = pairsByUser.get(f.userId);
-    if (arr) arr.push(f);
-    else pairsByUser.set(f.userId, [f]);
-  }
-  for (const [userId, pairs] of pairsByUser) {
-    const u = userById.get(userId);
+  // ⚠ IT CANNOT FABRICATE. An actor reaches this loop only via `foot`, which is built from real
+  // reviews / inline threads / PR comments on PRs in the scoped repos, and the scoped repos are
+  // bounded by the workspace's membership. `reviewerAnywhere === false && perRepo.length === 0`
+  // is a stored-row-only actor and is skipped: there is nothing new to derive, and deriving it
+  // would rewrite a row nobody asked about.
+  for (const a of actors.values()) {
+    if (storedByUser.has(a.userId)) continue; // already judged in this workspace
+    if (a.perRepo.length === 0) continue; // stored-row-only actor (unreachable given the above)
+    const u = userById.get(a.userId);
     if (!u) continue;
-    const missing = pairs.filter((p) => !storedByPair.has(pairKey(p.repoId, p.userId)));
-    if (missing.length === 0) continue;
-    const targetRepoIds = missing.map((p) => p.repoId);
-    const isReviewer = pairs.some((p) => p.reviewerHere);
-    if (isReviewer) {
-      const evidence = await reviewerEvidence(accountId, userId);
+    if (a.reviewerAnywhere) {
+      const evidence = await reviewerEvidence(accountId, a.userId);
       await classifyReviewer(
         accountId,
         { id: u.id, githubLogin: u.githubLogin, githubType: u.githubType, isBot: u.isBot },
         evidence,
-        targetRepoIds,
+        [workspaceId],
       );
     } else if (
       // Comment-only account. Skip the behavioral-evidence query (there are no reviews to score).
@@ -7803,31 +8195,34 @@ export async function listDetectedReviewers(
         accountId,
         { id: u.id, githubLogin: u.githubLogin, githubType: u.githubType, isBot: u.isBot },
         {},
-        targetRepoIds,
+        [workspaceId],
       );
     } else {
-      // A plain human commenter. Persist a low-confidence "not automated" row so the pair has a
-      // real object behind it (the row IS the bot object; a pair with no row is not listable and
+      // A plain human commenter. Persist a low-confidence "not automated" row so the actor has a
+      // real object behind it (the row IS the bot object; an actor with no row is not listable and
       // could never be corrected by hand).
-      await persistHumanJudgement(accountId, targetRepoIds, u.id, u.githubLogin);
+      await persistHumanJudgement(accountId, [workspaceId], u.id, u.githubLogin);
     }
   }
 
-  // Re-read the judgement rows now that the lazy pass has written. One extra query, and it is
-  // what makes the response reflect what is actually stored rather than what we think we wrote.
+  // Re-read now that the lazy pass has written. One extra query, and it is what makes the response
+  // reflect what is actually stored rather than what we think we wrote.
   const finalRows = await db
     .select()
-    .from(repoReviewers)
-    .where(and(eq(repoReviewers.accountId, accountId), inArray(repoReviewers.repoId, scopeRepoIds)))
+    .from(workspaceReviewers)
+    .where(
+      and(
+        eq(workspaceReviewers.accountId, accountId),
+        eq(workspaceReviewers.workspaceId, workspaceId),
+      ),
+    )
     .execute();
-  const rowByPair = new Map<string, (typeof finalRows)[number]>();
-  for (const r of finalRows) rowByPair.set(pairKey(r.repoId, r.authorUserId), r);
+  const rowByUser = new Map(finalRows.map((r) => [r.authorUserId, r]));
 
-  // Most-recent non-empty review body per (repo, actor) — the row's "why we think this is a bot"
-  // evidence, so it must come from THAT repo.
+  // Most-recent non-empty review body per actor in the scoped repos — the "why we think this is a
+  // bot" evidence, so it must come from THIS workspace.
   const sampleRows = await db
     .select({
-      repoId: pullRequests.repoId,
       authorId: reviews.authorId,
       body: reviews.body,
       submittedAt: reviews.submittedAt,
@@ -7844,91 +8239,121 @@ export async function listDetectedReviewers(
     )
     .orderBy(desc(reviews.submittedAt))
     .execute();
-  const sampleByPair = new Map<string, string>();
+  const sampleByUser = new Map<number, string>();
   for (const r of sampleRows) {
     if (r.authorId == null) continue;
-    const k = pairKey(r.repoId, r.authorId);
-    if (sampleByPair.has(k)) continue; // newest wins (ordered desc)
+    if (sampleByUser.has(r.authorId)) continue; // newest wins (ordered desc)
     const body = (r.body ?? '').trim();
-    if (body) sampleByPair.set(k, body.length > 400 ? `${body.slice(0, 399)}…` : body);
+    if (body) sampleByUser.set(r.authorId, body.length > 400 ? `${body.slice(0, 399)}…` : body);
   }
 
-  const rows: RepoReviewer[] = [];
-  for (const f of foot.values()) {
-    const stored = rowByPair.get(pairKey(f.repoId, f.userId));
+  const reviewers: WorkspaceReviewer[] = [];
+  for (const a of actors.values()) {
+    const stored = rowByUser.get(a.userId);
     if (!stored) continue; // the classifier declined to write (unknown user) — nothing to show
-    rows.push({
-      repoId: f.repoId,
-      userId: f.userId,
-      automated: stored.automated,
-      role: (stored.role as ReviewerRole | null) ?? 'review',
-      confidence: stored.confidence as ClassificationConfidence,
-      source: stored.source as ClassificationSource,
-      reasons: stored.reasonsJson ?? [],
-      isManualOverride: stored.source === 'manual',
-      footprint: {
-        reviews: f.reviews,
-        threads: f.threads,
-        comments: f.comments,
-        lastActiveAt: f.lastActiveAt ? f.lastActiveAt.toISOString() : null,
-      },
-      sampleReviewBody: sampleByPair.get(pairKey(f.repoId, f.userId)) ?? null,
-    });
+    const u = userById.get(a.userId);
+    if (!u) continue;
+    reviewers.push(
+      mapWorkspaceReviewer(stored, u, {
+        footprint: footprintOf(a.total),
+        repoFootprints: a.perRepo
+          .slice()
+          .sort((x, y) => x.repoId - y.repoId)
+          .map((f) => ({ repoId: f.repoId, ...footprintOf(f) })),
+        sampleReviewBody: sampleByUser.get(a.userId) ?? null,
+      }),
+    );
   }
 
-  // Automated first, then by 90-day thread volume desc, then repo, then login — a stable order.
-  const loginOf = (id: number): string => userById.get(id)?.githubLogin ?? '';
-  rows.sort(
+  // Automated first, then by 90-day thread volume desc, then label — a stable order.
+  reviewers.sort(
     (a, b) =>
       Number(b.automated) - Number(a.automated) ||
       b.footprint.threads - a.footprint.threads ||
-      a.repoId - b.repoId ||
-      loginOf(a.userId).localeCompare(loginOf(b.userId)),
+      a.label.localeCompare(b.label) ||
+      a.login.localeCompare(b.login),
   );
 
-  // ── IDENTITIES: one per distinct actor in `rows` ──────────────────────────────────────────
-  // Row-driven on purpose. An `account_reviewers` row for an actor with no repo row anywhere can
-  // never be displayed, edited or cleared, so serving it would only ever surface unreachable data
-  // — which is also why the identity and cost routes 404 in exactly that case.
-  const identities = await resolveIdentities(accountId);
-  const reviewers: ReviewerIdentity[] = [];
-  for (const userId of new Set(rows.map((r) => r.userId))) {
-    const u = userById.get(userId);
-    if (!u) continue;
-    reviewers.push(buildIdentity(u, identities.get(userId)));
-  }
-  reviewers.sort((a, b) => a.label.localeCompare(b.label) || a.login.localeCompare(b.login));
-
-  return { reviewers, rows, repoIds: scopeRepoIds, generatedAt };
+  return { workspaceId, reviewers, repoIds: scopeRepoIds, generatedAt };
 }
 
-// The wire form of one `account_reviewers` row (or its absence). Display name resolution is
-// fixed here so every surface agrees: a human-set label → the vendor's brand name → the login.
-function buildIdentity(
+function footprintOf(f: {
+  reviews: number;
+  threads: number;
+  comments: number;
+  lastActiveAt: Date | null;
+}): ReviewerFootprint {
+  return {
+    reviews: f.reviews,
+    threads: f.threads,
+    comments: f.comments,
+    lastActiveAt: f.lastActiveAt ? f.lastActiveAt.toISOString() : null,
+  };
+}
+
+// The wire form of one `workspace_reviewers` row. Display-name resolution is fixed here so every
+// surface agrees: a human-set label → the vendor's brand name → the login.
+function mapWorkspaceReviewer(
+  row: typeof workspaceReviewers.$inferSelect,
   u: { id: number; githubLogin: string; displayName: string | null; avatarUrl: string | null },
-  id: ResolvedIdentity | undefined,
-): ReviewerIdentity {
-  const kind = id?.kind ?? null;
+  evidence: {
+    footprint: ReviewerFootprint;
+    repoFootprints: RepoReviewerFootprintEntry[];
+    sampleReviewBody: string | null;
+  },
+): WorkspaceReviewer {
+  const kind = (row.kind as AutomatedReviewerKind | null) ?? null;
   const label =
-    id?.label?.trim() ||
+    row.label?.trim() ||
     (kind && kind !== 'in_house' ? labelForKind(kind) : null) ||
     u.githubLogin;
   return {
+    workspaceId: row.workspaceId,
     userId: u.id,
     login: u.githubLogin,
     displayName: u.displayName,
     avatarUrl: u.avatarUrl,
+    automated: row.automated,
+    role: (row.role as ReviewerRole | null) ?? 'review',
+    confidence: row.confidence as ClassificationConfidence,
+    source: row.source as ClassificationSource,
+    reasons: row.reasonsJson ?? [],
+    isManualOverride: row.source === 'manual',
     kind,
     label,
-    identitySource: id?.identitySource ?? 'auto',
+    identitySource: row.identitySource,
     // NULL = no price set, 0 = free. Nothing inherits, so there is no third state to resolve.
-    costMonthlyUsd: id?.monthlyCents == null ? null : id.monthlyCents / 100,
+    costMonthlyUsd: row.monthlyCents == null ? null : row.monthlyCents / 100,
+    footprint: evidence.footprint,
+    repoFootprints: evidence.repoFootprints,
+    sampleReviewBody: evidence.sampleReviewBody,
   };
 }
 
-// Read one actor's identity as the wire serves it. Used by the two ACTOR-grain write routes to
-// echo the row they just wrote. Returns null when the user id is unknown.
-async function readIdentity(accountId: number, userId: number): Promise<ReviewerIdentity | null> {
+// Read ONE stored row as the wire serves it, with its evidence recomputed. Used by all four write
+// routes to echo the row they just wrote. Returns null when the row or the user is gone.
+//
+// The footprint is recomputed rather than carried because the write routes have no listing in
+// hand, and a card rendered with a stale (or absent) blast radius is exactly what the
+// `repoFootprints[]` disclosure exists to prevent.
+async function readWorkspaceReviewer(
+  accountId: number,
+  workspaceId: number,
+  userId: number,
+): Promise<WorkspaceReviewer | null> {
+  const [row] = await db
+    .select()
+    .from(workspaceReviewers)
+    .where(
+      and(
+        eq(workspaceReviewers.accountId, accountId),
+        eq(workspaceReviewers.workspaceId, workspaceId),
+        eq(workspaceReviewers.authorUserId, userId),
+      ),
+    )
+    .limit(1)
+    .execute();
+  if (!row) return null;
   const u = (
     await db
       .select({
@@ -7943,225 +8368,174 @@ async function readIdentity(accountId: number, userId: number): Promise<Reviewer
       .execute()
   )[0];
   if (!u) return null;
-  return buildIdentity(u, (await resolveIdentities(accountId)).get(userId));
+  const evidence = await reviewerFootprintIn(accountId, workspaceId, userId);
+  return mapWorkspaceReviewer(row, u, evidence);
 }
 
-// Does this actor have ANY judgement row in this account? The gate on both ACTOR-grain writes.
-//
-// ⚠ IT IS NOT A FORMALITY. The two tables are keyed independently, so `account_reviewers` would
-// happily accept a row for a user id this account has never seen — and the listing is row-driven,
-// so that identity (or price) could then never be displayed, edited or cleared. Worse,
-// `author_user_id` points at the GLOBAL `users` table, so an ungated identity write plus a read
-// back would be a cross-tenant profile lookup. Same rule plugin migration 0019 enforces for the
-// legacy price import: no bot row ⇒ no import.
-async function actorHasRepoRow(accountId: number, userId: number): Promise<boolean> {
+// One actor's footprint across a workspace's repos: the workspace total + the per-repo breakdown +
+// the newest review body. The single-actor form of the six grouped queries in the listing.
+async function reviewerFootprintIn(
+  accountId: number,
+  workspaceId: number,
+  userId: number,
+): Promise<{
+  footprint: ReviewerFootprint;
+  repoFootprints: RepoReviewerFootprintEntry[];
+  sampleReviewBody: string | null;
+}> {
+  const empty = { reviews: 0, threads: 0, comments: 0, lastActiveAt: null };
+  const repoIds = await getWorkspaceRepoIds(workspaceId, accountId);
+  if (repoIds.length === 0) {
+    return { footprint: footprintOf(empty), repoFootprints: [], sampleReviewBody: null };
+  }
+  const since90 = new Date(Date.now() - 90 * 86_400_000);
+  const scoped = and(
+    eq(pullRequests.accountId, accountId),
+    inArray(pullRequests.repoId, repoIds),
+  );
+  const [revLast, revCount, thLast, thCount, cmLast, cmCount, sample] = await Promise.all([
+    db
+      .select({ repoId: pullRequests.repoId, last: max(reviews.submittedAt) })
+      .from(reviews)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+      .where(and(scoped, eq(reviews.authorId, userId)))
+      .groupBy(pullRequests.repoId)
+      .execute(),
+    db
+      .select({ repoId: pullRequests.repoId, c: count() })
+      .from(reviews)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+      .where(and(scoped, eq(reviews.authorId, userId), gte(reviews.submittedAt, since90)))
+      .groupBy(pullRequests.repoId)
+      .execute(),
+    db
+      .select({ repoId: pullRequests.repoId, last: max(reviewThreads.createdAt) })
+      .from(reviewThreads)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+      .where(and(scoped, eq(reviewThreads.originalCommenterId, userId)))
+      .groupBy(pullRequests.repoId)
+      .execute(),
+    db
+      .select({ repoId: pullRequests.repoId, c: count() })
+      .from(reviewThreads)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+      .where(
+        and(
+          scoped,
+          eq(reviewThreads.originalCommenterId, userId),
+          gte(reviewThreads.createdAt, since90),
+        ),
+      )
+      .groupBy(pullRequests.repoId)
+      .execute(),
+    db
+      .select({ repoId: pullRequests.repoId, last: max(prComments.createdAt) })
+      .from(prComments)
+      .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+      .where(and(scoped, eq(prComments.authorId, userId)))
+      .groupBy(pullRequests.repoId)
+      .execute(),
+    db
+      .select({ repoId: pullRequests.repoId, c: count() })
+      .from(prComments)
+      .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+      .where(and(scoped, eq(prComments.authorId, userId), gte(prComments.createdAt, since90)))
+      .groupBy(pullRequests.repoId)
+      .execute(),
+    db
+      .select({ body: reviews.body })
+      .from(reviews)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+      .where(and(scoped, eq(reviews.authorId, userId), isNotNull(reviews.body)))
+      .orderBy(desc(reviews.submittedAt))
+      .limit(1)
+      .execute(),
+  ]);
+
+  interface Acc {
+    reviews: number;
+    threads: number;
+    comments: number;
+    lastActiveAt: Date | null;
+  }
+  const byRepo = new Map<number, Acc>();
+  const at = (repoId: number): Acc => {
+    let a = byRepo.get(repoId);
+    if (!a) {
+      a = { reviews: 0, threads: 0, comments: 0, lastActiveAt: null };
+      byRepo.set(repoId, a);
+    }
+    return a;
+  };
+  const laterOf = (a: Date | null, b: Date | null): Date | null =>
+    a == null ? b : b == null ? a : a.getTime() >= b.getTime() ? a : b;
+  for (const r of revLast) at(r.repoId).lastActiveAt = laterOf(at(r.repoId).lastActiveAt, r.last);
+  for (const r of thLast) at(r.repoId).lastActiveAt = laterOf(at(r.repoId).lastActiveAt, r.last);
+  for (const r of cmLast) at(r.repoId).lastActiveAt = laterOf(at(r.repoId).lastActiveAt, r.last);
+  for (const r of revCount) at(r.repoId).reviews = r.c;
+  for (const r of thCount) at(r.repoId).threads = r.c;
+  for (const r of cmCount) at(r.repoId).comments = r.c;
+
+  const total: Acc = { reviews: 0, threads: 0, comments: 0, lastActiveAt: null };
+  for (const a of byRepo.values()) {
+    total.reviews += a.reviews;
+    total.threads += a.threads;
+    total.comments += a.comments;
+    total.lastActiveAt = laterOf(total.lastActiveAt, a.lastActiveAt);
+  }
+  const body = (sample[0]?.body ?? '').trim();
+  return {
+    footprint: footprintOf(total),
+    repoFootprints: [...byRepo.entries()]
+      .sort((x, y) => x[0] - y[0])
+      .map(([repoId, a]) => ({ repoId, ...footprintOf(a) })),
+    sampleReviewBody: body ? (body.length > 400 ? `${body.slice(0, 399)}…` : body) : null,
+  };
+}
+
+// Does this actor already have a row in THIS workspace? Half of the 404 gate on the write routes.
+async function actorHasWorkspaceRow(
+  accountId: number,
+  workspaceId: number,
+  userId: number,
+): Promise<boolean> {
   const row = (
     await db
-      .select({ id: repoReviewers.id })
-      .from(repoReviewers)
-      .where(and(eq(repoReviewers.accountId, accountId), eq(repoReviewers.authorUserId, userId)))
+      .select({ id: workspaceReviewers.id })
+      .from(workspaceReviewers)
+      .where(
+        and(
+          eq(workspaceReviewers.accountId, accountId),
+          eq(workspaceReviewers.workspaceId, workspaceId),
+          eq(workspaceReviewers.authorUserId, userId),
+        ),
+      )
       .limit(1)
       .execute()
   )[0];
   return row != null;
 }
 
-// PATCH /api/bot-reviewers/:userId — THE PER-REPO JUDGEMENT. Upserts a `source='manual'` row for
-// (accountId, body.repoId, userId) that the auto resolver never re-derives, and returns the
-// resulting classification. null → the route 404s.
+// Has this actor ever reviewed / opened a thread / commented on a PR in ANY of the workspace's
+// repos? THE ANTI-FABRICATION GATE, and the one gate nothing else stands in for: the case it
+// catches is SAME-ACCOUNT — writing a row for an actor this workspace never interacted with. A row
+// IS the bot object and the listing is row-driven, so a fabricated pair renders a stranger's login,
+// display name and avatar — read out of the GLOBAL `users` table — inside this account's settings.
 //
-// ⚠ IT MUST NEVER TOUCH `kind` / `label` / `identity_source`. Those are ACTOR-grain and live on
-// `account_reviewers`; writing them from here is precisely the bug the split exists to kill —
-// "Not a bot" on ONE repo used to null the kind, identity resolution picked that row up, and
-// CodeRabbit lost its brand colour and vendor name on the repos the user never touched. The rule
-// is structural now (this function issues no statement against `account_reviewers` at all), not a
-// column list to remember.
-//
-// ⚠ THREE GATES, AND THEY DO NOT COVER THE SAME THING — worth stating, because a mutation run
-// removing any ONE of the first two still keeps every cross-tenant assertion green, which is
-// exactly the shape that gets a "redundant" guard deleted:
-//   • the repo must belong to the account. The composite FK `(repo_id, account_id) →
-//     repos(id, account_id)` also rejects a foreign repo, and the footprint gate below happens to
-//     as well (it binds pullRequests.accountId), so this check is not what makes cross-tenancy
-//     safe — it is what makes it a 404 instead of a constraint violation, i.e. a 500. Verified:
-//     with BOTH JS gates removed the write raises an FK error rather than landing.
-//   • the user id must exist.
-//   • the actor must have a FOOTPRINT in that repo (or already own a row there). THIS is the gate
-//     nothing else stands in for, because the case it catches is SAME-ACCOUNT: fabricating a row
-//     for a pair that never interacted. A row IS the bot object and the listing is row-driven, so
-//     a fabricated pair renders a stranger's login, display name and avatar — read out of the
-//     GLOBAL `users` table — inside this account's settings. `verify:isolation` pins it directly.
-//
-// ⚠ EITHER FIELD STAMPS `source: 'manual'`, including a role-only patch, and the consequence is
-// deliberate: `role` is part of the JUDGEMENT grain, so a human's role opinion is a human's
-// opinion about this row. Not stamping it would let the next classification pass re-derive `role`
-// from the login seed and silently revert the edit. The cost is that pinning a role also pins
-// `automated` for that repo — visible, undoable in the same place, and strictly better than an
-// edit that quietly disappears. (This is NOT the old "typing a price froze the classification"
-// trap: price is on the other table now and cannot reach this row.)
-export async function setRepoReviewerJudgement(
+// ⚠ THE `repoIds.length === 0` EARLY-OUT IS LOAD-BEARING. An empty workspace is a legal,
+// explicitly-supported state, and the probes would otherwise emit `repo_id IN ()` rather than
+// trusting the two dialects to agree about an empty IN list.
+async function hasFootprintInWorkspace(
   accountId: number,
-  userId: number,
-  body: RepoReviewerJudgementBody,
-): Promise<ReviewerClassification | null> {
-  const u = (
-    await db
-      .select({
-        id: users.id,
-        login: users.githubLogin,
-        displayName: users.displayName,
-      })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1)
-      .execute()
-  )[0];
-  if (!u) return null;
-
-  const repoId = body.repoId;
-  if (!Number.isInteger(repoId) || repoId <= 0) return null;
-  const ownedRepo = (
-    await db
-      .select({ id: repos.id })
-      .from(repos)
-      .where(and(eq(repos.id, repoId), eq(repos.accountId, accountId)))
-      .limit(1)
-      .execute()
-  )[0];
-  if (!ownedRepo) return null; // unknown or another tenant's repo → 404
-
-  const existing = (
-    await db
-      .select()
-      .from(repoReviewers)
-      .where(
-        and(
-          eq(repoReviewers.accountId, accountId),
-          eq(repoReviewers.repoId, repoId),
-          eq(repoReviewers.authorUserId, userId),
-        ),
-      )
-      .limit(1)
-      .execute()
-  )[0];
-  if (!existing && !(await hasFootprintInRepo(accountId, repoId, userId))) return null;
-
-  const automated = body.automated ?? existing?.automated ?? false;
-  const role: ReviewerRole =
-    body.role ?? (existing?.role as ReviewerRole | null) ?? defaultRoleFor(u.login);
-  const reasons = [
-    body.automated === undefined
-      ? `manually set role to ${role}`
-      : body.automated
-        ? 'manually tagged as an automated reviewer'
-        : 'manually confirmed as a human',
-  ];
-  const now = new Date();
-  const values = {
-    automated,
-    role,
-    confidence: 'high' as const,
-    source: 'manual' as const,
-    reasonsJson: reasons,
-    updatedAt: now,
-  };
-  await db
-    .insert(repoReviewers)
-    .values({ accountId, repoId, authorUserId: userId, ...values })
-    .onConflictDoUpdate({
-      // The 3-column tuple `repo_reviewers_account_repo_author`. A stale target raises "no unique
-      // or exclusion constraint matching the ON CONFLICT specification" at RUNTIME, not at
-      // typecheck.
-      target: [repoReviewers.accountId, repoReviewers.repoId, repoReviewers.authorUserId],
-      set: values,
-    })
-    .execute();
-
-  // Echo the judgement joined to the ACTOR's identity — `ReviewerClassification` is the one type
-  // in this contract that legitimately spans both grains (the classifier writes both), and the
-  // identity half is READ here, never written.
-  const ident = (await resolveIdentities(accountId)).get(userId);
-  return {
-    userId,
-    login: u.login,
-    automated,
-    kind: ident?.kind ?? null,
-    label: ident?.label?.trim() || u.displayName || u.login,
-    role,
-    confidence: 'high',
-    source: 'manual',
-    reasons,
-  };
-}
-
-// DELETE /api/bot-reviewers/:userId/judgement?repoId= — RETURN ONE REPO ROW TO AUTO.
-//
-// THE UNDO FOR setRepoReviewerJudgement, and the reason the pin documented above is an acceptable
-// trade at all. A `source: 'manual'` row is one the classifier never re-derives, so without a
-// reset every judgement edit was PERMANENT — including a role-only patch, which stamps
-// `source: 'manual'` and therefore pins `automated` for that repo too. Flipping the value back by
-// hand does not undo it: the row is still manual, still frozen, just frozen on another value.
-//
-// ⚠ IT DELETES THE ROW RATHER THAN REWRITING IT TO AN AUTO-LOOKING VERDICT, and that is the
-// cleaner form BECAUSE THE ROW IS DERIVED FROM ACTIVITY, not user-authored content. The listing
-// rebuilds every (repo, actor) pair from the actor's reviews / inline threads / PR comments in
-// that repo and re-classifies any pair with NO STORED ROW (see the LAZY CLASSIFICATION block in
-// listDetectedReviewers — the trigger is a missing row, which is exactly what this leaves
-// behind), so the next listing recreates it with a fresh auto verdict. That was VERIFIED before
-// this shape was chosen, not assumed: bot-reviewer-grains.test.ts asserts the auto verdict comes
-// back with its own values, and would have been written as an in-place "clear source/confidence"
-// instead had the row not been re-derived. A rewrite would have left the human's `automated` /
-// `role` numbers behind under an auto label until something else happened to overwrite them —
-// a stale opinion wearing the wrong provenance, which is strictly worse than no row.
-//
-// The ONE case where nothing comes back is an actor with no remaining footprint in that repo, and
-// that is the right answer too: the row was pure human opinion about a reviewer that no longer
-// touches the repo, so there is nothing left to derive and nothing to show.
-//
-// ⚠ IT WRITES NOTHING AT THE ACTOR GRAIN — no kind, no label, no price. Structural, not a column
-// list to remember: this function issues no statement against `account_reviewers` at all.
-//
-// ⚠ IT DOES NOT CHECK THAT THE ROW WAS MANUAL, and that is deliberate: deleting an AUTO row is a
-// semantic no-op (the next listing re-derives it to the same values), while refusing one would
-// hand a 404 to a client that merely raced a re-classification. The UI still offers the control
-// only on `isManualOverride` rows — a reset on an auto row is invisible, not wrong.
-//
-// 404 (false) covers an unknown user, an unknown/foreign repo AND "no row here to reset" —
-// deliberately one status for all three, exactly like the PATCH twin, so the route is never an
-// existence oracle over another tenant's repo ids or over the GLOBAL `users` table. No separate
-// repo-ownership probe is needed here: `accountId` is IN the DELETE predicate, so a foreign repo
-// simply matches no row. (The upsert needs its explicit check only because an unmatched INSERT
-// would raise the composite FK and turn a 404 into a 500; a DELETE has no such failure mode.)
-export async function resetRepoReviewerJudgement(
-  accountId: number,
-  userId: number,
-  repoId: number,
-): Promise<boolean> {
-  if (!Number.isInteger(repoId) || repoId <= 0) return false;
-  // Portable "rows affected": `.returning({id}).execute().length`. Neither dialect's driver
-  // result object is portable, and `.run()` is banned in this layer.
-  const deleted = await db
-    .delete(repoReviewers)
-    .where(
-      and(
-        eq(repoReviewers.accountId, accountId),
-        eq(repoReviewers.repoId, repoId),
-        eq(repoReviewers.authorUserId, userId),
-      ),
-    )
-    .returning({ id: repoReviewers.id })
-    .execute();
-  return deleted.length > 0;
-}
-
-// Has this actor ever reviewed / opened a thread / commented on a PR in this repo? The
-// anti-fabrication gate for a per-repo judgement write. Three cheap EXISTS-shaped probes.
-async function hasFootprintInRepo(
-  accountId: number,
-  repoId: number,
+  workspaceId: number,
   userId: number,
 ): Promise<boolean> {
-  const scoped = and(eq(pullRequests.accountId, accountId), eq(pullRequests.repoId, repoId));
+  const repoIds = await getWorkspaceRepoIds(workspaceId, accountId);
+  if (repoIds.length === 0) return false;
+  const scoped = and(
+    eq(pullRequests.accountId, accountId),
+    inArray(pullRequests.repoId, repoIds),
+  );
   const [rev, th, cm] = await Promise.all([
     db
       .select({ id: reviews.id })
@@ -8188,76 +8562,179 @@ async function hasFootprintInRepo(
   return rev.length > 0 || th.length > 0 || cm.length > 0;
 }
 
-// PATCH /api/bot-reviewers/:userId/identity — WHO this actor is, account-wide. An upsert of the
-// ONE `account_reviewers` row for (accountId, userId), stamping `identity_source: 'manual'`.
-//
-// ⚠ IT MUST NEVER TOUCH `automated` / `role` / `source` / `confidence` / `reasons_json` — those
-// are on `repo_reviewers`, so this is a rule about which STATEMENT you write, and the function
-// issues none against that table. Naming a vendor is not a judgement about how it behaves in any
-// given repo, and stamping the row-level `source` from here would freeze auto-classification on
-// every one of that actor's repos.
-//
-// ⚠ NOR `monthly_cents`. It shares this row but is a different fact; a vendor correction must not
-// wipe a price. The `set:` below is the structural guarantee — there is no cost key in it, and on
-// INSERT the column simply defaults to NULL.
-//
-// 404 when the actor has no `repo_reviewers` row anywhere in the account (see actorHasRepoRow).
-export async function setReviewerIdentity(
-  accountId: number,
-  userId: number,
-  body: ReviewerIdentityBody,
-): Promise<ReviewerIdentity | null> {
-  if (!(await actorHasRepoRow(accountId, userId))) return null;
-  const current = (await resolveIdentities(accountId)).get(userId);
-  // Absent = leave it. null = clear it (still a human statement, so the provenance still becomes
-  // 'manual' — otherwise the next classification pass reinstates the kind the user just rejected).
-  const kind = body.kind === undefined ? current?.kind ?? null : body.kind;
-  const label = body.label === undefined ? current?.label ?? null : body.label;
-  const now = new Date();
-  const values = { kind, label, identitySource: 'manual' as const, updatedAt: now };
-  await db
-    .insert(accountReviewers)
-    .values({ accountId, authorUserId: userId, ...values })
-    .onConflictDoUpdate({
-      target: [accountReviewers.accountId, accountReviewers.authorUserId],
-      set: values,
-    })
-    .execute();
-  return readIdentity(accountId, userId);
+// Is this workspace one the calling account owns? A cheap, non-disclosing ownership probe — the
+// composite FK `(workspace_id, account_id) → workspaces(id, account_id)` would also reject a
+// foreign pair, but as a CONSTRAINT VIOLATION, i.e. a 500. This turns it into a 404.
+async function ownsWorkspace(accountId: number, workspaceId: number): Promise<boolean> {
+  if (!Number.isInteger(workspaceId) || workspaceId <= 0) return false;
+  const row = (
+    await db
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(and(eq(workspaces.id, workspaceId), eq(workspaces.accountId, accountId)))
+      .limit(1)
+      .execute()
+  )[0];
+  return row != null;
 }
 
-// DELETE /api/bot-reviewers/:userId/identity — RETURN THE ACTOR'S IDENTITY TO AUTO.
+// PATCH /api/bot-reviewers/:userId — the four RE-DERIVABLE fields, one row.
 //
-// The undo for setReviewerIdentity. Without it, naming a vendor once pinned `identity_source`
-// forever: the classifier skips a manual identity by design, so re-typing the auto-derived name
-// by hand would not un-pin it either — it would just re-stamp 'manual' on the same value.
+// ⚠ THE TWO PROVENANCE FLAGS ARE STAMPED INDEPENDENTLY: `source: 'manual'` iff `automated` and/or
+// `role` is present, `identitySource: 'manual'` iff `kind` and/or `label` is present. That
+// independence is the ONLY thing left stopping "not a bot here" from also un-naming the vendor,
+// now that the two facts share a row — the 0042/0043 table boundary that used to enforce it is
+// gone. A patch carrying only a judgement must not touch the identity flag, and vice versa.
 //
-// ⚠ IT MUST NOT DELETE THE `account_reviewers` ROW, and this is the whole reason the reset is a
-// column write. That row also carries `monthly_cents`, and A PRICE IS NOT A CLASSIFICATION
-// OPINION: losing what you pay for CodeRabbit as a side effect of un-naming it is precisely the
-// coupling the two-table split exists to remove, reintroduced from the delete side. The `set:`
-// below is the structural guarantee — there is no cost key in it.
+// ⚠ ITS `set:` OBJECT CONTAINS NO `monthlyCents` KEY, in any branch. Structural, not a rule to
+// remember: `setReviewerCost` is the only statement in this file that names the column.
 //
-// ⚠ NOR MAY IT TOUCH ANY REPO ROW. `automated` / `role` / `source` / `confidence` / `reasons_json`
-// live on the other table, and un-naming a vendor says nothing about how it behaves in any repo.
-// The re-derivation in step 2 is what makes that non-obvious, so it is enforced structurally: it
-// calls classifyReviewer with an EMPTY repo list, and persist() guards its whole judgement branch
-// on `repoIds.length > 0` — so no statement is issued against `repo_reviewers`, not even a read.
+// ⚠ THE 404 GATE IS `!existing && !hasFootprintInWorkspace(...)`, NOT the footprint test alone. The
+// `!existing &&` half is load-bearing: a STORED row whose actor has since gone quiet must stay
+// editable, because that row is still steering every metric and it is the only place its own reset
+// control can live. Drop the short-circuit and a "not a bot" pin on a vendor that later goes silent
+// becomes permanent and unreachable — the precise failure the two reset routes exist to prevent.
 //
-// ⚠ WHY IT RE-DERIVES IMMEDIATELY instead of only clearing and waiting for "the next pass". The
-// lazy pass in listDetectedReviewers reclassifies an actor ONLY when one of its (repo, actor)
-// pairs has no stored row — an actor whose rows all exist is skipped, which is what keeps opening
-// the settings page cheap. So a clear-only reset would leave `kind: null` on an actor nobody
-// re-syncs, buildIdentity would fall back to the raw login, and useBotColors (which filters on
-// `kind != null`) would drop the brand colour: "Reset name" would read as "delete the vendor",
-// indefinitely. Deriving here makes the auto answer land in the same request that asked for it.
+// ⚠ A ROLE-ONLY PATCH STILL STAMPS `source: 'manual'`, which also pins `automated` for this
+// workspace. Deliberate: not stamping it would let the next classification pass re-derive `role`
+// from the login seed and silently revert the edit. A visible, resettable pin beats an edit that
+// quietly disappears.
 //
-// Same 404 rule as its PATCH twin: no `repo_reviewers` row anywhere in the account ⇒ null.
-export async function resetReviewerIdentity(
+// null ⇒ the route 404s (unknown user / unknown or foreign workspace / no row AND no footprint) —
+// deliberately one status for all three, so the route is never an existence oracle over another
+// tenant's workspace ids or over the GLOBAL `users` table.
+export async function setWorkspaceReviewer(
   accountId: number,
   userId: number,
-): Promise<ReviewerIdentity | null> {
-  if (!(await actorHasRepoRow(accountId, userId))) return null;
+  body: WorkspaceReviewerPatchBody,
+): Promise<WorkspaceReviewer | null> {
+  const workspaceId = body.workspaceId;
+  if (!(await ownsWorkspace(accountId, workspaceId))) return null;
+
+  const u = (
+    await db
+      .select({ id: users.id, login: users.githubLogin })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+      .execute()
+  )[0];
+  if (!u) return null;
+
+  const [existing] = await db
+    .select()
+    .from(workspaceReviewers)
+    .where(
+      and(
+        eq(workspaceReviewers.accountId, accountId),
+        eq(workspaceReviewers.workspaceId, workspaceId),
+        eq(workspaceReviewers.authorUserId, userId),
+      ),
+    )
+    .limit(1)
+    .execute();
+  if (!existing && !(await hasFootprintInWorkspace(accountId, workspaceId, userId))) return null;
+
+  const touchesJudgement = body.automated !== undefined || body.role !== undefined;
+  const touchesIdentity = body.kind !== undefined || body.label !== undefined;
+
+  const now = new Date();
+  // The values the row must carry if it does not exist yet. NOT NULL columns need all of them;
+  // `monthly_cents` is deliberately absent, so a row this write creates has NO price.
+  const automated = body.automated ?? existing?.automated ?? false;
+  const role: ReviewerRole =
+    body.role ?? (existing?.role as ReviewerRole | null) ?? defaultRoleFor(u.login);
+  const reasons =
+    body.automated === undefined
+      ? [`manually set role to ${role}`]
+      : body.automated
+        ? ['manually tagged as an automated reviewer']
+        : ['manually confirmed as a human'];
+  const kind =
+    body.kind === undefined
+      ? ((existing?.kind as AutomatedReviewerKind | null) ?? null)
+      : body.kind;
+  const label = body.label === undefined ? (existing?.label ?? null) : body.label;
+
+  // TWO NARROWED HALVES, assembled independently — never one shared object used as both the
+  // INSERT values and the `set:`. That shared-object shape is correct for a single-grain table and
+  // is exactly what would let a judgement patch overwrite a human's vendor name here.
+  const set: Record<string, unknown> = { updatedAt: now };
+  if (touchesJudgement)
+    Object.assign(set, {
+      automated,
+      role,
+      confidence: 'high' as const,
+      source: 'manual' as const,
+      reasonsJson: reasons,
+    });
+  if (touchesIdentity)
+    Object.assign(set, { kind, label, identitySource: 'manual' as const });
+
+  await db
+    .insert(workspaceReviewers)
+    .values({
+      accountId,
+      workspaceId,
+      authorUserId: userId,
+      automated,
+      role,
+      // A brand-new row created by an identity-only patch is still a real judgement row; it takes
+      // the auto-looking provenance so the next classification pass owns it.
+      confidence: touchesJudgement ? 'high' : (existing?.confidence ?? 'low'),
+      source: touchesJudgement ? 'manual' : (existing?.source ?? 'behavioral'),
+      reasonsJson: touchesJudgement ? reasons : (existing?.reasonsJson ?? []),
+      kind,
+      label,
+      identitySource: touchesIdentity ? 'manual' : (existing?.identitySource ?? 'auto'),
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      // (account_id, workspace_id, author_user_id) — `workspace_reviewers_account_workspace_author`.
+      // A stale target type-checks perfectly and raises "no unique or exclusion constraint matching
+      // the ON CONFLICT specification" at RUNTIME, in both dialects, only on a real write.
+      target: [
+        workspaceReviewers.accountId,
+        workspaceReviewers.workspaceId,
+        workspaceReviewers.authorUserId,
+      ],
+      set,
+    })
+    .execute();
+
+  return readWorkspaceReviewer(accountId, workspaceId, userId);
+}
+
+// DELETE /api/bot-reviewers/:userId/judgement?workspaceId= — hand automated/role/confidence/
+// reasons back to detection.
+//
+// THE UNDO FOR setWorkspaceReviewer, and the reason the pin documented there is an acceptable
+// trade at all. A `source: 'manual'` row is one the classifier never re-derives, so without a reset
+// every judgement edit was PERMANENT — including a role-only patch. Flipping the value back by hand
+// does not undo it: the row is still manual, still frozen, just frozen on another value.
+//
+// ⚠ IT IS AN UPDATE, NOT A ROW DELETE. The old per-repo reset deleted its row because the row held
+// nothing else and the listing re-derived a missing row on the next pass. This row also holds the
+// vendor IDENTITY and the PRICE, so a delete is lossy.
+//
+// ⚠ IT RE-DERIVES IN THE SAME REQUEST: clear the provenance, THEN
+// `classifyReviewer(…, [workspaceId], { only: 'judgement' })`. A clear-only reset would leave the
+// human's automated/role values sitting under an auto label until something else overwrote them —
+// a stale opinion wearing the wrong provenance, strictly worse than no reset. Order matters:
+// persist() skips a still-'manual' row, so with the two swapped this would be a no-op.
+//
+// ⚠ THE `[workspaceId]` ARGUMENT IS NOT DECORATION. Its predecessor passed an EMPTY repo list to
+// mean "identity only", which worked only because persist() wrote the two halves as two statements
+// against two TABLES with the second gated on a non-empty list. With one merged row there is a
+// single per-workspace loop, so an empty list writes NOTHING. `PersistOpts.only` is the mechanism
+// now, and it is explicit rather than emergent.
+export async function resetWorkspaceReviewerJudgement(
+  accountId: number,
+  userId: number,
+  workspaceId: number,
+): Promise<WorkspaceReviewer | null> {
+  if (!(await ownsWorkspace(accountId, workspaceId))) return null;
+  if (!(await actorHasWorkspaceRow(accountId, workspaceId, userId))) return null;
   const u = (
     await db
       .select({
@@ -8273,26 +8750,97 @@ export async function resetReviewerIdentity(
   )[0];
   if (!u) return null;
 
-  // 1. Hand provenance back to detection and drop the human's naming. UPDATE, not upsert: no row
-  //    means the identity was already auto, and inserting an all-null row would add nothing.
+  // 1. Hand provenance back to detection. `source` is the write gate persist() reads; anything
+  //    else here would be cosmetic. The IDENTITY columns and the PRICE are untouched.
   await db
-    .update(accountReviewers)
-    .set({ kind: null, label: null, identitySource: 'auto', updatedAt: new Date() })
+    .update(workspaceReviewers)
+    .set({ source: 'behavioral', confidence: 'low', updatedAt: new Date() })
     .where(
-      and(eq(accountReviewers.accountId, accountId), eq(accountReviewers.authorUserId, userId)),
+      and(
+        eq(workspaceReviewers.accountId, accountId),
+        eq(workspaceReviewers.workspaceId, workspaceId),
+        eq(workspaceReviewers.authorUserId, userId),
+      ),
     )
     .execute();
 
-  // 2. Re-derive the identity NOW. The empty repo list is load-bearing (see above): identity-only
-  //    by construction. It must run AFTER step 1 — persist() skips a 'manual' identity row, so
-  //    with the order swapped this would be a no-op and the reset would clear and stop.
+  // 2. Re-derive the judgement NOW, judgement-half only.
   await classifyReviewer(
     accountId,
     { id: u.id, githubLogin: u.githubLogin, githubType: u.githubType, isBot: u.isBot },
     await reviewerEvidence(accountId, userId),
-    [],
+    [workspaceId],
+    { only: 'judgement' },
   );
-  return readIdentity(accountId, userId);
+  return readWorkspaceReviewer(accountId, workspaceId, userId);
+}
+
+// DELETE /api/bot-reviewers/:userId/identity?workspaceId= — clear kind/label, identitySource →
+// 'auto', re-derive NOW.
+//
+// The undo for the identity half of the PATCH. Without it, naming a vendor once pinned
+// `identity_source` forever: the classifier skips a manual identity by design, so re-typing the
+// auto-derived name by hand would not un-pin it either — it would just re-stamp 'manual' on the
+// same value.
+//
+// ⚠ THE PRICE SURVIVES. Un-naming a vendor is not a statement about what it costs; losing what you
+// pay for CodeRabbit as a side effect is exactly the coupling this contract keeps separated. The
+// `set:` below is the structural guarantee — there is no cost key in it.
+//
+// ⚠ NOR MAY IT TOUCH `automated` / `role` / `source` / `confidence` / `reasons_json` — that is the
+// other provenance flag and the other route. `{ only: 'identity' }` is what enforces it inside
+// persist(), where a table boundary used to.
+//
+// ⚠ WHY IT RE-DERIVES IMMEDIATELY instead of only clearing. The lazy pass in
+// listDetectedReviewers reclassifies an actor only when it has NO row in this workspace, so a
+// clear-only reset would leave `kind: null` on an actor nobody re-derives, `mapWorkspaceReviewer`
+// would fall back to the raw login, and `useBotColors` (which filters `kind != null`) would drop
+// the brand colour: "Reset name" would read as "delete the vendor", indefinitely.
+export async function resetWorkspaceReviewerIdentity(
+  accountId: number,
+  userId: number,
+  workspaceId: number,
+): Promise<WorkspaceReviewer | null> {
+  if (!(await ownsWorkspace(accountId, workspaceId))) return null;
+  if (!(await actorHasWorkspaceRow(accountId, workspaceId, userId))) return null;
+  const u = (
+    await db
+      .select({
+        id: users.id,
+        githubLogin: users.githubLogin,
+        githubType: users.githubType,
+        isBot: users.isBot,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+      .execute()
+  )[0];
+  if (!u) return null;
+
+  // 1. Clear the human's naming and hand provenance back. NO cost key, NO judgement key.
+  await db
+    .update(workspaceReviewers)
+    .set({ kind: null, label: null, identitySource: 'auto', updatedAt: new Date() })
+    .where(
+      and(
+        eq(workspaceReviewers.accountId, accountId),
+        eq(workspaceReviewers.workspaceId, workspaceId),
+        eq(workspaceReviewers.authorUserId, userId),
+      ),
+    )
+    .execute();
+
+  // 2. Re-derive the identity NOW, identity-half only. It must run AFTER step 1 — persist() skips
+  //    a 'manual' identity, so with the order swapped this would clear and stop.
+  await classifyReviewer(
+    accountId,
+    { id: u.id, githubLogin: u.githubLogin, githubType: u.githubType, isBot: u.isBot },
+    await reviewerEvidence(accountId, userId),
+    [workspaceId],
+    { only: 'identity' },
+  );
+  return readWorkspaceReviewer(accountId, workspaceId, userId);
 }
 
 // The int4 ceiling in CENTS, and the reason the cost route clamps rather than trusting the
@@ -8302,57 +8850,67 @@ export async function resetReviewerIdentity(
 // stored 2147483647 on pg and 9999999999900 on sqlite.)
 const MAX_MONTHLY_CENTS = 2_147_483_647;
 
-// The FIXED rounding rule, shared verbatim with migrations 0043 / pg 0030 / pro 0019:
-// cents = floor(usd × 100 + 0.5) evaluated in IEEE-754 binary64. Do not reach for a "more exact"
-// decimal rounding on one side — $1.005 lands on 100 under this rule and 101 under exact-decimal
-// rounding, and the two backfill paths were measured disagreeing on exactly that value.
+// The FIXED rounding rule, shared verbatim with the migrations: cents = floor(usd × 100 + 0.5)
+// evaluated in IEEE-754 binary64. Do not reach for a "more exact" decimal rounding on one side —
+// $1.005 lands on 100 under this rule and 101 under exact-decimal rounding, and the two backfill
+// paths were measured disagreeing on exactly that value.
 export function monthlyUsdToCents(usd: number): number {
   if (!Number.isFinite(usd)) return 0;
   const cents = Math.floor(usd * 100 + 0.5);
   return Math.min(MAX_MONTHLY_CENTS, Math.max(0, cents));
 }
 
-// PUT /api/bot-reviewers/:userId/cost — set or clear what this actor costs, account-wide.
+// PUT /api/bot-reviewers/:userId/cost — THE ONLY WRITE OF `monthly_cents` ANYWHERE.
 //
-// TWO STATES ONLY: a number → `monthly_cents` (0 is real: "we pay nothing"); null → NULL. There
-// is nothing to fall back to, so NULL means exactly "no price set".
+// TWO STATES ONLY: a number → `monthly_cents` (0 is real: "we pay nothing"); null → NULL. There is
+// nothing to fall back to, so NULL means exactly "no price set".
 //
-// ⚠ CLEARING IS A COLUMN WRITE, NOT A ROW DELETE. Cost shares its row with the actor's identity,
-// so `DELETE FROM account_reviewers` would take the vendor kind and label with it.
+// ⚠ IT WRITES EXACTLY ONE ROW: the predicate is (account_id, workspace_id, author_user_id). Price
+// is per workspace, like every other attribute on the row — the same actor's rows in other
+// workspaces are untouched and may hold different numbers. There is NO fan-out writer, NO INSERT
+// seed, and no cross-workspace coupling of any kind; a row created later in another workspace
+// comes up with a NULL price. `workspaceId` is therefore part of the row's IDENTITY, not merely
+// the ownership gate. The editor's copy says "Price for this Workspace".
 //
-// ⚠ THE VALUE IS CLAMPED HERE, not left to the driver — see MAX_MONTHLY_CENTS for the dialect
-// divergence that makes an unbounded field a 500 in cloud and a silent success locally. The route
-// ALSO bounds the input (so a fat-fingered paste gets a 400 rather than a silently clamped price);
-// this clamp is the backstop for every other caller.
+// ⚠ CLEARING IS A COLUMN WRITE, NOT A ROW DELETE. Cost shares its row with the judgement and the
+// identity, so deleting the row would take both with it. (When cost had its own table, NOT NULL +
+// delete-to-clear was the right shape — do not carry that reflex over.)
 //
-// 404 when the actor has no `repo_reviewers` row anywhere in the account.
+// ⚠ THE VALUE IS CLAMPED HERE, not left to the driver — see MAX_MONTHLY_CENTS. The route ALSO
+// bounds the input (so a fat-fingered paste gets a 400 rather than a silently clamped price); this
+// clamp is the backstop for every other caller.
+//
+// 404 when the workspace is not the account's, or the actor has no row in it — the write would
+// land, but the listing is row-driven, so nothing could ever display, edit or clear it.
 export async function setReviewerCost(
   accountId: number,
   userId: number,
+  workspaceId: number,
   monthlyUsd: number | null,
-): Promise<ReviewerIdentity | null> {
-  if (!(await actorHasRepoRow(accountId, userId))) return null;
+): Promise<WorkspaceReviewer | null> {
+  if (!(await ownsWorkspace(accountId, workspaceId))) return null;
+  if (!(await actorHasWorkspaceRow(accountId, workspaceId, userId))) return null;
   const monthlyCents = monthlyUsd == null ? null : monthlyUsdToCents(monthlyUsd);
-  const now = new Date();
   await db
-    .insert(accountReviewers)
-    .values({ accountId, authorUserId: userId, monthlyCents, updatedAt: now })
-    .onConflictDoUpdate({
-      target: [accountReviewers.accountId, accountReviewers.authorUserId],
-      // THE PRICE AND THE TIMESTAMP, NOTHING ELSE. This object is the structural guarantee that
-      // pricing a bot cannot restate its identity — there is no kind/label/identity_source to
-      // leak in, so `identity_source` keeps whatever it had (and takes its 'auto' default on a
-      // fresh row, because a price is not a claim about who the vendor is).
-      set: { monthlyCents, updatedAt: now },
-    })
+    .update(workspaceReviewers)
+    // THE PRICE AND THE TIMESTAMP, NOTHING ELSE. This object is the structural guarantee that
+    // pricing a bot cannot restate its judgement or its identity.
+    .set({ monthlyCents, updatedAt: new Date() })
+    .where(
+      and(
+        eq(workspaceReviewers.accountId, accountId),
+        eq(workspaceReviewers.workspaceId, workspaceId),
+        eq(workspaceReviewers.authorUserId, userId),
+      ),
+    )
     .execute();
-  return readIdentity(accountId, userId);
+  return readWorkspaceReviewer(accountId, workspaceId, userId);
 }
 
 // WS7 — "only a bot reviewed this": PRs (merged in-window, or open-and-mergeable) in the
 // given repos whose ONLY counting reviews (approved/changes_requested/commented) are from
 // automated reviewers (incl. Pierre-verbatim via the claudeReviews join) with NO human
-// review. Account-scoped. Feeds the bot_only_review card in getTeamInsights.
+// review. Account-scoped. Feeds the bot_only_review card in getWorkspaceInsights.
 export interface BotOnlyReviewPr {
   prId: number;
   number: number;
@@ -8371,7 +8929,7 @@ export interface BotOnlyReviewPr {
 }
 export async function getBotOnlyReviewPrs(
   accountId: number,
-  repoIds: number[],
+  scope: BotScope,
   window: { from: Date; to: Date },
   // openOnly: restrict to currently-OPEN (mergeable) PRs, dropping merged-in-window. The
   // analytics COUNT (the "only a bot reviewed…" banner) uses this — it's a live "needs a human
@@ -8379,6 +8937,7 @@ export async function getBotOnlyReviewPrs(
   // this so the tab can offer merged behind a "Show merged" toggle.
   opts?: { openOnly?: boolean },
 ): Promise<BotOnlyReviewPr[]> {
+  const repoIds = scope.repoIds;
   if (repoIds.length === 0) return [];
   // `role: 'all'` — DELIBERATELY NOT narrowed to 'review', and this is the one metric where the
   // obvious edit is wrong. This getter flags PRs NO HUMAN reviewed. Narrowing to review-role bots
@@ -8387,11 +8946,12 @@ export async function getBotOnlyReviewPrs(
   // it, the exact opposite of the banner's purpose ("needs a human before it merges"). The role
   // narrowing belongs on ROI / behaviour / dedup / benchmark, not here.
   //
-  // The judgement scope is `repoIds` — the very repos being scanned. It used to be a team key the
-  // caller had to remember to thread through (and a drill-down that forgot it silently evaluated
-  // a different rule than the count above it); the repo list was always right there.
-  const automatedIds = new Set(await automatedReviewerUserIds(accountId, repoIds, 'all'));
-  const kindMap = await classificationKindForUser(accountId, repoIds);
+  // The judgement comes from `scope.workspaceId` — the workspace the scanned repos belong to, so
+  // the drill-down list and the count above it evaluate the identical rule by construction.
+  const automatedIds = new Set(
+    await automatedReviewerUserIds(accountId, scope.workspaceId, 'all'),
+  );
+  const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
 
   // Pierre-verbatim posted review ids (these count as automated reviews; a human-curated
   // Pierre review counts as a human review). Keyed by reviews.databaseId == postedReviewId.
@@ -8554,7 +9114,7 @@ export async function getBotOnlyReviewPrs(
 // ── Human THEMES source rows (Pro) — the raw HUMAN review-comment CONTENT ─────────────────────
 // The sibling of getBotReviewComments for people, NOT bots: comments authored by non-bot users
 // (excludes every automated reviewer + any is_bot user), which INCLUDES human replies inside
-// bot-initiated threads. Powers the Pro "Discussion themes" Feed summary. Account- + TEAM-scoped +
+// bot-initiated threads. Powers the Pro "Discussion themes" Feed summary. Account- + WORKSPACE-scoped +
 // windowed; capped most-recent per source (a `truncated` flag). Returns the thread's derivedState so
 // the plugin funnel can prioritise threads that have responses (derivedState != 'untouched'). The
 // row shape is RE-DECLARED verbatim in packages/pro/src/human-themes/build.ts (open-core boundary);
@@ -8579,21 +9139,19 @@ export interface HumanReviewCommentRow {
 export async function getHumanReviewComments(
   accountId: number,
   window: BotWindowKind,
-  scopeRepoIds?: number[] | null,
+  scope: BotScope,
 ): Promise<{ comments: HumanReviewCommentRow[]; truncated: boolean }> {
-  if (scopeRepoIds != null && scopeRepoIds.length === 0) return { comments: [], truncated: false };
+  if (scope.repoIds.length === 0) return { comments: [], truncated: false };
   // `role: 'all'` — this set is used to EXCLUDE bots from the human Discussion-themes AI pass.
   // Narrowing it to review-role bots would let every SonarQube comment through as "human" and
   // leak lint output straight into the human themes summary (and pay for it). This is the site
   // where the obvious edit is wrong; see the ReviewerRole note in shared.
-  // Repo scope = the same `scopeRepoIds` the comment query filters on (null = account-wide).
-  const automatedIds = await automatedReviewerUserIds(accountId, scopeRepoIds ?? null, 'all');
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
 
   const nowMs = Date.now();
   const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
   const from = new Date(nowMs - windowDays * 86_400_000);
-  const repoScopeFilter =
-    scopeRepoIds != null ? [inArray(pullRequests.repoId, scopeRepoIds)] : [];
+  const repoScopeFilter = [inArray(pullRequests.repoId, scope.repoIds)];
   // Exclude bots two ways: any is_bot user, and the resolved automated-reviewer set (which can
   // include service-account PATs that carry is_bot=false). notInArray on [] is a no-op we skip.
   const excludeAutomated =
@@ -8724,7 +9282,7 @@ export async function getHumanReviewComments(
 // ── Bot THEMES source rows (Pro) — the raw automated-reviewer comment CONTENT ────────────────
 // The ONE bot query that returns comment BODIES (every other bot query is deterministic counts).
 // Powers the Pro "Themes" AI summary: the plugin funnels these (dedup + strip) then one Haiku pass
-// reads them. Account-scoped + TEAM-scoped (`scopeRepoIds`, mirroring getBotAnalytics) + windowed;
+// reads them. Account-scoped + WORKSPACE-scoped (`scope`, mirroring getBotAnalytics) + windowed;
 // only automated-reviewer authors; capped most-recent (a `truncated` flag) so a firehose repo can't
 // blow the payload. Returns both inline review-thread comments (with path + derivedState) and
 // issue-level PR comments (path/derivedState null). The row shape is RE-DECLARED verbatim in
@@ -8754,28 +9312,26 @@ const BOT_THEME_COMMENT_CAP = 3000; // most-recent bot comments per source consi
 export async function getBotReviewComments(
   accountId: number,
   window: BotWindowKind,
-  scopeRepoIds?: number[] | null,
+  scope: BotScope,
 ): Promise<{ comments: BotReviewCommentRow[]; truncated: boolean }> {
-  // Team scope resolved to no repos → nothing to summarize.
-  if (scopeRepoIds != null && scopeRepoIds.length === 0) return { comments: [], truncated: false };
+  // An empty workspace → nothing to summarize.
+  if (scope.repoIds.length === 0) return { comments: [], truncated: false };
   // `role: 'review'` — the Pro "Themes" Haiku pass summarises what the REVIEW bots are saying.
   // Excluding quality checks also saves real money: there is nothing to learn from summarising
   // lint output, and it is the highest-volume comment source in most accounts.
-  // Repo scope = the same `scopeRepoIds` the comment query filters on (null = account-wide).
-  const automatedIds = await automatedReviewerUserIds(accountId, scopeRepoIds ?? null, 'review');
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
   if (automatedIds.length === 0) return { comments: [], truncated: false };
-  const kindMap = await classificationKindForUser(accountId, scopeRepoIds ?? null);
+  const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
 
   const nowMs = Date.now();
   // Window resolution mirrors getBotAnalytics exactly (rolling_14 / 'sprint' both → 14d trailing).
   const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
   const from = new Date(nowMs - windowDays * 86_400_000);
-  const repoScopeFilter =
-    scopeRepoIds != null ? [inArray(pullRequests.repoId, scopeRepoIds)] : [];
+  const repoScopeFilter = [inArray(pullRequests.repoId, scope.repoIds)];
 
   // Per-reviewer label (custom classification label → vendor pretty name → login) — mirrors
   // getBotAnalytics.reviewerLabel exactly, so a bot reads the same here as in the ROI panel.
-  const classLabel = await classificationLabelMap(accountId);
+  const classLabel = await classificationLabelMap(accountId, scope.workspaceId);
   const loginById = new Map<number, string>();
   const rawLoginById = new Map<number, string>();
   for (const r of await db
@@ -8918,12 +9474,12 @@ export async function getBotReviewComments(
 export async function getBotAnalytics(
   accountId: number,
   window: BotWindowKind,
-  // The repo scope, and now ALSO the judgement scope: null/undefined = all account repos; a
-  // repo-id list = only those; [] = no repos in scope (e.g. a team with nothing assigned) →
-  // empty analytics. It used to carry a SECOND `teamKey` parameter deciding who counted as a
-  // bot, which a caller could forget to thread through — so the metric and the drill-down behind
-  // it could evaluate different rules. One scope, one answer.
-  scopeRepoIds?: number[] | null,
+  // ONE object carrying both halves: `workspaceId` decides who counts as a bot, `repoIds` narrows
+  // which data is measured. Its predecessor conflated them into a single `number[] | null` and
+  // then needed a SECOND `teamKey` parameter for the judgement, which a caller could forget to
+  // thread through — so the metric and the drill-down behind it could evaluate different rules.
+  // `repoIds: []` = an empty workspace → empty analytics.
+  scope: BotScope,
 ): Promise<BotAnalyticsResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
@@ -8936,36 +9492,35 @@ export async function getBotAnalytics(
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
 
   const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0, botOnlyPrs: 0, overdueGraceMs: OVERDUE_GRACE_MS };
-  // Team scope resolved to no repos → nothing to analyze.
-  if (scopeRepoIds != null && scopeRepoIds.length === 0) {
+  // An empty workspace → nothing to analyze.
+  if (scope.repoIds.length === 0) {
     return { enabled: true, generatedAt, window: win, vendors: [], qualityChecks: [], totals: emptyTotals, suggestions: [] };
   }
-  // Spread into each PR-joined WHERE to narrow to the scope's repos (empty = all repos).
-  const repoScopeFilter =
-    scopeRepoIds != null ? [inArray(pullRequests.repoId, scopeRepoIds)] : [];
+  // Spread into each PR-joined WHERE to narrow to the workspace's repos.
+  const repoScopeFilter = [inArray(pullRequests.repoId, scope.repoIds)];
   // `role: 'all'` here is NOT a leak of quality checks into the metrics: this getter computes a
   // row for EVERY automated reviewer and then SPLITS them by role at the bottom — `vendors` (the
   // metric surface: totals, verdicts, suggestions) vs `qualityChecks` (a collapsed
   // "excluded from ROI" section, volume only). Computing both in one pass is why a mis-roled bot
   // is discoverable in the UI instead of just vanishing.
-  const scope = scopeRepoIds ?? null;
-  const automatedIds = await automatedReviewerUserIds(accountId, scope, 'all');
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
   if (automatedIds.length === 0) {
     return { enabled: true, generatedAt, window: win, vendors: [], qualityChecks: [], totals: emptyTotals, suggestions: [] };
   }
-  const kindMap = await classificationKindForUser(accountId, scope);
-  const roleMap = await reviewerRoleForUser(accountId, scope);
-  // SERVER-resolved cost, read from `account_reviewers.monthly_cents`. It is an ACTOR-grain price
-  // deliberately joined onto a SCOPED row: this row aggregates one reviewer over whatever scope
-  // was asked for, but the price is ONE SUBSCRIPTION. Never sum or multiply it across rows, repos
-  // or scopes — a vendor on six repos is $120 of spend seen six ways, not $720. (This used to be
-  // `null` here with the client overlaying a per-LOGIN blob from `pro_settings.bots.cost`.)
-  const costMap = await reviewerCostForUser(accountId);
+  const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
+  const roleMap = await reviewerRoleForUser(accountId, scope.workspaceId);
+  // SERVER-resolved cost, read from `workspace_reviewers.monthly_cents` for THIS workspace. There
+  // is exactly one row per actor here, so this array may be totalled — but the figure is a
+  // WORKSPACE total and must never be added to another workspace's: six workspaces each listing a
+  // $120 CodeRabbit is either six subscriptions or one seen six ways, and the app must not assert
+  // which. (This used to be `null` here with the client overlaying a per-LOGIN blob from
+  // `pro_settings.bots.cost`.)
+  const costMap = await reviewerCostForUser(accountId, scope.workspaceId);
 
   // Per-REVIEWER identity (so in-house bots — all kind 'in_house' — separate into their own rows
   // instead of collapsing). Label preference: the account's custom classification label →
   // the vendor's pretty name (for known vendors) → the reviewer's login/display name.
-  const classLabel = await classificationLabelMap(accountId);
+  const classLabel = await classificationLabelMap(accountId, scope.workspaceId);
   const loginById = new Map<number, string>(); // display fallback (name || login)
   const rawLoginById = new Map<number, string>(); // the github login — the per-bot cost key
   if (automatedIds.length > 0) {
@@ -9348,9 +9903,9 @@ export async function getBotAnalytics(
       humanFollowThroughPct,
       noiseRatioPct,
       // The verdict uses OVERDUE untouched (aged past the norm), not raw untouched — so a bot
-      // isn't flagged noisy for threads the team just hasn't gotten to within its normal window.
+      // isn't flagged noisy for threads the workspace just hasn't gotten to within its normal window.
       verdict: botVerdict(acc.threads, actedOnPct, overdueUntouched),
-      // `?? null` (never `||`): a resolved 0 is a REAL price ("this team pays nothing for this
+      // `?? null` (never `||`): a resolved 0 is a REAL price ("we pay nothing for this
       // bot") and must survive as 0, not collapse to "unknown". $/acted-on is null whenever the
       // price is unknown or nothing was acted on — dividing by 0 would print Infinity.
       costMonthlyUsd: costMonthlyUsd,
@@ -9385,23 +9940,14 @@ export async function getBotAnalytics(
   qualityChecks.sort((a, b) => b.threads - a.threads || b.comments - a.comments);
   suggestions.sort((a, b) => b.volume - a.volume);
 
-  // Item 4b — bot-only OPEN PR count across ALL the account's repos, using the same broadened
-  // rule as getBotOnlyReviewPrs (item 4a): automated touch (review OR comment, incl. Pierre-
-  // verbatim) with no human review AND no human comment. OPEN-only (`openOnly`) — the banner is
-  // a live "needs a human before it merges" signal, so merged PRs (already shipped) are excluded;
-  // the drill-down list still offers them behind a toggle.
-  const allRepoRows = await db
-    .select({ id: repos.id })
-    .from(repos)
-    .where(eq(repos.accountId, accountId))
-    .execute();
+  // Item 4b — bot-only OPEN PR count over THIS WORKSPACE's repos, using the same broadened rule
+  // as getBotOnlyReviewPrs (item 4a): automated touch (review OR comment, incl. Pierre-verbatim)
+  // with no human review AND no human comment. OPEN-only (`openOnly`) — the banner is a live
+  // "needs a human before it merges" signal, so merged PRs (already shipped) are excluded; the
+  // drill-down list still offers them behind a toggle. It takes the SAME `scope`, so the count and
+  // the list it opens cannot disagree about either the repos or the verdict.
   const botOnlyPrs = (
-    await getBotOnlyReviewPrs(
-      accountId,
-      scopeRepoIds ?? allRepoRows.map((r) => r.id),
-      { from, to },
-      { openOnly: true },
-    )
+    await getBotOnlyReviewPrs(accountId, scope, { from, to }, { openOnly: true })
   ).length;
 
   // Totals sum `vendors` ONLY — quality checks are excluded by construction (they're in their own
@@ -9446,7 +9992,7 @@ function bucketize(values: number[], buckets: { label: string; maxHours: number 
   }
   return buckets.map((b, i) => ({ label: b.label, count: counts[i]! }));
 }
-// medianOf is defined once above (shared with getTeamMetrics).
+// medianOf is defined once above (shared with getWorkspaceMetrics).
 function percentileOf(xs: number[], p: number): number | null {
   if (xs.length === 0) return null;
   const s = [...xs].sort((a, b) => a - b);
@@ -9520,9 +10066,9 @@ export function detectSilentRuns(daily: number[]): { startDay: number; days: num
 export async function getBotBehaviourAnalytics(
   accountId: number,
   window: BotWindowKind,
-  // Repo scope AND judgement scope, exactly as getBotAnalytics: null = all account repos; a list
-  // = only those; [] = none.
-  scopeRepoIds?: number[] | null,
+  // Exactly as getBotAnalytics: `workspaceId` decides who counts as a bot, `repoIds` narrows the
+  // measured data. `repoIds: []` = an empty workspace.
+  scope: BotScope,
 ): Promise<BotBehaviourResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
@@ -9564,9 +10110,8 @@ export async function getBotBehaviourAnalytics(
     repoBotDirs: [],
   });
 
-  if (scopeRepoIds != null && scopeRepoIds.length === 0)
-    return empty(new Array<number>(SPAN_DAYS).fill(0));
-  const repoScopeFilter = scopeRepoIds != null ? [inArray(pullRequests.repoId, scopeRepoIds)] : [];
+  if (scope.repoIds.length === 0) return empty(new Array<number>(SPAN_DAYS).fill(0));
+  const repoScopeFilter = [inArray(pullRequests.repoId, scope.repoIds)];
 
   const prsOpenedPerDay = new Array<number>(SPAN_DAYS).fill(0);
   for (const p of await db
@@ -9590,12 +10135,12 @@ export async function getBotBehaviourAnalytics(
 
   // `role: 'review'` — TTFR, follow-up rate and the coverage heatmap are all claims about REVIEW
   // behaviour. A linter that fires on every push would flatten TTFR and dominate the heatmap.
-  const automatedIds = await automatedReviewerUserIds(accountId, scopeRepoIds ?? null, 'review');
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
   if (automatedIds.length === 0) return empty(prsOpenedPerDay);
-  const kindMap = await classificationKindForUser(accountId, scopeRepoIds ?? null);
+  const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
 
   // Identity (label + login) — mirrors getBotAnalytics.reviewerLabel exactly.
-  const classLabel = await classificationLabelMap(accountId);
+  const classLabel = await classificationLabelMap(accountId, scope.workspaceId);
   const loginById = new Map<number, string>();
   const rawLoginById = new Map<number, string>();
   for (const r of await db
@@ -10149,16 +10694,17 @@ export async function getPrBotBehaviour(
   // numbers are compared against. If the two sets disagreed the "slower than typical" claim would
   // be measured against a population the PR view doesn't contain.
   //
-  // Repo scope = THIS PR's repo. Addressed-by-prId used to mean "no scope to give"; the repo grain
-  // gives the PR its own, and it is the right one — "is this login a bot HERE" is exactly the
-  // question a per-PR panel asks.
-  const prRepoScope = [pr.repoId];
-  const automatedIds = await automatedReviewerUserIds(accountId, prRepoScope, 'review');
+  // The judgement scope is THIS PR's OWN workspace, derived from its repo — never the caller's
+  // selected one. A PR can be opened from another workspace via `?pr=`, a restored tab or a search
+  // hit, and "is this login a bot HERE" is exactly the question a per-PR panel asks.
+  const prScope = await botScopeForPr(accountId, prId);
+  if (!prScope) return null;
+  const automatedIds = await automatedReviewerUserIds(accountId, prScope.workspaceId, 'review');
   if (automatedIds.length === 0) return { enabled: true, prId, bots: [] };
-  const kindMap = await classificationKindForUser(accountId, prRepoScope);
+  const kindMap = await classificationKindForUser(accountId, prScope.workspaceId);
 
   // Identity (label + login) — same resolution as getBotBehaviourAnalytics / the ROI panel.
-  const classLabel = await classificationLabelMap(accountId);
+  const classLabel = await classificationLabelMap(accountId, prScope.workspaceId);
   const loginById = new Map<number, string>();
   const rawLoginById = new Map<number, string>();
   for (const r of await db
@@ -10346,11 +10892,10 @@ export async function getPrBotBehaviour(
 export async function getBotOnlyPrs(
   accountId: number,
   window: BotWindowKind,
-  // Repo scope AND judgement scope: null/undefined = all account repos; a repo-id list = only
-  // those; [] = no repos in scope → empty (mirrors getBotAnalytics's early-out). ONE scope is
-  // what makes the COUNT and this LIST agree by construction — the old second `teamKey` argument
-  // was a thing a caller could forget, and one drill-down did.
-  scopeRepoIds?: number[] | null,
+  // The SAME `BotScope` object getBotAnalytics computed its count from — which is what makes the
+  // COUNT and this LIST agree by construction. The old second `teamKey` argument was a thing a
+  // caller could forget, and one drill-down did. `repoIds: []` = an empty workspace → empty.
+  scope: BotScope,
 ): Promise<{ window: { kind: BotWindowKind; from: string; to: string }; prs: BotOnlyReviewPr[] }> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
@@ -10359,19 +10904,10 @@ export async function getBotOnlyPrs(
   const from = new Date(nowMs - windowDays * 86_400_000);
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
 
-  // A resolved-but-empty scope means "no repos" → no PRs.
-  if (scopeRepoIds != null && scopeRepoIds.length === 0) return { window: win, prs: [] };
-  const repoIds =
-    scopeRepoIds ??
-    (
-      await db
-        .select({ id: repos.id })
-        .from(repos)
-        .where(eq(repos.accountId, accountId))
-        .execute()
-    ).map((r) => r.id);
+  // An empty workspace means "no repos" → no PRs.
+  if (scope.repoIds.length === 0) return { window: win, prs: [] };
   // No `openOnly` here: the LIST offers merged PRs behind a client-side "Show merged" toggle.
-  const prs = await getBotOnlyReviewPrs(accountId, repoIds, { from, to });
+  const prs = await getBotOnlyReviewPrs(accountId, scope, { from, to });
   return { window: win, prs };
 }
 
@@ -10451,13 +10987,17 @@ export async function getBenchmarkContributions(
   // the kind filter below drops); this makes it deliberate and survives a user classifying
   // SonarQube as a named vendor.
   //
-  // `null` repo scope = a GENUINE ACCOUNT-WIDE SWEEP, and one of the few places that is the right
-  // answer: this rollup contributes the tenant's whole footprint to the shared dataset, so
-  // narrowing it to some repos would silently under-report. Stated rather than passed as a
-  // sentinel, which is what the predecessor's NO_TEAM_KEY was.
-  const automatedIds = await automatedReviewerUserIds(accountId, null, 'review');
+  // THE ONE GENUINE ACCOUNT-WIDE SWEEP, and it uses the two EXPLICITLY NAMED account-wide helpers
+  // rather than a null sentinel: this rollup contributes the tenant's whole footprint to the
+  // shared dataset, so narrowing it to one workspace would silently under-report. A login
+  // automated in ANY workspace counts (the union rule), and the kind map applies the written
+  // cross-workspace tie-break — a non-null vendor kind in any workspace wins, lowest workspace id
+  // breaks ties — because identity is per workspace now and an actor can legitimately be
+  // `coderabbit` in A and unnamed in B. That value decides what leaves the tenant and cannot be
+  // un-shipped, which is why it is a named rule and not an incidental Map build.
+  const automatedIds = await automatedReviewerUserIdsForAccount(accountId, 'review');
   if (automatedIds.length === 0) return [];
-  const kindMap = await classificationKindForUser(accountId, null);
+  const kindMap = await classificationKindForUserForAccount(accountId);
   const nowMs = Date.now();
 
   // Only KNOWN vendors are comparable across orgs — skip in_house/pierre/generic-vendor/unclassified.
@@ -10681,11 +11221,11 @@ export async function getBotVendorPrs(
   accountId: number,
   target: { userId: number } | { kind: 'pierre' },
   window: BotWindowKind,
-  // Team scope: null/undefined = all account repos; [] = no repos → empty. Applied at the
-  // final PR-metadata load (the single narrowing point), so the whole result stays scoped.
-  // The judgement scope too (mirrors getBotAnalytics — this list must reproduce ONE of its rows,
-  // and a single scope is what makes that structural rather than a parameter to remember).
-  scopeRepoIds?: number[] | null,
+  // The SAME `BotScope` the ROI row was computed at — this list must reproduce ONE of that
+  // panel's rows, so the header label and the per-PR `botOnly` badge both take the identical
+  // workspace and repo set. `repoIds` is applied at the final PR-metadata load (the single
+  // narrowing point), so the whole result stays scoped; `repoIds: []` = an empty workspace.
+  scope: BotScope,
 ): Promise<BotVendorPrsResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
@@ -10713,19 +11253,19 @@ export async function getBotVendorPrs(
     key = `u${userId}`;
     // NOT role-filtered: the quality-check SECTION of the ROI panel offers the same drill-down,
     // so narrowing here would make its rows un-openable.
-    const kindMap = await classificationKindForUser(accountId, scopeRepoIds ?? null);
+    const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
     // Only a reviewer this account has CLASSIFIED as automated is a valid drill-down target —
     // an arbitrary (human / foreign / unknown) userId echoes its identity but lists nothing
     // (the empty vendorIds hits the `vendorIds.length === 0 → empty` guard below), preserving
     // the old "unclassified kind → prs:[]" contract.
     kindTyped = kindMap.get(userId) ?? 'in_house';
     vendorIds = kindMap.has(userId) ? [userId] : [];
-    // Per-reviewer identity — mirrors getBotAnalytics's reviewerLabel resolution: the account's
-    // custom label → the vendor's pretty name (known vendors) → login/display name. ACTOR-grain
-    // (one `account_reviewers` row), so this drill-down and the ROI row it was opened from cannot
-    // show different labels — which they could when the label was replicated per repo/team row and
-    // an unordered `limit(1)` picked whichever the storage engine handed back first.
-    const classLabel = await classificationLabelMap(accountId);
+    // Per-reviewer identity — mirrors getBotAnalytics's reviewerLabel resolution: the workspace's
+    // custom label → the vendor's pretty name (known vendors) → login/display name. ONE row per
+    // (workspace, actor), so this drill-down and the ROI row it was opened from cannot show
+    // different labels — which they could when the label was replicated per repo/team row and an
+    // unordered `limit(1)` picked whichever the storage engine handed back first.
+    const classLabel = await classificationLabelMap(accountId, scope.workspaceId);
     const [userRow] = await db
       .select({ login: users.githubLogin, name: users.displayName })
       .from(users)
@@ -10743,7 +11283,7 @@ export async function getBotVendorPrs(
   const empty: BotVendorPrsResponse = {
     enabled: true, key, kind: kindTyped, label, login, window: win, prs: [], generatedAt,
   };
-  if (scopeRepoIds != null && scopeRepoIds.length === 0) return empty;
+  if (scope.repoIds.length === 0) return empty;
 
   // Per-PR vendor-activity accumulator.
   type PrAcc = {
@@ -10850,7 +11390,9 @@ export async function getBotVendorPrs(
   if (allThreadIds.length > 0) {
     // `role: 'all'` — this set answers "was the replier a HUMAN". A quality-check bot's reply is
     // not human follow-through, so narrowing to review-role bots would count it as one.
-    const autoSet = new Set(await automatedReviewerUserIds(accountId, scopeRepoIds ?? null, 'all'));
+    const autoSet = new Set(
+      await automatedReviewerUserIds(accountId, scope.workspaceId, 'all'),
+    );
     const fcRows = await db
       .select({
         threadId: reviewComments.threadId,
@@ -10901,19 +11443,24 @@ export async function getBotVendorPrs(
       and(
         eq(pullRequests.accountId, accountId),
         inArray(pullRequests.id, prIds),
-        ...(scopeRepoIds != null ? [inArray(pullRequests.repoId, scopeRepoIds)] : []),
+        inArray(pullRequests.repoId, scope.repoIds),
       ),
     )
     .execute();
 
-  // Bot-only flag: reuse the broadened rule (item 4a) over the candidate PRs' OWN repos, which is
-  // now also the judgement scope — getBotOnlyReviewPrs derives it from the `repoIds` it is handed,
-  // so this drill-down and the `totals.botOnlyPrs` header above it can no longer evaluate
-  // different rules. Under the old two-parameter shape, forgetting to thread the classification
-  // key gave one screen two contradictory bot-only answers.
+  // Bot-only flag: reuse the broadened rule (item 4a) over the candidate PRs' OWN repos, at THIS
+  // scope's workspace — so this drill-down and the `totals.botOnlyPrs` header above it cannot
+  // evaluate different rules. Under the old two-parameter shape, forgetting to thread the
+  // classification key gave one screen two contradictory bot-only answers.
   const repoIdSet = [...new Set(metaRows.map((m) => m.repoId))];
   const botOnlyIds = new Set(
-    (await getBotOnlyReviewPrs(accountId, repoIdSet, { from, to })).map((p) => p.prId),
+    (
+      await getBotOnlyReviewPrs(
+        accountId,
+        { workspaceId: scope.workspaceId, repoIds: repoIdSet },
+        { from, to },
+      )
+    ).map((p) => p.prId),
   );
 
   const prs: BotVendorPr[] = [];
@@ -10978,15 +11525,17 @@ export async function getBotDedupClusters(
       .execute()
   )[0];
   if (!owned) return null;
-  // Repo scope = THIS PR's repo (the ownership lookup already fetched it).
-  const prRepoScope = [owned.repoId];
+  // The judgement scope is THIS PR's OWN workspace, derived from its repo — never the caller's
+  // selected one (a PR reachable via `?pr=`, a restored tab or a search hit may belong to another).
+  const prScope = await workspaceScopeForRepo(accountId, owned.repoId);
+  if (!prScope) return { prId, clusters: [] };
 
   // `role: 'review'` — a dedup cluster claims two REVIEWERS independently flagged the same line.
   // "SonarQube and CodeRabbit both commented on line 42" is not cross-bot review consensus: one
   // is a rule firing, the other is a judgement, and presenting them as agreement is misleading.
-  const automatedIds = await automatedReviewerUserIds(accountId, prRepoScope, 'review');
+  const automatedIds = await automatedReviewerUserIds(accountId, prScope.workspaceId, 'review');
   if (automatedIds.length === 0) return { prId, clusters: [] };
-  const kindMap = await classificationKindForUser(accountId, prRepoScope);
+  const kindMap = await classificationKindForUser(accountId, prScope.workspaceId);
 
   const rows = await db
     .select({

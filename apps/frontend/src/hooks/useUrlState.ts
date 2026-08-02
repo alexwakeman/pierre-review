@@ -7,8 +7,9 @@ import {
   DEFAULT_PR_STATUSES,
   DEFAULT_REVIEW_STATES,
   pickFilterBarState,
+  pickScopeState,
   sanitizePersistedFilters,
-  scopeToParam,
+  sanitizePersistedScope,
   useFilters,
   type FilterState,
   type RangePreset,
@@ -39,6 +40,28 @@ function parseIds(raw: string | null): number[] | null {
   return ids.length ? ids : null;
 }
 
+/** A workspace id on the wire is a plain positive integer — nothing else parses. */
+function parseWorkspaceParam(raw: string | null): number | null {
+  if (raw == null || !/^[0-9]+$/.test(raw)) return null;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Resolve the URL's workspace scope: `?workspace=<int>` wins; with it absent, a LEGACY
+ * `?team=<int>` maps across (the workspace migration deliberately preserved team ids, so an
+ * integer team id names the workspace that team became). Everything else — an unparseable
+ * `?workspace`, and every legacy sentinel `?team=all|none|teams|teams:1,2` — resolves to null,
+ * which leaves the store unresolved and lets the workspace-sync effect pick the account's
+ * Default. Those sentinels have no image: 'all' spanned the account and 'teams:1,2' spanned two
+ * repo sets that are now one workspace each, so any mapping would be a guess.
+ */
+function readWorkspaceFromUrl(p: URLSearchParams): number | null {
+  const explicit = p.get('workspace');
+  if (explicit != null) return parseWorkspaceParam(explicit);
+  return parseWorkspaceParam(p.get('team'));
+}
+
 function readFromUrl(): Partial<FilterState> {
   const p = new URLSearchParams(window.location.search);
   const out: Partial<FilterState> = {};
@@ -47,30 +70,21 @@ function readFromUrl(): Partial<FilterState> {
   if (preset && PRESETS.includes(preset as RangePreset)) {
     out.preset = preset as RangePreset;
   }
-  out.repoIds = parseIds(p.get('repos'));
+  // ── Scope: the workspace, and the repo narrowing INSIDE it ────────────────────────────────
+  // `?repos=` is only meaningful relative to a workspace, so the two are read together.
+  //
+  // ⚠ THE TRAP THIS CLOSES: `?repos=` used to be parsed unconditionally. A link in the wild
+  // (`?team=3&repos=7,9,11`, or any `?repos=` with no scope at all) would then land the user in
+  // one workspace while hydrating another's repo ids — a header naming Default over a board
+  // showing someone else's repos, and the server honours those ids. So repo ids survive ONLY
+  // when the URL actually resolved a workspace; otherwise they are DISCARDED. (Even then they
+  // are a hint: the workspace-sync effect PRUNES them to the resolved membership before any
+  // query runs. Pruning, never replacing — replacing would revert a per-repo show/hide on every
+  // background refetch.)
+  const workspaceId = readWorkspaceFromUrl(p);
+  if (workspaceId != null) out.workspaceId = workspaceId;
+  out.repoIds = workspaceId != null ? parseIds(p.get('repos')) : null;
   out.userIds = parseIds(p.get('users'));
-  // Team scope: 'all' (default, omitted) | 'teams' | 'none' | '<teamId>'. We only have the raw
-  // scope on read — set teamScope and leave the repoIds derivation to a component effect (once
-  // the teams list has loaded). An unparseable value falls back to the default 'all'.
-  const team = p.get('team');
-  if (team === 'none') out.teamScope = 'none';
-  else if (team === 'teams') out.teamScope = 'teams';
-  else if (team === 'all') out.teamScope = 'all';
-  else if (team != null && team.startsWith('teams:')) {
-    // Multi-team set 'teams:1,3'. Canonicalize (dedupe/sort); collapse 1→single, 0→'all' so a
-    // hand-edited URL matches scopeToParam's inverse.
-    const ids = team
-      .slice('teams:'.length)
-      .split(',')
-      .map((x) => Number.parseInt(x, 10))
-      .filter((n) => Number.isFinite(n) && n > 0);
-    const uniq = [...new Set(ids)].sort((a, b) => a - b);
-    if (uniq.length >= 2) out.teamScope = uniq;
-    else if (uniq.length === 1) out.teamScope = uniq[0]!;
-  } else if (team != null) {
-    const n = Number.parseInt(team, 10);
-    if (Number.isFinite(n)) out.teamScope = n;
-  }
   // Bots are SHOWN by default now, so a clean URL means "shown". Only an explicit
   // `bots=1` turns the exclude-bots filter ON (a legacy `bots=0` correctly resolves
   // to off, matching the new default).
@@ -126,6 +140,10 @@ function readFromUrl(): Partial<FilterState> {
   if (activityRepo) {
     if (activityRepo === 'bots') out.activityRepoId = 'bots';
     else if (activityRepo === 'attention') out.activityRepoId = 'attention';
+    // The cross-WORKSPACE comparison rail entry. Deep-linkable like the other pseudo-rows; the
+    // rail GATES it on the account having 2+ workspaces and falls back to 'feed' for the render
+    // without writing a correction back (a corrective set() permanently forgets the choice).
+    else if (activityRepo === 'compare') out.activityRepoId = 'compare';
     else {
       const n = Number.parseInt(activityRepo, 10);
       if (Number.isFinite(n)) out.activityRepoId = n;
@@ -139,8 +157,14 @@ function writeToUrl(s: FilterState): void {
   const p = new URLSearchParams();
   if (s.preset !== '14d') p.set('preset', s.preset);
   if (s.repoIds?.length) p.set('repos', s.repoIds.join(','));
-  // Team scope: emit only the non-default ('all') selection so a clean URL stays clean.
-  if (s.teamScope !== 'all') p.set('team', scopeToParam(s.teamScope));
+  // The active WORKSPACE — emitted ALWAYS once resolved, never diffed against a default. There
+  // is no static default to diff against: the account's Default workspace id varies per account,
+  // so omitting "the default" would produce a link that means a different scope for the
+  // recipient. It is omitted ONLY while unresolved (null) — writeToUrl runs from the store
+  // subscription, which fires on the very first hydrate, so an unconditional set() would write
+  // the literal string `?workspace=null` on every bare load.
+  // (The legacy `?team=` param is never written; it is still READ once, see readWorkspaceFromUrl.)
+  if (s.workspaceId != null) p.set('workspace', String(s.workspaceId));
   if (s.userIds?.length) p.set('users', s.userIds.join(','));
   // Shown is the default; only encode the non-default "exclude bots" choice (bots=1).
   if (s.excludeBots) p.set('bots', '1');
@@ -172,8 +196,10 @@ function writeToUrl(s: FilterState): void {
   // is emitted only for a single-repo console (the 'all' feed is the default).
   if (usePinnedTabs.getState().activeTab === 'activity') {
     p.set('view', 'activity');
-    // A single-repo console, the CORE Bots console, and the CORE "Needs attention" console are
-    // deep-linkable; the 'feed' / 'insights' pseudo-rows are defaults and stay out of the URL.
+    // A single-repo console, the CORE Bots console, the CORE "Needs attention" console and the
+    // CORE cross-workspace "Compare" console are deep-linkable; the 'feed' / 'insights'
+    // pseudo-rows are landing defaults and deliberately stay out of the URL (they are not
+    // parsed on the read side either, so emitting them would be write-only).
     // (The 'retro' pseudo-row is gone with the Retro panel; it was never parsed on the read side
     // either, so no legacy `?activityRepo=retro` link ever selected it.)
     if (typeof s.activityRepoId === 'number') {
@@ -182,6 +208,8 @@ function writeToUrl(s: FilterState): void {
       p.set('activityRepo', 'bots');
     } else if (s.activityRepoId === 'attention') {
       p.set('activityRepo', 'attention');
+    } else if (s.activityRepoId === 'compare') {
+      p.set('activityRepo', 'compare');
     }
   }
 
@@ -200,17 +228,48 @@ function writeToUrl(s: FilterState): void {
 // you last used instead of snapping back to hard defaults.
 const FILTER_STORAGE_KEY = 'pierre:filterBarState';
 
+// The persisted-shape VERSION. Bump it when a stored blob's meaning changes in a way that
+// cannot be interpreted forward — the stored value is then DISCARDED WHOLESALE rather than
+// half-migrated.
+//
+// v2 = the workspace refactor, and both halves of the reason matter:
+//  • `teamScope` ('all' | 'none' | 'teams' | 'teams:1,2' | a bare team id) has no image in
+//    `workspaceId`. Three of the five shapes span sets a single workspace cannot express, and
+//    the fourth — a bare number — is the DANGEROUS one: team ids were preserved through the
+//    migration, so it would parse as a perfectly plausible workspace id and silently select a
+//    workspace whose repo membership is NOT that team's. (sanitizePersistedFilters already
+//    drops the key by whitelist; this makes the discard explicit and total.)
+//  • `repoIds` in a v1 blob names repos chosen under a team scope, and those repos may now sit
+//    in a different workspace entirely. On the URL path a stale id is merely pruned against the
+//    resolved membership; here there is no scope to correlate it with, so the honest move is to
+//    drop the blob and start from defaults.
+// The cost is one reset of the remembered filter bar, once, per user.
+const FILTER_STORAGE_VERSION = 2;
+
+// The SCOPE slice, persisted separately (see filters.ts `pickScopeState`): the active workspace
+// is the context filters apply inside, not a filter. Sharing the filter blob would make "Clear
+// filters" reset the workspace; sharing the key would let one legacy blob poison both. It is a
+// NEW key, so no pre-workspace value can exist under it — the legacy scope only ever lived
+// inside the filter blob, under a different name, and there is no path from there to here.
+const SCOPE_STORAGE_KEY = 'pierre:workspaceScope';
+const SCOPE_STORAGE_VERSION = 1;
+
 function loadPersistedFilters(): Partial<FilterState> | null {
   try {
     const raw = localStorage.getItem(FILTER_STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    // Sanitize: keep only known persisted filter keys. Drops a legacy persisted
-    // `myTurnOnly` (now a transient focus mode) so an upgraded user's stale blob
-    // can't force My Turn Focus Mode on a fresh load.
-    return parsed && typeof parsed === 'object'
-      ? sanitizePersistedFilters(parsed as Partial<FilterState>)
-      : null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    // A blob from an older shape is dropped, not interpreted (see FILTER_STORAGE_VERSION), and
+    // removed so it can never be read again by a build that lost this guard.
+    if ((parsed as { v?: unknown }).v !== FILTER_STORAGE_VERSION) {
+      localStorage.removeItem(FILTER_STORAGE_KEY);
+      return null;
+    }
+    // Sanitize: keep only known persisted filter keys — this also drops the version marker
+    // itself, a legacy persisted `myTurnOnly` (now a transient focus mode, which would
+    // otherwise force My Turn Focus Mode on a fresh load), and any legacy `teamScope`.
+    return sanitizePersistedFilters(parsed as Partial<FilterState>);
   } catch {
     return null;
   }
@@ -218,9 +277,44 @@ function loadPersistedFilters(): Partial<FilterState> | null {
 
 function persistFilters(s: FilterState): void {
   try {
-    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(pickFilterBarState(s)));
+    localStorage.setItem(
+      FILTER_STORAGE_KEY,
+      JSON.stringify({ v: FILTER_STORAGE_VERSION, ...pickFilterBarState(s) }),
+    );
   } catch {
     /* quota / private-mode — non-fatal, filters just won't persist */
+  }
+}
+
+function loadPersistedScope(): number | null {
+  try {
+    const raw = localStorage.getItem(SCOPE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    if ((parsed as { v?: unknown }).v !== SCOPE_STORAGE_VERSION) {
+      localStorage.removeItem(SCOPE_STORAGE_KEY);
+      return null;
+    }
+    return sanitizePersistedScope(parsed).workspaceId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function persistScope(s: FilterState): void {
+  // ⚠ NEVER write a null over a good value. The subscription fires on the very first hydrate,
+  // when the workspace is still unresolved — persisting that would erase the user's remembered
+  // workspace before the sync effect ever resolves one, and every future bare load would land
+  // on Default.
+  if (s.workspaceId == null) return;
+  try {
+    localStorage.setItem(
+      SCOPE_STORAGE_KEY,
+      JSON.stringify({ v: SCOPE_STORAGE_VERSION, ...pickScopeState(s) }),
+    );
+  } catch {
+    /* quota / private-mode — non-fatal, the scope just won't be remembered */
   }
 }
 
@@ -245,6 +339,13 @@ export function useUrlState(): void {
       } else {
         const persisted = loadPersistedFilters();
         if (persisted) useFilters.getState().hydrate(persisted);
+        // The remembered WORKSPACE, restored only on a bare load — a URL WITH params is a deep
+        // link whose scope is whatever it names, and §6.2's rule for one that names none is to
+        // resolve the account's Default rather than quietly reinterpret it in this browser's
+        // last context. Still only a hint: the sync effect corrects an id naming no live
+        // workspace, and prunes repoIds to the resolved membership before any query runs.
+        const workspaceId = loadPersistedScope();
+        if (workspaceId != null) useFilters.getState().hydrate({ workspaceId });
         // Activity-first: a bare load (a fresh sign-in / "open the app") lands on the
         // Activity — the relevance-ranked state of play — with the timeline secondary.
         // (A URL WITH params is a deep link: it keeps timeline unless `?view=activity`.)
@@ -256,6 +357,7 @@ export function useUrlState(): void {
     const unsub = useFilters.subscribe((s) => {
       writeToUrl(s);
       persistFilters(s);
+      persistScope(s);
     });
     // The active tab (timeline / inbox / pinned PR) lives in a separate store, so
     // mirror its changes into the URL too — switching to/from the Activity tab toggles

@@ -3,19 +3,19 @@ import type {
   AttentionCardsResponse,
   InsightsResponse,
   RepoAnalytics,
-  TeamComparisonResponse,
-  TeamMetricsDetailResponse,
-  TeamMetricsResponse,
+  WorkspaceComparisonResponse,
+  WorkspaceMetricsDetailResponse,
+  WorkspaceMetricsResponse,
 } from '@pierre-review/shared';
 import {
   getInsights,
   getRepoAnalytics,
-  getTeamInsights,
-  getTeamMetricsDetail,
-  getTeamMetricsForScope,
-  resolveScopeRepoIds,
+  getWorkspaceInsights,
+  getWorkspaceMetricsDetail,
+  getWorkspaceMetricsForScope,
+  resolveWorkspaceScope,
 } from '../../db/queries.js';
-import { getTeamComparison } from '../../db/team-comparison.js';
+import { getWorkspaceComparison } from '../../db/workspace-comparison.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 function parseIntList(raw: string | undefined): number[] | null {
@@ -28,8 +28,9 @@ function parseIntList(raw: string | undefined): number[] | null {
 }
 
 export async function insightsRoutes(app: FastifyInstance): Promise<void> {
-  // Per-repo sprint/team stats for the Insights panel. Scoped to the account;
-  // `repoIds` narrows to the active watched-repo selection.
+  // Per-repo sprint stats for the Insights panel. Scoped to the account; `repoIds` narrows to the
+  // repos the CALLER names. NOT workspace-scoped: it is a per-repo snapshot the caller already
+  // names its repos for, so there is no scope for a workspace to decide.
   app.get('/api/insights', async (req): Promise<InsightsResponse> => {
     const q = req.query as { repoIds?: string };
     return getInsights({
@@ -38,57 +39,65 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  // Team flow-metric header (DORA-ish tiles + trend charts) — CORE/free (moved out of the Pro
-  // Insights pane into the Feed). `scope` ('all'|'none'|'teams'|'<teamId>') resolves to repo ids
-  // like the rest of the app; null/'all' → the watched set.
-  app.get('/api/team-metrics', async (req): Promise<TeamMetricsResponse> => {
-    const q = req.query as { scope?: string };
+  // Workspace flow-metric header (DORA-ish tiles + trend charts) — CORE/free (it sits in the Feed,
+  // not the Pro Insights pane).
+  //
+  // `?workspace=<id>` is the ONE scope parameter: `resolveWorkspaceScope` resolves an absent,
+  // unparseable, unknown or foreign id to the account's DEFAULT workspace (never a 404 — every id
+  // yields the same response shape, so it is not an existence oracle, and the resolved id is always
+  // one the caller owns). Its `repoIds` are that workspace's membership, and `[]` — a workspace
+  // with no repos — is a legal state that yields `metrics: null`, NOT "every repo in the account".
+  app.get('/api/workspace-metrics', async (req): Promise<WorkspaceMetricsResponse> => {
+    const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
-    const scopeRepoIds = q.scope ? await resolveScopeRepoIds(accountId, q.scope) : null;
-    return { metrics: await getTeamMetricsForScope(accountId, scopeRepoIds) };
+    const scope = await resolveWorkspaceScope(accountId, q.workspace);
+    return { metrics: await getWorkspaceMetricsForScope(accountId, scope.repoIds) };
   });
 
-  // The PR lists behind each flow-metric tile (the tile drill-down) — also CORE/free now, so a
-  // Feed tile opens the same drill-down for everyone. Mirrors the Pro route's `{enabled, detail}`
-  // shape (enabled always true here).
-  app.get('/api/team-metrics/detail', async (req): Promise<TeamMetricsDetailResponse> => {
-    const q = req.query as { scope?: string };
+  // The PR lists behind each flow-metric tile (the tile drill-down) — also CORE/free, so a Feed
+  // tile opens the same drill-down for everyone. Mirrors the Pro route's `{enabled, detail}` shape
+  // (enabled always true here). Same workspace resolution as its sibling above.
+  app.get('/api/workspace-metrics/detail', async (req): Promise<WorkspaceMetricsDetailResponse> => {
+    const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
-    const scopeRepoIds = q.scope ? await resolveScopeRepoIds(accountId, q.scope) : null;
-    const detail = await getTeamMetricsDetail(accountId, undefined, scopeRepoIds);
+    const scope = await resolveWorkspaceScope(accountId, q.workspace);
+    const detail = await getWorkspaceMetricsDetail(accountId, undefined, scope.repoIds);
     return { enabled: true, detail };
   });
 
-  // Cross-team comparison — CORE/FREE, deliberately in the /api/team-metrics family because the
-  // panel now sits in the Feed beside the free DORA header and shares its (trailing-14d) window.
-  // It MOVED here from the Pro plugin's `/api/pro/insights/team-comparison`, which was behind the
-  // 402 entitlement gate, absent in OSS, and computed N × getTeamInsights to read `.metrics`.
+  // Cross-workspace comparison — CORE/FREE, deliberately in the /api/workspace-metrics family
+  // because the panel shares the free DORA header's (trailing-14d) window.
   //
-  // `scope` takes the same wire strings as its siblings ('all'|'none'|'teams'|'<teamId>'|
-  // 'teams:<ids>') but selects TEAMS, not repo ids — so it does NOT go through
-  // resolveScopeRepoIds. 'teams:<ids>' is the case that matters: it is what the client sends for
-  // an explicit 2-of-5 multi-select, which the old All-Teams-only gate silently dropped.
+  // ⚠ IT TAKES NO PARAMETERS — not even `?workspace=`. It compares EVERY workspace the account
+  // owns, Default included, because its whole purpose is to place the selected workspace against
+  // the others; scoping it is what made its predecessor vanish the moment fewer than two teams were
+  // selected. The surface is hidden client-side on `workspaces.length < 2`, a count over the
+  // roster, never a test on a scope value.
   //
-  // Isolation is by construction: getTeamComparison narrows `listTeams(accountId)`, so a foreign
-  // team id in the scope string matches no row rather than 404-ing (no existence oracle either).
+  // Isolation is by construction: getWorkspaceComparisonRows narrows `listWorkspaces(accountId)`,
+  // so there is no caller-supplied id to check and nothing to 404 on.
   //
-  // Rate limit: the default 600/min `read` bucket via tierFor, like its two siblings — no GitHub
-  // quota and no AI. Note it is the first route in the family whose cost multiplies by team
-  // count, which is why the SPA only fires it while the Compare tab is active.
-  app.get('/api/team-metrics/compare', async (req): Promise<TeamComparisonResponse> => {
-    const q = req.query as { scope?: string };
-    return getTeamComparison(accountIdOf(req), q.scope);
+  // Rate limit: the `search` tier (60/min), NOT the blanket 600/min `read` bucket its two siblings
+  // use — this is the one route in the family whose cost multiplies by workspace count
+  // (N × getWorkspaceMetrics, each a 12-week PR window). The SPA additionally fires it only while
+  // the Compare surface is open.
+  app.get('/api/workspace-metrics/compare', async (req): Promise<WorkspaceComparisonResponse> => {
+    return getWorkspaceComparison(accountIdOf(req));
   });
 
   // The attention cards (stalled reviews / untouched threads / reviewer load / needs-a-reviewer) —
-  // CORE/free (the same cards Pro Insights computes in core getTeamInsights), for the Feed "Needs
-  // attention" tab. The bot cards are excluded (they live in the free Bots console). `scope`
-  // resolves like the rest of the app; null/'all' → the watched set.
+  // CORE/free (the same cards Pro Insights computes in core getWorkspaceInsights), for the Feed
+  // "Needs attention" tab. The bot cards are excluded (they live in the free Bots console).
+  //
+  // It passes the whole `BotScope`, not just the repo ids: getWorkspaceInsights needs the
+  // workspaceId to know who counts as an automated reviewer for its bot cards. Those two cards are
+  // filtered out here, but the scope is what the getter's signature is about and splitting it would
+  // put a second, differently-shaped answer to "which workspace" on this route.
   app.get('/api/attention', async (req): Promise<AttentionCardsResponse> => {
-    const q = req.query as { scope?: string };
+    const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
-    const scopeRepoIds = q.scope ? await resolveScopeRepoIds(accountId, q.scope) : null;
-    const insights = await getTeamInsights(accountId, undefined, scopeRepoIds);
+    const scope = await resolveWorkspaceScope(accountId, q.workspace);
+    const insights = await getWorkspaceInsights(accountId, undefined, scope);
     const cards = insights.cards.filter(
       (c) => c.kind !== 'bot_signal' && c.kind !== 'bot_only_review',
     );

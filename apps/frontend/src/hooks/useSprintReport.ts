@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { SprintReportResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { workspaceKey } from './useActivity.js';
 
-// The Insights "Sprint report" (Pro Haiku summary of the team-insights state). Cached;
+// The Insights "Sprint report" (Pro Haiku summary of the workspace-insights state). Cached;
 // `report.stale` flags that the Insights changed since it was generated. Only fetched
-// when the AI digest capability is on (`enabled`). `scope` ('all' | 'none' | '<teamId>')
-// narrows the report to a team's repos — it's part of the cache key so each team's report
-// caches independently.
-export function useSprintReport(enabled: boolean, scope?: string) {
+// when the AI digest capability is on (`enabled`). The WORKSPACE narrows the report to that
+// workspace's repos, and it is part of the cache key so each one caches independently —
+// under the same `ws:<id>` vocabulary the plugin persists in `scope_key`.
+export function useSprintReport(enabled: boolean, workspaceId: number | null) {
   return useQuery<SprintReportResponse>({
-    queryKey: ['sprint-report', scope ?? 'all'],
-    queryFn: () => api.sprintReport(scope),
+    queryKey: ['sprint-report', workspaceKey(workspaceId)],
+    queryFn: workspaceId == null ? skipToken : () => api.sprintReport(workspaceId),
     enabled,
     staleTime: 60_000,
   });
@@ -24,7 +25,7 @@ const NOTICE_MS = 5000;
 // request (a regeneration ran moments ago) AND the report is still stale — so a no-op
 // "Regenerate" reads as "refreshed moments ago", not as a silent failure (mirrors the
 // per-repo digest refresh). Auto-clears.
-export function useRefreshSprintReport(scope?: string) {
+export function useRefreshSprintReport(workspaceId: number | null) {
   const qc = useQueryClient();
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
@@ -33,9 +34,14 @@ export function useRefreshSprintReport(scope?: string) {
     return () => window.clearTimeout(t);
   }, [notice]);
   const mutation = useMutation({
-    mutationFn: () => api.refreshSprintReport(scope),
+    // Refuses on an unresolved workspace: the billing path must never generate for the Default
+    // just because the store had not settled yet.
+    mutationFn: () => {
+      if (workspaceId == null) throw new Error('No workspace selected');
+      return api.refreshSprintReport(workspaceId);
+    },
     onSuccess: (data) => {
-      qc.setQueryData(['sprint-report', scope ?? 'all'], data);
+      qc.setQueryData(['sprint-report', workspaceKey(workspaceId)], data);
       // A generation may have spent credits → refresh the meter + the out-of-credits gate.
       void qc.invalidateQueries({ queryKey: ['ai-usage'] });
       // Nag when the click genuinely did nothing: out of credits, or throttled AND still stale.

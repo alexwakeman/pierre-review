@@ -1,13 +1,17 @@
-// getTeamMetrics review-load-per-PR (human vs bot) trend, on a THROWAWAY sqlite DB. Seeds merged
-// PRs in KNOWN merge weeks with a KNOWN mix of human/bot review touches (reviews + inline + issue
-// comments), then locks the per-week reviewLoad math — the cross-repo Feed chart showing whether
-// human scrutiny keeps pace with bots per shipped PR.
+// getWorkspaceMetrics review-load-per-PR (human vs bot) trend, on a THROWAWAY sqlite DB. Seeds
+// merged PRs in KNOWN merge weeks with a KNOWN mix of human/bot review touches (reviews + inline +
+// issue comments), then locks the per-week reviewLoad math — the cross-repo Feed chart showing
+// whether human scrutiny keeps pace with bots per shipped PR.
+//
+// The getter takes a CONCRETE `number[]` of repo ids (the active workspace's membership, already
+// resolved by the route) — there is no `null = every repo` sentinel any more — so these fixtures
+// pass `[repoId]` directly and never depend on a scope parser.
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-const DB_PATH = '/tmp/pierre-team-metrics-review-load-test.sqlite';
+const DB_PATH = '/tmp/pierre-workspace-metrics-review-load-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 
@@ -18,7 +22,7 @@ let closeDb: (() => void) | undefined;
 let q: any;
 
 const DAY = 24 * 60 * 60 * 1000;
-// nowMs is passed INTO getTeamMetrics, so the bucket math is fully deterministic off this value
+// nowMs is passed INTO getWorkspaceMetrics, so the bucket math is fully deterministic off this value
 // (no test→call clock drift). bucket = floor((84 − mergedDaysAgo) / 7): 5→11, 4→11, 30→7.
 const now = Math.floor(Date.now() / 1000) * 1000;
 let repoId = 0;
@@ -163,7 +167,7 @@ beforeAll(async () => {
   const { repos, users } = schema;
   const [repo] = await db
     .insert(repos)
-    .values({ accountId: 1, owner: 'acme', name: 'rl', githubNodeId: 'R_rl', inboxWatch: true })
+    .values({ accountId: 1, owner: 'acme', name: 'rl', githubNodeId: 'R_rl' })
     .returning()
     .execute();
   repoId = repo.id;
@@ -225,9 +229,9 @@ beforeAll(async () => {
 
 afterAll(() => closeDb?.());
 
-describe('getTeamMetrics — review load per merged PR (human vs bot)', () => {
+describe('getWorkspaceMetrics — review load per merged PR (human vs bot)', () => {
   it('averages human/bot review touches over the PRs merged that week', async () => {
-    const m = await q.getTeamMetrics(1, [repoId], now, undefined);
+    const m = await q.getWorkspaceMetrics(1, [repoId], now, undefined);
     expect(m).not.toBeNull();
     expect(m.reviewLoad).toBeDefined();
     // Bucket 11: 2 merges, human load 2, bot load 2.5.
@@ -241,23 +245,23 @@ describe('getTeamMetrics — review load per merged PR (human vs bot)', () => {
   });
 
   it('reports null load (not 0) for a week with no merges', async () => {
-    const m = await q.getTeamMetrics(1, [repoId], now, undefined);
+    const m = await q.getWorkspaceMetrics(1, [repoId], now, undefined);
     expect(m.throughput.merged[0]).toBe(0);
     expect(m.reviewLoad.human[0]).toBeNull();
     expect(m.reviewLoad.bot[0]).toBeNull();
   });
 });
 
-describe('getTeamMetrics — self-review depth (changes-requested / coverage / rework)', () => {
+describe('getWorkspaceMetrics — self-review depth (changes-requested / coverage / rework)', () => {
   it('changes-requested rate = % of merged PRs with a changes-requested review', async () => {
-    const m = await q.getTeamMetrics(1, [repoId], now, undefined);
+    const m = await q.getWorkspaceMetrics(1, [repoId], now, undefined);
     expect(m.changesRequestedTrend[11]).toBe(50); // M1 CR of 2 merges
     expect(m.changesRequestedTrend[7]).toBe(0); // M3, no CR
     expect(m.changesRequestedTrend[0]).toBeNull(); // no merges
   });
 
   it('review coverage classifies each merged PR human / bot-only / unreviewed', async () => {
-    const m = await q.getTeamMetrics(1, [repoId], now, undefined);
+    const m = await q.getWorkspaceMetrics(1, [repoId], now, undefined);
     expect(m.reviewCoverage.human[11]).toBe(2); // M1, M2
     expect(m.reviewCoverage.botOnly[11]).toBe(0);
     expect(m.reviewCoverage.unreviewed[11]).toBe(0);
@@ -266,20 +270,20 @@ describe('getTeamMetrics — self-review depth (changes-requested / coverage / r
   });
 
   it('rework ratio = median % of a reviewed PR’s commits pushed after first review', async () => {
-    const m = await q.getTeamMetrics(1, [repoId], now, undefined);
+    const m = await q.getWorkspaceMetrics(1, [repoId], now, undefined);
     expect(m.reworkTrend[3]).toBe(25); // M5: 1 of 4 commits after review
     expect(m.reworkTrend[11]).toBeNull(); // M1/M2 never had firstReviewAt → excluded
   });
 
   it('resolution latency = median open→resolved hours, split human vs bot self-resolve', async () => {
-    const m = await q.getTeamMetrics(1, [repoId], now, undefined);
+    const m = await q.getWorkspaceMetrics(1, [repoId], now, undefined);
     expect(m.resolutionLatencyTrend.human[11]).toBe(216); // median(336h, 96h)
     expect(m.resolutionLatencyTrend.bot[11]).toBe(72); // one bot self-resolve, 3d
     expect(m.resolutionLatencyTrend.human[0]).toBeNull(); // no resolutions that week
   });
 
   it('review pickup = median requested→first-review hours, by first-review week', async () => {
-    const m = await q.getTeamMetrics(1, [repoId], now, undefined);
+    const m = await q.getWorkspaceMetrics(1, [repoId], now, undefined);
     expect(m.reviewPickupTrend[9]).toBe(48); // M6: 21d→19d = 2 days
     expect(m.reviewPickupTrend[0]).toBeNull(); // no review requests that week
   });

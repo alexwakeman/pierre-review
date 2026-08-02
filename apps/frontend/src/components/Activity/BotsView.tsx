@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useBotAnalytics } from '../../hooks/useBotTriage.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { useFilters } from '../../store/filters.js';
 import { BotRoiPanel, ResolveBacklogBanner } from './BotRoiPanel.js';
 import { BotBehaviourPanel } from './BotBehaviourPanel.js';
 import { BotThemesPanel } from './BotThemesPanel.js';
@@ -11,29 +11,37 @@ import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 
 // The Bots rail view — "the calm layer above your review bots" as a CORE, FREE feature (works
 // via the npx / OSS path, no @pierre/pro plugin). It composes:
-//   • the ROI / utilisation panel (per-vendor signal-to-noise + trend + keep/tune/noisy verdicts),
+//   • the ROI / utilisation panel (per-bot signal-to-noise + trend + keep/tune/noisy verdicts),
 //   • a bot-ONLY activity feed (the consolidated Feed hard-filtered to automated-reviewer
 //     activity) with review-thread derived-state pills (Untouched / Replied / Likely-addressed /
 //     Resolved) so you can triage the bot firehose by state.
 // Everything reads the CORE, deterministic bot routes + the core consolidated-feed route — no AI,
-// no Pro gate. The detection / cost / Pierre-tagging SETTINGS live in the Settings modal's
-// "Review bots" section (free, plugin-backed).
+// no Pro gate. The detection heuristics and Limn's own attribution markers (account-wide policy,
+// not a judgement about any one Workspace) stay in the Settings modal's "Review bots" section.
 //
-// `repoId` scopes the WHOLE console to one repo (the per-repo Bots tab in the repo console):
-// analytics, the bot-only feed, the bot-only-review caution, and the vendor drill-down all
-// narrow to that repo, and only bots active in it surface. Absent = the cross-repo Bots rail.
+// ── SCOPE: ONE WORKSPACE, ALWAYS ─────────────────────────────────────────────────────────────
+// Every panel here is scoped by `filters.workspaceId` — the single scope this app has. A BOT IS A
+// PER-WORKSPACE OBJECT: one `workspace_reviewers` row per (account, workspace, actor), carrying
+// the judgement, the vendor identity AND the price. So a vendor running in six of the workspace's
+// repos is ONE row here, merged by GitHub handle — not six.
+//
+// `repoId` narrows the DATA to one repo (the per-repo Bots tab in the repo console): the
+// analytics, the bot-only feed, the bot-only-review caution and the vendor drill-down all measure
+// that repo alone. It does NOT narrow the judgement — there is nothing per-repo left to narrow —
+// which is why the Settings sub-tab renders the whole workspace's reviewers and filters them
+// client-side by footprint, and says out loud that an edit there lands workspace-wide.
 export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // Reuse the same analytics query BotRoiPanel drives (same key → deduped) just for the
-  // bot-only-review count in the header caution. A repo scope (per-repo tab) wins over the team
-  // scope, matching BotRoiPanel so both hit the same cache entry.
+  // bot-only-review count in the header caution. Same workspace + repo narrowing as the panel, so
+  // both hit the same cache entry.
+  const workspaceId = useFilters((s) => s.workspaceId);
   const window = useFilters((s) => s.botAnalyticsWindow);
-  const scope = scopeToParam(useFilters((s) => s.teamScope));
   const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
-  const { data } = useBotAnalytics(window, true, scope, repoScope);
+  const { data } = useBotAnalytics(workspaceId, window, true, repoScope);
   const botOnly = data?.totals.botOnlyPrs ?? 0;
 
   // The EXACT PR list behind the count lives in the bot-only-PRs drill-down TAB (same
-  // window/scope/repoIds route → caption ≡ list); the caption just opens it.
+  // window/workspace/repoIds route → caption ≡ list); the caption just opens it.
   const openBotOnlyDetail = useFilters((s) => s.openBotOnlyDetail);
 
   // Inner sub-tab: the shipped ROI surface vs the EXPERIMENTAL behaviour analytics. A single
@@ -42,18 +50,19 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   const innerTab = useFilters((s) => s.botsInnerTab);
   const setInnerTab = useFilters((s) => s.setBotsInnerTab);
 
-  // The "Themes" AI summary is STRICTLY Pro (activityDigest tier) and TEAM-scoped, so it only
-  // appears in the cross-repo Bots rail (repoId == null) — not the per-repo console Bots tab. When
-  // it's unavailable but the shared scalar still points at it, fall back to ROI.
+  // The "Themes" AI summary is STRICTLY Pro (activityDigest tier) and WORKSPACE-scoped with no
+  // repo narrowing, so it only appears in the cross-repo Bots rail (repoId == null) — not the
+  // per-repo console Bots tab. When it's unavailable but the shared scalar still points at it,
+  // fall back to ROI.
   const { activityDigest } = useProCapabilities();
   const showThemes = repoId == null && activityDigest;
-  // "Settings" ("who counts as a review bot here") shows in BOTH views now. It used to be
-  // cross-repo ONLY because the judgement was keyed per TEAM and a repo tab cannot express a team
-  // key (team_repos is many-to-many, so one repo sits in several teams). A bot is a per-REPO
-  // object, so a single-repo view is simply the same list with one group — there is nothing left
-  // for a repo tab to be unable to say. It is CORE/free — unlike Themes it has no capability gate,
-  // which also fixes an OSS gap: reviewer classification used to live behind SettingsModal's
-  // caps.botTriage, so an `npx` user could not classify a reviewer at all.
+  // "Settings" ("who counts as a review bot in this Workspace") shows in BOTH views. It used to be
+  // cross-repo ONLY because the judgement was keyed per TEAM and a repo tab could not express a
+  // team key (team_repos was many-to-many, so one repo sat in several teams). A repo now belongs
+  // to exactly ONE workspace and the judgement is the workspace's, so a repo tab is simply the
+  // same list filtered to the bots with a footprint in that repo. It is CORE/free — unlike Themes
+  // it has no capability gate, which also fixes an OSS gap: reviewer classification used to live
+  // behind SettingsModal's caps.botTriage, so an `npx` user could not classify a reviewer at all.
   //
   // DERIVE the visible tab; never write a correction back to the store. `themes` is still
   // optional and shares one scalar with the per-repo console, so it can legitimately hold a key
@@ -67,8 +76,8 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Review bots</h2>
         <span className="text-[11px] text-gray-400">
           {repoId != null
-            ? 'The calm layer above your review bots — scoped to this repo.'
-            : 'The calm layer above your review bots — detect, measure, and triage automated reviewers.'}
+            ? 'The calm layer above your review bots — this Workspace’s bots, measured on this repo.'
+            : 'The calm layer above your review bots — detect, measure, and triage the automated reviewers in this Workspace.'}
         </span>
       </div>
 
@@ -111,8 +120,9 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
       ) : effectiveTab === 'themes' ? (
         <BotThemesPanel />
       ) : effectiveTab === 'settings' ? (
-        /* A per-repo Bots tab narrows the list to that repo's own group; cross-repo passes
-           nothing and gets every in-scope repo. */
+        /* A per-repo Bots tab shows the SAME workspace listing, filtered client-side to the bots
+           with a footprint in that repo — every edit there is still workspace-wide, and the panel
+           says so. */
         <BotSettingsPanel repoId={repoId} />
       ) : (
         <>
@@ -148,7 +158,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           {/* Directly beneath the "only a bot reviewed" caution: the likely-addressed backlog, in
               the SAME full-width-clickable + "Show list" layout (sky, its own colour). Self-hides
               when the backlog is empty; opens the resolvable-bot-threads review-and-resolve tab. */}
-          <ResolveBacklogBanner scope={scope} repoScope={repoScope} />
+          <ResolveBacklogBanner workspaceId={workspaceId} repoIds={repoScope} />
 
           <BotRoiPanel repoId={repoId} />
 

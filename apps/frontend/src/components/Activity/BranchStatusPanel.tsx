@@ -303,7 +303,9 @@ function BranchRow({
  * channel: it never contributes to attention counts, the rail sort, My Turn, or any badge.
  *
  * `repoIds` (optional) pins the strip to one repo, for the per-repo console header. Omitted, it
- * follows the FilterBar/team scope like the rest of the Activity console.
+ * covers the active WORKSPACE, whole — like the rest of the Activity console. It does NOT follow
+ * the FilterBar's per-repo picker: that is a TIMELINE-board filter whose control is unmounted
+ * here, so honouring it would narrow this strip with no visible way to widen it again.
  */
 export function BranchStatusPanel({
   repoIds,

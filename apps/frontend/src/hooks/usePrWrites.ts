@@ -206,13 +206,18 @@ export function useAddReviewComment(prId: number) {
 // Request reviewers on a PR (the Insights "Assign reviewers" action). GitHub drops the
 // request once a review lands, and reviewRequests are re-derived each sync, so the
 // routing card that prompted this leaves the board on the next refresh — invalidate
-// ['team-insights'] (+ the PR detail, whose Requested list changes) to reflect it.
+// ['workspace-insights'] (+ the PR detail, whose Requested list changes) to reflect it.
+//
+// ⚠ Both keys below are owned by OTHER files (useWorkspaceInsights, useAttentionCards) and written
+// here as bare literals, so a rename there fails silently here — the mutation succeeds and the
+// card just doesn't clear. They are PREFIXES, so they still sweep every `['<name>', 'ws:<id>']`
+// entry, which matters because a user can have more than one workspace cached at a time.
 export function useRequestReviewers(prId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: RequestReviewersBody) => api.requestReviewers(prId, body),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['team-insights'] });
+      void qc.invalidateQueries({ queryKey: ['workspace-insights'] });
       // The CORE "Needs attention" tab renders the same routing card from a different query key —
       // refresh it too so an Assign there also clears the card.
       void qc.invalidateQueries({ queryKey: ['attention-cards'] });

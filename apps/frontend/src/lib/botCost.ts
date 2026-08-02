@@ -5,26 +5,33 @@ import type { BotVendorAnalytics, ReviewerCostBody } from '@pierre-review/shared
 // decision with a wrong answer that compiles — "cleared" vs "unchanged", $0 vs no price, a
 // fractional cent that survives a round trip — so each one gets a test in test/botCost.test.ts.
 //
-// ⚠ COST IS AN ACTOR-GRAIN FACT, and that is the single most important thing in this file. It is
-// stored once per (account, actor) in `account_reviewers.monthly_cents` and served on
-// `ReviewerIdentity.costMonthlyUsd` — NOT on the per-repo `RepoReviewer` rows. You buy ONE
-// subscription from a vendor, so a bot running in six repos is $120, not $720. Nothing here takes
-// a repo id, and nothing here should ever be called once per repo row; see
-// `monthlyCostTotal` in lib/botReviewers.ts for the deduped total.
+// ⚠ COST IS A PER-WORKSPACE FACT, and that is the single most important thing in this file. It is
+// stored once per (account, WORKSPACE, actor) in `workspace_reviewers.monthly_cents` and served on
+// `WorkspaceReviewer.costMonthlyUsd` — one plain column on the same row that carries the judgement
+// and the identity. Nothing here takes a repo id and nothing here may be called once per repo: a
+// vendor running in six of the workspace's repos is ONE row with ONE price.
+//
+// ⚠ AND IT IS NEVER SUMMED ACROSS WORKSPACES. Within one workspace there is exactly one row per
+// actor, so a total there is a plain sum (`monthlyCostTotal` in lib/botReviewers.ts). Across
+// workspaces it is not a sum at all — six workspaces each listing a $120 CodeRabbit is either six
+// subscriptions or one seen six ways, and the app must not assert which. Editing the price in
+// workspace A leaves B untouched and B may legitimately hold a different number; nothing
+// reconciles them and nothing is meant to. That is why the editor's label is
+// "Price for this Workspace" and not a bare "Price".
 //
 // UNITS: the wire and everything in this file are US DOLLARS. Storage is integer cents; the
 // conversion happens only at the server's store boundary. Nothing here may round to whole dollars
 // — $0.50/mo is representable and a silent floor to $0 would read as "free".
 //
-// ⚠ THERE IS NO INHERITANCE ANY MORE. The old model had a team-0 default every team fell back to,
-// so `null` meant "ask my parent" and `??` vs `||` was one character from a silently wrong price.
-// Now there are exactly TWO states — null ("no price set") and a number (0 being the real,
-// deliberate "we pay nothing") — with nothing behind either. Do not reintroduce a third.
+// ⚠ THERE IS NO INHERITANCE, AND NO FAN-OUT. There is no default row to fall back to and no
+// sibling row that gets seeded when this one is written, so `null` means exactly "no price set" —
+// not "ask my parent". Exactly TWO states — null and a number (0 being the real, deliberate "we
+// pay nothing") — with nothing behind either. Do not reintroduce a third.
 
 // ── Row state ───────────────────────────────────────────────────────────────────────────────
 
 /**
- * Which of the two visually-distinct cost states an actor's price is in.
+ * Which of the two visually-distinct cost states a bot's price is in, IN THIS WORKSPACE.
  *
  *   'none' — no price recorded. Clearing the box is a no-op; typing sets one.
  *   'set'  — a price is recorded (possibly 0, meaning "free"). Clearing IS the reset.
@@ -110,8 +117,8 @@ export interface CostEdit {
 }
 
 /**
- * Decide what applying `next` (the parsed box, null = cleared) does to an actor currently priced
- * at `current`.
+ * Decide what applying `next` (the parsed box, null = cleared) does to a bot currently priced at
+ * `current` IN THIS WORKSPACE.
  *
  * ⚠ 0 IS A PRICE. `current: 0, next: null` is a real CLEAR (from "we pay nothing" to "nobody has
  * said"), and `current: null, next: 0` is a real SET. Any implementation that leans on
@@ -128,15 +135,22 @@ export function costEditOutcome(current: number | null, next: number | null): Co
 /**
  * The body for `PUT /api/bot-reviewers/:userId/cost`.
  *
+ * ⚠ `workspaceId` IS REQUIRED AND IS PART OF THE ROW'S KEY, not a filter over it. A price now
+ * NAMES a per-workspace row (`workspace_reviewers.monthly_cents`, predicate
+ * `(account_id, workspace_id, author_user_id)`), so a body without it has no row to land on. It is
+ * the FIRST parameter deliberately: every call site had to be re-read when the wire type gained
+ * the field, and a positional required argument is what turned that into a tsc error rather than
+ * something a grep had to find.
+ *
  * `monthlyUsd` is REQUIRED by the contract precisely so `undefined` is not a third meaning: a
  * number sets, null clears. Spreading it conditionally (the reflex from the old optional-field
  * patch body) would turn the Clear button into a silent no-op.
  *
- * ⚠ IT CARRIES NO `repoId`, and must not gain one. A price is an actor fact; keying it per repo
- * is how six repos of CodeRabbit become $720.
+ * ⚠ IT CARRIES NO `repoId`, and must not gain one. Every repo in the workspace is priced by this
+ * one row; keying it per repo is how six repos of CodeRabbit become $720.
  */
-export function buildCostBody(monthlyUsd: number | null): ReviewerCostBody {
-  return { monthlyUsd };
+export function buildCostBody(workspaceId: number, monthlyUsd: number | null): ReviewerCostBody {
+  return { workspaceId, monthlyUsd };
 }
 
 // ── ROI cost resolution ─────────────────────────────────────────────────────────────────────
@@ -146,10 +160,10 @@ export interface ResolvedVendorCost {
   costPerActedOnUsd: number | null;
   /**
    * A price for this login found ONLY in the DEPRECATED per-login `pro_settings.bots.cost` blob,
-   * i.e. one plugin migration 0019 could not move onto an `account_reviewers` row. It is a
-   * POINTER, not a price: never applied, never charged, never divided into `costPerActedOnUsd` —
-   * the UI uses it to say "there is an old account-wide figure here, re-enter it on the row to
-   * use it". Null when there is none.
+   * i.e. one no migration could move onto a reviewer row. It is a POINTER, not a price: never
+   * applied, never charged, never divided into `costPerActedOnUsd` — the UI uses it to say "there
+   * is an old account-wide figure here, re-enter it on the bot's card to use it in this
+   * Workspace". Null when there is none.
    */
   legacyOnlyUsd: number | null;
 }
@@ -157,8 +171,9 @@ export interface ResolvedVendorCost {
 /**
  * Resolve one ROI row's cost.
  *
- * The server reads the price off the actor's own `account_reviewers` row and hands it over on the
- * analytics row, so the old client-side overlay from `pro_settings.bots.cost` is gone.
+ * The server reads the price off that reviewer's `workspace_reviewers` row FOR THE WORKSPACE THE
+ * ANALYTICS WERE REQUESTED AT and hands it over on the analytics row, so the old client-side
+ * overlay from `pro_settings.bots.cost` is gone.
  *
  * ⚠ THE BLOB NO LONGER FILLS A NULL, AND MUST NOT. It used to, "only for the case migration 0019
  * cannot cover: a costed login with no row to copy the price onto". But the branch could not test
@@ -171,12 +186,13 @@ export interface ResolvedVendorCost {
  * So the server's answer is FINAL — null means null — and the legacy value survives only as
  * `legacyOnlyUsd`, a surfaced-but-unapplied pointer.
  *
- * ⚠ THE PRICE ON AN ANALYTICS ROW IS ACCOUNT-WIDE EVEN THOUGH THE ROW IS SCOPED. The row
- * aggregates one reviewer over whatever repo/team scope was requested; the price is ONE
- * subscription. Never sum or multiply it across rows or scopes.
+ * ⚠ THE PRICE BELONGS TO ONE WORKSPACE. The row aggregates one reviewer over whatever repo
+ * narrowing was requested INSIDE that workspace, and the price is the single figure recorded on
+ * its row there. Never sum or multiply it across rows, and never add it to the same vendor's
+ * figure in another workspace — that is a comparison, not an invoice.
  *
  * RETIRE `legacyOnlyUsd` (with `ProSettings.bots.cost`, `bot_cost_json` and `parseCost`) one
- * release after `account_reviewers` ships — there is no write path to that blob, so the set only
+ * release after `workspace_reviewers` ships — there is no write path to that blob, so the set only
  * shrinks.
  */
 export function resolveVendorCost(

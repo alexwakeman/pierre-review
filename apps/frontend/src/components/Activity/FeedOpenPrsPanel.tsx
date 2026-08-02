@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Repo, TimelinePr } from '@pierre-review/shared';
-import { useSearchOpenPrs } from '../../hooks/useTriage.js';
+import { useWorkspaceOpenPrs } from '../../hooks/useTriage.js';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
 import { useFilters } from '../../store/filters.js';
@@ -16,9 +16,10 @@ interface PrGroup {
 
 // Bucket the scope's open PRs by the REPO they belong to — one section per repo, so the
 // cross-repo Feed's open work reads as "which repo has what open" (the per-repo console shows a
-// single repo; this team-wide feed spans them). The PR set is exactly what useSearchOpenPrs
-// returns (repo-scoped by the FilterBar); grouping is purely presentational. Within a section the
-// caller preserves the activity-sort; sections are ordered most-recently-active first.
+// single repo; this Workspace-wide feed spans them). The PR set is exactly what
+// useWorkspaceOpenPrs returns (every repo in the active workspace); grouping is purely
+// presentational. Within a section the caller preserves the activity-sort; sections are ordered
+// most-recently-active first.
 function groupOpenPrsByRepo(prs: TimelinePr[], reposById: Map<number, Repo>): PrGroup[] {
   const byRepo = new Map<number, TimelinePr[]>();
   for (const p of prs) {
@@ -38,9 +39,10 @@ function groupOpenPrsByRepo(prs: TimelinePr[], reposById: Map<number, Repo>): Pr
 // its own pr-detail tab (its Show/Focus links then drive the timeline / feed); a section's
 // "Show all" opens the sortable all-open-PRs drill-down scoped to that repo.
 export function FeedOpenPrsPanel(): JSX.Element | null {
-  // Member-AGNOSTIC open PRs (repo scope still applies) — Members is a Timeline-only filter,
-  // so the Activity panel must not narrow by it.
-  const { data: openPrs } = useSearchOpenPrs();
+  // Every open PR in the ACTIVE WORKSPACE. Members AND the FilterBar's repo picker are both
+  // TIMELINE-only filters, so neither narrows this panel — the Feed always spans its whole
+  // workspace, and you narrow it by picking a repo in the Activity rail.
+  const { data: openPrs } = useWorkspaceOpenPrs();
   const { data: repos } = useRepos();
   const { data: users } = useUsers();
   const openOpenPrsDetail = useFilters((s) => s.openOpenPrsDetail);

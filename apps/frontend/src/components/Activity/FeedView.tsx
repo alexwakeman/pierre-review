@@ -7,16 +7,16 @@ import type {
   DerivedState,
   EventType,
   FeedAffectedThread,
-  ReviewerIdentity,
   ReviewState,
   User,
+  WorkspaceReviewer,
 } from '@pierre-review/shared';
 import {
   useConsolidatedFeed,
   useFeedHasNew,
   useMarkFeedSeen,
 } from '../../hooks/useConsolidatedFeed.js';
-import { useDetectedReviewers, useRepoReviewerJudgement } from '../../hooks/useBotTriage.js';
+import { useDetectedReviewers, useSetWorkspaceReviewer } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
@@ -85,22 +85,23 @@ const CLAUDE_VERDICT_META: Record<ClaudeReviewVerdict, { label: string; color: s
   COMMENT: { label: 'comment', color: '#9ca3af' },
 };
 
-// An automated-reviewer tag for a feed row's actor: a known VENDOR bot (by login) OR an
-// account-classified automated reviewer (in-house AI / Pierre — surfaced via the detected-
-// reviewers classification map, since those aren't login-derivable). `userId` is the actor
+// An automated-reviewer tag for a feed row's actor: a known VENDOR bot (by login) OR a
+// workspace-classified automated reviewer (in-house AI / Pierre — surfaced via the detected-
+// reviewers listing, since those aren't login-derivable). `userId` is the actor
 // id so the inline "not a bot?" override can target it. Null → the actor is a human.
 type AutomatedTag = { userId: number | null; kind: AutomatedReviewerKind; label: string; color: string };
 
-// The account-wide per-bot colour resolver (see useBotColors) — so an in-house bot keeps the
-// SAME distinct colour in the feed as in the Bots ROI console / per-repo Bots tab.
+// The per-bot colour resolver for the ACTIVE WORKSPACE (see useBotColors) — so an in-house bot
+// keeps the SAME distinct colour in the feed as in the Bots ROI console / per-repo Bots tab.
 type BotColorFn = (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
 
-// ⚠ THE VENDOR NAME AND COLOUR COME FROM THE ACTOR GRAIN (`ReviewerIdentity`), never from a
-// per-repo judgement row. A feed is cross-repo, so reading them off whichever repo's row happened
-// to be in hand would render the same bot under two names in one scroll.
+// ⚠ THE VENDOR NAME AND COLOUR COME FROM THE ACTIVE WORKSPACE'S ROW, and there is exactly one per
+// actor, so the same bot cannot render under two names in one scroll. (It could when identity was
+// replicated across per-repo rows; the workspace row is now the single answer — and it is
+// per-workspace, so the same login may legitimately be named differently in another Workspace.)
 function automatedTagFor(
   actorUser: User | undefined,
-  identityByUserId: Map<number, ReviewerIdentity>,
+  identityByUserId: Map<number, WorkspaceReviewer>,
   botColor: BotColorFn,
 ): AutomatedTag | null {
   // Known review-bot vendor (CodeRabbit/Copilot/…) by login — the v1 path, still first.
@@ -113,12 +114,12 @@ function automatedTagFor(
       color: botColor({ login: actorUser?.githubLogin, kind: loginVendor.kind }),
     };
   }
-  // Otherwise, an account-classified automated reviewer (in-house AI / Pierre) — widened
+  // Otherwise, a workspace-classified automated reviewer (in-house AI / Pierre) — widened
   // from the login-only path so those tags surface in the feed too.
   if (actorUser) {
-    // `kind != null` IS the "automated somewhere" test at this grain: the identity row carries a
-    // vendor kind only while the actor is automated in at least one repo, and a cross-repo feed
-    // has no single repo whose judgement it could consult instead.
+    // `kind != null` IS the test: the row carries a vendor kind only while the actor has a vendor
+    // identity in THIS workspace. The feed spans the workspace's repos and the judgement is keyed
+    // to the workspace, so this one row is the whole answer — there is no per-repo row to pick.
     const id = identityByUserId.get(actorUser.id);
     if (id && id.kind != null) {
       return {
@@ -200,7 +201,7 @@ export function FeedView({
   // cross-repo "seen" marker (a person's feed isn't "the feed" being caught up on).
   userIds?: number[] | null;
 }): JSX.Element {
-  const repoIdsFilter = useFilters((s) => s.repoIds);
+  const workspaceId = useFilters((s) => s.workspaceId);
   const feedMyTurnOnly = useFilters((s) => s.feedMyTurnOnly);
   const toggleFeedMyTurnOnly = useFilters((s) => s.toggleFeedMyTurnOnly);
   const feedClaudeOnly = useFilters((s) => s.feedClaudeOnly);
@@ -223,17 +224,22 @@ export function FeedView({
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
   const { claudeReview: claudeReviewEnabled } = useProCapabilities();
 
-  // Detected-reviewer IDENTITIES (CORE / free) → the actor→kind map that lets in-house AI /
-  // Pierre actors carry a vendor tag (login-based vendors don't need it). Account-wide listing on
-  // purpose: the feed is cross-repo, and this is the same cache entry useBotColors reads.
-  const { data: detectedReviewers } = useDetectedReviewers();
-  // Account-wide per-bot colour resolver (shares the detected-reviewers cache above — no extra
+  // Detected reviewers for the ACTIVE WORKSPACE (CORE / free) → the actor→row map that lets
+  // in-house AI / Pierre actors carry a vendor tag (login-based vendors don't need it).
+  //
+  // ⚠ THE WORKSPACE ARGUMENT IS NOT OPTIONAL AND MUST BE THE ACTIVE ONE. Identity is a
+  // per-workspace fact on the `workspace_reviewers` row, so an unscoped call is answered from the
+  // account's DEFAULT workspace and every bot on screen would be painted — or un-named — from a
+  // workspace the user is not looking at. Unnarrowed by repo on purpose: within a workspace a bot
+  // must be the same colour on every surface, and this is the same cache entry useBotColors reads.
+  const { data: detectedReviewers } = useDetectedReviewers(workspaceId);
+  // Per-bot colour resolver for the same workspace (shares the listing cache above — no extra
   // fetch). Gives in-house bots a distinct, consistent colour in the feed pills + row tags.
-  const botColor = useBotColors();
-  const judgement = useRepoReviewerJudgement();
+  const botColor = useBotColors(workspaceId);
+  const judgement = useSetWorkspaceReviewer();
   const { mutate: judgementMutate } = judgement;
   const identityByUserId = useMemo(() => {
-    const m = new Map<number, ReviewerIdentity>();
+    const m = new Map<number, WorkspaceReviewer>();
     for (const r of detectedReviewers?.reviewers ?? []) {
       if (r.kind != null) m.set(r.userId, r);
     }
@@ -244,30 +250,43 @@ export function FeedView({
     : null;
   // Stable across renders so a memoised row's props don't churn.
   //
-  // ⚠ "not a bot?" IS A PER-REPO JUDGEMENT and takes the CARD's repo. The bot object is
-  // (repo, actor), so this clears the flag for the repo the user is looking at and leaves the
-  // other repos alone — which is what the button's title has to say, because the old
-  // account-wide version silently un-botted a vendor everywhere from a single feed card.
-  // It writes NO kind/label: the vendor tag survives, and the row simply stops being automated
-  // here. (The tag will still show if the actor is automated in another repo — that is the model
-  // working, not a stale render.)
+  // ⚠ "not a bot?" IS A WORKSPACE-WIDE JUDGEMENT — one row, keyed (account, workspace, actor) —
+  // so ONE CLICK STOPS TREATING THIS REVIEWER AS AUTOMATED IN EVERY REPO OF THE WORKSPACE. The
+  // old per-repo version could honestly promise "your other repos are unaffected"; this cannot,
+  // and on the highest-traffic surface in the app a silent write with that blast radius is a trap.
+  // Hence the confirm below and the button's rewritten title — both are the safety mechanism, not
+  // decoration. It writes NO kind/label (the two provenance flags are stamped independently), so
+  // the vendor tag survives: the row simply stops being automated in this Workspace, and the same
+  // actor's rows in other Workspaces are untouched and may still call it a bot.
   const markNotBot = useCallback(
-    (userId: number, repoId: number): void => {
-      judgementMutate({ userId, body: { repoId, automated: false } });
+    (userId: number, label: string): void => {
+      if (workspaceId == null) return;
+      const ok = window.confirm(
+        `Stop treating ${label} as an automated reviewer in this Workspace?\n\n` +
+          'This applies to every repo in the Workspace — not just this PR’s repo. ' +
+          'It keeps the vendor name, and you can undo it from Bots › Settings.',
+      );
+      if (!ok) return;
+      judgementMutate({ userId, body: { workspaceId, automated: false } });
     },
-    [judgementMutate],
+    [judgementMutate, workspaceId],
   );
   // The one-shot flash signal — set ONLY by a real browser Back (navigateBack), so an
   // ordinary return to Activity (e.g. clicking the Activity tab chip) never flashes.
   const flashTarget = usePinnedTabs((s) => s.activityFlashItemId);
   const clearFlash = usePinnedTabs((s) => s.clearActivityFlashItem);
 
-  // A selected rail repo scopes the feed to just that repo; otherwise the cross-repo feed
-  // FOLLOWS the FilterBar repo selection (which the team-scope picker drives): a `repoIds`
-  // of null → the backend resolves all-watched, a concrete list → just those repos.
-  const effectiveRepoIds = repoId != null ? [repoId] : repoIdsFilter;
+  // A selected rail repo scopes the feed to just that repo; otherwise the feed covers the WHOLE
+  // active workspace (`null` → the server expands it to the workspace's membership).
+  //
+  // ⚠ IT NO LONGER FOLLOWS `filters.repoIds`, AND THAT IS THE POINT. The FilterBar's repo picker
+  // is a TIMELINE-board filter and is not mounted while Activity is the active tab, so a feed
+  // scoped by it would be silently short with no visible control to widen it again — the picker's
+  // effect would outlive the only screen that shows it. Narrowing the feed is the RAIL's job: the
+  // `repoId` prop above IS that narrowing, and it comes with an obvious, reversible control.
+  const effectiveRepoIds = repoId != null ? [repoId] : null;
 
-  // Single-PR isolation applies to BOTH the cross-repo feed (the team-grouped "open PRs"
+  // Single-PR isolation applies to BOTH the cross-repo feed (the repo-grouped "open PRs"
   // panel) and a per-repo console (its RepoOpenPrList rows) — clicking a PR in either filters
   // the feed to that PR. `setActivityRepo` clears it when switching rails, so it never leaks
   // across repos.
@@ -320,6 +339,9 @@ export function FeedView({
     loadMore,
     isFetchingMore,
   } = useConsolidatedFeed({
+      // The active WORKSPACE decides which logins count as automated reviewers (the botsOnly
+      // path) AND which repos `repoIds: null` expands to — `repoIds` alone can express neither.
+      workspaceId,
       repoIds: effectiveRepoIds,
       userIds,
       prId: isolatedPrId,
@@ -337,6 +359,9 @@ export function FeedView({
   // fresh page's items[0]/total catch up → the banner clears.
   const rootRef = useRef<HTMLDivElement>(null);
   const { hasNew, refresh: refreshFeed } = useFeedHasNew({
+    // MUST match the loaded feed's workspace exactly, or the head belongs to another scope and
+    // the banner false-fires on every poll.
+    workspaceId,
     repoIds: effectiveRepoIds,
     userIds,
     prId: isolatedPrId,
@@ -926,8 +951,8 @@ export function FeedView({
       {/* The AI repo-summary (digest) collection now lives in the Insights panel — one home
           for every AI summary, with a single unified Refresh. It's no longer atop the Feed. */}
 
-      {/* Cross-repo only: a collapsible panel of open PRs grouped by team; clicking a PR
-          isolates the feed to that PR (below). Not in the Bots pane (a pure activity stream). */}
+      {/* Cross-repo only: a collapsible panel of the Workspace's open PRs grouped by REPO;
+          clicking a PR opens its detail tab. Not in the Bots pane (a pure activity stream). */}
       {repoId == null && !botsMode && userIds == null && isolatedPrId == null && (
         <FeedOpenPrsPanel />
       )}
@@ -1470,11 +1495,12 @@ const BODY_COLLAPSED_MAX = 160;
 type FeedRowProps = {
   item: ConsolidatedFeedItem;
   usersById: Map<number, User>;
-  identityByUserId: Map<number, ReviewerIdentity>;
+  identityByUserId: Map<number, WorkspaceReviewer>;
   botColor: BotColorFn;
   overridePendingUserId: number | null;
-  // (userId, repoId) — the judgement is per repo, so the card must pass its own repo.
-  onNotBot: (userId: number, repoId: number) => void;
+  // (userId, label) — the judgement is keyed to the active WORKSPACE, not to this card's repo, so
+  // the row passes the vendor's display name for the confirm copy instead of a repo id.
+  onNotBot: (userId: number, label: string) => void;
   flash: boolean;
   expanded: boolean;
   onToggleExpanded: (id: string) => void;
@@ -1650,11 +1676,12 @@ function FeedRowImpl({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (automatedTag.userId != null) onNotBot(automatedTag.userId, item.repoId);
+                    if (automatedTag.userId != null)
+                      onNotBot(automatedTag.userId, automatedTag.label);
                   }}
                   disabled={overridePending}
                   className="text-[9px] text-gray-400 underline underline-offset-2 opacity-0 transition-opacity hover:text-gray-600 disabled:opacity-40 group-hover/bot:opacity-100 dark:hover:text-gray-200"
-                  title="Not a bot? Stop treating this reviewer as automated IN THIS REPO. Its other repos are unaffected, and it keeps its vendor name everywhere."
+                  title="Not a bot? Stop treating this reviewer as automated ACROSS THIS WHOLE WORKSPACE — every repo in it, not just this PR's. It keeps its vendor name, other Workspaces are unaffected, and you'll be asked to confirm."
                 >
                   {overridePending ? 'saving…' : 'not a bot?'}
                 </button>

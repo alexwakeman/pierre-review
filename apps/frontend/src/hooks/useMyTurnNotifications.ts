@@ -35,13 +35,16 @@ export function useMyTurnNotifications(enabled: boolean): void {
     const threads = added.filter((id) => id.startsWith('t:')).length;
     const yours = added.filter((id) => id.startsWith('p:')).length;
     const approved = added.filter((id) => id.startsWith('a:')).length;
-    const watched = added.filter((id) => id.startsWith('w:')).length;
+    // `w:` and the wire field `watchedRepoPrs` keep their historical names (see the note on
+    // `WatchedRepoPrItem` in shared/types.ts — the stored dismissal kind pins them); the SECTION
+    // is "New PRs", and this copy has to say that, not resurrect a "watched" the user can't see.
+    const newPrs = added.filter((id) => id.startsWith('w:')).length;
     const bits: string[] = [];
     if (reviews) bits.push(`${reviews} review${reviews === 1 ? '' : 's'} requested`);
     if (threads) bits.push(`${threads} thread${threads === 1 ? '' : 's'} awaiting you`);
     if (yours) bits.push(`${yours} of your PRs active`);
     if (approved) bits.push(`${approved} of your PRs approved`);
-    if (watched) bits.push(`${watched} new in watched repos`);
+    if (newPrs) bits.push(`${newPrs} new PR${newPrs === 1 ? '' : 's'} in your repos`);
 
     try {
       const n = new Notification(`Limn — ${added.length} new in My Turn`, {

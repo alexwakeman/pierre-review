@@ -1,6 +1,8 @@
+import { useMemo } from 'react';
 import type { PrBotBehaviour, PrDetail } from '@pierre-review/shared';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { useBotColors } from '../hooks/useBotColors.js';
+import { useRepos } from '../hooks/useTimeline.js';
 import { automatedReviewerMeta, relativeTime } from '../lib/ui.js';
 import { fmtDuration } from './charts/common.js';
 
@@ -118,7 +120,19 @@ function BotBlock({ bot, color }: { bot: PrBotBehaviour; color: string }): JSX.E
 
 export function PrBotBehaviourTab({ pr }: { pr: PrDetail }): JSX.Element {
   const { data, isLoading, isError } = usePrBotBehaviour(pr.id, true);
-  const botColor = useBotColors();
+  // Colours come from the PR'S OWN workspace, not the selected one: vendor identity is a
+  // per-workspace fact on `workspace_reviewers`, and a PR tab can hold a PR from any workspace
+  // (a `?pr=<id>` deep link, a restored `pierre:tabs` entry, a search hit). Reading
+  // `filters.workspaceId` here would paint these bots with another workspace's identities.
+  // `Repo.workspaceId` is the only repo→workspace mapping the client has (same predicate as
+  // ThreadList's `prWorkspaceId`); null before `useRepos()` lands, which the hook degrades to
+  // brand-by-kind for.
+  const { data: repos } = useRepos();
+  const prWorkspaceId = useMemo(
+    () => (repos ?? []).find((r) => r.id === pr.repoId)?.workspaceId ?? null,
+    [repos, pr.repoId],
+  );
+  const botColor = useBotColors(prWorkspaceId);
   const bots = data?.bots ?? [];
 
   return (

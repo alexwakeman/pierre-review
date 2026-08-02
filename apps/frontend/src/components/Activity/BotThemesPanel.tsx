@@ -1,7 +1,7 @@
 import type { BotThemesResult } from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useBotThemes, useRefreshBotThemes } from '../../hooks/useBotThemes.js';
 import { ThemesReportBody, ThemesSkeleton } from './ThemesReportView.js';
@@ -11,8 +11,10 @@ import { prRefToMeta } from './ThemeThreadsDetail.js';
 // automated reviewers are actually flagging (nature + criticality + where), read from the deduped
 // comment stream. Every deterministic figure (per-bot volume, area split, coverage) comes straight
 // from the read layer; the themes + narrative are the model's read (labelled approximate). STRICTLY
-// Pro — gated on the activityDigest AI-summary capability — and scoped to the current TEAM + window.
-// The report BODY is shared with the Feed "Discussion themes" panel (ThemesReportBody).
+// Pro — gated on the activityDigest AI-summary capability — and scoped to the current WORKSPACE +
+// window. There is no repo narrowing: the cached report is keyed `ws:<id>` on both sides (the
+// client's query key and the plugin's `scope_key`), so the panel only renders in the cross-repo
+// Bots rail. The report BODY is shared with the Feed "Discussion themes" panel (ThemesReportBody).
 
 // The deterministic per-bot volume + acted-on rollup (from the read layer, not the model).
 function BotRollup({ result }: { result: BotThemesResult }): JSX.Element | null {
@@ -58,12 +60,14 @@ function BotCoverageLine({ result }: { result: BotThemesResult }): JSX.Element {
 export function BotThemesPanel(): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const window = useFilters((s) => s.botAnalyticsWindow);
-  const scope = scopeToParam(useFilters((s) => s.teamScope));
+  const workspaceId = useFilters((s) => s.workspaceId);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const openThemeThreads = useFilters((s) => s.openThemeThreadsDetail);
 
-  const query = useBotThemes(window, activityDigest, scope);
-  const refresh = useRefreshBotThemes(window, scope);
+  const query = useBotThemes(window, activityDigest, workspaceId);
+  // Generation is the one BILLED path here, so it refuses outright while the workspace is
+  // unresolved rather than spending on the account's Default (see useRefreshBotThemes).
+  const refresh = useRefreshBotThemes(window, workspaceId);
   const usage = useAiUsage(activityDigest);
   const outOfCredits = usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
 
@@ -87,9 +91,13 @@ export function BotThemesPanel(): JSX.Element | null {
         <button
           type="button"
           onClick={() => refresh.mutate()}
-          disabled={busy || outOfCredits}
+          disabled={busy || outOfCredits || workspaceId == null}
           className="ml-auto rounded bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
-          title={outOfCredits ? 'Out of AI credits — resets next month' : 'Summarise what the review bots are flagging over this scope (runs the Haiku model)'}
+          title={
+            outOfCredits
+              ? 'Out of AI credits — resets next month'
+              : 'Summarise what the review bots are flagging in this Workspace (runs the Haiku model)'
+          }
         >
           {busy ? 'Summarising…' : result ? '↻ Regenerate' : 'Generate'}
         </button>

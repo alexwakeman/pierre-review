@@ -33,10 +33,10 @@ import {
 } from '../../sync/sync-manager.js';
 import {
   deleteRepo,
+  getAddedRepoNodeIds,
   getRepo,
-  getWatchedRepoNodeIds,
   listRepos,
-  setRepoInboxWatch,
+  resolveWorkspaceScope,
 } from '../../db/queries.js';
 import { getBranchStatus } from '../../db/branch-queries.js';
 import { accountIdOf } from '../plugins/auth.js';
@@ -54,9 +54,6 @@ const createRepoSchema = {
     properties: {
       owner: { type: 'string', minLength: 1 },
       name: { type: 'string', minLength: 1 },
-      // When true, also Watch the repo for the inbox on add (the picker passes
-      // true for "yours" repos). Optional; defaults to not-watched.
-      watch: { type: 'boolean' },
     },
   },
 };
@@ -66,16 +63,6 @@ const idParamSchema = {
     type: 'object',
     required: ['id'],
     properties: { id: { type: 'integer' } },
-  },
-};
-
-const watchSchema = {
-  ...idParamSchema,
-  body: {
-    type: 'object',
-    required: ['inboxWatch'],
-    additionalProperties: false,
-    properties: { inboxWatch: { type: 'boolean' } },
   },
 };
 
@@ -101,7 +88,8 @@ const searchSchema = {
   },
 };
 
-// `repoIds=1,2,3` → [1,2,3]; absent/blank/garbage → null ("every repo in the account").
+// `repoIds=1,2,3` → [1,2,3]; absent/blank/garbage → null ("no explicit narrowing"). It is fed to
+// `resolveWorkspaceScope` as the `narrow` argument, never used as a scope in its own right.
 function parseIntList(raw: string | undefined): number[] | null {
   if (!raw) return null;
   const ids = raw
@@ -114,17 +102,30 @@ function parseIntList(raw: string | undefined): number[] | null {
 export async function repoRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/repos', async (req) => listRepos(accountIdOf(req)));
 
-  // Default-branch status ("is trunk green?") for every repo in scope: the head snapshot plus
-  // the recent trunk commits with their own CI state. A pure DB read off what the branch sync
-  // already persisted — never a live GitHub call, hence the plain `read` rate-limit tier.
-  // Informational only: nothing here feeds attention counts, My Turn, or any badge.
+  // Default-branch status ("is trunk green?") for every repo in the active WORKSPACE: the head
+  // snapshot plus the recent trunk commits with their own CI state. A pure DB read off what the
+  // branch sync already persisted — never a live GitHub call, hence the plain `read` rate-limit
+  // tier. Informational only: nothing here feeds attention counts, My Turn, or any badge.
+  //
+  // `?workspace=<id>` is the scope; `?repoIds=` only narrows within it. It carried repo ids alone
+  // while `null` meant "every repo of the account", which under a workspace scope meant an EMPTY
+  // workspace (no ids on the wire) rendered the whole account's trunk strip, and two workspaces
+  // sending no ids shared one client cache slot.
+  //
+  // ⚠ THE EMPTY CASE IS HANDLED HERE, NOT IN THE GETTER. `getBranchStatus` reads `[]` as "every
+  // repo the account owns" — the same widening this route exists to close — so an empty workspace
+  // must short-circuit before the call. That getter lives in db/branch-queries.ts and is not this
+  // unit's to change; the guard is the route's until it is.
   app.get('/api/branch-status', async (req): Promise<BranchStatusResponse> => {
-    const q = req.query as { repoIds?: string };
-    return getBranchStatus(accountIdOf(req), parseIntList(q.repoIds));
+    const q = req.query as { workspace?: string; repoIds?: string };
+    const accountId = accountIdOf(req);
+    const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
+    if (scope.repoIds.length === 0) return { repos: [] };
+    return getBranchStatus(accountId, scope.repoIds);
   });
 
   // Live GitHub repository search for the Add-repo picker. Best-match ordering
-  // (GitHub default), already-watched repos filtered out, owned/member repos
+  // (GitHub default), repos already added to this account filtered out, owned/member repos
   // floated to the top. Detail comes straight from GitHub — nothing persisted.
   app.get('/api/repos/search', { schema: searchSchema }, async (req, reply) => {
     const { q, cursor, limit } = req.query as {
@@ -197,7 +198,7 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       };
     }
 
-    const watched = await getWatchedRepoNodeIds(accountId);
+    const added = await getAddedRepoNodeIds(accountId);
     const me = resp.viewer.login.toLowerCase();
     const orgLogins = new Set(
       resp.viewer.organizations.nodes
@@ -209,9 +210,9 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       // GitHub returns a NULL node for any hit the token can't fully resolve (a scoped
       // GitHub-App token in cloud hits this; the local `gh` PAT sees them all), and {} for
       // a (theoretical) non-repo node. Drop both null-safely BEFORE reading `id`/`owner`,
-      // then drop already-watched. (This null node is the cloud-only crash source.)
+      // then drop the ones already added. (This null node is the cloud-only crash source.)
       .filter((n): n is GqlSearchRepo => n != null && typeof n.id === 'string')
-      .filter((n) => !watched.has(n.id))
+      .filter((n) => !added.has(n.id))
       .map((n) => {
         const ownerLogin = n.owner.login;
         return {
@@ -260,8 +261,8 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // First-run onboarding: the viewer's recently-active repositories, detected from their
-  // GitHub activity (recent pushes + contributions). Same token idiom as /search; already-
-  // watched repos filtered out; mapped to the picker's RepoSearchResult shape and ordered
+  // GitHub activity (recent pushes + contributions). Same token idiom as /search; repos
+  // already added filtered out; mapped to the picker's RepoSearchResult shape and ordered
   // most-recently-pushed first, capped at 30. Detail comes straight from GitHub — nothing
   // persisted. Local's broad `gh` token surfaces private + org repos; a scoped cloud token
   // surfaces only what it can read (both are handled by the same null-tolerant merge below).
@@ -312,9 +313,9 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    const watched = await getWatchedRepoNodeIds(accountId);
+    const added = await getAddedRepoNodeIds(accountId);
     const results: RepoSearchResult[] = [...byId.values()]
-      .filter((n) => !watched.has(n.id))
+      .filter((n) => !added.has(n.id))
       // Most-recently-pushed first; a missing pushedAt sorts to the bottom.
       .sort((a, b) => (b.pushedAt ?? '').localeCompare(a.pushedAt ?? ''))
       .slice(0, 30)
@@ -364,18 +365,15 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       };
     }
 
-    // Enforce the per-account repo cap. Re-adding an already-watched repo is an
+    // Enforce the per-account repo cap. Re-adding a repo that is already there is an
     // idempotent no-op (it doesn't grow the count), so only genuinely NEW repos
     // are blocked once at the limit.
-    const watched = await getWatchedRepoNodeIds(accountId);
-    if (
-      watched.size >= MAX_REPOS_PER_ACCOUNT &&
-      !watched.has(resp.repository.id)
-    ) {
+    const added = await getAddedRepoNodeIds(accountId);
+    if (added.size >= MAX_REPOS_PER_ACCOUNT && !added.has(resp.repository.id)) {
       reply.status(409);
       return {
         error: 'RepoLimitExceeded',
-        message: `You can watch at most ${MAX_REPOS_PER_ACCOUNT} repositories. Remove one to add another.`,
+        message: `You can add at most ${MAX_REPOS_PER_ACCOUNT} repositories. Remove one to add another.`,
       };
     }
 
@@ -389,11 +387,13 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       accountId,
     );
 
-    // Auto-watch every newly-added repo for the inbox (so its activity flows into the feed +
-    // team scopes by default). Idempotent on re-add and preserves an existing watch-start
-    // (setRepoInboxWatch only stamps the start when unset). The `watch` body field is now
-    // vestigial — every add watches — but the schema still accepts it for back-compat.
-    await setRepoInboxWatch(accountId, repoId, true);
+    // No second visibility axis to set: `upsertRepo` gives the repo its workspace membership
+    // in the same transaction, and a repo in a workspace is fully live — Feed, Activity, My
+    // Turn and Bots all cover it. (The old `setRepoInboxWatch(accountId, repoId, true)` call
+    // that used to sit here, and the `watch` body field that fed it, are both gone.)
+    //
+    // My Turn's "New PRs" clock is `repos.createdAt`, stamped by that same upsert, so adding a
+    // repo with 400 open PRs still doesn't dump them into the inbox on day one.
 
     // Kick off the initial backfill in the background.
     runSyncForRepo(repoId, app.log, { background: true });
@@ -402,20 +402,10 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     return getRepo(repoId, accountId);
   });
 
-  // Toggle "Watch for inbox" on a repo. Activity-only: it does not affect timeline
-  // visibility or syncing. Ownership-scoped → 404 for a repo this account doesn't own.
-  app.patch('/api/repos/:id', { schema: watchSchema }, async (req, reply) => {
-    const { id } = req.params as { id: number };
-    const { inboxWatch } = req.body as { inboxWatch: boolean };
-    const accountId = accountIdOf(req);
-    const ok = await setRepoInboxWatch(accountId, id, inboxWatch);
-    if (!ok) {
-      reply.status(404);
-      return { error: 'NotFound', message: `Repo ${id} not found` };
-    }
-    return getRepo(id, accountId);
-  });
-
+  // NOTE: there is no `PATCH /api/repos/:id`. Its only body was `{ inboxWatch }`, and the
+  // "watched" axis is gone — a repo is either in a workspace (fully live) or removed. Moving
+  // a repo between workspaces is `PATCH /api/workspaces/:id` / `POST /api/workspaces/:id/repos`,
+  // not a mutation of the repo row.
   app.delete('/api/repos/:id', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
     const accountId = accountIdOf(req);

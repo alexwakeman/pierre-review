@@ -9,18 +9,22 @@ import { useBotAnalytics } from '../../hooks/useBotTriage.js';
 import { useBotVendorPrs } from '../../hooks/useBotVendorPrs.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { useUsers } from '../../hooks/useTimeline.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { CI_META, indexUsers, relativeTime } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
 
-// The bot-vendor PR DRILL-DOWN — a persistent, singleton tab opened by clicking an
-// automated-reviewer row in the Bot-ROI panel. One sub-tab per detected vendor, each listing
-// the PRs that reviewer touched in the window (thread volume, acted-on %, still-untouched,
-// and whether ONLY bots reviewed the PR) so a lead can see WHERE a bot's attention lands.
-// Vendor sub-tabs come from the CORE analytics read (useBotAnalytics); the per-vendor PR
-// list is a lazy read (useBotVendorPrs). Clicking any PR opens its detail tab.
+// The bot PR DRILL-DOWN — a persistent, singleton tab opened by clicking an automated-reviewer
+// row in the Bot-ROI panel. One sub-tab per detected bot, each listing the PRs that reviewer
+// touched in the window (thread volume, acted-on %, still-untouched, and whether ONLY bots
+// reviewed the PR) so a lead can see WHERE a bot's attention lands. Bot sub-tabs come from the
+// CORE analytics read (useBotAnalytics); the per-bot PR list is a lazy read (useBotVendorPrs).
+// Clicking any PR opens its detail tab.
+//
+// ⚠ IT REPRODUCES ONE ROW OF THE PANEL IT WAS OPENED FROM, so it takes the identical
+// workspace + repo narrowing: the header label and each row's `botOnly` badge must not be able to
+// contradict the ROI table behind them.
 
 // The window picker options — kept in lockstep with BotRoiPanel's WINDOWS (same store field).
 const WINDOWS: { key: BotWindowKind; label: string }[] = [
@@ -199,22 +203,23 @@ export function BotPrsDetail(): JSX.Element {
   const consumeBotPrsFocus = useFilters((s) => s.consumeBotPrsFocus);
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
-  const scope = scopeToParam(useFilters((s) => s.teamScope));
-  // The repo the drill-down was opened from (per-repo Bots tab) — scopes the whole tab to that
-  // repo; null (the cross-repo Bots rail) falls back to the team scope. Read (not consumed) so
-  // the scope persists for the tab's lifetime; it's only reset when the next drill-down opens.
+  const workspaceId = useFilters((s) => s.workspaceId);
+  // The repo the drill-down was opened from (per-repo Bots tab) — narrows the whole tab's DATA to
+  // that repo; null (the cross-repo Bots rail) measures the whole workspace. Read (not consumed)
+  // so it persists for the tab's lifetime; only reset when the next drill-down opens.
   const focusRepoId = useFilters((s) => s.botPrsFocusRepoId);
   const repoScope = useMemo(() => (focusRepoId != null ? [focusRepoId] : null), [focusRepoId]);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
-  // The account-wide per-bot colour resolver (brand-aware) — so each in-house reviewer's tab
-  // gets its own distinct hue instead of all sharing the neutral gray.
-  const botColor = useBotColors();
+  // The ACTIVE WORKSPACE's per-bot colour resolver (brand-aware) — so each in-house reviewer's tab
+  // gets its own distinct hue instead of all sharing the neutral gray. Identity is a per-workspace
+  // fact, so the colour map is fetched at the same workspace as everything else on this tab.
+  const botColor = useBotColors(workspaceId);
 
-  // Vendor sub-tabs come from the CORE analytics read (the same query the Bot-ROI panel uses,
-  // so switching to this tab is usually instant off the cache).
-  const analytics = useBotAnalytics(window, true, scope, repoScope);
+  // Bot sub-tabs come from the CORE analytics read (the same query the Bot-ROI panel uses, at the
+  // same workspace + repo narrowing, so switching to this tab is usually instant off the cache).
+  const analytics = useBotAnalytics(workspaceId, window, true, repoScope);
   const vendors = analytics.data?.vendors ?? NO_VENDORS;
 
   // The active reviewer sub-tab, identified by its analytics-row KEY (`u<userId>` | 'pierre').
@@ -237,7 +242,7 @@ export function BotPrsDetail(): JSX.Element {
     );
   }, [vendors]);
 
-  const prs = useBotVendorPrs(active, window, true, scope, repoScope);
+  const prs = useBotVendorPrs(workspaceId, active, window, true, repoScope);
   const rows = prs.data?.prs ?? [];
   // The selected reviewer's per-reviewer label (from the drill-down response) for the header.
   const activeLabel = prs.data?.label ?? null;

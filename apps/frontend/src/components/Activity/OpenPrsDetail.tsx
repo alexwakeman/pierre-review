@@ -4,7 +4,8 @@ import type { OpenPrsResponse, TimelinePr, User } from '@pierre-review/shared';
 import { api } from '../../api/client.js';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
-import { buildOpenPrsSearch, useFilters } from '../../store/filters.js';
+import { workspaceKey } from '../../hooks/useActivity.js';
+import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
   CI_META,
@@ -164,22 +165,39 @@ export function OpenPrsDetail(): JSX.Element {
   // stale null (can't normally happen — the tab is ephemeral) falls back to the feed scope.
   const scope = useFilters((s) => s.openPrsScope);
   const repoScopeId = typeof scope === 'number' ? scope : null;
-  // A team GROUP scope (from a FeedOpenPrsPanel group footer): the group's exact repo set,
+  // A repo GROUP scope (from a FeedOpenPrsPanel group footer): the group's exact repo set,
   // so the tab reproduces the group and the footer's promised count holds.
   const groupScope = scope != null && typeof scope === 'object' ? scope : null;
-  // Member-AGNOSTIC fetch (Members is a Timeline-only filter — the Activity lists never
-  // narrow by it): a repo/group scope fetches just those repos; 'feed' reuses the FilterBar-
-  // visible repo scope (the same query string as useSearchOpenPrs → shared cache entry).
-  const search = useFilters((s) =>
-    repoScopeId != null
-      ? `repoIds=${repoScopeId}`
-      : groupScope != null
-        ? new URLSearchParams({ repoIds: groupScope.repoIds.join(',') }).toString()
-        : buildOpenPrsSearch(s, false),
-  );
+  // The ACTIVE WORKSPACE is the scope in every branch below, including the narrowed ones.
+  //
+  // ⚠ `repoIds` ALONE IS NOT A SCOPE any more: `/api/open-prs` resolves the workspace from
+  // `?workspace=` (absent ⇒ the account's DEFAULT) and returns `membership ∩ repoIds`. A
+  // repo-scoped drill-down that sent only `repoIds=<id>` would therefore be intersected against
+  // Default's membership and come back EMPTY for any repo the user moved into another workspace.
+  const workspaceId = useFilters((s) => s.workspaceId);
+  // Member-AGNOSTIC fetch (Members is a Timeline-only filter — the Activity lists never narrow by
+  // it), and repo-picker-agnostic for the same reason: a repo/group scope fetches just the repos
+  // the OPENER named, WITHIN the active workspace; the unscoped 'feed' case is the whole workspace.
+  //
+  // ⚠ 'feed' used to reuse `buildOpenPrsSearch(s, false)`, i.e. the FilterBar's repo picker. That
+  // picker is a TIMELINE-board control and is not mounted on Activity, so this tab could open
+  // silently short of the count the panel that launched it had just promised, with nothing on
+  // screen to widen it. Its string is byte-identical to `useWorkspaceOpenPrs`' whenever the picker
+  // is unset, so the shared-cache-entry property survives the common case.
+  const search = useFilters((s) => {
+    const p = new URLSearchParams();
+    if (s.workspaceId != null) p.set('workspace', String(s.workspaceId));
+    if (repoScopeId != null) p.set('repoIds', String(repoScopeId));
+    else if (groupScope != null) p.set('repoIds', groupScope.repoIds.join(','));
+    return p.toString();
+  });
   const { data, isLoading, isError, refetch, isFetching } = useQuery<OpenPrsResponse>({
-    queryKey: ['open-prs', search],
+    // The `ws:<id>` segment is NOT redundant with the `workspace=` param: the param fixes what the
+    // server returns, the segment fixes which cache entry it lands in (two workspaces on the same
+    // repo narrowing build the same string).
+    queryKey: ['open-prs', workspaceKey(workspaceId), search],
     queryFn: () => api.openPrs(search),
+    enabled: workspaceId != null,
     placeholderData: (prev) => prev,
   });
 
@@ -236,7 +254,7 @@ export function OpenPrsDetail(): JSX.Element {
       ? repoNameById.get(repoScopeId) ?? `repo ${repoScopeId}`
       : groupScope != null
         ? groupScope.label
-        : 'all visible repos';
+        : 'every repo in this Workspace';
   const draftCount = rows.reduce((n, p) => n + (p.isDraft ? 1 : 0), 0);
 
   return (
@@ -271,7 +289,7 @@ export function OpenPrsDetail(): JSX.Element {
         <div className="text-sm text-red-500">Couldn’t load the open PRs.</div>
       ) : rows.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          No open PRs in this scope. 🎉
+          No open PRs here. 🎉
         </div>
       ) : (
         <div className="overflow-x-auto">

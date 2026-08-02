@@ -1,8 +1,12 @@
-// Phase 2 "review-bot signal-to-noise" compute, on a THROWAWAY sqlite DB. Seeds one watched
-// repo + open PR with a mix of review-BOT threads (by a coderabbitai user) plus a human thread,
-// then asserts (a) getActivity's per-repo botThreads/botThreadsActedOn, and (b) getTeamInsights'
-// deterministic bot_signal card — proving the classifier segments bot vs human and the acted-on
-// heuristic (resolved|likely_addressed) is counted correctly.
+// Phase 2 "review-bot signal-to-noise" compute, on a THROWAWAY sqlite DB. Seeds one repo +
+// open PR with a mix of review-BOT threads (by a coderabbitai user) plus a human thread,
+// then asserts (a) getActivity's per-repo botThreads/botThreadsActedOn, and (b)
+// getWorkspaceInsights' deterministic bot_signal card — proving the classifier segments bot vs
+// human and the acted-on heuristic (resolved|likely_addressed) is counted correctly.
+//
+// A third block pins the GRAIN the judgement now lives at: one `workspace_reviewers` row per
+// (account, workspace, actor). A stored "this is a human" must bite in the workspace being read
+// and must be invisible from any other one.
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
@@ -19,6 +23,10 @@ let schema: any;
 let closeDb: (() => void) | undefined;
 let q: any;
 let prId = 0;
+let botId = 0;
+// BotScope { workspaceId, repoIds } — `workspaceId` decides who counts as a bot, `repoIds`
+// narrows the measured data. Resolved through the production resolver in beforeAll.
+let scope: any;
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -35,10 +43,10 @@ beforeAll(async () => {
   const now = Date.now();
   const { repos, pullRequests, events, users, reviewThreads } = schema;
 
-  // account 1 exists (migration 0008). One watched repo + one open PR.
+  // account 1 exists (migration 0008). One repo + one open PR.
   const [repo] = await db
     .insert(repos)
-    .values({ accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_bs', inboxWatch: true })
+    .values({ accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_bs' })
     .returning()
     .execute();
   const [pr] = await db
@@ -80,6 +88,7 @@ beforeAll(async () => {
     .values({ githubLogin: 'morgan-diaz', githubNodeId: 'U_mo', isBot: false })
     .returning()
     .execute();
+  botId = bot.id;
 
   // 5 BOT threads: 2 acted-on (resolved + likely_addressed), 2 untouched, 1 replied_unresolved.
   // Plus 1 HUMAN untouched thread that must NOT be counted as bot.
@@ -107,13 +116,22 @@ beforeAll(async () => {
       })
       .execute();
   }
+
+  // ⚠ Resolve the scope through `resolveWorkspaceScope`, never by hand-building
+  // `{workspaceId, repoIds}` — that call runs `ensureRepoMemberships`, which is what puts a repo
+  // inserted straight into `repos` (bypassing upsertRepo's in-transaction membership insert) into
+  // the account's Default workspace. Hand-build it and the repair never runs, the repo belongs to
+  // NO workspace, and `getActivity` returns zero repos — which reads exactly like a segmentation
+  // bug and is not one.
+  scope = await q.resolveWorkspaceScope(1, null);
 });
 
 afterAll(() => closeDb?.());
 
 describe('review-bot signal-to-noise (Phase 2)', () => {
   it('getActivity segments bot threads + counts acted-on over open PRs', async () => {
-    const activity = await q.getActivity(1, null);
+    expect(scope.repoIds).toHaveLength(1); // the seeded repo is in the workspace being read
+    const activity = await q.getActivity(1, scope);
     const repo = activity.repos[0];
     expect(repo).toBeDefined();
     // 5 bot threads (the human thread is excluded); acted-on = resolved + likely_addressed = 2.
@@ -121,8 +139,9 @@ describe('review-bot signal-to-noise (Phase 2)', () => {
     expect(repo.stats.botThreadsActedOn).toBe(2);
   });
 
-  it('getTeamInsights emits a deterministic bot_signal card', async () => {
-    const insights = await q.getTeamInsights(1);
+  it('getWorkspaceInsights emits a deterministic bot_signal card', async () => {
+    // (accountId, window|undefined, scope) — `undefined` keeps the legacy default window.
+    const insights = await q.getWorkspaceInsights(1, undefined, scope);
     const card = insights.cards.find((c: { kind: string }) => c.kind === 'bot_signal') as
       | BotSignalCard
       | undefined;
@@ -137,6 +156,49 @@ describe('review-bot signal-to-noise (Phase 2)', () => {
     expect(card.vendors[0]!.kind).toBe('coderabbit');
     expect(card.vendors[0]!.threads).toBe(5);
     expect(card.vendors[0]!.untouched).toBe(2);
+  });
+});
+
+// The judgement grain. `automatedReviewerUserIds` unions the known-vendor login set with THIS
+// workspace's `workspace_reviewers` rows, and a manual "this is a human" wins both directions —
+// it removes even a known vendor login. That makes it the sharpest available probe of which
+// workspace a getter actually read: the same row, written to two different workspace ids, must
+// produce two different answers. Without this pair a getter that ignored `scope.workspaceId`
+// entirely (or read some arbitrary workspace's rows) would pass every other test in this file.
+describe('the judgement is a WORKSPACE fact (one row per account+workspace+actor)', () => {
+  const humanRow = (workspaceId: number) => ({
+    accountId: 1,
+    workspaceId,
+    authorUserId: botId,
+    automated: false,
+    role: 'review',
+    confidence: 'high',
+    source: 'manual', // manual + !automated ⇒ manualHuman ⇒ removed from the automated set
+  });
+
+  it('a manual "not a bot" in ANOTHER workspace leaves this workspace\'s segmentation alone', async () => {
+    const { workspaceReviewers } = schema;
+    const other = await q.createWorkspace(1, 'Other');
+    await db.insert(workspaceReviewers).values(humanRow(other.id)).execute();
+    try {
+      const activity = await q.getActivity(1, scope); // read at the DEFAULT workspace
+      expect(activity.repos[0].stats.botThreads).toBe(5); // unchanged — the row is not ours
+    } finally {
+      await db.delete(workspaceReviewers).execute();
+      await q.deleteWorkspace(other.id, 1); // (id, accountId)
+    }
+  });
+
+  it('the SAME row in the workspace being read does bite (so the check above is not vacuous)', async () => {
+    const { workspaceReviewers } = schema;
+    await db.insert(workspaceReviewers).values(humanRow(scope.workspaceId)).execute();
+    try {
+      const activity = await q.getActivity(1, scope);
+      expect(activity.repos[0].stats.botThreads).toBe(0); // coderabbitai is a person here
+      expect(activity.repos[0].stats.botThreadsActedOn).toBe(0);
+    } finally {
+      await db.delete(workspaceReviewers).execute();
+    }
   });
 });
 

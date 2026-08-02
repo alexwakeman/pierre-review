@@ -1,19 +1,23 @@
 import type { FastifyInstance } from 'fastify';
 import type { User } from '@pierre-review/shared';
-import { getScopeMentionCandidates, resolveScopeRepoIds } from '../../db/queries.js';
+import { getScopeMentionCandidates, resolveWorkspaceScope } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
-// Scope-wide @mention candidates (CORE) — the team/repo-scoped sibling of
-// GET /api/prs/:id/mention-candidates. Powers the ad-hoc Insights "Ask about the sprint" box,
-// whose questions span the whole selected scope rather than one PR. `scope` mirrors the Insights
-// scope string ('all' | 'none' | 'teams' | '<teamId>'); it's resolved to the account's repo set
-// server-side (resolveScopeRepoIds), so a caller can't widen it. Self + bots excluded. Returns a
-// bare User[] exactly like the PR route so MentionTextarea can consume it directly.
+// Workspace-wide @mention candidates (CORE) — the scope-wide sibling of
+// GET /api/prs/:id/mention-candidates. Powers the ad-hoc Insights "Ask about the workspace" box,
+// whose questions span the whole selected scope rather than one PR.
+//
+// `?workspace=<id>` is a plain integer; absent / unparseable / another tenant's id all resolve to
+// the account's DEFAULT workspace (never a 404 — every id yields the same response shape, so it is
+// not an existence oracle). `resolveWorkspaceScope` turns it into the workspace's repo ids
+// server-side, so a caller cannot widen it, and an empty workspace yields `[]` → no candidates,
+// rather than the account's whole roster. Self + bots excluded. Returns a bare User[] exactly like
+// the PR route so MentionTextarea can consume it directly.
 export async function mentionsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/mention-candidates', async (req): Promise<User[]> => {
-    const q = req.query as { scope?: string };
+    const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
-    const repoIds = await resolveScopeRepoIds(accountId, q.scope ?? 'all');
-    return getScopeMentionCandidates(accountId, repoIds);
+    const scope = await resolveWorkspaceScope(accountId, q.workspace);
+    return getScopeMentionCandidates(accountId, scope.repoIds);
   });
 }

@@ -30,7 +30,7 @@ export interface ProCapabilities {
   aiAnalysis: boolean; // AI Fix: CI failure analysis (Haiku, read-only) + the Analysis tab
   prSummary: boolean; // per-PR AI summary (Haiku, read-only) — cheap SUMMARY tier, on in cloud
   aiFix: boolean; // AI Fix: agentic inline code fix + push (Agent SDK, needs write)
-  teamInsights: boolean; // team review-intelligence "Insights" (no AI; pure reads)
+  workspaceInsights: boolean; // workspace review-intelligence "Insights" (no AI; pure reads)
   claudeReview: boolean; // agentic Claude Review (Agent SDK; the product lives in the plugin)
   slackDigest: boolean; // Slack webhook delivery of the sprint + repo digest (Pro; mirrors activityDigest)
   issueLinks: boolean; // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI)
@@ -474,6 +474,26 @@ export interface SprintWindow {
   toMs: number;
 }
 
+// The wire form of the host's `BotScope` — the ONE shape every workspace-scoped getter takes.
+// Structurally identical to `db/queries.ts`'s `BotScope`, re-declared here (and mirrored in
+// packages/pro/src/contract-types.ts) because the plugin imports no host internals.
+//
+// It carries TWO different things, which the predecessor `repoIds: number[] | null` conflated:
+// `workspaceId` decides WHO COUNTS AS A BOT (the judgement grain — always exactly one), and
+// `repoIds` narrows WHICH DATA IS MEASURED (always concrete; `[]` is a legal, ordinary state
+// meaning "this workspace has no repos", not an edge case). Two named fields, so a call site
+// cannot transpose a number and a number[] and cannot forget which one the verdict comes from.
+//
+// ⚠ A BotScopeWire is only ever produced by the host — `resolveWorkspaceScope` (per request) or
+// `workspaceScopeForRepo` (below). The plugin must NOT hand-assemble one from a repo list it
+// gathered elsewhere: the host's resolver is what guarantees `repoIds ⊆ the workspace's
+// membership`, and an out-of-workspace repo id makes one workspace's data get measured through
+// another workspace's verdicts.
+export interface BotScopeWire {
+  workspaceId: number;
+  repoIds: number[];
+}
+
 // A curated, stable slice of the read layer, handed to the plugin via ctx.queries
 // (the plugin never imports the host's query module). Returns are `unknown` to
 // keep the contract decoupled from the host's concrete result types; the plugin
@@ -486,58 +506,74 @@ export interface ProHostQueries {
     accountId: number;
     repoIds?: number[] | null;
   }): Promise<unknown>;
-  getActivity(accountId: number, repoIds?: number[] | null): Promise<unknown>; // WS2 aggregate (lands in a later phase)
-  // Team review-intelligence cards (stalled reviews / untouched threads / reviewer load /
-  // routing), computed over the account's WATCHED repos. Returns InsightsResponse. The optional
-  // `window` (epoch-millis) overrides the default metrics window with the account's configured
-  // SPRINT (see the Pro sprint config); open PRs always count regardless of age. Omitted → the
-  // built-in default window (unchanged legacy behavior).
-  // The optional `repoIds` (apiVersion 12) scopes the computation to an explicit repo set (a
-  // Team) INSTEAD of the account's watched repos; omitted/null keeps the watched-set default.
-  getTeamInsights(
+  // The Activity aggregate. Takes a full scope, not a repo list: its acted-on bot stat needs the
+  // WORKSPACE to know who counts as an automated reviewer.
+  getActivity(accountId: number, scope: BotScopeWire): Promise<unknown>;
+  // Workspace review-intelligence cards (stalled reviews / untouched threads / reviewer load /
+  // routing). Returns WorkspaceInsightsResponse. `window` (epoch-millis) overrides the default
+  // metrics window with the account's configured SPRINT (see the Pro sprint config); open PRs
+  // always count regardless of age. `undefined` → the built-in default window.
+  // `scope` is a full BotScopeWire because the `bot_signal` and `bot_only_review` cards need the
+  // WORKSPACE to know who counts as an automated reviewer; `scope.repoIds` only narrows the data.
+  // (`window` is a REQUIRED-but-undefined-able parameter, not optional: it precedes a required
+  // one, so `window?` would not compile.)
+  getWorkspaceInsights(
     accountId: number,
-    window?: SprintWindow,
-    repoIds?: number[] | null,
+    window: SprintWindow | undefined,
+    scope: BotScopeWire,
   ): Promise<unknown>;
-  // The per-metric PR drill-down behind the flow-metric tiles (watched repos + sprint).
-  // Returns TeamMetricsDetail. Heavier than getTeamInsights — loaded on demand. Same optional
-  // sprint `window` override + the apiVersion-12 optional `repoIds` team scope.
-  getTeamMetricsDetail(
+  // The per-metric PR drill-down behind the flow-metric tiles. Returns WorkspaceMetricsDetail.
+  // Heavier than getWorkspaceInsights — loaded on demand. Same sprint `window` override.
+  // `repoIds` is REQUIRED and CONCRETE — this getter is pure flow metrics and needs no judgement
+  // grain, so it takes the repo list alone. `[]` is a legal state (an empty workspace) and yields
+  // the empty result; there is no null "means the watched set" widening.
+  getWorkspaceMetricsDetail(
     accountId: number,
-    window?: SprintWindow,
-    repoIds?: number[] | null,
+    window: SprintWindow | undefined,
+    repoIds: number[],
   ): Promise<unknown>;
+  // The repo → workspace direction, as a ready-made scope. TWO plugin call sites hold only a
+  // repoId and nothing else (the per-repo Insights metrics route and the per-repo Haiku digest's
+  // payload builder), and the plugin cannot compute a workspace from one: ctx exposes no such
+  // lookup and its own resolveWorkspaceRepoIds goes the other way. Ownership-bound — a foreign or
+  // unknown repo yields null, never another tenant's workspace id.
+  workspaceScopeForRepo(accountId: number, repoId: number): Promise<BotScopeWire | null>;
+  // The account's Default workspace id (creating the row if it is somehow absent). For the two
+  // ACCOUNT-WIDE CRON paths — the Slack digest and the AI-policy sprint refresh — which have no
+  // request and therefore no `?workspace=`. They previously leaned on a `scope = 'all'` default
+  // that covered every watched repo in the account; 'all' no longer exists.
+  // ⚠ BEHAVIOUR CHANGE, stated deliberately: those sweeps now cover the DEFAULT WORKSPACE ONLY.
+  // Iterating every workspace would multiply a billed LLM call by workspace count on a cron.
+  defaultWorkspaceId(accountId: number): Promise<number>;
   // Month-to-date-style AI-spend rollup for an account, split by seam (summary / agent).
   // Returns { summaryUsd, agentUsd, totalUsd }. Currently UNUSED by the plugin (the ai-usage
   // route now reads ctx.aiCredits.check, which carries turns + credits) — retained as a forward
   // hook for any future raw-USD Pro surface.
   getAiUsage(accountId: number, sinceMs: number): Promise<unknown>;
   // Deterministic review-bot ROI/behaviour rollup (CORE) — per-reviewer volume / acted-on% /
-  // untouched / verdict, over `window`. Additive (apiVersion stays 12). Returns BotAnalyticsResponse;
-  // the plugin casts it. `repoIds` scopes to a Team's repos (null → all account repos). Powers the
-  // ad-hoc Insights chat's optional bot-performance context.
+  // untouched / verdict, over `window`. Returns BotAnalyticsResponse; the plugin casts it.
+  // Powers the ad-hoc Insights chat's optional bot-performance context.
   getBotAnalytics(
     accountId: number,
     window: BotWindowKind,
-    repoIds?: number[] | null,
+    scope: BotScopeWire,
   ): Promise<unknown>;
   // The raw automated-reviewer comment CONTENT for a scope/window (Pro "Themes" AI summary — the
-  // one bot query that returns bodies). Additive (apiVersion stays 12). Returns
-  // { comments: BotReviewCommentRow[]; truncated } (cast by the plugin); `repoIds` scopes to a
-  // Team's repos (null → all account repos). Only automated-reviewer authors, capped most-recent.
+  // one bot query that returns bodies). Returns { comments: BotReviewCommentRow[]; truncated }
+  // (cast by the plugin). Only automated-reviewer authors, capped most-recent.
   getBotReviewComments(
     accountId: number,
     window: BotWindowKind,
-    repoIds?: number[] | null,
+    scope: BotScopeWire,
   ): Promise<unknown>;
   // The HUMAN sibling of getBotReviewComments — non-bot review + PR comment CONTENT for a
-  // scope/window (the Pro "Discussion themes" Feed summary). Additive (apiVersion stays 12).
-  // Returns { comments: HumanReviewCommentRow[]; truncated } (cast by the plugin); `repoIds`
-  // scopes to a Team's repos (null → all account repos). Excludes every bot/automated reviewer.
+  // scope/window (the Pro "Discussion themes" Feed summary). Returns
+  // { comments: HumanReviewCommentRow[]; truncated } (cast by the plugin). Excludes every
+  // bot/automated reviewer.
   getHumanReviewComments(
     accountId: number,
     window: BotWindowKind,
-    repoIds?: number[] | null,
+    scope: BotScopeWire,
   ): Promise<unknown>;
 }
 
@@ -627,7 +663,16 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  apiVersion: 13; // contract handshake; host warns on mismatch
+  // Contract handshake; host warns on mismatch. 13 → 14: the workspace refactor is BREAKING —
+  // every scope-bearing ProHostQueries member changed shape, `getTeamInsights`/
+  // `getTeamMetricsDetail` were renamed, two members were added, and the `teamInsights`
+  // capability became `workspaceInsights`.
+  //
+  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (the `plugin?.apiVersion !== 14` runtime gate) and two
+  // more in the plugin (packages/pro/src/index.ts, packages/pro/src/contract-types.ts). Bump ALL
+  // FOUR or the plugin log-and-degrades to OSS mode against a version that is actually correct:
+  // capabilities go dark, every /api/pro/* route 404s, and nothing throws.
+  apiVersion: 14;
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
@@ -640,7 +685,7 @@ export const EMPTY_CAPABILITIES: ProCapabilities = {
   aiAnalysis: false,
   prSummary: false,
   aiFix: false,
-  teamInsights: false,
+  workspaceInsights: false,
   claudeReview: false,
   slackDigest: false,
   issueLinks: false,

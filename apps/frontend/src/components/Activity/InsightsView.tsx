@@ -6,13 +6,15 @@ import { TrackUsage } from './TrackUsage.js';
 // The Pro "Insights" pane. Overview is a SINGLE consolidated surface: the ad-hoc chat with
 // quick-question pills (the former Sprint-report card + the six-question preset carousel were
 // folded into the chat — a pill pre-fills the box, the user presses Ask). The attention cards
-// that used to sit beneath the AI panels moved to the CORE/free Feed "Needs attention" tab
+// that used to sit beneath the AI panels moved to the CORE/free "Needs attention" rail entry
 // (AttentionView).
 //
-// The cross-team "Compare" sub-tab MOVED OUT to the Feed's sub-tab bar (see Activity/index.tsx).
-// It was gated here on `teamScope === 'teams'` — the All-Teams sentinel ONLY — so selecting an
-// explicit two-of-five teams made the tab silently vanish, which is the bug that move fixes. It
-// is also CORE/free now, and belongs beside the free flow-metric header whose window it shares.
+// The "Compare" sub-tab MOVED OUT twice and now lives on the Activity RAIL as its own line
+// ("Compare workspaces", `activityRepoId === 'compare'`; see Activity/index.tsx). It was gated
+// here on the old All-Teams scope sentinel, so an explicit two-of-five selection made the tab
+// silently vanish; it then sat briefly on the Feed's sub-tab bar. It is CORE/free, compares EVERY
+// workspace in the account rather than anything the selection narrows, and is shown whenever the
+// account owns 2+ workspaces — which is why it could not stay under a scoped pane at all.
 
 // InsightsSubTab lives in the store (filters.ts) — the last-active tab is remembered there.
 // SUB_TABS is the list of tabs that CURRENTLY exist; anything else stored or deep-linked (the
@@ -98,7 +100,7 @@ export function InsightsView(): JSX.Element {
 
       {/* Consolidated: JUST the ad-hoc chat (with quick-question pills). The Sprint report card +
           the "Sprint questions" preset carousel folded into it; the attention cards moved to the
-          free Feed "Needs attention" tab, and Compare to the free Feed sub-tab bar. */}
+          free "Needs attention" rail entry, and Compare to the free "Compare workspaces" one. */}
       <AdHocChatPanel />
     </div>
   );

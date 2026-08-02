@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
-import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, parseUserActivityKey } from '../../store/pinnedTabs.js';
-import { useRepos, useUsers } from '../../hooks/useTimeline.js';
+import { useUsers } from '../../hooks/useTimeline.js';
 import { profileUrl, userLabel } from '../../lib/ui.js';
 import { FeedView } from './FeedView.js';
 
@@ -17,9 +16,7 @@ import { FeedView } from './FeedView.js';
 export function UserActivityDetail(): JSX.Element {
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const tabs = usePinnedTabs((s) => s.tabs);
-  const visibleRepoIds = useFilters((s) => s.repoIds);
   const { data: users } = useUsers();
-  const { data: repos } = useRepos();
 
   // The tab's own key carries the user id — no seed to consume, so re-opening the same
   // person's tab (or reloading into a stale key) can never show someone else's feed.
@@ -37,13 +34,6 @@ export function UserActivityDetail(): JSX.Element {
   const label = user
     ? userLabel(user, userId ?? 0)
     : (tab?.userMeta?.displayName ?? tab?.userMeta?.login ?? `user ${userId ?? '?'}`);
-
-  const scopeLabel =
-    visibleRepoIds && visibleRepoIds.length > 0
-      ? visibleRepoIds.length === 1
-        ? ((repos ?? []).find((r) => r.id === visibleRepoIds[0])?.fullName ?? '1 repo')
-        : `${visibleRepoIds.length} repos`
-      : 'all watched repos';
 
   if (userId == null) {
     return (
@@ -75,8 +65,12 @@ export function UserActivityDetail(): JSX.Element {
           {label}
           <span className="font-normal text-gray-400"> · activity</span>
         </h2>
+        {/* The scope caption is a FIXED string now, and deliberately so: the feed below covers
+            every repo in the active Workspace. It used to name the FilterBar's per-repo
+            visibility, which is a Timeline-board filter the feed no longer honours — a caption
+            reading "across 2 repos" over a Workspace-wide feed is worse than no caption. */}
         <span className="text-[11px] text-gray-400">
-          last 14 days · across {scopeLabel} · merge/close rows are PRs they authored
+          last 14 days · across this Workspace · merge/close rows are PRs they authored
         </span>
         {login && (
           <a

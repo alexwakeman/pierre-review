@@ -175,8 +175,12 @@ function InsightThread({ card }: { card: UntouchedThreadCard }): JSX.Element {
 }
 
 // Suggested reviewers + rationale + a single "Assign" button that requests them on the PR
-// (server-gated on write access; drops the author + bots). Once requested, ['team-insights'] +
+// (server-gated on write access; drops the author + bots). Once requested, ['workspace-insights'] +
 // ['attention-cards'] are invalidated → the card leaves the board on the next refresh.
+//
+// ⚠ EVERY "team" BELOW IS GITHUB'S OWN, not a Limn Workspace: `ReviewerSuggestion.kind === 'team'`
+// carries an `@org/team` slug that addresses GitHub's review-request API. The word must NOT be
+// renamed here — it is the opposite category to a Workspace, which is our own grouping of repos.
 function RoutingReviewers({
   card,
   usersById,

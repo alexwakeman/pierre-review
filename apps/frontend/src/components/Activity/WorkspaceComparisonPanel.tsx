@@ -1,31 +1,37 @@
 import { useMemo } from 'react';
-import type { TeamComparisonRow, TeamMetrics } from '@pierre-review/shared';
-import { useTeamComparison } from '../../hooks/useTeamComparison.js';
-import { useTeams } from '../../hooks/useTeams.js';
-import { buildTeamColorMap, teamColorFor } from '../../lib/teamColors.js';
+import type { WorkspaceComparisonRow, WorkspaceMetrics } from '@pierre-review/shared';
+import { useWorkspaceComparison } from '../../hooks/useWorkspaceComparison.js';
+import { buildWorkspaceColorMap, workspaceColorFor } from '../../lib/workspaceColors.js';
 import { fmtDuration, fmtNum } from '../charts/common.js';
 
-// Cross-team comparison — the Feed's "Compare teams" sub-tab, shown whenever 2+ teams are in
-// scope. A compact metric×team matrix (teams as columns, flow metrics as rows) plus a 12-week
-// throughput sparkline per team, highlighting the best/worst team per metric so a lead can spot
+// Cross-workspace comparison — the Activity rail's "Compare workspaces" entry. A compact
+// metric×workspace matrix (workspaces as columns, flow metrics as rows) plus a 12-week throughput
+// sparkline per workspace, highlighting the best/worst workspace per metric so a lead can spot
 // throughput gaps and blockers at a glance.
 //
-// CORE/FREE, on every tier. It used to live as an Insights sub-tab behind the teamInsights Pro
-// capability AND a `teamScope === 'teams'` gate, reading the Pro route. Both are gone: it now
-// reads `GET /api/team-metrics/compare` and renders beside the free DORA header whose window it
-// shares. The Pro gate would have been wrong here twice over — the panel is deterministic (no
-// AI) and its neighbour in the same tab bar is free.
+// CORE/FREE, on every tier. It used to live as an Insights sub-tab behind the Pro insights
+// capability, then as a Feed sub-tab gated on "2+ teams in scope". Both gates are gone: it is now a
+// rail line of its own, shown whenever the account owns 2+ workspaces, and it reads
+// `GET /api/workspace-metrics/compare`.
 //
-// The caller passes the EXPLICIT team ids in scope (via `teamIdsInScope`) rather than a scope
-// sentinel: the whole bug this fixes was a gate that only recognised All-Teams and vanished the
-// moment a user ticked two of five teams.
+// ⚠ IT TAKES NO PROPS AND NO SCOPE, deliberately. Scope is exactly ONE workspace everywhere else in
+// the app; this is the one surface that is ABOUT the others, so it always renders every workspace
+// the account owns, Default included, independent of which one is selected. Its predecessor took
+// the selected team ids and a scope string, which is precisely what made it vanish the moment fewer
+// than two teams were ticked. The rail decides whether to mount it (`workspaces.length >= 2`); this
+// component decides nothing about scope.
+//
+// ⚠ NO PRICE ROW, AND THERE MUST NEVER BE ONE. A bot's price is a per-workspace fact, so six
+// workspaces each listing a $120 CodeRabbit is either six subscriptions or one seen six ways — and
+// this screen cannot know which. Costs may be shown side by side; they may NEVER be totalled across
+// workspaces. That is why no row below reads a cost.
 
-// One matrix row: how to read + format a metric off a team's TeamMetrics, and whether a LOWER
-// value is better (drives the best/worst highlight — the "blocker" is the worst).
+// One matrix row: how to read + format a metric off a workspace's WorkspaceMetrics, and whether a
+// LOWER value is better (drives the best/worst highlight — the "blocker" is the worst).
 interface Row {
   label: string;
   note?: string;
-  get: (m: TeamMetrics) => number | null;
+  get: (m: WorkspaceMetrics) => number | null;
   fmt: (v: number) => string;
   betterIsLower: boolean;
 }
@@ -69,42 +75,41 @@ function Sparkline({ values }: { values: number[] }): JSX.Element {
   );
 }
 
-export function TeamComparisonPanel({
-  // The teams in scope, already resolved + filtered to live teams by `teamIdsInScope`. Drives
-  // both the server-side selection (via the scope string) and the "N teams" caption.
-  teamIds,
-  // The scope wire string (scopeToParam) — the query key AND the server filter. Passed rather
-  // than derived here so the panel can never disagree with the tab that mounted it.
-  scope,
-}: {
-  teamIds: number[];
-  scope: string;
-}): JSX.Element {
-  const { data, isLoading, isError } = useTeamComparison(scope, true);
-  // Colour map over the ACCOUNT-WIDE roster (never `teamIds`), so a column's dot matches its
-  // rail group and stays put when the selection changes. See lib/teamColors.ts.
-  const { data: allTeams } = useTeams();
-  const colorMap = useMemo(
-    () => buildTeamColorMap((allTeams ?? []).map((t) => t.id)),
-    [allTeams],
+export function WorkspaceComparisonPanel(): JSX.Element {
+  // `enabled: true` — the panel only mounts when the rail line is the active entry, so being
+  // rendered IS the signal. (The route is N × getWorkspaceMetrics and sits on the 60/min `search`
+  // tier, which is why the hook takes the flag at all rather than firing on every Activity open.)
+  const { data, isLoading, isError } = useWorkspaceComparison(true);
+
+  const workspaces: WorkspaceComparisonRow[] = useMemo(
+    () => data?.workspaces ?? [],
+    [data?.workspaces],
   );
 
-  const teams: TeamComparisonRow[] = useMemo(() => data?.teams ?? [], [data?.teams]);
+  // Colour map seeded from THIS response's own rows. The response covers every workspace the
+  // account owns, in `listWorkspaces` order (Default first, then name asc), so it is already the
+  // complete, stable roster this map needs — no second query, and no window in which a late-
+  // arriving roster reshuffles the columns' hues. See lib/workspaceColors.ts.
+  const colorMap = useMemo(
+    () => buildWorkspaceColorMap(workspaces.map((w) => w.workspaceId)),
+    [workspaces],
+  );
 
-  // Per-row best/worst team index (only when ≥2 teams have a value → a comparison exists).
+  // Per-row best/worst workspace index (only when ≥2 workspaces have a value → a comparison
+  // exists).
   const extremes = useMemo(() => {
     return ROWS.map((row) => {
-      const vals = teams.map((t) => (t.metrics ? row.get(t.metrics) : null));
+      const vals = workspaces.map((w) => (w.metrics ? row.get(w.metrics) : null));
       const present = vals.filter((v): v is number => v != null);
       if (present.length < 2) return { best: -1, worst: -1 };
       const bestVal = row.betterIsLower ? Math.min(...present) : Math.max(...present);
       const worstVal = row.betterIsLower ? Math.max(...present) : Math.min(...present);
-      // Highlight the first team hitting the extreme (ties → first).
+      // Highlight the first workspace hitting the extreme (ties → first).
       const best = vals.findIndex((v) => v === bestVal);
       const worst = bestVal === worstVal ? -1 : vals.findIndex((v) => v === worstVal);
       return { best, worst };
     });
-  }, [teams]);
+  }, [workspaces]);
 
   if (isLoading) {
     return (
@@ -120,23 +125,23 @@ export function TeamComparisonPanel({
   }
   if (isError) return <div className="text-sm text-red-500">Couldn’t load the comparison.</div>;
 
-  if (teams.length === 0) {
+  if (workspaces.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-        No teams yet — create teams (and assign repos) to compare their flow metrics here.
+        Create a Workspace to compare — flow metrics show up here once the account has more than
+        one.
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
-      {/* No <h3> repeating the tab label — the caption alone carries the context the label
-          can't: WHICH teams are being compared (the tab is reachable from any 2+ team
-          selection, not just All-Teams). */}
+      {/* No <h3> repeating the rail label — the caption carries what the label can't: that this
+          covers EVERY workspace, not the selected one. */}
       <p className="text-xs text-gray-500 dark:text-gray-400">
-        Flow metrics side by side across the {teamIds.length} teams in scope — spot throughput
-        gaps and blockers, and see where to rebalance. Best value in each row is green; the
-        laggard is amber. Same trailing-2-week window as the flow-metric header.
+        Flow metrics side by side across all {workspaces.length} workspaces — spot throughput gaps
+        and blockers, and see where to rebalance. Best value in each row is green; the laggard is
+        amber. Same trailing-2-week window as the flow-metric header.
       </p>
 
       <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
@@ -146,20 +151,32 @@ export function TeamComparisonPanel({
               <th className="sticky left-0 bg-white px-3 py-2 text-left font-medium text-gray-500 dark:bg-gray-950 dark:text-gray-400">
                 Metric
               </th>
-              {teams.map((t) => (
-                <th key={t.teamId} className="px-3 py-2 text-right font-semibold text-gray-700 dark:text-gray-200">
-                  {/* The colour dot keys this column to its group in the Activity rail. Inline
-                      style, not a Tailwind class — the palette is a JS value. */}
+              {workspaces.map((w) => (
+                <th
+                  key={w.workspaceId}
+                  className="px-3 py-2 text-right font-semibold text-gray-700 dark:text-gray-200"
+                >
+                  {/* The colour dot is this column's identity across the matrix (header, and the
+                      sparkline row below). Inline style, not a Tailwind class — the palette is a
+                      JS value. */}
                   <div className="flex min-w-0 items-center justify-end gap-1.5">
                     <span
                       aria-hidden="true"
                       className="inline-block h-2 w-2 shrink-0 rounded-full"
-                      style={{ background: teamColorFor(colorMap, t.teamId) }}
+                      style={{ background: workspaceColorFor(colorMap, w.workspaceId) }}
                     />
-                    <span className="truncate">{t.teamName}</span>
+                    <span className="truncate">{w.workspaceName}</span>
+                    {w.isDefault && (
+                      <span
+                        className="shrink-0 rounded bg-gray-100 px-1 text-[9px] font-normal uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                        title="Where new repos land. It can be renamed but not deleted."
+                      >
+                        default
+                      </span>
+                    )}
                   </div>
                   <div className="text-[10px] font-normal text-gray-400">
-                    {t.repoCount} repo{t.repoCount === 1 ? '' : 's'}
+                    {w.repoCount} repo{w.repoCount === 1 ? '' : 's'}
                   </div>
                 </th>
               ))}
@@ -172,13 +189,13 @@ export function TeamComparisonPanel({
                   <span className="font-medium text-gray-700 dark:text-gray-200">{row.label}</span>
                   {row.note && <span className="ml-1 text-[10px] text-gray-400">{row.note}</span>}
                 </td>
-                {teams.map((t, ti) => {
-                  const v = t.metrics ? row.get(t.metrics) : null;
-                  const isBest = extremes[ri]?.best === ti;
-                  const isWorst = extremes[ri]?.worst === ti;
+                {workspaces.map((w, wi) => {
+                  const v = w.metrics ? row.get(w.metrics) : null;
+                  const isBest = extremes[ri]?.best === wi;
+                  const isWorst = extremes[ri]?.worst === wi;
                   return (
                     <td
-                      key={t.teamId}
+                      key={w.workspaceId}
                       className={`px-3 py-1.5 text-right tabular-nums ${
                         isBest
                           ? 'font-semibold text-emerald-600 dark:text-emerald-400'
@@ -193,16 +210,16 @@ export function TeamComparisonPanel({
                 })}
               </tr>
             ))}
-            {/* Throughput sparkline row — the 12-week merged trend per team. */}
+            {/* Throughput sparkline row — the 12-week merged trend per workspace. */}
             <tr className="border-t border-gray-200 dark:border-gray-800">
               <td className="sticky left-0 bg-white px-3 py-2 text-left dark:bg-gray-950">
                 <span className="font-medium text-gray-700 dark:text-gray-200">Throughput</span>
                 <span className="ml-1 text-[10px] text-gray-400">12-wk merged</span>
               </td>
-              {teams.map((t) => (
-                <td key={t.teamId} className="px-3 py-2 text-right">
+              {workspaces.map((w) => (
+                <td key={w.workspaceId} className="px-3 py-2 text-right">
                   <div className="flex justify-end">
-                    <Sparkline values={t.metrics?.throughput.merged ?? []} />
+                    <Sparkline values={w.metrics?.throughput.merged ?? []} />
                   </div>
                 </td>
               ))}

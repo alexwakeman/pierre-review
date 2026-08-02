@@ -369,7 +369,7 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
     );
   }
 
-  // The cross-team search-results drill-down — labelled with the query (from the transient seed).
+  // The cross-repo search-results drill-down — labelled with the query (from the transient seed).
   if (tab.kind === 'search') {
     const q = searchSeed ?? '';
     return (

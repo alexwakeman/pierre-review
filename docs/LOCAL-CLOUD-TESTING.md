@@ -91,7 +91,15 @@ Open `http://localhost:4000/`:
 4. **Per-account isolation** — sign in as user A, add/sync a repo. In a separate
    browser/incognito, sign in as user B. Confirm B cannot see A's repos/PRs, and
    that `GET /api/prs/<one of A's PR ids>` while signed in as B returns **404**.
-5. **Local mode is unchanged** — `pnpm dev` (no `DEPLOYMENT_MODE`) still goes
+5. **Workspaces** — a brand-new cloud account must land in a **Default** workspace
+   with the repos it adds already in it (`GET /api/workspaces` returns exactly one
+   row, `isDefault: true`, and it contains every repo you added). This is worth
+   checking on Postgres specifically: the pg migration has to advance the `id`
+   sequence by hand after preserving legacy ids, so the FIRST workspace on an empty
+   database must come back as **id 1** — an off-by-one there shows up here and
+   nowhere else. Then confirm `GET /api/activity?workspace=<B's workspace id>` while
+   signed in as A resolves to **A's own Default** (never a 404, never B's repos).
+6. **Local mode is unchanged** — `pnpm dev` (no `DEPLOYMENT_MODE`) still goes
    straight to the timeline at `/app` with no landing page and no sign-in.
 
 To reset the cloud DB between tests: `docker compose down -v && docker compose up -d db`

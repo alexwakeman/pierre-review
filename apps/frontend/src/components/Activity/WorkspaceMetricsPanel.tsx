@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { TeamMetrics, TeamMetricStat, TeamMetricKey } from '@pierre-review/shared';
+import type { WorkspaceMetrics, WorkspaceMetricStat, WorkspaceMetricKey } from '@pierre-review/shared';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import {
@@ -10,12 +10,16 @@ import {
   type Series,
 } from '../charts/common.js';
 
-// The team's DORA-ish flow metrics at the top of Insights — the higher-order view that
-// DRIVES the sprint report below it. Stat tiles compare this sprint to the prior one and
-// are CLICKABLE (→ a per-metric drill-down tab listing the PRs behind the number). The
-// charts reuse the per-repo analytics toolkit (LineChart/BarChart) over a 12-week x-axis;
-// the two most operationally-urgent trends (CI recovery + failures-by-stage) sit up front,
-// the rest fold into a "More charts" expander.
+// The active WORKSPACE's DORA-ish flow metrics — the higher-order view that DRIVES the sprint
+// report below it. Stat tiles compare this sprint to the prior one and are CLICKABLE (→ a
+// per-metric drill-down tab listing the PRs behind the number). The charts reuse the per-repo
+// analytics toolkit (LineChart/BarChart) over a 12-week x-axis; the two most operationally-urgent
+// trends (CI recovery + failures-by-stage) sit up front, the rest fold into a "More charts"
+// expander.
+//
+// The panel itself is scope-agnostic: it renders whatever WorkspaceMetrics it is handed. Its two
+// mounts differ only in what they fetched — the cross-repo Feed header (the whole workspace) and
+// the per-repo console (one repo, which overrides `openPrsSubtitle`).
 
 const pctFmt = (n: number): string => `${Math.round(n)}%`;
 const countFmt = (n: number): string => String(Math.round(n));
@@ -34,7 +38,7 @@ function Stat({
   onActivate,
 }: {
   label: string;
-  stat: TeamMetricStat;
+  stat: WorkspaceMetricStat;
   format: (n: number) => string;
   betterWhen: 'up' | 'down';
   sub: string;
@@ -99,16 +103,17 @@ function TileShell({
   );
 }
 
-export function TeamMetricsPanel({
+export function WorkspaceMetricsPanel({
   metrics,
   onOpenMetric,
-  openPrsSubtitle = 'across all repos',
+  openPrsSubtitle = 'across this workspace',
   moreChartsSlot,
 }: {
-  metrics: TeamMetrics;
-  onOpenMetric?: (metric: TeamMetricKey) => void;
-  // The Open-PRs tile caption. Insights (all watched repos) keeps the default; the per-repo
-  // console passes a repo-scoped label (e.g. "in this repo").
+  metrics: WorkspaceMetrics;
+  onOpenMetric?: (metric: WorkspaceMetricKey) => void;
+  // The Open-PRs tile caption. The cross-repo mount keeps the default ("across this workspace" —
+  // the workspace IS the scope now, so "across all repos" would overstate it); the per-repo console
+  // passes a repo-scoped label (e.g. "in this repo").
   openPrsSubtitle?: string;
   // When provided, the "More charts" expander renders THIS node instead of the built-in
   // lead-time / merge-CI charts — lets the per-repo console inline the full RepoAnalytics
@@ -130,7 +135,7 @@ export function TeamMetricsPanel({
       ? `day ${dayN} of ${metrics.sprintDays} · vs same point last sprint`
       : `rolling ${metrics.sprintDays} days · vs prior ${metrics.sprintDays} days`;
   const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
-  const open = (m: TeamMetricKey): (() => void) | undefined =>
+  const open = (m: WorkspaceMetricKey): (() => void) | undefined =>
     onOpenMetric ? () => onOpenMetric(m) : undefined;
 
   const throughputSeries: Series[] = [

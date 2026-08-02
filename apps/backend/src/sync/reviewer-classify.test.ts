@@ -5,6 +5,7 @@
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at load).
 import { rmSync } from 'node:fs';
+import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const DB_PATH = '/tmp/pierre-reviewer-classify-test.sqlite';
@@ -21,12 +22,17 @@ let fingerprintReview: any;
 
 const DAY = 24 * 60 * 60 * 1000;
 const MIN = 60 * 1000;
-// THE ROW IS THE BOT OBJECT, so every classifyReviewer call names the REPO ROWS its verdict
+// THE ROW IS THE BOT OBJECT, so every classifyReviewer call names the WORKSPACE ROWS its verdict
 // should land on. There is no sentinel: `NO_TEAM_KEY` used to stand in here for "no team to
-// give", which quietly also meant "the inheritance root every team reads". A repo id means one
-// thing. Most tests below use a single scope repo; the fan-out across several is covered in
-// db/bot-reviewer-grains.test.ts.
+// give", which quietly also meant "the inheritance root every team reads", and the repo id that
+// replaced it has in turn been replaced by the ONE scope this app has. A workspace id means one
+// thing. Most tests below use a single workspace; the fan-out across several — and the two
+// provenance flags inside one row — is covered in db/workspace-reviewer.test.ts.
 let SCOPE: number[] = [];
+// The workspace SCOPE names, and the repo whose PRs give its actors a real footprint. Both are
+// needed: a verdict lands on a workspace row, but the query-layer helpers measure repo data.
+let WS = 0;
+let REPO = 0;
 
 // user id by login, populated in beforeAll.
 const uid: Record<string, number> = {};
@@ -88,15 +94,23 @@ beforeAll(async () => {
   await addUser('sonarqubecloud', { isBot: true, githubType: 'Bot' }); // quality-check seed subject
   await addUser('per-repo-bot', { isBot: true, githubType: 'Bot' }); // per-repo override subject
 
-  // One repo for the resolution-order block to write its rows into. A judgement has to land
-  // somewhere, and a row keyed to a repo that does not exist is rejected by the composite FK
-  // `(repo_id, account_id) → repos(id, account_id)`.
+  // One repo + the account's Default workspace for the resolution-order block to write its rows
+  // into. A judgement has to land somewhere, and a row keyed to a workspace that does not exist —
+  // or to another account's — is rejected by the composite FK
+  // `(workspace_id, account_id) → workspaces(id, account_id)`.
   const [clsRepo] = await db
     .insert(schema.repos)
     .values({ accountId: 1, owner: 'acme', name: 'classify', githubNodeId: 'R_classify' })
     .returning()
     .execute();
-  SCOPE = [clsRepo.id];
+  REPO = clsRepo.id;
+  const queries = await import('../db/queries.js');
+  // Migration 0044 creates a Default for every account that existed when it ran; account 2 was
+  // inserted above, after, so it needs the same repair every request path performs.
+  WS = await queries.ensureDefaultWorkspace(1);
+  await queries.ensureDefaultWorkspace(2);
+  await queries.ensureRepoMemberships(1);
+  SCOPE = [WS];
 });
 
 afterAll(() => closeDb?.());
@@ -108,21 +122,21 @@ describe('classifyReviewer resolution order', () => {
     expect(c.kind).toBe('coderabbit');
     expect(c.confidence).toBe('high');
     expect(c.source).toBe('vendor_login');
-    // Persisted at BOTH grains: the JUDGEMENT on the repo row, the IDENTITY on the actor row.
-    // (Small test DB → a full scan is fine.)
-    const judgement = (
-      await db.select().from(schema.repoReviewers).execute()
-    ).find((r: any) => r.authorUserId === uid['coderabbitai']! && r.accountId === 1);
-    expect(judgement).toBeDefined();
-    expect(judgement.source).toBe('vendor_login');
-    expect(judgement.repoId).toBe(SCOPE[0]);
-    const identity = (
-      await db.select().from(schema.accountReviewers).execute()
-    ).find((r: any) => r.authorUserId === uid['coderabbitai']! && r.accountId === 1);
-    expect(identity).toBeDefined();
-    expect(identity.kind).toBe('coderabbit');
-    // The classifier wrote it, so the provenance stays 'auto' — it must keep self-healing.
-    expect(identity.identitySource).toBe('auto');
+    // ONE ROW, both halves. The judgement and the identity used to sit on two tables at two
+    // grains; with a workspace as the only scope they are facts about the same key, and the two
+    // PROVENANCE FLAGS are what keep them independent. (Small test DB → a full scan is fine.)
+    const row = (await db.select().from(schema.workspaceReviewers).execute()).find(
+      (r: any) => r.authorUserId === uid['coderabbitai']! && r.accountId === 1,
+    );
+    expect(row).toBeDefined();
+    expect(row.workspaceId).toBe(WS);
+    expect(row.source).toBe('vendor_login');
+    expect(row.kind).toBe('coderabbit');
+    // The classifier wrote both, so both provenances stay 'auto' — they must keep self-healing.
+    expect(row.identitySource).toBe('auto');
+    // Nothing here may invent a price: `monthly_cents` is the one column no classifier can
+    // regenerate, and `persist` does not name it at all.
+    expect(row.monthlyCents).toBeNull();
   });
 
   it("3. githubType==='Bot' with no marker → in_house, high, github_type", async () => {
@@ -218,21 +232,21 @@ describe('classifyReviewer resolution order', () => {
   });
 });
 
-describe('a MANUAL row is never re-derived — per grain, per repo', () => {
+describe('a MANUAL half is never re-derived — per workspace, per flag', () => {
   it('a manual "human" judgement survives a pass that would say "known vendor"', async () => {
     // qodo-ai is a KNOWN vendor login, so every classification pass wants to call it a bot. A
-    // human said otherwise IN THIS REPO, and persist() must decline to write that row.
+    // human said otherwise IN THIS WORKSPACE, and persist() must decline to write that half.
     //
     // NOTE WHAT IS NOT HERE ANY MORE: classifyReviewer used to short-circuit on a manual row and
-    // return it verbatim. Under the repo grain the derivation always runs — it has to, because
-    // the SAME actor's other repos must keep updating — and the decision to skip moved into the
-    // write. So the RETURN value below is the derived verdict; the STORED row is what the manual
-    // flag protects, and that is what this asserts.
+    // return it verbatim. The derivation always runs now — it has to, because the SAME actor's
+    // other workspaces must keep updating, and because the OTHER HALF of this very row may still
+    // be detection's — and the decision to skip moved into the write. So the RETURN value below
+    // is the derived verdict; the STORED row is what the manual flag protects.
     await db
-      .insert(schema.repoReviewers)
+      .insert(schema.workspaceReviewers)
       .values({
         accountId: 1,
-        repoId: SCOPE[0]!,
+        workspaceId: WS,
         authorUserId: uid['qodo-ai']!,
         automated: false,
         role: 'review',
@@ -243,42 +257,40 @@ describe('a MANUAL row is never re-derived — per grain, per repo', () => {
       })
       .execute();
     await classifyReviewer(1, userArg('qodo-ai', { isBot: true }), {}, SCOPE);
-    const row = (await db.select().from(schema.repoReviewers).execute()).find(
+    const row = (await db.select().from(schema.workspaceReviewers).execute()).find(
       (r: any) => r.authorUserId === uid['qodo-ai']! && r.accountId === 1,
     );
     expect(row.source).toBe('manual');
     expect(row.automated).toBe(false);
+    // …while the IDENTITY half of the SAME row, whose own flag is still 'auto', re-derived.
+    expect(row.kind).toBe('qodo');
+    expect(row.identitySource).toBe('auto');
   });
 
   it('a manual IDENTITY survives the same pass — and the judgement still re-derives', async () => {
-    // The two flags live on two tables precisely so this pair is expressible. Gating identity on
-    // the ROW's `source` would revert a human's vendor correction; gating the judgement on
-    // `identity_source` would freeze auto-detection on every one of the actor's repos.
+    // The two flags used to live on two TABLES, and that boundary was the enforcement. It is gone:
+    // both are columns of one row, so the separation is `persist`'s per-half `set:` narrowing.
+    // Gating identity on `source` would revert a human's vendor correction; gating the judgement
+    // on `identity_source` would freeze auto-detection in every workspace the actor appears in.
     await db
-      .insert(schema.accountReviewers)
-      .values({
-        accountId: 1,
-        authorUserId: uid['coderabbitai']!,
-        kind: 'greptile',
-        label: 'Actually Greptile',
-        identitySource: 'manual',
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: [schema.accountReviewers.accountId, schema.accountReviewers.authorUserId],
-        set: { kind: 'greptile', label: 'Actually Greptile', identitySource: 'manual' },
-      })
+      .update(schema.workspaceReviewers)
+      .set({ kind: 'greptile', label: 'Actually Greptile', identitySource: 'manual' })
+      .where(
+        and(
+          eq(schema.workspaceReviewers.accountId, 1),
+          eq(schema.workspaceReviewers.workspaceId, WS),
+          eq(schema.workspaceReviewers.authorUserId, uid['coderabbitai']!),
+        ),
+      )
       .execute();
     await classifyReviewer(1, userArg('coderabbitai', { isBot: true }), {}, SCOPE);
-    const identity = (await db.select().from(schema.accountReviewers).execute()).find(
+    const row = (await db.select().from(schema.workspaceReviewers).execute()).find(
       (r: any) => r.authorUserId === uid['coderabbitai']! && r.accountId === 1,
     );
-    expect(identity.kind).toBe('greptile'); // the human's correction stands
-    expect(identity.label).toBe('Actually Greptile');
-    const judgement = (await db.select().from(schema.repoReviewers).execute()).find(
-      (r: any) => r.authorUserId === uid['coderabbitai']! && r.accountId === 1,
-    );
-    expect(judgement.source).toBe('vendor_login'); // …and the repo row still re-derived
+    expect(row.kind).toBe('greptile'); // the human's correction stands
+    expect(row.label).toBe('Actually Greptile');
+    expect(row.identitySource).toBe('manual');
+    expect(row.source).toBe('vendor_login'); // …and the judgement half still re-derived
   });
 });
 
@@ -413,13 +425,14 @@ describe('computeBehavioralSignals', () => {
   });
 });
 
-// ── The quality-check ROLE, at the repo grain (migrations 0042/0043) ────────────────────────
-// The role is a per-(repo, actor) flag, so these cover the three things most likely to break: the
-// upsert's conflict target (now the 3-column `repo_reviewers_account_repo_author`), the role seed
-// surviving a re-sync, and the role narrowing the METRIC set without touching the exclusion set.
+// ── The quality-check ROLE, at the workspace grain (migrations 0044/0045) ───────────────────
+// The role is a per-(workspace, actor) flag, so these cover the three things most likely to break:
+// the upsert's conflict target (the 3-column `workspace_reviewers_account_workspace_author`), the
+// role seed surviving a re-sync, and the role narrowing the METRIC set without touching the
+// exclusion set.
 //
-// The per-repo divergence / identity-constancy cases live in db/bot-reviewer-grains.test.ts; this
-// file stays focused on the classifier itself.
+// The multi-workspace divergence / provenance-independence / price-confinement cases live in
+// db/workspace-reviewer.test.ts; this file stays focused on the classifier itself.
 describe('quality-check role', () => {
   let q: any;
   beforeAll(async () => {
@@ -432,7 +445,7 @@ describe('quality-check role', () => {
       .values({
         githubNodeId: 'PR_role_1',
         accountId: 1,
-        repoId: SCOPE[0]!,
+        repoId: REPO,
         number: 991,
         title: 'role',
         state: 'open',
@@ -465,20 +478,18 @@ describe('quality-check role', () => {
   });
 
   it('the ON CONFLICT target matches the 3-column unique index (upsert, not duplicate)', async () => {
-    // Classifying the SAME reviewer twice over the SAME repo must UPDATE, not insert a second row
-    // — and must not raise "no unique or exclusion constraint matching the ON CONFLICT
+    // Classifying the SAME reviewer twice over the SAME workspace must UPDATE, not insert a second
+    // row — and must not raise "no unique or exclusion constraint matching the ON CONFLICT
     // specification", which is what a stale target produces at RUNTIME (it type-checks fine).
     await classifyReviewer(1, userArg('sonarqubecloud', { isBot: true, githubType: 'Bot' }), {}, SCOPE);
     await classifyReviewer(1, userArg('sonarqubecloud', { isBot: true, githubType: 'Bot' }), {}, SCOPE);
-    const rows = (await db.select().from(schema.repoReviewers).execute()).filter(
+    const rows = (await db.select().from(schema.workspaceReviewers).execute()).filter(
       (r: any) => r.accountId === 1 && r.authorUserId === uid['sonarqubecloud']!,
     );
+    // ONE row carries the judgement, the identity and the price. There is no second table to
+    // upsert into any more, and no second conflict target to get wrong.
     expect(rows).toHaveLength(1);
-    // …and the identity upsert likewise (2-column target on `account_reviewers`).
-    const idRows = (await db.select().from(schema.accountReviewers).execute()).filter(
-      (r: any) => r.accountId === 1 && r.authorUserId === uid['sonarqubecloud']!,
-    );
-    expect(idRows).toHaveLength(1);
+    expect(rows[0].kind).toBe('in_house');
   });
 
   it('seeds a known quality-check login with role=quality_check, still automated', async () => {
@@ -499,15 +510,15 @@ describe('quality-check role', () => {
     // ON CONFLICT set:, so a role copied off the in-memory classification would be rewritten from
     // a stale default on the next sync — putting SonarQube back into the review-bot metrics.
     await classifyReviewer(1, userArg('sonarqubecloud', { isBot: true, githubType: 'Bot' }), {}, SCOPE);
-    const [row] = (await db.select().from(schema.repoReviewers).execute()).filter(
+    const [row] = (await db.select().from(schema.workspaceReviewers).execute()).filter(
       (r: any) => r.accountId === 1 && r.authorUserId === uid['sonarqubecloud']!,
     );
     expect(row.role).toBe('quality_check');
   });
 
   it('a quality_check reviewer is EXCLUDED from the metric set but present in the full set', async () => {
-    const reviewOnly = await q.automatedReviewerUserIds(1, SCOPE, 'review');
-    const all = await q.automatedReviewerUserIds(1, SCOPE, 'all');
+    const reviewOnly = await q.automatedReviewerUserIds(1, WS, 'review');
+    const all = await q.automatedReviewerUserIds(1, WS, 'all');
     expect(all).toContain(uid['sonarqubecloud']!);
     expect(reviewOnly).not.toContain(uid['sonarqubecloud']!);
     // …and a real review bot is in BOTH (the role filter is not a blanket narrowing).
@@ -515,32 +526,35 @@ describe('quality-check role', () => {
     expect(reviewOnly).toContain(uid['coderabbitai']!);
   });
 
-  it('reviewerRoleForUser reports the role folded over the requested repos', async () => {
-    expect((await q.reviewerRoleForUser(1, SCOPE)).get(uid['sonarqubecloud']!)).toBe(
+  it('reviewerRoleForUser reports the role stored for this workspace', async () => {
+    expect((await q.reviewerRoleForUser(1, WS)).get(uid['sonarqubecloud']!)).toBe(
       'quality_check',
     );
-    expect((await q.reviewerRoleForUser(1, SCOPE)).get(uid['coderabbitai']!)).toBe('review');
+    expect((await q.reviewerRoleForUser(1, WS)).get(uid['coderabbitai']!)).toBe('review');
   });
 
-  it('a manual role edit in one repo pins that row and nothing else', async () => {
+  it('a manual role edit pins that workspace row and nothing else', async () => {
     const userId = uid['per-repo-bot']!;
     await classifyReviewer(1, userArg('per-repo-bot', { isBot: true, githubType: 'Bot' }), {}, SCOPE);
-    expect(await q.automatedReviewerUserIds(1, SCOPE, 'review')).toContain(userId);
-    const patched = await q.setRepoReviewerJudgement(1, userId, {
-      repoId: SCOPE[0]!,
+    expect(await q.automatedReviewerUserIds(1, WS, 'review')).toContain(userId);
+    const patched = await q.setWorkspaceReviewer(1, userId, {
+      workspaceId: WS,
       role: 'quality_check',
     });
     expect(patched?.role).toBe('quality_check');
     // The role narrows the reviewer cohort …
-    expect(await q.automatedReviewerUserIds(1, SCOPE, 'review')).not.toContain(userId);
+    expect(await q.automatedReviewerUserIds(1, WS, 'review')).not.toContain(userId);
     // … but never the exclusion set: a linter's threads still have to be visible and triageable.
-    expect(await q.automatedReviewerUserIds(1, SCOPE, 'all')).toContain(userId);
+    expect(await q.automatedReviewerUserIds(1, WS, 'all')).toContain(userId);
     // …and it survives the next classification pass, because the row is now a human judgement.
     await classifyReviewer(1, userArg('per-repo-bot', { isBot: true, githubType: 'Bot' }), {}, SCOPE);
-    const [row] = (await db.select().from(schema.repoReviewers).execute()).filter(
+    const [row] = (await db.select().from(schema.workspaceReviewers).execute()).filter(
       (r: any) => r.accountId === 1 && r.authorUserId === userId,
     );
     expect(row.role).toBe('quality_check');
     expect(row.source).toBe('manual');
+    // A role-only patch stamps `source:'manual'`, which pins `automated` too — deliberate, and
+    // undone by DELETE …/judgement rather than by flipping the value back by hand.
+    expect(row.automated).toBe(true);
   });
 });

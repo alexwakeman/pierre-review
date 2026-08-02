@@ -1,6 +1,10 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, schema, runTransaction, type Executor } from '../db/client.js';
 import { searchText } from '../db/search.js';
+// The single owner of "which workspace is this account's Default" — concurrent-safe (INSERT …
+// ON CONFLICT DO NOTHING then re-SELECT) and carrying the name-collision ladder. Duplicating a
+// bare `SELECT … WHERE is_default` here would be a second answer to the same question.
+import { ensureDefaultWorkspace } from '../db/queries.js';
 import { config } from '../config.js';
 import { isLikelyBot } from './bot-detection.js';
 import {
@@ -28,6 +32,7 @@ const {
   reviewRequests,
   ciStatusEvents,
   searchIndex,
+  workspaceRepos,
 } = schema;
 
 // One accumulated search-index row (the shared prId/repoId/accountId are stamped at insert time).
@@ -175,7 +180,31 @@ export function createUserResolver() {
 
 export type UserResolver = ReturnType<typeof createUserResolver>;
 
-/** Upsert a repo by its GitHub node id; returns the local repo id. */
+/**
+ * Upsert a repo by its GitHub node id; returns the local repo id.
+ *
+ * ── IT ALSO WRITES THE WORKSPACE MEMBERSHIP ROW, IN THE SAME TRANSACTION ─────────────────────
+ * A repo with NO `workspace_repos` row is INVISIBLE to every workspace-scoped read — no PRs, no
+ * feed rows, no bots, and silently. This is the WRITE side of closing that gap (the READ side is
+ * `ensureRepoMemberships`, which repairs stragglers on essentially every GET). Doing it here, in
+ * the same `runTransaction` as the repo row, means a repo is never committed without a home.
+ *
+ * ⚠ `ON CONFLICT (account_id, repo_id) DO NOTHING` IS LOAD-BEARING. That unique is "one workspace
+ * per repo", so an upsert on it would be a MOVE: a re-sync of an existing repo would silently drag
+ * it back out of the workspace a human deliberately put it in, on every sync tick.
+ *
+ * The membership row IS the whole of a repo's visibility now — there is no second "watched" axis
+ * to also set (`repos.inbox_watch` and its start stamp are dropped). A repo in a workspace is
+ * fully live: Feed, Activity, My Turn and Bots all cover it.
+ *
+ * The Default workspace is resolved BEFORE the transaction opens, deliberately:
+ * `ensureDefaultWorkspace` runs on `db`, and on Postgres `db` is a Pool — i.e. a DIFFERENT
+ * connection from the transaction's executor — so calling it inside would run outside the
+ * transaction on one dialect and inside it on the other.
+ *
+ * Safe against `runTransaction`'s bare `BEGIN`: `upsertRepo` has no caller already inside a
+ * transaction (`api/routes/repos.ts`, `sync/sync-repo.ts`).
+ */
 export async function upsertRepo(
   owner: string,
   name: string,
@@ -198,25 +227,35 @@ export async function upsertRepo(
   } = { owner, name };
   if (defaultBranch != null) set.defaultBranch = defaultBranch;
   if (viewerPermission !== undefined) set.viewerPermission = viewerPermission;
-  const row = (
-    await db
-      .insert(repos)
-      .values({
-        accountId,
-        owner,
-        name,
-        githubNodeId,
-        defaultBranch: defaultBranch ?? null,
-        viewerPermission: viewerPermission ?? null,
-      })
-      .onConflictDoUpdate({
-        target: [repos.accountId, repos.githubNodeId],
-        set,
-      })
-      .returning({ id: repos.id })
-      .execute()
-  )[0]!;
-  return row.id;
+
+  const workspaceId = await ensureDefaultWorkspace(accountId);
+
+  return runTransaction(async (tx) => {
+    const row = (
+      await tx
+        .insert(repos)
+        .values({
+          accountId,
+          owner,
+          name,
+          githubNodeId,
+          defaultBranch: defaultBranch ?? null,
+          viewerPermission: viewerPermission ?? null,
+        })
+        .onConflictDoUpdate({
+          target: [repos.accountId, repos.githubNodeId],
+          set,
+        })
+        .returning({ id: repos.id })
+        .execute()
+    )[0]!;
+    await tx
+      .insert(workspaceRepos)
+      .values({ accountId, workspaceId, repoId: row.id })
+      .onConflictDoNothing({ target: [workspaceRepos.accountId, workspaceRepos.repoId] })
+      .execute();
+    return row.id;
+  });
 }
 
 function prState(s: GqlPullRequest['state']): 'open' | 'merged' | 'closed' {

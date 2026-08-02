@@ -1,7 +1,7 @@
 import type { HumanThemesResult } from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useHumanThemes, useRefreshHumanThemes } from '../../hooks/useHumanThemes.js';
 import { ThemesReportBody, ThemesSkeleton } from './ThemesReportView.js';
@@ -9,8 +9,8 @@ import { prRefToMeta } from './ThemeThreadsDetail.js';
 
 // The Feed "Discussion themes" panel (Pro Haiku) — the HUMAN sibling of the Bots "Themes" panel.
 // Summarises what PEOPLE are raising in review (concerns, debates, decisions, questions), including
-// their replies on bot threads. STRICTLY Pro (activityDigest tier), scoped to the current TEAM +
-// window (reuses the shared bot window selector so all three summaries stay on one window). The
+// their replies on bot threads. STRICTLY Pro (activityDigest tier), scoped to the active WORKSPACE
+// + window (reuses the shared bot window selector so all three summaries stay on one window). The
 // funnel does NO deterministic categorisation — it prioritises PR-level comments, then threads with
 // responses, then recency, up to a safe cap. Reuses the shared report body (ThemesReportBody).
 
@@ -53,12 +53,12 @@ function HumanCoverageLine({ result }: { result: HumanThemesResult }): JSX.Eleme
 export function HumanThemesPanel(): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const window = useFilters((s) => s.botAnalyticsWindow);
-  const scope = scopeToParam(useFilters((s) => s.teamScope));
+  const workspaceId = useFilters((s) => s.workspaceId);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const openThemeThreads = useFilters((s) => s.openThemeThreadsDetail);
 
-  const query = useHumanThemes(window, activityDigest, scope);
-  const refresh = useRefreshHumanThemes(window, scope);
+  const query = useHumanThemes(window, activityDigest, workspaceId);
+  const refresh = useRefreshHumanThemes(window, workspaceId);
   const usage = useAiUsage(activityDigest);
   const outOfCredits = usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
 
@@ -81,17 +81,22 @@ export function HumanThemesPanel(): JSX.Element | null {
         </span>
         <button
           type="button"
-          onClick={() => refresh.mutate()}
-          disabled={busy || outOfCredits}
+          onClick={() => {
+            // The hook refuses on an unresolved workspace (it would otherwise summarise the
+            // account's Default); the disabled state below is the visible half of the same guard.
+            if (workspaceId == null) return;
+            refresh.mutate();
+          }}
+          disabled={busy || outOfCredits || workspaceId == null}
           className="ml-auto rounded bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
-          title={outOfCredits ? 'Out of AI credits — resets next month' : 'Summarise what people are raising in review over this scope (runs the Haiku model)'}
+          title={outOfCredits ? 'Out of AI credits — resets next month' : 'Summarise what people are raising in review across this Workspace (runs the Haiku model)'}
         >
           {busy ? 'Summarising…' : result ? '↻ Regenerate' : 'Generate'}
         </button>
       </div>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
         A read of what your reviewers keep raising — recurring concerns, debates, decisions, and
-        questions across the team’s human review comments (including replies on bot threads). Themes
+        questions across this Workspace’s human review comments (including replies on bot threads). Themes
         are an AI read (approximate); the volumes and “where” are exact.
       </p>
 

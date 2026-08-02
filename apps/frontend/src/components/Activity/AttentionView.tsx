@@ -1,18 +1,20 @@
 import type { InsightCard } from '@pierre-review/shared';
 import { useAttentionCards } from '../../hooks/useAttentionCards.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { useFilters } from '../../store/filters.js';
 import { AttentionCards } from './AttentionCards.js';
 
-// The Feed "Needs attention" tab (CORE/free) — the attention cards (stalled reviews / untouched
+// The "Needs attention" rail entry (CORE/free) — the attention cards (stalled reviews / untouched
 // threads / reviewer load / needs-a-reviewer) that used to sit under the Pro Insights AI panels,
-// now a first-class Feed rail entry available on every tier. Scoped to the active team (teamScope);
-// the bot cards live in the free Bots console, so they're excluded here.
+// now a first-class rail entry available on every tier. Scoped to the ACTIVE WORKSPACE (a plain
+// id, the only scope this app has); the bot cards live in the free Bots console, so they're
+// excluded here.
 const BOT_CARD_KINDS = new Set<InsightCard['kind']>(['bot_signal', 'bot_only_review']);
 
 export function AttentionView(): JSX.Element {
-  const teamScope = useFilters((s) => s.teamScope);
-  const scope = scopeToParam(teamScope);
-  const { data, isLoading, isError } = useAttentionCards(scope);
+  // `workspaceId` is null until the workspaces query resolves the account's Default; the hook
+  // holds itself idle (skipToken) until then rather than asking the server for an unscoped answer.
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const { data, isLoading, isError } = useAttentionCards(workspaceId);
   const cards = (data?.cards ?? []).filter((c) => !BOT_CARD_KINDS.has(c.kind));
 
   return (
@@ -39,7 +41,7 @@ export function AttentionView(): JSX.Element {
         <div className="text-sm text-red-500">Couldn’t load what needs attention.</div>
       ) : cards.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          Nothing needs attention across your watched repos right now. 🎉
+          Nothing needs attention in this Workspace right now. 🎉
           <div className="mt-1 text-[11px]">
             Stalled reviews, untouched threads, reviewer load and un-assigned PRs will surface here.
           </div>

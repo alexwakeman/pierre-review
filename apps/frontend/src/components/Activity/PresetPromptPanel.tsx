@@ -2,14 +2,14 @@ import { useState } from 'react';
 import { PRESET_PROMPTS, type DigestPrRef, type PresetPromptKey } from '@pierre-review/shared';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { useFilters } from '../../store/filters.js';
 import { usePresetPrompt, useRefreshPresetPrompt } from '../../hooks/usePresetPrompt.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { SummaryMarkdown } from './prRefTable.js';
 
-// One-click "ask about this scope" panel (Pro Haiku). The 6 fixed preset questions are now a
+// One-click "ask about this Workspace" panel (Pro Haiku). The 6 fixed preset questions are now a
 // CAROUSEL — page through one at a time with the arrows — driven by a SINGLE "Generate all" button
-// that answers every preset for the current team scope (each key is an independent server-side
+// that answers every preset for the ACTIVE WORKSPACE (each key is an independent server-side
 // throttle/cache row, so unchanged answers stay $0). PR references linkify to the PR detail (same
 // treatment as the Sprint report card). Gated on the activityDigest capability — absent → nothing.
 //
@@ -45,20 +45,20 @@ function PresetSkeleton(): JSX.Element {
 // mutation writes the same cache key, so a generate/regenerate updates it in place).
 function PresetAnswer({
   presetKey,
-  scope,
+  workspaceId,
   enabled,
   busy,
   outOfCredits,
   onRegenerate,
 }: {
   presetKey: PresetPromptKey;
-  scope: string;
+  workspaceId: number | null;
   enabled: boolean;
   busy: boolean;
   outOfCredits: boolean;
   onRegenerate: (key: PresetPromptKey) => void;
 }): JSX.Element {
-  const query = usePresetPrompt(presetKey, enabled, scope);
+  const query = usePresetPrompt(presetKey, enabled, workspaceId);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const result = query.data?.result ?? null;
 
@@ -108,15 +108,17 @@ function PresetAnswer({
 
 export function PresetPromptPanel(): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
-  const teamScope = useFilters((s) => s.teamScope);
-  const scope = scopeToParam(teamScope);
+  // The ACTIVE WORKSPACE is the whole scope — a plain id the hooks stamp onto the wire themselves.
+  // It is null until the workspaces query resolves the account's Default; the read holds itself
+  // idle until then and the billing path refuses outright.
+  const workspaceId = useFilters((s) => s.workspaceId);
 
   const [idx, setIdx] = useState(0);
   const [generatingAll, setGeneratingAll] = useState(false);
   // "Generate all" fires 6 concurrent mutations on one shared observer, so the observer's own
   // isError can't represent a PARTIAL failure — track it here from the settled results.
   const [genError, setGenError] = useState<string | null>(null);
-  const refresh = useRefreshPresetPrompt(scope);
+  const refresh = useRefreshPresetPrompt(workspaceId);
   const usage = useAiUsage(activityDigest);
   const outOfCredits =
     usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
@@ -129,10 +131,13 @@ export function PresetPromptPanel(): JSX.Element | null {
   const current = PRESET_PROMPTS[idx] ?? PRESET_PROMPTS[0]!;
   const step = (delta: number): void => setIdx((i) => (i + delta + total) % total);
 
-  // The ONE billing entry: generate every preset for the current scope (unchanged ones are $0
+  // The ONE billing entry: generate every preset for the active Workspace (unchanged ones are $0
   // server-side). Concurrency-safe — each key is an independent throttle/in-flight row.
   const generateAll = async (): Promise<void> => {
-    if (outOfCredits || generatingAll) return;
+    // `workspaceId == null` bails BEFORE the six mutations: the hook throws on an unresolved
+    // workspace, which would surface as six rejected promises and a "6 of 6 couldn't be
+    // generated" error rather than the harmless no-op it actually is.
+    if (outOfCredits || generatingAll || workspaceId == null) return;
     setGeneratingAll(true);
     setGenError(null);
     try {
@@ -166,15 +171,15 @@ export function PresetPromptPanel(): JSX.Element | null {
         <button
           type="button"
           onClick={generateAll}
-          disabled={generatingAll || outOfCredits}
+          disabled={generatingAll || outOfCredits || workspaceId == null}
           className="ml-auto rounded bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
-          title={outOfCredits ? 'Out of AI credits — resets next month' : 'Generate answers to all six preset questions for this scope'}
+          title={outOfCredits ? 'Out of AI credits — resets next month' : 'Generate answers to all six preset questions for this Workspace'}
         >
           {generatingAll ? 'Generating…' : 'Generate all'}
         </button>
       </div>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        Six standing questions answered over the selected scope&apos;s repos (runs the Haiku model).
+        Six standing questions answered over this Workspace&apos;s repos (runs the Haiku model).
         Page through the answers with the arrows.
       </p>
 
@@ -223,11 +228,15 @@ export function PresetPromptPanel(): JSX.Element | null {
 
       <PresetAnswer
         presetKey={current.key}
-        scope={scope}
+        workspaceId={workspaceId}
         enabled={activityDigest}
         busy={busyCurrent}
         outOfCredits={outOfCredits}
-        onRegenerate={(k) => refresh.mutate(k)}
+        // Same guard as generateAll: the hook throws on an unresolved workspace rather than
+        // generating for the account's Default, so a click before it settles is a no-op.
+        onRegenerate={(k) => {
+          if (workspaceId != null) refresh.mutate(k);
+        }}
       />
     </div>
   );

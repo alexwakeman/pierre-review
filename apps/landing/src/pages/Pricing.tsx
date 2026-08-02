@@ -41,7 +41,7 @@ const FREE_FEATURES = [
 
 const PRO_FEATURES = [
   'AI summaries — per-repo digests + sprint reports (included in the sub, no key needed)',
-  'Team Insights: stalled reviews, unanswered-thread alerts, reviewer load',
+  'Workspace Insights: stalled reviews, unanswered-thread alerts, reviewer load',
   'Reviewer suggestions from commit history on the changed files — requested in one click',
   'DORA-style flow metrics with drill-downs',
   '“My Turn” feed intelligence — every event on PRs you’re part of, flagged',

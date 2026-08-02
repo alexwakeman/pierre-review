@@ -79,12 +79,50 @@ function rowToAccount(row: typeof schema.accounts.$inferSelect): Account {
 let cachedLocalAccount: Account | null = null;
 
 /**
+ * Guarantee the account's DEFAULT WORKSPACE exists before the account is handed to anyone.
+ *
+ * A workspace id is the only scope this app has: every scoped read resolves one, repos land in
+ * the Default on sync, and reviewer rows key on it. An account with no workspace therefore has
+ * no reachable state at all — not an empty board but a resolver with nothing to return — so both
+ * account-creation paths below close the gap at the moment the row is created. Migration 0044
+ * backfills a Default for every account that existed when it ran; this covers every account
+ * created afterwards, which in cloud is all of them.
+ *
+ * `db/queries.ts` STATICALLY imports `getAccountUserId` from this file, so the import here is
+ * DYNAMIC to avoid closing that cycle — the same shape `setBenchmarkConsent` below already uses
+ * for the same reason. It costs nothing: both callers are cold (process startup / an OAuth
+ * callback) and the module is cached after the first call.
+ *
+ * It is deliberately NOT swallowed. `ensureDefaultWorkspace` only throws when the partial unique
+ * index `workspaces_one_default` is missing, i.e. migration 0044 never ran — and both callers run
+ * `runMigrations()` first. Failing there names the real fault; swallowing it would instead have
+ * every later request resolve a scope that does not exist.
+ */
+async function ensureAccountWorkspace(accountId: number): Promise<void> {
+  const { ensureDefaultWorkspace } = await import('../db/queries.js');
+  await ensureDefaultWorkspace(accountId);
+}
+
+/**
  * Ensure the synthesized local account (id 1) reflects the locally-authenticated
- * GitHub user. Refetches via `gh api user` on first run and once per day;
- * otherwise returns the cached row. Never throws — failure leaves "you" unknown
- * and triage degrades gracefully to empty. Local mode only.
+ * GitHub user, and that it owns a Default workspace. Refetches via `gh api user`
+ * on first run and once per day; otherwise returns the cached row.
+ *
+ * A missing/unauthenticated/offline `gh` is non-fatal — it leaves "you" unknown and
+ * triage degrades gracefully to empty. (A failing DB is not: see
+ * `ensureAccountWorkspace`.) Local mode only.
  */
 export async function ensureLocalAccount(): Promise<Account | null> {
+  const account = await resolveLocalAccount();
+  cachedLocalAccount = account;
+  // ONE call site covering all three resolution paths — the fresh cache hit included, since an
+  // account row that predates the workspace tables reaches this function by that path too.
+  if (account) await ensureAccountWorkspace(account.id);
+  return account;
+}
+
+/** The `accounts` half of ensureLocalAccount: resolve/refresh the row, no workspace, no caching. */
+async function resolveLocalAccount(): Promise<Account | null> {
   const { accounts } = schema;
   const existingRows = await db
     .select()
@@ -102,16 +140,12 @@ export async function ensureLocalAccount(): Promise<Account | null> {
     // it NULL). A genuinely name-less GitHub user re-fetches each startup — cheap;
     // the daily refresh would repopulate it anyway.
     existing.displayName != null;
-  if (existing && fresh) {
-    cachedLocalAccount = rowToAccount(existing);
-    return cachedLocalAccount;
-  }
+  if (existing && fresh) return rowToAccount(existing);
 
   const gh = fetchFromGh();
   if (!gh) {
     // Fall back to whatever row exists (the migration seeds a placeholder).
-    cachedLocalAccount = existing ? rowToAccount(existing) : null;
-    return cachedLocalAccount;
+    return existing ? rowToAccount(existing) : null;
   }
 
   const updatedRows = await db
@@ -139,8 +173,7 @@ export async function ensureLocalAccount(): Promise<Account | null> {
     .returning()
     .execute();
 
-  cachedLocalAccount = updatedRows[0] ? rowToAccount(updatedRows[0]) : null;
-  return cachedLocalAccount;
+  return updatedRows[0] ? rowToAccount(updatedRows[0]) : null;
 }
 
 /** The local account from the module cache (no network / no DB). */
@@ -151,7 +184,11 @@ export function getLocalAccountCached(): Account | null {
 /**
  * Upsert a cloud account from a completed OAuth sign-in (keyed on the GitHub
  * user node id). Re-login refreshes the login/avatar, the encrypted token, and
- * lastLoginAt. Returns the account.
+ * lastLoginAt, and guarantees the account's Default workspace. Returns the account.
+ *
+ * This is the ONLY path that creates a cloud account, so it is the only place a
+ * brand-new tenant can be given the one scope the app has — migration 0044's
+ * backfill can only reach accounts that already existed when it ran.
  */
 export async function upsertCloudAccount(input: {
   githubUserId: string;
@@ -189,7 +226,12 @@ export async function upsertCloudAccount(input: {
     })
     .returning()
     .execute();
-  return rowToAccount(rows[0]!);
+  const account = rowToAccount(rows[0]!);
+  // Before returning: the callback redirects straight to /app, which immediately resolves a
+  // workspace scope. Creating it here (not lazily on that first request) means a sign-in that
+  // cannot produce a usable tenant fails at sign-in, where the error is attributable.
+  await ensureAccountWorkspace(account.id);
+  return account;
 }
 
 // In-memory throttle for the activity stamp below: accountId → last-stamp epoch ms.

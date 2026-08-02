@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, runTransaction, schema } from './client.js';
 import { deleteRepo } from './queries.js';
 
@@ -12,10 +12,14 @@ import { deleteRepo } from './queries.js';
 //
 // Two design rules:
 //
-//  1. REUSE deleteRepo per repository rather than hand-rolling a second cascade. The core
-//     schema has NO `ON DELETE CASCADE` anywhere, so the FK-safe delete order is intricate
-//     and has already been got wrong twice (ci_status_events was missing from both delete
-//     paths at one point, which 500'd repo deletion). One implementation, one place to fix.
+//  1. REUSE deleteRepo per repository rather than hand-rolling a second cascade. Almost none
+//     of the core schema declares `ON DELETE CASCADE` (the workspace tables and
+//     auto_merge_requests are the exceptions), so the FK-safe delete order is intricate and has
+//     already been got wrong twice (ci_status_events was missing from both delete paths at one
+//     point, which 500'd repo deletion). One implementation, one place to fix. Where a cascade
+//     DOES exist, this file still deletes explicitly and child-first: SQLite enforces FKs only
+//     under `foreign_keys=ON` while Postgres enforces them immediately, and an erasure promise
+//     must not depend on which dialect is running.
 //
 //  2. Enumerate the account-level tables EXPLICITLY and keep this list next to the schema in
 //     review. A table added later that carries `accountId` and is not listed here becomes a
@@ -35,10 +39,9 @@ const {
   repos,
   aiUsage,
   myTurnDismissals,
-  repoReviewers,
-  accountReviewers,
-  teams,
-  teamRepos,
+  workspaces,
+  workspaceRepos,
+  workspaceReviewers,
   benchmarkContributions,
   searchIndex,
   autoMergeRequests,
@@ -92,22 +95,31 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
   // 3. Account-level core tables, then the account itself. One transaction so an account can
   //    never be left present-but-stripped (or absent-but-referenced) if this fails midway.
   await runTransaction(async (tx) => {
-    // Teams: the membership rows for surviving repos are gone with their repos, but a team
-    // whose repos were all deleted still has its own row.
-    const teamRows = await tx
-      .select({ id: teams.id })
-      .from(teams)
-      .where(eq(teams.accountId, accountId))
+    // Workspaces and everything keyed to one, CHILD BEFORE PARENT. All three tables carry
+    // `accountId`, so each delete is a single indexed predicate and none of them depends on
+    // another's result set — but the ORDER still matters and is not belt-and-braces alone:
+    //
+    //   workspace_reviewers ─┐
+    //                        ├─ composite FK (workspace_id, account_id) → workspaces(id, account_id)
+    //   workspace_repos ─────┘   ON DELETE CASCADE
+    //
+    // Postgres checks FKs immediately, so deleting `workspaces` first would rely entirely on the
+    // cascade firing; SQLite only enforces them at all with `foreign_keys=ON`. Deleting the
+    // children explicitly, first, makes the erasure independent of both — the cascades then find
+    // nothing to do, which is exactly the property the checklist below asserts.
+    //
+    // `workspace_reviewers` is the one that must never be left to a cascade: it holds the manual
+    // judgements, the human-set vendor names and `monthly_cents` — a price the user typed — so a
+    // row surviving here survives an erasure the user was told was complete.
+    await tx
+      .delete(workspaceReviewers)
+      .where(eq(workspaceReviewers.accountId, accountId))
       .execute();
-    const teamIds = teamRows.map((t) => t.id);
-    if (teamIds.length > 0) {
-      await tx.delete(teamRepos).where(inArray(teamRepos.teamId, teamIds)).execute();
-    }
-    // teamRepos carries its OWN accountId as well as teamId, so delete by account too — a
-    // membership row whose team was already gone (or whose repo was deleted first) would
-    // otherwise survive with this account's id on it. Belt and braces after the teamId sweep.
-    await tx.delete(teamRepos).where(eq(teamRepos.accountId, accountId)).execute();
-    await tx.delete(teams).where(eq(teams.accountId, accountId)).execute();
+    // Membership rows for surviving repos are already gone with their repos (the repo half of
+    // the composite FK cascades), but a workspace whose repos were all deleted, and any row the
+    // repo loop above could not reach, still carries this account's id.
+    await tx.delete(workspaceRepos).where(eq(workspaceRepos.accountId, accountId)).execute();
+    await tx.delete(workspaces).where(eq(workspaces.accountId, accountId)).execute();
 
     // The AI spend ledger (token/credit counts — no prompt text).
     await tx.delete(aiUsage).where(eq(aiUsage.accountId, accountId)).execute();
@@ -118,14 +130,6 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .delete(myTurnDismissals)
       .where(eq(myTurnDismissals.accountId, accountId))
       .execute();
-    // The bot object, at BOTH grains. `repo_reviewers` cascades from `repos` (and from
-    // `accounts`), but it is deleted explicitly here for the same reason `teamRepos` is — the txn
-    // ordering must not depend on the dialect's FK timing, and the checklist below iterates every
-    // accountId-bearing table regardless of what a cascade would have done.
-    // `account_reviewers` carries the actor's identity AND its recorded PRICE, so leaving it
-    // behind would survive an erasure the user was told was complete.
-    await tx.delete(repoReviewers).where(eq(repoReviewers.accountId, accountId)).execute();
-    await tx.delete(accountReviewers).where(eq(accountReviewers.accountId, accountId)).execute();
     // Any aggregate rows contributed to the cross-org benchmark. Consent was the basis for
     // these, so withdrawal-by-deletion must remove them too.
     await tx
@@ -171,15 +175,19 @@ export function accountScopedTables(): {
     { name: 'claudeReviews', col: claudeReviews.accountId, table: claudeReviews },
     { name: 'aiUsage', col: aiUsage.accountId, table: aiUsage },
     { name: 'myTurnDismissals', col: myTurnDismissals.accountId, table: myTurnDismissals },
-    // Both grains of the bot object (migrations 0042/0043) replace the single
-    // `botReviewClassification` entry that used to sit here. BOTH must be listed: the judgement
-    // rows carry accountId, and so does the identity row that holds the price.
-    { name: 'repoReviewers', col: repoReviewers.accountId, table: repoReviewers },
-    { name: 'accountReviewers', col: accountReviewers.accountId, table: accountReviewers },
-    { name: 'teams', col: teams.accountId, table: teams },
-    // teamRepos has its own accountId (not only teamId) — it must be on the checklist, or a
-    // membership row could survive an erasure carrying this account's id.
-    { name: 'teamRepos', col: teamRepos.accountId, table: teamRepos },
+    // THE WORKSPACE TRIO (migrations 0044/0045). FOUR entries left here when they arrived —
+    // `repoReviewers`, `accountReviewers`, `teams`, `teamRepos` — and THREE replaced them. The net
+    // drop of one is correct and intended: the two bot tables collapsed onto a single
+    // (account, workspace, actor) row. It is written out because an off-by-one in a checklist is
+    // exactly how a table gets missed.
+    { name: 'workspaces', col: workspaces.accountId, table: workspaces },
+    // workspaceRepos carries its OWN accountId (not only workspaceId/repoId) — it must be on the
+    // checklist, or a membership row could survive an erasure carrying this account's id.
+    { name: 'workspaceRepos', col: workspaceRepos.accountId, table: workspaceRepos },
+    // The bot object, now one grain. It holds the human judgements, the human-set vendor names
+    // and `monthly_cents` — the one column no classifier can regenerate — so this is the entry
+    // whose omission would cost the user data they entered by hand.
+    { name: 'workspaceReviewers', col: workspaceReviewers.accountId, table: workspaceReviewers },
     {
       name: 'benchmarkContributions',
       col: benchmarkContributions.accountId,

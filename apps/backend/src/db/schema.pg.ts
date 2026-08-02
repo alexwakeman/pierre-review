@@ -89,13 +89,6 @@ export const repos = pgTable(
       withTimezone: true,
       mode: 'date',
     }),
-    // "Watch for inbox" — see schema.sqlite.ts for the full description. Kept in
-    // sync by hand (schema-parity.test.ts).
-    inboxWatch: boolean('inbox_watch').notNull().default(false),
-    inboxWatchStartedAt: timestamp('inbox_watch_started_at', {
-      withTimezone: true,
-      mode: 'date',
-    }),
     // Default-branch status snapshot ("is trunk green?") — the pg twin of schema.sqlite.ts.
     // All nullable until the branch sync runs. Kept in sync by hand (schema-parity.test.ts).
     defaultBranchName: text('default_branch_name'),
@@ -107,6 +100,8 @@ export const repos = pgTable(
       withTimezone: true,
       mode: 'date',
     }),
+    // When the repo was added to this account — My Turn's clock. See schema.sqlite.ts for why
+    // that is load-bearing. Kept in sync by hand (schema-parity.test.ts).
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),
@@ -119,9 +114,10 @@ export const repos = pgTable(
     ),
     nodeUx: uniqueIndex('repos_account_node').on(t.accountId, t.githubNodeId),
     accountIdx: index('repos_account_idx').on(t.accountId),
-    // Parent key for `repo_reviewers`' composite FK — not a lookup index. Postgres accepts a
+    // Parent key for `workspace_repos`' composite FK — not a lookup index. Postgres accepts a
     // plain UNIQUE INDEX here (a named UNIQUE CONSTRAINT is not required; verified on 16.13),
     // which is what lets this be the same DDL as the sqlite twin. See schema.sqlite.ts.
+    // `workspaces_id_account` is the same trick for the workspace half of those FKs.
     idAccountUx: uniqueIndex('repos_id_account').on(t.id, t.accountId),
   }),
 );
@@ -747,169 +743,187 @@ export const claudeReviewFindings = pgTable(
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
 
-// ---- Bot-Triage Platform (WS1 / WS6) ----
-// ── THE BOT STORE IS TWO TABLES, ONE PER GRAIN ──────────────────────────────────────────────
-// `repo_reviewers`    — (account, repo, author): the JUDGEMENT (automated / role + provenance).
-// `account_reviewers` — (account, author):       the IDENTITY (kind / label / price + provenance).
-// Every fact lives at exactly one of them; no team key, no inheritance, no merge, no dedup.
-// Full rationale in the sqlite twin — these two are kept in sync BY HAND (schema-parity.test.ts).
-//
-// A reviewer as seen in ONE REPO — the pg twin of schema.sqlite.ts repoReviewers. One row per
-// (account, repo, author) and THAT ROW IS THE BOT OBJECT. See the sqlite twin for why the repo
-// (not a team) is the key, why there is no deduplication, and why detection derives once per
-// ACTOR and copies the same verdict to each of its repo rows (a copy CAN legitimately diverge
-// when a human overrides one repo — which is precisely why identity, a fact that IS one value,
-// does not live here).
-//
-// IT CARRIES NO `kind`/`label`/`identity_source`. Those were columns here, replicated across an
-// actor's rows and held consistent only by convention; editing one is how CodeRabbit lost its
-// brand colour in the repos nobody touched. They are now one row on `account_reviewers`.
-export const repoReviewers = pgTable(
-  'repo_reviewers',
-  {
-    id: serial('id').primaryKey(),
-    accountId: integer('account_id')
-      .notNull()
-      .references(() => accounts.id, { onDelete: 'cascade' }),
-    // No `.references()` here on purpose: the FK is the COMPOSITE one in the table config below,
-    // `(repo_id, account_id) → repos(id, account_id)`. See the sqlite twin.
-    repoId: integer('repo_id').notNull(),
-    // No cascade: `users` is GLOBAL storage shared by every account and is never deleted.
-    authorUserId: integer('author_user_id')
-      .notNull()
-      .references(() => users.id),
-    automated: boolean('automated').notNull(),
-    // ReviewerRole — 'review' | 'quality_check'. A flag on this object, orthogonal to `kind`.
-    role: text('role').notNull().default('review'),
-    confidence: text('confidence').notNull(), // 'high'|'medium'|'low'
-    source: text('source').notNull(), // ClassificationSource
-    reasonsJson: jsonb('reasons_json').$type<string[]>(),
-    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => ({
-    accountRepoAuthorUx: uniqueIndex('repo_reviewers_account_repo_author').on(
-      t.accountId,
-      t.repoId,
-      t.authorUserId,
-    ),
-    accountRepoIdx: index('repo_reviewers_account_repo_idx').on(t.accountId, t.repoId),
-    // Also the join key from `account_reviewers` back to this table.
-    accountAuthorIdx: index('repo_reviewers_account_author_idx').on(t.accountId, t.authorUserId),
-    // Tenancy as a constraint: `repo_id` arrives in a REQUEST BODY, and a single-column FK would
-    // accept (account 2, repo 10) where repo 10 belongs to account 1. Verified by insertion —
-    // Postgres rejects the pair with "violates foreign key constraint
-    // \"repo_reviewers_repo_account_fk\"". CASCADE matches team_repos. See schema.sqlite.ts.
-    //
-    // The `name` is REAL: migration 0029 spells `CONSTRAINT "repo_reviewers_repo_account_fk"`, so
-    // this declaration matches the constraint Postgres actually holds. Before that the SQL named
-    // nothing and pg auto-named it `repo_reviewers_repo_id_account_id_fkey`, i.e. the name here
-    // matched nothing in any live database.
-    repoAccountFk: foreignKey({
-      name: 'repo_reviewers_repo_account_fk',
-      columns: [t.repoId, t.accountId],
-      foreignColumns: [repos.id, repos.accountId],
-    }).onDelete('cascade'),
-  }),
-);
-
-// WHAT AN AUTOMATED REVIEWER IS — one row per (account, actor), NEVER per repo — the pg twin of
-// schema.sqlite.ts accountReviewers. The ACTOR GRAIN: kind, label, identity provenance, price.
-// These are the same in every repo BY DEFINITION (a login is one vendor everywhere; you buy one
-// subscription, so six repos running CodeRabbit is $120, not $720).
-//
-// NAMED FOR ITS KEY, exactly as `repo_reviewers` is — not `reviewer_identities` (which would make
-// `monthly_cents` look like a stray) and not `reviewer_costs` (which made `kind`/`label` look the
-// same way). One table per grain; the next actor-level fact belongs here without a rename.
-//
-// `monthly_cents` is NULLABLE here where the old standalone cost table made it NOT NULL: this row
-// exists for identity reasons too, so "no price" can no longer be "no row". That is SAFE because
-// nothing inherits any more — NULL is "no price set", 0 is "free", and there is no fallback chain
-// behind either. `integer` in BOTH dialects: `numeric` has no sqlite twin AND node-postgres hands
-// it back as a STRING, breaking the shared `number` wire type. Full rationale in the sqlite twin.
-export const accountReviewers = pgTable(
-  'account_reviewers',
-  {
-    id: serial('id').primaryKey(),
-    accountId: integer('account_id')
-      .notNull()
-      .references(() => accounts.id, { onDelete: 'cascade' }),
-    // No cascade: `users` is GLOBAL storage and is never deleted.
-    authorUserId: integer('author_user_id')
-      .notNull()
-      .references(() => users.id),
-    kind: text('kind'), // AutomatedReviewerKind | null
-    label: text('label'),
-    // Provenance of `kind` + `label` ONLY — a different field from `repo_reviewers.source`, and
-    // now on a different TABLE, so neither edit can reach the other's rows.
-    identitySource: text('identity_source', { enum: ['auto', 'manual'] })
-      .notNull()
-      .default('auto'),
-    // NULL = no price set. 0 = free. Nothing inherits; see the sqlite twin.
-    monthlyCents: integer('monthly_cents'),
-    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => ({
-    accountAuthorUx: uniqueIndex('account_reviewers_account_author').on(
-      t.accountId,
-      t.authorUserId,
-    ),
-  }),
-);
-
-// NOTE: `bot_mute_rules` backed a removed feature (Pierre-only "hide" mute + the standing
-// auto-resolve cron) — dropped in favour of a strictly user-initiated, confirm-gated resolve.
-// No schema binding here on purpose; the pg baseline still creates the orphan table.
-
-// ---- Teams (CORE) ----
-// Named grouping of the account's repos — the pg twin of schema.sqlite.ts teams. Kept in
-// sync by hand (schema-parity.test.ts).
-export const teams = pgTable(
-  'teams',
+// ---- Workspaces (CORE) ----
+// A named grouping of an account's repos, and the ONE scope this app has — the pg twin of
+// schema.sqlite.ts workspaces. Kept in sync BY HAND (schema-parity.test.ts, which compares
+// columns but NOT indexes and NOT foreign keys — diff the FK blocks by eye). Exactly one row per
+// account carries is_default: auto-created, RENAMEABLE, NOT deletable, and new repos land in it.
+export const workspaces = pgTable(
+  'workspaces',
   {
     id: serial('id').primaryKey(),
     accountId: integer('account_id')
       .notNull()
       .references(() => accounts.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
+    // Exactly one true row per account — ALSO enforced by a PARTIAL UNIQUE INDEX created in
+    // migrations-pg/0031 (`… ON workspaces (account_id) WHERE is_default`), not here: drizzle
+    // index predicates are DDL-only metadata nothing in this repo consumes, but the constraint
+    // itself is what makes ensureDefaultWorkspace's "INSERT … ON CONFLICT DO NOTHING then
+    // re-SELECT" race-safe. See the sqlite twin.
+    isDefault: boolean('is_default').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),
   },
   (t) => ({
-    accountNameUx: uniqueIndex('teams_account_name').on(t.accountId, t.name),
-    accountIdx: index('teams_account_idx').on(t.accountId),
+    accountNameUx: uniqueIndex('workspaces_account_name').on(t.accountId, t.name),
+    accountIdx: index('workspaces_account_idx').on(t.accountId),
+    // NOT a lookup index — `id` is already the PK. It is the PARENT KEY of the composite FKs on
+    // workspace_repos and workspace_reviewers, exactly as `repos_id_account` is for those tables'
+    // repo FKs. Postgres accepts a plain unique index as a parent key (no named UNIQUE constraint
+    // required; verified on 16.13). Drop it and both composite FKs become unexpressible.
+    idAccountUx: uniqueIndex('workspaces_id_account').on(t.id, t.accountId),
   }),
 );
 
-// Many-to-many join of teams ↔ repos — the pg twin of schema.sqlite.ts teamRepos. Kept in
-// sync by hand (schema-parity.test.ts).
-export const teamRepos = pgTable(
-  'team_repos',
+// EXACTLY ONE WORKSPACE PER REPO, AS A DATABASE FACT — the pg twin of schema.sqlite.ts
+// workspaceRepos. The unique on (account_id, repo_id) makes reassignment an UPSERT, i.e. a MOVE;
+// no code path can produce a second membership row. See the sqlite twin for why this is a join
+// table rather than a `repos.workspace_id` column, and for the two sides that close the
+// "repo with no membership row is invisible" gap (upsertRepo on write, ensureRepoMemberships on
+// read). The workspace cascade is a SAFETY NET, not the delete path: deleteWorkspace moves the
+// repos to Default inside its transaction first.
+export const workspaceRepos = pgTable(
+  'workspace_repos',
   {
     id: serial('id').primaryKey(),
     accountId: integer('account_id')
       .notNull()
       .references(() => accounts.id, { onDelete: 'cascade' }),
-    teamId: integer('team_id')
-      .notNull()
-      .references(() => teams.id, { onDelete: 'cascade' }),
-    repoId: integer('repo_id')
-      .notNull()
-      .references(() => repos.id, { onDelete: 'cascade' }),
+    // No single-column FKs: both are the COMPOSITE declarations below.
+    workspaceId: integer('workspace_id').notNull(),
+    repoId: integer('repo_id').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),
   },
   (t) => ({
-    teamRepoUx: uniqueIndex('team_repos_team_repo').on(t.teamId, t.repoId),
-    accountIdx: index('team_repos_account_idx').on(t.accountId),
-    repoIdx: index('team_repos_repo_idx').on(t.repoId),
+    // One workspace per repo, structurally. Also the upsert conflict target for
+    // assignReposToWorkspace.
+    accountRepoUx: uniqueIndex('workspace_repos_account_repo').on(t.accountId, t.repoId),
+    accountWorkspaceIdx: index('workspace_repos_account_workspace_idx').on(
+      t.accountId,
+      t.workspaceId,
+    ),
+    repoIdx: index('workspace_repos_repo_idx').on(t.repoId),
+    // Tenancy as a constraint. `workspaceId` arrives in a REQUEST BODY, so a plain
+    // `REFERENCES workspaces(id)` would accept (account 2, workspace 10) where workspace 10
+    // belongs to account 1 — both halves individually valid. NAMED because Postgres quotes the
+    // name in the violation message and the hand-written migration spells the same
+    // `CONSTRAINT "workspace_repos_workspace_account_fk"`; an unnamed declaration would be
+    // auto-named `workspace_repos_workspace_id_account_id_fkey` and the name here would match
+    // nothing live.
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_repos_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'workspace_repos_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
   }),
 );
+
+// ---- Bot-Triage Platform (WS1 / WS6) ----
+// THE BOT OBJECT: one row per (account, WORKSPACE, actor) — the pg twin of schema.sqlite.ts
+// workspaceReviewers. It replaces BOTH `repo_reviewers` (judgement, per repo) and
+// `account_reviewers` (identity + price, per account): with one workspace as the only scope both
+// facts are about the same key, so a second table would key on the identical three columns.
+//
+// ⚠ THE TWO PROVENANCE FLAGS STAY SEPARATE COLUMNS and are honoured INDEPENDENTLY. `source` owns
+// automated/role/confidence/reasons; `identity_source` owns kind/label. Inside one row that is
+// code discipline (a narrowed `set:` object), not a table boundary — see the sqlite twin.
+//
+// ⚠ `monthly_cents` is in NO derived UPDATE. One writer (`setReviewerCost`), one row, keyed on
+// (account_id, workspace_id, author_user_id). Price is a PER-WORKSPACE fact like every other
+// column here: no fan-out, no INSERT seed, and two workspaces may legitimately hold different
+// numbers. NULL = no price set, 0 = "recorded as free"; nothing inherits. `integer` CENTS in BOTH
+// dialects: `numeric` has no sqlite twin AND node-postgres hands it back as a STRING, breaking
+// the shared `number` wire type; the WIRE is DOLLARS, clamped to MAX_MONTHLY_CENTS. NEVER summed
+// ACROSS workspaces on one screen. Full rationale in the sqlite twin.
+export const workspaceReviewers = pgTable(
+  'workspace_reviewers',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // No `.references()` here on purpose: the FK is the COMPOSITE one in the table config below,
+    // `(workspace_id, account_id) → workspaces(id, account_id)`. See the sqlite twin.
+    workspaceId: integer('workspace_id').notNull(),
+    // No cascade: `users` is GLOBAL storage shared by every account and is never deleted.
+    authorUserId: integer('author_user_id')
+      .notNull()
+      .references(() => users.id),
+    // ── JUDGEMENT (owned by `source`) ──
+    automated: boolean('automated').notNull(),
+    // ReviewerRole — 'review' | 'quality_check'. A flag on this object, orthogonal to `kind`.
+    role: text('role').notNull().default('review'),
+    confidence: text('confidence').notNull(), // ClassificationConfidence — 'high'|'medium'|'low'
+    source: text('source').notNull(), // ClassificationSource; 'manual' is never re-derived
+    reasonsJson: jsonb('reasons_json').$type<string[]>(),
+    // ── IDENTITY (owned by `identity_source`) ──
+    kind: text('kind'), // AutomatedReviewerKind | null
+    label: text('label'), // human-set display name; null ⇒ brand name ⇒ login
+    // Provenance of `kind` + `label` ONLY — a different field from `source`, sharing a row.
+    identitySource: text('identity_source', { enum: ['auto', 'manual'] })
+      .notNull()
+      .default('auto'),
+    // ── PRICE (owned by nothing derived; one writer only) ──
+    monthlyCents: integer('monthly_cents'),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    // The upsert conflict target for EVERY writer. A stale target type-checks perfectly and
+    // raises "no unique or exclusion constraint matching the ON CONFLICT specification" at
+    // RUNTIME, only when a row is actually written.
+    accountWorkspaceAuthorUx: uniqueIndex('workspace_reviewers_account_workspace_author').on(
+      t.accountId,
+      t.workspaceId,
+      t.authorUserId,
+    ),
+    // Listing one workspace's reviewers (the Bots settings list).
+    accountWorkspaceIdx: index('workspace_reviewers_account_workspace_idx').on(
+      t.accountId,
+      t.workspaceId,
+    ),
+    // Reaching every row of ONE actor across the account's workspaces.
+    accountAuthorIdx: index('workspace_reviewers_account_author_idx').on(
+      t.accountId,
+      t.authorUserId,
+    ),
+    // Tenancy as a constraint: `workspace_id` arrives in a REQUEST BODY, and a single-column FK
+    // would accept (account 2, workspace 10) where workspace 10 belongs to account 1. The
+    // composite FK makes the PAIR the thing that must exist, and it needs the
+    // `workspaces_id_account` unique index that exists for exactly this purpose. The `name` is
+    // REAL — the hand-written migration spells `CONSTRAINT
+    // "workspace_reviewers_workspace_account_fk"`, and Postgres quotes it in the violation.
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_reviewers_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// NOTE: `repo_reviewers` + `account_reviewers` were the TWO-GRAIN bot store `workspace_reviewers`
+// replaces (judgement per repo; identity + price per actor). Both are DROPPED by pg migration
+// 0032 after their backfill — leaving either behind would leave a second, differently-keyed
+// answer to the same question in every database. No schema binding here on purpose.
+
+// NOTE: `bot_mute_rules` backed a removed feature (Pierre-only "hide" mute + the standing
+// auto-resolve cron) — dropped in favour of a strictly user-initiated, confirm-gated resolve.
+// No schema binding here on purpose; the pg baseline still creates the orphan table.
+
+// NOTE: `teams` + `team_repos` (the many-to-many grouping) are what `workspaces` +
+// `workspace_repos` above replace. Both are DROPPED by pg migration 0031, which preserves the
+// team IDS as workspace ids and gives every repo exactly one membership row. No schema binding
+// here on purpose.
 
 // ── Cross-org benchmark network (CORE, cloud-only, opt-in) ── the pg twin of the sqlite
 // benchmarkContributions table. See that file for the full rationale (aggregate-only, no PII,
@@ -943,7 +957,7 @@ export const benchmarkContributions = pgTable(
   }),
 );
 
-// ── Cross-team full-text search index (CORE, no AI) ── the pg twin of the sqlite searchIndex
+// ── Cross-workspace full-text search index (CORE, no AI) ── the pg twin of the sqlite searchIndex
 // table. See that file for the full rationale (one row per searchable unit, accountId tenant anchor,
 // portable substring match, per-PR rebuild, cascading FKs). The (account_id, repo_id) btree already
 // bounds each search to one tenant's scoped rows; for cloud scale a `pg_trgm` GIN index on

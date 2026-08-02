@@ -11,7 +11,6 @@ import { usePr } from '../hooks/usePr.js';
 import { useMe, useProCapabilities } from '../hooks/useTriage.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
-import { WatchedBadge } from './WatchedBadge.js';
 import { api } from '../api/client.js';
 import { useFilters } from '../store/filters.js';
 import { usePinnedTabs, type PinnedPr } from '../store/pinnedTabs.js';
@@ -592,8 +591,16 @@ export function PrDetail({
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   // "Show in Activity feed" — jump to this PR's repo console (activity sub-tab) with the PR
-  // isolated as the feed filter. ORDER IS LOAD-BEARING: setActivityRepo clears feedIsolatedPrId,
-  // so isolate AFTER the rail move (mirrors OpenPrsDetail.showInFeed / BotOnlyPrsDetail).
+  // isolated as the feed filter. ORDER IS LOAD-BEARING, and there are now THREE steps that clear
+  // `feedIsolatedPrId`: `setWorkspace` and `setActivityRepo` both do, so the isolation is set
+  // LAST (mirrors OpenPrsDetail.showInFeed / BotOnlyPrsDetail).
+  //
+  // ⚠ THE WORKSPACE MOVES FIRST WHEN THE PR LIVES ELSEWHERE. A PR tab can hold a PR from any
+  // workspace (a `?pr=<id>` deep link, a restored `pierre:tabs` entry, a search hit), and the
+  // Activity rail lists only the ACTIVE workspace's repos — so without the switch this lands the
+  // console on a repo it has no row for and the feed is scoped to the wrong set entirely.
+  const activeWorkspaceId = useFilters((s) => s.workspaceId);
+  const setWorkspace = useFilters((s) => s.setWorkspace);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
   const setRepoConsoleTab = useFilters((s) => s.setRepoConsoleTab);
   const setFeedIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
@@ -807,6 +814,14 @@ export function PrDetail({
           <button
             type="button"
             onClick={() => {
+              // Switch scope first when this PR's repo belongs to another workspace (see the
+              // note by setWorkspace above). `null` = every repo in the new workspace, which is
+              // the REPLACE semantics a scope change wants.
+              const prWorkspaceId =
+                repos?.find((r) => r.id === pr.repoId)?.workspaceId ?? null;
+              if (prWorkspaceId != null && prWorkspaceId !== activeWorkspaceId) {
+                setWorkspace(prWorkspaceId, null);
+              }
               setRepoConsoleTab(pr.repoId, 'activity');
               setActivityRepo(pr.repoId);
               setFeedIsolatedPrId(pr.id);
@@ -858,12 +873,7 @@ export function PrDetail({
           <Avatar user={author} size={16} />
           <UserName user={author} fallbackId={pr.authorId} repoId={pr.repoId} />
           <span>·</span>
-          <span className="inline-flex items-center gap-1">
-            {pr.repoFullName}
-            {repos?.find((r) => r.id === pr.repoId)?.inboxWatch && (
-              <WatchedBadge size={11} />
-            )}
-          </span>
+          <span>{pr.repoFullName}</span>
           <span>·</span>
           <span>opened {relativeTime(pr.openedAt)}</span>
           {pr.changedFilesCount > 0 && (

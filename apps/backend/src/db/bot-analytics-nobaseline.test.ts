@@ -20,6 +20,9 @@ let db: any;
 let schema: any;
 let closeDb: (() => void) | undefined;
 let q: any;
+// BotScope { workspaceId, repoIds } — `workspaceId` decides who counts as a bot, `repoIds`
+// narrows the measured data. Resolved through the production resolver in beforeAll.
+let scope: any;
 
 const HOUR = 60 * 60 * 1000;
 const now = Math.floor(Date.now() / 1000) * 1000;
@@ -38,7 +41,7 @@ beforeAll(async () => {
 
   const [repo] = await db
     .insert(repos)
-    .values({ accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_nb', inboxWatch: true })
+    .values({ accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_nb' })
     .returning()
     .execute();
   const [pr] = await db
@@ -80,13 +83,23 @@ beforeAll(async () => {
       })
       .execute();
   }
+
+  // ⚠ Resolve the scope through `resolveWorkspaceScope`, never by hand-building
+  // `{workspaceId, repoIds}` — that call runs `ensureRepoMemberships`, which is what puts a repo
+  // inserted straight into `repos` into the account's Default workspace. Skip it and the seeded
+  // repo is in NO workspace, the getter short-circuits on an empty scope, and the gate below is
+  // never actually exercised.
+  scope = await q.resolveWorkspaceScope(1, null);
 });
 
 afterAll(() => closeDb?.());
 
 describe('getBotAnalytics fixed 36h overdue gate boundary', () => {
   it('only threads older than 36h are overdue (even with no reply history)', async () => {
-    const resp = await q.getBotAnalytics(1, 'rolling_14');
+    // The scope really carries the seeded repo — otherwise `vendors` would be empty and the
+    // `.find(...)!` below would blow up rather than silently passing, but state it anyway.
+    expect(scope.repoIds).toHaveLength(1);
+    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
     expect(resp.totals.overdueGraceMs).toBe(36 * HOUR); // the fixed gate
     const v = resp.vendors.find((x: { kind: string }) => x.kind === 'coderabbit')!;
     expect(v.untouched).toBe(3); // all three not addressed

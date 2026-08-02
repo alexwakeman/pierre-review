@@ -9,7 +9,7 @@ function isTypingTarget(el: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
 }
 
-// Global shortcuts: `/` focus filter, `j`/`k` cycle PRs (board only), `i` open the Activity
+// Global shortcuts: `/` focus search, `j`/`k` cycle PRs (board only), `i` open the Activity
 // console (per-repo insights now live there), `esc` leave the current tab/overlay → the
 // board (or clear the selection when already on the board).
 export function useKeyboard(): void {
@@ -35,9 +35,16 @@ export function useKeyboard(): void {
       }
       if (isTypingTarget(e.target)) return;
 
+      // `/` focuses the global search box, which is mounted on EVERY view (FilterBar). The
+      // add-repo field is the fallback and only exists while the "Manage repos & workspaces"
+      // modal (or first-run onboarding) is open — it used to be the sole target, which made the
+      // shortcut a silent no-op everywhere else once repo management moved into that modal.
       if (e.key === '/') {
         e.preventDefault();
-        document.getElementById('add-repo-input')?.focus();
+        const target =
+          document.getElementById('add-repo-input') ??
+          document.getElementById('global-search-input');
+        target?.focus();
         return;
       }
 

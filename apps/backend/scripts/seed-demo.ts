@@ -14,6 +14,12 @@
 // PR #114 (acme/infrastructure) has failing CI plus a seeded AI CI-analysis and
 // a succeeded AI Fix run (for the AI Analysis & Fix shot).
 //
+// The three repos are split across TWO workspaces — "Platform" (the DEFAULT, and
+// so what the SPA lands on: acme/api + acme/infrastructure) and "Web"
+// (acme/web-app) — so the "Compare workspaces" rail line, gated on two or more
+// workspaces, is reachable. See the "workspaces" block for why the split falls
+// where it does.
+//
 // When the PRIVATE @pierre/pro submodule is checked out (packages/pro), the
 // seeder also applies the plugin's own migrations (with pro_migrations
 // bookkeeping, so the backend's boot-time plugin migration is a no-op) and
@@ -128,13 +134,14 @@ const INFRA = 3;
 await db
   .insert(schema.repos)
   .values([
-    // inboxWatch=true so the watched-repo activity Feed populates (and new open PRs
-    // by others surface in the My Turn inbox). inboxWatchStartedAt well in the past
-    // so all the recent curated activity falls inside the Feed's 14-day window.
+    // `createdAt` is My Turn's clock, not decoration: an open PR only enters the "New PRs"
+    // section when `openedAt >= createdAt`, so 40 days back puts every curated PR inside the
+    // window (the newest curated activity is ~14 days old) AND inside the Feed's 14-day one.
+    // There is no second visibility axis to set — a repo in a workspace is fully live.
     // viewerPermission=ADMIN so write-gated UI (approve, AI Fix push controls) renders.
-    { id: WEB, accountId: 1, owner: 'acme', name: 'web-app', githubNodeId: 'R_web', defaultBranch: 'main', createdAt: day(40), inboxWatch: true, inboxWatchStartedAt: day(40), viewerPermission: 'ADMIN' },
-    { id: API, accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_api', defaultBranch: 'main', createdAt: day(40), inboxWatch: true, inboxWatchStartedAt: day(40), viewerPermission: 'ADMIN' },
-    { id: INFRA, accountId: 1, owner: 'acme', name: 'infrastructure', githubNodeId: 'R_infra', defaultBranch: 'main', createdAt: day(40), inboxWatch: true, inboxWatchStartedAt: day(40), viewerPermission: 'ADMIN' },
+    { id: WEB, accountId: 1, owner: 'acme', name: 'web-app', githubNodeId: 'R_web', defaultBranch: 'main', createdAt: day(40), viewerPermission: 'ADMIN' },
+    { id: API, accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_api', defaultBranch: 'main', createdAt: day(40), viewerPermission: 'ADMIN' },
+    { id: INFRA, accountId: 1, owner: 'acme', name: 'infrastructure', githubNodeId: 'R_infra', defaultBranch: 'main', createdAt: day(40), viewerPermission: 'ADMIN' },
   ])
   .execute();
 await db
@@ -145,6 +152,44 @@ await db
     { repoId: INFRA, lastFullSyncAt: day(7), lastIncrementalSyncAt: min(8), lastSyncStatus: 'ok' },
   ])
   .execute();
+
+// ---- workspaces ------------------------------------------------------------
+// A repo belongs to EXACTLY ONE workspace (`workspace_repos`, UNIQUE (account_id, repo_id)), so
+// assigning is a MOVE, never an add. The demo ships TWO of them for two reasons: the rail's
+// "Compare workspaces" line is gated on `workspaces.length >= 2` and would otherwise be
+// unreachable (⇒ a missing landing screenshot), and every workspace-SCOPED surface — Insights,
+// flow metrics, Bot ROI, the Detected-reviewers table — only visibly narrows when there is
+// something to narrow away from.
+//
+// THE SPLIT IS CHOSEN SO THE EXISTING SHOTS STAY WHOLE. The SPA lands on the DEFAULT workspace
+// (WorkspaceSelector falls back to the `isDefault` row), so the default keeps acme/api +
+// acme/infrastructure — every repo a workspace-scoped shot depends on: #113's threads and its
+// Claude run (api), #114's failing CI + AI Fix and #116's bot-only review (infrastructure), and
+// ALL of the bot activity (CodeRabbit + Copilot on api, Acme CI on infrastructure). acme/web-app
+// has no bot footprint whatsoever, so moving it out costs no bot surface at all, while its 42 PRs
+// make the second Compare row substantive rather than a zero-filled placeholder. The PR-detail
+// shots that live in the other workspace are addressed by id (`?pr=`), which is account-scoped —
+// and the per-PR bot panels derive their judgement scope from the PR's OWN repo, not the selected
+// workspace, so they render there too.
+//
+// What a wrong split would cost is PRICE, and it is worth stating because a known vendor login
+// stays automated in every workspace off the login seed, so nothing looks broken: move acme/api
+// into Web and the ROI panel still lists CodeRabbit and Copilot, now reporting NO PRICE. Money is
+// a plain per-workspace column with ONE writer and no fan-out, so it lives only where its row does
+// — verified by moving repo 2 across and watching $30/$19 become null.
+//
+// The default row is RENAMED rather than left as "Default": the default is renameable (it is only
+// un-deletable), and "Platform" beside "Web" reads like an org somebody actually set up.
+const { ensureDefaultWorkspace, createWorkspace, renameWorkspace, assignReposToWorkspace } =
+  await import('../src/db/queries.js');
+const PLATFORM_WS = await ensureDefaultWorkspace(1);
+await renameWorkspace(PLATFORM_WS, 1, 'Platform');
+const WEB_WS = (await createWorkspace(1, 'Web')).id;
+// Memberships are written EXPLICITLY rather than left to `ensureRepoMemberships`' lazy repair:
+// the repair would put all three in the default on the first request, which is both the wrong
+// split and non-deterministic (it depends on which request lands first).
+await assignReposToWorkspace(PLATFORM_WS, 1, [API, INFRA]);
+await assignReposToWorkspace(WEB_WS, 1, [WEB]);
 
 // ---- pull requests ---------------------------------------------------------
 // id == number for clarity (?pr=<id> opens the PR).
@@ -778,82 +823,61 @@ await db
   ])
   .execute();
 
-// ---- bot-triage: the bot object, at BOTH grains ----
-// A BOT IS A PER-REPO OBJECT (`repo_reviewers`, keyed (account, repo, author)) with a SINGLE
-// account-wide identity (`account_reviewers`, keyed (account, author)). The demo seeds both, and
-// the split is visible on screen: CodeRabbit appears once per repo in the Bots listing — THREE
-// rows, which is the intended display, not a duplicate to collapse — while its vendor colour,
-// name and $30/month price are read once from its identity row.
+// ---- bot-triage: the bot object ----
+// A BOT IS A PER-WORKSPACE OBJECT — ONE row per (account, workspace, actor) in
+// `workspace_reviewers`, carrying the judgement, the vendor identity AND the price together. The
+// two-table split (`repo_reviewers` for the judgement, `account_reviewers` for identity + cost)
+// is GONE: it existed only because those facts lived at different grains, and with one workspace
+// as the only scope they key on the identical three columns. So the demo now shows CodeRabbit
+// ONCE per workspace, not once per repo.
 //
-// ⚠ ROWS ARE ONLY SEEDED WHERE THE ACTOR ACTUALLY HAS A FOOTPRINT, mirroring the rule the real
-// listing enforces: a row for a repo a reviewer never touched is not a bot object, it is an
-// invented one. Acme CI reviews on WEB and API; CodeRabbit and Copilot are on all three.
+// ⚠ THE TWO PROVENANCE FLAGS STAY INDEPENDENT INSIDE THE ROW, and the demo data is what makes
+// that visible: Acme CI carries `identity_source: 'manual'` (a human named it "In-house AI") next
+// to `source: 'behavioral'` (detection still owns the automated/role verdict). A classification
+// pass must refresh the second and leave the first alone; a shared `set:` object would clobber the
+// human's name on the next sync.
 //
-// A MANUAL row tags Acme CI (id 10) as an in-house AI reviewer on WEB, so the table shows a
-// confirmed human judgement next to auto-detected ones — and, because the two grains are gated on
-// separate provenance flags, re-running detection would leave that one row alone while refreshing
-// API's. The two vendors' rows are exactly what `classifyReviewer` itself would persist for a
-// known vendor login (source 'vendor_login', NOT 'manual'), so auto-detection is unaffected.
+// The two vendor rows are exactly what `classifyReviewer` itself would persist for a known vendor
+// login (source 'vendor_login', NOT 'manual'), so auto-detection is unaffected.
 //
 // Acme CI deliberately carries NO price — the in-house agent has no vendor bill, and it keeps the
-// "no cost set" state on screen next to two priced rows.
-const demoJudgement = (
-  authorUserId: number,
-  repoIds: number[],
-  extra: { source: string; reasons: string[]; manualRepoIds?: number[] },
-) =>
-  repoIds.map((repoId) => ({
-    accountId: 1,
-    repoId,
-    authorUserId,
-    automated: true,
-    role: 'review',
-    confidence: 'high',
-    source: extra.manualRepoIds?.includes(repoId) ? 'manual' : extra.source,
-    reasonsJson: extra.reasons,
-    updatedAt: now,
-  }));
+// "no cost set" state on screen next to two priced rows. Money is integer CENTS in both dialects
+// (the wire unit is dollars).
+//
+// All three rows land in the PLATFORM workspace and nowhere else, because that is exactly what
+// detection itself would produce: every bot footprint in this fixture is in acme/api or
+// acme/infrastructure, and acme/web-app (the Web workspace) has none. Seeding a row where the
+// actor has never reviewed would fabricate a judgement — and, since price is per workspace with no
+// fan-out writer, a second price for a subscription nobody bought.
+const demoWorkspaceId = PLATFORM_WS;
 
 await db
-  .insert(schema.repoReviewers)
-  .values([
-    ...demoJudgement(ACME_CI, [WEB, API], {
-      source: 'behavioral',
-      reasons: ['manually confirmed as the in-house Acme CI review agent'],
-      manualRepoIds: [WEB],
-    }),
-    ...demoJudgement(CODERABBIT, [WEB, API, INFRA], {
-      source: 'vendor_login',
-      reasons: ['login "coderabbitai" is a known CodeRabbit review bot'],
-    }),
-    ...demoJudgement(COPILOT, [WEB, API, INFRA], {
-      source: 'vendor_login',
-      reasons: ['login "copilot-pull-request-reviewer" is a known Copilot review bot'],
-    }),
-  ])
-  .execute();
-
-// Identity + price: ONE row per actor, never per repo. You buy one subscription from a vendor, so
-// three repos running CodeRabbit is $30/month, not $90 — storing the price here is what makes that
-// unrepresentable. Money is integer CENTS in both dialects (the wire unit is dollars).
-await db
-  .insert(schema.accountReviewers)
+  .insert(schema.workspaceReviewers)
   .values([
     {
       accountId: 1,
+      workspaceId: demoWorkspaceId,
       authorUserId: ACME_CI,
+      automated: true,
+      role: 'review',
+      confidence: 'high',
+      source: 'behavioral',
+      reasonsJson: ['behaves like an automated reviewer (regular, high-volume, off-hours)'],
       kind: 'in_house',
       label: 'In-house AI',
-      // A human named this one, so the classifier must leave the kind/label alone. Note this is a
-      // DIFFERENT flag from the WEB judgement row's `source: 'manual'` above — same demo actor,
-      // two independent provenances, which is the whole point of the two tables.
       identitySource: 'manual',
       monthlyCents: null,
       updatedAt: now,
     },
     {
       accountId: 1,
+      workspaceId: demoWorkspaceId,
       authorUserId: CODERABBIT,
+      automated: true,
+      role: 'review',
+      confidence: 'high',
+      source: 'vendor_login',
+      reasonsJson: ['login "coderabbitai" is a known CodeRabbit review bot'],
       kind: 'coderabbit',
       label: 'CodeRabbit',
       identitySource: 'auto',
@@ -862,7 +886,13 @@ await db
     },
     {
       accountId: 1,
+      workspaceId: demoWorkspaceId,
       authorUserId: COPILOT,
+      automated: true,
+      role: 'review',
+      confidence: 'high',
+      source: 'vendor_login',
+      reasonsJson: ['login "copilot-pull-request-reviewer" is a known Copilot review bot'],
       kind: 'copilot',
       label: 'Copilot',
       identitySource: 'auto',
@@ -1550,10 +1580,11 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
       //
       // bot_cost_json is NULL. It used to seed `[{"kind":…}]` entries, which are the LEGACY
       // kind-keyed shape `parseCost` drops on read — so the demo's cost column was empty either
-      // way. Per-bot cost now lives on `account_reviewers.monthly_cents` (seeded above for
-      // CodeRabbit + Copilot), which is per ACTOR — one price per vendor, whatever number of
-      // repos it runs in — and CORE/free. There is no write path to this blob any more; it
-      // survives only as a read-time fallback.
+      // way. Per-bot cost now lives on `workspace_reviewers.monthly_cents` (seeded above for
+      // CodeRabbit + Copilot), which is per WORKSPACE — the same grain as every other attribute
+      // on the bot row, so editing a price in one workspace leaves the others alone — and
+      // CORE/free. There is no write path to this blob any more; it survives only as a
+      // read-time fallback.
       1, 1, 'acme-ci,*-ci', 0,
       0, 1, 1, 1,
       1, 7, null,
@@ -1609,7 +1640,7 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
   //    what the live GET recomputes (structural hash of the current Insight cards +
   //    the day-quantized sprint window — see packages/pro/src/insights/sprint-report.ts
   //    insightsHash/windowKey; replicated here so the report is NOT flagged stale).
-  const { getTeamInsights } = await import('../src/db/queries.js');
+  const { getWorkspaceInsights, resolveWorkspaceScope } = await import('../src/db/queries.js');
   // Replicate packages/pro/src/settings/store.ts `currentSprintWindow` EXACTLY so the
   // stored insights_hash matches what the plugin recomputes live (else a stale chip):
   // the auto-rolling window [start + k·cadence, +cadence) that contains `now`.
@@ -1617,7 +1648,15 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
   const k = Math.max(0, Math.floor((now.getTime() - sprintStart.getTime()) / cadenceMs));
   const windowFromMs = sprintStart.getTime() + k * cadenceMs;
   const window = { fromMs: windowFromMs, toMs: windowFromMs + cadenceMs };
-  const insights = await getTeamInsights(1, window);
+  // Scope: an undefined `?workspace=` resolves to the account's DEFAULT — here "Platform"
+  // (acme/api + acme/infrastructure) — which is the same path a bare page load takes, and the
+  // same workspace the SPA lands on. That equality is what keeps the stored hash matching: a
+  // report seeded at one scope and recomputed at another reads as permanently stale.
+  const insights = await getWorkspaceInsights(
+    1,
+    window,
+    await resolveWorkspaceScope(1, undefined),
+  );
   const cardHash = createHash('sha256')
     .update(
       insights.cards
@@ -1791,9 +1830,13 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
 
 console.log('Seeded demo data into', config.dbPath);
 console.log('  repos: acme/web-app (1), acme/api (2), acme/infrastructure (3)');
+console.log(
+  `  workspaces: Platform (${PLATFORM_WS}, DEFAULT) ← api + infrastructure ·`,
+  `Web (${WEB_WS}) ← web-app`,
+);
 console.log('  me: Morgan Diaz (account 1 → users.id 1)');
-console.log('  bot-triage: 8 repo_reviewers rows over 3 actors + 3 account_reviewers identities;');
-console.log('    CodeRabbit(8) $30 + Copilot(9) $19 on all 3 repos, Acme CI(10) on web+manual/api;');
+console.log('  bot-triage: 3 workspace_reviewers rows (one per actor) in Platform;');
+console.log('    CodeRabbit(8) $30 + Copilot(9) $19 priced, Acme CI(10) in-house with NO price;');
 console.log('    #113 Copilot/CodeRabbit dedup, #116 bot-only review');
 console.log('  PR-detail / Claude shot: ?pr=113 · AI-fix shot: ?pr=114 (failing CI)');
 console.log('  curated PRs:', PRS.length, `(ids 101–116 recent + 120–134 mid-range + 140–142 stale)`);

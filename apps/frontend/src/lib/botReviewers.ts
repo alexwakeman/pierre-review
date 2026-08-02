@@ -1,52 +1,60 @@
-import type {
-  BotVendorAnalytics,
-  RepoReviewer,
-  ReviewerIdentity,
-} from '@pierre-review/shared';
+import type { WorkspaceReviewer } from '@pierre-review/shared';
 
-// Pure shaping for the bot-reviewer listing. Everything here exists because the wire serves TWO
-// GRAINS that the UI has to join without ever confusing them:
+// Pure shaping for the bot-reviewer listing of ONE WORKSPACE.
 //
-//   `DetectedReviewersResponse.reviewers`  one per ACTOR      — identity + price (account-wide)
-//   `DetectedReviewersResponse.rows`       one per (repo, actor) — the judgement (this repo only)
+// ── ONE ROW PER ACTOR, AND THE WORKSPACE IS THE GRAIN ───────────────────────────────────────
+// `DetectedReviewersResponse.reviewers` is a FLAT list of `WorkspaceReviewer`s — one per actor in
+// the selected workspace — and each row carries, together, everything the UI used to have to join:
+// the judgement (`automated` / `role`), the identity (`kind` / `label`), the price
+// (`costMonthlyUsd`) and the evidence behind them (`footprint` + `repoFootprints`).
 //
-// ⚠ A BOT IS A PER-REPO OBJECT AND THERE IS NO DEDUPLICATION. A vendor running in six repos is SIX
-// rows and is MEANT to render as six entries, grouped by repo. That was asked and answered
-// explicitly: a team whose repos each run `githubactions` shows `githubactions` once per repo.
-// Nothing in this file collapses rows by userId, and nothing added to it should.
+// That replaced a two-grain wire (`rows`, one per (repo, actor) + `reviewers`, one per actor) and
+// with it the entire join this file existed to perform. A vendor running in six of the workspace's
+// repos is now ONE row whose `repoFootprints` names all six; it is not six rows to group, and
+// `groupRowsByRepo` / `identityIndex` / `actorSummaries` / `mixedRoleRowKeys` are gone rather than
+// renamed — there is nothing left for them to reconcile.
 //
-// ⚠ THE ONE THING THAT *MUST* BE DEDUPED IS MONEY. The price lives on the actor, so joining it
-// onto six repo rows and summing the column turns one $120 subscription into $720. That is what
-// `monthlyCostTotal` is for, and it is the only function here that keys on userId alone.
+// ── THE ONE RULE THAT SURVIVED THE COLLAPSE ─────────────────────────────────────────────────
+// Money is still deduped by `userId` in `monthlyCostTotal`. Within one workspace that dedupe is a
+// no-op — the server emits one row per actor — and it is kept deliberately as the cheap standing
+// guard that this figure is never handed two workspaces' listings at once. Price is a PER-WORKSPACE
+// fact now, so summing across workspaces is not a bigger total, it is a category error: six
+// workspaces each listing a $120 CodeRabbit is either six subscriptions or one seen six ways, and
+// nothing in this app may assert which.
+//
+// ── AND THE ONE THAT CHANGED SHAPE ──────────────────────────────────────────────────────────
+// "Marked not a bot" is now `!automated && (isManualOverride || identitySource === 'manual')`. The
+// second disjunct is not defensive padding: `isManualOverride` is `source === 'manual'`, and a
+// RENAMED actor carries `identitySource === 'manual'` with `source === 'auto'`. Without it, an
+// actor someone named and then marked "not a bot" would sit in NO bucket, invisible, with its
+// identity pinned to manual and its "Reset name" control unreachable — the exact known gap this
+// refactor claims to have closed.
 //
 // Pure and exported so each rule is a test rather than a comment (test/botReviewers.test.ts) —
 // the established pattern here (see lib/annotationRun.ts, lib/prRef.ts, lib/botCost.ts).
 
-// ── Grouping ────────────────────────────────────────────────────────────────────────────────
+// ── Buckets ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * One repo's slice of the listing: its own judgement rows, split by role.
+ * The three sub-lists the Settings surface renders, in render order.
  *
- * The role split is per repo BY CONSTRUCTION now — `role` is a `repo_reviewers` column — so the
- * same login can legitimately sit under "Review bots" in one group and "Quality checks" in the
- * next. That is a feature (a linter that also posts review comments in one repo), not a state to
- * reconcile, so the groups are computed independently and never compared.
+ * The split is per WORKSPACE by construction — `role` is one column on one row — so a login is a
+ * review bot or a quality check here, never both. (Under the old per-repo grain it could legally
+ * be one in `api` and the other in `infra`, which is why nothing compared the two lists. That
+ * state is now unrepresentable.)
  */
-export interface RepoReviewerGroup {
-  repoId: number;
+export interface ReviewerBuckets {
   /** `automated && role === 'review'` — the reviewers every bot metric counts. */
-  reviewBots: RepoReviewer[];
+  reviewBots: WorkspaceReviewer[];
   /** `automated && role === 'quality_check'` — coverage/lint/static analysis, excluded from ROI. */
-  qualityChecks: RepoReviewer[];
+  qualityChecks: WorkspaceReviewer[];
   /**
-   * `!automated && isManualOverride` — the rows a human explicitly marked "not a bot HERE".
+   * The rows a human deliberately pinned as NOT automated in this workspace.
    *
    * ⚠ THIS BUCKET EXISTS SO THE PIN STAYS VISIBLE. A manual row is one the classifier will never
-   * re-derive, and "Not a bot here" produces exactly that — so without this bucket the row
-   * disappeared from the only surface it could be edited from, leaving it pinned AND unreachable:
-   * the search box could only offer to re-promote it (another manual write), never to hand it back
-   * to detection. That is the "no way back" failure this whole reset pass exists to close, in the
-   * one case where it is invisible as well as permanent.
+   * re-derive, and "Not a bot" produces exactly that — so without this bucket the row disappears
+   * from the only surface it can be edited from, leaving it pinned AND unreachable: the search box
+   * could only offer to re-promote it (another manual write), never to hand it back to detection.
    *
    * ⚠ AUTO non-automated rows are still excluded, and must stay excluded. Every ordinary human
    * commenter has one (the row IS the bot object, so the classifier writes a low-confidence "not
@@ -54,147 +62,69 @@ export interface RepoReviewerGroup {
    * whole contributor roster. They are reached through `humanCandidates`, which is where a human
    * is a useful thing to look at.
    *
-   * These rows DO also remain `humanCandidates` — search-by-name is how you find one when you
-   * cannot remember which repo you dismissed it in — so the two surfaces offer the two different
-   * actions: promote it again from search, or hand it back to detection from here.
-   *
-   * ⚠ THIS BUCKET IS ALSO THE ONLY WAY BACK for a manually-RENAMED actor that is automated in no
-   * repo. `actorSummaries` skips an actor with no automated row, and the account-wide card it
-   * builds is the only home of "Reset name to auto" — so renaming a bot and then marking it "not a
-   * bot" in its last repo makes that card, and the identity reset with it, disappear while the
-   * identity stays pinned to `manual`. Resetting or re-promoting the row from HERE brings the
-   * actor (and its reset control) straight back, which is what keeps that a detour rather than the
-   * permanent pin the reset routes exist to abolish. Do not "tidy" this bucket away.
+   * ⚠ THE `identitySource === 'manual'` DISJUNCT IS LOAD-BEARING. See the file header: a renamed
+   * actor that is automated nowhere has `source === 'auto'`, so testing `isManualOverride` alone
+   * files it under no bucket at all and strands its "Reset name" control.
    */
-  markedNotBots: RepoReviewer[];
+  markedNotBots: WorkspaceReviewer[];
+}
+
+/** Whether a reviewer appears in any of the three lists at all — the buckets' own predicate. */
+function isListed(r: WorkspaceReviewer): boolean {
+  return r.automated || r.isManualOverride || r.identitySource === 'manual';
 }
 
 /**
- * Group the judgement rows by repo, in the order the server said to render them.
+ * Split one workspace's listing into the three lists, preserving the server's order within each.
  *
- * ⚠ EVERY `repoId` GETS A GROUP, INCLUDING AN EMPTY ONE. A repo in scope with no detected
- * reviewer is a real, useful answer ("nothing automated has spoken here yet") and dropping it
- * would make that indistinguishable from the repo not being in scope at all.
- *
- * ⚠ A ROW WHOSE REPO IS NOT IN `repoIds` IS APPENDED, NEVER DROPPED. The server is the authority
- * on both lists and they should agree; if they ever don't, showing an unexpected group is a
- * visible bug, whereas silently swallowing rows is an invisible one — and this listing is the only
- * surface from which a stored judgement can be edited, so a hidden row is an unreachable setting.
- * Appended (not interleaved) so the server's stated order still governs the normal case.
- *
- * AUTO non-automated rows are deliberately absent from all three buckets: they are the "this is
- * an ordinary human" answers the classifier writes for every commenter, and they are reached
- * through `humanCandidates` instead, which is the only place they are useful. A MANUAL one is a
- * different thing entirely — a judgement someone recorded and the classifier now honours forever —
- * so it lands in `markedNotBots` and stays visible. See that field for what went wrong without it.
+ * ⚠ ITS PREDICATE AND `reviewerListEmptyKind`'S MUST AGREE. They are the same `isListed` test for
+ * exactly that reason: if the empty state used a narrower rule it would paint "no automated
+ * reviewers seen yet" over a screen that has a pinned row on it — and the thing it hid would be a
+ * judgement the classifier honours forever, whose only reset control lives in the list being
+ * hidden.
  */
-export function groupRowsByRepo(
-  rows: readonly RepoReviewer[],
-  repoIds: readonly number[],
-): RepoReviewerGroup[] {
-  const groups = new Map<number, RepoReviewerGroup>();
-  const order: number[] = [];
-  const ensure = (repoId: number): RepoReviewerGroup => {
-    let g = groups.get(repoId);
-    if (g == null) {
-      g = { repoId, reviewBots: [], qualityChecks: [], markedNotBots: [] };
-      groups.set(repoId, g);
-      order.push(repoId);
-    }
-    return g;
-  };
-  for (const id of repoIds) ensure(id);
-  for (const r of rows) {
+export function bucketReviewers(reviewers: readonly WorkspaceReviewer[]): ReviewerBuckets {
+  const out: ReviewerBuckets = { reviewBots: [], qualityChecks: [], markedNotBots: [] };
+  for (const r of reviewers) {
     if (!r.automated) {
-      // Only the DELIBERATE ones. An auto "not a bot" row is every human in the account.
-      if (r.isManualOverride) ensure(r.repoId).markedNotBots.push(r);
+      // Only the DELIBERATE ones — a judgement pinned by hand, or an actor a human named.
+      if (r.isManualOverride || r.identitySource === 'manual') out.markedNotBots.push(r);
       continue;
     }
-    const g = ensure(r.repoId);
-    if (r.role === 'quality_check') g.qualityChecks.push(r);
-    else g.reviewBots.push(r);
+    if (r.role === 'quality_check') out.qualityChecks.push(r);
+    else out.reviewBots.push(r);
   }
-  return order.map((id) => groups.get(id) as RepoReviewerGroup);
-}
-
-/** Identity lookup by actor. The join key between the two grains is always `userId`. */
-export function identityIndex(
-  reviewers: readonly ReviewerIdentity[],
-): Map<number, ReviewerIdentity> {
-  return new Map(reviewers.map((r) => [r.userId, r]));
-}
-
-// ── Actor summaries (the account-wide half of the screen) ───────────────────────────────────
-
-/**
- * One actor, plus WHERE it is automated. Drives the identity + price section, which is rendered
- * ONCE per actor above the per-repo groups — because kind, label and price are the same in every
- * repo by definition, and putting an editor for them on each repo row is how a user comes to
- * believe they are renaming one copy.
- */
-export interface ActorSummary {
-  identity: ReviewerIdentity;
-  /** Repos where this actor has an `automated` row, in the listing's repo order. */
-  repoIds: number[];
-  /** Of those, how many treat it as a review bot vs a quality check. Both can be non-zero. */
-  reviewRepoCount: number;
-  qualityRepoCount: number;
-}
-
-/**
- * Every actor that is automated in at least one in-scope repo, with the repos it is automated in.
- *
- * Ordered by descending repo footprint then login, so the bot that is everywhere sorts first —
- * that is the one whose price and vendor name matter most, and the one a user is most likely to
- * be looking for.
- *
- * An identity with no automated row anywhere is NOT here: it is either a human (reachable through
- * `humanCandidates`) or a stale identity row, and either way there is nothing account-wide to say
- * about it.
- */
-export function actorSummaries(
-  reviewers: readonly ReviewerIdentity[],
-  rows: readonly RepoReviewer[],
-  repoIds: readonly number[],
-): ActorSummary[] {
-  const rank = new Map(repoIds.map((id, i) => [id, i]));
-  const byUser = new Map<number, { repoIds: number[]; review: number; quality: number }>();
-  for (const r of rows) {
-    if (!r.automated) continue;
-    let e = byUser.get(r.userId);
-    if (e == null) {
-      e = { repoIds: [], review: 0, quality: 0 };
-      byUser.set(r.userId, e);
-    }
-    e.repoIds.push(r.repoId);
-    if (r.role === 'quality_check') e.quality += 1;
-    else e.review += 1;
-  }
-  const out: ActorSummary[] = [];
-  for (const identity of reviewers) {
-    const e = byUser.get(identity.userId);
-    if (e == null) continue;
-    out.push({
-      identity,
-      // A repo absent from `repoIds` (see groupRowsByRepo's append rule) sorts last rather than
-      // first, which `?? -1` would do.
-      repoIds: [...e.repoIds].sort((a, b) => (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity)),
-      reviewRepoCount: e.review,
-      qualityRepoCount: e.quality,
-    });
-  }
-  out.sort(
-    (a, b) =>
-      b.repoIds.length - a.repoIds.length ||
-      a.identity.login.localeCompare(b.identity.login),
-  );
   return out;
+}
+
+// ── The per-repo Bots tab's filter ──────────────────────────────────────────────────────────
+
+/**
+ * The workspace's reviewers that have actually touched `repoId`.
+ *
+ * ⚠ THIS IS A DISPLAY FILTER, NOT A SCOPE. The per-repo Bots tab fetches the WHOLE workspace
+ * listing and narrows here, on purpose: every edit on that panel is workspace-wide — it is
+ * literally the same row — so each card has to be able to show its full `repoFootprints[]`, i.e.
+ * the real blast radius. Asking the server for `repoIds: [repoId]` would leave exactly one entry
+ * in that array and reduce the disclosure to a line of copy asserting something the UI cannot
+ * show. (It would also fragment the cache away from the workspace-wide entry every colour, vendor
+ * tag and thread filter shares — see `detectedReviewersQueryKey`.)
+ *
+ * A reviewer with no footprint here is omitted rather than shown at zero: a judgement is a
+ * workspace fact, and listing it under a repo it has never touched invites the reading that the
+ * row is about that repo.
+ */
+export function reviewersWithFootprintIn(
+  reviewers: readonly WorkspaceReviewer[],
+  repoId: number,
+): WorkspaceReviewer[] {
+  return reviewers.filter((r) => r.repoFootprints.some((f) => f.repoId === repoId));
 }
 
 // ── Money ───────────────────────────────────────────────────────────────────────────────────
 
 export interface MonthlyCostTotal {
-  /** Sum over DISTINCT actors. Null when no in-scope actor has a price at all. */
+  /** Sum over DISTINCT actors. Null when no automated reviewer here has a price at all. */
   totalUsd: number | null;
   /** How many distinct actors carry a price (0 included — 0 is a real price). */
   pricedActors: number;
@@ -203,37 +133,41 @@ export interface MonthlyCostTotal {
 }
 
 /**
- * What the automated reviewers in scope cost per month, IN TOTAL.
+ * What the automated reviewers of ONE WORKSPACE cost per month, in total.
  *
- * ⚠ THIS IS THE FUNCTION THE WHOLE FILE EXISTS FOR. The listing is one row per (repo, actor) and
- * the price hangs off the actor, so the obvious implementation — sum `costMonthlyUsd` across the
- * rendered rows — reports six CodeRabbit repos as $720 of spend when the invoice says $120. No
- * schema can prevent that (there is no per-repo price column to be wrong); only this dedupe can.
+ * ⚠ ONE WORKSPACE. Not one repo, not the account. The price on each row is what that bot costs in
+ * this workspace; the same vendor's row in the next workspace may hold a different number, or
+ * none, and the two must never be added together (§0 of the workspace contract: it would be
+ * asserting six subscriptions where there may be one). Hand this function a single
+ * `DetectedReviewersResponse.reviewers` array and nothing else.
  *
- * ⚠ 0 IS A PRICE, NOT AN ABSENCE. An actor recorded as free counts toward `pricedActors` and
+ * ⚠ THE DEDUPE BY `userId` IS KEPT THOUGH IT IS NOW TRIVIALLY SATISFIED. The server emits exactly
+ * one row per actor per workspace, so it can never fire — which is precisely what makes it a cheap
+ * standing invariant: the day someone concatenates two workspaces' listings to "show everything",
+ * the total does not silently double.
+ *
+ * ⚠ 0 IS A PRICE, NOT AN ABSENCE. A bot recorded as free counts toward `pricedActors` and
  * contributes 0 to the total; it must not be counted as unpriced, or "3 of 5 bots have no price"
  * becomes a nag about a bot someone deliberately marked free.
  *
  * `totalUsd` is null (not 0) when nothing is priced, so the caller can say "no prices set" rather
  * than printing a confident $0.
  */
-export function monthlyCostTotal(
-  reviewers: readonly ReviewerIdentity[],
-  rows: readonly RepoReviewer[],
-): MonthlyCostTotal {
-  const automatedActors = new Set<number>();
-  for (const r of rows) if (r.automated) automatedActors.add(r.userId);
+export function monthlyCostTotal(reviewers: readonly WorkspaceReviewer[]): MonthlyCostTotal {
+  const seen = new Set<number>();
   let total = 0;
   let priced = 0;
   let unpriced = 0;
-  for (const identity of reviewers) {
-    if (!automatedActors.has(identity.userId)) continue;
-    if (identity.costMonthlyUsd == null) {
+  for (const r of reviewers) {
+    if (!r.automated) continue;
+    if (seen.has(r.userId)) continue;
+    seen.add(r.userId);
+    if (r.costMonthlyUsd == null) {
       unpriced += 1;
       continue;
     }
     priced += 1;
-    total += identity.costMonthlyUsd;
+    total += r.costMonthlyUsd;
   }
   return {
     // Re-round to the cent: summing binary64 dollars accumulates representation error
@@ -247,55 +181,33 @@ export function monthlyCostTotal(
 // ── Promoting a human ───────────────────────────────────────────────────────────────────────
 
 /**
- * A human (or as-yet-unclassified actor) that could be marked automated, and the repos where
- * marking them would mean anything.
+ * Reviewers this workspace currently treats as human, matching a search string.
  *
- * ⚠ THE REPO LIST IS THE POINT. "Mark as a bot" is a per-repo judgement now, so a promote control
- * with no repo attached has no row to write. Offering the repos where the actor actually has a
- * footprint is what keeps the gesture honest — and stops the UI inventing rows for repos the
- * reviewer has never touched, which is a fabricated bot object, not a bot object.
+ * ⚠ IT TAKES NO REPO LIST ANY MORE, AND THE GESTURE IT FEEDS TAKES NO REPO EITHER. "Mark as a bot"
+ * is one workspace-wide write against the row that already exists for this actor, so there is no
+ * repo to pick and no row to fabricate — the old per-repo button set (and the fabricated-bot-object
+ * hazard it guarded against) went with the grain.
+ *
+ * A row a human pinned as "not a bot" IS still a candidate: search-by-name is how you find one you
+ * cannot remember dismissing, and the two surfaces then offer the two different actions — promote
+ * it again from here, or hand it back to detection from the marked-not-bots list.
  */
-export interface HumanCandidate {
-  identity: ReviewerIdentity;
-  /** Repos where this actor has a (non-automated) row, in the listing's repo order. */
-  repoIds: number[];
-}
-
 export function humanCandidates(
-  reviewers: readonly ReviewerIdentity[],
-  rows: readonly RepoReviewer[],
+  reviewers: readonly WorkspaceReviewer[],
   query: string,
   limit: number,
-  repoIds: readonly number[] = [],
-): HumanCandidate[] {
+): WorkspaceReviewer[] {
   const q = query.trim().toLowerCase();
   if (q === '') return [];
-  const rank = new Map(repoIds.map((id, i) => [id, i]));
-  const automatedActors = new Set<number>();
-  const humanRepos = new Map<number, number[]>();
-  for (const r of rows) {
-    if (r.automated) {
-      automatedActors.add(r.userId);
-      continue;
-    }
-    const list = humanRepos.get(r.userId);
-    if (list == null) humanRepos.set(r.userId, [r.repoId]);
-    else list.push(r.repoId);
-  }
-  const out: HumanCandidate[] = [];
-  for (const identity of reviewers) {
-    // Automated ANYWHERE ⇒ not a candidate: it already has a row in the lists above, where its
-    // per-repo judgement is editable. Promoting it again from the search box would be a second,
-    // competing control for the same fact.
-    if (automatedActors.has(identity.userId)) continue;
-    const repos = humanRepos.get(identity.userId);
-    if (repos == null || repos.length === 0) continue;
-    const hay = `${identity.login} ${identity.displayName ?? ''}`.toLowerCase();
+  const out: WorkspaceReviewer[] = [];
+  for (const r of reviewers) {
+    // Automated already ⇒ not a candidate: it has a card in the lists above, where its judgement
+    // is editable. Promoting it from the search box would be a second, competing control for one
+    // fact.
+    if (r.automated) continue;
+    const hay = `${r.login} ${r.displayName ?? ''}`.toLowerCase();
     if (!hay.includes(q)) continue;
-    out.push({
-      identity,
-      repoIds: [...repos].sort((a, b) => (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity)),
-    });
+    out.push(r);
     if (out.length >= limit) break;
   }
   return out;
@@ -307,24 +219,22 @@ export function humanCandidates(
  * An empty listing means two different things and looks like one. `repoIds` is what tells them
  * apart — which is exactly why the response carries the id LIST and not a count:
  *
- *   'no-repos'     — nothing in scope. The fix is to add or show repos; no amount of syncing helps.
- *   'no-reviewers' — repos in scope, but no automated reviewer has been seen in any of them yet.
- *                    The fix is to sync/wait.
+ *   'no-repos'     — the workspace has no repos. The fix is to move some in; syncing cannot help.
+ *   'no-reviewers' — repos in the workspace, but no automated reviewer has been seen in any of
+ *                    them yet. The fix is to sync/wait.
  *
- * ⚠ A MANUAL "not a bot" ROW COUNTS AS CONTENT, not as emptiness. It is not automated, so the
- * obvious `rows.some(r => r.automated)` renders the empty state over a screen that has something
- * on it — and worse, the thing it hides is a PIN the classifier honours forever, whose only reset
- * control lives in the list being hidden. An account that marked its one detected bot "not a bot
- * here" would land on "no automated reviewers seen yet" with no way back at all.
+ * ⚠ A PINNED ROW COUNTS AS CONTENT, not as emptiness — hence the shared `isListed` predicate. A
+ * workspace that marked its one detected bot "not a bot" would otherwise land on "no automated
+ * reviewers seen yet" with the pin, and its reset control, hidden behind that sentence.
  */
 export type ReviewerListEmptyKind = 'no-repos' | 'no-reviewers' | null;
 
 export function reviewerListEmptyKind(
+  reviewers: readonly WorkspaceReviewer[],
   repoIds: readonly number[],
-  rows: readonly RepoReviewer[],
 ): ReviewerListEmptyKind {
   if (repoIds.length === 0) return 'no-repos';
-  return rows.some((r) => r.automated || r.isManualOverride) ? null : 'no-reviewers';
+  return reviewers.some(isListed) ? null : 'no-reviewers';
 }
 
 /**
@@ -334,39 +244,14 @@ export function reviewerListEmptyKind(
  * shut. The "Add a review bot" search filters the SAME (empty) listing, so on any screen this copy
  * can appear it could only ever render a box that matches nobody. Copy, not markup, so the rule is
  * testable.
+ *
+ * The 'no-repos' string names the ONE place a repo's workspace can be changed, because under a
+ * one-workspace-per-repo model there is nothing to add here — the repos exist, they are simply
+ * somewhere else.
  */
 export function emptyStateCopy(kind: 'no-repos' | 'no-reviewers', repoCount: number): string {
   if (kind === 'no-repos') {
-    return 'No repos in scope. Add one — or widen the repo/team filter — and its automated reviewers appear here.';
+    return 'No repos in this Workspace — move some in from Manage repos & workspaces, and their automated reviewers appear here.';
   }
-  return `No automated reviewers seen yet in ${repoCount} repo${repoCount === 1 ? '' : 's'} — they appear here once one has reviewed or commented on a PR we’ve synced.`;
-}
-
-// ── ROI: one actor, two roles ───────────────────────────────────────────────────────────────
-
-/**
- * The analytics rows that appear in BOTH the ROI table and the excluded "quality checks" section.
- *
- * ⚠ THIS IS A LEGITIMATE STATE, NOT A SERVER BUG. `role` is a `repo_reviewers` column, so a login
- * can be a review bot in `api` and a quality gate in `infra`. Under a multi-repo scope the server
- * therefore has a reviewer whose role is not single-valued, and whichever way it splits the
- * aggregate, one of the two numbers is over a subset of that reviewer's work.
- *
- * The panel does NOT try to reconcile that — it cannot, from an aggregate — it LABELS it, keyed on
- * the analytics row `key` (`u<userId>` / 'pierre'), which is the identity both lists use. A quiet
- * marker on the affected rows says "this bot is roled differently in different repos, so this row
- * covers only part of its work", which is the honest statement and points at the per-repo Settings
- * list where the roles actually live.
- *
- * Matching on `key` and not `login` is deliberate: `login` is nullable on an analytics row and two
- * unresolved logins would both be null and falsely collide.
- */
-export function mixedRoleRowKeys(
-  vendors: readonly Pick<BotVendorAnalytics, 'key'>[],
-  qualityChecks: readonly Pick<BotVendorAnalytics, 'key'>[],
-): Set<string> {
-  const inVendors = new Set(vendors.map((v) => v.key));
-  const out = new Set<string>();
-  for (const q of qualityChecks) if (inVendors.has(q.key)) out.add(q.key);
-  return out;
+  return `No automated reviewers seen yet in this Workspace’s ${repoCount} repo${repoCount === 1 ? '' : 's'} — they appear here once one has reviewed or commented on a PR we’ve synced.`;
 }

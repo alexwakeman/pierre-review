@@ -215,12 +215,12 @@ export function qualityCheckBot(login: string | null | undefined): boolean {
 
 // ── Bot-Triage Platform (WS1–WS6) ──────────────────────────────────────────────
 // The neutral measurement + triage layer above ALL automated reviewers — the known
-// vendors (ReviewBotKind), a team's own in-house AI reviewer, and Pierre's own Claude
+// vendors (ReviewBotKind), an account's own in-house AI reviewer, and Pierre's own Claude
 // Review. See docs/PRO-PLATFORM.md / the bot-triage plan.
 
 // ── WS1 automated-reviewer classification ────────────────────────────
 // `vendor` = a generic PROPRIETARY third-party reviewer a user manually classifies when it
-// isn't a known brand — distinct from `in_house` (a team's OWN AI). It carries no brand
+// isn't a known brand — distinct from `in_house` (the account's OWN AI). It carries no brand
 // colour/label (rendered by login, like in_house) and is EXCLUDED from the cross-org
 // benchmark (brand-unknown, so not comparable to a named-vendor cohort).
 export type AutomatedReviewerKind = ReviewBotKind | 'in_house' | 'pierre' | 'vendor';
@@ -256,67 +256,70 @@ export type ClassificationSource =
 // does not, because a linter's approval is not a human's.
 export type ReviewerRole = 'review' | 'quality_check';
 
-// A BOT IS A PER-REPO OBJECT. Everything below keys on (repo, actor); there is no team key, no
-// inheritance chain, no merge and NO DEDUPLICATION anywhere.
+// A BOT IS A PER-WORKSPACE OBJECT. Everything below keys on (account, WORKSPACE, actor): ONE row
+// per key, one grain, no inheritance chain, no merge and NO DEDUPLICATION anywhere.
 //
-// WHY THE REPO AND NOT A TEAM. A bot is installed per repository — GitHub Apps are installed on
-// repos, CI configs live in repos — while a team is a bag of repos that someone can re-bag
-// tomorrow. Keying the judgement on a team made the answer move when team membership was edited,
-// and it forced an inheritance chain (`team row → default row → auto-detect`) whose
-// null-means-inherit rules leaked into every read type on this page.
+// WHY THE WORKSPACE AND NOT THE REPO. A workspace is the only scope this app has — the unit a user
+// selects, the unit every list and metric is computed over, and therefore the unit a judgement is
+// ABOUT. Its predecessor keyed the judgement on (account, repo) and the identity on (account,
+// actor): two tables, two write grains, and a listing that rendered the same vendor six times
+// because it ran in six repos. With one workspace answering "which repos am I looking at", both
+// questions have the SAME key — so a second table would key on the identical three columns and be
+// joined at every call site, i.e. this table with extra steps. "CodeRabbit across the six repos of
+// a workspace" is ONE row: one judgement, one price, one brand colour.
 //
-// A vendor running on six repos is SIX ROWS and is meant to render as six entries — in the team
-// view and in the Feed bot summary alike. Within one repo there is nothing to dedupe, because the
-// key already is (repo, actor).
+// ── ONE ROW, THREE INDEPENDENT FACTS — AND TWO PROVENANCE FLAGS THAT KEEP THEM APART ────────────
+// JUDGEMENT — is this login acting as an automated reviewer HERE (`automated`), is it reviewing or
+//   quality-checking (`role`), and how we know (`confidence` / `source` / `reasons`).
+//   Provenance: `source`.
+// IDENTITY  — what the bot IS (`kind`) and what it is CALLED (`label`).
+//   Provenance: `identitySource`.
+// PRICE     — `costMonthlyUsd`. No provenance flag, because nothing derives it: exactly ONE writer
+//   (the cost route), and it appears in no classifier statement at all.
 //
-// ── THE GOVERNING DISTINCTION: IDENTITY IS SINGLETON, JUDGEMENT IS PER REPO ─────────────────
-// IDENTITY is a property of the ACTOR and is the same in every repo BY DEFINITION — what this bot
-// IS (`kind`), what it is CALLED (`label`), what we PAY for it (`costMonthlyUsd`), and who
-// decided those (`identitySource`). A login is one vendor everywhere.
-// JUDGEMENT is a property of the (repo, actor) PAIR — whether it is acting as an automated
-// reviewer HERE (`automated`), whether that is reviewing or quality-checking (`role`), and the
-// provenance of THAT answer (`confidence`/`source`/`reasons`).
+// ⚠ THE TWO PROVENANCE FLAGS ARE NOT ONE FLAG, and they are now the ONLY thing doing the job the
+// two-table split did structurally. Honour them INDEPENDENTLY. Anything that gates both halves on
+// one flag — a classification pass, a PATCH handler, a single "Reset to auto" control — either
+// reverts a human's vendor correction on the next pass, or freezes auto-detection because somebody
+// renamed a vendor. There is no table boundary left to catch it; it is a narrowed `set:` object and
+// a pair of UI affordances, pinned by tests.
 //
-// THE STORAGE IS NORMALISED ON THE SAME LINE, which is what makes everything below cheap to hold
-// in your head: `account_reviewers` (account, author) holds identity + price, `repo_reviewers`
-// (account, repo, author) holds the judgement. Every fact lives at exactly ONE grain.
+// ⚠ IDENTITY AND PRICE ARE PER WORKSPACE TOO, and that is the deliberate, accepted consequence of
+// keying on the workspace. CodeRabbit named — or priced — in workspace A does NOT carry that name
+// or that number into workspace B; the two rows may legitimately differ, nothing reconciles them,
+// and nothing is meant to. Two rules follow, neither optional:
+//   • A vendor colour/label lookup must be built from the ACTIVE workspace's listing. Reading some
+//     arbitrary workspace's identity is how a bot renders orange on one screen and blue on the next.
+//   • COST IS NEVER SUMMED ACROSS WORKSPACES on one screen. Within a workspace there is exactly one
+//     row per actor, so a total there is a plain sum. Across workspaces, six workspaces each listing
+//     a $120 CodeRabbit is either six subscriptions or one seen six ways, and the app must not
+//     assert which — show the figures side by side and do not add them up.
 //
-// That was NOT true of an earlier draft, and the difference is the whole point. There, identity
-// sat on the per-repo row, REPLICATED across an actor's rows and held consistent only by
-// convention — which meant a new repo row had to seed three columns from its siblings, persist()
-// had to gate on two different provenance flags in the same row, and this file had to describe
-// `ReviewerIdentity` as "a straight read of any one of them", i.e. an election with no ballot.
-// One row per fact deletes all three problems rather than documenting them.
-//
-// The READ shape is normalised on that line — `ReviewerIdentity` (one per actor) vs `RepoReviewer`
-// (one per repo) — AND SO IS THE WRITE SHAPE: `ReviewerIdentityBody` and `ReviewerCostBody` are
-// actor-keyed, `RepoReviewerJudgementBody` is repo-keyed. Half-implementing it is worse than not
-// splitting at all: a field written at one grain and read at the other produces an edit the user
-// cannot see, on rows they never touched (see ReviewerIdentity for the worked example).
-//
-// IF YOU ADD A FIELD, DECIDE ITS GRAIN FIRST. "Is this the same in every repo by definition?" is
-// the whole test — then put it on both sides of the same line: one table, one read type, one
-// write body.
+// IF YOU ADD A FIELD, it lands on this row, under one of the three headings above. And if it is
+// neither derived nor re-derivable — money, or a human's typed text — give it its own writer, the
+// way price has one.
 
-// The stored VERDICT about one actor: what the classifier decided, written verbatim to each of
-// that actor's repo rows.
+// The stored VERDICT about one actor: what the classifier decided, written to that actor's row in
+// each workspace the pass covers.
 //
-// IT IS DERIVED ONCE PER ACTOR, NOT ONCE PER REPO — hence no `repoId` here. Every strong signal
-// (vendor login, `users.githubType`, app attribution, the branded-marker fingerprint) is a
-// property of the ACTOR and is repo-independent, so per-repo derivation would multiply the work
-// and the BILLED Haiku tie-break for an identical answer, and would weaken the behavioural score
-// by computing it on a thin per-repo slice. The rows stay independently overridable: only a HUMAN
-// edit should ever make two of an actor's rows disagree.
+// IT IS DERIVED ONCE PER ACTOR, NOT ONCE PER WORKSPACE — hence no `workspaceId` here. Every strong
+// signal (vendor login, `users.githubType`, app attribution, the branded-marker fingerprint) is a
+// property of the ACTOR and is scope-independent, so per-workspace derivation would multiply the
+// work and the BILLED Haiku tie-break for an identical answer, and would weaken the behavioural
+// score by computing it on a thin per-workspace slice. The rows stay independently overridable:
+// only a HUMAN edit should ever make two of an actor's workspace rows disagree.
 //
-// ⚠ IT SPANS BOTH GRAINS — the one place in this contract that legitimately does, because the
-// classifier is the writer for both. Persisting it is therefore TWO statements against TWO
-// tables, each honouring its own table's provenance flag:
-//   `account_reviewers`  kind/label       skip when that row's `identity_source` is 'manual'
-//   `repo_reviewers`     automated/role   skip when that row's `source`          is 'manual'
-// They no longer sit side by side in one row, so confusing them takes a genuine mistake rather
-// than a slip — but the failure it prevents is unchanged: gate on one flag for both and a
-// human's vendor correction is reverted by the next pass, or a per-repo "not a bot" freezes the
-// vendor identity account-wide.
+// ⚠ IT CARRIES BOTH HALVES OF THE ROW — the one place in this contract that legitimately does,
+// because the classifier is the writer for both. Persisting it is therefore a per-workspace loop
+// over a NARROWED `set:` object, each half gated on its OWN provenance flag:
+//     kind / label                       skipped when that row's `identity_source` is 'manual'
+//     automated / role / confidence / …  skipped when that row's `source`          is 'manual'
+// They share a row now, so nothing but that discipline separates them: gate both on one flag and a
+// human's vendor correction is reverted by the next pass, or one "not a bot" freezes the vendor
+// identity across the whole workspace.
+//
+// ⚠ IT DOES NOT AND MUST NOT CARRY A PRICE. `monthly_cents` appears in no derived INSERT and in no
+// derived `set:`; a row the classifier creates simply has no price until someone sets one.
 export interface ReviewerClassification {
   userId: number;
   login: string;
@@ -326,258 +329,229 @@ export interface ReviewerClassification {
   // What this automation is FOR (see ReviewerRole). Always 'review' for a human — the field is
   // meaningless when `automated` is false, and callers must gate on `automated` first rather
   // than reading a human's role. Persisted NOT NULL DEFAULT 'review', so it is never absent.
+  //
+  // ⚠ `persist()` takes this type MINUS `role` (`Omit<ReviewerClassification, 'role'>`) and derives
+  // the role itself from the local quality-check login list. Round-tripping the caller's value
+  // would let a stale default overwrite the migration's role fold on the next pass and put
+  // SonarQube straight back into the review-bot metrics.
   role: ReviewerRole;
   confidence: ClassificationConfidence;
   source: ClassificationSource;
   reasons: string[];
 }
 
-// WHO an automated reviewer IS, account-wide. Served ONCE per actor and joined to the repo rows
-// by `userId` — see the normalisation note above: a bot's colour and display name must key on the
-// actor or the same vendor renders differently from one repo to the next.
+// How much of this actor is visible across the workspace's repos. Counts are a rolling 90 days;
+// `lastActiveAt` is ALL-TIME, so a long-dormant bot still reports when it last ran.
 //
-// IT IS A STRAIGHT READ OF ONE ROW — `account_reviewers`, keyed (accountId, userId). There is
-// nothing to resolve, because there is nothing to disagree.
-//
-// TWO EARLIER DRAFTS GOT THIS WRONG IN THE SAME PLACE and the note is kept so neither comes back.
-// The first allowed per-repo identity EDITS and promised a tie-break here ("manual beats auto,
-// most recently updated wins"). The second removed the per-repo write but left the columns
-// REPLICATED on the repo rows, so this object was "a straight read of any one of them" — which is
-// still a tie-break, just an unwritten one that silently elects a winner the moment two rows
-// differ. A tie-break picks a winner but cannot make the losing rows editable or even visible:
-// mark CodeRabbit "not a bot" on `web` only, that row's kind goes null and is newest, identity
-// reports kind=null account-wide, useBotColors filters on kind != null, and CodeRabbit loses its
-// brand colour and vendor name on `api` and `infra` — repos the user never touched, with no
-// surface anywhere to undo it. One row per fact is what makes that unrepresentable.
-export interface ReviewerIdentity {
-  userId: number;
-  login: string;
-  displayName: string | null;
-  avatarUrl: string | null;
-  // Vendor identity — drives BOT_VENDOR_META / automatedReviewerMeta() colour + brand name.
-  // null when this actor is not automated in any repo.
-  kind: AutomatedReviewerKind | null;
-  // Display name: a human-set label → the vendor's brand name → the login.
-  label: string;
-  // Provenance of `kind` + `label` ONLY, and deliberately NOT the same field as
-  // `RepoReviewer.source`: identity and judgement are corrected independently, at different
-  // grains, and they now live on different TABLES. 'manual' ⇒ a human named this thing and the
-  // classifier will not re-derive it; 'auto' ⇒ detection owns it.
-  //
-  // IT DRIVES THE "RESET IDENTITY TO AUTO" AFFORDANCE, and that affordance is now a route rather
-  // than a promise this type makes on its own: `DELETE /api/bot-reviewers/:userId/identity`
-  // clears `kind`/`label`, sets this back to 'auto', and re-derives, all account-wide. Show the
-  // control ONLY when this is 'manual' — on an 'auto' identity it would appear to do nothing.
-  //
-  // ⚠ TWO THINGS THAT RESET MUST NOT DO, both enforced server-side and both worth stating where
-  // the flag is read: it must not reset six repos' `automated` verdicts (that is the OTHER grain
-  // — `DELETE …/judgement?repoId=`, one repo at a time), and it must not clear `costMonthlyUsd`.
-  // A price shares this row but is not a classification opinion; losing it as a side effect of
-  // un-naming a vendor is the coupling the two-table split exists to remove. Say so in the UI
-  // copy — "reset" reads as "delete everything" otherwise.
-  identitySource: 'auto' | 'manual';
-  // The monthly price recorded for this actor, in whole US DOLLARS (the wire unit; storage is
-  // integer cents in `account_reviewers.monthly_cents` — see that column for why money is never
-  // a float, and for the fixed rounding rule the two dialects share).
-  //
-  // ⚠ RENDERING RULE, and it is the client's job because no schema can enforce it: this price
-  // belongs to the ACTOR. You buy ONE subscription from a vendor, so six repos running CodeRabbit
-  // is $120, not $720. Storing it at the actor grain removed the STORAGE hazard — there is no
-  // per-repo cell to hold a divergent copy — but NOT the display one: a bot listing is one row
-  // per (repo, actor), and joining this price onto all six rows and summing the column is both
-  // easy and wrong. So: render it ONCE per actor (on the identity, not on each repo row), and
-  // DEDUPE BY `userId` before any total, average or $/acted-on. Same caveat, spelled out again,
-  // on BotVendorAnalytics.costMonthlyUsd.
-  //
-  // null = NO PRICE SET (`monthly_cents IS NULL`). 0 is a real, deliberate price meaning "we pay
-  // nothing for this". TWO STATES, and NOTHING INHERITS — so `??` vs `||` is an ordinary display
-  // bug here, not the silent wrong-price trap it was under the old team-inheritance chain, where
-  // null meant "ask my parent".
-  costMonthlyUsd: number | null;
-}
-
-// How much of this actor is actually visible IN ONE REPO. Counts are over a rolling 90-day
-// window; `lastActiveAt` is ALL-TIME, so a long-dormant bot still reports when it last ran.
-//
-// It is what makes a stale row legible without a flag: a row whose counts are all 0 is a
-// judgement someone recorded for a repo this reviewer no longer touches. That used to need a
-// `dormantInScope` boolean because a team-keyed row had no repo to point at; a per-repo row does,
-// and the numbers say it plainly.
-export interface RepoReviewerFootprint {
-  reviews: number;   // reviews submitted on this repo's PRs
+// It is what makes a stale row legible without a flag: a row whose counts are all 0 is a judgement
+// someone recorded for a workspace this reviewer no longer touches. The numbers say it plainly, so
+// no `dormantInScope` boolean is needed.
+export interface ReviewerFootprint {
+  reviews: number;   // reviews submitted on the workspace's PRs
   threads: number;   // inline review threads opened
   comments: number;  // issue-level PR comments
   lastActiveAt: string | null; // ISO-8601; most recent of the three, all-time
 }
 
-// THE BOT OBJECT: one actor's judgement in one repo — the wire form of a `repo_reviewers` row.
-// Join to `ReviewerIdentity` on `userId` for the vendor kind, label and price.
-//
-// IT CARRIES NO `kind`, `label` OR `costMonthlyUsd` BY DESIGN, and — since 0043 — none of them is
-// a column on the row it mirrors either, so the type and the table now say the same thing. Those
-// are actor-grain; put them here and a renderer reads them off whichever row it happens to hold,
-// which is how the same vendor comes out orange in one repo and blue in the next, and how a $120
-// subscription totals $720 across six rows.
-// The write side mirrors the same split — see RepoReviewerJudgementBody vs ReviewerIdentityBody.
-export interface RepoReviewer {
+// The same, for ONE repo inside the workspace. Emitted only for repos where the actor actually
+// has a footprint — it is what the per-repo Bots tab filters on, and it is why that tab does not
+// need (and must not have) a per-repo judgement.
+export interface RepoReviewerFootprintEntry extends ReviewerFootprint {
   repoId: number;
+}
+
+// THE BOT OBJECT — one actor, in one workspace. Judgement + identity + price + evidence, because
+// with one scope they are all facts about the same key. The wire form of a `workspace_reviewers`
+// row; it replaces the old `RepoReviewer` (one per repo) / `ReviewerIdentity` (one per account)
+// pair, and there is nothing left to join.
+//
+// ⚠ THE TWO PROVENANCE FIELDS ARE NOT ONE FIELD. `source` governs automated/role/confidence/
+// reasons; `identitySource` governs kind/label. A UI that offers one "Reset to auto" control for
+// both, or a handler that stamps one when the user edited the other, reintroduces the bug the
+// 0042/0043 split existed to kill — inside a single row this time, where no table boundary is
+// left to catch it.
+//
+// ⚠ `costMonthlyUsd` is a PER-WORKSPACE fact like every other field here. The same actor's rows in
+// two workspaces may legitimately hold different numbers; nothing reconciles them and nothing is
+// meant to. It must NEVER be summed ACROSS workspaces on one screen — six workspaces each listing
+// a $120 CodeRabbit is either six subscriptions or one seen six ways, and the app must not assert
+// which. Within one workspace there is exactly one row per actor, so a total there is a plain sum;
+// the Compare-workspaces surface shows them side by side and does not add them up.
+export interface WorkspaceReviewer {
+  workspaceId: number;
   userId: number;
+  login: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  // ── judgement (provenance: `source`) ──
   automated: boolean;
-  // 'review' | 'quality_check' — see ReviewerRole. A FLAG ON THIS OBJECT, not a separate kind:
-  // a login keeps its brand while being marked a linter, and it may legitimately be a reviewer in
-  // one repo and a quality gate in another.
+  // 'review' | 'quality_check' — see ReviewerRole. A FLAG ON THIS OBJECT, not a separate kind: a
+  // login keeps its brand while being marked a linter, and it may legitimately be a reviewer in one
+  // workspace and a quality gate in another.
   role: ReviewerRole;
   confidence: ClassificationConfidence;
   source: ClassificationSource;
   reasons: string[];
-  // `source === 'manual'` — the row is a human judgement the classifier will not re-derive.
-  // Kept as its own field because it drives the "Reset to auto" affordance, and reading it off
-  // `source` at every call site is how one of them ends up wrong.
+  // `source === 'manual'` — the judgement is a human's and the classifier will not re-derive it.
+  // Kept as its own field because it drives the "Reset classification" affordance, and reading it
+  // off `source` at every call site is how one of them ends up wrong.
   //
-  // THE AFFORDANCE IS `DELETE /api/bot-reviewers/:userId/judgement?repoId=`, which deletes THIS
-  // ROW so the next listing re-derives the pair from activity. Show it only when this is true —
-  // resetting an already-auto row is a no-op that looks like a broken button. It is the only way
-  // back: flipping `automated` back by hand re-stamps `source: 'manual'`, so the row stays pinned
-  // against re-derivation, just pinned on a different value.
+  // THE AFFORDANCE IS `DELETE /api/bot-reviewers/:userId/judgement?workspaceId=`, which hands
+  // automated/role/confidence/reasons back to detection and RE-DERIVES in the same request (it is
+  // an UPDATE, not a row delete — the row also holds the identity and the price). Show it only when
+  // this is true: resetting an already-auto row is a no-op that looks like a broken button. It is
+  // the only way back, because flipping `automated` by hand re-stamps `source: 'manual'` and leaves
+  // the row pinned against re-derivation, just pinned on a different value.
   //
-  // ⚠ BLAST RADIUS IS ONE REPO, and the UI must make that unmissable next to the identity reset,
-  // which affects the bot EVERYWHERE. This one touches no `kind`, no `label` and no
-  // `costMonthlyUsd` — different grain, different table, different route.
+  // ⚠ BLAST RADIUS IS THE WHOLE WORKSPACE, not one repo. Every repo in the workspace is judged by
+  // this one row, so the UI must say so wherever the toggle appears — including on surfaces that
+  // look repo-scoped (the per-repo Bots tab, a feed card's "not a bot?").
   isManualOverride: boolean;
-  footprint: RepoReviewerFootprint;
-  // A short excerpt of a review this reviewer posted IN THIS REPO — the evidence a user reads
-  // before deciding what the thing is. Null when it has posted no review body here.
-  sampleReviewBody: string | null;
+  // ── identity (provenance: `identitySource`) ──
+  // Vendor identity — drives BOT_VENDOR_META / automatedReviewerMeta() colour + brand name. null
+  // when this actor has no vendor identity in this workspace.
+  kind: AutomatedReviewerKind | null;
+  // Resolved display name: a human-set label → the vendor's brand name → the login.
+  label: string;
+  // Provenance of `kind` + `label` ONLY, and deliberately NOT the same field as `source`: identity
+  // and judgement are corrected independently. 'manual' ⇒ a human named this thing and the
+  // classifier will not re-derive it; 'auto' ⇒ detection owns it.
+  //
+  // IT DRIVES THE "RESET NAME" AFFORDANCE — `DELETE /api/bot-reviewers/:userId/identity?workspaceId=`
+  // clears kind/label, sets this back to 'auto' and re-derives immediately. Show it ONLY when this
+  // is 'manual'; on an auto identity it would appear to do nothing.
+  //
+  // ⚠ TWO THINGS THAT RESET MUST NOT DO, both enforced server-side and both worth stating where the
+  // flag is read: it must not touch `automated`/`role` (that is the other provenance flag and the
+  // other route), and it must NOT clear `costMonthlyUsd`. A price shares this row but is not a
+  // classification opinion; losing it as a side effect of un-naming a vendor is exactly the
+  // coupling this contract keeps separated. Say so in the UI copy — "reset" reads as "delete
+  // everything" otherwise.
+  identitySource: 'auto' | 'manual';
+  // ── price (no provenance; one writer) ──
+  // What this bot costs in THIS workspace, in whole US DOLLARS (the wire unit; storage is integer
+  // cents in `workspace_reviewers.monthly_cents` — money is never a float, and the two dialects
+  // share one fixed rounding rule).
+  //
+  // null = NO PRICE SET. 0 is a real, deliberate price meaning "we pay nothing for this". TWO
+  // STATES, and NOTHING INHERITS — so `??` vs `||` is an ordinary display bug here, not a silent
+  // wrong-price trap.
+  //
+  // ⚠ RENDERING RULE, and it is the client's job because no schema can enforce it: this price is
+  // per WORKSPACE. Totalling a single workspace's listing is correct (one row per actor). Totalling
+  // across workspaces is not, and no surface may do it.
+  costMonthlyUsd: number | null;
+  // ── evidence ──
+  footprint: ReviewerFootprint;                  // aggregated over the workspace's repos
+  repoFootprints: RepoReviewerFootprintEntry[];  // only repos where the actor has a footprint
+  sampleReviewBody: string | null;               // newest non-empty review body in the workspace
 }
 
 export interface DetectedReviewersResponse {
-  // One entry per ACTOR (see ReviewerIdentity) — the identity + price side of the join.
-  reviewers: ReviewerIdentity[];
-  // One entry per (repo, actor) — the judgement side. Several rows may share a `userId`; that is
-  // the intended display, not a duplicate to collapse.
-  rows: RepoReviewer[];
-  // The repos this listing actually covered, in the order the client should render them. It makes
-  // an empty `rows` legible, which is the whole reason it is here: `[]` means "no repos in scope
-  // — go add or assign some", while a non-empty list with no rows means "these repos have no
-  // detected reviewers yet — sync or wait". A count alone could not tell those apart.
+  // Echoed so the client can correct a stale stored id — an unknown/foreign id resolves to the
+  // account's Default workspace rather than 404ing.
+  workspaceId: number;
+  reviewers: WorkspaceReviewer[];
+  // The repos this listing covered, in render order. `[]` means "this workspace has no repos —
+  // go move some in", which a count alone could not distinguish from "no reviewers detected yet".
   repoIds: number[];
   generatedAt: string;
 }
 
-// ── THE WRITE SURFACE IS SPLIT BY KEY, MIRRORING THE READ SHAPE ─────────────────────────────
-// THREE bodies, at TWO grains, and the grain of each is the thing to hold onto:
+// ── THE WRITE SURFACE: TWO ROUTES, SPLIT BY MUTABILITY (NOT BY GRAIN) ───────────────────────────
+// There is one grain now, so there is no grain mismatch left to defend against. What remains is a
+// MUTABILITY difference, and it is the reason cost still has its own route:
 //
-//   PATCH /api/bot-reviewers/:userId          RepoReviewerJudgementBody   per (repo, actor)
-//   PATCH /api/bot-reviewers/:userId/identity ReviewerIdentityBody        per actor
-//   PUT   /api/bot-reviewers/:userId/cost     ReviewerCostBody            per actor
+//   PATCH /api/bot-reviewers/:userId       WorkspaceReviewerPatchBody   automated/role/kind/label
+//   PUT   /api/bot-reviewers/:userId/cost  ReviewerCostBody             monthly_cents
 //
-// Plus TWO RESETS, bodyless, one per grain — the way back to auto, without which every edit above
-// is permanent (a manual write pins the row against re-derivation, and flipping the value back by
-// hand leaves it pinned on the new value):
+// `automated`, `role`, `kind` and `label` are all RE-DERIVABLE: a wrong write is fixed by the next
+// classification pass or by a reset. They belong in one body, keyed by two independent provenance
+// flags, and merging them removes a whole class of "which endpoint do I call" bugs.
+// `monthly_cents` is derivable by nothing and is money. Keeping it on its own PUT means no combined
+// body can address the column at all and the PATCH handler's `set:` object contains no cost key —
+// the same structural guarantee the old two-table split provided, with one fewer table.
 //
-//   DELETE /api/bot-reviewers/:userId/judgement?repoId=   → 204, ONE repo back to auto
-//   DELETE /api/bot-reviewers/:userId/identity            → ReviewerIdentity, the actor
-//                                                           EVERYWHERE back to auto, PRICE KEPT
+// Plus TWO RESETS, bodyless, one per PROVENANCE FLAG — the way back to auto, without which every
+// edit above is permanent (a manual write pins its half against re-derivation, and flipping the
+// value back by hand leaves it pinned on the new value):
 //
-// They are two routes for the same reason the writes are: their blast radii differ by an order of
-// magnitude, so a single reset with an optional `repoId` would make "reset this row" and "reset
-// this bot in every repo" one keystroke apart. See `RepoReviewer.isManualOverride` and
-// `ReviewerIdentity.identitySource` for when each is offered.
+//   DELETE /api/bot-reviewers/:userId/judgement?workspaceId=  → 200 WorkspaceReviewer (re-derived)
+//   DELETE /api/bot-reviewers/:userId/identity?workspaceId=   → 200 WorkspaceReviewer (re-derived,
+//                                                                PRICE KEPT)
 //
-// WHY THEY ARE NOT ONE BODY. The predecessor was a single body with a REQUIRED `repoId` that also
-// carried `kind` and `label` — so identity was WRITTEN per repo and READ per actor, which is the
-// exact divergence the normalised read shape exists to prevent, reintroduced from the other side.
-// The handler wrote kind and label unconditionally with source 'manual', so: CodeRabbit is
-// detected on api, web and infra; the user clicks "Not a bot" on web ONLY; that row gets
-// kind=null, source=manual and the newest updated_at; identity resolution reports kind=null
-// account-wide; useBotColors filters on kind != null and CodeRabbit loses its brand colour and
-// vendor name on api and infra — repos the user never touched, with no surface to fix it from.
+// Both are UPDATE + immediate re-derive, not row deletes: the row carries the other half and the
+// price, so deleting it is lossy, and a clear-without-derive would leave the human's values sitting
+// under an auto label until something else happened to overwrite them.
 //
-// A most-recently-updated tie-break was the proposed mitigation and it is not one: it chooses a
-// winner, but the losing rows remain uneditable and invisible. Two small bodies keyed differently
-// makes the whole class unrepresentable. DO NOT MERGE THEM BACK.
+// ⚠ EVERY WRITE ON THIS SURFACE IS WORKSPACE-WIDE. The old per-repo PATCH could honestly promise
+// "this leaves your other repos alone"; nothing here can. A control rendered in a repo-shaped
+// context — the per-repo Bots tab, a feed card's "not a bot?" — must state the workspace scope in
+// its copy and, on the high-traffic surfaces, confirm before writing.
 
-// PATCH /api/bot-reviewers/:userId — the JUDGEMENT for one actor in ONE repo. Nothing here
-// describes what the actor IS; it says how it is BEHAVING HERE.
-export interface RepoReviewerJudgementBody {
-  // WHICH repo row this edits. REQUIRED — the row is the object, and a judgement with no repo has
-  // no row to land on. The repo must belong to the calling account; an unowned or unknown id must
-  // 404 rather than write a row keyed into another tenant's repo. (The composite FK
-  // `(repo_id, account_id) → repos(id, account_id)` makes that structural rather than a check
-  // this route could forget — but return the 404 anyway, a constraint violation is a 500.)
-  repoId: number;
-  // Present ⇒ a human judgement: stamp the ROW's `source: 'manual'` / `confidence: 'high'`, which
-  // is load-bearing — the classifier returns a manual row verbatim and never re-derives it.
-  //
-  // ⚠ It must NOT touch `kind`/`label`/`identity_source`. "Not a bot in this repo" is not a claim
-  // about who the vendor is, and writing identity from here is precisely the colour bug above.
-  automated?: boolean;
-  // Absent = leave the stored role alone (an existing row keeps its role; a new row takes the
-  // 'review' column default), so an old client that only knows `automated` cannot silently un-mark
-  // a quality check.
-  role?: ReviewerRole;
+// PATCH /api/bot-reviewers/:userId — ONE patch body for the four re-derivable fields. All four are
+// OPTIONAL; absent = leave alone. A body carrying NONE of them 400s (an opinion-free patch would
+// stamp a provenance flag on the strength of an empty request and freeze detection).
+//
+// The two halves stamp their flags INDEPENDENTLY: `automated` and/or `role` stamp
+// `source: 'manual'`; `kind` and/or `label` stamp `identitySource: 'manual'`. A patch that carries
+// only a judgement must not touch the identity flag, and vice versa — that independence is the
+// only thing stopping "not a bot here" from also un-naming the vendor now that the two facts share
+// a row.
+//
+// ⚠ A role-only patch still stamps `source: 'manual'`, which also pins `automated` for that
+// workspace. Deliberate: not stamping it would let the next classification pass re-derive `role`
+// from the login seed and silently revert the edit. A visible, resettable pin beats an edit that
+// quietly disappears.
+//
+// ⚠ IT CANNOT CARRY A PRICE. Cost has its own route precisely so no combined body can reach
+// `monthly_cents`.
+export interface WorkspaceReviewerPatchBody {
+  // WHICH row this edits. REQUIRED — the row is the object, and it is keyed
+  // (account, workspace, actor). The workspace must belong to the calling account; an unowned or
+  // unknown id 404s rather than writing a row keyed into another tenant's workspace. (The composite
+  // FK `(workspace_id, account_id) → workspaces(id, account_id)` makes that structural rather than
+  // a check this route could forget — but return the 404 anyway; a constraint violation is a 500.)
+  workspaceId: number;
+  automated?: boolean;                 // stamps source: 'manual'
+  role?: ReviewerRole;                 // stamps source: 'manual'
+  kind?: AutomatedReviewerKind | null; // stamps identitySource: 'manual'; null = clear the vendor
+  label?: string | null;               // stamps identitySource: 'manual'; null = clear the label
 }
 
-// PATCH /api/bot-reviewers/:userId/identity — WHO this actor is, account-wide. NO `repoId`: it is
-// an upsert of the ONE `account_reviewers` row for (account, userId), which is why the actor-grain
-// columns cannot diverge — there is nowhere for a second copy to live. (An earlier draft wrote
-// every repo row of the actor instead, keeping N copies in step by hand; the row count changed,
-// the guarantee did not improve, and the seeding rule it forced on new repo rows is gone with it.)
-// It also stamps `identity_source: 'manual'`.
-//
-// ⚠ IT MUST NOT TOUCH `automated` / `role` / `source` / `confidence` / `reasons_json`. Those are
-// on the other table now, so this is a rule about which STATEMENT you write, not which columns
-// you list: naming a vendor is not a judgement about how it behaves in any given repo, and
-// stamping the row-level `source` from here would freeze auto-classification on every one of that
-// actor's repos — the same mistake as "typing a price froze the classification", one field over.
-//
-// ⚠ AND THE OTHER DIRECTION: an actor with NO `repo_reviewers` row anywhere in the account must
-// 404 rather than silently create an identity row. The storage would happily take it — the two
-// tables are keyed independently — which is exactly why the rule has to be enforced in the route.
-// It is the same rule plugin migration 0019 enforces for price (no bot row ⇒ no import): the
-// listing is row-driven, so a value keyed to an actor with no rows can never be displayed, edited
-// or cleared. Unreachable, un-clearable data.
-export interface ReviewerIdentityBody {
-  // Absent = leave it. null = clear it back to "no vendor identity" (still a human statement, so
-  // `identity_source` still becomes 'manual' — otherwise the next classification pass reinstates
-  // the kind the user just rejected).
-  kind?: AutomatedReviewerKind | null;
-  // Absent = leave it. null = clear the human label, so display falls back to the vendor's brand
-  // name and then the login.
-  label?: string | null;
-}
-
-// PUT /api/bot-reviewers/:userId/cost — set or clear what this actor costs, account-wide.
+// PUT /api/bot-reviewers/:userId/cost — set or clear what this bot costs IN THIS WORKSPACE.
 //
 // TWO STATES ONLY:
-//   a number → write it to `account_reviewers.monthly_cents`. 0 is real: "we pay nothing".
+//   a number → write it to `workspace_reviewers.monthly_cents`. 0 is real: "we pay nothing".
 //   null     → write NULL. There is nothing to fall back to; the price is simply unset.
-// It is a required field precisely so `undefined` is not a third meaning.
+// `monthlyUsd` is REQUIRED and NULLABLE precisely so `undefined` is not a third meaning.
 //
-// ⚠ CLEARING IS A COLUMN WRITE, NOT A ROW DELETE. Cost shares its row with the actor's identity
-// now, so `DELETE FROM account_reviewers` would take the vendor kind and label with it. The
-// nullable column is what makes the two states expressible on a row that exists for other
-// reasons; there is no inheritance behind NULL, so it means exactly "no price set" and nothing
-// else. (When cost had its own table, NOT NULL + delete-to-clear was the right shape — do not
-// carry that reflex over.)
+// ⚠ IT WRITES EXACTLY ONE ROW, predicate (account_id, workspace_id, author_user_id). Price is per
+// workspace like every other attribute on the row: the same actor's rows in other workspaces are
+// untouched and may hold different numbers. There is no fan-out, no INSERT seed, no cross-workspace
+// coupling of any kind — so the editor's copy says "Price for this Workspace", not a bare "Price".
+//
+// ⚠ CLEARING IS A COLUMN WRITE, NOT A ROW DELETE. Cost shares its row with the judgement and the
+// identity, so deleting the row would take both with it. The nullable column is what makes the two
+// states expressible on a row that exists for other reasons. (When cost had its own table, NOT NULL
+// + delete-to-clear was the right shape — do not carry that reflex over.)
 //
 // ⚠ ROUNDING IS FIXED AND SHARED WITH THE MIGRATIONS: cents = floor(usd × 100 + 0.5) in binary64.
 // Do not reach for a "more exact" decimal rounding on one side — a fractional-cent price like
 // $1.005 lands on 100 under this rule and 101 under exact-decimal rounding, and the two backfill
 // paths were measured disagreeing on exactly that value before the rule was pinned. Rejecting
-// non-integer-cent input here (below) is what keeps the question academic for new writes; the
-// rule exists because the legacy blob is full of values written before that validation existed.
+// non-integer-cent input here is what keeps the question academic for new writes.
 //
-// ⚠ BOUNDED: a finite number in [0, 21474836.47]. Storage is int4 CENTS in both dialects
-// (`Math.round(usd * 100)` must land in int4), and that ceiling is not cosmetic — it is where the
-// two dialects stop agreeing. Postgres RAISES `integer out of range` (a 500) on anything above it
-// while SQLite's 64-bit integers accept the value happily, so an unbounded field means the same
-// request succeeds locally and 500s in cloud, leaving a number cloud can never represent. The
-// route must CLAMP or 400 — do not leave it to the driver. (Measured: monthlyUsd 99999999999
-// stored 2147483647 on pg and 9999999999900 on sqlite before both migration paths were clamped.)
-// Reject non-finite and non-integer-cent values here too: NaN/Infinity survive JSON.parse of a
-// hand-rolled body, and $1.005 is a price nothing downstream can print.
+// ⚠ BOUNDED: a finite number in [0, 21474836.47], multipleOf 0.01. Storage is int4 CENTS in both
+// dialects (`Math.round(usd * 100)` must land in int4), and that ceiling is where the two dialects
+// stop agreeing. Postgres RAISES `integer out of range` (a 500) on anything above it while SQLite's
+// 64-bit integers accept the value happily, so an unbounded field means the same request succeeds
+// locally and 500s in cloud, leaving a number cloud can never represent. The route must CLAMP or
+// 400 — do not leave it to the driver. (Measured: monthlyUsd 99999999999 stored 2147483647 on pg
+// and 9999999999900 on sqlite before both paths were clamped.) Reject non-finite values too:
+// NaN/Infinity survive JSON.parse of a hand-rolled body.
 export interface ReviewerCostBody {
+  workspaceId: number;
   monthlyUsd: number | null;
 }
 
@@ -617,17 +591,22 @@ export interface BotVendorAnalytics {
   noiseRatioPct: number | null;
   verdict: BotVerdict;
   // SERVER-resolved (no longer overlaid client-side from pro_settings `bots.cost`): this actor's
-  // monthly price from `account_reviewers.monthly_cents`, in US dollars (storage is integer cents).
+  // monthly price for THE WORKSPACE THIS RESPONSE WAS COMPUTED FOR, read from
+  // `workspace_reviewers.monthly_cents`, in US dollars (storage is integer cents).
   //
-  // IT IS AN ACCOUNT-WIDE PRICE ON A SCOPED ROW, and that is the trap worth naming: this row
-  // aggregates one reviewer over whatever scope was requested, but the price is ONE SUBSCRIPTION.
-  // Never sum or multiply it across rows, repos or scopes — a vendor on six repos is $120 of
-  // spend seen six ways, not $720. There is no inheritance to disclose any more (that is why the
-  // old `costInherited` companion is gone): the price either exists for this actor or it does not.
+  // IT IS ONE WORKSPACE'S PRICE, and that is the trap worth naming: this row aggregates one
+  // reviewer over the requested workspace (optionally narrowed by repoIds), and the number belongs
+  // to that workspace alone. Within it there is exactly one row per actor, so a total across the
+  // rows of ONE response is a plain sum. ACROSS workspaces it must never be summed — six
+  // workspaces each listing a $120 CodeRabbit is either six subscriptions or one seen six ways,
+  // and the app must not assert which. There is no inheritance to disclose (that is why the old
+  // `costInherited` companion is gone): the price either exists on this workspace's row or it does
+  // not, and another workspace may legitimately hold a different number.
   //
   // null = no price recorded. 0 = recorded as free. `costPerActedOnUsd` is
   // `costMonthlyUsd / actedOn` (null when either side is missing or actedOn is 0) and inherits
-  // the same caveat — under a narrow scope it divides a whole subscription by part of its work.
+  // the same caveat — under a repo-narrowed request it divides a whole subscription by part of its
+  // work.
   //
   // Cost is CORE/free: it is read from a core table, so an OSS/npx install can set and see it.
   costMonthlyUsd: number | null;
@@ -668,12 +647,13 @@ export interface BotAnalyticsResponse {
 // ── Bot THEMES (Pro, AI) — GET/POST /api/pro/bot-themes ─────────────────────────────────────
 // An AI (Haiku) QUALITATIVE summary layer over the Bots console — the one bot surface that reads
 // what the automated reviewers actually SAY (every other bot surface is deterministic volume /
-// timing / area). It funnels the in-window, TEAM-SCOPED bot review + PR comments (dedup + strip),
+// timing / area). It funnels the in-window, WORKSPACE-SCOPED bot review + PR comments (dedup + strip),
 // then a single Haiku pass extracts the recurring THEMES (nature + criticality + where) plus a
 // short narrative. The deterministic aggregates (per-bot volume, area distribution, acted-on %)
 // are computed in-plugin from the raw rows; the themes + narrative are the model's read
 // (approximate — the UI says so). STRICTLY Pro (rides the activityDigest AI-summary tier); cached +
-// credit-metered like the preset prompts. Scoped to the current Team via `scope`, windowed like ROI.
+// credit-metered like the preset prompts. Scoped to the current Workspace (`?workspace=<id>`),
+// windowed like ROI.
 export type BotThemeCategory =
   | 'correctness'
   | 'security'
@@ -775,7 +755,8 @@ export interface BotThemesResponse {
 // The HUMAN sibling of the Bot "Themes" summary: the same themed AI read, but over PEOPLE'S review
 // comments (non-bot authors, INCLUDING human replies inside bot threads) rather than the bots'. It
 // answers "what are people actually discussing / raising in review?" — recurring concerns, debates,
-// decisions, questions. STRICTLY Pro (activityDigest tier), team-scoped, surfaced as a Feed sub-tab.
+// decisions, questions. STRICTLY Pro (activityDigest tier), workspace-scoped, surfaced as a Feed
+// sub-tab.
 // UNLIKE the bot version it does NO deterministic categorisation of the input: the funnel just
 // PRIORITISES (PR-level comments, then threads that have responses, then recency) up to a safe cap —
 // the categorisation/severity is the model's alone. Reuses BotTheme + the category/severity/area/
@@ -1122,10 +1103,17 @@ export interface ResolvableThreadPrsResponse {
   generatedAt: string;
 }
 // POST body for the scope-wide resolve: the explicit reviewed thread-id list (required; ≤500 per
-// request — the client chunks larger selections) + an optional repo scope the server re-derives against.
+// request — the client chunks larger selections) + the WORKSPACE the server re-derives eligibility
+// against.
+//
+// ⚠ THE LISTING AND THE RESOLVE MUST DERIVE THE JUDGEMENT FROM THE SAME SCOPE, and this field is
+// what makes that structural. Its predecessor carried `repoIds?` while the listing was resolved
+// from a team scope, so a reviewer marked automated only under a per-team override had its threads
+// offered and then found ineligible — the route resolved 0 with no error anywhere. One workspace id
+// on both sides cannot disagree with itself.
 export interface ScopeResolveBotThreadsBody {
   threadIds: number[];
-  repoIds?: number[];
+  workspaceId: number;
 }
 
 export interface Repo {
@@ -1133,41 +1121,60 @@ export interface Repo {
   owner: string;
   name: string;
   fullName: string;
+  // When this repo was ADDED to the account. Not cosmetic: it is My Turn's clock. An open PR
+  // only enters the "New PRs" section when `openedAt >= createdAt`, which is what stops adding a
+  // repo with 400 open PRs from dumping all of them into the inbox on day one. (It replaced a
+  // separate `inboxWatchStartedAt`, written when a repo was "Watched" — an axis that no longer
+  // exists: every repo in a workspace is fully live.)
   createdAt: string;
   lastFullSyncAt: string | null;
   lastIncrementalSyncAt: string | null;
   lastSyncStatus: string | null;
   lastSyncError: string | null;
-  // Whether this repo is "Watched" for the My Turn inbox: when true, new open PRs
-  // (opened after the watch began) by other people are surfaced in the inbox. This is
-  // independent of timeline visibility (the repoIds filter) and of removing the repo.
-  inboxWatch: boolean;
+  // The ONE workspace this repo belongs to — a database fact (`workspace_repos`, UNIQUE
+  // (account_id, repo_id)), never a set and never absent: a repo with no membership row is repaired
+  // into the account's Default before any listing returns.
+  //
+  // IT IS ON THIS TYPE BECAUSE THE CLIENT HAS NO OTHER REPO→WORKSPACE MAPPING. Surfaces that hold
+  // only a repoId — PR detail, ThreadList's bulk-resolve offer, a restored tab, a search result —
+  // must name the PR's OWN workspace when they ask for a bot judgement. Using the currently
+  // SELECTED workspace there is a real bug: a PR can be opened from another workspace via `?pr=`,
+  // a restored tab or a search hit, and the client would then build its offer from workspace X's
+  // judgements while the server re-derives from the PR's workspace Y — an offer the server refuses,
+  // i.e. a dead button with an unchanged count.
+  workspaceId: number;
 }
 
-// ---- Teams (CORE) ----
-// A named grouping of an account's repos (sprint teams / product areas). A repo may belong to
-// several teams (overlap allowed). `repoIds` are the member repo ids; `repoCount` is their count.
-export interface Team {
+// ---- Workspaces (CORE) ----
+// A named grouping of an account's repos, and THE ONLY SCOPE THIS APP HAS. A repo belongs to
+// EXACTLY ONE workspace — a database fact (`workspace_repos`, UNIQUE (account_id, repo_id)), so
+// assigning it elsewhere is a MOVE and there is no "belongs to nothing" state. `repoIds` are the
+// member repo ids; `repoCount` is their count.
+//
+// THE WIRE SCOPE IS A PLAIN INTEGER: `?workspace=<id>`. There is no union type, no sentinel string,
+// no canonical set form and nothing to parse — its predecessor was
+// `'all' | 'none' | 'teams' | <id> | <id>[]` with five client canonicalisers and three server
+// parsers, which is what made "which repos am I looking at" a five-branch question whose answers
+// disagreed. Absent / unknown / another tenant's id all resolve to the account's DEFAULT workspace
+// (never a 404 — every id yields the same response shape, so it is not an existence oracle, and a
+// stale bookmark degrades to something renderable). Every scoped response echoes the resolved
+// `workspaceId` so a client can correct a stale stored id.
+export interface Workspace {
   id: number;
   name: string;
   repoIds: number[];
   repoCount: number;
+  // Exactly one workspace per account carries this. It is auto-created, RENAMEABLE, NOT deletable
+  // (DELETE 409s on it), and it is where new repos land and where a deleted workspace's repos and
+  // reviewer rows are re-homed. The client uses it to hide the delete control and to name the
+  // fallback in its copy.
+  isDefault: boolean;
   createdAt: string; // ISO-8601
 }
 
-export interface TeamsResponse {
-  teams: Team[];
+export interface WorkspacesResponse {
+  workspaces: Workspace[];
 }
-
-// The frontend store value for the active scope selector: 'all' (every account repo), 'none'
-// (repos in no team), 'teams' (the UNION of every team's repos — cross-team monitoring; differs
-// from 'all', which is every account repo incl. unassigned), a single teamId (that team's repos),
-// or a SET of teamIds `number[]` (the union of just those teams — pick several, but not all).
-// NOTE the WIRE `scope` query param is the STRING form — `'all' | 'none' | 'teams' | '<teamId>' |
-// 'teams:<sorted,comma,ids>'` — resolved server-side by resolveScopeRepoIds. The set form is
-// canonical: a single-id set collapses to '<teamId>' and an all-teams set to 'teams', so a scope
-// key never fragments. Canonicalize with scopeToParam (frontend) / normalizeScope (backend).
-export type TeamScope = 'all' | 'none' | 'teams' | number | number[];
 
 // ---- Preset prompts (declared now; implemented later by Pro + the frontend) ----
 // The fixed set of one-click "ask about this scope" questions the AI answer surface offers.
@@ -1234,7 +1241,7 @@ export interface PresetPromptResult {
   prRefs: DigestPrRef[];
 }
 
-// GET /api/pro/preset-prompt?key=&scope= and its refresh POST. `enabled` false = the capability
+// GET /api/pro/preset-prompt?key=&workspace= and its refresh POST. `enabled` false = the capability
 // is off (plugin absent / not entitled); `throttled` / `creditsExhausted` mirror the digest gates.
 export interface PresetPromptResponse {
   enabled: boolean;
@@ -1244,7 +1251,7 @@ export interface PresetPromptResponse {
 }
 
 // ── Ad-hoc "Ask about the sprint" chat (Pro, Haiku) ──────────────────────────────────────────
-// A free-text question answered from the SAME team-insights snapshot the Sprint summary uses,
+// A free-text question answered from the SAME workspace-insights snapshot the Sprint summary uses,
 // grounded (answer only from the JSON) with a soft decline for off-topic / unanswerable asks.
 // When `wantChart`, a SECOND constrained Haiku pass emits this narrow spec, rendered by the
 // frontend's zero-dep chart toolkit; validated strictly, dropped (chart:null) on any mismatch.
@@ -1258,11 +1265,15 @@ export interface SprintChatChartSpec {
   series: { label: string; values: (number | null)[] }[];
 }
 
-// POST /api/pro/insights/ask body. `scope` ('all' | 'none' | 'teams' | '<teamId>') narrows the
-// grounding data to a team's repos exactly like the Sprint report. `wantBots` appends Pierre's
-// deterministic bot-performance data (getBotAnalytics) to the prompt.
+// POST /api/pro/insights/ask body. `wantBots` appends Pierre's deterministic bot-performance data
+// (getBotAnalytics) to the prompt.
 export interface SprintChatBody {
   question: string;
+  // Which WORKSPACE to ground the answer in — the wire value is the workspace id (the same plain
+  // integer `?workspace=` carries, as a string on this body). Absent = the account's Default.
+  // The sentinel vocabulary it used to accept ('all' | 'none' | 'teams' | '<teamId>') is gone with
+  // the scope union; the plugin parses this with parseWorkspaceId and persists `ws:<id>` as the
+  // cache `scope_key`, whose prefix is what stops a legacy '3' aliasing workspace 3.
   scope?: string;
   wantChart?: boolean;
   wantBots?: boolean;
@@ -1284,8 +1295,8 @@ export interface SprintChatResponse {
   creditsExhausted?: boolean;
 }
 
-// One stored past ad-hoc chat (Pro; server-persisted per account, all scopes). Carries the full
-// grounded answer + chart + PR refs so re-opening a past question is FREE (no re-run / no spend).
+// One stored past ad-hoc chat (Pro; server-persisted per account, every workspace). Carries the
+// full grounded answer + chart + PR refs so re-opening a past question is FREE (no re-run/no spend).
 export interface SprintChatHistoryItem {
   id: number;
   question: string;
@@ -1294,7 +1305,11 @@ export interface SprintChatHistoryItem {
   prRefs: DigestPrRef[];
   wantChart: boolean;
   wantBots: boolean;
-  scope: string; // the scope the answer was grounded in ('all' | 'none' | '<teamId>')
+  // The stored cache key of the workspace the answer was grounded in — `ws:<workspaceId>`. Rows
+  // written before the workspace refactor carried a bare team scope string and are re-keyed (or
+  // cleared) by plugin migration 0020; the `ws:` prefix is what makes a legacy value unmatchable
+  // rather than a silent alias onto a workspace with a different repo set.
+  scope: string;
   model: string | null;
   createdAt: string; // ISO-8601
 }
@@ -1306,7 +1321,7 @@ export interface SprintChatHistoryResponse {
   total: number;
 }
 
-// A saved, re-runnable ad-hoc prompt (Pro; server-stored per account + scope, cross-device).
+// A saved, re-runnable ad-hoc prompt (Pro; server-stored per account + workspace, cross-device).
 export interface PinnedPrompt {
   id: number;
   text: string;
@@ -1322,6 +1337,8 @@ export interface CreatePinnedPromptBody {
   text: string;
   wantChart?: boolean;
   wantBots?: boolean;
+  // The workspace this prompt is pinned to — the workspace id as a string, exactly like
+  // SprintChatBody.scope. Absent = the account's Default. Stored as the `ws:<id>` scope key.
   scope?: string;
 }
 
@@ -1674,6 +1691,11 @@ export interface UpdateBranchResult {
 
 // An outstanding review request on a PR (user resolved via the users array;
 // team requests carry only a name).
+//
+// ⚠ `teamName` HERE IS GITHUB'S OWN TEAM (`@org/team`) — NOT this app's workspace. It is parsed
+// straight out of a GitHub payload and stored in `reviewRequests.teamName`. It is one `sed` away
+// from `WorkspaceComparisonRow.workspaceName`, which is the OPPOSITE category and WAS renamed;
+// renaming this one breaks GitHub-team review-request rendering. Do not touch it.
 export interface RequestedReviewer {
   userId: number | null;
   teamName: string | null;
@@ -1694,7 +1716,7 @@ export interface PrFileChange {
 // the API's PrFileChange minus the `githubUrl`, which is derived on read.
 export type StoredPrFile = Omit<PrFileChange, 'githubUrl'>;
 
-// Hard cap on how many repositories a single account may watch. Enforced on the
+// Hard cap on how many repositories a single account may ADD. Enforced on the
 // add-repo route (backend, the source of truth) and surfaced in the add-repo UI.
 export const MAX_REPOS_PER_ACCOUNT = 100;
 
@@ -1754,8 +1776,8 @@ export interface MyTurnCounts {
   // Your authored, still-open PRs that have a standing approval (ready to merge).
   approvedPrs: number;
   threadsAwaiting: number;
-  // New open PRs by others in repos you've Watched (opened after the watch began),
-  // not yet dismissed. 0 when no repos are watched.
+  // New open PRs by others in your repos (opened at or after the repo was added — see
+  // `Repo.createdAt`), not yet dismissed. 0 when the account has no repos.
   watchedRepoPrs: number;
   // Completed Claude reviews not yet actioned (no comments/review posted). Always 0
   // when Claude Review is disabled (cloud / flag off).
@@ -1776,7 +1798,7 @@ export interface ProCapabilities {
   // pro+ advanced-AI tier. On whenever the digest/summary tier is on (or advanced AI is).
   prSummary: boolean;
   aiFix: boolean; // agentic inline code fix + push (Agent SDK, needs write access)
-  teamInsights: boolean; // team review-intelligence "Insights" (no AI; pure reads)
+  workspaceInsights: boolean; // workspace review-intelligence "Insights" (no AI; pure reads)
   // Agentic Claude Review (Agent SDK). The product lives in the plugin (routes/manager/
   // prompts); the SDK-run infra + tables stay in core behind the ctx.review seam. Gated
   // by PRO_ADVANCED_AI_ENABLED (formerly PRO_CLAUDE_REVIEW_ENABLED, kept as an alias); all-false
@@ -1786,7 +1808,7 @@ export interface ProCapabilities {
   // Slack digest delivery (Pro): a per-account webhook receives the freshly-generated sprint +
   // repo digest on a cadence. The report is AI-generated (Haiku), so this mirrors activityDigest.
   slackDigest: boolean;
-  // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI). Gated (like teamInsights) on
+  // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI). Gated (like workspaceInsights) on
   // PRO_DIGEST_ENABLED. Config (provider + base URL) lives in pro_settings.
   issueLinks: boolean;
   // Review-bot triage tier — CORE/FREE. The Bots rail view reads the core bot routes and shows
@@ -2036,7 +2058,7 @@ export interface UserContributionStats {
   repoIds: number[] | null;
 }
 
-// ---- insights (per-repo team/sprint stats) ----
+// ---- insights (per-repo sprint stats) ----
 
 // Open review-requests still pending for one reviewer in a repo — the review-load
 // signal that surfaces a bottleneck reviewer.
@@ -2074,7 +2096,7 @@ export interface InsightsTimePoint {
 
 // A per-repo snapshot for the Insights panel. Counts are current state; the
 // time-windowed figures carry their window in InsightsResponse. Per repo only
-// (no cross-repo/team aggregation yet).
+// (no cross-repo/workspace aggregation yet).
 export interface RepoInsights {
   repoId: number;
   repoFullName: string;
@@ -2455,10 +2477,16 @@ export interface ApprovedPrItem extends MyTurnPr {
   mergeStateStatus: MergeStateStatus;
 }
 
-// A new open PR (by someone other than you, non-draft) in a repo you've Watched,
-// opened after the watch began. Surfaced so new work in repos you care about doesn't
-// get missed. Dismissing one is sticky (it acknowledges that specific PR); unwatching
-// the repo hides all of them, re-watching restores them.
+// A new open PR (by someone other than you, non-draft) in one of the account's repos,
+// opened at or after that repo was ADDED (`Repo.createdAt` — see the note there for why the
+// cutoff exists). Surfaced so new work doesn't get missed. Dismissing one is sticky: it
+// acknowledges that specific PR and does not resurface on later activity.
+//
+// The name is historical — it predates the removal of the per-repo "Watched" flag, which used
+// to be both the membership test and the clock. Nothing is opted into any more: every repo the
+// account has added qualifies. The identifier is kept because `MyTurnDismissKind`
+// ('watched_repo_pr') is a value STORED in `my_turn_dismissals.kind`, and renaming the type
+// without renaming that value would be worse than the stale word.
 export type WatchedRepoPrItem = MyTurnPr;
 
 export interface ThreadAwaitingItem {
@@ -2501,8 +2529,8 @@ export interface MyTurnResponse {
   // against `yourPrs` — an approved PR shows here, not under "new activity".
   approvedPrs: ApprovedPrItem[];
   threadsAwaiting: ThreadAwaitingItem[];
-  // New open PRs by others in repos you've Watched (deduped against the sections
-  // above). Empty when no repos are watched.
+  // New open PRs by others, opened at or after their repo was added (deduped against the
+  // sections above). Empty when the account has no repos.
   watchedRepoPrs: WatchedRepoPrItem[];
   // Completed Claude reviews awaiting action (empty when Claude Review is disabled).
   claudeReviewsToAction: ClaudeReviewToAction[];
@@ -2552,8 +2580,8 @@ export interface DismissedClaudeReviewItem extends Restorability {
   dismissedAt: string;
 }
 
-// A dismissed watched-repo PR. Opening it loads the PR; "To do" restores it to the
-// inbox (only if the PR is still open and the repo is still watched).
+// A dismissed new-PR entry. Opening it loads the PR; "To do" restores it to the inbox (only
+// if the PR is still open and its repo is still on the account).
 export interface DismissedWatchedRepoPrItem extends MyTurnPr, Restorability {
   kind: 'watched_repo_pr';
   dismissedAt: string;
@@ -2579,8 +2607,8 @@ export interface DismissedMyTurnResponse {
   users: User[];
 }
 
-// ---- my turn: activity Feed (watched repos, last 14 days) ----
-// One activity entry in the watched-repo Feed. A denormalized, render-ready view of
+// ---- my turn: activity Feed (the account's repos, last 14 days) ----
+// One activity entry in the Feed. A denormalized, render-ready view of
 // an `events` row (commit pushes excluded) — the frontend mirrors these into an
 // append-only IndexedDB store. `id` is the stable `events.id`, used to dedupe on
 // merge. Excludes `commit_pushed`; includes `pr_ready_for_review` / `pr_reopened`.
@@ -2616,12 +2644,12 @@ export interface FeedResponse {
 
 // ---- request payloads ----
 
+// Adding a repo is the WHOLE decision — there is no second per-repo visibility axis to set
+// alongside it. An added repo is fully live in its workspace (Feed, Activity, My Turn, Bots),
+// so the old `watch?: boolean` is gone rather than defaulted.
 export interface CreateRepoBody {
   owner: string;
   name: string;
-  // When true, the repo is also Watched for the My Turn inbox on add (the picker
-  // passes true for repos that are "yours" — owned or org-member).
-  watch?: boolean;
 }
 
 // ---- repo search (Add-repo picker) ----
@@ -2653,7 +2681,7 @@ export interface RepoSearchResponse {
 }
 
 // The viewer's recently-active repositories, detected from their GitHub activity (recent
-// pushes + contributions), for the first-run onboarding "watch what you're working on"
+// pushes + contributions), for the first-run onboarding "add what you're working on"
 // picker. Already-added repos are filtered out; results are ordered most-recently-pushed
 // first. Sourced live from GitHub — never persisted. Reuses RepoSearchResult so the picker
 // rows render identically. Local sees whatever the `gh` token sees (private + org repos);
@@ -2668,9 +2696,9 @@ export interface RepoSearchQuery {
   limit?: number;
 }
 
-// ---- cross-team text search (CORE, no AI; served by /api/search) ----
+// ---- cross-repo text search (CORE, no AI; served by /api/search) ----
 // A full-text search over the LOCAL search_index (PR titles + descriptions, review bodies,
-// review-comments, PR-comments, and authors) across the caller's watched/team-scoped repos. Case-
+// review-comments, PR-comments, and authors) across the caller's workspace-scoped repos. Case-
 // insensitive substring match, so you can "pinpoint where certain text exists". A review-comment
 // hit carries its `threadId` so the UI deep-links straight to the thread.
 export type SearchHitKind = 'pr' | 'review' | 'review_comment' | 'pr_comment';
@@ -3693,7 +3721,7 @@ export interface RepoClaudeReviewsResponse {
 // ---- Pro per-repo digest (Workstream 2; @pierre/pro, flagged) ----
 
 // One resolved PR reference inside a digest's markdown. The Haiku digests reference
-// PRs as "#123" tokens; the backend resolves each to its watched PR so the frontend
+// PRs as "#123" tokens; the backend resolves each to its synced PR so the frontend
 // can linkify the token and open the PR as a new tab. `prId` is null when a "#N"
 // token didn't resolve to a known PR in that repo (render it as plain text).
 export interface DigestPrRef {
@@ -3775,8 +3803,8 @@ export type DigestRefreshEvent =
   | { type: 'done'; total: number; completed: number; budgetReached?: boolean };
 
 // NOTE: the old cross-repo "Feed digest" (FeedDigest*) was removed. The Activity "Feed"
-// entry now renders the COLLECTION of per-repo RepoDigests directly (scoped to the
-// watched repos), each in a collapsible card — one source of truth, no aggregate LLM pass.
+// entry now renders the COLLECTION of per-repo RepoDigests directly (scoped to the active
+// workspace's repos), each in a collapsible card — one source of truth, no aggregate LLM pass.
 
 // ---- Consolidated Feed (CORE, no AI; the Activity "Feed" entry's main list) ----
 // One flat, purely-chronological (newest-first) stream of real activity events (opens /
@@ -3924,10 +3952,10 @@ export interface ConsolidatedFeedResponse {
   generatedAt: string; // ISO-8601
 }
 
-// ---- Team review-intelligence "Insights" (Pro; `teamInsights` capability) ----
+// ---- Workspace review-intelligence "Insights" (Pro; `workspaceInsights` capability) ----
 // Discrete, Feed-style cards computed on the sync cadence from data already synced (NO
 // AI): PRs stalled on review, review threads left untouched, reviewer load/queue depth,
-// and reviewer-routing suggestions. Scoped to WATCHED repos (= the team). "Sprint" is
+// and reviewer-routing suggestions. Scoped to the workspace's repos. "Sprint" is
 // the trailing 2 weeks. Each card is a self-contained work item, ranked most-urgent first.
 export type InsightKind =
   | 'stalled_review' // an open PR awaiting review too long
@@ -3971,6 +3999,11 @@ export interface InsightPrRef {
 //   'team' → `teamSlug` is the assign key (sent as `team_reviewers`); `teamName` is the
 //            'org/team' display label. userId/login are null.
 // `reason` is the human rationale; `source` records where the suggestion came from.
+//
+// ⚠ `kind: 'team'`, `teamSlug` AND `teamName` ARE GITHUB'S OWN TEAMS — not this app's workspaces.
+// `teamSlug` is the literal key sent in GitHub's `team_reviewers` REST body and `kind === 'team'`
+// is tested by the renderers. They are one `sed` away from the workspace vocabulary and are the
+// opposite category: renaming them breaks CODEOWNERS `@org/team` suggestions and the assign call.
 export interface ReviewerSuggestion {
   kind: 'user' | 'team';
   login: string | null;
@@ -4072,12 +4105,12 @@ export type InsightCard =
   | BotSignalCard
   | BotOnlyReviewCard;
 
-// ---- Team DORA-ish flow metrics (Insights header; no AI) ----
+// ---- Workspace DORA-ish flow metrics (Insights header; no AI) ----
 // Best-effort DORA mapping from synced PR/CI data (there is NO stored CI-state history,
 // so recovery is a current-state proxy — see fields). Each stat carries the current
 // sprint value + the prior sprint's (for a Δ trend arrow). Weekly series align to
 // `weekBuckets` (a shared x-axis, oldest first) and reuse the repo-analytics chart format.
-export interface TeamMetricStat {
+export interface WorkspaceMetricStat {
   value: number | null; // this sprint SO FAR (null = no sample)
   previous: number | null; // the SAME elapsed slice of the prior sprint (apples-to-apples)
   // How many items fed each figure (for counts this equals the value; for medians/percentages
@@ -4090,7 +4123,7 @@ export interface TeamMetricStat {
   lowConfidence?: boolean;
 }
 
-export interface TeamMetrics {
+export interface WorkspaceMetrics {
   // Which window model produced value/previous — the panel + AI report label accordingly
   // ("day N of M · vs same point last sprint" for 'sprint'; "rolling N days · vs prior N days" for
   // 'rolling_*'). Optional for back-compat with cached responses predating the setting.
@@ -4109,20 +4142,20 @@ export interface TeamMetrics {
   openPrs: number;
 
   // Deployment frequency → PRs merged to a base branch.
-  merges: TeamMetricStat;
+  merges: WorkspaceMetricStat;
   // Lead time for changes → median hours open → merge.
-  leadTimeHours: TeamMetricStat;
+  leadTimeHours: WorkspaceMetricStat;
   // Review responsiveness → median hours open → first review.
-  timeToFirstReviewHours: TeamMetricStat;
+  timeToFirstReviewHours: WorkspaceMetricStat;
   // Change failure rate (inverted) → % of merged PRs whose head CI was green.
-  mergeCiSuccessPct: TeamMetricStat;
+  mergeCiSuccessPct: WorkspaceMetricStat;
   // Time to restore (snapshot proxy) → open PRs currently red on CI + how long sat.
   ciFailingNow: number;
   ciFailingMedianAgeHours: number | null;
 
   // Time to restore (REAL, from the ci_status_events transition log) → median hours a
   // PR head spends red before CI goes green again. Null until enough history accrues.
-  ciRecoveryHours: TeamMetricStat;
+  ciRecoveryHours: WorkspaceMetricStat;
 
   // Weekly series (length === weekBuckets.length).
   throughput: { opened: number[]; merged: number[] }; // flow + deploy frequency
@@ -4162,38 +4195,39 @@ export interface TeamMetrics {
   ciFailureReasons: { stage: string; count: number }[];
 }
 
-export interface TeamInsightsResponse {
+export interface WorkspaceInsightsResponse {
   enabled: boolean; // false when the capability is off (plugin absent)
   generatedAt: string; // ISO-8601
   sprint: { from: string; to: string };
-  metrics: TeamMetrics | null; // team flow metrics header (null = no repos)
+  metrics: WorkspaceMetrics | null; // workspace flow-metrics header (null = the workspace has no repos)
   cards: InsightCard[];
   users: User[]; // actors referenced by the cards (avatar/login lookup)
 }
 
 // The attention cards (stalled reviews / untouched threads / reviewer load / needs-a-reviewer),
 // served CORE/free by GET /api/attention for the Feed "Needs attention" tab — the same cards the
-// (Pro) Insights pane computes in core getTeamInsights, minus the bot-signal cards (those live in
-// the free Bots console). No AI, no capability gate.
+// (Pro) Insights pane computes in core getWorkspaceInsights, minus the bot-signal cards (those live
+// in the free Bots console). No AI, no capability gate.
 export interface AttentionCardsResponse {
   cards: InsightCard[];
   users: User[];
 }
 
-// The Insights flow-metric header (TeamMetrics tiles + trend charts) computed for a SINGLE
-// repo — powers the per-repo console's "Insights-style" panel (getTeamInsights scoped to
-// [repoId]). Metrics-only; the repo console renders these tiles NON-clickable.
-export interface RepoTeamMetricsResponse {
+// The Insights flow-metric header (WorkspaceMetrics tiles + trend charts) computed for a SINGLE
+// repo — powers the per-repo console's "Insights-style" panel (getWorkspaceInsights narrowed to
+// that one repo, its workspace resolved from the repo itself). Metrics-only; the repo console
+// renders these tiles NON-clickable.
+export interface RepoWorkspaceMetricsResponse {
   enabled: boolean; // false when the Pro plugin/capability is off
-  metrics: TeamMetrics | null; // null = repo not owned / no data
+  metrics: WorkspaceMetrics | null; // null = repo not owned / no data
 }
 
-// ---- Team flow-metric DRILL-DOWN (Insights; clicking a metric tile) ----
+// ---- Workspace flow-metric DRILL-DOWN (Insights; clicking a metric tile) ----
 // Each of the 6 flow-metric tiles opens a drill-down tab; this is the per-metric PR
 // list behind each. Loaded on demand (a separate, heavier read than the always-loaded
-// TeamMetrics), scoped to the WATCHED repos + the current sprint. Lets the user see
+// WorkspaceMetrics), scoped to the workspace's repos + the current sprint. Lets the user see
 // WHERE issues cluster (which PRs/repos drag a metric).
-export type TeamMetricKey =
+export type WorkspaceMetricKey =
   | 'open_prs' // ALL currently-open PRs across the repos, oldest first
   | 'merges' // deploy frequency → all merged PRs (per repo)
   | 'lead_time' // open → merge, merged + open, longest first
@@ -4202,7 +4236,7 @@ export type TeamMetricKey =
   | 'ci_recovery' // red → green recovery, slowest first
   | 'ci_red'; // currently CI-failing open branches
 
-export const TEAM_METRIC_KEYS: TeamMetricKey[] = [
+export const WORKSPACE_METRIC_KEYS: WorkspaceMetricKey[] = [
   'open_prs',
   'merges',
   'lead_time',
@@ -4215,7 +4249,7 @@ export const TEAM_METRIC_KEYS: TeamMetricKey[] = [
 // One PR row in a metric drill-down list. Carries the shared PR context plus the
 // metric-specific figures (only the fields relevant to the list it appears in are
 // populated; the rest are null). Users referenced by authorId / mergedById /
-// reviewerIds resolve against TeamMetricsDetail.users.
+// reviewerIds resolve against WorkspaceMetricsDetail.users.
 export interface MetricPr {
   prId: number;
   repoId: number;
@@ -4241,7 +4275,7 @@ export interface MetricPr {
   reviewerIds: number[]; // distinct reviewers — review_latency
 }
 
-export interface TeamMetricsDetail {
+export interface WorkspaceMetricsDetail {
   sprint: { from: string; to: string };
   openPrs: MetricPr[]; // ALL currently-open non-draft PRs, longest-open first
   merges: MetricPr[]; // merged in the sprint (per repo on the client)
@@ -4253,47 +4287,56 @@ export interface TeamMetricsDetail {
   users: User[]; // actors referenced by any list
 }
 
-export interface TeamMetricsDetailResponse {
+export interface WorkspaceMetricsDetailResponse {
   enabled: boolean; // false when the capability is off (plugin absent)
-  detail: TeamMetricsDetail | null; // null when there are no watched repos
+  detail: WorkspaceMetricsDetail | null; // null when the workspace has no repos
 }
 
-// The team flow-metric header (DORA-ish tiles + trend charts) as a standalone CORE/free payload,
-// served by /api/team-metrics — moved out of the Pro Insights bundle into the Feed.
-export interface TeamMetricsResponse {
-  metrics: TeamMetrics | null; // null = no repos in scope
+// The workspace flow-metric header (DORA-ish tiles + trend charts) as a standalone CORE/free
+// payload, served by /api/workspace-metrics — moved out of the Pro Insights bundle into the Feed.
+export interface WorkspaceMetricsResponse {
+  metrics: WorkspaceMetrics | null; // null = the workspace has no repos
 }
 
-// ---- Cross-team comparison (the Feed's "Compare teams" sub-tab) ----
-// One row per team IN SCOPE: that team's full flow metrics (same TeamMetrics shape the DORA
-// header uses), so the SPA can render a compact metric×team comparison matrix with per-team
-// throughput sparklines. `metrics` null when the team has no repos/data.
+// ---- Cross-workspace comparison (the "Compare workspaces" rail line) ----
+// One row per WORKSPACE: that workspace's full flow metrics (the same WorkspaceMetrics shape the
+// DORA header uses), so the SPA can render a compact metric×workspace comparison matrix with
+// per-workspace throughput sparklines. `metrics` null when the workspace has no repos/data.
 //
-// This moved OUT of the Pro Insights pane and is now CORE/FREE, served by
-// `GET /api/team-metrics/compare?scope=` beside `/api/team-metrics` and `/api/team-metrics/detail`
-// — sitting next to the free DORA header it shares its window with. It is shown whenever 2+ teams
-// are in scope, which is NOT the same test as the old All-Teams-only gate: `teamSetToScope`
-// canonicalises a full selection to `'teams'` and a one-team selection to a bare number, so the
-// predicate must count resolved team ids (`teamIdsInScope`), never inspect the scope's runtime type.
+// ⚠ IT COVERS EVERY WORKSPACE, ALWAYS — Default included — and takes NO scope parameter. The
+// selection cannot narrow a comparison whose entire purpose is to place the selected workspace
+// against the others; its predecessor was scoped, which is what made it disappear the moment fewer
+// than two teams were selected. The surface is simply hidden when the account owns fewer than two
+// workspaces (`workspaces.length >= 2`), a count over the roster — never a test on a scope value.
+//
+// ⚠ COST IS NOT TOTALLED HERE, and no other cross-workspace surface may total it either: prices are
+// per workspace (see WorkspaceReviewer.costMonthlyUsd), so six workspaces each listing a $120
+// CodeRabbit is either six subscriptions or one seen six ways, and this screen must not assert
+// which. Show the figures side by side.
 //
 // WINDOW: core cannot read the plugin-owned `pro_settings`, so this uses the same trailing-14d
-// default `/api/team-metrics` does — NOT the account's configured sprint window. That makes
-// Compare agree with the free header directly above it, at the cost of possibly differing from a
+// default `/api/workspace-metrics` does — NOT the account's configured sprint window. That makes
+// Compare agree with the free header elsewhere in the app, at the cost of possibly differing from a
 // Pro user's custom-window Insights header. Deliberate, and a visible change for those users.
-export interface TeamComparisonRow {
-  teamId: number;
-  teamName: string;
+export interface WorkspaceComparisonRow {
+  workspaceId: number;
+  // The workspace's display name. NOTE, because the two are one `sed` apart and are opposites:
+  // this is OUR name for a grouping of repos, whereas `RequestedReviewer.teamName` and
+  // `ReviewerSuggestion.teamName`/`teamSlug` are GITHUB's own teams (`@org/team`) and must never
+  // be renamed — they parse GitHub payloads and address GitHub's review-request API.
+  workspaceName: string;
+  isDefault: boolean;
   repoCount: number;
-  metrics: TeamMetrics | null;
+  metrics: WorkspaceMetrics | null;
 }
 
-export interface TeamComparisonResponse {
+export interface WorkspaceComparisonResponse {
   // Always true from the core route — kept on the wire (rather than removed) because the client
   // never read it and dropping a field buys nothing, while a future gate might want it back.
   enabled: boolean;
   generatedAt: string; // ISO-8601
   sprint: { from: string; to: string };
-  teams: TeamComparisonRow[]; // one per team IN SCOPE, in listTeams order (name asc)
+  workspaces: WorkspaceComparisonRow[]; // one per workspace, in listWorkspaces order (name asc)
 }
 
 // ---- Comment-validity assessment (Pro; reuses the prSummary capability) ----
@@ -4412,7 +4455,7 @@ export type AddressedCheckProgress =
 //  - AGENTIC (Agent-SDK runs — Claude Review, AI Fix) is metered by CREDITS ($ cost), because a
 //    single run's cost varies wildly. Cost is tracked in USD server-side but NEVER surfaced as
 //    dollars — only as CREDITS (conversion below). The paid plan default is a $15/mo allowance.
-// Covers ALL usage on the account, including work outside the Watched repos.
+// Covers ALL usage on the account, including work outside the active workspace.
 export const AI_CREDITS_PER_USD = 1250; // $1 of model cost = 1250 credits (1 credit ≈ $0.0008)
 
 // The per-seam month-to-date balances. A null limit/allowance = unmetered (local / unlimited);

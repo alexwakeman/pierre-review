@@ -101,14 +101,6 @@ export const repos = sqliteTable(
     // until a sync populates it (or when GitHub returns null).
     viewerPermission: text('viewer_permission'),
     backfillUntil: integer('backfill_until', { mode: 'timestamp' }),
-    // "Watch for inbox": when true, new open PRs by others (opened on/after
-    // inboxWatchStartedAt) surface in the My Turn inbox. Independent of timeline
-    // visibility and of removing the repo. inboxWatchStartedAt is set on the first
-    // watch and preserved across unwatch so re-watching restores the same window.
-    inboxWatch: integer('inbox_watch', { mode: 'boolean' })
-      .notNull()
-      .default(false),
-    inboxWatchStartedAt: integer('inbox_watch_started_at', { mode: 'timestamp' }),
     // ---- Default-branch status ("is trunk green?") ----
     // A snapshot of the repo's DEFAULT BRANCH head, distinct from `defaultBranch` above
     // (which is just the name and has been here since the maintainer inference). All four
@@ -126,6 +118,12 @@ export const repos = sqliteTable(
     // When the branch snapshot was last refreshed (OUR observation time, not the commit time
     // — that lives on the branch_commits rows).
     defaultBranchUpdatedAt: integer('default_branch_updated_at', { mode: 'timestamp' }),
+    // When the repo was added to this account. LOAD-BEARING beyond bookkeeping: it is My Turn's
+    // clock. An open, non-draft PR by a human other than you qualifies for the "New PRs" section
+    // only when `openedAt >= createdAt`, so adding a repo with 400 open PRs does not dump them
+    // all into My Turn on day one. (It replaced `inbox_watch_started_at`, dropped in 0046 along
+    // with the whole "watched" concept — a Workspace IS the scope now, and a second visibility
+    // axis on top of it was just confusing.)
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -141,12 +139,13 @@ export const repos = sqliteTable(
     nodeUx: uniqueIndex('repos_account_node').on(t.accountId, t.githubNodeId),
     accountIdx: index('repos_account_idx').on(t.accountId),
     // NOT a lookup index — `id` is already the primary key, so this is redundant for reads. It
-    // exists solely as the PARENT KEY of `repo_reviewers`' composite FK
+    // exists solely as the PARENT KEY of `workspace_repos`' composite FK
     // `(repo_id, account_id) → repos(id, account_id)`, which is what makes tenancy structural for
-    // the one table whose repo id arrives in a request body. Both dialects require a unique index
+    // a table whose repo ids arrive in a request body. Both dialects require a unique index
     // over the parent key columns before such an FK is legal (Postgres accepts a plain unique
     // index — it does NOT need a named UNIQUE constraint; verified on 16.13). Drop it and the FK
     // becomes unexpressible, so a cross-account write goes back to being one handler's predicate.
+    // `workspaces_id_account` is the exact same trick for the workspace half of those FKs.
     idAccountUx: uniqueIndex('repos_id_account').on(t.id, t.accountId),
   }),
 );
@@ -518,7 +517,7 @@ export const events = sqliteTable(
     repoTimeIdx: index('events_repo_time_idx').on(t.repoId, t.occurredAt),
     actorIdx: index('events_actor_idx').on(t.actorId),
     accountIdx: index('events_account_idx').on(t.accountId),
-    // Correlated "does this PR have an event since <cutoff>" EXISTS lookups (getTeamInsights
+    // Correlated "does this PR have an event since <cutoff>" EXISTS lookups (getWorkspaceInsights
     // open-PR staleness, getOpenPrs, new-since checks, feed joins) filter by pr_id — WITHOUT
     // this they fall back to events_account_idx and scan every account event per PR (O(open PRs
     // × events)). Composite so the occurred_at bound resolves inside the index too.
@@ -879,261 +878,270 @@ export const claudeReviewFindings = sqliteTable(
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
 
-// ---- Bot-Triage Platform (WS1 / WS6) ----
-// ── THE BOT STORE IS TWO TABLES, ONE PER GRAIN ──────────────────────────────────────────────
-// `repo_reviewers`    — (account, repo, author): the JUDGEMENT. Is this acting as an automated
-//                        reviewer HERE, is that reviewing or quality-checking, and how we know.
-// `account_reviewers` — (account, author):       the IDENTITY. What the bot IS, what it is
-//                        CALLED, and what we PAY for it.
-//
-// EVERY FACT ON THIS PAGE LIVES AT EXACTLY ONE OF THEM. That is the whole design, and it is worth
-// stating as a rule because the previous shape kept `kind`/`label`/`identity_source` on the
-// per-repo row and held them consistent BY CONVENTION — replicated across an actor's rows with no
-// constraint anywhere. That convention cost three standing obligations (a new repo row had to
-// seed three columns from its siblings; persist() had to gate on two different provenance flags;
-// and the account-wide identity was "a straight read of any one of them", which silently elects a
-// winner the moment two rows disagree) and it is exactly the hazard that moving cost out of the
-// row was meant to eliminate — left in place for three other columns.
-//
-// There is NO team key, NO inheritance, NO merge and NO DEDUPLICATION in either table.
-//
-// IF YOU ADD A FIELD, DECIDE ITS GRAIN FIRST. "Is this the same in every repo by definition?" is
-// the whole test: a login is one vendor everywhere (identity), but it can be a reviewer on one
-// repo and a quality gate on the next (judgement).
-//
-// A REVIEWER AS SEEN IN ONE REPO — this account's stored judgement about one actor in one repo.
-// One row per (account, repo, author), and THAT ROW IS THE BOT OBJECT: is it automated, what is
-// it for (`role`), and the provenance of that answer.
-//
-// WHY THE REPO IS THE KEY. A bot is installed per repository — GitHub Apps are installed on
-// repos, CI configs live in repos — whereas a team is a bag of repos someone can re-bag tomorrow.
-// The previous design keyed this judgement on a team, so the answer moved when team membership
-// was edited, and it needed an inheritance chain (`team row → team-0 default → auto-detect`)
-// whose null-means-inherit rules leaked into every read and every write path. Keying on the repo
-// removes the chain outright: exactly one row per repo, nothing to fall back to, nothing to merge.
-//
-// THERE IS NO DEDUPLICATION ANYWHERE, deliberately. A vendor running on six repos is six rows and
-// renders as six entries — in the team view and in the Feed bot summary alike. Within one repo
-// there is nothing to dedupe, because the key already is (repo, actor).
-//
-// WHY `repo_reviewers` AND NOT `repo_bots`: a row may legitimately say `automated: false` — a
-// human someone corrected off the bot list — so "bots" would be a lie for a real, load-bearing
-// subset of the table. `repo_reviewers` reads exactly as its key: reviewers, per repo.
-//
-// DETECTION DERIVES ONCE PER ACTOR AND WRITES THE SAME VERDICT TO EVERY REPO ROW of that actor
-// (sync/reviewer-classify.ts). Every strong signal — a known vendor login, `users.githubType`,
-// app attribution, the branded-marker fingerprint — is a property of the ACTOR and is
-// repo-independent, so deriving per repo would multiply the work AND the billed Haiku tie-break
-// for an identical answer, and would weaken the behavioural score by computing it on a thin
-// per-repo slice. The rows stay independently overridable: only a HUMAN edit should ever make two
-// of an actor's rows disagree.
-//
-// NOTE THE ASYMMETRY WITH IDENTITY, because it is why the two grains are not one table: this is a
-// derivation that happens once and is COPIED to N rows, so two rows CAN legitimately differ (a
-// human overrode one). Identity is a fact that IS one value, so it gets one row.
-//
-// ── IT CARRIES NO IDENTITY, AND THAT IS THE POINT ───────────────────────────────────────────
-// `kind`, `label` and `identity_source` USED TO BE COLUMNS HERE, replicated across an actor's
-// rows and held consistent only by convention. They now live once, on `account_reviewers`.
-//
-// THE FAILURE THAT MOVE MAKES UNREPRESENTABLE, because it is not hypothetical: CodeRabbit is
-// detected on api, web and infra; a user clicks "Not a bot" on web ONLY; that row's `kind` goes
-// null and is the most recently updated; identity resolution reports kind=null account-wide; and
-// useBotColors (which filters on kind != null) drops CodeRabbit's brand colour and vendor name on
-// api and infra — repos the user never touched. A most-recently-updated tie-break does not fix
-// it: it picks a winner, but it cannot make the losing rows editable or even visible. With
-// identity at its own grain there is no losing row: one storage location, no election.
-//
-// The write side mirrors it exactly (packages/shared/src/types.ts): per-repo writes carry ONLY
-// the judgement (`automated`, `role`); `kind`/`label` are an ACTOR-keyed write, as cost is. DO
-// NOT MERGE THEM BACK into one body with a `repoId` — that is the shape this replaced.
-export const repoReviewers = sqliteTable(
-  'repo_reviewers',
+// ---- Workspaces (CORE) ----
+// A named grouping of an account's repos, and the ONE scope this app has. Exactly one row per
+// account carries is_default: it is auto-created, RENAMEABLE, NOT deletable, and new repos land
+// in it. Everything the old `teams` table did, minus the many-to-many and minus the four scope
+// sentinels ('all' / 'none' / 'teams' / a set) that made "which repos am I looking at" a
+// five-branch question with three independent parsers.
+export const workspaces = sqliteTable(
+  'workspaces',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
     accountId: integer('account_id')
       .notNull()
       .references(() => accounts.id, { onDelete: 'cascade' }),
-    // NOTE THE MISSING `.references()`: this column's foreign key is the COMPOSITE one declared
-    // in the table config below, `(repo_id, account_id) → repos(id, account_id)`, and a
-    // single-column FK here as well would be a second, weaker constraint saying nearly the same
-    // thing. See that declaration for why it is composite (tenancy) and why it cascades.
-    repoId: integer('repo_id').notNull(),
-    // No cascade: `users` is GLOBAL storage shared by every account and is never deleted.
-    authorUserId: integer('author_user_id')
-      .notNull()
-      .references(() => users.id),
-    automated: integer('automated', { mode: 'boolean' }).notNull(),
-    // ReviewerRole — 'review' (an AI code reviewer) | 'quality_check' (static analysis / coverage
-    // / lint). Just a FLAG ON THIS OBJECT, orthogonal to `kind` (vendor identity): a login keeps
-    // its brand while being marked a linter, and it may honestly be a reviewer in one repo and a
-    // quality gate in another. `automated` stays TRUE for a quality check, so exclusion + the feed
-    // are unaffected; only the SCORING sets (behaviour, dedup, benchmark, ROI) treat 'review' as
-    // the reviewer cohort. BOT-ONLY PRs DELIBERATELY DO NOT NARROW: that list answers "did a human
-    // look at this", and a PR reviewed only by SonarQube is exactly what it exists to surface.
-    // NOT NULL DEFAULT 'review' so a row written by an older code path still means something.
-    role: text('role').notNull().default('review'),
-    confidence: text('confidence').notNull(), // 'high'|'medium'|'low'
-    source: text('source').notNull(), // ClassificationSource — 'manual' is never re-derived
-    reasonsJson: text('reasons_json', { mode: 'json' }).$type<string[]>(),
-    updatedAt: integer('updated_at', { mode: 'timestamp' })
+    name: text('name').notNull(),
+    // Exactly one true row per account. ensureDefaultWorkspace() is the ONLY writer of `true`;
+    // createWorkspace always writes false and deleteWorkspace refuses a true row. That invariant
+    // is ALSO enforced by a PARTIAL UNIQUE INDEX created in the .sql migrations (not here — see
+    // the note under the table), so two concurrent ensureDefaultWorkspace() calls cannot both
+    // insert.
+    isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
   },
   (t) => ({
-    // The upsert conflict target for BOTH writers (reviewer-classify.ts persist() and the
-    // override route). `account_id` is redundant with `repo_id` (a repo has one account) but is
-    // kept in the key so the isolation predicate and the conflict target are the same columns —
-    // miss it in an onConflictDoUpdate and Postgres raises "no unique or exclusion constraint
-    // matching the ON CONFLICT specification" at RUNTIME, not at typecheck.
-    accountRepoAuthorUx: uniqueIndex('repo_reviewers_account_repo_author').on(
+    accountNameUx: uniqueIndex('workspaces_account_name').on(t.accountId, t.name),
+    accountIdx: index('workspaces_account_idx').on(t.accountId),
+    // NOT a lookup index — `id` is already the PK. It is the PARENT KEY of the composite FKs on
+    // workspace_repos and workspace_reviewers, exactly as `repos_id_account` is for those tables'
+    // repo FKs. Both dialects require a unique index over the parent-key columns before such an
+    // FK is legal (Postgres accepts a plain unique index; it does not need a named constraint).
+    // Drop it and both composite FKs become unexpressible.
+    idAccountUx: uniqueIndex('workspaces_id_account').on(t.id, t.accountId),
+  }),
+);
+
+// THE PARTIAL UNIQUE INDEX ON `is_default` LIVES IN THE MIGRATIONS, NOT HERE. Drizzle index
+// predicates are DDL-only metadata that nothing in this repo consumes (core sqlite migrations are
+// hand-written and the pg baseline is not regenerated for this change), so declaring it in the
+// table config above would buy nothing — but the CONSTRAINT ITSELF is required, because
+// `ensureDefaultWorkspace` runs on effectively every request and two concurrent calls for an
+// account with no default would otherwise both SELECT nothing and both INSERT. Both dialects
+// enforce it, one literal apart:
+//   sqlite (0044):   CREATE UNIQUE INDEX … `workspaces_one_default` ON `workspaces` (`account_id`)
+//                    WHERE `is_default` = 1;
+//   postgres (0031): CREATE UNIQUE INDEX … workspaces_one_default ON workspaces (account_id)
+//                    WHERE is_default;
+// With it in place, `ensureDefaultWorkspace` is `INSERT … ON CONFLICT DO NOTHING` then re-SELECT
+// — the loser of a race reads the winner's row instead of 500ing.
+
+// EXACTLY ONE WORKSPACE PER REPO, AS A DATABASE FACT. The unique on (account_id, repo_id) is what
+// makes that structural: assigning a repo elsewhere is an UPSERT on that key, i.e. a MOVE, and no
+// code path can produce a second membership row. `repo_id` alone would do (repos.id is a global
+// PK) — account_id rides in the key so the isolation predicate and the conflict target are the
+// same columns, the same discipline the old repo_reviewers used.
+//
+// WHY A TABLE AND NOT A `repos.workspace_id` COLUMN. SQLite cannot ADD a CONSTRAINT to an
+// existing table and cannot cheaply make an existing column NOT NULL; a NOT NULL FK column on
+// `repos` therefore means rebuilding `repos` (create-copy-drop-rename) under `foreign_keys=ON`,
+// with every child FK in the schema pointing at it mid-flight. That is a large, irreversible
+// risk for a column, and it is exactly why 0042 created `repo_reviewers` fresh rather than
+// altering anything. A join table arrives fully constrained on day one.
+//
+// THE RESIDUAL RISK, and it is real: a repo with NO membership row is invisible to every
+// workspace-scoped read. It is closed on both sides —
+//   • WRITE: sync/upsert.ts `upsertRepo` inserts the membership row in the SAME runTransaction
+//     as the repo row, ON CONFLICT (account_id, repo_id) DO NOTHING so re-adding an existing repo
+//     never moves it out of the workspace a human put it in.
+//   • READ: `ensureRepoMemberships(accountId)` (queries.ts) diffs the account's repo ids against
+//     its membership repo ids IN JS (the portable anti-join `getUnassignedRepoIds` already used)
+//     and inserts the missing ones into Default. It is called from `listWorkspaces` and from
+//     `resolveWorkspaceScope`, i.e. on every page load and every scoped request.
+//     ⚠ IT IS A WRITE ON ESSENTIALLY EVERY GET, so the insert MUST carry
+//     `ON CONFLICT (account_id, repo_id) DO NOTHING` (concurrent requests WILL race the unique).
+//     It writes the membership row and NOTHING else — there is no second visibility column left
+//     to touch (`repos.inbox_watch` was dropped in 0046), which is one of the things that made
+//     collapsing to a single axis worth doing: a repair pass can no longer have a side effect.
+//
+// THE WORKSPACE CASCADE IS A SAFETY NET, NOT THE DELETE PATH. `deleteWorkspace` MOVES the
+// workspace's repos to Default inside its transaction BEFORE deleting the row, so the cascade
+// finds nothing to do. It exists so account erasure and a hand-run `DELETE FROM workspaces`
+// cannot leave orphan membership rows.
+export const workspaceRepos = sqliteTable(
+  'workspace_repos',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // No single-column FKs: both are the COMPOSITE declarations below.
+    workspaceId: integer('workspace_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    // One workspace per repo, structurally. Also the upsert conflict target for
+    // assignReposToWorkspace.
+    accountRepoUx: uniqueIndex('workspace_repos_account_repo').on(t.accountId, t.repoId),
+    accountWorkspaceIdx: index('workspace_repos_account_workspace_idx').on(
       t.accountId,
-      t.repoId,
-      t.authorUserId,
+      t.workspaceId,
     ),
-    // Listing one repo's reviewers (the per-repo Bots settings list).
-    accountRepoIdx: index('repo_reviewers_account_repo_idx').on(t.accountId, t.repoId),
-    // Reaching every row of ONE actor: what "derive once per actor, write the verdict to each of
-    // its repo rows" walks, and the join key from `account_reviewers` back to this table. It is
-    // NOT what an identity write fans out over any more — there is nothing to fan out.
-    accountAuthorIdx: index('repo_reviewers_account_author_idx').on(t.accountId, t.authorUserId),
-    // ── TENANCY AS A CONSTRAINT, NOT A CONVENTION ────────────────────────────────────────
-    // `repo_id` is the FIRST column in this schema that arrives in a REQUEST BODY rather than
-    // from sync (the override names the repo row it edits). A plain `repo_id → repos(id)` FK
-    // accepts (account 2, repo 10) where repo 10 belongs to account 1 — both halves are
-    // individually valid — so the only thing between that and a row written into another
-    // tenant's repo would be one hand-written predicate in one handler.
-    //
-    // The composite FK makes the pair itself the thing that must exist. Verified by insertion in
-    // BOTH dialects: the cross-account row is rejected ("FOREIGN KEY constraint failed" /
-    // "violates foreign key constraint"), and it needs the `repos_id_account` unique index that
-    // exists for exactly this purpose.
-    //
-    // CASCADE, matching team_repos (the closest analogue). Core has no cascades on the PR subtree
-    // because deleteRepo unwinds that by hand, but these rows are pure per-repo metadata with
-    // nothing downstream: a repo's bot objects should die with the repo, and without the cascade
-    // deleteRepo hits a foreign-key violation (local mode opens SQLite with `foreign_keys=ON`)
-    // the moment a repo with a classified reviewer is removed.
-    //
-    // THE `name` IS REAL, NOT DECORATION — the hand-written migrations SPELL IT (`CONSTRAINT
-    // "repo_reviewers_repo_account_fk" FOREIGN KEY …`) in both dialects, so the declaration and
-    // the emitted DDL say the same thing. It previously did not: the SQL named nothing, so
-    // Postgres auto-named the constraint `repo_reviewers_repo_id_account_id_fkey` and a grep for
-    // the name in this file found no live constraint anywhere. In Postgres the name is what the
-    // violation message quotes; SQLite parses and stores it but never reports it (its error is
-    // the bare "FOREIGN KEY constraint failed" and `PRAGMA foreign_key_list` has no name column),
-    // so on that side it is documentation that at least matches the stored DDL.
+    repoIdx: index('workspace_repos_repo_idx').on(t.repoId),
+    // Tenancy as a constraint. `workspaceId` arrives in a REQUEST BODY, so a plain
+    // `REFERENCES workspaces(id)` would accept (account 2, workspace 10) where workspace 10
+    // belongs to account 1 — both halves individually valid. NAMED so Postgres quotes it in the
+    // violation message and a grep for the name finds a live constraint. (SQLite parses and
+    // stores the name but never reports it — its error is the bare "FOREIGN KEY constraint
+    // failed" and `PRAGMA foreign_key_list` has no name column — so on that side it is
+    // documentation that at least matches the stored DDL.)
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_repos_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
     repoAccountFk: foreignKey({
-      name: 'repo_reviewers_repo_account_fk',
+      name: 'workspace_repos_repo_account_fk',
       columns: [t.repoId, t.accountId],
       foreignColumns: [repos.id, repos.accountId],
     }).onDelete('cascade'),
   }),
 );
 
-// WHAT AN AUTOMATED REVIEWER IS — one row per (account, actor), NEVER per repo. The ACTOR GRAIN:
-// what the bot IS (`kind`), what it is CALLED (`label`), who decided that (`identity_source`),
-// and what we PAY for it (`monthly_cents`).
+// ---- Bot-Triage Platform (WS1 / WS6) ----
+// THE BOT OBJECT: one row per (account, WORKSPACE, actor). It replaces BOTH `repo_reviewers`
+// (the judgement, per repo) and `account_reviewers` (identity + price, per account).
 //
-// THESE ARE THE SAME IN EVERY REPO BY DEFINITION, which is the entire membership rule. A login is
-// one vendor everywhere: CodeRabbit does not stop being CodeRabbit on the infra repo. And you buy
-// ONE subscription from a vendor — six repos running CodeRabbit is $120, not $720 — so a per-repo
-// price is a number that is wrong by construction the moment anyone sums it.
+// WHY ONE TABLE NOW. The two-table split existed because judgement and identity lived at
+// DIFFERENT grains: "not a bot on web" had to not blank CodeRabbit's brand colour on api and
+// infra. With one workspace as the only scope, both facts are about the same key — so a second
+// table would key on the identical three columns and be joined at every call site, i.e. this
+// table with extra steps. "CodeRabbit in 6 repos of a workspace" is ONE row: one judgement, one
+// price, one brand colour.
 //
-// ── THE NAME ────────────────────────────────────────────────────────────────────────────────
-// `account_reviewers` is named for its KEY, exactly as `repo_reviewers` is, so the two table
-// names ARE the statement of the model: one row per (account, author) here, one per (account,
-// repo, author) there. Read them side by side and the grain of any fact is obvious from which
-// file it is in.
+// ⚠ WHAT MUST NOT BE LOST WITH THE SPLIT: the two PROVENANCE FLAGS stay separate columns and are
+// honoured INDEPENDENTLY. `source` owns automated/role/confidence/reasons; `identity_source` owns
+// kind/label. A classification pass that respects only one of them either reverts a human's vendor
+// correction or freezes auto-detection. Inside one row this is a narrowed `set:` object, not a
+// table boundary, so it is code discipline now and it is pinned by tests.
 //
-// It is deliberately NOT named after any of the facts it holds. `reviewer_identities` would make
-// `monthly_cents` look like a stray column someone bolted on; `reviewer_costs` (which this
-// replaces) made `kind`/`label` look the same way. This table is defined by its GRAIN, not by its
-// contents, and the next actor-level fact — a vendor's plan tier, a contract end date — belongs
-// here without renaming anything.
+// ⚠ `monthly_cents` IS NEVER IN ANY DERIVED **UPDATE**. It is the one column no classifier can
+// regenerate, so exactly ONE writer touches it and it names exactly ONE row:
+//   `setReviewerCost` — an UPDATE keyed on (account_id, workspace_id, author_user_id). The price
+//   is per WORKSPACE, like every other attribute on this row: editing it in workspace A leaves
+//   A's siblings alone and they may hold different numbers. There is no fan-out and no INSERT
+//   seed. A newly created row's price is simply NULL until someone sets it, and the column
+//   appears in no other `set:` object anywhere in the codebase.
+// NULL = no price set, 0 = "recorded as free". Nothing inherits; there is no chain behind a `??`.
+// Storage is integer CENTS in both dialects (pg `numeric` has no sqlite twin and node-postgres
+// returns it as a STRING; REAL is a float64 that cannot hold money); the WIRE is DOLLARS,
+// converted only at the store boundary, clamped to MAX_MONTHLY_CENTS. The ROUNDING RULE is fixed
+// and identical in both dialects — cents = floor(usd × 100 + 0.5) evaluated in IEEE-754 binary64.
 //
-// ── WHY COST IS IN HERE RATHER THAN IN A THIRD TABLE ────────────────────────────────────────
-// Cost is simply another actor-level property. A separate `reviewer_costs` table alongside this
-// one would key on the same two columns and be joined at every call site, i.e. it would be this
-// table with extra steps. ONE TABLE PER GRAIN is the clearest possible statement of the model,
-// and it is the same reason `kind`/`label` are here rather than replicated across repo rows.
+// ⚠ RENDERING RULE, and it is the client's job because no schema can enforce it: within ONE
+// workspace there is exactly one row per actor, so a total there is a plain sum. ACROSS
+// workspaces it must never be summed — six workspaces each listing a $120 CodeRabbit is either
+// six subscriptions or one seen six ways, and the app must not assert which. Compare-workspaces
+// shows the figures side by side and does not total them.
 //
-// ── `monthly_cents` IS NULLABLE, AND THAT IS SAFE HERE IN A WAY IT WAS NOT BEFORE ───────────
-// When cost had its own table, NOT NULL was the point: "no price" was "no row", so clearing a
-// price was a DELETE and there was no third state. Folding it into a row that ALSO carries
-// identity means the row can exist for reasons that have nothing to do with money, so the column
-// must be nullable — an actor with a `kind` and no price is completely ordinary.
+// WHY `workspace_reviewers` AND NOT `workspace_bots`: a row may legitimately say
+// `automated: false` — a human someone corrected off the bot list — so "bots" would be a lie for
+// a real, load-bearing subset of the table. The name states the KEY, exactly as the table names
+// it replaces did: reviewers, per workspace.
 //
-// DO NOT REINTRODUCE THE OLD FEAR. The bug class that made nullable money dangerous was
-// nullable-means-INHERIT: NULL meant "fall through to the team-0 row", so 0 ("free HERE") and
-// NULL ("ask my parent") had to be distinguished with `??` and never `||`, one character from a
-// silent wrong price. THERE IS NO INHERITANCE ANYWHERE ANY MORE. NULL means exactly "no price
-// set" and 0 means "free" — two states, no chain, no fallback, nothing to resolve. `||` is still
-// wrong (it would turn a real 0 into "unset" for display), but it is now wrong in the ordinary,
-// visible way that any falsy-vs-nullish mistake is, not in the way that silently bills a repo the
-// wrong number. Clearing a price is `SET monthly_cents = NULL`, not a DELETE — deleting the row
-// would take the identity with it.
-//
-// ⚠ RENDERING RULE, and it is the client's job because no schema can enforce it: a bot listing is
-// one row per (repo, actor), so joining this price onto all six CodeRabbit rows and summing the
-// column is both easy and wrong. Render it ONCE per actor and DEDUPE BY `author_user_id` before
-// any total, average or $/acted-on. Stated again with the wire type
-// (`ReviewerIdentity.costMonthlyUsd` in packages/shared/src/types.ts).
-//
-// MONEY IS NEVER A FLOAT HERE. SQLite has no DECIMAL and its REAL is a float64 where
-// $0.10 + $0.20 !== $0.30, and this value gets divided ($/acted-on) and printed with toFixed(2).
-// pg `numeric` was rejected as the twin: no sqlite equivalent, and node-postgres returns it as a
-// STRING, which would silently break the shared `number` wire type. integer↔integer is exact
-// parity for schema-parity.test.ts (which canonicalises int vs float precisely to catch this).
-// The WIRE unit is DOLLARS; convert only at the store boundary. The ROUNDING RULE is fixed and
-// identical in both dialects — cents = floor(usd × 100 + 0.5) evaluated in IEEE-754 binary64 —
-// see the migrations for why anything computed in pg `numeric` disagrees with SQLite on $1.005.
-//
-// It is CORE, not Pro: an OSS/npx install can set and see a price. The legacy account-wide blob
-// it replaces (`pro_settings.bot_cost_json`) is plugin-owned and stays put — see plugin
-// migration 0019.
-export const accountReviewers = sqliteTable(
-  'account_reviewers',
+// ⚠ THE WORKSPACE CASCADE IS FAR MORE DANGEROUS HERE than on workspace_repos: it would destroy
+// every manual judgement, every manual vendor name and every `monthly_cents` in the workspace —
+// money the user typed — while the repos survive. `deleteWorkspace` therefore ALSO re-homes the
+// reviewer rows to Default before deleting the workspace row. Under the old model deleting a team
+// touched no classification at all, so this is a NEW failure mode and it must be closed in code,
+// not in copy.
+export const workspaceReviewers = sqliteTable(
+  'workspace_reviewers',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
     accountId: integer('account_id')
       .notNull()
       .references(() => accounts.id, { onDelete: 'cascade' }),
+    // NOTE THE MISSING `.references()`: this column's foreign key is the COMPOSITE one declared
+    // in the table config below, `(workspace_id, account_id) → workspaces(id, account_id)`.
+    workspaceId: integer('workspace_id').notNull(),
     // No cascade: `users` is GLOBAL storage shared by every account and is never deleted.
     authorUserId: integer('author_user_id')
       .notNull()
       .references(() => users.id),
+    // ── JUDGEMENT (owned by `source`) ──
+    automated: integer('automated', { mode: 'boolean' }).notNull(),
+    // ReviewerRole — 'review' (an AI code reviewer) | 'quality_check' (static analysis / coverage
+    // / lint). Just a FLAG ON THIS OBJECT, orthogonal to `kind` (vendor identity): a login keeps
+    // its brand while being marked a linter. `automated` stays TRUE for a quality check, so
+    // exclusion + the feed are unaffected; only the SCORING sets (behaviour, dedup, benchmark,
+    // ROI) treat 'review' as the reviewer cohort. BOT-ONLY PRs DELIBERATELY DO NOT NARROW: that
+    // list answers "did a human look at this", and a PR reviewed only by SonarQube is exactly
+    // what it exists to surface. NOT NULL DEFAULT 'review' so a row written by an older code path
+    // still means something.
+    role: text('role').notNull().default('review'),
+    confidence: text('confidence').notNull(), // ClassificationConfidence — 'high'|'medium'|'low'
+    source: text('source').notNull(), // ClassificationSource; 'manual' is never re-derived
+    reasonsJson: text('reasons_json', { mode: 'json' }).$type<string[]>(),
+    // ── IDENTITY (owned by `identity_source`) ──
     // Vendor identity — drives BOT_VENDOR_META / automatedReviewerMeta() colour + brand name.
-    // NULL when this actor is not automated anywhere.
+    // NULL when this actor is not automated in this workspace.
     kind: text('kind'), // AutomatedReviewerKind | null
-    // A human-set display name. NULL ⇒ fall back to the vendor's brand name, then the login.
-    label: text('label'),
+    label: text('label'), // human-set display name; null ⇒ brand name ⇒ login
     // Provenance of `kind` + `label` ONLY — 'auto' (the classifier derived them) | 'manual' (a
-    // human named this thing and the classifier must leave it alone).
-    //
-    // IT IS NOT THE SAME FIELD AS `repo_reviewers.source`, and the split is the reason both are
-    // now trivially correct. "This is actually Greptile, not CodeRabbit" is an ACTOR-wide
-    // identity correction; "not a bot HERE" is a per-repo judgement. They live on different
-    // tables, so neither edit can reach the other's rows — where the previous shape needed
-    // persist() to gate two provenance flags against columns sitting side by side.
+    // human named this thing and the classifier must leave it alone). IT IS NOT THE SAME FIELD AS
+    // `source`, and keeping the two apart is what stops a vendor correction reverting a
+    // judgement (and vice versa) now that they share a row.
     identitySource: text('identity_source', { enum: ['auto', 'manual'] })
       .notNull()
       .default('auto'),
-    // NULL = no price set. 0 = free. See the nullability note above the table.
+    // ── PRICE (owned by nothing derived; one writer only) ──
     monthlyCents: integer('monthly_cents'),
     updatedAt: integer('updated_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
   },
   (t) => ({
-    // Upsert conflict target AND the isolation predicate — one row per actor per account, which
-    // IS the table. Both identity writes and cost writes use it as their ON CONFLICT target.
-    accountAuthorUx: uniqueIndex('account_reviewers_account_author').on(
+    // The upsert conflict target for EVERY writer. A stale target type-checks perfectly and
+    // raises "no unique or exclusion constraint matching the ON CONFLICT specification" at
+    // RUNTIME, in both dialects, only when a row is actually written.
+    accountWorkspaceAuthorUx: uniqueIndex('workspace_reviewers_account_workspace_author').on(
+      t.accountId,
+      t.workspaceId,
+      t.authorUserId,
+    ),
+    // Listing one workspace's reviewers (the Bots settings list).
+    accountWorkspaceIdx: index('workspace_reviewers_account_workspace_idx').on(
+      t.accountId,
+      t.workspaceId,
+    ),
+    // Reaching every row of ONE actor across the account's workspaces.
+    accountAuthorIdx: index('workspace_reviewers_account_author_idx').on(
       t.accountId,
       t.authorUserId,
     ),
+    // ── TENANCY AS A CONSTRAINT, NOT A CONVENTION ────────────────────────────────────────
+    // `workspace_id` arrives in a REQUEST BODY rather than from sync. A plain
+    // `workspace_id → workspaces(id)` FK accepts (account 2, workspace 10) where workspace 10
+    // belongs to account 1 — both halves are individually valid — so the only thing between that
+    // and a row written into another tenant's workspace would be one hand-written predicate in
+    // one handler. The composite FK makes the PAIR itself the thing that must exist, and it needs
+    // the `workspaces_id_account` unique index that exists for exactly this purpose.
+    //
+    // THE `name` IS REAL, NOT DECORATION — the hand-written migrations SPELL IT (`CONSTRAINT
+    // "workspace_reviewers_workspace_account_fk" FOREIGN KEY …`) in both dialects, so the
+    // declaration and the emitted DDL say the same thing. In Postgres the name is what the
+    // violation message quotes; SQLite stores it but never reports it.
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_reviewers_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
   }),
 );
+
+// NOTE: `repo_reviewers` (account, repo, author) and `account_reviewers` (account, author) were
+// the TWO-GRAIN bot store this replaces — the judgement per repo, the identity + price per actor.
+// Both are DROPPED by migration 0045 / pg 0032, which folds them onto `workspace_reviewers`
+// above. The split existed only because those facts sat at different grains; with the workspace
+// as the one scope they are facts about the same key. Leaving either table behind would leave a
+// second, differently-keyed answer to the same question in every database — the exact failure
+// `bot_review_classification` was dropped to avoid. Don't reintroduce a schema binding for either.
 
 // NOTE: the `bot_mute_rules` table (migration 0029) backed a removed feature — the
 // Pierre-only "hide" mute + the standing auto-resolve cron. Both were dropped; resolving
@@ -1141,54 +1149,12 @@ export const accountReviewers = sqliteTable(
 // bot-triage/resolve.ts). The table is left orphaned in existing DBs (no drop migration);
 // don't reintroduce a schema binding for it.
 
-// ---- Teams (CORE) ----
-// A named grouping of the account's repos (sprint teams / product areas). Account-scoped;
-// a repo can belong to many teams (overlap allowed via the team_repos join). Drives the
-// scope selector (all / none / <teamId>) that per-team AI + digests key off downstream.
-export const teams = sqliteTable(
-  'teams',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    accountId: integer('account_id')
-      .notNull()
-      .references(() => accounts.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
-    createdAt: integer('created_at', { mode: 'timestamp' })
-      .notNull()
-      .default(sql`(unixepoch())`),
-  },
-  (t) => ({
-    accountNameUx: uniqueIndex('teams_account_name').on(t.accountId, t.name),
-    accountIdx: index('teams_account_idx').on(t.accountId),
-  }),
-);
-
-// Many-to-many join of teams ↔ repos (a repo may sit in several teams). `accountId` is
-// denormalized for isolation (== teams.accountId == repos.accountId). Cascades from both
-// teams and repos so deleting either cleans up membership rows automatically.
-export const teamRepos = sqliteTable(
-  'team_repos',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    accountId: integer('account_id')
-      .notNull()
-      .references(() => accounts.id, { onDelete: 'cascade' }),
-    teamId: integer('team_id')
-      .notNull()
-      .references(() => teams.id, { onDelete: 'cascade' }),
-    repoId: integer('repo_id')
-      .notNull()
-      .references(() => repos.id, { onDelete: 'cascade' }),
-    createdAt: integer('created_at', { mode: 'timestamp' })
-      .notNull()
-      .default(sql`(unixepoch())`),
-  },
-  (t) => ({
-    teamRepoUx: uniqueIndex('team_repos_team_repo').on(t.teamId, t.repoId),
-    accountIdx: index('team_repos_account_idx').on(t.accountId),
-    repoIdx: index('team_repos_repo_idx').on(t.repoId),
-  }),
-);
+// NOTE: `teams` + `team_repos` (the many-to-many grouping a repo could sit in 0..N of) are what
+// `workspaces` + `workspace_repos` above replace. Both are DROPPED by migration 0044 / pg 0031,
+// which preserves the team IDS as workspace ids (a URL, a bookmark, a persisted filter and a
+// plugin cache row all carry the number) and gives every repo exactly one membership row. The
+// four scope sentinels those tables needed ('all' / 'none' / 'teams' / a set) are gone with them:
+// there is one workspace id and no parsers. Don't reintroduce a schema binding for either.
 
 // ── Cross-org benchmark network (CORE, cloud-only, opt-in) ──────────────────────────────
 // Phase 0 of the neutral review-bot benchmark: de-identified, AGGREGATE-ONLY weekly outcome
@@ -1243,10 +1209,10 @@ export const benchmarkContributions = sqliteTable(
   }),
 );
 
-// ── Cross-team full-text search index (CORE, no AI) ─────────────────────────────────────
+// ── Cross-workspace full-text search index (CORE, no AI) ────────────────────────────────
 // One row per searchable text unit — a PR (title + description), a review body, a review-comment,
-// or a PR-comment — so a team lead can "pinpoint where certain text exists" across every watched
-// repo. Populated inside persistPr() (delete-by-prId then insert, so removed comments drop out) and
+// or a PR-comment — so a team lead can "pinpoint where certain text exists" across every repo on
+// the account. Populated inside persistPr() (delete-by-prId then insert, so removed comments drop out) and
 // backfilled from already-stored data at startup (sync/search-backfill.ts). Denormalized `accountId`
 // is the tenant anchor: EVERY search filters on it, so cross-account isolation stays one indexed
 // predicate (mirroring events/pullRequests). Matching is PORTABLE case-insensitive SUBSTRING

@@ -13,6 +13,13 @@ has likely addressed vs the ones still needing a human, a per-vendor signal-to-n
 rate, and one-click bulk-resolve of the stale ones. Pierre's own agentic **Claude
 Review** is just *one* optional reviewer you can plug in (BYO key) — never the point.
 
+Repos are organised into **Workspaces** — a named group of repos, and the one scope
+the whole app runs on. Every repo lives in exactly one workspace (new repos land in
+**Default**, which you can rename but not delete), so switching workspace re-scopes
+the feed, the timeline, the metrics and the review-bot settings together. A
+**Compare workspaces** view puts their flow metrics side by side once you have more
+than one.
+
 Runs two ways from one codebase (the `DEPLOYMENT_MODE` env var selects):
 
 - **Local** (default): zero-config, SQLite, authenticates via your `gh` CLI.
@@ -24,7 +31,7 @@ Runs two ways from one codebase (the `DEPLOYMENT_MODE` env var selects):
 
 > **☁️ Try it now — [pierre-review.com](https://pierre-review.com/)**
 > A hosted instance of the cloud deployment is live. Sign in with GitHub, add the
-> repos you want to watch, and get the full timeline dashboard — no install, no
+> repos you want to track, and get the full timeline dashboard — no install, no
 > local setup. (Prefer to keep everything on your machine? Use local mode below.)
 
 ## Screenshots

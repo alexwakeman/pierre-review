@@ -23,7 +23,7 @@ const MODE_OPTIONS: { value: SprintComparisonMode; label: string; hint: string }
 ];
 
 // Comparison-window model for the Insights flow-metrics + sprint report, plus the (optional)
-// sprint cadence/start that the 'sprint' mode uses. Teams without sprints leave it on a rolling
+// sprint cadence/start that the 'sprint' mode uses. Accounts without sprints leave it on a rolling
 // window and never set a date; the "Clear sprint dates" action disables sprints entirely.
 export function SprintSection({ settings, save, saving }: SectionProps): JSX.Element {
   const savedMode = settings.sprint.comparisonMode;

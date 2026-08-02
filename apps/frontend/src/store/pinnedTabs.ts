@@ -85,7 +85,7 @@ export const BOT_THREADS_TAB_KEY = 'bot-threads';
 // comments a Bot/Human theme groups. The theme itself is the transient seed (store/filters.ts
 // `themeThreadsSeed`), not the key. EPHEMERAL like the others (dropped on reload).
 export const THEME_THREADS_TAB_KEY = 'theme-threads';
-// The cross-team search results drill-down is a SINGLETON, non-PR tab. The query it shows is the
+// The cross-repo search results drill-down is a SINGLETON, non-PR tab. The query it shows is the
 // transient seed (store/filters.ts `searchSeed`), not the key. EPHEMERAL like the others.
 export const SEARCH_TAB_KEY = 'search';
 // The per-contributor activity feed is keyed PER USER (not a singleton) — two people's feeds

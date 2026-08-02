@@ -1,14 +1,18 @@
-import { useRepoTeamMetrics } from '../../hooks/useRepoTeamMetrics.js';
+import { useRepoWorkspaceMetrics } from '../../hooks/useRepoWorkspaceMetrics.js';
 import { useRepoAnalytics, useProCapabilities } from '../../hooks/useTriage.js';
 import { Charts } from '../RepoAnalyticsModal.js';
-import { TeamMetricsPanel } from './TeamMetricsPanel.js';
+import { WorkspaceMetricsPanel } from './WorkspaceMetricsPanel.js';
 
 // The per-repo replica of the Insights Overview, scoped to ONE repo. Visually mirrors the
-// team Insights panel — the same "FLOW METRICS · DORA-ish" tile row + the 3 primary trend
+// Workspace Insights panel — the same "FLOW METRICS · DORA-ish" tile row + the 3 primary trend
 // charts + a single "More charts" button — except the tiles are NON-clickable (no
 // `onOpenMetric`) and "More charts" reveals the FULL per-repo charts grid inline (the old
 // RepoAnalyticsModal content) instead of just lead-time/merge-CI. Reuses the two per-repo
-// caches: useRepoTeamMetrics (the tile/trend header) + useRepoAnalytics (the charts grid).
+// caches: useRepoWorkspaceMetrics (the tile/trend header) + useRepoAnalytics (the charts grid).
+//
+// ⚠ IT PASSES NO WORKSPACE, and must not: the route holds a repo id and resolves that repo's OWN
+// workspace server-side (a repo belongs to exactly one). Handing it the SELECTED workspace would
+// be a real bug — this panel is reachable for a repo the current selection does not contain.
 //
 // `repoFullName` is part of the console's contract (passed by the repo-detail mount); the
 // panel is scoped by `repoId` and captions the Open-PRs tile "in this repo".
@@ -19,10 +23,10 @@ export function RepoInsightsPanel({
   repoFullName: string;
 }): JSX.Element {
   // The flow-metric header (DORA-ish tiles + trend charts) is the Pro Insights surface, so gate
-  // its fetch on teamInsights. When Pro is off (no PRO_DIGEST_ENABLED) rm stays undefined and the
-  // panel degrades to just the CORE per-repo charts below — the same as the OSS/no-plugin path.
-  const { teamInsights } = useProCapabilities();
-  const { data: rm, isLoading: rmLoading } = useRepoTeamMetrics(repoId, teamInsights);
+  // its fetch on workspaceInsights. When Pro is off (no PRO_DIGEST_ENABLED) rm stays undefined and
+  // the panel degrades to just the CORE per-repo charts below — the same as the OSS/no-plugin path.
+  const { workspaceInsights } = useProCapabilities();
+  const { data: rm, isLoading: rmLoading } = useRepoWorkspaceMetrics(repoId, workspaceInsights);
   const { data: analytics, isLoading: analyticsLoading } = useRepoAnalytics(repoId);
 
   // The full per-repo charts grid, inlined under the panel's "More charts" expander (null
@@ -33,7 +37,7 @@ export function RepoInsightsPanel({
   // trends + the inline charts grid under "More charts").
   if (rm?.metrics) {
     return (
-      <TeamMetricsPanel
+      <WorkspaceMetricsPanel
         metrics={rm.metrics}
         openPrsSubtitle="in this repo"
         moreChartsSlot={chartsSlot}

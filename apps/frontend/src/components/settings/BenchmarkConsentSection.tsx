@@ -17,7 +17,7 @@ export function BenchmarkConsentSection(): JSX.Element {
   return (
     <SectionShell
       title="Contribute to the bot benchmark"
-      desc="Opt in to share anonymous, aggregate stats about how your review bots perform, so we can build a neutral cross-team benchmark — e.g. “your CodeRabbit is 38% acted-on vs a 45% peer median”. Off by default."
+      desc="Opt in to share anonymous, aggregate stats about how your review bots perform, so we can build a neutral cross-organisation benchmark — e.g. “your CodeRabbit is 38% acted-on vs a 45% peer median”. Off by default."
     >
       <label className="flex cursor-pointer items-start gap-2">
         <input
@@ -48,7 +48,7 @@ export function BenchmarkConsentSection(): JSX.Element {
         <li>
           <span className="font-medium text-gray-600 dark:text-gray-300">Reversible:</span> turning
           this off immediately deletes everything you&rsquo;ve contributed. Aggregates are only
-          ever shown across many teams (k-anonymised).
+          ever shown across many organisations (k-anonymised).
         </li>
       </ul>
 

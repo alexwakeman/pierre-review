@@ -323,7 +323,7 @@ export default function Features(): JSX.Element {
               Every open PR, with a reason it’s on the list.
             </h2>
             <p className="mb-9 max-w-answer">
-              A collapsible strip across the top holds every open PR in your watched repos.
+              A collapsible strip across the top holds every open PR in your repos.
               Filter to <span className="font-mono text-[16px] text-ink">all</span>,{' '}
               <span className="font-mono text-[16px] text-ink">my&nbsp;turn</span>, or{' '}
               <span className="font-mono text-[16px] text-ink">needs&nbsp;attention</span>,
@@ -420,8 +420,8 @@ export default function Features(): JSX.Element {
               The intelligence layer lives in Pro.
             </h2>
             <p className="max-w-[56ch]">
-              AI summaries, team Insights, flow metrics, My-Turn triage, Slack digests, and
-              agentic review &amp; fix — everything that turns activity into decisions.
+              AI summaries, Workspace Insights, flow metrics, My-Turn triage, Slack digests,
+              and agentic review &amp; fix — everything that turns activity into decisions.
             </p>
           </div>
           <div className="shrink-0">

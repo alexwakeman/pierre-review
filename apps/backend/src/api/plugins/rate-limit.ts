@@ -104,6 +104,25 @@ function tierFor(method: string, path: string): readonly Tier[] {
   }
   if (path.startsWith('/api/auth/')) return [TIERS.auth];
 
+  // ---- Workspace CRUD: `read`, RECORDED rather than inherited ----
+  //
+  // The five surviving routes (list / create / rename+reassign / delete / move-one-repo-in) are
+  // pure local database work: a membership upsert on (account_id, repo_id), a rename, a re-home
+  // of repos and reviewer rows to Default. Nothing behind them calls GitHub and nothing behind
+  // them calls an LLM — assignment writes ONE membership row and nothing else (`repos.inbox_watch`
+  // is dropped; there is no second visibility column left to set), and the sync scheduler picks
+  // the repo up on its own cron rather than on this request. So `read` is the same
+  // answer the fall-through at the bottom of this function would give, and it is spelled out
+  // anyway: the two documented mistakes in this file were both a route whose tier was never
+  // decided, only inherited. An explicit line makes the next reader's question "is this still
+  // true?" instead of "did anyone look?".
+  //
+  // Written as an exact match plus a `/`-terminated prefix, NOT a bare
+  // `startsWith('/api/workspaces')` and emphatically not `startsWith('/api/workspace')`:
+  // `/api/workspace-metrics/compare` sits on a DIFFERENT tier a few lines below, and a loose
+  // prefix over two sibling vocabularies is precisely how one silently swallows the other.
+  if (path === '/api/workspaces' || path.startsWith('/api/workspaces/')) return [TIERS.read];
+
   // ---- AI generation ----
   // Two shapes: the Pro plugin's /api/pro/* generators, and the Claude Review
   // family, which for back-compat kept the pre-plugin paths (/api/prs/:id/
@@ -131,6 +150,22 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // ---- GitHub-quota spenders ----
   if (path.startsWith('/api/repos/search')) return [TIERS.search, TIERS.read];
   if (path === '/api/repos/suggested') return [TIERS.search, TIERS.read];
+  // GET /api/workspace-metrics/compare — the one route in the app whose cost multiplies by the
+  // number of workspaces. It runs N × getWorkspaceMetrics, each a twelve-week PR window over that
+  // workspace's repos, and it takes NO narrowing parameters at all: it always compares every
+  // workspace the account owns. The spend is not GitHub quota and not Anthropic — it is this
+  // process's event loop and this database — which is exactly why it would otherwise have landed
+  // on the 600/min blanket bucket by default and made a loop over it a self-inflicted DoS.
+  // `search` is borrowed as the nearest correctly-sized 60/min bucket rather than inventing a
+  // tier for a single route; the SPA only fires it while the Compare-workspaces rail line is
+  // open, so 60/min is orders of magnitude above any human use.
+  //
+  // Its two siblings `/api/workspace-metrics` and `/api/workspace-metrics/detail` are ordinary
+  // single-window reads over one workspace's repos and are deliberately left on `read` via the
+  // fall-through — they do not multiply by anything. Matched as a prefix rather than an exact
+  // string because no other route shares it, so over-matching costs nothing while under-matching
+  // costs the bucket.
+  if (path.startsWith('/api/workspace-metrics/compare')) return [TIERS.search, TIERS.read];
   // GET /api/prs/<id> plus the sub-routes that ALSO hydrate live from GitHub rather than reading
   // already-synced rows:
   //   `/merge-options`            repo merge config + mergeability + the merge-queue GraphQL probe
@@ -192,11 +227,31 @@ function tierFor(method: string, path: string): readonly Tier[] {
     if (hitsGithub) return [TIERS.githubWrite];
   }
 
-  // Everything else, deliberately including the two new cross-account GETs
-  // `GET /api/auto-merge` (the armed-intent list) and `GET /api/branch-status` (default-branch
-  // health): both are pure DB reads off already-synced rows — no GitHub call, no LLM — so the
-  // blanket 600/min backstop is the right bucket. If either ever grows a live GitHub fetch it
-  // must move to `search`/`prDetail` like the other hydrating reads.
+  // Everything else, deliberately including the two cross-account GETs `GET /api/auto-merge`
+  // (the armed-intent list) and `GET /api/branch-status` (default-branch health): both are pure
+  // DB reads off already-synced rows — no GitHub call, no LLM — so the blanket 600/min backstop
+  // is the right bucket. If either ever grows a live GitHub fetch it must move to
+  // `search`/`prDetail` like the other hydrating reads.
+  //
+  // The five workspace-scoped CONTENT routes (`/api/timeline`, `/api/activity`,
+  // `/api/activity/feed`, `/api/open-prs`, `/api/branch-status`) stay here too. Taking
+  // `?workspace=` did not change what they cost: the resolver's membership repair
+  // (`ensureRepoMemberships`, a write on essentially every GET) is a local anti-join plus an
+  // `ON CONFLICT DO NOTHING` insert of at most the account's unassigned repos, which is cheaper
+  // than the feed query it precedes and reaches nothing upstream.
+  //
+  // ⚠ KNOWN, AND DELIBERATELY LEFT ON `read` — written down rather than left to be re-discovered,
+  // because this is the shape of the two mistakes above. `GET /api/bot-reviewers` (its lazy pass
+  // classifies any actor with a footprint in the workspace and no stored row) and the two
+  // `DELETE /api/bot-reviewers/:userId/{judgement,identity}` resets (each re-derives in the same
+  // request) all run `classifyReviewer`, whose last resort for the medium-confidence band is a
+  // Haiku tie-break — `sync/reviewer-classify.ts:508` → `review/llm.ts cheapComplete`. That is a
+  // real LLM leg on a `read`-tier route. It is left because the tie-break is settings-gated OFF
+  // by default (`pro_settings bots.aiTiebreak`), because it predates the workspace refactor
+  // rather than arriving with it, and because the listing is fetched on every Bots-tab open, so
+  // moving it to `ai` (20/min, shared with digests and chat turns) would 429 the settings page it
+  // is trying to protect. If that tie-break is ever defaulted ON, these three routes need a tier
+  // in the same change — do not let it ship as a default flip alone.
   return [TIERS.read];
 }
 

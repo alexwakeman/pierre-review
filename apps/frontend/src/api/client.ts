@@ -34,12 +34,12 @@ import type {
   CreatePrCommentResult,
   CreateRepoBody,
   ConsolidatedFeedResponse,
-  TeamInsightsResponse,
+  WorkspaceInsightsResponse,
   AttentionCardsResponse,
-  RepoTeamMetricsResponse,
-  TeamMetricsDetailResponse,
-  TeamMetricsResponse,
-  TeamComparisonResponse,
+  RepoWorkspaceMetricsResponse,
+  WorkspaceMetricsDetailResponse,
+  WorkspaceMetricsResponse,
+  WorkspaceComparisonResponse,
   AiUsageResponse,
   SprintReportResponse,
   BotWindowKind,
@@ -53,8 +53,8 @@ import type {
   BotDedupResponse,
   PrBotBehaviourResponse,
   DetectedReviewersResponse,
-  RepoReviewerJudgementBody,
-  ReviewerIdentityBody,
+  WorkspaceReviewer,
+  WorkspaceReviewerPatchBody,
   ReviewerCostBody,
   MeResponse,
   MergersResponse,
@@ -106,8 +106,8 @@ import type {
   SuggestedReposResponse,
   SearchHitKind,
   SearchResponse,
-  Team,
-  TeamsResponse,
+  Workspace,
+  WorkspacesResponse,
   ReplyResult,
   ReplyToThreadBody,
   ResolveThreadBody,
@@ -169,21 +169,44 @@ function jsonBody(method: string, body?: unknown): RequestInit {
 
 export { ApiError };
 
-// Build the `scope=` query fragment (no leading `?`/`&`). Omitted for the default 'all' scope
-// so the common case stays clean. The wire value is the string form ('all' | 'none' | '<teamId>').
-function scopeParam(scope?: string): string {
-  return scope && scope !== 'all' ? `scope=${encodeURIComponent(scope)}` : '';
+// ── THE ONE SCOPE PARAMETER ──────────────────────────────────────────────────────────────────
+// `workspace=<id>` (no leading `?`/`&`). A plain positive integer and nothing else: there is no
+// sentinel vocabulary left ('all' / 'none' / 'teams' / 'teams:2,4' and the five client
+// canonicalisers that produced them are all gone), so there is nothing to canonicalise and
+// nothing to parse.
+//
+// ⚠ IT IS ALWAYS EMITTED, never diffed against a "default" value. The Default workspace's id
+// varies per account, so there is no static default to diff against — omitting the parameter means
+// "resolve me to whatever Default is", which is a different request, not a shorter spelling of the
+// same one. Callers therefore take a REQUIRED `workspaceId: number`; the store holds
+// `workspaceId: number | null` and nothing may render workspace-scoped data while it is null.
+//
+// The server resolves an absent / unparseable / unknown / another tenant's id to the caller's own
+// Default workspace (never a 404 — every id yields the same response shape, so it is not an
+// existence oracle) and echoes the resolved `workspaceId` back, so a stale stored id self-corrects.
+function workspaceParam(workspaceId: number): string {
+  return `workspace=${workspaceId}`;
 }
 
-// Build the `repoIds=` query fragment (no leading separators) from an id list; omitted when
-// empty/absent. Used by the per-repo Bots tab to scope bot analytics to one repo.
+// `repoIds=<csv>` — a NARROWING WITHIN the workspace, never a scope in its own right. The server
+// intersects it with the workspace's membership (`membership ∩ (repoIds ?? membership)`), so it
+// can no longer reach outside the scope and can no longer disagree with it about the verdict:
+// `?workspace=` owns "which workspace am I in", this only says "show me fewer of its repos".
+//
+// ⚠ IT IS EMITTED FOR AN EMPTY ARRAY TOO — `if (ids)`, never `if (ids && ids.length > 0)`. Under
+// the old model an empty list was dropped and `null` on the wire meant "every repo in the ACCOUNT",
+// so a scope that resolved to no repos was served the whole account: the precise opposite of what
+// it asked for. `?workspace=` now closes that hole on its own (an empty workspace's membership is
+// `[]` whatever this parameter says), but a builder that drops `[]` is the exact shape of that bug
+// and must not be reintroduced — an empty selection is a real narrowing, not the absence of one.
+//
+// (For completeness: the server's parsers read a VALUE-less `repoIds=` as "no narrowing", the same
+// as omitting it. That is not a contradiction — with `?workspace=` also on the wire both readings
+// land on the same answer for the only case that can produce an empty array, an empty workspace.
+// Do not lean on it: `repoIds=` is not a way to ask for nothing.)
 function repoIdsParam(repoIds?: number[] | null): string {
-  return repoIds && repoIds.length > 0 ? `repoIds=${repoIds.join(',')}` : '';
+  return repoIds ? `repoIds=${repoIds.join(',')}` : '';
 }
-
-// (`teamIdParam` lived here for the per-TEAM bot-reviewer routes. A bot is a per-REPO object now
-// — no team key, no inheritance root — so the bot-reviewer routes scope with `scope`/`repoIds`
-// like every other bot route, and the helper had no callers left.)
 
 // Join query fragments (already URL-encoded, no leading separators) onto a base path.
 function withQuery(base: string, ...parts: (string | undefined)[]): string {
@@ -202,30 +225,28 @@ export const api = {
   // The viewer's recently-active repositories (first-run onboarding). Detected from GitHub
   // activity; already-added repos filtered out server-side; ordered most-recently-pushed first.
   suggestedRepos: () => get<SuggestedReposResponse>('/api/repos/suggested'),
-  // Cross-team full-text search over the local index (PRs/reviews/comments/people). `scope` mirrors
-  // the Activity/Insights scope string; `kinds` optionally narrows to hit kinds; paginated.
+  // Workspace-wide full-text search over the local index (PRs/reviews/comments/people).
+  // `workspaceId` is the scope — the server turns it into repo ids itself, so a caller cannot widen
+  // it and an empty workspace searches nothing rather than the whole account. `kinds` optionally
+  // narrows to hit kinds; paginated.
   search: (opts: {
     q: string;
-    scope?: string;
+    workspaceId: number;
     kinds?: SearchHitKind[];
     limit?: number;
     offset?: number;
   }) => {
-    const p = new URLSearchParams({ q: opts.q });
-    if (opts.scope) p.set('scope', opts.scope);
+    const p = new URLSearchParams({ q: opts.q, workspace: String(opts.workspaceId) });
     if (opts.kinds && opts.kinds.length > 0) p.set('kinds', opts.kinds.join(','));
     if (opts.limit != null) p.set('limit', String(opts.limit));
     if (opts.offset != null) p.set('offset', String(opts.offset));
     return get<SearchResponse>(`/api/search?${p.toString()}`);
   },
+  // Adding is the whole decision: the repo lands in a workspace and is immediately live
+  // everywhere (Feed, Activity, My Turn, Bots). There is no follow-up per-repo visibility call —
+  // `setRepoInboxWatch` and the `PATCH /api/repos/:id` body it wrote are both GONE.
   addRepo: (body: CreateRepoBody) =>
     fetch('/api/repos', jsonBody('POST', body)).then((r) => handle<Repo>(r)),
-  // Toggle "Watch for inbox" on a repo (inbox-only; does not affect timeline
-  // visibility). Returns the updated repo.
-  setRepoInboxWatch: (id: number, inboxWatch: boolean) =>
-    fetch(`/api/repos/${id}`, jsonBody('PATCH', { inboxWatch })).then((r) =>
-      handle<Repo>(r),
-    ),
   deleteRepo: (id: number) =>
     fetch(`/api/repos/${id}`, jsonBody('DELETE')).then((r) => handle<void>(r)),
   syncRepo: (id: number, full = false) =>
@@ -240,53 +261,111 @@ export const api = {
     ),
   syncStatus: (id: number) => get<SyncStatus>(`/api/repos/${id}/sync-status`),
 
-  // ---- Teams (CORE) ----
-  listTeams: () => get<TeamsResponse>('/api/teams'),
-  createTeam: (name: string) =>
-    fetch('/api/teams', jsonBody('POST', { name })).then((r) =>
-      handle<{ team: Team }>(r),
+  // ---- Workspaces (CORE) ----
+  //
+  // A workspace groups an account's repos, and a repo belongs to EXACTLY ONE of them — a database
+  // fact (`workspace_repos`, UNIQUE `(account_id, repo_id)`). Two consequences shape this block:
+  //
+  //   • ASSIGNMENT IS A MOVE, NOT AN ADD. Putting a repo in a workspace takes it out of whatever
+  //     workspace it was in; there is no second membership row to create.
+  //   • THERE IS NO UN-ASSIGN, and `unassignRepoFromTeam`'s route is GONE (not renamed). "Belongs
+  //     to no workspace" is not a state, so removing a repo from a workspace IS moving it to the
+  //     account's Default — expressed either by omitting it from a PATCH's `repoIds` (the server
+  //     re-homes it) or by POSTing it to the Default workspace's own id.
+  //
+  // The listing repairs two silent invariants server-side before it answers: every account has a
+  // Default row, and every repo has a membership row. So `listWorkspaces()` is also the client's
+  // "make the world coherent" call, and the sync effect that resolves a null `workspaceId` reads
+  // its `isDefault` row.
+  listWorkspaces: () => get<WorkspacesResponse>('/api/workspaces'),
+  // Always created with `isDefault: false` — the Default row is auto-created server-side and is the
+  // only one that may carry the flag. A duplicate name 400s.
+  createWorkspace: (name: string) =>
+    fetch('/api/workspaces', jsonBody('POST', { name })).then((r) =>
+      handle<{ workspace: Workspace }>(r),
     ),
-  // Rename and/or replace membership (PATCH accepts { name?, repoIds? }).
-  renameTeam: (id: number, body: { name?: string; repoIds?: number[] }) =>
-    fetch(`/api/teams/${id}`, jsonBody('PATCH', body)).then((r) =>
-      handle<{ team: Team }>(r),
+  // Rename and/or SET the membership (PATCH accepts `{ name?, repoIds? }`). RENAMING THE DEFAULT IS
+  // ALLOWED — it is not deletable, which is a different thing.
+  renameWorkspace: (id: number, body: { name?: string; repoIds?: number[] }) =>
+    fetch(`/api/workspaces/${id}`, jsonBody('PATCH', body)).then((r) =>
+      handle<{ workspace: Workspace }>(r),
     ),
-  // Replace a team's membership with exactly `repoIds` (assign new, remove missing; auto-watch).
-  setTeamRepos: (id: number, repoIds: number[]) =>
-    fetch(`/api/teams/${id}`, jsonBody('PATCH', { repoIds })).then((r) =>
-      handle<{ team: Team }>(r),
+  // Replace a workspace's membership with exactly `repoIds`: ids ADDED are MOVED in, ids DROPPED
+  // are re-homed to Default.
+  //
+  // ⚠ MEMBERSHIP IS THE ONLY THING THIS WRITES. A move never changes what a repo covers — every
+  // repo is fully live in whichever workspace holds it (Feed, Activity, My Turn, Bots), so there
+  // is no second per-repo visibility flag for a re-home to silently flip on or off. That used to
+  // be a real hazard: the drop leg deliberately skipped the old `inboxWatch` write so a repo a
+  // user had un-watched wasn't re-watched on its way out. The column is gone; the property now
+  // holds by construction rather than by omission, and nothing here should start writing per-repo
+  // state again.
+  setWorkspaceRepos: (id: number, repoIds: number[]) =>
+    fetch(`/api/workspaces/${id}`, jsonBody('PATCH', { repoIds })).then((r) =>
+      handle<{ workspace: Workspace }>(r),
     ),
-  deleteTeam: (id: number) =>
-    fetch(`/api/teams/${id}`, jsonBody('DELETE')).then((r) => handle<void>(r)),
-  assignRepoToTeam: (teamId: number, repoId: number) =>
-    fetch(`/api/teams/${teamId}/repos`, jsonBody('POST', { repoId })).then((r) =>
-      handle<{ team: Team }>(r),
-    ),
-  unassignRepoFromTeam: (teamId: number, repoId: number) =>
-    fetch(`/api/teams/${teamId}/repos/${repoId}`, jsonBody('DELETE')).then((r) =>
-      handle<void>(r),
+  // 204 on success. ⚠ TWO OTHER OUTCOMES THE UI MUST TELL APART: 404 for a foreign/unknown id, and
+  // **409 `{error:'DefaultWorkspace'}`** for the default row, which cannot be deleted — it is where
+  // new repos land and where a deleted workspace's repos AND reviewer rows (judgements, vendor
+  // names, prices) are re-homed. Hide the control on `workspace.isDefault` rather than relying on
+  // the 409.
+  deleteWorkspace: (id: number) =>
+    fetch(`/api/workspaces/${id}`, jsonBody('DELETE')).then((r) => handle<void>(r)),
+  // MOVE one repo into this workspace. Membership is the only write (see `setWorkspaceRepos`) —
+  // the repo was already fully live wherever it was, and it stays fully live here.
+  // To take a repo OUT of a workspace, move it into the Default one — there is no delete route.
+  assignRepoToWorkspace: (workspaceId: number, repoId: number) =>
+    fetch(`/api/workspaces/${workspaceId}/repos`, jsonBody('POST', { repoId })).then((r) =>
+      handle<{ workspace: Workspace }>(r),
     ),
 
   listUsers: () => get<User[]>('/api/users'),
   // One contributor's ALL-TIME totals (PRs authored by state, reviews given, comments) for the
-  // user popover. `repoIds` narrows to a repo subset — the surrounding PR's repo when the
-  // handle was clicked inside one, else the FilterBar-visible set (already team-scope resolved),
-  // so the popover's caption matches what the board is showing. Counts only: the caller already
-  // has the account-scoped user roster from `listUsers`.
-  userStats: (userId: number, repoIds?: number[] | null) =>
+  // user popover. Counts only: the caller already has the account-scoped user roster from
+  // `listUsers`.
+  //
+  // ⚠ `workspaceId` IS REQUIRED AND IS NOT COSMETIC. The server narrows to
+  // `membership ∩ (repoIds ?? membership)`, so a `repoIds` from OUTSIDE the named workspace
+  // intersects to nothing and the popover reports all zeros. When the handle was clicked inside a
+  // PR, pass that PR's repo AND that repo's OWN workspace (`Repo.workspaceId`) — a PR can be opened
+  // from another workspace via `?pr=`, a restored tab or a search hit, and the currently-SELECTED
+  // workspace would then be the wrong one. Otherwise pass the active workspace and the
+  // FilterBar-visible repo set, which is what the popover's caption says it is showing.
+  userStats: (userId: number, workspaceId: number, repoIds?: number[] | null) =>
     get<UserContributionStats>(
-      withQuery(`/api/users/${userId}/stats`, repoIdsParam(repoIds)),
+      withQuery(
+        `/api/users/${userId}/stats`,
+        workspaceParam(workspaceId),
+        repoIdsParam(repoIds),
+      ),
     ),
   mergers: () => get<MergersResponse>('/api/mergers'),
   // `setUserBot` was removed with `PATCH /api/users/:id`: it wrote the GLOBAL users row with
   // no ownership check, so one tenant could permanently reclassify a login for everyone. It
-  // had no caller. Bot classification is `setRepoReviewerJudgement` below, which writes the
-  // account-scoped, per-repo `repo_reviewers` table.
+  // had no caller. Bot classification is `setWorkspaceReviewer` below, which writes the
+  // account-scoped, per-WORKSPACE `workspace_reviewers` table.
 
+  // ── THE FOUR SEARCH-STRING CONTENT READS ────────────────────────────────────────────────────
+  // `timeline` / `openPrs` / `inbox` / `consolidatedFeed` take a pre-built query string rather than
+  // named arguments, because their filter surface is wide and lives in the store.
+  //
+  // ⚠ THE BUILDER MUST PUT `workspace=<id>` IN THAT STRING, and must emit `repoIds` even when the
+  // list is EMPTY. These routes used to carry repo ids alone, with `null` meaning "every repo of
+  // the account" — which under a workspace scope is two bugs at once: an empty workspace sends no
+  // ids and is served the WHOLE ACCOUNT, and two different workspaces both sitting on
+  // `repoIds = null` produce the SAME query string, so React Query serves one workspace's data
+  // under the other's cache key with no refetch. The cache key must carry `ws:<id>` too — the
+  // request being right does not make the key right. The five workspace-scoped content routes are
+  // `/api/activity`, `/api/activity/feed`, `/api/timeline`, `/api/open-prs` and
+  // `/api/branch-status`; their builders are `buildTimelineSearch` / `buildOpenPrsSearch` in
+  // `store/filters.ts`, `activitySearch` in `hooks/useActivity.ts`, and `hooks/
+  // {useConsolidatedFeed,useBranchStatus}.ts`.
   timeline: (search: string) =>
     get<TimelineResponse>(`/api/timeline${search ? `?${search}` : ''}`),
   openPrs: (search: string) =>
     get<OpenPrsResponse>(`/api/open-prs${search ? `?${search}` : ''}`),
+  // NOT workspace-scoped, deliberately: `/api/insights` is a per-repo snapshot whose caller already
+  // names its repos, so there is no scope left for a workspace to decide. `repoIds` only.
   insights: (search: string) =>
     get<InsightsResponse>(`/api/insights${search ? `?${search}` : ''}`),
   repoAnalytics: (repoId: number) =>
@@ -300,10 +379,13 @@ export const api = {
   // @mention candidates for a PR, pre-ranked by proximity (self + bots excluded).
   mentionCandidates: (prId: number) =>
     get<User[]>(`/api/prs/${prId}/mention-candidates`),
-  // @mention candidates for a whole SCOPE (team / listed repos), for the ad-hoc Insights box.
-  // `scope` ('all' | 'none' | 'teams' | '<teamId>') resolves server-side to the account's repos.
-  scopeMentionCandidates: (scope?: string) =>
-    get<User[]>(withQuery('/api/mention-candidates', scopeParam(scope))),
+  // @mention candidates for a whole WORKSPACE, for the ad-hoc Insights box — the scope-wide sibling
+  // of `mentionCandidates` above, which is one PR's. (The name keeps the word "scope" for that
+  // contrast alone; a workspace IS the scope, and there is no other kind left.) The id resolves to
+  // the workspace's repos server-side, so a caller cannot widen it and an empty workspace yields no
+  // candidates rather than the account's whole roster.
+  scopeMentionCandidates: (workspaceId: number) =>
+    get<User[]>(withQuery('/api/mention-candidates', workspaceParam(workspaceId))),
   prFiles: (id: number) => get<PrFilesResponse>(`/api/prs/${id}/files`),
   // A WINDOW of a failed GitHub Actions check's logs (fetched live, never stored).
   //
@@ -394,11 +476,16 @@ export const api = {
   armedMerges: () => get<ArmedMergeListResponse>('/api/auto-merge'),
 
   // ---- Default-branch status ("is trunk green?") ----
-  // Per-repo default-branch head + recent trunk commits with their CI state. `repoIds` scopes
-  // it to the visible repo set; omitted = every repo the account watches. Pure DB read off the
-  // branch sync — never a live GitHub call.
-  branchStatus: (repoIds?: number[] | null) =>
-    get<BranchStatusResponse>(withQuery('/api/branch-status', repoIdsParam(repoIds))),
+  // Per-repo default-branch head + recent trunk commits with their CI state, for the active
+  // WORKSPACE. Pure DB read off the branch sync — never a live GitHub call.
+  //
+  // ⚠ THE FIFTH AND LAST OF THE WORKSPACE-SCOPED CONTENT ROUTES, and a `search` passthrough like
+  // the other four: the same two rules apply, and `branchStatusSearch` in `hooks/useBranchStatus.ts`
+  // owns the builder. `workspace=<id>` must be in the string (without it an EMPTY workspace sends no
+  // ids and is served the whole account's trunk strip, and two workspaces on `repoIds = null`
+  // collide in one cache slot), and `repoIds` must be emitted even when empty.
+  branchStatus: (search: string) =>
+    get<BranchStatusResponse>(`/api/branch-status${search ? `?${search}` : ''}`),
   addReviewComment: (prId: number, body: AddReviewCommentBody) =>
     fetch(`/api/prs/${prId}/review-comment`, jsonBody('POST', body)).then((r) =>
       handle<AddReviewCommentResult>(r),
@@ -409,14 +496,18 @@ export const api = {
     ),
 
   // ---- Activity (Workstream 1; CORE, no AI) ----
-  // The multi-repo triage aggregate (per watched repo: stats, thread totals,
-  // grouped PRs). Respects the active repo filter via the query string. A pure DB
-  // read — "Refresh" re-queries this, it never triggers a GitHub sync.
+  // The multi-repo triage aggregate (per repo: stats, thread totals, grouped PRs) for the
+  // active WORKSPACE. A pure DB read — "Refresh" re-queries this, it never triggers a GitHub sync.
+  //
+  // ⚠ Its `search` string MUST carry `workspace=<id>` (and `repoIds` even when empty) — see the
+  // note above `timeline`. `activitySearch` in `hooks/useActivity.ts` owns this builder.
   inbox: (search: string) =>
     get<ActivityResponse>(`/api/activity${search ? `?${search}` : ''}`),
-  // The consolidated Feed (the Activity "Feed" entry): one chronological stream across
-  // the watched repos (My Turn actionables + the activity feed). Pure DB read. The
-  // `search` string carries the active repo/member scope (repoIds/userIds).
+  // The consolidated Feed (the Activity "Feed" entry): one chronological stream across the
+  // workspace's repos, each row flagged `isMyTurn` by participation. Pure DB read. The
+  // `search` string carries the workspace + the active repo/member narrowing (`workspace`,
+  // `repoIds`, `userIds`, …) — the bots-only path in particular NEEDS the workspace id, since "is
+  // this login a bot" is a workspace fact. `hooks/useConsolidatedFeed.ts` owns this builder.
   consolidatedFeed: (search: string) =>
     get<ConsolidatedFeedResponse>(`/api/activity/feed${search ? `?${search}` : ''}`),
   // Mark the Activity Feed as seen (server-side "seen" marker → resets the new-My-Turn count).
@@ -434,47 +525,57 @@ export const api = {
     fetch('/api/me/benchmark-consent', jsonBody('POST', { optIn })).then((r) =>
       handle<{ status: string; benchmarkOptIn: boolean }>(r),
     ),
-  // Team review-intelligence "Insights" (Pro; teamInsights capability) — the attention CARDS
-  // (+ the sprint report). The flow-metric HEADER moved OUT to the free /api/team-metrics, the
-  // Retro panel was deleted, and Compare moved to the free /api/team-metrics/compare.
-  teamInsights: (scope?: string) =>
-    get<TeamInsightsResponse>(withQuery('/api/pro/insights', scopeParam(scope))),
-  // The team flow-metric header (DORA-ish tiles + trends) — CORE/free, now rendered in the Feed.
-  teamMetrics: (scope?: string) =>
-    get<TeamMetricsResponse>(withQuery('/api/team-metrics', scopeParam(scope))),
+  // Workspace review-intelligence "Insights" (Pro; workspaceInsights capability) — the attention
+  // CARDS (+ the sprint report). The flow-metric HEADER moved OUT to the free
+  // /api/workspace-metrics, the Retro panel was deleted, and Compare moved to the free
+  // /api/workspace-metrics/compare.
+  workspaceInsights: (workspaceId: number) =>
+    get<WorkspaceInsightsResponse>(withQuery('/api/pro/insights', workspaceParam(workspaceId))),
+  // The workspace flow-metric header (DORA-ish tiles + trends) — CORE/free, rendered in the Feed.
+  workspaceMetrics: (workspaceId: number) =>
+    get<WorkspaceMetricsResponse>(withQuery('/api/workspace-metrics', workspaceParam(workspaceId))),
   // The attention cards (CORE/free) for the Feed "Needs attention" tab.
-  attentionCards: (scope?: string) =>
-    get<AttentionCardsResponse>(withQuery('/api/attention', scopeParam(scope))),
+  attentionCards: (workspaceId: number) =>
+    get<AttentionCardsResponse>(withQuery('/api/attention', workspaceParam(workspaceId))),
   // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click) — CORE/free
   // too, so a Feed tile opens the drill-down for everyone.
-  teamMetricsDetail: (scope?: string) =>
-    get<TeamMetricsDetailResponse>(withQuery('/api/team-metrics/detail', scopeParam(scope))),
+  workspaceMetricsDetail: (workspaceId: number) =>
+    get<WorkspaceMetricsDetailResponse>(
+      withQuery('/api/workspace-metrics/detail', workspaceParam(workspaceId)),
+    ),
   // The Insights flow-metric header (tiles + trends) for a SINGLE repo — the per-repo console
-  // panel. Metrics-only; tiles render non-clickable there.
-  repoTeamMetrics: (repoId: number) =>
-    get<RepoTeamMetricsResponse>(`/api/pro/insights/repo/${repoId}/metrics`),
-  // Cross-team comparison — one TeamMetrics row per team IN SCOPE, so the SPA renders a compact
-  // metric×team matrix. CORE/FREE and served beside the two routes above (it shares their
-  // trailing-14d window), NOT the old Pro `/api/pro/insights/team-comparison`: the panel moved
-  // out of Insights into the Feed's sub-tab bar, where it must render on every tier.
+  // panel. Metrics-only; tiles render non-clickable there. The route holds a repo id and resolves
+  // that repo's OWN workspace server-side, so it takes no `?workspace=`.
+  repoWorkspaceMetrics: (repoId: number) =>
+    get<RepoWorkspaceMetricsResponse>(`/api/pro/insights/repo/${repoId}/metrics`),
+  // Cross-WORKSPACE comparison — one WorkspaceMetrics row per workspace the account owns, so the
+  // SPA renders a compact metric×workspace matrix. CORE/FREE and served beside the two routes above
+  // (it shares their trailing-14d window), NOT the old Pro `/api/pro/insights/team-comparison`,
+  // which is DELETED: the panel is now its own Activity rail line, where it must render on every
+  // tier.
   //
-  // `scope` is now load-bearing and MUST be sent: the route filters to the scope's teams, so two
-  // different team selections are two different responses. (The old route took no params — it
-  // always returned every team — which is why its query key was unscoped; a caller that keeps
-  // that key would serve one selection's columns to another.)
-  teamComparison: (scope?: string) =>
-    get<TeamComparisonResponse>(withQuery('/api/team-metrics/compare', scopeParam(scope))),
+  // ⚠ IT TAKES NO PARAMETERS — not even a workspace id — and its query key must have no scope
+  // segment either. It compares EVERY workspace, Default included, because its whole purpose is to
+  // place the selected one against the others; scoping it is what made its predecessor vanish the
+  // moment fewer than two teams were selected, and a scoped KEY would fragment one answer across N
+  // cache slots. The surface is gated client-side on `workspaces.length >= 2`, a count over the
+  // roster, never a test on a scope value.
+  //
+  // Rate limit: the `search` tier (60/min), not the blanket `read` bucket — its cost multiplies by
+  // workspace count. Fire it only while the Compare surface is open.
+  workspaceComparison: () =>
+    get<WorkspaceComparisonResponse>('/api/workspace-metrics/compare'),
   // Month-to-date AI-usage rollup (credits, split by seam). Covers all account AI spend.
   aiUsage: () => get<AiUsageResponse>('/api/pro/ai-usage'),
-  // The Insights "Sprint report" (Pro Haiku summary; activityDigest capability). `scope`
-  // ('all' | 'none' | '<teamId>') narrows the report to a team's repos; omitted = all.
-  sprintReport: (scope?: string) =>
+  // The Insights "Sprint report" (Pro Haiku summary; activityDigest capability), grounded in one
+  // workspace's repos.
+  sprintReport: (workspaceId: number) =>
     get<SprintReportResponse>(
-      withQuery('/api/pro/sprint-report', scopeParam(scope)),
+      withQuery('/api/pro/sprint-report', workspaceParam(workspaceId)),
     ),
-  refreshSprintReport: (scope?: string) =>
+  refreshSprintReport: (workspaceId: number) =>
     fetch(
-      withQuery('/api/pro/sprint-report/refresh', scopeParam(scope)),
+      withQuery('/api/pro/sprint-report/refresh', workspaceParam(workspaceId)),
       jsonBody('POST'),
     ).then((r) => handle<SprintReportResponse>(r)),
   // (`retroReport` / `refreshRetroReport` were REMOVED with the Insights "Retro" panel and its
@@ -486,57 +587,68 @@ export const api = {
     get<RepoClaudeReviewsResponse>(`/api/repos/${repoId}/claude-reviews`),
 
   // ---- Pro per-repo digest (Workstream 2; @pierre/pro, flagged) ----
-  // Cached per-repo LLM headline digests for the watched repos. Only fetched when
-  // pro.activityDigest is true (absent plugin → 404 / enabled:false).
-  repoDigests: (search: string, scope?: string) =>
-    get<RepoDigestsResponse>(
-      withQuery('/api/pro/activity/digests', search, scopeParam(scope)),
-    ),
-  refreshRepoDigests: (search?: string, scope?: string) =>
+  // Cached per-repo LLM headline digests. Only fetched when pro.activityDigest is true (absent
+  // plugin → 404 / enabled:false).
+  //
+  // ⚠ THESE TWO TAKE NO WORKSPACE ID, and that is not an oversight. A digest is a per-REPO object:
+  // the routes are keyed by `repoIds` alone and always were — the `scope` fragment the client used
+  // to append was read by nothing on the server. The caller passes the repo set it wants (the
+  // workspace's repos) and folds the workspace into its own CACHE KEY, which is where the
+  // scope actually matters: two workspaces' repo sets must not share a cache slot.
+  repoDigests: (search: string) =>
+    get<RepoDigestsResponse>(withQuery('/api/pro/activity/digests', search)),
+  refreshRepoDigests: (search?: string) =>
     fetch(
-      withQuery('/api/pro/activity/digests/refresh', search, scopeParam(scope)),
+      withQuery('/api/pro/activity/digests/refresh', search),
       jsonBody('POST'),
     ).then((r) => handle<{ status: string }>(r)),
-  // ---- Preset prompts (Pro; the routes land in a later phase — stubs against the shape) ----
-  // One-click "ask about this scope" answers (Markdown). `scope` ('all' | 'none' | '<teamId>')
-  // narrows the question to a team's repos; omitted = all.
-  presetPrompt: (key: PresetPromptKey, scope?: string) =>
+  // ---- Preset prompts (Pro) ----
+  // One-click "ask about this workspace" answers (Markdown), grounded in that workspace's repos.
+  presetPrompt: (key: PresetPromptKey, workspaceId: number) =>
     get<PresetPromptResponse>(
       withQuery(
         '/api/pro/preset-prompt',
         `key=${encodeURIComponent(key)}`,
-        scopeParam(scope),
+        workspaceParam(workspaceId),
       ),
     ),
-  refreshPresetPrompt: (key: PresetPromptKey, scope?: string) =>
+  refreshPresetPrompt: (key: PresetPromptKey, workspaceId: number) =>
     fetch(
       withQuery(
         '/api/pro/preset-prompt/refresh',
         `key=${encodeURIComponent(key)}`,
-        scopeParam(scope),
+        workspaceParam(workspaceId),
       ),
       jsonBody('POST'),
     ).then((r) => handle<PresetPromptResponse>(r)),
   // ---- Ad-hoc "Ask about the sprint" chat (Pro Haiku; activityDigest capability) ----
-  // A free-text question answered from the sprint snapshot. `scope` narrows to a team's repos.
+  // A free-text question answered from the workspace's snapshot.
+  //
+  // ⚠ WIRE ODDITY, DELIBERATE: the workspace rides in the POST BODY as `SprintChatBody.scope`, a
+  // STRING holding the workspace id (`String(workspaceId)`) — the field name is frozen in the
+  // shared contract. The sentinel vocabulary it used to accept is gone; the plugin parses it with
+  // `parseWorkspaceId` and persists `ws:<id>` as the cache `scope_key`, whose prefix is what stops
+  // a legacy `'3'` (team 3) aliasing onto workspace 3's different repo set. Absent = the Default.
   sprintChat: (body: SprintChatBody) =>
     fetch('/api/pro/insights/ask', jsonBody('POST', body)).then((r) =>
       handle<SprintChatResponse>(r),
     ),
-  // The account's paginated chat history (newest-first; stored answers, free to re-open) SCOPED to
-  // the current team context (`scope`).
-  sprintChatHistory: (limit: number, offset: number, scope?: string) =>
+  // The account's paginated chat history (newest-first; stored answers, free to re-open), scoped to
+  // the current workspace.
+  sprintChatHistory: (limit: number, offset: number, workspaceId: number) =>
     get<SprintChatHistoryResponse>(
       withQuery(
         '/api/pro/insights/chat-history',
         `limit=${limit}`,
         `offset=${offset}`,
-        scopeParam(scope),
+        workspaceParam(workspaceId),
       ),
     ),
-  // Saved, re-runnable ad-hoc prompts (server-stored per account + scope).
-  pinnedPrompts: (scope?: string) =>
-    get<PinnedPromptsResponse>(withQuery('/api/pro/insights/pinned', scopeParam(scope))),
+  // Saved, re-runnable ad-hoc prompts (server-stored per account + workspace).
+  pinnedPrompts: (workspaceId: number) =>
+    get<PinnedPromptsResponse>(
+      withQuery('/api/pro/insights/pinned', workspaceParam(workspaceId)),
+    ),
   createPinnedPrompt: (body: CreatePinnedPromptBody) =>
     fetch('/api/pro/insights/pinned', jsonBody('POST', body)).then((r) =>
       handle<{ pinned: PinnedPromptsResponse['prompts'][number] }>(r),
@@ -761,180 +873,261 @@ export const api = {
 
   // ---- Bot triage (CORE, deterministic, no AI) ----
   //
-  // ⚠ THREE ROUTES AT TWO GRAINS, and mixing them up is the bug this shape exists to prevent.
-  // A bot is a PER-REPO object; who the vendor IS (and what it costs) is a PER-ACCOUNT fact:
+  // THE BOT OBJECT IS ONE ROW per `(account, WORKSPACE, actor)` — `workspace_reviewers`. It
+  // replaced BOTH `repo_reviewers` (the judgement, per repo) and `account_reviewers` (identity +
+  // price, per account): with one workspace as the only scope, all three facts are about the same
+  // key, so a second table would key on the identical columns and be joined at every call site.
   //
-  //   PATCH /api/bot-reviewers/:userId           the JUDGEMENT in one repo  (automated / role)
-  //   PATCH /api/bot-reviewers/:userId/identity   WHO it is, everywhere     (kind / label)
-  //   PUT   /api/bot-reviewers/:userId/cost       what it costs, everywhere (monthlyUsd)
+  //   PATCH /api/bot-reviewers/:userId                        automated / role / kind / label
+  //   PUT   /api/bot-reviewers/:userId/cost                    monthlyUsd
+  //   DELETE /api/bot-reviewers/:userId/judgement?workspaceId= automated+role back to auto
+  //   DELETE /api/bot-reviewers/:userId/identity?workspaceId=  kind+label back to auto, PRICE KEPT
   //
-  // The judgement call must never carry kind/label, and the identity call must never carry
-  // automated/role — see `ReviewerIdentity` in shared for the worked example (marking CodeRabbit
-  // "not a bot" in ONE repo used to null its kind account-wide, so it lost its brand colour and
-  // vendor name in repos the user never touched).
+  // ⚠ TWO WRITE ROUTES, SPLIT BY MUTABILITY — NOT BY GRAIN. With one grain the old three-route
+  // split has nothing left to defend against, but `automated`/`role`/`kind`/`label` are all
+  // RE-DERIVABLE (a wrong write is repaired by the next classification pass or by a reset) while
+  // `monthly_cents` is derivable by NOTHING and is money. Cost keeps its own route so that no
+  // combined body can address the column at all — the same structural guarantee the two-table split
+  // used to provide, with one fewer table. Do not fold it into the PATCH.
+  //
+  // ⚠ THE TWO PROVENANCE FLAGS ARE STILL INDEPENDENT, and they are now the ONLY thing doing the job
+  // the table boundary used to do: `source` owns automated/role/confidence/reasons, `identitySource`
+  // owns kind/label. A UI that offers ONE "Reset to auto" for both, or a call that stamps one while
+  // the user edited the other, brings back the exact bug the 0042/0043 split existed to kill —
+  // inside a single row this time, where no table boundary is left to catch it.
+  //
+  // ⚠ EVERY WRITE HERE IS WORKSPACE-WIDE. The old per-repo PATCH could honestly promise "this
+  // leaves your other repos alone"; nothing here can. A control rendered in a repo-shaped context
+  // must say so in its copy.
+  //
+  // ⚠ READS DEGRADE, WRITES 404. `?workspace=` on a read resolves an unknown/foreign id to the
+  // caller's Default. A write NAMES the row it edits, so its `workspaceId` must never silently land
+  // somewhere else: the server 404s instead — one status for unknown user / unknown-or-foreign
+  // workspace / no footprint there, deliberately, so it is never an existence oracle.
 
-  // The listing: one identity per ACTOR + one judgement row per (repo, actor), plus the repo ids
-  // the listing covered, in render order.
+  // The listing: one `WorkspaceReviewer` per actor in the workspace, each carrying its judgement,
+  // identity, price and the evidence behind them (including `repoFootprints[]`, the real blast
+  // radius of an edit that is workspace-wide by design), plus the repo ids the listing covered.
   //
-  // `scope` ('all' | 'none' | '<teamId>') and `repoIds` resolve exactly as they do for
-  // /api/bot-analytics — repoIds WINS when present (a specific repo is the more specific
-  // selection). Both absent = every watched repo, which is what the ACCOUNT-WIDE consumers want
-  // (the bot colour map, the feed's vendor tag, the Threads-tab vendor filter): they need the
-  // whole roster, and a narrowed one would silently drop bots from surfaces that aren't about
-  // scope at all. The scoped/unscoped responses MUST NOT share a cache key — see
-  // detectedReviewersQueryKey.
-  botReviewers: (scope?: string, repoIds?: number[] | null) => {
-    const r = repoIdsParam(repoIds);
-    const s = r ? '' : scopeParam(scope);
-    return get<DetectedReviewersResponse>(withQuery('/api/bot-reviewers', s, r));
-  },
-  // The JUDGEMENT for one actor in ONE repo: is it automated here, and is it reviewing or
-  // quality-checking. `repoId` is REQUIRED — the row IS the object, so a judgement with no repo
-  // has no row to land on; an unowned/unknown repo 404s.
+  // `workspaceId` decides the VERDICT; `repoIds` only narrows which repos' footprints are shown,
+  // bounded by the workspace's membership server-side. THEY NO LONGER COMPETE — the old "repoIds
+  // WINS, so omit the scope" rule is gone, because they answer different questions and both are
+  // sent.
   //
-  // ⚠ NO `kind`/`label` EVER. "Not a bot in this repo" is not a claim about who the vendor is.
-  //
-  // ⚠ THE RESPONSE BODY IS DELIBERATELY UNTYPED (`void`) ON ALL THREE WRITES. Nothing reads it:
-  // each mutation invalidates the listing and every surface downstream of it, so the REFETCH is
-  // the source of truth. Declaring a shape here would be a second, unverified copy of the wire
-  // contract — and it was already wrong once (this route answers with the classifier's own
-  // object, not the row). `handle` still surfaces a non-2xx as an ApiError, which is the only
-  // thing a caller actually needs from the reply.
-  setRepoReviewerJudgement: (userId: number, body: RepoReviewerJudgementBody) =>
-    fetch(`/api/bot-reviewers/${userId}`, jsonBody('PATCH', body)).then((r) => handle<void>(r)),
-  // THE WAY BACK TO AUTO for ONE repo row: deletes the stored judgement so the next listing
-  // re-derives it. It is the only way back — flipping `automated` by hand re-stamps
-  // `source: 'manual'`, leaving the row just as pinned. 204, so nothing to read; the listing
-  // refetch is where the re-derived row shows up. 404 when there is no stored row to reset.
-  //
-  // ⚠ ONE REPO. Its sibling below resets the bot EVERYWHERE — keep the two visibly distinct at
-  // every call site, exactly as the two PATCHes are.
-  resetRepoReviewerJudgement: (userId: number, repoId: number) =>
-    fetch(`/api/bot-reviewers/${userId}/judgement?repoId=${repoId}`, jsonBody('DELETE')).then((r) =>
-      handle<void>(r),
+  // ⚠ THE ACCOUNT-WIDE CONSUMERS (the bot colour map, the feed's vendor tag, the Threads-tab vendor
+  // filter) MUST NAME A WORKSPACE TOO. Identity is per workspace now: `kind`/`label` set in
+  // workspace A do not carry into B. Passing no scope used to mean "the whole roster"; there is no
+  // such request any more, and reading an arbitrary workspace's identity is the single most
+  // dangerous mistake available on this surface. Scoped and unscoped-by-repo responses must not
+  // share a cache key either — see `detectedReviewersQueryKey`, now three segments.
+  botReviewers: (workspaceId: number, repoIds?: number[] | null) =>
+    get<DetectedReviewersResponse>(
+      withQuery('/api/bot-reviewers', workspaceParam(workspaceId), repoIdsParam(repoIds)),
     ),
-  // WHO this actor is, account-wide — an upsert of its one `account_reviewers` row. No repoId:
-  // there is nowhere for a second copy of a vendor identity to live, which is the whole point.
-  // Stamps `identity_source: 'manual'`, including when clearing (`kind: null`), or the next
-  // classification pass reinstates the kind the user just rejected. 404s for an actor with no
-  // judgement row anywhere — an identity nothing lists is unreachable, un-editable data.
-  setReviewerIdentity: (userId: number, body: ReviewerIdentityBody) =>
-    fetch(`/api/bot-reviewers/${userId}/identity`, jsonBody('PATCH', body)).then((r) =>
-      handle<void>(r),
+  // The four RE-DERIVABLE fields of one row. `workspaceId` is REQUIRED and rides in the BODY: the
+  // workspace is part of the row's key, not a filter over it. All four value fields are OPTIONAL
+  // (absent = leave the stored value alone) but a body carrying NONE of them 400s — an opinion-free
+  // patch would stamp a provenance flag on the strength of an empty request and freeze detection.
+  //
+  // `automated`/`role` stamp `source: 'manual'`; `kind`/`label` stamp `identitySource: 'manual'`.
+  // ⚠ A ROLE-ONLY PATCH THEREFORE PINS `automated` TOO. That is the deliberate trade: not stamping
+  // it would let the next classification pass re-derive `role` from the login seed and silently
+  // revert the edit. The pin is visible (`isManualOverride`) and undoable (the judgement reset).
+  //
+  // ⚠ IT CANNOT CARRY A PRICE — `WorkspaceReviewerPatchBody` has no cost field and the handler's
+  // `set:` object has no cost key.
+  //
+  // Answers with the written row, so a caller can render the result without waiting for the
+  // listing refetch.
+  setWorkspaceReviewer: (userId: number, body: WorkspaceReviewerPatchBody) =>
+    fetch(`/api/bot-reviewers/${userId}`, jsonBody('PATCH', body)).then((r) =>
+      handle<WorkspaceReviewer>(r),
     ),
-  // THE WAY BACK TO AUTO for the actor's identity, ACCOUNT-WIDE: clears the human-set kind/label,
-  // sets `identity_source` back to 'auto', and re-derives in the same request.
+  // THE WAY BACK TO AUTO for the JUDGEMENT half, in one workspace: hands
+  // `automated`/`role`/`confidence`/`reasons` back to detection and re-derives in the same request.
+  // It is the only way back — flipping `automated` by hand re-stamps `source: 'manual'`, leaving
+  // the row just as pinned.
   //
-  // ⚠ IT KEEPS THE PRICE. `monthly_cents` shares that row but is not a classification opinion, so
-  // it survives — say so in the UI copy, because "reset" otherwise reads as "delete everything".
+  // ⚠ AN UPDATE, NOT A ROW DELETE, which is why it answers **200 with the re-derived
+  // `WorkspaceReviewer`** and not the old 204: the row also holds the identity and the price, so
+  // deleting it would take both with it. `workspaceId` rides in the QUERY STRING because a DELETE
+  // body is stripped by enough intermediaries not to be a place for a required field.
   //
-  // ⚠ AND IT TOUCHES NO REPO ROW: `automated`/`role` are the other grain (the judgement reset
-  // above, one repo at a time).
-  resetReviewerIdentity: (userId: number) =>
-    fetch(`/api/bot-reviewers/${userId}/identity`, jsonBody('DELETE')).then((r) => handle<void>(r)),
-  // What this actor costs, account-wide. `monthlyUsd` is REQUIRED: a number sets it (0 is a real
-  // price — "we pay nothing"), null clears it. PUT, not PATCH, because there is exactly one field
-  // and no "leave it alone" state to express.
+  // ⚠ IT TOUCHES NEITHER THE IDENTITY NOR THE PRICE. Different provenance flag, different route.
+  // Offer it only where `isManualOverride` is true — resetting an already-auto row does nothing.
+  resetReviewerJudgement: (userId: number, workspaceId: number) =>
+    fetch(
+      `/api/bot-reviewers/${userId}/judgement?workspaceId=${workspaceId}`,
+      jsonBody('DELETE'),
+    ).then((r) => handle<WorkspaceReviewer>(r)),
+  // THE WAY BACK TO AUTO for the IDENTITY half, in one workspace: clears the human-set kind/label,
+  // sets `identitySource` back to 'auto', and re-derives immediately (a clear WITHOUT the re-derive
+  // would leave the bot nameless and colourless until something else overwrote it, so "Reset name"
+  // would read as "delete the vendor"). 200 with the re-derived row.
   //
-  // ⚠ CLEARING IS A COLUMN WRITE, NOT A ROW DELETE — cost shares its row with the vendor identity,
-  // so deleting the row would take the kind and label with it.
+  // ⚠ IT KEEPS THE PRICE. `monthly_cents` shares this row but is not a classification opinion —
+  // say so in the UI copy, because "reset" otherwise reads as "delete everything".
+  //
+  // ⚠ IT TOUCHES NO JUDGEMENT FIELD. Naming a vendor is not a statement about how it behaves, and
+  // stamping `source` from here would freeze auto-classification for the whole workspace.
+  //
+  // ⚠ ITS BLAST RADIUS IS ONE WORKSPACE, not the account. The same actor's rows elsewhere keep
+  // their own names — that is the accepted consequence of the per-workspace grain.
+  resetReviewerIdentity: (userId: number, workspaceId: number) =>
+    fetch(
+      `/api/bot-reviewers/${userId}/identity?workspaceId=${workspaceId}`,
+      jsonBody('DELETE'),
+    ).then((r) => handle<WorkspaceReviewer>(r)),
+  // What this bot costs per month IN THIS WORKSPACE. `monthlyUsd` is REQUIRED and NULLABLE so
+  // `undefined` is not a third meaning: a number sets it (0 is a real price — "we pay nothing"),
+  // null CLEARS it. PUT, not PATCH: one field, no "leave it alone" state to express.
+  //
+  // ⚠ CLEARING IS A COLUMN WRITE, NOT A ROW DELETE — the row also carries the judgement and the
+  // identity.
+  //
+  // ⚠ THE PRICE IS PER WORKSPACE, like every other attribute on the row. Editing it here leaves the
+  // same actor's rows in other workspaces alone, and they may legitimately hold different numbers;
+  // nothing reconciles them and nothing is meant to. The editor's copy says "Price for this
+  // Workspace" so the scope of the edit is on screen. Within ONE workspace there is exactly one row
+  // per actor, so a total there is a plain sum — ACROSS workspaces it is not a sum at all (six
+  // workspaces each listing a $120 CodeRabbit is either six subscriptions or one seen six ways, and
+  // the app must not assert which), so no surface may add them up.
+  //
+  // Bounds `[0, 21474836.47]` + `multipleOf 0.01` are enforced server-side: that is the int4-cents
+  // ceiling where the dialects stop agreeing (Postgres RAISES `integer out of range`; SQLite
+  // accepts it happily), so an out-of-range value 400s rather than succeeding locally and 500ing in
+  // cloud.
   setReviewerCost: (userId: number, body: ReviewerCostBody) =>
-    fetch(`/api/bot-reviewers/${userId}/cost`, jsonBody('PUT', body)).then((r) => handle<void>(r)),
-  // Per-vendor bot ROI / utilisation analytics over the chosen window (threads / acted-on %
-  // / untouched / verdict / trend). Cost is SERVER-resolved onto each row from the actor's
-  // `account_reviewers` price (`costMonthlyUsd`); the old client-side overlay from
-  // /api/pro/settings `bots.cost` survives only as an un-applied legacy POINTER — see
-  // lib/botCost.ts. The price is ACCOUNT-WIDE even on a scoped row: never sum it across rows.
-  botAnalytics: (window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
-    const r = repoIdsParam(repoIds);
-    // A repo scope wins over the team scope (the per-repo Bots tab); omit `scope` then.
-    const s = r ? '' : scopeParam(scope);
-    return get<BotAnalyticsResponse>(
-      withQuery(`/api/bot-analytics`, `window=${encodeURIComponent(window)}`, s, r),
-    );
-  },
-  // The Bots "Themes" AI summary (Pro Haiku) — the qualitative read of what the automated
-  // reviewers are flagging over the current TEAM scope + window. GET is a pure cache read; the
-  // refresh POST is the only billing path. Team-scoped (cross-repo Bots rail), so no repoIds.
-  botThemes: (window: BotWindowKind, scope?: string) =>
+    fetch(`/api/bot-reviewers/${userId}/cost`, jsonBody('PUT', body)).then((r) =>
+      handle<WorkspaceReviewer>(r),
+    ),
+  // Per-reviewer bot ROI / utilisation analytics over the chosen window (threads / acted-on % /
+  // untouched / verdict / trend). Cost is SERVER-resolved onto each row from that actor's row IN
+  // THIS WORKSPACE (`costMonthlyUsd`); a null there is FINAL.
+  //
+  // ⚠ `workspaceId` decides WHO COUNTS AS A BOT, `repoIds` only narrows WHICH DATA IS MEASURED, and
+  // both are sent. The old "a repo scope wins, so omit the team scope" rule is gone: they answered
+  // the same question at two grains and could disagree, which is what let one screen show two
+  // contradictory bot-only answers. The narrowing is bounded by the workspace's membership
+  // server-side, so it can never reach outside the scope.
+  //
+  // ⚠ Never sum `costMonthlyUsd` across workspaces. Within this workspace's rows it is a plain sum.
+  botAnalytics: (window: BotWindowKind, workspaceId: number, repoIds?: number[] | null) =>
+    get<BotAnalyticsResponse>(
+      withQuery(
+        '/api/bot-analytics',
+        `window=${encodeURIComponent(window)}`,
+        workspaceParam(workspaceId),
+        repoIdsParam(repoIds),
+      ),
+    ),
+  // The Bots "Themes" AI summary (Pro Haiku) — the qualitative read of what the automated reviewers
+  // are flagging over the current WORKSPACE + window. GET is a pure cache read; the refresh POST is
+  // the only billing path. Workspace-scoped (the cross-repo Bots rail), so no repoIds.
+  botThemes: (window: BotWindowKind, workspaceId: number) =>
     get<BotThemesResponse>(
       withQuery(
         '/api/pro/bot-themes',
         `window=${encodeURIComponent(window)}`,
-        scopeParam(scope),
+        workspaceParam(workspaceId),
       ),
     ),
-  botThemesRefresh: (window: BotWindowKind, scope?: string) =>
+  botThemesRefresh: (window: BotWindowKind, workspaceId: number) =>
     fetch(
       withQuery(
         '/api/pro/bot-themes/refresh',
         `window=${encodeURIComponent(window)}`,
-        scopeParam(scope),
+        workspaceParam(workspaceId),
       ),
       jsonBody('POST'),
     ).then((r) => handle<BotThemesResponse>(r)),
   // The Feed "Discussion themes" AI summary (Pro Haiku) — the HUMAN sibling of bot-themes: what
-  // PEOPLE are raising in review, over the current TEAM scope + window. GET is a pure cache read;
+  // PEOPLE are raising in review, over the current WORKSPACE + window. GET is a pure cache read;
   // the refresh POST is the only billing path.
-  humanThemes: (window: BotWindowKind, scope?: string) =>
+  humanThemes: (window: BotWindowKind, workspaceId: number) =>
     get<HumanThemesResponse>(
-      withQuery('/api/pro/human-themes', `window=${encodeURIComponent(window)}`, scopeParam(scope)),
+      withQuery(
+        '/api/pro/human-themes',
+        `window=${encodeURIComponent(window)}`,
+        workspaceParam(workspaceId),
+      ),
     ),
-  humanThemesRefresh: (window: BotWindowKind, scope?: string) =>
+  humanThemesRefresh: (window: BotWindowKind, workspaceId: number) =>
     fetch(
-      withQuery('/api/pro/human-themes/refresh', `window=${encodeURIComponent(window)}`, scopeParam(scope)),
+      withQuery(
+        '/api/pro/human-themes/refresh',
+        `window=${encodeURIComponent(window)}`,
+        workspaceParam(workspaceId),
+      ),
       jsonBody('POST'),
     ).then((r) => handle<HumanThemesResponse>(r)),
-  // EXPERIMENTAL bot behaviour analytics (TTFR / LoC-to-comments / 24h heatmap / follow-ups).
-  // Same window/scope/repoIds wiring as botAnalytics (repo scope wins over team scope).
-  botBehaviour: (window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
-    const r = repoIdsParam(repoIds);
-    const s = r ? '' : scopeParam(scope);
-    return get<BotBehaviourResponse>(
-      withQuery(`/api/bot-behaviour`, `window=${encodeURIComponent(window)}`, s, r),
-    );
-  },
-  // The exact PR list behind the analytics `totals.botOnlyPrs` count — "only a bot reviewed
-  // these". Same window/scope/repoIds wiring as botAnalytics (repo scope wins over team scope),
-  // so the caption's number and this list are computed identically server-side.
-  botOnlyPrs: (window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
-    const r = repoIdsParam(repoIds);
-    const s = r ? '' : scopeParam(scope);
-    return get<BotOnlyPrsResponse>(
-      withQuery(`/api/bot-analytics/bot-only-prs`, `window=${encodeURIComponent(window)}`, s, r),
-    );
-  },
+  // EXPERIMENTAL bot behaviour analytics (TTFR / LoC-to-comments / week×hour heatmap / follow-ups).
+  // Same window/workspace/repoIds wiring as botAnalytics — both scope parameters are sent.
+  botBehaviour: (window: BotWindowKind, workspaceId: number, repoIds?: number[] | null) =>
+    get<BotBehaviourResponse>(
+      withQuery(
+        '/api/bot-behaviour',
+        `window=${encodeURIComponent(window)}`,
+        workspaceParam(workspaceId),
+        repoIdsParam(repoIds),
+      ),
+    ),
+  // The exact PR list behind the analytics `totals.botOnlyPrs` count — "only a bot reviewed these".
+  // Same window/workspace/repoIds wiring as botAnalytics, so the caption's number and this list are
+  // computed identically server-side.
+  botOnlyPrs: (window: BotWindowKind, workspaceId: number, repoIds?: number[] | null) =>
+    get<BotOnlyPrsResponse>(
+      withQuery(
+        '/api/bot-analytics/bot-only-prs',
+        `window=${encodeURIComponent(window)}`,
+        workspaceParam(workspaceId),
+        repoIdsParam(repoIds),
+      ),
+    ),
   // The per-PR drill-down behind one Bot-ROI row: the PRs that one automated reviewer touched in
   // the window (threads/comments/acted-on/untouched/bot-only), most-recent-activity first. `key` is
   // the analytics row identity — `u<userId>` (a single reviewer) or the 'pierre' sentinel.
-  botVendorPrs: (key: string, window: BotWindowKind, scope?: string, repoIds?: number[] | null) => {
-    const r = repoIdsParam(repoIds);
-    const s = r ? '' : scopeParam(scope);
-    return get<BotVendorPrsResponse>(
+  //
+  // ⚠ It is opened FROM a scoped ROI row, so it MUST be given the SAME workspace and repo set that
+  // row was computed at: the header label and the per-PR `botOnly` badge both key on them, and one
+  // screen cannot show two contradictory bot-only answers.
+  botVendorPrs: (
+    key: string,
+    window: BotWindowKind,
+    workspaceId: number,
+    repoIds?: number[] | null,
+  ) =>
+    get<BotVendorPrsResponse>(
       withQuery(
         `/api/bot-analytics/vendor/${encodeURIComponent(key)}/prs`,
         `window=${encodeURIComponent(window)}`,
-        s,
-        r,
+        workspaceParam(workspaceId),
+        repoIdsParam(repoIds),
       ),
-    );
-  },
+    ),
   // Cross-bot dedup + consensus/conflict clusters for a PR (≥2 automated reviewers of
   // distinct kinds on the same path/line window).
   prBotDedup: (prId: number) => get<BotDedupResponse>(`/api/prs/${prId}/bot-dedup`),
   // Per-PR bot behaviour — each automated reviewer's on-PR timeline + vs-typical comparison.
   prBotBehaviour: (prId: number) =>
     get<PrBotBehaviourResponse>(`/api/prs/${prId}/bot-behaviour`),
-  // Scope-wide "clear the stale-bot backlog": the review list of every likely-addressed
-  // automated-reviewer thread across the account (or a repo scope), grouped by PR + capped, and
-  // the confirm-gated resolve. `repoIds` (the per-repo Bots tab) wins over `scope` server-side.
-  resolvableBotThreads: (scope?: string, repoIds?: number[] | null) => {
-    const r = repoIdsParam(repoIds);
-    const s = r ? '' : scopeParam(scope);
-    return get<ResolvableThreadPrsResponse>(withQuery('/api/bot-threads/resolvable', s, r));
-  },
-  // Resolve the explicit reviewed thread ids (server re-derives eligibility ∩ this list). The
+  // Workspace-wide "clear the stale-bot backlog": one row per PR with ≥1 likely-addressed
+  // automated-reviewer thread in the scope (uncapped), and the confirm-gated resolve below.
+  // `workspaceId` decides who counts as a bot; `repoIds` only narrows which PRs are listed.
+  resolvableBotThreads: (workspaceId: number, repoIds?: number[] | null) =>
+    get<ResolvableThreadPrsResponse>(
+      withQuery('/api/bot-threads/resolvable', workspaceParam(workspaceId), repoIdsParam(repoIds)),
+    ),
+  // Resolve the explicit reviewed thread ids (the server re-derives eligibility ∩ this list). The
   // caller chunks a large selection into ≤500-id POSTs; the response aggregates per chunk.
+  //
+  // ⚠ `ScopeResolveBotThreadsBody.workspaceId` IS REQUIRED, AND IT MUST BE THE SAME ID THE LISTING
+  // ABOVE WAS FETCHED WITH — that is what makes "the listing and the resolve agree" structural
+  // rather than a convention. Its predecessor carried an optional `repoIds` while the listing was
+  // resolved from a team scope, so a reviewer marked automated only under a per-team override had
+  // its threads offered and then found ineligible: the route resolved 0 with no error anywhere.
+  // The body carries no `repoIds` on purpose — the user ticked these ids explicitly, and narrowing
+  // them a second time could only silently drop some of them.
   scopeResolveBotThreads: (body: ScopeResolveBotThreadsBody) =>
     fetch('/api/bot-threads/resolve', jsonBody('POST', body)).then((r) =>
       handle<ResolveBotThreadsResult>(r),

@@ -11,7 +11,7 @@ import {
   useScopeResolveBotThreads,
 } from '../../hooks/useBotTriage.js';
 import { useUsers } from '../../hooks/useTimeline.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { useFilters } from '../../store/filters.js';
 import { type TabMeta } from '../../store/pinnedTabs.js';
 import { CI_META, CONFIDENCE_META, indexUsers, relativeTime, userLabel } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
@@ -19,14 +19,20 @@ import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
 import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
 
 // The resolvable-bot-threads DRILL-DOWN — a persistent, singleton tab opened by the Bot-ROI
-// backlog banner ("Review & resolve"). The scope-wide review-and-resolve flow. Every PR with ≥1
-// `likely_addressed` automated-reviewer thread is a SORTABLE tabular row (author · CI · age ·
+// backlog banner ("Review & resolve"). The WORKSPACE-WIDE review-and-resolve flow. Every PR with
+// ≥1 `likely_addressed` automated-reviewer thread is a SORTABLE tabular row (author · CI · age ·
 // last-update · a bot thread-state mix · its resolvable count), with the bulk resolve pinned to
 // the TOP. PRs are DESELECTED by default; per-PR checkboxes + "Select all" (across all pages) /
 // "Clear" drive the batch. Selecting all resolves the ENTIRE backlog (uncapped) — chunked into
 // sequential POSTs with a Stop control. The server RE-DERIVES eligibility (the heuristic only
 // LOOKS addressed — a later commit touched the file). Clicking a row opens that PR's Threads tab
 // with the 'likely_addressed' pill preselected — inspect before resolving.
+//
+// ⚠ THE LISTING AND THE RESOLVE SEND THE SAME `workspaceId`, and that is the whole design. Its
+// predecessor listed under a TEAM scope and re-derived the resolve from `repoIds`, so a reviewer
+// marked automated only under a per-team override had its threads offered and then found
+// ineligible — the POST resolved 0 with no error anywhere. One workspace id on both sides cannot
+// disagree with itself, which is why the POST body no longer carries repo ids at all.
 
 const PAGE_SIZE = 50;
 
@@ -111,15 +117,16 @@ function sortValue(pr: ResolvableThreadPr, col: SortCol, usersById: Map<number, 
 }
 
 export function BotThreadsDetail(): JSX.Element {
-  const scope = scopeToParam(useFilters((s) => s.teamScope));
-  // The repo the tab was opened from (per-repo Bots tab) — scopes the whole tab to that repo;
-  // null (the cross-repo Bots rail) falls back to the team scope. Read (not consumed) so the
-  // scope persists for the tab's lifetime; only reset when the next drill-down opens.
+  const workspaceId = useFilters((s) => s.workspaceId);
+  // The repo the tab was opened from (per-repo Bots tab) — narrows which repos' PRs are LISTED;
+  // null (the cross-repo Bots rail) lists the whole workspace. It never narrows the judgement.
+  // Read (not consumed) so it persists for the tab's lifetime; only reset when the next
+  // drill-down opens.
   const focusRepoId = useFilters((s) => s.botThreadsFocusRepoId);
   const repoScope = useMemo(() => (focusRepoId != null ? [focusRepoId] : null), [focusRepoId]);
   const { data, isLoading, isError, refetch, isFetching } = useResolvableBotThreads(
+    workspaceId,
     true,
-    scope,
     repoScope,
   );
   const resolve = useScopeResolveBotThreads();
@@ -237,12 +244,17 @@ export function BotThreadsDetail(): JSX.Element {
   const runResolve = (): void => {
     // NEVER send an empty threadIds list — [] means resolve-NOTHING by design server-side.
     if (selectedThreadIds.length === 0) return;
+    // Unreachable in practice (the listing is idle until the workspace resolves, so there is
+    // nothing to select), but the id is REQUIRED on the wire: it is the scope the server
+    // re-derives eligibility against, and defaulting it server-side would resolve against the
+    // account's Default workspace.
+    if (workspaceId == null) return;
     stopRef.current = false;
     setProgress({ done: 0, total: selectedThreadIds.length, resolved: 0, failed: 0 });
     resolve.mutate(
       {
         threadIds: selectedThreadIds,
-        repoIds: repoScope,
+        workspaceId,
         prIds: selectedPrIds,
         onProgress: (done, total, resolved, failed) =>
           setProgress({ done, total, resolved, failed }),
@@ -369,7 +381,7 @@ export function BotThreadsDetail(): JSX.Element {
                   onClick={selectAll}
                   disabled={allSelected || filtered.length === 0}
                   className="rounded border border-gray-300 px-2 py-1 text-[12px] font-medium text-gray-600 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
-                  title="Select every PR in scope (across all pages)"
+                  title="Select every PR in the list (across all pages)"
                 >
                   Select all{effectiveRepoFilter === 'all' ? '' : ' (repo)'}
                 </button>
@@ -424,7 +436,7 @@ export function BotThreadsDetail(): JSX.Element {
           {filtered.length === 0 && (
             <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
               {highOnly
-                ? 'No high-confidence threads in this scope — uncheck “High-confidence only” to see the rest of the backlog.'
+                ? 'No high-confidence threads here — uncheck “High-confidence only” to see the rest of the backlog.'
                 : 'No PRs match this filter.'}
             </div>
           )}

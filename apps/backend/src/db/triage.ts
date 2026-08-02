@@ -149,7 +149,9 @@ export async function computeTriage(
       .where(inArray(reviewRequests.prId, prIds))
       .execute();
     for (const r of rows) {
-      if (r.userId == null) continue; // team requests don't map to "me"
+      // A null userId means the request went to a GITHUB team — a group of people on GitHub,
+      // NOT one of this app's workspaces — so it names no single person and can't be "me".
+      if (r.userId == null) continue;
       const entry = reqByPr.get(r.prId) ?? { mine: false, others: 0 };
       if (localUserId != null && r.userId === localUserId) entry.mine = true;
       else entry.others += 1;

@@ -4,6 +4,7 @@ import { DERIVED_STATES } from '@pierre-review/shared';
 import { useMyTurn } from '../../hooks/useTriage.js';
 import { useResolveBotThreads } from '../../hooks/usePrWrites.js';
 import { useDetectedReviewers, usePrBotDedup } from '../../hooks/useBotTriage.js';
+import { useRepos } from '../../hooks/useTimeline.js';
 import {
   resolvableBotThreadIds,
   threadBotKind,
@@ -117,25 +118,38 @@ export function ThreadList({
   // only when a vendor filter is active, because the resolve control only renders there: a PR
   // opened without touching the Bots chip costs no extra request.
   //
-  // ⚠ THE ACCOUNT-WIDE LISTING IS FETCHED AND FILTERED TO THIS PR'S REPO, rather than a
-  // repo-scoped request. Two reasons, both load-bearing:
-  //   • a bot is a PER-REPO object now, so "is this login a review bot" has no answer until a
-  //     repo is named — reading another repo's row here would offer threads the server refuses;
-  //   • the unscoped key is the ONE entry FeedView and useBotColors already keep warm, so a PR
-  //     open costs no fetch, where a `repo:<id>` key would be cold on every new repo.
+  // ⚠ THE LISTING IS FETCHED FOR THE PR'S OWN WORKSPACE, NOT THE SELECTED ONE. A bot object is
+  // keyed per WORKSPACE now, and the server re-derives eligibility from the workspace the PR's
+  // repo belongs to — but this PR can be open from a different workspace entirely (a `?pr=<id>`
+  // deep link, a restored `pierre:tabs` entry, a search hit). Building the offer from
+  // `filters.workspaceId` would then read workspace X's judgements while the resolve evaluates
+  // workspace Y's: an offered count the server refuses, i.e. the dead button this predicate
+  // exists to retire. `Repo.workspaceId` is the only repo→workspace mapping the client has.
+  //
+  // It is fetched UNNARROWED (no `repoIds`): the judgement is workspace-wide, and that unscoped
+  // key is the one entry FeedView and useBotColors already keep warm, so a PR open usually costs
+  // no fetch at all.
+  //
   // `repoId` is optional on this component (a thread list can be rendered without one); with no
-  // repo the map is left null, which resolvable.ts treats as "listing not loaded" — it keeps the
-  // vendor-login fallback rather than silently offering or refusing threads on no evidence.
-  const { data: detected } = useDetectedReviewers(undefined, null, botFilter != null);
+  // repo — or before `useRepos()` lands — there is no workspace, the query stays inert and the map
+  // is left null, which resolvable.ts treats as "listing not loaded": it keeps the vendor-login
+  // fallback rather than silently offering or refusing threads on no evidence.
+  const { data: repos } = useRepos();
+  const prWorkspaceId = useMemo(() => {
+    if (repoId == null) return null;
+    return (repos ?? []).find((r) => r.id === repoId)?.workspaceId ?? null;
+  }, [repos, repoId]);
+  const { data: detected } = useDetectedReviewers(prWorkspaceId, null, botFilter != null);
   const reviewerRoles = useMemo(() => {
-    if (detected == null || repoId == null) return null;
+    if (detected == null) return null;
+    // ONE row per actor in the workspace — no repo filter left to apply, and no rows/reviewers
+    // split to reconcile.
     const m = new Map<number, ReviewerRoleInfo>();
-    for (const r of detected.rows) {
-      if (r.repoId !== repoId) continue;
+    for (const r of detected.reviewers) {
       m.set(r.userId, { automated: r.automated, role: r.role });
     }
     return m;
-  }, [detected, repoId]);
+  }, [detected]);
 
   // The bot threads a later commit has LIKELY ADDRESSED — the set the bulk "clear backlog"
   // action can safely resolve (matches the server's getResolvableBotThreads eligibility).

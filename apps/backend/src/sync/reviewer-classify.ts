@@ -8,24 +8,32 @@
 //   5. Opt-in AI tie-break (only if enabled AND medium) → may raise MEDIUM→HIGH.        ai_tiebreak
 //   otherwise                                           → human (automated:false).
 //
-// ── IT DERIVES ONCE PER ACTOR AND WRITES THAT VERDICT TO EVERY ONE OF THAT ACTOR'S REPO ROWS ──
-// A bot is a PER-REPO object, but the SIGNALS are not: a vendor login, `users.githubType`, app
-// attribution and the branded-marker fingerprint are all properties of the ACTOR and give the
-// same answer in every repo. Deriving per repo would multiply the work — and the BILLED Haiku
-// tie-break — for an identical result, and would weaken the behavioural score by computing it on
-// a thin per-repo slice. So `classifyReviewer` takes the actor's TARGET REPO LIST and `persist`
+// ── IT DERIVES ONCE PER ACTOR AND WRITES THAT VERDICT TO EVERY ONE OF THE NAMED WORKSPACE ROWS ─
+// A bot is a PER-WORKSPACE object, but the SIGNALS are not: a vendor login, `users.githubType`,
+// app attribution and the branded-marker fingerprint are all properties of the ACTOR and give the
+// same answer in every workspace. Deriving per workspace would multiply the work — and the BILLED
+// Haiku tie-break — for an identical result, and would weaken the behavioural score by computing
+// it on a thin slice. So `classifyReviewer` takes the actor's TARGET WORKSPACE LIST and `persist`
 // fans one verdict out across it.
 //
-// ── IT GATES ON TWO PROVENANCE FLAGS ON TWO TABLES, AND ONE FLAG FOR BOTH RE-BREAKS IT ────────
-//   `account_reviewers.identity_source = 'manual'`  ⇒ leave kind/label alone (a human named this
-//                                                     vendor; re-deriving reverts the correction)
-//   `repo_reviewers.source          = 'manual'`     ⇒ leave automated/role alone FOR THAT REPO
-//     (a human judged this row; re-deriving reverts it — and the OTHER repos still update, which
-//      is the whole point of the repo grain)
-// They live on different tables now, so confusing them takes a genuine mistake rather than a
-// slip. The failure they prevent is unchanged: gate identity on the row flag and a per-repo "not
-// a bot" freezes the vendor identity account-wide; gate the judgement on the identity flag and
-// naming a vendor freezes auto-detection on every one of its repos.
+// ── IT GATES ON TWO PROVENANCE FLAGS THAT NOW SHARE ONE ROW ───────────────────────────────────
+//   `workspace_reviewers.identity_source = 'manual'` ⇒ leave kind/label alone (a human named this
+//                                                      vendor; re-deriving reverts the correction)
+//   `workspace_reviewers.source          = 'manual'` ⇒ leave automated/role/confidence/reasons
+//                                                      alone FOR THAT WORKSPACE (a human judged
+//                                                      this row; the OTHER workspaces still update)
+//
+// ⚠ THEY USED TO LIVE ON TWO TABLES, AND THAT TABLE BOUNDARY WAS THE ENFORCEMENT. It is gone: both
+// facts are columns of one `workspace_reviewers` row now, so the separation is CODE DISCIPLINE —
+// a `set:` object narrowed per half, built fresh per workspace, honouring each flag independently.
+// The failure it prevents is unchanged: gate identity on the judgement flag and a "not a bot" here
+// blanks the vendor's brand colour; gate the judgement on the identity flag and naming a vendor
+// freezes auto-detection. See §4.6 / §9.9 of the workspace contract, and the paired tests.
+//
+// ⚠ THE SHARED-`values`-OBJECT PATTERN IS GONE ON PURPOSE. One object used as both the INSERT
+// values and the ON CONFLICT `set:` is correct only while a table holds ONE grain. With judgement,
+// identity and price in a single row it would overwrite a human's vendor correction on every auto
+// pass — the exact bug the two-table split was built to kill, reintroduced inside one row.
 //
 // `import type` only from shared.
 import { and, eq, inArray, isNotNull } from 'drizzle-orm';
@@ -43,7 +51,7 @@ import type { ReviewFingerprint } from './review-fingerprint.js';
 import type { BehavioralSignals } from './reviewer-behavior.js';
 import { cheapComplete } from '../review/llm.js';
 
-const { repoReviewers, accountReviewers, reviewComments, pullRequests } = schema;
+const { workspaceReviewers, reviewComments, pullRequests } = schema;
 
 // The evidence the caller has already gathered (all optional — the resolver degrades to
 // the hard login/type signals when a piece is missing).
@@ -53,7 +61,22 @@ export interface ReviewerEvidence {
   appAttributed?: boolean;
 }
 
-export interface ClassifyOpts {
+// Which HALF of the merged row this pass is allowed to write.
+//
+// It REPLACES the old empty-repo-list trick, which worked only because the two halves were two
+// statements against two TABLES with only the second gated on `repoIds.length > 0`: passing `[]`
+// wrote the identity and skipped the judgement. With one row and one per-workspace loop, an empty
+// list means ZERO iterations and ZERO writes — so "Reset name" would clear `kind` and stop, the
+// lazy pass only re-derives a MISSING row, and the brand colour would be gone for good. The two
+// reset paths in the query layer therefore pass a REAL workspace id plus `only`.
+export interface PersistOpts {
+  only?: 'judgement' | 'identity';
+}
+
+// The classifier's own knobs. It EXTENDS PersistOpts so `classifyReviewer` takes a single options
+// bag: a caller that only wants to name a half passes `{ only: … }`, a caller with per-account
+// settings passes the allowlist / tie-break flags, and either is a legal `PersistOpts`.
+export interface ClassifyOpts extends PersistOpts {
   // Per-account service-account login globs (Pro settings `bots.loginAllowlist`).
   allowlist?: string[];
   // Opt-in Haiku tie-break for the MEDIUM band (Pro settings `bots.aiTiebreak`).
@@ -132,13 +155,12 @@ function behavioralVerdict(
   return { medium: score >= 3, reasons };
 }
 
-// NOTE: the old `rowToClassification(row, login)` helper is GONE. It built a
-// `ReviewerClassification` out of ONE `bot_review_classification` row, which was only possible
-// while identity and judgement shared a row. They no longer do — `kind`/`label` are on
-// `account_reviewers`, `automated`/`role`/`confidence`/`source`/`reasons` on `repo_reviewers` —
-// so a caller that wants both must read both, and the query layer does exactly that (and states
-// which half it is reading at each call site). Reintroducing a one-row adapter would quietly
-// reintroduce the assumption that a repo row knows who the actor is.
+// NOTE: the old `rowToClassification(row, login)` helper is GONE and is NOT to be reinstated now
+// that one row does hold both halves. It built a `ReviewerClassification` out of one row, which
+// reads as harmless again — and is exactly how a caller starts treating a row as a single
+// undifferentiated verdict, losing the two provenance flags that make the halves independent. A
+// caller that wants both facts reads both columns and states which flag governs the one it uses;
+// the query layer does exactly that.
 
 // The DEFAULT role for a login nobody has classified by hand: 'quality_check' for the known
 // static-analysis / coverage automations, else 'review'.
@@ -149,111 +171,134 @@ export function defaultRoleFor(login: string): ReviewerRole {
   return qualityCheckBot(login) ? 'quality_check' : 'review';
 }
 
-// Write ONE derived verdict to BOTH grains: the actor's identity row and each of `repoIds`'
-// judgement rows. Returns the classification as it now applies (with the derived role).
+// The narrowed ON CONFLICT `set:` — every column optional EXCEPT `updatedAt`, which is what makes
+// "did this pass acquire anything to write?" a plain key count (see the `length === 1` guard).
 //
-// LANDMINE 1 — TWO STATEMENTS AGAINST TWO TABLES, EACH GATED ON ITS OWN PROVENANCE FLAG. Identity
-// (`kind`/`label`) is skipped when `account_reviewers.identity_source = 'manual'`; the judgement
-// (`automated`/`role`) is skipped FOR THE REPOS whose `repo_reviewers.source = 'manual'`. Using
-// one flag for both is the failure this shape exists to prevent — see the header comment. Note
-// the asymmetry: an identity skip is all-or-nothing (one row), a judgement skip is PER REPO, so a
-// human's "not a bot" on `web` survives while `api` and `infra` re-derive.
+// ⚠ THERE IS NO PRICE MEMBER, AND THERE MUST NEVER BE ONE. The price is the single column no
+// classifier can regenerate; `setReviewerCost` (db/queries.ts) is the only writer in the codebase
+// that names it, and this file does not name it at all. Typing the absence here makes a stray
+// `Object.assign` a compile error rather than a silent wipe of money the user typed — and this
+// runs lazily from listDetectedReviewers, so the wipe would happen just by opening the Bots tab.
+type ReviewerSetValues = {
+  // ── JUDGEMENT half (gated on the stored `source`) ──
+  automated?: boolean;
+  role?: ReviewerRole;
+  confidence?: ClassificationConfidence;
+  source?: ClassificationSource;
+  reasonsJson?: string[];
+  // ── IDENTITY half (gated on the stored `identity_source`) ──
+  kind?: AutomatedReviewerKind | null;
+  label?: string | null;
+  updatedAt: Date;
+};
+
+// Write ONE derived verdict to each of `workspaceIds`' rows. Returns the classification as it now
+// applies (with the derived role).
+//
+// LANDMINE 1 — ONE STATEMENT PER WORKSPACE, WITH A `set:` NARROWED PER HALF. The loop is not an
+// oversight to be batched away: an account has few workspaces, and two workspaces may legitimately
+// hold DIFFERENT provenance flags for the same actor (manual "not a bot" in one, untouched auto in
+// the next). A single batched insert carries ONE `set:` object and physically cannot express that.
 //
 // LANDMINE 2 — the gate is a READ-THEN-NARROW, not an `onConflictDoUpdate … WHERE`. drizzle
 // spells the conditional-update clause differently per dialect, and `db` is typed as
 // node-postgres, so a `setWhere` here would compile and then behave differently (or not at all)
-// on SQLite. Selecting the manual rows first and simply not writing them is dialect-free.
+// on SQLite. Reading the two provenance flags first and simply not naming the columns a human
+// owns is dialect-free.
 //
 // LANDMINE 3 — `role` is DERIVED from the local quality-check list rather than round-tripped
-// through the ReviewerClassification the caller built. The insert and the ON CONFLICT `set:`
-// share ONE values object (they must agree), which means anything in it OVERWRITES the stored
-// column on every auto pass. Copying a stale in-memory role would put SonarQube straight back
-// into the review-bot metrics on the next pass — the exact miscount `role` exists to fix.
-// Deriving keeps the write idempotent AND self-healing for a login added to the list later.
-// (The parameter is role-LESS on purpose, so a future step in the resolution order physically
-// cannot hand one in.)
+// through the ReviewerClassification the caller built. Anything in the `set:` OVERWRITES the
+// stored column on every auto pass, so copying a stale in-memory role would re-write migration
+// 0045's role fold from a stale default and put SonarQube straight back into the review-bot
+// metrics. Deriving keeps the write idempotent AND self-healing for a login added to the list
+// later. (The parameter is role-LESS on purpose, so a future step in the resolution order
+// physically cannot hand one in.)
 //
-// LANDMINE 4 — `monthly_cents` MUST STAY OUT of the identity `values`. That object is BOTH the
-// insert and the ON CONFLICT `set:`, so naming the column here would wipe the user's price on
-// every auto-classification pass — and this runs lazily from listDetectedReviewers, so it would
-// happen just by opening the Bots tab. `ReviewerClassification` (the parameter type) carries no
-// cost field, which makes the omission structural rather than a rule to remember.
+// LANDMINE 4 — THE PRICE COLUMN IS NAMED NOWHERE IN THIS FILE: not in a `set:`, not as a derived
+// INSERT value, not as a seed read off a sibling workspace. Price is PER WORKSPACE, so there is no
+// sibling that could be authoritative; a row this pass creates simply has no price until someone
+// sets one, and because the column is never in the `set:`, a conflict leaves a stored price
+// untouched. `ReviewerClassification` carries no cost field either, which makes the omission
+// structural rather than a rule to remember. `setReviewerCost` is the one writer.
 //
-// LANDMINE 5 — the judgement conflict target is the 3-COLUMN tuple
-// `repo_reviewers_account_repo_author`, the identity target the 2-column
-// `account_reviewers_account_author`. A stale target raises "no unique or exclusion constraint
-// matching the ON CONFLICT specification" at RUNTIME; it type-checks perfectly.
+// LANDMINE 5 — the conflict target is the 3-COLUMN tuple
+// `workspace_reviewers_account_workspace_author`. A stale target raises "no unique or exclusion
+// constraint matching the ON CONFLICT specification" at RUNTIME, in both dialects, only when a row
+// is actually written; it type-checks perfectly.
 async function persist(
   accountId: number,
-  repoIds: number[],
+  workspaceIds: number[],
   c: Omit<ReviewerClassification, 'role'>,
+  opts: PersistOpts = {},
 ): Promise<ReviewerClassification> {
   const now = new Date();
   const role = defaultRoleFor(c.login);
 
-  // ── IDENTITY (actor grain) ────────────────────────────────────────────────────────────────
-  const idRow = (
-    await db
-      .select({ identitySource: accountReviewers.identitySource })
-      .from(accountReviewers)
-      .where(
-        and(
-          eq(accountReviewers.accountId, accountId),
-          eq(accountReviewers.authorUserId, c.userId),
-        ),
-      )
-      .limit(1)
-      .execute()
-  )[0];
-  if (idRow?.identitySource !== 'manual') {
-    const idValues = { kind: c.kind, label: c.label, updatedAt: now };
-    await db
-      .insert(accountReviewers)
-      .values({ accountId, authorUserId: c.userId, ...idValues })
-      .onConflictDoUpdate({
-        target: [accountReviewers.accountId, accountReviewers.authorUserId],
-        // `identity_source` is deliberately NOT in here: it takes its 'auto' default on insert,
-        // and on update it can only be 'auto' already (a 'manual' row never reaches this branch),
-        // so writing it would be noise that also looks like this path may set provenance.
-        set: idValues,
-      })
-      .execute();
-  }
+  for (const workspaceId of workspaceIds) {
+    const existing = (
+      await db
+        .select({
+          source: workspaceReviewers.source,
+          identitySource: workspaceReviewers.identitySource,
+        })
+        .from(workspaceReviewers)
+        .where(
+          and(
+            eq(workspaceReviewers.accountId, accountId),
+            eq(workspaceReviewers.workspaceId, workspaceId),
+            eq(workspaceReviewers.authorUserId, c.userId),
+          ),
+        )
+        .limit(1)
+        .execute()
+    )[0];
 
-  // ── JUDGEMENT (repo grain) ────────────────────────────────────────────────────────────────
-  if (repoIds.length > 0) {
-    const manualRows = await db
-      .select({ repoId: repoReviewers.repoId })
-      .from(repoReviewers)
-      .where(
-        and(
-          eq(repoReviewers.accountId, accountId),
-          eq(repoReviewers.authorUserId, c.userId),
-          eq(repoReviewers.source, 'manual'),
-          inArray(repoReviewers.repoId, repoIds),
-        ),
-      )
-      .execute();
-    const manual = new Set(manualRows.map((r) => r.repoId));
-    const writable = repoIds.filter((id) => !manual.has(id));
-    if (writable.length > 0) {
-      const values = {
+    const set: ReviewerSetValues = { updatedAt: now };
+    if (opts.only !== 'identity' && existing?.source !== 'manual') {
+      set.automated = c.automated;
+      set.role = role;
+      set.confidence = c.confidence;
+      set.source = c.source;
+      set.reasonsJson = c.reasons;
+    }
+    if (opts.only !== 'judgement' && existing?.identitySource !== 'manual') {
+      set.kind = c.kind;
+      set.label = c.label;
+    }
+    // Nothing this pass is allowed to write — emit NO statement at all rather than an UPDATE that
+    // only bumps `updated_at`, which would make a skipped row look freshly re-derived.
+    if (Object.keys(set).length === 1) continue;
+
+    await db
+      .insert(workspaceReviewers)
+      .values({
+        accountId,
+        workspaceId,
+        authorUserId: c.userId,
+        // The INSERT carries the FULL derived verdict regardless of `only`: `automated`,
+        // `confidence` and `source` are NOT NULL, so a brand-new row needs them, and a new row has
+        // no human opinion on either half to preserve. The price column is omitted ⇒ NULL.
+        // `identity_source` is omitted too, taking its 'auto' default — on the UPDATE path it can
+        // only be 'auto' already (a 'manual' identity never reaches the kind/label branch), so
+        // writing it would be noise that also reads as if this path may set provenance.
         automated: c.automated,
         role,
         confidence: c.confidence,
         source: c.source,
         reasonsJson: c.reasons,
+        kind: c.kind,
+        label: c.label,
         updatedAt: now,
-      };
-      await db
-        .insert(repoReviewers)
-        .values(writable.map((repoId) => ({ accountId, repoId, authorUserId: c.userId, ...values })))
-        .onConflictDoUpdate({
-          target: [repoReviewers.accountId, repoReviewers.repoId, repoReviewers.authorUserId],
-          set: values,
-        })
-        .execute();
-    }
+      })
+      .onConflictDoUpdate({
+        target: [
+          workspaceReviewers.accountId,
+          workspaceReviewers.workspaceId,
+          workspaceReviewers.authorUserId,
+        ],
+        set,
+      })
+      .execute();
   }
   return { ...c, role };
 }
@@ -262,34 +307,43 @@ async function persist(
 // comments — the population `classifyReviewer` is deliberately not run for (there are no reviews
 // to score, so every signal it could read is absent).
 //
-// It exists because THE ROW IS THE BOT OBJECT: a (repo, actor) pair with no row cannot be listed,
-// and therefore cannot be corrected by hand either. Writing a low-confidence non-manual row makes
-// the pair visible and leaves it fully re-derivable — the moment that person submits a real
-// review, the next classification pass overwrites this.
+// It exists because THE ROW IS THE BOT OBJECT: a (workspace, actor) pair with no row cannot be
+// listed, and therefore cannot be corrected by hand either. Writing a low-confidence non-manual
+// row makes the pair visible and leaves it fully re-derivable — the moment that person submits a
+// real review, the next classification pass overwrites this.
 //
-// Same two gates as persist(): it never touches a `source='manual'` repo row, and it writes NO
-// identity at all (a human has no vendor kind to record, and stamping one would be a claim).
+// ⚠ TWO PROPERTIES THAT WERE EMERGENT UNDER TWO TABLES AND ARE NOW REQUIREMENTS:
+//   (a) the values object contains NO `kind`/`label` AT ALL, so a human judgement can never rename
+//       the vendor as a side effect. Under the merged row that omission is the ONLY thing stopping
+//       it — there is no longer a table boundary doing the job. (A new row therefore comes up with
+//       kind/label NULL, which is correct: a human has no vendor kind, and stamping one is a
+//       claim.) The price column is likewise absent, so a price already recorded survives.
+//   (b) it still narrows to the workspaces no human owns (`source = 'manual'`) by READING them
+//       first, not by a `setWhere` — drizzle spells that clause differently per dialect while `db`
+//       is pg-typed.
+// Because the shared values object here names ONLY judgement columns and the manual rows are
+// already filtered out, one batched statement is safe: every writable row takes identical values.
 export async function persistHumanJudgement(
   accountId: number,
-  repoIds: number[],
+  workspaceIds: number[],
   userId: number,
   login: string,
 ): Promise<void> {
-  if (repoIds.length === 0) return;
+  if (workspaceIds.length === 0) return;
   const manualRows = await db
-    .select({ repoId: repoReviewers.repoId })
-    .from(repoReviewers)
+    .select({ workspaceId: workspaceReviewers.workspaceId })
+    .from(workspaceReviewers)
     .where(
       and(
-        eq(repoReviewers.accountId, accountId),
-        eq(repoReviewers.authorUserId, userId),
-        eq(repoReviewers.source, 'manual'),
-        inArray(repoReviewers.repoId, repoIds),
+        eq(workspaceReviewers.accountId, accountId),
+        eq(workspaceReviewers.authorUserId, userId),
+        eq(workspaceReviewers.source, 'manual'),
+        inArray(workspaceReviewers.workspaceId, workspaceIds),
       ),
     )
     .execute();
-  const manual = new Set(manualRows.map((r) => r.repoId));
-  const writable = repoIds.filter((id) => !manual.has(id));
+  const manual = new Set(manualRows.map((r) => r.workspaceId));
+  const writable = workspaceIds.filter((id) => !manual.has(id));
   if (writable.length === 0) return;
   const values = {
     automated: false,
@@ -300,10 +354,14 @@ export async function persistHumanJudgement(
     updatedAt: new Date(),
   };
   await db
-    .insert(repoReviewers)
-    .values(writable.map((repoId) => ({ accountId, repoId, authorUserId: userId, ...values })))
+    .insert(workspaceReviewers)
+    .values(writable.map((workspaceId) => ({ accountId, workspaceId, authorUserId: userId, ...values })))
     .onConflictDoUpdate({
-      target: [repoReviewers.accountId, repoReviewers.repoId, repoReviewers.authorUserId],
+      target: [
+        workspaceReviewers.accountId,
+        workspaceReviewers.workspaceId,
+        workspaceReviewers.authorUserId,
+      ],
       set: values,
     })
     .execute();
@@ -350,22 +408,26 @@ async function aiTiebreak(
   }
 }
 
-// `repoIds` is the set of REPO ROWS this verdict should be written to — the actor's in-scope
-// pairs. It is REQUIRED and positional so no caller can "just classify" without saying where the
-// answer lands: the row IS the bot object, and a verdict with no row is a verdict nobody can see
-// or correct. An empty list is legal (the identity half still writes) but does nothing useful.
+// `workspaceIds` is the set of WORKSPACE ROWS this verdict should be written to. It is REQUIRED
+// and positional so no caller can "just classify" without saying where the answer lands: the row
+// IS the bot object, and a verdict with no row is a verdict nobody can see or correct.
 //
-// THERE IS NO "MANUAL OVERRIDE WINS" EARLY RETURN ANY MORE, and its absence is the point. Under
-// one table, one manual row shadowed the whole derivation for that actor. Now a manual row is
-// per REPO and per GRAIN, so the derivation always runs and `persist` declines the rows a human
-// owns — which is what lets a manual "not a bot" on `web` coexist with fresh auto verdicts on
-// `api` and `infra`. The value this function RETURNS is therefore the DERIVED verdict, not
-// necessarily what is stored for any given repo; read the rows back if you need that.
+// ⚠ AN EMPTY LIST IS A NO-OP WITH NO CALLER, NOT A MECHANISM. It used to be the way to write the
+// identity half alone (two statements, two tables, only the judgement gated on the list being
+// non-empty). Under one row and one per-workspace loop it writes NOTHING, so the two reset paths
+// pass a real workspace id plus `opts.only` instead — see PersistOpts.
+//
+// THERE IS NO "MANUAL OVERRIDE WINS" EARLY RETURN, and its absence is the point. A manual flag is
+// per WORKSPACE and per HALF, so the derivation always runs and `persist` declines exactly the
+// columns a human owns — which is what lets a manual "not a bot" in one workspace coexist with a
+// fresh auto verdict in the next, and a manual vendor name coexist with a re-derived judgement in
+// the same row. The value this function RETURNS is therefore the DERIVED verdict, not necessarily
+// what is stored for any given workspace; read the row back if you need that.
 export async function classifyReviewer(
   accountId: number,
   user: { id: number; githubLogin: string; githubType?: string | null; isBot: boolean },
   evidence: ReviewerEvidence,
-  repoIds: number[],
+  workspaceIds: number[],
   opts: ClassifyOpts = {},
 ): Promise<ReviewerClassification> {
   const login = user.githubLogin;
@@ -374,16 +436,21 @@ export async function classifyReviewer(
   // 1. Known vendor login.
   const vendor = reviewBotKind(login);
   if (vendor) {
-    return persist(accountId, repoIds, {
-      userId: user.id,
-      login,
-      automated: true,
-      kind: vendor,
-      label: labelFor(vendor),
-      confidence: 'high',
-      source: 'vendor_login',
-      reasons: [`login "${login}" is a known ${labelFor(vendor)} review bot`],
-    });
+    return persist(
+      accountId,
+      workspaceIds,
+      {
+        userId: user.id,
+        login,
+        automated: true,
+        kind: vendor,
+        label: labelFor(vendor),
+        confidence: 'high',
+        source: 'vendor_login',
+        reasons: [`login "${login}" is a known ${labelFor(vendor)} review bot`],
+      },
+      opts,
+    );
   }
 
   // 2. GitHub App / Bot typename, or opt-in app attribution.
@@ -395,31 +462,41 @@ export async function classifyReviewer(
       isBotType ? 'GitHub reports this account as a Bot' : 'posted via a GitHub App',
     ];
     if (fp?.marked) reasons.push(...describeMarkers(fp));
-    return persist(accountId, repoIds, {
-      userId: user.id,
-      login,
-      automated: true,
-      kind,
-      label: kind === 'in_house' ? login : labelFor(kind),
-      confidence: 'high',
-      source,
-      reasons,
-    });
+    return persist(
+      accountId,
+      workspaceIds,
+      {
+        userId: user.id,
+        login,
+        automated: true,
+        kind,
+        label: kind === 'in_house' ? login : labelFor(kind),
+        confidence: 'high',
+        source,
+        reasons,
+      },
+      opts,
+    );
   }
 
   // 3. Branded/marked fingerprint.
   if (fp?.marked) {
     const kind: AutomatedReviewerKind = fp.tool ?? 'in_house';
-    return persist(accountId, repoIds, {
-      userId: user.id,
-      login,
-      automated: true,
-      kind,
-      label: labelFor(kind),
-      confidence: 'high',
-      source: 'fingerprint',
-      reasons: describeMarkers(fp),
-    });
+    return persist(
+      accountId,
+      workspaceIds,
+      {
+        userId: user.id,
+        login,
+        automated: true,
+        kind,
+        label: labelFor(kind),
+        confidence: 'high',
+        source: 'fingerprint',
+        reasons: describeMarkers(fp),
+      },
+      opts,
+    );
   }
 
   // 4. Behavioral band (MEDIUM — never auto-badges; the UI asks "confirm?").
@@ -430,56 +507,76 @@ export async function classifyReviewer(
     if (opts.enableAiTiebreak) {
       const ai = await aiTiebreak(accountId, user.id);
       if (ai === 'automated') {
-        return persist(accountId, repoIds, {
-          userId: user.id,
-          login,
-          automated: true,
-          kind: 'in_house',
-          label: allowlistMatch ? login : 'In-house AI',
-          confidence: 'high',
-          source: 'ai_tiebreak',
-          reasons: [...beh.reasons, 'AI tie-break: comments read as machine-generated'],
-        });
+        return persist(
+          accountId,
+          workspaceIds,
+          {
+            userId: user.id,
+            login,
+            automated: true,
+            kind: 'in_house',
+            label: allowlistMatch ? login : 'In-house AI',
+            confidence: 'high',
+            source: 'ai_tiebreak',
+            reasons: [...beh.reasons, 'AI tie-break: comments read as machine-generated'],
+          },
+          opts,
+        );
       }
       if (ai === 'human') {
-        return persist(accountId, repoIds, {
-          userId: user.id,
-          login,
-          automated: false,
-          kind: null,
-          label: login,
-          confidence: 'high',
-          source: 'ai_tiebreak',
-          reasons: [...beh.reasons, 'AI tie-break: comments read as human-written'],
-        });
+        return persist(
+          accountId,
+          workspaceIds,
+          {
+            userId: user.id,
+            login,
+            automated: false,
+            kind: null,
+            label: login,
+            confidence: 'high',
+            source: 'ai_tiebreak',
+            reasons: [...beh.reasons, 'AI tie-break: comments read as human-written'],
+          },
+          opts,
+        );
       }
       // ai === null → unavailable/ambiguous → fall through to the medium result.
     }
-    return persist(accountId, repoIds, {
-      userId: user.id,
-      login,
-      automated: true,
-      kind: 'in_house',
-      label: allowlistMatch ? login : 'In-house AI',
-      confidence: 'medium',
-      source: 'behavioral',
-      reasons: beh.reasons,
-    });
+    return persist(
+      accountId,
+      workspaceIds,
+      {
+        userId: user.id,
+        login,
+        automated: true,
+        kind: 'in_house',
+        label: allowlistMatch ? login : 'In-house AI',
+        confidence: 'medium',
+        source: 'behavioral',
+        reasons: beh.reasons,
+      },
+      opts,
+    );
   }
 
   // Otherwise → human. Strong (HIGH) when we had enough behavioral evidence to look and
   // it didn't trip; LOW when there was nothing to go on.
   const hadEvidence = (evidence.behavioral?.reviews ?? 0) >= 3;
-  return persist(accountId, repoIds, {
-    userId: user.id,
-    login,
-    automated: false,
-    kind: null,
-    label: login,
-    confidence: hadEvidence ? 'high' : 'low',
-    source: evidence.behavioral ? 'behavioral' : 'fingerprint',
-    reasons: hadEvidence
-      ? ['no automation markers; reviewing behaviour looks human']
-      : ['no automated-reviewer signals'],
-  });
+  return persist(
+    accountId,
+    workspaceIds,
+    {
+      userId: user.id,
+      login,
+      automated: false,
+      kind: null,
+      label: login,
+      confidence: hadEvidence ? 'high' : 'low',
+      source: evidence.behavioral ? 'behavioral' : 'fingerprint',
+      reasons: hadEvidence
+        ? ['no automation markers; reviewing behaviour looks human']
+        : ['no automated-reviewer signals'],
+    },
+    opts,
+  );
 }

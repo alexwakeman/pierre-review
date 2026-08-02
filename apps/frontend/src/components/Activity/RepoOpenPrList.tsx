@@ -26,7 +26,7 @@ const OPEN_PRS_PAGE = 10;
 
 // One open-PR row: CI dot · ⚠ needs-attention · #number title · author · draft / approval /
 // merge chips · thread-state bar · my-turn reason or updated-time. Shared by the single-repo
-// RepoOpenPrList and the Feed's team-grouped "open PRs" panel, so both read identically.
+// RepoOpenPrList and the Feed's repo-grouped "open PRs" panel, so both read identically.
 // Clicking the row opens the PR's own full-height pr-detail tab (its Show/Focus links then
 // drive the timeline; a PR-detail button isolates the feed if wanted).
 export function OpenPrRow({
@@ -133,11 +133,11 @@ export function OpenPrRow({
 }
 
 // A <ul> of the first OPEN_PRS_PAGE open-PR rows, shared by the per-repo list and the
-// cross-repo Feed panel (one instance per team group). `prs` must ALREADY be sorted by the
+// cross-repo Feed panel (one instance per repo group). `prs` must ALREADY be sorted by the
 // caller (sortOpenPrsByActivity). Anything beyond the first page lives in the all-open-PRs
 // drill-down tab — the footer's "Show all N" calls `onShowAll` (the caller opens the tab with
 // its own scope). Clicking a row opens the PR's own pr-detail tab. `keyPrefix` keeps React
-// keys unique when the same PR appears under multiple team groups.
+// keys unique when the same PR appears under more than one group.
 export function OpenPrRows({
   prs,
   usersById,

@@ -7,11 +7,16 @@ import { MagnifierIcon } from '../Icons.js';
 import { KIND_GLYPH, KIND_LABEL, openSearchHit } from './searchNav.js';
 import { highlightTerms } from './highlight.js';
 
-// The global cross-team search box (in the FilterBar). Debounced; a query ≥ 2 chars pops a panel of
+// The global cross-repo search box (in the FilterBar). Debounced; a query ≥ 2 chars pops a panel of
 // the top hits (PRs / reviews / threads / comments) + matching people. Clicking a hit opens it (a
 // thread hit deep-links to its thread); Enter, or "See all results", opens the full results tab.
-// Scoped to the active team (the hook reads teamScope). Purely additive to the timeline-title
-// TimelineSearch — this one searches the SERVER index (bodies, comments, people), not loaded PRs.
+// Scoped to the ACTIVE WORKSPACE (useSearchDropdown reads `workspaceId` straight from the store, so
+// a caller cannot widen it). Purely additive to the timeline-title TimelineSearch — this one
+// searches the SERVER index (bodies, comments, people), not loaded PRs.
+//
+// The input carries a stable `id` because it is the `/` shortcut's target (hooks/useKeyboard.ts):
+// this box is mounted on EVERY view, where the add-repo field only exists inside the
+// "Manage repos & workspaces" modal.
 export function GlobalSearch(): JSX.Element {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
@@ -55,6 +60,7 @@ export function GlobalSearch(): JSX.Element {
         <MagnifierIcon size={13} />
       </div>
       <input
+        id="global-search-input"
         type="search"
         value={query}
         placeholder="Search PRs, threads, people…"
@@ -64,7 +70,7 @@ export function GlobalSearch(): JSX.Element {
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
-        aria-label="Search PRs, reviews, threads, comments and people across your team's repos"
+        aria-label="Search PRs, reviews, threads, comments and people across this workspace's repos"
         className="w-64 rounded border border-gray-300 bg-transparent py-0.5 pl-7 pr-2 text-xs focus:border-blue-500 focus:outline-none dark:border-gray-700"
       />
       {showPanel && (

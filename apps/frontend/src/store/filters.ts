@@ -12,8 +12,7 @@ import {
   type PrStatus,
   type ReviewBotKind,
   type ReviewState,
-  type TeamMetricKey,
-  type TeamScope,
+  type WorkspaceMetricKey,
   type SprintChatResponse,
 } from '@pierre-review/shared';
 
@@ -28,8 +27,9 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // The Insights console's sub-tab keys. TWO members were REMOVED and must not come back here:
 //  • 'retro'   — the Pro "Retro" narrative panel was deleted (its content is now a quick-question
 //                pill in the ad-hoc chat).
-//  • 'compare' — cross-team comparison MOVED to the cross-repo Feed's sub-tab bar (feedInnerTab
-//                below), where it sits beside the free DORA header it shares a window with.
+//  • 'compare' — cross-WORKSPACE comparison is its own Activity RAIL entry now
+//                (activityRepoId === 'compare'), gated on the account having 2+ workspaces. It
+//                lived here, then briefly on the Feed's sub-tab bar; neither is where it is now.
 // 'sprint' is likewise vestigial (that tab was folded into Overview long ago) and is deliberately
 // KEPT in the union: it is the one value that makes the "stale sub-tab → 'overview'" redirect in
 // InsightsView both reachable and type-checkable. A stale/deep-linked value MUST normalize to
@@ -37,9 +37,22 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // blank pane. This field is transient (freshDefaults only, never persisted, never URL-parsed), so
 // a stale value can only live in memory for one session.
 export type InsightsSubTab = 'overview' | 'sprint';
-// The all-open-PRs drill-down's scope: one repo | the FilterBar-visible 'feed' scope | a
-// team group (label + the exact repo set behind it — see openPrsScope).
+// The all-open-PRs drill-down's scope: one repo | the FilterBar-visible 'feed' scope | a named
+// repo GROUP (label + the exact repo set behind it — see openPrsScope).
 export type OpenPrsScope = number | 'feed' | { label: string; repoIds: number[] };
+
+/**
+ * The cache/result key for a workspace-scoped client-side memo — `ws:<id>`.
+ *
+ * It deliberately shares its vocabulary with the plugin's `scopeKeyFor` (packages/pro
+ * `insights/workspace-scope.ts`), which is what the server persists in `scope_key`. The prefix is
+ * load-bearing: a bare `String(workspaceId)` would alias a legacy team scope string ('3') onto
+ * workspace 3, whose repo set is different, and the stale answer would be served under the new
+ * name. Use this everywhere a workspace has to key a Record — never hand-roll the template.
+ */
+export function workspaceScopeKey(workspaceId: number): string {
+  return `ws:${workspaceId}`;
+}
 
 export type RangePreset = '7d' | '14d' | '30d' | '90d' | 'custom';
 
@@ -92,14 +105,27 @@ const PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = {
 };
 
 export interface FilterState {
-  // null = "all" (no explicit selection yet)
+  // Which of the ACTIVE WORKSPACE's repos are visible. null = every repo in the active workspace
+  // (NOT every repo in the account — the workspace already bounds the set). An explicit array is
+  // the per-repo show/hide narrowing (RepoSelectPanel) and is sent on the wire even when EMPTY:
+  // an empty workspace is a real narrowing, and dropping the param is what made the server fall
+  // back to the whole account.
   repoIds: number[] | null;
-  // The active TEAM scope selector: 'all' (every account repo), 'none' (repos in no team),
-  // or a teamId (that team's repos). Persisted + URL-mirrored (team=…). setTeamScope keeps
-  // it in lockstep with repoIds (the caller resolves the team → repoIds from the teams data,
-  // 'all' → null). A component effect re-derives repoIds once teams load for a URL-restored
-  // team=<id>.
-  teamScope: TeamScope;
+  // THE ACTIVE WORKSPACE — the single scope selector. A plain id; there is no union, no sentinel
+  // and no wire-string form (that whole vocabulary — 'all' / 'none' / 'teams' / 'teams:1,2' —
+  // is gone with TeamScope, and so are the five canonicalisation helpers that existed to keep it
+  // honest).
+  //
+  // `null` = NOT RESOLVED YET. Nothing may render workspace-scoped data while it is null: the
+  // account's Default id varies per account, so there is no static default to assume. The
+  // workspace-sync effect (WorkspaceSelector) fills it from listWorkspaces()' default the moment
+  // that query lands, and corrects a stored id that names no live workspace.
+  //
+  // Persisted in its OWN slice (pickScopeState / a separate storage key) and URL-mirrored as
+  // `?workspace=<id>`. It is deliberately NOT in FilterDefaults: persistence and "Clear filters"
+  // share that list, so a persisted workspaceId would also be RESET by clearing a date range —
+  // silently teleporting the user into Default. See resetAllFilters.
+  workspaceId: number | null;
   userIds: number[] | null;
   excludeBots: boolean;
   // Bots to KEEP visible even when excludeBots is on — the per-repo "important bots"
@@ -154,34 +180,39 @@ export interface FilterState {
   botAnalyticsWindow: BotWindowKind;
   // Which inner sub-tab the Bots view shows: 'roi' (the shipped ROI panel + bot feed),
   // 'behaviour' (the EXPERIMENTAL behaviour analytics), 'themes' (the Pro Haiku summary), or
-  // 'settings' (the per-TEAM "who counts as a review bot here" classification tab). A single
+  // 'settings' (the "who counts as a review bot in this workspace" classification tab). A single
   // scalar (both the cross-repo rail Bots view and the per-repo console Bots tab share one
-  // BotsView) — so 'settings' can be selected while a PER-REPO Bots tab is showing, where it
-  // has no meaning: a repo can sit in several teams (teamRepos is many-to-many), so a repo tab
-  // cannot express a team key. BotsView's effectiveTab fallback must degrade a stale 'settings'
-  // to 'roi' there. Transient, URL-silent.
+  // BotsView) — so 'settings' can be selected while a PER-REPO Bots tab is showing, where it is
+  // the same list narrowed to one repo's footprint rather than a different judgement (the bot
+  // object is keyed per WORKSPACE now, and a repo belongs to exactly one). BotsView's
+  // effectiveTab fallback still owns any degradation. Transient, URL-silent.
   botsInnerTab: 'roi' | 'behaviour' | 'themes' | 'settings';
-  // (There is no `botSettingsTeamId` any more. The Bots "Settings" tab used to carry its own team
-  // picker because the judgement was keyed per team; a bot is a per-REPO object now, so the panel
-  // just reads the FilterBar's repo/team scope like every other Bots panel.)
+  // (There is no `botSettingsTeamId` / per-repo judgement picker. The judgement is keyed by the
+  // active WORKSPACE, so the panel just reads `workspaceId` like every other Bots panel.)
   //
   // Which inner sub-tab the cross-repo Feed rail shows: 'feed' (the metrics header + consolidated
-  // feed), 'themes' (the Pro "Discussion themes" AI summary), or 'compare' (the CORE/free
-  // cross-team comparison matrix, moved here from Insights — shown only when 2+ teams are in
-  // scope; see isMultiTeamScope). Transient, URL-silent.
+  // feed) or 'themes' (the Pro "Discussion themes" AI summary). Transient, URL-silent.
   //
-  // Landmine: 'themes' is capability-gated and 'compare' is scope-gated, so this scalar can hold
-  // a key whose tab isn't currently rendered. The consumer must DERIVE an effective tab from the
+  // 'compare' is NOT a member: cross-workspace comparison is its own Activity RAIL entry
+  // (activityRepoId === 'compare'), gated on the account having 2+ workspaces.
+  //
+  // Landmine (still live for 'themes'): it is capability-gated, so this scalar can hold a key
+  // whose tab isn't currently rendered. The consumer must DERIVE an effective tab from the
   // visible tab list rather than writing a correction back into the store — a write permanently
-  // forgets the user's choice, so un-ticking a team would silently lose Compare instead of
-  // restoring it when the team is re-ticked.
-  feedInnerTab: 'feed' | 'themes' | 'compare';
+  // forgets the user's choice, so losing the capability for a moment would silently forget
+  // Themes instead of restoring it when the capability returns. Being transient (freshDefaults
+  // only, never persisted, never URL-parsed) a stale value cannot outlive the session, which is
+  // why removing 'compare' from the union needs no migration.
+  feedInnerTab: 'feed' | 'themes';
   // The ad-hoc "Ask about the sprint" chat's LIVE state, lifted here so it survives the Insights
   // panel unmounting (e.g. clicking a PR then returning) — the mutation result lives in
   // component state and would otherwise be lost. `draft` = the in-progress question + toggles.
-  // `results` = the last answer shown, keyed BY SCOPE (scopeToParam) so each team/context keeps
-  // its own answer and switching to a context you haven't asked in shows nothing (never the
-  // previous team's output). Transient, URL-silent; NOT the persisted history.
+  // `results` = the last answer shown, keyed by `workspaceScopeKey(workspaceId)` (`ws:<id>`) so
+  // each workspace keeps its own answer and switching to one you haven't asked in shows nothing
+  // (never the previous workspace's output). The key MUST come from that helper, not from a
+  // plausible-looking `String(workspaceId)`: it is the same vocabulary the server persists in
+  // `scope_key`, and the `ws:` prefix is what stops a legacy '3' aliasing workspace 3.
+  // Transient, URL-silent; NOT the persisted history.
   sprintChatDraft: { question: string; wantChart: boolean; wantBots: boolean };
   sprintChatResults: Record<string, SprintChatResponse | null>;
 
@@ -225,34 +256,34 @@ export interface FilterState {
 
   // transient: a clicked flow-metric tile → which metric the drill-down tab should show.
   // Seeds/re-jumps the MetricsDetail sub-tab (the tab itself is a singleton). null = none.
-  metricsFocus: TeamMetricKey | null;
+  metricsFocus: WorkspaceMetricKey | null;
 
   // transient: a clicked Bot-ROI vendor row → which analytics-row KEY (`u<userId>` | 'pierre')
   // the bot-PR drill-down tab should show. Seeds/re-jumps the BotPrsDetail sub-tab (the tab
   // itself is a singleton). null = none.
   botPrsFocusKey: string | null;
   // transient: the repo the bot-PR drill-down was opened FROM (the per-repo Bots tab), so the
-  // drill-down stays scoped to that repo. null = account/team scope (the cross-repo Bots rail).
+  // drill-down stays scoped to that repo. null = the whole active workspace (the cross-repo
+  // Bots rail).
   botPrsFocusRepoId: number | null;
 
   // transient: the scope the all-open-PRs drill-down tab lists — a repoId (that repo's open
-  // PRs), 'feed' (the FilterBar-visible scope), or a team GROUP (label + the exact repo set
-  // behind a FeedOpenPrsPanel group — teams span repos, so a repoId list, not a teamId,
-  // reproduces the group and keeps the footer's promised count ≡ the tab). Read (not
-  // consumed) for the tab's lifetime, like botPrsFocusRepoId. null = never opened.
+  // PRs), 'feed' (the FilterBar-visible scope), or a named GROUP (label + the exact repo set
+  // behind a FeedOpenPrsPanel group — a repoId list, so the footer's promised count ≡ the tab).
+  // Read (not consumed) for the tab's lifetime, like botPrsFocusRepoId. null = never opened.
   openPrsScope: OpenPrsScope | null;
 
   // transient: the repo the bot-only-PRs drill-down was opened FROM (the per-repo Bots tab).
-  // null = account/team scope (the cross-repo Bots rail). Read-not-consumed, like the above.
+  // null = the whole active workspace (the cross-repo Bots rail). Read-not-consumed, like above.
   botOnlyFocusRepoId: number | null;
-  // transient: the repo the resolvable-bot-threads tab was opened FROM. null = account/team
-  // scope. Read-not-consumed, like the above.
+  // transient: the repo the resolvable-bot-threads tab was opened FROM. null = the whole active
+  // workspace. Read-not-consumed, like the above.
   botThreadsFocusRepoId: number | null;
   // transient: the theme whose review threads / PR comments the theme-threads drill-down renders
   // (carries the theme's resolved `threads` + `prs`) + which summary it came from (for labels).
   // Read-not-consumed, like the above.
   themeThreadsSeed: { theme: BotTheme; source: 'bot' | 'human' } | null;
-  // transient: the query string the cross-team search-results tab renders. Read-not-consumed
+  // transient: the query string the cross-repo search-results tab renders. Read-not-consumed
   // (survives the tab's lifetime), like the drill-down seeds above. null = never opened.
   searchSeed: string | null;
 
@@ -263,12 +294,18 @@ export interface FilterState {
   // side narrow, no refetch. (The old 'all' briefing-feed pseudo-row was removed — it was
   // redundant with the Feed + per-repo entries.) Transient (mirrors myTurnOnly/
   // insightsOpen): in freshDefaults() but NOT in pickFilterBarState /
-  // sanitizePersistedFilters. `?activityRepo=<id>` / `?activityRepo=bots` are the URL mirrors
-  // (see useUrlState); the active TAB lives in the pinnedTabs store. 'bots' = the CORE/free
-  // review-bot triage console (BotsView); 'insights' is the Pro Insights rail entry. (The
-  // 'retro' rail value was REMOVED with the Retro panel — it was already unreachable: nothing
-  // called setActivityRepo('retro') and useUrlState never parsed it.)
-  activityRepoId: number | 'feed' | 'attention' | 'insights' | 'bots' | null;
+  // sanitizePersistedFilters. `?activityRepo=<id>` / `bots` / `attention` / `compare` are the
+  // URL mirrors (see useUrlState); the active TAB lives in the pinnedTabs store. 'bots' = the
+  // CORE/free review-bot triage console (BotsView); 'compare' = the CORE/free cross-WORKSPACE
+  // comparison matrix, gated on the account having 2+ workspaces; 'insights' is the Pro
+  // Insights rail entry. (The 'retro' rail value was REMOVED with the Retro panel — it was
+  // already unreachable: nothing called setActivityRepo('retro') and useUrlState never parsed it.)
+  //
+  // Landmine (same discipline as feedInnerTab): 'compare' is GATED, so this scalar can name a
+  // rail entry that isn't currently rendered. The consumer DERIVES a fallback ('feed') for the
+  // render and leaves the store alone — a corrective set() would permanently forget the choice,
+  // so deleting and recreating a workspace would lose Compare instead of restoring it.
+  activityRepoId: number | 'feed' | 'attention' | 'insights' | 'bots' | 'compare' | null;
   // Soft thread-state filter inside an Activity repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
@@ -323,9 +360,15 @@ export interface FilterState {
   claudeReviewKickoff: number;
 
   setRepoIds: (ids: number[] | null) => void;
-  // Set the active team scope AND the resolved repo visibility together. The caller
-  // resolves `repoIds` from the teams data (via resolveScopeRepoIds); 'all' → null.
-  setTeamScope: (scope: TeamScope, repoIds: number[] | null) => void;
+  // Switch the active WORKSPACE and set the resolved repo visibility together. The caller
+  // resolves `repoIds` from the workspaces data (workspaceRepoIds(workspaceId, workspaces));
+  // pass null for "every repo in the workspace".
+  //
+  // ⚠ This is the REPLACE path — it is for switching workspace (and for the sync effect
+  // adopting a Default / correcting an id that names no live workspace). A PRUNE (dropping ids
+  // that left the workspace while leaving a user-narrowed subset alone) must go through
+  // setRepoIds, or the per-repo show/hide would be reverted by the next background refetch.
+  setWorkspace: (workspaceId: number, repoIds: number[] | null) => void;
   toggleRepo: (id: number) => void;
   // Make a repo visible WITHOUT clearing an active filter: a no-op when all repos
   // are already shown (repoIds == null) or the id is already in the visible set,
@@ -370,7 +413,7 @@ export interface FilterState {
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
   // Switch the Bots view's inner sub-tab (ROI / experimental Behaviour / Themes / Settings).
   setBotsInnerTab: (v: 'roi' | 'behaviour' | 'themes' | 'settings') => void;
-  setFeedInnerTab: (v: 'feed' | 'themes' | 'compare') => void;
+  setFeedInnerTab: (v: 'feed' | 'themes') => void;
   // Persist the ad-hoc chat's live draft + last result across Insights remounts.
   setSprintChatDraft: (
     patch: Partial<{ question: string; wantChart: boolean; wantBots: boolean }>,
@@ -448,7 +491,7 @@ export interface FilterState {
   consumeAiFixTabFocus: () => void;
   // Open (or re-focus) the flow-metric drill-down tab on a specific metric. Sets the
   // metricsFocus signal + opens the singleton metrics tab; MetricsDetail consumes it.
-  openMetricsDetail: (metric: TeamMetricKey) => void;
+  openMetricsDetail: (metric: WorkspaceMetricKey) => void;
   consumeMetricsFocus: () => void;
   // Open (or re-focus) the bot-vendor PR drill-down tab on a specific analytics-row key
   // (`u<userId>` | 'pierre'). Sets the botPrsFocusKey signal + opens the singleton bot-PRs tab;
@@ -456,14 +499,14 @@ export interface FilterState {
   openBotPrsDetail: (key: string, repoId?: number | null) => void;
   consumeBotPrsFocus: () => void;
   // Open (or re-focus) the sortable all-open-PRs drill-down tab on a scope (a repoId | the
-  // FilterBar-visible 'feed' scope | a team group). Sets the openPrsScope seed + opens the
+  // FilterBar-visible 'feed' scope | a named repo group). Sets the openPrsScope seed + opens the
   // singleton tab; OpenPrsDetail reads (never consumes) the seed.
   openOpenPrsDetail: (scope: OpenPrsScope) => void;
   // Open (or re-focus) the bot-only-PRs drill-down tab (the amber "only a bot reviewed
-  // these" caption). repoId scopes it to one repo; null = the cross-repo Bots scope.
+  // these" caption). repoId scopes it to one repo; null = the whole active workspace.
   openBotOnlyDetail: (repoId: number | null) => void;
   // Open (or re-focus) the resolvable-bot-threads review & resolve tab (the Bot-ROI
-  // backlog banner). repoId scopes it to one repo; null = the cross-repo Bots scope.
+  // backlog banner). repoId scopes it to one repo; null = the whole active workspace.
   openBotThreadsDetail: (repoId: number | null) => void;
   openThemeThreadsDetail: (theme: BotTheme, source: 'bot' | 'human') => void;
   openSearchDetail: (query: string) => void;
@@ -472,9 +515,11 @@ export interface FilterState {
   // records the added repo id so the modal can scope to just that repo.
   requestSyncModal: (repoId: number) => void;
   bumpClaudeReviewKickoff: () => void;
-  // Select an Activity detail target (a repo id, or 'feed' for the cross-repo consolidated
-  // Feed).
-  setActivityRepo: (id: number | 'feed' | 'attention' | 'insights' | 'bots') => void;
+  // Select an Activity detail target (a repo id, or one of the pseudo-rows: 'feed' for the
+  // cross-repo consolidated Feed, 'bots', 'attention', 'compare', 'insights').
+  setActivityRepo: (
+    id: number | 'feed' | 'attention' | 'insights' | 'bots' | 'compare',
+  ) => void;
   // Set/clear the Activity repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
   setActivityThreadFilter: (s: DerivedState | null) => void;
@@ -488,6 +533,9 @@ export interface FilterState {
   // derived states, search, excludeBots, excludeStale, strip filter) back to its
   // fresh-load default. Selection and focus state are deliberately left intact —
   // "Clear filters" only clears filters, it doesn't deselect the PR or exit focus.
+  // ⚠ `workspaceId` is NOT a filter and is explicitly PRESERVED: clearing a date range must
+  // never teleport the user into another workspace. That is the whole reason it lives outside
+  // FilterDefaults (persistence and reset share that one list).
   // The filter defaults mirror freshFilterDefaults() so useUrlState's diff-against-
   // defaults drops those params from the URL. (The FilterBar disables this while a
   // focus overlay is active, so it never runs mid-focus.)
@@ -513,10 +561,20 @@ type FilterData = Omit<
 // Selection, focus, transient signals and detail-view state are NOT here: Clear
 // all leaves them alone. These values are what useUrlState diffs against, so a
 // reset drops the filter params from the URL.
+//
+// ⚠ `workspaceId` MUST NOT JOIN THIS LIST. Persistence (pickFilterBarState), restore
+// (sanitizePersistedFilters, which whitelists against freshFilterDefaults()) and reset
+// (resetAllFilters) are all driven by it, so anything here is reset by "Clear filters" — and a
+// workspace that resets to Default whenever a user clears a date range is a silent context
+// switch. The scope is persisted in its own slice (pickScopeState) instead.
+//
+// A happy consequence of the same structure: because sanitizePersistedFilters whitelists against
+// freshFilterDefaults(), a returning user's LEGACY persisted `teamScope` ('all' | 'none' |
+// 'teams' | 'teams:1,2' | a bare number) is dropped automatically by its absence here — there is
+// no coercion path that could read a bare team id as a workspace id.
 type FilterDefaults = Pick<
   FilterState,
   | 'repoIds'
-  | 'teamScope'
   | 'userIds'
   | 'excludeBots'
   | 'allowedBotIds'
@@ -534,10 +592,9 @@ type FilterDefaults = Pick<
 // call so callers never share a mutable reference.
 function freshFilterDefaults(): FilterDefaults {
   return {
+    // null = every repo in the ACTIVE WORKSPACE (see FilterState.repoIds). The URL serializer
+    // diffs against this, so a fresh load stays clean (no repos= param).
     repoIds: null,
-    // Scope defaults to every account repo. The URL serializer diffs against this, so a
-    // fresh load stays clean (no team= param).
-    teamScope: 'all',
     userIds: null,
     // Bots are SHOWN on a fresh load (default OFF); the user can hide them via the
     // Members dropdown, and that non-default choice round-trips as bots=1 (see
@@ -567,7 +624,6 @@ function freshFilterDefaults(): FilterDefaults {
 export function pickFilterBarState(s: FilterState): FilterDefaults {
   return {
     repoIds: s.repoIds,
-    teamScope: s.teamScope,
     userIds: s.userIds,
     excludeBots: s.excludeBots,
     allowedBotIds: s.allowedBotIds,
@@ -583,10 +639,17 @@ export function pickFilterBarState(s: FilterState): FilterDefaults {
 }
 
 // Restore an UNTRUSTED persisted blob (old localStorage / a saved view) down to the
-// known persisted filter-bar keys, dropping everything else. Critically this drops a
-// LEGACY persisted `myTurnOnly` — older builds persisted it as a filter, but it's now
-// a TRANSIENT focus mode, so blindly re-hydrating it would silently re-enter My Turn
-// Focus Mode on load / on applying an old view (a fresh load must be the full board).
+// known persisted filter-bar keys, dropping everything else. Critically this drops:
+//  • a LEGACY persisted `myTurnOnly` — older builds persisted it as a filter, but it's now
+//    a TRANSIENT focus mode, so blindly re-hydrating it would silently re-enter My Turn
+//    Focus Mode on load / on applying an old view (a fresh load must be the full board);
+//  • a LEGACY persisted `teamScope` in ANY of its five old shapes ('all' | 'none' | 'teams' |
+//    'teams:1,2' | a bare team id). It is NOT half-migrated into `workspaceId`: the migration
+//    preserved team ids, so a bare `3` would read as a plausible workspace id and silently
+//    select a workspace whose repo membership is not the team's. Discarding leaves
+//    `workspaceId` null and the sync effect resolves the account's Default — the only honest
+//    answer. Three of the five shapes have no image at all, and half-migrating persisted state
+//    is worse than discarding it.
 // New writes never include such keys (pickFilterBarState), but blobs written by an
 // older build can. Whitelisting against freshFilterDefaults() also future-proofs this.
 export function sanitizePersistedFilters(
@@ -602,12 +665,46 @@ export function sanitizePersistedFilters(
   return out;
 }
 
+// ── The SCOPE slice — persisted separately from the filters, on purpose ──────────────────────
+//
+// The active workspace is not a filter: it is the context the filters apply INSIDE. Sharing the
+// filter list would make "Clear filters" reset it (see FilterDefaults), and sharing the storage
+// key would make one legacy blob poison both. It gets its own pick/sanitize pair and its own
+// storage key (see hooks/useUrlState).
+export interface ScopeState {
+  workspaceId: number | null;
+}
+
+/** The persisted scope slice — the active workspace and nothing else. */
+export function pickScopeState(s: FilterState): ScopeState {
+  return { workspaceId: s.workspaceId };
+}
+
+/**
+ * Restore an UNTRUSTED persisted scope blob. Only a POSITIVE INTEGER survives; anything else —
+ * including every legacy `teamScope` shape that might land here by accident ('all', 'teams',
+ * 'teams:1,2', an array) — yields `{}`, leaving `workspaceId` null so the sync effect resolves
+ * the account's Default. The id is still only a HINT: it may name a workspace that was deleted
+ * or belongs to another account, which is exactly what that effect corrects.
+ */
+export function sanitizePersistedScope(raw: unknown): Partial<ScopeState> {
+  if (!raw || typeof raw !== 'object') return {};
+  const id = (raw as { workspaceId?: unknown }).workspaceId;
+  if (typeof id !== 'number' || !Number.isInteger(id) || id <= 0) return {};
+  return { workspaceId: id };
+}
+
 // The fresh-load defaults for every (non-action) piece of state: the filters above
 // plus selection, transient signals and detail-view state. Used for the initial
 // store. (resetAllFilters resets only the filter subset.)
 function freshDefaults(): FilterData {
   return {
     ...freshFilterDefaults(),
+    // NOT RESOLVED YET. There is no static default — the account's Default workspace id varies
+    // per account — so a fresh store starts null and the workspace-sync effect fills it once
+    // listWorkspaces() lands. Nothing may render workspace-scoped data before then.
+    // Deliberately outside freshFilterDefaults(): see FilterDefaults.
+    workspaceId: null,
     // Transient Activity "Feed" scope toggles (not persisted filters): fresh load = false.
     feedMyTurnOnly: false,
     feedClaudeOnly: false,
@@ -663,10 +760,10 @@ export const useFilters = create<FilterState>((set, get) => ({
   ...freshDefaults(),
 
   setRepoIds: (ids) => set({ repoIds: ids }),
-  // Changing the team scope re-scopes the whole feed; an isolated PR may fall out of the
+  // Switching workspace re-scopes everything; an isolated PR almost certainly falls out of the
   // new scope, so drop the isolation to avoid a confusing empty feed.
-  setTeamScope: (scope, repoIds) =>
-    set({ teamScope: scope, repoIds, feedIsolatedPrId: null }),
+  setWorkspace: (workspaceId, repoIds) =>
+    set({ workspaceId, repoIds, feedIsolatedPrId: null }),
   toggleRepo: (id) =>
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),
   showRepo: (id) => {
@@ -930,6 +1027,10 @@ export const useFilters = create<FilterState>((set, get) => ({
     // Reset only the user-set filters (selection / focus state is preserved);
     // bumping rangeResetSignal snaps the window back to the default range. The
     // FilterBar disables this control during focus, so it never runs mid-focus.
+    //
+    // ⚠ `workspaceId` is PRESERVED, structurally: it is not in freshFilterDefaults(), and this
+    // set() writes a PARTIAL, so the active workspace is untouched. Adding it to
+    // FilterDefaults would silently turn "Clear filters" into "go to the Default workspace".
     set((s) => ({ ...freshFilterDefaults(), rangeResetSignal: s.rangeResetSignal + 1 })),
   hydrate: (partial) => set(partial),
 }));
@@ -939,77 +1040,15 @@ export function resolveRange(s: FilterState): { from: Date; to: Date } {
   return resolveBaseRange(s);
 }
 
-/**
- * Serialize a TeamScope to its wire/URL string form: 'all' → "all", 'none' → "none",
- * 'teams' → "teams" (cross-team monitoring), a teamId → String(id), a SET of teamIds →
- * "teams:<sorted,comma,ids>" (canonical — sorted so the string/key is order-independent). The
- * inverse (string → TeamScope) is done in useUrlState. Callers should hold a canonical scope
- * (a set is never length 0 or 1 — teamSetToScope collapses those), but we sort defensively here.
- */
-export function scopeToParam(scope: TeamScope): string {
-  if (scope === 'all' || scope === 'none' || scope === 'teams') return scope;
-  if (Array.isArray(scope)) return `teams:${[...scope].sort((a, b) => a - b).join(',')}`;
-  return String(scope);
-}
-
-/**
- * Canonicalize a user-selected set of team ids into a TeamScope: [] → 'all', exactly one → that
- * `number`, ALL of the account's teams → 'teams' (the existing union sentinel), otherwise the
- * sorted `number[]` set. Collapsing 1/all keeps single-team + all-teams scope keys stable, so a
- * team picked via the new multi-select shares history/pins with the old single-select.
- */
-export function teamSetToScope(selected: number[], allTeamIds: number[]): TeamScope {
-  const uniq = [...new Set(selected)].filter((id) => allTeamIds.includes(id));
-  if (uniq.length === 0) return 'all';
-  if (uniq.length === 1) return uniq[0]!;
-  if (allTeamIds.length > 0 && uniq.length === allTeamIds.length) return 'teams';
-  return uniq.sort((a, b) => a - b);
-}
-
-/**
- * The team ids a scope currently selects, for driving the multi-select checkboxes. 'all'/'none'
- * → [] (no team checked — those are exclusive options); 'teams' → every team; a number → [id]; a
- * set → itself.
- */
-export function scopeToTeamSet(scope: TeamScope, allTeamIds: number[]): number[] {
-  if (scope === 'teams') return [...allTeamIds];
-  if (typeof scope === 'number') return [scope];
-  if (Array.isArray(scope)) return scope;
-  return [];
-}
-
-/**
- * The team ids a scope currently resolves to, filtered to teams that still EXIST. This is the
- * ONE way to ask "which teams am I looking at" — every surface that branches on team count (the
- * Feed's "Compare teams" sub-tab, the Activity rail's per-team grouping) must go through it, or
- * they will disagree with each other.
- *
- * LANDMINE — neither naive test works, and both were live bugs:
- *   • `Array.isArray(scope)` misses 'teams'. `teamSetToScope` canonicalises a selection covering
- *     EVERY team to the 'teams' sentinel, so on a 2-team account ticking both yields 'teams',
- *     not `[a, b]`.
- *   • `scope === 'teams'` misses an explicit subset. Ticking 2 of 5 teams yields a `number[]`,
- *     which is exactly the multi-team case the old All-Teams-only gate silently dropped.
- * `teamSetToScope` also collapses a ONE-team selection to a bare `number`, so the count must come
- * from the resolved ids, never from the scope's runtime type.
- *
- * The `live` filter matters because teams can be deleted while a scope still names them: without
- * it a stale id inflates the count and a surface flickers into (or stays stuck in) multi-team
- * mode between renders.
- */
-export function teamIdsInScope(scope: TeamScope, allTeamIds: number[]): number[] {
-  const live = new Set(allTeamIds);
-  return scopeToTeamSet(scope, allTeamIds).filter((id) => live.has(id));
-}
-
-/**
- * True when 2+ teams are in scope — the gate for every cross-team surface (the Feed's "Compare
- * teams" sub-tab, per-team rail grouping). One place, so moving the threshold (e.g. to show a
- * single team's header too) is a one-line change and cannot desync two callers.
- */
-export function isMultiTeamScope(scope: TeamScope, allTeamIds: number[]): boolean {
-  return teamIdsInScope(scope, allTeamIds).length >= 2;
-}
+// (The five TeamScope canonicalisation helpers that lived here — scopeToParam, teamSetToScope,
+// scopeToTeamSet, teamIdsInScope, isMultiTeamScope — are DELETED, with no replacement. They
+// existed only to keep a five-shape union ('all' | 'none' | 'teams' | number | number[]) honest:
+// a canonical wire string, a set→scope collapse, and a "how many teams am I actually looking at"
+// predicate that neither `Array.isArray(scope)` nor `scope === 'teams'` could answer. The scope
+// is a plain workspace id now, so there is nothing left to canonicalise and no predicate that
+// two surfaces could disagree about. Surfaces that need the workspace's repos ask
+// workspaceRepoIds(workspaceId, workspaces); the "2+ workspaces" gate on the Compare rail entry
+// counts the ACCOUNT's workspaces, not the selection.)
 
 function resolveBaseRange(s: FilterState): { from: Date; to: Date } {
   if (s.preset === 'custom' && (s.customFrom || s.customTo)) {
@@ -1045,12 +1084,19 @@ function floorMinute(d: Date): Date {
 }
 
 /**
- * Build the /api/open-prs query string. Respects repo + member filters but
- * ignores the date range — open PRs are always open.
+ * Build the /api/open-prs query string. Respects the workspace scope + repo/member narrowing
+ * but ignores the date range — open PRs are always open.
+ *
+ * ⚠ `repoIds` is emitted whenever it is NON-NULL, **including when it is empty**. `[]` is a real
+ * narrowing ("nothing visible / this workspace has no repos"), not the absence of one, and the
+ * old `length > 0` guard is exactly what let an empty workspace fall back to the whole account.
+ * `workspace` is omitted only while the id is unresolved (null) — callers must keep the query
+ * DISABLED until then rather than letting the server silently answer for Default.
  */
 export function buildOpenPrsSearch(s: FilterState, includeMembers = true): string {
   const params = new URLSearchParams();
-  if (s.repoIds && s.repoIds.length > 0) params.set('repoIds', s.repoIds.join(','));
+  if (s.workspaceId != null) params.set('workspace', String(s.workspaceId));
+  if (s.repoIds) params.set('repoIds', s.repoIds.join(','));
   if (includeMembers && s.userIds && s.userIds.length > 0)
     params.set('userIds', s.userIds.join(','));
   return params.toString();
@@ -1091,6 +1137,10 @@ export function buildTimelineSearch(
   // A pr-focus tab: fetch exactly the subject PR + its events, ignoring the board filters.
   // Emit ONLY `prIds` (no from/to) so the query key is STABLE per mount — the board's live
   // `to` (=now) would otherwise churn every minute, refetching + resetting the isolate boot.
+  // Deliberately NO `workspace` either: getTimeline's prIds path BYPASSES the repo scope (an
+  // isolate tab must load its subject PR even when the board's scope would hide it), so naming
+  // a workspace could not change the response — it would only churn the key, and the request is
+  // still bound by accountId. A scope bypass, never a tenancy one.
   if (prIdsOverride && prIdsOverride.length > 0) {
     return `prIds=${prIdsOverride.join(',')}`;
   }
@@ -1100,9 +1150,14 @@ export function buildTimelineSearch(
       ? new Date(fromOverrideMs)
       : from;
   const params = new URLSearchParams();
+  // The board's SCOPE. Omitted only while unresolved (null) — callers must keep the query
+  // disabled until then rather than letting the server answer for Default under another name.
+  if (s.workspaceId != null) params.set('workspace', String(s.workspaceId));
   params.set('from', floorMinute(effectiveFrom).toISOString());
   params.set('to', floorMinute(to).toISOString());
-  if (s.repoIds && s.repoIds.length > 0) params.set('repoIds', s.repoIds.join(','));
+  // NON-NULL, including EMPTY (see buildOpenPrsSearch): `[]` narrows to nothing, it is not the
+  // absence of a narrowing, and dropping it is what made an empty workspace show the account.
+  if (s.repoIds) params.set('repoIds', s.repoIds.join(','));
   if (includeMembers && s.userIds && s.userIds.length > 0)
     params.set('userIds', s.userIds.join(','));
   if (s.categories.length < ALL_CATEGORIES.length) {

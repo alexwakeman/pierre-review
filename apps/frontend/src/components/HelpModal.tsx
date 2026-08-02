@@ -46,7 +46,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
 
         <div className="min-h-0 flex-1 space-y-4 overflow-auto px-4 py-3 text-sm leading-relaxed text-gray-600 dark:text-gray-300">
           <p className="text-gray-500 dark:text-gray-400">
-            A dashboard for your team’s GitHub pull-request activity across many repos —
+            A dashboard for GitHub pull-request activity across a Workspace of repos —
             built for sprint situational-awareness: who’s doing what, which PRs are
             stalled, which review threads sit untouched, and what needs <em>you</em>. It
             opens on the <strong>Activity</strong> console; the <strong>Timeline</strong>{' '}
@@ -54,34 +54,40 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             GitHub sign-in).
           </p>
 
-          <Section title="Add repos & scope with Teams">
-            Add repos in the filter bar’s search box as <Code>owner/name</Code>. Group them
-            into <strong>Teams</strong> (the <em>◈</em> scope selector, top-left) — pick one
-            team, <strong>All Teams</strong> (every team together, grouped in the Activity
-            rail), <strong>All repos</strong>, or <strong>No team</strong>. The scope narrows
-            the whole app — Activity, Insights, and the Timeline — at once.
+          <Section title="Add repos & scope with Workspaces">
+            Every repo lives in exactly one <strong>Workspace</strong>, and a Workspace is the
+            only scope there is: the <em>◈</em> selector top-left picks <em>one</em>, and that
+            choice narrows the whole app — Activity, Insights and the Timeline — at once. There
+            is no “all repos” and no “unassigned” bucket. <strong>Default</strong> is made for
+            you: you can rename it, you can’t delete it, and new repos land there. Add repos,
+            create Workspaces and move repos between them under{' '}
+            <strong>Manage repos &amp; workspaces</strong> — assigning a repo elsewhere{' '}
+            <em>moves</em> it, it is never in two places. Inside the selected Workspace, the
+            repo show/hide dropdown narrows further without changing scope.
           </Section>
 
           <Section title="Activity console (the default)">
             The left rail is your state of play: <strong>Insights</strong>, a cross-repo{' '}
-            <strong>Feed</strong>, <strong>Needs&nbsp;attention</strong>, <strong>Bots</strong>,
-            then each repo. The Feed is one chronological stream of real activity — opens,
-            merges, reviews, comments, and pushes that addressed a thread — under the free
-            flow-metric header (throughput, lead time, time-to-first-review, CI success &amp;
-            recovery). Filter it with the pills: <strong>My Turn</strong> (things that concern
-            you — you authored it, were asked to review, or already chimed in),{' '}
+            <strong>Feed</strong>, <strong>Bots</strong>,{' '}
+            <strong>Compare&nbsp;workspaces</strong>, <strong>Needs&nbsp;attention</strong>, then
+            the Workspace’s repos as a flat list. The Feed is one chronological stream of real
+            activity — opens, merges, reviews, comments, and pushes that addressed a thread —
+            under the free flow-metric header (throughput, lead time, time-to-first-review, CI
+            success &amp; recovery). Filter it with the pills: <strong>My Turn</strong> (things
+            that concern you — you authored it, were asked to review, or already chimed in),{' '}
             <strong>Comments</strong> / <strong>PR events</strong> by category, and the
-            <strong> Bots</strong> lens (all → hide → only). With <strong>two or more teams</strong>{' '}
-            in scope the Feed also offers <strong>Compare&nbsp;teams</strong>, a free
-            side-by-side matrix over the same window, and the rail groups its repos by team.
-            Click any card to open that PR; <strong>Back</strong> returns you to the exact card.
+            <strong> Bots</strong> lens (all → hide → only).{' '}
+            <strong>Compare&nbsp;workspaces</strong> appears once you’ve made a Workspace of your
+            own: a free side-by-side matrix of <em>every</em> Workspace over the same window,
+            whichever one is selected. Click any card to open that PR; <strong>Back</strong>{' '}
+            returns you to the exact card.
           </Section>
 
           <Section title="Insights (Pro)">
-            AI review-intelligence over the current scope.{' '}
-            <strong>Ask about the sprint</strong> answers a question from the scope&rsquo;s own
+            AI review-intelligence over the selected Workspace.{' '}
+            <strong>Ask about the sprint</strong> answers a question from that Workspace&rsquo;s own
             sprint data — pick a quick-question pill (sprint report, retro, bottlenecks,
-            biggest changes, …) or type your own, <Code>@</Code>-mention a teammate, and
+            biggest changes, …) or type your own, <Code>@</Code>-mention a contributor, and
             optionally attach a chart. PR mentions in an answer are clickable, and answers can
             be pinned. <strong>Track&nbsp;usage</strong> shows your month-to-date AI credits.
             The flow metrics and the attention cards are not here — they are free, and live on
@@ -96,12 +102,14 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             automatic. The rail&rsquo;s <strong>Bots</strong> console shows per-vendor keep /
             tune / noisy verdicts (<strong>ROI</strong>), timing and coverage
             (<strong>Behaviour</strong>), and — under <strong>Settings</strong> — who counts as
-            a review bot <em>for the selected team</em>: mark a reviewer as a{' '}
+            a review bot <em>in this Workspace</em>. A bot is <em>one row per Workspace</em>,
+            merged by GitHub handle however many repos it runs in, and everything about it is
+            edited there: whether it&rsquo;s automated, whether it&rsquo;s a{' '}
             <strong>quality&nbsp;check</strong> (SonarCloud, Codecov &amp; co, kept out of the
-            ROI verdicts) or not a bot at all. Rows marked <em>inherited</em> are using the{' '}
-            <strong>No&nbsp;team</strong> default; editing one overrides it for that team only.
-            What a bot <em>costs</em>, how we detect it and how Limn attributes its own reviews
-            stay account-wide, in <strong>Settings → Review bots</strong>.
+            ROI verdicts), its vendor name, and its <strong>price</strong>. All of those are
+            per Workspace — setting a price in one leaves the others untouched, and prices are
+            never added up across Workspaces. How we detect bots and how Limn attributes its own
+            reviews stay account-wide, in <strong>Settings → Review bots</strong>.
           </Section>
 
           <Section title="PR detail & threads">
@@ -129,7 +137,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           </Section>
 
           <Section title="Keyboard">
-            <Kbd>/</Kbd> focus the filter · <Kbd>j</Kbd>/<Kbd>k</Kbd> cycle PRs ·{' '}
+            <Kbd>/</Kbd> focus search · <Kbd>j</Kbd>/<Kbd>k</Kbd> cycle PRs ·{' '}
             <Kbd>i</Kbd> Insights · <Kbd>Esc</Kbd> leave a tab/overlay, else clear the
             selection.
           </Section>

@@ -1,35 +1,41 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Repo } from '@pierre-review/shared';
 import { useClickOutside } from '../hooks/useClickOutside.js';
-import { WatchedBadge } from './WatchedBadge.js';
 
-// Show/hide dropdown for the added repos. Each repo is a checkbox row showing the
-// full `owner/name` (so same-named repos under different owners are distinguishable).
-// A checked row is visible on the timeline; unchecking hides it. Committed state lives
-// in the store's `repoIds` (null = all shown); toggling is immediate (no Apply) — this
-// is a visibility control, not a staged multi-select. Each row also carries a "Watch"
-// toggle (new open PRs by others go to the My Turn inbox — independent of timeline
-// visibility) and a Remove (delete) affordance.
+// Show/hide dropdown for the ACTIVE WORKSPACE's repos — the only narrowing left inside a
+// workspace, and the reason this panel is mounted rather than merely defined. Each repo is a
+// checkbox row showing the full `owner/name` (so same-named repos under different owners are
+// distinguishable). A checked row is visible; unchecking hides it. Committed state lives in the
+// store's `repoIds`, where `null` now means "every repo IN THIS WORKSPACE" — the workspace already
+// bounds the set — and "all" / "none" therefore mean all-or-none of the workspace, not of the
+// account. Toggling is immediate (no Apply): this is a visibility control, not a staged
+// multi-select.
+//
+// ⚠ THIS PANEL IS TIMELINE-ONLY, AND SO IS WHAT IT CONTROLS. `repoIds` narrows the TIMELINE
+// board and nothing else: Activity, the Feed, Bots and Compare always cover every repo in the
+// selected workspace, and you narrow Activity by clicking a repo row in its rail. A visibility
+// control must not silently scope screens that cannot see it, so this is mounted only while the
+// Timeline board is the active tab.
+//
+// ⚠ THERE IS NO PER-ROW REMOVE. Removing a repo lives in the workspace manager and nowhere else:
+// a visibility panel that deletes a repo is a footgun, and under one-workspace-per-repo the
+// gesture people actually want from here is a MOVE, which this panel cannot express.
+//
+// There is no per-row WATCH toggle either — "watched" is gone as a concept. A workspace IS the
+// scope, so every repo in it is fully live (Feed, Activity, My Turn, Bots); a second visibility
+// axis on top of the workspace was only ever confusing.
 export function RepoSelectPanel({
   repos,
   repoIds,
   onToggle,
   onOnly,
   onShowAll,
-  onToggleWatch,
-  watchPending,
-  onRemove,
-  removePending,
 }: {
-  repos: Repo[];
-  repoIds: number[] | null; // committed visibility filter (null = all visible)
+  repos: Repo[]; // the active workspace's repos ONLY, never the account's
+  repoIds: number[] | null; // committed visibility filter (null = every repo in the workspace)
   onToggle: (id: number) => void; // immediate show/hide of one repo
   onOnly: (id: number) => void; // isolate to just this repo (deselect the rest)
-  onShowAll: () => void; // clear the filter → show every repo
-  onToggleWatch: (repo: Repo) => void; // toggle inbox watch (caller mutates)
-  watchPending: boolean;
-  onRemove: (repo: Repo) => void; // remove/delete the repo (caller confirms + mutates)
-  removePending: boolean;
+  onShowAll: () => void; // clear the filter → show every repo in the workspace
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('');
@@ -83,8 +89,8 @@ export function RepoSelectPanel({
           <button
             type="button"
             onClick={() => onShowAll()}
-            title="Show all repos"
-            aria-label="Show all repos"
+            title="Show every repo in this workspace"
+            aria-label="Show every repo in this workspace"
             className="py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
           >
             ✕
@@ -95,7 +101,7 @@ export function RepoSelectPanel({
       {open && (
         <div
           role="dialog"
-          aria-label="Repositories"
+          aria-label="Repositories in this workspace"
           className="absolute left-0 top-full z-[60] mt-1 w-[28rem] max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900"
         >
           {total > 8 && (
@@ -112,8 +118,11 @@ export function RepoSelectPanel({
 
           <div className="max-h-72 overflow-y-auto">
             {total === 0 ? (
+              // An EMPTY WORKSPACE — an ordinary state, not a broken one, and no longer the
+              // account-wide "you have added nothing yet". This panel has no add affordance, so
+              // it names the surface that does rather than inviting a search that isn't here.
               <div className="px-1 py-2 text-xs text-gray-500">
-                No repos yet — search to add one.
+                No repos in this workspace — move some in from Manage repos &amp; workspaces.
               </div>
             ) : rows.length === 0 ? (
               <div className="px-1 py-2 text-xs text-gray-500">No repos match.</div>
@@ -146,7 +155,6 @@ export function RepoSelectPanel({
                           {r.name}
                         </span>
                       </span>
-                      {r.inboxWatch && <WatchedBadge size={11} />}
                       {r.lastSyncStatus === 'error' && (
                         <span
                           className="shrink-0 text-red-500"
@@ -157,33 +165,6 @@ export function RepoSelectPanel({
                         </span>
                       )}
                     </label>
-                    {/* Watch toggle: new open PRs by others in this repo go to the My
-                        Turn inbox (independent of timeline visibility). Persistently
-                        shown (in sky) when watching, so watched repos read at a glance;
-                        a hover affordance otherwise. */}
-                    <button
-                      type="button"
-                      onClick={() => onToggleWatch(r)}
-                      disabled={watchPending}
-                      aria-pressed={r.inboxWatch}
-                      title={
-                        r.inboxWatch
-                          ? `Watching ${r.fullName} — new PRs go to your inbox. Click to stop.`
-                          : `Watch ${r.fullName}: new open PRs go to your My Turn inbox`
-                      }
-                      aria-label={
-                        r.inboxWatch
-                          ? `Stop watching ${r.fullName} for the inbox`
-                          : `Watch ${r.fullName} for the inbox`
-                      }
-                      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide disabled:opacity-30 ${
-                        r.inboxWatch
-                          ? 'text-sky-600 hover:bg-sky-100 dark:text-sky-400 dark:hover:bg-sky-900/40'
-                          : 'text-gray-400 opacity-0 hover:bg-gray-200 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-gray-700 dark:hover:text-gray-200'
-                      }`}
-                    >
-                      {r.inboxWatch ? 'watching' : 'watch'}
-                    </button>
                     {/* Quick-isolate: show only this repo (deselect the rest), so
                         you can hop between repos without unchecking everything.
                         Hidden when this repo is already the sole visible one. */}
@@ -198,16 +179,6 @@ export function RepoSelectPanel({
                         only
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => onRemove(r)}
-                      disabled={removePending}
-                      title={`Remove ${r.fullName}`}
-                      aria-label={`Remove ${r.fullName}`}
-                      className="shrink-0 px-1 text-gray-400 opacity-0 hover:text-red-500 focus:opacity-100 group-hover:opacity-100 disabled:opacity-30"
-                    >
-                      ✕
-                    </button>
                   </div>
                 );
               })

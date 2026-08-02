@@ -7,7 +7,7 @@ const MIN_INTERVAL = 5; // floor (backend also enforces >= its MIN_INTERVAL_SEC)
 const MODES: { value: AiUpdateMode; label: string; desc: string }[] = [
   { value: 'manual', label: 'Manual', desc: 'Only regenerate when you click Refresh.' },
   { value: 'interval', label: 'Every N minutes', desc: 'Regenerate on a timer (unchanged repos cost nothing).' },
-  { value: 'on_change', label: 'When a change is detected', desc: 'Regenerate after a sync that changed a watched repo.' },
+  { value: 'on_change', label: 'When a change is detected', desc: 'Regenerate after a sync that changed one of your repos.' },
 ];
 
 // How the AI summaries / digests refresh: manually, on a fixed interval, or whenever a sync

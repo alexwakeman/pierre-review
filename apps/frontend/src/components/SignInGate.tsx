@@ -73,8 +73,8 @@ export function SignInGate(): JSX.Element {
       <div className="flex w-full max-w-sm flex-col items-center rounded-2xl border border-gray-800 bg-gray-900/40 px-8 py-10 text-center shadow-xl">
         <Wordmark className="text-4xl" />
         <p className="mt-4 text-sm text-gray-400">
-          Sign in to view your team&rsquo;s GitHub activity — pull requests,
-          reviews, and what needs your attention.
+          Sign in to view your GitHub activity across every repo you watch — pull
+          requests, reviews, and what needs your attention.
         </p>
         {authMessage && (
           <div

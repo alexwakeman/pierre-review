@@ -121,16 +121,25 @@ describe('buildCostBody', () => {
   // `monthlyUsd` must always be PRESENT: the contract makes it required precisely so `undefined`
   // is not a third meaning. Spreading it conditionally would turn Clear into a silent no-op.
   it('always carries monthlyUsd, including when clearing', () => {
-    expect(buildCostBody(null)).toEqual({ monthlyUsd: null });
-    expect('monthlyUsd' in buildCostBody(null)).toBe(true);
-    expect(buildCostBody(0)).toEqual({ monthlyUsd: 0 });
-    expect(buildCostBody(120)).toEqual({ monthlyUsd: 120 });
+    expect(buildCostBody(3, null)).toEqual({ workspaceId: 3, monthlyUsd: null });
+    expect('monthlyUsd' in buildCostBody(3, null)).toBe(true);
+    expect(buildCostBody(3, 0)).toEqual({ workspaceId: 3, monthlyUsd: 0 });
+    expect(buildCostBody(3, 120)).toEqual({ workspaceId: 3, monthlyUsd: 120 });
   });
 
-  // The body is actor-keyed. A repoId here would be the "$720 for one $120 subscription" bug
-  // reintroduced from the write side.
-  it('carries no repoId', () => {
-    expect(Object.keys(buildCostBody(120))).toEqual(['monthlyUsd']);
+  // ⚠ THE WORKSPACE IS PART OF THE ROW'S KEY, not a filter over it. A price names exactly one
+  // `workspace_reviewers` row (predicate `(account_id, workspace_id, author_user_id)`), so a body
+  // without it has no row to land on — and the SAME actor's price in another workspace is a
+  // different, legitimately different, number that this write must not reach.
+  it('names the workspace the price belongs to', () => {
+    expect(buildCostBody(3, 120).workspaceId).toBe(3);
+    expect(buildCostBody(4, 120).workspaceId).toBe(4);
+  });
+
+  // The body addresses one row. A repoId here would be the "$720 for one $120 subscription" bug
+  // reintroduced from the write side: every repo in the workspace is priced by this single row.
+  it('carries a workspaceId and a price, and nothing else — no repoId', () => {
+    expect(Object.keys(buildCostBody(3, 120)).sort()).toEqual(['monthlyUsd', 'workspaceId']);
   });
 });
 

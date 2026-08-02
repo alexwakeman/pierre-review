@@ -16,6 +16,9 @@ let db: any;
 let schema: any;
 let closeDb: (() => void) | undefined;
 let q: any;
+// BotScope { workspaceId, repoIds } — `workspaceId` decides who counts as a bot, `repoIds`
+// narrows the measured data. Resolved through the production resolver in beforeAll.
+let scope: any;
 
 const DAY = 24 * 60 * 60 * 1000;
 // Second-aligned: sqlite stores mode:'timestamp' as epoch SECONDS, so a millisecond-bearing date
@@ -34,10 +37,11 @@ async function seedPr(
   threadCount: number,
 ): Promise<void> {
   const { repos, pullRequests, reviews, reviewThreads } = schema;
-  // One repo per PR keeps node ids trivially unique; scope is the whole account anyway.
+  // One repo per PR keeps node ids trivially unique. All three land in the account's Default
+  // workspace (every repo belongs to exactly one), so the resolved scope covers all of them.
   const [repo] = await db
     .insert(repos)
-    .values({ accountId: 1, owner: 'acme', name: `r${n}`, githubNodeId: `R_d${n}`, inboxWatch: true })
+    .values({ accountId: 1, owner: 'acme', name: `r${n}`, githubNodeId: `R_d${n}` })
     .returning()
     .execute();
   const [pr] = await db
@@ -108,13 +112,22 @@ beforeAll(async () => {
   await seedPr(bot, 2, 4, 300, 100, 4);
   // Week 7: PR C — reviewed but ZERO findings (a real 0, not a gap), 100 LoC.
   await seedPr(bot, 3, 30, 50, 50, 0);
+
+  // ⚠ Resolve the scope through `resolveWorkspaceScope`, never by hand-building
+  // `{workspaceId, repoIds}` — that call runs `ensureRepoMemberships`, which is what puts repos
+  // inserted straight into `repos` into the account's Default workspace. Hand-build it (or list
+  // only some of the three repos) and the density averages below silently change denominator.
+  scope = await q.resolveWorkspaceScope(1, null);
 });
 
 afterAll(() => closeDb?.());
 
 describe('getBotBehaviourAnalytics — findings density trend', () => {
   it('averages threads-per-PR and threads-per-KLoC over the PRs first touched that week', async () => {
-    const resp = await q.getBotBehaviourAnalytics(1, 'rolling_14');
+    // All THREE seeded repos must be in scope or every denominator below is wrong — a missing
+    // membership would quietly drop a PR and still produce plausible-looking numbers.
+    expect(scope.repoIds).toHaveLength(3);
+    const resp = await q.getBotBehaviourAnalytics(1, 'rolling_14', scope);
     const bot = resp.bots.find((b: { login: string | null }) => b.login === 'coderabbitai');
     expect(bot).toBeDefined();
 
@@ -132,7 +145,7 @@ describe('getBotBehaviourAnalytics — findings density trend', () => {
   });
 
   it('reports null density (not 0) for a week with no reviewed PRs', async () => {
-    const resp = await q.getBotBehaviourAnalytics(1, 'rolling_14');
+    const resp = await q.getBotBehaviourAnalytics(1, 'rolling_14', scope);
     const bot = resp.bots.find((b: { login: string | null }) => b.login === 'coderabbitai');
     const w0 = bot.trend[0]; // ~12 weeks ago — no fixtures
     expect(w0.prsInWeek).toBe(0);
@@ -141,7 +154,7 @@ describe('getBotBehaviourAnalytics — findings density trend', () => {
   });
 
   it('does not flag a density anomaly while the baseline is still building (<4 active weeks)', async () => {
-    const resp = await q.getBotBehaviourAnalytics(1, 'rolling_14');
+    const resp = await q.getBotBehaviourAnalytics(1, 'rolling_14', scope);
     const bot = resp.bots.find((b: { login: string | null }) => b.login === 'coderabbitai');
     expect(bot.trend.every((p: { densityAnomaly: boolean }) => p.densityAnomaly === false)).toBe(true);
     expect(bot.anomalies.every((a: { metric: string }) => a.metric !== 'density')).toBe(true);

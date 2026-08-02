@@ -31,23 +31,24 @@ function Toggle({
 // loaded — so this stays FREE, no paid flag); the Slack-digest toggle additionally needs
 // caps.slackDigest.
 //
-// TWO things moved OUT of here to the Bots rail's "Settings" tab (Activity → Bots → Settings),
-// for the same reason both times — the account is the wrong key:
-//   • the per-reviewer CLASSIFICATION: repos define bots differently (one repo's
-//     `githubactions[bot]` funnels an AI reviewer, another's is plain CI), so the judgement is
-//     keyed per (repo, actor) in the CORE `repo_reviewers` table;
-//   • the per-bot monthly COST: it is a property of the ACTOR (one subscription per vendor), and a
-//     per-LOGIN blob in pro_settings could not be edited or cleared from the row that showed it.
-//     It now lives on `account_reviewers.monthly_cents` in CORE (so it is free/OSS too), edited
-//     inline on the bot's actor card.
+// EVERYTHING ABOUT AN INDIVIDUAL BOT moved OUT of here to the Bots rail's "Settings" tab
+// (Activity → Bots → Settings), where one card per bot carries its whole configuration:
+//   • whether it counts as an automated reviewer at all, and whether it is REVIEWING or
+//     QUALITY-CHECKING — Workspaces define bots differently (one Workspace's `githubactions[bot]`
+//     funnels an AI reviewer, another's is plain CI);
+//   • WHO it is (vendor kind + display label);
+//   • WHAT IT COSTS.
+// All three are columns on one CORE `workspace_reviewers` row keyed (account, WORKSPACE, actor),
+// so all three are free/OSS and all three are edited in one place.
+//
 // The standalone cost editor that used to sit here — with its own add-a-login dropdown — is gone;
 // `ProSettingsUpdate.bots.cost` no longer exists, so there is no write path to the legacy blob.
 // `ProSettings.bots.cost` survives only as a deprecated READ that BotRoiPanel uses to fill in a
-// login plugin migration 0019 could not backfill. Retire both one release on.
+// login no migration could attach to a reviewer row. Retire both one release on.
 //
-// The split, in one sentence: "is this login a bot in THIS repo" is per repo, "who the bot is and
-// what it costs" is per actor, and "how we detect it and how we attribute our own reviews" — the
-// knobs below — is per account.
+// The split, in one sentence: "is this login a bot, who is it, and what does it cost" is per
+// WORKSPACE, and "how we detect bots at all and how we attribute our own reviews" — the knobs
+// below — is per account.
 export function BotSection({ settings, save, saving }: SectionProps): JSX.Element {
   const caps = useProCapabilities();
   const b = settings.bots;
@@ -74,9 +75,10 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
   const [pierreFooter, setPierreFooter] = useState<boolean>(b.pierreFooter);
   const pierreDirty = tagPierre !== b.tagPierreReviews || pierreFooter !== b.pierreFooter;
 
-  // (No cost group here any more — it is per ACTOR, inline on each bot's card in Activity → Bots
-  // → Settings. The old editor's account-wide `useDetectedReviewers()` fetch went with it, which
-  // also removes one of the callers of that hook.)
+  // (No cost group here any more — a price is a per-WORKSPACE column on the bot's own row, edited
+  // inline on its card in Activity → Bots → Settings. The old editor's unscoped
+  // `useDetectedReviewers()` fetch went with it, which is just as well: there is no account-wide
+  // reviewer roster to fetch any more.)
 
   // Slack bot digest (only meaningful when the account has a Slack digest configured).
   const [slackDigest, setSlackDigest] = useState<boolean>(b.slackDigest);
@@ -87,9 +89,9 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
       <p className="rounded border border-gray-200 bg-gray-50 px-2.5 py-2 text-[11px] text-gray-500 dark:border-gray-800 dark:bg-gray-900/40 dark:text-gray-400">
         These settings are <span className="font-medium">account-wide</span>. Deciding{' '}
         <span className="font-medium">who counts as a review bot</span> — which reviewers are
-        quality checks rather than reviewers, and{' '}
+        quality checks rather than reviewers, who each bot is, and{' '}
         <span className="font-medium">what each bot costs</span> — is per{' '}
-        <span className="font-medium">team</span>, and lives in{' '}
+        <span className="font-medium">Workspace</span>, and lives in{' '}
         <span className="font-medium">Activity → Bots → Settings</span>.
       </p>
 
@@ -171,11 +173,12 @@ export function BotSection({ settings, save, saving }: SectionProps): JSX.Elemen
 
       {/* The "Per-bot cost (account-wide)" section that used to sit here — a list of
           login+dollars rows with its own add-a-login dropdown, saved via the now-removed
-          `ProSettingsUpdate.bots.cost` — is GONE. Cost is per TEAM and edited inline on each bot
-          row in Activity → Bots → Settings, where the row already answers "is this a bot here".
-          Do not reinstate an account-wide editor beside it: two live writers to one price is how
-          the two silently disagree, which is why the update field was retired rather than
-          mirrored. */}
+          `ProSettingsUpdate.bots.cost` — is GONE. Cost is per WORKSPACE and edited inline on each
+          bot's card in Activity → Bots → Settings, on the same row that already answers "is this a
+          bot here, and who is it". Do not reinstate an account-wide editor beside it: two live
+          writers to one price is how the two silently disagree, which is why the update field was
+          retired rather than mirrored — and an account-wide one could no longer even name the row
+          it would be writing. */}
 
       {caps.slackDigest && (
         <SectionShell title="Slack bot digest" desc="Include a review-bot summary block in the Slack digest.">

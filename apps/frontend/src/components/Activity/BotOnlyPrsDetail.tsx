@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { BotOnlyPrItem, BotWindowKind, User } from '@pierre-review/shared';
 import { useBotOnlyPrs } from '../../hooks/useBotTriage.js';
 import { useUsers } from '../../hooks/useTimeline.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { indexUsers, relativeTime, userLabel } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
@@ -157,16 +157,18 @@ function Row({
 export function BotOnlyPrsDetail(): JSX.Element {
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
-  const scope = scopeToParam(useFilters((s) => s.teamScope));
-  // The repo the drill-down was opened from (per-repo Bots tab) — scopes the whole tab to that
-  // repo; null (the cross-repo Bots rail) falls back to the team scope. Read (not consumed) so
-  // the scope persists for the tab's lifetime; only reset when the next drill-down opens.
+  // The ACTIVE WORKSPACE decides which reviewers are automated — i.e. which PRs are "bot-only" —
+  // and it is the same id the banner's count was computed at, so caption ≡ list.
+  const workspaceId = useFilters((s) => s.workspaceId);
+  // The repo the drill-down was opened from (per-repo Bots tab) — narrows the tab's DATA to that
+  // repo; null (the cross-repo Bots rail) lists the whole workspace. Read (not consumed) so it
+  // persists for the tab's lifetime; only reset when the next drill-down opens.
   const focusRepoId = useFilters((s) => s.botOnlyFocusRepoId);
   const repoScope = useMemo(() => (focusRepoId != null ? [focusRepoId] : null), [focusRepoId]);
   const { data, isLoading, isError, refetch, isFetching } = useBotOnlyPrs(
+    workspaceId,
     window,
     true,
-    scope,
     repoScope,
   );
   const prs = useMemo(() => data?.prs ?? [], [data]);

@@ -1,0 +1,25 @@
+-- Drop the "watched" concept, SQLite / local mode.
+--
+-- `repos.inbox_watch` / `repos.inbox_watch_started_at` were a SECOND visibility axis on top of
+-- "is this repo added to the account": a repo could be added-but-not-in-my-inbox, and the Feed,
+-- recent activity, My Turn and the Pro digest collection all quietly narrowed to the watched
+-- subset. With Workspaces the Workspace IS the scope, so that second axis only made it
+-- ambiguous which of the two a screen was obeying. Every repo in a Workspace is now fully live.
+--
+-- The one property the watch window actually bought — adding a repo with 400 open PRs must not
+-- dump them all into My Turn on day one — is preserved by keying the "New PRs" section on
+-- `repos.created_at` (when the repo was ADDED) instead of `inbox_watch_started_at`. That column
+-- already exists, is NOT NULL, and is set on insert, so there is no backfill and no window to
+-- reconstruct: an existing repo keeps the cutoff it was added at.
+--
+-- Neither column is a PK, UNIQUE, indexed, or named in any partial index / CHECK / FK /
+-- generated column (verified against the real dev DB: the four indexes on `repos` are
+-- repos_account_owner_name, repos_account_node, repos_account_idx, repos_id_account, and none
+-- mentions either column), so SQLite's plain ALTER TABLE ... DROP COLUMN is legal here and no
+-- 12-step table rebuild is needed.
+--
+-- NOT re-runnable: SQLite has no `DROP COLUMN IF EXISTS` (the pg twin uses one). drizzle's
+-- migrator records each file once, so that is fine — but do not hand-replay this one.
+-- Postgres twin: migrations-pg/0033_drop_inbox_watch.sql.
+ALTER TABLE `repos` DROP COLUMN `inbox_watch`;--> statement-breakpoint
+ALTER TABLE `repos` DROP COLUMN `inbox_watch_started_at`;

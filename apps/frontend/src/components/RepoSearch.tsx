@@ -13,7 +13,7 @@ import { useFilters } from '../store/filters.js';
 // Don't fire a search until there's something to match on.
 const MIN_QUERY = 2;
 // The same cache cascade AddRepo used to run on success. Includes the Activity/Insights
-// surface so a newly-added (auto-watched) repo shows up in the rail/feed/Insights live.
+// surface so a newly-added repo shows up in the rail/feed/Insights live.
 const INVALIDATE_KEYS = [
   'repos',
   'timeline',
@@ -63,16 +63,16 @@ function Spinner(): JSX.Element {
 }
 
 // Debounced, search-on-keypress repository picker that replaces the old plain
-// "owner/repo" input. Results come live from GitHub (best-match order), already-
-// watched repos are filtered server-side, and repos you own / are an org member
-// of are floated to the top. Picking a result adds the repo (the existing add
-// flow) and refetches the list so it drops out of the results.
+// "owner/repo" input. Results come live from GitHub (best-match order), repos
+// already added to the account are filtered server-side, and repos you own / are
+// an org member of are floated to the top. Picking a result adds the repo (the
+// existing add flow) and refetches the list so it drops out of the results.
 export function RepoSearch({
   // Optional: called with the freshly-added repo after a successful add (in addition to the
-  // usual sync-modal + cache-invalidation). The Activity TeamManager uses it to auto-assign a
-  // brand-new repo to the currently-selected team.
+  // usual sync-modal + cache-invalidation). WorkspaceManager uses it to MOVE a brand-new repo
+  // (which lands in Default server-side) into the workspace the user is looking at.
   onAdded,
-  // Optional placeholder override (e.g. "Add a repo to this team…" in TeamManager).
+  // Optional placeholder override (e.g. "Add a repo to Platform…" in WorkspaceManager).
   placeholder = 'Search repos to add…',
 }: {
   onAdded?: (repo: Repo) => void;
@@ -109,11 +109,11 @@ export function RepoSearch({
   const panelOpen = showPanel || showSuggestions;
   const cursor = cursors[pageIdx] ?? null;
 
-  // Curated suggestions for the empty-query state, minus repos already watched.
+  // Curated suggestions for the empty-query state, minus repos already added.
   const { data: repos } = useRepos();
   // Per-account repo cap (backend enforces it; we disable adds + explain here).
   const atRepoLimit = (repos?.length ?? 0) >= MAX_REPOS_PER_ACCOUNT;
-  const watched = useMemo(
+  const added = useMemo(
     () => new Set((repos ?? []).map((r) => `${r.owner}/${r.name}`.toLowerCase())),
     [repos],
   );
@@ -121,10 +121,10 @@ export function RepoSearch({
     () =>
       SUGGESTED_REPOS.filter(
         (s) =>
-          !watched.has(`${s.owner}/${s.name}`.toLowerCase()) &&
+          !added.has(`${s.owner}/${s.name}`.toLowerCase()) &&
           !justAdded.has(`${s.owner}/${s.name}`.toLowerCase()),
       ),
-    [watched, justAdded],
+    [added, justAdded],
   );
 
   // A fresh search term resets pagination back to the first page.
@@ -144,10 +144,10 @@ export function RepoSearch({
 
   const addRepo = useMutation({
     // Accepts a live search result OR a curated suggestion — both carry owner+name,
-    // which is all the POST needs (CreateRepoBody). `watch` auto-watches the repo for
-    // the inbox on add (true for "yours" — owned/org-member — search hits).
-    mutationFn: (r: { owner: string; name: string; watch?: boolean }) =>
-      api.addRepo({ owner: r.owner, name: r.name, watch: r.watch }),
+    // which is all the POST needs (CreateRepoBody). There is no second visibility axis:
+    // an added repo lands in the account's Default workspace and is immediately live.
+    mutationFn: (r: { owner: string; name: string }) =>
+      api.addRepo({ owner: r.owner, name: r.name }),
     // Hide the row IMMEDIATELY (before the search/repos refetch round-trips), keyed
     // on owner/name from the mutation variables.
     onMutate: (r) => {
@@ -166,7 +166,7 @@ export function RepoSearch({
       // Ensure the just-added repo is visible even when a repo filter is active —
       // append it to the visible set (no-op when all repos are already shown).
       showRepo(repo.id);
-      // Let a host (e.g. TeamManager) react to the new repo — assign it to a team.
+      // Let a host (e.g. WorkspaceManager) react to the new repo — move it into a workspace.
       onAdded?.(repo);
     },
   });
@@ -237,11 +237,7 @@ export function RepoSearch({
       e.preventDefault();
       const item = navItems[active];
       if (item && !addRepo.isPending && !atRepoLimit) {
-        addRepo.mutate({
-          owner: item.owner,
-          name: item.name,
-          watch: 'isOwnedOrMember' in item ? item.isOwnedOrMember : undefined,
-        });
+        addRepo.mutate({ owner: item.owner, name: item.name });
       }
     }
   }
@@ -280,7 +276,7 @@ export function RepoSearch({
         >
           {atRepoLimit && (
             <div className="sticky top-0 z-20 border-b border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-              You&rsquo;re watching the maximum of {MAX_REPOS_PER_ACCOUNT} repos.
+              You&rsquo;ve added the maximum of {MAX_REPOS_PER_ACCOUNT} repos.
               Remove one to add another.
             </div>
           )}
@@ -291,7 +287,7 @@ export function RepoSearch({
               </div>
               {suggestions.length === 0 ? (
                 <div className="px-3 py-2 text-xs text-gray-500">
-                  You&rsquo;re already watching all the suggestions.
+                  You&rsquo;ve already added all the suggestions.
                 </div>
               ) : (
                 <div ref={listRef}>
@@ -405,13 +401,7 @@ export function RepoSearch({
                       aria-selected={idx === active}
                       disabled={addRepo.isPending}
                       onMouseEnter={() => setActive(idx)}
-                      onClick={() =>
-                        addRepo.mutate({
-                          owner: r.owner,
-                          name: r.name,
-                          watch: r.isOwnedOrMember,
-                        })
-                      }
+                      onClick={() => addRepo.mutate({ owner: r.owner, name: r.name })}
                       className="flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left disabled:opacity-60"
                     >
                       <OwnerAvatar login={r.owner} src={r.ownerAvatarUrl} />

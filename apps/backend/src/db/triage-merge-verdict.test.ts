@@ -69,7 +69,6 @@ beforeAll(async () => {
       owner: 'acme',
       name: 'api',
       githubNodeId: 'R_triage',
-      inboxWatch: true,
     })
     .returning()
     .execute();

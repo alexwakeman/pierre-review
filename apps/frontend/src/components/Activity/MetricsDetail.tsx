@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { MetricPr, TeamMetricKey, User } from '@pierre-review/shared';
-import { TEAM_METRIC_KEYS } from '@pierre-review/shared';
-import { useTeamMetricsDetail } from '../../hooks/useTeamMetricsDetail.js';
+import type { MetricPr, WorkspaceMetricKey, User } from '@pierre-review/shared';
+import { WORKSPACE_METRIC_KEYS } from '@pierre-review/shared';
+import { useWorkspaceMetricsDetail } from '../../hooks/useWorkspaceMetricsDetail.js';
 import { useUsers } from '../../hooks/useTimeline.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { CI_META, indexUsers, relativeTime } from '../../lib/ui.js';
 import { fmtDuration } from '../charts/common.js';
@@ -12,12 +12,12 @@ import { UserName } from '../UserName.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
 import { SortHeader, type SortDir, type SortState, compare, nextSort } from './sortableTable.js';
 
-// The flow-metric DRILL-DOWN — a persistent tab opened by clicking a metric tile in
-// Insights. One sub-tab per metric, each listing the PRs behind that number (with the
-// metric-specific figure) so a lead can see WHERE issues cluster. All data comes from a
-// single lazy read (useTeamMetricsDetail); clicking any PR opens its detail tab.
+// The flow-metric DRILL-DOWN — a persistent tab opened by clicking a metric tile on the Feed's
+// workspace metrics header. One sub-tab per metric, each listing the PRs behind that number (with
+// the metric-specific figure) so a lead can see WHERE issues cluster. All data comes from a single
+// lazy read (useWorkspaceMetricsDetail); clicking any PR opens its detail tab.
 
-const METRIC_META: Record<TeamMetricKey, { label: string; blurb: string }> = {
+const METRIC_META: Record<WorkspaceMetricKey, { label: string; blurb: string }> = {
   open_prs: { label: 'Open PRs', blurb: 'All currently-open PRs · most-recently-updated first' },
   merges: { label: 'Merges', blurb: 'Merged this sprint · most-recently-updated first' },
   lead_time: { label: 'Lead time', blurb: 'Open → merge (merged + open) · longest first' },
@@ -47,7 +47,7 @@ const DEFAULT_DIR: Record<SortCol, SortDir> = {
 // Per-tab default sort. Recency (updated desc) for the two tabs where "what moved lately" is
 // the useful lens; the duration/CI tabs keep the metric magnitude as the sort (which IS the
 // point of the tile — e.g. NOT recency for lead time), reproducing the backend order.
-const DEFAULT_SORT: Record<TeamMetricKey, SortState<SortCol> | null> = {
+const DEFAULT_SORT: Record<WorkspaceMetricKey, SortState<SortCol> | null> = {
   open_prs: { col: 'updated', dir: 'desc' },
   merges: { col: 'updated', dir: 'desc' },
   lead_time: { col: 'value', dir: 'desc' },
@@ -71,7 +71,7 @@ function ciRank(ci: MetricPr['ciStatus']): number {
 }
 
 // The metric-specific "value" column, mapped to a numeric magnitude so it sorts sensibly.
-function valueSort(m: TeamMetricKey, pr: MetricPr): number {
+function valueSort(m: WorkspaceMetricKey, pr: MetricPr): number {
   switch (m) {
     case 'open_prs':
     case 'merges':
@@ -90,7 +90,7 @@ function valueSort(m: TeamMetricKey, pr: MetricPr): number {
 }
 
 // The contextual last column (Reviewers / Merged by / Opened) → a sortable value.
-function lastColSort(m: TeamMetricKey, pr: MetricPr, usersById: Map<number, User>): number | string {
+function lastColSort(m: WorkspaceMetricKey, pr: MetricPr, usersById: Map<number, User>): number | string {
   if (m === 'review_latency') return pr.reviewerIds.length;
   if (m === 'merges' || m === 'merge_ci') {
     const u = pr.mergedById != null ? usersById.get(pr.mergedById) : undefined;
@@ -103,7 +103,7 @@ function lastColSort(m: TeamMetricKey, pr: MetricPr, usersById: Map<number, User
 // DiffCell string), or compare() localeCompares lexicographically and '100' < '20'.
 function sortValue(
   pr: MetricPr,
-  m: TeamMetricKey,
+  m: WorkspaceMetricKey,
   col: SortCol,
   usersById: Map<number, User>,
 ): number | string {
@@ -128,8 +128,8 @@ function sortValue(
 }
 
 function listFor(
-  detail: NonNullable<ReturnType<typeof useTeamMetricsDetail>['data']>['detail'],
-  m: TeamMetricKey,
+  detail: NonNullable<ReturnType<typeof useWorkspaceMetricsDetail>['data']>['detail'],
+  m: WorkspaceMetricKey,
 ): MetricPr[] {
   if (!detail) return [];
   switch (m) {
@@ -217,7 +217,7 @@ function Reviewers({
 }
 
 // The metric-specific "value" cell for a row (and its column header text).
-function valueHeader(m: TeamMetricKey): string {
+function valueHeader(m: WorkspaceMetricKey): string {
   switch (m) {
     case 'open_prs':
       return 'Open for';
@@ -235,7 +235,7 @@ function valueHeader(m: TeamMetricKey): string {
   }
 }
 
-function ValueCell({ m, pr }: { m: TeamMetricKey; pr: MetricPr }): JSX.Element {
+function ValueCell({ m, pr }: { m: WorkspaceMetricKey; pr: MetricPr }): JSX.Element {
   const dur = (h: number | null): string => (h == null ? '—' : fmtDuration(h));
   switch (m) {
     case 'open_prs':
@@ -265,7 +265,7 @@ function Row({
   usersById,
   onOpen,
 }: {
-  m: TeamMetricKey;
+  m: WorkspaceMetricKey;
   pr: MetricPr;
   usersById: Map<number, User>;
   onOpen: (pr: MetricPr) => void;
@@ -327,7 +327,7 @@ function Table({
   sort,
   onSort,
 }: {
-  m: TeamMetricKey;
+  m: WorkspaceMetricKey;
   rows: MetricPr[];
   usersById: Map<number, User>;
   onOpen: (pr: MetricPr) => void;
@@ -363,14 +363,19 @@ export function MetricsDetail(): JSX.Element {
   const metricsFocus = useFilters((s) => s.metricsFocus);
   const consumeMetricsFocus = useFilters((s) => s.consumeMetricsFocus);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  // Match the scoped tile that opened this drill-down — scope is in the query key so a scope
-  // change refetches.
-  const scope = scopeToParam(useFilters((s) => s.teamScope));
-  const { data, isLoading, isError, refetch, isFetching } = useTeamMetricsDetail(true, scope);
+  // Match the scoped tile that opened this drill-down: the ACTIVE WORKSPACE, which is in the query
+  // key so a workspace change refetches into its own cache slot. The hook holds itself idle while
+  // the id is still null — an unscoped request would silently be answered for the account's
+  // Default workspace and shown under this one's name.
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const { data, isLoading, isError, refetch, isFetching } = useWorkspaceMetricsDetail(
+    true,
+    workspaceId,
+  );
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
 
-  const [active, setActive] = useState<TeamMetricKey>(metricsFocus ?? 'merges');
+  const [active, setActive] = useState<WorkspaceMetricKey>(metricsFocus ?? 'merges');
   // A clicked tile (even while the tab is already open) re-jumps to that metric's sub-tab.
   useEffect(() => {
     if (metricsFocus) {
@@ -381,7 +386,7 @@ export function MetricsDetail(): JSX.Element {
 
   // Sort is PER-TAB (each metric keeps its own column + direction), seeded from DEFAULT_SORT —
   // recency for open_prs/merges, metric magnitude for the duration/CI tabs. Header clicks toggle.
-  const [sortByTab, setSortByTab] = useState<Record<TeamMetricKey, SortState<SortCol> | null>>(
+  const [sortByTab, setSortByTab] = useState<Record<WorkspaceMetricKey, SortState<SortCol> | null>>(
     () => ({ ...DEFAULT_SORT }),
   );
   const sort = sortByTab[active];
@@ -390,9 +395,10 @@ export function MetricsDetail(): JSX.Element {
 
   const detail = data?.detail ?? null;
 
-  // Per-metric-tab repo filter — each tab owns its own selection (null = all team repos),
-  // so filtering CI-red doesn't disturb Merges. Independent across tabs, as requested.
-  const [repoSel, setRepoSel] = useState<Partial<Record<TeamMetricKey, number[] | null>>>({});
+  // Per-metric-tab repo filter — each tab owns its own selection (null = every repo the
+  // drill-down covers, i.e. the whole workspace), so filtering CI-red doesn't disturb Merges.
+  // Independent across tabs, as requested.
+  const [repoSel, setRepoSel] = useState<Partial<Record<WorkspaceMetricKey, number[] | null>>>({});
   const activeSel = repoSel[active] ?? null;
   const setActiveSel = (sel: number[] | null): void =>
     setRepoSel((prev) => ({ ...prev, [active]: sel }));
@@ -402,7 +408,7 @@ export function MetricsDetail(): JSX.Element {
   const repoOptions = useMemo(() => {
     const byId = new Map<number, string>();
     if (detail)
-      for (const k of TEAM_METRIC_KEYS)
+      for (const k of WORKSPACE_METRIC_KEYS)
         for (const r of listFor(detail, k)) byId.set(r.repoId, r.repoFullName);
     return [...byId.entries()]
       .map(([id, fullName]) => ({ id, fullName }))
@@ -460,7 +466,7 @@ export function MetricsDetail(): JSX.Element {
 
       {/* Sub-tab bar — one per metric. */}
       <div role="tablist" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
-        {TEAM_METRIC_KEYS.map((m) => {
+        {WORKSPACE_METRIC_KEYS.map((m) => {
           const on = m === active;
           const n = listFor(detail, m).length;
           return (

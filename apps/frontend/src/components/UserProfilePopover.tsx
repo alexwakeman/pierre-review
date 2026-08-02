@@ -31,8 +31,21 @@ export type PopoverAnchor =
 // profile was one click away and told you nothing about THIS codebase.
 //
 // Scope: `repoId` set (the handle was rendered inside a PR/thread/comment) → that repo's
-// numbers. Otherwise the FilterBar-visible repo set, which the team picker already resolved.
-// The caption states which, because "12 merged" means nothing without it.
+// numbers, counted in THAT REPO'S OWN WORKSPACE. Otherwise the WHOLE active workspace. The
+// caption states which, because "12 merged" means nothing without it.
+//
+// ⚠ IT NO LONGER FALLS BACK TO `filters.repoIds`. This card is rendered from five surfaces —
+// timeline row labels, PR detail, threads, feed cards, the drill-down tables — and only the first
+// two live on the Timeline board, which is the only place the repo picker is mounted. One scope
+// that silently means "the picker" on Activity would make the same person's totals differ between
+// two screens for a reason invisible on both of them.
+//
+// ⚠ THE WORKSPACE FOLLOWS THE REPO, NOT THE SELECTOR. The server narrows to
+// `membership ∩ (repoIds ?? membership)`, so naming the SELECTED workspace while passing a repo
+// from another one intersects to nothing and the card silently reports all zeros under a caption
+// that names the repo. A PR can be open from a different workspace via `?pr=<id>`, a restored
+// tab or a search hit, so `Repo.workspaceId` — the client's only repo→workspace mapping — is what
+// this must ask for.
 export function UserProfilePopover({
   user,
   userId,
@@ -46,32 +59,32 @@ export function UserProfilePopover({
   anchor: PopoverAnchor;
   onDismiss: () => void;
 }): JSX.Element {
-  const visibleRepoIds = useFilters((s) => s.repoIds);
+  const activeWorkspaceId = useFilters((s) => s.workspaceId);
   const openUserActivityTab = usePinnedTabs((s) => s.openUserActivityTab);
   const { data: repos } = useRepos();
 
-  // The repo subset the counts cover + the caption that names it. A single in-context repo
-  // wins; otherwise the visible set (null = every watched repo, which the backend resolves).
+  // The repo subset the counts cover + the caption that names it. A single in-context repo wins;
+  // otherwise `null`, which the backend resolves to every repo in the named workspace.
   const scopeRepoIds = useMemo(
-    () => (repoId != null ? [repoId] : visibleRepoIds),
-    [repoId, visibleRepoIds],
+    () => (repoId != null ? [repoId] : null),
+    [repoId],
   );
+  // The workspace the counts are read in. In a PR context it is the PR's repo's OWN workspace
+  // (see the note above); otherwise the selected one. `null` while `useRepos()` is still loading
+  // keeps the query inert rather than asking the wrong workspace.
+  const scopeWorkspaceId = useMemo(() => {
+    if (repoId == null) return activeWorkspaceId;
+    return (repos ?? []).find((x) => x.id === repoId)?.workspaceId ?? null;
+  }, [repoId, repos, activeWorkspaceId]);
   const scopeLabel = useMemo(() => {
     if (repoId != null) {
       const r = (repos ?? []).find((x) => x.id === repoId);
       return r ? `in ${r.fullName}` : 'in this repo';
     }
-    if (visibleRepoIds && visibleRepoIds.length > 0) {
-      if (visibleRepoIds.length === 1) {
-        const r = (repos ?? []).find((x) => x.id === visibleRepoIds[0]);
-        return r ? `in ${r.fullName}` : 'in 1 repo';
-      }
-      return `across ${visibleRepoIds.length} repos`;
-    }
-    return 'across all repos';
-  }, [repoId, visibleRepoIds, repos]);
+    return 'across this workspace';
+  }, [repoId, repos]);
 
-  const { data: stats, isLoading, isError } = useUserStats(userId, scopeRepoIds);
+  const { data: stats, isLoading, isError } = useUserStats(userId, scopeWorkspaceId, scopeRepoIds);
 
   const { refs, floatingStyles, context, isPositioned } = useFloating({
     open: true,

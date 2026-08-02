@@ -6,7 +6,7 @@ import { useFilters } from '../../store/filters.js';
 import { ACTIVITY_QUERY_KEYS } from '../../hooks/useActivity.js';
 import { RepoSearch } from '../RepoSearch.js';
 
-// How many detected repos are pre-checked. Kept small so the one-click "Watch selected" flow
+// How many detected repos are pre-checked. Kept small so the one-click "Add selected" flow
 // doesn't kick off a 30-repo two-phase backfill storm on the user's very first action.
 const DEFAULT_CHECKED = 5;
 
@@ -51,8 +51,8 @@ function OwnerAvatar({ login, src }: { login: string; src: string | null }): JSX
 }
 
 // The zero-repo Activity console body: detect the repos the viewer has recently pushed to /
-// contributed on, let them one-click "watch" a selection, and hand off to the existing
-// add → auto-watch → two-phase-backfill cascade to populate the board. Only ever mounted
+// contributed on, let them one-click add a selection, and hand off to the existing
+// add → two-phase-backfill cascade to populate the board. Only ever mounted
 // when the account has zero repos (see ActivityView); a successful add flips that condition
 // and this unmounts, revealing the populated console.
 export function FirstRunOnboarding(): JSX.Element {
@@ -112,7 +112,7 @@ export function FirstRunOnboarding(): JSX.Element {
     setPendingSuccessIds([]);
   }
 
-  async function watchSelected(): Promise<void> {
+  async function addSelected(): Promise<void> {
     if (running || chosen.length === 0) return;
     setRunning(true);
     setFailures([]);
@@ -122,7 +122,7 @@ export function FirstRunOnboarding(): JSX.Element {
     for (const r of chosen) {
       setProgress({ done, total: chosen.length, current: r.fullName });
       try {
-        const repo = await api.addRepo({ owner: r.owner, name: r.name, watch: r.isOwnedOrMember });
+        const repo = await api.addRepo({ owner: r.owner, name: r.name });
         // The backfill is already running server-side; the sync-modal signal is DEFERRED to
         // flushBatch — signalling now would make SyncStatus invalidate ['repos'] and unmount
         // this component mid-loop (killing the progress display and any failure report).
@@ -151,10 +151,10 @@ export function FirstRunOnboarding(): JSX.Element {
     <div className="mx-auto max-w-2xl space-y-5 py-6">
       <header>
         <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
-          Watch the repos you work on
+          Add the repos you work on
         </h2>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Limn watches the repos you care about &mdash; here&rsquo;s what you&rsquo;ve been
+          Limn tracks the repos you care about &mdash; here&rsquo;s what you&rsquo;ve been
           working on.
         </p>
       </header>
@@ -238,7 +238,7 @@ export function FirstRunOnboarding(): JSX.Element {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={watchSelected}
+              onClick={addSelected}
               disabled={running || chosen.length === 0}
               className="rounded bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -246,7 +246,7 @@ export function FirstRunOnboarding(): JSX.Element {
                 ? progress
                   ? `Adding ${progress.done + 1}/${progress.total} — ${progress.current}…`
                   : 'Adding…'
-                : `Watch ${chosen.length} selected`}
+                : `Add ${chosen.length} selected`}
             </button>
             {!running && (
               <span className="text-[11px] text-gray-400">

@@ -11,7 +11,7 @@
 >
 > **Why adaptive rather than webhooks as the default, even in cloud** (decided 2026-07-25):
 > webhooks require the GitHub App to be **installed** on each repo, and installation needs
-> admin rights on that repo. In practice most watched repos are **third-party public repos**
+> admin rights on that repo. In practice most tracked repos are **third-party public repos**
 > nobody on the deployment can install on (of the first production account's 8 repos, 2 —
 > `mrdoob/three.js`, `raspberrypi/…` — are permanently uninstallable). A strategy that only
 > works where you hold admin can't be the baseline. Adaptive needs no cooperation from anyone
@@ -79,7 +79,7 @@ Feasibility diverges hard along the local/cloud deployment modes (see CLAUDE.md
 > **Revised 2026-07-25.** This table originally read "best lever: webhooks" for cloud. In
 > practice the binding constraint isn't feasibility, it's **permission**: an installation needs
 > admin on the repo, so webhooks simply cannot cover third-party public repos — a large share of
-> what people watch. Adaptive polling is therefore the baseline in both modes, with webhooks as
+> what people track. Adaptive polling is therefore the baseline in both modes, with webhooks as
 > an accelerator on the subset that *is* installed.
 
 Local can't be the webhook target: the official `gh webhook forward` CLI extension
@@ -149,7 +149,7 @@ registered in `app.ts` (both modes), exempted from the auth gate in `api/plugins
   reads `repository.owner.login` + `repository.name` + the PR number(s) from the payload →
   `SELECT id FROM repos WHERE owner=? AND name=?` → `enqueuePrSync(repoId, prNumber, log)` for
   each matching row. Multi-tenant fan-out is automatic; `syncOnePr` resolves each account's own
-  token, so an account watching the same public repo via the OAuth App (no install) even gets
+  token, so an account tracking the same public repo via the OAuth App (no install) even gets
   refreshed for free off another account's App-triggered delivery. Responds
   `{ received, queued }` (`queued` = rows × PR numbers).
 - **PR-number extraction** (`extractPrTargets`, pure/tested) per event: `pull_request` /
@@ -176,7 +176,7 @@ missing means zero deliveries, and the failure is silent:
    event ever fires — the exact trap hit here on 2026-07-25.
 3. **Install App**: the App must be **installed** on an account/org for its events to fire
    there. On the Install App page an account showing "Install" (rather than "Configure") is
-   NOT installed. Public repos watched via the OAuth App only still rely on the periodic
+   NOT installed. Public repos tracked via the OAuth App only still rely on the periodic
    poll — which is why Phase 1 is additive.
 
 **Diagnosing silence.** An unsigned `curl -XPOST <base>/api/webhooks/github` returns `401

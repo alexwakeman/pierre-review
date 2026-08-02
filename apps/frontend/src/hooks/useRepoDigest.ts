@@ -11,25 +11,38 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
+import { workspaceKey } from './useActivity.js';
 
 /** Build the digest query string from the active repo filter. */
 function digestSearch(repoIds: number[] | null): string {
   return repoIds && repoIds.length > 0 ? `repoIds=${repoIds.join(',')}` : '';
 }
 
-// Bulk per-repo digests for the watched repos. Only fetched when `enabled`
-// (pro.activityDigest) — absent the @pierre/pro plugin the route 404s. Cached snapshot;
-// regeneration is explicit (the refresh stream / per-banner regenerate).
+// Bulk per-repo digests for a repo set. Only fetched when `enabled` (pro.activityDigest) — absent
+// the @pierre/pro plugin the route 404s. Cached snapshot; regeneration is explicit (the refresh
+// stream / per-banner regenerate).
+//
+// ⚠ CURRENTLY UNCALLED. The Feed collection renders through `InsightsDigests`, which derives its
+// own scoped repo list; the only live digest reads are the single-repo `useRepoDigest` below and
+// `useRefreshRepoDigests`. Kept because the route and its workspace-keying rule are live.
+//
+// ⚠ THE WORKSPACE IS A CACHE-KEY CONCERN ONLY, AND THAT ASYMMETRY IS DELIBERATE. A digest is a
+// per-REPO object: `api.repoDigests` takes the repo set alone, because the route is keyed by
+// `repoIds` and the old `scope` fragment was read by nothing on the server. But a caller passes a
+// workspace-narrowed set, and two workspaces can resolve that to the same string (both empty, or
+// both narrowed to nothing), so without a workspace segment React Query would serve one
+// workspace's digests under the other's name. The param fixes nothing on the wire; this key
+// segment is the whole point of taking it.
 export function useRepoDigests(
   repoIds: number[] | null,
   enabled: boolean,
-  scope?: string,
+  workspaceId: number | null,
 ) {
   const search = digestSearch(repoIds);
   return useQuery<RepoDigestsResponse>({
-    queryKey: ['repo-digests', search, scope ?? 'all'],
-    queryFn: () => api.repoDigests(search, scope),
-    enabled,
+    queryKey: ['repo-digests', workspaceKey(workspaceId), search],
+    queryFn: () => api.repoDigests(search),
+    enabled: enabled && workspaceId != null,
     staleTime: Infinity,
   });
 }
@@ -88,7 +101,8 @@ export function digestProgressProps(progress: DigestRefreshProgress | null): {
 //   • `progress` is the honest N-of-K reading for the determinate bar (K = repos that
 //     really changed), not an animated guess.
 // Pass a single repo id (per-repo console), an array (Feed "Regenerate all"), or omit
-// for the backend's watched-repos default.
+// for the backend's default — which is now the WHOLE ACCOUNT, not a "watched" subset (that
+// column is dropped), so prefer passing the workspace's ids explicitly.
 export function useRefreshRepoDigests() {
   const qc = useQueryClient();
   const [isPending, setIsPending] = useState(false);

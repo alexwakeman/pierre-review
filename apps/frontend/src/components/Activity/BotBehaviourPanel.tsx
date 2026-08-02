@@ -8,7 +8,7 @@ import type {
   BotWindowKind,
 } from '@pierre-review/shared';
 import { useBotBehaviour } from '../../hooks/useBotTriage.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { useFilters } from '../../store/filters.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { automatedReviewerMeta } from '../../lib/ui.js';
 import { LineChart } from '../charts/LineChart.js';
@@ -40,7 +40,9 @@ type BotColorFn = (bot: { login?: string | null; kind: BotBehaviourBotStat['kind
 //   • the week × hour activity heatmap — WHEN it's active (coverage gaps / rate-limit inference,
 //     INFERRED from timestamps — labelled as such, UTC),
 //   • follow-up behaviour — does it keep finding issues after its first pass.
-// Scope + window come from the store (shared with the ROI panel), so it inherits repo/team/window.
+// Scope + window come from the store (shared with the ROI panel): the ACTIVE WORKSPACE decides
+// which logins count as automated reviewers, the optional `repoId` narrows the measured data to
+// one repo, and the window is the same one the ROI panel's picker sets.
 
 const WINDOWS: { key: BotWindowKind; label: string }[] = [
   { key: 'rolling_7', label: '7d' },
@@ -803,10 +805,10 @@ function BotRepoWorkChart({
 export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Element {
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
-  const scope = scopeToParam(useFilters((s) => s.teamScope));
+  const workspaceId = useFilters((s) => s.workspaceId);
   const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
-  const botColor = useBotColors();
-  const { data, isLoading, isError } = useBotBehaviour(window, true, scope, repoScope);
+  const botColor = useBotColors(workspaceId);
+  const { data, isLoading, isError } = useBotBehaviour(workspaceId, window, true, repoScope);
   const bots = data?.bots ?? [];
 
   return (

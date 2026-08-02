@@ -426,6 +426,15 @@ export function ChecksTab({
   // threads by the vendor that opened them (originalCommenter → reviewBotKind), counting
   // total + still-unresolved (untouched | replied_unresolved). Drives the "CodeRabbit · 12 ·
   // 3 unresolved" chips; clicking one filters the Threads tab to that vendor's threads.
+  //
+  // ⚠ KNOWN GAP, recorded rather than closed here: this classifies CLIENT-SIDE BY LOGIN
+  // (`botVendorMeta`), so the stored per-WORKSPACE judgement never reaches these chips — a login
+  // marked "not a bot" or `quality_check` in this workspace still gets one, and a workspace-local
+  // vendor `label` is not shown. ThreadList's bulk-resolve OFFER on the same screen DOES consult
+  // the workspace listing (it has to match what the server re-derives), so the two can disagree by
+  // design. Closing it means threading the PR's own workspace listing in here — see
+  // ThreadList/index.tsx for the shape, and note the workspace must come from the PR's repo
+  // (`Repo.workspaceId`), never from the selector.
   const setThreadBotFilter = useFilters((s) => s.setThreadBotFilter);
   const botGroups = (() => {
     const byKind = new Map<ReviewBotKind, { threads: number; unresolved: number }>();

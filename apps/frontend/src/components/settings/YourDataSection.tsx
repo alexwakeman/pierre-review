@@ -94,7 +94,7 @@ export function YourDataSection(): JSX.Element {
           {exporting ? 'Preparing…' : 'Download my data (JSON)'}
         </button>
         <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
-          Your account, repositories, teams, synced pull-request activity and AI usage. Your stored
+          Your account, repositories, workspaces, synced pull-request activity and AI usage. Your stored
           GitHub token is deliberately excluded — it is a credential, and an export file is not a
           safe place for one.
         </p>

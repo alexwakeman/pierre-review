@@ -501,16 +501,6 @@ body {
 .tl-repo-tint-0 { --tl-tint: 59 130 246; }   /* blue   (blue-500)   */
 .tl-repo-tint-1 { --tl-tint: 139 92 246; }   /* purple (violet-500) */
 
-/* "Watched repo" eye next to the repo name in the timeline header row — sky to
-   match the Watch toggle. Inline-flex so the 11px SVG aligns with the name text. */
-.tl-repo-watch {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 5px;
-  color: #0ea5e9;
-  vertical-align: middle;
-}
-
 /* Paint the tint as the row's BACKGROUND-COLOR on both the label (left) and the
    foreground (right), for the repo header and every contributor row. The
    `[class*="tl-repo-tint-"]` attribute selector lands at specificity (0,4,0) —

@@ -14,7 +14,7 @@ const FULL: ProCapabilities = {
   aiAnalysis: true,
   prSummary: true,
   aiFix: true,
-  teamInsights: true,
+  workspaceInsights: true,
   claudeReview: true,
   slackDigest: true,
   issueLinks: true,

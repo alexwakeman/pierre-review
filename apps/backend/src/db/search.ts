@@ -8,12 +8,17 @@ import type {
 } from '@pierre-review/shared';
 import { db, schema, runTransaction } from './client.js';
 
-// Cross-team text search over the local `search_index` (CORE, no AI). The match is a PORTABLE
-// case-insensitive SUBSTRING (`lower(col) LIKE pattern ESCAPE '\'`, term lowercased in JS) so the
-// SAME query runs on SQLite (local) and Postgres (cloud) — no dialect fork, no FTS operator.
-// Substring is the right semantics for the user's goal ("pinpoint where certain text exists"). Every
-// query filters on the denormalized `accountId`, so cross-account isolation is a single indexed
-// predicate. A Postgres `pg_trgm` GIN index (see schema.pg.ts) is a drop-in accelerator.
+// Cross-repo text search over the local `search_index` (CORE, no AI), scoped to ONE workspace's
+// repos. The match is a PORTABLE case-insensitive SUBSTRING (`lower(col) LIKE pattern ESCAPE '\'`,
+// term lowercased in JS) so the SAME query runs on SQLite (local) and Postgres (cloud) — no dialect
+// fork, no FTS operator. Substring is the right semantics for the user's goal ("pinpoint where
+// certain text exists"). Every query filters on the denormalized `accountId`, so cross-account
+// isolation is a single indexed predicate. A Postgres `pg_trgm` GIN index (see schema.pg.ts) is a
+// drop-in accelerator.
+//
+// ⚠ NOTHING HERE PERSISTS A SCOPE. `search_index` stores `accountId` + `repoId` and the scope is
+// applied at QUERY time from the caller's resolved repo list, so the workspace refactor needs no
+// data migration on this table — unlike the plugin's report caches, which persist a `scope_key`.
 //
 // Case-folding caveat: SQL `lower()` folds ASCII on both dialects, but only Postgres folds non-ASCII
 // (accents, Cyrillic, …) — better-sqlite3 has no ICU. So a lowercase-accented query for
@@ -93,7 +98,12 @@ const toIso = (d: Date | number | null): string => {
 
 export interface SearchOpts {
   query: string;
-  repoIds: number[] | null; // null = all the account's repos; [] = none (returns empty)
+  // The repos to search — the active workspace's membership, already intersected with any explicit
+  // `?repoIds=` narrow by `resolveWorkspaceScope`. It is a CONCRETE list and is NEVER null: `[]`
+  // means "this workspace is empty" and returns nothing. There is deliberately no "null = every
+  // repo the account has" branch any more — that sentinel is exactly how a scope that resolved to
+  // zero repos silently widened to the whole account (§5.1).
+  repoIds: number[];
   kinds?: SearchHitKind[];
   limit: number;
   offset: number;
@@ -102,8 +112,8 @@ export interface SearchOpts {
 export async function searchPrs(accountId: number, opts: SearchOpts): Promise<SearchResponse> {
   const query = opts.query.trim();
   const terms = parseTerms(query);
-  // No terms, or a scope that resolved to zero repos → nothing to match.
-  if (terms.length === 0 || (opts.repoIds != null && opts.repoIds.length === 0)) {
+  // No terms, or an empty workspace → nothing to match.
+  if (terms.length === 0 || opts.repoIds.length === 0) {
     return { query, hits: [], people: [], total: 0 };
   }
 
@@ -116,12 +126,12 @@ export async function searchPrs(accountId: number, opts: SearchOpts): Promise<Se
       likeCol(users.displayName, pat),
     )!;
   };
-  const scope = opts.repoIds != null ? inArray(searchIndex.repoId, opts.repoIds) : undefined;
+  const repoFilter = inArray(searchIndex.repoId, opts.repoIds);
   const kindFilter =
     opts.kinds && opts.kinds.length > 0 ? inArray(searchIndex.kind, opts.kinds) : undefined;
   const where = and(
     eq(searchIndex.accountId, accountId),
-    scope,
+    repoFilter,
     kindFilter,
     ...terms.map(termMatch),
   );
@@ -186,10 +196,12 @@ export async function searchPrs(accountId: number, opts: SearchOpts): Promise<Se
 }
 
 // The "People" facet: authors whose login/display name matches ANY term AND who have indexed
-// activity in scope (so the person is real + relevant), ranked by how much they've authored.
+// activity in the searched repos (so the person is real + relevant), ranked by how much they've
+// authored. `repoIds` is the same concrete workspace-bounded list `searchPrs` matched on — the
+// caller has already returned empty for `[]`, so the facet can never widen past the hits.
 async function findPeople(
   accountId: number,
-  repoIds: number[] | null,
+  repoIds: number[],
   terms: string[],
 ): Promise<SearchPerson[]> {
   const nameMatch = or(
@@ -198,7 +210,7 @@ async function findPeople(
       return or(likeCol(users.githubLogin, pat), likeCol(users.displayName, pat))!;
     }),
   );
-  const scope = repoIds != null ? inArray(searchIndex.repoId, repoIds) : undefined;
+  const repoFilter = inArray(searchIndex.repoId, repoIds);
   const n = sql<number>`count(*)`;
   const rows = await db
     .select({
@@ -210,7 +222,7 @@ async function findPeople(
     })
     .from(searchIndex)
     .innerJoin(users, eq(searchIndex.authorId, users.id))
-    .where(and(eq(searchIndex.accountId, accountId), scope, nameMatch))
+    .where(and(eq(searchIndex.accountId, accountId), repoFilter, nameMatch))
     .groupBy(users.id, users.githubLogin, users.displayName, users.avatarUrl)
     .orderBy(desc(n))
     .limit(10)

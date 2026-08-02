@@ -3,12 +3,11 @@ import type { ActivityRepo, RepoBranchStatus, ThreadStateCounts } from '@pierre-
 import { useActivity } from '../../hooks/useActivity.js';
 import { useBranchStatus } from '../../hooks/useBranchStatus.js';
 import { useRepos } from '../../hooks/useTimeline.js';
-import { useTeams } from '../../hooks/useTeams.js';
+import { useWorkspaces } from '../../hooks/useWorkspaces.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
-import { useFilters, isMultiTeamScope, scopeToParam, teamIdsInScope } from '../../store/filters.js';
+import { useFilters } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
-import { buildTeamColorMap, teamColorFor } from '../../lib/teamColors.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { BranchStatusChip } from './BranchStatusChip.js';
 import { BranchStatusPanel } from './BranchStatusPanel.js';
@@ -19,7 +18,7 @@ import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { FeedMetricsPanel } from './FeedMetricsPanel.js';
 import { HumanThemesPanel } from './HumanThemesPanel.js';
-import { TeamComparisonPanel } from './TeamComparisonPanel.js';
+import { WorkspaceComparisonPanel } from './WorkspaceComparisonPanel.js';
 import { InsightsView } from './InsightsView.js';
 import { AttentionView } from './AttentionView.js';
 import { BotsView } from './BotsView.js';
@@ -67,7 +66,6 @@ function RailRow({
   openPrs,
   threadTotals,
   branch,
-  accent,
   selected,
   onSelect,
 }: {
@@ -80,10 +78,6 @@ function RailRow({
   // The repo's default-branch snapshot, or null when it has never been branch-synced.
   // Informational only — it deliberately does NOT participate in the rail sort.
   branch: RepoBranchStatus | null;
-  // The owning team's identity colour when the rail is grouped by team, else null. Rendered as
-  // the row's left border so a row visually belongs to the header above it — and so a repo that
-  // legitimately appears under TWO teams is distinguishable at a glance.
-  accent: string | null;
   selected: boolean;
   onSelect: () => void;
 }): JSX.Element {
@@ -95,17 +89,13 @@ function RailRow({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      // SELECTION WINS over the team accent: the sky border is how you find the open repo, and
-      // an accent that overrode it would make the selected row indistinguishable. The inline
-      // style is only applied on unselected rows, and only when grouped (accent != null) —
-      // Tailwind can't express a runtime palette value.
-      style={!selected && accent ? { borderLeftColor: accent } : undefined}
+      // A repo belongs to EXACTLY ONE workspace and the rail only ever shows that one workspace,
+      // so there is nothing left for a per-row accent colour to disambiguate: the sky border is
+      // the only border state, and it means "this is the open repo".
       className={`flex w-56 shrink-0 flex-col gap-0.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
         selected
           ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
-          : accent
-            ? 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
-            : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+          : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
       }`}
     >
       {/* line 1: repo name */}
@@ -211,59 +201,66 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
   );
 }
 
-// The Activity "Triage Console with a Briefing Feed": a fixed left rail of repos (the
-// cross-repo glance) + a right detail that defaults to the cross-repo consolidated Feed
-// and narrows to a single-repo console on selection. Entirely on the core query layer —
-// no AI (the only Pro surface is the per-repo digest banner inside RepoFeedHeader).
+// The Activity "Triage Console with a Briefing Feed": a fixed left rail (the cross-repo pseudo-
+// rows, then this WORKSPACE's repos, flat) + a right detail that defaults to the consolidated
+// Feed and narrows to a single-repo console on selection. Entirely on the core query layer — no
+// AI (the only Pro surfaces are the Insights rail entry and the per-repo digest banner inside
+// RepoFeedHeader).
+//
+// SCOPE IS ONE WORKSPACE, always — the WHOLE workspace. There is no "all repos", no multi-select,
+// and (deliberately) NO second visibility axis on top: this console reads `filters.workspaceId` and
+// nothing else. The FilterBar's per-repo show/hide (`repoIds`) is a TIMELINE-board filter and is
+// not even mounted while Activity is the active tab; narrowing here is the RAIL's job — clicking a
+// repo row switches to that repo's console (`activityRepoId`), which is a different mechanism with
+// a visible, obvious control. The one entry that steps outside the workspace is "Compare
+// workspaces", and it does so completely — it compares every workspace in the account and ignores
+// the selection entirely.
 export function ActivityView(): JSX.Element {
   useStalenessTick();
-  const teamScope = useFilters((s) => s.teamScope);
-  const repoIds = useFilters((s) => s.repoIds);
+  const workspaceId = useFilters((s) => s.workspaceId);
   const activityRepoId = useFilters((s) => s.activityRepoId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
-  const { teamInsights, activityDigest } = useProCapabilities();
+  const { workspaceInsights, activityDigest } = useProCapabilities();
   // The cross-repo Feed's inner sub-tab: 'feed' (metrics + consolidated feed) vs the Pro
   // "Discussion themes" AI summary. The Themes tab only appears when the AI-summary tier is on.
+  // ('compare' is NOT a member any more — cross-workspace comparison is its own rail entry.)
   const feedInnerTab = useFilters((s) => s.feedInnerTab);
   const setFeedInnerTab = useFilters((s) => s.setFeedInnerTab);
-  // Scope the aggregate to the active TEAM: 'all' → null (every watched repo), a team → its
-  // teamScope-derived repoIds (kept in lockstep by setTeamScope / useTeamScopeSync). Members
-  // is a TIMELINE-only filter, so it never narrows the console (userIds → null). When 'all'
-  // the backend resolves the whole watched set, so the rail + "new activity" check reflect
-  // the whole team, not just one repo.
-  const scopeRepoIds = teamScope === 'all' ? null : repoIds;
-  const { data, isFetching, isLoading } = useActivity(scopeRepoIds, null);
-  // Default-branch status for the SAME scope (the hook reads teamScope/repoIds itself, so this
-  // needs no argument and can never drift from useActivity's scope). Purely informational: it
-  // feeds the rail's third line and the Feed strip, and nothing else — not the sort, not
-  // attentionCount, not any badge.
+  // Scope is the ACTIVE WORKSPACE — the whole of it. Both narrowing arguments are NULL on purpose,
+  // and they are null for the SAME reason: each is a TIMELINE-only filter that this console does
+  // not show and therefore must not honour. `repoIds: null` means "every repo in this workspace",
+  // which only the server can expand, hence the workspace id travelling beside it; `userIds: null`
+  // is the long-standing Members rule. Passing the store's `repoIds` here is the bug this reads as
+  // a fix for — the picker is unmounted on Activity, so its effect would be invisible and
+  // unclearable from this screen. While `workspaceId` is still null (the workspaces query hasn't
+  // landed) the hook is disabled: nothing workspace-scoped may render against a guessed scope.
+  const { data, isFetching, isLoading } = useActivity(workspaceId, null, null);
+  // Default-branch status for the SAME scope. `useBranchStatus` reads the workspace from the store
+  // and narrows ONLY on an explicit argument, so an argument-less call here is the whole workspace
+  // by construction and can never drift from useActivity's scope. Purely informational: it feeds
+  // the rail's third line and the Feed strip, and nothing else — not the sort, not attentionCount,
+  // not any badge.
   const { data: branchData } = useBranchStatus();
   const branchByRepo = useMemo(
     () => new Map((branchData?.repos ?? []).map((r) => [r.repoId, r])),
     [branchData],
   );
   const { data: allRepos } = useRepos();
-  // The rail is grouped by team whenever 2+ teams are in scope (a repo in several teams shows
-  // under each). See `scopedTeamIds` below for why the predicate is not a scope-shape test.
-  const { data: teams } = useTeams();
-  const allTeamIds = useMemo(() => (teams ?? []).map((t) => t.id), [teams]);
-  // The teams currently in scope, and the ONE gate every cross-team surface here shares.
+  // The account's workspaces — read ONLY to gate the "Compare workspaces" rail entry. The rail
+  // itself is no longer grouped: a repo belongs to exactly one workspace and only one workspace
+  // is ever in scope, so there is one flat list, no headers, no colour dots and no "Other".
+  const { data: workspaces } = useWorkspaces();
+  // THE COMPARE GATE — a count over the ACCOUNT-WIDE roster, Default included, never a test on
+  // the selection. It answers "has the user created a workspace of their own?", which is only
+  // true at 2+. The panel then compares ALL of them, so the entry's data does not depend on
+  // which workspace is selected.
   //
-  // LANDMINE (this is the bug the whole change fixes): neither `teamScope === 'teams'` nor
-  // `Array.isArray(teamScope)` is a correct multi-team test. `teamSetToScope` canonicalises a
-  // selection covering EVERY team to the 'teams' sentinel and a one-team selection to a bare
-  // number, so the count must come from the RESOLVED ids. The old rail + Compare gates both
-  // tested the sentinel, which is why ticking two of five teams silently un-grouped the rail
-  // and made the Compare tab disappear.
-  const scopedTeamIds = useMemo(
-    () => teamIdsInScope(teamScope, allTeamIds),
-    [teamScope, allTeamIds],
-  );
-  const groupRail = isMultiTeamScope(teamScope, allTeamIds);
-  // Colours are seeded from the ACCOUNT-WIDE roster, never `scopedTeamIds` — otherwise every
-  // team's hue would shift as the selection changed, and the rail would disagree with the
-  // Compare matrix built from a different subset. (Same discipline as buildBotColorMap.)
-  const teamColors = useMemo(() => buildTeamColorMap(allTeamIds), [allTeamIds]);
+  // ⚠ `undefined` (not loaded) must read as HIDDEN, not as "show optimistically": `workspaces ??
+  // []` is what keeps the line from being painted and then yanked away a frame later. The
+  // converse — demoting a deep-linked `?activityRepo=compare` to the Feed — must wait until the
+  // roster has actually LOADED, or that same pre-load window flashes the Feed before Compare.
+  const canCompare = (workspaces ?? []).length >= 2;
+  const compareUnavailable = workspaces != null && !canCompare;
 
   const sorted = useMemo(() => sortRepos(data?.repos ?? []), [data?.repos]);
 
@@ -272,8 +269,17 @@ export function ActivityView(): JSX.Element {
     typeof activityRepoId === 'number'
       ? sorted.find((r) => r.repoId === activityRepoId) ?? null
       : null;
-  // The cross-repo consolidated Feed is the default detail (also when nothing's set).
-  const showingFeed = activityRepoId === 'feed' || activityRepoId == null;
+  // The CORE/free cross-WORKSPACE comparison matrix — its own rail entry now (it was a Feed
+  // sub-tab). DERIVED, never written back: when the gate is known-false the render falls back to
+  // the Feed and the store keeps 'compare', so deleting and recreating a workspace RESTORES the
+  // entry instead of having silently forgotten it.
+  const showingCompare = activityRepoId === 'compare' && !compareUnavailable;
+  // The cross-repo consolidated Feed is the default detail (also when nothing's set, and when a
+  // stale/deep-linked 'compare' has nothing to compare).
+  const showingFeed =
+    activityRepoId === 'feed' ||
+    activityRepoId == null ||
+    (activityRepoId === 'compare' && compareUnavailable);
   // The CORE/free "Needs attention" cards console — always available, no Pro gate.
   const showingAttention = activityRepoId === 'attention';
   const showingInsights = activityRepoId === 'insights';
@@ -285,38 +291,39 @@ export function ActivityView(): JSX.Element {
   // only from the pristine 'feed' default (never overriding a deep-linked repo or a choice
   // the user has already made this session).
   useEffect(() => {
-    if (!insightsDefaultApplied && teamInsights) {
+    if (!insightsDefaultApplied && workspaceInsights) {
       insightsDefaultApplied = true;
       if (useFilters.getState().activityRepoId === 'feed') setActivityRepo('insights');
     }
-  }, [teamInsights, setActivityRepo]);
+  }, [workspaceInsights, setActivityRepo]);
 
-  // The cross-repo Feed's sub-tab bar. Built dynamically so a tab exists only where it means
-  // something: Themes needs the Pro AI tier, Compare needs 2+ teams to compare.
+  // The cross-repo Feed's sub-tab bar: Feed | Themes(Pro). Still built dynamically so a tab
+  // exists only where it means something — Themes needs the Pro AI tier. ("Compare teams" left
+  // this bar for its own rail entry; it compares every workspace in the account, which is not a
+  // property of the Feed's scope and had no business being nested under it.)
   const feedTabs = useMemo(() => {
-    const tabs: { key: 'feed' | 'themes' | 'compare'; label: string }[] = [
-      { key: 'feed', label: 'Feed' },
-    ];
+    const tabs: { key: 'feed' | 'themes'; label: string }[] = [{ key: 'feed', label: 'Feed' }];
     if (activityDigest) tabs.push({ key: 'themes', label: 'Themes' });
-    if (groupRail) tabs.push({ key: 'compare', label: 'Compare teams' });
     return tabs;
-  }, [activityDigest, groupRail]);
-  // DERIVED, never written back to the store. Un-ticking a team (or Pro going away) must not
-  // strand the pane on a tab that no longer exists — but a corrective `setFeedInnerTab` would
-  // also FORGET the user's choice, so re-ticking the team wouldn't restore Compare. Falling back
-  // for the render only keeps the choice intact. This also fixes the pre-existing wart where
-  // `activityDigest` flipping off left feedInnerTab stuck on 'themes' with no tab highlighted.
+  }, [activityDigest]);
+  // DERIVED, never written back to the store. Pro going away must not strand the pane on a tab
+  // that no longer exists — but a corrective `setFeedInnerTab` would also FORGET the user's
+  // choice, so the capability returning wouldn't restore Themes. Falling back for the render only
+  // keeps the choice intact.
   const effectiveFeedTab = feedTabs.some((t) => t.key === feedInnerTab) ? feedInnerTab : 'feed';
 
   const generatedAt = data?.generatedAt ?? null;
 
-  // Rail items: the loaded inbox repos, or a name-only fallback from useRepos while the first
-  // aggregate is loading (so names paint instantly). When ANY team is in scope the fallback is
-  // restricted to the union of THOSE teams' repos — else, on a cold load (activity isn't
-  // IndexedDB-persisted, so this happens every time), every account repo briefly paints and the
-  // out-of-scope ones land under "Other" until the scoped aggregate resolves, which reads as the
-  // rail reshuffling itself. This used to narrow only for the All-Teams sentinel, so both the
-  // 2-team and the single-team scopes flashed the whole account.
+  // Rail items: the loaded repos, or a name-only fallback from useRepos while the first aggregate
+  // is loading (so names paint instantly).
+  //
+  // The fallback narrows to the ACTIVE WORKSPACE and to nothing else — the same bound the server
+  // will apply a moment later, so the rail does not visibly reshuffle when the aggregate lands.
+  // `useRepos()` is the ACCOUNT's repo list (it is not workspace-scoped), and `Repo.workspaceId` is
+  // a database fact on the row precisely so a client surface holding only repo ids can answer
+  // "which workspace is this?" without guessing. It deliberately does NOT consult
+  // `filters.repoIds`: that is a timeline-board filter, so honouring it here would make the rail
+  // disagree with the aggregate that replaces it a frame later.
   type RailItem = {
     repoId: number;
     fullName: string;
@@ -326,19 +333,10 @@ export function ActivityView(): JSX.Element {
     openPrs: number | null;
     threadTotals: ThreadStateCounts | null;
   };
-  const fallbackRepos = (() => {
-    const repos = allRepos ?? [];
-    if (scopedTeamIds.length > 0) {
-      const scoped = new Set(scopedTeamIds);
-      const union = new Set(
-        (teams ?? []).filter((t) => scoped.has(t.id)).flatMap((t) => t.repoIds),
-      );
-      return repos.filter((r) => union.has(r.id));
-    }
-    // No team in scope ('all' / 'none'): fall back to the FilterBar's repo visibility if it
-    // narrows anything, else the whole list.
-    return repoIds != null ? repos.filter((r) => repoIds.includes(r.id)) : repos;
-  })();
+  const fallbackRepos =
+    workspaceId == null
+      ? []
+      : (allRepos ?? []).filter((r) => r.workspaceId === workspaceId);
   const railItems: RailItem[] =
     data != null
       ? sorted.map((r) => ({
@@ -360,12 +358,12 @@ export function ActivityView(): JSX.Element {
           threadTotals: null,
         }));
 
-  // `key` is passed by the caller, not derived from repoId: under grouping a repo shared by two
-  // teams renders once per group, so the key must be `${teamId}:${repoId}` there.
-  const renderRailRow = (r: RailItem, key: string, accent: string | null): JSX.Element => (
+  // The repo id IS the key: a repo belongs to exactly one workspace and the rail shows one
+  // workspace, so a repo appears exactly once. (It used to be a caller-supplied
+  // `${teamId}:${repoId}` composite, because a repo shared by two teams rendered once per group.)
+  const renderRailRow = (r: RailItem): JSX.Element => (
     <RailRow
-      key={key}
-      accent={accent}
+      key={String(r.repoId)}
       fullName={r.fullName}
       maintainerCount={r.maintainerCount}
       hasUnread={r.hasUnread}
@@ -378,37 +376,10 @@ export function ActivityView(): JSX.Element {
     />
   );
 
-  // With 2+ teams in scope, group the rail rows under a header per team.
-  //
-  // A repo can belong to SEVERAL teams. It is shown under EACH of them, deliberately: hiding it
-  // from one group would misrepresent that team's surface area, and silently picking one owner
-  // would be arbitrary. The rows are genuinely the same repo, so selecting either highlights
-  // both — accepted, and the reason the accent colour matters (you can see which group you are
-  // reading). `matched` tracks placed repos so a row in NO selected team (a repo that is watched
-  // but unassigned, or assigned only to a team outside the scope) lands under "Other" rather
-  // than vanishing from the rail.
-  //
-  // LANDMINE: the loop iterates the SELECTED teams, not every team. Iterating all of them — as
-  // it did when this was All-Teams-only and "all teams" was the same set — would emit a header
-  // for an unselected team the moment one of its repos was shared with a selected one.
-  const teamGroups: { id: number; name: string; rows: RailItem[] }[] = [];
-  let leftoverRows: RailItem[] = [];
-  if (groupRail) {
-    const matched = new Set<number>();
-    const scoped = new Set(scopedTeamIds);
-    for (const team of (teams ?? []).filter((t) => scoped.has(t.id))) {
-      const ids = new Set(team.repoIds);
-      const rows = railItems.filter((r) => ids.has(r.repoId));
-      if (rows.length === 0) continue;
-      rows.forEach((r) => matched.add(r.repoId));
-      teamGroups.push({ id: team.id, name: team.name, rows });
-    }
-    leftoverRows = railItems.filter((r) => !matched.has(r.repoId));
-  }
-
-  // The Activity console is scoped to WATCHED repos, so an empty console has two distinct
-  // causes: no repos added at all, vs. repos added but none watched. The remedy differs
-  // (add a repo vs. toggle Watch), so distinguish them in the empty state below.
+  // The console is scoped to the WORKSPACE's repos, so an empty console has two distinct causes:
+  // no repos on the account at all, vs. repos that all live in OTHER workspaces. The remedy
+  // differs (add a repo vs. move one in), so distinguish them in the empty state below.
+  // ("Watched" is gone as a concept — every repo in a workspace is fully live.)
   const noRepos = data != null && sorted.length === 0;
   const hasAnyRepo = (allRepos ?? []).length > 0;
   // A genuine FIRST-RUN account: the repos list has LOADED and is empty (distinct from
@@ -422,11 +393,11 @@ export function ActivityView(): JSX.Element {
     <div className="flex h-full min-h-0 flex-col md:flex-row">
       {/* LEFT RAIL */}
       <div className="flex flex-col border-b border-gray-200 md:w-72 md:shrink-0 md:border-b-0 md:border-r dark:border-gray-800">
-        {/* No manual Refresh: the console tracks the WATCHED set live — watch/add/sync all
+        {/* No manual Refresh: the console tracks the workspace's repo set live — add/move/sync all
             invalidate the Activity/Insights queries (ACTIVITY_QUERY_KEYS), and the feed has its
             own "new activity" banner — so there's nothing to refresh by hand. */}
-        {/* The team scope selector + "Manage repos & teams" now live in the header's
-            TeamSelector (shown on every view), so the rail no longer carries its own header. */}
+        {/* The workspace selector + "Manage repos & workspaces" live in the header's
+            WorkspaceSelector (shown on every view), so the rail carries no header of its own. */}
         {generatedAt != null && (
           <div
             className="px-3 py-1 text-[10px] text-gray-400"
@@ -448,10 +419,16 @@ export function ActivityView(): JSX.Element {
             isFetching && data != null ? 'opacity-60 transition-opacity' : ''
           }`}
         >
-          {/* INSIGHTS pseudo-row — team review-intelligence (Pro; teamInsights). When Pro is
-              on it is the FIRST entry AND the default landing view (see the effect above);
-              hidden entirely in OSS / when Pro is off. */}
-          {teamInsights && (
+          {/* RAIL ORDER, top to bottom: Insights (Pro) · Feed · Bots · Compare workspaces ·
+              Needs attention — then the per-repo rows BENEATH the whole block. The daily surfaces
+              lead; Compare and Needs attention are the occasional ones and sit at the bottom of
+              the pseudo-row block. Two entries are gated (Insights on the Pro capability, Compare
+              on the account owning 2+ workspaces); the other three are always present. */}
+
+          {/* INSIGHTS pseudo-row — review intelligence for this workspace (Pro;
+              workspaceInsights). When Pro is on it is the FIRST entry AND the default landing
+              view (see the effect above); hidden entirely in OSS / when Pro is off. */}
+          {workspaceInsights && (
             <button
               type="button"
               onClick={() => setActivityRepo('insights')}
@@ -461,7 +438,7 @@ export function ActivityView(): JSX.Element {
                   ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
                   : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
               }`}
-              title="Team review-intelligence across your watched repos (Pro)"
+              title="Review intelligence across this workspace's repos (Pro)"
             >
               <span aria-hidden="true" className="shrink-0 text-violet-500">
                 ◈
@@ -475,8 +452,9 @@ export function ActivityView(): JSX.Element {
             </button>
           )}
 
-          {/* FEED pseudo-row — the cross-repo consolidated state of play. The old "All repos"
-              pseudo-row was removed (redundant with the Feed + the per-repo entries below). */}
+          {/* FEED pseudo-row — this workspace's consolidated state of play, across every repo in
+              it. The old "All repos" pseudo-row was removed (redundant with the Feed + the
+              per-repo entries below). */}
           <button
             type="button"
             onClick={() => setActivityRepo('feed')}
@@ -486,7 +464,7 @@ export function ActivityView(): JSX.Element {
                 ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
                 : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
-            title="A relevance-ranked stream across all your repos"
+            title="One chronological stream across every repo in this workspace"
           >
             <span aria-hidden="true" className="shrink-0 text-sky-500">
               ✦
@@ -496,9 +474,62 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
+          {/* BOTS pseudo-row — "the calm layer above your review bots". CORE/free (reads the
+              deterministic bot routes), so it's ALWAYS shown, on every tier, no Pro gate. A bot is
+              one object per WORKSPACE: a vendor running in six of this workspace's repos is ONE
+              row here, and everything about it — automated, role, vendor name, price — is edited
+              at this level. */}
+          <button
+            type="button"
+            onClick={() => setActivityRepo('bots')}
+            aria-pressed={showingBots}
+            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+              showingBots
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            title="Detect, measure and triage this workspace's automated review bots (free)"
+          >
+            <span aria-hidden="true" className="shrink-0">
+              🤖
+            </span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+              Bots
+            </span>
+          </button>
+
+          {/* COMPARE-WORKSPACES pseudo-row — the cross-workspace flow-metric matrix. CORE/free.
+              It was a sub-tab of the Feed, gated on "2+ teams in scope"; it is a rail entry now
+              because it is NOT a view of the selected scope — it compares EVERY workspace in the
+              account, so nesting it under a scoped surface misrepresented what it shows.
+              Gate: 2+ workspaces exist (Default counts) — i.e. the user has made one of their
+              own. Hidden, never disabled, while the roster is still loading. */}
+          {canCompare && (
+            <button
+              type="button"
+              onClick={() => setActivityRepo('compare')}
+              aria-pressed={showingCompare}
+              className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+                showingCompare
+                  ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                  : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+              }`}
+              title="Flow metrics for every workspace in your account, side by side (free)"
+            >
+              <span aria-hidden="true" className="shrink-0 text-teal-500">
+                ⚖
+              </span>
+              <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+                Compare workspaces
+              </span>
+            </button>
+          )}
+
           {/* NEEDS-ATTENTION pseudo-row — the attention cards (stalled reviews / untouched threads /
               reviewer load / needs-a-reviewer), moved out from under the Pro Insights AI panels.
-              CORE/free (reads the deterministic /api/attention route), so it's ALWAYS shown. */}
+              CORE/free (reads the deterministic /api/attention route), so it's ALWAYS shown. Last
+              of the top-level entries: it is the "when something is wrong" surface, not a daily
+              one. */}
           <button
             type="button"
             onClick={() => setActivityRepo('attention')}
@@ -518,64 +549,12 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
-          {/* BOTS pseudo-row — "the calm layer above your review bots". CORE/free (reads the
-              deterministic bot routes), so it's ALWAYS shown, on every tier, no Pro gate. */}
-          <button
-            type="button"
-            onClick={() => setActivityRepo('bots')}
-            aria-pressed={showingBots}
-            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
-              showingBots
-                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
-                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
-            }`}
-            title="Detect, measure, and triage your automated review bots (free)"
-          >
-            <span aria-hidden="true" className="shrink-0">
-              🤖
-            </span>
-            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
-              Bots
-            </span>
-          </button>
-
-          {/* Grouped by team (2+ teams in scope) vs the flat list. The single-team and no-team
-              cases render EXACTLY as before — same rows, no header, accent null. */}
-          {groupRail ? (
-            <>
-              {teamGroups.map((g) => {
-                const color = teamColorFor(teamColors, g.id);
-                return (
-                  <div key={g.id} className="flex w-56 shrink-0 flex-col gap-1 md:w-full">
-                    <div className="flex items-center gap-1.5 px-2 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                      <span
-                        aria-hidden="true"
-                        className="inline-block h-2 w-2 shrink-0 rounded-full"
-                        style={{ background: color }}
-                      />
-                      <span className="min-w-0 truncate">{g.name}</span>
-                      <span className="shrink-0 font-normal normal-case tabular-nums text-gray-400">
-                        · {g.rows.length}
-                      </span>
-                    </div>
-                    {g.rows.map((r) => renderRailRow(r, `${g.id}:${r.repoId}`, color))}
-                  </div>
-                );
-              })}
-              {leftoverRows.length > 0 && (
-                <div className="flex w-56 shrink-0 flex-col gap-1 md:w-full">
-                  {/* Repos in NO selected team still need a home — they are watched and in the
-                      aggregate, so dropping them would lose real activity. */}
-                  <div className="px-2 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                    Other · {leftoverRows.length}
-                  </div>
-                  {leftoverRows.map((r) => renderRailRow(r, `other:${r.repoId}`, null))}
-                </div>
-              )}
-            </>
-          ) : (
-            railItems.map((r) => renderRailRow(r, String(r.repoId), null))
-          )}
+          {/* The workspace's repos — a FLAT list. There is nothing to group by: a repo belongs to
+              exactly ONE workspace (a database fact, `workspace_repos` UNIQUE (account, repo)) and
+              exactly one workspace is ever in scope. The per-team headers, their identity colour
+              dots, the shared-repo duplicate rows and the "Other" bucket for unassigned repos are
+              all gone with the many-to-many that created them. */}
+          {railItems.map((r) => renderRailRow(r))}
 
           {/* Legend (hidden on the narrow chip strip) */}
           <div className="mt-auto hidden flex-wrap gap-x-3 gap-y-0.5 px-1 pt-3 md:flex">
@@ -601,32 +580,43 @@ export function ActivityView(): JSX.Element {
       {/* RIGHT DETAIL */}
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {noReposAtAll ? (
-          // First-run: detect the viewer's recent repos + one-click watch. Hoisted above the
+          // First-run: detect the viewer's recent repos + one-click add. Hoisted above the
           // rail-entry branches so a zero-repo account always lands here (a Pro account could
           // otherwise auto-select Insights and never reach the empty state).
           <FirstRunOnboarding />
         ) : showingBots ? (
-          // The CORE/free review-bot triage console (ROI panel + a bot-only feed). Scoped by the
-          // FilterBar repos (the bot feed ignores the human-member filter); carries its own empty
-          // states, so it renders even before any repo data loads.
+          // The CORE/free review-bot triage console (ROI panel + a bot-only feed). Scoped to the
+          // whole active WORKSPACE (never the timeline's repo picker; the bot feed likewise ignores
+          // the human-member filter); carries its own empty states, so it renders even before any
+          // repo data loads.
           <BotsView />
         ) : showingAttention ? (
           // The CORE/free "Needs attention" cards (stalled reviews / untouched threads / reviewer
           // load / needs-a-reviewer) — moved out from under the Pro Insights AI panels. Renders on
           // every tier, before repo data loads (its own empty/loading states).
           <AttentionView />
+        ) : showingCompare ? (
+          // The CORE/free cross-workspace flow-metric matrix, full-width. It takes NO scope — it
+          // compares every workspace in the account, which is why it is not nested under the Feed
+          // any more.
+          //
+          // ⚠ BRANCH POSITION IS LOAD-BEARING: it sits with Bots/Attention, ABOVE `noRepos`. The
+          // rail's top-to-bottom reading would put it after, which makes Compare unreachable while
+          // the SELECTED workspace happens to be empty — precisely when someone is setting
+          // workspaces up and most wants to compare them.
+          <WorkspaceComparisonPanel />
         ) : showingInsights ? (
           <InsightsView />
         ) : noRepos ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-400">
             {hasAnyRepo
-              ? 'No watched repos yet. Open "Manage repos & teams" in the header and toggle Watch on a repo to populate the Activity console.'
+              ? 'No repos in this workspace yet. Open "Manage repos & workspaces" in the header to move some in.'
               : 'Detecting the repos you work on…'}
           </div>
         ) : showingFeed ? (
-          // The cross-repo Feed: the team flow-metric header (DORA-ish tiles + trend charts —
-          // CORE/free, moved out of the Pro Insights pane) atop the consolidated feed stream. With
-          // Pro on, a "Discussion themes" sub-tab (the human sibling of Bots → Themes) sits beside it.
+          // The workspace Feed: the flow-metric header (DORA-ish tiles + trend charts — CORE/free,
+          // moved out of the Pro Insights pane) atop the consolidated feed stream. With Pro on, a
+          // "Discussion themes" sub-tab (the human sibling of Bots → Themes) sits beside it.
           <div className="space-y-3">
             {feedTabs.length > 1 && (
               <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
@@ -646,7 +636,7 @@ export function ActivityView(): JSX.Element {
                       }`}
                     >
                       {t.label}
-                      {/* Only Themes is Pro. Compare deliberately carries NO pill — it is core. */}
+                      {/* Only Themes is Pro; the Feed itself is core. */}
                       {t.key === 'themes' && (
                         <span className="rounded bg-violet-500/10 px-1 text-[9px] font-semibold uppercase text-violet-600 dark:text-violet-300">
                           pro
@@ -659,10 +649,6 @@ export function ActivityView(): JSX.Element {
             )}
             {effectiveFeedTab === 'themes' ? (
               <HumanThemesPanel />
-            ) : effectiveFeedTab === 'compare' ? (
-              // Cross-team flow-metric matrix — beside the free DORA header whose window it
-              // shares, and reachable from ANY 2+ team selection (not just All-Teams).
-              <TeamComparisonPanel teamIds={scopedTeamIds} scope={scopeToParam(teamScope)} />
             ) : (
               <>
                 {/* "Is trunk green?" across every repo in scope — above the flow metrics,
@@ -688,8 +674,8 @@ export function ActivityView(): JSX.Element {
           // sub-tab is store-remembered per repo (repoConsoleTabs), so the remount restores it.
           <RepoConsole key={selectedRepo.repoId} repo={selectedRepo} />
         ) : (
-          // A numeric repo id that didn't resolve (e.g. removed, or added-but-unwatched so it's
-          // absent from the watched aggregate) — fall back to the cross-repo Feed, still
+          // A numeric repo id that didn't resolve (e.g. removed, or moved to another workspace so
+          // it's absent from this workspace's aggregate) — fall back to the cross-repo Feed, still
           // surfacing the "Showing only #N" banner + Clear when a PR is isolated here.
           <div className="space-y-3">
             <FeedIsolationBanner />

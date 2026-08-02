@@ -7,6 +7,14 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { buildTimelineSearch, useFilters } from '../store/filters.js';
+import { workspaceKey } from './useActivity.js';
+
+// ⚠ THE WORKSPACE IS READ FROM THE STORE, NOT PASSED IN — and here that is the correctness rule,
+// not a convenience. `buildTimelineSearch` derives the whole query string (including
+// `workspace=<id>`) from the same store state; a caller-supplied id could disagree with the string
+// it keys, and the cache would then be labelled with a workspace the request never asked for.
+// Hooks whose scope arrives as props (useActivity, useConsolidatedFeed, the bot hooks) take it as
+// a parameter instead, because their callers already own the narrowing.
 
 export function useRepos() {
   return useQuery<Repo[]>({ queryKey: ['repos'], queryFn: api.listRepos });
@@ -50,9 +58,25 @@ export function useTimeline(override?: {
       override?.prIds,
     ),
   );
+  const workspaceId = useFilters((s) => s.workspaceId);
+  // A pr-focus tab (`prIds`) is WORKSPACE-INDEPENDENT and must stay that way in the cache too.
+  // `buildTimelineSearch` deliberately emits no `workspace=` on that path — getTimeline's prIds
+  // branch bypasses the repo scope entirely so an isolate tab loads its subject PR even when the
+  // board's scope would hide it — so naming a workspace here could not change the response. It
+  // would only fragment one answer across N slots AND (via the gate below) refuse to load the tab
+  // until the workspaces query lands, which is a regression on a surface that never needed it.
+  const isolated = (override?.prIds?.length ?? 0) > 0;
   return useQuery<TimelineResponse>({
-    queryKey: ['timeline', search],
+    // The `ws:` segment is NOT redundant with `workspace=` inside `search`: it is the half that
+    // fixes the CACHE. Two workspaces on `repoIds = null` would otherwise be one slot.
+    queryKey: isolated
+      ? ['timeline', search]
+      : ['timeline', workspaceKey(workspaceId), search],
     queryFn: () => api.timeline(search),
+    // Null = the store has not resolved a workspace yet, and `search` then carries no `workspace=`
+    // — the server would answer for the account's Default under whatever name the header is about
+    // to show. Held idle until it resolves (except on the scope-free isolate path).
+    enabled: isolated || workspaceId != null,
     placeholderData: (prev) => prev, // keep previous data while refetching
   });
 }
@@ -64,9 +88,11 @@ export function useTimeline(override?: {
 // useTimeline whenever excludeBots is on — one extra fetch in that case; otherwise shared.
 export function useSearchTimeline() {
   const search = useFilters((s) => buildTimelineSearch(s, false, false, false, false, null, false));
+  const workspaceId = useFilters((s) => s.workspaceId);
   return useQuery<TimelineResponse>({
-    queryKey: ['timeline', search],
+    queryKey: ['timeline', workspaceKey(workspaceId), search],
     queryFn: () => api.timeline(search),
+    enabled: workspaceId != null,
     placeholderData: (prev) => prev,
   });
 }

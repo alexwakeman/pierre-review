@@ -4,7 +4,7 @@ import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useSprintReport, useRefreshSprintReport } from '../../hooks/useSprintReport.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
-import { useFilters, scopeToParam } from '../../store/filters.js';
+import { useFilters } from '../../store/filters.js';
 import { useSprintReportUi } from '../../store/digestCollapse.js';
 import { SummaryMarkdown } from './prRefTable.js';
 
@@ -12,8 +12,8 @@ import { SummaryMarkdown } from './prRefTable.js';
 // prioritised, PR-linked issues, repos ranked by activity + code volume. Cost-safe: it
 // only generates on an explicit Generate/Regenerate. `stale` flags that the Insights
 // changed since it was written, so the lead knows to regenerate. Referenced PRs are
-// clickable → the PR detail (Overview), mirroring the digest's #N refs. Scoped per team via
-// the FilterBar's team selection (teamScope) — each team's report caches independently.
+// clickable → the PR detail (Overview), mirroring the digest's #N refs. Scoped to the ACTIVE
+// WORKSPACE (a plain id — the whole scope) — each Workspace's report caches independently.
 
 function refMeta(ref: DigestPrRef): PinnedPr {
   return {
@@ -32,10 +32,11 @@ function refMeta(ref: DigestPrRef): PinnedPr {
 export function SprintReportCard(): JSX.Element | null {
   const { activityDigest } = useProCapabilities();
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  const teamScope = useFilters((s) => s.teamScope);
-  const scope = scopeToParam(teamScope);
-  const { data, isLoading } = useSprintReport(activityDigest, scope);
-  const refresh = useRefreshSprintReport(scope);
+  // null until the workspaces query resolves the account's Default: the read holds itself idle
+  // and the billing path refuses, so nothing is ever generated for the wrong Workspace.
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const { data, isLoading } = useSprintReport(activityDigest, workspaceId);
+  const refresh = useRefreshSprintReport(workspaceId);
   // Metered-plan credit status (paid cloud): drives disabling Generate/Regenerate. Fetched
   // eagerly (the card doesn't wait for the Track-usage panel to open); shares the ['ai-usage']
   // cache. Unmetered (local) → allowanceCredits null → never out of credits.
@@ -55,6 +56,9 @@ export function SprintReportCard(): JSX.Element | null {
   const busy = refresh.isPending;
 
   const regenerate = (): void => {
+    // The hook refuses on an unresolved workspace (it would otherwise generate for the account's
+    // Default); bail here too so the click is a plain no-op rather than a rejected mutation.
+    if (workspaceId == null) return;
     refresh.mutate();
   };
 
@@ -102,7 +106,7 @@ export function SprintReportCard(): JSX.Element | null {
                 e.stopPropagation();
                 regenerate();
               }}
-              disabled={busy || outOfCredits}
+              disabled={busy || outOfCredits || workspaceId == null}
               className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
               title={
                 outOfCredits
@@ -120,7 +124,7 @@ export function SprintReportCard(): JSX.Element | null {
                   e.stopPropagation();
                   regenerate();
                 }}
-                disabled={busy || outOfCredits}
+                disabled={busy || outOfCredits || workspaceId == null}
                 className="flex items-center gap-0.5 rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-600 hover:border-violet-400 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:border-violet-600"
                 title={
                   outOfCredits

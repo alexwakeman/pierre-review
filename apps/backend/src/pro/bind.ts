@@ -79,7 +79,10 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   if (!mod) return;
 
   const plugin = (mod.default ?? mod) as ProPlugin;
-  if (plugin?.apiVersion !== 13 || typeof plugin.register !== 'function') {
+  // ⚠ THE RUNTIME GATE. This literal is the twin of `ProPlugin['apiVersion']` in contract.ts —
+  // bump them together. A half-bump here silently degrades a CORRECT plugin to OSS mode (the warn
+  // below is the only trace; capabilities go dark and every /api/pro/* route 404s).
+  if (plugin?.apiVersion !== 14 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -123,19 +126,27 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
           repoIds: args.repoIds ?? null,
           userIds: null,
         }),
-      getActivity: (accountId, repoIds) =>
-        hostQueries.getActivity(accountId, repoIds ?? null),
-      getTeamInsights: (accountId, window, repoIds) =>
-        hostQueries.getTeamInsights(accountId, window, repoIds),
-      getTeamMetricsDetail: (accountId, window, repoIds) =>
-        hostQueries.getTeamMetricsDetail(accountId, window, repoIds),
+      // The scope-bearing getters pass `scope` straight through: BotScopeWire is structurally the
+      // host's BotScope, and the plugin only ever holds one the host produced (per-request via
+      // resolveWorkspaceScope, or workspaceScopeForRepo / defaultWorkspaceId below).
+      getActivity: (accountId, scope) => hostQueries.getActivity(accountId, scope),
+      getWorkspaceInsights: (accountId, window, scope) =>
+        hostQueries.getWorkspaceInsights(accountId, window, scope),
+      getWorkspaceMetricsDetail: (accountId, window, repoIds) =>
+        hostQueries.getWorkspaceMetricsDetail(accountId, window, repoIds),
+      workspaceScopeForRepo: (accountId, repoId) =>
+        hostQueries.workspaceScopeForRepo(accountId, repoId),
+      // The account's Default workspace, for the two account-wide crons (no request → no
+      // `?workspace=`). ensureDefaultWorkspace creates the row if it is missing, so a cron can
+      // never fail on an account that has somehow never been through a scoped request.
+      defaultWorkspaceId: (accountId) => hostQueries.ensureDefaultWorkspace(accountId),
       getAiUsage: (accountId, sinceMs) => getAiUsageSummary(accountId, sinceMs),
-      getBotAnalytics: (accountId, window, repoIds) =>
-        hostQueries.getBotAnalytics(accountId, window, repoIds ?? null),
-      getBotReviewComments: (accountId, window, repoIds) =>
-        hostQueries.getBotReviewComments(accountId, window, repoIds ?? null),
-      getHumanReviewComments: (accountId, window, repoIds) =>
-        hostQueries.getHumanReviewComments(accountId, window, repoIds ?? null),
+      getBotAnalytics: (accountId, window, scope) =>
+        hostQueries.getBotAnalytics(accountId, window, scope),
+      getBotReviewComments: (accountId, window, scope) =>
+        hostQueries.getBotReviewComments(accountId, window, scope),
+      getHumanReviewComments: (accountId, window, scope) =>
+        hostQueries.getHumanReviewComments(accountId, window, scope),
     },
     recordAiUsage: (row) => recordAiUsage(row),
     aiCredits: {

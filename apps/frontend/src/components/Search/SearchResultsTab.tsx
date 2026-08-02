@@ -12,10 +12,11 @@ import { PrMetaRow, InsightPrSummary } from '../Activity/AttentionCards.js';
 import { KIND_GLYPH, KIND_LABEL, openHitPr, openSearchHit } from './searchNav.js';
 import { highlightTerms } from './highlight.js';
 
-// The full cross-team search-results tab (a singleton drill-down overlay). Reads the query from the
+// The full cross-repo search-results tab (a singleton drill-down overlay). Reads the query from the
 // transient `searchSeed`, offers an editable box + kind filters + a People facet, lists every hit
 // (paginated "Load more"), and opens a hit on click (thread hits deep-link to their thread). Scoped
-// to the active team (via useSearchResults). Kept fully in the read layer — no writes.
+// to the ACTIVE WORKSPACE (useSearchResults reads it from the store). Kept fully in the read layer
+// — no writes.
 const KIND_FILTERS: { key: SearchHitKind; label: string }[] = [
   { key: 'pr', label: 'PRs' },
   { key: 'review', label: 'Reviews' },

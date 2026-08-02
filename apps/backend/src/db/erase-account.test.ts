@@ -2,12 +2,28 @@
 // pattern): env is set BEFORE importing config/client, so every host module arrives via dynamic
 // import in beforeAll.
 //
-// The point of the second test is not "delete works" — it is that a table ADDED LATER and
-// forgotten cannot silently survive an erasure. It iterates the exported
-// `accountScopedTables()` checklist rather than a copy of it, so a new accountId-bearing table
-// that is not handled by `eraseAccountData` fails here instead of quietly leaving personal data
-// behind after a user was told it was gone.
-import { rmSync } from 'node:fs';
+// THE POINT OF THIS FILE IS NOT "delete works". It is that a table ADDED LATER and forgotten
+// cannot silently survive an erasure the user was told was complete. That guarantee has THREE
+// legs, and all three have to be present or the file is theatre:
+//
+//   1. COMPLETENESS — every `accountId`-bearing table in the schema appears on the exported
+//      `accountScopedTables()` checklist. Derived from the schema module at runtime, so a new
+//      table fails here the day it lands. Without this leg, DELETING an entry from the checklist
+//      makes the file pass MORE easily, which is the exact inversion a checklist test must not
+//      have (this leg is new: the old file iterated the list and could not see an omission).
+//   2. NON-VACUITY — the fixture actually SEEDS a row in every table it expects to be cleared.
+//      "0 rows remain" is trivially true for a table nothing ever wrote to; §9.5/§9.6 of the
+//      workspace spec call this out as the failure mode a rewrite falls into, and this repo has
+//      shipped a vacuous isolation guard before.
+//   3. ERASURE + ISOLATION — the checklist reads zero for the erased account and byte-identical
+//      counts for the surviving one.
+//
+// The fixture seeds the WORKSPACE TRIO (`workspaces` / `workspace_repos` / `workspace_reviewers`,
+// migrations 0044/0045) in place of the four tables that left with the refactor (`teams`,
+// `team_repos`, `repo_reviewers`, `account_reviewers`). `workspace_reviewers` is the entry whose
+// omission would cost the user data they typed by hand: it carries the manual judgement, the
+// human-set vendor name AND `monthly_cents`, the one column no classifier can regenerate.
+import { readFileSync, rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const DB_PATH = '/tmp/pierre-erase-test.sqlite';
@@ -23,14 +39,45 @@ let eraseAccountData: (accountId: number) => Promise<{ reposDeleted: number }>;
 let registerAccountErasureHandler: (h: (a: { accountId: number }) => void) => void;
 let accountScopedTables: () => { name: string; count: (id: number) => Promise<number> }[];
 let exportAccountData: (accountId: number) => Promise<any>;
+let ensureDefaultWorkspace: (accountId: number) => Promise<number>;
 
 const KEEP = 1; // the seeded local account (id 1)
 const DOOMED = 2;
 
-/** Pre-erasure row counts for the surviving account, keyed by table name. */
+/** Pre-erasure row counts, keyed by table name. */
 const keepBefore: Record<string, number> = {};
+const doomedBefore: Record<string, number> = {};
+/** The surviving account's reviewer rows before anything is erased (compared byte-for-byte after). */
+let keepReviewersBefore: any[] = [];
 
-/** Seed one account with a repo, a PR, an event and a row in every account-level table. */
+/**
+ * Every table this fixture deliberately writes a row into. The non-vacuity test below asserts
+ * each one is genuinely non-empty for the DOOMED account BEFORE the erasure runs — otherwise
+ * "0 rows remain" proves nothing about whether `eraseAccountData` handles it.
+ *
+ * `claudeReviews` and `benchmarkContributions` are the two checklist entries NOT seeded here:
+ * both are written only by features this fixture does not exercise (an agentic review run, an
+ * opt-in cross-org contribution). They are covered by the completeness leg, not this one.
+ */
+const SEEDED_TABLES = [
+  'accounts',
+  'repos',
+  'pullRequests',
+  'events',
+  'aiUsage',
+  'myTurnDismissals',
+  'workspaces',
+  'workspaceRepos',
+  'workspaceReviewers',
+  'searchIndex',
+  'autoMergeRequests',
+  'branchCommits',
+];
+
+/**
+ * Seed one account with a repo, a PR, an event and a row in every account-level table —
+ * including all three workspace tables, which is what makes the checklist able to catch them.
+ */
 async function seedAccount(accountId: number, login: string): Promise<void> {
   const s = schema;
   await db
@@ -129,40 +176,52 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
     .insert(s.myTurnDismissals)
     .values({ accountId, kind: 'thread', refId: 900 + accountId, dismissedAt: new Date() })
     .execute();
-  // The bot object at BOTH grains (migrations 0042/0043). Both carry accountId, so both must be
-  // on the erasure checklist — and `account_reviewers` holds the reviewer's recorded PRICE, which
-  // surviving an erasure the user was told was complete is exactly the failure the checklist
-  // exists to catch.
-  await db
-    .insert(s.repoReviewers)
-    .values({
-      accountId,
-      repoId: repo.id,
-      authorUserId: user.id,
-      automated: true,
-      role: 'review',
-      confidence: 'high',
-      source: 'manual',
-    })
-    .execute();
-  await db
-    .insert(s.accountReviewers)
-    .values({
-      accountId,
-      authorUserId: user.id,
-      kind: 'coderabbit',
-      label: 'CodeRabbit',
-      identitySource: 'manual',
-      monthlyCents: 3000,
-    })
-    .execute();
-  const team = (
-    await db.insert(s.teams).values({ accountId, name: `Team ${accountId}` }).returning().execute()
+
+  // ── THE WORKSPACE TRIO (migrations 0044/0045) ──────────────────────────────────────────────
+  // Two workspaces per account: the auto-created Default (through the REAL writer, so the
+  // partial unique `workspaces_one_default` is honoured the way production honours it) plus a
+  // second one the repo has been MOVED into. A repo belongs to exactly one workspace, so the
+  // membership row lives with the move.
+  const defaultWorkspaceId = await ensureDefaultWorkspace(accountId);
+  const extra = (
+    await db
+      .insert(s.workspaces)
+      .values({ accountId, name: `Platform ${accountId}`, isDefault: false })
+      .returning()
+      .execute()
   )[0];
   await db
-    .insert(s.teamRepos)
-    .values({ accountId, teamId: team.id, repoId: repo.id })
+    .insert(s.workspaceRepos)
+    .values({ accountId, workspaceId: extra.id, repoId: repo.id })
     .execute();
+
+  // The bot object, now ONE row carrying three independent facts: the judgement (source),
+  // the identity (identity_source) and the PRICE. Seeded in BOTH workspaces at DIFFERENT prices
+  // — price is a per-workspace fact, so this is a legitimate state, and it means the erasure has
+  // two rows to clear rather than one.
+  for (const [workspaceId, cents] of [
+    [extra.id, 3000],
+    [defaultWorkspaceId, 1500],
+  ] as [number, number][]) {
+    await db
+      .insert(s.workspaceReviewers)
+      .values({
+        accountId,
+        workspaceId,
+        authorUserId: user.id,
+        automated: true,
+        role: 'review',
+        confidence: 'high',
+        source: 'manual',
+        reasonsJson: ['manually tagged as an automated reviewer'],
+        kind: 'coderabbit',
+        label: 'CodeRabbit',
+        identitySource: 'manual',
+        monthlyCents: cents,
+      })
+      .execute();
+  }
+
   await db
     .insert(s.searchIndex)
     .values({
@@ -222,19 +281,90 @@ beforeAll(async () => {
   registerAccountErasureHandler = erase.registerAccountErasureHandler;
   accountScopedTables = erase.accountScopedTables;
   ({ exportAccountData } = await import('./export-account.js'));
+  ({ ensureDefaultWorkspace } = await import('./queries.js'));
 
   await seedAccount(KEEP, 'keeper');
   await seedAccount(DOOMED, 'doomed');
 
-  // Snapshot the SURVIVING account's row counts before anything is erased. The isolation
-  // assertion compares against this rather than requiring every table to be non-empty — some
-  // (claudeReviews, benchmarkContributions) are only populated by features this seed doesn't
-  // exercise, and "unchanged" is the property that actually matters.
-  for (const t of accountScopedTables()) keepBefore[t.name] = await t.count(KEEP);
+  // Snapshot BOTH accounts' row counts before anything is erased.
+  //   • DOOMED, so the "0 rows remain" assertions can be shown to be non-vacuous.
+  //   • KEEP, so the isolation assertion compares against a real baseline rather than requiring
+  //     every table to be non-empty — some (claudeReviews, benchmarkContributions) are only
+  //     populated by features this seed doesn't exercise, and "unchanged" is the property that
+  //     actually matters.
+  for (const t of accountScopedTables()) {
+    keepBefore[t.name] = await t.count(KEEP);
+    doomedBefore[t.name] = await t.count(DOOMED);
+  }
+  keepReviewersBefore = await db.select().from(schema.workspaceReviewers).execute();
+  keepReviewersBefore = keepReviewersBefore.filter((r: any) => r.accountId === KEEP);
 });
 
 afterAll(async () => {
   await closeDb?.();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// LEG 1 + LEG 2: the checklist is complete, and the fixture is not vacuous. Both must hold
+// BEFORE the erasure runs, so they sit in their own describe ahead of it.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+describe('accountScopedTables — the checklist itself', () => {
+  // WITHOUT THIS TEST, REMOVING AN ENTRY FROM THE CHECKLIST MAKES THE SUITE PASS: every other
+  // assertion in this file ITERATES the list, so a table that leaves it simply stops being
+  // checked. That is the one direction a checklist guard must be able to see, and it is what
+  // makes CLAUDE.md's claim — "a new accountId-bearing table that isn't added there fails
+  // erase-account.test.ts" — actually true rather than aspirational.
+  //
+  // The expected set is DERIVED from the live schema module (any export with an `account_id`
+  // column), not hand-listed, so a table added tomorrow is covered without touching this file.
+  it('names every accountId-bearing table in the schema', () => {
+    const bearing = Object.entries(schema)
+      .filter(
+        ([, t]: [string, any]) =>
+          t && typeof t === 'object' && t.accountId && t.accountId.name === 'account_id',
+      )
+      .map(([name]) => name);
+    // Sanity: the derivation itself found something. A refactor that changed how drizzle exposes
+    // columns would otherwise turn this whole test into a no-op.
+    expect(bearing.length).toBeGreaterThan(10);
+    expect(bearing).toContain('workspaceReviewers');
+    expect(bearing).toContain('workspaceRepos');
+    expect(bearing).toContain('workspaces');
+
+    const listed = new Set(accountScopedTables().map((t) => t.name));
+    // `accounts` is on the checklist keyed by its own `id`, so it never appears in `bearing`.
+    expect(listed.has('accounts')).toBe(true);
+
+    // ⚠ KNOWN, PRE-EXISTING GAP, exempted by NAME so it can never widen silently.
+    // `ci_status_events` carries accountId but is cleared per-repo inside `deleteRepo`, so an
+    // erasure that completes leaves none behind — it has simply never been added to the
+    // checklist. The relation asserted is a SUBSET, not equality, so adding it to
+    // `accountScopedTables()` (which it should be, to make the guarantee independent of the
+    // repo loop succeeding) needs no change here.
+    const KNOWN_UNCHECKED = new Set(['ciStatusEvents']);
+    const missing = bearing.filter((n) => !listed.has(n) && !KNOWN_UNCHECKED.has(n));
+    expect(missing, 'accountId-bearing tables absent from accountScopedTables()').toEqual([]);
+
+    // And nothing on the checklist names a table that does not exist.
+    for (const name of listed) {
+      expect(schema[name], `accountScopedTables() names unknown table ${name}`).toBeTruthy();
+    }
+  });
+
+  // LEG 2. Every table this fixture claims to seed really does hold a row for the account that
+  // is about to be erased — otherwise the "leaves NO row behind" assertion below is satisfied by
+  // an empty table and proves nothing. The workspace trio is named explicitly because it is the
+  // part that arrived with migrations 0044/0045.
+  it('the fixture seeds a real row for the doomed account in every table it covers', () => {
+    for (const name of SEEDED_TABLES) {
+      const msg = `${name} was never seeded — its erasure check is vacuous`;
+      expect(doomedBefore[name], msg).toBeGreaterThan(0);
+    }
+    // Two workspaces, two reviewer rows (one per workspace), one membership row.
+    expect(doomedBefore.workspaces).toBe(2);
+    expect(doomedBefore.workspaceReviewers).toBe(2);
+    expect(doomedBefore.workspaceRepos).toBe(1);
+  });
 });
 
 describe('exportAccountData', () => {
@@ -246,7 +376,23 @@ describe('exportAccountData', () => {
     expect(out.pullRequests).toHaveLength(1);
     expect(out.events).toHaveLength(1);
     expect(out.reviews).toHaveLength(1);
-    expect(out.teams[0].repoIds).toHaveLength(1);
+    // Workspaces replaced teams in the Art. 15 payload; each row still carries its repo ids.
+    expect(out.workspaces).toHaveLength(2);
+    const platform = out.workspaces.find((w: any) => w.name === `Platform ${DOOMED}`);
+    expect(platform.repoIds).toHaveLength(1);
+    expect(out.workspaces.find((w: any) => w.isDefault).repoIds).toHaveLength(0);
+  });
+
+  // The bot object is Art. 15 material in its own right: human judgements, a human-set vendor
+  // name, and a price the user typed. A rename that dropped it from the export would be a silent
+  // regression of a data-subject right.
+  it('includes the workspace reviewers, judgement + identity + price', async () => {
+    const out = await exportAccountData(DOOMED);
+    expect(out.workspaceReviewers).toHaveLength(2);
+    expect(out.workspaceReviewers.map((r: any) => r.monthlyCents).sort()).toEqual([1500, 3000]);
+    expect(out.workspaceReviewers[0].label).toBe('CodeRabbit');
+    expect(out.workspaceReviewers[0].source).toBe('manual');
+    expect(out.workspaceReviewers[0].identitySource).toBe('manual');
   });
 
   // The single most important assertion in this file: an export is a file people email to
@@ -278,14 +424,26 @@ describe('eraseAccountData', () => {
     expect(seen).toEqual([DOOMED]);
   });
 
-  // The checklist test. Iterates the EXPORTED table list, so adding an accountId-bearing table
-  // without handling it in eraseAccountData fails here.
+  // The checklist test. Iterates the EXPORTED table list, so a table that IS on the list but is
+  // not handled by eraseAccountData fails here. (A table MISSING from the list is caught by the
+  // completeness test above — the two legs cover opposite directions.)
   it('leaves NO row behind in any account-scoped table', async () => {
     const remaining: string[] = [];
     for (const t of accountScopedTables()) {
       if ((await t.count(DOOMED)) > 0) remaining.push(t.name);
     }
     expect(remaining).toEqual([]);
+  });
+
+  // Called out separately from the loop above because these three are the refactor's new
+  // surface and because `workspace_reviewers` is the one table whose survival would cost the
+  // user data no classifier can regenerate.
+  it('clears the workspace trio specifically, including the prices', async () => {
+    const { workspaces, workspaceRepos, workspaceReviewers } = schema;
+    for (const table of [workspaces, workspaceRepos, workspaceReviewers]) {
+      const rows = (await db.select().from(table).execute()) as any[];
+      expect(rows.filter((r) => r.accountId === DOOMED)).toEqual([]);
+    }
   });
 
   it('does not touch the other account (isolation)', async () => {
@@ -295,19 +453,18 @@ describe('eraseAccountData', () => {
       );
     }
     // Sanity: the snapshot itself was meaningful — the surviving account really does still hold
-    // its repo, PR, events and account row (otherwise "unchanged" could be vacuously true).
-    for (const name of [
-      'accounts',
-      'repos',
-      'pullRequests',
-      'events',
-      'teams',
-      'searchIndex',
-      'autoMergeRequests',
-      'branchCommits',
-    ]) {
+    // its repo, PR, events, workspaces and bot rows (otherwise "unchanged" could be vacuously
+    // true).
+    for (const name of SEEDED_TABLES) {
       expect(keepBefore[name], `${name} should have been seeded`).toBeGreaterThan(0);
     }
+    // Counts alone would not notice the surviving account's PRICE being overwritten, so compare
+    // the rows themselves.
+    const after = ((await db.select().from(schema.workspaceReviewers).execute()) as any[]).filter(
+      (r) => r.accountId === KEEP,
+    );
+    expect(after).toEqual(keepReviewersBefore);
+    expect(after.map((r) => r.monthlyCents).sort()).toEqual([1500, 3000]);
   });
 
   it('leaves the GLOBAL users table alone', async () => {
@@ -321,5 +478,61 @@ describe('eraseAccountData', () => {
   it('is safe to call twice / for an unknown id', async () => {
     await expect(eraseAccountData(DOOMED)).resolves.toEqual({ reposDeleted: 0 });
     await expect(eraseAccountData(9999)).resolves.toEqual({ reposDeleted: 0 });
+  });
+
+  // ⚠ THE ASSERTION ABOVE IS VACUOUS FOR THE WORKSPACE TRIO ON ITS OWN, and this test is why it
+  // exists. `workspaces.account_id` cascades from `accounts`, and both children cascade from
+  // `workspaces` — so on SQLite with `foreign_keys=ON`, deleting the account row alone clears all
+  // three. Mutation-checked: removing the explicit `workspaceReviewers` delete, and separately
+  // removing the explicit `workspaces` delete, both leave "leaves NO row behind" PASSING.
+  //
+  // The explicit statements exist precisely so the erasure promise does not depend on a pragma
+  // (SQLite enforces FKs only when asked) — so the honest test is to take the pragma away and
+  // require the erasure to stand up by itself. A THIRD account is seeded for this so nothing
+  // above is disturbed.
+  it('erases the workspace trio WITHOUT relying on the FK cascades', async () => {
+    const SANDBOX = 3;
+    await seedAccount(SANDBOX, 'sandboxed');
+    for (const name of ['workspaces', 'workspaceRepos', 'workspaceReviewers']) {
+      const t = accountScopedTables().find((x) => x.name === name)!;
+      expect(await t.count(SANDBOX), `${name} not seeded for the sandbox account`).toBeGreaterThan(
+        0,
+      );
+    }
+    // Connection-level pragma; a no-op inside a transaction, so it must be set out here.
+    const raw = (db as any).$client;
+    expect(raw?.pragma, 'expected the better-sqlite3 handle via drizzle $client').toBeTruthy();
+    raw.pragma('foreign_keys = OFF');
+    try {
+      expect(raw.pragma('foreign_keys', { simple: true })).toBe(0);
+      await eraseAccountData(SANDBOX);
+      for (const t of accountScopedTables()) {
+        expect(
+          await t.count(SANDBOX),
+          `${t.name} survived an erasure once the cascades were switched off`,
+        ).toBe(0);
+      }
+    } finally {
+      raw.pragma('foreign_keys = ON');
+    }
+  });
+
+  // A STRUCTURAL assertion, and deliberately so. Presence is now covered behaviourally by the
+  // test above; ORDER is not, and cannot be: the explicit child deletes clear the children
+  // whichever way round they run, with or without the cascades. Child-before-parent is still the
+  // documented contract — Postgres checks FKs immediately, so a parent-first delete would depend
+  // entirely on the cascade firing — and the only way to pin it is to look at the statements.
+  it('deletes the workspace tables child-before-parent', () => {
+    const src = readFileSync(new URL('./erase-account.ts', import.meta.url), 'utf8');
+    const at = (needle: string): number => {
+      const i = src.indexOf(needle);
+      expect(i, `${needle} not found in erase-account.ts`).toBeGreaterThan(-1);
+      return i;
+    };
+    const reviewers = at('.delete(workspaceReviewers)');
+    const memberships = at('.delete(workspaceRepos)');
+    const parents = at('.delete(workspaces)');
+    expect(reviewers).toBeLessThan(memberships);
+    expect(memberships).toBeLessThan(parents);
   });
 });

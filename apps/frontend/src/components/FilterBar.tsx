@@ -2,11 +2,13 @@ import { useMemo } from 'react';
 import { type User } from '@pierre-review/shared';
 import { useMergers, useRepos, useSearchTimeline, useUsers } from '../hooks/useTimeline.js';
 import { useSearchOpenPrs } from '../hooks/useTriage.js';
+import { useWorkspaces, workspaceRepoIds } from '../hooks/useWorkspaces.js';
 import { useFilters, type RangePreset } from '../store/filters.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { EventSelectPanel } from './EventSelectPanel.js';
+import { RepoSelectPanel } from './RepoSelectPanel.js';
 import { StatusSelectPanel } from './StatusSelectPanel.js';
-import { TeamSelector } from './TeamSelector.js';
+import { WorkspaceSelector } from './WorkspaceSelector.js';
 import { GlobalSearch } from './Search/GlobalSearch.js';
 import { ThreadStateSelectPanel } from './ThreadStateSelectPanel.js';
 import { UserSelectPanel, type MemberSection } from './UserSelectPanel.js';
@@ -94,6 +96,7 @@ function Section({
 
 export function FilterBar(): JSX.Element {
   const { data: repos } = useRepos();
+  const { data: workspaces } = useWorkspaces();
   const { data: users } = useUsers();
   // Member-AGNOSTIC, repo-scoped activity (ignores the member filter, so the
   // option list never collapses to just the already-selected members). When a
@@ -104,17 +107,59 @@ export function FilterBar(): JSX.Element {
 
   const f = useFilters();
 
-  // Every filter except the Team scope is TIMELINE-only — Members / Status / Events / Threads /
-  // Range (and the right-hand Clear-filters cluster) only make sense against the shared timeline
-  // board, so they show ONLY when the Timeline is the active tab. On Activity, Insights, a
-  // PR-detail/focus tab, and every drill-down, just the Team dropdown remains.
+  // ⚠ ONLY THE WORKSPACE SELECTOR (+ the global search) SHOWS ON EVERY VIEW. Everything else in
+  // this bar — the per-repo show/hide panel, Members, Status, Events, Threads, Range and the
+  // right-hand Clear-filters cluster — is TIMELINE-only, because the timeline board is the only
+  // surface that honours any of it.
+  //
+  // The repos panel used to be the exception, mounted everywhere on the reasoning that Activity
+  // "consumes `repoIds` hardest". That was the bug, not the justification: `repoIds` now narrows
+  // the TIMELINE and nothing else (Activity / Feed / Bots / Compare always cover every repo in the
+  // selected workspace, and you narrow Activity by clicking a repo row in its rail), so a picker
+  // left on those views would silently scope screens that cannot see it — the worst kind of
+  // filter, one whose control is visible and whose effect is not.
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const isTimeline = activeTab === 'timeline';
 
   // The FilterBar is always fully live now — PR-isolation / My-Turn focus is a separate
   // TAB (its own keyed <Timeline>), so it no longer disables or fades the board filters.
-  // Repo/team MANAGEMENT (add/remove/assign) now lives in the Activity console's TeamManager;
-  // the FilterBar only carries the read-only TEAM SCOPE selector (TeamSelector) below.
+  // Repo/workspace MANAGEMENT (add/remove/move) lives in the WorkspaceManager modal, reached from
+  // inside the WorkspaceSelector dropdown below; the FilterBar itself carries the SCOPE (which
+  // workspace, everywhere) and — on the Timeline only — the board filters, `repoIds` among them.
+
+  // ── The workspace's repos ────────────────────────────────────────────────────────────────────
+  // RepoSelectPanel lists ONLY the active workspace's repos, never the account's: `repoIds = null`
+  // means "every repo in THIS workspace", so an account-wide list would let the user tick a repo
+  // that is not in scope and would make "all" mean two different things in two places.
+  // `useRepos()` is account-wide, so it is narrowed by the membership the workspace row carries.
+  const workspaceRepos = useMemo(() => {
+    if (workspaces == null || f.workspaceId == null) return [];
+    const member = new Set(workspaceRepoIds(f.workspaceId, workspaces));
+    return (repos ?? []).filter((r) => member.has(r.id));
+  }, [repos, workspaces, f.workspaceId]);
+
+  // Show/hide a single repo ON THE TIMELINE BOARD. `repoIds` is the explicit visible subset (null =
+  // every repo in the workspace). Toggling canonicalises back to null when the whole workspace is
+  // visible again, so the URL stays clean and the trigger reads the plain total. "All" and "none"
+  // are all-or-none OF THE WORKSPACE — the account's other repos are not in this list and cannot be
+  // reached from it.
+  const toggleRepoVisibility = (id: number): void => {
+    const allIds = workspaceRepos.map((r) => r.id);
+    const visible = new Set(useFilters.getState().repoIds ?? allIds);
+    if (visible.has(id)) visible.delete(id);
+    else visible.add(id);
+    f.setRepoIds(
+      visible.size === 0 || visible.size === allIds.length
+        ? null
+        : allIds.filter((x) => visible.has(x)),
+    );
+  };
+
+  // Isolate to a single repo (deselect the rest) — quick switching without unchecking everything.
+  // Canonicalises to null when it is the workspace's only repo (so the trigger still reads "all").
+  const showOnlyRepo = (id: number): void => {
+    f.setRepoIds(workspaceRepos.length <= 1 ? null : [id]);
+  };
 
   // Member picker options, organised into sections: one section per in-scope repo
   // listing that repo's members. A member active in several repos is intentionally
@@ -130,7 +175,18 @@ export function FilterBar(): JSX.Element {
     maintainerIds,
   } = useMemo(() => {
     const repoScoped = f.repoIds != null && f.repoIds.length > 0;
-    const inScopeRepoIds = repoScoped ? new Set(f.repoIds) : null;
+    // ⚠ IN-SCOPE IS NOW ALWAYS BOUNDED BY THE WORKSPACE, even with no per-repo narrowing.
+    // `repoIds == null` used to mean "every repo in the account" and a null set here was
+    // therefore correct; it now means "every repo in THIS WORKSPACE". Two of the three sources
+    // feeding `repoMembers` are already workspace-scoped server-side, but `useMergers()` is
+    // account-wide and unscoped — so a null set let maintainers of OTHER workspaces' repos in as
+    // members of a board that can never show them.
+    const workspaceRepoIdSet = new Set(workspaceRepos.map((r) => r.id));
+    const explicit = f.repoIds;
+    const inScopeRepoIds =
+      explicit != null && explicit.length > 0
+        ? new Set(explicit.filter((id) => workspaceRepoIdSet.has(id)))
+        : workspaceRepoIdSet;
 
     const byId = new Map((users ?? []).map((u) => [u.id, u] as const));
     const usable = (id: number | null): User | null => {
@@ -247,26 +303,55 @@ export function FilterBar(): JSX.Element {
     }
 
     return { sections, botSections, maintainerIds: maintainers };
-  }, [users, searchTimeline, searchOpenPrs, mergers, repos, f.repoIds, f.userIds, f.allowedBotIds]);
+  }, [
+    users,
+    searchTimeline,
+    searchOpenPrs,
+    mergers,
+    repos,
+    workspaceRepos,
+    f.repoIds,
+    f.userIds,
+    f.allowedBotIds,
+  ]);
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-800 dark:bg-gray-900">
       {/* The board filters. Always live — focus is a separate tab now, not an overlay
           that locks the board. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {/* Team scope: pick All repos / All Teams / a team / No team; repo/team management
-            lives inside this dropdown. Shown on EVERY view (Timeline + Activity/Insights) — the
-            single scope control, so the Activity rail no longer carries its own. */}
+        {/* THE SCOPE, and it is now a SINGLE control: WHICH WORKSPACE (single-select — there is no
+            "all", a workspace is the only scope). It shows on EVERY view (Timeline +
+            Activity/Insights + every drill-down); repo and workspace management lives inside the
+            selector's dropdown, so the Activity rail carries no scope control of its own. */}
         <Section>
-          <TeamSelector />
+          <WorkspaceSelector />
         </Section>
 
-        {/* Cross-team full-text search — global (shown on EVERY view), scoped to the active team.
+        {/* Full-text search — global (shown on EVERY view), scoped to the active workspace.
             Searches the server index (PR bodies, review threads, comments, people), distinct from
             the timeline-title TimelineSearch below. */}
         <Section>
           <GlobalSearch />
         </Section>
+
+        {/* The per-repo show/hide panel is TIMELINE-ONLY, in placement AND in effect: `repoIds`
+            narrows the timeline board and nothing else. It sits with the other board filters
+            below, NOT beside the workspace selector — a control mounted on a view it cannot
+            change is exactly the confusion this move removes. Narrowing Activity is the rail's
+            job (click a repo row); narrowing a drill-down table is that table's own repo
+            dropdown. */}
+        {isTimeline && (
+          <Section>
+            <RepoSelectPanel
+              repos={workspaceRepos}
+              repoIds={f.repoIds}
+              onToggle={toggleRepoVisibility}
+              onOnly={showOnlyRepo}
+              onShowAll={() => f.setRepoIds(null)}
+            />
+          </Section>
+        )}
 
         {/* Members is timeline-only too — off the board nothing honours the member selection
             (Activity's bot filtering lives in the feed's own lens pills), so the panel shows
@@ -288,7 +373,7 @@ export function FilterBar(): JSX.Element {
         )}
 
         {/* Status / Events / Threads / Range are timeline-only — shown only on the Timeline
-            board; every other tab keeps just the team/repos scope. */}
+            board; every other tab keeps just the workspace selector + global search. */}
         {isTimeline && (
           <Section>
             <StatusSelectPanel
@@ -346,7 +431,7 @@ export function FilterBar(): JSX.Element {
       </div>
 
       {/* Right cluster, pinned next to the timeline. Timeline-only — Clear filters shows only on
-          the Timeline board (every other tab keeps just the team/repos scope). */}
+          the Timeline board (every other tab keeps just the workspace selector + global search). */}
       {isTimeline && (
         <div className="ml-auto flex items-center gap-2">
           <button

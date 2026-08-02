@@ -1,11 +1,14 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { skipToken, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import type { SearchHit, SearchHitKind, SearchPerson, SearchResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
-import { useFilters, scopeToParam } from '../store/filters.js';
+import { useFilters } from '../store/filters.js';
+import { workspaceKey } from './useActivity.js';
 
-// Cross-team text search hooks. Both scope to the ACTIVE team (`teamScope` → the API `scope`
-// string) so results honour the user's current team selection, exactly like Activity/Insights.
+// Workspace-wide text search hooks. Both scope to the ACTIVE WORKSPACE (read straight from the
+// store, exactly like Activity/Insights) so results honour the user's current selection. The
+// server resolves `?workspace=` to that workspace's repos, so an empty workspace yields no hits
+// rather than the whole account, and a caller cannot widen the scope.
 
 const DROPDOWN_LIMIT = 8;
 export const SEARCH_PAGE_SIZE = 25;
@@ -16,12 +19,15 @@ export function useSearchDropdown(query: string): {
   data: SearchResponse | undefined;
   isFetching: boolean;
 } {
-  const scope = scopeToParam(useFilters((s) => s.teamScope));
+  const workspaceId = useFilters((s) => s.workspaceId);
   const q = query.trim();
-  const enabled = q.length >= 2;
+  const enabled = q.length >= 2 && workspaceId != null;
   const res = useQuery<SearchResponse>({
-    queryKey: ['search-dropdown', scope, q],
-    queryFn: () => api.search({ q, scope, limit: DROPDOWN_LIMIT }),
+    queryKey: ['search-dropdown', workspaceKey(workspaceId), q],
+    queryFn:
+      workspaceId == null
+        ? skipToken
+        : () => api.search({ q, workspaceId, limit: DROPDOWN_LIMIT }),
     enabled,
     placeholderData: (prev) => prev,
     staleTime: 30_000,
@@ -41,15 +47,24 @@ export function useSearchResults(query: string, kinds: SearchHitKind[]): {
   fetchMore: () => void;
   isFetchingMore: boolean;
 } {
-  const scope = scopeToParam(useFilters((s) => s.teamScope));
+  const workspaceId = useFilters((s) => s.workspaceId);
   const q = query.trim();
-  const enabled = q.length >= 1;
+  const enabled = q.length >= 1 && workspaceId != null;
   const kindKey = [...kinds].sort().join(',');
   const query$ = useInfiniteQuery<SearchResponse>({
-    queryKey: ['search-results', scope, q, kindKey],
+    queryKey: ['search-results', workspaceKey(workspaceId), q, kindKey],
     initialPageParam: 0,
-    queryFn: ({ pageParam }) =>
-      api.search({ q, scope, kinds, limit: SEARCH_PAGE_SIZE, offset: pageParam as number }),
+    queryFn:
+      workspaceId == null
+        ? skipToken
+        : ({ pageParam }) =>
+            api.search({
+              q,
+              workspaceId,
+              kinds,
+              limit: SEARCH_PAGE_SIZE,
+              offset: pageParam as number,
+            }),
     getNextPageParam: (_last, all) => {
       const loaded = all.reduce((n, p) => n + p.hits.length, 0);
       const total = all[0]?.total ?? 0;

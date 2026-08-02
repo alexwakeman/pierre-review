@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { UserContributionStats } from '@pierre-review/shared';
-import { getUserStats, listUsers, resolveScopeRepoIds } from '../../db/queries.js';
+import { getUserStats, listUsers, resolveWorkspaceScope } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
-// Parse a comma-separated id list into a positive-int array, or null when empty/absent (so
-// the query layer treats it as "all repos"). Mirrors the parser in bot-triage.ts.
+// Parse a comma-separated id list into a positive-int array, or null when empty/absent ("no
+// explicit narrowing"). It is fed to `resolveWorkspaceScope` as the `narrow` argument, never used
+// as a scope in its own right. Mirrors the parser in bot-triage.ts.
 function parseIntList(raw?: string): number[] | null {
   if (raw == null || raw.trim() === '') return null;
   const ids = raw
@@ -14,10 +15,11 @@ function parseIntList(raw?: string): number[] | null {
   return ids.length > 0 ? ids : null;
 }
 
-// GET /api/users/:id/stats — all-time contribution counts for one user. `scope` is the team
-// scope string (see resolveScopeRepoIds); `repoIds` is an explicit comma-separated list which
-// WINS over `scope` (a specific repo selection is the more specific ask), same precedence as
-// the bot-triage analytics routes.
+// GET /api/users/:id/stats — all-time contribution counts for one user. `workspace` is the scope
+// (a plain integer; absent / unknown / foreign ⇒ the account's Default workspace), and `repoIds`
+// NARROWS within it rather than replacing it: `resolveWorkspaceScope` returns
+// `membership ∩ (repoIds ?? membership)`, so a repo id from another workspace simply drops out and
+// cannot measure one workspace through another's repos.
 const statsSchema = {
   params: {
     type: 'object',
@@ -28,7 +30,7 @@ const statsSchema = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      scope: { type: 'string' },
+      workspace: { type: 'string' },
       repoIds: { type: 'string' },
     },
   },
@@ -47,7 +49,7 @@ const statsSchema = {
 // account could permanently reclassify any enumerable user id for every other tenant. It had
 // no frontend caller — bot classification goes through the account-scoped
 // `PATCH /api/bot-reviewers/:userId` (api/routes/bot-triage.ts), which writes the per-account,
-// per-repo `repo_reviewers` table. See the note in db/queries.ts.
+// per-WORKSPACE `workspace_reviewers` table. See the note in db/queries.ts.
 export async function userRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/users', async (req) => listUsers(accountIdOf(req)));
 
@@ -60,11 +62,10 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
   // leaks nothing, which is also why the response echoes no profile field.
   app.get('/api/users/:id/stats', { schema: statsSchema }, async (req) => {
     const { id } = req.params as { id: number };
-    const { scope, repoIds } = req.query as { scope?: string; repoIds?: string };
+    const { workspace, repoIds } = req.query as { workspace?: string; repoIds?: string };
     const accountId = accountIdOf(req);
-    const explicit = parseIntList(repoIds);
-    const scopeRepoIds = explicit ?? (scope ? await resolveScopeRepoIds(accountId, scope) : null);
-    const resp: UserContributionStats = await getUserStats(accountId, id, scopeRepoIds);
+    const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
+    const resp: UserContributionStats = await getUserStats(accountId, id, scope.repoIds);
     return resp;
   });
 }

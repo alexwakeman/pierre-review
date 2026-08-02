@@ -20,7 +20,7 @@ import { registerRateLimit } from './api/plugins/rate-limit.js';
 import { authRoutes } from './api/routes/auth.js';
 import { healthRoutes } from './api/routes/health.js';
 import { repoRoutes } from './api/routes/repos.js';
-import { teamRoutes } from './api/routes/teams.js';
+import { workspaceRoutes } from './api/routes/workspaces.js';
 import { userRoutes } from './api/routes/users.js';
 import { timelineRoutes } from './api/routes/timeline.js';
 import { prRoutes } from './api/routes/prs.js';
@@ -205,8 +205,10 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(healthRoutes);
   await app.register(repoRoutes);
-  // Teams (CORE, always registered): group repos into named teams; account-scoped, no AI.
-  await app.register(teamRoutes);
+  // Workspaces (CORE, always registered): THE ONE SCOPE. A workspace groups an account's repos and
+  // a repo belongs to exactly one — so assignment is a MOVE and there is no "unassign" route.
+  // Account-scoped, no AI, no GitHub calls.
+  await app.register(workspaceRoutes);
   await app.register(userRoutes);
   await app.register(timelineRoutes);
   await app.register(prRoutes);
