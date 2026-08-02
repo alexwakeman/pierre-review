@@ -1,0 +1,189 @@
+# Merge, CI logs & trunk status
+
+> Split out of CLAUDE.md (2026-08) to keep the root memory file lean. This is the
+> authoritative deep-dive for this area; CLAUDE.md keeps only the summary and the
+> cross-cutting landmines. Add new detail HERE, not to CLAUDE.md. References to other
+> sections of the old CLAUDE.md resolve via the doc map at the top of CLAUDE.md.
+
+## Merge, CI logs & trunk status (CORE, no AI)
+
+### The ONE merge verdict (`lib/ui.ts` `mergeVerdict`)
+
+Every surface that answers "can this land?" resolves it through the pure `mergeVerdict()` →
+`MergeVerdictInfo{verdict,label,tone,canMerge,detail}`. It replaced `mergeWarning()` plus each
+surface's own ad-hoc reading, which is how the same PR could read "mergeable" in the Overview
+and "blocked" in the merge control.
+
+**Why GitHub's `mergeable` is not the answer:** it reports ONLY merge-CONFLICT state
+(MERGEABLE / CONFLICTING / UNKNOWN). A PR whose REQUIRED checks are failing is still
+`mergeable: 'mergeable'` — which is exactly what the Overview row used to render as a green
+"mergeable" (~444 open PRs in one real DB). **`mergeStateStatus` is the protection-aware field**
+and the one to lead with (`clean` / `blocked` / `unstable` / `behind` / `dirty` / `has_hooks` /
+`unknown`); `mergeable` survives only as the conflict corroborator. `mergeStateStatus` is
+**ACTOR-AGNOSTIC** — it does not model an admin's bypass power, which is precisely why it needs
+no branch-protection API call to be trustworthy, and why "blocked" may not be blocking *you*.
+`reviewDecision` (new PR column) names the review half of a `blocked` status so the verdict can
+say *why*; absent (the lean timeline PR doesn't carry it) the reason stays generic, never invented.
+
+- **`unstable` IS treated as mergeable** (`canMerge: true`, warn tone): it means only
+  NON-required checks are red, and GitHub's own merge button merges it. Do not read "respects
+  CI" as stricter than that. `behind` is `canMerge: false` because GitHub itself 405s the merge
+  when the repo requires up-to-date branches. `queued`/`armed` are checked FIRST (the truest
+  answer to "what happens next"), then conflicts, then draft.
+- `db/triage.ts` had the identical blindness: `approved_ready` tested `mergeable === 'mergeable'`
+  alone and tagged PRs "approved & ready" with red required checks. It now also requires
+  `mergeStateStatus ∈ READY_MERGE_STATES {clean, has_hooks, unstable}` — **that set and
+  `mergeVerdict`'s `canMerge` must agree**, or the triage queue and the PR disagree about the
+  same PR.
+- Consumers: `ChecksTab` (Overview verdict row, open PRs only), `MergeControl`,
+  `Activity/RepoOpenPrList` + `Timeline/prBar` via **`mergeVerdictWarning()`**.
+  **Landmine:** `mergeVerdict` returns `draft` before it looks at behind/blocked, and `draft`
+  is not a compact warning — so a draft that was ALSO behind lost its ⚠ on the dense surfaces.
+  `mergeVerdictWarning` re-derives with `isDraft` dropped and shows only
+  `conflicts`/`behind` underneath (never `blocked`/`unstable` — "required reviews missing" IS
+  what draft means, and unstable's "GitHub will still merge it" is a lie about a draft).
+  `MergeControl` deliberately does NOT pass `autoMergeArmed`: the `armed` verdict reports
+  `canMerge: true`, which on that surface would enable a Merge button for a blocked PR.
+- `PrMergeOptions.mergeStateStatus` is GitHub's LIVE REST string (it can return values the enum
+  doesn't model, `draft` among them), so the live path narrows through **`toMergeStateStatus()`**
+  rather than casting — anything unrecognised becomes `unknown`.
+
+### Merge queue (GitHub's native)
+
+`fetchMergeQueueState` / `enqueuePullRequestOnQueue` / `dequeuePullRequestFromQueue` are the
+one place `github/mutations.ts` **forks from its REST house style**, and it has to:
+`enqueuePullRequest`/`dequeuePullRequest` are GraphQL-only with no REST equivalent, and queue
+presence is not inferable from REST at all — `MergeStateStatus` has no QUEUED value, so a queued
+PR looks like any other blocked one. Nothing is synced (a position changes minute to minute and
+only the merge control renders it): state rides the lazy `merge-options` fetch. When a queue
+exists the control REPLACES "Merge" with "Add to merge queue" — GitHub refuses a direct merge on
+a queued branch, so offering one only produces a confusing 405. `estimatedTimeToMerge` is SECONDS
+in GitHub's schema; the ×1000 lives in the single `SECONDS_TO_MS` constant, applied at the two
+call sites that read the field (`fetchMergeQueueState` + `enqueuePullRequestOnQueue`).
+
+### "Merge when ready" (`merge/auto-merge-runner.ts`)
+
+A Pierre-side standing intent in `auto_merge_requests`, re-evaluated on its own cron
+(`AUTO_MERGE_CRON` `*/2`, registered in `scheduler.ts` under the same `disableScheduler` gate as
+sync — hence the UI saying it only lands while the app is running). Bounded per tick
+(`MAX_INTENTS_PER_TICK` 25, least-recently-checked first so a backlog rotates), one tick at a
+time, grouped per account so each tenant's token is fetched once and one bad token fails only
+that tenant.
+
+**It deliberately does NOT use GitHub's `enablePullRequestAutoMerge`**, which has 422'd since
+2026-03-25 on any PR that does not ALREADY meet its merge requirements — i.e. exactly the PRs
+the feature exists for. Using it would invert the feature.
+
+Pre-flight, before any GitHub read: past `expiresAt` ⇒ `expired`; PR no longer open ⇒
+`disarmed_blocked`; **write permission re-checked at LAND time**, not just at arm time, because
+access can be revoked in between and the watcher must never act on a stale grant. Then, per
+intent, ONE `GET /pulls/{n}` (`fetchPrMergeSnapshot`) serves both the head and the mergeability —
+they are non-overlapping fields of the same payload, and reading them separately cost 750 wasted
+calls/hour at 25 intents. The gates it feeds:
+
+1. **Pinned `expectedHeadOid`** — arming is consent to merge THE CODE THE USER SAW. A different
+   head ⇒ `disarmed_head_moved`, never a merge.
+2. **`isOurUpdateMerge`, the one sanctioned re-pin** — a head move is adopted only on all three
+   proofs: we issued an update for THIS intent recently against exactly the pinned head; the new
+   head is a **TWO-parent** commit whose FIRST parent is that pinned head (a human commit on top
+   also has the old head as a parent — the ARITY is what separates "merged into" from "pushed
+   onto"); and the second parent is contained in the base ref. Anything unproven, including a
+   compare that couldn't run, is a NO.
+3. **Async update-branch is never re-pinned optimistically** — GitHub's update returns **202
+   ACCEPTED** and merges asynchronously with no handle to poll, so re-reading the head there
+   would adopt a concurrent human push as consented-to code. The runner records what it ASKED
+   for (`pendingUpdates`, TTL 15 min) and lets a later tick prove the move via (2).
+4. **Retarget guard** — a `PATCH pulls/{n}` base change leaves `head.sha` alone, so the head pin
+   is blind to it; the runner compares the live base against the last SYNCED base ref and
+   disarms on a mismatch (waiting, not merging, when it can't tell). The exact fix is an
+   `expected_base_ref` column that does not exist yet.
+5. **COMPARE-AND-SET immediately before the merge** — everything above acts on a scan snapshot
+   that can be minutes old; a user who hit Cancel mid-tick DELETED the row, and merging anyway
+   would leave the UI saying "cancelled" for a PR that landed.
+6. **Green light = `mergeableState ∈ {clean, has_hooks, unstable}`** — so, as everywhere else,
+   **`unstable` merges** (CI red but not REQUIRED by branch protection), matching GitHub's own
+   button. `blocked`/`conflicts` KEEP WAITING with a `lastReason` (unblocking on its own is the
+   whole value of arming); only a head move disarms. `unknown` waits.
+
+**Landmine: `behindBy > 0` is true of MOST healthy PRs** (any trunk commit since the branch
+point) — only `mergeStateStatus === 'behind'` means GitHub is blocking. Treating `behindBy` as a
+blocker parked every clean armed PR forever, and freshening on it every tick pushed a merge
+commit (and a CI run) every two minutes for the intent's 72h life; hence `freshenedIntents`,
+which honours "update before merging" exactly ONCE. A local rebase (`coding/merge.ts`, local-only
+— cloud has no clone) IS synchronous and returns the sha it pushed, so re-pinning to that adopts
+nothing we didn't produce. On success the runner stamps the PR merged locally (like the
+interactive route) and sets `merged`; a merge/close that happened outside Pierre becomes
+`disarmed_blocked`, NOT `merged` — the latter means "the watcher did it" and would raise a false
+toast. `MAX_CONSECUTIVE_FAILURES` 3, counted in memory so a restart errs towards retrying.
+Client side: `useArmedMerges` polls `GET /api/auto-merge` (45s, foreground only) and
+`AutoMergeBanner` toasts only on an `armed → terminal` TRANSITION it observed itself — the first
+poll seeds a silent baseline, so a page load never replays yesterday's outcomes.
+
+### CI logs (`github/actions-logs.ts`)
+
+`GET /repos/…/actions/jobs/{id}/logs` 302s to a short-lived signed blob URL that **does honour
+HTTP `Range`** (206 + `Content-Range`), so the fetcher resolves the redirect itself
+(`redirect:'manual'`) and issues ONE ranged GET for the window it wants — real byte chunking, not
+a download-then-slice. The signed URL is server-side only and NEVER returned to a client (it is
+unauthenticated and would bypass the route's ownership check). `parseContentRange` also parses
+the start-less `bytes */<total>` form — the shape RFC 7233 mandates on a 416, and the only way to
+learn the log's true size when the window fell past the end; a start-anchored-only regex made the
+416 recovery dead code.
+
+**Logs are offered for PASSING checks too** — the failure-only gate was OURS, not GitHub's, which
+serves logs for every Actions job, and "what did this green check actually run?" is a real
+question. `CheckRow` now expands for any check with a job id parsed out of its `detailsUrl`;
+third-party checks (external URL, no job) keep the plain link row. The viewer opens at the TAIL
+and pulls EARLIER chunks as you scroll up (`useCheckLogs`, a `useInfiniteQuery` where "next page"
+means earlier, `LOG_PAGE_BYTES` 128 KiB); the prepend is anchored by **distance from the bottom**,
+which is what stays constant when content is added above, and the "Load earlier" control lives
+OUTSIDE the `<pre>` so it can't change the scroller's `scrollHeight` mid-anchor.
+
+### Default-branch ("trunk") status
+
+`GET /api/branch-status` over `repos`' four head columns + `branch_commits` (written by the sync
+step described under **Sync pipeline**). It exists because everything else in this app is
+PR-shaped, while a broken default branch invalidates every open PR's CI at once — and because it
+**cannot come from the existing `commits` table, which is PR-scoped: a squash-merged PR never
+appears there under the SHA that landed on trunk**. Deliberately informational: it feeds no
+attention count, no badge, no My Turn.
+
+- **Both detail columns follow the partial-response write policy** (Conventions): `undefined` ⇒
+  omit the key from the upsert, `null`/`[]` ⇒ clear. `failingChecksToWrite` /`prNumberToWrite`
+  are the implementations, and what counts as GitHub's POSITIVE statement is specific — for
+  failing checks, a green/`expected` phase-1 ROLLUP or a phase-2 response that actually carried a
+  `contexts` list (an `unknown` rollup, which is also what a nulled-by-partial rollup maps to,
+  clears nothing); for the PR ref, an `associatedPullRequests.nodes` ARRAY, whose emptiness means
+  "this commit came from no PR" — a direct push, a legitimate steady state, not a gap.
+  Phase 2's own failure is caught separately (`syncBranchStatus` is already non-fatal upstream, so
+  an unguarded throw here would discard the phase-1 snapshot too): detail failure degrades to "no
+  carets", never to "no strip".
+- Failing checks reuse `sync/upsert.ts`'s `checkContextState` + `parseActionsIds` **verbatim** (now
+  exported) so a trunk failure is the SAME object as a PR failure — one vocabulary, one icon set.
+  They are deduped by display name keeping the highest Actions `runId`, because `contexts` returns
+  every check suite on the commit and does not collapse to latest-per-name the way GitHub's PR UI
+  does. `workflowName` is null for a legacy StatusContext and for a non-Actions suite; nothing may
+  require it. The repo-level `failingChecks` is DERIVED from the commit whose sha is `headSha`
+  (one writer, one reader), matched by SHA and not by position — a backdated committer date can
+  sort the head outside the read cap.
+- **Commit → PR link.** `pickAssociatedPrNumber` stores exactly ONE number from
+  `associatedPullRequests` under a 0/1/many contract, ranked (merged into THIS default branch) >
+  (merged anywhere) > (open) with the lowest number as tiebreak — determinism is the point, since
+  `first:1` on an unordered connection could FLIP between syncs. Candidates from another
+  repository are DROPPED (the connection spans the repo network, so a fork's PR can appear).
+  **Landmine: the read layer's map key is `(repoId, number)`, NEVER a bare number** — PR numbers
+  are unique only WITHIN a repo, so a number-keyed map cross-links repo A's #12 onto repo B's
+  commit and opens the wrong PR. The `inArray × inArray` predicate intentionally over-matches;
+  keying by the pair is what makes that harmless, and there is a seeded test rather than only a
+  comment. `prId != null` → open the PR's own detail tab in-app; `prNumber` set but `prId` null
+  (squash-merged before the backfill window, or a repo added later) → link out to github.com;
+  both null → no chip. Headlines go through `lib/prRef.ts` `trimTrailingPrRef` first: GitHub
+  truncates `messageHeadline` itself (~70 chars, a literal U+2026) and the trailing `(#1234)` is
+  the FIRST thing eaten, so the chip would otherwise sit next to a dangling `(#2…`.
+- UI: `Activity/BranchStatusChip` (rail row: dot + branch + age; a HOLLOW dot for "no CI
+  observed", unlike the PR surfaces which render nothing for `unknown`) and
+  `Activity/BranchStatusPanel` (cross-repo strip on the Feed entry, `compact` per-repo variant in
+  `RepoFeedHeader`). A per-commit expander is driven by `failingChecks.length`, never by the dot's
+  colour, so a caret can never open onto an empty drawer.
+
+
