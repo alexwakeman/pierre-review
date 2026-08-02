@@ -13,6 +13,7 @@ import Features from './pages/Features';
 import Pro from './pages/Pro';
 import Pricing from './pages/Pricing';
 import HowItWorks from './pages/HowItWorks';
+import Arcade from './pages/Arcade';
 import Privacy from './pages/Privacy';
 import Cookies from './pages/Cookies';
 import Terms from './pages/Terms';
@@ -23,6 +24,7 @@ const ROUTES: Record<string, () => JSX.Element> = {
   '/pro': Pro,
   '/pricing': Pricing,
   '/how-it-works': HowItWorks,
+  '/arcade': Arcade,
   // Legal. Required before the site can lawfully collect anything in the EU/UK, and
   // linked from the footer on every page + from the consent banner.
   '/privacy': Privacy,

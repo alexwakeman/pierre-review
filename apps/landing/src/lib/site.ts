@@ -50,12 +50,17 @@ export const REPO_URL = 'https://github.com/alexwakeman/pierre-review';
  * The arcade game ("Inbox Invaders") entry points — the hero's game bar and the
  * footer link.
  *
- * OFF until the game itself exists. The <GameBar/> component is complete
- * (sprites, rules, persisted dismissal), but shipping its "Play →" link before
- * there is anything at /arcade would put a 404 directly under the primary CTA.
- * Flip this to `true` in the same change that lands the game route.
+ * ON: the game exists. /arcade is a real, prerendered marketing route (it is in
+ * ROUTE_SEO, and therefore in PRERENDER_PATHS and the sitemap), so the "Play →"
+ * link under the primary CTA resolves to a page rather than a 404.
+ *
+ * This stays a flag rather than being inlined because the game is deliberately
+ * subordinate: it is the one piece of the site that can be pulled from the
+ * marketing surface — hero bar and footer link both — without touching layout,
+ * copy or the route itself. The route keeps working when this is false; only the
+ * invitations to it disappear.
  */
-export const ARCADE_ENABLED = false;
+export const ARCADE_ENABLED = true;
 
-/** Where the game lives once ARCADE_ENABLED is true. */
+/** Where the game lives. */
 export const ARCADE_PATH = '/arcade';

@@ -102,9 +102,28 @@ details > summary::-webkit-details-marker {
 }
 
 /* ---- motion ----
-   "The site does not move. Motion is the game's job." The only animation on the
-   site proper is the terminal caret blink; everything else is a 120ms colour
-   fade on links and buttons. Under reduced motion the caret renders solid. */
+   The site does not move, with ONE sanctioned exception. The CSS-driven motion
+   is still just the terminal caret blink plus a 120ms colour fade on links and
+   buttons; under reduced motion the rule below kills both and the caret renders
+   solid.
+
+   THE EXCEPTION is the hero rain (components/feint/Rain.tsx) — notification
+   sprites falling behind the home page's headline and fading out as they go. It
+   is an argument rather than a decoration (the storm keeps arriving and goes
+   quiet before it reaches you), it is confined to the hero <header>, and it is
+   deliberately faint: 0.16 alpha at the top, superlinear fade, no vermilion.
+
+   IT IS NOT COVERED BY THE RULE BELOW. The rain is a requestAnimationFrame loop
+   painting to a canvas, and `animation: none` / `transition: none` reach neither
+   — a rAF loop is script, not a CSS animation, and a canvas paint is not a
+   property transition. So Rain.tsx checks
+   `matchMedia('(prefers-reduced-motion: reduce)')` itself, subscribes to its
+   `change` event, and under reduced motion paints ONE static frame of the same
+   seeded arrangement and starts no loop. Any future JS-driven motion on this
+   site inherits that obligation: this rule is a floor, not a guarantee.
+
+   The arcade cabinet at /arcade is not an exception — it is the game, it only
+   runs while its field has focus, and it makes the same matchMedia check. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

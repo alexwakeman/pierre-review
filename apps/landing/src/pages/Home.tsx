@@ -13,6 +13,7 @@ import {
 import { ShotFrame } from '../components/feint/ShotFrame';
 import { TerminalPanel } from '../components/feint/Terminal';
 import { SignalFigure } from '../components/feint/Sprite';
+import { Rain } from '../components/feint/Rain';
 import { GameBar } from '../components/feint/GameBar';
 
 // ---------------------------------------------------------------------------
@@ -89,8 +90,14 @@ export default function Home(): JSX.Element {
   return (
     <>
       {/* ---------- hero ---------- */}
-      <header className="grid gap-16 px-gutter pt-hero-y rail:grid-cols-hero">
-        <div>
+      {/* `relative overflow-hidden` is what confines <Rain/>: the drops are a
+          child of this header and are clipped by it, so they can never reach the
+          arcade bar or the screenshot below. The two grid children take
+          `relative z-10` so the copy sits above the canvas, not behind it. */}
+      <header className="relative grid gap-16 overflow-hidden px-gutter pt-hero-y rail:grid-cols-hero">
+        <Rain />
+
+        <div className="relative z-10">
           <MonoLabel wide className="mb-[26px] text-secondary">
             The cross-repo review layer
           </MonoLabel>
@@ -120,7 +127,7 @@ export default function Home(): JSX.Element {
 
         {/* The vendor rail. Below the `rail` breakpoint it becomes a wrapped mono
             row under the reassurance line, per the brief — no logos, no chips. */}
-        <div className="rail:border-l rail:border-rule rail:pl-6 rail:pt-2">
+        <div className="relative z-10 rail:border-l rail:border-rule rail:pl-6 rail:pt-2">
           <MonoLabel className="mb-4 text-secondary">Works with</MonoLabel>
           <div className="flex flex-wrap gap-x-6 gap-y-2 font-mono text-mono-row text-ink-body rail:flex-col rail:gap-0">
             {WORKS_WITH.map((name, i) => (

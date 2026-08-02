@@ -74,7 +74,7 @@ function seoBlock({ title, description, robots = 'index, follow', url, image, im
     `<title>${escapeText(title)}</title>`,
     `<meta name="description" content="${d}" />`,
     `<meta name="robots" content="${escapeAttr(robots)}" />`,
-    // Canonical + og:url are per-route. Serving one canonical for all eight URLs
+    // Canonical + og:url are per-route. Serving one canonical for all nine URLs
     // (the old behaviour for any non-JS crawl) tells a search engine the whole
     // site is one page.
     `<link rel="canonical" href="${escapeAttr(url)}" />`,
@@ -157,8 +157,8 @@ for (const path of PRERENDER_PATHS) {
 // The failure this whole script exists to prevent is silent: a broken prerender
 // still produces a site that works perfectly in a browser. These assertions are
 // what turn that into a build failure.
-if (written.length < 8) {
-  throw new Error(`only ${written.length} routes prerendered — expected all 8`);
+if (written.length < 9) {
+  throw new Error(`only ${written.length} routes prerendered — expected all 9`);
 }
 // The floor is on the FINAL html, and it has to clear the un-prerendered shell by
 // a real margin to mean anything: index.html plus Vite's asset tags is already

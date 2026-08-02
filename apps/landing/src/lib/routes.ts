@@ -61,6 +61,13 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
     title: 'How it works — sync, architecture & roadmap',
     description: `The engineering behind ${SITE_NAME}: an idempotent five-minute sync pipeline with two-phase backfill and lean storage, a dual-dialect SQLite/Postgres data layer, the local-vs-cloud split, the security model — and what’s next (metered advanced AI, BYO endpoints, deeper Jira/Linear, email digests).`,
   },
+  '/arcade': {
+    title: 'Inbox Invaders — the notification firehose as an arcade game',
+    description:
+      `A free browser game about the thing ${SITE_NAME} takes off your desk: ` +
+      'twelve kinds of notification descend, you clear what you can, and the ' +
+      'inbox wins. No sign-up.',
+  },
   '/privacy': {
     title: `Privacy policy — ${SITE_NAME}`,
     description: `What ${SITE_NAME} collects, why, who processes it, how long it is kept, and how to get it deleted or exported. Run locally, ${SITE_NAME} collects nothing at all.`,

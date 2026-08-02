@@ -17,8 +17,10 @@ import { Sprite, SPRITE_PALETTE } from './Sprite';
 //   · dismissal persists and must not re-appear on a route change; and
 //   · it is the only game entry point above the footer.
 //
-// GATED OFF for now — see ARCADE_ENABLED in lib/site.ts. The component is
-// finished; the game is not.
+// LIVE — /arcade exists and ARCADE_ENABLED (lib/site.ts) is true. That flag is
+// the single switch that removes BOTH invitations (this bar and the footer link)
+// without touching the route, the layout or any copy; the game stays deliberately
+// subordinate, so the ability to withdraw the invitation outlives the gating.
 // ---------------------------------------------------------------------------
 
 // A NEW key, so it takes the new prefix rather than the legacy `pierre:*` one
