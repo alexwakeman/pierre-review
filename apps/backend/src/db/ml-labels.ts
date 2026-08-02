@@ -61,6 +61,21 @@ const ML_CATEGORY_VALUES = new Set<string>([
 
 const SEVERITY_KEYS: MlSeverity[] = ['nit', 'minor', 'major', 'critical'];
 
+/**
+ * "This row has text worth classifying."
+ *
+ * ⚠ `IS NOT NULL` IS NOT ENOUGH, and getting this wrong is silent. An approval with no comment
+ * is a `reviews` row with an EMPTY-STRING body — there are 5.4k of them in this repo's own dev
+ * database. They are not candidates (there is nothing to classify), but a NOT NULL test counts
+ * them, so the candidate query and the pending COUNT would disagree forever: the worker would
+ * skip them every tick while the Bots panel reported them as "still being processed" and
+ * coverage never reached 100%.
+ *
+ * `trim(x) <> ''` is portable — both SQLite and Postgres have `trim` — so the two callers below
+ * share ONE predicate rather than two that could drift.
+ */
+const hasText = (col: AnyColumn) => sql`trim(${col}) <> ''`;
+
 function emptySeverityCounts(): MlSeverityCounts {
   return { nit: 0, minor: 0, major: 0, critical: 0 };
 }
@@ -138,6 +153,7 @@ export async function listMlCandidates(
           isNotNull(reviewComments.authorId),
           inArray(reviewComments.authorId, automatedIds),
           isNotNull(reviewComments.body),
+          hasText(reviewComments.body),
           isNull(mlCommentLabels.id),
         ),
       )
@@ -163,6 +179,7 @@ export async function listMlCandidates(
           isNotNull(prComments.authorId),
           inArray(prComments.authorId, automatedIds),
           isNotNull(prComments.body),
+          hasText(prComments.body),
           isNull(mlCommentLabels.id),
         ),
       )
@@ -188,6 +205,7 @@ export async function listMlCandidates(
           isNotNull(reviews.authorId),
           inArray(reviews.authorId, automatedIds),
           isNotNull(reviews.body),
+          hasText(reviews.body),
           isNull(mlCommentLabels.id),
         ),
       )
@@ -199,18 +217,23 @@ export async function listMlCandidates(
   const out: MlCandidate[] = [];
   const push = (kind: MlLabelTargetKind, rows: typeof rc) => {
     for (const r of rows) {
-      const body = (r.body ?? '').trim();
-      // An empty body is not a classification failure, it is nothing to classify. Skipping it
-      // here (rather than sending it) keeps it OUT of every batch forever — which matters,
-      // because a target that is never labelled is re-selected on every single tick.
-      if (!body || r.authorUserId == null) continue;
+      const raw = r.body ?? '';
+      // ⚠ THE SQL PREDICATES ARE THE SOLE AUTHORITY ON CANDIDACY — nothing is dropped here.
+      // This loop used to skip `raw.trim() === ''`, which sounds harmless and is not: SQL's
+      // `trim()` strips SPACES ONLY in both dialects, JavaScript's strips all whitespace, so a
+      // body of "  \n  " passed the SQL filter and was then discarded in JS. The row is then
+      // pending forever — re-selected on every tick, never labelled, and counted by
+      // `countUnlabelledBotText` as work outstanding. Whatever SQL offers, we classify; the
+      // trim below only normalises the text we SEND (falling back to the raw string, so the
+      // service is never handed an empty body).
+      if (r.authorUserId == null) continue; // unreachable — `isNotNull(authorId)` above; narrows the type
       out.push({
         targetKind: kind,
         targetId: r.targetId,
         prId: r.prId,
         repoId: r.repoId,
         authorUserId: r.authorUserId,
-        body,
+        body: raw.trim() || raw,
         targetCreatedAt: r.targetCreatedAt,
       });
     }
@@ -354,9 +377,15 @@ export async function getPrMlLabels(
 }
 
 // A workspace's whole labelled corpus is read into memory for the rollup. It is bounded by
-// retention (180 days by default) and each row is four small columns, but a cap keeps a
-// pathological account from turning one request into a 100 MB allocation; when it bites, the
-// response says so rather than quietly reporting a partial rollup as complete.
+// retention (180 days by default) and each row is a handful of small columns, but a cap keeps a
+// pathological account from turning one request into a huge allocation.
+//
+// TWO THINGS THE CAP NEEDS TO BE HONEST. It must have an ORDER BY — without one the rows a
+// truncated scan returns are whatever the storage engine hands back first, which differs between
+// SQLite and Postgres and CHANGES on Postgres after an UPDATE, so the same workspace would
+// report different totals run to run. And the response must SAY it truncated (`truncated`),
+// because a capped scan silently presented as a total is exactly the failure `pending` exists
+// to avoid at the other end.
 const ROLLUP_SCAN_CAP = 50_000;
 
 /**
@@ -386,6 +415,7 @@ export async function getBotSeverityRollup(
     },
     rows: [],
     backends: [],
+    truncated: false,
     generatedAt,
   };
   if (scope.repoIds.length === 0) return empty;
@@ -410,6 +440,7 @@ export async function getBotSeverityRollup(
           inArray(mlCommentLabels.authorUserId, automatedIds),
         ),
       )
+      .orderBy(desc(mlCommentLabels.targetCreatedAt), desc(mlCommentLabels.id))
       .limit(ROLLUP_SCAN_CAP)
       .execute(),
     classificationKindForUser(accountId, scope.workspaceId),
@@ -454,14 +485,18 @@ export async function getBotSeverityRollup(
       categories: new Map(),
     };
     acc.labelled += 1;
-    acc.bySeverity[severity] += 1;
-    totalsBySeverity[severity] += 1;
     if (row.isSummary) {
       acc.summaries += 1;
       summaries += 1;
     } else {
       acc.findings += 1;
       findings += 1;
+      // ⚠ SEVERITY COUNTS ARE FINDINGS-ONLY, and it has to be inside this branch. Counting a
+      // walkthrough's severity here while every RATE below divides by `findings` would let
+      // "nits as a share of findings" exceed 100% — a vendor that posts one summary per PR would
+      // reliably push it over. Summaries have their own counter; nothing divides by `labelled`.
+      acc.bySeverity[severity] += 1;
+      totalsBySeverity[severity] += 1;
       if (severity === 'major' || severity === 'critical') acc.high += 1;
       // Categories describe a FINDING. A walkthrough comment's category is an artefact of the
       // marker parser reading a summary table, so counting it would make "what do the bots
@@ -514,6 +549,7 @@ export async function getBotSeverityRollup(
     },
     rows,
     backends: [...backends].sort(),
+    truncated: labelRows.length >= ROLLUP_SCAN_CAP,
     generatedAt,
   };
 }
@@ -562,6 +598,7 @@ async function countUnlabelledBotText(
           isNotNull(reviewComments.authorId),
           inArray(reviewComments.authorId, automatedIds),
           isNotNull(reviewComments.body),
+          hasText(reviewComments.body),
           isNull(mlCommentLabels.id),
         ),
       )
@@ -585,6 +622,7 @@ async function countUnlabelledBotText(
           isNotNull(prComments.authorId),
           inArray(prComments.authorId, automatedIds),
           isNotNull(prComments.body),
+          hasText(prComments.body),
           isNull(mlCommentLabels.id),
         ),
       )
@@ -608,6 +646,7 @@ async function countUnlabelledBotText(
           isNotNull(reviews.authorId),
           inArray(reviews.authorId, automatedIds),
           isNotNull(reviews.body),
+          hasText(reviews.body),
           isNull(mlCommentLabels.id),
         ),
       )

@@ -4892,6 +4892,9 @@ export interface PrMlLabelsResponse {
 }
 
 // ── Bots interface: the high-level severity rollup ──────────────────────────────
+// FINDINGS ONLY — walkthrough/summary comments are counted by `summaries`, never here, so these
+// four always sum to the matching `findings` count. Every rate in this payload divides by
+// findings, so folding summaries in would let a share exceed 100%.
 export interface MlSeverityCounts {
   nit: number;
   minor: number;
@@ -4907,6 +4910,8 @@ export interface MlBotSeverityRow {
   // Display name override, else the vendor brand, else the login (resolved server-side).
   label: string;
   kind: AutomatedReviewerKind | null;
+  // Every label for this bot, findings AND summaries. `bySeverity` covers the findings only, so
+  // it sums to `labelled - summaries`.
   labelled: number;
   bySeverity: MlSeverityCounts;
   // MAJOR + CRITICAL as a share of this bot's NON-SUMMARY labels, 0..1. Bucketing the top two
@@ -4940,5 +4945,9 @@ export interface BotSeverityResponse {
   // Distinct `backend` strings seen in scope. Non-empty and lacking `modernbert-onnx` on every
   // entry means the whole corpus was labelled by the marker fallback.
   backends: string[];
+  // The rollup reads a bounded window of the corpus (newest labels first). True when that bound
+  // was HIT, so the numbers below it are a sample rather than the whole picture — said out loud
+  // rather than presented as a total, which is the same honesty rule as `pending`.
+  truncated: boolean;
   generatedAt: string;
 }

@@ -60,6 +60,9 @@ const BACKOFF_MS = 10 * 60_000;
 let consecutiveFailures = 0;
 let backoffUntil = 0;
 
+// Where the next tick starts in the account list — see the rotation note in the tick.
+let rotationCursor = 0;
+
 // Logged once per process so a marker-fallback deployment is visible in the boot log rather
 // than only in the `backend` string on rows nobody reads.
 let healthLogged = false;
@@ -114,15 +117,24 @@ export function packBatches(
   return batches;
 }
 
+const SEVERITY_BY_ORD: MlSeverity[] = ['nit', 'minor', 'major', 'critical'];
+
 function toWrite(
   accountId: number,
   candidate: MlCandidate,
   result: SeverityResult,
   modelVersion: string,
   sentBody: string,
-): MlLabelWrite | null {
-  const severity = SEVERITY_WORD_TO_WIRE[result.severity];
-  if (!severity) return null;
+): MlLabelWrite {
+  // A word outside the service's documented four would be a contract break, but DROPPING the
+  // row is the one thing we must not do: an unwritten target is re-selected on every tick
+  // forever, so a single bad word turns into the same batch being re-POSTed every two minutes
+  // for the life of the deployment. Fall back to the numeric ordinal (clamped), which always
+  // yields a storable value and terminates.
+  const severity =
+    SEVERITY_WORD_TO_WIRE[result.severity] ??
+    SEVERITY_BY_ORD[Math.min(3, Math.max(0, Math.trunc(result.severityOrd)))] ??
+    'nit';
   return {
     accountId,
     repoId: candidate.repoId,
@@ -184,8 +196,12 @@ export async function runMlEnrichmentTick(log: FastifyBaseLogger): Promise<TickS
 
   try {
     if (!healthLogged) {
-      healthLogged = true;
       const health = await severityHealth();
+      // Only CONSUME the once-per-process flag when the service actually answered. Setting it
+      // before the await meant a service that was merely slow to start (a ~150 MB model loads on
+      // first request) burned the single probe on a failure, and a marker-fallback deployment
+      // that came up a minute later was never reported.
+      healthLogged = health !== null;
       if (!health) {
         log.warn(
           `ml enrichment: severity-api at ${config.severityApiUrl} did not answer /health; will retry`,
@@ -200,7 +216,20 @@ export async function runMlEnrichmentTick(log: FastifyBaseLogger): Promise<TickS
       }
     }
 
-    for (const accountId of await activeAccountIds()) {
+    // ROTATE THE STARTING POINT. A tick has a wall-clock budget and each workspace can consume
+    // a whole pool of it, so a fixed account order means account 1's workspaces are always
+    // served first and a busy tenant at the front starves everyone behind it INDEFINITELY —
+    // not just this tick, every tick. The cursor is process-local (a restart resets it, which
+    // is harmless) and mirrors the auto-merge runner's least-recently-checked rotation.
+    const accountIds = await activeAccountIds();
+    if (accountIds.length > 0) rotationCursor %= accountIds.length;
+    const rotated = [
+      ...accountIds.slice(rotationCursor),
+      ...accountIds.slice(0, rotationCursor),
+    ];
+    rotationCursor = accountIds.length > 0 ? (rotationCursor + 1) % accountIds.length : 0;
+
+    for (const accountId of rotated) {
       if (Date.now() >= deadline) break;
       // Every workspace, because a repo lives in exactly one and the bot verdict is per
       // workspace: the same login can be a bot in one and a person in another.
@@ -317,17 +346,27 @@ async function enrichWorkspace(
       for (let i = 0; i < batch.length; i += 1) {
         const candidate = batch[i]!;
         const result = response.results[i]!;
-        const write = toWrite(
-          accountId,
-          candidate,
-          result,
-          response.modelVersion,
-          candidate.body,
+        writes.push(
+          toWrite(accountId, candidate, result, response.modelVersion, candidate.body),
         );
-        if (write) writes.push(write);
       }
       stats.batches += 1;
-      stats.labelled += await upsertMlLabels(writes);
+      // ⚠ NOTHING IN THIS LOOP MAY THROW. Two of these run under one `Promise.all`, so a throw
+      // rejects the whole thing, propagates past the caller's `finally` (which clears the
+      // re-entrancy flag) and leaves the SIBLING worker running detached — still POSTing and
+      // still writing, while the next tick believes it is alone.
+      try {
+        stats.labelled += await upsertMlLabels(writes);
+      } catch (err) {
+        stats.failures += 1;
+        hardFailure = true;
+        log.warn(
+          `ml enrichment: writing ${writes.length} label(s) failed: ${
+            err instanceof Error ? err.message.slice(0, 200) : String(err)
+          }`,
+        );
+        return;
+      }
     }
   };
 
@@ -341,4 +380,5 @@ export function __resetMlEnrichmentState(): void {
   consecutiveFailures = 0;
   backoffUntil = 0;
   healthLogged = false;
+  rotationCursor = 0;
 }

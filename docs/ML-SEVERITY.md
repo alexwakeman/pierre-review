@@ -100,6 +100,12 @@ The worker therefore:
 Measured effect of step 3 on the dev corpus: **482 labels in 71 s** (≈6.8 items/s) versus the
 ~3 items/s an unsorted batcher gets on the same machine.
 
+**Tenant fairness.** A tick's budget is finite and one workspace can eat a whole pool of it, so
+the account list is walked from a **rotating cursor** rather than always from account 1 —
+otherwise a busy tenant at the front starves everyone behind it not just this tick but every
+tick. Same reasoning as the auto-merge runner's least-recently-checked ordering; the cursor is
+process-local and a restart resetting it is harmless.
+
 Failure handling: a batch failure aborts that workspace for the tick and counts once; five
 consecutive failing ticks pause the worker for 10 minutes. Nothing is written on failure, so a
 retry costs only the round trip. The tick **never throws** — the service being down (the normal
@@ -323,11 +329,40 @@ empty — an unmatched comment falls back to a single low-probability best guess
   comment's severity to a different comment, which is worse than no label.
 - **The unique is `(account_id, target_kind, target_id)`.** A stale `onConflictDoUpdate` target
   type-checks perfectly and fails only at runtime, only when a row is actually written.
+- **Nothing inside the concurrency workers may throw.** Two run under one `Promise.all`; a throw
+  rejects the whole thing, propagates past the `finally` that clears the re-entrancy flag, and
+  leaves the SIBLING running detached — still POSTing and writing while the next tick believes
+  it is alone. The DB write is inside the same try as the HTTP call for exactly this reason.
+- **A label that is never WRITTEN is a poison pill.** The candidate query is "has no label row",
+  so any target the worker declines to store is re-selected on every tick forever. That is why an
+  unrecognised severity word falls back to the numeric ordinal instead of being dropped, and why
+  SQL — not JavaScript — decides candidacy.
+- **Severity counts are FINDINGS-ONLY.** `is_summary` is a separate axis, so a walkthrough still
+  carries a severity. Counting those in `bySeverity` while every rate divides by `findings` let
+  "high severity" exceed 100% — a vendor posting one MAJOR-scored walkthrough per PR reaches it
+  reliably. Summaries have their own counter and nothing divides by `labelled`.
+- **The rollup's 50 k scan cap needs an ORDER BY and must announce itself.** Without the order,
+  a truncated scan returns storage-engine order — which differs by dialect and shifts on Postgres
+  after an UPDATE, so the same workspace reports different totals run to run. `truncated: true`
+  is what stops a capped sample being read as a total.
+- **Every store action that resets `threadStateFilter` must reset `threadSeverityFilter` too.**
+  They are two halves of one preset. `openPrThreadsFiltered` seeds one and moves `selectedPrId`,
+  so anything it does not name survives from the previous PR and passes the
+  `selectedPrId === prId` guard on the new one — and if that PR has no labels, the severity pill
+  row (including its Clear button) is hidden, leaving no way to undo it.
 - **`target_id` is not globally unique.** Three id spaces. Any lookup — server or client — must
   carry the kind. `PrDetail` renders PR comments and review bodies in *one list*, which is where
   this is easiest to get wrong.
-- **Empty bodies are skipped at selection, not sent.** A target that is never labelled is
-  re-selected on *every* tick forever.
+- **`IS NOT NULL` IS NOT "HAS TEXT", and the difference is a permanent discrepancy.** An
+  approval with no comment is a `reviews` row whose body is the **empty string** — 5 378 of them
+  in this repo's own dev database. The first cut filtered candidates with `IS NOT NULL` and then
+  dropped empties in JavaScript, while the `pending` count did only the `IS NOT NULL` half, so
+  the worker skipped those rows every tick while the panel reported them as "still being
+  processed" and coverage could never reach 100%. Both sides now share one `hasText()`
+  predicate — and **SQL is the sole authority on candidacy; the JS loop drops nothing**, because
+  SQL's `trim()` strips spaces only in both dialects while JavaScript's strips all whitespace, so
+  any JS-side filter reintroduces exactly the same class of drift. Pinned by
+  `db/ml-labels.test.ts`.
 - **The badge must never fetch.** `ThreadCard` has eight mount sites; a per-target query behind
   an unconditional panel is how a 60-thread PR once became 60 requests drawing 60 empty boxes.
   Everything reads the one `['ml-labels', prId]` index and returns `null` when it finds nothing.
@@ -360,6 +395,13 @@ empty — an unmatched comment falls back to a single low-probability best guess
   `accountId` predicate and confirming the checks fail.
 - `erase-account.test.ts` picks the table up automatically (it derives the expected set from the
   live schema module).
+- `db/ml-labels.test.ts` runs the candidate query and the rollup against a throwaway SQLite DB,
+  seeding an **empty-string approval** so the candidates ≡ `pending` invariant is non-vacuous,
+  and writes the same target twice so the `onConflictDoUpdate` target is actually exercised (an
+  insert-only test never reaches that branch).
+- `sync/ml-enrichment.test.ts` pins `packBatches`: the character budget, the item cap, that an
+  over-budget item gets its own batch rather than being dropped, and that nothing is lost or
+  duplicated.
 
 ---
 

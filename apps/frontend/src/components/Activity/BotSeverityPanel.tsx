@@ -89,6 +89,13 @@ export function BotSeverityPanel({
         )}
       </div>
 
+      {data.truncated && (
+        <div className="mb-2 rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+          This workspace has more labelled bot comments than one rollup reads — the numbers below
+          cover the most recent {total.toLocaleString()}.
+        </div>
+      )}
+
       {fallbackOnly && (
         <div className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
           The scoring service is running its heuristic fallback, not the trained model — these
@@ -176,7 +183,9 @@ export function BotSeverityPanel({
                 )}
               </td>
               <td className="py-1.5 pr-2">
-                <SeverityBar counts={r.bySeverity} total={r.labelled} />
+                {/* Findings, NOT `labelled` — `bySeverity` excludes summaries, so dividing by
+                    the all-in count would leave a phantom gap at the end of every bar. */}
+                <SeverityBar counts={r.bySeverity} total={r.labelled - r.summaries} />
               </td>
               <td
                 className="py-1.5 pr-2 text-right font-semibold tabular-nums"

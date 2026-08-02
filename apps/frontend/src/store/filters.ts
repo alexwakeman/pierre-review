@@ -1008,6 +1008,11 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedCommentId: null,
       threadBotFilter: null,
       threadStateFilter: new Set<DerivedState>([state]),
+      // Reset the severity pills too. This set() is a deliberate "seed the filters for the PR we
+      // are opening", and it is the ONLY place that seeds one of them — so anything it does NOT
+      // name survives from the PREVIOUS PR and silently hides threads on the new one. The same
+      // reasoning as `threadBotFilter: null` on the line above.
+      threadSeverityFilter: new Set<MlSeverity>(),
     });
   },
   requestSyncModal: (repoId: number) =>
