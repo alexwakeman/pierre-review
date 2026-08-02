@@ -9,6 +9,7 @@ import {
   type DerivedState,
   type EventCategory,
   type EventType,
+  type MlSeverity,
   type PrStatus,
   type ReviewBotKind,
   type ReviewState,
@@ -228,6 +229,13 @@ export interface FilterState {
   // {likely_addressed} when arriving from the resolvable-bot-threads tab. Transient; cleared
   // when the PR changes / selection clears.
   threadStateFilter: Set<DerivedState>;
+  // PR-detail Threads-tab ML-SEVERITY filter pills (Critical/Major/Minor/Nit). Empty = all
+  // shown. A thread matches when ANY of its non-summary bot comments carries a selected
+  // severity, so the pills read as "show me threads containing a major finding", not "threads
+  // whose worst is exactly major". Transient and cleared alongside threadStateFilter — it is
+  // the same GLOBAL-field trap: PrDetail must only apply it when selectedPrId === prId, or a
+  // PR opened via a pinned tab inherits a preset from another PR and silently hides threads.
+  threadSeverityFilter: Set<MlSeverity>;
   // A specific issue-level PR comment selected from the timeline popover's "Open in
   // detail pane". Drives a PERMANENT amber highlight on that comment card (mirroring
   // selectedThreadId's thread highlight); cleared when another thread/comment/PR is
@@ -425,6 +433,8 @@ export interface FilterState {
   // Toggle one state pill on the PR-detail Threads tab (rebuilds the Set so subscribers rerender).
   toggleThreadStateFilter: (s: DerivedState) => void;
   setThreadStateFilter: (states: Set<DerivedState>) => void;
+  toggleThreadSeverityFilter: (s: MlSeverity) => void;
+  setThreadSeverityFilter: (severities: Set<MlSeverity>) => void;
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
   clearSelection: () => void;
@@ -722,6 +732,7 @@ function freshDefaults(): FilterData {
     selectedThreadId: null,
     threadBotFilter: null,
     threadStateFilter: new Set<DerivedState>(),
+    threadSeverityFilter: new Set<MlSeverity>(),
     selectedCommentId: null,
     activityFocus: null,
     commentFocus: null,
@@ -826,6 +837,14 @@ export const useFilters = create<FilterState>((set, get) => ({
       return { threadStateFilter: next };
     }),
   setThreadStateFilter: (states) => set({ threadStateFilter: states }),
+  toggleThreadSeverityFilter: (sev) =>
+    set((s) => {
+      const next = new Set(s.threadSeverityFilter);
+      if (next.has(sev)) next.delete(sev);
+      else next.add(sev);
+      return { threadSeverityFilter: next };
+    }),
+  setThreadSeverityFilter: (severities) => set({ threadSeverityFilter: severities }),
   selectPr: (id) =>
     set({
       selectedPrId: id,
@@ -833,6 +852,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedCommentId: null,
       threadBotFilter: null,
       threadStateFilter: new Set<DerivedState>(),
+      threadSeverityFilter: new Set<MlSeverity>(),
     }),
   selectThread: (prId, threadId) =>
     set((s) => ({
@@ -843,6 +863,8 @@ export const useFilters = create<FilterState>((set, get) => ({
       // (from the resolvable-bot-threads tab) could otherwise filter the target thread out and
       // it would never scroll into view.
       threadStateFilter: threadId != null ? new Set<DerivedState>() : s.threadStateFilter,
+      threadSeverityFilter:
+        threadId != null ? new Set<MlSeverity>() : s.threadSeverityFilter,
     })),
   clearSelection: () =>
     set({
@@ -851,6 +873,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedCommentId: null,
       threadBotFilter: null,
       threadStateFilter: new Set<DerivedState>(),
+      threadSeverityFilter: new Set<MlSeverity>(),
     }),
   openPrFocused: (id, threadId = null, focusAt = null, event = null) => {
     // Any timeline navigation leaves an open focus/PR tab so the move is visible on the
@@ -867,6 +890,8 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineFocusEvent: event,
       // Clear a leftover Threads-tab state preset when focusing a specific thread (see selectThread).
       threadStateFilter: threadId != null ? new Set<DerivedState>() : s.threadStateFilter,
+      threadSeverityFilter:
+        threadId != null ? new Set<MlSeverity>() : s.threadSeverityFilter,
     }));
   },
   showEventOnTimeline: (prId, focusAt, event) => {

@@ -106,7 +106,7 @@ started. Two things to know if you touch it:
 **BOTH journals are hand-maintained, and the pg half is the one that gets forgotten.**
 `run-migrations.ts` picks the folder AND the migrator by mode, and each migrator reads its OWN
 folder's `meta/_journal.json` — a file that is not registered **SILENTLY SKIPS**. sqlite entries are
-`"version": "6"`, **pg entries are `"version": "7"`**; `0038`–`0046` and pg `0025`–`0033` are
+`"version": "6"`, **pg entries are `"version": "7"`**; `0038`–`0047` and pg `0025`–`0034` are
 registered. (Plugin migrations are discovered by filename sort and have NO journal — that
 requirement is core-only, do not add one.) An unregistered pg file produces a perfectly
 successful-looking boot that then 500s on a missing relation for every query. **Do not run
@@ -183,3 +183,29 @@ completed by the bucket predicate, which is `!automated && (isManualOverride || 
 `docs/BILLING-STRIPE.md` (Stripe Payment Link + webhook → `accounts.plan` entitlement),
 `docs/RELEASE.md`.
 
+
+
+## `0047` / pg `0034` — `ml_comment_labels`
+
+Additive, hand-written in both dialects (never `db:generate:pg` — it squashes the pg baseline).
+Creates the one table behind [ML-SEVERITY.md](ML-SEVERITY.md): ML severity/category labels for
+bot-authored text. Journal entries `idx 47 / version "6"` and `idx 34 / version "7"`, sharing
+`when: 1785800000000` as every paired twin does.
+
+Points worth remembering:
+
+- All three id FKs (`account_id`, `repo_id`, `pr_id`) are **ON DELETE cascade**, so the table
+  joins NEITHER `deleteRepo` nor `deletePrSubtree` — the `search_index` precedent. It IS in
+  `accountScopedTables()` and is deleted explicitly in `eraseAccountData`, because erasure must
+  not depend on which dialect enforces FKs.
+- `target_id` has **no FK**: it names a row in one of three tables depending on `target_kind`,
+  which is exactly why `target_kind` is part of the unique `mcl_account_target`.
+- Dialect columns: sqlite `real` / pg `double precision` for `severity_prob`; sqlite
+  `text ... mode:'json'` / pg `jsonb` for the two category columns; sqlite `integer` /
+  pg `boolean` for `is_summary`; sqlite `integer` + `DEFAULT (unixepoch())` / pg
+  `timestamp with time zone` + `DEFAULT now()` for the three timestamps.
+- ⚠ **pg `0034` has not been replayed against a real Postgres** — same status as pg `0031`–`0033`.
+- ⚠ A running `tsx watch` dev server applies migrations on every restart, so editing a `.sql`
+  file AFTER the watcher has already applied it leaves the dev DB on the old DDL with the new
+  file's hash unrecorded. Drop the table, delete its `__drizzle_migrations` row, re-run
+  `pnpm db:migrate`. This happened while writing this migration.

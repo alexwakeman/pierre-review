@@ -1024,6 +1024,150 @@ check(
 const rcCross = await findPostedReviewComment(A.prId, 2, 'nonexistent-db-id', 'RC_iso_A');
 check('findPostedReviewComment(B, A’s comment) returns null (IDOR blocked)', rcCross === null);
 
+// ── ML severity labels (db/ml-labels.ts) ───────────────────────────────────────
+// Two id-addressed reads that live OUTSIDE db/queries.ts, so — like findPostedReviewComment
+// above — this script cannot see them unless they are imported by name.
+//
+// The assertions are seeded to be NON-VACUOUS in BOTH directions: a real label row is written
+// onto A's inline comment, so deleting the accountId predicate from either getter makes a check
+// FAIL rather than quietly still returning nothing. Note `mcl_account_target` is unique per
+// (account, target_kind, target_id) and target ids are per-tenant local pks, so B genuinely can
+// carry a row naming the SAME target id — which is exactly the cross-account read to block.
+const { getPrMlLabels, getBotSeverityRollup, upsertMlLabels } = await import(
+  '../src/db/ml-labels.js'
+);
+const [isoThreadB] = await db
+  .insert(schema.reviewThreads)
+  .values({
+    githubNodeId: 'RT_iso_B',
+    prId: B.prId,
+    path: 'src/b.ts',
+    line: 1,
+    isResolved: false,
+    derivedState: 'untouched',
+    // setWorkspaceReviewer refuses an actor with no FOOTPRINT in the workspace, and a footprint
+    // is counted off threads/reviews/PR-comments — a review COMMENT alone does not create one.
+    originalCommenterId: contributor!.id,
+    createdAt: now,
+  })
+  .returning({ id: schema.reviewThreads.id })
+  .execute();
+const isoRc = await db
+  .select({ id: schema.reviewComments.id })
+  .from(schema.reviewComments)
+  .where(eq(schema.reviewComments.githubNodeId, 'RC_iso_A'))
+  .limit(1)
+  .execute();
+await upsertMlLabels([
+  {
+    accountId: 1,
+    repoId: A.repoId,
+    prId: A.prId,
+    targetKind: 'review_comment',
+    targetId: isoRc[0]!.id,
+    authorUserId: contributor!.id,
+    severity: 'major',
+    severityOrd: 2,
+    severityProb: 0.9,
+    categories: ['security'],
+    categoryProbs: { security: 0.9 },
+    isSummary: false,
+    backend: 'test',
+    modelVersion: 'test',
+    bodyHash: 'h',
+    targetCreatedAt: now,
+  },
+]);
+const mlOwn = await getPrMlLabels(A.prId, 1);
+check(
+  'getPrMlLabels(A.pr, A) returns the stored label',
+  mlOwn != null && mlOwn.length === 1 && mlOwn[0]!.severity === 'major',
+);
+check('getPrMlLabels(A.pr, B) returns null (IDOR blocked)', (await getPrMlLabels(A.prId, 2)) === null);
+check('getPrMlLabels(B.pr, A) returns null (IDOR blocked)', (await getPrMlLabels(B.prId, 1)) === null);
+
+// The rollup is workspace-scoped, and a BotScope may only ever come from resolveWorkspaceScope —
+// so the cross-account attempt is spelled the way a caller could actually spell it: B asking for
+// A's repo id. resolveWorkspaceScope intersects with B's own membership, so the narrowing must
+// come back empty and the rollup must count nothing.
+// The rollup only counts actors the WORKSPACE calls bots — a stored label whose author is not
+// (or is no longer) automated there is deliberately absent, so the fixture has to say so or the
+// "own" assertion is vacuous for the wrong reason.
+// Resolve through the repo, not through "the account's Default": earlier assertions in this
+// file MOVE repos between workspaces, so Default is not reliably where the seeded repo lives by
+// the time we get here — and a scope with no repos short-circuits the rollup, which would make
+// both assertions below pass for the wrong reason.
+const mlScopeA = (await q.workspaceScopeForRepo(1, A.repoId))!;
+await q.setWorkspaceReviewer(1, contributor!.id, {
+  workspaceId: mlScopeA.workspaceId,
+  automated: true,
+});
+const rollupOwn = await getBotSeverityRollup(1, mlScopeA, true);
+check(
+  'getBotSeverityRollup(A) counts A’s label',
+  rollupOwn.labelled === 1 && rollupOwn.totals.bySeverity.major === 1,
+);
+const rollupCross = await getBotSeverityRollup(
+  2,
+  await q.resolveWorkspaceScope(2, undefined, [A.repoId]),
+  true,
+);
+check(
+  'getBotSeverityRollup(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)',
+  rollupCross.repoIds.length === 0 && rollupCross.labelled === 0,
+);
+// ⚠ THE CHECK ABOVE IS VACUOUS ON ITS OWN, and that is worth spelling out because it looks
+// like a real assertion: `resolveWorkspaceScope` intersects the requested narrowing with B's own
+// membership, so the scope comes back EMPTY and the rollup short-circuits before it queries
+// anything. Deleting the accountId predicate from the rollup leaves it green.
+//
+// This is the binding one. B gets its OWN label, on its OWN repo, authored by the SAME global
+// user (users is a shared table, so one actor legitimately appears in both tenants). B's rollup
+// must count exactly ONE — its own. Drop `accountId` (or `repoId`) from the scan and it counts
+// two, and this fails.
+const isoRcB = await db
+  .insert(schema.reviewComments)
+  .values({
+    githubNodeId: 'RC_iso_B',
+    threadId: isoThreadB!.id,
+    prId: B.prId,
+    authorId: contributor!.id,
+    body: 'iso inline B',
+    createdAt: now,
+  })
+  .returning({ id: schema.reviewComments.id })
+  .execute();
+const mlScopeB = (await q.workspaceScopeForRepo(2, B.repoId))!;
+await q.setWorkspaceReviewer(2, contributor!.id, {
+  workspaceId: mlScopeB.workspaceId,
+  automated: true,
+});
+await upsertMlLabels([
+  {
+    accountId: 2,
+    repoId: B.repoId,
+    prId: B.prId,
+    targetKind: 'review_comment',
+    targetId: isoRcB[0]!.id,
+    authorUserId: contributor!.id,
+    severity: 'nit',
+    severityOrd: 0,
+    severityProb: 0.5,
+    categories: ['nitpick'],
+    categoryProbs: { nitpick: 0.5 },
+    isSummary: false,
+    backend: 'test',
+    modelVersion: 'test',
+    bodyHash: 'h',
+    targetCreatedAt: now,
+  },
+]);
+const rollupB = await getBotSeverityRollup(2, mlScopeB, true);
+check(
+  'getBotSeverityRollup(B) counts ONLY B’s label, not A’s (IDOR blocked)',
+  rollupB.labelled === 1 && rollupB.totals.bySeverity.nit === 1 && rollupB.totals.bySeverity.major === 0,
+);
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

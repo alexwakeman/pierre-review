@@ -23,7 +23,8 @@
     "db:generate": "pnpm --filter @pierre-review/backend db:generate",
     "db:migrate": "pnpm --filter @pierre-review/backend db:migrate",
     "db:studio": "pnpm --filter @pierre-review/backend db:studio",
-    "sync:once": "pnpm --filter @pierre-review/backend sync:once"
+    "sync:once": "pnpm --filter @pierre-review/backend sync:once",
+    "ml:enrich": "pnpm --filter @pierre-review/backend ml:enrich"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",

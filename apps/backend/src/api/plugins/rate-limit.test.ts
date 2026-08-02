@@ -61,6 +61,18 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/repos/suggested')).toEqual(['search', 'read']);
   });
 
+  // The ML severity surface spends NO GitHub quota and NO Anthropic credit — the model is
+  // called only by the background worker. What it does spend is this process: the rollup reads
+  // a workspace's whole label corpus (capped at 50k rows) plus three unlabelled-count joins, so
+  // it borrows the same 60/min bucket as `/compare`, while the per-PR badge index is two indexed
+  // reads and stays on `read`. Both are pinned here so the pair can't drift into each other.
+  it('separates the expensive ML rollup from the cheap per-PR label index', () => {
+    expect(tiers('GET', '/api/bot-severity')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/prs/42/ml-labels')).toEqual(['read']);
+    // ...and the label index must NOT be swept into the GitHub-hydrating PR-detail bucket.
+    expect(tiers('GET', '/api/prs/42/ml-labels')).not.toContain('pr_detail');
+  });
+
   it('throttles sync triggers and repo-add (each starts a backfill)', () => {
     expect(tiers('POST', '/api/repos/5/sync')).toEqual(['sync']);
     expect(tiers('POST', '/api/repos')).toEqual(['sync']);

@@ -23,7 +23,7 @@ fixture tests (see Conventions).
 
 ### Data model (`src/db/schema.sqlite.ts` + its `schema.pg.ts` twin are authoritative)
 
-26 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
+27 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
 `users` + `commitFiles` global). The core entities:
 
 - **`accounts`** — a tenant. Local mode has exactly one (`id 1`, `isLocal=true`,
@@ -227,3 +227,34 @@ reads are **accountId-scoped**; **triage fields are computed on read** (`triage.
 stored.
 
 
+
+
+## `ml_comment_labels` (CORE, free tier — ML severity/category on bot text)
+
+One row per classified target. Written ONLY by the background enrichment worker
+(`sync/ml-enrichment.ts`), which batches text to the `severity-api` microservice from the
+sibling `pierre-ml` repo; read by the per-PR badge index and the Bots severity rollup. Full
+contract: [ML-SEVERITY.md](ML-SEVERITY.md).
+
+- `target_kind` ∈ `review_comment | pr_comment | review` (the review **body**), `target_id` is
+  that entity's own PK **within its kind**. THREE DIFFERENT ID SPACES — which is why the unique
+  `mcl_account_target` is `(account_id, target_kind, target_id)` and why every lookup, server or
+  client, must carry the kind. `target_id` is deliberately NOT a foreign key (no single FK can
+  express three parents; the plugin's `pr_comment_annotations` has the same shape).
+- `severity` (`nit|minor|major|critical`) + `severity_ord` (0–3) + `severity_prob`;
+  `categories` (multi-label, never empty) + `category_probs` (all eight keys);
+  `is_summary` (a PR walkthrough rather than a finding — a separate axis, NOT a category).
+- `backend` / `model_version` are verbatim from the service. A `backend` lacking
+  `modernbert-onnx` means the ONNX model did not load and the marker heuristic answered — a
+  degraded deployment that the Bots panel surfaces rather than hiding.
+- `body_hash` is sha256 of the text ACTUALLY SENT (trimmed + capped). Comment bodies are
+  mutable, so a boolean "enriched" flag would go stale invisibly. ⚠ Stored but not yet compared
+  — see the known gap on re-scoring.
+- `account_id` / `repo_id` / `pr_id` / `author_user_id` are DENORMALISED so a scoped read is one
+  indexed predicate rather than a three-way UNION back to the polymorphic parents. They are
+  snapshot facts about an immutable parent, not a second writable copy of a live fact.
+- All three id FKs **cascade**, so the table is deliberately in NEITHER `deleteRepo` nor
+  `deletePrSubtree` (the `search_index` precedent). It IS in `accountScopedTables()` and is
+  deleted explicitly in `eraseAccountData`.
+- The **rollup counts only actors the workspace CURRENTLY calls bots** — a label whose author
+  has since been marked human is stored but excluded.

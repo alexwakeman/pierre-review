@@ -1254,3 +1254,103 @@ export const searchIndex = sqliteTable(
     prIdx: index('search_pr_idx').on(t.prId),
   }),
 );
+
+// ── ML severity/category labels for BOT-authored text (CORE, free tier, no LLM) ──────────
+// One row per classified target. Written ONLY by the background enrichment worker
+// (sync/ml-enrichment.ts), which POSTs batches to the `severity-api` microservice from the
+// sibling `pierre-ml` repo. Read by the per-PR badge index and the Bots severity rollup.
+// Full contract: docs/ML-SEVERITY.md.
+//
+// WHY THE ROW DENORMALISES accountId / repoId / prId / authorUserId, when `targetId` already
+// names a row that could be joined for all four: `target_kind` is polymorphic across THREE
+// tables, so every scoped read would otherwise be a three-way UNION of joins — including the
+// Bots rollup, which groups by author across a whole workspace. These are SNAPSHOT facts about
+// an immutable parent (a comment never changes PR or author), not a second writable copy of a
+// live fact, so the "one fact, one grain" rule is not in play. accountId is additionally the
+// tenant anchor every read filters on, per the project-wide rule.
+//
+// TARGET IDS ARE NOT FOREIGN KEYS. `target_id` lives in three different id spaces
+// (reviewComments.id / prComments.id / reviews.id) so no single FK can express it — the same
+// shape the plugin's `pr_comment_annotations` uses. Cleanup rides the CASCADING pr_id FK
+// instead: deleting a PR (deleteRepo, the retention sweep) takes its labels with it, which is
+// why this table is deliberately absent from both hand-written delete paths (the `search_index`
+// precedent). Its own comments can only be deleted WITH their PR, so nothing dangles.
+export const mlCommentLabels = sqliteTable(
+  'ml_comment_labels',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    // MlLabelTargetKind — 'review_comment' | 'pr_comment' | 'review'. NOT the plugin's
+    // AnnotationTargetKind (that one has 'thread' and no 'review').
+    targetKind: text('target_kind', {
+      enum: ['review_comment', 'pr_comment', 'review'],
+    }).notNull(),
+    // The target's own primary key WITHIN its kind. Not globally unique — which is exactly why
+    // the unique index below carries target_kind.
+    targetId: integer('target_id').notNull(),
+    // The bot that wrote the labelled text (users.id). Denormalised so the Bots rollup is one
+    // GROUP BY rather than a three-way union back to the source tables.
+    authorUserId: integer('author_user_id')
+      .notNull()
+      .references(() => users.id),
+    // MlSeverity, lowercased at the wire boundary ('nit'|'minor'|'major'|'critical').
+    severity: text('severity', {
+      enum: ['nit', 'minor', 'major', 'critical'],
+    }).notNull(),
+    // 0..3, nit → critical. The service's own ordinal, stored so ordering/thresholding is an
+    // indexed integer comparison instead of a CASE over the enum.
+    severityOrd: integer('severity_ord').notNull(),
+    severityProb: real('severity_prob').notNull(),
+    // MlCategory[] — multi-label, never empty.
+    categories: text('categories', { mode: 'json' }).$type<string[]>().notNull(),
+    // The service returns a probability for ALL eight categories; kept whole so a later
+    // threshold change is a re-read rather than a re-score of the entire corpus.
+    categoryProbs: text('category_probs', { mode: 'json' })
+      .$type<Record<string, number>>()
+      .notNull(),
+    isSummary: integer('is_summary', { mode: 'boolean' }).notNull(),
+    // Which backends served it, verbatim. Lacking 'modernbert-onnx' means the marker fallback
+    // answered — a degraded deployment that must be VISIBLE, not silently lower quality.
+    backend: text('backend').notNull(),
+    modelVersion: text('model_version').notNull(),
+    // sha256 of the exact text sent to the service. Comment bodies are MUTABLE (every sync
+    // re-upserts them), so a boolean "enriched" flag or the row id would both go stale
+    // invisibly; the hash is what lets a re-score be decided without a second model call.
+    bodyHash: text('body_hash').notNull(),
+    // The SOURCE comment's createdAt, copied so the Bots rollup can window without a
+    // three-way union back to the polymorphic parents (and so the worker can order a
+    // re-score newest-first). Immutable on the parent, so it never diverges.
+    targetCreatedAt: integer('target_created_at', { mode: 'timestamp' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    // THE conflict target for every writer. accountId first so uniqueness is per tenant, and
+    // target_kind is load-bearing: the three id spaces overlap freely.
+    accountTargetUx: uniqueIndex('mcl_account_target').on(
+      t.accountId,
+      t.targetKind,
+      t.targetId,
+    ),
+    // The per-PR badge index (one query serves every card on a PR).
+    accountPrIdx: index('mcl_account_pr_idx').on(t.accountId, t.prId),
+    // The Bots rollup: one workspace's repos, grouped by bot.
+    accountRepoAuthorIdx: index('mcl_account_repo_author_idx').on(
+      t.accountId,
+      t.repoId,
+      t.authorUserId,
+    ),
+  }),
+);

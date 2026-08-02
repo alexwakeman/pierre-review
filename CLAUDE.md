@@ -31,6 +31,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [docs/FRONTEND.md](docs/FRONTEND.md) | stores, tabs/overlays, FilterBar scoping, timeline internals, PrDetail |
 | [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, the auto-merge runner, CI log viewer, trunk status |
 | [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) | the agentic PR-review feature |
+| [docs/ML-SEVERITY.md](docs/ML-SEVERITY.md) | ML severity/category enrichment of bot comments (the `pierre-ml` severity-api seam) |
 | [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity tab, Feed, the bot platform ("One bot object"), annotations, digests |
 | [docs/PRO-PLATFORM.md](docs/PRO-PLATFORM.md) | the Pro platform's own deep-dive |
 | [docs/SECURITY.md](docs/SECURITY.md) | app.ts, CORS/CSP, rate limits, GDPR export/erase, dependency posture |
@@ -103,7 +104,8 @@ against a PORTABLE async surface:
 
 **Multi-tenancy.** Every GitHub entity is owned by an `accounts` row. `accountId` is
 **denormalized** onto `repos`, `pullRequests`, `events`, `claudeReviews`,
-`myTurnDismissals`, `workspaces`, `workspaceRepos`, `workspaceReviewers` (isolation = one indexed
+`myTurnDismissals`, `workspaces`, `workspaceRepos`, `workspaceReviewers`,
+`mlCommentLabels` (isolation = one indexed
 predicate); everything else reaches its account via `repoId`/`prId`. `users` + `commitFiles` stay
 **global**. GitHub-node-id uniques are
 **composite** so two accounts can track the same repo (`(accountId, githubNodeId)`,
@@ -299,12 +301,12 @@ in `src/sync/__fixtures__/threads/` first (see its README).
 
 ### Data model
 
-`db/schema.sqlite.ts` + `schema.pg.ts` are authoritative (26 tables); the table-by-table
+`db/schema.sqlite.ts` + `schema.pg.ts` are authoritative (27 tables); the table-by-table
 contracts are in [docs/DATA-MODEL.md](docs/DATA-MODEL.md). Cross-cutting facts:
 
 - `accountId` is denormalized onto the anchor tables (`repos`, `pullRequests`, `events`,
   `claudeReviews`, `myTurnDismissals`, `workspaces`, `workspaceRepos`,
-  `workspaceReviewers`); **`users` + `commitFiles` are GLOBAL** — never hand a tenant the
+  `workspaceReviewers`, `mlCommentLabels`); **`users` + `commitFiles` are GLOBAL** — never hand a tenant the
   raw table (`listUsers` is account-scoped by subquery; `/api/users/:id/stats` returns
   counts only, no profile fields, and deliberately no ownership 404).
 - Timestamps are unix-epoch integers (sqlite) / `timestamptz` (pg), both read as `Date`.
@@ -486,6 +488,42 @@ passthrough on `/api/me`, and inert seams. Details:
 - The plugin owns its own dual-dialect tables/migrations/isolation test; plugin migrations
   take NO `--> statement-breakpoint` and their pg twins wrap in `DO $$ … EXCEPTION`
   warnings (a plugin-migration failure is TOTAL and SILENT — OSS-mode degrade).
+
+---
+
+## ML severity/category on bot comments (CORE, free tier, no LLM)
+
+Every bot-authored review comment / PR comment / review body is labelled with a **severity**
+(`nit`·`minor`·`major`·`critical`) and up to eight **categories** by the `severity-api`
+microservice from the sibling **`pierre-ml`** repo (fine-tuned ModernBERT ONNX on CPU + a
+deterministic marker parser). Badges render on the comments; a rollup sits on the Bots tab.
+Full detail: **[docs/ML-SEVERITY.md](docs/ML-SEVERITY.md)**. The invariants:
+
+- **`SEVERITY_API_URL` IS THE WHOLE GATE.** Unset ⇒ no worker, `/api/me` reports
+  `mlSeverity:false`, the SPA issues zero ML queries. That is also what keeps the feature dark
+  under `npx pierre-review` (which ships no model). The flag is a **top-level** `MeResponse`
+  field, NOT part of `pro` — `entitledProCapabilities` zeroes that object for free cloud
+  accounts, i.e. exactly this feature's audience.
+- **Enrichment is a PULL-BASED BACKGROUND WORKER (`sync/ml-enrichment.ts`), never a sync step.**
+  Inference cost tracks TOTAL TEXT (measured: 32 short comments 2.7s vs 32 long ones 28.4s;
+  ~17.5k items ≈ 7M chars ≈ an hour locally), and `persistPr` runs entirely inside
+  `runTransaction` — an awaited `fetch` there holds the single sqlite write lock across network
+  latency. The worker re-derives "bot text with no label yet" every tick, which is ALSO why
+  webhook/post-write paths need no hook and why a bot classified later (workspace_reviewers rows
+  are written LAZILY, on a read of the Bots tab) brings its whole backlog with it.
+- **The batch budget is CHARACTERS, not items** — a batch pads to its longest member, so the
+  worker sorts candidates by length before packing (`config.mlBatchMaxChars`, 128-item cap,
+  service hard cap 256). Results are zipped POSITIONALLY; a length mismatch throws rather than
+  attaching one comment's severity to another.
+- `ml_comment_labels` is keyed `(accountId, targetKind, targetId)` — `targetId` lives in THREE
+  id spaces (`reviewComments`/`prComments`/`reviews`), so every lookup carries the kind
+  (`PrDetail` renders PR comments and review bodies in ONE list, where this is easiest to get
+  wrong). Cleanup rides the cascading `pr_id` FK, so it is deliberately in NEITHER delete path
+  (the `search_index` precedent) but IS in `accountScopedTables()`.
+- Reads only: two DB-only routes, no generate endpoint, nothing billable. The badge NEVER
+  fetches — every mount reads the one `['ml-labels', prId]` per-PR index.
+- Advisory: macro-F1 ≈ 0.66 and CRITICAL is under-recalled, so the product buckets
+  **major+critical as "high"** and nothing auto-acts on a label.
 
 ---
 
@@ -756,4 +794,6 @@ sprint refresh) now cover the Default workspace ONLY; PrDetail still classifies 
 client-side by login; the legacy `?team=` URL rule is unit-tested nowhere;
 `SprintReportCard` has no importer yet the AI-policy sweep still spends;
 `packages/pro/test/` (135 tests) + `apps/frontend/test/` (127 tests) do not run in CI;
-auto-merge's retarget guard still lacks a stored `expected_base_ref`.
+auto-merge's retarget guard still lacks a stored `expected_base_ref`; ML labels are never
+re-scored (neither an edited body nor a model-version bump invalidates one — `pnpm ml:enrich
+--reset` is the only refresh) and pg `0034` has not been replayed against a real Postgres.

@@ -46,6 +46,7 @@ const {
   searchIndex,
   autoMergeRequests,
   branchCommits,
+  mlCommentLabels,
 } = schema;
 
 /**
@@ -138,6 +139,14 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .execute();
     // Full-text search rows are keyed by (accountId, …) and are copies of comment/PR text.
     await tx.delete(searchIndex).where(eq(searchIndex.accountId, accountId)).execute();
+    // ML severity/category labels. Their FKs cascade from repos/pull_requests, so the repo loop
+    // above has normally taken them already — explicit for the same reason as every other entry
+    // here: the guarantee must not depend on which dialect enforces FKs, or on the repo loop
+    // having succeeded. Each row is a machine judgement ABOUT this account's bot comments.
+    await tx
+      .delete(mlCommentLabels)
+      .where(eq(mlCommentLabels.accountId, accountId))
+      .execute();
     // Standing auto-merge intents. Their FKs cascade from pull_requests, so deleteRepo above
     // has already taken most of them — but a row is only as safe as the repo loop that ran,
     // and an intent naming a PR id is a record of what this user was about to ship. Explicit.
@@ -200,6 +209,7 @@ export function accountScopedTables(): {
       table: autoMergeRequests,
     },
     { name: 'branchCommits', col: branchCommits.accountId, table: branchCommits },
+    { name: 'mlCommentLabels', col: mlCommentLabels.accountId, table: mlCommentLabels },
   ];
   return rows.map(({ name, col, table }) => ({
     name,

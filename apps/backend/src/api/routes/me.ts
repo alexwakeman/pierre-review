@@ -13,6 +13,7 @@ import {
 } from '../../pro/contract.js';
 import { countNewMyTurnFeedItems } from '../../feed/my-turn.js';
 import { getAuthNotices } from '../../sync/auth-notices.js';
+import { isSeverityApiConfigured } from '../../ml/severity-client.js';
 import {
   dismissMyTurn,
   getCompletedDismissals,
@@ -108,6 +109,11 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // Claude Review is now the Pro `claudeReview` capability (in `pro` below).
       deploymentMode: config.deploymentMode,
       pro: entitled,
+      // ML severity/category enrichment of bot comments — FREE TIER, so a TOP-LEVEL field and
+      // NOT part of `pro` above: `entitledProCapabilities` returns all-false for a cloud
+      // account on the free plan, which would hide this from exactly the users it is for.
+      // True iff a severity-api is reachable for this deployment; false under `npx`.
+      mlSeverity: isSeverityApiConfigured(),
       // Cross-org benchmark consent (cloud-only; always false in local). Drives the Settings toggle.
       benchmarkOptIn: config.isCloud ? req.account?.benchmarkOptIn ?? false : false,
       // Orgs currently SAML-blocked for this account (empty in the normal case + in local).

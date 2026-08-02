@@ -1,6 +1,12 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import type { DerivedState, ReviewBotKind, ThreadDetail, User } from '@pierre-review/shared';
-import { DERIVED_STATES } from '@pierre-review/shared';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  DerivedState,
+  MlSeverity,
+  ReviewBotKind,
+  ThreadDetail,
+  User,
+} from '@pierre-review/shared';
+import { DERIVED_STATES, ML_SEVERITIES } from '@pierre-review/shared';
 import { useMyTurn } from '../../hooks/useTriage.js';
 import { useResolveBotThreads } from '../../hooks/usePrWrites.js';
 import { useDetectedReviewers, usePrBotDedup } from '../../hooks/useBotTriage.js';
@@ -11,12 +17,23 @@ import {
   type ReviewerRoleInfo,
 } from './resolvable.js';
 import { useFilters } from '../../store/filters.js';
-import { automatedReviewerMeta, BOT_VENDOR_META, DERIVED_STATE_META } from '../../lib/ui.js';
+import {
+  automatedReviewerMeta,
+  BOT_VENDOR_META,
+  DERIVED_STATE_META,
+  ML_SEVERITY_META,
+} from '../../lib/ui.js';
+import {
+  mlLabelKey,
+  useMlLabelIndex,
+  useMlSeverityEnabled,
+} from '../../hooks/useMlLabels.js';
 import { FileGroup } from './FileGroup.js';
 import { rollupCounts } from './ThreadCountChips.js';
 
 // Stable empty Set so an absent stateFilter prop doesn't churn the memo deps every render.
 const EMPTY_STATE_SET: Set<DerivedState> = new Set();
+const EMPTY_SEVERITY_SET: Set<MlSeverity> = new Set();
 
 interface FileBucket {
   path: string;
@@ -54,6 +71,7 @@ export function ThreadList({
   viewedSince,
   botFilter = null,
   stateFilter,
+  severityFilter,
 }: {
   threads: ThreadDetail[];
   usersById: Map<number, User>;
@@ -67,12 +85,41 @@ export function ThreadList({
   // Derived-state pill filter (empty = all). ANDs with botFilter. Preset to
   // {likely_addressed} when arriving from the resolvable-bot-threads tab.
   stateFilter?: Set<DerivedState>;
+  // ML-severity pill filter (empty = all). ANDs with the other two. Passed in (not read from
+  // the store here) for the same reason as `stateFilter`: it is a GLOBAL store field and only
+  // PrDetail knows whether it belongs to the PR being rendered.
+  severityFilter?: Set<MlSeverity>;
 }): JSX.Element {
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
   const setThreadBotFilter = useFilters((s) => s.setThreadBotFilter);
   const toggleThreadStateFilter = useFilters((s) => s.toggleThreadStateFilter);
   const setThreadStateFilter = useFilters((s) => s.setThreadStateFilter);
   const activeStates = stateFilter ?? EMPTY_STATE_SET;
+  const activeSeverities = severityFilter ?? EMPTY_SEVERITY_SET;
+  const toggleThreadSeverityFilter = useFilters((s) => s.toggleThreadSeverityFilter);
+  const setThreadSeverityFilter = useFilters((s) => s.setThreadSeverityFilter);
+  // The ONE shared per-PR label index — the same query the cards themselves read, so the pills
+  // cost nothing extra. Undefined until it lands (or forever, with no model configured), which
+  // is why the severity row hides itself rather than rendering dead pills.
+  const mlEnabled = useMlSeverityEnabled();
+  const mlIndex = useMlLabelIndex(prId ?? null, mlEnabled);
+
+  // Every non-summary severity present in a thread. A thread matches the pills when it holds a
+  // comment of a selected severity — not when its WORST equals it: filtering to "major" should
+  // surface the thread that has one major finding among five nits, which an equality test on
+  // the rollup would hide.
+  const severitiesOf = useCallback(
+    (t: ThreadDetail): Set<MlSeverity> => {
+      const out = new Set<MlSeverity>();
+      if (!mlIndex) return out;
+      for (const c of t.comments) {
+        const l = mlIndex.get(mlLabelKey('review_comment', c.id));
+        if (l && !l.isSummary) out.add(l.severity);
+      }
+      return out;
+    },
+    [mlIndex],
+  );
   const resolveBotThreads = useResolveBotThreads();
   const [confirming, setConfirming] = useState(false);
 
@@ -103,15 +150,25 @@ export function ThreadList({
       threads.filter(
         (t) =>
           (botFilter ? threadBotKind(t, usersById) === botFilter : true) &&
-          (activeStates.size === 0 || activeStates.has(t.derivedState)),
+          (activeStates.size === 0 || activeStates.has(t.derivedState)) &&
+          (activeSeverities.size === 0 ||
+            [...severitiesOf(t)].some((sev) => activeSeverities.has(sev))),
       ),
-    [threads, botFilter, usersById, activeStates],
+    [threads, botFilter, usersById, activeStates, activeSeverities, severitiesOf],
   );
 
   // Per-state counts for the pill badges — over the FULL thread list (independent of the active
   // pills, like the feed's whole-stream facet counts), so a pill's badge doesn't drop to 0 when
   // another pill is active.
   const stateCounts = useMemo(() => rollupCounts(threads), [threads]);
+
+  // Per-severity THREAD counts (a thread counts once per distinct severity it contains), over
+  // the FULL list like stateCounts — so a pill's badge doesn't drop to 0 when another is active.
+  const severityCounts = useMemo(() => {
+    const out: Record<MlSeverity, number> = { critical: 0, major: 0, minor: 0, nit: 0 };
+    for (const t of threads) for (const sev of severitiesOf(t)) out[sev] += 1;
+    return out;
+  }, [threads, severitiesOf]);
 
   // The reviewer JUDGEMENTS — the SAME answers `getResolvableBotThreads` re-derives eligibility
   // from, so the offered count matches what the resolve will accept (see resolvable.ts). Fetched
@@ -233,6 +290,54 @@ export function ThreadList({
               </button>
             )}
           </div>
+
+          {/* ML severity pills. Hidden entirely when nothing on this PR is labelled — an
+              always-present row of zero-count pills on an un-enriched (or OSS) install would
+              advertise a filter that can only ever return nothing. */}
+          {mlIndex != null && mlIndex.size > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                Severity
+              </span>
+              {ML_SEVERITIES.map((sev) => {
+                const meta = ML_SEVERITY_META[sev];
+                const on = activeSeverities.has(sev);
+                const count = severityCounts[sev] ?? 0;
+                return (
+                  <button
+                    key={sev}
+                    type="button"
+                    onClick={() => toggleThreadSeverityFilter(sev)}
+                    aria-pressed={on}
+                    disabled={count === 0 && !on}
+                    className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                      on
+                        ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
+                        : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                    }`}
+                    title={meta.description}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="inline-block h-2 w-2 rounded-full"
+                      style={{ background: meta.color }}
+                    />
+                    {meta.label}
+                    {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
+                  </button>
+                );
+              })}
+              {activeSeverities.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setThreadSeverityFilter(new Set())}
+                  className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 underline-offset-2 hover:underline"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
 
           {vendor && (
             <div className="flex flex-wrap items-center gap-2 text-xs">

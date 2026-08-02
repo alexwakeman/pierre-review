@@ -991,3 +991,64 @@ export const searchIndex = pgTable(
     prIdx: index('search_pr_idx').on(t.prId),
   }),
 );
+
+// ── ML severity/category labels for BOT-authored text ── the pg twin of the sqlite
+// mlCommentLabels table. See that file for the full rationale (why accountId/repoId/prId/
+// authorUserId are denormalised, why target_id is not a foreign key, why cleanup rides the
+// cascading pr_id FK instead of the two hand-written delete paths). Contract: docs/ML-SEVERITY.md.
+export const mlCommentLabels = pgTable(
+  'ml_comment_labels',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    prId: integer('pr_id')
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    targetKind: text('target_kind', {
+      enum: ['review_comment', 'pr_comment', 'review'],
+    }).notNull(),
+    targetId: integer('target_id').notNull(),
+    authorUserId: integer('author_user_id')
+      .notNull()
+      .references(() => users.id),
+    severity: text('severity', {
+      enum: ['nit', 'minor', 'major', 'critical'],
+    }).notNull(),
+    severityOrd: integer('severity_ord').notNull(),
+    severityProb: doublePrecision('severity_prob').notNull(),
+    categories: jsonb('categories').$type<string[]>().notNull(),
+    categoryProbs: jsonb('category_probs').$type<Record<string, number>>().notNull(),
+    isSummary: boolean('is_summary').notNull(),
+    backend: text('backend').notNull(),
+    modelVersion: text('model_version').notNull(),
+    bodyHash: text('body_hash').notNull(),
+    targetCreatedAt: timestamp('target_created_at', {
+      withTimezone: true,
+      mode: 'date',
+    }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountTargetUx: uniqueIndex('mcl_account_target').on(
+      t.accountId,
+      t.targetKind,
+      t.targetId,
+    ),
+    accountPrIdx: index('mcl_account_pr_idx').on(t.accountId, t.prId),
+    accountRepoAuthorIdx: index('mcl_account_repo_author_idx').on(
+      t.accountId,
+      t.repoId,
+      t.authorUserId,
+    ),
+  }),
+);

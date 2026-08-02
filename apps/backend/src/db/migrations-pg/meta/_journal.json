@@ -239,6 +239,13 @@
       "when": 1785700000000,
       "tag": "0033_drop_inbox_watch",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1785800000000,
+      "tag": "0034_ml_comment_labels",
+      "breakpoints": true
     }
   ]
 }

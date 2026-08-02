@@ -244,3 +244,14 @@ All via env (see `config.ts`); defaults in parentheses.
 
 > `STALL_THRESHOLD_DAYS` (default `3`) also exists but is a **read-side** triage knob
 > (`isStalled`), not part of sync.
+
+
+---
+
+## Not part of this pipeline: ML enrichment
+
+`sync/ml-enrichment.ts` lives in this directory but is **not a sync stage**. It has its own cron,
+takes no hook from `syncRepo` / `syncOnePr` / `persistPr`, and pulls its worklist from the
+database instead ("bot-authored text with no label yet"). That is deliberate — the classifier's
+cost tracks total text and `persistPr` runs entirely inside `runTransaction`, which on SQLite is
+a manual `BEGIN`/`COMMIT` on the one shared connection. See [ML-SEVERITY.md](ML-SEVERITY.md).

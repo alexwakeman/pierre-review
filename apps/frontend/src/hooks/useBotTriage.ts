@@ -48,7 +48,7 @@ const RESOLVE_CHUNK_SIZE = 25;
 // an unscoped request is unrepresentable rather than merely discouraged.
 
 /** The repo-narrowing key slot: a sorted id list, or 'all' when there is no narrowing. */
-function repoKeySlot(repoIds?: number[] | null): string {
+export function repoKeySlot(repoIds?: number[] | null): string {
   return repoIds && repoIds.length > 0
     ? [...repoIds].sort((a, b) => a - b).join(',')
     : 'all';
@@ -181,6 +181,11 @@ const RECLASSIFY_INVALIDATE_KEYS = [
   'bot-resolvable',
   'bot-vendor-prs',
   'bot-dedup',
+  // The ML severity rollup counts only the actors the workspace calls bots, so marking a login
+  // human (or a new one automated) changes it as surely as it changes the ROI numbers. The
+  // per-PR label index (['ml-labels', prId]) is deliberately NOT here: it holds stored labels
+  // for named targets, which a reclassification does not alter.
+  'bot-severity',
   'pr-bot-behaviour',
   'activity',
   'consolidated-feed',

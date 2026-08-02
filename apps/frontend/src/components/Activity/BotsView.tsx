@@ -3,6 +3,7 @@ import { useBotAnalytics } from '../../hooks/useBotTriage.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { BotRoiPanel, ResolveBacklogBanner } from './BotRoiPanel.js';
+import { BotSeverityPanel } from './BotSeverityPanel.js';
 import { BotBehaviourPanel } from './BotBehaviourPanel.js';
 import { BotThemesPanel } from './BotThemesPanel.js';
 import { BotSettingsPanel } from './BotSettingsPanel.js';
@@ -159,6 +160,12 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               the SAME full-width-clickable + "Show list" layout (sky, its own colour). Self-hides
               when the backlog is empty; opens the resolvable-bot-threads review-and-resolve tab. */}
           <ResolveBacklogBanner workspaceId={workspaceId} repoIds={repoScope} />
+
+          {/* ML severity/category rollup (CORE, free tier, no AI). Renders NOTHING when the
+              deployment has no scoring service (the npx case) or when this workspace has no bot
+              text at all — so it adds no empty chrome anywhere it has nothing to say. Sits above
+              the ROI panel because "what are they saying" frames the volume numbers below it. */}
+          <BotSeverityPanel workspaceId={workspaceId} repoIds={repoScope} />
 
           <BotRoiPanel repoId={repoId} />
 

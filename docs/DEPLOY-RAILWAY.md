@@ -58,6 +58,7 @@ On the **app service → Variables**:
 | `ENCRYPTION_KEY` | `openssl rand -hex 32` | **must be 64 hex chars (32 bytes)** — AES-256-GCM key for stored tokens |
 | `PORT` | (Railway sets this) | the app reads it; `HOST` defaults to `0.0.0.0` in cloud |
 | `VITE_GA_ID` | `G-XXXXXXXXXX` (optional) | **BUILD-TIME** GA4 Measurement ID. Vite inlines it into the landing + SPA bundles at build, so it must reach the Docker build — the `Dockerfile` declares `ARG VITE_GA_ID`, and Railway passes the service variable to it. Empty/unset → analytics stays off. **Changing it requires a rebuild**, not just a restart. |
+| `SEVERITY_API_URL` | `http://severity-api.railway.internal:8080` (optional) | **The whole gate** for ML severity/category enrichment of bot comments (free tier — see [ML-SEVERITY.md](ML-SEVERITY.md)). Unset ⇒ the feature is inert: no worker, `/api/me` reports `mlSeverity:false`, the SPA issues no ML queries. Points at the **`severity-api`** service from the sibling `pierre-ml` repo, which must live in the **same Railway project + environment** (private DNS is per-environment) and must **NOT** have a public domain — it is unauthenticated by design. Prefer a Railway reference variable over a hardcoded host. `ML_SEVERITY_DISABLED=true` is the kill switch; `ML_ENRICHMENT_CRON` / `ML_TICK_BUDGET_MS` / `ML_BATCH_MAX_CHARS` / `ML_CONCURRENCY` tune the worker (defaults are sized for the deploy's 2 uvicorn workers) |
 
 Generate the two secrets locally:
 

@@ -110,6 +110,23 @@ You can also put `ENABLE_CLAUDE_REVIEW=true` in `.env` (repo root) or
 `apps/backend/.env`. When enabled, a **Claude Review** tab appears in the PR detail
 pane.
 
+### Bot-comment severity (dev / cloud only)
+
+Review-bot comments can be scored for **severity** (nit → critical) and **category** by a small
+local ML model, with badges on each comment and a rollup on the Bots tab. It is **free tier**,
+uses no LLM and costs nothing — but it needs the `severity-api` service from the sibling
+[`pierre-ml`](https://github.com/alexwakeman/pierre-ml) repo, so it is **not available through
+`npx pierre-review`** (the published package ships no model). Working from a checkout with the
+sibling repo alongside:
+
+```bash
+SEVERITY_API_PORT=8799 ../pierre-ml/scripts/serve_local.sh &
+echo 'SEVERITY_API_URL=http://127.0.0.1:8799' >> .env
+pnpm dev
+```
+
+Full setup, tuning and caveats: [docs/ML-SEVERITY.md](docs/ML-SEVERITY.md).
+
 ### Anthropic auth — precedence order
 
 Auth comes from the ambient environment; the first available source wins:

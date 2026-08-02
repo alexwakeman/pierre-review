@@ -339,3 +339,15 @@ only), `i` opens Insights, `esc` leaves any tab/overlay → the board (else clea
 selection).
 
 
+
+
+---
+
+## ML severity badges + the Bots severity rollup
+
+Bot comments carry a severity/category badge, threads a worst-severity rollup, the Threads tab a
+severity filter, and the Bots ROI tab a "What the bots are flagging" block. All of it reads ONE
+per-PR query (`['ml-labels', prId]`, `staleTime: Infinity`) — the badge never fetches, and a
+target with no label renders nothing. Gated on `MeResponse.mlSeverity` (a TOP-LEVEL field, not a
+`pro` capability). `threadSeverityFilter` is a global store field and carries the same
+`selectedPrId === prId` guard as `threadStateFilter`. Detail: [ML-SEVERITY.md](ML-SEVERITY.md).

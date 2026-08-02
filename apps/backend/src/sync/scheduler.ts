@@ -6,12 +6,15 @@ import { pruneOldData } from '../db/retention.js';
 import { getScheduledJobs } from './scheduled-jobs.js';
 import { runBenchmarkRollup } from './benchmark-rollup.js';
 import { AUTO_MERGE_CRON, runAutoMergeTick } from '../merge/auto-merge-runner.js';
+import { runMlEnrichmentTick } from './ml-enrichment.js';
+import { isSeverityApiConfigured } from '../ml/severity-client.js';
 import type { Logger } from './sync-repo.js';
 
 let task: ScheduledTask | null = null;
 let retentionTask: ScheduledTask | null = null;
 let benchmarkTask: ScheduledTask | null = null;
 let autoMergeTask: ScheduledTask | null = null;
+let mlEnrichmentTask: ScheduledTask | null = null;
 // node-cron handles for plugin-registered background jobs (Slack digest cron, AI update policy).
 let proJobTasks: ScheduledTask[] = [];
 
@@ -77,6 +80,25 @@ export function startScheduler(log: FastifyBaseLogger): void {
     log.info(`auto-merge watcher started (cron "${AUTO_MERGE_CRON}")`);
   }
 
+  // ML severity/category enrichment of bot comments (CORE, free tier). INERT unless a
+  // severity-api is configured — which is also what keeps it dark under `npx pierre-review`,
+  // where there is no model to talk to. Its own tick because it is independent of sync: it
+  // pulls "bot text with no label yet" from the DB rather than being fed by a sync hook, so a
+  // webhook-delivered comment and an hour-old backfill are the same kind of work to it. The
+  // tick is wall-clock bounded and never throws, so a slow or absent service costs nothing.
+  if (isSeverityApiConfigured()) {
+    if (cron.validate(config.mlEnrichmentCron)) {
+      mlEnrichmentTask = cron.schedule(config.mlEnrichmentCron, () => {
+        void runMlEnrichmentTick(log);
+      });
+      log.info(`ml enrichment started (cron "${config.mlEnrichmentCron}")`);
+    } else {
+      log.warn(
+        `invalid ML_ENRICHMENT_CRON "${config.mlEnrichmentCron}"; ml enrichment disabled`,
+      );
+    }
+  }
+
   // Plugin-registered background jobs (the @pierre/pro Slack digest cron + AI update policy).
   // Registered during bindProPlugin (which runs BEFORE startScheduler), so the registry is
   // populated here. Each rides the same disableScheduler gate as sync/retention and is torn
@@ -106,6 +128,8 @@ export function stopScheduler(): void {
   benchmarkTask = null;
   autoMergeTask?.stop();
   autoMergeTask = null;
+  mlEnrichmentTask?.stop();
+  mlEnrichmentTask = null;
   for (const t of proJobTasks) t.stop();
   proJobTasks = [];
 }

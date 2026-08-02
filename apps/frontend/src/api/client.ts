@@ -70,6 +70,8 @@ import type {
   AnnotationRunBody,
   AnnotationRunResponse,
   PrAnnotationsResponse,
+  PrMlLabelsResponse,
+  BotSeverityResponse,
   ClosePrResult,
   PrMergeOptions,
   UpdateBranchBody,
@@ -697,6 +699,17 @@ export const api = {
       ...jsonBody('POST', body),
       ...(signal ? { signal } : {}),
     }).then((r) => handle<AnnotationRunResponse>(r)),
+
+  // ---- ML severity/category labels (CORE, FREE TIER — not under /api/pro/) ----------------
+  // Both are pure DB reads: the model runs in a background worker on the server, never on a
+  // request, so neither of these can spend anything. They answer normally on a deployment with
+  // no severity-api configured (empty labels / enabled:false) — the SPA's gate is
+  // `useMlSeverityEnabled()` off /api/me, not a 404 from here.
+  prMlLabels: (prId: number) => get<PrMlLabelsResponse>(`/api/prs/${prId}/ml-labels`),
+  botSeverity: (workspaceId: number, repoIds?: number[] | null) =>
+    get<BotSeverityResponse>(
+      withQuery('/api/bot-severity', workspaceParam(workspaceId), repoIdsParam(repoIds)),
+    ),
 
   // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----
   // Aggregated retrieval signals shown BEFORE a run (Surface 1). Only fetched when

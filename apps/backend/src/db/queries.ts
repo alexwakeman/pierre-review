@@ -7734,7 +7734,7 @@ async function vendorLoginKindMap(): Promise<Map<number, AutomatedReviewerKind>>
 // The workspace's custom reviewer LABELS. WORKSPACE-GRAIN now — a human-set display name lives on
 // the same row as everything else, so the same login may carry a different name in another
 // workspace. Replaces the six hand-rolled inline reads that used to sit in the analytics getters.
-async function classificationLabelMap(
+export async function classificationLabelMap(
   accountId: number,
   workspaceId: number,
 ): Promise<Map<number, string>> {

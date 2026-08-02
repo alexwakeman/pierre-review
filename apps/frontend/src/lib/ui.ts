@@ -10,6 +10,8 @@ import type {
   MergeStateStatus,
   MergeVerdict,
   MergeVerdictInfo,
+  MlCategory,
+  MlSeverity,
   MyTurnReason,
   PrReviewDecision,
   PrState,
@@ -96,6 +98,48 @@ export const ADDRESSED_VERDICT_META: Record<AddressedVerdict, { label: string; c
   partial: { label: 'Partially addressed', color: '#d97706' },
   not_addressed: { label: 'Not addressed', color: '#ef4444' },
   unclear: { label: 'Unclear', color: '#94a3b8' },
+};
+
+// ML severity of a BOT comment (CORE, free tier) — the `severity-api` model's four classes.
+// Its own hues, deliberately: this badge sits next to a StateBadge and a ConfidenceBadge in the
+// same header, and three pills that share a palette read as one gradient rather than three
+// independent facts. Raw hex, like every meta record here, because badges compose the colour at
+// low opacity for the background (`${color}22`).
+export const ML_SEVERITY_META: Record<MlSeverity, StateMeta> = {
+  critical: {
+    label: 'Critical',
+    color: '#dc2626',
+    description:
+      'The model rates this the most serious class of finding. Advisory — CRITICAL is the class it under-recalls, so treat major+critical together as "high".',
+  },
+  major: {
+    label: 'Major',
+    color: '#ea580c',
+    description: 'A substantive problem the model expects to need a real change.',
+  },
+  minor: {
+    label: 'Minor',
+    color: '#0284c7',
+    description: 'A small but genuine issue.',
+  },
+  nit: {
+    label: 'Nit',
+    color: '#78716c',
+    description: 'Trivial or optional — style, wording, preference.',
+  },
+};
+
+// Human labels for the model's eight fixed categories. NOT `BotThemeCategory` (nine values, an
+// LLM's vocabulary) — the two must not be mixed in one chart.
+export const ML_CATEGORY_LABEL: Record<MlCategory, string> = {
+  correctness_bug: 'Correctness',
+  security: 'Security',
+  performance: 'Performance',
+  style_readability: 'Style',
+  maintainability_refactor: 'Maintainability',
+  testing: 'Testing',
+  documentation: 'Docs',
+  nitpick: 'Nitpick',
 };
 
 export const PR_STATE_META: Record<PrState, { label: string; color: string }> = {

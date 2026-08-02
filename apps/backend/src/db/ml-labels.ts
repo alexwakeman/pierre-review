@@ -1,0 +1,618 @@
+// Query layer for ML severity/category labels on BOT-authored text (CORE, free tier).
+//
+// Three jobs, and nothing else:
+//   1. CANDIDATES  — which bot-authored targets in a workspace have no label yet
+//                    (the background worker's worklist; see sync/ml-enrichment.ts)
+//   2. WRITE       — upsert a batch of labels
+//   3. READS       — the per-PR badge index, and the Bots severity rollup
+//
+// WHO COUNTS AS A BOT is not decided here: it is `automatedReviewerUserIds(accountId,
+// workspaceId, 'all')` from queries.ts, the one workspace-grain answer. `'all'` rather than
+// `'review'` on purpose — a quality check (SonarQube, Codecov, Hound) posts exactly the kind
+// of finding a severity label is FOR, and the role split exists to stop a linter's volume
+// distorting a REVIEWER's ROI numbers, which is a different question from "how bad is this
+// comment". The role is still reported per row, so a consumer can narrow.
+//
+// TIMING: `workspace_reviewers` rows are written LAZILY (listDetectedReviewers, on a read of
+// the Bots tab), never by sync. Known vendor logins are automated with zero stored rows, so
+// CodeRabbit et al. are candidates from the first sync; a purely in-house bot becomes a
+// candidate only once it has been classified. That is fine BECAUSE this is a pull-based
+// worker: it re-derives the bot set every tick, so a newly-classified or newly-marked bot's
+// whole backlog is picked up on the next pass with no backfill trigger of its own.
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import type { AnyColumn } from 'drizzle-orm';
+import type {
+  AutomatedReviewerKind,
+  BotSeverityResponse,
+  MlBotSeverityRow,
+  MlCategory,
+  MlLabel,
+  MlLabelTargetKind,
+  MlSeverity,
+  MlSeverityCounts,
+} from '@pierre-review/shared';
+import { db, schema } from './client.js';
+import {
+  automatedReviewerUserIds,
+  classificationKindForUser,
+  classificationLabelMap,
+  type BotScope,
+} from './queries.js';
+
+const {
+  mlCommentLabels,
+  pullRequests,
+  reviewComments,
+  prComments,
+  reviews,
+  users,
+} = schema;
+
+const ML_CATEGORY_VALUES = new Set<string>([
+  'correctness_bug',
+  'security',
+  'performance',
+  'style_readability',
+  'maintainability_refactor',
+  'testing',
+  'documentation',
+  'nitpick',
+]);
+
+const SEVERITY_KEYS: MlSeverity[] = ['nit', 'minor', 'major', 'critical'];
+
+function emptySeverityCounts(): MlSeverityCounts {
+  return { nit: 0, minor: 0, major: 0, critical: 0 };
+}
+
+/** Anything the service invents beyond its eight documented values is dropped, not stored. */
+function coerceCategories(raw: unknown): MlCategory[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((c): c is MlCategory => typeof c === 'string' && ML_CATEGORY_VALUES.has(c));
+}
+
+function coerceSeverity(raw: unknown): MlSeverity | null {
+  return typeof raw === 'string' && (SEVERITY_KEYS as string[]).includes(raw)
+    ? (raw as MlSeverity)
+    : null;
+}
+
+// ── 1. Candidates ────────────────────────────────────────────────────────────────────────
+
+export interface MlCandidate {
+  targetKind: MlLabelTargetKind;
+  targetId: number;
+  prId: number;
+  repoId: number;
+  authorUserId: number;
+  body: string;
+  targetCreatedAt: Date;
+}
+
+/**
+ * Bot-authored targets in this workspace that carry no label yet, NEWEST FIRST.
+ *
+ * Newest-first is a product decision, not an implementation detail: the enrichment is a
+ * background sweep that can take an hour over a large history, and the labels a user is about
+ * to look at are the ones on today's PRs. History fills in behind them.
+ *
+ * `limit` is a POOL size, not a batch size — the caller re-sorts the pool by body length before
+ * batching, because the model pads a batch to its longest member (see config.mlBatchMaxChars).
+ */
+export async function listMlCandidates(
+  accountId: number,
+  scope: BotScope,
+  limit: number,
+): Promise<MlCandidate[]> {
+  if (scope.repoIds.length === 0) return [];
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
+  if (automatedIds.length === 0) return [];
+
+  // The join predicate is identical for all three kinds bar the discriminator and which id
+  // space `target_id` is compared against — hence the AnyColumn parameter rather than three
+  // copies that could drift.
+  const unlabelled = (kind: MlLabelTargetKind, targetId: AnyColumn) =>
+    and(
+      eq(mlCommentLabels.accountId, accountId),
+      eq(mlCommentLabels.targetKind, kind),
+      eq(mlCommentLabels.targetId, targetId),
+    );
+
+  const [rc, pc, rv] = await Promise.all([
+    db
+      .select({
+        targetId: reviewComments.id,
+        prId: reviewComments.prId,
+        repoId: pullRequests.repoId,
+        authorUserId: reviewComments.authorId,
+        body: reviewComments.body,
+        targetCreatedAt: reviewComments.createdAt,
+      })
+      .from(reviewComments)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+      .leftJoin(mlCommentLabels, unlabelled('review_comment', reviewComments.id))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(pullRequests.repoId, scope.repoIds),
+          isNotNull(reviewComments.authorId),
+          inArray(reviewComments.authorId, automatedIds),
+          isNotNull(reviewComments.body),
+          isNull(mlCommentLabels.id),
+        ),
+      )
+      .orderBy(desc(reviewComments.createdAt))
+      .limit(limit)
+      .execute(),
+    db
+      .select({
+        targetId: prComments.id,
+        prId: prComments.prId,
+        repoId: pullRequests.repoId,
+        authorUserId: prComments.authorId,
+        body: prComments.body,
+        targetCreatedAt: prComments.createdAt,
+      })
+      .from(prComments)
+      .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+      .leftJoin(mlCommentLabels, unlabelled('pr_comment', prComments.id))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(pullRequests.repoId, scope.repoIds),
+          isNotNull(prComments.authorId),
+          inArray(prComments.authorId, automatedIds),
+          isNotNull(prComments.body),
+          isNull(mlCommentLabels.id),
+        ),
+      )
+      .orderBy(desc(prComments.createdAt))
+      .limit(limit)
+      .execute(),
+    db
+      .select({
+        targetId: reviews.id,
+        prId: reviews.prId,
+        repoId: pullRequests.repoId,
+        authorUserId: reviews.authorId,
+        body: reviews.body,
+        targetCreatedAt: reviews.submittedAt,
+      })
+      .from(reviews)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+      .leftJoin(mlCommentLabels, unlabelled('review', reviews.id))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(pullRequests.repoId, scope.repoIds),
+          isNotNull(reviews.authorId),
+          inArray(reviews.authorId, automatedIds),
+          isNotNull(reviews.body),
+          isNull(mlCommentLabels.id),
+        ),
+      )
+      .orderBy(desc(reviews.submittedAt))
+      .limit(limit)
+      .execute(),
+  ]);
+
+  const out: MlCandidate[] = [];
+  const push = (kind: MlLabelTargetKind, rows: typeof rc) => {
+    for (const r of rows) {
+      const body = (r.body ?? '').trim();
+      // An empty body is not a classification failure, it is nothing to classify. Skipping it
+      // here (rather than sending it) keeps it OUT of every batch forever — which matters,
+      // because a target that is never labelled is re-selected on every single tick.
+      if (!body || r.authorUserId == null) continue;
+      out.push({
+        targetKind: kind,
+        targetId: r.targetId,
+        prId: r.prId,
+        repoId: r.repoId,
+        authorUserId: r.authorUserId,
+        body,
+        targetCreatedAt: r.targetCreatedAt,
+      });
+    }
+  };
+  push('review_comment', rc);
+  push('pr_comment', pc);
+  push('review', rv);
+
+  out.sort((a, b) => b.targetCreatedAt.getTime() - a.targetCreatedAt.getTime());
+  return out.slice(0, limit);
+}
+
+// ── 2. Write ─────────────────────────────────────────────────────────────────────────────
+
+export interface MlLabelWrite {
+  accountId: number;
+  repoId: number;
+  prId: number;
+  targetKind: MlLabelTargetKind;
+  targetId: number;
+  authorUserId: number;
+  severity: MlSeverity;
+  severityOrd: number;
+  severityProb: number;
+  categories: MlCategory[];
+  categoryProbs: Record<string, number>;
+  isSummary: boolean;
+  backend: string;
+  modelVersion: string;
+  bodyHash: string;
+  targetCreatedAt: Date;
+}
+
+/**
+ * Upsert labels.
+ *
+ * ⚠ THE CONFLICT TARGET IS THE TABLE'S DECLARED UNIQUE — `(account_id, target_kind,
+ * target_id)`, index `mcl_account_target`. A stale target type-checks perfectly and only fails
+ * at RUNTIME, in both dialects, when a row is actually written.
+ *
+ * Rows are written one statement per row rather than one multi-VALUES insert: a batch mixes
+ * three target kinds and drizzle's `onConflictDoUpdate` set-clause would have to reference
+ * `excluded.*` uniformly, which is the kind of thing that reads fine and silently writes the
+ * wrong row when the shapes diverge. Batches are ≤128 and this is a background worker.
+ */
+export async function upsertMlLabels(rows: MlLabelWrite[]): Promise<number> {
+  let written = 0;
+  for (const r of rows) {
+    const values = {
+      accountId: r.accountId,
+      repoId: r.repoId,
+      prId: r.prId,
+      targetKind: r.targetKind,
+      targetId: r.targetId,
+      authorUserId: r.authorUserId,
+      severity: r.severity,
+      severityOrd: r.severityOrd,
+      severityProb: r.severityProb,
+      categories: r.categories,
+      categoryProbs: r.categoryProbs,
+      isSummary: r.isSummary,
+      backend: r.backend,
+      modelVersion: r.modelVersion,
+      bodyHash: r.bodyHash,
+      targetCreatedAt: r.targetCreatedAt,
+      updatedAt: new Date(),
+    };
+    const res = await db
+      .insert(mlCommentLabels)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [
+          mlCommentLabels.accountId,
+          mlCommentLabels.targetKind,
+          mlCommentLabels.targetId,
+        ],
+        set: {
+          severity: values.severity,
+          severityOrd: values.severityOrd,
+          severityProb: values.severityProb,
+          categories: values.categories,
+          categoryProbs: values.categoryProbs,
+          isSummary: values.isSummary,
+          backend: values.backend,
+          modelVersion: values.modelVersion,
+          bodyHash: values.bodyHash,
+          targetCreatedAt: values.targetCreatedAt,
+          updatedAt: values.updatedAt,
+        },
+      })
+      .returning({ id: mlCommentLabels.id })
+      .execute();
+    written += res.length;
+  }
+  return written;
+}
+
+// ── 3. Reads ─────────────────────────────────────────────────────────────────────────────
+
+function toWireLabel(row: typeof mlCommentLabels.$inferSelect): MlLabel | null {
+  const severity = coerceSeverity(row.severity);
+  if (!severity) return null;
+  return {
+    targetKind: row.targetKind as MlLabelTargetKind,
+    targetId: row.targetId,
+    severity,
+    severityOrd: row.severityOrd,
+    severityProb: row.severityProb,
+    categories: coerceCategories(row.categories),
+    isSummary: row.isSummary,
+    backend: row.backend,
+    modelVersion: row.modelVersion,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/**
+ * Every label on one PR — the ONE query each badge reads, so N cards on a PR cost one request.
+ *
+ * Returns null for a PR this account does not own (the handler 404s on that), which is the
+ * standard id-addressed ownership rule: ownership is checked HERE, not in the handler.
+ */
+export async function getPrMlLabels(
+  prId: number,
+  accountId: number,
+): Promise<MlLabel[] | null> {
+  const owned = await db
+    .select({ id: pullRequests.id })
+    .from(pullRequests)
+    .where(and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)))
+    .limit(1)
+    .execute();
+  if (owned.length === 0) return null;
+
+  const rows = await db
+    .select()
+    .from(mlCommentLabels)
+    .where(and(eq(mlCommentLabels.accountId, accountId), eq(mlCommentLabels.prId, prId)))
+    .execute();
+  return rows.map(toWireLabel).filter((l): l is MlLabel => l !== null);
+}
+
+// A workspace's whole labelled corpus is read into memory for the rollup. It is bounded by
+// retention (180 days by default) and each row is four small columns, but a cap keeps a
+// pathological account from turning one request into a 100 MB allocation; when it bites, the
+// response says so rather than quietly reporting a partial rollup as complete.
+const ROLLUP_SCAN_CAP = 50_000;
+
+/**
+ * The Bots-interface severity rollup: how the bots in this workspace are distributed across
+ * severities and categories, plus how much of their corpus has been labelled so far.
+ *
+ * Deliberately UNWINDOWED in this first cut — it covers every label in scope. The Bots panels
+ * around it are windowed, so the block states its own coverage rather than borrowing theirs.
+ */
+export async function getBotSeverityRollup(
+  accountId: number,
+  scope: BotScope,
+  enabled: boolean,
+): Promise<BotSeverityResponse> {
+  const generatedAt = new Date().toISOString();
+  const empty: BotSeverityResponse = {
+    workspaceId: scope.workspaceId,
+    repoIds: scope.repoIds,
+    enabled,
+    labelled: 0,
+    pending: 0,
+    totals: {
+      bySeverity: emptySeverityCounts(),
+      byCategory: [],
+      summaries: 0,
+      findings: 0,
+    },
+    rows: [],
+    backends: [],
+    generatedAt,
+  };
+  if (scope.repoIds.length === 0) return empty;
+
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
+  if (automatedIds.length === 0) return empty;
+
+  const [labelRows, kindMap, labelMap, userRows, pending] = await Promise.all([
+    db
+      .select({
+        authorUserId: mlCommentLabels.authorUserId,
+        severity: mlCommentLabels.severity,
+        isSummary: mlCommentLabels.isSummary,
+        categories: mlCommentLabels.categories,
+        backend: mlCommentLabels.backend,
+      })
+      .from(mlCommentLabels)
+      .where(
+        and(
+          eq(mlCommentLabels.accountId, accountId),
+          inArray(mlCommentLabels.repoId, scope.repoIds),
+          inArray(mlCommentLabels.authorUserId, automatedIds),
+        ),
+      )
+      .limit(ROLLUP_SCAN_CAP)
+      .execute(),
+    classificationKindForUser(accountId, scope.workspaceId),
+    classificationLabelMap(accountId, scope.workspaceId),
+    db
+      .select({ id: users.id, login: users.githubLogin, name: users.displayName })
+      .from(users)
+      .where(inArray(users.id, automatedIds))
+      .execute(),
+    countUnlabelledBotText(accountId, scope, automatedIds),
+  ]);
+
+  const loginById = new Map<number, string>();
+  for (const u of userRows) loginById.set(u.id, u.login || u.name?.trim() || `#${u.id}`);
+
+  const totalsBySeverity = emptySeverityCounts();
+  const totalsByCategory = new Map<MlCategory, number>();
+  const backends = new Set<string>();
+  let summaries = 0;
+  let findings = 0;
+
+  interface Acc {
+    labelled: number;
+    bySeverity: MlSeverityCounts;
+    summaries: number;
+    findings: number;
+    high: number;
+    categories: Map<MlCategory, number>;
+  }
+  const byBot = new Map<number, Acc>();
+
+  for (const row of labelRows) {
+    const severity = coerceSeverity(row.severity);
+    if (!severity) continue;
+    if (row.backend) backends.add(row.backend);
+    const acc: Acc = byBot.get(row.authorUserId) ?? {
+      labelled: 0,
+      bySeverity: emptySeverityCounts(),
+      summaries: 0,
+      findings: 0,
+      high: 0,
+      categories: new Map(),
+    };
+    acc.labelled += 1;
+    acc.bySeverity[severity] += 1;
+    totalsBySeverity[severity] += 1;
+    if (row.isSummary) {
+      acc.summaries += 1;
+      summaries += 1;
+    } else {
+      acc.findings += 1;
+      findings += 1;
+      if (severity === 'major' || severity === 'critical') acc.high += 1;
+      // Categories describe a FINDING. A walkthrough comment's category is an artefact of the
+      // marker parser reading a summary table, so counting it would make "what do the bots
+      // talk about" a chart of each vendor's summary template.
+      for (const c of coerceCategories(row.categories)) {
+        acc.categories.set(c, (acc.categories.get(c) ?? 0) + 1);
+        totalsByCategory.set(c, (totalsByCategory.get(c) ?? 0) + 1);
+      }
+    }
+    byBot.set(row.authorUserId, acc);
+  }
+
+  const rows: MlBotSeverityRow[] = [...byBot.entries()]
+    .map(([userId, acc]) => {
+      const login = loginById.get(userId) ?? `#${userId}`;
+      const kind = (kindMap.get(userId) ?? null) as AutomatedReviewerKind | null;
+      return {
+        reviewerKey: `u${userId}`,
+        userId,
+        login,
+        // Custom label → vendor brand → login: the same precedence the ROI panel uses, so one
+        // bot reads with one name across the whole Bots interface.
+        label: labelMap.get(userId) ?? (kind ? vendorBrand(kind, login) : login),
+        kind,
+        labelled: acc.labelled,
+        bySeverity: acc.bySeverity,
+        highShare: acc.findings > 0 ? acc.high / acc.findings : 0,
+        summaries: acc.summaries,
+        topCategories: [...acc.categories.entries()]
+          .map(([category, count]) => ({ category, count }))
+          .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category))
+          .slice(0, 5),
+      };
+    })
+    .sort((a, b) => b.labelled - a.labelled || a.label.localeCompare(b.label));
+
+  return {
+    workspaceId: scope.workspaceId,
+    repoIds: scope.repoIds,
+    enabled,
+    labelled: labelRows.length,
+    pending,
+    totals: {
+      bySeverity: totalsBySeverity,
+      byCategory: [...totalsByCategory.entries()]
+        .map(([category, count]) => ({ category, count }))
+        .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category)),
+      summaries,
+      findings,
+    },
+    rows,
+    backends: [...backends].sort(),
+    generatedAt,
+  };
+}
+
+// Vendor brand names for the row label. Kept local and minimal on purpose: the frontend owns
+// BOT_VENDOR_META (colours + display names), and duplicating that whole map server-side would
+// give two answers to "what is this bot called".
+function vendorBrand(kind: AutomatedReviewerKind, login: string): string {
+  if (kind === 'in_house' || kind === 'vendor' || kind === 'pierre') return login;
+  return kind
+    .split('_')
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(' ');
+}
+
+/**
+ * How much bot text in scope is still waiting for a label. Three counts with the same
+ * left-join-is-null predicate the candidate query uses, so "pending" and "what the worker will
+ * pick up next" cannot drift apart.
+ */
+async function countUnlabelledBotText(
+  accountId: number,
+  scope: BotScope,
+  automatedIds: number[],
+): Promise<number> {
+  if (scope.repoIds.length === 0 || automatedIds.length === 0) return 0;
+  const n = sql<number>`count(*)`;
+
+  const [rc, pc, rv] = await Promise.all([
+    db
+      .select({ n })
+      .from(reviewComments)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+      .leftJoin(
+        mlCommentLabels,
+        and(
+          eq(mlCommentLabels.accountId, accountId),
+          eq(mlCommentLabels.targetKind, 'review_comment'),
+          eq(mlCommentLabels.targetId, reviewComments.id),
+        ),
+      )
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(pullRequests.repoId, scope.repoIds),
+          isNotNull(reviewComments.authorId),
+          inArray(reviewComments.authorId, automatedIds),
+          isNotNull(reviewComments.body),
+          isNull(mlCommentLabels.id),
+        ),
+      )
+      .execute(),
+    db
+      .select({ n })
+      .from(prComments)
+      .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+      .leftJoin(
+        mlCommentLabels,
+        and(
+          eq(mlCommentLabels.accountId, accountId),
+          eq(mlCommentLabels.targetKind, 'pr_comment'),
+          eq(mlCommentLabels.targetId, prComments.id),
+        ),
+      )
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(pullRequests.repoId, scope.repoIds),
+          isNotNull(prComments.authorId),
+          inArray(prComments.authorId, automatedIds),
+          isNotNull(prComments.body),
+          isNull(mlCommentLabels.id),
+        ),
+      )
+      .execute(),
+    db
+      .select({ n })
+      .from(reviews)
+      .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+      .leftJoin(
+        mlCommentLabels,
+        and(
+          eq(mlCommentLabels.accountId, accountId),
+          eq(mlCommentLabels.targetKind, 'review'),
+          eq(mlCommentLabels.targetId, reviews.id),
+        ),
+      )
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(pullRequests.repoId, scope.repoIds),
+          isNotNull(reviews.authorId),
+          inArray(reviews.authorId, automatedIds),
+          isNotNull(reviews.body),
+          isNull(mlCommentLabels.id),
+        ),
+      )
+      .execute(),
+  ]);
+
+  return Number(rc[0]?.n ?? 0) + Number(pc[0]?.n ?? 0) + Number(rv[0]?.n ?? 0);
+}

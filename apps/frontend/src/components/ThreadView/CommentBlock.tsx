@@ -1,4 +1,5 @@
-import type { CommentDetail, User } from '@pierre-review/shared';
+import type { CommentDetail, MlLabel, User } from '@pierre-review/shared';
+import { MlSeverityBadge } from '../MlSeverityBadge.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
@@ -17,6 +18,7 @@ export function CommentBlock({
   isNew,
   anchor,
   showLink,
+  mlLabel,
 }: {
   comment: CommentDetail;
   usersById: Map<number, User>;
@@ -24,6 +26,11 @@ export function CommentBlock({
   isNew?: boolean;
   anchor?: JSX.Element | null;
   showLink?: JSX.Element;
+  // The ML severity/category label for THIS comment, already looked up by the parent from the
+  // one shared per-PR index. Passed down rather than fetched here: a hook in this component
+  // would run once per comment, which is the shape of the request storm the annotation surface
+  // was rebuilt to avoid. Undefined ⇒ no badge, no placeholder.
+  mlLabel?: MlLabel;
 }): JSX.Element {
   const user = comment.authorId != null ? usersById.get(comment.authorId) : undefined;
   return (
@@ -44,6 +51,7 @@ export function CommentBlock({
         />
         <span className="text-gray-400">{relativeTime(comment.createdAt)}</span>
         {isNew && <NewTag />}
+        <MlSeverityBadge label={mlLabel} />
       </div>
       {anchor && <div className="mt-1.5">{anchor}</div>}
       {/* NO annotation surface here any more. The AI "Simplified" rewrite used to sit above each

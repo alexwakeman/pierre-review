@@ -29,6 +29,9 @@ import { ExternalLinkIcon, FeedIcon, MagnifierIcon, OctocatIcon, TimelineIcon } 
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
 import { CommentAnnotations, ReviewCheckButton } from './CommentAnnotations.js';
+import type { MlSeverity } from '@pierre-review/shared';
+import { MlSeverityBadge } from './MlSeverityBadge.js';
+import { mlLabelKey, useMlLabelIndex, useMlSeverityEnabled } from '../hooks/useMlLabels.js';
 import { ChangesTab } from './ChangesTab.js';
 import { PrCommentComposer } from './PrCommentComposer.js';
 import { SkeletonBlock, SkeletonLine } from './Skeleton.js';
@@ -378,6 +381,14 @@ function PrCommentsList({
     return () => clearTimeout(t);
   }, [flashId]);
 
+  // ML severity/category labels for this PR — the same one-query-per-PR index the Threads tab
+  // reads, deduped by React Query. Two target kinds meet here: an issue comment is
+  // ('pr_comment', prComments.id) and a review body is ('review', reviews.id). Those are
+  // SEPARATE id spaces on separate tables, so the lookup must key on `it.kind` — a badge that
+  // assumed one kind would find a different row's label and be confidently wrong.
+  const mlEnabled = useMlSeverityEnabled();
+  const mlIndex = useMlLabelIndex(pr.id, mlEnabled);
+
   // Merge issue comments + reviews-with-body, oldest first — chronological reading order
   // (matches the GitHub conversation; comments carry createdAt, reviews submittedAt).
   const items: ConversationItem[] = [
@@ -471,6 +482,11 @@ function PrCommentsList({
                 {relativeTime(it.at)}
               </span>
               {isNew && <NewTag />}
+              <MlSeverityBadge
+                label={mlIndex?.get(
+                  mlLabelKey(isComment ? 'pr_comment' : 'review', it.id),
+                )}
+              />
             </div>
             <div className="mt-1 text-sm">
               <Markdown>{it.body}</Markdown>
@@ -572,6 +588,7 @@ function PrDetailSkeleton(): JSX.Element {
 // Stable empty filter for the guarded threadStateFilter (see the effect below) — a fresh Set
 // each render would churn the effect deps.
 const EMPTY_THREAD_STATE_FILTER: Set<DerivedState> = new Set();
+const EMPTY_THREAD_SEVERITY_FILTER: Set<MlSeverity> = new Set();
 
 export function PrDetail({
   prId,
@@ -649,6 +666,10 @@ export function PrDetail({
   const rawThreadStateFilter = useFilters((s) => s.threadStateFilter);
   const threadStateFilter =
     selectedPrId === prId ? rawThreadStateFilter : EMPTY_THREAD_STATE_FILTER;
+  // Same GLOBAL-store trap, same guard: an ML-severity preset belongs to the PR it was set for.
+  const rawThreadSeverityFilter = useFilters((s) => s.threadSeverityFilter);
+  const threadSeverityFilter =
+    selectedPrId === prId ? rawThreadSeverityFilter : EMPTY_THREAD_SEVERITY_FILTER;
   useEffect(() => {
     if (threadStateFilter.size > 0) setTab('threads');
   }, [threadStateFilter]);
@@ -1008,6 +1029,7 @@ export function PrDetail({
             viewedSince={pr.lastViewedAt}
             botFilter={threadBotFilter}
             stateFilter={threadStateFilter}
+            severityFilter={threadSeverityFilter}
           />
         ) : tab === 'activity' ? (
           <ActivityList

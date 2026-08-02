@@ -2,6 +2,8 @@ import type { ThreadDetail, User } from '@pierre-review/shared';
 import { StateBadge } from '../StateBadge.js';
 import { ConfidenceBadge } from '../ConfidenceBadge.js';
 import { ReviewCheckButton, ThreadCheckOutput } from '../CommentAnnotations.js';
+import { MlSeverityBadge, worstSeverity } from '../MlSeverityBadge.js';
+import { mlLabelKey, useMlLabelIndex, useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';
 import { CodeAnchor } from './CodeAnchor.js';
@@ -45,6 +47,19 @@ export function ThreadCard({
 }): JSX.Element {
   const anchorHunk = thread.comments[0]?.diffHunk ?? null;
   const lineLabel = thread.line != null ? `line ${thread.line}` : 'file-level';
+  // ONE shared per-PR query, whichever of the eight ThreadCard mount sites this is. React Query
+  // dedupes it across every card on the same PR, and it is skipped entirely when the deployment
+  // has no severity-api (npx), so an OSS install issues nothing.
+  const mlEnabled = useMlSeverityEnabled();
+  const mlIndex = useMlLabelIndex(thread.prId, mlEnabled);
+  // The thread's WORST non-summary severity — triage without expanding the conversation.
+  const threadWorst = mlIndex
+    ? worstSeverity(
+        thread.comments
+          .map((c) => mlIndex.get(mlLabelKey('review_comment', c.id)))
+          .filter((l): l is NonNullable<typeof l> => l != null),
+      )
+    : undefined;
 
   return (
     <div
@@ -96,6 +111,10 @@ export function ThreadCard({
             reason={thread.addressedReason}
           />
         )}
+        {/* The worst ML severity anywhere in this conversation (summaries excluded). Renders
+            nothing when no comment in the thread is labelled — which is also the state of every
+            thread on a deployment with no model. */}
+        <MlSeverityBadge label={threadWorst} compact />
         <ShowOnTimeline
           prId={thread.prId}
           at={thread.createdAt}
@@ -139,6 +158,7 @@ export function ThreadCard({
             comment={c}
             usersById={usersById}
             repoId={repoId}
+            mlLabel={mlIndex?.get(mlLabelKey('review_comment', c.id))}
             isNew={
               highlightCommentId != null
                 ? c.id === highlightCommentId

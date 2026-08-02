@@ -175,6 +175,47 @@ export const config = {
   // Disable the periodic scheduler (used by scripts/tests).
   disableScheduler: process.env.DISABLE_SCHEDULER === 'true',
 
+  // ---- ML severity/category enrichment of bot comments (CORE, free tier) ----
+  // Classifies BOT-authored review comments, PR comments and review bodies against the
+  // `severity-api` microservice from the sibling `pierre-ml` repo (a fine-tuned ModernBERT-ONNX
+  // severity model + a deterministic category parser). No LLM, nothing billed. Full contract +
+  // the local run recipe: docs/ML-SEVERITY.md.
+  //
+  // THE GATE IS THE URL. `SEVERITY_API_URL` unset ⇒ the whole feature is inert: no worker, no
+  // routes registered, `/api/me` reports mlSeverity:false and the SPA issues zero ML queries.
+  // That is deliberately the same switch that makes the feature UNAVAILABLE under
+  // `npx pierre-review` — the published package ships no model and config.ts's .env search
+  // paths resolve against the INSTALL directory, so an npx user has nowhere to put the var.
+  // Cloud sets it to the Railway private-DNS name; local dev to the sibling repo's port.
+  // ML_SEVERITY_DISABLED=true is the kill switch for a deployment that has the URL set.
+  severityApiUrl:
+    process.env.ML_SEVERITY_DISABLED === 'true'
+      ? ''
+      : (process.env.SEVERITY_API_URL ?? '').replace(/\/$/, ''),
+  // The enrichment worker's own cron — a TICK, not a cadence: each tick drains as much of the
+  // unlabelled backlog as its wall-clock budget allows, newest-first. Separate from the sync
+  // cron on purpose (the two are independent, and enrichment must never delay a sync).
+  mlEnrichmentCron: process.env.ML_ENRICHMENT_CRON ?? '*/2 * * * *',
+  // Wall-clock ceiling for one tick. Sized under the cron period so ticks never overlap in
+  // practice (a re-entrancy guard covers the case where they would anyway).
+  mlTickBudgetMs: intFromEnv('ML_TICK_BUDGET_MS', 90_000),
+  // Batch shape. The service caps a request at 256 items (422 beyond), but ITEM COUNT is the
+  // wrong budget: inference cost tracks TOTAL TEXT, and a batch pads to its longest member, so
+  // one 8k-char walkthrough in a batch of 128 makes every slot cost like the walkthrough.
+  // Measured on an Intel i9: 32 short bodies 2.7s vs 32 long bodies 28.4s. The worker therefore
+  // sorts candidates by length and fills batches to a CHARACTER budget, capping the count too.
+  mlBatchMaxItems: intFromEnv('ML_BATCH_MAX_ITEMS', 128),
+  mlBatchMaxChars: intFromEnv('ML_BATCH_MAX_CHARS', 24_000),
+  // How many batch requests are in flight at once. The deployed service runs 2 uvicorn workers,
+  // so 2 saturates it; more just queues.
+  mlConcurrency: intFromEnv('ML_CONCURRENCY', 2),
+  // Per-request timeout. A cold start loads a ~150 MB model, and a long batch is legitimately
+  // slow on CPU, so this is generous by design.
+  mlRequestTimeoutMs: intFromEnv('ML_REQUEST_TIMEOUT_MS', 120_000),
+  // The model truncates at 512 tokens, so anything past ~2.5k chars is discarded server-side.
+  // Trimming client-side bounds the request payload without changing what the model sees.
+  mlBodyMaxChars: intFromEnv('ML_BODY_MAX_CHARS', 6_000),
+
   // ---- Cloud (Railway) — GitHub sign-in + sessions + token encryption ----
   // Public base URL of the deployment (no trailing slash); used to build the
   // OAuth redirect_uri and absolute links. Locally http://localhost:<port>.

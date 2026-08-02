@@ -166,6 +166,19 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // string because no other route shares it, so over-matching costs nothing while under-matching
   // costs the bucket.
   if (path.startsWith('/api/workspace-metrics/compare')) return [TIERS.search, TIERS.read];
+  // GET /api/bot-severity — the Bots ML-severity rollup. DB-only (the model is called by the
+  // background worker, never on a request), but it reads a whole workspace's label corpus into
+  // memory to aggregate it, capped at 50k rows, plus three unlabelled-count joins. Same shape of
+  // cost as `/compare` above — this process's event loop, not GitHub quota and not Anthropic —
+  // so it borrows the same 60/min `search` bucket rather than sitting on the 600/min blanket one.
+  // The SPA fires it once per Bots-tab view.
+  if (path.startsWith('/api/bot-severity')) return [TIERS.search, TIERS.read];
+  // GET /api/prs/<id>/ml-labels — the per-PR badge index. Two indexed reads over
+  // ml_comment_labels, no model call, no GitHub. `read` is right, and it is RECORDED here rather
+  // than inherited from the fall-through: it sits inside the /api/prs/<id>/ family whose other
+  // members are GitHub-hydrating, so the next person to widen `prGithubGet` should have to see
+  // that this one was decided, not defaulted.
+  if (!mutating && /^\/api\/prs\/\d+\/ml-labels$/.test(path)) return [TIERS.read];
   // GET /api/prs/<id> plus the sub-routes that ALSO hydrate live from GitHub rather than reading
   // already-synced rows:
   //   `/merge-options`            repo merge config + mergeability + the merge-queue GraphQL probe

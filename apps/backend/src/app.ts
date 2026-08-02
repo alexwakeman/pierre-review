@@ -35,6 +35,7 @@ import { mentionsRoutes } from './api/routes/mentions.js';
 import { searchRoutes } from './api/routes/search.js';
 import { billingRoutes } from './api/routes/billing.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
+import { mlLabelRoutes } from './api/routes/ml-labels.js';
 import { webhookRoutes } from './api/routes/webhooks.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -224,6 +225,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Bot-triage platform (CORE, always registered): detection/override, ROI analytics,
   // cross-bot dedup, confirm-gated bot-thread resolve. Account-scoped; no AI.
   await app.register(botTriageRoutes);
+  // ML severity/category labels on bot text (CORE, FREE TIER, no AI, no GitHub). Registered
+  // UNCONDITIONALLY: both routes are pure DB reads that answer honestly when no severity-api is
+  // configured (empty labels / `enabled:false`), so nothing 404s on a deployment that has the
+  // data but not the service. Generation is the background worker's job (sync/ml-enrichment.ts).
+  await app.register(mlLabelRoutes);
   // Stripe billing seam (checkout redirect + webhook). Registered in both modes;
   // inert until the STRIPE_* env vars are set (webhook 501s unconfigured).
   await app.register(billingRoutes);
