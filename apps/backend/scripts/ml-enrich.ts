@@ -31,7 +31,7 @@ async function main(): Promise<void> {
     console.error(
       'SEVERITY_API_URL is not set (or ML_SEVERITY_DISABLED=true), so there is nothing to run.\n' +
         'Start the sibling service and export the URL:\n' +
-        '  SEVERITY_API_PORT=8799 ../pierre-ml/scripts/serve_local.sh &\n' +
+        '  SEVERITY_API_PORT=8799 packages/ml/scripts/serve_local.sh &\n' +
         '  export SEVERITY_API_URL=http://127.0.0.1:8799\n' +
         'See docs/ML-SEVERITY.md.',
     );
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     // heuristic and only noticing later is worse than being told now.
     console.warn(
       'WARNING: severity-api is on the MARKER FALLBACK (models_loaded.taxonomy=false). ' +
-        'Labels will be low quality. Run `git lfs pull` in pierre-ml and restart it.',
+        'Labels will be low quality. Run `git lfs pull` in packages/ml and restart it.',
     );
   }
 

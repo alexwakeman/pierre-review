@@ -177,7 +177,7 @@ export const config = {
 
   // ---- ML severity/category enrichment of bot comments (CORE, free tier) ----
   // Classifies BOT-authored review comments, PR comments and review bodies against the
-  // `severity-api` microservice from the sibling `pierre-ml` repo (a fine-tuned ModernBERT-ONNX
+  // `severity-api` microservice from the `packages/ml` submodule (a fine-tuned ModernBERT-ONNX
   // severity model + a deterministic category parser). No LLM, nothing billed. Full contract +
   // the local run recipe: docs/ML-SEVERITY.md.
   //

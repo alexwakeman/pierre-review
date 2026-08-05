@@ -7,14 +7,16 @@ Every comment an AI review bot leaves gets two machine-read labels — a **sever
 wall of CodeRabbit/Copilot/Sonar output can be triaged without reading all of it. The labels
 render on the comments themselves and roll up on the Bots interface.
 
-The classifier is not part of this repo. It is the **`severity-api`** microservice from the
-sibling **[`pierre-ml`](https://github.com/alexwakeman/pierre-ml)** repo: a fine-tuned
-ModernBERT (ONNX int8, CPU) severity model plus a deterministic marker-based category parser.
-It is stateless — text in, labels out — and this repo owns all persistence.
+The classifier is its own repo, **[`pierre-ml`](https://github.com/alexwakeman/pierre-ml)**,
+vendored here as the **`packages/ml`** submodule: a fine-tuned ModernBERT (ONNX int8, CPU)
+severity model plus a deterministic marker-based category parser, exposed as the
+**`severity-api`** microservice. It is stateless — text in, labels out — and this repo owns all
+persistence. It builds, versions and deploys on its own; the submodule is a pinned pointer, not
+a merge of the two codebases.
 
-> Read `../pierre-ml/docs/SEVERITY_API_INTEGRATION.md` for the service's own contract
+> Read `packages/ml/docs/SEVERITY_API_INTEGRATION.md` for the service's own contract
 > (endpoints, response fields, the eight categories, accuracy limits) and
-> `../pierre-ml/docs/RUN_LOCALLY.md` for how to run it. This document is the pierre-review
+> `packages/ml/docs/RUN_LOCALLY.md` for how to run it. This document is the pierre-review
 > side: where it plugs in, why it plugs in there, and what will bite you.
 
 ---
@@ -341,12 +343,12 @@ nothing is draining, which is worse than the feature being quietly off. `scripts
 runs the sibling's own `scripts/serve_local.sh` (which hydrates the Git-LFS model on first run);
 `pnpm dev:ml` runs just the service in its own terminal.
 
-**Every "can't run it" path prints one line and exits 0** — the sibling repo is optional, and a
-checkout without it must get exactly the dev loop it always had.
+**Every "can't run it" path prints one line and exits 0** — the submodule is optional, and a
+clone without `--recurse-submodules` must get exactly the dev loop it always had.
 
 | Var | Effect |
 |---|---|
-| `PIERRE_ML_DIR` | where the sibling lives (default `../pierre-ml`) |
+| `PIERRE_ML_DIR` | override the submodule location (default `packages/ml`) |
 | `SEVERITY_API_PORT` | port to serve on (default 8799) |
 | `PIERRE_ML_DISABLED=1` | run the app without it |
 
@@ -365,7 +367,7 @@ Prereqs on the machine: [`uv`](https://docs.astral.sh/uv/) and `git-lfs`
 Doing it by hand (or against a service you host elsewhere) is unchanged:
 
 ```bash
-SEVERITY_API_PORT=8799 ../pierre-ml/scripts/serve_local.sh &
+SEVERITY_API_PORT=8799 packages/ml/scripts/serve_local.sh &
 until curl -sf http://127.0.0.1:8799/health | grep -q '"taxonomy":true'; do sleep 1; done
 echo 'SEVERITY_API_URL=http://127.0.0.1:8799' >> .env
 pnpm dev
@@ -376,7 +378,7 @@ ONNX model did not load and the service is answering from the marker heuristic �
 answers, so nothing errors, it is just materially worse. Three places surface it: the backend
 logs it once at boot, every stored row carries the `backend` string, and the Bots panel shows a
 banner when every label in scope came from the fallback. The fix is `git lfs pull` in
-`pierre-ml` and a restart.
+`packages/ml` and a restart.
 
 **If you do want Docker** (not wired into this repo's dev loop): the ML repo's `serving` stage
 already loads the real model — `serving_assets/` is deliberately *not* in its `.dockerignore`
@@ -384,12 +386,12 @@ and the image sets `BOT_MONITOR_MODELS_DIR=/app/serving_assets`. Build it direct
 via `docker compose up api`, which pulls in a Postgres the `/score` endpoints do not need:
 
 ```bash
-docker build --target serving -t severity-api ../pierre-ml
+docker build --target serving -t severity-api packages/ml
 docker run --rm -p 8799:8000 -e PORT=8000 severity-api
 ```
 
 Verify with `/health` exactly as above; if it reports `taxonomy:false`, run `git lfs pull` in
-`pierre-ml` **before** building — the image copies whatever is in the working tree, and a fresh
+`packages/ml` **before** building — the image copies whatever is in the working tree, and a fresh
 clone has only the LFS pointer.
 
 ### Draining the backlog / re-labelling everything

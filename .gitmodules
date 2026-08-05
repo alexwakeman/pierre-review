@@ -1,3 +1,6 @@
 [submodule "packages/pro"]
 	path = packages/pro
 	url = git@github.com:alexwakeman/pierre-pro.git
+[submodule "packages/ml"]
+	path = packages/ml
+	url = git@github.com:alexwakeman/pierre-ml.git

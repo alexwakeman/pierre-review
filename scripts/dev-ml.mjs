@@ -1,22 +1,22 @@
-// Start the sibling `pierre-ml` severity-api for the local dev loop.
+// Start the `pierre-ml` severity-api (the `packages/ml` submodule) for the local dev loop.
 //
 // The ML severity/category labels on bot comments are produced by a SEPARATE service — the
-// `severity-api` from the sibling repo (a fine-tuned ModernBERT-ONNX model on CPU). Nothing in
-// this repo ships a model, so without that service running the feature is simply dark. Having
-// to remember a second terminal made "why are there no badges?" a recurring question, so
-// `pnpm dev` starts it too. See docs/ML-SEVERITY.md § "Running it locally".
+// `severity-api` from the `packages/ml` submodule (a fine-tuned ModernBERT-ONNX model on CPU).
+// Nothing in this repo ships a model, so without that service running the feature is simply
+// dark. Having to remember a second terminal made "why are there no badges?" a recurring
+// question, so `pnpm dev` starts it too. See docs/ML-SEVERITY.md § "Running it locally".
 //
 //   pnpm dev              starts this alongside the backend + frontend (via scripts/dev.mjs)
 //   pnpm dev:ml           starts ONLY the service, e.g. in its own terminal
 //
-//   PIERRE_ML_DIR=…       where the sibling repo lives (default: ../pierre-ml)
+//   PIERRE_ML_DIR=…       override the submodule location (default: packages/ml)
 //   SEVERITY_API_PORT=…   port to serve on (default 8799)
 //   PIERRE_ML_DISABLED=1  skip it entirely
 //
-// THIS SCRIPT NEVER FAILS THE DEV LOOP. The sibling repo is optional — it is a separate,
-// private-ish research repo and most people working on pierre-review will not have it checked
-// out. Every "can't run it" path prints one line and exits 0, so `pnpm dev` starts the app
-// exactly as it always did.
+// THIS SCRIPT NEVER FAILS THE DEV LOOP. The submodule is optional — it is a separate,
+// private-ish research repo, and a plain `git clone` (without `--recurse-submodules`) leaves
+// `packages/ml` an EMPTY directory. Every "can't run it" path prints one line and exits 0, so
+// `pnpm dev` starts the app exactly as it always did.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -27,7 +27,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 export const ML_PORT = process.env.SEVERITY_API_PORT || '8799';
 export const ML_DIR = process.env.PIERRE_ML_DIR
   ? resolve(process.env.PIERRE_ML_DIR)
-  : resolve(ROOT, '..', 'pierre-ml');
+  : resolve(ROOT, 'packages', 'ml');
 
 const SERVE_SCRIPT = join(ML_DIR, 'scripts', 'serve_local.sh');
 
@@ -44,7 +44,11 @@ export function severityApiUnavailable() {
     return 'PIERRE_ML_DISABLED is set';
   }
   if (process.env.ML_SEVERITY_DISABLED === 'true') return 'ML_SEVERITY_DISABLED=true';
-  if (!existsSync(SERVE_SCRIPT)) return `no sibling repo at ${ML_DIR}`;
+  // An uninitialised submodule is an empty directory, which lands here exactly like a missing
+  // sibling repo used to — same graceful skip, but the fix is now one command rather than a clone.
+  if (!existsSync(SERVE_SCRIPT)) {
+    return `nothing at ${ML_DIR} (run \`git submodule update --init packages/ml\`)`;
+  }
   // `serve_local.sh` runs `uv sync` + `uv run uvicorn` under `set -euo pipefail`, so a missing
   // `uv` is a hard failure two lines in. Catch it here instead, where it can be one clear line.
   const uv = spawnSync('uv', ['--version'], { stdio: 'ignore' });

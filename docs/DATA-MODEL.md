@@ -233,7 +233,7 @@ stored.
 
 One row per classified target. Written ONLY by the background enrichment worker
 (`sync/ml-enrichment.ts`), which batches text to the `severity-api` microservice from the
-sibling `pierre-ml` repo; read by the per-PR badge index and the Bots severity rollup. Full
+`packages/ml` submodule; read by the per-PR badge index and the Bots severity rollup. Full
 contract: [ML-SEVERITY.md](ML-SEVERITY.md).
 
 - `target_kind` ∈ `review_comment | pr_comment | review` (the review **body**), `target_id` is

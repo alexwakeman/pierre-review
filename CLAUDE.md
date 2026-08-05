@@ -31,7 +31,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [docs/FRONTEND.md](docs/FRONTEND.md) | stores, tabs/overlays, FilterBar scoping, timeline internals, PrDetail |
 | [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, the auto-merge runner, CI log viewer, trunk status |
 | [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) | the agentic PR-review feature |
-| [docs/ML-SEVERITY.md](docs/ML-SEVERITY.md) | ML severity/category enrichment of bot comments (the `pierre-ml` severity-api seam) |
+| [docs/ML-SEVERITY.md](docs/ML-SEVERITY.md) | ML severity/category enrichment of bot comments (the `packages/ml` severity-api seam) |
 | [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity tab, Feed, the bot platform ("One bot object"), annotations, digests |
 | [docs/PRO-PLATFORM.md](docs/PRO-PLATFORM.md) | the Pro platform's own deep-dive |
 | [docs/SECURITY.md](docs/SECURITY.md) | app.ts, CORS/CSP, rate limits, GDPR export/erase, dependency posture |
@@ -205,11 +205,16 @@ pierre-review/
 │                              SEO copy in src/lib/routes.ts) so non-JS clients / AI agents get real HTML
 └─ packages/
    ├─ shared/                 @pierre-review/shared — types ONLY, the contract between the apps (src/types.ts)
-   └─ pro/                    @pierre/pro — PRIVATE git submodule (alexwakeman/pierre-pro), runtime-imported plugin (per-repo
-                              Haiku digest, Insights, Claude Review + AI Fix, Claude Review learnings). Resolved by
-                              PATH (not a declared dep); absent → clean OSS mode + install still succeeds.
-                              (My Turn / FYI feed participation is CORE, not Pro — see below.)
-                              `git submodule update --init` to fetch. See [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md).
+   ├─ pro/                    @pierre/pro — PRIVATE git submodule (alexwakeman/pierre-pro), runtime-imported plugin (per-repo
+   │                          Haiku digest, Insights, Claude Review + AI Fix, Claude Review learnings). Resolved by
+   │                          PATH (not a declared dep); absent → clean OSS mode + install still succeeds.
+   │                          (My Turn / FYI feed participation is CORE, not Pro — see below.)
+   │                          `git submodule update --init` to fetch. See [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md).
+   └─ ml/                     pierre-ml — git submodule (alexwakeman/pierre-ml), the `severity-api` microservice.
+                              PYTHON, not a pnpm workspace (no package.json ⇒ the `packages/*` glob skips it) and
+                              NOT imported — the backend talks to it over HTTP only. Builds, versions and DEPLOYS
+                              INDEPENDENTLY; the submodule is a pinned pointer, not a merge of the two codebases.
+                              Absent → ML labels are simply dark. See [docs/ML-SEVERITY.md](docs/ML-SEVERITY.md).
 ```
 
 ---
@@ -221,7 +226,7 @@ All from the repo root unless noted.
 | Command | What it does |
 |---|---|
 | `pnpm install` | install all workspaces |
-| `pnpm dev` | run backend (`:4000`) + frontend (`:5173`) + the sibling `pierre-ml` severity-api (`:8799`) concurrently, via `scripts/dev.mjs` |
+| `pnpm dev` | run backend (`:4000`) + frontend (`:5173`) + the `packages/ml` severity-api (`:8799`) concurrently, via `scripts/dev.mjs` |
 | `pnpm dev:backend` / `pnpm dev:frontend` / `pnpm dev:ml` | run one side only |
 | `pnpm build` | recursive build across workspaces |
 | `pnpm typecheck` | `tsc --noEmit` across all packages — **run before considering work done** |
@@ -239,9 +244,9 @@ All from the repo root unless noted.
 
 `DEPLOYMENT_MODE=local` (default) vs `cloud` selects the whole stack (SQLite vs Postgres,
 landing, OAuth); `pnpm dev` is local unless `DEPLOYMENT_MODE=cloud`. **`pnpm dev` also starts
-the sibling `../pierre-ml` severity-api when the machine has it** (`PIERRE_ML_DIR`,
+the `packages/ml` severity-api when that submodule is checked out** (`PIERRE_ML_DIR`,
 `SEVERITY_API_PORT`, `PIERRE_ML_DISABLED=1`); every "can't run it" path prints one line and
-exits 0, so a checkout without the sibling gets the dev loop it always had. ⚠ It exports
+exits 0, so a clone without `--recurse-submodules` gets the dev loop it always had. ⚠ It exports
 `SEVERITY_API_DEFAULT_URL`, never `SEVERITY_API_URL` — `process.loadEnvFile` does NOT overwrite
 an already-set variable, so a command-line `SEVERITY_API_URL` would have BEATEN your `.env`.
 The frontend dev server
@@ -501,7 +506,7 @@ passthrough on `/api/me`, and inert seams. Details:
 
 Every bot-authored review comment / PR comment / review body is labelled with a **severity**
 (`nit`·`minor`·`major`·`critical`) and up to eight **categories** by the `severity-api`
-microservice from the sibling **`pierre-ml`** repo (fine-tuned ModernBERT ONNX on CPU + a
+microservice from the **`packages/ml`** submodule (fine-tuned ModernBERT ONNX on CPU + a
 deterministic marker parser). Badges render on the comments; a rollup sits on the Bots tab.
 Full detail: **[docs/ML-SEVERITY.md](docs/ML-SEVERITY.md)**. The invariants:
 

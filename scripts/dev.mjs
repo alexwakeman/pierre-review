@@ -1,15 +1,15 @@
-// `pnpm dev` — the local dev loop: backend (:4000) + frontend (:5173), plus the sibling
-// `pierre-ml` severity-api (:8799) when this machine has it.
+// `pnpm dev` — the local dev loop: backend (:4000) + frontend (:5173), plus the
+// `packages/ml` severity-api (:8799) when that submodule is checked out.
 //
 // WHY THIS IS A SCRIPT AND NOT A `concurrently` ONE-LINER. Whether the ML service is available
-// is a runtime question (is the sibling repo checked out? is `uv` installed?), and its answer
+// is a runtime question (is the submodule checked out? is `uv` installed?), and its answer
 // has to reach TWO places: which processes to start, and whether the backend may be pointed at
 // the service at all. Those must not be able to disagree — a backend told to use a severity-api
 // that is not running would report `mlSeverity: true` from /api/me and show a scoring backlog
 // that nothing is draining, which is a worse failure than the feature being quietly off. One
 // decision, made here, used for both.
 //
-//   PIERRE_ML_DIR=…        where the sibling repo lives (default: ../pierre-ml)
+//   PIERRE_ML_DIR=…        override the submodule location (default: packages/ml)
 //   SEVERITY_API_PORT=…    port for the severity-api (default 8799)
 //   PIERRE_ML_DISABLED=1   run the app without it
 //
