@@ -41,21 +41,25 @@ export type RouteSeo = {
 export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
     title: `${SITE_NAME} — the calm layer above your review bot`,
-    description: `Bring your own reviewer. ${SITE_NAME} is the cross-repo layer above CodeRabbit, Greptile and Copilot — what’s stalled, whose turn it is, and which of the bot’s comments a human still needs to read.`,
+    description: `Bring your own reviewer. ${SITE_NAME} is the cross-repo layer above CodeRabbit, Greptile and Copilot — what’s stalled, whose turn it is, and what every bot comment is actually worth: graded independently, on your own repos.`,
   },
   '/features': {
     title: 'Open Core — the free multi-repo GitHub dashboard',
     description:
-      'The free, open-core tier in full: the cross-repo Activity feed, the repo→contributor timeline, per-repo consoles, derived thread states, PR detail with real write actions, and the open-PR strip. Free, forever.',
+      'The free, open-core tier in full: the cross-repo Activity feed, derived thread states, the repo→contributor timeline, per-repo consoles, PR detail with real write actions, the bot receipt, and cross-repo search. Free, forever.',
+  },
+  '/bots': {
+    title: 'The receipt — independent grading of your AI review bots',
+    description: `Every bot comment on your repos, graded by ${SITE_NAME}’s own ML model — severity, category, cost and overlap. Is the review bot worth its seat? Now it’s a number, not a feeling. Free in the hosted service.`,
   },
   '/pro': {
-    title: `${SITE_NAME} Pro — AI summaries, workspace insights & agentic review`,
+    title: `${SITE_NAME} Pro & Pro+ — the intelligence layer, and the full loop`,
     description:
-      'The intelligence layer: per-repo AI digests, sprint reports, Workspace Insights, DORA-style flow metrics, My-Turn triage, Slack digests, Jira/Linear links — plus Claude Review and AI Fix with a human hand on the wheel.',
+      'Pro reads the board for you: attention & risk digests, thread validity, addressed-confidence, themes and reports, chat with your repos, CI diagnosis. Pro+ closes the loop — Claude reviews that learn, and fixes you approve, pushed to GitHub.',
   },
   '/pricing': {
-    title: `Pricing — ${SITE_NAME} is open-core and free. Pro is $15/month`,
-    description: `The ${SITE_NAME} dashboard is free, local-first, and yours forever. Pro adds AI summaries, Workspace Insights, flow metrics, Slack digests and My Turn — for $15 a month.`,
+    title: `Pricing — ${SITE_NAME} is open-core and free. Pro from $15 a seat`,
+    description: `The ${SITE_NAME} dashboard — including the bot receipt — is free forever. Pro is $15 a seat for the intelligence layer; Pro+ is $29 a seat for Claude reviews and fixes on your own key.`,
   },
   '/how-it-works': {
     title: 'How it works — sync, architecture & roadmap',

@@ -295,6 +295,58 @@ export function InlineLink({
   );
 }
 
+/* ------------------------------------------------------- section kit ------- */
+
+/**
+ * A documented voice from outside — a section's "surprise". REAL quotes only:
+ * every quote rendered through this component must be verbatim from a source a
+ * human can find (the attribution names it). Nothing here is ever invented or
+ * paraphrased into quotation marks. The left rule is `signal-fill`, which is
+ * legal vermilion because it is a rule, not type.
+ */
+export function Evidence({
+  quote,
+  source,
+}: {
+  quote: string;
+  source: string;
+}): JSX.Element {
+  return (
+    <figure className="my-6 max-w-answer border-l border-signal-fill pl-5">
+      <blockquote className="font-serif text-[19px] italic leading-normal text-ink-soft">
+        “{quote}”
+      </blockquote>
+      <figcaption className="mt-2.5 font-mono text-mono-caption text-secondary">
+        {source}
+      </figcaption>
+    </figure>
+  );
+}
+
+/**
+ * One line of the working day — how a section lands in practice. The same
+ * shape as the homepage's scenario beats (vermilion dash, ink moment, quiet
+ * mono line), so the pages read as one narrative family.
+ */
+export function Story({
+  moment,
+  children,
+}: {
+  moment: string;
+  children: ReactNode;
+}): JSX.Element {
+  return (
+    <p className="mt-7 flex items-baseline gap-3.5 border-t border-rule pt-4 font-mono text-mono-nav text-secondary">
+      <span aria-hidden="true" className="text-signal-text">
+        —
+      </span>
+      <span>
+        <span className="text-ink">{moment}</span> · {children}
+      </span>
+    </p>
+  );
+}
+
 /* ------------------------------------------------------------ lists -------- */
 
 /**

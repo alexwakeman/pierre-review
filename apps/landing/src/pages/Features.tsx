@@ -1,36 +1,40 @@
-import type { ReactNode } from 'react';
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
 import { SITE_NAME } from '../lib/site';
 import {
+  Evidence,
   InkButton,
   MonoLabel,
+  MonoLink,
   RailGrid,
   Section,
+  Story,
 } from '../components/feint/primitives';
 import { ShotFrame } from '../components/feint/ShotFrame';
+import { PixelIcon } from '../components/feint/PixelIcon';
 
 // ---------------------------------------------------------------------------
 // The Open Core page — everything in the free tier, section by section.
 //
-// The argument is that the free dashboard IS the product, so the page is laid
-// out as a numbered sequence (01–07) rather than as a feature grid: each part of
-// the board gets a rail number, a screenshot where one exists, and the "why it
-// matters" note that used to sit in a tinted box.
+// Each section now follows the site-wide kit: an 8-bit icon (a whisper of
+// vermilion each), a slogan-grade H2 in service of the one mission — calm over
+// the chaos of running complex software projects — a short "idea" body, a
+// documented outside voice (<Evidence>, REAL quotes only — sourced via
+// research, never invented; if a section has no verifiable quote it simply has
+// none), and one <Story> line landing it in a working day. Deliberately brief:
+// the pattern replaces the old WhyNote footnotes rather than stacking on them.
 //
-// GONE from the previous version, deliberately:
-//   · the seven per-section icons (a locally-owned ConsoleIcon, plus FeedIcon /
-//     TimelineIcon / ThreadIcon / StripIcon / BoltIcon / ShieldIcon) — this
-//     direction has no icon layer at all, and the inline shield glyph inside the
-//     timeline copy is now just the phrase it labelled.
-//   · the four coloured status dots on the derived-thread-state cards. Exactly
-//     one colour exists here and it means "a human is still needed", so a
-//     green/blue/amber/red legend cannot be expressed — the four states are
-//     rule-topped blocks and the words carry the distinction.
-//   · every card, tinted panel and <kbd> chrome (rounded, filled, ringed).
-//
-// All copy is verbatim from the live site, with "Pierre" → {SITE_NAME}. The
-// eyebrows became rail labels, per the section pattern.
+// EVIDENCE SOURCES (verbatim, verified 2026-08-04 — keep this list in sync):
+//   01 Feed     — github.com/orgs/community/discussions/5793 (@waterplea, 2021)
+//   02 Threads  — arxiv.org/pdf/2304.08426 (Hasan et al., read from the PDF)
+//   03 Timeline — same paper, same PDF
+//   05 PR detail— ics.uci.edu/~gmark/CHI2005.pdf p.324 (developer quote)
+//   06 Receipt  — greptile.com/blog/make-llms-shut-up (Dec 2024)
+//   07 Search   — engineering.atspotify.com/2021/05/a-product-story-… (Backstage)
+// Popular-but-unciteable figures deliberately NOT used: the "23 min 15 s"
+// context-switch number (traces to an interview, not a study — the CHI 2005
+// field figure is 25 min 26 s) and every Reddit CodeRabbit quote (only
+// reachable via competitors' marketing pages, i.e. unverifiable).
 // ---------------------------------------------------------------------------
 
 const DERIVED_STATES = [
@@ -59,22 +63,6 @@ const SHORTCUTS = [
   { keys: ['Esc'], label: 'Step back out — tab, then selection' },
 ];
 
-/**
- * The recurring "why it matters" note.
- *
- * Was a rounded, sky-tinted panel with an inline coloured lead-in. Here it is
- * what it always was in substance — a footnote to the section — so it reads as
- * one: a hairline, a mono label, and the sentence at reading size.
- */
-function WhyNote({ children }: { children: ReactNode }): JSX.Element {
-  return (
-    <div className="mt-7 border-t border-rule pt-4">
-      <MonoLabel className="mb-2.5 text-secondary">Why it matters</MonoLabel>
-      <p className="max-w-answer text-list text-muted">{children}</p>
-    </div>
-  );
-}
-
 export default function Features(): JSX.Element {
   useSeo(seoFor('/features'));
 
@@ -90,8 +78,8 @@ export default function Features(): JSX.Element {
         </h1>
         <p className="max-w-[58ch] text-pretty text-lede text-ink-soft">
           {SITE_NAME} is opinionated about one thing: the fastest way to understand a team
-          is to <em>see</em> it. Everything on this page is free and open-core — not a
-          trial, not a taster. The core is the product.
+          is to <em>see</em> it. Everything here is free and open-core — not a trial, not
+          a taster. The core is the product.
         </p>
       </Section>
 
@@ -99,26 +87,24 @@ export default function Features(): JSX.Element {
       <Section id="activity">
         <RailGrid rail={{ n: '01', word: 'Feed' }}>
           <div>
+            <PixelIcon name="feed" className="mb-5" />
             <h2 className="mb-6 max-w-[24ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
-              A feed that reads like a changelog, not a firehose.
+              Caught up in ten seconds.
             </h2>
-            <p className="mb-[18px]">
-              The view {SITE_NAME} opens on: one consolidated, cross-repo stream of what
-              actually happened — opens, merges, reviews, comments — and the commits that{' '}
-              <span className="text-ink">addressed a review thread</span>, coalesced into
-              runs per author so “pushed 4 commits · addressed 2 threads” is one line, not
-              four. Chronological, bot-filterable, full markdown bodies inline.
+            <p className="mb-2">
+              One cross-repo stream of what actually happened — opens, merges, reviews,
+              and the commits that <span className="text-ink">addressed a thread</span> —
+              coalesced per author, bot-filterable, full markdown inline. Click through to
+              the PR; Back returns you to the exact item you left.
             </p>
-            <p>
-              Click any card and the full PR detail opens in its own tab; browser{' '}
-              <span className="text-ink">Back</span> returns you to the exact feed item you
-              left, scrolled into place. Reply to and resolve threads without leaving the
-              feed.
-            </p>
-            <WhyNote>
-              It’s the “what did I miss overnight?” view — answerable in ten seconds,
-              instead of by reconstructing the day from Slack, GitHub, email and Jira.
-            </WhyNote>
+            <Evidence
+              quote="Some bots are helpful but their automatic comments add noise to my notifications/emails and there seems to be no way to configure that."
+              source="“Allow to mute bots” — GitHub community discussion, open and unanswered since 2021"
+            />
+            <Story moment="08:58">
+              Coffee down, feed open: two merges overnight, one question addressed to
+              you. That’s the whole catch-up.
+            </Story>
           </div>
 
           <ShotFrame
@@ -131,10 +117,52 @@ export default function Features(): JSX.Element {
         </RailGrid>
       </Section>
 
-      {/* ---------- 02 · timeline ---------- */}
+      {/* ---------- 02 · derived thread state ---------- */}
+      <Section id="threads" tone="alt">
+        <RailGrid rail={{ n: '02', word: 'Threads' }} cols="one">
+          <div>
+            <PixelIcon name="threads" className="mb-5" />
+            <h2 className="mb-6 font-display text-h2-sm font-semibold text-ink type:text-h2">
+              No feedback left behind.
+            </h2>
+            <p className="mb-2 max-w-answer">
+              During sync, {SITE_NAME} classifies every review thread by cross-referencing
+              replies and resolution against the commits that landed afterward. One state
+              is a heuristic — and the product never pretends otherwise.
+            </p>
+            <Evidence
+              quote="In 37 (74%) PRs, the reviewer responded after one week but quickly merged the PR after reviewing it."
+              source="Hasan et al., “Understanding the Time to First Response in GitHub Pull Requests” — 111,094 PRs, arXiv, 2023"
+            />
+            <p className="mb-9 max-w-answer text-body-sm text-muted">
+              Most late reviews aren’t hard reviews — they’re unseen ones. A thread state
+              you can scan is the difference.
+            </p>
+
+            <div className="grid gap-x-grid-gutter gap-y-8 rail:grid-cols-2">
+              {DERIVED_STATES.map((s) => (
+                <div key={s.label} className="border-t border-rule-strong pt-[18px]">
+                  <h3 className="mb-2.5 font-display text-h4-sm font-semibold text-ink">
+                    {s.label}
+                  </h3>
+                  <p className="text-list">{s.body}</p>
+                </div>
+              ))}
+            </div>
+
+            <Story moment="Day 3">
+              The critical PR’s thread flips to untouched. Someone answers it today —
+              because it was visible, not because anyone nagged.
+            </Story>
+          </div>
+        </RailGrid>
+      </Section>
+
+      {/* ---------- 03 · timeline ---------- */}
       <Section id="timeline">
-        <RailGrid rail={{ n: '02', word: 'Timeline' }}>
+        <RailGrid rail={{ n: '03', word: 'Timeline' }}>
           <div className="rail:col-span-2">
+            <PixelIcon name="timeline" className="mb-5" />
             <h2 className="mb-7 max-w-[30ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
               Repos down the side. Time across the top. Everything in between.
             </h2>
@@ -150,84 +178,46 @@ export default function Features(): JSX.Element {
 
             <div className="grid gap-grid-gutter rail:grid-cols-2">
               <div>
-                <p className="mb-[18px]">
-                  When the feed answers “what happened?” and you want “what’s the shape of
-                  it?”, switch to the board. It’s nested two levels deep: each repo holds a
-                  row per contributor. PR bars pack into lanes so nothing overlaps; opens,
-                  reviews, comments and commits render as distinct{' '}
-                  <span className="text-ink">shaped markers</span> that cluster into counts
-                  as you zoom out and expand again as you zoom in.
-                </p>
                 <p>
-                  Contributors with merge rights wear a{' '}
-                  <span className="text-ink">maintainer shield</span>, every name links to
-                  its GitHub profile, and a noisy contributor collapses to a single line —
-                  remembered across reloads. Click a marker to read the actual review or
-                  comment in a popover; click a bar to load the PR into the detail pane.
+                  Each repo holds a row per contributor; PR bars pack into lanes; events
+                  render as <span className="text-ink">shaped markers</span> that cluster
+                  as you zoom. A list tells you a PR exists — a timeline tells you it’s
+                  been open eleven days, reviewed once on day two, silent since.{' '}
+                  <span className="text-ink">Duration and staleness live in the shape.</span>
                 </p>
               </div>
-              <div>
-                <p>
-                  And it’s fast in a way GitHub structurally isn’t. GitHub makes you click
-                  through repo → pull requests → files → back, once per repo, per PR.{' '}
-                  {SITE_NAME} renders your whole org’s activity in one scan — and because
-                  everything is <span className="text-ink">synced locally first</span>,
-                  navigation is instant. No spinners between you and the answer.
-                </p>
-                <WhyNote>
-                  A list tells you a PR exists. A timeline tells you it’s been open eleven
-                  days, reviewed once on day two, silent since — and that’s the part that
-                  changes what you do next.
-                </WhyNote>
-              </div>
+              <Evidence
+                quote="…the authors had to grab the attention of the reviewer by mentioning their PRs in the comment of other PRs."
+                source="How stalled PRs actually get unstuck today — Hasan et al., arXiv, 2023"
+              />
             </div>
 
-            {/* The argument for the board itself — under an ink rule, because it
-                is a change of register: everything above describes the feature,
-                this defends the choice. */}
-            <div className="mt-12 border-t border-ink pt-6">
-              <h3 className="mb-4 font-display text-h3 font-semibold text-ink">
-                Why a timeline, not a list
-              </h3>
-              <p className="max-w-answer text-body-sm">
-                Lists make you read; a board lets you{' '}
-                <span className="text-ink">scan</span>. Putting time on an axis surfaces
-                the two things a list structurally can’t —{' '}
-                <span className="text-ink">duration</span> and{' '}
-                <span className="text-ink">staleness</span> — at a glance: a long bar is a
-                long-lived PR, a gap after the last marker is a stall. Grouping spatially
-                (repo → contributor) turns “who’s working on what” into a shape you
-                recognise rather than rows you parse, and clustering keeps it legible as
-                volume grows. A list of 200 open PRs is unreadable; a timeline of 200 has a
-                shape — and the outliers jump out.
-              </p>
-            </div>
+            <Story moment="Sprint day 9">
+              The migration PR’s bar is long and quiet. You see it, you ping once, it
+              ships — no nagging economy required.
+            </Story>
           </div>
         </RailGrid>
       </Section>
 
-      {/* ---------- 03 · repo consoles ---------- */}
+      {/* ---------- 04 · repo consoles ---------- */}
       <Section id="repo-console">
-        <RailGrid rail={{ n: '03', word: 'Consoles' }}>
+        <RailGrid rail={{ n: '04', word: 'Consoles' }}>
           <div>
+            <PixelIcon name="console" className="mb-5" />
             <h2 className="mb-6 max-w-[24ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
-              Each repo gets a console. State of play at a glance.
+              Standup, pre-assembled.
             </h2>
-            <p className="mb-[18px]">
-              Pick a repo in the Activity rail and you get its state of play: a compact
-              stats header, a <span className="text-ink">thread-state bar</span> showing how
-              much review feedback is resolved versus sitting, and every open PR with its CI
-              status, approval standing and thread counts — then that repo’s own feed
-              underneath.
+            <p className="mb-2">
+              Pick a repo: a stats header, a{' '}
+              <span className="text-ink">thread-state bar</span> showing how much feedback
+              is resolved versus sitting, every open PR with its CI and approval standing,
+              that repo’s own feed underneath. Re-scopes live with your filters.
             </p>
-            <p>
-              The whole console re-scopes live with your repo and member filters, so “how’s
-              the payments repo doing this sprint?” is one click, not a query.
-            </p>
-            <WhyNote>
-              Standups ask the same question per repo every day. The console is that answer,
-              pre-assembled, before anyone shares a screen.
-            </WhyNote>
+            <Story moment="09:58">
+              Two minutes before standup, “how’s the payments repo doing?” is already
+              answered — before anyone shares a screen.
+            </Story>
           </div>
 
           <ShotFrame
@@ -240,69 +230,30 @@ export default function Features(): JSX.Element {
         </RailGrid>
       </Section>
 
-      {/* ---------- 04 · derived thread state ---------- */}
-      <Section id="threads" tone="alt">
-        <RailGrid rail={{ n: '04', word: 'Threads' }} cols="one">
-          <div>
-            <h2 className="mb-6 font-display text-h2-sm font-semibold text-ink type:text-h2">
-              Every review thread, in one of four states.
-            </h2>
-            <p className="mb-9 max-w-answer">
-              During sync, {SITE_NAME} classifies each review thread by cross-referencing
-              replies and resolution against the commits that landed afterward. One of these
-              states is a heuristic — and the product never pretends otherwise.
-            </p>
-
-            <div className="grid gap-x-grid-gutter gap-y-8 rail:grid-cols-2">
-              {DERIVED_STATES.map((s) => (
-                <div key={s.label} className="border-t border-rule-strong pt-[18px]">
-                  <h3 className="mb-2.5 font-display text-h4-sm font-semibold text-ink">
-                    {s.label}
-                  </h3>
-                  <p className="text-list">{s.body}</p>
-                </div>
-              ))}
-            </div>
-
-            <WhyNote>
-              A tool that hides its uncertainty earns distrust the first time it’s wrong.
-              “Likely” is doing honest work — it surfaces threads worth a glance without
-              claiming they’re settled.
-            </WhyNote>
-          </div>
-        </RailGrid>
-      </Section>
-
       {/* ---------- 05 · PR detail ---------- */}
       <Section id="pr-detail">
         <RailGrid rail={{ n: '05', word: 'PR detail' }}>
           <div>
+            <PixelIcon name="pr" className="mb-5" />
             <h2 className="mb-6 max-w-[24ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
-              Drill in without leaving the dashboard.
+              The loop stays closed.
             </h2>
-            <p className="mb-[18px]">
-              Select a PR and the full detail opens in place:{' '}
-              <span className="text-ink">Overview</span> (CI checks with failing-job logs,
-              reviewers vs approvers vs merged-by, requested reviewers, labels, summary and
-              comments), <span className="text-ink">Threads</span> (grouped by file, newest
-              first, with code anchors), inline file{' '}
-              <span className="text-ink">diffs</span> with unresolved threads pinned to
-              their lines, and a per-PR activity feed — each entry with a “Show on timeline”
-              deep-link.
+            <p className="mb-2">
+              Overview (CI checks with failing-job logs, reviewers vs approvers), threads
+              grouped by file, inline diffs with unresolved threads pinned to their lines.
+              And it’s not read-only: reply, resolve,{' '}
+              <span className="font-mono text-[16px] text-ink">@mention</span>, request
+              reviewers, approve, rebase, merge — real GitHub writes, gated on your real
+              permissions.
             </p>
-            <p>
-              It’s not read-only. Reply to and resolve threads, leave PR comments with{' '}
-              <span className="font-mono text-[16px] text-ink">@mention</span> autocomplete,
-              request reviewers, and approve — real GitHub writes, and the approve control
-              is gated on your real{' '}
-              <code className="font-mono text-[16px] text-ink">viewer_permission</code>, so
-              it only appears when you genuinely can.
-            </p>
-            <WhyNote>
-              Every context switch back to github.com is a chance to get lost in the tabs.
-              If the answer <em>and</em> the action live in the dashboard, the loop stays
-              closed.
-            </WhyNote>
+            <Evidence
+              quote="…you have your mind on something else and then you have to shift completely… by the time you come back to it your frame of mind is completely different…"
+              source="A developer, in Mark et al.’s 700-hour field study of fragmented work — CHI 2005"
+            />
+            <Story moment="Mid-review">
+              Read, reply, approve, merge. The tab count never moves; neither does your
+              frame of mind.
+            </Story>
           </div>
 
           <ShotFrame
@@ -315,70 +266,90 @@ export default function Features(): JSX.Element {
         </RailGrid>
       </Section>
 
-      {/* ---------- 06 · open-PR strip ---------- */}
-      <Section id="open-prs">
-        <RailGrid rail={{ n: '06', word: 'Open PRs' }} cols="one">
+      {/* ---------- 06 · the receipt ---------- */}
+      <Section id="receipt" tone="alt">
+        <RailGrid rail={{ n: '06', word: 'The receipt' }}>
           <div>
-            <h2 className="mb-6 font-display text-h2-sm font-semibold text-ink type:text-h2">
-              Every open PR, with a reason it’s on the list.
+            <PixelIcon name="receipt" className="mb-5" />
+            <h2 className="mb-6 max-w-[24ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
+              Noise, measured.
             </h2>
-            <p className="mb-9 max-w-answer">
-              A collapsible strip across the top holds every open PR in your repos.
-              Filter to <span className="font-mono text-[16px] text-ink">all</span>,{' '}
-              <span className="font-mono text-[16px] text-ink">my&nbsp;turn</span>, or{' '}
-              <span className="font-mono text-[16px] text-ink">needs&nbsp;attention</span>,
-              and each card carries a reason tag — awaiting your review, CI failing, merge
-              conflicts, approved &amp; ready, stalled — computed from the PR’s real state.
-              The strip even keeps a running{' '}
-              <span className="text-ink">stalled count</span>, so a growing backlog of quiet
-              PRs is a number you can’t miss.
+            <p className="mb-2">
+              Every bot comment graded by {SITE_NAME}’s own ML model — severity and
+              category, no vendor self-assessment. Rolled up per bot: cost, noise mix,
+              overlap, and the bot-only reviews no human ever handled. Grading runs in the
+              hosted service today; the local install is on the roadmap.
             </p>
-
-            {/* The strip is a 9:1 sliver of UI, so it gets the full content column
-                and `contain` — cropping it would remove the thing being shown. */}
-            <ShotFrame
-              src="/shots/open-pr-strip.png"
-              alt="The open-PR strip: a collapsible row of every open PR with all / my-turn / needs-attention filters and reason tags."
-              caption={`${SITE_NAME.toLowerCase()} · open PRs`}
-              height={140}
-              fit="contain"
+            <Evidence
+              quote="When we first launched this product, the biggest complaint by far was that the bot left too many comments."
+              source="Greptile — an AI review bot vendor, on its own bot. Vendor blog, December 2024"
             />
+            <MonoLink to="/bots">The receipt, in depth →</MonoLink>
+            <Story moment="Renewal week">
+              “The bot feels noisy” becomes keep, tune, or kill — decided on evidence,
+              calmly.
+            </Story>
+          </div>
 
-            <WhyNote>
-              Stale PRs are where work silently dies. {SITE_NAME} flags any open PR that’s
-              gone quiet — unresolved threads, no commits for days — so it never slips past
-              a sprint boundary unnoticed. And on the timeline they’re impossible to miss: a
-              long bar with no recent markers <em>is</em> a stall, at a glance.
-            </WhyNote>
+          <ShotFrame
+            src="/shots/bot-only-review.png"
+            alt="Open PRs where the only review activity is bot-authored — reviews no human has handled."
+            caption={`${SITE_NAME.toLowerCase()} · bot-only reviews`}
+            height={280}
+            fit="contain"
+            strong
+          />
+        </RailGrid>
+      </Section>
+
+      {/* ---------- 07 · search & workspaces ---------- */}
+      <Section id="search">
+        <RailGrid rail={{ n: '07', word: 'Search' }} cols="one">
+          <div>
+            <PixelIcon name="search" className="mb-5" />
+            <h2 className="mb-6 font-display text-h2-sm font-semibold text-ink type:text-h2">
+              Found, not remembered.
+            </h2>
+            <div className="grid gap-grid-gutter rail:grid-cols-2">
+              <p>
+                Cross-repo search, instantly — PRs, threads, comments, people — against
+                the locally-synced index, results as you type. It’s the{' '}
+                <span className="font-mono text-[16px] text-ink">/</span> key.{' '}
+                <span className="text-ink">Workspaces</span> group repos by team: every
+                view scopes to one, bots are judged per workspace, and the compare board
+                tracks metrics across all of them.
+              </p>
+              <Evidence
+                quote="People couldn’t find things. It was simple as that. It took forever to just find the right service."
+                source="Spotify Engineering, on why it built Backstage — engineering blog, 2021"
+              />
+            </div>
+            <Story moment="Thursday">
+              “Which repo was that thread in?” stops being a question anyone asks.
+            </Story>
           </div>
         </RailGrid>
       </Section>
 
-      {/* ---------- 07 · speed ---------- */}
+      {/* ---------- 08 · speed ---------- */}
       <Section id="fast" tone="alt">
-        <RailGrid rail={{ n: '07', word: 'Speed' }}>
+        <RailGrid rail={{ n: '08', word: 'Speed' }}>
           <div>
+            <PixelIcon name="speed" className="mb-5" />
             <h2 className="mb-6 font-display text-h2-sm font-semibold text-ink type:text-h2">
-              Fast is a feature.
+              Fast enough to be a habit.
             </h2>
-            <p className="mb-[18px]">
-              Everything is synced into a local database and served through a deliberately
-              lean read layer — the board never waits on GitHub to render. Filters compose
-              instantly: repos, members, date presets, event categories, thread states,
-              review verdicts. The whole thing feels like a native app because,
-              architecturally, it nearly is one.
+            <p className="mb-2">
+              Everything syncs into a local database behind a deliberately lean read layer
+              — the board never waits on GitHub to render, and adaptive sync keeps hot
+              repos seconds-fresh without burning quota on cold ones. Filters compose
+              instantly, and <span className="text-ink">every view is a URL</span> —
+              shareable, bookmarkable, pasteable into a standup note.
             </p>
-            <p>
-              And <span className="text-ink">every view is a URL</span>. The filter state
-              mirrors into the query string both ways, diffed against defaults — so the
-              common view stays a clean link and a custom one is shareable, reloadable and
-              bookmarkable.
-            </p>
-            <WhyNote>
-              A dashboard you wait for is a dashboard you stop opening. Speed isn’t polish
-              here — it’s the difference between a habit and a bookmark you feel guilty
-              about.
-            </WhyNote>
+            <Story moment="Every day">
+              A dashboard you wait for is a dashboard you stop opening. This one opens
+              fast enough that you actually do.
+            </Story>
           </div>
 
           <div className="border-t border-ink pt-6">
@@ -403,10 +374,6 @@ export default function Features(): JSX.Element {
                 </li>
               ))}
             </ul>
-            <p className="mt-6 text-list text-muted">
-              Deep links work everywhere too — a PR, a thread, a filtered view are all
-              addresses you can paste into a standup note.
-            </p>
           </div>
         </RailGrid>
       </Section>
@@ -417,11 +384,11 @@ export default function Features(): JSX.Element {
           <div>
             <MonoLabel className="mb-5 text-secondary">Keep going</MonoLabel>
             <h2 className="mb-5 max-w-[22ch] font-display text-h2-sm font-semibold text-ink type:text-cta">
-              The intelligence layer lives in Pro.
+              Pro reads the board. Pro+ acts on it.
             </h2>
             <p className="max-w-[56ch]">
-              AI summaries, Workspace Insights, flow metrics, My-Turn triage, Slack digests,
-              and agentic review &amp; fix — everything that turns activity into decisions.
+              Digests with teeth, thread validity, themes and reports, chat with your
+              repos — and in Pro+, the Claude loop: review, fix, push, one app.
             </p>
           </div>
           <div className="shrink-0">

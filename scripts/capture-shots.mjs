@@ -163,26 +163,10 @@ async function proShots() {
     await ctx.close();
   });
 
-  // 6. Sprint report — element shot of the Pro sprint-report card.
-  //
-  // BROKEN, and not by a selector: `SprintReportCard` has ZERO call sites. Commit
-  // 8af5e4c ("consolidate Sprint questions + chat into one pill panel") replaced
-  // the standing card with a "Sprint report" preset pill in AdHocChatPanel, and
-  // the component was left orphaned. The FEATURE is alive (the /api/pro/sprint-report
-  // routes, the hook and the Slack digest all still work) — only this UI is gone,
-  // so there is nothing to photograph. Capturing what replaced it means running a
-  // real, billed Haiku call with a nondeterministic answer, which is a decision
-  // rather than a fix. Left failing loudly instead of silently shipping a stale PNG.
-  await shot('sprint-report.png', async () => {
-    const ctx = await newCtx({ width: 1400, height: 1800 });
-    const page = await ctx.newPage();
-    await openApp(page, '?view=activity');
-    const card = page.getByTestId('sprint-report');
-    await card.waitFor({ timeout: 8000 });
-    await page.waitForTimeout(2000); // report markdown + PR-ref table render
-    await card.screenshot({ path: out('sprint-report.png') });
-    await ctx.close();
-  });
+  // 6. (retired) sprint-report.png — `SprintReportCard` has zero call sites since
+  // commit 8af5e4c, so there was nothing to photograph; the shot failed on every
+  // run while the stale PNG kept shipping. The 2026-08 content redesign removed
+  // its last page mounts (Home §03, /pro §02), closing the loop.
 
   // 7. PR detail — Overview tab of #113, focused on the (taller) detail pane.
   await shot('pr-detail.png', async () => {
@@ -362,29 +346,11 @@ async function proShots() {
     await ctx.close();
   });
 
-  // 11. Open-PR strip — the 30-day preset so the strip surfaces the stalled PRs
-  // (its header reads "N stalled" > 0). Ensure expanded, element screenshot.
-  // BROKEN: there is no `open-pr-strip` testid anywhere in the SPA. OpenPrsStrip was
-  // DELETED in the July Activity cleanup; its job is now done by the Feed's open-PR
-  // panel and the sortable `open-prs` drill-down tab. The /features page still
-  // references this shot and describes the strip as a live feature — that copy needs
-  // a decision, which is why this is left failing rather than quietly removed.
-  await shot('open-pr-strip.png', async () => {
-    const ctx = await newCtx();
-    const page = await ctx.newPage();
-    await openApp(page, '?preset=30d&view=timeline');
-    const strip = page.getByTestId('open-pr-strip');
-    // expand if collapsed
-    const toggle = strip.locator('button[aria-expanded]').first();
-    const expanded = await toggle.getAttribute('aria-expanded').catch(() => 'true');
-    if (expanded === 'false') {
-      await toggle.click();
-      await page.waitForTimeout(500);
-    }
-    await page.waitForTimeout(400);
-    await strip.screenshot({ path: out('open-pr-strip.png') });
-    await ctx.close();
-  });
+  // 11. (retired) open-pr-strip.png — OpenPrsStrip was DELETED in the July
+  // Activity cleanup (its job is now the Feed's open-PR panel + the sortable
+  // `open-prs` drill-down), so the testid never matched and the shot failed on
+  // every run. The 2026-08 content redesign replaced the /features section that
+  // described the strip, closing the loop.
 
   // =========================================================================
   // WALKTHROUGH step crops — the landing page's two step-by-step demos

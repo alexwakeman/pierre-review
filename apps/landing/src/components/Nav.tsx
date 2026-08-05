@@ -17,6 +17,7 @@ import { Wordmark } from './feint/Wordmark';
 
 const NAV_LINKS = [
   { to: '/features', label: 'Open Core' },
+  { to: '/bots', label: 'Bots' },
   { to: '/pro', label: 'Pro' },
   { to: '/pricing', label: 'Pricing' },
   { to: '/how-it-works', label: 'How it works' },

@@ -7,11 +7,11 @@ import type { AlienName } from '../../lib/sprites';
 //
 // The site's standing rule is "the site does not move; motion is the game's
 // job", and this is the one sanctioned exception. It earns it by being an
-// ARGUMENT rather than a decoration: notifications arrive from off the top of
-// the page, fall straight down past the headline, and fade to nothing on the
-// way. The fading is the product — the storm keeps arriving, and it goes quiet
-// before it reaches you. That is why the drops never land, never pile up, never
-// interact, and never touch the two words that matter.
+// ARGUMENT rather than a decoration: notifications arrive fast from off the
+// top of the page, then DECELERATE as they fall — the storm enters at speed
+// and settles to a drift, fading to nothing on the way. The slowing and the
+// fading are the product: chaos above, calm below. That is why the drops never
+// land, never pile up, never interact, and never touch the words that matter.
 //
 // It must read as a whisper. Start alpha is 0.16 and the fade is superlinear
 // (^1.6), so a drop spends most of its fall under 5 % opacity; at a glance the
@@ -60,10 +60,24 @@ const INK = '#2A2A2E';
 const START_ALPHA = 0.16;
 /** Superlinear so the drop is nearly gone by the time it is halfway down. */
 const FADE_EXPONENT = 1.6;
-/** CSS px per second. Faster than the rack's descent, slower than its shots. */
-const SPEED = 34;
+/**
+ * CSS px per second at the hero's top edge — the storm arrives quickly…
+ * …and settles toward SPEED_SETTLE as it descends (quadratic ease-out on fall
+ * progress). The deceleration is the argument: chaos above, calm below.
+ */
+const SPEED_ENTER = 120;
+const SPEED_SETTLE = 16;
 /** Below this the drop contributes nothing a display can show — skip the runs. */
 const ALPHA_FLOOR = 0.002;
+/**
+ * Once a drop has faded below ~1% it may respawn without a visible pop. Without
+ * this, the slow tail of the deceleration would let near-invisible drops crawl
+ * for many seconds and starve the visible storm — steady-state density is
+ * ∝ 1/velocity, so the slow zone hoards drops. Derived from the fade constants
+ * so the three stay consistent if either is tuned.
+ */
+const RESPAWN_ALPHA = 0.01;
+const RESPAWN_P = 1 - Math.pow(RESPAWN_ALPHA / START_ALPHA, 1 / FADE_EXPONENT);
 /**
  * Fixed seed. The page is prerendered and then re-rendered fresh in the browser,
  * and two visitors comparing screens should see the same page — so the
@@ -183,7 +197,8 @@ export function Rain(): JSX.Element {
         const x = Math.round(d.xf * Math.max(0, width - sprite.cols * CELL));
         // Snap to the device pixel grid so the runs never straddle a physical
         // pixel and get anti-aliased into a smudge. Never `Math.round` to a
-        // whole CSS px — at 34 px/s that visibly steps on a 2× display.
+        // whole CSS px — in the settled zone (~16 px/s) that visibly steps on
+        // a 2× display.
         const y = Math.round(d.y * dpr) / dpr;
 
         ctx.globalAlpha = alpha;
@@ -204,8 +219,12 @@ export function Rain(): JSX.Element {
       lastFrame = now;
 
       for (const d of drops) {
-        d.y += SPEED * dt;
-        if (d.y >= height) respawn(d);
+        // Fast at the top, drifting by the bottom: quadratic ease-out on fall
+        // progress, with anything still above the hero moving at full speed.
+        const p = Math.min(1, Math.max(0, d.y / height));
+        const ease = (1 - p) * (1 - p);
+        d.y += (SPEED_SETTLE + (SPEED_ENTER - SPEED_SETTLE) * ease) * dt;
+        if (d.y >= height || p >= RESPAWN_P) respawn(d);
       }
       paint();
     };

@@ -15,7 +15,7 @@
     <title>Limn — the calm layer above your review bot</title>
     <meta
       name="description"
-      content="Bring your own reviewer. Limn is the cross-repo layer above CodeRabbit, Greptile and Copilot — what’s stalled, whose turn it is, and which of the bot’s comments a human still needs to read."
+      content="Bring your own reviewer. Limn is the cross-repo layer above CodeRabbit, Greptile and Copilot — what’s stalled, whose turn it is, and what every bot comment is actually worth: graded independently, on your own repos."
     />
     <meta name="robots" content="index, follow" />
 
@@ -84,32 +84,46 @@
             "name": "Limn",
             "applicationCategory": "DeveloperApplication",
             "operatingSystem": "Web, macOS, Linux, Windows",
-            "description": "A timeline-first dashboard for tracking a team’s GitHub activity across repositories — sprint situational awareness, PR triage, team insights, flow metrics, and human-in-the-loop AI review.",
+            "description": "A timeline-first dashboard for tracking a team’s GitHub activity across repositories — sprint situational awareness, PR triage, independent ML grading of AI review bots, flow metrics, and human-in-the-loop AI review.",
             "url": "https://pierre-review.com/",
             "publisher": { "@id": "https://pierre-review.com/#org" },
             "offers": {
               "@type": "AggregateOffer",
               "priceCurrency": "USD",
               "lowPrice": "0",
-              "highPrice": "15",
-              "offerCount": "2",
+              "highPrice": "29",
+              "offerCount": "3",
               "offers": [
                 {
                   "@type": "Offer",
                   "name": "Free",
-                  "description": "The open-core dashboard: timeline, Activity feed, PR detail and write actions. Free forever.",
+                  "description": "The open-core dashboard: timeline, Activity feed, PR detail with write actions, and the bot receipt — independent ML grading of AI review bots. Free forever.",
                   "price": "0",
                   "priceCurrency": "USD"
                 },
                 {
                   "@type": "Offer",
                   "name": "Pro",
-                  "description": "The intelligence layer: AI summaries, Workspace Insights, flow metrics, Slack digests and My Turn. $15 per month.",
+                  "description": "The intelligence layer: attention & risk digests, thread validity, themes and reports, chat with your repos, CI diagnosis. $15 per seat per month, billed annually.",
                   "price": "15",
                   "priceCurrency": "USD",
                   "priceSpecification": {
                     "@type": "UnitPriceSpecification",
                     "price": "15",
+                    "priceCurrency": "USD",
+                    "billingIncrement": 1,
+                    "unitText": "MONTH"
+                  }
+                },
+                {
+                  "@type": "Offer",
+                  "name": "Pro+",
+                  "description": "The full loop: Claude Review with memory, reword and simplify, AI Fix and CI auto-fix on your own Anthropic key. $29 per seat per month, billed annually.",
+                  "price": "29",
+                  "priceCurrency": "USD",
+                  "priceSpecification": {
+                    "@type": "UnitPriceSpecification",
+                    "price": "29",
                     "priceCurrency": "USD",
                     "billingIncrement": 1,
                     "unitText": "MONTH"

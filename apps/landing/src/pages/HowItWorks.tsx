@@ -9,8 +9,10 @@ import {
   RailGrid,
   RuledItem,
   Section,
+  Story,
 } from '../components/feint/primitives';
 import { TerminalPanel } from '../components/feint/Terminal';
+import { PixelIcon } from '../components/feint/PixelIcon';
 
 // ---------------------------------------------------------------------------
 // The engineering page — five numbered sections plus the closing CTA.
@@ -127,7 +129,7 @@ const LOCAL: ReactNode[] = [
   </>,
   'One synthesized account; opens straight to the Activity console.',
   // A plain string, not JSX text — so the ampersand is literal, not `&amp;`.
-  'Runs the Pro intelligence layer, including agentic review & fix (opt-in).',
+  'Runs Pro and Pro+ in full, including agentic review & fix (opt-in).',
   <>
     <Term>{INSTALL_COMMAND}</Term> and you’re in.
   </>,
@@ -145,6 +147,7 @@ const SECURITY = [
   'Per-account isolation is load-bearing: every list query filters by account, every id-addressed read scopes ownership, and a cross-account IDOR check (verify:isolation) guards the query layer.',
   'Cloud OAuth tokens are sealed with AES-256-GCM and decrypted per request — never held in a module-level cache.',
   'Local mode stores no credentials at all: it borrows your authenticated gh CLI and talks to a SQLite file on your disk.',
+  'The model that grades bot comments is Limn’s own — fine-tuned on public GitHub bot reviews, running on plain CPU in the hosted service. Comment text in, a label out; your code never trains anyone’s model.',
 ];
 
 const RUN_STEPS: ReactNode[] = [
@@ -180,7 +183,17 @@ const ROADMAP: { tag: string; title: string; body: string }[] = [
   {
     tag: 'Platform',
     title: 'Hosted cloud Pro rollout',
-    body: 'Pro runs in the local and self-hosted deployment today; the hosted cloud tier is rolling out, same features, zero setup.',
+    body: 'Pro and Pro+ run in the local and self-hosted deployment today; the hosted cloud tiers are rolling out, same features, zero setup.',
+  },
+  {
+    tag: 'Platform',
+    title: 'The cross-org benchmark',
+    body: 'Opt-in and anonymised: how your bots’ acted-on rate and noise mix compare with teams like yours. The receipt gets a reference column.',
+  },
+  {
+    tag: 'AI',
+    title: 'Bot grading in the local install',
+    body: 'The severity model that powers the receipt runs in the hosted service today. Bringing it to the local install — the same grades, fully offline — is planned.',
   },
   {
     tag: 'Platform',
@@ -221,7 +234,9 @@ export default function HowItWorks(): JSX.Element {
           not — stage 01 feeds 02. So it is a numbered spec table. */}
       <Section>
         <RailGrid rail={{ n: '01', word: 'Pipeline' }} cols="one">
-          <ol className="max-w-answer border-t border-ink">
+          <div>
+            <PixelIcon name="arrow" className="mb-5" />
+            <ol className="max-w-answer border-t border-ink">
             {PIPELINE.map((stage, i) => (
               <li
                 key={stage.label}
@@ -234,7 +249,8 @@ export default function HowItWorks(): JSX.Element {
                 <span className="font-mono text-mono-caption text-secondary">{stage.sub}</span>
               </li>
             ))}
-          </ol>
+            </ol>
+          </div>
         </RailGrid>
       </Section>
 
@@ -242,8 +258,9 @@ export default function HowItWorks(): JSX.Element {
       <Section tone="alt">
         <RailGrid rail={{ n: '02', word: 'Sync pipeline' }} cols="one">
           <div>
+            <PixelIcon name="sync" className="mb-5" />
             <h2 className="mb-5 font-display text-h2-sm font-semibold text-ink type:text-h2">
-              How the board stays current.
+              Current, without ceremony.
             </h2>
             <p className="mb-11 max-w-[64ch] text-lede">
               The sync is the load-bearing part — and it’s built to be boring: safe to
@@ -261,6 +278,11 @@ export default function HowItWorks(): JSX.Element {
                 </div>
               ))}
             </div>
+
+            <Story moment="Overnight">
+              CI went green at 02:11 and a thread resolved at 23:40 — the board had both
+              before your first coffee. Nothing to run, nothing to refresh.
+            </Story>
           </div>
         </RailGrid>
       </Section>
@@ -269,6 +291,7 @@ export default function HowItWorks(): JSX.Element {
       <Section>
         <RailGrid rail={{ n: '03', word: 'Two modes' }} cols="one">
           <div>
+            <PixelIcon name="modes" className="mb-5" />
             <h2 className="mb-5 font-display text-h2-sm font-semibold text-ink type:text-h2">
               Local-first. Cloud when you need it.
             </h2>
@@ -309,6 +332,11 @@ export default function HowItWorks(): JSX.Element {
                 </ul>
               </div>
             </div>
+
+            <Story moment="Day one">
+              <span className="font-mono">npx</span> on your laptop before lunch; the same
+              board, hosted for the whole team, next sprint. One codebase, one habit.
+            </Story>
           </div>
         </RailGrid>
 
@@ -330,6 +358,7 @@ export default function HowItWorks(): JSX.Element {
       <Section id="run-locally">
         <RailGrid rail={{ n: '04', word: 'Run locally' }}>
           <div>
+            <PixelIcon name="console" className="mb-5" />
             <h2 className="mb-7 font-display text-h2-sm font-semibold text-ink type:text-h2">
               What happens when you run the command.
             </h2>
@@ -362,6 +391,7 @@ export default function HowItWorks(): JSX.Element {
       <Section id="roadmap">
         <RailGrid rail={{ n: '05', word: 'Roadmap' }} cols="one">
           <div>
+            <PixelIcon name="flag" className="mb-5" />
             <h2 className="mb-5 font-display text-h2-sm font-semibold text-ink type:text-h2">
               What’s next.
             </h2>

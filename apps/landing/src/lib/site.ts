@@ -64,3 +64,17 @@ export const ARCADE_ENABLED = true;
 
 /** Where the game lives. */
 export const ARCADE_PATH = '/arcade';
+
+/**
+ * Which H1 the homepage hero runs.
+ *
+ *   'calm'   — "Calm above the noise." The slogan form: what the product gives
+ *              you, above the churn of multi-repo, multi-bot GitHub work.
+ *   'signal' — "Your review bot flags 40 things. Limn shows you the 3 that
+ *              matter." The proven concrete form, with the vermilion numeral.
+ *
+ * Both variants live in Home.tsx; this flag is the only switch. It is manual
+ * and deliberate — a static, prerendered site has no A/B machinery, and the
+ * two H1s make the same argument at different altitudes. Flip, rebuild, ship.
+ */
+export const HERO_VARIANT: 'calm' | 'signal' = 'calm';

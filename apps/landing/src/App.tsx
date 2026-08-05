@@ -10,6 +10,7 @@ import { LightboxProvider } from './components/Lightbox';
 import { InkButton, Section } from './components/feint/primitives';
 import Home from './pages/Home';
 import Features from './pages/Features';
+import Bots from './pages/Bots';
 import Pro from './pages/Pro';
 import Pricing from './pages/Pricing';
 import HowItWorks from './pages/HowItWorks';
@@ -21,6 +22,7 @@ import Terms from './pages/Terms';
 const ROUTES: Record<string, () => JSX.Element> = {
   '/': Home,
   '/features': Features,
+  '/bots': Bots,
   '/pro': Pro,
   '/pricing': Pricing,
   '/how-it-works': HowItWorks,
