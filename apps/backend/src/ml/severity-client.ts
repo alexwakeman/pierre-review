@@ -6,11 +6,14 @@ import { config } from '../config.js';
 
 export type SeverityWord = 'NIT' | 'MINOR' | 'MAJOR' | 'CRITICAL';
 
-/** One item as the service wants it. `vendor` is an optional hint for the marker parser. */
+/** One item as the service wants it. `vendor` is an optional hint for the marker parser;
+ * `path` (the reviewed file's path) feeds the v2 model's input representation — a strong
+ * testing/docs signal the service ignores gracefully on older artifacts. */
 export interface SeverityRequestItem {
   body: string;
   diffHunk?: string | null;
   vendor?: string | null;
+  path?: string | null;
 }
 
 /** One item as the service answers it (batch results omit `model_version` — see the envelope). */
@@ -135,6 +138,7 @@ export async function scoreComments(
       body: i.body,
       ...(i.diffHunk ? { diff_hunk: i.diffHunk } : {}),
       ...(i.vendor ? { vendor: i.vendor } : {}),
+      ...(i.path ? { path: i.path } : {}),
     })),
   };
   const raw = await postJson<{

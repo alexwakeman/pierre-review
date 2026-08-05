@@ -43,6 +43,7 @@ const {
   mlCommentLabels,
   pullRequests,
   reviewComments,
+  reviewThreads,
   prComments,
   reviews,
   users,
@@ -57,6 +58,7 @@ const ML_CATEGORY_VALUES = new Set<string>([
   'testing',
   'documentation',
   'nitpick',
+  'praise', // v2 non-finding class — excluded from severity-weighted rollups below
 ]);
 
 const SEVERITY_KEYS: MlSeverity[] = ['nit', 'minor', 'major', 'critical'];
@@ -80,7 +82,7 @@ function emptySeverityCounts(): MlSeverityCounts {
   return { nit: 0, minor: 0, major: 0, critical: 0 };
 }
 
-/** Anything the service invents beyond its eight documented values is dropped, not stored. */
+/** Anything the service invents beyond its nine documented values is dropped, not stored. */
 function coerceCategories(raw: unknown): MlCategory[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((c): c is MlCategory => typeof c === 'string' && ML_CATEGORY_VALUES.has(c));
@@ -90,6 +92,19 @@ function coerceSeverity(raw: unknown): MlSeverity | null {
   return typeof raw === 'string' && (SEVERITY_KEYS as string[]).includes(raw)
     ? (raw as MlSeverity)
     : null;
+}
+
+/**
+ * Deep re-sync support: drop every ML label in one repo so the enrichment worker re-scores
+ * it against the CURRENTLY served model. Labels carry the model_version that produced them;
+ * a deep sync is the user's explicit "re-fetch and re-derive everything" gesture, so stale
+ * versions are purged rather than left to mix with fresh ones in the same charts.
+ */
+export async function deleteMlLabelsForRepo(accountId: number, repoId: number): Promise<void> {
+  await db
+    .delete(mlCommentLabels)
+    .where(and(eq(mlCommentLabels.accountId, accountId), eq(mlCommentLabels.repoId, repoId)))
+    .execute();
 }
 
 // ── 1. Candidates ────────────────────────────────────────────────────────────────────────
@@ -102,6 +117,10 @@ export interface MlCandidate {
   authorUserId: number;
   body: string;
   targetCreatedAt: Date;
+  /** Inline review comments only (and only when PERSIST_BODIES stores hunks); null elsewhere. */
+  diffHunk: string | null;
+  /** The reviewed file's path (review threads carry it); null for PR comments / review bodies. */
+  path: string | null;
 }
 
 /**
@@ -142,9 +161,12 @@ export async function listMlCandidates(
         authorUserId: reviewComments.authorId,
         body: reviewComments.body,
         targetCreatedAt: reviewComments.createdAt,
+        diffHunk: reviewComments.diffHunk,
+        path: reviewThreads.path,
       })
       .from(reviewComments)
       .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+      .innerJoin(reviewThreads, eq(reviewThreads.id, reviewComments.threadId))
       .leftJoin(mlCommentLabels, unlabelled('review_comment', reviewComments.id))
       .where(
         and(
@@ -215,7 +237,8 @@ export async function listMlCandidates(
   ]);
 
   const out: MlCandidate[] = [];
-  const push = (kind: MlLabelTargetKind, rows: typeof rc) => {
+  type CandidateRow = (typeof pc)[number] & { diffHunk?: string | null; path?: string | null };
+  const push = (kind: MlLabelTargetKind, rows: CandidateRow[]) => {
     for (const r of rows) {
       const raw = r.body ?? '';
       // ⚠ THE SQL PREDICATES ARE THE SOLE AUTHORITY ON CANDIDACY — nothing is dropped here.
@@ -235,6 +258,8 @@ export async function listMlCandidates(
         authorUserId: r.authorUserId,
         body: raw.trim() || raw,
         targetCreatedAt: r.targetCreatedAt,
+        diffHunk: r.diffHunk ?? null,
+        path: r.path ?? null,
       });
     }
   };
@@ -411,6 +436,7 @@ export async function getBotSeverityRollup(
       bySeverity: emptySeverityCounts(),
       byCategory: [],
       summaries: 0,
+      praise: 0,
       findings: 0,
     },
     rows: [],
@@ -460,12 +486,14 @@ export async function getBotSeverityRollup(
   const totalsByCategory = new Map<MlCategory, number>();
   const backends = new Set<string>();
   let summaries = 0;
+  let praise = 0;
   let findings = 0;
 
   interface Acc {
     labelled: number;
     bySeverity: MlSeverityCounts;
     summaries: number;
+    praise: number;
     findings: number;
     high: number;
     categories: Map<MlCategory, number>;
@@ -480,14 +508,23 @@ export async function getBotSeverityRollup(
       labelled: 0,
       bySeverity: emptySeverityCounts(),
       summaries: 0,
+      praise: 0,
       findings: 0,
       high: 0,
       categories: new Map(),
     };
     acc.labelled += 1;
+    const categories = coerceCategories(row.categories);
+    const isPraise = categories.includes('praise');
     if (row.isSummary) {
       acc.summaries += 1;
       summaries += 1;
+    } else if (isPraise) {
+      // v2 non-finding class: the bot acknowledging a fix / withdrawing a concern. Counted
+      // like summaries — visible as labelled work, excluded from every severity-weighted
+      // number for the same reason walkthroughs are (it is not a finding).
+      acc.praise += 1;
+      praise += 1;
     } else {
       acc.findings += 1;
       findings += 1;
@@ -501,7 +538,7 @@ export async function getBotSeverityRollup(
       // Categories describe a FINDING. A walkthrough comment's category is an artefact of the
       // marker parser reading a summary table, so counting it would make "what do the bots
       // talk about" a chart of each vendor's summary template.
-      for (const c of coerceCategories(row.categories)) {
+      for (const c of categories) {
         acc.categories.set(c, (acc.categories.get(c) ?? 0) + 1);
         totalsByCategory.set(c, (totalsByCategory.get(c) ?? 0) + 1);
       }
@@ -525,6 +562,7 @@ export async function getBotSeverityRollup(
         bySeverity: acc.bySeverity,
         highShare: acc.findings > 0 ? acc.high / acc.findings : 0,
         summaries: acc.summaries,
+        praise: acc.praise,
         topCategories: [...acc.categories.entries()]
           .map(([category, count]) => ({ category, count }))
           .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category))
@@ -545,6 +583,7 @@ export async function getBotSeverityRollup(
         .map(([category, count]) => ({ category, count }))
         .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category)),
       summaries,
+      praise,
       findings,
     },
     rows,

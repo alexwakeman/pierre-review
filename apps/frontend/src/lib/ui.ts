@@ -140,6 +140,7 @@ export const ML_CATEGORY_LABEL: Record<MlCategory, string> = {
   testing: 'Testing',
   documentation: 'Docs',
   nitpick: 'Nitpick',
+  praise: 'Praise',
 };
 
 export const PR_STATE_META: Record<PrState, { label: string; color: string }> = {

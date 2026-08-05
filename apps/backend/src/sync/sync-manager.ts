@@ -5,6 +5,9 @@ import { config } from '../config.js';
 import { getAccessToken } from '../auth/account.js';
 import { syncRepo, type Logger } from './sync-repo.js';
 import { isDue, decideIncrementalWalk, recordFullWalk } from './adaptive.js';
+import { isSeverityApiConfigured } from '../ml/severity-client.js';
+import { runMlEnrichmentTick } from './ml-enrichment.js';
+import { deleteMlLabelsForRepo } from '../db/ml-labels.js';
 
 const { repos, syncState, accounts } = schema;
 
@@ -309,6 +312,16 @@ export async function runSyncForRepo(
   };
 
   const task = runWalk()
+    .then(async () => {
+      // Deep re-sync is the user's explicit "re-fetch and re-derive everything" gesture:
+      // purge this repo's ML labels so the enrichment worker re-scores the whole corpus
+      // against the CURRENTLY served model (labels are model_version-stamped; a deep sync
+      // after a model upgrade is exactly how stale labels get replaced).
+      if (opts.forceFull && isSeverityApiConfigured()) {
+        await deleteMlLabelsForRepo(repo.accountId, repoId);
+        log.info(`deep sync ${repo.owner}/${repo.name}: purged ML labels for re-scoring`);
+      }
+    })
     .catch((err) => {
       log.error(
         `background sync ${repo.owner}/${repo.name} failed: ${err instanceof Error ? err.message : err}`,
@@ -319,6 +332,11 @@ export async function runSyncForRepo(
       deepSyncing.delete(repoId);
       cancelRequested.delete(repoId);
       clearSyncProgress(repoId);
+      // Kick an enrichment tick as soon as the sync lands (deep OR initial-backfill), so a
+      // deep re-sync backfills labels immediately and a freshly added repo gets its first
+      // labels without waiting for the cron. The tick is re-entrancy-guarded and
+      // budget-bounded; if one is already running this is a cheap no-op.
+      if (isSeverityApiConfigured()) void runMlEnrichmentTick(log);
     });
 
   if (!opts.background) return Boolean(task);

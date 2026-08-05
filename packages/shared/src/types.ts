@@ -4828,9 +4828,12 @@ export interface AnnotationRunResponse {
 export type MlSeverity = 'nit' | 'minor' | 'major' | 'critical';
 export const ML_SEVERITIES: MlSeverity[] = ['critical', 'major', 'minor', 'nit'];
 
-// The service's EIGHT fixed categories, verbatim. Deliberately NOT `BotThemeCategory` (nine
-// values, LLM-authored, a different vocabulary): conflating them would silently mix a
+// The service's NINE fixed categories, verbatim. Deliberately NOT `BotThemeCategory`
+// (LLM-authored, a different vocabulary): conflating them would silently mix a
 // deterministic marker parse with a Haiku theme judgement in the same chart.
+// `praise` (added with severity-api v2, 2026-08) marks a NON-FINDING — the bot
+// acknowledging a fix, confirming a resolution, withdrawing a concern, or pure thanks.
+// Praise rows must be excluded from severity-weighted views (like summaries are).
 export type MlCategory =
   | 'correctness_bug'
   | 'security'
@@ -4839,7 +4842,8 @@ export type MlCategory =
   | 'maintainability_refactor'
   | 'testing'
   | 'documentation'
-  | 'nitpick';
+  | 'nitpick'
+  | 'praise';
 export const ML_CATEGORIES: MlCategory[] = [
   'correctness_bug',
   'security',
@@ -4849,6 +4853,7 @@ export const ML_CATEGORIES: MlCategory[] = [
   'testing',
   'documentation',
   'nitpick',
+  'praise',
 ];
 
 // What a label hangs off. `targetId` is that entity's own primary key:
@@ -4910,14 +4915,17 @@ export interface MlBotSeverityRow {
   // Display name override, else the vendor brand, else the login (resolved server-side).
   label: string;
   kind: AutomatedReviewerKind | null;
-  // Every label for this bot, findings AND summaries. `bySeverity` covers the findings only, so
-  // it sums to `labelled - summaries`.
+  // Every label for this bot: findings, summaries AND praise. `bySeverity` covers the
+  // findings only, so it sums to `labelled - summaries - praise`.
   labelled: number;
   bySeverity: MlSeverityCounts;
-  // MAJOR + CRITICAL as a share of this bot's NON-SUMMARY labels, 0..1. Bucketing the top two
+  // MAJOR + CRITICAL as a share of this bot's FINDING labels, 0..1. Bucketing the top two
   // is deliberate: the model under-recalls CRITICAL alone (docs/ML-SEVERITY.md § accuracy).
   highShare: number;
   summaries: number;
+  // v2 non-finding class: acknowledgments/withdrawals/thanks. Excluded from bySeverity and
+  // highShare for the same reason summaries are.
+  praise: number;
   // Descending by count, capped server-side. Summary comments are excluded.
   topCategories: Array<{ category: MlCategory; count: number }>;
 }
@@ -4939,6 +4947,7 @@ export interface BotSeverityResponse {
     bySeverity: MlSeverityCounts;
     byCategory: Array<{ category: MlCategory; count: number }>;
     summaries: number;
+    praise: number;
     findings: number;
   };
   rows: MlBotSeverityRow[];

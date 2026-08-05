@@ -18,6 +18,8 @@ function candidate(len: number): MlCandidate {
     repoId: 1,
     authorUserId: 1,
     body: 'x'.repeat(len),
+    diffHunk: null,
+    path: null,
     targetCreatedAt: new Date(0),
   };
 }

@@ -18,7 +18,12 @@
 //   • a bot classified LATER (workspace_reviewers rows are written lazily, on a read of the
 //     Bots tab — never by sync) brings its whole backlog with it on the next tick,
 //   • a restart loses nothing: there is no in-memory queue to drop.
-import type { FastifyBaseLogger } from 'fastify';
+/** The subset of a logger this worker uses — pino (app.log) and sync-repo's minimal
+ * Logger both satisfy it structurally, so any sync path can kick a tick. */
+export interface MlLog {
+  info: (msg: string) => void;
+  warn: (msg: string) => void;
+}
 import { createHash } from 'node:crypto';
 import { gte } from 'drizzle-orm';
 import type { MlCategory, MlSeverity } from '@pierre-review/shared';
@@ -102,7 +107,9 @@ export function packBatches(
   let current: MlCandidate[] = [];
   let chars = 0;
   for (const item of items) {
-    const len = item.body.length;
+    // Budget by what is actually SENT — body + diff hunk + path — or diff-carrying batches
+    // would blow past maxChars while looking body-thin.
+    const len = item.body.length + (item.diffHunk?.length ?? 0) + (item.path?.length ?? 0);
     // A single item longer than the whole budget still has to go somewhere: give it its own
     // batch rather than silently dropping it (the service truncates at 512 tokens anyway).
     if (current.length > 0 && (current.length >= maxItems || chars + len > maxChars)) {
@@ -186,7 +193,7 @@ interface TickStats {
  * Bounded by `config.mlTickBudgetMs` of wall clock, checked between batches, so a tick cannot
  * run into the next one no matter how large the backlog or how slow the service.
  */
-export async function runMlEnrichmentTick(log: FastifyBaseLogger): Promise<TickStats> {
+export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
   const stats: TickStats = { labelled: 0, batches: 0, failures: 0 };
   if (!isSeverityApiConfigured()) return stats;
   if (running) return stats;
@@ -283,7 +290,7 @@ async function enrichWorkspace(
   accountId: number,
   scope: BotScope,
   deadline: number,
-  log: FastifyBaseLogger,
+  log: MlLog,
   stats: TickStats,
 ): Promise<boolean> {
   // The pool is sized so one tick's worth of batches can be selected in a single query. It is
@@ -324,6 +331,11 @@ async function enrichWorkspace(
       const items: SeverityRequestItem[] = batch.map((c) => ({
         body: c.body,
         vendor: vendorHint(kindMap.get(c.authorUserId)),
+        // The v2 model reads `path [SEP] body [SEP] diff`; both are optional and the
+        // service degrades gracefully without them. Hunks are capped like bodies —
+        // the model truncates at 512 tokens regardless.
+        diffHunk: c.diffHunk ? c.diffHunk.slice(0, config.mlBodyMaxChars) : null,
+        path: c.path,
       }));
 
       let response;

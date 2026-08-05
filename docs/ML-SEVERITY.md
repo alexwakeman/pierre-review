@@ -3,7 +3,7 @@
 **CORE. Free tier. No LLM, no GitHub quota, nothing billed.**
 
 Every comment an AI review bot leaves gets two machine-read labels — a **severity**
-(`nit` · `minor` · `major` · `critical`) and one or more of **eight fixed categories** — so a
+(`nit` · `minor` · `major` · `critical`) and one or more of **nine fixed categories** — so a
 wall of CodeRabbit/Copilot/Sonar output can be triaged without reading all of it. The labels
 render on the comments themselves and roll up on the Bots interface.
 
@@ -159,7 +159,23 @@ migrations `0047` / pg `0034`). One row per classified target.
 | `target_id` | the target's own PK **within its kind** — three different id spaces |
 | `author_user_id` | the bot (`users.id`) |
 | `severity`, `severity_ord`, `severity_prob` | `nit`…`critical`; ord 0–3; confidence 0–1 |
-| `categories`, `category_probs` | multi-label list + the full 8-key probability map |
+| `categories`, `category_probs` | multi-label list + the full 9-key probability map |
+
+> **severity-api v2 (2026-08).** Three integration changes shipped together:
+> 1. **`praise` is the 9th category** — a NON-finding (the bot acknowledging a fix, confirming
+>    a resolution, withdrawing a concern, or pure thanks). Praise rows are stored like any
+>    label but excluded from every severity-weighted rollup number, exactly like summaries
+>    (`totals.praise` / `row.praise` count them).
+> 2. **`path` + `diff_hunk` are sent when available.** The v2 model's input is
+>    `path [SEP] body [SEP] diff`; path comes from the review thread, hunks exist only when
+>    `PERSIST_BODIES=true` (set it, then run a Deep re-sync so the re-fetch stores hunks).
+>    Both fields are optional — older artifacts ignore them.
+> 3. **Deep re-sync purges the repo's ML labels** and kicks an immediate enrichment tick, so
+>    the whole corpus is re-scored against the currently served model (labels are
+>    model_version-stamped; this is the supported "backfill against the new model" gesture).
+>    Ordinary syncs — including a freshly added repo's initial backfill — also kick a tick on
+>    completion, so new comments get labels without waiting for the cron.
+
 | `is_summary` | PR walkthrough/summary rather than a specific finding |
 | `backend`, `model_version` | verbatim from the service |
 | `body_hash` | sha256 of the text **actually sent** (trimmed + capped) |
