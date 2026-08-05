@@ -207,11 +207,13 @@ function AttractScreen({ reducedMotion }: { reducedMotion: boolean }): JSX.Eleme
           reducedMotion ? '' : 'animate-limn-caret'
         }`}
       >
-        PRESS SPACE
+        PRESS SPACE OR CLICK TO PLAY
       </p>
-      <p className={MONO}>Click the field, or Tab to it, to play</p>
+      <p className={MONO}>Keyboard or mouse — Tab reaches the field too</p>
       <p className={`absolute bottom-4 ${MONO}`}>
         ← → move · space fire · F focus · esc exits
+        <br />
+        mouse steers · click fires
       </p>
     </Overlay>
   );
@@ -421,7 +423,7 @@ export function Cabinet(): JSX.Element {
   // The live region announces transitions only. Wiring it to the score would
   // interrupt a screen-reader user roughly fifteen times a second.
   const announcement = useMemo(() => {
-    if (phase === 'attract') return 'Inbox Invaders. Press space to play.';
+    if (phase === 'attract') return 'Inbox Invaders. Press space, or click the field, to play.';
     if (phase === 'waveBreak') return `Wave ${hud.wave} cleared. Score ${hud.score}.`;
     if (phase === 'gameOver') {
       return `Game over. Score ${hud.score}. Cleared ${hud.cleared}. Missed ${hud.unread}.`;
@@ -567,7 +569,9 @@ export function Cabinet(): JSX.Element {
 
       <p id="arcade-controls" className="sr-only">
         Arrow keys or A and D move. Space fires. Hold F to spend a focus segment and clear a
-        column. P pauses. M toggles sound. Escape returns to the site.
+        column. P pauses. M toggles sound. Escape returns to the site. A mouse can play
+        instead: click the field to start, move the pointer to steer the craft toward it, and
+        click to fire. Everything is reachable from the keyboard alone.
       </p>
     </div>
   );

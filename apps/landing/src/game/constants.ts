@@ -128,7 +128,12 @@ export function playerSpeed(width: number): number {
 
 /** The death animation, original 60 frames. */
 export const PLAYER_DEATH_TICKS = 60;
-/** The re-entry hold before control returns, original 128 frames. */
+/**
+ * The re-entry GRACE, original 128 frames: alien fire passes through the craft
+ * for this long after it reappears. It does NOT hold the controls — control
+ * returns the instant the craft is back, because a ship that is drawn but
+ * ignores the player reads as a broken game rather than as mercy.
+ */
 export const PLAYER_RESPAWN_TICKS = 128;
 export const LIVES_START = 3;
 /**

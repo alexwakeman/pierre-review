@@ -570,6 +570,7 @@ export const EMPTY_INPUT: Readonly<Input> = Object.freeze({
   right: false,
   fire: false,
   focus: false,
+  pointerX: null,
 });
 
 // ---- the tick ---------------------------------------------------------------
@@ -647,15 +648,35 @@ function stepCraft(w: World, input: Readonly<Input>): void {
   if (c.respawnTicks > 0) c.respawnTicks -= 1;
   if (c.frozenTicks > 0) c.frozenTicks -= 1;
 
-  if (c.respawnTicks > 0 || c.frozenTicks > 0) {
+  // ONLY `frozenTicks` TAKES THE CONTROLS AWAY. `respawnTicks` is the re-entry
+  // GRACE — alien fire lands on nothing while it runs (see the guard in
+  // stepAlienShots) — and it used to return here too, which meant that after
+  // every death the craft sat at the left edge for 128 ticks (2.1 s) ignoring
+  // the player while the rack kept marching and the aliens resumed firing at
+  // tick 48. Invulnerability and paralysis are different things, and the ROM's
+  // hold is a pause of the whole game, not a live ship that will not answer.
+  // The meeting invite's freeze is the one deliberate loss of control, so it
+  // keeps the early return.
+  if (c.frozenTicks > 0) {
     w.focusHold = 0;
     w.focusColumn = null;
     return;
   }
 
+  // KEYS BEAT THE POINTER. Both are live at once — a mouse player may still hit
+  // F or Space — but if a movement key is down it wins outright, so the two
+  // cannot drag the craft in opposite directions. (useGame also drops pointerX
+  // the moment a movement key goes down, so this is belt and braces.)
   const speed = playerSpeed(w.width);
   if (input.left && !input.right) c.x -= speed;
   else if (input.right && !input.left) c.x += speed;
+  else if (input.pointerX !== null) {
+    // Steer toward the pointer at the craft's own speed, and SNAP when the gap
+    // is smaller than one step — without that the craft oscillates around the
+    // target forever, one step either side of it.
+    const delta = input.pointerX - CRAFT_W / 2 - c.x;
+    c.x += Math.abs(delta) <= speed ? delta : Math.sign(delta) * speed;
+  }
   c.x = Math.min(craftMaxX(w.width), Math.max(CRAFT_MIN_X, c.x));
 
   const shot = w.playerShot;

@@ -134,7 +134,7 @@ export function useGame(): UseGame {
 
   const worldRef = useRef<World | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
-  const inputRef = useRef<Input>({ left: false, right: false, fire: false, focus: false });
+  const inputRef = useRef<Input>({ left: false, right: false, fire: false, focus: false, pointerX: null });
 
   const [hud, setHud] = useState<HudSnapshot>(INITIAL_HUD);
   const [phase, setPhase] = useState<Phase>('attract');
@@ -279,7 +279,7 @@ export function useGame(): UseGame {
     if (paused) {
       // Drop every held key. Otherwise the craft resumes still travelling in
       // whatever direction it was going when the tab lost focus.
-      inputRef.current = { left: false, right: false, fire: false, focus: false };
+      inputRef.current = { left: false, right: false, fire: false, focus: false, pointerX: null };
       suspendAudio();
     } else {
       resumeAudio();
@@ -347,15 +347,21 @@ export function useGame(): UseGame {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const world = worldRef.current;
       switch (e.code) {
+        // A movement key TAKES CONTROL BACK from the pointer. Without this the
+        // craft would keep steering toward a mouse that is sitting motionless
+        // somewhere over the field, and the arrow keys would feel like they were
+        // fighting something invisible.
         case 'ArrowLeft':
         case 'KeyA':
           e.preventDefault();
           inputRef.current.left = true;
+          inputRef.current.pointerX = null;
           break;
         case 'ArrowRight':
         case 'KeyD':
           e.preventDefault();
           inputRef.current.right = true;
+          inputRef.current.pointerX = null;
           break;
         case 'KeyF':
           e.preventDefault();
@@ -408,15 +414,95 @@ export function useGame(): UseGame {
     const onFocus = (): void => setFocused(true);
     const onBlur = (): void => setFocused(false);
 
+    /* --------------------------------------------------------- pointer --- */
+    //
+    // The pointer is a SECOND, EQUAL input, not a replacement: keyboard-only
+    // play stays the primary mode the brief asks for, and nothing here is
+    // required to play. Move the mouse over the field and the craft steers
+    // toward its x; hold the left button and it fires, auto-repeating on the
+    // shot slot exactly as Space does.
+    //
+    // TOUCH IS DELIBERATELY EXCLUDED. A finger dragging across the field would
+    // otherwise both steer the craft and be swallowed for page scrolling, which
+    // makes the page feel broken on a phone — and the site is desktop-first
+    // anyway. Mouse and pen only.
+    const drives = (e: PointerEvent): boolean => e.pointerType !== 'touch';
+
+    /**
+     * Pointer x in LOGICAL field units.
+     *
+     * `fieldScale` is the same CSS-px-per-logical-unit the world and the canvas
+     * transform are built from, so the craft lands under the cursor at every
+     * viewport width — including below 560 px, where the whole field is
+     * uniformly downscaled and a raw clientX would be wrong by that factor.
+     */
+    const logicalX = (e: PointerEvent): number => {
+      const rect = field.getBoundingClientRect();
+      const px = fieldScale(field.clientWidth) || 1;
+      return (e.clientX - rect.left) / px;
+    };
+
+    const onPointerMove = (e: PointerEvent): void => {
+      if (!drives(e)) return;
+      inputRef.current.pointerX = logicalX(e);
+    };
+
+    // Hand control back to the keyboard when the pointer leaves, so a craft
+    // parked under a mouse that has wandered off to another window does not go
+    // on steering toward the last place it was seen.
+    const onPointerLeave = (e: PointerEvent): void => {
+      if (!drives(e)) return;
+      inputRef.current.pointerX = null;
+      inputRef.current.fire = false;
+    };
+
+    // CLICK-TO-START IS NOT HERE, and that is structural rather than an
+    // oversight. The attract, wave and game-over screens are SIBLINGS rendered
+    // above this element (see the role="application" note in Cabinet.tsx), so
+    // while any of them is up the pointer never reaches the canvas at all —
+    // a start branch here would be unreachable code that reads as live. The
+    // field wrapper's own onClick owns starting; this handler only ever runs
+    // during play, which is exactly when a click should mean "fire".
+    //
+    // The consequence worth knowing: after clicking to start, steering engages
+    // on the first pointer MOVEMENT. That is deliberate — it means clicking to
+    // start does not immediately yank the craft toward wherever the cursor
+    // happens to be resting.
+    const onPointerDown = (e: PointerEvent): void => {
+      if (!drives(e) || e.button !== 0) return;
+      e.preventDefault(); // no text selection, no drag-select of the cabinet
+      field.focus({ preventScroll: true });
+      inputRef.current.pointerX = logicalX(e);
+      inputRef.current.fire = true;
+    };
+
+    const onPointerUp = (e: PointerEvent): void => {
+      if (!drives(e)) return;
+      inputRef.current.fire = false;
+    };
+
     field.addEventListener('keydown', onKeyDown);
     field.addEventListener('keyup', onKeyUp);
     field.addEventListener('focus', onFocus);
     field.addEventListener('blur', onBlur);
+    field.addEventListener('pointermove', onPointerMove);
+    field.addEventListener('pointerleave', onPointerLeave);
+    field.addEventListener('pointerdown', onPointerDown);
+    // On WINDOW, not the field: releasing the button after the pointer has
+    // wandered off the cabinet must still stop the firing, or the craft is left
+    // shooting with nothing held down.
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
     return () => {
       field.removeEventListener('keydown', onKeyDown);
       field.removeEventListener('keyup', onKeyUp);
       field.removeEventListener('focus', onFocus);
       field.removeEventListener('blur', onBlur);
+      field.removeEventListener('pointermove', onPointerMove);
+      field.removeEventListener('pointerleave', onPointerLeave);
+      field.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
     };
   }, [exit, skipBreak, start, toggleSound]);
 

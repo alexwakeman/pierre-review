@@ -38,6 +38,16 @@ export type Input = {
   right: boolean;
   fire: boolean;
   focus: boolean;
+  /**
+   * Where the pointer is, in LOGICAL FIELD UNITS, or null when the pointer is
+   * not driving (it has left the field, or a movement key has taken over).
+   *
+   * The craft STEERS toward it at its normal speed rather than teleporting to
+   * it: the pointer sets a target, not a position, so a mouse player and a
+   * keyboard player move the craft at exactly the same rate and nothing about
+   * the game's balance depends on which one you are.
+   */
+  pointerX: number | null;
 };
 
 export type AlienShotStyle =

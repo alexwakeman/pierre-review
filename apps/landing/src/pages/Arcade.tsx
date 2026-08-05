@@ -65,6 +65,11 @@ const CONTROLS: ReactNode[] = [
     else.
   </>,
   <>
+    Or play with the mouse. Click the field to start, and the craft steers toward wherever your
+    pointer is — at its own speed, so it catches up rather than teleports. Click to fire. Touch
+    the arrow keys and they take control straight back.
+  </>,
+  <>
     Hold <Key>F</Key> for half a second to spend a focus segment and clear an entire column at
     once. Let go early and it costs you nothing.
   </>,
