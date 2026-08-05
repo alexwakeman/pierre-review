@@ -157,8 +157,28 @@ for (const path of PRERENDER_PATHS) {
 // The failure this whole script exists to prevent is silent: a broken prerender
 // still produces a site that works perfectly in a browser. These assertions are
 // what turn that into a build failure.
-if (written.length < 9) {
-  throw new Error(`only ${written.length} routes prerendered — expected all 9`);
+// TWO SEPARATE FAILURES, so both get their own assertion.
+//
+// The first is the loop breaking: a route that threw, was skipped, or silently
+// wrote nothing. Comparing against PRERENDER_PATHS catches that however many
+// routes there happen to be, so it never needs editing.
+//
+// The second is a route DISAPPEARING FROM ROUTE_SEO — a bad merge, an
+// over-eager tidy — which the first assertion cannot see, because the list it
+// checks against would shrink with it. That is what the hard-coded floor is
+// for, and it is the reason this number must be raised by hand whenever a route
+// is added. It was left at 9 when /bots landed and the site went to 10.
+if (written.length !== PRERENDER_PATHS.length) {
+  throw new Error(
+    `prerendered ${written.length} routes but PRERENDER_PATHS has ${PRERENDER_PATHS.length} — ` +
+      `a route was skipped: ${PRERENDER_PATHS.filter((p) => !written.includes(p)).join(', ')}`,
+  );
+}
+if (written.length < 10) {
+  throw new Error(
+    `only ${written.length} routes prerendered — expected at least 10. ` +
+      `If you deliberately removed a route, lower this floor in the same change.`,
+  );
 }
 // The floor is on the FINAL html, and it has to clear the un-prerendered shell by
 // a real margin to mean anything: index.html plus Vite's asset tags is already
