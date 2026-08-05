@@ -73,6 +73,14 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/prs/42/ml-labels')).not.toContain('pr_detail');
   });
 
+  // /api/ml-status is POLLED every few seconds while a sync round is open (it is what lets the
+  // progress UI represent the model pass rather than stopping at the GitHub walk). Its backlog
+  // half is the rollup's unlabelled-count joins repeated PER WORKSPACE, so the 600/min blanket
+  // `read` bucket would be the wrong answer for a route a client hits on a timer.
+  it('puts the polled enrichment-status route on the expensive bucket, not the blanket read one', () => {
+    expect(tiers('GET', '/api/ml-status')).toEqual(['search', 'read']);
+  });
+
   it('throttles sync triggers and repo-add (each starts a backfill)', () => {
     expect(tiers('POST', '/api/repos/5/sync')).toEqual(['sync']);
     expect(tiers('POST', '/api/repos')).toEqual(['sync']);

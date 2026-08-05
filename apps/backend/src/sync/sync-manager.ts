@@ -328,15 +328,26 @@ export async function runSyncForRepo(
       );
     })
     .finally(() => {
+      // ⚠ ORDER IS LOAD-BEARING: the enrichment tick is kicked BEFORE this repo is released
+      // and its progress cleared.
+      //
+      // The GitHub walk is only half of making the board correct — the severity badges come
+      // from a CPU-bound model pass over the same text, which cannot run inside the walk (see
+      // docs/ML-SEVERITY.md) and therefore always follows it. This used to run AFTER
+      // clearSyncProgress, which put the model calls structurally downstream of "done": the
+      // client saw every repo idle, declared the sync complete, and only then did scoring
+      // start — so no indicator could ever represent it.
+      //
+      // runMlEnrichmentTick's guards and its `running = true` all sit before its first await,
+      // so by the time this line returns `GET /api/ml-status` already reports the scoring
+      // phase and there is no window in which a poll sees both halves idle. The tick is
+      // re-entrancy-guarded and budget-bounded; if one is already running this is a cheap
+      // no-op (and the pending count keeps the UI honest until it is picked up).
+      if (isSeverityApiConfigured()) void runMlEnrichmentTick(log);
       running.delete(repoId);
       deepSyncing.delete(repoId);
       cancelRequested.delete(repoId);
       clearSyncProgress(repoId);
-      // Kick an enrichment tick as soon as the sync lands (deep OR initial-backfill), so a
-      // deep re-sync backfills labels immediately and a freshly added repo gets its first
-      // labels without waiting for the cron. The tick is re-entrancy-guarded and
-      // budget-bounded; if one is already running this is a cheap no-op.
-      if (isSeverityApiConfigured()) void runMlEnrichmentTick(log);
     });
 
   if (!opts.background) return Boolean(task);

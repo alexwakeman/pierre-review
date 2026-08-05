@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { skipToken } from '@tanstack/react-query';
 import type {
   BotSeverityResponse,
+  MlEnrichmentStatus,
   MlLabel,
   MlLabelTargetKind,
   PrMlLabelsResponse,
@@ -89,5 +90,62 @@ export function useBotSeverity(
         ? () => api.botSeverity(workspaceId, repoIds)
         : skipToken,
     staleTime: 60_000,
+  });
+}
+
+// ---- The scoring phase of a sync ---------------------------------------------------------
+//
+// Syncing a repo has TWO halves: the GitHub walk, and the model pass that scores the bot text
+// the walk just stored. The second cannot run inside the first (docs/ML-SEVERITY.md), so it
+// always follows it — which is why a progress indicator that ends with the walk announces
+// "complete" while the CPU is still working. These read `/api/ml-status` so the sync surfaces
+// can represent the second half too.
+
+/**
+ * Is there scoring to show the user right now?
+ *
+ * ⚠ BACKLOG IS NOT WORK IN FLIGHT, and the difference is the whole point of this predicate.
+ * `pending > 0` on its own would spin an indicator forever in three separate real situations,
+ * each of which is a worse lie than the one this seam exists to fix:
+ *
+ *   • the URL is set but nothing is listening (a dev machine whose sibling `pierre-ml` is not
+ *     running) — `serviceHealthy === false`,
+ *   • the worker has backed off after repeated failures — `pausedUntil`,
+ *   • a few comments the service REJECTS. The candidate query is "has no label row", so a batch
+ *     the service 500s on is re-selected on every tick forever (four comments in this repo's own
+ *     dev database do exactly this). The signal is a completed tick that failed and scored
+ *     nothing — a tick that scored 300 and failed one batch is still progressing and must
+ *     keep its indicator.
+ *
+ * `serviceHealthy === null` (no attempt yet) counts as available: the worker is about to find
+ * out, and a brief optimistic spinner is the right call while it does.
+ */
+export function isMlScoring(status: MlEnrichmentStatus | undefined): boolean {
+  if (!status?.enabled) return false;
+  if (status.running) return true;
+  if (status.serviceHealthy === false) return false;
+  if (status.pausedUntil) return false;
+  if (status.failuresThisRun > 0 && status.scoredThisRun === 0) return false;
+  return status.pending > 0;
+}
+
+/**
+ * Poll the worker's live state.
+ *
+ * `active` means a sync round is open in the UI. It only RAISES the cadence — the poll also
+ * stays fast on its own while scoring is in flight, because the backlog from a sync outlives
+ * the round that produced it (a first backfill can leave tens of thousands of items) and the
+ * header indicator keeps reporting it long after the modal is gone.
+ */
+export function useMlEnrichmentStatus(active: boolean) {
+  const enabled = useMlSeverityEnabled();
+  return useQuery<MlEnrichmentStatus>({
+    queryKey: ['ml-status'],
+    queryFn: api.mlStatus,
+    enabled,
+    // The server caches the backlog scan for a few seconds, so a fast poll collapses to one
+    // scan regardless of how many tabs are open.
+    refetchInterval: (q) => (active || isMlScoring(q.state.data) ? 4_000 : 60_000),
+    refetchIntervalInBackground: false,
   });
 }

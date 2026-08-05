@@ -221,8 +221,8 @@ All from the repo root unless noted.
 | Command | What it does |
 |---|---|
 | `pnpm install` | install all workspaces |
-| `pnpm dev` | run backend (`:4000`) + frontend (`:5173`) concurrently |
-| `pnpm dev:backend` / `pnpm dev:frontend` | run one side only |
+| `pnpm dev` | run backend (`:4000`) + frontend (`:5173`) + the sibling `pierre-ml` severity-api (`:8799`) concurrently, via `scripts/dev.mjs` |
+| `pnpm dev:backend` / `pnpm dev:frontend` / `pnpm dev:ml` | run one side only |
 | `pnpm build` | recursive build across workspaces |
 | `pnpm typecheck` | `tsc --noEmit` across all packages — **run before considering work done** |
 | `pnpm test` | recursive `vitest` (backend has tests; frontend/shared are no-ops) |
@@ -238,7 +238,13 @@ All from the repo root unless noted.
 | `pnpm package` | assemble `./release` for publishing |
 
 `DEPLOYMENT_MODE=local` (default) vs `cloud` selects the whole stack (SQLite vs Postgres,
-landing, OAuth); `pnpm dev` is local unless `DEPLOYMENT_MODE=cloud`. The frontend dev server
+landing, OAuth); `pnpm dev` is local unless `DEPLOYMENT_MODE=cloud`. **`pnpm dev` also starts
+the sibling `../pierre-ml` severity-api when the machine has it** (`PIERRE_ML_DIR`,
+`SEVERITY_API_PORT`, `PIERRE_ML_DISABLED=1`); every "can't run it" path prints one line and
+exits 0, so a checkout without the sibling gets the dev loop it always had. ⚠ It exports
+`SEVERITY_API_DEFAULT_URL`, never `SEVERITY_API_URL` — `process.loadEnvFile` does NOT overwrite
+an already-set variable, so a command-line `SEVERITY_API_URL` would have BEATEN your `.env`.
+The frontend dev server
 proxies `/api` to the backend (`BACKEND_PORT`, default 4000); the landing has its own dev
 server on `:5174`. Config comes from `.env` (repo root) then `apps/backend/.env` (see
 `config.ts`); `DATABASE_URL` overrides the SQLite path (local) / is the Postgres conn string
@@ -520,8 +526,20 @@ Full detail: **[docs/ML-SEVERITY.md](docs/ML-SEVERITY.md)**. The invariants:
   (`PrDetail` renders PR comments and review bodies in ONE list, where this is easiest to get
   wrong). Cleanup rides the cascading `pr_id` FK, so it is deliberately in NEITHER delete path
   (the `search_index` precedent) but IS in `accountScopedTables()`.
-- Reads only: two DB-only routes, no generate endpoint, nothing billable. The badge NEVER
+- Reads only: three DB-only routes, no generate endpoint, nothing billable. The badge NEVER
   fetches — every mount reads the one `['ml-labels', prId]` per-PR index.
+- **A SYNC HAS TWO HALVES and the UI must show both.** The walk stores the text; this pass makes
+  the badges, and it always FOLLOWS the walk. The enrichment kick therefore sits **above**
+  `clearSyncProgress` in `runSyncForRepo`'s `finally` — it used to sit below, which put the model
+  calls structurally downstream of "done" and left no window in which any indicator could
+  represent them. That works only because `runMlEnrichmentTick` flips `running` before its first
+  `await`; an `await` added above it reopens the gap (pinned by `sync-manager.test.ts`).
+  `GET /api/ml-status` (account-wide, NO scope — the worker's own grain) feeds the header
+  spinner, the sync-menu line and the modal's scoring row. ⚠ **`pending > 0` is NOT "scoring in
+  progress"** — go through `isMlScoring`. Backlog with nothing draining it is a real state
+  (service unreachable, worker backed off, or a comment the service keeps rejecting — one live
+  comment in this dev DB does exactly that, blocking its whole workspace), and spinning on it is
+  a worse lie than the premature "done" this replaced.
 - Advisory: macro-F1 ≈ 0.66 and CRITICAL is under-recalled, so the product buckets
   **major+critical as "high"** and nothing auto-acts on a label.
 
@@ -793,7 +811,11 @@ ANY migration. Operating rules:
 sprint refresh) now cover the Default workspace ONLY; PrDetail still classifies bots
 client-side by login; the legacy `?team=` URL rule is unit-tested nowhere;
 `SprintReportCard` has no importer yet the AI-policy sweep still spends;
-`packages/pro/test/` (135 tests) + `apps/frontend/test/` (127 tests) do not run in CI;
+`packages/pro/test/` (135 tests) + `apps/frontend/test/` (135 tests) do not run in CI;
 auto-merge's retarget guard still lacks a stored `expected_base_ref`; ML labels are never
 re-scored (neither an edited body nor a model-version bump invalidates one — `pnpm ml:enrich
---reset` is the only refresh) and pg `0034` has not been replayed against a real Postgres.
+--reset` is the only refresh); a SINGLE comment the severity-api rejects blocks its whole
+workspace's enrichment backlog forever (`hardFailure` abandons the workspace, and the candidate
+query re-selects the same comment next tick — live in this dev DB; the sync UI declines to
+report it as progress but nothing quarantines it); and pg `0034` has not been replayed against
+a real Postgres.

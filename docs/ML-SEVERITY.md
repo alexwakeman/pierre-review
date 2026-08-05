@@ -82,6 +82,63 @@ fatal inline:
 The cost is latency: a brand-new bot comment is unlabelled for up to one tick (~2 min). That is
 the deliberate trade.
 
+### The sync UI has to represent this pass — and the ordering that makes it possible
+
+A sync has **two halves**. The GitHub walk stores the text; this pass produces the badges the
+board actually renders. The second cannot run inside the first (that is the whole argument
+above), so it always FOLLOWS it — which means a progress indicator that ends with the walk
+announces "complete" while the model is still working.
+
+That was not just a copy problem, it was structural. `runSyncForRepo`'s `finally` used to clear
+the repo's progress and release it, and only THEN kick the tick:
+
+```ts
+running.delete(repoId); clearSyncProgress(repoId);   // ← client can now observe "all idle"
+if (isSeverityApiConfigured()) void runMlEnrichmentTick(log);   // ← …and only now does it start
+```
+
+A client polling both halves could land in that window, see every repo idle and no scoring in
+flight, and correctly conclude the sync was over. **The kick now comes first**, which works
+because `runMlEnrichmentTick`'s guards and its `running = true` all sit **before its first
+`await`** — so by the time `void …` returns, `/api/ml-status` already reports the scoring phase
+and the window does not exist. ⚠ Introducing an `await` above that assignment silently reopens
+it; `sync-manager.test.ts` pins the ordering (and was mutation-tested against the old order).
+
+**`GET /api/ml-status`** (account-wide — the worker's own grain) is what the SPA polls. The
+client-side predicate is `isMlScoring` in `hooks/useMlLabels.ts`, and its whole job is that
+**backlog is not the same as work in flight**. `pending > 0` alone spins an indicator forever in
+four real states, each a worse lie than the premature "done" this replaced:
+
+| state | signal |
+|---|---|
+| URL set, nothing listening (a dev box without the sibling repo running) | `serviceHealthy: false` |
+| worker backed off after 5 failing ticks | `pausedUntil` |
+| **a comment the service rejects** — the candidate query is "has no label row", so a batch it 500s on is re-selected every tick forever | last tick `failuresThisRun > 0` **and** `scoredThisRun === 0` |
+| genuinely drained | `pending === 0` |
+
+That third row is not hypothetical: one PR comment in this repo's own dev database reliably
+500s the severity-api (the 6 000-char `ML_BODY_MAX_CHARS` trim cuts it mid-markdown-fence), and
+because a batch failure sets `hardFailure` and abandons the workspace for that tick, **that one
+comment blocks its whole workspace's backlog**. A partial failure is still progress, though —
+a tick that scored 300 and lost one batch keeps its indicator, or one bad comment anywhere in a
+large corpus would suppress the indicator for the entire sync.
+
+`serviceHealthy` tracks **reachability only**. `severity-client.ts` throws `SeverityApiError`
+carrying a `status` (`null` = never answered), because "the service is down" and "the service
+rejected this batch" have different consequences and a bare `Error` made them indistinguishable
+— conflating them made a healthy service read as down the moment one comment 500'd.
+
+UI surfaces, all in `SyncStatus.tsx` / `SyncProgressModal.tsx`:
+
+- the header refresh glyph **spins for both halves**,
+- the sync menu says `scoring bot comments — N to go` once the walk is done,
+- the modal grows a **Scoring bot comments** row with its own bar (denominated by the
+  high-water mark of `pending` this round, since the backlog is only known once it exists and
+  then SHRINKS), and its header says "Scoring bot comments…" rather than "Sync complete",
+- the modal auto-closes only when BOTH halves are idle — but once every repo is done its footer
+  button becomes **"Continue in background"**, because a first backfill's scoring pass can run
+  for the better part of an hour and the board is already usable.
+
 ### Batching: the character budget is the real one
 
 The model truncates at **512 tokens**, and a batch **pads to its longest member**. So one 6 k-char
@@ -206,6 +263,7 @@ enforces FKs.
 |---|---|
 | `GET /api/prs/:id/ml-labels` | **THE per-PR index** → `PrMlLabelsResponse`. Every badge on the page reads this one query (React Query dedupes; `staleTime: Infinity`), so a 60-thread PR costs one request, not 60. A target with no label is simply absent. Ownership 404 via the getter. Rate tier `read` — recorded explicitly, not inherited, because it sits inside the `/api/prs/<id>/` family whose other members hydrate from GitHub |
 | `GET /api/bot-severity?workspace&repoIds` | Bots-interface rollup → `BotSeverityResponse` (per-severity + per-category totals, one row per bot, coverage as `labelled`/`pending`, the distinct `backend` strings). `?workspace=` follows the read contract — unknown/foreign/garbage degrades to Default, never 404. ⚠ **Rate-limit tier `search` (60/min), not `read`**: DB-only, but it scans a workspace's whole label corpus (capped 50 k rows) plus three unlabelled-count joins — the same shape of cost as `/api/workspace-metrics/compare` |
+| `GET /api/ml-status` | The worker's live state → `MlEnrichmentStatus`, so the sync UI can show the scoring pass (above). **NO scope parameter** — the worker walks every workspace, so a workspace-scoped backlog would under-report the work actually running. Same `search` tier as the rollup, for the same reason (its backlog half is those unlabelled-count joins, once per workspace) — plus a ~3 s per-account cache on the scan, because this one is POLLED and a tier bounds request count, not per-request work |
 
 Both are **pure reads**. There is no generate endpoint and no mutating verb: the model is only
 ever called by the background worker, so no request can spend anything.
@@ -269,25 +327,49 @@ by design).
 
 ## Running it locally
 
-The ML repo's own recommendation is **native, no Docker** (see `../pierre-ml/docs/RUN_LOCALLY.md`)
-— Docker is a resource hog locally and the native path runs the identical ONNX serving code.
-From this repo's root, with the two repos as siblings:
+**`pnpm dev` starts it for you.** With the two repos as siblings there is nothing to configure:
 
 ```bash
-# 1. start the service (hydrates the Git-LFS model on first run, then serves)
-SEVERITY_API_PORT=8799 ../pierre-ml/scripts/serve_local.sh &
-
-# 2. wait until the REAL model is live — "taxonomy":true, not the marker fallback
-until curl -sf http://127.0.0.1:8799/health | grep -q '"taxonomy":true'; do sleep 1; done
-
-# 3. point this app at it, then run the dev server as usual
-echo 'SEVERITY_API_URL=http://127.0.0.1:8799' >> .env
-pnpm dev
+pnpm dev     # severity-api (:8799) + backend (:4000) + frontend (:5173)
 ```
+
+`scripts/dev.mjs` decides ONCE whether the service can be started (sibling repo present, `uv`
+installed, not disabled) and uses that one answer for two things: whether to launch it, and
+whether to point the backend at it. Those must not be able to disagree — a backend aimed at a
+severity-api that is not running would report `mlSeverity: true` and show a scoring backlog
+nothing is draining, which is worse than the feature being quietly off. `scripts/dev-ml.mjs`
+runs the sibling's own `scripts/serve_local.sh` (which hydrates the Git-LFS model on first run);
+`pnpm dev:ml` runs just the service in its own terminal.
+
+**Every "can't run it" path prints one line and exits 0** — the sibling repo is optional, and a
+checkout without it must get exactly the dev loop it always had.
+
+| Var | Effect |
+|---|---|
+| `PIERRE_ML_DIR` | where the sibling lives (default `../pierre-ml`) |
+| `SEVERITY_API_PORT` | port to serve on (default 8799) |
+| `PIERRE_ML_DISABLED=1` | run the app without it |
+
+⚠ **The URL is exported as `SEVERITY_API_DEFAULT_URL`, never as `SEVERITY_API_URL`**, and
+`config.ts` reads it only as a fallback. `process.loadEnvFile` does **not** overwrite an
+already-set variable, so putting `SEVERITY_API_URL` on the dev command line would have BEATEN
+whatever is in your `.env` — the exact inverse of what a default should do. An explicit
+`SEVERITY_API_URL` (shell or `.env`) always wins, and nothing but the dev script sets the
+fallback. A custom `SEVERITY_API_PORT` therefore needs an explicit `SEVERITY_API_URL` too;
+`dev.mjs` prints the URL it chose so a mismatch is visible.
 
 Prereqs on the machine: [`uv`](https://docs.astral.sh/uv/) and `git-lfs`
 (`brew install git-lfs && git lfs install`) — the 150 MB ONNX model is LFS-tracked.
 `db: "unavailable"` in `/health` is expected locally; `/score/*` needs no database.
+
+Doing it by hand (or against a service you host elsewhere) is unchanged:
+
+```bash
+SEVERITY_API_PORT=8799 ../pierre-ml/scripts/serve_local.sh &
+until curl -sf http://127.0.0.1:8799/health | grep -q '"taxonomy":true'; do sleep 1; done
+echo 'SEVERITY_API_URL=http://127.0.0.1:8799' >> .env
+pnpm dev
+```
 
 **Check you are on the real model, not the fallback.** `models_loaded.taxonomy: false` means the
 ONNX model did not load and the service is answering from the marker heuristic — it still
@@ -337,6 +419,17 @@ empty — an unmatched comment falls back to a single low-probability best guess
 
 ## Landmines
 
+- **The enrichment kick must stay ABOVE `clearSyncProgress` in `runSyncForRepo`'s `finally`.**
+  It works only because `runMlEnrichmentTick` sets its `running` flag before its first `await`;
+  an `await` added above that assignment reopens the window where a client sees both halves idle
+  and declares a sync complete that has not scored anything yet. Pinned by `sync-manager.test.ts`.
+- **`pending > 0` is NOT "scoring in progress".** Four states have backlog with nothing draining
+  it (service unreachable, worker backed off, a batch the service rejects, drained) — go through
+  `isMlScoring`, never the raw count, or the fix for a premature "done" becomes a spinner that
+  never stops. `apps/frontend/test/mlScoring.test.ts` pins all four.
+- **`serviceHealthy` means REACHABLE, not "working".** A 500 on one batch is an answer; treating
+  it as "down" hid the scoring phase on a perfectly healthy service. The distinction lives in
+  `SeverityApiError.status` (`null` = never answered) — do not collapse it back into a bare Error.
 - **Never call the service inside `persistPr`'s transaction.** SQLite's `runTransaction` is a
   manual `BEGIN`/`COMMIT` on one shared connection whose stated invariant is that the callback
   only awaits in-process SQLite work.
@@ -417,7 +510,17 @@ empty — an unmatched comment falls back to a single low-probability best guess
   insert-only test never reaches that branch).
 - `sync/ml-enrichment.test.ts` pins `packBatches`: the character budget, the item cap, that an
   over-budget item gets its own batch rather than being dropped, and that nothing is lost or
-  duplicated.
+  duplicated — plus `severityApiAnswered`, so "the service rejected this batch" and "the service
+  is not there" stay distinguishable.
+- `sync/sync-manager.test.ts` pins the ORDERING: the enrichment tick is kicked while the repo is
+  still marked running. Mutation-tested by moving the kick back below `clearSyncProgress`, which
+  fails the assertion.
+- `db/ml-labels.test.ts` additionally pins that `getMlBacklogForAccount` (the account-wide
+  backlog behind `/api/ml-status`) agrees with the per-workspace rollup rather than quietly
+  reporting nothing — a zero there would make the sync indicator go dark with work outstanding.
+- `apps/frontend/test/mlScoring.test.ts` pins `isMlScoring` across all four stalled states plus
+  the partial-failure case that must KEEP its indicator. ⚠ Frontend tests do not run in CI —
+  `./apps/backend/node_modules/.bin/vitest run --root apps/frontend`.
 
 ---
 
@@ -436,5 +539,17 @@ empty — an unmatched comment falls back to a single low-probability best guess
 - **pg `0034` has not been replayed against a real Postgres** (the unit suite is SQLite-only).
   Same status as pg `0031`–`0033`; the throwaway-container recipe is in
   `docs/SECURITY.md` § dependency posture.
+- **One bad comment blocks a whole workspace's backlog, indefinitely.** A batch failure sets
+  `hardFailure` and abandons that workspace for the tick — correct when the service is down (it
+  stops N pointless round trips), but wrong for a single rejected comment: the candidate query
+  is "has no label row", so that comment is re-selected on the next tick and blocks the same
+  workspace again, forever. **Live example in this repo's own dev database:** `pr_comment` 151836
+  in the `Erxes` workspace 500s the severity-api, and it alone is why that workspace sits at
+  `pending: 4` permanently. Bisected: it scores fine at 5 000 chars and 500s at 6 000, i.e. the
+  `ML_BODY_MAX_CHARS` trim cuts it mid-markdown-fence. Two independent fixes, neither done:
+  the service should never 500 on input (pierre-ml), and the worker should quarantine a
+  repeatedly-failing item — a per-item retry counter, or splitting a failed batch — instead of
+  letting one poison pill hold a workspace. The sync UI already refuses to report this as
+  progress, but that only stops it LYING about it.
 - **Not exercised in CI.** The Docker image is not pushed anywhere and CI has no severity-api,
   so the enrichment path is only ever run locally or in cloud.

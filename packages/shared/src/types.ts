@@ -1369,6 +1369,60 @@ export interface SyncStatus {
   lastSyncError: string | null;
 }
 
+/**
+ * Live state of the background ML severity/category worker (CORE, free tier) — `GET
+ * /api/ml-status`.
+ *
+ * WHY THE SYNC UI NEEDS THIS. Fetching a PR's comments from GitHub is only half of making the
+ * board correct: the severity badges the user reads come from a separate CPU-bound pass over
+ * the same text, which runs AFTER the walk lands (it cannot run inside it — see
+ * docs/ML-SEVERITY.md). A sync indicator that stops at the end of the GitHub walk is therefore
+ * announcing "complete" while the model is still working, which is what this endpoint exists to
+ * stop it doing.
+ *
+ * ACCOUNT-WIDE, not workspace-scoped: that is the worker's own grain.
+ */
+export interface MlEnrichmentStatus {
+  /** A severity-api is configured. False ⇒ every other field is inert and the UI shows nothing. */
+  enabled: boolean;
+  /** A tick is in flight right now. */
+  running: boolean;
+  /** Bot text with no label yet, across every workspace of the account. */
+  pending: number;
+  /** Labels already stored for the account. */
+  labelled: number;
+  /** Labels written by the CURRENT (or most recent) tick — the live counter. */
+  scoredThisRun: number;
+  batchesThisRun: number;
+  /**
+   * Failed batches in the current (or most recent) tick.
+   *
+   * ⚠ With `scoredThisRun === 0` this is the STALLED signal, and a client must stop showing
+   * progress on it. Backlog is not the same as work in flight: a handful of comments the service
+   * rejects (a 500 on one batch is a real, observed case) are re-selected every tick forever, so
+   * `pending > 0` alone would spin an indicator on input that will never be scored.
+   */
+  failuresThisRun: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  /** Set while the worker is backed off after repeated failures. */
+  pausedUntil: string | null;
+  /**
+   * Did the service last answer? `null` before the first attempt, `false` when it did not.
+   *
+   * ⚠ A client must treat `false` as "no scoring phase to show". Without the URL pointed at a
+   * live service there is backlog but nothing draining it, and a spinner that never stops is a
+   * worse lie than the one this endpoint was added to fix.
+   *
+   * This tracks REACHABILITY only. A service that answers 500 on one batch is healthy — see
+   * `failuresThisRun` for whether the tick is actually making progress.
+   */
+  serviceHealthy: boolean | null;
+  /** The service answered from the MARKER FALLBACK, not the ONNX model — labels are weaker. */
+  markerFallback: boolean;
+  generatedAt: string;
+}
+
 export interface ThreadStateCounts {
   resolved: number;
   likely_addressed: number;

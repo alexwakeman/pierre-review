@@ -73,18 +73,51 @@ function endpoint(path: string): string {
   return new URL(path, base).toString();
 }
 
+/**
+ * A failed call, carrying the ONE distinction callers actually need: did the service ANSWER?
+ *
+ * "The service is down" and "the service rejected this batch" are different facts with different
+ * consequences, and a bare Error made them indistinguishable. A 500 on one batch (four comments
+ * in this repo's own dev database reliably produce one) means the service is up and the rest of
+ * the corpus will score fine; a transport failure means nothing will. Reporting the first as
+ * "unreachable" would tell the UI to hide a scoring phase that is in fact running.
+ */
+export class SeverityApiError extends Error {
+  /** HTTP status when the service answered; null when it could not be reached at all. */
+  readonly status: number | null;
+  constructor(message: string, status: number | null) {
+    super(message);
+    this.name = 'SeverityApiError';
+    this.status = status;
+  }
+}
+
+/** True when this failure proves nothing about reachability — the service answered. */
+export function severityApiAnswered(err: unknown): boolean {
+  return err instanceof SeverityApiError && err.status !== null;
+}
+
 async function postJson<T>(path: string, payload: unknown): Promise<T> {
-  const res = await fetch(endpoint(path), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(config.mlRequestTimeoutMs),
-  });
+  let res: Response;
+  try {
+    res = await fetch(endpoint(path), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(config.mlRequestTimeoutMs),
+    });
+  } catch (err) {
+    // Transport-level: connection refused, DNS, timeout. The service did not answer.
+    throw new SeverityApiError(
+      `severity-api unreachable: ${err instanceof Error ? err.message : String(err)}`,
+      null,
+    );
+  }
   if (!res.ok) {
     // Bound the echoed body: a 500 from FastAPI can carry a full traceback, and this string
     // ends up in a log line on every failed tick.
     const text = await res.text().catch(() => '');
-    throw new Error(`severity-api ${res.status}: ${text.slice(0, 300)}`);
+    throw new SeverityApiError(`severity-api ${res.status}: ${text.slice(0, 300)}`, res.status);
   }
   return (await res.json()) as T;
 }

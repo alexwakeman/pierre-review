@@ -1033,9 +1033,8 @@ check('findPostedReviewComment(B, A’s comment) returns null (IDOR blocked)', r
 // FAIL rather than quietly still returning nothing. Note `mcl_account_target` is unique per
 // (account, target_kind, target_id) and target ids are per-tenant local pks, so B genuinely can
 // carry a row naming the SAME target id — which is exactly the cross-account read to block.
-const { getPrMlLabels, getBotSeverityRollup, upsertMlLabels } = await import(
-  '../src/db/ml-labels.js'
-);
+const { getPrMlLabels, getBotSeverityRollup, getMlBacklogForAccount, upsertMlLabels } =
+  await import('../src/db/ml-labels.js');
 const [isoThreadB] = await db
   .insert(schema.reviewThreads)
   .values({
@@ -1166,6 +1165,24 @@ const rollupB = await getBotSeverityRollup(2, mlScopeB, true);
 check(
   'getBotSeverityRollup(B) counts ONLY B’s label, not A’s (IDOR blocked)',
   rollupB.labelled === 1 && rollupB.totals.bySeverity.nit === 1 && rollupB.totals.bySeverity.major === 0,
+);
+
+// getMlBacklogForAccount — the account-wide enrichment backlog behind GET /api/ml-status. It
+// takes NO scope argument (the worker walks every workspace, so a workspace-scoped count would
+// under-report the work actually running), which makes its ONE accountId predicate carry the
+// whole isolation weight — worth a check for exactly that reason.
+//
+// Non-vacuous by construction: each tenant has written exactly one label by now, so a missing
+// predicate reads as 2 rather than as an empty result that would pass either way.
+const backlogA = await getMlBacklogForAccount(1);
+const backlogB = await getMlBacklogForAccount(2);
+check(
+  'getMlBacklogForAccount(A) counts ONLY A’s labels (IDOR blocked)',
+  backlogA.labelled === 1,
+);
+check(
+  'getMlBacklogForAccount(B) counts ONLY B’s labels (IDOR blocked)',
+  backlogB.labelled === 1,
 );
 
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);

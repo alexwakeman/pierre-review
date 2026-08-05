@@ -72,6 +72,7 @@ import type {
   PrAnnotationsResponse,
   PrMlLabelsResponse,
   BotSeverityResponse,
+  MlEnrichmentStatus,
   ClosePrResult,
   PrMergeOptions,
   UpdateBranchBody,
@@ -710,6 +711,10 @@ export const api = {
     get<BotSeverityResponse>(
       withQuery('/api/bot-severity', workspaceParam(workspaceId), repoIdsParam(repoIds)),
     ),
+  // Live state of the background scoring worker. NO workspace parameter on purpose — the worker
+  // walks every workspace, so this is account-wide (see MlEnrichmentStatus). Polled by the sync
+  // UI so "sync complete" is not claimed while the model is still scoring what the walk fetched.
+  mlStatus: () => get<MlEnrichmentStatus>('/api/ml-status'),
 
   // ---- Claude Review learnings / memory (Workstream 3; @pierre/pro, flagged) ----
   // Aggregated retrieval signals shown BEFORE a run (Surface 1). Only fetched when

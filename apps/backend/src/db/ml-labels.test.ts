@@ -158,6 +158,19 @@ describe('ML label candidates vs the pending count', () => {
     expect(rollup.labelled).toBe(0);
   });
 
+  // The account-wide backlog is what `GET /api/ml-status` reports so a sync surface can keep
+  // showing the scoring phase instead of announcing "complete" when only the GitHub walk is
+  // done. It walks every workspace itself, so the thing worth pinning is that it agrees with
+  // the per-workspace answer rather than quietly reporting an empty backlog — a zero here would
+  // make the indicator go dark with work still outstanding, which is the exact bug it fixes.
+  it('reports the same outstanding work account-wide as the workspace rollup', async () => {
+    const backlog = await mlLabels.getMlBacklogForAccount(1);
+    const rollup = await mlLabels.getBotSeverityRollup(1, scope, true);
+    expect(backlog.pending).toBe(rollup.pending);
+    expect(backlog.pending).toBe(2);
+    expect(backlog.labelled).toBe(0);
+  });
+
   it('drops to zero pending once every candidate is labelled', async () => {
     const prId = (await db.select().from(schema.pullRequests).execute())[0]!.id;
     const candidates = await mlLabels.listMlCandidates(1, scope, 100);
@@ -186,6 +199,8 @@ describe('ML label candidates vs the pending count', () => {
     expect(rollup.labelled).toBe(2);
     expect(rollup.totals.bySeverity.major).toBe(1);
     expect(await mlLabels.listMlCandidates(1, scope, 100)).toEqual([]);
+    // ...and the account-wide backlog drains with it, so the sync indicator can actually stop.
+    expect(await mlLabels.getMlBacklogForAccount(1)).toEqual({ pending: 0, labelled: 2 });
   });
 
   it('upserts idempotently on (account, target_kind, target_id)', async () => {

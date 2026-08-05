@@ -6,6 +6,11 @@ import { ACTIVITY_QUERY_KEYS } from '../hooks/useActivity.js';
 import { relativeTime } from '../lib/ui.js';
 import { useFilters } from '../store/filters.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
+import {
+  isMlScoring,
+  useMlEnrichmentStatus,
+  useMlSeverityEnabled,
+} from '../hooks/useMlLabels.js';
 import { SyncProgressModal } from './SyncProgressModal.js';
 
 // Circular-arrows glyph for the sync trigger + "Sync now" item; spins while a sync runs.
@@ -160,6 +165,19 @@ export function SyncStatus(): JSX.Element | null {
   const foregroundComplete =
     runningCount > 0 && runningScoped.every((s) => s.progress?.foregroundComplete === true);
 
+  // THE SECOND HALF OF A SYNC. The GitHub walk above only stores the text; the severity badges
+  // the board renders come from a model pass that runs after it and can far outlast it. Polled
+  // faster while a round is open, and it keeps polling itself while scoring continues — the
+  // backlog outlives the modal that produced it.
+  const mlEnabled = useMlSeverityEnabled();
+  const { data: ml, isFetched: mlFetched } = useMlEnrichmentStatus(syncing || modalOpen);
+  const mlScoring = isMlScoring(ml);
+  // "The feature is on but we have not heard back yet." Load-bearing for the auto-close below:
+  // a fast incremental walk can finish inside one poll interval, and closing on `undefined`
+  // would recreate the very race this seam exists to remove. `isFetched` (not `isSuccess`) so a
+  // failing status request unblocks the close instead of pinning the overlay open forever.
+  const mlUnknown = mlEnabled && !mlFetched;
+
   const lastSync = mostRecentSync(repos ?? []);
   const prevLastSync = useRef<string | null>(lastSync);
   // Latch so the foreground→background handoff (close the modal, refresh the
@@ -245,22 +263,38 @@ export function SyncStatus(): JSX.Element | null {
     if (runningCount > 0) setSeenRunning(true);
   }, [runningCount]);
 
-  // Completion: once we've observed a running sync and every repo reports idle
-  // again, drop the "syncing…" indicator, refresh data, and auto-dismiss the
-  // progress modal a second later (long enough to show the final "✓ done").
+  // Completion of the WALK: once we've observed a running sync and every repo reports idle
+  // again, drop the "syncing…" indicator and refresh data. The modal is NOT closed here —
+  // closing is the separate effect below, because the walk finishing is not the sync finishing.
   useEffect(() => {
     if (syncing && seenRunning && statuses && runningCount === 0) {
       setSyncing(false);
       setSeenRunning(false);
       invalidateData();
-      cancelAutoClose();
-      autoCloseTimerRef.current = setTimeout(() => {
-        setModalOpen(false);
-        autoCloseTimerRef.current = null;
-      }, 1000);
+      // Ask the worker where it is RIGHT NOW rather than waiting out the poll interval: the
+      // backend kicks a scoring tick before it releases the repo, so this observation is what
+      // tells the modal whether "done" is actually done.
+      void qc.invalidateQueries({ queryKey: ['ml-status'] });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncing, seenRunning, statuses, runningCount]);
+
+  // Auto-dismiss the progress modal — gated on BOTH halves being idle. The walk ending used to
+  // schedule this directly, which is exactly what made the model pass unrepresentable: the
+  // overlay closed on "✓ done" while scoring was only just starting. Its own effect so the close
+  // is scheduled whenever the last half settles, which for a small sync is the walk and for a
+  // first backfill is the scoring, minutes later. (The user is never trapped: once every repo is
+  // done the modal's button becomes "Continue in background".)
+  useEffect(() => {
+    if (!modalOpen || syncing || cancelling || mlScoring || mlUnknown) return;
+    cancelAutoClose();
+    autoCloseTimerRef.current = setTimeout(() => {
+      setModalOpen(false);
+      autoCloseTimerRef.current = null;
+    }, 1200);
+    return cancelAutoClose;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen, syncing, cancelling, mlScoring, mlUnknown]);
 
   // A freshly-added repo bumps syncModalSignal: pop the progress modal and start
   // polling so its initial backfill (which can take a while) is visible. The
@@ -333,11 +367,18 @@ export function SyncStatus(): JSX.Element | null {
     invalidateData();
   };
 
+  // What the sync is doing, in one phrase. The scoring pass is a real phase of it, not a
+  // footnote: on a first backfill it is the phase that lasts the longest.
+  const scoringLine = ml
+    ? `scoring bot comments${ml.pending > 0 ? ` — ${ml.pending.toLocaleString()} to go` : '…'}`
+    : 'scoring bot comments…';
   const progress = foregroundComplete
     ? 'loading older history…'
     : runningCount > 0
       ? `syncing ${runningCount} repo${runningCount === 1 ? '' : 's'}…`
-      : 'syncing…';
+      : mlScoring
+        ? scoringLine
+        : 'syncing…';
 
   return (
     <>
@@ -345,8 +386,13 @@ export function SyncStatus(): JSX.Element | null {
         <SyncProgressModal
           repos={scopedRepos}
           statuses={scopedStatuses}
+          ml={ml}
           cancelling={cancelling}
           onCancel={() => void cancelSync()}
+          onDismiss={() => {
+            cancelAutoClose();
+            setModalOpen(false);
+          }}
         />
       )}
       <div ref={rootRef} className="relative">
@@ -360,15 +406,19 @@ export function SyncStatus(): JSX.Element | null {
               ? `Sync error: ${erroredRepo.fullName}${
                   erroredRepo.lastSyncError ? ` — ${erroredRepo.lastSyncError}` : ''
                 }`
-              : syncTooltip(lastSync)
+              : mlScoring && !syncing
+                ? `Scoring bot comments${ml && ml.pending > 0 ? ` — ${ml.pending.toLocaleString()} to go` : ''}\n${syncTooltip(lastSync)}`
+                : syncTooltip(lastSync)
           }
           className={`relative flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 ${
             menuOpen ? 'bg-gray-100 dark:bg-gray-800' : ''
           }`}
         >
-          <RefreshIcon spinning={syncing} />
+          {/* Spins for BOTH halves. Stopping it when the GitHub walk ends was the visible form
+              of the bug: the badges the user is waiting for were still being computed. */}
+          <RefreshIcon spinning={syncing || mlScoring} />
           <span className="hidden sm:inline">Sync</span>
-          {erroredRepo && !syncing && (
+          {erroredRepo && !syncing && !mlScoring && (
             <span
               aria-hidden
               className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white dark:ring-gray-900"
@@ -388,7 +438,7 @@ export function SyncStatus(): JSX.Element | null {
             <div className="px-3 py-1.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
               {erroredRepo ? (
                 <span className="text-red-500">Sync error: {erroredRepo.fullName}</span>
-              ) : syncing ? (
+              ) : syncing || mlScoring ? (
                 <span>{progress}</span>
               ) : lastSync ? (
                 <>

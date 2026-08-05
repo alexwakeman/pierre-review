@@ -6,6 +6,7 @@
 // labelled, just several times slower — which is exactly the kind of thing a test has to catch.
 import { describe, expect, it } from 'vitest';
 import { packBatches } from './ml-enrichment.js';
+import { SeverityApiError, severityApiAnswered } from '../ml/severity-client.js';
 import type { MlCandidate } from '../db/ml-labels.js';
 
 let nextId = 1;
@@ -82,5 +83,32 @@ describe('packBatches', () => {
     }
     // And the tiny comments end up together rather than one-per-batch behind a walkthrough.
     expect(batches[0]!.length).toBeGreaterThan(1);
+  });
+});
+
+// The worker turns a batch failure into `serviceHealthy`, which /api/ml-status reports and the
+// sync UI uses to decide whether to show a scoring phase at all. So "the service rejected this
+// batch" and "the service is not there" have to stay distinguishable: conflating them made a
+// healthy severity-api read as down the moment one comment 500'd (four in this repo's own dev
+// database reliably do), which would hide a scoring pass that was in fact about to run fine on
+// the rest of the corpus.
+describe('severityApiAnswered — reachability vs a rejected batch', () => {
+  it('treats any HTTP answer, including a 500, as proof the service is up', () => {
+    expect(severityApiAnswered(new SeverityApiError('severity-api 500: boom', 500))).toBe(true);
+    expect(severityApiAnswered(new SeverityApiError('severity-api 422: too big', 422))).toBe(
+      true,
+    );
+  });
+
+  it('treats a transport failure as unreachable', () => {
+    expect(
+      severityApiAnswered(new SeverityApiError('severity-api unreachable: ECONNREFUSED', null)),
+    ).toBe(false);
+  });
+
+  it('treats anything that is not a SeverityApiError as unreachable', () => {
+    // Conservative on purpose: an unrecognised failure must not be able to assert health.
+    expect(severityApiAnswered(new Error('something else'))).toBe(false);
+    expect(severityApiAnswered('nope')).toBe(false);
   });
 });

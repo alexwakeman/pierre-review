@@ -43,6 +43,7 @@ import {
 import {
   isSeverityApiConfigured,
   scoreComments,
+  severityApiAnswered,
   severityHealth,
   type SeverityRequestItem,
   type SeverityResult,
@@ -71,6 +72,72 @@ let rotationCursor = 0;
 // Logged once per process so a marker-fallback deployment is visible in the boot log rather
 // than only in the `backend` string on rows nobody reads.
 let healthLogged = false;
+
+// ---- Live run state: what the sync UI polls (GET /api/ml-status) ----
+//
+// WHY THIS EXISTS. The enrichment pass used to be structurally invisible to every sync
+// surface. `runSyncForRepo`'s `finally` cleared the repo's progress and THEN kicked a tick, so
+// the UI was told "sync complete" at the exact instant the model calls began — an indicator
+// downstream of "done" can never represent them. Two things fix that: sync-manager now kicks
+// the tick BEFORE it clears progress (the guards below run synchronously, so `running` is true
+// by the time that function returns), and these fields let the client keep showing the scoring
+// phase until the labels the board renders actually exist.
+//
+// All process-local, like the sync manager's own progress map: a restart loses only a readout.
+let runStartedAt: number | null = null;
+let runLabelled = 0;
+let runBatches = 0;
+let runFailures = 0;
+let lastFinishedAt: number | null = null;
+let lastError: string | null = null;
+// null until a /health probe has answered at all; false = it did not answer (the normal state
+// of a dev machine without the sibling repo running), true = it did. The UI must NOT claim a
+// scoring phase is in progress against a service that is not there.
+let serviceHealthy: boolean | null = null;
+// True when the last answered probe reported the MARKER FALLBACK rather than the ONNX model.
+let markerFallback = false;
+
+/** Live state of the worker. Mirrors the tick's counters as they increment, not on completion. */
+export interface MlEnrichmentState {
+  running: boolean;
+  startedAt: number | null;
+  labelled: number;
+  batches: number;
+  failures: number;
+  finishedAt: number | null;
+  lastError: string | null;
+  /** Epoch ms until which the worker is backed off after repeated failures, else null. */
+  pausedUntil: number | null;
+  serviceHealthy: boolean | null;
+  markerFallback: boolean;
+}
+
+export function getMlEnrichmentState(): MlEnrichmentState {
+  return {
+    running,
+    startedAt: runStartedAt,
+    labelled: runLabelled,
+    batches: runBatches,
+    failures: runFailures,
+    finishedAt: lastFinishedAt,
+    lastError,
+    pausedUntil: backoffUntil > Date.now() ? backoffUntil : null,
+    serviceHealthy,
+    markerFallback,
+  };
+}
+
+/**
+ * Publish the in-flight tick's counters so a poll mid-tick sees progress rather than a step
+ * function at the end. Called from inside the concurrency workers, which is safe: assigning two
+ * numbers cannot throw, and the landmine those workers guard against is a THROW escaping into
+ * the shared `Promise.all`.
+ */
+function publishProgress(stats: TickStats): void {
+  runLabelled = stats.labelled;
+  runBatches = stats.batches;
+  runFailures = stats.failures;
+}
 
 /** Only the 16 real vendor names are a useful hint to the service's marker parser. */
 function vendorHint(kind: string | null | undefined): string | null {
@@ -195,10 +262,20 @@ interface TickStats {
  */
 export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
   const stats: TickStats = { labelled: 0, batches: 0, failures: 0 };
+  // ⚠ These three guards and the `running = true` below MUST stay before the first `await`.
+  // sync-manager kicks a tick from `runSyncForRepo`'s `finally` and relies on `running` being
+  // true by the time `void runMlEnrichmentTick(log)` returns, so that there is no instant where
+  // a client can observe every repo idle AND no scoring in flight. Introducing an await above
+  // this line reopens the gap the sync indicator exists to close.
   if (!isSeverityApiConfigured()) return stats;
   if (running) return stats;
   if (Date.now() < backoffUntil) return stats;
   running = true;
+  runStartedAt = Date.now();
+  runLabelled = 0;
+  runBatches = 0;
+  runFailures = 0;
+  lastError = null;
   const deadline = Date.now() + config.mlTickBudgetMs;
 
   try {
@@ -209,6 +286,10 @@ export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
       // first request) burned the single probe on a failure, and a marker-fallback deployment
       // that came up a minute later was never reported.
       healthLogged = health !== null;
+      // Recorded for the status readout as well as the log: a client must not be shown a
+      // "scoring bot comments…" phase against a service that never answered.
+      serviceHealthy = health !== null;
+      markerFallback = health !== null && !health.taxonomyLoaded;
       if (!health) {
         log.warn(
           `ml enrichment: severity-api at ${config.severityApiUrl} did not answer /health; will retry`,
@@ -264,11 +345,13 @@ export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
   } catch (err) {
     // A tick failing is expected when the service is down; it must never be fatal.
     stats.failures += 1;
-    log.warn(
-      `ml enrichment tick failed: ${err instanceof Error ? err.message.slice(0, 300) : String(err)}`,
-    );
+    lastError = err instanceof Error ? err.message.slice(0, 300) : String(err);
+    log.warn(`ml enrichment tick failed: ${lastError}`);
   } finally {
     running = false;
+    runStartedAt = null;
+    lastFinishedAt = Date.now();
+    publishProgress(stats);
     if (stats.failures > 0) {
       consecutiveFailures += 1;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
@@ -341,7 +424,16 @@ async function enrichWorkspace(
       let response;
       try {
         response = await scoreComments(items);
+        // Direct evidence, and cheaper + fresher than re-probing /health: the once-per-process
+        // probe cannot notice a service that dies later, and this readout gates whether the sync
+        // UI is allowed to claim a scoring phase at all.
+        serviceHealthy = true;
       } catch (err) {
+        // A 500 on ONE batch does not mean the service is down — four comments in this repo's
+        // own dev database reliably produce one — so only a failure that proves unreachability
+        // clears the flag. Whether the tick is making progress is a separate question, answered
+        // by `failures`/`labelled` rather than by this.
+        serviceHealthy = severityApiAnswered(err);
         stats.failures += 1;
         // One failed batch does not condemn the rest of the tick, but a service that is down
         // fails every batch — so stop this workspace and let the failure counter decide.
@@ -363,12 +455,14 @@ async function enrichWorkspace(
         );
       }
       stats.batches += 1;
+      publishProgress(stats);
       // ⚠ NOTHING IN THIS LOOP MAY THROW. Two of these run under one `Promise.all`, so a throw
       // rejects the whole thing, propagates past the caller's `finally` (which clears the
       // re-entrancy flag) and leaves the SIBLING worker running detached — still POSTing and
       // still writing, while the next tick believes it is alone.
       try {
         stats.labelled += await upsertMlLabels(writes);
+        publishProgress(stats);
       } catch (err) {
         stats.failures += 1;
         hardFailure = true;
@@ -393,4 +487,12 @@ export function __resetMlEnrichmentState(): void {
   backoffUntil = 0;
   healthLogged = false;
   rotationCursor = 0;
+  runStartedAt = null;
+  runLabelled = 0;
+  runBatches = 0;
+  runFailures = 0;
+  lastFinishedAt = null;
+  lastError = null;
+  serviceHealthy = null;
+  markerFallback = false;
 }

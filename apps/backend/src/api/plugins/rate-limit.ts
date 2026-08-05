@@ -179,6 +179,13 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // members are GitHub-hydrating, so the next person to widen `prGithubGet` should have to see
   // that this one was decided, not defaulted.
   if (!mutating && /^\/api\/prs\/\d+\/ml-labels$/.test(path)) return [TIERS.read];
+  // GET /api/ml-status — the enrichment worker's live state, POLLED every few seconds while a
+  // sync round is open so the progress UI can represent the model pass. Its in-memory half is
+  // free, but its backlog half is `/api/bot-severity`'s unlabelled-count joins repeated PER
+  // WORKSPACE, so it belongs in the same 60/min `search` bucket, not the blanket read one. The
+  // route caches the scan for a few seconds precisely because the tier bounds request COUNT and
+  // not the work each request does — the two are complementary, neither is a substitute.
+  if (path.startsWith('/api/ml-status')) return [TIERS.search, TIERS.read];
   // GET /api/prs/<id> plus the sub-routes that ALSO hydrate live from GitHub rather than reading
   // already-synced rows:
   //   `/merge-options`            repo merge config + mergeability + the merge-queue GraphQL probe

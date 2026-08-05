@@ -36,6 +36,7 @@ import {
   automatedReviewerUserIds,
   classificationKindForUser,
   classificationLabelMap,
+  listWorkspaces,
   type BotScope,
 } from './queries.js';
 
@@ -693,4 +694,46 @@ async function countUnlabelledBotText(
   ]);
 
   return Number(rc[0]?.n ?? 0) + Number(pc[0]?.n ?? 0) + Number(rv[0]?.n ?? 0);
+}
+
+export interface MlBacklog {
+  /** Bot text across EVERY workspace of the account that carries no label yet. */
+  pending: number;
+  /** Labels already stored for the account. */
+  labelled: number;
+}
+
+/**
+ * The account's whole enrichment backlog — what `GET /api/ml-status` reports so a sync surface
+ * can keep showing activity until the labels exist, instead of announcing "complete" the moment
+ * the GitHub walk ends and leaving the model calls unrepresented.
+ *
+ * ACCOUNT-WIDE, NOT WORKSPACE-SCOPED, because that is the worker's own grain: a tick walks every
+ * workspace of every active account. Scoping this to the selected workspace would under-report
+ * exactly the work that is running and let the indicator go quiet while the CPU is busy.
+ *
+ * Cost: one bot-set resolve plus three indexed counts PER WORKSPACE, and they share the same
+ * left-join-is-null predicate as `listMlCandidates`, so "pending" and "what the worker will pick
+ * up next" cannot drift. That is not free, which is why the route in front of it caches — see
+ * the TTL note there. Workspaces are walked serially rather than with `Promise.all` so a
+ * many-workspace account cannot open 4×N connections at once on a poll.
+ */
+export async function getMlBacklogForAccount(accountId: number): Promise<MlBacklog> {
+  const workspaces = await listWorkspaces(accountId);
+  let pending = 0;
+  for (const ws of workspaces) {
+    if (ws.repoIds.length === 0) continue;
+    const scope: BotScope = { workspaceId: ws.id, repoIds: ws.repoIds };
+    const automatedIds = await automatedReviewerUserIds(accountId, ws.id, 'all');
+    if (automatedIds.length === 0) continue;
+    pending += await countUnlabelledBotText(accountId, scope, automatedIds);
+  }
+
+  const labelledRows = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(mlCommentLabels)
+    .where(eq(mlCommentLabels.accountId, accountId))
+    .execute();
+
+  return { pending, labelled: Number(labelledRows[0]?.n ?? 0) };
 }

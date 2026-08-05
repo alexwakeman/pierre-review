@@ -188,10 +188,21 @@ export const config = {
   // paths resolve against the INSTALL directory, so an npx user has nowhere to put the var.
   // Cloud sets it to the Railway private-DNS name; local dev to the sibling repo's port.
   // ML_SEVERITY_DISABLED=true is the kill switch for a deployment that has the URL set.
+  //
+  // SEVERITY_API_DEFAULT_URL is a DEV-LOOP FALLBACK, never a deployment knob: `pnpm dev`
+  // (scripts/dev.mjs) exports it only after confirming it can actually start the sibling repo's
+  // service, so the backend points at a service that exists without anyone editing `.env`. It is
+  // deliberately a SECOND variable rather than a default assigned to SEVERITY_API_URL, because
+  // `process.loadEnvFile` does NOT overwrite an already-set variable — a command-line
+  // SEVERITY_API_URL would therefore have BEATEN the developer's own `.env`, inverting the
+  // precedence a default is supposed to have. Nothing but the dev script ever sets it.
   severityApiUrl:
     process.env.ML_SEVERITY_DISABLED === 'true'
       ? ''
-      : (process.env.SEVERITY_API_URL ?? '').replace(/\/$/, ''),
+      : (process.env.SEVERITY_API_URL ?? process.env.SEVERITY_API_DEFAULT_URL ?? '').replace(
+          /\/$/,
+          '',
+        ),
   // The enrichment worker's own cron — a TICK, not a cadence: each tick drains as much of the
   // unlabelled backlog as its wall-clock budget allows, newest-first. Separate from the sync
   // cron on purpose (the two are independent, and enrichment must never delay a sync).
