@@ -30,6 +30,7 @@ import type {
   MlLabelTargetKind,
   MlSeverity,
   MlSeverityCounts,
+  MlVendorConfidence,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import {
@@ -92,6 +93,14 @@ function coerceCategories(raw: unknown): MlCategory[] {
 function coerceSeverity(raw: unknown): MlSeverity | null {
   return typeof raw === 'string' && (SEVERITY_KEYS as string[]).includes(raw)
     ? (raw as MlSeverity)
+    : null;
+}
+
+const VENDOR_CONFIDENCE_KEYS: MlVendorConfidence[] = ['high', 'medium', 'low'];
+
+function coerceVendorConfidence(raw: unknown): MlVendorConfidence | null {
+  return typeof raw === 'string' && (VENDOR_CONFIDENCE_KEYS as string[]).includes(raw)
+    ? (raw as MlVendorConfidence)
     : null;
 }
 
@@ -284,6 +293,11 @@ export interface MlLabelWrite {
   severity: MlSeverity;
   severityOrd: number;
   severityProb: number;
+  /** The BOT'S OWN declared severity, stored beside ours to be shown next to it — never used
+   * to derive, correct or fall back `severity`. Null when the vendor declared none, and when
+   * the deployed severity-api is an older build that omits the field. */
+  vendorSeverity: MlSeverity | null;
+  vendorSeverityConfidence: MlVendorConfidence | null;
   categories: MlCategory[];
   categoryProbs: Record<string, number>;
   isSummary: boolean;
@@ -318,6 +332,12 @@ export async function upsertMlLabels(rows: MlLabelWrite[]): Promise<number> {
       severity: r.severity,
       severityOrd: r.severityOrd,
       severityProb: r.severityProb,
+      // `?? null` rather than a straight read: drizzle DROPS an `undefined` key from both the
+      // INSERT column list and the SET list, so an accidental undefined would insert fine and
+      // then silently refuse to clear a stale vendor claim on the update path. An explicit null
+      // means the same thing on both.
+      vendorSeverity: r.vendorSeverity ?? null,
+      vendorSeverityConfidence: r.vendorSeverityConfidence ?? null,
       categories: r.categories,
       categoryProbs: r.categoryProbs,
       isSummary: r.isSummary,
@@ -340,6 +360,12 @@ export async function upsertMlLabels(rows: MlLabelWrite[]): Promise<number> {
           severity: values.severity,
           severityOrd: values.severityOrd,
           severityProb: values.severityProb,
+          // ⚠ IN BOTH HALVES. A re-score must be able to CLEAR a vendor claim as well as set
+          // one (a vendor drops its badge, or the service that read it is rolled back), so
+          // these are written on the update path too — an omitted key here would freeze the
+          // first value ever stored while the insert path looked perfectly correct.
+          vendorSeverity: values.vendorSeverity,
+          vendorSeverityConfidence: values.vendorSeverityConfidence,
           categories: values.categories,
           categoryProbs: values.categoryProbs,
           isSummary: values.isSummary,
@@ -368,6 +394,12 @@ function toWireLabel(row: typeof mlCommentLabels.$inferSelect): MlLabel | null {
     severity,
     severityOrd: row.severityOrd,
     severityProb: row.severityProb,
+    // Coerced on the way OUT as well as in. The column is plain text in both dialects (the
+    // drizzle `enum` is a compile-time nicety, not a CHECK constraint), and unlike `severity`
+    // above a bad value here must NOT drop the whole label — the row's real severity is the
+    // useful one, so an unreadable vendor claim degrades to "no vendor claim".
+    vendorSeverity: coerceSeverity(row.vendorSeverity),
+    vendorSeverityConfidence: coerceVendorConfidence(row.vendorSeverityConfidence),
     categories: coerceCategories(row.categories),
     isSummary: row.isSummary,
     backend: row.backend,

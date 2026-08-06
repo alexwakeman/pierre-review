@@ -153,9 +153,10 @@ nothing).
   login→`ReviewBotKind` only. A stored workspace judgement and the `quality_check` role never reach
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
-- **pg `0031`/`0032` and plugin `0020`'s pg twin have not been replayed against a real Postgres**
-  (see the paragraph above). The unit suite is SQLite-only, so nothing automated covers the eight
-  dialect divergences those files carry.
+- **Plugin `0020`'s pg twin has not been replayed against a real Postgres.** The unit suite is
+  SQLite-only, so nothing automated covers the dialect divergences it carries. (CORE's pg chain
+  `0000`→`0035` — including `0031`/`0032` — WAS replayed by hand during `0035`; see that section.
+  It is still a one-off by hand, not CI, so it will go stale again.)
 - **The legacy `?team=` URL rule is unit-tested nowhere.** It lives in
   `readWorkspaceFromUrl`/`readFromUrl` in `hooks/useUrlState.ts`, neither of which is exported, so a
   test would pin a copy rather than the code — flagged in `workspaceScope.test.ts`'s own header.
@@ -204,8 +205,44 @@ Points worth remembering:
   `text ... mode:'json'` / pg `jsonb` for the two category columns; sqlite `integer` /
   pg `boolean` for `is_summary`; sqlite `integer` + `DEFAULT (unixepoch())` / pg
   `timestamp with time zone` + `DEFAULT now()` for the three timestamps.
-- ⚠ **pg `0034` has not been replayed against a real Postgres** — same status as pg `0031`–`0033`.
+- ✅ **pg `0034` HAS now been replayed against a real Postgres** — see `0048` / pg `0035` below,
+  which replayed the whole pg chain (`0000`→`0035`) into a throwaway database on Postgres 17.
 - ⚠ A running `tsx watch` dev server applies migrations on every restart, so editing a `.sql`
   file AFTER the watcher has already applied it leaves the dev DB on the old DDL with the new
   file's hash unrecorded. Drop the table, delete its `__drizzle_migrations` row, re-run
   `pnpm db:migrate`. This happened while writing this migration.
+
+
+
+## `0048` / pg `0035` — `ml_comment_labels.vendor_severity`
+
+Two additive nullable `text` columns — `vendor_severity` (`nit`…`critical`) and
+`vendor_severity_confidence` (`high`/`medium`/`low`) — carrying the REVIEW BOT'S OWN declared
+severity, which the severity-api's marker parser already extracted and we were discarding.
+Journal entries `idx 48 / version "6"` and `idx 35 / version "7"`, sharing
+`when: 1785900000000`. No index (read out of an already-fetched label row, never a predicate)
+and no backfill.
+
+- **This is not an input to our label.** On `gold_v2_sample` (300 comments, fresh label-free
+  adjudication, marker-stratified, held out) our model scores 0.700 exact / 0.303 ordinal MAE
+  against the vendor badge's 0.474 / 0.697 — the bot's self-assessment is the WORSE of the two.
+  The columns exist to be displayed beside ours; nothing derives, corrects or falls back from
+  them.
+- **Both nullable, for two reasons that are indistinguishable after the fact and need not be
+  distinguished**: most comments carry no vendor badge at all, and an older severity-api build
+  omits the response fields entirely. The client (`ml/severity-client.ts`) reads both defensively
+  — absent, null, non-string, or a word outside the union all become `null`, and nothing throws.
+  A throw there would fail the batch, and a failed batch abandons its workspace's backlog for the
+  tick.
+- **Both columns are in BOTH halves of `upsertMlLabels`'s upsert** — the values object AND the
+  `set:` clause — so a re-score can CLEAR a stale claim, not just set one. Omitting them from
+  `set:` type-checks perfectly and freezes the first value ever stored; `db/ml-labels.test.ts`
+  mutation-tested exactly that (removing the two `set:` keys fails two cases).
+- **Existing rows keep NULL.** Labels are never re-scored (ML-SEVERITY.md § known gaps), so
+  historical rows gain a vendor claim only via `pnpm ml:enrich --reset`. A null renders nothing.
+- ✅ **Replayed against a real Postgres 17.** The entire pg chain `0000`→`0035` was applied in
+  journal order into a throwaway database (`docker exec … psql -v ON_ERROR_STOP=1`), then
+  smoke-tested at row level: the insert stores the claim, an `ON CONFLICT (account_id,
+  target_kind, target_id) DO UPDATE` re-write with NULLs clears it, the row count stays 1 and our
+  own `severity` is untouched. Re-applying `0035` is a no-op (`ADD COLUMN IF NOT EXISTS`). This
+  also closes the standing gap on pg `0031`–`0034` — by hand, once; CI still does not do it.

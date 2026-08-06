@@ -337,6 +337,13 @@
       "when": 1785800000000,
       "tag": "0047_ml_comment_labels",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1785900000000,
+      "tag": "0048_ml_vendor_severity",
+      "breakpoints": true
     }
   ]
 }

@@ -1068,6 +1068,10 @@ await upsertMlLabels([
     severity: 'major',
     severityOrd: 2,
     severityProb: 0.9,
+    // The vendor's own claim, stored beside ours — irrelevant to isolation, but the write
+    // shape is exhaustive on purpose so a new column cannot be added without a decision here.
+    vendorSeverity: 'critical',
+    vendorSeverityConfidence: 'high',
     categories: ['security'],
     categoryProbs: { security: 0.9 },
     isSummary: false,
@@ -1152,6 +1156,8 @@ await upsertMlLabels([
     severity: 'nit',
     severityOrd: 0,
     severityProb: 0.5,
+    vendorSeverity: null,
+    vendorSeverityConfidence: null,
     categories: ['nitpick'],
     categoryProbs: { nitpick: 0.5 },
     isSummary: false,

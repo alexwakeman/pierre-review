@@ -233,13 +233,16 @@ migrations `0047` / pg `0034`). One row per classified target.
 >    `PERSIST_BODIES=true` (set it, then run a Deep re-sync so the re-fetch stores hunks).
 >    Both fields are optional — older artifacts ignore them.
 > 3. **Deep re-sync purges the repo's ML labels** and kicks an immediate enrichment tick, so
->    the whole corpus is re-scored against the currently served model (labels are
->    model_version-stamped; this is the supported "backfill against the new model" gesture).
+>    the whole corpus is re-scored against the currently served model — the supported
+>    "backfill against the new model" gesture. ⚠ It was for a while the ONLY way to know what
+>    scored a row: the `model_version` stamp was a constant through an artifact swap (landmine
+>    below), so re-scoring is what *makes* a corpus one model's, not the stamp.
 >    Ordinary syncs — including a freshly added repo's initial backfill — also kick a tick on
 >    completion, so new comments get labels without waiting for the cron.
 
 | `is_summary` | PR walkthrough/summary rather than a specific finding |
-| `backend`, `model_version` | verbatim from the service |
+| `vendor_severity`, `vendor_severity_confidence` | **the bot's OWN badge**, read off its markup by the service's deterministic marker parser (`nit`…`critical`; `high`/`medium`/`low`). Both **nullable** — most comments carry no badge, and an older severity-api omits the fields entirely, so the client reads them defensively. Stored to be SHOWN BESIDE ours and for nothing else; see the landmine |
+| `backend`, `model_version` | verbatim from the service — and a `model_version` is worth something only if it MOVES when the artifact does; see the landmine |
 | `body_hash` | sha256 of the text **actually sent** (trimmed + capped) |
 | `target_created_at` | the source comment's timestamp |
 
@@ -266,7 +269,7 @@ enforces FKs.
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/prs/:id/ml-labels` | **THE per-PR index** → `PrMlLabelsResponse`. Every badge on the page reads this one query (React Query dedupes; `staleTime: Infinity`), so a 60-thread PR costs one request, not 60. A target with no label is simply absent. Ownership 404 via the getter. Rate tier `read` — recorded explicitly, not inherited, because it sits inside the `/api/prs/<id>/` family whose other members hydrate from GitHub |
+| `GET /api/prs/:id/ml-labels` | **THE per-PR index** → `PrMlLabelsResponse`. Every badge on the page reads this one query (React Query dedupes; `staleTime: Infinity`), so a 60-thread PR costs one request, not 60. A target with no label is simply absent. Ownership 404 via the getter. Carries the vendor's own badge (`vendorSeverity` / `vendorSeverityConfidence`, both nullable) alongside ours, purely so the client can render the disagreement. Rate tier `read` — recorded explicitly, not inherited, because it sits inside the `/api/prs/<id>/` family whose other members hydrate from GitHub |
 | `GET /api/bot-severity?workspace&repoIds` | Bots-interface rollup → `BotSeverityResponse` (per-severity + per-category totals, one row per bot, coverage as `labelled`/`pending`, the distinct `backend` strings). `?workspace=` follows the read contract — unknown/foreign/garbage degrades to Default, never 404. ⚠ **Rate-limit tier `search` (60/min), not `read`**: DB-only, but it scans a workspace's whole label corpus (capped 50 k rows) plus three unlabelled-count joins — the same shape of cost as `/api/workspace-metrics/compare` |
 | `GET /api/ml-status` | The worker's live state → `MlEnrichmentStatus`, so the sync UI can show the scoring pass (above). **NO scope parameter** — the worker walks every workspace, so a workspace-scoped backlog would under-report the work actually running. Same `search` tier as the rollup, for the same reason (its backlog half is those unlabelled-count joins, once per workspace) — plus a ~3 s per-account cache on the scan, because this one is POLLED and a tier bounds request count, not per-request work |
 
@@ -280,6 +283,12 @@ ever called by the background worker, so no request can spend anything.
 - **`MlSeverityBadge`** (`components/MlSeverityBadge.tsx`) — a pill in a comment's header row,
   plus the category chip and a `summary` marker. Renders **nothing** without a label, and never
   fetches: the caller passes a label it already found in the shared index.
+- **The vendor's verdict, shown only when it DIFFERS.** `vendorSeverity` rides the same per-PR
+  index; agreement stays silent (two pills saying the same thing is noise). The point is to make
+  the contradiction legible where the user is already looking — a badge reading `minor` under a
+  comment CodeRabbit itself headed `🟠 Major` otherwise reads as our bug, when it is our answer
+  and the better one (Accuracy above). It is a display of the vendor's claim, never a correction
+  of ours.
 - **`CommentBlock`** — the per-comment badge on a review-thread comment. Covers **all eight
   `ThreadCard` mount sites** for free (Threads tab, feed inline threads, attention cards, theme
   drill-down, search results, both diff-view mounts).
@@ -353,7 +362,19 @@ clone without `--recurse-submodules` must get exactly the dev loop it always had
 |---|---|
 | `PIERRE_ML_DIR` | override the submodule location (default `packages/ml`) |
 | `SEVERITY_API_PORT` | port to serve on (default 8799) |
+| `SEVERITY_API_WORKERS` | uvicorn worker processes (default **2**, to match `ML_CONCURRENCY`) |
 | `PIERRE_ML_DISABLED=1` | run the app without it |
+
+⚠ **`SEVERITY_API_WORKERS` and `ML_CONCURRENCY` are two halves of one number.** The client sends
+`ML_CONCURRENCY` (2) requests at once *because the deployed service runs two uvicorn workers* — so
+a one-worker local service is the single topology the shipped defaults do not fit. Both batches
+serialize on the one worker, and since the category axis moved to a model head each batch costs
+**two** ONNX forwards rather than one, so the second batch reliably outran the client's 120 s
+`ML_REQUEST_TIMEOUT_MS`. The failure reads as a lie from both ends: the client reports
+`severity-api unreachable`, while the server logs **nothing at all** — it never finished the
+request it was still working on, and uvicorn only logs on completion. `serve_local.sh` therefore
+defaults to 2. Raise both together to drain a large backlog; lower both together on a memory-tight
+box (each worker resident-loads both ~150 MB int8 heads).
 
 ⚠ **The URL is exported as `SEVERITY_API_DEFAULT_URL`, never as `SEVERITY_API_URL`**, and
 `config.ts` reads it only as a fallback. `process.loadEnvFile` does **not** overwrite an
@@ -412,7 +433,11 @@ without it.
 
 ---
 
-## Accuracy — what to tell users, and what the UI already says
+## Accuracy — and who is right when we contradict the bot
+
+Two questions. The second is the one that arrives as a bug report.
+
+### How good is the label
 
 Macro-F1 ≈ 0.66 against a three-source consensus. **CRITICAL is the class it under-recalls**, so
 the product treats **major + critical together as "high"** everywhere (the panel's headline
@@ -420,10 +445,140 @@ number, the badge tooltip). Nothing auto-acts on a label: there is no gate, no a
 blocking. Categories are marker-derived (deterministic), not model output, and the list is never
 empty — an unmatched comment falls back to a single low-probability best guess.
 
+The sharper measurement is `packages/ml/data/gold/gold_v2_sample.jsonl` +
+`fable_gold_labels.jsonl`: **300 comments adjudicated fresh with every existing label hidden**,
+drawn from repos we know (including `erxes/erxes`) and **marker-stratified so CodeRabbit's own
+verdicts are evenly represented** — 76 critical / 76 major / 76 minor / 72 none. What the
+adjudication found: minor 144 (48%), major 99 (33%), nit 55 (18%), **critical 2 (0.7%)**.
+
+Scored with the **served int8 ONNX artifact**, split-half — each half's calibration prior is fit
+on the other, so the prior is not grading its own homework:
+
+| rater | exact | ordinal MAE |
+|---|---|---|
+| **v2 + calibration (what ships)** | **0.700** | **0.303** |
+| v2, calibration off | 0.610 | 0.440 |
+| CodeRabbit's own badge | 0.474 | 0.697 (n = 228) |
+| human ↔ referee ceiling | 0.700 | 0.320 |
+
+Two things fall out of that table and both are load-bearing:
+
+- **We are AT the human ceiling on exact agreement and inside it on MAE.** There is no headroom
+  left to chase against this gold set; a better number now means a better gold set, not a better
+  model.
+- **The vendor is the worst of the three raters, by a distance.** On the same 300 comments
+  CodeRabbit declared **76 critical**; the adjudication found **2**. This question is settled.
+
+### ⚠ Agreement with the vendor is an ANTI-METRIC
+
+Turning calibration off moves us sharply TOWARDS CodeRabbit — `major` agreement 28% → 48% — and
+sharply AWAY from ground truth: 0.700 → 0.610 exact, 0.303 → 0.440 MAE. The two move in opposite
+directions, which makes "users see fewer contradictions" a direct proxy for "the product got
+worse".
+
+**Standing rule: no change to the model, the calibration prior or the served artifact may be
+justified by reducing visible disagreement with a vendor badge.** The contradictions are the
+feature. They are also what gets reported as a bug, which is exactly why this is written down.
+
+### The disagreement at scale
+
+Live corpus, the 2 967 CodeRabbit comments carrying a HIGH-confidence vendor badge:
+
+| what scored it | our mix (nit/minor/major/crit) | agree | we downgrade | we upgrade |
+|---|---|---|---|---|
+| the stored labels (a two-model blend — see the landmine) | 6/21/66/5 | 54% | 27% | 19% |
+| the current v2 artifact | 3/70/22/3 | 44% | 51% | 5% |
+| current v2, calibration off | 25/28/39/6 | 42% | 47% | 11% |
+
+Per vendor class, stored labels: CR-`minor` 35% agree (we UPGRADE 52% of them), CR-`major` 73%,
+CR-`critical` 16% (we downgrade 83%). Under the current artifact CR-`major` agreement collapses
+to 28% — **1 080 of 1 639 CodeRabbit Majors become `minor`**. Calibration alone changes the
+verdict on **44%** of comments (1 314 / 2 967), and the stored labels disagree with the current
+artifact on **58%** (1 741 / 2 967).
+
+**Why the vendor inflates** is visible in CodeRabbit's own `_Source:_` provenance footer:
+
+| footer | n | CR says Major | we agree | we downgrade | → `nit` |
+|---|---|---|---|---|---|
+| (none) | 2 635 | 56% | 55% | 23% | 5% |
+| `Coding guidelines` | 245 | 50% | 36% | 56% | 24% |
+| `Linters/SAST tools` | 59 | 50% | 45% | 28% | 8% |
+
+Half of its house-style-rule findings are Major. **CodeRabbit's severity conflates
+rule-confidence with impact** — "I am certain this violates your style guide" and "this will
+hurt" come out as the same badge. Ours does not, and that is the entire disagreement in one line.
+
+### `severity_prob < 0.25` is an IDENTITY, not a heuristic
+
+`severity_prob` is the RAW probability of the CHOSEN class, and the argmax of a 4-class softmax
+is **always ≥ 0.25**. So **any stored label under 0.25 is one the model did not pick** — the
+calibration prior overrode it. That is a free, exact "the model itself disagreed with this label"
+flag, and **15% of the CodeRabbit corpus (447 / 2 967) sits in that state** under the current
+artifact. We compute it, store it, and currently do nothing with it (see Known gaps).
+
+Confidence carries signal on its own, too — agreement with the vendor rises monotonically with it:
+
+| `severity_prob` | n | agree with vendor |
+|---|---|---|
+| < 0.40 | 257 | 39.3% |
+| 0.40 – 0.50 | 600 | 44.2% |
+| 0.50 – 0.60 | 606 | 48.7% |
+| 0.60 – 0.75 | 833 | 58.6% |
+| ≥ 0.75 | 548 | 70.4% |
+
+### One worked example, end to end
+
+`review_comments.id = 366949` — erxes/erxes #8917,
+`frontend/core-ui/src/modules/search/graphql/queries/globalSearch.ts`. CodeRabbit's own header:
+`_🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_`. Stored label: `minor`, prob `0.4433`.
+Re-scored live on the same body, the v2 artifact returns raw NIT 0.568 / MINOR 0.189 /
+MAJOR 0.230 / CRITICAL 0.014 — **argmax `nit`** — and calibration lifts MINOR to 0.558.
+
+So the shipped answer (`minor`) is the defensible one, and it is defensible for the wrong reason:
+the model wanted `nit` and the prior moved it. Say that out loud, because "right answer, wrong
+mechanism" is exactly the state in which the next regression is invisible — the number on screen
+stays plausible while the thing producing it has changed underneath.
+
+### What we do about it: show the disagreement, never fold it
+
+`vendor_severity` + `vendor_severity_confidence` are stored beside our label and rendered when
+the two differ. That is the whole intervention. The vendor's claim never corrects ours, never
+breaks a tie, never becomes a low-confidence fallback, and never reaches the model.
+
 ---
 
 ## Landmines
 
+- **The vendor's own badge must NEVER be an input to the model — in any form.** Not a feature,
+  not a tie-break, not a fallback when our confidence is low, not a training target.
+  `strip_vendor_chrome` (`packages/ml`, `parse/markers.py`) exists precisely so the model cannot
+  shortcut to it, and the gold-300 adjudication says why: the vendor is the WORST of the three
+  raters (0.474 exact vs our 0.700), and tuning towards agreement with it measurably degrades us
+  (0.700 → 0.610). `vendor_severity` is a DISPLAY column that the scoring path never reads. See
+  Accuracy above — this is settled, not open.
+- **A stored model output needs a version stamp that actually CHANGES, or the corpus becomes
+  un-auditable.** 17 911 of 18 662 stored labels (96%) predate the gold-calibrated v2 artifact
+  that landed 2026-08-05, and the daily severity mix moved from 51/10/38/1.5
+  (nit/minor/major/crit) on 08-02 to 17/80/3/0 on 08-06 — a different product, silently.
+  **Every one of those rows was stamped `model_version = "taxonomy-composite-v1"`**: the literal
+  was a default argument in the service (`models/taxonomy.py`), so it did not move when the
+  artifact did, and the running dev service even swapped artifacts mid-day — visible only as the
+  `category:marker` → `category:modernbert-onnx` split *within* 08-06. With no re-scoring path,
+  the corpus was a blend of two models that no query could separate. Fixed at the source (the
+  service now DERIVES `model_version` from the loaded artifact) and the corpus was re-labelled
+  with `pnpm ml:enrich --reset`. The stamp is now evidence; it is still not a mechanism (Known
+  gaps).
+- **Vendor RESOLUTION footers are input contamination, not chrome you can leave in.** CodeRabbit
+  **edits its comment in place** when a finding gets fixed, appending
+  `✅ Confirmed as addressed by @user` / `✅ Addressed in commit <sha>` — so the model was scoring
+  the RESOLVED comment rather than the finding. Ablation on `review_comments.id = 366949`: with
+  the footer the raw argmax is NIT (0.57), without it MINOR (0.50). **802 labelled review comments
+  carry one — 16% of CodeRabbit's 5 002.** Fixed in `strip_vendor_chrome`. The general shape:
+  anything a vendor appends AFTER the fact is a statement about the comment's lifecycle, and
+  feeding it to a severity model asks a different question than the one you meant.
+- **`severity_prob < 0.25` is an identity, not a threshold anyone chose.** It is below the 4-class
+  argmax floor, so it means the calibration prior overrode the model's own pick — 15% of the
+  CodeRabbit corpus. Read it, don't "tune" it.
 - **NEVER trim text for the model with a bare `String.prototype.slice`.** It counts UTF-16 code
   units, so a cut can land between the halves of an astral character and leave a lone surrogate —
   the one thing UTF-8 cannot encode. `JSON.stringify` emits it as a bare `\ud83d` escape, so it
@@ -542,8 +697,20 @@ empty — an unmatched comment falls back to a single low-probability best guess
   candidate query is "has no label row". Bot comments are rarely edited, but a vendor that
   rewrites its walkthrough in place keeps its first label. `pnpm ml:enrich --reset` is the
   blunt fix; a staleness sweep over `body_hash` is the targeted one.
-- **No re-scoring on a model upgrade.** Same mechanism, same fix — `model_version` is stored but
-  not compared.
+- **Nothing AUTO-invalidates a label when the model changes.** Half closed: `model_version` now
+  moves when the served artifact does (it used to be a constant across an artifact swap — see the
+  landmine), so a stale row is at least *identifiable* for the first time. Nothing compares it:
+  the candidate query is still "has no label row", so an upgrade leaves the whole corpus on the
+  old model until someone runs `pnpm ml:enrich --reset`. The targeted fix — a sweep that deletes
+  labels whose `model_version` ≠ the service's current one — is now actually possible.
+- **`vendor_severity` is only populated for rows written after the service started returning it.**
+  Same mechanism again (no re-scoring path, nullable column), so the same `--reset` is the only
+  backfill. A NULL there means "not scored recently enough", not "this bot posted no badge" — do
+  not read it as a rate.
+- **The "the model did not pick this" flag is computed, stored and ignored.** `severity_prob <
+  0.25` is an exact statement that calibration overrode the argmax (Accuracy above), true of 15%
+  of the CodeRabbit corpus. Nothing surfaces it, no rollup weights by it, and no evaluation
+  reports it as its own slice.
 - **The rollup is unwindowed.** It covers every label in scope (bounded by the 180-day retention
   sweep), while the Bots panels around it are windowed. `target_created_at` is stored
   specifically so a window can be added without a migration.

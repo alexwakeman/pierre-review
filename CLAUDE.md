@@ -545,8 +545,12 @@ Full detail: **[docs/ML-SEVERITY.md](docs/ML-SEVERITY.md)**. The invariants:
   (service unreachable, worker backed off, or a comment the service keeps rejecting — one live
   comment in this dev DB does exactly that, blocking its whole workspace), and spinning on it is
   a worse lie than the premature "done" this replaced.
-- Advisory: macro-F1 ≈ 0.66 and CRITICAL is under-recalled, so the product buckets
-  **major+critical as "high"** and nothing auto-acts on a label.
+- **The vendor's own severity badge is stored to be SHOWN, never to be BELIEVED** — on the
+  adjudicated gold-300 it is the worst of the three raters (0.474 exact vs our 0.700) and tuning
+  towards agreement with it measurably degrades us, so it must never be an input to the model.
+- Advisory: macro-F1 ≈ 0.66 (0.700 exact / 0.303 ordinal MAE on the gold-300, at the human
+  ceiling) and CRITICAL is under-recalled, so the product buckets **major+critical as "high"**
+  and nothing auto-acts on a label.
 
 ---
 

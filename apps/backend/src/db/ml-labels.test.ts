@@ -8,6 +8,7 @@
 // processed", and coverage could never reach 100%. Both sides now share one `trim(x) <> ''`
 // predicate. Seeding an empty-body review is what makes this fail against the old code.
 import { rmSync } from 'node:fs';
+import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const DB_PATH = '/tmp/pierre-ml-labels-test.sqlite';
@@ -201,6 +202,118 @@ describe('ML label candidates vs the pending count', () => {
     expect(await mlLabels.listMlCandidates(1, scope, 100)).toEqual([]);
     // ...and the account-wide backlog drains with it, so the sync indicator can actually stop.
     expect(await mlLabels.getMlBacklogForAccount(1)).toEqual({ pending: 0, labelled: 2 });
+  });
+
+  // ── The VENDOR'S OWN declared severity, stored beside ours ──────────────────────────────
+  //
+  // Two independent things have to hold, and they fail in opposite directions:
+  //   • a claim that IS present survives the round trip to the per-PR badge index, because the
+  //     whole point is displaying it next to ours ("CodeRabbit: Major · Pierre: Minor");
+  //   • a claim that is ABSENT — the ordinary case, and also what an older severity-api build
+  //     produces for every row — stores NULL and throws nothing. A write that threw here would
+  //     abandon the workspace's backlog for the tick, and the target would be re-selected
+  //     forever after (the candidate query is "has no label row").
+  describe('vendor severity', () => {
+    const baseRow = () => ({
+      accountId: 1,
+      repoId: scope.repoIds[0]!,
+      authorUserId: botId,
+      severity: 'minor' as const,
+      severityOrd: 1,
+      severityProb: 0.7,
+      categories: ['correctness_bug'],
+      categoryProbs: { correctness_bug: 0.7 },
+      isSummary: false,
+      backend: 'test',
+      modelVersion: 'test',
+      bodyHash: 'hv',
+      targetCreatedAt: new Date(),
+    });
+
+    it('round-trips a vendor claim through the per-PR index', async () => {
+      const prId = (await db.select().from(schema.pullRequests).execute())[0]!.id;
+      // Clear this target's label first so what follows is a genuine INSERT. By the time this
+      // file gets here the earlier cases have already labelled every candidate, so without the
+      // delete both halves of the upsert would only ever be exercised on the UPDATE path — and
+      // "the insert forgot the new columns" is the other half of the same landmine. The row is
+      // re-created immediately below, so the counts the later cases assert are unchanged.
+      // Scoped to THIS target: a blanket delete would also drop the other candidate's label and
+      // leave `labelled` one short for the cases that follow.
+      await db
+        .delete(schema.mlCommentLabels)
+        .where(
+          and(
+            eq(schema.mlCommentLabels.targetKind, 'review'),
+            eq(schema.mlCommentLabels.targetId, realReviewId),
+          ),
+        )
+        .execute();
+      await mlLabels.upsertMlLabels([
+        {
+          ...baseRow(),
+          prId,
+          targetKind: 'review',
+          targetId: realReviewId,
+          // The bot says MAJOR where we say MINOR. That disagreement is the feature: our label
+          // is the more accurate one (0.700 exact / 0.303 ordinal MAE against the vendor
+          // badge's 0.474 / 0.697), so ours must be untouched by theirs.
+          vendorSeverity: 'major',
+          vendorSeverityConfidence: 'high',
+        },
+      ]);
+      const labels = await mlLabels.getPrMlLabels(prId, 1);
+      const label = labels.find(
+        (l: any) => l.targetKind === 'review' && l.targetId === realReviewId,
+      );
+      expect(label).toBeDefined();
+      expect(label.vendorSeverity).toBe('major');
+      expect(label.vendorSeverityConfidence).toBe('high');
+      // OUR severity is not derived from, corrected by, or overwritten with theirs.
+      expect(label.severity).toBe('minor');
+    });
+
+    it('stores null when the service omitted the fields entirely', async () => {
+      const prId = (await db.select().from(schema.pullRequests).execute())[0]!.id;
+      const row: any = { ...baseRow(), prId, targetKind: 'review', targetId: realReviewId };
+      // Not `vendorSeverity: null` — the keys are ABSENT, exactly as they are when an older
+      // severity-api build answers and the client's defensive read finds nothing.
+      expect('vendorSeverity' in row).toBe(false);
+      await expect(mlLabels.upsertMlLabels([row])).resolves.toBe(1);
+      const labels = await mlLabels.getPrMlLabels(prId, 1);
+      const label = labels.find(
+        (l: any) => l.targetKind === 'review' && l.targetId === realReviewId,
+      );
+      expect(label.vendorSeverity).toBeNull();
+      expect(label.vendorSeverityConfidence).toBeNull();
+    });
+
+    it('CLEARS a stale claim on re-write — the onConflictDoUpdate branch', async () => {
+      // The conflict target is `(account_id, target_kind, target_id)` and the new columns have
+      // to be in BOTH halves of the upsert. An insert-only test never reaches the SET list, and
+      // a missing key there type-checks perfectly while freezing the first value ever stored.
+      const prId = (await db.select().from(schema.pullRequests).execute())[0]!.id;
+      const target = { prId, targetKind: 'review' as const, targetId: realReviewId };
+      await mlLabels.upsertMlLabels([
+        { ...baseRow(), ...target, vendorSeverity: 'critical', vendorSeverityConfidence: 'low' },
+      ]);
+      let label = (await mlLabels.getPrMlLabels(prId, 1)).find(
+        (l: any) => l.targetKind === 'review' && l.targetId === realReviewId,
+      );
+      expect(label.vendorSeverity).toBe('critical');
+
+      // Same target, re-scored after the vendor dropped its badge (or the service that read it
+      // was rolled back). The row must be UPDATED in place and the claim must go.
+      await mlLabels.upsertMlLabels([
+        { ...baseRow(), ...target, vendorSeverity: null, vendorSeverityConfidence: null },
+      ]);
+      const all = await mlLabels.getPrMlLabels(prId, 1);
+      expect(
+        all.filter((l: any) => l.targetKind === 'review' && l.targetId === realReviewId),
+      ).toHaveLength(1);
+      label = all.find((l: any) => l.targetKind === 'review' && l.targetId === realReviewId);
+      expect(label.vendorSeverity).toBeNull();
+      expect(label.vendorSeverityConfidence).toBeNull();
+    });
   });
 
   it('upserts idempotently on (account, target_kind, target_id)', async () => {

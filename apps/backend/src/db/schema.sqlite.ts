@@ -1309,6 +1309,25 @@ export const mlCommentLabels = sqliteTable(
     // indexed integer comparison instead of a CASE over the enum.
     severityOrd: integer('severity_ord').notNull(),
     severityProb: real('severity_prob').notNull(),
+    // ── THE VENDOR'S OWN CLAIM, kept BESIDE ours — never folded into it. ──────────────────
+    // The severity the review bot declared for itself in its own markup (CodeRabbit's
+    // "Major" badge and friends), parsed by the service's deterministic marker reader.
+    // NULLABLE because most comments carry no vendor badge at all, and because an older
+    // severity-api build omits the field entirely (the client reads it defensively → null).
+    //
+    // It is stored to be SHOWN NEXT TO ours ("CodeRabbit: Major · Pierre: Minor"), and for no
+    // other purpose. On the 300-comment `gold_v2_sample` adjudication our model scores 0.700
+    // exact / 0.303 ordinal MAE against the vendor badge's 0.474 / 0.697 — so this column is
+    // materially LESS accurate than the one next to it. Nothing may derive, correct or
+    // fall back to it: the disagreement is the product.
+    vendorSeverity: text('vendor_severity', {
+      enum: ['nit', 'minor', 'major', 'critical'],
+    }),
+    // How sure the marker reader is that it read a real vendor badge rather than inferred one
+    // from prose. Advisory metadata ABOUT the column above, not about our own severity.
+    vendorSeverityConfidence: text('vendor_severity_confidence', {
+      enum: ['high', 'medium', 'low'],
+    }),
     // MlCategory[] — multi-label, never empty.
     categories: text('categories', { mode: 'json' }).$type<string[]>().notNull(),
     // The service returns a probability for ALL eight categories; kept whole so a later

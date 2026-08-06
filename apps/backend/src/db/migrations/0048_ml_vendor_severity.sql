@@ -1,0 +1,31 @@
+-- The REVIEW BOT'S OWN declared severity, stored beside ours. SQLite / local mode; Postgres
+-- twin: migrations-pg/0035_ml_vendor_severity.sql. Two additive nullable columns on
+-- `ml_comment_labels`, no index, no backfill.
+--
+-- WHAT THESE ARE. CodeRabbit et al. stamp their own severity into their comment markup
+-- ("**Major**", a badge, a table cell). The severity-api's deterministic marker reader already
+-- extracts it and we were discarding it. `vendor_severity` is that claim verbatim (the four
+-- values our own scale uses, lowercased at the wire boundary); `vendor_severity_confidence`
+-- is how sure the reader is that it read a real declared badge rather than inferring one from
+-- prose.
+--
+-- WHAT THEY ARE NOT: an input to our own label. Measured on `gold_v2_sample` (300 comments,
+-- fresh label-free adjudication, marker-stratified, held out properly) our model scores 0.700
+-- exact / 0.303 ordinal MAE while the vendor's own badge scores 0.474 / 0.697 — the bot's
+-- self-assessment is materially WORSE than the model sitting next to it. So nothing derives,
+-- corrects or falls back to these columns. They exist to be DISPLAYED alongside ours
+-- ("CodeRabbit: Major · Pierre: Minor"), because the disagreement is the product.
+--
+-- BOTH ARE NULLABLE, for two independent reasons that must not be conflated:
+--   1. most comments simply carry no vendor badge — null is the ordinary case, not a gap;
+--   2. an OLDER severity-api build omits the response fields entirely, and that has to degrade
+--      to null silently rather than throw (the client reads them defensively).
+-- Neither is distinguishable from the other after the fact, and neither needs to be: a null
+-- renders nothing.
+--
+-- No index: the values are read out of an already-fetched label row (the per-PR badge index),
+-- never used as a predicate. No backfill either — an existing label is never re-scored (see
+-- docs/ML-SEVERITY.md § known gaps), so historical rows keep NULL until `pnpm ml:enrich --reset`
+-- refills them. Until then a badge with no vendor claim renders exactly as it does today.
+ALTER TABLE `ml_comment_labels` ADD `vendor_severity` text;--> statement-breakpoint
+ALTER TABLE `ml_comment_labels` ADD `vendor_severity_confidence` text;

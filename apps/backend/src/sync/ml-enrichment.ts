@@ -250,6 +250,13 @@ function toWrite(
     severity,
     severityOrd: result.severityOrd,
     severityProb: result.severityProb,
+    // Carried through UNCHANGED and never consulted above: the vendor's own claim is stored to
+    // be shown BESIDE our severity, not to influence it (it is the less accurate of the two —
+    // 0.474 exact / 0.697 ordinal MAE vs our 0.700 / 0.303 on `gold_v2_sample`). Already
+    // validated against the severity/confidence unions by the client, which nulls anything it
+    // does not recognise — including the whole field on a service too old to send it.
+    vendorSeverity: result.vendorSeverity,
+    vendorSeverityConfidence: result.vendorSeverityConfidence,
     categories: result.category as MlCategory[],
     categoryProbs: result.categoryProbs,
     isSummary: result.isSummary,

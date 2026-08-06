@@ -4919,6 +4919,12 @@ export const ML_CATEGORIES: MlCategory[] = [
 // wrong row, so the unions stay separate.
 export type MlLabelTargetKind = 'review_comment' | 'pr_comment' | 'review';
 
+// How sure the service's deterministic marker reader is that it read a REAL vendor-declared
+// severity badge, rather than inferring one from surrounding prose. Metadata about
+// `MlLabel.vendorSeverity` only — it says nothing about our own severity's confidence, which
+// is `severityProb`.
+export type MlVendorConfidence = 'high' | 'medium' | 'low';
+
 export interface MlLabel {
   targetKind: MlLabelTargetKind;
   targetId: number;
@@ -4927,6 +4933,24 @@ export interface MlLabel {
   severityOrd: number;
   // Confidence in the CHOSEN class, 0..1. Advisory — see docs/ML-SEVERITY.md on CRITICAL recall.
   severityProb: number;
+  // ── THE BOT'S OWN CLAIM, not ours. Show it, never derive from it. ─────────────────────
+  // The severity the review bot declared for ITSELF in its own markup — CodeRabbit's "Major"
+  // badge and the equivalents — as read by the service's deterministic marker parser. `null`
+  // whenever the vendor declared nothing (the common case) and equally when the deployed
+  // severity-api is an older build that does not report it; the two are indistinguishable
+  // here and neither needs distinguishing, because both render as "no vendor claim".
+  //
+  // ⚠ THIS IS THE LESS ACCURATE NUMBER OF THE TWO ON THIS OBJECT. Measured on
+  // `gold_v2_sample` (300 comments, fresh label-free adjudication, marker-stratified, held out
+  // properly): our `severity` scores 0.700 exact / 0.303 ordinal MAE, the vendor's own badge
+  // 0.474 / 0.697. So this is advisory ONLY — nothing may correct, override, seed or fall back
+  // our `severity` from it, and no rollup may count it. It exists so a UI can put the two side
+  // by side ("CodeRabbit: Major · Pierre: Minor"), because the DISAGREEMENT is the product.
+  vendorSeverity: MlSeverity | null;
+  // The marker reader's confidence in the line above — `null` alongside a null claim, and also
+  // when an older service reports the claim without a confidence. Never a confidence in OUR
+  // label; that is `severityProb`.
+  vendorSeverityConfidence: MlVendorConfidence | null;
   // Multi-label; never empty (the parser falls back to a single best guess).
   categories: MlCategory[];
   // PR-walkthrough / summary comment rather than a specific finding. A separate axis, NOT a

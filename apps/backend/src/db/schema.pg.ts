@@ -1021,6 +1021,17 @@ export const mlCommentLabels = pgTable(
     }).notNull(),
     severityOrd: integer('severity_ord').notNull(),
     severityProb: doublePrecision('severity_prob').notNull(),
+    // The VENDOR'S own declared severity + the marker reader's confidence in it — kept beside
+    // ours, never folded into it. Both nullable: most comments carry no vendor badge, and an
+    // older severity-api omits the fields. Measurably less accurate than our own label
+    // (0.474 exact / 0.697 ordinal MAE vs 0.700 / 0.303); stored only to be DISPLAYED next to
+    // it. See the sqlite twin for the full argument.
+    vendorSeverity: text('vendor_severity', {
+      enum: ['nit', 'minor', 'major', 'critical'],
+    }),
+    vendorSeverityConfidence: text('vendor_severity_confidence', {
+      enum: ['high', 'medium', 'low'],
+    }),
     categories: jsonb('categories').$type<string[]>().notNull(),
     categoryProbs: jsonb('category_probs').$type<Record<string, number>>().notNull(),
     isSummary: boolean('is_summary').notNull(),

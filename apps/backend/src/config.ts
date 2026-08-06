@@ -203,6 +203,14 @@ export const config = {
           /\/$/,
           '',
         ),
+  // Extra headers for every severity-api call, as a JSON object string — e.g.
+  // `SEVERITY_API_HEADERS='{"X-Severity-Token":"…"}'`. Empty in both shipped deployments, which
+  // reach the service over private DNS (cloud) or loopback (local) and need no credential. It
+  // exists so a RENTED endpoint can be used without a code change — draining a large backlog on
+  // hired CPUs is far faster than a dev box, and that endpoint must not be open to the internet.
+  // Parsing is deliberately forgiving; see `extraHeaders()` in ml/severity-client.ts for why a
+  // malformed value must not throw.
+  severityApiHeaders: process.env.SEVERITY_API_HEADERS ?? '',
   // The enrichment worker's own cron — a TICK, not a cadence: each tick drains as much of the
   // unlabelled backlog as its wall-clock budget allows, newest-first. Separate from the sync
   // cron on purpose (the two are independent, and enrichment must never delay a sync).
