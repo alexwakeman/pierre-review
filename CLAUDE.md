@@ -819,8 +819,8 @@ client-side by login; the legacy `?team=` URL rule is unit-tested nowhere;
 `packages/pro/test/` (135 tests) + `apps/frontend/test/` (135 tests) do not run in CI;
 auto-merge's retarget guard still lacks a stored `expected_base_ref`; ML labels are never
 re-scored (neither an edited body nor a model-version bump invalidates one — `pnpm ml:enrich
---reset` is the only refresh); a SINGLE comment the severity-api rejects blocks its whole
+--reset` is the only refresh); a SINGLE comment the severity-api rejects still blocks its whole
 workspace's enrichment backlog forever (`hardFailure` abandons the workspace, and the candidate
-query re-selects the same comment next tick — live in this dev DB; the sync UI declines to
-report it as progress but nothing quarantines it); and pg `0034` has not been replayed against
-a real Postgres.
+query re-selects the same comment next tick — the sync UI declines to report it as progress, but
+nothing quarantines it; the one live instance of this is fixed at both ends, so the mechanism is
+now latent rather than firing); and pg `0034` has not been replayed against a real Postgres.

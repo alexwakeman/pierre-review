@@ -5,7 +5,7 @@
 // budgets characters rather than items. A regression here is invisible — everything still gets
 // labelled, just several times slower — which is exactly the kind of thing a test has to catch.
 import { describe, expect, it } from 'vitest';
-import { packBatches } from './ml-enrichment.js';
+import { packBatches, truncateOnCodePoint } from './ml-enrichment.js';
 import { SeverityApiError, severityApiAnswered } from '../ml/severity-client.js';
 import type { MlCandidate } from '../db/ml-labels.js';
 
@@ -112,3 +112,66 @@ describe('severityApiAnswered — reachability vs a rejected batch', () => {
     expect(severityApiAnswered('nope')).toBe(false);
   });
 });
+
+
+// The client-side trim, and the one thing it must never do.
+//
+// `String.prototype.slice` counts UTF-16 code units, so cutting at 6000 can land between the
+// halves of an astral character and leave a lone surrogate — the one thing UTF-8 cannot encode.
+// `JSON.stringify` emits it as a bare \ud83d escape, so it travels fine and detonates at the far
+// end: the severity-api's tokenizer 500'd the WHOLE batch, and because the candidate query is
+// "rows with no label yet", the same comment returned every tick forever. This is exactly how one
+// real comment pinned a workspace's backlog — its 6000th code unit landed inside a 💡.
+describe('truncateOnCodePoint', () => {
+  const EMOJI = '\u{1F4A1}'; // 💡 — two UTF-16 code units, "💡"
+
+  it('never leaves a lone surrogate, whichever half the cut lands on', () => {
+    // "ab💡" — cutting at 3 would keep 'a','b' and the HIGH half only.
+    const text = `ab${EMOJI}`;
+    expect(text.length).toBe(4);
+    expect(truncateOnCodePoint(text, 3)).toBe('ab');
+    // Cutting at 4 keeps the complete pair.
+    expect(truncateOnCodePoint(text, 4)).toBe(text);
+    // Every prefix length is encodable — the property that actually matters.
+    for (let n = 0; n <= text.length + 2; n += 1) {
+      expect(hasLoneSurrogate(truncateOnCodePoint(text, n))).toBe(false);
+    }
+  });
+
+  it('reproduces the real failure at the real budget', () => {
+    // The shape of pr_comment 151836: long enough to trim, with an emoji straddling char 6000.
+    const body = `${'x'.repeat(5999)}${EMOJI}${'y'.repeat(500)}`;
+    expect(body.charCodeAt(5999)).toBeGreaterThanOrEqual(0xd800); // high half sits AT the cut
+    const sent = truncateOnCodePoint(body, 6000);
+    expect(sent.length).toBe(5999);
+    expect(hasLoneSurrogate(sent)).toBe(false);
+    // The old behaviour, kept as the contrast that makes this test mean something.
+    expect(hasLoneSurrogate(body.slice(0, 6000))).toBe(true);
+  });
+
+  it('leaves anything under the cap completely alone', () => {
+    for (const text of ['', 'plain ascii', `emoji ${EMOJI} inside`, '日本語 café']) {
+      expect(truncateOnCodePoint(text, 6000)).toBe(text);
+    }
+  });
+
+  it('drops at most one code unit — the trim must stay a trim', () => {
+    const text = `${'a'.repeat(100)}${EMOJI}${'b'.repeat(100)}`;
+    for (let n = 1; n <= text.length; n += 1) {
+      const out = truncateOnCodePoint(text, n);
+      expect(out.length).toBeGreaterThanOrEqual(n - 1);
+      expect(out.length).toBeLessThanOrEqual(n);
+      expect(text.startsWith(out)).toBe(true); // always a prefix, never re-encoded
+    }
+  });
+
+  it('handles a zero/negative budget without throwing', () => {
+    expect(truncateOnCodePoint(`${EMOJI}abc`, 0)).toBe('');
+    expect(truncateOnCodePoint(`${EMOJI}abc`, -5)).toBe('');
+  });
+});
+
+/** True when the string cannot be encoded as UTF-8 — i.e. it holds an unpaired surrogate. */
+function hasLoneSurrogate(text: string): boolean {
+  return Buffer.from(text, 'utf8').toString('utf8') !== text;
+}

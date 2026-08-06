@@ -118,10 +118,12 @@ four real states, each a worse lie than the premature "done" this replaced:
 | **a comment the service rejects** — the candidate query is "has no label row", so a batch it 500s on is re-selected every tick forever | last tick `failuresThisRun > 0` **and** `scoredThisRun === 0` |
 | genuinely drained | `pending === 0` |
 
-That third row is not hypothetical: one PR comment in this repo's own dev database reliably
-500s the severity-api (the 6 000-char `ML_BODY_MAX_CHARS` trim cuts it mid-markdown-fence), and
-because a batch failure sets `hardFailure` and abandons the workspace for that tick, **that one
-comment blocks its whole workspace's backlog**. A partial failure is still progress, though —
+That third row was not hypothetical: one PR comment in this repo's own dev database reliably
+500'd the severity-api — the 6 000-char `ML_BODY_MAX_CHARS` trim cut it **mid-emoji**, leaving a
+lone UTF-16 surrogate — and because a batch failure sets `hardFailure` and abandons the workspace
+for that tick, **that one comment blocked its whole workspace's backlog**. Both ends are fixed
+now (`truncateOnCodePoint` here, input sanitising in the service), but the predicate stays: any
+input the service rejects has the same shape. A partial failure is still progress, though —
 a tick that scored 300 and lost one batch keeps its indicator, or one bad comment anywhere in a
 large corpus would suppress the indicator for the entire sync.
 
@@ -149,7 +151,8 @@ The worker therefore:
 
 1. pulls a **pool** (≥512 candidates) newest-first,
 2. trims each body to `ML_BODY_MAX_CHARS` (6 000 — past ~2.5 k chars the server discards it
-   anyway; this only bounds the request payload),
+   anyway; this only bounds the request payload) via **`truncateOnCodePoint`, never a bare
+   `slice`** — see the landmine below,
 3. **sorts the pool by body length** so each batch is internally uniform,
 4. fills batches to `ML_BATCH_MAX_CHARS` (24 000) **and** `ML_BATCH_MAX_ITEMS` (128, service
    cap 256),
@@ -421,6 +424,13 @@ empty — an unmatched comment falls back to a single low-probability best guess
 
 ## Landmines
 
+- **NEVER trim text for the model with a bare `String.prototype.slice`.** It counts UTF-16 code
+  units, so a cut can land between the halves of an astral character and leave a lone surrogate —
+  the one thing UTF-8 cannot encode. `JSON.stringify` emits it as a bare `\ud83d` escape, so it
+  travels fine and detonates at the far end. This cost a workspace its entire backlog, from a
+  single character. Go through **`truncateOnCodePoint`** (`sync/ml-enrichment.ts`), which drops
+  at most one code unit and is pinned by `ml-enrichment.test.ts` (mutation-tested against the
+  naive cut). Applies to `body` AND `diffHunk`; `path` is sent untrimmed.
 - **The enrichment kick must stay ABOVE `clearSyncProgress` in `runSyncForRepo`'s `finally`.**
   It works only because `runMlEnrichmentTick` sets its `running` flag before its first `await`;
   an `await` added above that assignment reopens the window where a client sees both halves idle
@@ -545,13 +555,17 @@ empty — an unmatched comment falls back to a single low-probability best guess
   `hardFailure` and abandons that workspace for the tick — correct when the service is down (it
   stops N pointless round trips), but wrong for a single rejected comment: the candidate query
   is "has no label row", so that comment is re-selected on the next tick and blocks the same
-  workspace again, forever. **Live example in this repo's own dev database:** `pr_comment` 151836
-  in the `Erxes` workspace 500s the severity-api, and it alone is why that workspace sits at
-  `pending: 4` permanently. Bisected: it scores fine at 5 000 chars and 500s at 6 000, i.e. the
-  `ML_BODY_MAX_CHARS` trim cuts it mid-markdown-fence. Two independent fixes, neither done:
-  the service should never 500 on input (pierre-ml), and the worker should quarantine a
-  repeatedly-failing item — a per-item retry counter, or splitting a failed batch — instead of
-  letting one poison pill hold a workspace. The sync UI already refuses to report this as
-  progress, but that only stops it LYING about it.
+  workspace again, forever. **This actually happened:** `pr_comment` 151836 in the `Erxes`
+  workspace 500'd the severity-api, and it alone pinned that workspace at `pending: 4`
+  indefinitely. Bisected to a single character — it scored fine at 5 000 chars and 500'd at
+  6 000, because the trim's 6 000th code unit landed inside a 💡 and left the orphaned high
+  surrogate, which UTF-8 cannot encode and the tokenizer rejects.
+
+  **Two of the three fixes have landed**: the trim is now surrogate-safe
+  (`truncateOnCodePoint`), and the service sanitises its own input rather than 500ing
+  (pierre-ml `0af0408`). The third has NOT: the worker still has no quarantine, so any future
+  input the service rejects will hold its workspace exactly the same way. A per-item retry
+  counter, or splitting a failed batch to isolate the offender, is the durable fix — the sync
+  UI's stalled-detection only stops it LYING about the situation.
 - **Not exercised in CI.** The Docker image is not pushed anywhere and CI has no severity-api,
   so the enrichment path is only ever run locally or in cloud.

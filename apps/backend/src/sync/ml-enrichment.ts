@@ -191,6 +191,37 @@ export function packBatches(
   return batches;
 }
 
+/**
+ * Truncate to `max` UTF-16 code units WITHOUT splitting a surrogate pair.
+ *
+ * `String.prototype.slice` counts code units, so cutting a string mid-astral-character leaves
+ * the orphaned first half behind — a lone surrogate, which is the one thing UTF-8 cannot
+ * encode. `JSON.stringify` happily emits it as a bare `\ud83d` escape, so it travels fine on
+ * the wire and detonates at the far end: the severity-api's tokenizer raised `TypeError` and
+ * returned 500 for the WHOLE batch, and since the candidate query is "rows with no label yet",
+ * the same comment came back every tick forever. One 10k-char comment whose 6000th code unit
+ * landed inside a 💡 pinned an entire workspace's backlog indefinitely.
+ *
+ * The service now sanitises its own input, so this is no longer load-bearing — but emitting
+ * text we know to be malformed is still wrong: the orphan is silently dropped over there, so
+ * the model reads one character less than we believe we sent.
+ *
+ * Only surrogate PAIRS are protected. Splitting a grapheme cluster (a combining accent, a ZWJ
+ * emoji sequence) still happens and is fine: the result is well-formed UTF-8, which is the
+ * property that matters. Chasing grapheme boundaries would need `Intl.Segmenter` per item for
+ * a cosmetic gain the model never sees — it truncates at 512 tokens regardless.
+ */
+export function truncateOnCodePoint(text: string, max: number): string {
+  if (max <= 0) return '';
+  if (text.length <= max) return text;
+  // A HIGH surrogate at the last kept position means its partner is the first dropped one —
+  // step back and take neither. A LOW surrogate there is the tail of a complete pair, so the
+  // cut is already clean.
+  const last = text.charCodeAt(max - 1);
+  const end = last >= 0xd800 && last <= 0xdbff ? max - 1 : max;
+  return text.slice(0, end);
+}
+
 const SEVERITY_BY_ORD: MlSeverity[] = ['nit', 'minor', 'major', 'critical'];
 
 function toWrite(
@@ -389,7 +420,7 @@ async function enrichWorkspace(
   // a single label.
   const trimmed = pool.map((c) => ({
     candidate: c,
-    body: c.body.length > config.mlBodyMaxChars ? c.body.slice(0, config.mlBodyMaxChars) : c.body,
+    body: truncateOnCodePoint(c.body, config.mlBodyMaxChars),
   }));
   // LENGTH-SORTED so each batch is internally uniform — see packBatches.
   trimmed.sort((a, b) => a.body.length - b.body.length);
@@ -415,9 +446,9 @@ async function enrichWorkspace(
         body: c.body,
         vendor: vendorHint(kindMap.get(c.authorUserId)),
         // The v2 model reads `path [SEP] body [SEP] diff`; both are optional and the
-        // service degrades gracefully without them. Hunks are capped like bodies —
-        // the model truncates at 512 tokens regardless.
-        diffHunk: c.diffHunk ? c.diffHunk.slice(0, config.mlBodyMaxChars) : null,
+        // service degrades gracefully without them. Hunks are capped like bodies — same
+        // surrogate-safe cut, since a diff carries emoji as readily as a comment does.
+        diffHunk: c.diffHunk ? truncateOnCodePoint(c.diffHunk, config.mlBodyMaxChars) : null,
         path: c.path,
       }));
 
