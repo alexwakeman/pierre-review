@@ -77,14 +77,27 @@ jobs:
       # Railway service deployed from its own repo and consumed over HTTP, and its serving
       # assets are ~300 MB of Git-LFS model weights that would land in the build context.
       - uses: actions/checkout@v4
-        with:
-          ssh-key: ${{ secrets.PRO_DEPLOY_KEY }}
 
-      # `ssh-key` above leaves core.sshCommand in the repo's local git config (persist-credentials
-      # defaults to true), which is what the submodule clone below authenticates with — the same
-      # mechanism `submodules: recursive` was using, just pointed at one path.
+      # ⚠ THE KEY MUST REACH THE CLONE VIA GIT_SSH_COMMAND — AN ENVIRONMENT VARIABLE.
+      #
+      # `actions/checkout`'s `ssh-key` input leaves `core.sshCommand` in the SUPERPROJECT's git
+      # config, and `git submodule update` in a LATER step does not pass that down to the child
+      # `git clone` it spawns. Relying on it failed with `Permission denied (publickey)` for
+      # pierre-pro — a real, observed failure, not a theoretical one. Environment variables ARE
+      # inherited by child processes, so this is the mechanism that actually arrives.
+      #
+      # (It only ever worked before because `submodules: recursive` had checkout itself do the
+      # cloning, inside the step that owns the key.)
       - name: Check out the private @pierre/pro submodule (and only that one)
-        run: git submodule update --init --depth=1 packages/pro
+        env:
+          PRO_DEPLOY_KEY: ${{ secrets.PRO_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$PRO_DEPLOY_KEY" > ~/.ssh/pro_deploy_key
+          chmod 600 ~/.ssh/pro_deploy_key
+          ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/pro_deploy_key -o IdentitiesOnly=yes"
+          git submodule update --init --depth=1 packages/pro
 
       # Fail loud early if the submodule didn't check out (wrong/absent deploy key), rather than
       # silently building the OSS variant.
