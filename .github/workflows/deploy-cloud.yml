@@ -65,10 +65,26 @@ jobs:
       # Check out the public repo AND the private packages/pro submodule (SSH via the read-only
       # deploy key). The submodule MUST be on disk before `docker build` — .dockerignore strips
       # .git, so it cannot self-init inside the image.
+      #
+      # ⚠ NOT `submodules: recursive`, and this is not a style choice. PRO_DEPLOY_KEY is a
+      # deploy key on alexwakeman/pierre-pro and grants access to NOTHING else, so the moment a
+      # second submodule appeared in .gitmodules (packages/ml) recursion tried to clone it too,
+      # got "Repository not found", and failed the whole job at the checkout step — before a
+      # single line of the image was built. Naming the one submodule we need keeps this job
+      # working no matter what else gets vendored into packages/.
+      #
+      # The cloud image genuinely does not want packages/ml: the severity-api is a SEPARATE
+      # Railway service deployed from its own repo and consumed over HTTP, and its serving
+      # assets are ~300 MB of Git-LFS model weights that would land in the build context.
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           ssh-key: ${{ secrets.PRO_DEPLOY_KEY }}
+
+      # `ssh-key` above leaves core.sshCommand in the repo's local git config (persist-credentials
+      # defaults to true), which is what the submodule clone below authenticates with — the same
+      # mechanism `submodules: recursive` was using, just pointed at one path.
+      - name: Check out the private @pierre/pro submodule (and only that one)
+        run: git submodule update --init --depth=1 packages/pro
 
       # Fail loud early if the submodule didn't check out (wrong/absent deploy key), rather than
       # silently building the OSS variant.
