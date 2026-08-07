@@ -169,6 +169,12 @@ export function SyncProgressModal({
               {ml?.markerFallback
                 ? 'Severity model unavailable — labelling from markers only.'
                 : 'Severity + category labels for the bot comments this sync brought in.'}
+              {/* Quiet, and only when real: legacy rows with no stored text are outside this
+                  bar's denominator on purpose — they are not work in flight, so folding them
+                  into the count would spin the bar on rows nothing will ever score. */}
+              {ml && ml.unscorable > 0
+                ? ` ${ml.unscorable.toLocaleString()} unscorable (no stored text).`
+                : null}
             </p>
           </div>
         )}

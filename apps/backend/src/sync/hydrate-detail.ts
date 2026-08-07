@@ -16,7 +16,7 @@
 // hydrate on every PR open too, spending the user's own `gh` token's rate limit. Only an
 // explicit PERSIST_BODIES=true makes these no-ops. See the hydration cache below.
 import { createHash } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type {
   AuthNotice,
   CheckRun,
@@ -278,6 +278,80 @@ async function fetchGhPrTextUncached(
   };
 }
 
+// ---- Legacy NULL-body write-back ----
+//
+// Rows synced during the lean-storage window (2026-06-07 → 2026-07-01, when comment/review
+// bodies were not persisted) still hold `body IS NULL`, and nothing repairs them: incremental
+// sync only re-walks PRs whose GitHub `updatedAt` moves, and these live on old, closed PRs.
+// That population is invisible to the ML candidate query AND its pending count — the user sees
+// the full hydrated text with no badge, while coverage reads 100%. Bodies are persisted-always
+// now (sync/upsert.ts), so filling the NULLs from a hydration we already paid for re-aligns the
+// stored rows with current policy; the pull-based enrichment worker then labels them on its
+// next tick with no further hook.
+//
+// POSITIVE-STATEMENT RULE: `graphqlTolerant` hands back partial data with forbidden selections
+// NULLED, so only a real string may be written — never null-over-null as a "change", and the
+// `body IS NULL` in each WHERE means a concurrent sync's write is never clobbered. `diffHunk`
+// stays untouched: it is lean-gated on purpose. Plain awaited UPDATEs, deliberately in NO
+// transaction — holding the single sqlite write lock across anything slow is the landmine
+// `persistPr` documents, and each statement is independently idempotent anyway.
+async function writeBackNullBodies(prId: number, gh: GhPrText): Promise<number> {
+  let updated = 0;
+
+  const fill = async (
+    table: typeof reviewComments | typeof prComments | typeof reviews,
+    bodyFor: (nodeId: string) => string | null | undefined,
+  ): Promise<void> => {
+    const rows = await db
+      .select({ id: table.id, nodeId: table.githubNodeId })
+      .from(table)
+      .where(and(eq(table.prId, prId), isNull(table.body)))
+      .execute();
+    for (const row of rows) {
+      const body = bodyFor(row.nodeId);
+      if (typeof body !== 'string') continue;
+      updated += (
+        await db
+          .update(table)
+          .set({ body })
+          .where(and(eq(table.id, row.id), isNull(table.body)))
+          .returning({ id: table.id })
+          .execute()
+      ).length;
+    }
+  };
+
+  await fill(reviewComments, (nodeId) => gh.reviewCommentByNode.get(nodeId)?.body);
+  await fill(prComments, (nodeId) => gh.prCommentBodyByNode.get(nodeId));
+  await fill(reviews, (nodeId) => gh.reviewBodyByNode.get(nodeId));
+  return updated;
+}
+
+/**
+ * Repair entry for scripts/backfill-null-bodies.ts: hydrate ONE PR through the normal cached
+ * path and write its legacy NULL bodies back. Returns rows updated, or null when the PR is
+ * unknown to this account or the GitHub fetch failed (deleted PR, lost access) — the caller
+ * logs and moves on. Idempotent: the write-back only ever fills NULLs.
+ */
+export async function backfillPrNullBodies(
+  prId: number,
+  accountId: number,
+): Promise<number | null> {
+  const ctx = (
+    await db
+      .select({ owner: repos.owner, name: repos.name, number: pullRequests.number })
+      .from(pullRequests)
+      .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+      .where(and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)))
+      .limit(1)
+      .execute()
+  )[0];
+  if (!ctx) return null;
+  const { data: gh } = await fetchGhPrText(ctx.owner, ctx.name, ctx.number, accountId);
+  if (!gh) return null;
+  return writeBackNullBodies(prId, gh);
+}
+
 // localId -> githubNodeId for a set of rows of the given table on this PR.
 async function nodeIdMap(
   table: typeof reviews | typeof reviewComments | typeof prComments,
@@ -315,6 +389,23 @@ export async function hydratePrDetail(
   // Blocked or otherwise unfetchable → keep the stored metadata, but tell the SPA WHY the
   // description/checks are blank when it was an org authorization wall (so it can guide the fix).
   if (!gh) return authNotice ? { ...detail, authNotice } : detail;
+
+  // Repair pass for lean-window legacy rows (see writeBackNullBodies). Swallowed on failure:
+  // the write-back must never cost the hydration that just succeeded.
+  try {
+    const updated = await writeBackNullBodies(detail.id, gh);
+    if (updated > 0) {
+      console.info(
+        `[hydrate] backfilled ${updated} legacy NULL bod${updated === 1 ? 'y' : 'ies'} for ${detail.repoFullName}#${detail.number}`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `[hydrate] NULL-body write-back failed for ${detail.repoFullName}#${detail.number}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
 
   const [reviewNodes, reviewCommentNodes, prCommentNodes] = await Promise.all([
     nodeIdMap(reviews, detail.id),

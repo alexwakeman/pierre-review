@@ -20,6 +20,7 @@ const status = (over: Partial<MlEnrichmentStatus> = {}): MlEnrichmentStatus => (
   enabled: true,
   running: false,
   pending: 0,
+  unscorable: 0,
   labelled: 0,
   scoredThisRun: 0,
   batchesThisRun: 0,
@@ -93,5 +94,13 @@ describe('isMlScoring — when the indicator may claim a scoring phase', () => {
         status({ running: true, pending: 4, failuresThisRun: 1, scoredThisRun: 0 }),
       ),
     ).toBe(true);
+  });
+
+  // `unscorable` is the lean-storage-window legacy population (body IS NULL): rows the worker
+  // CANNOT see, with nothing draining them until `pnpm ml:backfill-bodies` repairs the bodies.
+  // It exists to make the coverage numbers honest, and it must never claim a scoring phase —
+  // that would be the permanent spinner all four cases above exist to prevent.
+  it('never spins on the unscorable population', () => {
+    expect(isMlScoring(status({ unscorable: 266 }))).toBe(false);
   });
 });

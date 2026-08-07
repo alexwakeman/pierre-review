@@ -115,7 +115,7 @@ export async function mlLabelRoutes(app: FastifyInstance): Promise<void> {
       // cannot know that until it asks once, and the counts would be meaningless anyway.
       const backlog = enabled
         ? await cachedBacklog(accountId)
-        : { pending: 0, labelled: 0 };
+        : { pending: 0, unscorable: 0, labelled: 0 };
       const iso = (ms: number | null): string | null =>
         ms == null ? null : new Date(ms).toISOString();
 
@@ -123,6 +123,7 @@ export async function mlLabelRoutes(app: FastifyInstance): Promise<void> {
         enabled,
         running: state.running,
         pending: backlog.pending,
+        unscorable: backlog.unscorable,
         labelled: backlog.labelled,
         scoredThisRun: state.labelled,
         batchesThisRun: state.batches,

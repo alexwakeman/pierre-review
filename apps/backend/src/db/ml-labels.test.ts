@@ -8,6 +8,7 @@
 // processed", and coverage could never reach 100%. Both sides now share one `trim(x) <> ''`
 // predicate. Seeding an empty-body review is what makes this fail against the old code.
 import { rmSync } from 'node:fs';
+import Database from 'better-sqlite3';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -201,7 +202,11 @@ describe('ML label candidates vs the pending count', () => {
     expect(rollup.totals.bySeverity.major).toBe(1);
     expect(await mlLabels.listMlCandidates(1, scope, 100)).toEqual([]);
     // ...and the account-wide backlog drains with it, so the sync indicator can actually stop.
-    expect(await mlLabels.getMlBacklogForAccount(1)).toEqual({ pending: 0, labelled: 2 });
+    expect(await mlLabels.getMlBacklogForAccount(1)).toEqual({
+      pending: 0,
+      unscorable: 0,
+      labelled: 2,
+    });
   });
 
   // ── The VENDOR'S OWN declared severity, stored beside ours ──────────────────────────────
@@ -343,5 +348,70 @@ describe('ML label candidates vs the pending count', () => {
     expect(rollup.labelled).toBe(2); // the row was UPDATED, not duplicated
     expect(rollup.totals.bySeverity.major).toBe(0); // major → nit
     expect(rollup.totals.bySeverity.nit).toBe(2);
+  });
+
+  // ── The reviewThreads join drift ────────────────────────────────────────────────────────
+  //
+  // The candidate query joins reviewThreads to carry `path` — a HINT to the model, nothing
+  // more — while the pending count does not join threads at all. With an INNER join those two
+  // disagree the moment a review comment's thread row is missing: counted as pending forever,
+  // never offered to the worker — a phantom backlog `isMlScoring` cannot tell from real work.
+  // The join is LEFT so a threadless comment is counted AND selectable, with a null path.
+  //
+  // This schema's FKs make the orphan unreachable through the app, so the fixture is built
+  // with a second raw connection with `foreign_keys` OFF (the pragma is per-connection). The
+  // state is still worth pinning: FK enforcement is a runtime pragma, not a property of the
+  // file, and the cost of the drift is silent in exactly the way this suite exists to catch.
+  describe('a review comment without a thread row', () => {
+    let orphanCommentId = 0;
+
+    beforeAll(async () => {
+      const at = new Date();
+      const prId = (await db.select().from(schema.pullRequests).execute())[0]!.id;
+      const [thread] = await db
+        .insert(schema.reviewThreads)
+        .values({
+          githubNodeId: 'RT_orphan',
+          prId,
+          path: 'b.ts',
+          isResolved: false,
+          derivedState: 'untouched',
+          originalCommenterId: botId,
+          createdAt: at,
+        })
+        .returning()
+        .execute();
+      const [comment] = await db
+        .insert(schema.reviewComments)
+        .values({
+          githubNodeId: 'RC_orphan',
+          threadId: thread.id,
+          prId,
+          authorId: botId,
+          body: 'a real finding whose thread row is gone',
+          createdAt: at,
+        })
+        .returning()
+        .execute();
+      orphanCommentId = comment.id;
+      const raw = new Database(DB_PATH);
+      raw.pragma('foreign_keys = OFF');
+      raw.prepare('DELETE FROM review_threads WHERE id = ?').run(thread.id);
+      raw.close();
+    });
+
+    it('is counted AND selectable — never phantom pending', async () => {
+      const candidates = await mlLabels.listMlCandidates(1, scope, 100);
+      const orphan = candidates.find(
+        (c: any) => c.targetKind === 'review_comment' && c.targetId === orphanCommentId,
+      );
+      expect(orphan).toBeDefined();
+      expect(orphan.path).toBeNull(); // the hint degrades; the candidacy does not
+      // THE INVARIANT, same as the empty-body case above: whatever pending reports, the
+      // worker can actually pick up. An inner thread join makes this 1 vs 0.
+      const rollup = await mlLabels.getBotSeverityRollup(1, scope, true);
+      expect(rollup.pending).toBe(candidates.length);
+      expect(rollup.pending).toBe(1);
+    });
   });
 });

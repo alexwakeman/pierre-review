@@ -176,7 +176,13 @@ export async function listMlCandidates(
       })
       .from(reviewComments)
       .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
-      .innerJoin(reviewThreads, eq(reviewThreads.id, reviewComments.threadId))
+      // LEFT, not inner: `path` is only a HINT to the model, so a review comment whose thread
+      // row is missing (an orphan cannot arise under this schema's FKs, but nothing here should
+      // depend on that) must still be selectable — `countUnlabelledBotText` does not join
+      // threads at all, and an inner join here would count such a row as pending forever while
+      // never offering it to the worker (the exact phantom-pending drift `hasText` exists to
+      // prevent on the body predicate).
+      .leftJoin(reviewThreads, eq(reviewThreads.id, reviewComments.threadId))
       .leftJoin(mlCommentLabels, unlabelled('review_comment', reviewComments.id))
       .where(
         and(
@@ -465,6 +471,7 @@ export async function getBotSeverityRollup(
     enabled,
     labelled: 0,
     pending: 0,
+    unscorable: 0,
     totals: {
       bySeverity: emptySeverityCounts(),
       byCategory: [],
@@ -482,7 +489,7 @@ export async function getBotSeverityRollup(
   const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
   if (automatedIds.length === 0) return empty;
 
-  const [labelRows, kindMap, labelMap, userRows, pending] = await Promise.all([
+  const [labelRows, kindMap, labelMap, userRows, pending, unscorable] = await Promise.all([
     db
       .select({
         authorUserId: mlCommentLabels.authorUserId,
@@ -510,6 +517,7 @@ export async function getBotSeverityRollup(
       .where(inArray(users.id, automatedIds))
       .execute(),
     countUnlabelledBotText(accountId, scope, automatedIds),
+    countUnscorableBotText(accountId, scope, automatedIds),
   ]);
 
   const loginById = new Map<number, string>();
@@ -610,6 +618,7 @@ export async function getBotSeverityRollup(
     enabled,
     labelled: labelRows.length,
     pending,
+    unscorable,
     totals: {
       bySeverity: totalsBySeverity,
       byCategory: [...totalsByCategory.entries()]
@@ -638,17 +647,31 @@ function vendorBrand(kind: AutomatedReviewerKind, login: string): string {
 }
 
 /**
- * How much bot text in scope is still waiting for a label. Three counts with the same
- * left-join-is-null predicate the candidate query uses, so "pending" and "what the worker will
- * pick up next" cannot drift apart.
+ * The two disjoint populations of unlabelled bot rows, split by ONE body predicate over one
+ * shared query shape so their union and boundary cannot drift:
+ *
+ *   - `unlabelled` — text the worker WILL pick up next: the same `isNotNull` + `hasText` +
+ *     no-label-row predicate the candidate query uses. This is `pending`.
+ *   - `unscorable` — rows whose body was never STORED (`body IS NULL`): synced during the
+ *     lean-storage window and never repaired, because incremental sync only re-walks PRs whose
+ *     GitHub `updatedAt` moves. There is no text to classify, so the candidate query cannot see
+ *     them — counting them as pending would spin the scoring indicator on work nothing will ever
+ *     drain, and NOT counting them anywhere reported 100% coverage with badges missing. They are
+ *     repairable (hydration write-back, `pnpm ml:backfill-bodies`), at which point they MOVE
+ *     into `pending` — honest, even though the jump looks alarming.
  */
-async function countUnlabelledBotText(
+type UnlabelledBodyMode = 'unlabelled' | 'unscorable';
+
+async function countBotText(
   accountId: number,
   scope: BotScope,
   automatedIds: number[],
+  mode: UnlabelledBodyMode,
 ): Promise<number> {
   if (scope.repoIds.length === 0 || automatedIds.length === 0) return 0;
   const n = sql<number>`count(*)`;
+  const bodyPredicate = (col: AnyColumn) =>
+    mode === 'unlabelled' ? and(isNotNull(col), hasText(col)) : isNull(col);
 
   const [rc, pc, rv] = await Promise.all([
     db
@@ -669,8 +692,7 @@ async function countUnlabelledBotText(
           inArray(pullRequests.repoId, scope.repoIds),
           isNotNull(reviewComments.authorId),
           inArray(reviewComments.authorId, automatedIds),
-          isNotNull(reviewComments.body),
-          hasText(reviewComments.body),
+          bodyPredicate(reviewComments.body),
           isNull(mlCommentLabels.id),
         ),
       )
@@ -693,8 +715,7 @@ async function countUnlabelledBotText(
           inArray(pullRequests.repoId, scope.repoIds),
           isNotNull(prComments.authorId),
           inArray(prComments.authorId, automatedIds),
-          isNotNull(prComments.body),
-          hasText(prComments.body),
+          bodyPredicate(prComments.body),
           isNull(mlCommentLabels.id),
         ),
       )
@@ -717,8 +738,7 @@ async function countUnlabelledBotText(
           inArray(pullRequests.repoId, scope.repoIds),
           isNotNull(reviews.authorId),
           inArray(reviews.authorId, automatedIds),
-          isNotNull(reviews.body),
-          hasText(reviews.body),
+          bodyPredicate(reviews.body),
           isNull(mlCommentLabels.id),
         ),
       )
@@ -728,9 +748,82 @@ async function countUnlabelledBotText(
   return Number(rc[0]?.n ?? 0) + Number(pc[0]?.n ?? 0) + Number(rv[0]?.n ?? 0);
 }
 
+/**
+ * How much bot text in scope is still waiting for a label. Three counts with the same
+ * left-join-is-null predicate the candidate query uses, so "pending" and "what the worker will
+ * pick up next" cannot drift apart.
+ */
+async function countUnlabelledBotText(
+  accountId: number,
+  scope: BotScope,
+  automatedIds: number[],
+): Promise<number> {
+  return countBotText(accountId, scope, automatedIds, 'unlabelled');
+}
+
+/** How much bot text in scope can NEVER be labelled as stored — see `UnlabelledBodyMode`. */
+async function countUnscorableBotText(
+  accountId: number,
+  scope: BotScope,
+  automatedIds: number[],
+): Promise<number> {
+  return countBotText(accountId, scope, automatedIds, 'unscorable');
+}
+
+/**
+ * The PRs in scope still carrying bot-authored NULL-body targets — the worklist for
+ * `pnpm ml:backfill-bodies` (scripts/backfill-null-bodies.ts). Same bot set and the same
+ * NULL-body predicate as `countUnscorableBotText`, so the script repairs exactly the
+ * population that count reports.
+ */
+export async function listNullBodyBotPrIds(
+  accountId: number,
+  scope: BotScope,
+  automatedIds: number[],
+): Promise<number[]> {
+  if (scope.repoIds.length === 0 || automatedIds.length === 0) return [];
+
+  const prIdsFor = (
+    kind: MlLabelTargetKind,
+    table: typeof reviewComments | typeof prComments | typeof reviews,
+  ) =>
+    db
+      .selectDistinct({ prId: table.prId })
+      .from(table)
+      .innerJoin(pullRequests, eq(pullRequests.id, table.prId))
+      .leftJoin(
+        mlCommentLabels,
+        and(
+          eq(mlCommentLabels.accountId, accountId),
+          eq(mlCommentLabels.targetKind, kind),
+          eq(mlCommentLabels.targetId, table.id),
+        ),
+      )
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(pullRequests.repoId, scope.repoIds),
+          isNotNull(table.authorId),
+          inArray(table.authorId, automatedIds),
+          isNull(table.body),
+          isNull(mlCommentLabels.id),
+        ),
+      )
+      .execute();
+
+  const [rc, pc, rv] = await Promise.all([
+    prIdsFor('review_comment', reviewComments),
+    prIdsFor('pr_comment', prComments),
+    prIdsFor('review', reviews),
+  ]);
+  return [...new Set([...rc, ...pc, ...rv].map((r) => r.prId))];
+}
+
 export interface MlBacklog {
   /** Bot text across EVERY workspace of the account that carries no label yet. */
   pending: number;
+  /** Bot rows with NO stored body — never pending, never a candidate. See `UnlabelledBodyMode`. */
+  unscorable: number;
   /** Labels already stored for the account. */
   labelled: number;
 }
@@ -753,12 +846,14 @@ export interface MlBacklog {
 export async function getMlBacklogForAccount(accountId: number): Promise<MlBacklog> {
   const workspaces = await listWorkspaces(accountId);
   let pending = 0;
+  let unscorable = 0;
   for (const ws of workspaces) {
     if (ws.repoIds.length === 0) continue;
     const scope: BotScope = { workspaceId: ws.id, repoIds: ws.repoIds };
     const automatedIds = await automatedReviewerUserIds(accountId, ws.id, 'all');
     if (automatedIds.length === 0) continue;
     pending += await countUnlabelledBotText(accountId, scope, automatedIds);
+    unscorable += await countUnscorableBotText(accountId, scope, automatedIds);
   }
 
   const labelledRows = await db
@@ -767,5 +862,5 @@ export async function getMlBacklogForAccount(accountId: number): Promise<MlBackl
     .where(eq(mlCommentLabels.accountId, accountId))
     .execute();
 
-  return { pending, labelled: Number(labelledRows[0]?.n ?? 0) };
+  return { pending, unscorable, labelled: Number(labelledRows[0]?.n ?? 0) };
 }

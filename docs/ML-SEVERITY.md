@@ -270,8 +270,8 @@ enforces FKs.
 | Method & path | Purpose |
 |---|---|
 | `GET /api/prs/:id/ml-labels` | **THE per-PR index** → `PrMlLabelsResponse`. Every badge on the page reads this one query (React Query dedupes; `staleTime: Infinity`), so a 60-thread PR costs one request, not 60. A target with no label is simply absent. Ownership 404 via the getter. Carries the vendor's own badge (`vendorSeverity` / `vendorSeverityConfidence`, both nullable) alongside ours, purely so the client can render the disagreement. Rate tier `read` — recorded explicitly, not inherited, because it sits inside the `/api/prs/<id>/` family whose other members hydrate from GitHub |
-| `GET /api/bot-severity?workspace&repoIds` | Bots-interface rollup → `BotSeverityResponse` (per-severity + per-category totals, one row per bot, coverage as `labelled`/`pending`, the distinct `backend` strings). `?workspace=` follows the read contract — unknown/foreign/garbage degrades to Default, never 404. ⚠ **Rate-limit tier `search` (60/min), not `read`**: DB-only, but it scans a workspace's whole label corpus (capped 50 k rows) plus three unlabelled-count joins — the same shape of cost as `/api/workspace-metrics/compare` |
-| `GET /api/ml-status` | The worker's live state → `MlEnrichmentStatus`, so the sync UI can show the scoring pass (above). **NO scope parameter** — the worker walks every workspace, so a workspace-scoped backlog would under-report the work actually running. Same `search` tier as the rollup, for the same reason (its backlog half is those unlabelled-count joins, once per workspace) — plus a ~3 s per-account cache on the scan, because this one is POLLED and a tier bounds request count, not per-request work |
+| `GET /api/bot-severity?workspace&repoIds` | Bots-interface rollup → `BotSeverityResponse` (per-severity + per-category totals, one row per bot, coverage as `labelled`/`pending`/`unscorable`, the distinct `backend` strings). `?workspace=` follows the read contract — unknown/foreign/garbage degrades to Default, never 404. ⚠ **Rate-limit tier `search` (60/min), not `read`**: DB-only, but it scans a workspace's whole label corpus (capped 50 k rows) plus three unlabelled-count joins — the same shape of cost as `/api/workspace-metrics/compare` |
+| `GET /api/ml-status` | The worker's live state → `MlEnrichmentStatus` (incl. `unscorable`, the NULL-body legacy population — never part of `pending`), so the sync UI can show the scoring pass (above). **NO scope parameter** — the worker walks every workspace, so a workspace-scoped backlog would under-report the work actually running. Same `search` tier as the rollup, for the same reason (its backlog half is those unlabelled-count joins, once per workspace) — plus a ~3 s per-account cache on the scan, because this one is POLLED and a tier bounds request count, not per-request work |
 
 Both are **pure reads**. There is no generate endpoint and no mutating verb: the model is only
 ever called by the background worker, so no request can spend anything.
@@ -639,6 +639,38 @@ breaks a tie, never becomes a low-confidence fallback, and never reaches the mod
   SQL's `trim()` strips spaces only in both dialects while JavaScript's strips all whitespace, so
   any JS-side filter reintroduces exactly the same class of drift. Pinned by
   `db/ml-labels.test.ts`.
+- **`body IS NULL` is a THIRD population, and it is not pending — it is `unscorable`.** Rows
+  synced during the lean-storage window (2026-06-07 → 2026-07-01, when comment/review bodies
+  were not persisted) hold NULL bodies forever on their own: incremental sync only re-walks PRs
+  whose GitHub `updatedAt` moves, and these live on old closed PRs. They are invisible to the
+  candidate query AND the pending count by the same `isNotNull` predicate, so coverage read
+  100% while hydration showed the user the full text with no badge — the exact reported
+  symptom (48 bevy review comments, ~190 pr_comments, 26 review bodies in this dev DB). Three
+  repairs now exist: **(1)** `hydratePrDetail` writes hydrated bodies back over NULLs (only a
+  real string, only over NULL — `graphqlTolerant` nulls forbidden selections, so a positive
+  statement is required; `diffHunk` stays lean-gated; plain awaited UPDATEs, never inside a
+  transaction), **(2)** `pnpm ml:backfill-bodies` sweeps every PR still carrying bot-authored
+  NULL-body targets through the same hydration path (~1 GraphQL call per PR, idempotent), and
+  **(3)** the counts are honest: `unscorable` (the same three counts with `isNull(body)`) rides
+  `MlEnrichmentStatus`, `BotSeverityResponse` and `MlBacklog` beside `pending`, and the sync
+  menu/modal show it quietly when non-zero. ⚠ `unscorable` must NEVER feed `isMlScoring` —
+  nothing drains it, so counting it as pending is the permanent-spinner lie again. And expect
+  `pending` to JUMP right after a backfill run: silently missing work becoming visible work is
+  the honest direction. Pinned by `sync/hydrate-backfill.test.ts`.
+
+  The first live run (2026-08-07, this dev DB) wrote 801 bodies across 143 PRs and moved the
+  counted backlog `pending 0 / unscorable 266` → `pending 127 / unscorable 133`. What REMAINS
+  is rows whose comment GitHub itself no longer has — delete-and-repost bots (SonarQube's
+  quality-gate comment, verified by node-id lookup returning `NOT_FOUND`) — i.e. genuinely
+  unscorable forever, which is exactly what the count is for. A `+0 bodies` PR in the script's
+  log is therefore normal, not a failure.
+- **The candidate query's `reviewThreads` join is LEFT, and must stay LEFT.** `path` is only a
+  hint to the model, but the pending count does not join threads at all — an INNER join there
+  means a review comment whose thread row is missing is counted as pending forever while never
+  being offered to the worker (phantom backlog, the drift `isMlScoring` cannot see through).
+  The schema's FKs make the orphan unreachable today; `db/ml-labels.test.ts` still pins it with
+  a `foreign_keys=OFF` fixture because the failure is silent and FK enforcement is a pragma,
+  not a property of the data.
 - **The badge must never fetch.** `ThreadCard` has eight mount sites; a per-target query behind
   an unconditional panel is how a 60-thread PR once became 60 requests drawing 60 empty boxes.
   Everything reads the one `['ml-labels', prId]` index and returns `null` when it finds nothing.
@@ -675,6 +707,10 @@ breaks a tie, never becomes a low-confidence fallback, and never reaches the mod
   seeding an **empty-string approval** so the candidates ≡ `pending` invariant is non-vacuous,
   and writes the same target twice so the `onConflictDoUpdate` target is actually exercised (an
   insert-only test never reaches that branch).
+- `sync/hydrate-backfill.test.ts` runs the NULL-body write-back on a throwaway SQLite DB with
+  only the GitHub boundary mocked: fills exactly the NULLs GitHub has text for, never overwrites
+  a stored body, never writes a nulled selection, leaves `diffHunk` lean-gated, moves repaired
+  rows `unscorable` → `pending`, and is idempotent.
 - `sync/ml-enrichment.test.ts` pins `packBatches`: the character budget, the item cap, that an
   over-budget item gets its own batch rather than being dropped, and that nothing is lost or
   duplicated — plus `severityApiAnswered`, so "the service rejected this batch" and "the service

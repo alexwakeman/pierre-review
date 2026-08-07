@@ -18,6 +18,8 @@ vi.mock('../db/client.js', () => {
     where: () => chain,
     innerJoin: () => chain,
     limit: () => chain,
+    set: () => chain,
+    returning: () => chain,
     execute: async () => [],
   };
   // Stand-in tables: hydrate-detail destructures these off `schema` at module load and only
@@ -26,12 +28,16 @@ vi.mock('../db/client.js', () => {
     id: 'id',
     githubNodeId: 'github_node_id',
     prId: 'pr_id',
+    body: 'body',
     owner: 'owner',
     name: 'name',
     number: 'number',
   });
   return {
-    db: { select: () => chain },
+    // `update` is reachable only when the NULL-body write-back finds rows, and the select
+    // chain returns none here — the write-back's real behaviour is covered on a real DB by
+    // hydrate-backfill.test.ts.
+    db: { select: () => chain, update: () => chain },
     schema: {
       reviews: table(),
       reviewComments: table(),

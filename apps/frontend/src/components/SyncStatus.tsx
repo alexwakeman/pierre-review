@@ -368,9 +368,14 @@ export function SyncStatus(): JSX.Element | null {
   };
 
   // What the sync is doing, in one phrase. The scoring pass is a real phase of it, not a
-  // footnote: on a first backfill it is the phase that lasts the longest.
+  // footnote: on a first backfill it is the phase that lasts the longest. `unscorable` rides
+  // along quietly when non-zero — rows with no stored text, which nothing will ever score
+  // (repair is `pnpm ml:backfill-bodies`) — so "N to go" is never read as full coverage. It
+  // deliberately does NOT feed isMlScoring: it is not work in flight.
+  const unscorableSuffix =
+    ml && ml.unscorable > 0 ? ` · ${ml.unscorable.toLocaleString()} unscorable` : '';
   const scoringLine = ml
-    ? `scoring bot comments${ml.pending > 0 ? ` — ${ml.pending.toLocaleString()} to go` : '…'}`
+    ? `scoring bot comments${ml.pending > 0 ? ` — ${ml.pending.toLocaleString()} to go` : '…'}${unscorableSuffix}`
     : 'scoring bot comments…';
   const progress = foregroundComplete
     ? 'loading older history…'

@@ -1438,6 +1438,15 @@ export interface MlEnrichmentStatus {
   running: boolean;
   /** Bot text with no label yet, across every workspace of the account. */
   pending: number;
+  /**
+   * Bot rows whose body was never STORED (`body IS NULL` — synced during the lean-storage
+   * window) — no text to classify, so they are invisible to the candidate query and excluded
+   * from `pending` on purpose. Repairable via hydration write-back / `pnpm ml:backfill-bodies`.
+   *
+   * ⚠ Must NEVER feed a scoring indicator (`isMlScoring`): nothing is draining it, so counting
+   * it as pending would spin forever — the exact lie `pending` was separated from.
+   */
+  unscorable: number;
   /** Labels already stored for the account. */
   labelled: number;
   /** Labels written by the CURRENT (or most recent) tick — the live counter. */
@@ -5092,6 +5101,10 @@ export interface BotSeverityResponse {
   // presenting a partial rollup as complete.
   labelled: number;
   pending: number;
+  // Bot rows with NO stored body (lean-storage-window legacy) — permanently outside `pending`
+  // and the worker's reach until repaired (hydration write-back / `pnpm ml:backfill-bodies`).
+  // Counted separately so "pending 0" cannot claim 100% coverage while badges are missing.
+  unscorable: number;
   totals: {
     bySeverity: MlSeverityCounts;
     byCategory: Array<{ category: MlCategory; count: number }>;
