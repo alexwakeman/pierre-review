@@ -796,6 +796,79 @@ export async function getMlWindowAggregates(
   };
 }
 
+// ── The label rows behind the Behaviour tab's severity/category charts ──────────────────────
+// A DELIBERATELY RAW read, unlike every fold above it: the Behaviour tab needs the same rows
+// bucketed two ways at once (flat over the selected window, weekly over the 84-day trend span),
+// and those week boundaries are computed in getBotBehaviourAnalytics from ITS trendFrom. Folding
+// here would mean either re-deriving that arithmetic in a second place — the one thing that would
+// make the new charts' x-axis silently disagree with the density chart's — or passing the bucket
+// function in, which is a worse seam than handing back rows.
+//
+// Coercion is NOT skipped, though: severity/categories go through the same coercions the wire
+// reads use, so an unreadable severity drops the row (there is nothing to count) and an
+// unreadable vendor claim degrades to "no claim", never to ours.
+export interface MlBehaviourLabelRow {
+  authorUserId: number;
+  severity: MlSeverity;
+  /** The bot's OWN declared badge. Display-only, by hard invariant — see MlLabel.vendorSeverity. */
+  vendorSeverity: MlSeverity | null;
+  categories: MlCategory[];
+  isSummary: boolean;
+  targetCreatedAtMs: number;
+}
+
+export async function listMlLabelsForBehaviour(
+  accountId: number,
+  scope: BotScope,
+  automatedIds: number[],
+  from: Date,
+  to: Date,
+): Promise<{ rows: MlBehaviourLabelRow[]; truncated: boolean }> {
+  if (scope.repoIds.length === 0 || automatedIds.length === 0) {
+    return { rows: [], truncated: false };
+  }
+  // Newest-first + a cap, then `truncated` — the ROLLUP_SCAN_CAP contract: a capped scan needs an
+  // ORDER BY or the sample differs run to run (heap order flips on Postgres after an UPDATE), and
+  // it has to SAY it was capped rather than present a sample as a total.
+  const raw = await db
+    .select({
+      authorUserId: mlCommentLabels.authorUserId,
+      severity: mlCommentLabels.severity,
+      vendorSeverity: mlCommentLabels.vendorSeverity,
+      categories: mlCommentLabels.categories,
+      isSummary: mlCommentLabels.isSummary,
+      targetCreatedAt: mlCommentLabels.targetCreatedAt,
+    })
+    .from(mlCommentLabels)
+    .where(
+      and(
+        eq(mlCommentLabels.accountId, accountId),
+        inArray(mlCommentLabels.repoId, scope.repoIds),
+        inArray(mlCommentLabels.authorUserId, automatedIds),
+        gte(mlCommentLabels.targetCreatedAt, from),
+        lte(mlCommentLabels.targetCreatedAt, to),
+      ),
+    )
+    .orderBy(desc(mlCommentLabels.targetCreatedAt), desc(mlCommentLabels.id))
+    .limit(ROLLUP_SCAN_CAP)
+    .execute();
+
+  const rows: MlBehaviourLabelRow[] = [];
+  for (const r of raw) {
+    const severity = coerceSeverity(r.severity);
+    if (!severity) continue;
+    rows.push({
+      authorUserId: r.authorUserId,
+      severity,
+      vendorSeverity: coerceSeverity(r.vendorSeverity),
+      categories: coerceCategories(r.categories),
+      isSummary: r.isSummary,
+      targetCreatedAtMs: r.targetCreatedAt.getTime(),
+    });
+  }
+  return { rows, truncated: raw.length >= ROLLUP_SCAN_CAP };
+}
+
 // ── The per-REVIEWER comments drill-down (GET /api/bot-analytics/vendor/:key/comments) ──────
 // Everything one automated reviewer SAID in the window — inline review comments (path + thread
 // state), issue-level PR comments, and non-empty review bodies — each row carrying its stored

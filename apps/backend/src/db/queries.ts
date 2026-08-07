@@ -113,6 +113,9 @@ import type {
   BotBehaviourBotStat,
   BotBehaviourTrendPoint,
   BotBehaviourAnomaly,
+  BotBehaviourMl,
+  BotBehaviourMlBot,
+  BotBehaviourMlWeekPoint,
   BotOverlapStats,
   BotCoReviewPair,
   BotRepoDirBreakdown,
@@ -127,6 +130,7 @@ import type {
   BotTuningSuggestion,
   MlSeverity,
   MlSeverityCounts,
+  MlCategory,
   BotOnlyReviewCard,
   UserContributionStats,
   ArmedMergeRequest,
@@ -180,7 +184,7 @@ import { fingerprintReview } from '../sync/review-fingerprint.js';
 // ⚠ A deliberate module CYCLE: ml-labels.ts imports the bot-set resolvers from this file. It is
 // benign under ESM because both sides export hoisted function declarations and only call each
 // other at request time — never during module evaluation. Do not add an eval-time use.
-import { getMlWindowAggregates } from './ml-labels.js';
+import { getMlWindowAggregates, listMlLabelsForBehaviour } from './ml-labels.js';
 import { clusterThreadsByLine } from './line-overlap.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
@@ -10785,6 +10789,15 @@ export async function getBotBehaviourAnalytics(
   const HOUR = 3_600_000;
   const SPAN_WEEKS = 12;
   // DAY / SPAN_DAYS / trendFromMs are hoisted above (they also gate the prsOpenedPerDay series).
+  // THE week boundaries, computed once. Both the per-bot `trend` below and the ML fold at the end
+  // read this array rather than re-deriving `trendFromMs + i·7·DAY` — the two series are drawn on
+  // the same x-axis, and a second copy of that arithmetic is exactly how they would come to
+  // disagree by a week without anything failing.
+  const weekStarts = Array.from({ length: SPAN_WEEKS }, (_, i) =>
+    new Date(trendFromMs + i * 7 * DAY).toISOString(),
+  );
+  const weekIndexOf = (ms: number): number =>
+    Math.min(SPAN_WEEKS - 1, Math.max(0, Math.floor((ms - trendFromMs) / (7 * DAY))));
   const bots: BotBehaviourBotStat[] = [];
   for (const [userId, byPr] of touchesByUserPr) {
     const kind = kindMap.get(userId);
@@ -10824,7 +10837,7 @@ export async function getBotBehaviourAnalytics(
       const ttfrHours = Math.max(0, (firstMs - baselineMs) / HOUR);
 
       // 12-week trend: bucket every trend-span PR by the week of its first touch.
-      const wk = Math.min(SPAN_WEEKS - 1, Math.max(0, Math.floor((firstMs - trendFromMs) / (7 * DAY))));
+      const wk = weekIndexOf(firstMs);
       const wkArr = ttfrByWeek.get(wk) ?? [];
       wkArr.push(ttfrHours);
       ttfrByWeek.set(wk, wkArr);
@@ -10839,7 +10852,7 @@ export async function getBotBehaviourAnalytics(
       // Every touch → the span-wide weekly volume + the daily coverage strip; the week×hour
       // heatmap keeps its WINDOW scope (the coverage snapshot). All from real GitHub timestamps.
       for (const t of touches) {
-        const wIdx = Math.min(SPAN_WEEKS - 1, Math.max(0, Math.floor((t.ms - trendFromMs) / (7 * DAY))));
+        const wIdx = weekIndexOf(t.ms);
         volumeByWeek[wIdx]! += 1;
         const dIdx = Math.min(SPAN_DAYS - 1, Math.max(0, Math.floor((t.ms - trendFromMs) / DAY)));
         dailyActivity[dIdx]! += 1;
@@ -10907,7 +10920,7 @@ export async function getBotBehaviourAnalytics(
     const densityAnoms = weeklyAnomalies(findingsPerKlocSeries, { direction: 'both', minScale: 0.5 });
 
     const trend: BotBehaviourTrendPoint[] = Array.from({ length: SPAN_WEEKS }, (_, i) => ({
-      weekStart: new Date(trendFromMs + i * 7 * DAY).toISOString(),
+      weekStart: weekStarts[i]!,
       medianTtfrHours: ttfrSeries[i]!,
       volume: volumeByWeek[i]!,
       followupRatePct: followupSeries[i]!,
@@ -11161,6 +11174,107 @@ export async function getBotBehaviourAnalytics(
     lineOverlapPrs: overlapPrSet.size,
   };
 
+  // ── ML severity/category fold (CORE, free tier — no LLM) ────────────────────────────────────
+  // ONE read of `ml_comment_labels` over the trend span, grouped in memory: no per-bot fan-out,
+  // and no second derivation of anything. Scope, bot set and week boundaries are the SAME values
+  // the rest of this function used — `automatedIds` (role 'review', so a linter's volume can't
+  // dominate a chart about reviewers), `scope.repoIds`, and `weekIndexOf`/`weekStarts`.
+  //
+  // Exclusions are the shared ones with ONE deliberate difference, spelled out in
+  // BotBehaviourMl's doc: severity is FINDINGS-ONLY (no summaries, no praise), while categories
+  // cover every non-summary row so `praise` can appear as a category in its own right.
+  //
+  // Rows are emitted only for bots that also appear in `bots` — the key is the join, and a
+  // severity row for a bot the panel never draws is a row nothing can label or colour.
+  const mlBotKeys = new Set(bots.map((b) => b.userId));
+  const { rows: mlRows, truncated: mlTruncated } = await listMlLabelsForBehaviour(
+    accountId,
+    scope,
+    automatedIds,
+    trendFrom,
+    to,
+  );
+
+  interface MlAcc {
+    findings: number;
+    bySeverity: MlSeverityCounts;
+    byVendorSeverity: MlSeverityCounts;
+    vendorDeclared: number;
+    byCategory: Map<MlCategory, number>;
+    weekly: { bySeverity: MlSeverityCounts; byCategory: Map<MlCategory, number> }[];
+  }
+  const emptyCounts = (): MlSeverityCounts => ({ nit: 0, minor: 0, major: 0, critical: 0 });
+  const mlByBot = new Map<number, MlAcc>();
+  for (const row of mlRows) {
+    if (!mlBotKeys.has(row.authorUserId)) continue;
+    if (row.isSummary) continue; // a walkthrough is not a finding, and its categories are template
+    let acc = mlByBot.get(row.authorUserId);
+    if (!acc) {
+      acc = {
+        findings: 0,
+        bySeverity: emptyCounts(),
+        byVendorSeverity: emptyCounts(),
+        vendorDeclared: 0,
+        byCategory: new Map(),
+        weekly: Array.from({ length: SPAN_WEEKS }, () => ({
+          bySeverity: emptyCounts(),
+          byCategory: new Map<MlCategory, number>(),
+        })),
+      };
+      mlByBot.set(row.authorUserId, acc);
+    }
+    const wk = acc.weekly[weekIndexOf(row.targetCreatedAtMs)]!;
+    const inWindow = row.targetCreatedAtMs >= fromMs;
+    const isPraise = row.categories.includes('praise');
+
+    // Categories: every non-summary row, both grains.
+    for (const c of row.categories) {
+      wk.byCategory.set(c, (wk.byCategory.get(c) ?? 0) + 1);
+      if (inWindow) acc.byCategory.set(c, (acc.byCategory.get(c) ?? 0) + 1);
+    }
+    // Severity: findings only. Praise carries a severity in the table (every row does) and it
+    // means nothing — counting it would put "acknowledged your fix" in the nit column.
+    if (isPraise) continue;
+    wk.bySeverity[row.severity] += 1;
+    if (inWindow) {
+      acc.findings += 1;
+      acc.bySeverity[row.severity] += 1;
+      // The vendor's own badge — a strictly smaller population (most findings carry none), so it
+      // gets its own denominator and never shares one with ours.
+      if (row.vendorSeverity) {
+        acc.vendorDeclared += 1;
+        acc.byVendorSeverity[row.vendorSeverity] += 1;
+      }
+    }
+  }
+
+  const sortedCategories = (m: Map<MlCategory, number>): Array<{ category: MlCategory; count: number }> =>
+    [...m.entries()]
+      .map(([category, count]) => ({ category, count }))
+      .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
+
+  const mlPerBot: BotBehaviourMlBot[] = bots
+    .filter((b) => mlByBot.has(b.userId))
+    .map((b) => {
+      const acc = mlByBot.get(b.userId)!;
+      const weekly: BotBehaviourMlWeekPoint[] = acc.weekly.map((w, i) => ({
+        weekStart: weekStarts[i]!,
+        bySeverity: w.bySeverity,
+        byCategory: sortedCategories(w.byCategory),
+      }));
+      return {
+        key: b.key,
+        findings: acc.findings,
+        bySeverity: acc.bySeverity,
+        byVendorSeverity: acc.byVendorSeverity,
+        vendorDeclared: acc.vendorDeclared,
+        byCategory: sortedCategories(acc.byCategory),
+        weekly,
+      };
+    });
+  const ml: BotBehaviourMl | undefined =
+    mlPerBot.length > 0 ? { perBot: mlPerBot, truncated: mlTruncated } : undefined;
+
   return {
     enabled: true,
     generatedAt,
@@ -11170,6 +11284,7 @@ export async function getBotBehaviourAnalytics(
     daySpanStart,
     overlap,
     repoBotDirs,
+    ...(ml ? { ml } : {}),
   };
 }
 

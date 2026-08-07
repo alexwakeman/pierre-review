@@ -341,6 +341,35 @@ ever called by the background worker, so no request can spend anything.
     The gate reads the RAW share, not the rounded `mlNitPct` the column shows, and never
     `vendorSeverity`. Matrix pinned by `bot-analytics-verdict.test.ts`; the fold, the split and
     the overlap count by `bot-analytics-ml.test.ts`.
+- **The Bots → Behaviour tab (`BotBehaviourPanel`, EXPERIMENTAL)** — five charts off ONE
+  additive `ml` block on `/api/bot-behaviour` (`BotBehaviourMl`; no new route, no new fetch).
+  Two grains in one block, and they are not the same: the flat counts describe the panel's
+  SELECTED WINDOW, `weekly` covers the 84-day trend span on the SAME week boundaries as
+  `trend[i].weekStart` (both read `weekStarts` in `getBotBehaviourAnalytics` — a second copy of
+  that arithmetic is how the severity chart and the density chart come to disagree by a week
+  with nothing failing). Bot set is the tab's own `automatedReviewerUserIds(…, 'review')`, so a
+  quality check's volume stays out of a chart about reviewers, and rows are emitted ONLY for
+  bots that already appear in `bots` (the `u<userId>` key is the join).
+  - **"Severity mix per bot (Limn)"** + **"Severity mix per bot (bot's own badge)"** — the same
+    stacked bar twice, ours and theirs, side by side, because **the disagreement is the
+    product**. The vendor half has its OWN denominator (`vendorDeclared`, usually far smaller
+    than `findings`) and says so in its caveat line; nothing derives from it.
+  - **"Severity over time"** — one line per bot of its weekly MEAN severity on a nit(1)…
+    critical(4) axis (`LineChart`'s `yDomain`, added for exactly this: the default 0→niceMax
+    scale ticks at 0 and 5, two values a severity cannot take). A week with no findings is a
+    GAP, never 0 — there is nothing below `nit`. The week's counts ride in the hover note in
+    the new `noteTone="muted"` styling, since a note on every point painted in the anomaly
+    colour would claim everything is an outlier.
+  - folded behind "▸ More charts — categories": **"Categories per vendor"** (stacked bar) and
+    **"Category activity over time"** (one line per category), the latter sharing the severity
+    trend's bot-subset selection so the two read as one investigation.
+  - ⚠ **THE TWO EXCLUSIONS DIFFER HERE, deliberately.** Severity is findings-only (summaries
+    and praise out, the phantom-gap rule); CATEGORIES cover every non-summary row, so `praise`
+    appears as a category in its own right — "what does this bot talk about" is a fair question
+    to ask of an acknowledgment, while a walkthrough's categories are a read of the vendor's
+    template. Pinned by `db/bot-behaviour-ml.test.ts`; the pure series maths (the mean, the
+    union-of-weeks axis, the category fold) is `lib/botMlSeries.ts` +
+    `apps/frontend/test/botMlSeries.test.ts`.
 - **The Comments drill-down (`BotPrsDetail`)** — a PRs | Comments sub-view toggle on the bot
   drill-down tab (state local to the tab; window/scope shared with the panel; the visible view
   is DERIVED for the 'pierre' sentinel, never written back). Rows: severity badge from the

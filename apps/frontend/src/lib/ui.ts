@@ -143,6 +143,23 @@ export const ML_CATEGORY_LABEL: Record<MlCategory, string> = {
   praise: 'Praise',
 };
 
+// One colour per category, for charts that stack or line up all nine at once. Not derived from a
+// rotating palette index: a category has to keep its colour between charts (and between a bot's
+// bar and the same category's trend line), which an index into SERIES_COLORS stops guaranteeing
+// the moment two charts see different category SETS. `praise` is the only non-finding here and is
+// the only green, so a bar that is mostly acknowledgment reads as such at a glance.
+export const ML_CATEGORY_COLOR: Record<MlCategory, string> = {
+  correctness_bug: '#ef4444',
+  security: '#8957e5',
+  performance: '#f59e0b',
+  style_readability: '#3b82f6',
+  maintainability_refactor: '#6366f1',
+  testing: '#14b8a6',
+  documentation: '#64748b',
+  nitpick: '#9ca3af',
+  praise: '#22c55e',
+};
+
 export const PR_STATE_META: Record<PrState, { label: string; color: string }> = {
   open: { label: 'Open', color: '#3b82f6' },
   merged: { label: 'Merged', color: '#22c55e' },

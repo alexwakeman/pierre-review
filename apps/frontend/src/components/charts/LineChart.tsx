@@ -21,9 +21,11 @@ export function LineChart({
   formatY = fmtNum,
   height = 132,
   logY = false,
+  yDomain,
   centerTip = false,
   tipBelow = false,
   hideLegend = false,
+  noteTone = 'anomaly',
 }: {
   labels: string[];
   series: Series[];
@@ -35,6 +37,12 @@ export function LineChart({
   // when the series also has large spikes. Zeros/negatives floor to the bottom decade (log has no
   // 0). Falls back to linear when there's no positive value to scale. Opt-in; default linear.
   logY?: boolean;
+  // An EXPLICIT linear y-scale with its own gridlines, for a series whose axis is a fixed
+  // ordinal scale rather than a magnitude — e.g. severity nit(1)…critical(4), where the default
+  // 0→niceMax(4)=5 would put the ticks at 0 and 5, i.e. on two values the metric cannot take and
+  // has no name for. Values outside [min,max] are clamped to the edge rather than drawn off the
+  // plot. Ignored when `logY` wins a domain.
+  yDomain?: { min: number; max: number; ticks: number[] };
   // Pin the hover tooltip to the chart's horizontal centre (see FloatingTip) so it can't spill
   // into a neighbouring panel at the far edges — for wide, multi-series charts.
   centerTip?: boolean;
@@ -43,6 +51,11 @@ export function LineChart({
   tipBelow?: boolean;
   // Suppress the built-in legend (the host renders its own — e.g. an interactive series selector).
   hideLegend?: boolean;
+  // How a `pointNotes` entry reads. 'anomaly' (default) is the red ⭘ exception note — THIS POINT
+  // DIVERGED. 'muted' is a neutral gray detail line for a note that is just extra context (the
+  // counts behind a mean), which must not borrow the exception colour: a note on every point,
+  // painted red, says "everything is an outlier".
+  noteTone?: 'anomaly' | 'muted';
 }): JSX.Element {
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
@@ -66,7 +79,14 @@ export function LineChart({
   const useLog = logY && positives.length > 0;
   let y: (v: number) => number;
   let yTicks: number[];
-  if (useLog) {
+  if (!useLog && yDomain) {
+    const span = Math.max(yDomain.max - yDomain.min, 1e-9);
+    y = (v: number): number => {
+      const cl = Math.min(yDomain.max, Math.max(yDomain.min, v));
+      return PAD_T + innerH * (1 - (cl - yDomain.min) / span);
+    };
+    yTicks = yDomain.ticks;
+  } else if (useLog) {
     const hiExp = Math.ceil(Math.log10(Math.max(...positives)) - 1e-9);
     let loExp = Math.floor(Math.log10(Math.min(...positives)) + 1e-9);
     if (loExp >= hiExp) loExp = hiExp - 1; // guarantee at least one decade of range
@@ -298,13 +318,16 @@ export function LineChart({
                     />
                     {s.label}: {s.values[hover] == null ? '—' : formatY(s.values[hover]!)}
                   </div>
-                  {/* The ringed-point explanation — why THIS point is an exception. */}
+                  {/* The ringed-point explanation — why THIS point is an exception (or, in the
+                      'muted' tone, plain detail behind the value). */}
                   {note && (
                     <div
-                      className="ml-2.5 mt-0.5 flex max-w-[220px] items-start gap-1 whitespace-normal"
-                      style={{ color: ANOMALY_RING }}
+                      className={`ml-2.5 mt-0.5 flex max-w-[220px] items-start gap-1 whitespace-normal ${
+                        noteTone === 'muted' ? 'text-gray-500 dark:text-gray-400' : ''
+                      }`}
+                      style={noteTone === 'muted' ? undefined : { color: ANOMALY_RING }}
                     >
-                      <span className="mt-px">⭘</span>
+                      <span className="mt-px">{noteTone === 'muted' ? '·' : '⭘'}</span>
                       <span>{note}</span>
                     </div>
                   )}
@@ -339,7 +362,12 @@ export function LineChart({
                       <span className="text-gray-600 dark:text-gray-300">
                         {s.label}: {v == null ? '—' : formatY(v)}
                       </span>
-                      {note && <span style={{ color: ANOMALY_RING }}>⭘ {note}</span>}
+                      {note &&
+                        (noteTone === 'muted' ? (
+                          <span className="text-gray-500 dark:text-gray-400">· {note}</span>
+                        ) : (
+                          <span style={{ color: ANOMALY_RING }}>⭘ {note}</span>
+                        ))}
                     </span>
                   );
                 })}

@@ -1050,11 +1050,59 @@ export interface BotRepoDirBreakdown {
   }[];
 }
 
+// ── ML severity/category on the Behaviour tab (CORE, free tier) ──────────────────────────────
+// The label corpus (`ml_comment_labels`) folded over the SAME scope + bot set as the rest of this
+// response, so a row here joins a `bots` row by `key`. Two grains, and they are NOT the same:
+//   • the flat counts describe the SELECTED WINDOW (what the panel's window picker says),
+//   • `weekly` describes the 84-day trend span, bucketed on the SAME week boundaries as
+//     BotBehaviourTrendPoint.weekStart, so a severity chart lines up with the density chart.
+//
+// ⚠ TWO DIFFERENT EXCLUSIONS, on purpose. Severity counts are FINDINGS-ONLY — summaries and
+// praise-category rows are labelled work but not findings, exactly as getBotSeverityRollup has it
+// (a share over findings could otherwise top 100%). CATEGORY counts cover every NON-SUMMARY row,
+// so `praise` appears as a category of its own: "what do the bots talk about" is a fair question
+// to ask of an acknowledgment, while a walkthrough's categories are an artefact of the marker
+// parser reading a summary table and stay excluded from both.
+export interface BotBehaviourMlWeekPoint {
+  weekStart: string; // ISO — IDENTICAL to the matching BotBehaviourTrendPoint.weekStart
+  bySeverity: MlSeverityCounts; // findings-only
+  byCategory: Array<{ category: MlCategory; count: number }>; // non-summary (praise included)
+}
+
+export interface BotBehaviourMlBot {
+  key: string; // `u<userId>` — joins BotBehaviourBotStat.key (identity/colour come from there)
+  // ── Selected window ──
+  findings: number; // the denominator every share on this object divides by
+  bySeverity: MlSeverityCounts; // OUR model's severity, findings-only
+  // ── THE BOT'S OWN DECLARED BADGE — shown beside ours, never believed. ──────────────────
+  // Findings-only, and only the ones where the vendor declared a badge at all, so it does NOT
+  // sum to `findings`; `vendorDeclared` is that (usually much smaller) denominator, carried so
+  // a chart can state its own sparsity instead of implying the two mixes are comparable.
+  // Nothing derives from these — see MlLabel.vendorSeverity on why (0.474 vs 0.700 exact).
+  byVendorSeverity: MlSeverityCounts;
+  vendorDeclared: number;
+  byCategory: Array<{ category: MlCategory; count: number }>; // non-summary, desc by count
+  // ── 84-day trend span, oldest→newest, one point per trend week (same length as `trend`) ──
+  weekly: BotBehaviourMlWeekPoint[];
+}
+
+export interface BotBehaviourMl {
+  perBot: BotBehaviourMlBot[]; // only bots with ≥1 non-summary label in the span
+  // The label scan is capped (newest-first). True when the cap was HIT, so these counts are a
+  // sample rather than a total — the same honesty rule as BotSeverityResponse.truncated.
+  truncated: boolean;
+}
+
 export interface BotBehaviourResponse {
   enabled: boolean; // always true (CORE / deterministic) — parallels BotAnalyticsResponse.enabled
   generatedAt: string;
   window: { kind: BotWindowKind; from: string; to: string };
   bots: BotBehaviourBotStat[]; // most-active-first
+  // ML severity/category fold. ABSENT (not an empty block) when no bot in scope has a single
+  // non-summary label — which is also what an install with no severity-api configured looks
+  // like, since nothing ever writes a label there. The client renders no ML cards at all in
+  // that case, rather than a row of empty ones.
+  ml?: BotBehaviourMl;
   // Cross-bot overlap + coverage (EXPERIMENTAL), over the selected window + scope:
   overlap: BotOverlapStats; // (i) multiple bots on the same PR + (ii) same-line overlap
   repoBotDirs: BotRepoDirBreakdown[]; // (iii) merged "where bots work" — per bot × repo × directory

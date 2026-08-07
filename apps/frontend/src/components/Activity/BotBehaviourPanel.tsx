@@ -3,14 +3,32 @@ import type {
   AnalyticsBin,
   BotBehaviourAnomaly,
   BotBehaviourBotStat,
+  BotBehaviourMl,
+  BotBehaviourMlBot,
   BotOverlapStats,
   BotRepoDirBreakdown,
   BotWindowKind,
+  MlSeverityCounts,
 } from '@pierre-review/shared';
 import { useBotBehaviour } from '../../hooks/useBotTriage.js';
+import { useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { useFilters } from '../../store/filters.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
-import { automatedReviewerMeta } from '../../lib/ui.js';
+import {
+  ML_CATEGORY_COLOR,
+  ML_CATEGORY_LABEL,
+  ML_SEVERITY_META,
+  automatedReviewerMeta,
+} from '../../lib/ui.js';
+import {
+  SEVERITY_STACK_ORDER,
+  categoriesPresent,
+  categoryWeeklySeries,
+  meanSeverityValues,
+  mlWeekLabels,
+  severityBreakdownNote,
+  severityTotal,
+} from '../../lib/botMlSeries.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import { Heatmap } from '../charts/Heatmap.js';
@@ -153,6 +171,87 @@ function DistChart({ bins, color }: { bins: AnalyticsBin[]; color: string }): JS
   return <BarChart labels={bins.map((b) => b.label)} series={series} height={130} />;
 }
 
+// ── Per-bot subset selection, shared by every cross-bot trend chart on this tab ────────────────
+// `null` = every bot shown (and it STAYS correct across a window refetch, which a Set of keys
+// would not — a bot dropping out of the response would silently narrow the view). Click a bot to
+// FOCUS it, click more to ADD them; clicking the last one off — or ending up with all of them —
+// returns to "all".
+interface BotSubset {
+  selected: Set<string> | null;
+  isOn: (key: string) => boolean;
+  toggle: (key: string) => void;
+  reset: () => void;
+}
+// Memoised on (selection, key set) so a consumer can put the whole object in a useMemo dep list
+// — a fresh object every render would silently rebuild every series on every parent render.
+function useBotSubset(allKeys: string[]): BotSubset {
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  return useMemo(
+    () => ({
+      selected,
+      isOn: (key: string) => selected == null || selected.has(key),
+      toggle: (key: string) =>
+        setSelected((prev) => {
+          if (prev == null) return new Set([key]); // from "all shown" → isolate to just this bot
+          const base = new Set(prev);
+          if (base.has(key)) base.delete(key);
+          else base.add(key);
+          if (base.size === 0 || base.size === allKeys.length) return null; // none / all → "all"
+          return base;
+        }),
+      reset: () => setSelected(null),
+    }),
+    [selected, allKeys],
+  );
+}
+
+// The interactive legend for the above — a bot pill per selectable series. Nothing to pick when
+// there is only one bot, so it renders nothing rather than an unclickable row of one.
+function BotSubsetLegend({
+  bots,
+  subset,
+  botColor,
+}: {
+  bots: { key: string; label: string; login: string | null; kind: BotBehaviourBotStat['kind'] }[];
+  subset: BotSubset;
+  botColor: BotColorFn;
+}): JSX.Element | null {
+  if (bots.length <= 1) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      {bots.map((b) => {
+        const on = subset.isOn(b.key);
+        const color = botColor({ login: b.login, kind: b.kind });
+        return (
+          <button
+            key={b.key}
+            type="button"
+            onClick={() => subset.toggle(b.key)}
+            className={`flex items-center gap-1 text-[10px] ${
+              on ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 line-through opacity-60'
+            }`}
+          >
+            <span
+              className="inline-block h-2 w-2 rounded-[2px]"
+              style={{ background: on ? color : 'transparent', boxShadow: `inset 0 0 0 1.5px ${color}` }}
+            />
+            {b.label}
+          </button>
+        );
+      })}
+      {subset.selected != null && (
+        <button
+          type="button"
+          onClick={subset.reset}
+          className="text-[10px] text-sky-600 hover:underline dark:text-sky-400"
+        >
+          all
+        </button>
+      )}
+    </div>
+  );
+}
+
 // The cross-bot findings-DENSITY trend (one line per bot over the shared ≤12-week weeks) — the
 // headline "is PR quality improving?" read that replaces the old cross-bot TTFR chart (TTFR
 // survives as a per-bot mini below). Each point = review threads the bot OPENED per PR / per 1000
@@ -188,8 +287,6 @@ function DensityTrendChart({
   // Trend line ON by default — the combined line-of-best-fit is the headline "is density rising or
   // falling over the span" read, the single most decision-useful mark on this chart.
   const [showTrend, setShowTrend] = useState(true);
-  // null = all bots selected (stays correct across window refetches); a Set = an explicit subset.
-  const [selected, setSelected] = useState<Set<string> | null>(null);
 
   // Bots that actually have density history — the selectable set (stable x-axis from all of them).
   const botsWithData = useMemo(
@@ -200,19 +297,8 @@ function DensityTrendChart({
     [bots],
   );
   const allKeys = useMemo(() => botsWithData.map((b) => b.key), [botsWithData]);
-  const isOn = (key: string): boolean => selected == null || selected.has(key);
-  // Click a bot to FOCUS it (show ONLY that one); click more bots to ADD them (additive). Clicking
-  // an already-shown bot removes it; removing the last one — or ending up with every bot — returns
-  // to the "all bots" view.
-  const toggleBot = (key: string): void =>
-    setSelected((prev) => {
-      if (prev == null) return new Set([key]); // from "all shown" → isolate to just this bot
-      const base = new Set(prev);
-      if (base.has(key)) base.delete(key);
-      else base.add(key);
-      if (base.size === 0 || base.size === allKeys.length) return null; // none / all → "all"
-      return base;
-    });
+  const subset = useBotSubset(allKeys);
+  const { selected, isOn } = subset;
 
   const { labels, series, trendPct } = useMemo(() => {
     const val = (p: BotBehaviourBotStat['trend'][number]): number | null =>
@@ -346,39 +432,7 @@ function DensityTrendChart({
       </div>
 
       {/* Interactive legend / bot selector — click a bot to focus just it; click others to add. */}
-      {botsWithData.length > 1 && (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          {botsWithData.map((b) => {
-            const on = isOn(b.key);
-            const color = botColor({ login: b.login, kind: b.kind });
-            return (
-              <button
-                key={b.key}
-                type="button"
-                onClick={() => toggleBot(b.key)}
-                className={`flex items-center gap-1 text-[10px] ${
-                  on ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 line-through opacity-60'
-                }`}
-              >
-                <span
-                  className="inline-block h-2 w-2 rounded-[2px]"
-                  style={{ background: on ? color : 'transparent', boxShadow: `inset 0 0 0 1.5px ${color}` }}
-                />
-                {b.label}
-              </button>
-            );
-          })}
-          {selected != null && (
-            <button
-              type="button"
-              onClick={() => setSelected(null)}
-              className="text-[10px] text-sky-600 hover:underline dark:text-sky-400"
-            >
-              all
-            </button>
-          )}
-        </div>
-      )}
+      <BotSubsetLegend bots={botsWithData} subset={subset} botColor={botColor} />
 
       {noneSelected ? (
         <ChartEmpty label="Select at least one bot" />
@@ -396,6 +450,399 @@ function DensityTrendChart({
           formatY={densAxis}
         />
       )}
+    </div>
+  );
+}
+
+// ── ML severity / category charts (CORE, free tier, deterministic — no LLM) ────────────────────
+// What the severity model made of everything these bots WROTE, over the same scope + window as the
+// rest of the tab. Five charts: our severity mix per bot, the bot's OWN declared badge beside it,
+// severity over time, and — folded away — the same two questions asked of categories.
+//
+// Every one of them is gated on `mlSeverity` from /api/me: with no severity-api configured there
+// are no labels at all, and the server omits the whole block rather than shipping empty rows.
+//
+// ⚠ THE VENDOR BADGE IS SHOWN, NEVER BELIEVED. It is the least accurate number on the tab (0.474
+// exact vs our 0.700 on the adjudicated gold set) and nothing may derive from it — it is here
+// precisely so a reader can see where the two disagree.
+
+// One bot's ML fold joined to its identity from the `bots` rows (the `key` is the join).
+interface MlBotView {
+  key: string;
+  label: string;
+  login: string | null;
+  kind: BotBehaviourBotStat['kind'];
+  ml: BotBehaviourMlBot;
+}
+
+// nit(1) … critical(4) — the fixed ordinal axis the "severity over time" line is drawn on. A
+// fractional value is a weekly MEAN, so it gets a number rather than a class name it isn't.
+const SEV_ORD_LABEL: Record<number, string> = { 1: 'Nit', 2: 'Minor', 3: 'Major', 4: 'Critical' };
+const sevOrdAxis = (n: number): string => SEV_ORD_LABEL[n] ?? n.toFixed(1);
+
+// Charts 1, 2 and 4: one stacked bar per bot. Bars are coloured by the SEVERITY (or category)
+// stacked inside them, not by the bot — so a bot's own colour deliberately does not appear here;
+// it identifies the LINES on the two trend charts, where the series is the bot itself.
+//
+// ⚠ THE DEFAULT IS SHARE, NOT COUNT, and it has to be: these bots' volumes differ by three orders
+// of magnitude in real data (927 findings against 1), so a count-stacked "mix" draws one tall bar
+// and a row of invisible slivers — and comparing OUR mix to the VENDOR'S is impossible at two
+// different denominators, which is the entire point of the pair. Counts stay one click away, and
+// the caveat lines under each chart state the totals either way.
+type MixMode = 'share' | 'count';
+const mixAxis = (mode: MixMode) => (n: number) => (mode === 'share' ? `${Math.round(n)}%` : fmtNum(n));
+
+// Counts → the values a stack should draw: raw, or each BAR normalised to its own total.
+//
+// `counts[series][bar]`, and the whole matrix at once rather than a series at a time, because a
+// column has to sum to EXACTLY 100: BarChart's axis is `niceMax(tallest stack)`, and four shares
+// summing to 100.00000000000001 in float pushes niceMax from 100 straight to 200 — every bar then
+// draws at half height under a "200%" axis. The last non-zero series in each column absorbs the
+// rounding residue, which is invisible (sub-1e-13) and makes the overflow impossible.
+function mixValues(counts: number[][], mode: MixMode): number[][] {
+  if (mode === 'count') return counts;
+  const bars = counts[0]?.length ?? 0;
+  const out = counts.map((row) => row.slice());
+  for (let i = 0; i < bars; i++) {
+    const total = counts.reduce((n, row) => n + (row[i] ?? 0), 0);
+    let last = -1;
+    for (let s = 0; s < counts.length; s++) if ((counts[s]![i] ?? 0) > 0) last = s;
+    if (total <= 0 || last < 0) {
+      for (const row of out) row[i] = 0;
+      continue;
+    }
+    let acc = 0;
+    for (let s = 0; s < counts.length; s++) {
+      if (s === last) {
+        out[s]![i] = 100 - acc;
+        continue;
+      }
+      const share = ((counts[s]![i] ?? 0) / total) * 100;
+      out[s]![i] = share;
+      acc += share;
+    }
+  }
+  return out;
+}
+
+function StackedByBotChart({
+  rows,
+  series,
+  mode,
+  height = 160,
+}: {
+  rows: { label: string }[];
+  series: Series[];
+  mode: MixMode;
+  height?: number;
+}): JSX.Element {
+  return (
+    <BarChart
+      labels={rows.map((r) => r.label)}
+      series={series}
+      mode="stacked"
+      height={height}
+      rotateLabels
+      formatY={mixAxis(mode)}
+    />
+  );
+}
+
+// The count | % switch above the stacked bars — one control for all three of them, so "how are
+// these bars measured" is answered once for the tab rather than per card.
+function MixModeToggle({
+  mode,
+  setMode,
+}: {
+  mode: MixMode;
+  setMode: (m: MixMode) => void;
+}): JSX.Element {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] text-gray-400">Bars</span>
+      <div className="inline-flex overflow-hidden rounded border border-gray-300 text-[10px] dark:border-gray-700">
+        {(
+          [
+            ['share', 'share of each bot'],
+            ['count', 'counts'],
+          ] as const
+        ).map(([k, lbl]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setMode(k)}
+            className={`px-2 py-0.5 font-medium ${
+              mode === k
+                ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
+                : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+            }`}
+          >
+            {lbl}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function severitySeries(rows: { counts: MlSeverityCounts }[], mode: MixMode): Series[] {
+  const values = mixValues(
+    SEVERITY_STACK_ORDER.map((s) => rows.map((r) => r.counts[s])),
+    mode,
+  );
+  return SEVERITY_STACK_ORDER.map((s, i) => ({
+    key: s,
+    label: ML_SEVERITY_META[s].label,
+    color: ML_SEVERITY_META[s].color,
+    values: values[i]!,
+  }));
+}
+
+// Chart 3 — weekly MEAN severity, one line per bot: "is this bot's bar rising or falling?".
+// The mean is plotted on the 1–4 ordinal with the class names as the axis (an explicit yDomain;
+// the default scale would tick at 0 and 5, two values a severity cannot take), and the week's
+// actual counts ride along in the hover note so a mean drawn from three findings can be told
+// apart from one drawn from ninety.
+function MlSeverityTrendChart({
+  views,
+  subset,
+  botColor,
+}: {
+  views: MlBotView[];
+  subset: BotSubset;
+  botColor: BotColorFn;
+}): JSX.Element {
+  const labels = useMemo(() => mlWeekLabels(views.map((v) => v.ml)), [views]);
+  const series = useMemo(() => {
+    const out: Series[] = [];
+    for (const v of views) {
+      if (!subset.isOn(v.key)) continue;
+      const values = meanSeverityValues(v.ml, labels);
+      if (values.every((x) => x == null)) continue;
+      const byWeek = new Map(v.ml.weekly.map((p) => [p.weekStart, p.bySeverity]));
+      out.push({
+        key: v.key,
+        label: v.label,
+        color: botColor({ login: v.login, kind: v.kind }),
+        values,
+        pointNotes: labels.map((w) => {
+          const counts = byWeek.get(w);
+          return counts ? severityBreakdownNote(counts) : null;
+        }),
+      });
+    }
+    return out;
+  }, [views, subset, labels, botColor]);
+
+  const noneSelected = views.length > 0 && views.every((v) => !subset.isOn(v.key));
+  return (
+    <div className="space-y-2">
+      <BotSubsetLegend bots={views} subset={subset} botColor={botColor} />
+      {noneSelected ? (
+        <ChartEmpty label="Select at least one bot" />
+      ) : labels.length < 2 || series.length === 0 ? (
+        <ChartEmpty label="Not enough weekly history yet" />
+      ) : (
+        <LineChart
+          labels={labels}
+          series={series}
+          height={160}
+          curved
+          hideLegend
+          noteTone="muted"
+          formatY={sevOrdAxis}
+          yDomain={{ min: 1, max: 4, ticks: [1, 2, 3, 4] }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Chart 5 (folded) — the same weeks, one line per CATEGORY, summed over the bots selected on
+// chart 3. Zero is a real value here ("nobody raised a security finding that week"), unlike the
+// severity mean above, so these lines touch the floor instead of breaking.
+function MlCategoryTrendChart({
+  views,
+  subset,
+}: {
+  views: MlBotView[];
+  subset: BotSubset;
+}): JSX.Element {
+  const labels = useMemo(() => mlWeekLabels(views.map((v) => v.ml)), [views]);
+  const series = useMemo(() => {
+    const shown = views.filter((v) => subset.isOn(v.key));
+    return categoryWeeklySeries(
+      shown.map((v) => v.ml),
+      labels,
+    ).map<Series>((c) => ({
+      key: c.category,
+      label: ML_CATEGORY_LABEL[c.category],
+      color: ML_CATEGORY_COLOR[c.category],
+      values: c.values,
+    }));
+  }, [views, subset, labels]);
+
+  if (labels.length < 2 || series.length === 0)
+    return <ChartEmpty label="No categorised bot comments in this span" />;
+  // Log scale, like the density trend: real corpora run one dominant category in the hundreds
+  // against a handful in single digits, and on a linear axis every line but one is pinned flat to
+  // the floor. Zeros sit on the bottom decade (LineChart's own rule), so a quiet week reads as
+  // "nothing much" rather than disappearing.
+  return <LineChart labels={labels} series={series} height={160} curved logY centerTip />;
+}
+
+function MlCharts({
+  bots,
+  ml,
+  botColor,
+  windowLabel,
+}: {
+  bots: BotBehaviourBotStat[];
+  ml: BotBehaviourMl;
+  botColor: BotColorFn;
+  windowLabel: string;
+}): JSX.Element | null {
+  const views = useMemo<MlBotView[]>(() => {
+    const byKey = new Map(bots.map((b) => [b.key, b]));
+    return ml.perBot.flatMap((m) => {
+      const b = byKey.get(m.key);
+      return b ? [{ key: m.key, label: b.label, login: b.login, kind: b.kind, ml: m }] : [];
+    });
+  }, [bots, ml]);
+  const allKeys = useMemo(() => views.map((v) => v.key), [views]);
+  // ONE subset across the two trend charts, so isolating a bot on "Severity over time" carries
+  // into the category trend below it and the two read as a single investigation.
+  const subset = useBotSubset(allKeys);
+  const [showMore, setShowMore] = useState(false);
+  const [mixMode, setMixMode] = useState<MixMode>('share');
+
+  const model = useMemo(() => {
+    const mixRows = views
+      .filter((v) => severityTotal(v.ml.bySeverity) > 0)
+      .map((v) => ({ label: v.label, counts: v.ml.bySeverity }));
+    const vendorRows = views
+      .filter((v) => v.ml.vendorDeclared > 0)
+      .map((v) => ({ label: v.label, counts: v.ml.byVendorSeverity }));
+    const catRows = views.filter((v) => v.ml.byCategory.length > 0);
+    const categories = categoriesPresent(catRows.map((v) => v.ml));
+    const catValues = mixValues(
+      categories.map((c) =>
+        catRows.map((v) => v.ml.byCategory.find((x) => x.category === c)?.count ?? 0),
+      ),
+      mixMode,
+    );
+    const catSeries: Series[] = categories.map((c, i) => ({
+      key: c,
+      label: ML_CATEGORY_LABEL[c],
+      color: ML_CATEGORY_COLOR[c],
+      values: catValues[i]!,
+    }));
+    return {
+      mixRows,
+      vendorRows,
+      catRows,
+      catSeries,
+      findings: views.reduce((n, v) => n + v.ml.findings, 0),
+      vendorDeclared: views.reduce((n, v) => n + v.ml.vendorDeclared, 0),
+    };
+  }, [views, mixMode]);
+
+  if (views.length === 0) return null;
+  const { mixRows, vendorRows, catRows, catSeries, findings, vendorDeclared } = model;
+  const windowNote = `model-scored · findings only · ${windowLabel}`;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {ml.truncated ? (
+          <span className="text-[10px] text-amber-600 dark:text-amber-400">
+            ⚠ the label scan hit its cap — these counts are the most recent sample, not the total.
+          </span>
+        ) : (
+          <span />
+        )}
+        <MixModeToggle mode={mixMode} setMode={setMixMode} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <ChartCard title="Severity mix per bot (Limn)" note={windowNote}>
+          {mixRows.length === 0 ? (
+            <ChartEmpty label="No scored findings in this window" />
+          ) : (
+            <StackedByBotChart
+              rows={mixRows}
+              series={severitySeries(mixRows, mixMode)}
+              mode={mixMode}
+            />
+          )}
+          <div className="mt-1 text-[10px] text-gray-400">
+            Our model’s reading of what each bot raised. Summaries and acknowledgments are labelled
+            work but not findings, so neither is counted here.
+          </div>
+        </ChartCard>
+
+        <ChartCard title="Severity mix per bot (bot’s own badge)" note={`self-declared · ${windowLabel}`}>
+          {vendorRows.length === 0 ? (
+            <ChartEmpty label="No bot declared a severity in this window" />
+          ) : (
+            <StackedByBotChart
+              rows={vendorRows}
+              series={severitySeries(vendorRows, mixMode)}
+              mode={mixMode}
+            />
+          )}
+          <div className="mt-1 text-[10px] text-gray-400">
+            What each bot <span className="font-medium">claims</span> about its own findings —
+            shown beside ours because the disagreement is the product, never used to correct or
+            replace our label. Only {fmtNum(vendorDeclared)} of {fmtNum(findings)} findings carry a
+            badge at all, so this mix is a sparser sample than the one on the left.
+          </div>
+        </ChartCard>
+      </div>
+
+      <ChartCard
+        title="Severity over time"
+        note="weekly mean severity · findings only · hover for the week’s counts"
+      >
+        <MlSeverityTrendChart views={views} subset={subset} botColor={botColor} />
+      </ChartCard>
+
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowMore((s) => !s)}
+          className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        >
+          {showMore ? '▾' : '▸'} More charts — categories
+        </button>
+        {showMore && (
+          <div className="mt-3 space-y-3">
+            <ChartCard title="Categories per vendor" note={`what each bot talks about · ${windowLabel}`}>
+              {catRows.length === 0 || catSeries.length === 0 ? (
+                <ChartEmpty label="No categorised bot comments in this window" />
+              ) : (
+                <StackedByBotChart
+                  rows={catRows.map((v) => ({ label: v.label }))}
+                  series={catSeries}
+                  mode={mixMode}
+                />
+              )}
+              <div className="mt-1 text-[10px] text-gray-400">
+                Multi-label: one comment can count under several categories, so a bot’s category
+                total exceeds its finding count — each bar is a share of that bot’s own mentions,
+                not of its findings. Walkthrough summaries are excluded (their categories are a
+                read of the template, not of a finding); acknowledgments appear as “Praise”.
+              </div>
+            </ChartCard>
+            <ChartCard
+              title="Category activity over time"
+              note="weekly · log scale · over the bots selected above"
+            >
+              <MlCategoryTrendChart views={views} subset={subset} />
+            </ChartCard>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -808,8 +1255,10 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
   const workspaceId = useFilters((s) => s.workspaceId);
   const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
   const botColor = useBotColors(workspaceId);
+  const mlEnabled = useMlSeverityEnabled();
   const { data, isLoading, isError } = useBotBehaviour(workspaceId, window, true, repoScope);
   const bots = data?.bots ?? [];
+  const windowLabel = WINDOWS.find((w) => w.key === window)?.label ?? '';
 
   return (
     <div className="space-y-3">
@@ -858,6 +1307,11 @@ export function BotBehaviourPanel({ repoId }: { repoId?: number } = {}): JSX.Ele
           >
             <DensityTrendChart bots={bots} botColor={botColor} />
           </ChartCard>
+          {/* ML severity/category — dark entirely when this deployment has no severity-api (the
+              `mlSeverity` capability), which is also when the server ships no `ml` block. */}
+          {mlEnabled && data?.ml != null && (
+            <MlCharts bots={bots} ml={data.ml} botColor={botColor} windowLabel={windowLabel} />
+          )}
           {data?.overlap != null && (
             <BotOverlapSection overlap={data.overlap} color={botColor({ login: null, kind: 'in_house' })} />
           )}
