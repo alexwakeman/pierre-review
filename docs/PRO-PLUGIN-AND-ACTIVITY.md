@@ -216,7 +216,8 @@ kept in lockstep by `bot-detection.test.ts`. Verified logins (2026-07); coding a
 `copilot-swe-agent`) + dependency bots (`dependabot`/`renovate`/`snyk`) are deliberately EXCLUDED —
 still `isBot`, just not *review* bots. **Surfaces:** a PrDetail "Bots" chip ("CodeRabbit · 12 · 3
 unresolved", `ChecksTab`) that filters the Threads tab to that vendor (`store.threadBotFilter`); a
-feed **bot lens** (all/hide/only, `store.feedBotLens`) + per-row vendor tag (`FeedView`); a **core
+feed **bot lens** (hide — the DEFAULT — /all/only, `store.feedBotLens`; 'hide' is server-side via
+the feed route's `excludeBots`, union bot definition) + per-row vendor tag (`FeedView`); a **core
 per-repo acted-on stat** (`ActivityRepoStats.botThreads/botThreadsActedOn` computed in `getActivity`
 → `RepoStats`, free); a **Pro-gated deterministic `bot_signal` Insights card** (per-vendor volume /
 acted-on % / oldest-untouched backlog, computed in core `getWorkspaceInsights`, rides `/api/pro/insights`
@@ -520,7 +521,10 @@ uses `countNewMyTurnFeedItems` for `me.newFeedItems`. Every tier gets the My Tur
 cards** with a "My Turn" badge + a `feedMyTurnOnly` "My Turn only" toggle; they're
 uncapped, plain activity is capped (`FEED_EVENT_CAP`). Cards render the **full comment/review body
 as markdown**, the affected threads inline, + a merge/review credit line
-(`mergedById`/`reviewers`). The **`excludeBots`** filter drops bot-authored activity. **PAGINATED**
+(`mergedById`/`reviewers`). The **`excludeBots`** filter drops bot-authored activity BEFORE the
+page cap, using the UNION bot definition (`users.isBot` ∪ the workspace's automated set, manual
+"human" wins) — it is what the lens's default 'hide' sends; a bot contributor's own activity tab
+derives an effective 'all' so it isn't empty (derive-for-render, never written back). **PAGINATED**
 — `useConsolidatedFeed` is a `useInfiniteQuery` (page 0 loads `FEED_PAGE_SIZE`=50, "Load more" by
 `offset`; `total` tells the client when to stop). **No "seen"/Done concept.**
 **Click → pr-DETAIL tab:** clicking ANY feed card → `usePinnedTabs.openPrDetailTab(meta,

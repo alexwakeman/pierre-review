@@ -1064,6 +1064,11 @@ export async function getUserStats(
 
 export interface TimelineFilters {
   accountId: number;
+  // The REQUEST's resolved workspace (the route already runs resolveWorkspaceScope for
+  // `repoIds`) — the grain the excludeBots union reads its automated-reviewer verdict at.
+  // Required so no call site can quietly fall back to Default while the rows on screen come
+  // from another workspace's repos.
+  workspaceId: number;
   from: Date;
   to: Date;
   repoIds: number[] | null;
@@ -1332,6 +1337,7 @@ export async function getTimeline(
 ): Promise<TimelineResponse> {
   const {
     accountId,
+    workspaceId,
     from,
     to,
     repoIds,
@@ -1388,13 +1394,18 @@ export async function getTimeline(
       );
     }
   }
-  // Resolve the bot set once (used by both the PR and events branches below). The
-  // per-repo allow-list subtracts the "important" bots so their activity stays visible
-  // even under excludeBots — every downstream predicate keys off this trimmed set. Skipped
-  // entirely when pr-scoped (no bot filtering there).
+  // Resolve the bot set once (used by both the PR and events branches below) — the UNION
+  // definition (global users.isBot ∪ the workspace's automated-reviewer verdict, manualHuman
+  // removed from both halves; see hiddenBotUserIds), so a workspace-classified in-house bot is
+  // hidden too and a workspace "not a bot" override un-hides. The per-repo allow-list subtracts
+  // the "important" bots so their activity stays visible even under excludeBots — every
+  // downstream predicate keys off this trimmed set. Skipped entirely when pr-scoped (no bot
+  // filtering there).
   const allowBots = new Set(allowBotIds ?? []);
   const bots =
-    !prScoped && excludeBots ? (await botUserIds()).filter((id) => !allowBots.has(id)) : [];
+    !prScoped && excludeBots
+      ? (await hiddenBotUserIds(accountId, workspaceId)).filter((id) => !allowBots.has(id))
+      : [];
   if (!prScoped && excludeBots && bots.length > 0) {
     prConds.push(
       or(
@@ -2681,8 +2692,11 @@ export interface ConsolidatedFeedFilters {
   // items. Applied after coalesce + my-turn enrich so `total` and the page reflect the
   // isolated set. Drives the Feed "open PRs" panel's per-PR filter.
   prId?: number | null;
-  // Mirror the timeline's "exclude bots" toggle: drop feed activity + My Turn items whose
-  // actor is a known bot (users.isBot). Claude-review items are never dropped (no member
+  // Mirror the timeline's "exclude bots" filter: drop feed activity + My Turn items whose
+  // actor is a bot under the UNION definition (global users.isBot ∪ this workspace's
+  // automated-reviewer verdict — see hiddenBotUserIds). Applied BEFORE the page cap, so a
+  // bot-heavy window fills with human rows rather than paging mostly-hidden ones (this is what
+  // the SPA's feed lens 'hide' sends). Claude-review items are never dropped (no member
   // author). Absent/false → bots shown.
   excludeBots?: boolean;
   // Bots to KEEP visible even when excludeBots is on (the per-repo allow-list override).
@@ -4411,12 +4425,13 @@ export async function getWorkspaceInsights(
 
 // Facet counts over the post-cap `ordered` stream (see ConsolidatedFeedCounts). Pure, so it's
 // unit-testable and shares the exact set the page is sliced from — the badges reconcile with
-// the loadable feed by construction. `globalBotIds` is the raw users.isBot id set (NOT the
-// allow-list-subtracted excludeBots set), matching the SPA's isBotActor. `byBotActor` is only
-// built in the bot-only feed; `byThreadState` groups items carrying a derivedState.
+// the loadable feed by construction. `botIds` is the raw UNION bot id set (users.isBot ∪ the
+// workspace's automated reviewers, manualHuman removed — NOT the allow-list-subtracted
+// excludeBots set), matching the SPA's isBotActor. `byBotActor` is only built in the bot-only
+// feed; `byThreadState` groups items carrying a derivedState.
 export function computeFeedCounts(
   ordered: ConsolidatedFeedItem[],
-  globalBotIds: ReadonlySet<number>,
+  botIds: ReadonlySet<number>,
   botsOnly: boolean,
 ): ConsolidatedFeedCounts {
   const counts: ConsolidatedFeedCounts = {
@@ -4444,7 +4459,7 @@ export function computeFeedCounts(
       it.kind === 'review_submitted'
     )
       counts.prEvents += 1;
-    if (it.actorId != null && globalBotIds.has(it.actorId)) counts.bots += 1;
+    if (it.actorId != null && botIds.has(it.actorId)) counts.bots += 1;
     if (botsOnly && it.actorId != null)
       counts.byBotActor[it.actorId] = (counts.byBotActor[it.actorId] ?? 0) + 1;
     if (it.derivedState != null)
@@ -4508,16 +4523,18 @@ export async function getConsolidatedFeed(
   }
   if (effectiveRepoIds.length === 0) return emptyResponse();
   const allowBots = new Set(allowBotIds ?? []);
-  // The global users.isBot id set — ONE lookup, reused for BOTH the excludeBots filter (below,
-  // minus the per-repo allow-list) AND the `bots` facet count (raw isBot, matching the SPA's
-  // isBotActor). getFeed doesn't filter bots, so the notBot() below applies excludeBots here;
-  // the commit helper filters in its own SQL.
-  const globalBotIds = new Set(await botUserIds());
+  // The UNION bot id set (global users.isBot ∪ this workspace's automated-reviewer verdict,
+  // manualHuman removed — see hiddenBotUserIds) — ONE lookup, reused for BOTH the excludeBots
+  // filter (below, minus the per-repo allow-list) AND the `bots` facet count (the raw union,
+  // matching the SPA's isBotActor, which reads the same two halves client-side). getFeed
+  // doesn't filter bots, so the notBot() below applies excludeBots here; the commit helper
+  // filters in its own SQL.
+  const unionBotIds = new Set(await hiddenBotUserIds(accountId, workspaceId));
   // excludeBots is meaningless in the bot-only feed (it would drop everything) — force it off.
   // The per-repo allow-list subtracts the "important" bots so their activity stays visible.
   const botIds =
     !botsOnly && excludeBots
-      ? new Set([...globalBotIds].filter((id) => !allowBots.has(id)))
+      ? new Set([...unionBotIds].filter((id) => !allowBots.has(id)))
       : new Set<number>();
   const notBot = (id: number | null): boolean =>
     !excludeBots || id == null || !botIds.has(id);
@@ -4548,7 +4565,7 @@ export async function getConsolidatedFeed(
       users: [],
       total: 0,
       uncappedTotal: 0,
-      counts: computeFeedCounts([], globalBotIds, botsOnly),
+      counts: computeFeedCounts([], unionBotIds, botsOnly),
       generatedAt: new Date().toISOString(),
     };
   }
@@ -4704,8 +4721,8 @@ export async function getConsolidatedFeed(
   // the page is enriched + has its users backfilled, so hidden items cost nothing.
   const total = ordered.length;
   // Facet counts over the WHOLE post-cap stream (not just the page) so the SPA's pill badges
-  // reflect every matching item. Uses the raw global bot set, so `bots` matches isBotActor.
-  const counts = computeFeedCounts(ordered, globalBotIds, botsOnly);
+  // reflect every matching item. Uses the raw union bot set, so `bots` matches isBotActor.
+  const counts = computeFeedCounts(ordered, unionBotIds, botsOnly);
   const start = Math.max(0, offset ?? 0);
   const page =
     limit != null ? ordered.slice(start, start + Math.max(0, limit)) : ordered.slice(start);
@@ -7713,6 +7730,34 @@ function narrowAutomatedIds(
     if (r) return r.role !== 'quality_check';
     return !qcDefault.has(id);
   });
+}
+
+// The UNION bot set that "hide bots" hides (the Timeline's excludeBots + the Feed lens): the
+// global `users.isBot` flag ∪ this WORKSPACE's automated-reviewer verdict (vendor-login seed +
+// `workspace_reviewers` rows flagged automated), with the workspace's manual "this is a human"
+// winning BOTH directions — it removes the actor from the set even where the global table flags
+// the login a Bot. Either half alone lies: `isBot` misses workspace-classified in-house bots
+// (deepsource-io etc.), and the workspace set misses dependabot-style non-review bots the global
+// heuristic catches. Per-workspace on purpose — a judgement must never leak across workspaces,
+// so the caller passes the REQUEST's resolved scope, never a default.
+async function hiddenBotUserIds(
+  accountId: number,
+  workspaceId: number,
+): Promise<number[]> {
+  const [globalIds, vendorIds, resolved] = await Promise.all([
+    botUserIds(),
+    reviewBotUserIds(),
+    resolveWorkspaceReviewers(accountId, workspaceId),
+  ]);
+  // Same verdict rule as narrowAutomatedIds (role 'all'), applied over BOTH halves of the
+  // union — a manualHuman row must also subtract a `users.isBot` id, which the automated
+  // helpers alone cannot express (they never see the global flag).
+  const set = new Set<number>([...globalIds, ...vendorIds]);
+  for (const [id, r] of resolved) {
+    if (r.automated) set.add(id);
+    else if (r.manualHuman) set.delete(id);
+  }
+  return [...set];
 }
 
 // Map every automated reviewer in ONE workspace → its AutomatedReviewerKind, for grouping

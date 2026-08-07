@@ -163,11 +163,12 @@ describe('resetAllFilters preserves the workspace', () => {
   });
 
   it('clears the filters but leaves the active workspace alone', () => {
-    useFilters.setState({ preset: '90d', excludeBots: true });
+    useFilters.setState({ preset: '90d', excludeBots: false });
     useFilters.getState().resetAllFilters();
     const s = useFilters.getState();
     expect(s.preset).toBe('14d');
-    expect(s.excludeBots).toBe(false);
+    // Bots are HIDDEN by default now — reset restores the exclusion, not the old shown state.
+    expect(s.excludeBots).toBe(true);
     expect(s.repoIds).toBeNull();
     // ⚠ THE ASSERTION. A workspace reset here is a silent context switch into Default, triggered
     // by a control whose label promises only to clear filters.

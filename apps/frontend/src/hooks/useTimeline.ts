@@ -84,8 +84,10 @@ export function useTimeline(override?: {
 // PR/event set for the PR-title search index AND the Members dropdown's per-repo
 // membership derivation. Always ignores the member filter (a global "jump to any PR"
 // tool) AND always includes bots (so the Bots sections can list every bot even while the
-// board hides them). Because it always emits bot activity, its query string differs from
-// useTimeline whenever excludeBots is on — one extra fetch in that case; otherwise shared.
+// board hides them). Because it always emits bot activity — and the board now hides bots
+// by DEFAULT — its query string differs from useTimeline's on every fresh load: one
+// permanent extra lean fetch, accepted so the bot listing stays complete. The strings
+// still share a cache entry while the user is showing bots.
 export function useSearchTimeline() {
   const search = useFilters((s) => buildTimelineSearch(s, false, false, false, false, null, false));
   const workspaceId = useFilters((s) => s.workspaceId);

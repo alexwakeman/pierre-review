@@ -21,7 +21,7 @@ import { useBotColors } from '../../hooks/useBotColors.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
-import { useFilters } from '../../store/filters.js';
+import { useFilters, type FeedBotLens } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
   botVendorMeta,
@@ -36,6 +36,7 @@ import {
   userLabel,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
+import { CommentAnnotations, ReviewCheckButton } from '../CommentAnnotations.js';
 import { MagnifierIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
@@ -245,6 +246,30 @@ export function FeedView({
     }
     return m;
   }, [detectedReviewers]);
+  // EVERY stored reviewer row for the workspace (not just the vendor-identity subset above) —
+  // the client half of the UNION bot definition. `automated` adds an actor to the bot set; a
+  // manual "this is a human" removes it even where the global users.isBot flag disagrees.
+  const reviewerByUserId = useMemo(() => {
+    const m = new Map<number, WorkspaceReviewer>();
+    for (const r of detectedReviewers?.reviewers ?? []) m.set(r.userId, r);
+    return m;
+  }, [detectedReviewers]);
+  // The union verdict for ONE actor — mirrors the server's hiddenBotUserIds so the lens, the
+  // pill counts and the server-side exclusion agree on who is a bot. `user` may come from the
+  // feed response OR the account roster, whichever the caller holds; the workspace's stored
+  // row wins in BOTH directions.
+  const isUnionBot = useCallback(
+    (userId: number, user: User | undefined): boolean => {
+      const r = reviewerByUserId.get(userId);
+      if (r != null) {
+        if (r.automated) return true;
+        // A manual "this is a human" beats the global isBot flag.
+        if (r.isManualOverride) return false;
+      }
+      return user?.isBot ?? false;
+    },
+    [reviewerByUserId],
+  );
   const overridePendingUserId = judgement.isPending
     ? judgement.variables?.userId ?? null
     : null;
@@ -321,9 +346,29 @@ export function FeedView({
         : 14
     : null;
 
+  // Per-contributor exemption: a BOT contributor's own activity tab must not be emptied by
+  // the hidden-by-default lens, so when EVERY viewed actor is a bot under the union
+  // definition the EFFECTIVE lens is 'all'. Derived for the render only — never written back
+  // to the store (the standing sub-tab landmine: a corrective set() would permanently forget
+  // the user's choice). The check reads the account roster + the workspace reviewer rows, NOT
+  // the feed response — the lens now drives the request itself (excludeBots below), so a
+  // response-derived check would ask an already-emptied feed whether its subject is a bot.
+  const { data: roster } = useUsers();
+  const rosterById = useMemo(() => indexUsers(roster ?? []), [roster]);
+  const lensInert = useMemo(
+    () =>
+      userIds != null &&
+      userIds.length > 0 &&
+      userIds.every((id) => isUnionBot(id, rosterById.get(id))),
+    [userIds, isUnionBot, rosterById],
+  );
+  const effectiveBotLens: FeedBotLens = lensInert ? 'all' : feedBotLens;
+
   // Members + the header exclude-bots toggle/allow-list are TIMELINE-only filters — the feed
-  // never sends them (userIds → null, excludeBots/allowedBotIds omitted). Bot filtering here
-  // is Activity-native only: the feedBotLens pills (client-side) and botsMode (server-side).
+  // never sends them (userIds → null, allowedBotIds omitted). Bot filtering here is
+  // Activity-native: the feedBotLens pills — whose 'hide' now rides the server's excludeBots
+  // param (union bot definition, excluded BEFORE the page cap so a bot-heavy window fills
+  // with human rows) while 'only' stays a client-side view — and botsMode (server-side).
   // useConsolidatedFeed and useFeedHasNew below MUST share identical scope inputs, or the
   // "New activity" banner false-fires against a differently-scoped head.
   const {
@@ -345,6 +390,10 @@ export function FeedView({
       repoIds: effectiveRepoIds,
       userIds,
       prId: isolatedPrId,
+      // Lens 'hide' is SERVER-side: bots (union definition) excluded before the page cap.
+      // 'only'/'all' fetch everything; 'only' narrows client-side. Off in botsMode (the
+      // server forces it off under botsOnly anyway).
+      excludeBots: !botsMode && effectiveBotLens === 'hide',
       // Bot pane: the backend filters to automated reviewers IN SQL (before the cap), so the
       // feed spans the full window of bot activity instead of a bot-slice of a capped page.
       botsOnly: botsMode,
@@ -365,6 +414,7 @@ export function FeedView({
     repoIds: effectiveRepoIds,
     userIds,
     prId: isolatedPrId,
+    excludeBots: !botsMode && effectiveBotLens === 'hide',
     botsOnly: botsMode,
     botWindowDays,
     includeAllCommits: !botsMode && feedShowCommits,
@@ -381,12 +431,15 @@ export function FeedView({
   };
 
   const usersById = useMemo(() => indexUsers(users), [users]);
-  // Bot lens: an actor is a "bot" for the lens if it's ANY bot (dependabot/CI/review bots),
-  // so "Hide bots" gives the clean human-only view; the per-row vendor TAG is review-bot-only.
+  // Bot lens: an actor is a "bot" for the lens if it's ANY bot under the UNION definition —
+  // the global users.isBot flag (dependabot/CI) ∪ the workspace's automated-reviewer verdict
+  // (classified in-house bots like deepsource), with a manual "human" override un-botting in
+  // both directions — so "Hide bots" gives the clean human-only view and the pills/counts/lens
+  // agree with the server's exclusion. The per-row vendor TAG is review-bot-only.
   const isBotActor = useCallback(
     (i: ConsolidatedFeedItem): boolean =>
-      i.actorId != null && (usersById.get(i.actorId)?.isBot ?? false),
-    [usersById],
+      i.actorId != null && isUnionBot(i.actorId, usersById.get(i.actorId)),
+    [isUnionBot, usersById],
   );
   // Pill badge counts come from the SERVER facets (whole loadable stream), falling back to the
   // loaded-page derivation only for a stale IndexedDB response predating `counts`.
@@ -551,10 +604,13 @@ export function FeedView({
         ? items.filter((i) => i.kind === 'claude_review')
         : items;
     const byCat = feedCatComments || feedCatPrEvents ? base.filter(catMatch) : base;
+    // 'hide' is applied server-side too (excludeBots on the request); the client pass here
+    // keeps placeholder pages from the previous key (which still hold bots) consistent while
+    // the re-keyed fetch is in flight, and covers any client/server divergence.
     const byLens =
-      feedBotLens === 'hide'
+      effectiveBotLens === 'hide'
         ? byCat.filter((i) => !isBotActor(i))
-        : feedBotLens === 'only'
+        : effectiveBotLens === 'only'
           ? byCat.filter(isBotActor)
           : byCat;
     // Same rule as botsMode: any active state pill hides items without a derivedState
@@ -562,7 +618,7 @@ export function FeedView({
     return botStateFilter.size > 0
       ? byLens.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState))
       : byLens;
-  }, [botsMode, botStateFilter, botVendorFilter, items, feedMyTurnOnly, feedClaudeOnly, feedBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor]);
+  }, [botsMode, botStateFilter, botVendorFilter, items, feedMyTurnOnly, feedClaudeOnly, effectiveBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor]);
 
   // Honest count line: loaded-of-TOTAL (the server's post-cap stream length), never
   // visible-of-loaded — the initial page must not read "50 of 50" when the stream holds
@@ -1078,8 +1134,13 @@ export function FeedView({
           <span aria-hidden="true">◆</span> Commits
           {commitsCount > 0 && <span className="tabular-nums opacity-70">{commitsCount}</span>}
         </button>
-        {/* Bot lens — Pierre as the calm layer above your review bot. Cycles all → hide → only. */}
-        {botCount > 0 && (
+        {/* Bot lens — Pierre as the calm layer above your review bot. Cycles all → hide → only.
+            MUST also render whenever the lens is non-'all': under the server-side 'hide' the
+            counts facet is computed over the already-excluded stream, so botCount reads 0
+            exactly when hiding is working — and this pill is the only way back to 'all'.
+            Hidden when the lens is inert (a bot contributor's own tab renders at an effective
+            'all'), where cycling the store lens would visibly do nothing. */}
+        {!lensInert && (botCount > 0 || feedBotLens !== 'all') && (
           <button
             type="button"
             onClick={cycleFeedBotLens}
@@ -1153,9 +1214,9 @@ export function FeedView({
             ? 'Nothing matches these state filters.'
             : feedClaudeOnly
             ? 'No Claude Reviews in this window.'
-            : feedBotLens === 'only'
+            : effectiveBotLens === 'only'
               ? 'No bot activity in this window.'
-              : feedBotLens === 'hide'
+              : effectiveBotLens === 'hide'
                 ? 'Only bot activity here — nothing from humans in this window.'
                 : 'Nothing needs your attention right now.'}
         </div>
@@ -1843,20 +1904,32 @@ function FeedRowImpl({
         )}
 
         {/* A PR (issue-level) comment card can be replied to — a new comment
-            prefilled with the original quoted + its author @mentioned. */}
+            prefilled with the original quoted + its author @mentioned — and (Pro, prSummary)
+            "Check review"-ed inline, same target as PrDetail's per-comment mount. Both AI
+            pieces read the ONE shared per-PR annotations index (no per-card requests), and
+            the outcome span next to the button MUST stay visible — it carries the one-run
+            429 message, without which a second click mid-run looks like it did nothing. */}
         {isPrCommentCard && item.prId != null && (
           <div className="mt-1.5">
             {!replyOpen ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSetReplyOpen(item.id, true);
-                }}
-                className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
-              >
-                Reply
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSetReplyOpen(item.id, true);
+                  }}
+                  className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+                >
+                  Reply
+                </button>
+                {item.commentId != null && (
+                  <ReviewCheckButton
+                    prId={item.prId}
+                    target={{ targetKind: 'pr_comment', targetId: item.commentId }}
+                  />
+                )}
+              </div>
             ) : (
               <div onClick={(e) => e.stopPropagation()}>
                 <PrCommentComposer
@@ -1865,6 +1938,18 @@ function FeedRowImpl({
                   autoFocus
                   onCancel={() => onSetReplyOpen(item.id, false)}
                   onDone={() => onSetReplyOpen(item.id, false)}
+                />
+              </div>
+            )}
+            {/* Stored judgements for this comment, under the body they judge (renders nothing
+                and requests nothing when the comment has none). The card is a clickable
+                region, so interacting with a panel must not open the tab. */}
+            {item.commentId != null && (
+              <div className="cursor-default" onClick={(e) => e.stopPropagation()}>
+                <CommentAnnotations
+                  prId={item.prId}
+                  targetKind="pr_comment"
+                  targetId={item.commentId}
                 />
               </div>
             )}

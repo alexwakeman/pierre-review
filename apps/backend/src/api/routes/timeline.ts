@@ -138,6 +138,9 @@ export async function timelineRoutes(app: FastifyInstance): Promise<void> {
     const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
     const filters: TimelineFilters = {
       accountId,
+      // The excludeBots union reads the automated-reviewer verdict at this grain — the same
+      // resolved scope the repo narrowing came from, never a second resolution.
+      workspaceId: scope.workspaceId,
       from: window.from,
       to: window.to,
       repoIds: scope.repoIds,

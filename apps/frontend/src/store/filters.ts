@@ -155,10 +155,12 @@ export interface FilterState {
   // Review items. Transient (like feedMyTurnOnly) — owned by the Activity lane, not a
   // persisted filter, not URL-synced. Mutually exclusive with feedMyTurnOnly.
   feedClaudeOnly: boolean;
-  // Activity "Feed" bot lens (Pierre as the layer above your review bot): 'all' (default),
-  // 'hide' (drop bot-authored rows — the anti-fatigue view), or 'only' (bot activity only).
-  // Client-side view over the loaded page, ORTHOGONAL to feedMyTurnOnly/feedClaudeOnly (they
-  // compose). Transient, URL-silent.
+  // Activity "Feed" bot lens (Pierre as the layer above your review bot): 'hide' (default —
+  // drop bot-authored rows, the anti-fatigue view), 'all', or 'only' (bot activity only).
+  // 'hide' is SERVER-side (useConsolidatedFeed sends excludeBots=true, so bots are excluded
+  // BEFORE the page cap and a bot-heavy window fills with human rows); 'only' stays a
+  // client-side view over the loaded page. ORTHOGONAL to feedMyTurnOnly/feedClaudeOnly (they
+  // compose). Transient, URL-silent — the hidden default reasserts every session, deliberately.
   feedBotLens: FeedBotLens;
   // Activity "Feed" event-CATEGORY pills — narrow the stream to comment activity and/or PR
   // events. Both false (default) = no category filter (everything shows). When either is true,
@@ -606,11 +608,15 @@ function freshFilterDefaults(): FilterDefaults {
     // diffs against this, so a fresh load stays clean (no repos= param).
     repoIds: null,
     userIds: null,
-    // Bots are SHOWN on a fresh load (default OFF); the user can hide them via the
-    // Members dropdown, and that non-default choice round-trips as bots=1 (see
-    // useUrlState). This is the baseline the URL serializer diffs against.
-    excludeBots: false,
-    // No bots allow-listed on a fresh load — round-trips as allowBots=… when non-empty.
+    // Bots are HIDDEN on a fresh load (default ON) — bot chatter is clutter for situational
+    // awareness, same reasoning as excludeStale below. The hidden set is the UNION definition
+    // server-side (users.isBot ∪ the workspace's automated-reviewer verdict, with a manual
+    // "this is a human" beating the global flag both ways). The user can show bots via the
+    // Members dropdown, and that non-default choice round-trips as bots=0 (see useUrlState).
+    // This is the baseline the URL serializer diffs against.
+    excludeBots: true,
+    // No bots allow-listed on a fresh load — round-trips as allowBots=… when non-empty. Now
+    // that excludeBots defaults on, this list bites for every user out of the box.
     allowedBotIds: [],
     // Stale open PRs (no commit/comment/review in the active range) are clutter for
     // situational awareness, so they're HIDDEN on a fresh load. This is the baseline
@@ -718,7 +724,9 @@ function freshDefaults(): FilterData {
     // Transient Activity "Feed" scope toggles (not persisted filters): fresh load = false.
     feedMyTurnOnly: false,
     feedClaudeOnly: false,
-    feedBotLens: 'all',
+    // Bots hidden by default (matches the Timeline's excludeBots default; same union
+    // definition server-side). Transient, so the calm view reasserts every session.
+    feedBotLens: 'hide',
     feedCatComments: false,
     feedCatPrEvents: false,
     feedShowCommits: false,
@@ -1208,10 +1216,11 @@ export function buildTimelineSearch(
     if (s.excludeBots && s.allowedBotIds.length > 0)
       params.set('allowBotIds', s.allowedBotIds.join(','));
   } else {
-    // The search / member-derivation index always wants bots visible. Emit an explicit
-    // `false` (rather than omitting the param) so its query string matches the board's in
-    // the common excludeBots-OFF case → React Query serves both from one cache entry; the
-    // strings only diverge (a second lean fetch) when the board is actually hiding bots.
+    // The search / member-derivation index always wants bots visible (the Members dropdown's
+    // Bots sections must list every bot even while the board hides them). Explicit `false`
+    // still matches the board's string whenever the user is SHOWING bots — one shared cache
+    // entry then — but with hidden-by-default the two strings diverge on a fresh load, a
+    // permanent extra lean fetch accepted by design. Do NOT "fix" this by hiding bots here.
     params.set('excludeBots', 'false');
   }
   if (includeStaleFilter && s.excludeStale) params.set('excludeStale', 'true');

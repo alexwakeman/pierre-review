@@ -100,8 +100,15 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
     derived-state tags, and the right-hand Clear-filters cluster. Activity, Insights,
     PR-detail/focus tabs and every drill-down keep just the scope row. The filter STATE persists
     (reachable again from the Timeline tab); the Activity console's queries never send
-    `userIds`/`excludeBots` anyway (its bot control is the feed's bot-lens pills); the board stays
-    member-scoped. ⚠ **`workspaceId` must NOT live in `FilterDefaults`** — persistence and reset
+    `userIds` or the FilterBar's exclude-bots toggle/allow-list anyway (its bot control is the
+    feed's bot-lens pills — whose 'hide', the DEFAULT, rides the feed route's own `excludeBots`
+    param server-side); the board stays member-scoped. **Bots are HIDDEN by default on the
+    Timeline too** (`excludeBots: true` in `freshFilterDefaults`; the hidden set is the UNION of
+    `users.isBot` and the workspace's automated-reviewer verdict, a workspace manual "human"
+    winning both ways). The URL follows the excludeStale pattern — `bots=0` = shown, clean URL =
+    hidden, legacy `bots=1` still parses — and the persisted blob's v2→v3 migration
+    (`migratePersistedFilters`, `useUrlState.ts`) drops only `excludeBots`/`allowedBotIds` so
+    existing users get the new default once without losing the rest of their filter bar. ⚠ **`workspaceId` must NOT live in `FilterDefaults`** — persistence and reset
     share one list (`pickFilterBarState` writes exactly `FilterDefaults`, `resetAllFilters` spreads
     `freshFilterDefaults()`), so a persisted `workspaceId` would also be **reset by "Clear
     filters"**, silently teleporting the user into Default whenever they cleared a date range. It

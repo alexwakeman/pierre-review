@@ -85,9 +85,10 @@ function readFromUrl(): Partial<FilterState> {
   if (workspaceId != null) out.workspaceId = workspaceId;
   out.repoIds = workspaceId != null ? parseIds(p.get('repos')) : null;
   out.userIds = parseIds(p.get('users'));
-  // Bots are SHOWN by default now, so a clean URL means "shown". Only an explicit
-  // `bots=1` turns the exclude-bots filter ON (a legacy `bots=0` correctly resolves
-  // to off, matching the new default).
+  // Bots are HIDDEN by default now, so a clean URL means "hidden". An explicit `bots=0`
+  // turns the exclude-bots filter OFF (show bots); `bots=1` is still honoured for
+  // backward-compat with older shared URLs (now redundant with the default). Mirrors the
+  // excludeStale pattern below.
   if (p.get('bots') !== null) out.excludeBots = p.get('bots') === '1';
   // Per-repo "allowed bots" (kept visible under excludeBots). Absent → none allow-listed.
   const allowBots = parseIds(p.get('allowBots'));
@@ -166,10 +167,13 @@ function writeToUrl(s: FilterState): void {
   // (The legacy `?team=` param is never written; it is still READ once, see readWorkspaceFromUrl.)
   if (s.workspaceId != null) p.set('workspace', String(s.workspaceId));
   if (s.userIds?.length) p.set('users', s.userIds.join(','));
-  // Shown is the default; only encode the non-default "exclude bots" choice (bots=1).
-  if (s.excludeBots) p.set('bots', '1');
-  // Only meaningful under excludeBots; encode the allow-list so it survives a reload.
-  if (s.excludeBots && s.allowedBotIds.length) p.set('allowBots', s.allowedBotIds.join(','));
+  // Hidden is the default; only encode the non-default "show bots" choice (bots=0) — the
+  // excludeStale pattern. Old bots=1 links still parse to the same (now default) state.
+  if (!s.excludeBots) p.set('bots', '0');
+  // The allow-list only bites under excludeBots — the DEFAULT now — so encode it whenever
+  // non-empty: an allow-list picked while bots are shown must survive a reload into the
+  // hidden default rather than silently vanishing with the `bots=0` param.
+  if (s.allowedBotIds.length) p.set('allowBots', s.allowedBotIds.join(','));
   // Hidden is the default; only encode the non-default "show stale" choice (stale=0).
   if (!s.excludeStale) p.set('stale', '0');
   if (s.preset === 'custom' && s.customFrom) p.set('from', s.customFrom);
@@ -228,9 +232,9 @@ function writeToUrl(s: FilterState): void {
 // you last used instead of snapping back to hard defaults.
 const FILTER_STORAGE_KEY = 'pierre:filterBarState';
 
-// The persisted-shape VERSION. Bump it when a stored blob's meaning changes in a way that
-// cannot be interpreted forward — the stored value is then DISCARDED WHOLESALE rather than
-// half-migrated.
+// The persisted-shape VERSION. Bump it when a stored blob's meaning changes. A version with
+// no entry in `migratePersistedFilters` below is DISCARDED WHOLESALE rather than
+// half-migrated; a version with one carries forward.
 //
 // v2 = the workspace refactor, and both halves of the reason matter:
 //  • `teamScope` ('all' | 'none' | 'teams' | 'teams:1,2' | a bare team id) has no image in
@@ -243,8 +247,29 @@ const FILTER_STORAGE_KEY = 'pierre:filterBarState';
 //    in a different workspace entirely. On the URL path a stale id is merely pruned against the
 //    resolved membership; here there is no scope to correlate it with, so the honest move is to
 //    drop the blob and start from defaults.
-// The cost is one reset of the remembered filter bar, once, per user.
-const FILTER_STORAGE_VERSION = 2;
+// The cost of THAT bump was one reset of the remembered filter bar, once, per user — right for
+// v1→v2, where the stored shape had no forward interpretation.
+//
+// v3 = bots hidden by default. The only change is the `excludeBots` default flipping, so a v2
+// blob is still perfectly meaningful — discarding a user's whole remembered filter bar (repos,
+// range, statuses) to re-assert one default would be theft. Hence the per-version migration.
+const FILTER_STORAGE_VERSION = 3;
+
+// Per-version migrations for the persisted filter blob, applied in loadPersistedFilters before
+// the version check (so a migrated blob passes it). Exported for its unit test only.
+//
+// v2 → v3: drop EXACTLY the two bot keys — `excludeBots` (so every user gets the new
+// hidden-by-default baseline once, instead of a persisted `false` pinning the old default
+// forever) and `allowedBotIds` (an allow-list picked when excluding was a deliberate opt-in
+// choice doesn't carry the same intent into a world where excluding is ambient). Everything
+// else carries forward untouched.
+export function migratePersistedFilters(
+  parsed: Record<string, unknown>,
+): Record<string, unknown> {
+  if (parsed.v !== 2) return parsed;
+  const { excludeBots: _excludeBots, allowedBotIds: _allowedBotIds, ...rest } = parsed;
+  return { ...rest, v: 3 };
+}
 
 // The SCOPE slice, persisted separately (see filters.ts `pickScopeState`): the active workspace
 // is the context filters apply inside, not a filter. Sharing the filter blob would make "Clear
@@ -260,16 +285,18 @@ function loadPersistedFilters(): Partial<FilterState> | null {
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
-    // A blob from an older shape is dropped, not interpreted (see FILTER_STORAGE_VERSION), and
-    // removed so it can never be read again by a build that lost this guard.
-    if ((parsed as { v?: unknown }).v !== FILTER_STORAGE_VERSION) {
+    // Migrate a blob a per-version step CAN carry forward (v2 → v3); anything else from an
+    // older shape is dropped, not interpreted (see FILTER_STORAGE_VERSION), and removed so it
+    // can never be read again by a build that lost this guard.
+    const migrated = migratePersistedFilters(parsed as Record<string, unknown>);
+    if (migrated.v !== FILTER_STORAGE_VERSION) {
       localStorage.removeItem(FILTER_STORAGE_KEY);
       return null;
     }
     // Sanitize: keep only known persisted filter keys — this also drops the version marker
     // itself, a legacy persisted `myTurnOnly` (now a transient focus mode, which would
     // otherwise force My Turn Focus Mode on a fresh load), and any legacy `teamScope`.
-    return sanitizePersistedFilters(parsed as Partial<FilterState>);
+    return sanitizePersistedFilters(migrated as Partial<FilterState>);
   } catch {
     return null;
   }
