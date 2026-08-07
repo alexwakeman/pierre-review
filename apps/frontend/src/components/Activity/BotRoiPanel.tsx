@@ -7,8 +7,14 @@ import type {
   BotVendorTrendPoint,
   BotVerdict,
   BotWindowKind,
+  MlSeverity,
 } from '@pierre-review/shared';
 import { ML_SEVERITIES } from '@pierre-review/shared';
+
+// ASCENDING (nit → critical), deliberately NOT the shared `ML_SEVERITIES` (worst-first, which is
+// the right order for a badge legend): the four "not addressed by severity" columns read
+// left-to-right as a scale, and flipping them would silently transpose every cell's meaning.
+const SEVERITY_COLUMNS: MlSeverity[] = ['nit', 'minor', 'major', 'critical'];
 import {
   useBotAnalytics,
   useResolvableBotThreads,
@@ -72,7 +78,11 @@ const VERDICT_META: Record<BotVerdict, { label: string; className: string; title
     label: 'Tune',
     className:
       'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30',
-    title: 'A lot of comments go unaddressed — consider tuning the noisy paths/severities on the bot.',
+    // Two routes reach this chip and the copy has to cover both: a lot of threads going
+    // unaddressed, OR a bot whose scored findings are overwhelmingly nits (the same gates as the
+    // nit tuning suggestion, so the reason is spelled out in the list below the table).
+    title:
+      'Either a lot of comments go unaddressed, or nearly everything it flags scores as a nit — consider tuning the noisy paths/severities on the bot.',
   },
   noisy: {
     label: 'Noisy',
@@ -285,7 +295,17 @@ function TuningSuggestions({
 // mixing two time grains was the whole complaint). Renders NOTHING when the deployment has no
 // scoring service (the caller gates on MeResponse.mlSeverity) or when the window has neither
 // labels nor pending text — no empty chrome.
-function MlTotalsStrip({ ml }: { ml: BotAnalyticsMlTotals }): JSX.Element | null {
+function MlTotalsStrip({
+  ml,
+  overlapClusters,
+}: {
+  ml: BotAnalyticsMlTotals;
+  // DETERMINISTIC, not model output: it counts line areas from the threads' own line data (the
+  // shared ±3-line clustering), and it rides `totals` rather than the `ml` block for that reason.
+  // It renders HERE because this strip is where the window's "what did the bots flag" facts are
+  // read, and "two bots flagged the same lines" is one of them.
+  overlapClusters: number;
+}): JSX.Element | null {
   if (ml.labelled === 0 && ml.pending === 0) return null;
   const coverage =
     ml.labelled + ml.pending > 0 ? ml.labelled / (ml.labelled + ml.pending) : 0;
@@ -343,8 +363,9 @@ function MlTotalsStrip({ ml }: { ml: BotAnalyticsMlTotals }): JSX.Element | null
         </div>
       )}
 
-      {/* Totals strip — all four tiles are claims about the SELECTED WINDOW's findings. */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {/* Totals strip — every tile is a claim about the SELECTED WINDOW. The first four are
+          model-scored findings; the last is deterministic (see the prop's note). */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
         <div className="rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800">
           <div className="text-[10px] uppercase tracking-wide text-gray-400">Findings</div>
           <div className="text-lg font-semibold tabular-nums">
@@ -387,6 +408,20 @@ function MlTotalsStrip({ ml }: { ml: BotAnalyticsMlTotals }): JSX.Element | null
             {topCategory
               ? `${topCategory.count.toLocaleString()} findings`
               : 'no categorised findings yet'}
+          </div>
+        </div>
+        <div
+          className="rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800"
+          title="Distinct line areas two or more review bots both flagged in this window. Threads within ±3 lines of each other in the same file count as one area (two bots reviewing different revisions of a diff rarely land on the exact same line). Quality checks and outdated/file-level threads are excluded. Measured from the threads' own line data — not model-scored."
+        >
+          <div className="text-[10px] uppercase tracking-wide text-gray-400">
+            Same-line overlap
+          </div>
+          <div className="text-lg font-semibold tabular-nums">
+            {overlapClusters.toLocaleString()}
+          </div>
+          <div className="text-[10px] text-gray-400">
+            line area{overlapClusters === 1 ? '' : 's'} flagged by &gt;1 bot · window
           </div>
         </div>
       </div>
@@ -519,28 +554,37 @@ function VendorTable({
   botColor: BotColor;
   onOpenVendor: (key: string) => void;
   overdueGraceMs: number;
-  // The ML severity columns (mix bar / High / Nits) — rendered ONLY when the deployment scores
-  // (MeResponse.mlSeverity) AND the window has labels. False must render NO ml chrome at all.
+  // The ML severity columns (mix bar / High / Nits / the four "not addressed by severity"
+  // columns) — rendered ONLY when the deployment scores (MeResponse.mlSeverity) AND the window
+  // has labels. False must render NO ml chrome at all.
   showMl: boolean;
 }): JSX.Element {
+  // ⚠ THE HEADER IS TWO ROWS WHEN `showMl`, ONE WHEN NOT — because the four "not addressed by
+  // severity" columns sit under a shared group cell, and a group cell only makes sense with a
+  // second row beneath it. Every OTHER header cell therefore has to span both rows, or the four
+  // sub-headers shove the ordinary columns out of alignment with their own data. Add a column
+  // here and it needs `rowSpan={headSpan}` too.
+  const headSpan = showMl ? 2 : 1;
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
-      <table className={`w-full border-collapse text-[11px] ${showMl ? 'min-w-[1060px]' : 'min-w-[880px]'}`}>
+      <table className={`w-full border-collapse text-[11px] ${showMl ? 'min-w-[1240px]' : 'min-w-[880px]'}`}>
         <thead>
-          <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-800 dark:text-gray-400">
-            <th className="px-2 py-1.5 font-medium">Vendor</th>
-            <th className="px-2 py-1.5 text-right font-medium">Threads</th>
-            <th className="px-2 py-1.5 text-right font-medium">Comments</th>
+          <tr className={`text-left text-gray-500 dark:text-gray-400${showMl ? '' : ' border-b border-gray-200 dark:border-gray-800'}`}>
+            <th rowSpan={headSpan} className="px-2 py-1.5 font-medium">Vendor</th>
+            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium">Threads</th>
+            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium">Comments</th>
             <th
+              rowSpan={headSpan}
               className="px-2 py-1.5 text-right font-medium"
               title="A later commit likely addressed the thread, it was resolved, or a human replied/resolved after the bot"
             >
               Acted on
             </th>
-            <th className="px-2 py-1.5 text-right font-medium" title="Threads with no reply and no follow-up commit — the total not-addressed">
+            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="Threads with no reply and no follow-up commit — the total not-addressed">
               Not addressed
             </th>
             <th
+              rowSpan={headSpan}
               className="px-2 py-1.5 text-right font-medium"
               title={`Not-addressed threads older than the ${Math.round(
                 overdueGraceMs / 3_600_000,
@@ -548,16 +592,17 @@ function VendorTable({
             >
               Overdue
             </th>
-            <th className="px-2 py-1.5 text-right font-medium" title="This bot's median time from opening a thread to it being addressed — a human reply, a resolve, or an addressing commit">
+            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="This bot's median time from opening a thread to it being addressed — a human reply, a resolve, or an addressing commit">
               Time to address
             </th>
-            <th className="px-2 py-1.5 text-right font-medium" title="Not-addressed threads' oldest age">
+            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="Not-addressed threads' oldest age">
               Oldest
             </th>
-            <th className="px-2 py-1.5 text-right font-medium" title="Low-value / untouched share — the noise floor">
+            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="Low-value / untouched share — the noise floor">
               Noise
             </th>
             <th
+              rowSpan={headSpan}
               className="px-2 py-1.5 text-right font-medium"
               title="Share of this bot's threads landing within ±3 lines of another bot's thread in the same file — redundant coverage. Advisory only; hover a cell for the top partner. Outdated/file-level threads (no line) never count."
             >
@@ -566,33 +611,62 @@ function VendorTable({
             {showMl && (
               <>
                 <th
+                  rowSpan={headSpan}
                   className="w-28 px-2 py-1.5 font-medium"
                   title="This bot's scored findings by predicted severity, over the selected window — model-scored, advisory. Summaries and praise are excluded."
                 >
                   Severity mix
                 </th>
                 <th
+                  rowSpan={headSpan}
                   className="px-2 py-1.5 text-right font-medium"
                   title="Major + critical as a share of this bot's scored findings in the window."
                 >
                   High
                 </th>
                 <th
+                  rowSpan={headSpan}
                   className="px-2 py-1.5 text-right font-medium"
                   title="Nits as a share of this bot's scored findings in the window — a persistently high share suggests raising the bot's severity floor."
                 >
                   Nits
                 </th>
+                {/* The group cell for the four columns below it. Its own count is deliberately
+                    NOT shown: these are a split of the LABELLED not-addressed threads, so they
+                    need not add up to the "Not addressed" column, and a total here would invite
+                    exactly that subtraction. */}
+                <th
+                  colSpan={4}
+                  className="border-l border-gray-200 px-2 pb-0 pt-1.5 text-center font-medium dark:border-gray-800"
+                  title="This bot's not-addressed threads, split by the predicted severity of the finding that opened each one. Model-scored and advisory: threads whose opening comment was never scored aren't counted, so these need not add up to the Not addressed column."
+                >
+                  Not addressed by severity
+                </th>
               </>
             )}
             <th
+              rowSpan={headSpan}
               className="px-2 py-1.5 text-right font-medium"
               title="Monthly cost ÷ acted-on threads. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Bots → Settings. Narrowed to a single repo this divides a whole month's price by part of that bot's work, so read it as a rate, not as spend, and never add it up across workspaces."
             >
               $/acted-on
             </th>
-            <th className="px-2 py-1.5 text-center font-medium">Verdict</th>
+            <th rowSpan={headSpan} className="px-2 py-1.5 text-center font-medium">Verdict</th>
           </tr>
+          {showMl && (
+            <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-800 dark:text-gray-400">
+              {SEVERITY_COLUMNS.map((s, i) => (
+                <th
+                  key={s}
+                  className={`px-1.5 pb-1.5 text-right text-[10px] font-medium${i === 0 ? ' border-l border-gray-200 dark:border-gray-800' : ''}`}
+                  style={{ color: ML_SEVERITY_META[s].color }}
+                  title={`Not-addressed threads whose opening finding scored ${ML_SEVERITY_META[s].label.toLowerCase()}`}
+                >
+                  {s === 'critical' ? 'Crit' : ML_SEVERITY_META[s].label}
+                </th>
+              ))}
+            </tr>
+          )}
         </thead>
         <tbody>
           {vendors.map((v) => {
@@ -611,7 +685,7 @@ function VendorTable({
                   <button
                     type="button"
                     onClick={() => onOpenVendor(v.key)}
-                    title="View this bot's PRs"
+                    title="Open the bot drill-down — its comments (default) and the PRs it touched"
                     className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:underline"
                     style={{ color, background: `${color}1a` }}
                   >
@@ -729,6 +803,28 @@ function VendorTable({
                     >
                       {v.mlNitPct != null ? `${v.mlNitPct}%` : dash}
                     </td>
+                    {/* Not-addressed threads by the severity of the finding that opened them. A
+                        ZERO renders as a blank, like every other ML cell: the four are a split of
+                        the LABELLED not-addressed threads, so a 0 says "none scored that way",
+                        which is not a number worth drawing attention to — and printing zeros
+                        would invite reading the row as a decomposition of "Not addressed". */}
+                    {SEVERITY_COLUMNS.map((s, i) => {
+                      const n = v.notAddressedBySeverity?.[s] ?? 0;
+                      return (
+                        <td
+                          key={s}
+                          className={`px-1.5 py-1.5 text-right tabular-nums${i === 0 ? ' border-l border-gray-200 dark:border-gray-800' : ''}`}
+                          style={n > 0 ? { color: ML_SEVERITY_META[s].color } : undefined}
+                          title={
+                            n > 0
+                              ? `${n} not-addressed thread${n === 1 ? '' : 's'} opened by a ${ML_SEVERITY_META[s].label.toLowerCase()} finding`
+                              : undefined
+                          }
+                        >
+                          {n > 0 ? n : dash}
+                        </td>
+                      );
+                    })}
                   </>
                 )}
                 {/* The $/acted-on figure. The price is a plain column on this bot's WORKSPACE row
@@ -940,7 +1036,9 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
         {/* The severity totals strip (the old BotSeverityPanel's survivor) — same response,
             same window as the table below it. Self-hides when the window has nothing scored
             and nothing pending. */}
-        {showMlStrip && ml && <MlTotalsStrip ml={ml} />}
+        {showMlStrip && ml && (
+          <MlTotalsStrip ml={ml} overlapClusters={t.overlapClusters ?? 0} />
+        )}
         <div className="text-[11px] text-gray-500 dark:text-gray-400">
           <span className="font-semibold tabular-nums text-gray-700 dark:text-gray-200">
             {t.threads}

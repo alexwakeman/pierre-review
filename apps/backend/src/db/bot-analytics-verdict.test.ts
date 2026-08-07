@@ -1,8 +1,17 @@
-// getBotAnalytics — the response-time-gated "noisy" verdict, on a THROWAWAY sqlite DB.
+// getBotAnalytics — the response-time-gated "noisy" verdict AND the ML nit-ratio escalation, on
+// a THROWAWAY sqlite DB.
 //
 // The point of the gate: an untouched thread only counts against a bot ("overdue", and only then
 // feeding the noisy verdict) once its age exceeds a FIXED 36h grace window. So two bots with the
 // SAME untouched count get OPPOSITE verdicts when one's backlog is young and the other's is aged.
+//
+// The verdict is NO LONGER ML-free. One label-derived input reaches it — a bot whose scored
+// findings are overwhelmingly nits is ESCALATED 'keep' → 'tune', on the same gates as the nit
+// tuning suggestion (findings ≥ 20 AND nit share ≥ 0.7) so the chip and the advisory beneath the
+// table cannot contradict each other. The third suite below is that rule's matrix, and the
+// properties it defends are the reason the input is narrow: escalation ONLY (a label may never
+// soften a verdict the thread math already earned, and can never produce 'noisy'), the RAW share
+// rather than the rounded display twin, and no reading of the vendor's own declared severity.
 //
 // Seed (account 1, one repo/PR, window rolling_14):
 //  • Two REPLIED bot threads (coderabbit), each answered by a human ~1 day after opening → they
@@ -29,6 +38,9 @@ let q: any;
 // narrows the measured data. Resolved through the production resolver in beforeAll.
 let scope: any;
 let greptileId = 0;
+let coderabbitId = 0;
+let repoId = 0;
+let prId = 0;
 
 const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 60 * 60 * 1000;
@@ -52,6 +64,7 @@ beforeAll(async () => {
     .values({ accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_v' })
     .returning()
     .execute();
+  repoId = repo.id;
   const [pr] = await db
     .insert(pullRequests)
     .values({
@@ -67,6 +80,7 @@ beforeAll(async () => {
     })
     .returning()
     .execute();
+  prId = pr.id;
 
   const [coderabbit] = await db
     .insert(users)
@@ -84,6 +98,7 @@ beforeAll(async () => {
     .returning()
     .execute();
   greptileId = greptile.id;
+  coderabbitId = coderabbit.id;
 
   // Two REPLIED coderabbit threads — a human answers ~1 day after each opens. These are the
   // only response-time samples, so the account norm = 1 day. (No bot comment needed: the
@@ -247,5 +262,181 @@ describe('getBotAnalytics role split (quality_check is SPLIT OUT, not filtered a
       await db.delete(workspaceReviewers).execute();
       await q.deleteWorkspace(other.id, 1); // (id, accountId) — not the (accountId, …) of its siblings
     }
+  });
+});
+
+// ── The ML nit-ratio ESCALATION matrix ───────────────────────────────────────────────────────
+// Seeded in this suite's own beforeAll, AFTER the two above have asserted on the shared fixture.
+//
+// Three fresh in-house bots share one shape — 6 threads, all resolved, so the thread math alone
+// says 'keep' — and differ ONLY in their labels. That isolation is the point: any movement here
+// is the label speaking, and nothing else.
+//
+//   nitbot   — 20 findings, 14 nits: BOTH gates exactly met (0.7)             → escalated 'tune'
+//   fewbot   — 19 findings, ALL nits: one short of the volume gate            → stays    'keep'
+//   sharebot — 23 findings, 16 nits = 0.6957: DISPLAYS as 70% but is under it → stays    'keep'
+//
+// plus the two bots from the fixture above, relabelled nit-heavy to pin the no-downgrade rule:
+// greptile stays 'noisy' and coderabbit stays 'tune' — an ML input may only ever escalate
+// 'keep', never soften a thread-math verdict and never manufacture 'noisy'.
+describe('getBotAnalytics ML nit-ratio escalation', () => {
+  const nits = (n: number) => Array.from({ length: n }, () => 'nit');
+
+  beforeAll(async () => {
+    const { users, reviewThreads, mlCommentLabels } = schema;
+    let targetSeq = 5000;
+    const label = (userId: number, severity: string) => {
+      targetSeq += 1;
+      return {
+        accountId: 1,
+        repoId,
+        prId,
+        targetKind: 'review_comment' as const,
+        targetId: targetSeq,
+        authorUserId: userId,
+        severity,
+        severityOrd: { nit: 0, minor: 1, major: 2, critical: 3 }[severity] ?? 0,
+        severityProb: 0.8,
+        categories: severity === 'nit' ? ['nitpick'] : ['correctness_bug'],
+        categoryProbs: {},
+        isSummary: false,
+        backend: 'modernbert-onnx',
+        modelVersion: 'test',
+        bodyHash: `hv${targetSeq}`,
+        targetCreatedAt: new Date(now - 2 * HOUR),
+      };
+    };
+
+    // (login, the bot's findings as a severity list)
+    const bots: Array<[string, string[]]> = [
+      ['nit-bot', [...nits(14), ...Array.from({ length: 6 }, () => 'minor')]],
+      ['few-bot', nits(19)],
+      ['share-bot', [...nits(16), ...Array.from({ length: 7 }, () => 'minor')]],
+    ];
+    for (const [login, severities] of bots) {
+      const [u] = await db
+        .insert(users)
+        .values({ githubLogin: login, githubNodeId: `U_${login}`, isBot: true })
+        .returning()
+        .execute();
+      // 6 RESOLVED threads: acted-on 100% → the thread math says 'keep' on its own, which is the
+      // only starting point from which an escalation is observable.
+      for (let i = 0; i < 6; i++) {
+        await db
+          .insert(reviewThreads)
+          .values({
+            githubNodeId: `V_${login}_${i}`,
+            prId,
+            path: `src/${login}${i}.ts`,
+            line: 1,
+            isResolved: true,
+            isOutdated: false,
+            derivedState: 'resolved',
+            originalCommenterId: u.id,
+            createdAt: new Date(now - 2 * HOUR),
+            resolvedAt: new Date(now - HOUR),
+          })
+          .execute();
+      }
+      // An in-house login is automated only once the workspace says so — and only with a
+      // footprint, hence after the threads.
+      await q.setWorkspaceReviewer(1, u.id, { workspaceId: scope.workspaceId, automated: true });
+      await db.insert(mlCommentLabels).values(severities.map((s) => label(u.id, s))).execute();
+    }
+
+    // The no-downgrade fixtures: both already have a verdict from the thread math.
+    for (const userId of [coderabbitId, greptileId]) {
+      await db.insert(mlCommentLabels).values(nits(25).map((s) => label(userId, s))).execute();
+    }
+  });
+
+  const rowFor = async (login: string) => {
+    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
+    return resp.vendors.find((v: { login: string | null }) => v.login === login)!;
+  };
+
+  it('escalates keep → tune at exactly the gates (20 findings, 70% nits)', async () => {
+    const v = await rowFor('nit-bot');
+    expect(v.threads).toBe(6);
+    expect(v.actedOnPct).toBe(100); // the thread math has no complaint at all…
+    expect(v.overdueUntouched).toBe(0);
+    expect(v.mlFindings).toBe(20);
+    expect(v.mlNitPct).toBe(70);
+    expect(v.verdict).toBe('tune'); // …so this is the label, and only the label
+  });
+
+  it('the chip and the nit SUGGESTION agree by construction (one pair of gates)', async () => {
+    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
+    const suggested = new Set(
+      resp.suggestions
+        .filter((s: { severity: string | null }) => s.severity === 'nit')
+        .map((s: { label: string }) => s.label),
+    );
+    // Every bot the nit advisory names reads at least 'tune' — the failure this forbids is a row
+    // chipped 'keep' sitting directly above a sentence telling you to tune it.
+    for (const v of resp.vendors) {
+      if (suggested.has(v.label)) expect(v.verdict).not.toBe('keep');
+    }
+    expect(suggested.has('nit-bot')).toBe(true);
+    expect(suggested.has('few-bot')).toBe(false);
+    expect(suggested.has('share-bot')).toBe(false);
+  });
+
+  it('19 findings is under the volume gate — 100% nits still reads keep', async () => {
+    const v = await rowFor('few-bot');
+    expect(v.mlFindings).toBe(19);
+    expect(v.mlNitPct).toBe(100);
+    expect(v.verdict).toBe('keep');
+  });
+
+  it('gates on the RAW share, not the rounded percentage the column shows', async () => {
+    const v = await rowFor('share-bot');
+    expect(v.mlFindings).toBe(23);
+    // 16/23 = 0.6956… — the COLUMN rounds it to 70%, the gate does not. Reading the rounded
+    // twin here would flip this row and make the boundary depend on a display decision.
+    expect(v.mlNitPct).toBe(70);
+    expect(v.verdict).toBe('keep');
+  });
+
+  it('never downgrades: a nit-heavy noisy bot stays noisy, a tune bot stays tune', async () => {
+    const gr = await rowFor('greptile-apps');
+    expect(gr.mlNitPct).toBe(100);
+    expect(gr.overdueUntouched).toBe(10);
+    expect(gr.verdict).toBe('noisy'); // the ML branch is never reached — thread math already spoke
+    const cr = await rowFor('coderabbitai');
+    expect(cr.mlNitPct).toBe(100);
+    expect(cr.verdict).toBe('tune'); // and nothing about a label can push a row TO 'noisy'
+  });
+
+  it('a bot with no labels at all is judged exactly as before', async () => {
+    // Same shape as nit-bot (6 resolved threads) but unscored: no ML input, no escalation.
+    const { users, reviewThreads } = schema;
+    const [u] = await db
+      .insert(users)
+      .values({ githubLogin: 'bare-bot', githubNodeId: 'U_bare', isBot: true })
+      .returning()
+      .execute();
+    for (let i = 0; i < 6; i++) {
+      await db
+        .insert(reviewThreads)
+        .values({
+          githubNodeId: `V_bare_${i}`,
+          prId,
+          path: `src/bare${i}.ts`,
+          line: 1,
+          isResolved: true,
+          isOutdated: false,
+          derivedState: 'resolved',
+          originalCommenterId: u.id,
+          createdAt: new Date(now - 2 * HOUR),
+          resolvedAt: new Date(now - HOUR),
+        })
+        .execute();
+    }
+    await q.setWorkspaceReviewer(1, u.id, { workspaceId: scope.workspaceId, automated: true });
+    const v = await rowFor('bare-bot');
+    expect(v.mlFindings).toBeUndefined();
+    expect(v.notAddressedBySeverity).toBeUndefined();
+    expect(v.verdict).toBe('keep');
   });
 });

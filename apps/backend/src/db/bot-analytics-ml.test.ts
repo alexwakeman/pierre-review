@@ -9,10 +9,14 @@
 //  • a bot with NO in-window labels ships the fields ABSENT (blanks, never zeros);
 //  • the nit suggestion fires only past BOTH gates (findings ≥ 20 AND nit share ≥ 0.7), fills
 //    the severity slot, and NEVER fires for a quality_check-roled bot;
-//  • the verdict is UNTOUCHED by any label — an 88%-nits bot keeps its thread-math verdict
-//    (the pinned botVerdict semantics; nothing auto-acts on an ML label);
-//  • response-level `ml` totals cover the whole automated set (both roles) and `pending`
-//    counts only unlabelled bot text INSIDE the window.
+//  • those SAME gates escalate the verdict 'keep' → 'tune', so the chip and the advisory under
+//    the table always agree (the escalation's own matrix — boundaries, no-downgrade — lives in
+//    bot-analytics-verdict.test.ts);
+//  • `notAddressedBySeverity` splits the untouched threads by the severity of the finding that
+//    OPENED each one — addressed threads, praise and summaries never count;
+//  • response-level `ml` totals cover the whole automated set (both roles), `pending` counts
+//    only unlabelled bot text INSIDE the window, and `totals.overlapClusters` counts the
+//    shared line areas ONCE (it is not the sum of the per-vendor overlap columns).
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
@@ -288,14 +292,35 @@ describe('getBotAnalytics ML fold (windowed, findings-only)', () => {
     ).toBe(false);
   });
 
-  it('the verdict is UNTOUCHED by the labels — 88% nits does not move it', async () => {
+  it('the nit ratio ESCALATES the verdict — 88% nits turns keep into tune', async () => {
     const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
     const cr = resp.vendors.find((v: { kind: string }) => v.kind === 'coderabbit')!;
-    // Thread math: 2 threads, 0 acted on, 0 overdue (both 2h old, inside the 36h grace) →
-    // botVerdict(2, 0, 0) = 'keep'. If an ML input ever reached the verdict this would move.
+    // Thread math alone: 2 threads, 0 acted on, 0 overdue (both 2h old, inside the 36h grace) →
+    // botVerdict(2, 0, 0) = 'keep'. The 88% nit share over 24 findings clears both gates, so the
+    // chip agrees with the suggestion this same response emits rather than contradicting it.
     expect(cr.threads).toBe(2);
     expect(cr.overdueUntouched).toBe(0);
-    expect(cr.verdict).toBe('keep');
+    expect(cr.verdict).toBe('tune');
+    // greptile is the control: 100% nits, but only 5 findings — under the volume gate, so its
+    // thread math (1 young untouched thread) still decides.
+    const gr = resp.vendors.find((v: { kind: string }) => v.kind === 'greptile')!;
+    expect(gr.mlNitPct).toBe(100);
+    expect(gr.verdict).toBe('keep');
+  });
+
+  it('totals.overlapClusters counts each shared line area ONCE, not per bot', async () => {
+    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
+    // Every fixture thread sits on (src/a.ts, line 1) of the same PR, so the ±3-line clustering
+    // makes ONE area — shared by coderabbit ×2, greptile and old-bot (quality-bot is roled
+    // quality_check and never enters the pass).
+    expect(resp.totals.overlapClusters).toBe(1);
+    // ⚠ THE POINT OF THE SEPARATE COUNT: a cluster credits EVERY member, so summing the rows'
+    // overlapThreads gives 4 for the one area. The strip's tile must not be derivable that way.
+    const summed = [...resp.vendors, ...resp.qualityChecks].reduce(
+      (s: number, v: { overlapThreads: number }) => s + v.overlapThreads,
+      0,
+    );
+    expect(summed).toBe(4);
   });
 });
 
@@ -387,5 +412,124 @@ describe('getBotVendorComments (the Comments drill-down)', () => {
     expect(pierre.comments).toEqual([]);
     const unknown = await ml.getBotVendorComments(1, { userId: 999_999 }, 'rolling_14', scope);
     expect(unknown.comments).toEqual([]);
+  });
+});
+
+// ── "Not addressed" split by the severity of the finding that OPENED the thread ──────────────
+// Seeded AFTER the assertions above (its rows would move the fold's counts). Every case here is
+// a way the split must DIFFER from a naive "label the untouched threads" pass:
+//   • an ADDRESSED thread with a major finding must not appear anywhere;
+//   • a praise-categorised or summary label is not a finding, so it is not an ignored one either;
+//   • an untouched thread whose opening comment was never scored counts toward `untouched` and
+//     toward NOTHING here — which is why the four numbers need not sum to that column.
+describe('notAddressedBySeverity (the untouched column, split by severity)', () => {
+  beforeAll(async () => {
+    // (thread node id, derivedState, path, the origin comment's label — null = unscored)
+    const cases: Array<[string, string, string, null | { severity: string; ord: number; isSummary?: boolean; categories?: string[] }]> = [
+      ['T_na_major', 'untouched', 'src/na1.ts', { severity: 'major', ord: 2, categories: ['correctness_bug'] }],
+      ['T_na_nit', 'untouched', 'src/na2.ts', { severity: 'nit', ord: 0 }],
+      // Addressed — the thread was resolved, so it is not an ignored finding at all.
+      ['T_na_done', 'resolved', 'src/na3.ts', { severity: 'critical', ord: 3, categories: ['security'] }],
+      // Praise and a walkthrough: labelled work, never findings (the fold's exclusion, verbatim).
+      ['T_na_praise', 'untouched', 'src/na4.ts', { severity: 'nit', ord: 0, categories: ['praise'] }],
+      ['T_na_summary', 'untouched', 'src/na5.ts', { severity: 'minor', ord: 1, isSummary: true }],
+      // Unscored: counted by `untouched`, invisible to the split.
+      ['T_na_unscored', 'untouched', 'src/na6.ts', null],
+    ];
+    let seq = 0;
+    for (const [nodeId, state, path, label] of cases) {
+      seq += 1;
+      const [thread] = await db
+        .insert(schema.reviewThreads)
+        .values({
+          githubNodeId: nodeId,
+          prId,
+          path,
+          line: 10,
+          isResolved: state === 'resolved',
+          isOutdated: false,
+          derivedState: state,
+          originalCommenterId: coderabbitId,
+          createdAt: new Date(now - 3 * HOUR),
+        })
+        .returning()
+        .execute();
+      // TWO comments on each thread, the bot's first: the split must key on the OPENING
+      // comment, so a later comment's label (here: always critical) must never be read.
+      const [origin] = await db
+        .insert(schema.reviewComments)
+        .values({
+          githubNodeId: `RC_${nodeId}_a`,
+          threadId: thread.id,
+          prId,
+          authorId: coderabbitId,
+          body: 'the finding that opened the thread',
+          createdAt: new Date(now - 3 * HOUR),
+        })
+        .returning()
+        .execute();
+      const [followUp] = await db
+        .insert(schema.reviewComments)
+        .values({
+          githubNodeId: `RC_${nodeId}_b`,
+          threadId: thread.id,
+          prId,
+          authorId: coderabbitId,
+          body: 'a later remark from the same bot',
+          createdAt: new Date(now - 2 * HOUR),
+        })
+        .returning()
+        .execute();
+      const mk = (targetId: number, severity: string, ord: number, opts: { isSummary?: boolean; categories?: string[] } = {}) => ({
+        accountId: 1,
+        repoId,
+        prId,
+        targetKind: 'review_comment' as const,
+        targetId,
+        authorUserId: coderabbitId,
+        severity,
+        severityOrd: ord,
+        severityProb: 0.9,
+        categories: opts.categories ?? ['maintainability_refactor'],
+        categoryProbs: {},
+        isSummary: opts.isSummary ?? false,
+        backend: 'modernbert-onnx',
+        modelVersion: 'test',
+        bodyHash: `h_na_${seq}_${targetId}`,
+        targetCreatedAt: new Date(now - 3 * HOUR),
+      });
+      const rows = [mk(followUp.id, 'critical', 3, { categories: ['security'] })];
+      if (label) rows.push(mk(origin.id, label.severity, label.ord, label));
+      await db.insert(schema.mlCommentLabels).values(rows).execute();
+    }
+  });
+
+  it('buckets ONLY the untouched threads whose opening finding was scored', async () => {
+    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
+    const cr = resp.vendors.find((v: { kind: string }) => v.kind === 'coderabbit')!;
+    // nit: T_na_nit. major: T_na_major PLUS the drill-down suite's own untouched thread, whose
+    // real inline comment carries a major label — a second scored thread reaching this split
+    // through the ordinary path. The resolved critical, the praise, the summary and the unscored
+    // thread all contribute nothing, and NO cell picks up the follow-up comments' critical
+    // labels, which is what proves the join keys on the OPENING comment.
+    expect(cr.notAddressedBySeverity).toEqual({ nit: 1, minor: 0, major: 2, critical: 0 });
+    // …while the total it splits counts every untouched thread, scored or not: 3 from the suites
+    // above (2 fixture + 1 drill-down) + the 5 untouched ones seeded here. 8 ≠ 1 + 2, and that
+    // gap is the contract — the four numbers split the LABELLED subset, nothing more.
+    expect(cr.untouched).toBe(8);
+  });
+
+  it('a bot with no in-window labels ships the split ABSENT, like its ml* siblings', async () => {
+    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
+    const ob = resp.vendors.find((v: { login: string | null }) => v.login === 'old-bot')!;
+    expect(ob.mlFindings).toBeUndefined();
+    expect(ob.notAddressedBySeverity).toBeUndefined();
+  });
+
+  it('single-bot line areas never become overlap clusters', async () => {
+    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
+    // Six more threads, all coderabbit's own and each on its own file — no second bot, so the
+    // count is still the one shared area from the base fixture.
+    expect(resp.totals.overlapClusters).toBe(1);
   });
 });

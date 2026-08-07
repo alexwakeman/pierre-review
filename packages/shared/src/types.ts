@@ -648,6 +648,21 @@ export interface BotVendorAnalytics {
   mlBySeverity?: MlSeverityCounts;
   mlNitPct?: number | null;
   mlHighPct?: number | null;
+  // The NOT-ADDRESSED (untouched) window threads split by the predicted severity of the finding
+  // that OPENED each one — "17 not addressed" is a volume complaint; "3 of them major" is a
+  // decision. Same population as `untouched`, but it is a split of the LABELLED subset only:
+  // a thread whose origin comment carries no label (or a summary/praise one — never findings)
+  // contributes to `untouched` and to nothing here, so THESE FOUR NEED NOT SUM TO `untouched`
+  // and must never be presented as if they did. Absent under the same rule as its ml* siblings
+  // (no in-window labels for this bot ⇒ no ML claim at all); present-and-zero means labels
+  // exist and none of the ignored threads scored that way.
+  notAddressedBySeverity?: MlSeverityCounts;
+  // keep | tune | noisy. Thread math first (volume, acted-on, OVERDUE-untouched), plus ONE ML
+  // input: a bot past the nit gates (findings ≥ 20 AND nit share ≥ 0.7 — the same gates as the
+  // nit `BotTuningSuggestion`, so chip and advisory always agree) is ESCALATED 'keep' → 'tune'.
+  // The label may only escalate, and only that far: 'tune' and 'noisy' are never softened, and
+  // nothing about a label can produce 'noisy'. The vendor's own declared severity is never an
+  // input. Pinned by bot-analytics-verdict.test.ts.
   verdict: BotVerdict;
   // SERVER-resolved (no longer overlaid client-side from pro_settings `bots.cost`): this actor's
   // monthly price for THE WORKSPACE THIS RESPONSE WAS COMPUTED FOR, read from
@@ -714,7 +729,14 @@ export interface BotAnalyticsResponse {
   // `overdueUntouched` (feeding the `noisy` verdict) once it's older than this. NOT the measured
   // reply time — that's intrinsically fast (sample bias), so a flat cutoff is the fair gate. Each
   // row's own `medianResponseMs` is display-only.
-  totals: { threads: number; comments: number; actedOn: number; actedOnPct: number | null; untouched: number; botOnlyPrs: number; overdueGraceMs: number };
+  // `overlapClusters` = distinct line areas (the shared ±3-line clustering, db/line-overlap.ts)
+  // that MORE THAN ONE review bot flagged in this window — quality checks and null-line
+  // (outdated / file-level) threads excluded, i.e. exactly the population the per-vendor overlap
+  // columns are credited from. DETERMINISTIC (thread line data, no model), which is why it sits
+  // here rather than on the `ml` block, even though the UI renders it on the flagging strip.
+  // ⚠ It is NOT the sum of the rows' `overlapThreads`: a cluster credits EVERY bot in it, so
+  // that sum counts each shared area at least twice.
+  totals: { threads: number; comments: number; actedOn: number; actedOnPct: number | null; untouched: number; botOnlyPrs: number; overdueGraceMs: number; overlapClusters: number };
   // The windowed ML label rollup for the WHOLE scope (every automated reviewer, BOTH roles —
   // quality checks post exactly the kind of finding a severity label is for). Feeds the severity
   // totals strip that used to be the standalone /api/bot-severity panel, computed over the SAME

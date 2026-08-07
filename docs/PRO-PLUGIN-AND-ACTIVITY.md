@@ -251,7 +251,12 @@ a null-only client fallback. The `noisy` (ex-`kill`)
 verdict is **response-time-gated**: it keys on `overdueUntouched` (untouched threads older than a
 FIXED 36h grace window, `totals.overdueGraceMs`; `medianAddressedMs` per bot = time-to-addressed, display-only), never raw `untouched`, so a bot
 isn't flagged noisy for threads still inside the normal response window (tested in
-`bot-analytics-verdict.test.ts`). **Same-line overlap** (ADVISORY): every "same line" claim now
+`bot-analytics-verdict.test.ts`). ⚠ **The verdict also takes ONE ML input** (it is no longer
+ML-free): a bot past the nit gates — findings ≥ 20 AND nit share ≥ 0.7, the SAME
+`ML_NIT_MIN_FINDINGS`/`ML_NIT_MIN_SHARE` pair the nit tuning suggestion uses, so chip and
+advisory always agree — is **escalated `keep` → `tune`**. Escalation only: `tune`/`noisy` are
+never softened, a label can never produce `noisy`, the gate reads the RAW share (not the rounded
+`mlNitPct`), and `vendorSeverity` is never read. See docs/ML-SEVERITY.md. **Same-line overlap** (ADVISORY): every "same line" claim now
 goes through the ONE shared ±3-line clustering helper (`db/line-overlap.ts` — user-distinct, so two
 distinct in-house bots CAN overlap; quality checks excluded). `getBotAnalytics` runs it over the
 window's review-role threads with **null-line (outdated/file-level) threads EXCLUDED** (they

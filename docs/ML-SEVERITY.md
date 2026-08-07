@@ -311,15 +311,36 @@ ever called by the background worker, so no request can spend anything.
     walkthroughs, high-severity share, nit share, top topic, top-category chips, the severity
     legend. States its own windowed **coverage** ("527 of 626 bot comments in this window
     scored (84%)"), announces a truncated scan, and calls out a marker-fallback deployment.
+    Its fifth tile, **"Same-line overlap"**, is the one number on this strip that is NOT model
+    output: `totals.overlapClusters` counts the window's ±3-line clusters that more than one
+    review bot flagged (`db/line-overlap.ts`; quality checks and null-line threads excluded).
+    It rides `totals`, not the `ml` block, for exactly that reason — and it is **not** the sum
+    of the rows' `overlapThreads`, since a cluster credits every bot in it.
   - **three ML columns on the VendorTable** (severity-mix `SeverityBar` — now exported from
     `MlSeverityBadge.tsx` — plus High % and Nit %), hidden entirely when `mlSeverity` is false
     or nothing in the window is labelled. ⚠ A bot with no in-window labels ships the `ml*`
     fields **ABSENT** and renders **blanks, never zeros** — "not scored" and "zero findings"
     are different claims. Every rate divides by FINDINGS (the phantom-gap rule).
+  - **four more columns under a grouped "Not addressed by severity" header**
+    (`notAddressedBySeverity`, same `showMl` gate, zeros blanked): the untouched threads split
+    by the severity of the finding that OPENED each one — the label on the thread's FIRST
+    comment by its own bot (`review_comment` targets; addressed threads, praise and summaries
+    excluded). ⚠ **They need not sum to the "Not addressed" column** and must never be
+    presented as if they did: a thread whose opening comment was never scored counts in that
+    total and in none of these four. One query over the whole scope (the ids are collected
+    during the human-follow pass), never a per-vendor fan-out.
   - the **nit-ratio tuning suggestion**: findings ≥ 20 AND nit share ≥ 0.7 → a
     `BotTuningSuggestion` filling its (previously always-null) `severity` slot; skipped for
-    quality checks. ADVISORY — it must NEVER feed `botVerdict` (semantics pinned by
-    `bot-analytics-verdict.test.ts`; the fold + suggestion by `bot-analytics-ml.test.ts`).
+    quality checks.
+  - ⚠ **THE VERDICT IS NO LONGER ML-FREE**, and this is the one place a label changes a
+    judgement. A bot past those SAME two gates (`ML_NIT_MIN_FINDINGS` / `ML_NIT_MIN_SHARE` —
+    ONE pair of constants shared by the suggestion and `botVerdict`, so the chip and the
+    advisory under the table cannot contradict each other) is **escalated `keep` → `tune`**.
+    Escalation ONLY: `tune` and `noisy` are never softened, and nothing about a label can
+    produce `noisy` — "mostly nits" is a tuning fact, not evidence the bot is being ignored.
+    The gate reads the RAW share, not the rounded `mlNitPct` the column shows, and never
+    `vendorSeverity`. Matrix pinned by `bot-analytics-verdict.test.ts`; the fold, the split and
+    the overlap count by `bot-analytics-ml.test.ts`.
 - **The Comments drill-down (`BotPrsDetail`)** — a PRs | Comments sub-view toggle on the bot
   drill-down tab (state local to the tab; window/scope shared with the panel; the visible view
   is DERIVED for the 'pierre' sentinel, never written back). Rows: severity badge from the
@@ -464,7 +485,8 @@ Two questions. The second is the one that arrives as a bug report.
 Macro-F1 ≈ 0.66 against a three-source consensus. **CRITICAL is the class it under-recalls**, so
 the product treats **major + critical together as "high"** everywhere (the panel's headline
 number, the badge tooltip). Nothing auto-acts on a label: there is no gate, no auto-resolve, no
-blocking. Categories are marker-derived (deterministic), not model output, and the list is never
+blocking. The single judgement a label moves is the Bots table's own advisory chip — the
+`keep → tune` nit escalation above — which changes a word on a row and nothing else. Categories are marker-derived (deterministic), not model output, and the list is never
 empty — an unmatched comment falls back to a single low-probability best guess.
 
 The sharper measurement is `packages/ml/data/gold/gold_v2_sample.jsonl` +

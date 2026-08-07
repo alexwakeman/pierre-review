@@ -125,6 +125,8 @@ import type {
   BotDedupResponse,
   AddressedConfidence,
   BotTuningSuggestion,
+  MlSeverity,
+  MlSeverityCounts,
   BotOnlyReviewCard,
   UserContributionStats,
   ArmedMergeRequest,
@@ -206,6 +208,7 @@ const {
   claudeReviews,
   claudeReviewFindings,
   ciStatusEvents,
+  mlCommentLabels,
   // THE ONE SCOPE (migrations 0044/0045). `workspaces` + `workspace_repos` replace the old
   // `teams`/`team_repos` many-to-many: a repo belongs to EXACTLY ONE workspace, as a database
   // fact (`workspace_repos`, UNIQUE (account_id, repo_id)), so there is no scope grammar left to
@@ -7920,12 +7923,19 @@ function pathBucket(path: string): string {
 // reply; ignored ones never do), so a measured norm gives almost no grace. Flat + predictable.
 const OVERDUE_GRACE_MS = 36 * 60 * 60 * 1000;
 
-// Gates on the ML nit-ratio tuning suggestion (ADVISORY — it fills BotTuningSuggestion's
-// severity slot and never touches botVerdict; nothing auto-acts on a label). FINDINGS, not
-// labelled — summaries/praise are not findings — and a real sample floor so a bot is never
-// judged on a handful of scored comments.
-const ML_NIT_SUGGESTION_MIN_FINDINGS = 20;
-const ML_NIT_SUGGESTION_MIN_SHARE = 0.7;
+// THE ML nit-ratio gates — ONE pair, read by BOTH the tuning suggestion and `botVerdict`'s
+// escalation below. They are deliberately not two pairs: the chip and the suggestion make the
+// same claim about the same bot ("this one is mostly nits"), and a drift between them would show
+// up as a row whose verdict says 'keep' while the advisory underneath it says to tune.
+// FINDINGS, not labelled — summaries/praise are not findings — and a real sample floor so a bot
+// is never judged on a handful of scored comments.
+const ML_NIT_MIN_FINDINGS = 20;
+const ML_NIT_MIN_SHARE = 0.7;
+
+const ML_SEVERITY_KEYS: MlSeverity[] = ['nit', 'minor', 'major', 'critical'];
+function emptyMlSeverityCounts(): MlSeverityCounts {
+  return { nit: 0, minor: 0, major: 0, critical: 0 };
+}
 
 // Gates on the same-line-overlap tuning suggestion (ADVISORY — pair-level redundancy hint;
 // botVerdict never reads overlap). The share is of the bot's window threads landing in ≥2-bot
@@ -7938,13 +7948,38 @@ const OVERLAP_SUGGESTION_MIN_THREADS = 5;
 // acted-on + a high share of OVERDUE-untouched threads (untouched AND aged past the account-
 // wide normal response window) → noisy; moderate low acted-on → tune; else keep. The overdue
 // gate is what stops a bot being called noisy for threads the workspace simply hasn't reached yet.
-function botVerdict(threads: number, actedOnPct: number | null, overdueUntouched: number): BotVerdict {
+//
+// ── THE ONE ML INPUT: a nit-heavy bot can be ESCALATED 'keep' → 'tune' ──────────────────────
+// A bot whose threads all get answered looks perfect to the thread math, and that is exactly the
+// bot whose severity floor is set too low: the team is doing the work of triaging nits. The ML
+// fold is the only signal that sees it, so it speaks here as well as in the suggestion (same
+// gates, `ML_NIT_MIN_*` — one pair, so the chip and the advisory cannot contradict each other).
+//
+// ⚠ ESCALATION ONLY, AND ONLY TO 'tune'. The label is advisory (macro-F1 ≈ 0.66), so it may
+// never make a bot look WORSE than the thread math already found it ('noisy' stays 'noisy',
+// 'tune' stays 'tune') and it can never PRODUCE 'noisy' — "mostly nits" is a tuning fact, not
+// evidence the bot is being ignored. `nits` is the FINDINGS-only nit count (summaries and praise
+// are excluded upstream by the fold), and the bot's OWN declared severity is never an input to
+// it — that stored badge is display-only, and on the gold-300 it is the worst of the three
+// raters (see docs/ML-SEVERITY.md § Accuracy).
+function botVerdict(
+  threads: number,
+  actedOnPct: number | null,
+  overdueUntouched: number,
+  ml?: { findings: number; nits: number } | null,
+): BotVerdict {
   const overdueRatio = threads > 0 ? overdueUntouched / threads : 0;
   const highVolume = threads >= 10;
   const lowActedOn = actedOnPct != null && actedOnPct < 30;
   const highOverdue = overdueRatio >= 0.5;
   if (highVolume && lowActedOn && highOverdue) return 'noisy';
   if (threads >= 5 && actedOnPct != null && actedOnPct < 60) return 'tune';
+  if (
+    ml != null &&
+    ml.findings >= ML_NIT_MIN_FINDINGS &&
+    ml.nits / ml.findings >= ML_NIT_MIN_SHARE
+  )
+    return 'tune';
   return 'keep';
 }
 
@@ -9699,7 +9734,7 @@ export async function getBotAnalytics(
   const generatedAt = to.toISOString();
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
 
-  const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0, botOnlyPrs: 0, overdueGraceMs: OVERDUE_GRACE_MS };
+  const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0, botOnlyPrs: 0, overdueGraceMs: OVERDUE_GRACE_MS, overlapClusters: 0 };
   // An empty workspace → nothing to analyze.
   if (scope.repoIds.length === 0) {
     return { enabled: true, generatedAt, window: win, vendors: [], qualityChecks: [], totals: emptyTotals, suggestions: [] };
@@ -9876,10 +9911,18 @@ export async function getBotAnalytics(
   // the bot's last comment on that thread. Feeds BOTH the human-only humanFollowThroughPct
   // sub-figure (acc.humanFollow) AND the merged acted-on definition (humanFollowSet, item 6).
   const humanFollowSet = new Set<number>();
+  // Each NOT-ADDRESSED window thread → the id of the bot comment that OPENED it. The ML severity
+  // pass below joins `ml_comment_labels` on these ids; it is filled here because this is the one
+  // place the threads' comments are already in memory (a second read of the same rows for the
+  // severity split would be pure waste). Untouched-only on purpose: that is exactly the
+  // population the "Not addressed" column counts, so the per-severity split cannot describe a
+  // different set of threads than the total it sits beside.
+  const originCommentIdByThread = new Map<number, number>();
   const wtIds = windowThreads.map((t) => t.id);
   if (wtIds.length > 0) {
     const ftRows = await db
       .select({
+        id: reviewComments.id,
         threadId: reviewComments.threadId,
         authorId: reviewComments.authorId,
         createdAt: reviewComments.createdAt,
@@ -9887,11 +9930,24 @@ export async function getBotAnalytics(
       .from(reviewComments)
       .where(inArray(reviewComments.threadId, wtIds))
       .execute();
-    const byThread = new Map<number, { authorId: number | null; at: number }[]>();
+    const byThread = new Map<number, { id: number; authorId: number | null; at: number }[]>();
     for (const r of ftRows) {
       const arr = byThread.get(r.threadId) ?? [];
-      arr.push({ authorId: r.authorId, at: r.createdAt.getTime() });
+      arr.push({ id: r.id, authorId: r.authorId, at: r.createdAt.getTime() });
       byThread.set(r.threadId, arr);
+    }
+    for (const t of windowThreads) {
+      if (t.state !== 'untouched') continue;
+      // The thread's OWN bot (`originalCommenterId`), earliest comment first; ties break on the
+      // lower id so the same thread resolves to the same comment on every run and in both
+      // dialects (row order out of the join is not a promise).
+      let origin: { id: number; at: number } | null = null;
+      for (const c of byThread.get(t.id) ?? []) {
+        if (c.authorId !== t.userId) continue;
+        if (origin == null || c.at < origin.at || (c.at === origin.at && c.id < origin.id))
+          origin = { id: c.id, at: c.at };
+      }
+      if (origin) originCommentIdByThread.set(t.id, origin.id);
     }
     const reviewerByThread = new Map(windowThreads.map((t) => [t.id, { userId: t.userId, kind: t.kind }]));
     for (const [threadId, comments] of byThread) {
@@ -9990,6 +10046,57 @@ export async function getBotAnalytics(
     }
   }
 
+  // ── "Not addressed" BY ML SEVERITY (CORE, free — docs/ML-SEVERITY.md) ─────────────────────
+  // The `untouched` column split by how bad the model thinks each ignored finding was: "17 not
+  // addressed" is a volume complaint, "3 of them major" is a decision. Same population as that
+  // column by construction (`originCommentIdByThread` is untouched-only), bucketed by the label
+  // on the comment that OPENED the thread — the finding itself, not a later reply.
+  //
+  // ONE query over the whole scope, never a per-vendor fan-out: the ids are already collected and
+  // the read is the label table's own (account, kind, target) unique. A thread whose origin
+  // comment carries NO label simply does not count — the four numbers are a split of the LABELLED
+  // untouched threads and must not be read as summing to `untouched` (the UI blanks a zero for
+  // exactly this reason). Summaries and praise are excluded, the same exclusion the fold applies:
+  // a walkthrough nobody replied to is not an ignored finding.
+  const notAddressedBySeverityByUser = new Map<number, MlSeverityCounts>();
+  if (originCommentIdByThread.size > 0) {
+    const labelByCommentId = new Map<number, { severity: MlSeverity; skip: boolean }>();
+    for (const r of await db
+      .select({
+        targetId: mlCommentLabels.targetId,
+        severity: mlCommentLabels.severity,
+        categories: mlCommentLabels.categories,
+        isSummary: mlCommentLabels.isSummary,
+      })
+      .from(mlCommentLabels)
+      .where(
+        and(
+          eq(mlCommentLabels.accountId, accountId),
+          eq(mlCommentLabels.targetKind, 'review_comment'),
+          inArray(mlCommentLabels.targetId, [...originCommentIdByThread.values()]),
+        ),
+      )
+      .execute()) {
+      const severity = ML_SEVERITY_KEYS.find((s) => s === r.severity);
+      if (!severity) continue; // the column is plain text in both dialects — an unreadable value is no claim
+      const categories = Array.isArray(r.categories) ? r.categories : [];
+      labelByCommentId.set(r.targetId, {
+        severity,
+        skip: r.isSummary === true || categories.includes('praise'),
+      });
+    }
+    for (const t of windowThreads) {
+      if (t.state !== 'untouched') continue;
+      const commentId = originCommentIdByThread.get(t.id);
+      if (commentId == null) continue;
+      const label = labelByCommentId.get(commentId);
+      if (!label || label.skip) continue;
+      const counts = notAddressedBySeverityByUser.get(t.userId) ?? emptyMlSeverityCounts();
+      counts[label.severity] += 1;
+      notAddressedBySeverityByUser.set(t.userId, counts);
+    }
+  }
+
   // Item 6 — merged "acted-on": a window thread counts as acted-on when it's resolved or
   // likely_addressed (the commit heuristic) OR a human followed up after the bot (humanFollowSet).
   for (const t of windowThreads) {
@@ -10008,10 +10115,15 @@ export async function getBotAnalytics(
   // attribution. Advisory only: a column + a suggestion — botVerdict never reads any of this.
   const overlapThreadsByUser = new Map<number, number>();
   const overlapPairClusters = new Map<string, number>(); // `u<a>|u<b>` (a < b) → shared clusters
+  // The qualifying clusters themselves — the ONE scope-level number behind "line areas more than
+  // one bot flagged". Counted here rather than derived from the per-vendor columns because those
+  // credit EACH member of a cluster, so summing them double-counts by construction.
+  let overlapClusters = 0;
   {
     const reviewRoleThreads = windowThreads.filter((t) => roleMap.get(t.userId) !== 'quality_check');
     for (const c of clusterThreadsByLine(reviewRoleThreads, { nullLineGroup: false })) {
       if (c.userIds.size < 2) continue;
+      overlapClusters += 1;
       for (const t of c.items)
         overlapThreadsByUser.set(t.userId, (overlapThreadsByUser.get(t.userId) ?? 0) + 1);
       const ids = [...c.userIds].sort((x, y) => x - y);
@@ -10208,13 +10320,26 @@ export async function getBotAnalytics(
                 : null,
             mlHighPct:
               mlRow.findings > 0 ? Math.round((mlRow.high / mlRow.findings) * 100) : null,
+            // The not-addressed threads split by the severity of the finding that opened them.
+            // Rides the same `mlRow` gate as its siblings — a bot with no in-window labels has no
+            // ML claim to make about its backlog either. Zeros here mean "labels exist, none of
+            // the ignored threads are scored that way"; the UI blanks them like the other ML cells.
+            notAddressedBySeverity:
+              notAddressedBySeverityByUser.get(userId) ?? emptyMlSeverityCounts(),
           }
         : {}),
       // The verdict uses OVERDUE untouched (aged past the norm), not raw untouched — so a bot
       // isn't flagged noisy for threads the workspace just hasn't gotten to within its normal window.
-      // ⚠ NO ML INPUT: severity labels are advisory (macro-F1 ≈ 0.66) and the verdict's
-      // semantics are test-pinned — the nit ratio speaks only through the suggestion below.
-      verdict: botVerdict(acc.threads, actedOnPct, overdueUntouched),
+      // The ONE ML input is the nit ratio, and it can only ESCALATE 'keep' → 'tune' (see
+      // botVerdict): a bot whose threads all get answered is invisible to the thread math even
+      // when the team is triaging its nits by hand. Same gates as the suggestion below, so the
+      // chip and the advisory always agree. Semantics pinned by bot-analytics-verdict.test.ts.
+      verdict: botVerdict(
+        acc.threads,
+        actedOnPct,
+        overdueUntouched,
+        mlRow ? { findings: mlRow.findings, nits: mlRow.bySeverity.nit } : null,
+      ),
       // `?? null` (never `||`): a resolved 0 is a REAL price ("we pay nothing for this
       // bot") and must survive as 0, not collapse to "unknown". $/acted-on divides the EFFECTIVE
       // monthly and is null whenever the price is unknown or nothing was acted on — dividing by 0
@@ -10250,13 +10375,17 @@ export async function getBotAnalytics(
       });
     }
     // ML nit-ratio advisory — the severity-slot suggestion: a bot whose scored findings are
-    // overwhelmingly nits probably has its severity floor set too low. Same advisory contract
-    // as the path suggestions (no action attached; it must NOT feed botVerdict), gated on a
-    // real sample so a bot is never judged on a handful of labels. Quality checks are skipped
-    // by the `continue` above — a linter's findings being nits is its job, not a tuning signal.
-    if (mlRow && mlRow.findings >= ML_NIT_SUGGESTION_MIN_FINDINGS) {
+    // overwhelmingly nits probably has its severity floor set too low. Gated on a real sample so
+    // a bot is never judged on a handful of labels. Quality checks are skipped by the `continue`
+    // above — a linter's findings being nits is its job, not a tuning signal.
+    //
+    // It shares its gates with the verdict's escalation (ML_NIT_MIN_*), so whenever this
+    // sentence appears the chip above it reads at least 'tune'. That is the point of one pair of
+    // constants: the suggestion explains what the chip is reacting to, rather than being a second
+    // opinion about it.
+    if (mlRow && mlRow.findings >= ML_NIT_MIN_FINDINGS) {
       const nitShare = mlRow.bySeverity.nit / mlRow.findings;
-      if (nitShare >= ML_NIT_SUGGESTION_MIN_SHARE) {
+      if (nitShare >= ML_NIT_MIN_SHARE) {
         const nitPct = Math.round(nitShare * 100);
         suggestions.push({
           vendorKind: kind,
@@ -10328,6 +10457,11 @@ export async function getBotAnalytics(
     // The fixed overdue grace window (ms): a not-addressed thread is "overdue" (feeding the noisy
     // verdict) once it's older than this. Exposed so the UI can state the rule ("overdue after 36h").
     overdueGraceMs: OVERDUE_GRACE_MS,
+    // Line areas MORE THAN ONE review bot flagged in this window (the shared ±3-line clustering).
+    // A scope-level count, not a per-bot one — it answers "how much of this window did two tools
+    // both cover", which the per-vendor `overlapThreads` cannot: those credit every member of a
+    // cluster, so adding them up counts each shared spot twice or more.
+    overlapClusters,
   };
   // `ml` rides every non-empty response (the two empty-scope early returns omit it — treat
   // absent as "nothing labelled"). The totals cover the WHOLE automated set, both roles.
