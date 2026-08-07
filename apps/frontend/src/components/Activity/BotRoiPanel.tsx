@@ -523,7 +523,14 @@ function VendorTable({
                           // from "never migrated" on this row. So it is offered, not charged.
                           `No price set for this bot in this Workspace. The old account-wide list still has $${formatCostInput(v.legacyOnlyUsd)}/mo for it — re-enter it in Bots → Settings to use it.`
                         : 'No price set for this bot in this Workspace — set one in Bots → Settings.'
-                      : `$${formatCostInput(v.costMonthlyUsd)}/mo for this bot in this Workspace. Another Workspace may hold a different figure; the two are never added together.`
+                      : // `costMonthlyUsd` arrives EFFECTIVE (the server already multiplied a
+                        // per-seat unit by the Workspace's derived seat count on read), so the
+                        // per-seat case only ANNOTATES the figure — nothing here multiplies.
+                        `$${formatCostInput(v.costMonthlyUsd)}/mo for this bot in this Workspace${
+                          v.costModel === 'per_seat' && v.costUnitMonthlyUsd != null
+                            ? ` — $${formatCostInput(v.costUnitMonthlyUsd)}/seat at ${v.costSeatCount} seat${v.costSeatCount === 1 ? '' : 's'}`
+                            : ''
+                        }. Another Workspace may hold a different figure; the two are never added together.`
                   }
                 >
                   {v.dormant ? (

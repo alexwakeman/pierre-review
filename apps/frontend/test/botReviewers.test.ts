@@ -52,6 +52,10 @@ function reviewer(
     label: 'CodeRabbit',
     identitySource: 'auto',
     costMonthlyUsd: null,
+    costModel: 'flat',
+    // Mirrors the server's flat derivation (effective = the price itself); a per-seat fixture
+    // overrides BOTH fields explicitly, like the wire does.
+    effectiveMonthlyUsd: over.costMonthlyUsd ?? null,
     footprint: { reviews: 1, threads: 2, comments: 3, lastActiveAt: null },
     repoFootprints: [footprintIn(1)],
     sampleReviewBody: null,
@@ -211,6 +215,24 @@ describe('monthlyCostTotal — one workspace’s prices, deduped by actor', () =
       reviewer({ userId: 2, costMonthlyUsd: 0.2 }),
     ]);
     expect(t.totalUsd).toBe(0.3);
+  });
+
+  // ⚠ THE PER-SEAT RULE: the total sums the SERVER's `effectiveMonthlyUsd` (unit × seats,
+  // multiplied once, on read, server-side) — never the raw unit, and never a client-side
+  // unit × seats of its own. Summing the unit would print $29 for a $203 bot; multiplying here
+  // too would double-charge.
+  it('sums the server-computed effective figure for a per-seat row, not the unit', () => {
+    const t = monthlyCostTotal([
+      reviewer({
+        userId: 7,
+        costModel: 'per_seat',
+        costMonthlyUsd: 29,
+        effectiveMonthlyUsd: 203, // 29 × 7 seats, as the server serves it
+      }),
+      reviewer({ userId: 8, costMonthlyUsd: 30 }),
+    ]);
+    expect(t.totalUsd).toBe(233);
+    expect(t.pricedActors).toBe(2);
   });
 });
 

@@ -360,6 +360,13 @@ export interface RepoReviewerFootprintEntry extends ReviewerFootprint {
   repoId: number;
 }
 
+// How a bot's stored monthly price is READ. 'flat' = the number IS this workspace's monthly total
+// for the bot. 'per_seat' = the number is a PER-SEAT unit price, multiplied ON READ by the
+// workspace's derived seat count — a SEAT being a distinct HUMAN PR author across the workspace's
+// repos over the trailing 30 days. The product (unit × seats) is NEVER stored: as int4 cents it
+// can overflow, and a stored copy would go stale the moment the team changed.
+export type CostModel = 'flat' | 'per_seat';
+
 // THE BOT OBJECT — one actor, in one workspace. Judgement + identity + price + evidence, because
 // with one scope they are all facts about the same key. The wire form of a `workspace_reviewers`
 // row; it replaces the old `RepoReviewer` (one per repo) / `ReviewerIdentity` (one per account)
@@ -431,7 +438,9 @@ export interface WorkspaceReviewer {
   // ── price (no provenance; one writer) ──
   // What this bot costs in THIS workspace, in whole US DOLLARS (the wire unit; storage is integer
   // cents in `workspace_reviewers.monthly_cents` — money is never a float, and the two dialects
-  // share one fixed rounding rule).
+  // share one fixed rounding rule). Under `costModel: 'per_seat'` this is the STORED UNIT — the
+  // per-seat price the user typed, not the monthly figure; `effectiveMonthlyUsd` below carries
+  // that.
   //
   // null = NO PRICE SET. 0 is a real, deliberate price meaning "we pay nothing for this". TWO
   // STATES, and NOTHING INHERITS — so `??` vs `||` is an ordinary display bug here, not a silent
@@ -441,6 +450,15 @@ export interface WorkspaceReviewer {
   // per WORKSPACE. Totalling a single workspace's listing is correct (one row per actor). Totalling
   // across workspaces is not, and no surface may do it.
   costMonthlyUsd: number | null;
+  // How `costMonthlyUsd` is read — see CostModel. Written ONLY by the standalone cost route,
+  // exactly like the price itself (same one writer, same body; clearing the price resets this to
+  // 'flat' in the same statement). A row with no price is always 'flat'.
+  costModel: CostModel;
+  // The figure a monthly TOTAL may sum: `costMonthlyUsd × workspaceSeatCount` under 'per_seat',
+  // `costMonthlyUsd` itself under 'flat'. Null exactly when `costMonthlyUsd` is null.
+  // SERVER-computed on read so exactly one place multiplies seats — a client that multiplies again
+  // double-charges. Still a PER-WORKSPACE fact: never summed across workspaces.
+  effectiveMonthlyUsd: number | null;
   // ── evidence ──
   footprint: ReviewerFootprint;                  // aggregated over the workspace's repos
   repoFootprints: RepoReviewerFootprintEntry[];  // only repos where the actor has a footprint
@@ -455,6 +473,12 @@ export interface DetectedReviewersResponse {
   // The repos this listing covered, in render order. `[]` means "this workspace has no repos —
   // go move some in", which a count alone could not distinguish from "no reviewers detected yet".
   repoIds: number[];
+  // The workspace's derived SEAT COUNT: distinct HUMAN PR authors across the workspace's repos
+  // over the trailing 30 days, judged by the workspace's own bot verdicts (a manual "this is a
+  // human" makes a seat of a `users.isBot` login; a workspace-classified in-house bot is excluded
+  // even though the global table calls it human). ONE number per workspace, computed once per
+  // response — it feeds every per-seat row above, so it is not repeated per reviewer.
+  workspaceSeatCount: number;
   generatedAt: string;
 }
 
@@ -553,6 +577,16 @@ export interface WorkspaceReviewerPatchBody {
 export interface ReviewerCostBody {
   workspaceId: number;
   monthlyUsd: number | null;
+  // How the number is to be read — 'flat' (the default; omitted means flat) or 'per_seat' (a
+  // per-seat unit price, multiplied on read by the workspace's derived seat count). Only
+  // meaningful when `monthlyUsd` is a number: a CLEAR (`monthlyUsd: null`) always resets the
+  // stored model to 'flat' in the same single UPDATE, because a NULL price has no reading rule
+  // and a per-seat leftover would silently re-meter the next number typed.
+  //
+  // ⚠ IT RIDES THIS BODY AND NEVER THE PATCH. The model changes what the stored number MEANS, so
+  // it is money the same way the number is — the structural no-combined-body-can-address-money
+  // guarantee covers both columns or it covers neither.
+  costModel?: CostModel;
 }
 
 // ── WS2 Pierre-own-review provenance ────────────────────────────────
@@ -608,9 +642,24 @@ export interface BotVendorAnalytics {
   // the same caveat — under a repo-narrowed request it divides a whole subscription by part of its
   // work.
   //
+  // ⚠ THIS IS THE **EFFECTIVE** MONTHLY FIGURE. Under `costModel: 'per_seat'` the server has
+  // ALREADY multiplied the stored unit by the workspace's derived seat count (on read — the
+  // product is never stored), so every consumer — the ROI cell, `costPerActedOnUsd`, any
+  // within-workspace total — shows seat-adjusted dollars without knowing seats exist. The stored
+  // unit survives as `costUnitMonthlyUsd` for tooltip copy only.
+  //
   // Cost is CORE/free: it is read from a core table, so an OSS/npx install can set and see it.
   costMonthlyUsd: number | null;
   costPerActedOnUsd: number | null;
+  // How the stored price is metered — display metadata only: `costMonthlyUsd` above is already
+  // effective, so no consumer multiplies anything.
+  costModel: CostModel;
+  // The workspace's derived seat count the effective figure was computed at ("$29/seat at 12
+  // seats"). One workspace per response, so this repeats across rows by construction.
+  costSeatCount: number;
+  // The stored per-seat unit in dollars when `costModel === 'per_seat'`; null under 'flat' (the
+  // unit IS `costMonthlyUsd` there).
+  costUnitMonthlyUsd: number | null;
   // Zero window activity (no threads, comments, OR submitted reviews in the window) — the row
   // survives on its 12-week trend so a paused/quiet bot doesn't silently vanish from the table.
   dormant: boolean;

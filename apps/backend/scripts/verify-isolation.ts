@@ -611,6 +611,83 @@ check(
   'setReviewerCost(0) stores a real zero, distinct from null',
   (await q.setReviewerCost(1, botUser!.id, defaultA, 0))?.costMonthlyUsd === 0,
 );
+// `cost_model` shares the price's writer and its ownership gate — a foreign workspace can set
+// neither the number nor its reading rule.
+check(
+  'setReviewerCost(B, A’s workspace, per_seat) returns null (foreign workspace → 404)',
+  (await q.setReviewerCost(2, botUser!.id, defaultA, 29, 'per_seat')) === null &&
+    (await reviewerRow(1, defaultA, botUser!.id))?.costModel === 'flat',
+);
+check(
+  'setReviewerCost(A, per_seat) stores the reading rule beside the unit',
+  (await q.setReviewerCost(1, botUser!.id, defaultA, 29, 'per_seat'))?.costModel === 'per_seat',
+);
+check(
+  'setReviewerCost(null) resets the reading rule to flat in the same write',
+  (await q.setReviewerCost(1, botUser!.id, defaultA, null)) !== null &&
+    (await reviewerRow(1, defaultA, botUser!.id))?.costModel === 'flat',
+);
+// Restore the pre-existing state for the checks below (a real zero, flat).
+await q.setReviewerCost(1, botUser!.id, defaultA, 0);
+
+// ── SEAT COUNT: the read-time input to every per-seat price ─────────────────────
+// `workspaceHumanSeatCount` reaches the GLOBAL `users` table through `pull_requests.author_id`,
+// so its tenancy rests entirely on the accountId predicate + the `workspace_repos
+// (repo_id, account_id)` join. A human PR author is seeded for A; B computing over A's workspace
+// id must see ZERO — never A's headcount, and never a 404-shaped existence oracle.
+const [seatHuman] = await db
+  .insert(schema.users)
+  .values({ githubLogin: 'seat-human', githubNodeId: 'U_seat', isBot: false })
+  .returning()
+  .execute();
+await db
+  .insert(schema.pullRequests)
+  .values({
+    githubNodeId: 'PR_seat_A',
+    accountId: 1,
+    repoId: A.repoId,
+    number: 2,
+    title: 'seat fixture',
+    state: 'open',
+    isDraft: false,
+    authorId: seatHuman!.id,
+    openedAt: now,
+    updatedAt: now,
+  })
+  .execute();
+check(
+  'workspaceHumanSeatCount(A) counts A’s human PR author (positive control — not vacuous)',
+  (await q.workspaceHumanSeatCount(1, defaultA)) === 1,
+);
+check(
+  'workspaceHumanSeatCount(B, A’s workspace id) is 0 (foreign workspace yields nothing)',
+  (await q.workspaceHumanSeatCount(2, defaultA)) === 0,
+);
+check(
+  "workspaceHumanSeatCount(B, B's own workspace) does not count A's author",
+  (await q.workspaceHumanSeatCount(2, defaultB)) === 0,
+);
+// The exclusion routes through the WORKSPACE verdict: botUser is automated in defaultA (restored
+// above), so a PR it authors adds no seat.
+await db
+  .insert(schema.pullRequests)
+  .values({
+    githubNodeId: 'PR_seat_bot',
+    accountId: 1,
+    repoId: A.repoId,
+    number: 3,
+    title: 'bot-authored',
+    state: 'open',
+    isDraft: false,
+    authorId: botUser!.id,
+    openedAt: now,
+    updatedAt: now,
+  })
+  .execute();
+check(
+  'workspaceHumanSeatCount(A) excludes the workspace-classified bot author',
+  (await q.workspaceHumanSeatCount(1, defaultA)) === 1,
+);
 
 // ── WORKSPACE CRUD (CORE) ───────────────────────────────────────────────────────
 // `workspaces` + `workspace_repos` are account-scoped; every getter/writer filters accountId and

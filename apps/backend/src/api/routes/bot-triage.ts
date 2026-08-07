@@ -195,6 +195,13 @@ const identityResetSchema = {
 // `multipleOf: 0.01` rejects a fractional-cent price like $1.005, which nothing downstream can
 // print and which the two rounding paths were measured disagreeing about. (Non-finite values
 // cannot survive JSON.parse, and `type: number` rejects them anyway.)
+//
+// `costModel` is OPTIONAL (omitted ⇒ 'flat') and rides THIS body because it changes what the
+// number MEANS: 'per_seat' makes `monthlyUsd` a per-seat unit price, multiplied on read by the
+// workspace's derived seat count. It is money the same way the number is, so it must never appear
+// in the PATCH body — the no-combined-body guarantee covers both columns or neither. A CLEAR
+// (`monthlyUsd: null`) resets the stored model to 'flat' server-side regardless of what rides
+// along.
 const costSchema = {
   params: {
     type: 'object',
@@ -213,6 +220,7 @@ const costSchema = {
         maximum: 21474836.47,
         multipleOf: 0.01,
       },
+      costModel: { type: 'string', enum: ['flat', 'per_seat'] },
     },
   },
 };
@@ -478,8 +486,14 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // Same 404 rule as the resets: no row for that (workspace, actor) ⇒ no price to attach.
   app.put('/api/bot-reviewers/:userId/cost', { schema: costSchema }, async (req, reply) => {
     const { userId } = req.params as { userId: number };
-    const { workspaceId, monthlyUsd } = req.body as ReviewerCostBody;
-    const reviewer = await setReviewerCost(accountIdOf(req), userId, workspaceId, monthlyUsd);
+    const { workspaceId, monthlyUsd, costModel } = req.body as ReviewerCostBody;
+    const reviewer = await setReviewerCost(
+      accountIdOf(req),
+      userId,
+      workspaceId,
+      monthlyUsd,
+      costModel,
+    );
     if (!reviewer) {
       reply.status(404);
       return {

@@ -215,6 +215,8 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
         label: workspaceReviewers.label,
         identitySource: workspaceReviewers.identitySource,
         monthlyCents: workspaceReviewers.monthlyCents,
+        // The price's reading rule ('flat' | 'per_seat') — user-typed the same way the price is.
+        costModel: workspaceReviewers.costModel,
         updatedAt: workspaceReviewers.updatedAt,
       })
       .from(workspaceReviewers)

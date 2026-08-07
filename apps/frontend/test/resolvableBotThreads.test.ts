@@ -142,6 +142,8 @@ function listedBot(workspaceId: number, over: Partial<WorkspaceReviewer>): Works
     label: 'DeepSource',
     identitySource: 'auto',
     costMonthlyUsd: null,
+    costModel: 'flat',
+    effectiveMonthlyUsd: null,
     footprint: { reviews: 1, threads: 2, comments: 0, lastActiveAt: null },
     repoFootprints: [{ repoId: 1, reviews: 1, threads: 2, comments: 0, lastActiveAt: null }],
     sampleReviewBody: null,

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type {
   AutomatedReviewerKind,
+  CostModel,
   ReviewerRole,
   WorkspaceReviewer,
   WorkspaceReviewerPatchBody,
@@ -12,6 +13,7 @@ import {
   buildCostBody,
   formatCostInput,
   parseCostInput,
+  perSeatMonthlyUsd,
   type CostState,
 } from '../../lib/botCost.js';
 import {
@@ -121,6 +123,9 @@ export function DetectedReviewersTable({
 
   const reviewers = useMemo(() => q.data?.reviewers ?? [], [q.data]);
   const listRepoIds = useMemo(() => q.data?.repoIds ?? [], [q.data]);
+  // ONE derived number per workspace (distinct human PR authors, trailing 30 days) — the per-seat
+  // preview multiplies by it; every SAVED figure comes back server-multiplied.
+  const workspaceSeatCount = q.data?.workspaceSeatCount ?? 0;
 
   // The cards on screen. Filtered for the per-repo tab; the numbers below are deliberately NOT.
   const shown = useMemo(
@@ -212,12 +217,13 @@ export function DetectedReviewersTable({
             heading="Review bots"
             note="Counted in the ROI, behaviour and dedup metrics."
             reviewers={buckets.reviewBots}
+            workspaceSeatCount={workspaceSeatCount}
             repoName={repoName}
             botColor={botColor}
             busy={busy}
             onPatch={onPatch}
-            onCost={(userId, monthlyUsd) =>
-              cost.mutate({ userId, body: buildCostBody(workspaceId, monthlyUsd) })
+            onCost={(userId, monthlyUsd, costModel) =>
+              cost.mutate({ userId, body: buildCostBody(workspaceId, monthlyUsd, costModel) })
             }
             onResetJudgement={(userId) => resetJudgement.mutate({ userId, workspaceId })}
             onResetIdentity={(userId) => resetIdentity.mutate({ userId, workspaceId })}
@@ -230,12 +236,13 @@ export function DetectedReviewersTable({
             heading="Quality checks"
             note="Static analysis / coverage / lint — still visible in the feed, excluded from the review-bot metrics."
             reviewers={buckets.qualityChecks}
+            workspaceSeatCount={workspaceSeatCount}
             repoName={repoName}
             botColor={botColor}
             busy={busy}
             onPatch={onPatch}
-            onCost={(userId, monthlyUsd) =>
-              cost.mutate({ userId, body: buildCostBody(workspaceId, monthlyUsd) })
+            onCost={(userId, monthlyUsd, costModel) =>
+              cost.mutate({ userId, body: buildCostBody(workspaceId, monthlyUsd, costModel) })
             }
             onResetJudgement={(userId) => resetJudgement.mutate({ userId, workspaceId })}
             onResetIdentity={(userId) => resetIdentity.mutate({ userId, workspaceId })}
@@ -250,12 +257,13 @@ export function DetectedReviewersTable({
             heading="Marked “not a bot” by you"
             note="Detection leaves these alone until you reset them."
             reviewers={buckets.markedNotBots}
+            workspaceSeatCount={workspaceSeatCount}
             repoName={repoName}
             botColor={botColor}
             busy={busy}
             onPatch={onPatch}
-            onCost={(userId, monthlyUsd) =>
-              cost.mutate({ userId, body: buildCostBody(workspaceId, monthlyUsd) })
+            onCost={(userId, monthlyUsd, costModel) =>
+              cost.mutate({ userId, body: buildCostBody(workspaceId, monthlyUsd, costModel) })
             }
             onResetJudgement={(userId) => resetJudgement.mutate({ userId, workspaceId })}
             onResetIdentity={(userId) => resetIdentity.mutate({ userId, workspaceId })}
@@ -363,6 +371,7 @@ function ReviewerList({
   heading,
   note,
   reviewers,
+  workspaceSeatCount,
   repoName,
   botColor,
   busy,
@@ -374,11 +383,12 @@ function ReviewerList({
   heading: string;
   note: string;
   reviewers: WorkspaceReviewer[];
+  workspaceSeatCount: number;
   repoName: Map<number, string>;
   botColor: BotColorFn;
   busy: boolean;
   onPatch: (userId: number, body: ReviewerPatch) => void;
-  onCost: (userId: number, monthlyUsd: number | null) => void;
+  onCost: (userId: number, monthlyUsd: number | null, costModel: CostModel) => void;
   onResetJudgement: (userId: number) => void;
   onResetIdentity: (userId: number) => void;
 }): JSX.Element | null {
@@ -396,6 +406,7 @@ function ReviewerList({
           <ReviewerCard
             key={r.userId}
             reviewer={r}
+            workspaceSeatCount={workspaceSeatCount}
             repoName={repoName}
             botColor={botColor}
             busy={busy}
@@ -424,6 +435,7 @@ function ReviewerList({
  */
 function ReviewerCard({
   reviewer,
+  workspaceSeatCount,
   repoName,
   botColor,
   busy,
@@ -433,11 +445,12 @@ function ReviewerCard({
   onResetIdentity,
 }: {
   reviewer: WorkspaceReviewer;
+  workspaceSeatCount: number;
   repoName: Map<number, string>;
   botColor: BotColorFn;
   busy: boolean;
   onPatch: (userId: number, body: ReviewerPatch) => void;
-  onCost: (userId: number, monthlyUsd: number | null) => void;
+  onCost: (userId: number, monthlyUsd: number | null, costModel: CostModel) => void;
   onResetJudgement: (userId: number) => void;
   onResetIdentity: (userId: number) => void;
 }): JSX.Element {
@@ -687,12 +700,15 @@ function ReviewerCard({
 
       {/* ── PRICE (no provenance; one writer) ── */}
       <CostEditor
-        // Remount on a userId change so a half-typed number can never survive onto another bot.
+        // Remount on a userId change so a half-typed number (or a flipped pricing mode) can never
+        // survive onto another bot.
         key={r.userId}
         login={r.login}
         costMonthlyUsd={r.costMonthlyUsd}
+        costModel={r.costModel}
+        workspaceSeatCount={workspaceSeatCount}
         busy={busy}
-        onApply={(v) => onCost(r.userId, v)}
+        onApply={(v, m) => onCost(r.userId, v, m)}
       />
     </li>
   );
@@ -709,7 +725,7 @@ const COST_INPUT_CLS: Record<CostState, string> = {
 };
 
 /**
- * One bot's monthly price IN THIS WORKSPACE.
+ * One bot's monthly price IN THIS WORKSPACE — a number plus its reading rule (flat / per seat).
  *
  * ⚠ THE LABEL IS "PRICE FOR THIS WORKSPACE", NOT "PRICE". The old control sat in an account-wide
  * section and was captioned "all repos"; the price is now a plain column on the same per-Workspace
@@ -719,29 +735,47 @@ const COST_INPUT_CLS: Record<CostState, string> = {
  *
  * ⚠ 0 IS A PRICE ("we pay nothing"), EMPTY IS NO PRICE. `parseCostInput` keeps them apart —
  * `Number('')` is 0, which is exactly the trap.
+ *
+ * ⚠ THE MODE IS PART OF WHAT SAVE SAVES. Under "per seat" the typed number is a per-seat unit and
+ * the displayed monthly is unit × the Workspace's derived seat count — SERVER-computed on read;
+ * the "× N seats ≈ $X/mo" line below is a preview of the same arithmetic, never a second source
+ * of truth. A mode flip with an unchanged number is a REAL save (`costEditOutcome` compares
+ * both), and the mode state lives inside this component so the remount key on `userId` keeps a
+ * flipped toggle from ever leaking onto another bot's card.
  */
 function CostEditor({
   login,
   costMonthlyUsd,
+  costModel,
+  workspaceSeatCount,
   busy,
   onApply,
 }: {
   login: string;
   costMonthlyUsd: number | null;
+  costModel: CostModel;
+  workspaceSeatCount: number;
   busy: boolean;
-  onApply: (value: number | null) => void;
+  onApply: (value: number | null, model: CostModel) => void;
 }): JSX.Element {
   const state = costStateOf({ costMonthlyUsd });
   const serverText = formatCostInput(costMonthlyUsd);
   const [text, setText] = useState(serverText);
-  const [seededFrom, setSeededFrom] = useState(serverText);
-  if (seededFrom !== serverText) {
-    setSeededFrom(serverText);
+  const [mode, setMode] = useState<CostModel>(costModel);
+  // Re-seed BOTH fields when the server row changes under us (a save, a refetch): the mode is as
+  // much "the stored value" as the number is, and a stale one would silently re-save the old
+  // metering. Same U+001F separator rationale as the identity seed above (greppability).
+  const SEP = '\u001f';
+  const serverSeed = `${serverText}${SEP}${costModel}`;
+  const [seededFrom, setSeededFrom] = useState(serverSeed);
+  if (seededFrom !== serverSeed) {
+    setSeededFrom(serverSeed);
     setText(serverText);
+    setMode(costModel);
   }
 
   const parsed = parseCostInput(text);
-  const outcome = parsed.ok ? costEditOutcome(costMonthlyUsd, parsed.value) : null;
+  const outcome = parsed.ok ? costEditOutcome(costMonthlyUsd, parsed.value, costModel, mode) : null;
 
   // What the button would do / why it can't. The one no-op outcome is exactly the case where a
   // user who clicked and saw nothing needs the explanation on screen, not on hover.
@@ -751,7 +785,10 @@ function CostEditor({
   else
     switch (outcome.kind) {
       case 'set':
-        hint = 'Sets this bot’s price for this Workspace. Other Workspaces are unaffected.';
+        hint =
+          mode === 'per_seat'
+            ? 'Sets a per-seat price for this Workspace — the monthly figure is the price × this Workspace’s seats. Other Workspaces are unaffected.'
+            : 'Sets this bot’s price for this Workspace. Other Workspaces are unaffected.';
         break;
       case 'clear':
         hint = 'Clears the price for this Workspace. $/acted-on stops showing for this bot.';
@@ -763,6 +800,13 @@ function CostEditor({
         hint = 'No price set. Type a number to add one (0 means “free”).';
         break;
     }
+
+  const modeBtnCls = (active: boolean): string =>
+    `px-1.5 py-0.5 text-[10px] font-medium ${
+      active
+        ? 'bg-sky-600 text-white'
+        : 'bg-white text-gray-500 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+    }`;
 
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
@@ -782,18 +826,51 @@ function CostEditor({
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && parsed.ok && outcome?.dirty === true && !busy) {
-            onApply(parsed.value);
+            onApply(parsed.value, mode);
           }
         }}
         aria-label={`Monthly cost in US dollars for ${login} in this Workspace`}
       />
-      <span className="text-[11px] text-gray-400">/mo</span>
+      <span className="text-[11px] text-gray-400">{mode === 'per_seat' ? '/seat/mo' : '/mo'}</span>
+
+      {/* Flat vs per-seat. A segmented pair rather than a checkbox so the stored state is always
+          one of the two words on screen. */}
+      <span
+        role="group"
+        aria-label={`Pricing model for ${login} in this Workspace`}
+        className="inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700"
+      >
+        <button type="button" disabled={busy} onClick={() => setMode('flat')} className={modeBtnCls(mode === 'flat')}>
+          flat
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => setMode('per_seat')}
+          className={modeBtnCls(mode === 'per_seat')}
+          title="Meter this bot per seat — a seat is a distinct human who opened a PR in this Workspace’s repos over the last 30 days."
+        >
+          per seat
+        </button>
+      </span>
+
+      {/* Read-only preview of the server's read-time arithmetic — never a second source of truth
+          for a saved figure. */}
+      {mode === 'per_seat' && parsed.ok && parsed.value != null && (
+        <span
+          className="text-[10px] tabular-nums text-gray-400"
+          title="Seats are the distinct humans who opened a PR in this Workspace’s repos over the last 30 days. The monthly figure is derived at read time and moves with the team."
+        >
+          × {workspaceSeatCount} seat{workspaceSeatCount === 1 ? '' : 's'} ≈ $
+          {formatCostInput(perSeatMonthlyUsd(parsed.value, workspaceSeatCount))}/mo
+        </span>
+      )}
 
       <button
         type="button"
         disabled={busy || !parsed.ok || outcome?.dirty !== true}
         onClick={() => {
-          if (parsed.ok && outcome?.dirty === true) onApply(parsed.value);
+          if (parsed.ok && outcome?.dirty === true) onApply(parsed.value, mode);
         }}
         title={hint}
         className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"

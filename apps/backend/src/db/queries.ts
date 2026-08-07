@@ -101,6 +101,7 @@ import type {
   WorkspaceReviewer,
   WorkspaceReviewerPatchBody,
   ReviewerRole,
+  CostModel,
   DetectedReviewersResponse,
   ReviewProvenance,
   BotWindowKind,
@@ -580,6 +581,9 @@ export async function deleteWorkspace(
           label: r.label,
           identitySource: r.identitySource,
           monthlyCents: r.monthlyCents,
+          // The price's reading rule travels WITH the price: a per-seat unit re-homed as 'flat'
+          // would silently turn $29 × seats into a bare $29.
+          costModel: r.costModel,
           updatedAt: r.updatedAt,
         })
         .onConflictDoNothing({
@@ -7443,6 +7447,7 @@ interface ResolvedReviewer {
   label: string | null;
   identitySource: 'auto' | 'manual';
   monthlyCents: number | null;
+  costModel: CostModel;
 }
 
 // ONE read of ONE row per actor in ONE workspace. The `workspace_reviewers_account_workspace_idx`
@@ -7480,6 +7485,7 @@ function mapResolvedReviewer(
     label: r.label,
     identitySource: r.identitySource,
     monthlyCents: r.monthlyCents,
+    costModel: r.costModel,
   };
 }
 
@@ -7552,24 +7558,98 @@ export async function accountRepoIds(accountId: number): Promise<number[]> {
   return rows.map((r) => r.id);
 }
 
-// The monthly price recorded for each actor IN THIS WORKSPACE, in whole US DOLLARS (storage is
-// integer cents). NULL = no price set; 0 = "recorded as free". Nothing inherits, so there is no
-// chain behind a `??`.
+// The monthly price recorded for each actor IN THIS WORKSPACE — the stored UNIT in whole US
+// DOLLARS (storage is integer cents) plus its reading rule. Under 'flat' the unit IS the monthly
+// figure; under 'per_seat' the CALLER multiplies by `workspaceHumanSeatCount` ON READ (the
+// product is never stored — it can exceed int4 as cents and would go stale). NULL unit = no price
+// set; 0 = "recorded as free". Nothing inherits, so there is no chain behind a `??`.
 //
 // ⚠ THE CALLER OWNS THE RENDERING RULE THE SCHEMA CANNOT ENFORCE. Within one workspace there is
-// exactly one row per actor, so a total over this map is a plain sum. ACROSS workspaces it must
-// never be summed: six workspaces each listing a $120 CodeRabbit is either six subscriptions or
-// one seen six ways, and the app must not assert which.
+// exactly one row per actor, so a total over the EFFECTIVE figures is a plain sum. ACROSS
+// workspaces it must never be summed: six workspaces each listing a $120 CodeRabbit is either six
+// subscriptions or one seen six ways, and the app must not assert which.
 //
 // Cost is CORE/free: it is read from a core table, so an OSS/npx install can set and see it.
 export async function reviewerCostForUser(
   accountId: number,
   workspaceId: number,
-): Promise<Map<number, number | null>> {
-  const out = new Map<number, number | null>();
+): Promise<Map<number, { unitMonthlyUsd: number | null; costModel: CostModel }>> {
+  const out = new Map<number, { unitMonthlyUsd: number | null; costModel: CostModel }>();
   for (const [id, r] of await resolveWorkspaceReviewers(accountId, workspaceId))
-    out.set(id, r.monthlyCents == null ? null : r.monthlyCents / 100);
+    out.set(id, {
+      unitMonthlyUsd: r.monthlyCents == null ? null : r.monthlyCents / 100,
+      costModel: r.costModel,
+    });
   return out;
+}
+
+// A SEAT: one distinct HUMAN PR author across THIS workspace's repos over the trailing 30 days —
+// the grain per-seat vendors meter ("developers who opened PRs"). The window is FIXED rather than
+// following whatever analytics window the user is viewing: the price is an invoice-shaped fact,
+// and a monthly figure that changed when a chart flipped from 7d to 30d would read as a billing
+// bug. Every per-seat derivation (`effectiveMonthlyUsd`, the analytics' effective
+// `costMonthlyUsd`) multiplies by this number on read.
+const SEAT_WINDOW_DAYS = 30;
+
+// ⚠ THE BOT EXCLUSION IS THE WORKSPACE'S OWN VERDICT, NOT A RAW `users.isBot` PREDICATE — and the
+// verdict wins BOTH directions. `isBot` alone under-excludes (rows synced before a login joined
+// the known set — the same reason other exclusions in this file filter by LOGIN), so the excluded
+// set is `automatedReviewerUserIds` (vendor-login seed ∪ workspace rows) UNION the global
+// Bot markers; and a workspace's manual "this is a human" row makes that author a SEAT even where
+// the global table types the login a Bot.
+//
+// TENANCY IS THE JOIN: `workspace_repos (repo_id, account_id)` bound to the PR's own accountId,
+// so a foreign or unknown workspace id yields 0 — never another tenant's headcount, and no
+// existence oracle. The count keys on the WORKSPACE MEMBERSHIP (like the price itself), never on
+// a repoIds narrowing: a per-seat invoice does not shrink because the user filtered a chart.
+export async function workspaceHumanSeatCount(
+  accountId: number,
+  workspaceId: number,
+): Promise<number> {
+  const since = new Date(Date.now() - SEAT_WINDOW_DAYS * 86_400_000);
+  const [automatedIds, resolved, authorRows] = await Promise.all([
+    automatedReviewerUserIds(accountId, workspaceId, 'all'),
+    resolveWorkspaceReviewers(accountId, workspaceId),
+    // The global markers ride the author join rather than a sweep of the GLOBAL `users` table —
+    // only the authors actually in scope are ever read.
+    db
+      .selectDistinct({
+        id: pullRequests.authorId,
+        isBot: users.isBot,
+        githubType: users.githubType,
+      })
+      .from(pullRequests)
+      .innerJoin(
+        workspaceRepos,
+        and(
+          eq(workspaceRepos.repoId, pullRequests.repoId),
+          eq(workspaceRepos.accountId, pullRequests.accountId),
+        ),
+      )
+      .innerJoin(users, eq(users.id, pullRequests.authorId))
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          eq(workspaceRepos.workspaceId, workspaceId),
+          gte(pullRequests.openedAt, since),
+        ),
+      )
+      .execute(),
+  ]);
+  const automated = new Set(automatedIds);
+  let seats = 0;
+  for (const r of authorRows) {
+    if (r.id == null) continue;
+    // The workspace's manual "this is a human" beats every global marker.
+    if (resolved.get(r.id)?.manualHuman) {
+      seats += 1;
+      continue;
+    }
+    if (automated.has(r.id)) continue;
+    if (r.isBot || r.githubType === 'Bot') continue;
+    seats += 1;
+  }
+  return seats;
 }
 
 // The set of automated-reviewer user ids for ONE workspace = known vendor logins (the global
@@ -7943,7 +8023,14 @@ export async function listDetectedReviewers(
   const membership = new Set(await getWorkspaceRepoIds(workspaceId, accountId));
   const scopeRepoIds = scope.repoIds.filter((id) => membership.has(id));
   if (scopeRepoIds.length === 0) {
-    return { workspaceId, reviewers: [], repoIds: scopeRepoIds, generatedAt };
+    // Still the WORKSPACE's seat count, not the (empty) narrowing's: seats key on membership.
+    return {
+      workspaceId,
+      reviewers: [],
+      repoIds: scopeRepoIds,
+      workspaceSeatCount: await workspaceHumanSeatCount(accountId, workspaceId),
+      generatedAt,
+    };
   }
 
   const since90 = new Date(Date.now() - 90 * 86_400_000);
@@ -8149,7 +8236,14 @@ export async function listDetectedReviewers(
   for (const r of storedRows) touchActor(r.authorUserId);
 
   if (actors.size === 0) {
-    return { workspaceId, reviewers: [], repoIds: scopeRepoIds, generatedAt };
+    // No reviewers is not "no seats": the repos may hold plenty of human PR authors.
+    return {
+      workspaceId,
+      reviewers: [],
+      repoIds: scopeRepoIds,
+      workspaceSeatCount: await workspaceHumanSeatCount(accountId, workspaceId),
+      generatedAt,
+    };
   }
 
   const userIds = [...actors.keys()];
@@ -8247,6 +8341,10 @@ export async function listDetectedReviewers(
     if (body) sampleByUser.set(r.authorId, body.length > 400 ? `${body.slice(0, 399)}…` : body);
   }
 
+  // ONE seat count per response — it feeds every per-seat row below, and it is computed AFTER the
+  // lazy pass so a bot first classified by this very listing is already out of the count.
+  const workspaceSeatCount = await workspaceHumanSeatCount(accountId, workspaceId);
+
   const reviewers: WorkspaceReviewer[] = [];
   for (const a of actors.values()) {
     const stored = rowByUser.get(a.userId);
@@ -8254,14 +8352,19 @@ export async function listDetectedReviewers(
     const u = userById.get(a.userId);
     if (!u) continue;
     reviewers.push(
-      mapWorkspaceReviewer(stored, u, {
-        footprint: footprintOf(a.total),
-        repoFootprints: a.perRepo
-          .slice()
-          .sort((x, y) => x.repoId - y.repoId)
-          .map((f) => ({ repoId: f.repoId, ...footprintOf(f) })),
-        sampleReviewBody: sampleByUser.get(a.userId) ?? null,
-      }),
+      mapWorkspaceReviewer(
+        stored,
+        u,
+        {
+          footprint: footprintOf(a.total),
+          repoFootprints: a.perRepo
+            .slice()
+            .sort((x, y) => x.repoId - y.repoId)
+            .map((f) => ({ repoId: f.repoId, ...footprintOf(f) })),
+          sampleReviewBody: sampleByUser.get(a.userId) ?? null,
+        },
+        workspaceSeatCount,
+      ),
     );
   }
 
@@ -8274,7 +8377,7 @@ export async function listDetectedReviewers(
       a.login.localeCompare(b.login),
   );
 
-  return { workspaceId, reviewers, repoIds: scopeRepoIds, generatedAt };
+  return { workspaceId, reviewers, repoIds: scopeRepoIds, workspaceSeatCount, generatedAt };
 }
 
 function footprintOf(f: {
@@ -8301,12 +8404,17 @@ function mapWorkspaceReviewer(
     repoFootprints: RepoReviewerFootprintEntry[];
     sampleReviewBody: string | null;
   },
+  // The workspace's derived seat count — computed ONCE by the caller (once per listing, once per
+  // single-reviewer echo), never per row: it is one number for the whole workspace.
+  seatCount: number,
 ): WorkspaceReviewer {
   const kind = (row.kind as AutomatedReviewerKind | null) ?? null;
   const label =
     row.label?.trim() ||
     (kind && kind !== 'in_house' ? labelForKind(kind) : null) ||
     u.githubLogin;
+  // NULL = no price set, 0 = free. Nothing inherits, so there is no third state to resolve.
+  const unitUsd = row.monthlyCents == null ? null : row.monthlyCents / 100;
   return {
     workspaceId: row.workspaceId,
     userId: u.id,
@@ -8322,11 +8430,32 @@ function mapWorkspaceReviewer(
     kind,
     label,
     identitySource: row.identitySource,
-    // NULL = no price set, 0 = free. Nothing inherits, so there is no third state to resolve.
-    costMonthlyUsd: row.monthlyCents == null ? null : row.monthlyCents / 100,
+    costMonthlyUsd: unitUsd,
+    // Read via the stored reading rule; a per-seat price is 'flat' by construction once cleared.
+    ...priceReading(unitUsd, row.costModel, seatCount),
     footprint: evidence.footprint,
     repoFootprints: evidence.repoFootprints,
     sampleReviewBody: evidence.sampleReviewBody,
+  };
+}
+
+// unit × seats, ON READ — the one place the per-seat multiplication happens for the reviewer wire
+// (the analytics row does the same arithmetic against its own map). The product stays in JS
+// dollars (binary64) and is re-rounded to the cent; it is NEVER stored, because seats × cents can
+// exceed int4 and a stored copy would go stale as the team changes.
+function priceReading(
+  unitUsd: number | null,
+  costModel: CostModel,
+  seatCount: number,
+): { costModel: CostModel; effectiveMonthlyUsd: number | null } {
+  return {
+    costModel,
+    effectiveMonthlyUsd:
+      unitUsd == null
+        ? null
+        : costModel === 'per_seat'
+          ? Math.round(unitUsd * seatCount * 100) / 100
+          : unitUsd,
   };
 }
 
@@ -8369,7 +8498,9 @@ async function readWorkspaceReviewer(
   )[0];
   if (!u) return null;
   const evidence = await reviewerFootprintIn(accountId, workspaceId, userId);
-  return mapWorkspaceReviewer(row, u, evidence);
+  // Once per echo, exactly like once per listing — never per row.
+  const seatCount = await workspaceHumanSeatCount(accountId, workspaceId);
+  return mapWorkspaceReviewer(row, u, evidence, seatCount);
 }
 
 // One actor's footprint across a workspace's repos: the workspace total + the per-repo breakdown +
@@ -8860,7 +8991,8 @@ export function monthlyUsdToCents(usd: number): number {
   return Math.min(MAX_MONTHLY_CENTS, Math.max(0, cents));
 }
 
-// PUT /api/bot-reviewers/:userId/cost — THE ONLY WRITE OF `monthly_cents` ANYWHERE.
+// PUT /api/bot-reviewers/:userId/cost — THE ONLY WRITE OF `monthly_cents` AND `cost_model`
+// ANYWHERE.
 //
 // TWO STATES ONLY: a number → `monthly_cents` (0 is real: "we pay nothing"); null → NULL. There is
 // nothing to fall back to, so NULL means exactly "no price set".
@@ -8887,15 +9019,26 @@ export async function setReviewerCost(
   userId: number,
   workspaceId: number,
   monthlyUsd: number | null,
+  // How the number is to be read — 'flat' (omitted ⇒ flat) or 'per_seat' (a per-seat unit,
+  // multiplied on read by workspaceHumanSeatCount). It shares the price's one writer because it
+  // changes what the stored number MEANS: a body that can set one without the other could turn
+  // $29/mo into $29 × seats without touching a money column.
+  costModel?: CostModel,
 ): Promise<WorkspaceReviewer | null> {
   if (!(await ownsWorkspace(accountId, workspaceId))) return null;
   if (!(await actorHasWorkspaceRow(accountId, workspaceId, userId))) return null;
   const monthlyCents = monthlyUsd == null ? null : monthlyUsdToCents(monthlyUsd);
   await db
     .update(workspaceReviewers)
-    // THE PRICE AND THE TIMESTAMP, NOTHING ELSE. This object is the structural guarantee that
-    // pricing a bot cannot restate its judgement or its identity.
-    .set({ monthlyCents, updatedAt: new Date() })
+    // THE PRICE, ITS READING RULE AND THE TIMESTAMP, NOTHING ELSE. This object is the structural
+    // guarantee that pricing a bot cannot restate its judgement or its identity. A CLEAR resets
+    // the model to 'flat' in the SAME statement: a NULL price has no reading rule, and a per-seat
+    // leftover would silently re-meter the next number typed as unit × seats.
+    .set({
+      monthlyCents,
+      costModel: monthlyUsd == null ? 'flat' : (costModel ?? 'flat'),
+      updatedAt: new Date(),
+    })
     .where(
       and(
         eq(workspaceReviewers.accountId, accountId),
@@ -9516,6 +9659,11 @@ export async function getBotAnalytics(
   // which. (This used to be `null` here with the client overlaying a per-LOGIN blob from
   // `pro_settings.bots.cost`.)
   const costMap = await reviewerCostForUser(accountId, scope.workspaceId);
+  // ONE seat count per response. Per-seat prices multiply by it on read, and it is one number for
+  // the whole workspace — fanning the DISTINCT scan out per vendor row would be pure waste. It
+  // keys on the workspace MEMBERSHIP, never the repoIds narrowing (a per-seat invoice does not
+  // shrink because the user filtered a chart).
+  const seatCount = await workspaceHumanSeatCount(accountId, scope.workspaceId);
 
   // Per-REVIEWER identity (so in-house bots — all kind 'in_house' — separate into their own rows
   // instead of collapsing). Label preference: the account's custom classification label →
@@ -9877,7 +10025,19 @@ export async function getBotAnalytics(
     const isQualityCheck = roleMap.get(userId) === 'quality_check';
     // `?? null` (never `||`): a stored 0 is a REAL price ("we pay nothing for this bot") and must
     // survive as 0, not collapse to "unknown". Nothing inherits, so there is no chain to walk.
-    const costMonthlyUsd = costMap.get(userId) ?? null;
+    const storedCost = costMap.get(userId);
+    const costModel: CostModel = storedCost?.costModel ?? 'flat';
+    const unitUsd = storedCost?.unitMonthlyUsd ?? null;
+    // The EFFECTIVE monthly (unit × seats under per_seat, computed here on read — the product is
+    // never stored) rides the long-standing `costMonthlyUsd` field, so every consumer — the ROI
+    // cell, `costPerActedOnUsd`, within-workspace totals — is seat-adjusted without knowing seats
+    // exist. The stored unit survives as `costUnitMonthlyUsd` for tooltip copy.
+    const costMonthlyUsd =
+      unitUsd == null
+        ? null
+        : costModel === 'per_seat'
+          ? Math.round(unitUsd * seatCount * 100) / 100
+          : unitUsd;
     const trend: BotVendorTrendPoint[] = acc.weekly.map((w, i) => ({
       weekStart: new Date(trendFrom.getTime() + i * 7 * 86_400_000).toISOString(),
       threads: w.threads,
@@ -9906,11 +10066,15 @@ export async function getBotAnalytics(
       // isn't flagged noisy for threads the workspace just hasn't gotten to within its normal window.
       verdict: botVerdict(acc.threads, actedOnPct, overdueUntouched),
       // `?? null` (never `||`): a resolved 0 is a REAL price ("we pay nothing for this
-      // bot") and must survive as 0, not collapse to "unknown". $/acted-on is null whenever the
-      // price is unknown or nothing was acted on — dividing by 0 would print Infinity.
+      // bot") and must survive as 0, not collapse to "unknown". $/acted-on divides the EFFECTIVE
+      // monthly and is null whenever the price is unknown or nothing was acted on — dividing by 0
+      // would print Infinity.
       costMonthlyUsd: costMonthlyUsd,
       costPerActedOnUsd:
         costMonthlyUsd != null && acc.actedOn > 0 ? costMonthlyUsd / acc.actedOn : null,
+      costModel,
+      costSeatCount: seatCount,
+      costUnitMonthlyUsd: costModel === 'per_seat' ? unitUsd : null,
       dormant,
       lastActiveAt: lastActiveMs != null ? new Date(lastActiveMs).toISOString() : null,
       trend,

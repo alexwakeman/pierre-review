@@ -338,8 +338,9 @@ loosened:
   `source !== 'manual'` and the identity half only when `identitySource !== 'manual'`; if neither
   half may be written it emits **no statement at all**. The old shared-object pattern is correct for
   a single-grain table and would, here, overwrite a human's vendor name on every auto pass.
-- **`monthlyCents` is in NEITHER half** — not in the `set:`, not as a derived INSERT value, nowhere
-  in `reviewer-classify.ts`. A row `persist` creates has no price.
+- **`monthlyCents` (and its reading rule `costModel`) is in NEITHER half** — not in the `set:`, not
+  as a derived INSERT value, nowhere in `reviewer-classify.ts`. A row `persist` creates has no
+  price and reads 'flat' by column default.
 - **`persistHumanJudgement` carries no `kind`/`label`** at all, so a human "this is a bot" cannot
   rename the vendor as a side effect.
 - **`useBotColors` is now WORKSPACE-SCOPED**, and this is the single most dangerous consequence of
@@ -363,7 +364,7 @@ considered and overruled.
 
 **3. THE WRITE SURFACE IS TWO ROUTES, NOT ONE AND NOT THREE** (full contract in the HTTP API table):
 `PATCH :userId {workspaceId, automated?, role?, kind?, label?}` and
-`PUT …/cost {workspaceId, monthlyUsd}`.
+`PUT …/cost {workspaceId, monthlyUsd, costModel?}`.
 
 - The four PATCH fields merged because they are all **re-derivable** — a wrong write is fixed by the
   next classification pass or a reset — so one body keyed by two independent provenance flags
@@ -372,6 +373,22 @@ considered and overruled.
 - **Cost stayed separate because it is derivable by nothing and it is money.** Its own body means no
   combined body can address `monthly_cents` at all — the same structural guarantee the two-table
   split gave, with one fewer table. **Do not fold it into the PATCH.**
+- **`cost_model` ('flat' | 'per_seat', NOT NULL DEFAULT 'flat') is the price's READING RULE and is
+  part of the price half**: it rides ONLY the cost body (it changes what the stored number MEANS,
+  so it is money the same way the number is), shares `setReviewerCost`'s single UPDATE, and a CLEAR
+  (`monthlyUsd: null`) resets it to 'flat' in that same statement. Under `per_seat` the stored
+  `monthly_cents` is a PER-SEAT UNIT and every displayed monthly figure is
+  **unit × the workspace's derived seat count, computed ON READ** — the product is never stored
+  (seats × cents can exceed int4, and a stored copy goes stale). A **seat** =
+  `workspaceHumanSeatCount(accountId, workspaceId)`: distinct HUMAN PR authors across the
+  workspace's MEMBERSHIP repos (never a repoIds narrowing) over the trailing 30 days, with the bot
+  exclusion routed through `automatedReviewerUserIds` ∪ the global `users.isBot`/`githubType='Bot'`
+  markers, minus the workspace's manual-human rows (which win both directions). The wire serves the
+  unit on `costMonthlyUsd`, the derived figure on `WorkspaceReviewer.effectiveMonthlyUsd` and — for
+  the analytics — AS `BotVendorAnalytics.costMonthlyUsd` (already-effective; the unit survives as
+  `costUnitMonthlyUsd`), so exactly ONE side multiplies seats: the server. The listing carries one
+  `workspaceSeatCount` per response; `monthlyCostTotal` sums `effectiveMonthlyUsd`; the resets and
+  the deleteWorkspace re-home carry BOTH price columns; still never summed across workspaces.
 - The classifier honours BOTH provenance flags, which is what lets a manual "not a bot" in workspace
   A coexist with fresh auto verdicts in B and C: there is **no "manual override wins" early return**
   — the derivation always runs and `persist` declines only the halves a human owns.

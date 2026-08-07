@@ -1,4 +1,4 @@
-import type { BotVendorAnalytics, ReviewerCostBody } from '@pierre-review/shared';
+import type { BotVendorAnalytics, CostModel, ReviewerCostBody } from '@pierre-review/shared';
 
 // Pure logic for a bot's monthly price: what state it is in, what a typed box means, and what
 // body a cost edit sends. Lives here (not inline in the component) because every rule in it is a
@@ -123,12 +123,23 @@ export interface CostEdit {
  * ⚠ 0 IS A PRICE. `current: 0, next: null` is a real CLEAR (from "we pay nothing" to "nobody has
  * said"), and `current: null, next: 0` is a real SET. Any implementation that leans on
  * truthiness collapses both into no-ops, which is why both are pinned by tests.
+ *
+ * ⚠ A MODE CHANGE WITH AN UNCHANGED NUMBER IS A REAL SAVE. $29 flat and $29/seat are different
+ * monthly figures the moment the workspace has more than one seat, so "unchanged" must compare
+ * BOTH halves — a number-only comparison would leave the toggle looking saved while the server
+ * still meters the old way. A CLEAR ignores the modes entirely: the server resets the stored
+ * model to 'flat' as part of the same write, so there is no mode left to disagree about.
  */
-export function costEditOutcome(current: number | null, next: number | null): CostEdit {
+export function costEditOutcome(
+  current: number | null,
+  next: number | null,
+  currentModel: CostModel = 'flat',
+  nextModel: CostModel = 'flat',
+): CostEdit {
   if (next == null) {
     return current == null ? { kind: 'no-cost', dirty: false } : { kind: 'clear', dirty: true };
   }
-  if (current === next) return { kind: 'unchanged', dirty: false };
+  if (current === next && currentModel === nextModel) return { kind: 'unchanged', dirty: false };
   return { kind: 'set', dirty: true };
 }
 
@@ -146,11 +157,31 @@ export function costEditOutcome(current: number | null, next: number | null): Co
  * number sets, null clears. Spreading it conditionally (the reflex from the old optional-field
  * patch body) would turn the Clear button into a silent no-op.
  *
+ * `costModel` rides along only when SETTING a number ('flat' | 'per_seat'; omitted ⇒ flat). A
+ * CLEAR carries no model — the server resets the stored one to 'flat' inside the same UPDATE, and
+ * sending one anyway would imply a cleared price still has a reading rule.
+ *
  * ⚠ IT CARRIES NO `repoId`, and must not gain one. Every repo in the workspace is priced by this
  * one row; keying it per repo is how six repos of CodeRabbit become $720.
  */
-export function buildCostBody(workspaceId: number, monthlyUsd: number | null): ReviewerCostBody {
-  return { workspaceId, monthlyUsd };
+export function buildCostBody(
+  workspaceId: number,
+  monthlyUsd: number | null,
+  costModel?: CostModel,
+): ReviewerCostBody {
+  if (monthlyUsd == null) return { workspaceId, monthlyUsd: null };
+  return costModel == null ? { workspaceId, monthlyUsd } : { workspaceId, monthlyUsd, costModel };
+}
+
+/**
+ * The read-only "× N seats ≈ $X/mo" line under the per-seat editor — the SAME arithmetic the
+ * server applies on read (unit × seats, re-rounded to the cent, because binary64 dollars × an
+ * integer picks up representation error). Duplicated here ONLY for the live preview of a number
+ * not yet saved: every SAVED figure on screen comes from the server's `effectiveMonthlyUsd` /
+ * effective `costMonthlyUsd`, and nothing else on the client multiplies seats.
+ */
+export function perSeatMonthlyUsd(unitUsd: number, seats: number): number {
+  return Math.round(unitUsd * seats * 100) / 100;
 }
 
 // ── ROI cost resolution ─────────────────────────────────────────────────────────────────────

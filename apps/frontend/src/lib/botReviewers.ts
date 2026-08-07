@@ -141,6 +141,13 @@ export interface MonthlyCostTotal {
  * asserting six subscriptions where there may be one). Hand this function a single
  * `DetectedReviewersResponse.reviewers` array and nothing else.
  *
+ * ⚠ IT SUMS THE SERVER'S `effectiveMonthlyUsd`, NEVER `costMonthlyUsd`. Under 'per_seat' the
+ * stored number is a per-seat UNIT, and the server has already multiplied it by the workspace's
+ * derived seat count on read — multiplying here too would double-charge, and summing the raw unit
+ * would under-state. Exactly one place does that arithmetic, and it is not the client.
+ * (`effectiveMonthlyUsd` is null exactly when `costMonthlyUsd` is, so the priced/unpriced split
+ * is unchanged.)
+ *
  * ⚠ THE DEDUPE BY `userId` IS KEPT THOUGH IT IS NOW TRIVIALLY SATISFIED. The server emits exactly
  * one row per actor per workspace, so it can never fire — which is precisely what makes it a cheap
  * standing invariant: the day someone concatenates two workspaces' listings to "show everything",
@@ -162,12 +169,12 @@ export function monthlyCostTotal(reviewers: readonly WorkspaceReviewer[]): Month
     if (!r.automated) continue;
     if (seen.has(r.userId)) continue;
     seen.add(r.userId);
-    if (r.costMonthlyUsd == null) {
+    if (r.effectiveMonthlyUsd == null) {
       unpriced += 1;
       continue;
     }
     priced += 1;
-    total += r.costMonthlyUsd;
+    total += r.effectiveMonthlyUsd;
   }
   return {
     // Re-round to the cent: summing binary64 dollars accumulates representation error

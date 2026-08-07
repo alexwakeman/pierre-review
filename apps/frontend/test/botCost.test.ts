@@ -18,6 +18,7 @@ import {
   formatCostInput,
   MAX_COST_USD,
   parseCostInput,
+  perSeatMonthlyUsd,
   resolveVendorCost,
 } from '../src/lib/botCost.js';
 
@@ -115,6 +116,40 @@ describe('costEditOutcome — which gestures actually send a request', () => {
   it('emptying an unpriced bot sends nothing, and says which no-op it is', () => {
     expect(costEditOutcome(null, null)).toEqual({ kind: 'no-cost', dirty: false });
   });
+
+  // ── The pricing MODE is part of what "unchanged" compares ─────────────────────────────────
+  // $29 flat and $29/seat are different monthly figures the moment the workspace has ≠1 seats, so
+  // a mode flip with an untouched number must be a REAL save — a number-only comparison leaves
+  // the toggle looking saved while the server still meters the old way.
+  it('a MODE change with an unchanged number is a real save', () => {
+    expect(costEditOutcome(29, 29, 'flat', 'per_seat')).toEqual({ kind: 'set', dirty: true });
+    expect(costEditOutcome(29, 29, 'per_seat', 'flat')).toEqual({ kind: 'set', dirty: true });
+  });
+
+  it('same number AND same mode is unchanged', () => {
+    expect(costEditOutcome(29, 29, 'per_seat', 'per_seat')).toEqual({
+      kind: 'unchanged',
+      dirty: false,
+    });
+  });
+
+  // The models default to 'flat' so every pre-existing two-argument call keeps its meaning.
+  it('omitted models mean flat/flat — the two-argument form is unchanged', () => {
+    expect(costEditOutcome(120, 120)).toEqual({ kind: 'unchanged', dirty: false });
+  });
+
+  // A clear resets the stored model to 'flat' server-side in the same UPDATE, so the modes play
+  // no part in whether the clear sends.
+  it('a CLEAR is a clear regardless of the modes', () => {
+    expect(costEditOutcome(29, null, 'per_seat', 'per_seat')).toEqual({
+      kind: 'clear',
+      dirty: true,
+    });
+    expect(costEditOutcome(null, null, 'flat', 'per_seat')).toEqual({
+      kind: 'no-cost',
+      dirty: false,
+    });
+  });
 });
 
 describe('buildCostBody', () => {
@@ -140,6 +175,43 @@ describe('buildCostBody', () => {
   // reintroduced from the write side: every repo in the workspace is priced by this single row.
   it('carries a workspaceId and a price, and nothing else — no repoId', () => {
     expect(Object.keys(buildCostBody(3, 120)).sort()).toEqual(['monthlyUsd', 'workspaceId']);
+  });
+
+  // The pricing mode rides the COST body (it changes what the number means — money the same way
+  // the number is), and only when a number is being set.
+  it('carries costModel when setting with a mode', () => {
+    expect(buildCostBody(3, 29, 'per_seat')).toEqual({
+      workspaceId: 3,
+      monthlyUsd: 29,
+      costModel: 'per_seat',
+    });
+    expect(buildCostBody(3, 0, 'per_seat')).toEqual({
+      workspaceId: 3,
+      monthlyUsd: 0,
+      costModel: 'per_seat',
+    });
+  });
+
+  // A CLEAR carries no model: the server resets the stored one to 'flat' inside the same UPDATE,
+  // and a model on a null price would imply a cleared price still has a reading rule.
+  it('a CLEAR omits costModel even when one is passed', () => {
+    expect(buildCostBody(3, null, 'per_seat')).toEqual({ workspaceId: 3, monthlyUsd: null });
+    expect(Object.keys(buildCostBody(3, null, 'per_seat')).sort()).toEqual([
+      'monthlyUsd',
+      'workspaceId',
+    ]);
+  });
+});
+
+describe('perSeatMonthlyUsd — the preview mirrors the server’s read-time arithmetic', () => {
+  it('multiplies and re-rounds to the cent (binary64 × integer picks up error)', () => {
+    expect(perSeatMonthlyUsd(29.99, 7)).toBe(209.93);
+    expect(perSeatMonthlyUsd(0.1, 3)).toBe(0.3);
+  });
+
+  it('zero seats and zero unit are honest zeros, not blanks', () => {
+    expect(perSeatMonthlyUsd(29, 0)).toBe(0);
+    expect(perSeatMonthlyUsd(0, 12)).toBe(0);
   });
 });
 

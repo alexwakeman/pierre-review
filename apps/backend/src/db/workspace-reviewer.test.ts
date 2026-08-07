@@ -5,7 +5,9 @@
 //
 //   JUDGEMENT  automated / role / confidence / source / reasons_json   — provenance: `source`
 //   IDENTITY   kind / label                                            — provenance: `identity_source`
-//   PRICE      monthly_cents                                           — no provenance; ONE writer
+//   PRICE      monthly_cents + cost_model                              — no provenance; ONE writer
+//              (`cost_model` is the price's READING RULE — 'flat' | 'per_seat' — and shares the
+//              price's single writer because it changes what the stored number MEANS)
 //
 // This file replaces `bot-reviewer-grains.test.ts`, which pinned two semantics the workspace model
 // deletes outright — "cost is an ACTOR fact" and "the judgement is PER REPO". Both are gone: a repo
@@ -55,6 +57,9 @@ let wsCostB = 0;
 let wsCostC = 0;
 let wsCostD = 0;
 let costBot = 0;
+// A second HUMAN PR author in wsCostB, so its seat count is 2 and a per-seat effective figure is
+// visibly unit × seats rather than accidentally equal to the unit.
+let erin = 0;
 
 // ── INVARIANTS 1 + 2: the two halves of the PATCH ──
 let wsPatch = 0;
@@ -109,6 +114,28 @@ async function mkWorkspace(name: string, repoId: number): Promise<number> {
   const ws = await q.createWorkspace(1, name);
   await q.assignReposToWorkspace(ws.id, 1, [repoId]);
   return ws.id as number;
+}
+
+// A bare PR authored by `authorId` — a SEAT (a distinct human PR author in the trailing 30 days),
+// not a footprint: PR authorship alone never creates a reviewer row.
+async function seedPr(repoId: number, authorId: number): Promise<void> {
+  seq += 1;
+  await db
+    .insert(schema.pullRequests)
+    .values({
+      githubNodeId: `PR_wsr_${seq}`,
+      accountId: 1,
+      repoId,
+      number: seq,
+      title: `fixture #${seq}`,
+      state: 'open',
+      mergeable: 'mergeable',
+      isDraft: false,
+      authorId,
+      openedAt: new Date(now - 5 * DAY),
+      updatedAt: new Date(now - DAY),
+    })
+    .execute();
 }
 
 // One inline thread opened by `actorId` on a fresh PR in `repoId` — the FOOTPRINT a row is created
@@ -212,6 +239,9 @@ beforeAll(async () => {
   wsCostC = await mkWorkspace('Cost C', repoCostC);
   wsCostD = await mkWorkspace('Cost D', repoCostD);
   for (const r of [repoCostA, repoCostB, repoCostC, repoCostD]) await seedThread(r, costBot);
+  // seedThread's PRs are all authored by dana-h, so wsCostB has 1 seat; erin makes it 2.
+  erin = await mkUser('erin-h');
+  await seedPr(repoCostB, erin);
 
   const repoPatch = await mkRepo('patch');
   wsPatch = await mkWorkspace('Patch', repoPatch);
@@ -262,6 +292,7 @@ describe('the fixture is real (nothing below is vacuous)', () => {
     expect(row.source).toBe('vendor_login');
     expect(row.identitySource).toBe('auto');
     expect(row.monthlyCents).toBeNull();
+    expect(row.costModel).toBe('flat'); // no price ⇒ no reading rule beyond the default
 
     // …and exactly one row, not one per repo. There is no grain below the workspace any more.
     const all = (await db.select().from(schema.workspaceReviewers).execute()).filter(
@@ -430,6 +461,50 @@ describe('invariant 3 — setReviewerCost writes ONE column in ONE workspace', (
     expect((await rawRow(wsCostB, costBot)).monthlyCents).toBe(2_147_483_647);
     await q.setReviewerCost(1, costBot, wsCostB, 0);
   });
+
+  it('cost_model rides the price write and ONLY the price write', async () => {
+    // A per-seat unit: same column, different reading rule.
+    await q.setReviewerCost(1, costBot, wsCostB, 29, 'per_seat');
+    let row = await rawRow(wsCostB, costBot);
+    expect(row.monthlyCents).toBe(2900);
+    expect(row.costModel).toBe('per_seat');
+    // …confined to its workspace exactly like the price: A's row still reads flat.
+    expect((await rawRow(wsCostA, costBot)).costModel).toBe('flat');
+
+    // Omitted ⇒ 'flat'. The mode is RE-STATED on every set, so a bare number can never silently
+    // keep metering per seat.
+    await q.setReviewerCost(1, costBot, wsCostB, 29);
+    expect((await rawRow(wsCostB, costBot)).costModel).toBe('flat');
+
+    // 0 is a PRICE, so it can be metered per seat like any other number.
+    await q.setReviewerCost(1, costBot, wsCostB, 0, 'per_seat');
+    row = await rawRow(wsCostB, costBot);
+    expect(row.monthlyCents).toBe(0);
+    expect(row.costModel).toBe('per_seat');
+
+    // A CLEAR resets the mode in the SAME single UPDATE: a NULL price has no reading rule, and a
+    // per_seat leftover would silently re-meter the next number typed as unit × seats.
+    await q.setReviewerCost(1, costBot, wsCostB, null);
+    row = await rawRow(wsCostB, costBot);
+    expect(row.monthlyCents).toBeNull();
+    expect(row.costModel).toBe('flat');
+  });
+
+  it('the wire serves the unit, the model, the seat count and the seat-multiplied effective figure', async () => {
+    await q.setReviewerCost(1, costBot, wsCostB, 15, 'per_seat');
+    const resp = await listWs(wsCostB);
+    // dana-h (seedThread's PR author) + erin — and NOT the bot, which authors nothing here.
+    expect(resp.workspaceSeatCount).toBe(2);
+    const wire = resp.reviewers.find((r: any) => r.userId === costBot);
+    expect(wire.costMonthlyUsd).toBe(15); // the stored UNIT, untouched
+    expect(wire.costModel).toBe('per_seat');
+    expect(wire.effectiveMonthlyUsd).toBe(30); // 15 × 2 seats, computed on read — never stored
+    // Back to flat: the effective figure collapses onto the unit.
+    await q.setReviewerCost(1, costBot, wsCostB, 15);
+    const flatWire = (await listWs(wsCostB)).reviewers.find((r: any) => r.userId === costBot);
+    expect(flatWire.effectiveMonthlyUsd).toBe(15);
+    await q.setReviewerCost(1, costBot, wsCostB, null);
+  });
 });
 
 // ── 4. ONE FULL CLASSIFICATION PASS, TWO FLAGS, ONE ROW ──────────────────────────────────────
@@ -455,10 +530,10 @@ describe('invariant 4 — a full classifyReviewer pass honours both provenance f
       kind: 'greptile',
       label: 'Actually Greptile',
     });
-    // Money in all three, at three different values, so a fan-out or a wipe is visible wherever
-    // it happens.
+    // Money in all three, at three different values (one metered per seat), so a fan-out, a wipe
+    // or a mode reset is visible wherever it happens.
     await q.setReviewerCost(1, pinBot, wsPinJudgement, 10);
-    await q.setReviewerCost(1, pinBot, wsPinIdentity, 20);
+    await q.setReviewerCost(1, pinBot, wsPinIdentity, 20, 'per_seat');
     await q.setReviewerCost(1, pinBot, wsPinNeither, 30);
 
     const beforeJ = await rawRow(wsPinJudgement, pinBot);
@@ -504,10 +579,12 @@ describe('invariant 4 — a full classifyReviewer pass honours both provenance f
     expect(afterN.kind).toBe('coderabbit');
     expect(afterN.label).toBe('CodeRabbit');
 
-    // (d) NOT ONE PRICE MOVED. The classifier does not name the column; this is the assertion
+    // (d) NOT ONE PRICE MOVED — and the reading rule is price-half too: the pass must not fold a
+    // per-seat price back to flat. The classifier names neither column; this is the assertion
     // that would catch it growing one.
     expect(afterJ.monthlyCents).toBe(1000);
     expect(afterI.monthlyCents).toBe(2000);
+    expect(afterI.costModel).toBe('per_seat');
     expect(afterN.monthlyCents).toBe(3000);
   });
 
@@ -540,6 +617,9 @@ describe('invariant 4 — a full classifyReviewer pass honours both provenance f
       'utf8',
     );
     expect(classifySrc).not.toMatch(/monthlyCents|monthly_cents/);
+    // `cost_model` is the price's READING RULE and is money the same way the price is — a
+    // classifier that could flip it would turn $29/mo into $29 × seats without naming a cent.
+    expect(classifySrc).not.toMatch(/costModel|cost_model/);
 
     // …and in queries.ts exactly ONE UPDATE of this table names it: `setReviewerCost`. The other
     // two (resetJudgement, resetIdentity) must not — losing a price as a side effect of resetting
@@ -553,14 +633,18 @@ describe('invariant 4 — a full classifyReviewer pass honours both provenance f
     // Non-vacuity, not a census: the count is deliberately a FLOOR so adding a legitimate fourth
     // UPDATE is not a spurious CI failure that reads exactly like a real regression.
     expect(updates.length).toBeGreaterThan(0);
-    expect(updates.filter((u) => u.includes('monthlyCents'))).toHaveLength(1);
+    const priceUpdates = updates.filter((u) => u.includes('monthlyCents'));
+    expect(priceUpdates).toHaveLength(1);
+    // The reading rule shares the price's ONE writer — the SAME single UPDATE, and no other.
+    expect(updates.filter((u) => u.includes('costModel'))).toHaveLength(1);
+    expect(priceUpdates[0]).toContain('costModel');
 
-    // The PATCH handler's `set:` object cannot reach the column either.
+    // The PATCH handler's `set:` object cannot reach either column.
     const patchStart = queriesSrc.indexOf('export async function setWorkspaceReviewer(');
     const patchEnd = queriesSrc.indexOf('export async function resetWorkspaceReviewerJudgement(');
     expect(patchStart).toBeGreaterThan(0);
     expect(patchEnd).toBeGreaterThan(patchStart);
-    expect(queriesSrc.slice(patchStart, patchEnd)).not.toMatch(/monthlyCents/);
+    expect(queriesSrc.slice(patchStart, patchEnd)).not.toMatch(/monthlyCents|costModel/);
   });
 });
 
@@ -573,7 +657,9 @@ describe('invariant 5 — each reset RE-DERIVES its own half and leaves the othe
       kind: 'qodo',
       label: 'Hand-named',
     });
-    await q.setReviewerCost(1, resetBot, wsReset, 15);
+    // Per-seat, so the resets are also proven to keep BOTH price columns — the number AND its
+    // reading rule. A reset that folded per_seat back to flat would silently shrink the bill.
+    await q.setReviewerCost(1, resetBot, wsReset, 15, 'per_seat');
     await q.setWorkspaceReviewer(1, resetBot, { workspaceId: wsReset, automated: false });
     const before = await rawRow(wsReset, resetBot);
     expect(before.source).toBe('manual');
@@ -593,6 +679,7 @@ describe('invariant 5 — each reset RE-DERIVES its own half and leaves the othe
     expect(after.label).toBe('Hand-named');
     expect(after.identitySource).toBe('manual');
     expect(after.monthlyCents).toBe(1500);
+    expect(after.costModel).toBe('per_seat');
   });
 
   it('resetIdentity re-derives the vendor (never nameless) and KEEPS the price', async () => {
@@ -621,9 +708,11 @@ describe('invariant 5 — each reset RE-DERIVES its own half and leaves the othe
     expect(after.source).toBe('manual');
     expect(after.role).toBe('quality_check');
     expect(after.automated).toBe(true);
-    // … and un-naming a vendor says NOTHING about what it costs.
+    // … and un-naming a vendor says NOTHING about what it costs — number OR reading rule.
     expect(after.monthlyCents).toBe(1500);
+    expect(after.costModel).toBe('per_seat');
     expect(wire.costMonthlyUsd).toBe(15);
+    expect(wire.costModel).toBe('per_seat');
   });
 
   it('both resets 404 (null) for a foreign workspace and for an actor with no row there', async () => {
@@ -648,9 +737,12 @@ describe('invariant 6 — deleteWorkspace re-homes repos AND reviewer rows to De
   it('an actor ABSENT from Default arrives there intact, price included', async () => {
     await listWs(wsDoomedSolo);
     await q.setWorkspaceReviewer(1, moveBot, { workspaceId: wsDoomedSolo, automated: false });
-    await q.setReviewerCost(1, moveBot, wsDoomedSolo, 77);
+    // Per-seat, so the whole-row comparison below also proves the re-home carries the price's
+    // READING RULE — a per-seat unit arriving as 'flat' would silently change what $77 means.
+    await q.setReviewerCost(1, moveBot, wsDoomedSolo, 77, 'per_seat');
     const before = await rawRow(wsDoomedSolo, moveBot);
     expect(before.monthlyCents).toBe(7700);
+    expect(before.costModel).toBe('per_seat');
     expect(await rawRow(wsDefault, moveBot)).toBeNull(); // nothing to collide with
 
     expect(await q.deleteWorkspace(wsDoomedSolo, 1)).toBe('deleted');
@@ -658,6 +750,7 @@ describe('invariant 6 — deleteWorkspace re-homes repos AND reviewer rows to De
     const rehomed = await rawRow(wsDefault, moveBot);
     expect(rehomed).not.toBeNull();
     expect(rehomed.monthlyCents).toBe(7700);
+    expect(rehomed.costModel).toBe('per_seat');
     // Everything else came across verbatim — only the row's own identity columns differ.
     expect({ ...rehomed, id: 0, workspaceId: 0 }).toEqual({ ...before, id: 0, workspaceId: 0 });
     // …and the doomed workspace's row is gone, not orphaned.
