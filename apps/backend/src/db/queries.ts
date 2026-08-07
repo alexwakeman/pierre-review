@@ -10290,7 +10290,11 @@ export async function getBotAnalytics(
           partnerLabel,
           untouchedPct: Math.round(overlapShare * 100),
           volume: acc.threads,
-          rationale: `${overlapThreads} of ${label}'s threads land on lines ${partnerLabel} also flagged — redundant coverage; consider narrowing one of them.`,
+          // `overlapThreads` pools clusters shared with ANY bot, while `partnerLabel` names
+          // only the top pair — so the pooled count must not be attributed to the partner
+          // (with 3+ overlapping bots that overstates the named pair, sometimes ~2×). The
+          // pooled figure describes the bot; the pair figure describes the partner.
+          rationale: `${overlapThreads} of ${label}'s threads land on lines other bots also flagged (most often ${partnerLabel}: ${topPartner.clusters} shared cluster${topPartner.clusters === 1 ? '' : 's'}) — redundant coverage; consider narrowing one of them.`,
         });
       }
     }
@@ -11615,17 +11619,26 @@ export async function getBotVendorPrs(
     // NOT role-filtered: the quality-check SECTION of the ROI panel offers the same drill-down,
     // so narrowing here would make its rows un-openable.
     const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
-    // Only a reviewer this account has CLASSIFIED as automated is a valid drill-down target —
-    // an arbitrary (human / foreign / unknown) userId echoes its identity but lists nothing
-    // (the empty vendorIds hits the `vendorIds.length === 0 → empty` guard below), preserving
-    // the old "unclassified kind → prs:[]" contract.
+    // Only a reviewer this account has CLASSIFIED as automated is a valid drill-down target.
+    // An arbitrary (human / foreign / unknown) userId lists nothing AND identifies nothing:
+    // the users table is GLOBAL, and resolving login/displayName for an unclassified numeric
+    // id would hand any tenant a cross-account login-enumeration oracle — the exact thing the
+    // /api/users/:id/stats precedent (counts only, no profile fields) exists to prevent. The
+    // key is the caller's own input; the label degrades to it; login stays null.
+    if (!kindMap.has(userId)) {
+      return {
+        enabled: true, key, kind: 'in_house', label: key, login: null, window: win,
+        prs: [], generatedAt,
+      };
+    }
     kindTyped = kindMap.get(userId) ?? 'in_house';
-    vendorIds = kindMap.has(userId) ? [userId] : [];
+    vendorIds = [userId];
     // Per-reviewer identity — mirrors getBotAnalytics's reviewerLabel resolution: the workspace's
     // custom label → the vendor's pretty name (known vendors) → login/display name. ONE row per
     // (workspace, actor), so this drill-down and the ROI row it was opened from cannot show
     // different labels — which they could when the label was replicated per repo/team row and an
-    // unordered `limit(1)` picked whichever the storage engine handed back first.
+    // unordered `limit(1)` picked whichever the storage engine handed back first. Safe to read
+    // the global row HERE: the classification row above proves the account association.
     const classLabel = await classificationLabelMap(accountId, scope.workspaceId);
     const [userRow] = await db
       .select({ login: users.githubLogin, name: users.displayName })

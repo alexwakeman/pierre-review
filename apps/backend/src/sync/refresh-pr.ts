@@ -34,7 +34,13 @@ import { isPrSyncInFlight, syncOnePr } from './sync-one-pr.js';
 // restart just costs each polled PR one extra walk.
 interface ProbeState {
   etag: string | null;
-  lastWalkAt: number; // ms epoch of the last full walk from this route; 0 = never
+  lastWalkAt: number; // ms epoch of the last full walk ATTEMPT from this route; 0 = never
+  // Whether that attempt ingested GitHub successfully. Load-bearing for honesty: a 304
+  // only proves GitHub didn't move SINCE THE STORED ETAG — it says nothing about whether
+  // the last walk actually landed. While false, every non-walking tick must keep
+  // reporting {synced:false}, or a failed walk would be laundered into "current" by the
+  // very next 304.
+  lastWalkOk: boolean;
 }
 
 // Bounded with the HYDRATE_CACHE_MAX FIFO pattern: a browse over many PRs must not grow
@@ -77,62 +83,80 @@ export async function refreshPrFromGitHub(args: {
   const before = target.updatedAt;
 
   try {
+    const key = probeKey(accountId, prId);
     if (wait) {
-      // A manual walk IS a full walk — reset the poll's floor clock (keeping the stored
-      // ETag) so the next tick inside the window doesn't floor-walk again for nothing.
-      const key = probeKey(accountId, prId);
-      rememberProbeState(key, {
-        etag: probeState.get(key)?.etag ?? null,
-        lastWalkAt: Date.now(),
-      });
       // Every manual walk is potentially-changed: the user asked for current state, and
-      // the hydration bust below means only an invalidation repaints their checks.
-      return await walkAndReport({ target, prId, accountId, before, wait, log, forced: true });
+      // the hydration bust below means only an invalidation repaints their checks. The
+      // stored ETag is deliberately KEPT — it describes GitHub-side content, not our sync
+      // state, so a 304 against it stays truthful after the walk. State bookkeeping
+      // (floor clock + outcome) happens AFTER the walk, in walkAndReport.
+      return await walkAndReport({
+        target, prId, accountId, before, wait, log,
+        forced: true,
+        stateKey: key,
+        nextEtag: probeState.get(key)?.etag ?? null,
+      });
     }
 
-    const key = probeKey(accountId, prId);
     const state = probeState.get(key);
     const now = Date.now();
     const floorDue = !state || now - state.lastWalkAt >= WALK_FLOOR_MS;
 
-    // Probe EVERY tick, not only when the floor isn't due: a 304 is free, and keeping the
+    // Probe EVERY tick, not only when the floor is due: a 304 is free, and keeping the
     // stored ETag current is what lets the next tick 304 instead of re-paying for a walk
-    // this tick already did.
-    let probeChanged = true; // no stored ETag / probe failure ⇒ must walk
+    // this tick already did. Three outcomes, and they are NOT the same thing:
+    //   'unchanged' — a real 304: GitHub affirms nothing moved since the stored ETag.
+    //   'changed'   — a real 200: GitHub has something newer than the stored ETag.
+    //   'unknown'   — non-2xx or network failure: the probe PROVED NOTHING. Treating this
+    //                 as 'changed' (as this code originally did) turned a revoked token /
+    //                 SAML wall into a full GraphQL walk EVERY 5s tick with no floor —
+    //                 ~24 failing GitHub calls/min per open pane. Unknown ticks retry at
+    //                 the floor cadence instead.
+    let probe: 'unchanged' | 'changed' | 'unknown' = 'unknown';
     let nextEtag = state?.etag ?? null;
     try {
-      const probe = await ghRestGetConditional(
+      const res = await ghRestGetConditional(
         await getAccessToken(accountId),
         `/repos/${target.owner}/${target.name}/pulls/${target.number}`,
         nextEtag,
       );
-      probeChanged = !probe.notModified;
-      if (probe.etag != null) nextEtag = probe.etag;
+      if (res.notModified) {
+        probe = 'unchanged';
+      } else if (res.status >= 200 && res.status < 300) {
+        probe = 'changed';
+        if (res.etag != null) nextEtag = res.etag;
+      }
+      // Any non-2xx (403 SAML wall, 404 revoked access, 5xx) stays 'unknown' — the
+      // helper never throws on those, so this branch IS the failure path.
     } catch {
-      // Network failure — fall through to a walk rather than silently skipping (the same
-      // contract ghRestGetConditional applies to a non-2xx).
+      // Network failure — 'unknown'.
     }
 
-    if (!probeChanged && state && now - state.lastWalkAt < WALK_FLOOR_MS) {
-      // Nothing changed and the floor isn't due: the stored row IS current, at zero
-      // GitHub cost (the 304 is unbilled).
-      rememberProbeState(key, { etag: nextEtag, lastWalkAt: state.lastWalkAt });
-      return { synced: true, changed: false, updatedAt: before.toISOString() };
+    // Walk when the floor is due, or immediately on a genuine probe-200 — but only if the
+    // last walk didn't fail. Once a walk has failed, retries happen at the FLOOR cadence
+    // regardless of what the probe says (a GraphQL outage with healthy REST would
+    // otherwise walk every tick: the un-stored ETag keeps the probe 200ing).
+    const walkNow = floorDue || (probe === 'changed' && (state?.lastWalkOk ?? true));
+    if (!walkNow) {
+      // Not walking this tick. `synced` must carry the LAST walk's honesty, not the
+      // probe's: a 304 after a failed walk means "GitHub still has what we failed to
+      // ingest", which is exactly NOT "the stored row reflects GitHub".
+      const lastOk = state?.lastWalkOk ?? true;
+      if (probe === 'unchanged' && lastOk) {
+        return { synced: true, changed: false, updatedAt: before.toISOString() };
+      }
+      return { synced: lastOk, changed: false, updatedAt: before.toISOString() };
     }
 
-    rememberProbeState(key, { etag: nextEtag, lastWalkAt: now });
     // A walk the 304ing probe couldn't justify — the floor forced it for the probe's
     // blind spots (checks, thread-resolves) — is potentially-changed even when updatedAt
     // holds still. A probe-200 walk lets the updatedAt comparison decide (REST payload
     // fields like mergeable_state churn ETags without real activity).
     return await walkAndReport({
-      target,
-      prId,
-      accountId,
-      before,
-      wait,
-      log,
-      forced: !probeChanged,
+      target, prId, accountId, before, wait, log,
+      forced: probe !== 'changed',
+      stateKey: key,
+      nextEtag,
     });
   } catch (err) {
     log.warn({ err }, `refreshPr: PR ${prId} failed`);
@@ -148,8 +172,10 @@ async function walkAndReport(args: {
   wait: boolean;
   log: FastifyBaseLogger;
   forced: boolean; // treat the walk itself as potentially-changed (floor / manual)
+  stateKey: string;
+  nextEtag: string | null; // the probe's fresh ETag (or the kept one on a manual walk)
 }): Promise<PrRefreshResponse> {
-  const { target, prId, accountId, before, wait, log, forced } = args;
+  const { target, prId, accountId, before, wait, log, forced, stateKey, nextEtag } = args;
   // Order load-bearing (the resync-after-write rule): bust the 60s hydration cache
   // BEFORE the walk, so even if the sync fails the client's follow-up GET /api/prs/:id
   // can't be served the pre-walk snapshot — in lean mode checkRuns render ONLY from that
@@ -162,6 +188,16 @@ async function walkAndReport(args: {
   const synced =
     (await syncOnePr(target.repoId, target.number, asSyncLogger(log), wait ? { waitForInFlight: true } : undefined)) ||
     (!wait && inFlightAtStart);
+  // Bookkeeping AFTER the outcome is known. The floor clock stamps on every ATTEMPT
+  // (success or failure — that is what caps the retry cadence), but the fresh ETag is
+  // committed ONLY on success: storing it before a failed walk would consume the change
+  // signal, and every later 304 would launder the un-ingested change into "current".
+  const prev = probeState.get(stateKey);
+  rememberProbeState(stateKey, {
+    etag: synced ? nextEtag : (prev?.etag ?? null),
+    lastWalkAt: Date.now(),
+    lastWalkOk: synced,
+  });
   const after = await getPrSyncTarget(prId, accountId);
   const afterAt = after?.updatedAt ?? before;
   const changed = synced && (forced || afterAt.getTime() !== before.getTime());

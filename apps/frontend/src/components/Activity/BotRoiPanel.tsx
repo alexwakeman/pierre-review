@@ -315,6 +315,18 @@ function MlTotalsStrip({ ml }: { ml: BotAnalyticsMlTotals }): JSX.Element | null
             being processed
           </span>
         )}
+        {/* The honesty channel: without it, pending 0 reads as 100% coverage while badges are
+            visibly missing from the lists below. All-time within this scope, NOT windowed —
+            the unscorable population is legacy by nature and sits outside rolling windows. */}
+        {ml.unscorable > 0 && (
+          <span
+            className={`text-[11px] text-gray-400 tabular-nums${ml.pending > 0 ? '' : ' ml-auto'}`}
+            title="Comments synced during an old lean-storage window whose text GitHub no longer has (deleted-and-reposted bot comments). They can never be scored and are excluded from every coverage figure."
+          >
+            {ml.unscorable.toLocaleString()} older comment{ml.unscorable === 1 ? '' : 's'} can’t
+            be scored
+          </span>
+        )}
       </div>
 
       {ml.truncated && (

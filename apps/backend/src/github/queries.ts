@@ -669,9 +669,11 @@ export interface RepoActivityResponse {
     nameWithOwner: string;
     // The repo's GitHub "About" description. OPTIONAL on purpose — the three-state
     // partial-response policy (see sync/branch-status.ts): absent (`undefined`) means the
-    // selection was never received (hand-built fixtures, a salvaged partial without the key)
-    // and the stored value must be PRESERVED; `null` means GitHub positively said the repo
-    // has none and CLEARS it; a string overwrites. Threaded through upsertRepo as-is.
+    // selection was never received (hand-built fixtures) and the stored value must be
+    // PRESERVED; `null` means GitHub positively said the repo has none and CLEARS it; a
+    // string overwrites. ⚠ A tolerant-SALVAGED partial does NOT produce `undefined` here —
+    // GraphQL nulls an errored field with the key PRESENT — so sync-repo.ts degrades the
+    // whole field to `undefined` whenever onPartial fired; only a clean response may clear.
     description?: string | null;
     // GraphQL RepositoryPermission enum (ADMIN/MAINTAIN/WRITE/TRIAGE/READ); may be
     // null. Drives whether the viewer may approve a PR.

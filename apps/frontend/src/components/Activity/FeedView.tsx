@@ -1204,6 +1204,15 @@ export function FeedView({
             ? 'No bot activity yet — automated-reviewer activity across your repos will appear here.'
             : 'Nothing to show yet — activity across your repos will appear here.'}
         </div>
+      ) : visible.length === 0 && isPlaceholderData ? (
+        // Placeholder pages belong to the PREVIOUS query key. The one transition where that
+        // matters here: lens hide→only re-keys the query (excludeBots leaves the search), and
+        // the carried-over 'hide' pages contain zero bot rows BY CONSTRUCTION — so until the
+        // new fetch lands, "No bot activity in this window" would be a fabricated claim in a
+        // window possibly full of it. Say nothing verdict-shaped while the data is borrowed.
+        <div className="flex h-32 items-center justify-center text-sm text-gray-400">
+          Loading…
+        </div>
       ) : visible.length === 0 ? (
         <div className="flex h-32 items-center justify-center text-sm text-gray-400">
           {botsMode

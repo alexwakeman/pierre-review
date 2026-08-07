@@ -139,6 +139,61 @@ describe('refreshPrFromGitHub — the poll variant', () => {
     expect(mockSync).toHaveBeenCalledTimes(1);
     expect(res!.synced).toBe(true);
   });
+
+  it('a failed walk is not laundered by later 304s: the fresh ETag is not committed and synced stays false', async () => {
+    // Tick 1: probe 200s (real change), the walk FAILS — the change was never ingested.
+    mockSync.mockResolvedValue(false);
+    const t1 = await refresh();
+    expect(t1).toEqual({ synced: false, changed: false, updatedAt: T0.toISOString() });
+
+    // Tick 2 (inside the floor): the probe must be sent the OLD (null) ETag — committing
+    // W/"e1" before the walk succeeded would consume the change signal. And whatever the
+    // probe answers, the tick must keep reporting synced:false: a 304 only proves GitHub
+    // didn't move since the ETag, not that the failed walk ever landed.
+    mockProbe.mockClear();
+    mockProbe.mockResolvedValue({ status: 200, notModified: false, etag: 'W/"e2"' });
+    const t2 = await refresh();
+    expect(mockProbe).toHaveBeenCalledWith('tok', '/repos/o/n/pulls/42', null);
+    expect(t2!.synced).toBe(false);
+    // ...and the failure put walk retries on the FLOOR cadence: tick 2's probe-200 did not
+    // buy an off-floor walk (a GraphQL outage with healthy REST would otherwise walk every
+    // 5s tick — the un-stored ETag keeps the probe 200ing).
+    expect(mockSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('after a failed walk the floor still retries, and recovery restores synced:true', async () => {
+    vi.useFakeTimers();
+    try {
+      mockSync.mockResolvedValue(false);
+      await refresh(); // tick 1: walk fails
+      vi.advanceTimersByTime(30_001); // floor due
+      mockSync.mockResolvedValue(true);
+      mockTarget.mockResolvedValue(target(T0));
+      const res = await refresh();
+      expect(mockSync).toHaveBeenCalledTimes(2);
+      expect(res!.synced).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a failing probe (non-2xx, e.g. SAML wall) inside the floor is a free skip, not a walk per tick', async () => {
+    await refresh(); // tick 1: healthy walk records the floor clock
+    vi.clearAllMocks();
+    mockTarget.mockResolvedValue(target(T0));
+    // ghRestGetConditional never throws on a non-2xx — it reports it. That must be treated
+    // as "the probe proved nothing" (skip until the floor), NOT as "changed → walk": a
+    // revoked token polling at 5s would otherwise burn a REST probe + a GraphQL walk on
+    // every tick with only the stale note as a symptom.
+    mockProbe.mockResolvedValue({ status: 403, notModified: false, etag: null });
+
+    const res = await refresh();
+
+    expect(mockSync).not.toHaveBeenCalled();
+    expect(mockInvalidate).not.toHaveBeenCalled();
+    // The last walk succeeded, so within the floor the stored row is still honestly fresh.
+    expect(res).toEqual({ synced: true, changed: false, updatedAt: T0.toISOString() });
+  });
 });
 
 describe('refreshPrFromGitHub — the manual variant (wait:true)', () => {

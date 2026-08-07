@@ -145,12 +145,19 @@ export function ThreadList({
   };
 
   // A ×N pill cycles through its bot's threads on successive clicks. The cursor lives in a ref
-  // keyed per (cluster, bot) — no re-render needed, the scroll IS the feedback.
+  // keyed per (cluster, bot) — no re-render needed, the scroll IS the feedback. Cycle only over
+  // threads that currently HAVE a row: the rollup renders unfiltered clusters above a list the
+  // state/vendor/severity pills may have narrowed, and rowRefs only holds rendered rows — a
+  // click that "advances" onto a hidden thread would silently do nothing (a dead click the
+  // pill's own tooltip promises against). With every thread filtered out, the click no-ops
+  // without advancing, so the cursor doesn't drift while nothing is visible.
   const dedupCycleRef = useRef(new Map<string, number>());
   const cycleToThread = (clusterKey: string, userId: number, ids: number[]): void => {
+    const visible = ids.filter((id) => rowRefs.current.has(id));
+    if (visible.length === 0) return;
     const k = `${clusterKey}:${userId}`;
     const i = dedupCycleRef.current.get(k) ?? 0;
-    scrollToThread(ids[i % ids.length]!);
+    scrollToThread(visible[i % visible.length]!);
     dedupCycleRef.current.set(k, i + 1);
   };
 
@@ -433,8 +440,9 @@ export function ThreadList({
             {dedupClusters.map((cluster, i) => {
               const file = cluster.path.split('/').pop() ?? cluster.path;
               const clusterKey = `${cluster.path}:${cluster.line ?? 'x'}:${i}`;
-              // Distinct BOTS, computed defensively: a stale IndexedDB-cached cluster predates
-              // the per-bot collapse and still carries one member per THREAD.
+              // Distinct BOTS, computed defensively rather than trusting one-member-per-bot
+              // (['bot-dedup'] is NOT IndexedDB-persisted — main.tsx dehydrates only
+              // pr/thread/pr-files — this is just cheap insurance against a future shape).
               const distinctBots = new Set(cluster.members.map((m) => m.userId)).size;
               const verb = distinctBots === 2 ? 'both flagged' : 'all flagged';
               return (

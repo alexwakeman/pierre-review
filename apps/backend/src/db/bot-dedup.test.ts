@@ -269,8 +269,11 @@ describe('getBotAnalytics same-line overlap (advisory ROI signal)', () => {
     expect(s.severity).toBeNull();
     expect(s.volume).toBe(5);
     expect(s.untouchedPct).toBe(100); // the share this suggestion keys on
+    // The pooled count ("5 of …'s threads") describes the BOT (clusters shared with ANY
+    // other bot); the partner is named with its own pair-level cluster count — attributing
+    // the pooled figure to the partner overstates the pair whenever 3+ bots overlap.
     expect(s.rationale).toBe(
-      "5 of inhouse-bot-b's threads land on lines DeepSource also flagged — redundant coverage; consider narrowing one of them.",
+      "5 of inhouse-bot-b's threads land on lines other bots also flagged (most often DeepSource: 5 shared clusters) — redundant coverage; consider narrowing one of them.",
     );
   });
 

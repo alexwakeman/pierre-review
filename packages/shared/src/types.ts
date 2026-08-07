@@ -737,6 +737,13 @@ export interface BotAnalyticsMlTotals {
   // strip's "X of Y scored" stays a statement about the window it sits over. ⚠ pending > 0 is
   // NOT "scoring in progress" — that judgement stays with isMlScoring over /api/ml-status.
   pending: number;
+  // Bot text that can NEVER be scored (body IS NULL — legacy lean-storage rows whose text
+  // GitHub itself no longer has). ALL-TIME within the scope, not windowed: the population is
+  // old by nature and a windowed count would read 0 while badges are visibly missing below.
+  // Counted separately so "pending 0" cannot claim 100% coverage while badges are missing —
+  // the same honesty rule BotSeverityResponse.unscorable pins, rehomed here when the merged
+  // table replaced that response's panel.
+  unscorable: number;
   bySeverity: MlSeverityCounts;
   byCategory: Array<{ category: MlCategory; count: number }>;
   // Distinct `backend` strings seen in window — none containing 'modernbert-onnx' means the
@@ -1197,8 +1204,11 @@ export interface BotDedupMember {
   threadId: number; userId: number; kind: AutomatedReviewerKind;
   login: string; label: string; excerpt: string | null; derivedState: DerivedState;
   addressedConfidence: AddressedConfidence;
-  // Optional-ADDITIVE: ['bot-dedup', prId] responses persist in IndexedDB, so a cached member
-  // may predate the field (one member per THREAD back then) — treat absent as [threadId].
+  // Optional-ADDITIVE. NOT for IndexedDB reasons — ['bot-dedup', prId] is not in the
+  // persist whitelist (main.tsx dehydrates only 'pr'/'thread'/'pr-files'), so no cached
+  // member survives a reload. It is optional for the IN-MEMORY cache within one session
+  // (a response fetched before a deploy… cannot happen either — a deploy needs a reload).
+  // Kept optional purely as additive-wire hygiene; consumers treat absent as [threadId].
   threadIds?: number[];
 }
 export interface BotDedupCluster {

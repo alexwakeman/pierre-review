@@ -50,8 +50,13 @@ export function usePrLiveRefresh(prId: number, enabled: boolean): PrLiveRefresh 
     retry: false,
     // The interval-as-function pattern (useMlLabels.ts): 5s normally; after a failure
     // back off exponentially to 60s, honoring a 429's Retry-After when it's longer.
+    // A 200 carrying {synced:false} counts as a failure here too — it means the server
+    // could not re-read GitHub (revoked access, SAML wall, GraphQL outage), and holding
+    // the 5s cadence against a broken token would spend the tenant's probe/walk budget
+    // on a pane that cannot get fresher until something external changes.
     refetchInterval: (q) => {
-      if (q.state.status !== 'error') return POLL_MS;
+      const unsynced = q.state.status === 'success' && q.state.data?.synced === false;
+      if (q.state.status !== 'error' && !unsynced) return POLL_MS;
       const backoff = Math.min(POLL_MS * 2 ** failsRef.current, POLL_MAX_MS);
       const err = q.state.error;
       const retryAfterMs =
@@ -67,8 +72,9 @@ export function usePrLiveRefresh(prId: number, enabled: boolean): PrLiveRefresh 
 
   useEffect(() => {
     if (status === 'error') failsRef.current += 1;
+    else if (status === 'success' && data?.synced === false) failsRef.current += 1;
     else if (status === 'success') failsRef.current = 0;
-  }, [status, errorUpdatedAt, dataUpdatedAt]);
+  }, [status, errorUpdatedAt, dataUpdatedAt, data]);
 
   // Changed-only invalidation, mirroring useDetailCacheReconciler's exact set: the PR,
   // its cached threads, its ML-label index, and the two lean feeds (reconciler + badges +
@@ -88,16 +94,23 @@ export function usePrLiveRefresh(prId: number, enabled: boolean): PrLiveRefresh 
   }, [data, dataUpdatedAt, prId, qc]);
 
   const refreshNow = useCallback(() => {
-    // fetchQuery on the SAME key: it dedupes onto an in-flight poll tick, and its result
-    // lands in the same cache entry, so the changed-invalidation effect above covers both
-    // paths and `isRefreshing` below is one truth. Errors surface through the query
+    // fetchQuery on the SAME key so the result lands in the same cache entry — the
+    // changed-invalidation effect above covers both paths and `isRefreshing` below is
+    // one truth. But fetchQuery DEDUPES onto an in-flight fetch for the key: if a poll
+    // tick's wait:false probe is mid-flight at click time, the click would silently
+    // become that probe (which can 304 and do nothing) and the {wait:true} walk the
+    // button promises would never be sent. Cancel the in-flight tick first, THEN fetch —
+    // the click's semantics must survive the collision. Errors surface through the query
     // state (the stale note), never as an unhandled rejection.
     void qc
-      .fetchQuery({
-        queryKey: prRefreshKey(prId),
-        queryFn: () => api.refreshPr(prId, { wait: true }),
-        staleTime: 0,
-      })
+      .cancelQueries({ queryKey: prRefreshKey(prId) })
+      .then(() =>
+        qc.fetchQuery({
+          queryKey: prRefreshKey(prId),
+          queryFn: () => api.refreshPr(prId, { wait: true }),
+          staleTime: 0,
+        }),
+      )
       .catch(() => {});
   }, [prId, qc]);
 

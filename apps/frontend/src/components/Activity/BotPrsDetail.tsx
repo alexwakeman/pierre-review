@@ -345,10 +345,15 @@ export function BotPrsDetail(): JSX.Element {
     effectiveView === 'comments',
     repoScope,
   );
-  // Re-window the markdown-heavy list whenever what it shows changes shape.
+  // Re-window the markdown-heavy list whenever what it shows changes shape. workspaceId and
+  // repoScope are deliberately in the deps: both re-key the comments query WITHOUT remounting
+  // this singleton tab (openBotPrsDetail re-seeds the repo focus in place, and the header
+  // WorkspaceSelector can switch workspace while the tab is open) — an enlarged 'Show more'
+  // window surviving that switch would mount hundreds of markdown bodies in the new scope's
+  // first paint, exactly the stall the windowing exists to prevent.
   useEffect(() => {
     setVisibleComments(COMMENTS_PAGE);
-  }, [active, commentSort, window]);
+  }, [active, commentSort, window, workspaceId, repoScope]);
   const commentRows = useMemo(() => {
     const list = comments.data?.comments ?? [];
     if (commentSort !== 'severity') return list; // server order — newest first

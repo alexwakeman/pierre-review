@@ -690,6 +690,7 @@ export async function getMlWindowAggregates(
     summaries: 0,
     praise: 0,
     pending: 0,
+    unscorable: 0,
     bySeverity: emptySeverityCounts(),
     byCategory: [],
     backends: [],
@@ -699,7 +700,7 @@ export async function getMlWindowAggregates(
     return { byBot: new Map(), totals: emptyTotals };
   }
 
-  const [labelRows, pending] = await Promise.all([
+  const [labelRows, pending, unscorable] = await Promise.all([
     db
       .select({
         authorUserId: mlCommentLabels.authorUserId,
@@ -721,6 +722,13 @@ export async function getMlWindowAggregates(
       .limit(ROLLUP_SCAN_CAP)
       .execute(),
     countUnlabelledBotText(accountId, scope, automatedIds, from),
+    // NOT window-bounded on purpose: the NULL-body population is legacy by nature (the
+    // 2026-06 lean-storage window) and mostly sits OUTSIDE every rolling window — a windowed
+    // count would read 0 while badges are visibly missing from the very lists this strip
+    // sits above. This is the honesty channel getBotSeverityRollup carries; when the merged
+    // table retired that response's panel, the count has to live HERE or the Bots screen
+    // claims "N of N scored" over comments it can never score.
+    countUnscorableBotText(accountId, scope, automatedIds),
   ]);
 
   const byBot = new Map<number, MlVendorWindowAgg>();
@@ -777,6 +785,7 @@ export async function getMlWindowAggregates(
       summaries,
       praise,
       pending,
+      unscorable,
       bySeverity: totalsBySeverity,
       byCategory: [...totalsByCategory.entries()]
         .map(([category, count]) => ({ category, count }))
@@ -875,12 +884,23 @@ export async function getBotVendorComments(
   const userId = target.userId;
   const key = `u${userId}`;
   // NOT role-filtered — mirrors getBotVendorPrs: the quality-check section of the ROI panel
-  // offers the same drill-down. Only a reviewer this account has CLASSIFIED as automated is a
-  // valid target; an arbitrary userId echoes its identity but lists nothing.
+  // offers the same drill-down.
   const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
+  if (!kindMap.has(userId)) {
+    // An id this workspace has NOT classified as automated identifies NOTHING. The users
+    // table is GLOBAL — resolving login/displayName for an arbitrary numeric id here
+    // would hand any tenant a cross-account login-enumeration oracle, exactly what the
+    // /api/users/:id/stats precedent exists to prevent (counts only, no profile fields).
+    // The key is the caller's own input; the label degrades to it; login stays null.
+    return {
+      enabled: true, key, kind: 'in_house', label: key, login: null, window: win,
+      comments: [], truncated: false, generatedAt,
+    };
+  }
   const kindTyped: AutomatedReviewerKind = kindMap.get(userId) ?? 'in_house';
   // Identity mirrors getBotVendorPrs / getBotAnalytics.reviewerLabel exactly: the workspace's
-  // custom label → the vendor's pretty name (known vendors) → login/display name.
+  // custom label → the vendor's pretty name (known vendors) → login/display name. Safe to
+  // read the global row HERE: the classification row above proves the account association.
   const classLabel = await classificationLabelMap(accountId, scope.workspaceId);
   const [userRow] = await db
     .select({ login: users.githubLogin, name: users.displayName })
@@ -900,7 +920,7 @@ export async function getBotVendorComments(
     enabled: true, key, kind: kindTyped, label, login, window: win,
     comments: [], truncated: false, generatedAt,
   };
-  if (scope.repoIds.length === 0 || !kindMap.has(userId)) return empty;
+  if (scope.repoIds.length === 0) return empty;
 
   const mlCols = {
     mlSeverity: mlCommentLabels.severity,

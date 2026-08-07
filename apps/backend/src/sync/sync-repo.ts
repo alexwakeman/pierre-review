@@ -145,6 +145,12 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       // the fat query on a big repo routinely 502s) so one hiccup can't abort the whole
       // multi-page backfill. Partial-data (forbidden sub-field) responses are handled
       // inside graphqlTolerant and are NOT retried.
+      // Whether THIS page's response was a tolerant-salvaged partial. Load-bearing for the
+      // description write below: GraphQL nulls an ERRORED field in partial data (the key is
+      // present, not absent), so inside a partial response `description: null` is
+      // indistinguishable from GitHub positively saying "no description" — and the
+      // clear-only-on-a-positive-statement rule then forbids treating it as a clear.
+      let pagePartial = false;
       const resp: RepoActivityResponse = await withGithubRetry(
         () =>
           graphqlTolerant<RepoActivityResponse>(
@@ -152,6 +158,7 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
             REPO_ACTIVITY_QUERY,
             { owner, name, cursor },
             (errors) => {
+              pagePartial = true;
               if (isSamlBlock(errors)) samlBlocked = true;
               log.warn(
                 `sync ${owner}/${name}: partial GraphQL — continuing without forbidden fields${graphqlChecksHint(errors)}. ${summarizeGraphqlErrors(errors)}`,
@@ -199,9 +206,12 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
           resp.repository.defaultBranchRef?.name ?? null,
           accountId,
           resp.repository.viewerPermission ?? null,
-          // Passed RAW (no `?? null`): `undefined` = the key never arrived → upsertRepo
-          // preserves the stored description; `null` = GitHub positively says none → clears.
-          resp.repository.description,
+          // Passed RAW (no `?? null`): `undefined` = not received → upsertRepo preserves the
+          // stored description; `null` = GitHub positively says none → clears. A PARTIAL
+          // response can never make that positive statement (an errored field arrives as
+          // null with the key present), so it degrades to undefined — a stale description
+          // beats silently clearing a real one on every tick of a partially-forbidden token.
+          pagePartial ? undefined : resp.repository.description,
         );
       }
 
