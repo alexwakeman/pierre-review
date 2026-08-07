@@ -1,5 +1,9 @@
 import { skipToken, useQuery } from '@tanstack/react-query';
-import type { BotVendorPrsResponse, BotWindowKind } from '@pierre-review/shared';
+import type {
+  BotVendorCommentsResponse,
+  BotVendorPrsResponse,
+  BotWindowKind,
+} from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 
@@ -31,6 +35,34 @@ export function useBotVendorPrs(
       key == null || workspaceId == null
         ? skipToken
         : () => api.botVendorPrs(key, window, workspaceId, repoIds),
+    enabled,
+    refetchInterval: 5 * 60_000, // main sync cadence
+    refetchIntervalInBackground: false,
+    staleTime: 60_000,
+  });
+}
+
+// The COMMENTS twin of the drill-down above — same row identity, same scope contract, fetched
+// lazily only while the Comments sub-view is open (`enabled`). Each row's ML label ships INLINE
+// in the response, so this list never touches the per-PR label index (the rule that keeps a
+// cross-PR list from becoming one request per card). Key mirrors bot-vendor-prs — ws:<id> and
+// the repo slot each get their own segment — and it is a member of RECLASSIFY_INVALIDATE_KEYS:
+// reclassifying a login changes both who counts and whose labels count.
+export function useBotVendorComments(
+  workspaceId: number | null,
+  key: string | null,
+  window: BotWindowKind,
+  enabled = true,
+  repoIds?: number[] | null,
+) {
+  const repoSlot =
+    repoIds && repoIds.length > 0 ? [...repoIds].sort((a, b) => a - b).join(',') : 'all';
+  return useQuery<BotVendorCommentsResponse>({
+    queryKey: ['bot-vendor-comments', key, window, workspaceKey(workspaceId), repoSlot],
+    queryFn:
+      key == null || workspaceId == null
+        ? skipToken
+        : () => api.botVendorComments(key, window, workspaceId, repoIds),
     enabled,
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,

@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import type {
   BotVendorAnalytics,
+  BotVendorComment,
   BotVendorPr,
   BotWindowKind,
   User,
 } from '@pierre-review/shared';
 import { useBotAnalytics } from '../../hooks/useBotTriage.js';
-import { useBotVendorPrs } from '../../hooks/useBotVendorPrs.js';
+import { useBotVendorComments, useBotVendorPrs } from '../../hooks/useBotVendorPrs.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
+import { useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
-import { CI_META, indexUsers, relativeTime } from '../../lib/ui.js';
+import { CI_META, DERIVED_STATE_META, indexUsers, relativeTime } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
+import { Markdown } from '../Markdown.js';
+import { MlSeverityBadge } from '../MlSeverityBadge.js';
 import { UserName } from '../UserName.js';
 
 // The bot PR DRILL-DOWN — a persistent, singleton tab opened by clicking an automated-reviewer
@@ -36,6 +40,84 @@ const WINDOWS: { key: BotWindowKind; label: string }[] = [
 
 // Stable empty reference so the default-vendor effect below doesn't loop every render.
 const NO_VENDORS: BotVendorAnalytics[] = [];
+
+// The Comments sub-view renders FULL markdown bodies, so the list is windowed client-side
+// (3000 rows of react-markdown in one paint is a stall): first page, then "Show more" steps.
+const COMMENTS_PAGE = 50;
+const COMMENTS_PAGE_STEP = 150;
+
+const TARGET_KIND_LABEL: Record<BotVendorComment['targetKind'], string> = {
+  review_comment: 'inline comment',
+  pr_comment: 'PR comment',
+  review: 'review summary',
+};
+
+// One row of the Comments sub-view. The severity badge reads the label shipped INLINE on the
+// row — this list must never mount the per-PR label index per row (the per-card-query failure
+// the feed's unbadged comment cards exist to avoid).
+function CommentRow({
+  c,
+  showSeverity,
+  onOpen,
+}: {
+  c: BotVendorComment;
+  showSeverity: boolean;
+  onOpen: (c: BotVendorComment) => void;
+}): JSX.Element {
+  const state = c.derivedState ? DERIVED_STATE_META[c.derivedState] : null;
+  return (
+    <tr className="border-t border-gray-100 align-top dark:border-gray-800/60">
+      {showSeverity && (
+        <td className="py-2 pr-3">
+          {c.mlLabel ? (
+            <MlSeverityBadge label={c.mlLabel} />
+          ) : (
+            <span className="text-[11px] text-gray-300 dark:text-gray-600" title="Not scored yet">
+              —
+            </span>
+          )}
+        </td>
+      )}
+      <td className="max-w-2xl py-2 pr-3">
+        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[10px] text-gray-400">
+          <span className="uppercase tracking-wide">{TARGET_KIND_LABEL[c.targetKind]}</span>
+          {c.path && <span className="truncate font-mono">{c.path}</span>}
+          {state && (
+            <span
+              className="rounded px-1 py-px font-medium"
+              style={{ color: state.color, background: `${state.color}1a` }}
+              title={state.description}
+            >
+              {state.label}
+            </span>
+          )}
+        </div>
+        {/* Full markdown — comment/review bodies are always persisted (lean storage keeps them). */}
+        <div className="text-xs">
+          <Markdown>{c.body ?? ''}</Markdown>
+        </div>
+      </td>
+      <td className="py-2 pr-3">
+        <button
+          type="button"
+          onClick={() => onOpen(c)}
+          className="block max-w-56 text-left hover:underline"
+          title={`${c.repoFullName} #${c.prNumber} — ${c.prTitle}`}
+        >
+          <span className="block truncate font-mono text-[11px] text-gray-400">
+            {c.repoFullName} #{c.prNumber}
+          </span>
+          <span className="block truncate text-[11px] text-gray-700 dark:text-gray-200">
+            {c.prTitle}
+          </span>
+        </button>
+      </td>
+      <td className="whitespace-nowrap py-2 text-[11px] text-gray-500 dark:text-gray-400">
+        {relativeTime(c.createdAt)}
+      </td>
+    </tr>
+  );
+}
 
 function CiCell({ ci }: { ci: BotVendorPr['ciStatus'] }): JSX.Element {
   const meta = ci ? CI_META[ci] : null;
@@ -242,8 +324,43 @@ export function BotPrsDetail(): JSX.Element {
     );
   }, [vendors]);
 
+  // PRs | Comments sub-view — state LOCAL to the tab (window/scope stay shared with the panel).
+  // The visible view is DERIVED for the 'pierre' sentinel and never written back: its verbatim
+  // reviews are posted with the human's token, so there are no per-comment rows to list — the
+  // scalar keeps the user's choice for the sub-tabs that do render it (a corrective set would
+  // permanently forget it).
+  const [view, setView] = useState<'prs' | 'comments'>('prs');
+  const effectiveView: 'prs' | 'comments' = active === 'pierre' ? 'prs' : view;
+  const mlEnabled = useMlSeverityEnabled();
+  const [commentSort, setCommentSort] = useState<'newest' | 'severity'>('newest');
+  const [visibleComments, setVisibleComments] = useState(COMMENTS_PAGE);
+
   const prs = useBotVendorPrs(workspaceId, active, window, true, repoScope);
   const rows = prs.data?.prs ?? [];
+  // Lazy: the comments list (bodies + inline labels) is fetched only while its view is open.
+  const comments = useBotVendorComments(
+    workspaceId,
+    active,
+    window,
+    effectiveView === 'comments',
+    repoScope,
+  );
+  // Re-window the markdown-heavy list whenever what it shows changes shape.
+  useEffect(() => {
+    setVisibleComments(COMMENTS_PAGE);
+  }, [active, commentSort, window]);
+  const commentRows = useMemo(() => {
+    const list = comments.data?.comments ?? [];
+    if (commentSort !== 'severity') return list; // server order — newest first
+    // Worst-first. Summaries and unscored rows sink to the bottom (a walkthrough scored
+    // `major` must not outrank real findings — the worstSeverity rule); newest breaks ties.
+    const ord = (c: BotVendorComment): number =>
+      c.mlLabel && !c.mlLabel.isSummary ? c.mlLabel.severityOrd : -1;
+    return [...list].sort(
+      (a, b) => ord(b) - ord(a) || (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0),
+    );
+  }, [comments.data, commentSort]);
+
   // The selected reviewer's per-reviewer label (from the drill-down response) for the header.
   const activeLabel = prs.data?.label ?? null;
   const botOnlyPrs = analytics.data?.totals.botOnlyPrs ?? 0;
@@ -261,11 +378,27 @@ export function BotPrsDetail(): JSX.Element {
     };
     openPrDetailTab(meta);
   };
+  const openPrFromComment = (c: BotVendorComment): void => {
+    const u = c.prAuthorId != null ? usersById.get(c.prAuthorId) : undefined;
+    const meta: PinnedPr = {
+      id: c.prId,
+      number: c.prNumber,
+      title: c.prTitle,
+      repoFullName: c.repoFullName,
+      authorLogin: u?.githubLogin ?? null,
+      authorDisplayName: u?.displayName ?? null,
+      authorAvatarUrl: u?.avatarUrl ?? null,
+    };
+    openPrDetailTab(meta);
+  };
 
-  const isFetching = analytics.isFetching || prs.isFetching;
+  const isFetching = analytics.isFetching || prs.isFetching || comments.isFetching;
   const refresh = (): void => {
     void analytics.refetch();
     void prs.refetch();
+    // Only when its view is open — `refetch` ignores `enabled`, and firing the heavy comments
+    // read from the PRs view would spend a search-tier request nothing renders.
+    if (effectiveView === 'comments') void comments.refetch();
   };
 
   return (
@@ -358,7 +491,127 @@ export function BotPrsDetail(): JSX.Element {
             })}
           </div>
 
-          {prs.isLoading ? (
+          {/* PRs | Comments sub-view toggle. Comments is DISABLED for the 'pierre' sentinel
+              (verbatim reviews are posted with the human's token — no per-comment rows), and
+              the sort control only appears where severity exists to sort by. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
+              {(
+                [
+                  { key: 'prs', label: 'PRs' },
+                  { key: 'comments', label: 'Comments' },
+                ] as const
+              ).map((t) => {
+                const disabled = t.key === 'comments' && active === 'pierre';
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setView(t.key)}
+                    disabled={disabled}
+                    title={
+                      disabled
+                        ? 'Pierre’s verbatim reviews are posted with the human’s token — there are no per-comment rows to list.'
+                        : t.key === 'comments'
+                          ? 'Everything this bot said in the window — inline comments, PR comments and review summaries'
+                          : 'The PRs this bot touched in the window'
+                    }
+                    className={`px-2 py-0.5 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
+                      effectiveView === t.key
+                        ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                        : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+            {effectiveView === 'comments' && mlEnabled && (
+              <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
+                {(
+                  [
+                    { key: 'newest', label: 'Newest' },
+                    { key: 'severity', label: 'Severity' },
+                  ] as const
+                ).map((s) => (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() => setCommentSort(s.key)}
+                    title={
+                      s.key === 'severity'
+                        ? 'Worst predicted severity first — summaries and unscored comments sink to the bottom'
+                        : 'Most recent first'
+                    }
+                    className={`px-2 py-0.5 text-[11px] font-medium ${
+                      commentSort === s.key
+                        ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                        : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {effectiveView === 'comments' ? (
+            comments.isLoading ? (
+              <div className="space-y-2">
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i} className="h-8 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+                ))}
+              </div>
+            ) : comments.isError ? (
+              <div className="text-sm text-red-500">Couldn’t load the comment list.</div>
+            ) : commentRows.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+                No comments from this bot in the window.
+              </div>
+            ) : (
+              <>
+                {comments.data?.truncated && (
+                  <div className="rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    This bot said more in the window than one read covers — showing the most
+                    recent {commentRows.length.toLocaleString()}.
+                  </div>
+                )}
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] border-collapse text-sm">
+                    <thead>
+                      <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                        {mlEnabled && <th className="pb-1 pr-3 font-semibold">Severity</th>}
+                        <th className="pb-1 pr-3 font-semibold">Comment</th>
+                        <th className="pb-1 pr-3 font-semibold">Pull request</th>
+                        <th className="pb-1 font-semibold">Posted</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {commentRows.slice(0, visibleComments).map((c) => (
+                        <CommentRow
+                          key={`${c.targetKind}:${c.targetId}`}
+                          c={c}
+                          showSeverity={mlEnabled}
+                          onOpen={openPrFromComment}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {commentRows.length > visibleComments && (
+                  <button
+                    type="button"
+                    onClick={() => setVisibleComments((n) => n + COMMENTS_PAGE_STEP)}
+                    className="w-full rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
+                  >
+                    Show more ({(commentRows.length - visibleComments).toLocaleString()} remaining)
+                  </button>
+                )}
+              </>
+            )
+          ) : prs.isLoading ? (
             <div className="space-y-2">
               {[0, 1, 2, 3].map((i) => (
                 <div key={i} className="h-8 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />

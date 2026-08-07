@@ -1,4 +1,4 @@
-import type { MlCategory, MlLabel, MlSeverity } from '@pierre-review/shared';
+import type { MlCategory, MlLabel, MlSeverity, MlSeverityCounts } from '@pierre-review/shared';
 import { ML_CATEGORY_LABEL, ML_SEVERITY_META } from '../lib/ui.js';
 
 // `severityProb` is the RAW probability of the CHOSEN class, and the argmax of a FOUR-class
@@ -193,4 +193,41 @@ export function MlSeverityDots({
 
 export function categoryLabel(c: MlCategory): string {
   return ML_CATEGORY_LABEL[c] ?? c;
+}
+
+/**
+ * One horizontal severity-mix bar over a set of FINDINGS-only counts. ⚠ `total` must be the
+ * FINDINGS count (the four counts' own sum), never the all-in labelled count — `bySeverity`
+ * excludes summaries and praise, so dividing by `labelled` leaves a phantom gap at the end of
+ * every bar. Lived in the retired standalone BotSeverityPanel; the merged Bots ROI table is
+ * now the main consumer.
+ */
+const BAR_ORDER: MlSeverity[] = ['critical', 'major', 'minor', 'nit'];
+
+export function SeverityBar({
+  counts,
+  total,
+}: {
+  counts: MlSeverityCounts;
+  total: number;
+}): JSX.Element {
+  if (total === 0) {
+    return <div className="h-2 w-full rounded-full bg-gray-100 dark:bg-gray-800" />;
+  }
+  return (
+    <div className="flex h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+      {BAR_ORDER.map((s) => {
+        const n = counts[s];
+        if (n === 0) return null;
+        const meta = ML_SEVERITY_META[s];
+        return (
+          <div
+            key={s}
+            style={{ width: `${(n / total) * 100}%`, backgroundColor: meta.color }}
+            title={`${meta.label}: ${n}`}
+          />
+        );
+      })}
+    </div>
+  );
 }

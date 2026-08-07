@@ -180,6 +180,7 @@ const RECLASSIFY_INVALIDATE_KEYS = [
   'bot-only-prs',
   'bot-resolvable',
   'bot-vendor-prs',
+  'bot-vendor-comments',
   'bot-dedup',
   // The ML severity rollup counts only the actors the workspace calls bots, so marking a login
   // human (or a new one automated) changes it as surely as it changes the ROI numbers. The
@@ -394,6 +395,8 @@ export function useScopeResolveBotThreads() {
       void qc.invalidateQueries({ queryKey: ['bot-analytics'] });
       void qc.invalidateQueries({ queryKey: ['bot-only-prs'] });
       void qc.invalidateQueries({ queryKey: ['bot-vendor-prs'] });
+      // The comments drill-down shows each thread's derivedState, which a resolve just changed.
+      void qc.invalidateQueries({ queryKey: ['bot-vendor-comments'] });
       void qc.invalidateQueries({ queryKey: ['consolidated-feed'] });
       // Mirror the per-PR resolve hook (usePrWrites.useResolveBotThreads): the Activity
       // console's acted-on stats, the triage queue, and each affected PR's cached detail

@@ -1267,6 +1267,43 @@ check(
   rollupB.labelled === 1 && rollupB.totals.bySeverity.nit === 1 && rollupB.totals.bySeverity.major === 0,
 );
 
+// getBotVendorComments (the Comments drill-down) has the rollup's exact shape of exposure —
+// outer rows off the caller's PR join, labels off the (accountId, kind, targetId) LEFT JOIN —
+// and the same vacuity trap (a transposed scope short-circuits empty before querying). The
+// binding pair is therefore the SAME global author labelled in BOTH tenants just above: each
+// side must list exactly its own comment, carrying its own label inline, never the other's.
+const { getBotVendorComments } = await import('../src/db/ml-labels.js');
+const vcOwnA = await getBotVendorComments(1, { userId: contributor!.id }, 'rolling_30', mlScopeA);
+check(
+  "getBotVendorComments(A) lists A's comment with A's label inline, never B's row",
+  vcOwnA.comments.some(
+    (c) =>
+      c.targetKind === 'review_comment' &&
+      c.targetId === isoRc[0]!.id &&
+      c.mlLabel?.severity === 'major',
+  ) && !vcOwnA.comments.some((c) => c.targetKind === 'review_comment' && c.targetId === isoRcB[0]!.id),
+);
+const vcOwnB = await getBotVendorComments(2, { userId: contributor!.id }, 'rolling_30', mlScopeB);
+check(
+  "getBotVendorComments(B) lists ONLY B's comment and label, not A's (IDOR blocked)",
+  vcOwnB.comments.some(
+    (c) =>
+      c.targetKind === 'review_comment' &&
+      c.targetId === isoRcB[0]!.id &&
+      c.mlLabel?.severity === 'nit',
+  ) && !vcOwnB.comments.some((c) => c.mlLabel?.severity === 'major'),
+);
+const vcCross = await getBotVendorComments(
+  2,
+  { userId: contributor!.id },
+  'rolling_30',
+  await q.resolveWorkspaceScope(2, undefined, [A.repoId]),
+);
+check(
+  'getBotVendorComments(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)',
+  vcCross.comments.length === 0,
+);
+
 // getMlBacklogForAccount — the account-wide enrichment backlog behind GET /api/ml-status. It
 // takes NO scope argument (the worker walks every workspace, so a workspace-scoped count would
 // under-report the work actually running), which makes its ONE accountId predicate carry the

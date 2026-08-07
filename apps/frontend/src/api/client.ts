@@ -49,6 +49,7 @@ import type {
   BotBehaviourResponse,
   BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
+  BotVendorCommentsResponse,
   BotVendorPrsResponse,
   BotDedupResponse,
   PrBotBehaviourResponse,
@@ -1131,6 +1132,24 @@ export const api = {
     get<BotVendorPrsResponse>(
       withQuery(
         `/api/bot-analytics/vendor/${encodeURIComponent(key)}/prs`,
+        `window=${encodeURIComponent(window)}`,
+        workspaceParam(workspaceId),
+        repoIdsParam(repoIds),
+      ),
+    ),
+  // The per-bot COMMENTS drill-down behind the same Bot-ROI row: everything the reviewer said
+  // in the window (inline review comments, PR comments, review bodies), each row's ML label
+  // shipped INLINE — one request, never the per-PR label index per row. Same scope wiring as
+  // botVendorPrs, for the same one-screen-one-answer reason.
+  botVendorComments: (
+    key: string,
+    window: BotWindowKind,
+    workspaceId: number,
+    repoIds?: number[] | null,
+  ) =>
+    get<BotVendorCommentsResponse>(
+      withQuery(
+        `/api/bot-analytics/vendor/${encodeURIComponent(key)}/comments`,
         `window=${encodeURIComponent(window)}`,
         workspaceParam(workspaceId),
         repoIdsParam(repoIds),

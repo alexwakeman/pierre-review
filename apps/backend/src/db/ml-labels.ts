@@ -19,11 +19,15 @@
 // candidate only once it has been classified. That is fine BECAUSE this is a pull-based
 // worker: it re-derives the bot set every tick, so a newly-classified or newly-marked bot's
 // whole backlog is picked up on the next pass with no backfill trigger of its own.
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import type { AnyColumn } from 'drizzle-orm';
 import type {
   AutomatedReviewerKind,
+  BotAnalyticsMlTotals,
   BotSeverityResponse,
+  BotVendorComment,
+  BotVendorCommentsResponse,
+  BotWindowKind,
   MlBotSeverityRow,
   MlCategory,
   MlLabel,
@@ -33,6 +37,7 @@ import type {
   MlVendorConfidence,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
+import { labelFor as labelForKind } from '../sync/reviewer-classify.js';
 import {
   automatedReviewerUserIds,
   classificationKindForUser,
@@ -44,6 +49,7 @@ import {
 const {
   mlCommentLabels,
   pullRequests,
+  repos,
   reviewComments,
   reviewThreads,
   prComments,
@@ -646,6 +652,470 @@ function vendorBrand(kind: AutomatedReviewerKind, login: string): string {
     .join(' ');
 }
 
+// ── The WINDOWED per-bot label fold for getBotAnalytics ─────────────────────────────────────
+// The merged Bots table shows ROI columns and severity columns on ONE row over ONE window, so
+// this aggregates `ml_comment_labels` per author over the SAME [from, now] window the ROI math
+// uses — `target_created_at` was stored precisely so this read needs no union back to the three
+// polymorphic parents (and the (account, repo, author) index carries the scan). Exclusion
+// semantics are getBotSeverityRollup's, VERBATIM: summaries and praise are labelled work but not
+// findings, every rate divides by findings, and the vendor's own declared severity is never
+// read. Same cap honesty too — newest-first ORDER BY plus a `truncated` flag.
+//
+// `pending` is the windowed twin of the rollup's: the same hasText/no-label predicate the
+// candidate query uses, additionally bounded to the window, so the merged strip's "X of Y
+// scored" is a statement about the window it sits over.
+export interface MlVendorWindowAgg {
+  labelled: number;
+  findings: number;
+  summaries: number;
+  praise: number;
+  high: number; // major + critical findings
+  bySeverity: MlSeverityCounts; // findings-only
+}
+
+export interface MlWindowAggregates {
+  byBot: Map<number, MlVendorWindowAgg>;
+  totals: BotAnalyticsMlTotals;
+}
+
+export async function getMlWindowAggregates(
+  accountId: number,
+  scope: BotScope,
+  automatedIds: number[],
+  from: Date,
+): Promise<MlWindowAggregates> {
+  const emptyTotals: BotAnalyticsMlTotals = {
+    labelled: 0,
+    findings: 0,
+    summaries: 0,
+    praise: 0,
+    pending: 0,
+    bySeverity: emptySeverityCounts(),
+    byCategory: [],
+    backends: [],
+    truncated: false,
+  };
+  if (scope.repoIds.length === 0 || automatedIds.length === 0) {
+    return { byBot: new Map(), totals: emptyTotals };
+  }
+
+  const [labelRows, pending] = await Promise.all([
+    db
+      .select({
+        authorUserId: mlCommentLabels.authorUserId,
+        severity: mlCommentLabels.severity,
+        isSummary: mlCommentLabels.isSummary,
+        categories: mlCommentLabels.categories,
+        backend: mlCommentLabels.backend,
+      })
+      .from(mlCommentLabels)
+      .where(
+        and(
+          eq(mlCommentLabels.accountId, accountId),
+          inArray(mlCommentLabels.repoId, scope.repoIds),
+          inArray(mlCommentLabels.authorUserId, automatedIds),
+          gte(mlCommentLabels.targetCreatedAt, from),
+        ),
+      )
+      .orderBy(desc(mlCommentLabels.targetCreatedAt), desc(mlCommentLabels.id))
+      .limit(ROLLUP_SCAN_CAP)
+      .execute(),
+    countUnlabelledBotText(accountId, scope, automatedIds, from),
+  ]);
+
+  const byBot = new Map<number, MlVendorWindowAgg>();
+  const totalsBySeverity = emptySeverityCounts();
+  const totalsByCategory = new Map<MlCategory, number>();
+  const backends = new Set<string>();
+  let findings = 0;
+  let summaries = 0;
+  let praise = 0;
+
+  for (const row of labelRows) {
+    const severity = coerceSeverity(row.severity);
+    if (!severity) continue;
+    if (row.backend) backends.add(row.backend);
+    let acc = byBot.get(row.authorUserId);
+    if (!acc) {
+      acc = {
+        labelled: 0,
+        findings: 0,
+        summaries: 0,
+        praise: 0,
+        high: 0,
+        bySeverity: emptySeverityCounts(),
+      };
+      byBot.set(row.authorUserId, acc);
+    }
+    acc.labelled += 1;
+    const categories = coerceCategories(row.categories);
+    if (row.isSummary) {
+      acc.summaries += 1;
+      summaries += 1;
+    } else if (categories.includes('praise')) {
+      acc.praise += 1;
+      praise += 1;
+    } else {
+      // ⚠ FINDINGS-ONLY, inside this branch — the same phantom-gap rule as the rollup: counting
+      // a walkthrough's severity while every rate divides by `findings` lets a share top 100%.
+      acc.findings += 1;
+      findings += 1;
+      acc.bySeverity[severity] += 1;
+      totalsBySeverity[severity] += 1;
+      if (severity === 'major' || severity === 'critical') acc.high += 1;
+      for (const c of categories) {
+        totalsByCategory.set(c, (totalsByCategory.get(c) ?? 0) + 1);
+      }
+    }
+  }
+
+  return {
+    byBot,
+    totals: {
+      labelled: labelRows.length,
+      findings,
+      summaries,
+      praise,
+      pending,
+      bySeverity: totalsBySeverity,
+      byCategory: [...totalsByCategory.entries()]
+        .map(([category, count]) => ({ category, count }))
+        .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category)),
+      backends: [...backends].sort(),
+      truncated: labelRows.length >= ROLLUP_SCAN_CAP,
+    },
+  };
+}
+
+// ── The per-REVIEWER comments drill-down (GET /api/bot-analytics/vendor/:key/comments) ──────
+// Everything one automated reviewer SAID in the window — inline review comments (path + thread
+// state), issue-level PR comments, and non-empty review bodies — each row carrying its stored
+// ML label INLINE via a LEFT JOIN on (account_id, target_kind, target_id). One response serves
+// the whole list: a cross-PR list must never mount the per-PR label index per row.
+//
+// Deliberately a NEW query rather than a re-export of getBotReviewComments: that row shape is
+// re-declared verbatim in packages/pro/src/bot-themes/build.ts (open-core lockstep) and it is
+// role:'review' by design, while this drill-down must also serve quality_check-roled rows —
+// mirroring getBotVendorPrs, whose quality-check section offers the same drill-down.
+//
+// The 'pierre' sentinel answers EMPTY: its verbatim reviews are posted with the human's token
+// (per-review provenance), so there are no attributable per-comment rows to list — the same
+// reasoning as its getBotVendorPrs special case, minus the review-join it uses for PR rows.
+const BOT_VENDOR_COMMENT_CAP = 3000; // most-recent rows per source (the themes-funnel precedent)
+
+interface JoinedLabelCols {
+  mlSeverity: string | null;
+  mlSeverityOrd: number | null;
+  mlSeverityProb: number | null;
+  mlVendorSeverity: string | null;
+  mlVendorSeverityConfidence: string | null;
+  mlCategories: string[] | null;
+  mlIsSummary: boolean | null;
+  mlBackend: string | null;
+  mlModelVersion: string | null;
+  mlCreatedAt: Date | null;
+}
+
+// The left-joined label columns → a wire MlLabel, or null when the target has no label row.
+// Coercions mirror toWireLabel: an unreadable severity drops the LABEL (not the comment row),
+// an unreadable vendor claim degrades to "no vendor claim".
+function inlineLabel(
+  targetKind: MlLabelTargetKind,
+  targetId: number,
+  r: JoinedLabelCols,
+): MlLabel | null {
+  const severity = coerceSeverity(r.mlSeverity);
+  if (!severity || r.mlSeverityOrd == null || r.mlSeverityProb == null) return null;
+  return {
+    targetKind,
+    targetId,
+    severity,
+    severityOrd: r.mlSeverityOrd,
+    severityProb: r.mlSeverityProb,
+    vendorSeverity: coerceSeverity(r.mlVendorSeverity),
+    vendorSeverityConfidence: coerceVendorConfidence(r.mlVendorSeverityConfidence),
+    categories: coerceCategories(r.mlCategories),
+    isSummary: r.mlIsSummary ?? false,
+    backend: r.mlBackend ?? '',
+    modelVersion: r.mlModelVersion ?? '',
+    createdAt: (r.mlCreatedAt ?? new Date(0)).toISOString(),
+  };
+}
+
+export async function getBotVendorComments(
+  accountId: number,
+  target: { userId: number } | { kind: 'pierre' },
+  window: BotWindowKind,
+  // The SAME BotScope the ROI row was computed at — this list reproduces one of that panel's
+  // rows, so it takes the identical workspace + repo narrowing.
+  scope: BotScope,
+): Promise<BotVendorCommentsResponse> {
+  const nowMs = Date.now();
+  const to = new Date(nowMs);
+  // Same window→days mapping as getBotAnalytics (rolling_7=7, rolling_30=30, else — incl. sprint — 14).
+  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
+  const from = new Date(nowMs - windowDays * 86_400_000);
+  const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
+  const generatedAt = to.toISOString();
+
+  if ('kind' in target) {
+    return {
+      enabled: true,
+      key: 'pierre',
+      kind: 'pierre',
+      label: labelForKind('pierre'),
+      login: null,
+      window: win,
+      comments: [],
+      truncated: false,
+      generatedAt,
+    };
+  }
+
+  const userId = target.userId;
+  const key = `u${userId}`;
+  // NOT role-filtered — mirrors getBotVendorPrs: the quality-check section of the ROI panel
+  // offers the same drill-down. Only a reviewer this account has CLASSIFIED as automated is a
+  // valid target; an arbitrary userId echoes its identity but lists nothing.
+  const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
+  const kindTyped: AutomatedReviewerKind = kindMap.get(userId) ?? 'in_house';
+  // Identity mirrors getBotVendorPrs / getBotAnalytics.reviewerLabel exactly: the workspace's
+  // custom label → the vendor's pretty name (known vendors) → login/display name.
+  const classLabel = await classificationLabelMap(accountId, scope.workspaceId);
+  const [userRow] = await db
+    .select({ login: users.githubLogin, name: users.displayName })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1)
+    .execute();
+  const login = userRow?.login ?? null;
+  const custom = classLabel.get(userId);
+  let label: string;
+  if (custom) label = custom;
+  else if (kindTyped !== 'in_house' && kindTyped !== 'pierre' && kindTyped !== 'vendor')
+    label = labelForKind(kindTyped);
+  else label = userRow?.name?.trim() || login || key;
+
+  const empty: BotVendorCommentsResponse = {
+    enabled: true, key, kind: kindTyped, label, login, window: win,
+    comments: [], truncated: false, generatedAt,
+  };
+  if (scope.repoIds.length === 0 || !kindMap.has(userId)) return empty;
+
+  const mlCols = {
+    mlSeverity: mlCommentLabels.severity,
+    mlSeverityOrd: mlCommentLabels.severityOrd,
+    mlSeverityProb: mlCommentLabels.severityProb,
+    mlVendorSeverity: mlCommentLabels.vendorSeverity,
+    mlVendorSeverityConfidence: mlCommentLabels.vendorSeverityConfidence,
+    mlCategories: mlCommentLabels.categories,
+    mlIsSummary: mlCommentLabels.isSummary,
+    mlBackend: mlCommentLabels.backend,
+    mlModelVersion: mlCommentLabels.modelVersion,
+    mlCreatedAt: mlCommentLabels.createdAt,
+  };
+
+  // Inline review-thread comments (carry the thread's path + derivedState).
+  const rcRows = await db
+    .select({
+      targetId: reviewComments.id,
+      prId: reviewComments.prId,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      prAuthorId: pullRequests.authorId,
+      repoId: pullRequests.repoId,
+      owner: repos.owner,
+      name: repos.name,
+      body: reviewComments.body,
+      createdAt: reviewComments.createdAt,
+      path: reviewThreads.path,
+      derivedState: reviewThreads.derivedState,
+      threadId: reviewComments.threadId,
+      ...mlCols,
+    })
+    .from(reviewComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .leftJoin(reviewThreads, eq(reviewThreads.id, reviewComments.threadId))
+    .leftJoin(
+      mlCommentLabels,
+      and(
+        eq(mlCommentLabels.accountId, accountId),
+        eq(mlCommentLabels.targetKind, 'review_comment'),
+        eq(mlCommentLabels.targetId, reviewComments.id),
+      ),
+    )
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.repoId, scope.repoIds),
+        eq(reviewComments.authorId, userId),
+        gte(reviewComments.createdAt, from),
+        lte(reviewComments.createdAt, to),
+      ),
+    )
+    .orderBy(desc(reviewComments.createdAt))
+    .limit(BOT_VENDOR_COMMENT_CAP)
+    .execute();
+
+  // Issue-level PR comments (no path / thread state).
+  const pcRows = await db
+    .select({
+      targetId: prComments.id,
+      prId: prComments.prId,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      prAuthorId: pullRequests.authorId,
+      repoId: pullRequests.repoId,
+      owner: repos.owner,
+      name: repos.name,
+      body: prComments.body,
+      createdAt: prComments.createdAt,
+      ...mlCols,
+    })
+    .from(prComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .leftJoin(
+      mlCommentLabels,
+      and(
+        eq(mlCommentLabels.accountId, accountId),
+        eq(mlCommentLabels.targetKind, 'pr_comment'),
+        eq(mlCommentLabels.targetId, prComments.id),
+      ),
+    )
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.repoId, scope.repoIds),
+        eq(prComments.authorId, userId),
+        gte(prComments.createdAt, from),
+        lte(prComments.createdAt, to),
+      ),
+    )
+    .orderBy(desc(prComments.createdAt))
+    .limit(BOT_VENDOR_COMMENT_CAP)
+    .execute();
+
+  // Review BODIES with real text only (`hasText` — an approval with no comment is an
+  // empty-string body, and 5.4k empty rows are not things the bot "said"). Matches the label
+  // corpus: the candidate query applies the same predicate, so every row here is labellable.
+  const rvRows = await db
+    .select({
+      targetId: reviews.id,
+      prId: reviews.prId,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      prAuthorId: pullRequests.authorId,
+      repoId: pullRequests.repoId,
+      owner: repos.owner,
+      name: repos.name,
+      body: reviews.body,
+      createdAt: reviews.submittedAt,
+      ...mlCols,
+    })
+    .from(reviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .leftJoin(
+      mlCommentLabels,
+      and(
+        eq(mlCommentLabels.accountId, accountId),
+        eq(mlCommentLabels.targetKind, 'review'),
+        eq(mlCommentLabels.targetId, reviews.id),
+      ),
+    )
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(pullRequests.repoId, scope.repoIds),
+        eq(reviews.authorId, userId),
+        isNotNull(reviews.body),
+        hasText(reviews.body),
+        gte(reviews.submittedAt, from),
+        lte(reviews.submittedAt, to),
+      ),
+    )
+    .orderBy(desc(reviews.submittedAt))
+    .limit(BOT_VENDOR_COMMENT_CAP)
+    .execute();
+
+  const toIso = (d: Date | number | null): string => {
+    if (d == null) return new Date(0).toISOString();
+    if (d instanceof Date) return d.toISOString();
+    const ms = Number(d) > 1e12 ? Number(d) : Number(d) * 1000;
+    return new Date(ms).toISOString();
+  };
+
+  const out: BotVendorComment[] = [];
+  for (const r of rcRows) {
+    out.push({
+      targetKind: 'review_comment',
+      targetId: r.targetId,
+      prId: r.prId,
+      prNumber: r.prNumber,
+      prTitle: r.prTitle,
+      prAuthorId: r.prAuthorId ?? null,
+      repoId: r.repoId,
+      repoFullName: `${r.owner}/${r.name}`,
+      path: r.path ?? null,
+      threadId: r.threadId ?? null,
+      derivedState: r.derivedState ?? null,
+      body: r.body,
+      createdAt: toIso(r.createdAt),
+      mlLabel: inlineLabel('review_comment', r.targetId, r),
+    });
+  }
+  for (const r of pcRows) {
+    out.push({
+      targetKind: 'pr_comment',
+      targetId: r.targetId,
+      prId: r.prId,
+      prNumber: r.prNumber,
+      prTitle: r.prTitle,
+      prAuthorId: r.prAuthorId ?? null,
+      repoId: r.repoId,
+      repoFullName: `${r.owner}/${r.name}`,
+      path: null,
+      threadId: null,
+      derivedState: null,
+      body: r.body,
+      createdAt: toIso(r.createdAt),
+      mlLabel: inlineLabel('pr_comment', r.targetId, r),
+    });
+  }
+  for (const r of rvRows) {
+    out.push({
+      targetKind: 'review',
+      targetId: r.targetId,
+      prId: r.prId,
+      prNumber: r.prNumber,
+      prTitle: r.prTitle,
+      prAuthorId: r.prAuthorId ?? null,
+      repoId: r.repoId,
+      repoFullName: `${r.owner}/${r.name}`,
+      path: null,
+      threadId: null,
+      derivedState: null,
+      body: r.body,
+      createdAt: toIso(r.createdAt),
+      mlLabel: inlineLabel('review', r.targetId, r),
+    });
+  }
+  // Newest-first, capped combined — `truncated` when either a source hit its own cap or the
+  // combined stream overflowed (the getBotReviewComments rule).
+  out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  const truncated =
+    rcRows.length >= BOT_VENDOR_COMMENT_CAP ||
+    pcRows.length >= BOT_VENDOR_COMMENT_CAP ||
+    rvRows.length >= BOT_VENDOR_COMMENT_CAP ||
+    out.length > BOT_VENDOR_COMMENT_CAP;
+  return {
+    enabled: true, key, kind: kindTyped, label, login, window: win,
+    comments: out.slice(0, BOT_VENDOR_COMMENT_CAP), truncated, generatedAt,
+  };
+}
+
 /**
  * The two disjoint populations of unlabelled bot rows, split by ONE body predicate over one
  * shared query shape so their union and boundary cannot drift:
@@ -667,11 +1137,16 @@ async function countBotText(
   scope: BotScope,
   automatedIds: number[],
   mode: UnlabelledBodyMode,
+  // Optional window floor on the SOURCE row's own timestamp (createdAt / submittedAt) — the
+  // windowed ROI fold's coverage statement must be about the window it sits over. Absent =
+  // the whole corpus, exactly as before.
+  from?: Date,
 ): Promise<number> {
   if (scope.repoIds.length === 0 || automatedIds.length === 0) return 0;
   const n = sql<number>`count(*)`;
   const bodyPredicate = (col: AnyColumn) =>
     mode === 'unlabelled' ? and(isNotNull(col), hasText(col)) : isNull(col);
+  const windowed = (col: AnyColumn) => (from ? [gte(col, from)] : []);
 
   const [rc, pc, rv] = await Promise.all([
     db
@@ -694,6 +1169,7 @@ async function countBotText(
           inArray(reviewComments.authorId, automatedIds),
           bodyPredicate(reviewComments.body),
           isNull(mlCommentLabels.id),
+          ...windowed(reviewComments.createdAt),
         ),
       )
       .execute(),
@@ -717,6 +1193,7 @@ async function countBotText(
           inArray(prComments.authorId, automatedIds),
           bodyPredicate(prComments.body),
           isNull(mlCommentLabels.id),
+          ...windowed(prComments.createdAt),
         ),
       )
       .execute(),
@@ -740,6 +1217,7 @@ async function countBotText(
           inArray(reviews.authorId, automatedIds),
           bodyPredicate(reviews.body),
           isNull(mlCommentLabels.id),
+          ...windowed(reviews.submittedAt),
         ),
       )
       .execute(),
@@ -751,14 +1229,15 @@ async function countBotText(
 /**
  * How much bot text in scope is still waiting for a label. Three counts with the same
  * left-join-is-null predicate the candidate query uses, so "pending" and "what the worker will
- * pick up next" cannot drift apart.
+ * pick up next" cannot drift apart. Optional `from` bounds the count to a window (the ROI fold).
  */
 async function countUnlabelledBotText(
   accountId: number,
   scope: BotScope,
   automatedIds: number[],
+  from?: Date,
 ): Promise<number> {
-  return countBotText(accountId, scope, automatedIds, 'unlabelled');
+  return countBotText(accountId, scope, automatedIds, 'unlabelled', from);
 }
 
 /** How much bot text in scope can NEVER be labelled as stored — see `UnlabelledBodyMode`. */

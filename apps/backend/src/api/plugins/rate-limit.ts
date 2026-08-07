@@ -173,6 +173,14 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // so it borrows the same 60/min `search` bucket rather than sitting on the 600/min blanket one.
   // The SPA fires it once per Bots-tab view.
   if (path.startsWith('/api/bot-severity')) return [TIERS.search, TIERS.read];
+  // GET /api/bot-analytics/vendor/<key>/comments — the per-bot comments drill-down: up to 3000
+  // comment BODIES per source plus a three-way ml_comment_labels join, per request. Same shape
+  // of cost as the rollup above (this process, not GitHub and not Anthropic), so the same
+  // 60/min bucket. Its `/prs` sibling stays on `read` DELIBERATELY — that list is PR metadata
+  // only, no bodies. Anchored at both ends so the sibling cannot be swept in.
+  if (!mutating && /^\/api\/bot-analytics\/vendor\/[^/]+\/comments$/.test(path)) {
+    return [TIERS.search, TIERS.read];
+  }
   // GET /api/prs/<id>/ml-labels — the per-PR badge index. Two indexed reads over
   // ml_comment_labels, no model call, no GitHub. `read` is right, and it is RECORDED here rather
   // than inherited from the fall-through: it sits inside the /api/prs/<id>/ family whose other

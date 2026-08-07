@@ -4,6 +4,7 @@ import type {
   BotBehaviourResponse,
   BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
+  BotVendorCommentsResponse,
   BotVendorPrsResponse,
   BotWindowKind,
   DetectedReviewersResponse,
@@ -13,6 +14,7 @@ import type {
   WorkspaceReviewer,
   WorkspaceReviewerPatchBody,
 } from '@pierre-review/shared';
+import { getBotVendorComments } from '../../db/ml-labels.js';
 import {
   getBotAnalytics,
   getBotBehaviourAnalytics,
@@ -266,6 +268,30 @@ const analyticsSchema = {
 // parses it (anything else → 400). The window/workspace/repoIds resolution is identical to
 // /api/bot-analytics, because this list must reproduce ONE of that panel's rows.
 const vendorPrsSchema = {
+  params: {
+    type: 'object',
+    required: ['key'],
+    properties: { key: { type: 'string' } },
+  },
+  querystring: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      window: {
+        type: 'string',
+        enum: ['rolling_7', 'rolling_14', 'rolling_30', 'sprint'],
+        default: 'rolling_14',
+      },
+      workspace: { type: 'string' },
+      repoIds: { type: 'string' },
+    },
+  },
+};
+
+// GET /api/bot-analytics/vendor/:key/comments?window= — the per-REVIEWER COMMENTS drill-down.
+// Same shape as vendorPrsSchema, spelled out rather than aliased so the two can diverge without
+// a shared-object surprise (the reset-schema precedent above).
+const vendorCommentsSchema = {
   params: {
     type: 'object',
     required: ['key'],
@@ -587,6 +613,45 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     const resp: BotVendorPrsResponse = await getBotVendorPrs(accountId, target, window, scope);
     return resp;
   });
+
+  // The per-REVIEWER COMMENTS drill-down behind the same Bot-ROI row: everything the reviewer
+  // said in the window (inline review comments, PR comments, review bodies), each row with its
+  // stored ML label INLINE — one response, never the per-PR label index per row. Same key parse
+  // and the same scope resolution as the /prs sibling, so the list reproduces the same ROI row;
+  // the 'pierre' sentinel answers empty (verbatim reviews are human-posted — no per-comment
+  // rows to attribute). ⚠ Rate tier `search`, pinned in rate-limit.test.ts — this ships up to
+  // 3000 comment BODIES per source plus a three-way label join per request.
+  app.get(
+    '/api/bot-analytics/vendor/:key/comments',
+    { schema: vendorCommentsSchema },
+    async (req, reply) => {
+      const { key } = req.params as { key: string };
+      const { window, workspace, repoIds } = req.query as {
+        window: BotWindowKind;
+        workspace?: string;
+        repoIds?: string;
+      };
+      const m = /^u(\d+)$/.exec(key);
+      const target = m
+        ? { userId: Number(m[1]) }
+        : key === 'pierre'
+          ? ({ kind: 'pierre' } as const)
+          : null;
+      if (!target) {
+        reply.status(400);
+        return { error: 'BadRequest', message: `Invalid vendor key: ${key}` };
+      }
+      const accountId = accountIdOf(req);
+      const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
+      const resp: BotVendorCommentsResponse = await getBotVendorComments(
+        accountId,
+        target,
+        window,
+        scope,
+      );
+      return resp;
+    },
+  );
 
   // Cross-bot dedup clusters for one PR (≥2 automated reviewers on the same path/line window).
   // Ownership-scoped → 404 for a PR this account doesn't own. No `?workspace=`: the getter derives

@@ -1,21 +1,30 @@
 import { useMemo } from 'react';
 import type {
   AutomatedReviewerKind,
+  BotAnalyticsMlTotals,
   BotTuningSuggestion,
   BotVendorAnalytics,
   BotVendorTrendPoint,
   BotVerdict,
   BotWindowKind,
 } from '@pierre-review/shared';
+import { ML_SEVERITIES } from '@pierre-review/shared';
 import {
   useBotAnalytics,
   useResolvableBotThreads,
 } from '../../hooks/useBotTriage.js';
+import { useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { useProSettings, useHasProSettings } from '../../hooks/useProSettings.js';
 import { useFilters } from '../../store/filters.js';
-import { automatedReviewerMeta, relativeTime } from '../../lib/ui.js';
+import {
+  automatedReviewerMeta,
+  ML_CATEGORY_LABEL,
+  ML_SEVERITY_META,
+  relativeTime,
+} from '../../lib/ui.js';
 import { formatCostInput, resolveVendorCost } from '../../lib/botCost.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
+import { SeverityBar } from '../MlSeverityBadge.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js';
@@ -268,6 +277,136 @@ function TuningSuggestions({
   );
 }
 
+// ── "What the bots are flagging" — the ML severity totals strip (CORE, free, no AI) ──────────
+// The survivor of the retired standalone BotSeverityPanel: its per-bot table merged into the
+// VendorTable below (the ML columns), and these totals + top-category chips rehomed here — now
+// computed from the SAME response and therefore the SAME WINDOW as every other number on the
+// screen (the old block was corpus-wide while everything around it was windowed, and one row
+// mixing two time grains was the whole complaint). Renders NOTHING when the deployment has no
+// scoring service (the caller gates on MeResponse.mlSeverity) or when the window has neither
+// labels nor pending text — no empty chrome.
+function MlTotalsStrip({ ml }: { ml: BotAnalyticsMlTotals }): JSX.Element | null {
+  if (ml.labelled === 0 && ml.pending === 0) return null;
+  const coverage =
+    ml.labelled + ml.pending > 0 ? ml.labelled / (ml.labelled + ml.pending) : 0;
+  const highFindings = ml.bySeverity.major + ml.bySeverity.critical;
+  const highShare = ml.findings > 0 ? highFindings / ml.findings : 0;
+  const nitShare = ml.findings > 0 ? ml.bySeverity.nit / ml.findings : 0;
+  // `backend` without `modernbert-onnx` means the marker heuristic answered — materially worse
+  // severities, so it is stated, not hidden.
+  const fallbackOnly =
+    ml.backends.length > 0 && ml.backends.every((b) => !b.includes('modernbert-onnx'));
+  const topCategory = ml.byCategory[0];
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+      <div className="mb-2 flex flex-wrap items-baseline gap-2">
+        <h3 className="text-sm font-semibold">What the bots are flagging</h3>
+        <span
+          className="text-[11px] text-gray-400"
+          title="Severity and category are predicted by a small local model, not an LLM. Advisory — treat major+critical together as 'high' rather than trusting critical alone."
+        >
+          model-scored · advisory · over the selected window
+        </span>
+        {ml.pending > 0 && (
+          <span className="ml-auto text-[11px] text-gray-400 tabular-nums">
+            {ml.labelled.toLocaleString()} of {(ml.labelled + ml.pending).toLocaleString()} bot
+            comments in this window scored ({Math.round(coverage * 100)}%) — the rest are still
+            being processed
+          </span>
+        )}
+      </div>
+
+      {ml.truncated && (
+        <div className="mb-2 rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+          This window has more labelled bot comments than one read covers — the numbers below
+          cover the most recent {ml.labelled.toLocaleString()}.
+        </div>
+      )}
+
+      {fallbackOnly && (
+        <div className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+          The scoring service is running its heuristic fallback, not the trained model — these
+          severities are low quality. See docs/ML-SEVERITY.md.
+        </div>
+      )}
+
+      {/* Totals strip — all four tiles are claims about the SELECTED WINDOW's findings. */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800">
+          <div className="text-[10px] uppercase tracking-wide text-gray-400">Findings</div>
+          <div className="text-lg font-semibold tabular-nums">
+            {ml.findings.toLocaleString()}
+          </div>
+          <div className="text-[10px] text-gray-400">
+            + {ml.summaries.toLocaleString()} walkthrough/summary
+          </div>
+        </div>
+        <div className="rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800">
+          <div className="text-[10px] uppercase tracking-wide text-gray-400">High severity</div>
+          <div
+            className="text-lg font-semibold tabular-nums"
+            style={{ color: ML_SEVERITY_META.major.color }}
+          >
+            {Math.round(highShare * 100)}%
+          </div>
+          <div className="text-[10px] text-gray-400">
+            {highFindings.toLocaleString()} major or critical
+          </div>
+        </div>
+        <div className="rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800">
+          <div className="text-[10px] uppercase tracking-wide text-gray-400">Nits</div>
+          <div
+            className="text-lg font-semibold tabular-nums"
+            style={{ color: ML_SEVERITY_META.nit.color }}
+          >
+            {Math.round(nitShare * 100)}%
+          </div>
+          <div className="text-[10px] text-gray-400">
+            {ml.bySeverity.nit.toLocaleString()} trivial or optional
+          </div>
+        </div>
+        <div className="rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800">
+          <div className="text-[10px] uppercase tracking-wide text-gray-400">Top topic</div>
+          <div className="truncate text-lg font-semibold">
+            {topCategory ? (ML_CATEGORY_LABEL[topCategory.category] ?? topCategory.category) : '—'}
+          </div>
+          <div className="text-[10px] text-gray-400">
+            {topCategory
+              ? `${topCategory.count.toLocaleString()} findings`
+              : 'no categorised findings yet'}
+          </div>
+        </div>
+      </div>
+
+      {/* Top-category chips (rehomed from the old per-bot table's column) + the severity legend,
+          which doubles as the vocabulary key for the per-bot mix bars below. */}
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
+        {ml.byCategory.slice(0, 5).map((c) => (
+          <span
+            key={c.category}
+            className="rounded bg-gray-100 px-1 py-0.5 font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+          >
+            {ML_CATEGORY_LABEL[c.category] ?? c.category} {c.count}
+          </span>
+        ))}
+        <span className="ml-auto inline-flex flex-wrap items-center gap-2">
+          {ML_SEVERITIES.map((s) => (
+            <span key={s} className="inline-flex items-center gap-1">
+              <span
+                className="inline-block h-2 w-2 rounded-full"
+                style={{ backgroundColor: ML_SEVERITY_META[s].color }}
+              />
+              {ML_SEVERITY_META[s].label}
+            </span>
+          ))}
+          <span>Summaries and praise are excluded from severity shares.</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /*
  * (There is no "mixed role" chip any more, and there is nothing left for one to say. `role` used
  * to be a `repo_reviewers` column, so one login could be a review bot in `api` and a quality gate
@@ -362,15 +501,19 @@ function VendorTable({
   botColor,
   onOpenVendor,
   overdueGraceMs,
+  showMl,
 }: {
   vendors: CostedVendor[];
   botColor: BotColor;
   onOpenVendor: (key: string) => void;
   overdueGraceMs: number;
+  // The ML severity columns (mix bar / High / Nits) — rendered ONLY when the deployment scores
+  // (MeResponse.mlSeverity) AND the window has labels. False must render NO ml chrome at all.
+  showMl: boolean;
 }): JSX.Element {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
-      <table className="w-full min-w-[820px] border-collapse text-[11px]">
+      <table className={`w-full border-collapse text-[11px] ${showMl ? 'min-w-[1000px]' : 'min-w-[820px]'}`}>
         <thead>
           <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-800 dark:text-gray-400">
             <th className="px-2 py-1.5 font-medium">Vendor</th>
@@ -402,6 +545,28 @@ function VendorTable({
             <th className="px-2 py-1.5 text-right font-medium" title="Low-value / untouched share — the noise floor">
               Noise
             </th>
+            {showMl && (
+              <>
+                <th
+                  className="w-28 px-2 py-1.5 font-medium"
+                  title="This bot's scored findings by predicted severity, over the selected window — model-scored, advisory. Summaries and praise are excluded."
+                >
+                  Severity mix
+                </th>
+                <th
+                  className="px-2 py-1.5 text-right font-medium"
+                  title="Major + critical as a share of this bot's scored findings in the window."
+                >
+                  High
+                </th>
+                <th
+                  className="px-2 py-1.5 text-right font-medium"
+                  title="Nits as a share of this bot's scored findings in the window — a persistently high share suggests raising the bot's severity floor."
+                >
+                  Nits
+                </th>
+              </>
+            )}
             <th
               className="px-2 py-1.5 text-right font-medium"
               title="Monthly cost ÷ acted-on threads. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Bots → Settings. Narrowed to a single repo this divides a whole month's price by part of that bot's work, so read it as a rate, not as spend, and never add it up across workspaces."
@@ -503,6 +668,39 @@ function VendorTable({
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
                   {v.dormant ? dash : pct(v.noiseRatioPct)}
                 </td>
+                {/* ML severity mix over the SAME window as every other cell. A bot with NO
+                    labels in-window ships the fields ABSENT and renders blanks — never zeros,
+                    because "not scored" and "zero findings" are different claims. */}
+                {showMl && (
+                  <>
+                    <td
+                      className="w-28 px-2 py-1.5"
+                      title={
+                        v.mlFindings != null
+                          ? `${v.mlFindings} scored finding${v.mlFindings === 1 ? '' : 's'} in the window`
+                          : 'No scored comments for this bot in the window'
+                      }
+                    >
+                      {v.mlBySeverity && v.mlFindings != null && v.mlFindings > 0 ? (
+                        <SeverityBar counts={v.mlBySeverity} total={v.mlFindings} />
+                      ) : (
+                        dash
+                      )}
+                    </td>
+                    <td
+                      className="px-2 py-1.5 text-right font-semibold tabular-nums"
+                      style={v.mlHighPct != null ? { color: ML_SEVERITY_META.major.color } : undefined}
+                    >
+                      {v.mlHighPct != null ? `${v.mlHighPct}%` : dash}
+                    </td>
+                    <td
+                      className="px-2 py-1.5 text-right tabular-nums"
+                      style={v.mlNitPct != null ? { color: ML_SEVERITY_META.nit.color } : undefined}
+                    >
+                      {v.mlNitPct != null ? `${v.mlNitPct}%` : dash}
+                    </td>
+                  </>
+                )}
                 {/* The $/acted-on figure. The price is a plain column on this bot's WORKSPACE row
                     — one row per actor here, so nothing is inherited, shared or split, and the
                     tooltip names the workspace rather than an account-wide subscription. The
@@ -620,6 +818,15 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
   const { data, isLoading, isError } = useBotAnalytics(workspaceId, window, true, repoScope);
   const botColor = useBotColors(workspaceId);
+  // The ML severity surface: hidden ENTIRELY (no columns, no strip, no empty chrome) when the
+  // deployment has no scoring service — /api/me's mlSeverity is the gate, exactly as the old
+  // standalone panel gated. Columns additionally need at least one in-window label, or every
+  // cell would be a blank; the strip also shows while a backlog is still being scored so the
+  // coverage line can say so.
+  const mlEnabled = useMlSeverityEnabled();
+  const ml = data?.ml;
+  const showMlStrip = mlEnabled && ml != null;
+  const showMlColumns = mlEnabled && (ml?.labelled ?? 0) > 0;
   // The DEPRECATED per-login cost blob. Read ONLY to POINT AT a stranded price in the tooltip of
   // a row the server resolved to null — never to fill that null (see `resolveVendorCost`). Still
   // gated on plugin presence so the pure OSS path never hits /api/pro/settings (which 404s without
@@ -700,6 +907,10 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
     const t = data.totals;
     body = (
       <div className="space-y-3">
+        {/* The severity totals strip (the old BotSeverityPanel's survivor) — same response,
+            same window as the table below it. Self-hides when the window has nothing scored
+            and nothing pending. */}
+        {showMlStrip && ml && <MlTotalsStrip ml={ml} />}
         <div className="text-[11px] text-gray-500 dark:text-gray-400">
           <span className="font-semibold tabular-nums text-gray-700 dark:text-gray-200">
             {t.threads}
@@ -734,6 +945,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           botColor={botColor}
           onOpenVendor={(key) => openBotPrsDetail(key, repoId ?? null)}
           overdueGraceMs={t.overdueGraceMs}
+          showMl={showMlColumns}
         />
         {/* Bot-effectiveness charts (per vendor) — all always visible: raw weekly volume, the
             volume-independent effectiveness + verdict, and the acted-on vs untouched split. */}

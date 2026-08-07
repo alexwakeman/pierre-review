@@ -174,6 +174,10 @@ import {
 } from '../sync/reviewer-classify.js';
 import { computeBehavioralSignals } from '../sync/reviewer-behavior.js';
 import { fingerprintReview } from '../sync/review-fingerprint.js';
+// ⚠ A deliberate module CYCLE: ml-labels.ts imports the bot-set resolvers from this file. It is
+// benign under ESM because both sides export hoisted function declarations and only call each
+// other at request time — never during module evaluation. Do not add an eval-time use.
+import { getMlWindowAggregates } from './ml-labels.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
 // timestamptz (drizzle binds the Date through the codec), whereas SQLite columns
@@ -7869,6 +7873,13 @@ function pathBucket(path: string): string {
 // reply; ignored ones never do), so a measured norm gives almost no grace. Flat + predictable.
 const OVERDUE_GRACE_MS = 36 * 60 * 60 * 1000;
 
+// Gates on the ML nit-ratio tuning suggestion (ADVISORY — it fills BotTuningSuggestion's
+// severity slot and never touches botVerdict; nothing auto-acts on a label). FINDINGS, not
+// labelled — summaries/praise are not findings — and a real sample floor so a bot is never
+// judged on a handful of scored comments.
+const ML_NIT_SUGGESTION_MIN_FINDINGS = 20;
+const ML_NIT_SUGGESTION_MIN_SHARE = 0.7;
+
 // keep / tune / noisy verdict (deterministic rule-of-thumb, no AI): high volume + low
 // acted-on + a high share of OVERDUE-untouched threads (untouched AND aged past the account-
 // wide normal response window) → noisy; moderate low acted-on → tune; else keep. The overdue
@@ -9665,6 +9676,14 @@ export async function getBotAnalytics(
   // shrink because the user filtered a chart).
   const seatCount = await workspaceHumanSeatCount(accountId, scope.workspaceId);
 
+  // The windowed ML label fold (docs/ML-SEVERITY.md): the merged Bots table shows severity
+  // columns beside the ROI columns over the SAME window, so the per-bot aggregates ride this
+  // response instead of a second, unwindowed one. Computed for the whole automated set (both
+  // roles, like the rollup) and ALWAYS — the SPA's render gate is MeResponse.mlSeverity, and on
+  // a deployment with no scoring service this is a cheap scan of an empty table plus three
+  // indexed zero counts. The vendor's own declared severity is never read here.
+  const mlAgg = await getMlWindowAggregates(accountId, scope, automatedIds, from);
+
   // Per-REVIEWER identity (so in-house bots — all kind 'in_house' — separate into their own rows
   // instead of collapsing). Label preference: the account's custom classification label →
   // the vendor's pretty name (for known vendors) → the reviewer's login/display name.
@@ -9995,6 +10014,9 @@ export async function getBotAnalytics(
   const qualityChecks: BotVendorAnalytics[] = [];
   for (const [userId, acc] of byUser) {
     const comments = commentsByUser.get(userId) ?? 0;
+    // This bot's windowed ML label aggregate — undefined when it has no labels in the window,
+    // and the row then OMITS the ml* fields entirely (blanks in the UI, never zeros).
+    const mlRow = mlAgg.byBot.get(userId);
     // Window activity = threads/comments (the volume math) OR a body-only submitted review.
     // No window activity but ANY 12-week-trend footprint (threads, comments, or body-only
     // reviews) → the row survives as DORMANT (zeroed window counts + the trend) instead of
@@ -10062,8 +10084,25 @@ export async function getBotAnalytics(
       oldestUntouchedDays,
       humanFollowThroughPct,
       noiseRatioPct,
+      // ML severity mix over the SAME window (fields absent when the bot has no in-window
+      // labels). Rates divide by FINDINGS — the phantom-gap rule — and round like their `…Pct`
+      // siblings; the suggestion gate below uses the raw share, not these rounded figures.
+      ...(mlRow
+        ? {
+            mlFindings: mlRow.findings,
+            mlBySeverity: mlRow.bySeverity,
+            mlNitPct:
+              mlRow.findings > 0
+                ? Math.round((mlRow.bySeverity.nit / mlRow.findings) * 100)
+                : null,
+            mlHighPct:
+              mlRow.findings > 0 ? Math.round((mlRow.high / mlRow.findings) * 100) : null,
+          }
+        : {}),
       // The verdict uses OVERDUE untouched (aged past the norm), not raw untouched — so a bot
       // isn't flagged noisy for threads the workspace just hasn't gotten to within its normal window.
+      // ⚠ NO ML INPUT: severity labels are advisory (macro-F1 ≈ 0.66) and the verdict's
+      // semantics are test-pinned — the nit ratio speaks only through the suggestion below.
       verdict: botVerdict(acc.threads, actedOnPct, overdueUntouched),
       // `?? null` (never `||`): a resolved 0 is a REAL price ("we pay nothing for this
       // bot") and must survive as 0, not collapse to "unknown". $/acted-on divides the EFFECTIVE
@@ -10099,6 +10138,28 @@ export async function getBotAnalytics(
         rationale: `${untouchedPct}% of ${label}'s ${b.volume} threads in ${pb} went untouched — mostly noise; consider tuning this bot.`,
       });
     }
+    // ML nit-ratio advisory — the severity-slot suggestion: a bot whose scored findings are
+    // overwhelmingly nits probably has its severity floor set too low. Same advisory contract
+    // as the path suggestions (no action attached; it must NOT feed botVerdict), gated on a
+    // real sample so a bot is never judged on a handful of labels. Quality checks are skipped
+    // by the `continue` above — a linter's findings being nits is its job, not a tuning signal.
+    if (mlRow && mlRow.findings >= ML_NIT_SUGGESTION_MIN_FINDINGS) {
+      const nitShare = mlRow.bySeverity.nit / mlRow.findings;
+      if (nitShare >= ML_NIT_SUGGESTION_MIN_SHARE) {
+        const nitPct = Math.round(nitShare * 100);
+        suggestions.push({
+          vendorKind: kind,
+          label,
+          pathGlob: null,
+          severity: 'nit',
+          // The share this suggestion keys on (see BotTuningSuggestion in shared): nit share
+          // for a severity suggestion, over `volume` = scored findings.
+          untouchedPct: nitPct,
+          volume: mlRow.findings,
+          rationale: `${nitPct}% of ${label}'s ${mlRow.findings} scored findings are nits — consider raising its severity floor.`,
+        });
+      }
+    }
   }
   vendors.sort((a, b) => b.threads - a.threads || b.comments - a.comments);
   qualityChecks.sort((a, b) => b.threads - a.threads || b.comments - a.comments);
@@ -10130,7 +10191,9 @@ export async function getBotAnalytics(
     // verdict) once it's older than this. Exposed so the UI can state the rule ("overdue after 36h").
     overdueGraceMs: OVERDUE_GRACE_MS,
   };
-  return { enabled: true, generatedAt, window: win, vendors, qualityChecks, totals, suggestions };
+  // `ml` rides every non-empty response (the two empty-scope early returns omit it — treat
+  // absent as "nothing labelled"). The totals cover the WHOLE automated set, both roles.
+  return { enabled: true, generatedAt, window: win, vendors, qualityChecks, totals, ml: mlAgg.totals, suggestions };
 }
 
 // ── Bot BEHAVIOUR analytics (EXPERIMENTAL, CORE, deterministic) ────────────────────────────

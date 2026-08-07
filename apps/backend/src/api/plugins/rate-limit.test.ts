@@ -81,6 +81,15 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/ml-status')).toEqual(['search', 'read']);
   });
 
+  // The comments drill-down ships comment BODIES (up to 3000/source) plus a three-way label
+  // join per request — the same shape of cost as the rollup — while its /prs sibling is PR
+  // metadata only and stays on the blanket bucket. Both pinned so neither drifts into the other.
+  it('puts the bot-comments drill-down on the expensive bucket, its /prs sibling on read', () => {
+    expect(tiers('GET', '/api/bot-analytics/vendor/u12/comments')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/bot-analytics/vendor/pierre/comments')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/bot-analytics/vendor/u12/prs')).toEqual(['read']);
+  });
+
   it('throttles sync triggers and repo-add (each starts a backfill)', () => {
     expect(tiers('POST', '/api/repos/5/sync')).toEqual(['sync']);
     expect(tiers('POST', '/api/repos')).toEqual(['sync']);

@@ -623,6 +623,18 @@ export interface BotVendorAnalytics {
   oldestUntouchedDays: number | null;
   humanFollowThroughPct: number | null;
   noiseRatioPct: number | null;
+  // ── ML severity mix (CORE, free — docs/ML-SEVERITY.md), WINDOWED like every other column ──
+  // Aggregated from `ml_comment_labels` over the SAME window as the ROI numbers, for THIS bot.
+  // ALL FOUR ARE ABSENT (undefined) when the bot has no labels in the window — the UI renders
+  // blanks, never zeros ("no data yet" and "zero findings" are different claims). A present
+  // `mlFindings: 0` means labels exist and every one is a summary/praise. The two rates divide
+  // by FINDINGS (summaries + praise excluded — the phantom-gap rule) and are rounded 0..100
+  // like their `…Pct` siblings; null when findings is 0. The vendor's OWN declared severity is
+  // NEVER an input to any of these (measured anti-metric — see docs/ML-SEVERITY.md § Accuracy).
+  mlFindings?: number;
+  mlBySeverity?: MlSeverityCounts;
+  mlNitPct?: number | null;
+  mlHighPct?: number | null;
   verdict: BotVerdict;
   // SERVER-resolved (no longer overlaid client-side from pro_settings `bots.cost`): this actor's
   // monthly price for THE WORKSPACE THIS RESPONSE WAS COMPUTED FOR, read from
@@ -690,7 +702,36 @@ export interface BotAnalyticsResponse {
   // reply time — that's intrinsically fast (sample bias), so a flat cutoff is the fair gate. Each
   // row's own `medianResponseMs` is display-only.
   totals: { threads: number; comments: number; actedOn: number; actedOnPct: number | null; untouched: number; botOnlyPrs: number; overdueGraceMs: number };
+  // The windowed ML label rollup for the WHOLE scope (every automated reviewer, BOTH roles —
+  // quality checks post exactly the kind of finding a severity label is for). Feeds the severity
+  // totals strip that used to be the standalone /api/bot-severity panel, computed over the SAME
+  // window as everything else in this response so one screen carries one time grain. Optional
+  // purely for wire back-compat (and omitted on the empty-scope early returns); treat absent as
+  // "nothing labelled". The SPA's render gate stays `MeResponse.mlSeverity`.
+  ml?: BotAnalyticsMlTotals;
   suggestions: BotTuningSuggestion[];  // WS6c, deterministic
+}
+
+// The windowed twin of BotSeverityResponse.totals (same exclusion semantics: `bySeverity` and
+// every rate are FINDINGS-only; summaries and praise are labelled work, not findings).
+export interface BotAnalyticsMlTotals {
+  labelled: number;   // every label in window: findings + summaries + praise
+  findings: number;
+  summaries: number;
+  praise: number;
+  // Unlabelled bot text IN THE WINDOW (the coverage denominator's other half). Same
+  // hasText/no-label predicate as the candidate query, additionally window-bounded — so the
+  // strip's "X of Y scored" stays a statement about the window it sits over. ⚠ pending > 0 is
+  // NOT "scoring in progress" — that judgement stays with isMlScoring over /api/ml-status.
+  pending: number;
+  bySeverity: MlSeverityCounts;
+  byCategory: Array<{ category: MlCategory; count: number }>;
+  // Distinct `backend` strings seen in window — none containing 'modernbert-onnx' means the
+  // marker fallback labelled everything (surfaced, not hidden).
+  backends: string[];
+  // The label scan is capped (newest-first ORDER BY); true when the cap was hit, so the numbers
+  // are a sample — said out loud, same honesty rule as the unwindowed rollup.
+  truncated: boolean;
 }
 
 // ── Bot THEMES (Pro, AI) — GET/POST /api/pro/bot-themes ─────────────────────────────────────
@@ -1060,6 +1101,47 @@ export interface BotVendorPrsResponse {
   generatedAt: string;
 }
 
+// One comment row behind a vendor's COMMENTS drill-down — the individual things one automated
+// reviewer said in the window (GET /api/bot-analytics/vendor/:key/comments): inline review
+// comments (with path + thread state), issue-level PR comments, and review BODIES, each with its
+// stored ML label shipped INLINE. One request carries everything — a cross-PR list must never
+// mount the per-PR label index per row (the ThreadAssessment 60-requests-for-60-empty-boxes
+// failure; docs/ML-SEVERITY.md § UI).
+export interface BotVendorComment {
+  // Which id space `targetId` lives in — the same discriminator `ml_comment_labels` keys on.
+  targetKind: MlLabelTargetKind;
+  targetId: number;
+  prId: number;
+  prNumber: number;
+  prTitle: string;
+  prAuthorId: number | null;
+  repoId: number;
+  repoFullName: string;
+  path: string | null;               // inline review comments only
+  threadId: number | null;           // inline review comments only
+  derivedState: DerivedState | null; // inline threads only
+  body: string | null;               // full markdown — comment/review bodies are always persisted
+  createdAt: string;                 // ISO-8601
+  // The stored ML label for this target, or null when it has not been scored (or the deployment
+  // has no scoring service) — the row still renders, just unbadged.
+  mlLabel: MlLabel | null;
+}
+
+export interface BotVendorCommentsResponse {
+  enabled: boolean;
+  // `u<userId>` | 'pierre' — mirrors BotVendorAnalytics.key. The 'pierre' sentinel always
+  // answers empty: its verbatim reviews are posted with the human's token, so there are no
+  // attributable per-comment rows (same reasoning as its getBotVendorPrs special case).
+  key: string;
+  kind: AutomatedReviewerKind;
+  label: string;
+  login: string | null;
+  window: { kind: BotWindowKind; from: string; to: string };
+  comments: BotVendorComment[]; // newest-first, capped per source
+  truncated: boolean;           // a source (or the combined stream) hit the cap
+  generatedAt: string;
+}
+
 // The exact PR LIST behind getBotAnalytics's totals.botOnlyPrs count — "only a bot reviewed
 // these" (GET /api/bot-analytics/bot-only-prs). Served by a DEDICATED route so the amber caption
 // and its expandable list are computed from the SAME query and can never disagree: the count is a
@@ -1105,6 +1187,13 @@ export interface BotDedupCluster {
 export interface BotDedupResponse { prId: number; clusters: BotDedupCluster[]; }
 
 // ── Bot tuning suggestions (advisory; deterministic — no action attached) ───
+// Two shapes share the row. A PATH suggestion (`pathGlob` set, `severity` null) keys on the
+// untouched share of one (bot, path-bucket). A SEVERITY suggestion (`severity` set — today only
+// 'nit', from the windowed ML label fold) keys on the nit share of the bot's scored findings.
+// `untouchedPct` carries whichever share the suggestion keys on; `volume` is the population it
+// was measured over (threads for path, scored findings for severity). ADVISORY either way — the
+// ML shape must never feed `botVerdict` (nothing auto-acts on a label; the verdict's semantics
+// are pinned by bot-analytics-verdict.test.ts).
 export interface BotTuningSuggestion {
   vendorKind: AutomatedReviewerKind; label: string;
   pathGlob: string | null; severity: string | null;
