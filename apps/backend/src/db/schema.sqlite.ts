@@ -91,6 +91,10 @@ export const repos = sqliteTable(
     owner: text('owner').notNull(),
     name: text('name').notNull(),
     githubNodeId: text('github_node_id').notNull(),
+    // The repo's GitHub "About" description, captured each activity sync. Grounding for the
+    // workspace-purpose sprint-chat preset — the app's only repo-purpose text (READMEs are
+    // never fetched or stored). Null until a sync populates it or when unset on GitHub.
+    description: text('description'),
     // The repo's default branch (GraphQL defaultBranchRef.name), captured each
     // activity sync. Used to scope the "maintainer" inference to PRs merged into
     // the default branch. Null until a sync populates it.
@@ -1092,6 +1096,14 @@ export const workspaceReviewers = sqliteTable(
       .default('auto'),
     // ── PRICE (owned by nothing derived; one writer only) ──
     monthlyCents: integer('monthly_cents'),
+    // How `monthly_cents` is READ: 'flat' = the whole workspace subscription; 'per_seat' = a
+    // per-seat unit price, multiplied on read by the workspace's derived human seat count.
+    // The product (seats × cents) is NEVER stored — it can exceed int4 and would go stale.
+    // Written ONLY by `setReviewerCost`, exactly like `monthly_cents` (same one-writer rule,
+    // same standalone cost route; never in any derived UPDATE, never in the PATCH body).
+    costModel: text('cost_model', { enum: ['flat', 'per_seat'] })
+      .notNull()
+      .default('flat'),
     updatedAt: integer('updated_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

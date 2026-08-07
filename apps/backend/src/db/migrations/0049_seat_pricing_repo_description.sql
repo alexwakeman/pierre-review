@@ -1,0 +1,21 @@
+-- Per-seat bot pricing + repo descriptions. SQLite / local mode; Postgres twin:
+-- migrations-pg/0036_seat_pricing_repo_description.sql. Two additive columns, no index,
+-- no backfill.
+--
+-- `workspace_reviewers.cost_model` — how `monthly_cents` is READ, never a second price.
+-- 'flat' (the default, preserving every existing row's meaning) = the whole workspace
+-- subscription, exactly as before. 'per_seat' = `monthly_cents` is a per-seat UNIT price
+-- (e.g. CodeRabbit's $29/user/month) multiplied on read by the workspace's derived human
+-- seat count (distinct human PR authors in the workspace's repos over a trailing window).
+-- The product is NEVER stored: seats × cents can exceed int4 and would go stale the moment
+-- a new contributor opens a PR. Ownership is identical to `monthly_cents`: one writer
+-- (`setReviewerCost`), one standalone cost route, never in any derived UPDATE, never in the
+-- combined PATCH body.
+--
+-- `repos.description` — the repo's GitHub "About" text, captured by the activity sync like
+-- `default_branch` / `viewer_permission`. It exists as grounding for the workspace-purpose
+-- sprint-chat preset ("what does this workspace do?"): the app persists no other repo-purpose
+-- text (READMEs are never fetched, PR bodies are lean). Nullable — null until a sync
+-- populates it, or when the repo has no description on GitHub.
+ALTER TABLE `repos` ADD `description` text;--> statement-breakpoint
+ALTER TABLE `workspace_reviewers` ADD `cost_model` text DEFAULT 'flat' NOT NULL;

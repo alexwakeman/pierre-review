@@ -253,6 +253,13 @@
       "when": 1785900000000,
       "tag": "0035_ml_vendor_severity",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786000000000,
+      "tag": "0036_seat_pricing_repo_description",
+      "breakpoints": true
     }
   ]
 }

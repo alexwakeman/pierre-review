@@ -80,6 +80,9 @@ export const repos = pgTable(
     owner: text('owner').notNull(),
     name: text('name').notNull(),
     githubNodeId: text('github_node_id').notNull(),
+    // The repo's GitHub "About" description — grounding for the workspace-purpose
+    // sprint-chat preset. See schema.sqlite.ts. Kept in sync by hand (schema-parity.test.ts).
+    description: text('description'),
     defaultBranch: text('default_branch'),
     // The viewer's permission on the repo (GraphQL Repository.viewerPermission).
     // Drives whether the viewer may approve a PR (WRITE+). See schema.sqlite.ts.
@@ -874,6 +877,12 @@ export const workspaceReviewers = pgTable(
       .default('auto'),
     // ── PRICE (owned by nothing derived; one writer only) ──
     monthlyCents: integer('monthly_cents'),
+    // How `monthly_cents` is read: 'flat' = whole-workspace subscription; 'per_seat' = unit
+    // price × derived seat count (product never stored). One writer (`setReviewerCost`).
+    // See schema.sqlite.ts. Kept in sync by hand (schema-parity.test.ts).
+    costModel: text('cost_model', { enum: ['flat', 'per_seat'] })
+      .notNull()
+      .default('flat'),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),
