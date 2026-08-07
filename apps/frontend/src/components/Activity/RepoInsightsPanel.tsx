@@ -29,9 +29,12 @@ export function RepoInsightsPanel({
   const { data: rm, isLoading: rmLoading } = useRepoWorkspaceMetrics(repoId, workspaceInsights);
   const { data: analytics, isLoading: analyticsLoading } = useRepoAnalytics(repoId);
 
-  // The full per-repo charts grid, inlined under the panel's "More charts" expander (null
-  // until the analytics fetch resolves — the expander simply has no content yet).
-  const chartsSlot = analytics ? <Charts data={analytics} /> : null;
+  // The per-repo charts grid, inlined under the panel's "More charts" expander (null until the
+  // analytics fetch resolves — the expander simply has no content yet). `omitPrimaries`: the
+  // panel already shows throughput/CI-recovery up front and renders its own CI-failures card
+  // inside the same fold, so the slot repeating those three showed duplicate charts in the
+  // hidden section.
+  const chartsSlot = analytics ? <Charts data={analytics} omitPrimaries /> : null;
 
   // Metrics header available → the full Insights-style panel (non-clickable tiles + primary
   // trends + the inline charts grid under "More charts").

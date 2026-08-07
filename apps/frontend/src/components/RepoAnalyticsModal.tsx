@@ -34,16 +34,22 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // Exported so the per-repo Activity console (RepoInsightsPanel) can render the full charts
 // grid INLINE (under the panel's "More charts" expander) instead of only in this modal shell.
 //
-// `collapsible` (repo console default): show only the 3 primary charts up front — PR throughput
-// (open/merged/closed) · CI recovery time · CI failures by stage, matching the Insights pane's
-// primary trio — and fold the rest behind a "More charts" expander. Absent ⇒ the full sectioned
-// grid (the analytics modal + the Pro "More charts" slot both want everything).
+// `collapsible` (repo console default): show the primary pair up front — PR throughput
+// (open/merged/closed) · CI recovery time, matching the Insights pane's primaries — and fold the
+// rest (including "CI failures by stage", hidden by default by product decision) behind a "More
+// charts" expander. Absent ⇒ the full sectioned grid (the analytics modal wants everything).
+// `omitPrimaries` (the Pro "More charts" slot): the surrounding WorkspaceMetricsPanel already
+// shows its own throughput/CI-recovery up front AND its own CI-failures card inside the fold, so
+// the slot's grid must not repeat any of the three — the folded section showed the same concept
+// twice from two data sources before this flag existed.
 export function Charts({
   data,
   collapsible = false,
+  omitPrimaries = false,
 }: {
   data: RepoAnalytics;
   collapsible?: boolean;
+  omitPrimaries?: boolean;
 }): JSX.Element {
   const [showMore, setShowMore] = useState(false);
   const { data: users } = useUsers();
@@ -180,10 +186,13 @@ export function Charts({
     </ChartCard>
   );
 
-  // The sectioned charts grid. `includePrimaries` = render the 3 primary cards inline (the full
-  // modal / Pro-slot view); false = OMIT them (the collapsible repo view shows them up front, so
-  // the "More charts" expander must not repeat them).
-  const grid = (includePrimaries: boolean): JSX.Element => (
+  // The sectioned charts grid. `includePrimaries` = render the primary cards inline (the full
+  // modal view); false = OMIT them (the collapsible repo view shows them up front / the Pro slot's
+  // host panel owns them, so the folded grid must not repeat them). `includeCiStage` keeps
+  // "CI failures by stage" available in the FOLD when the primaries are omitted — the collapsible
+  // view hides it by default but must still offer it, while the Pro slot omits it entirely (the
+  // host panel renders its own CI-failures card in the same fold).
+  const grid = (includePrimaries: boolean, includeCiStage = includePrimaries): JSX.Element => (
     <div className="space-y-4">
       <Section title="Flow & throughput">
         {includePrimaries && throughputCard}
@@ -220,10 +229,10 @@ export function Charts({
         </ChartCard>
       </Section>
 
-      {includePrimaries && (
+      {(includePrimaries || includeCiStage) && (
         <Section title="CI health">
-          {ciRecoveryCard}
-          {ciStageCard}
+          {includePrimaries && ciRecoveryCard}
+          {includeCiStage && ciStageCard}
         </Section>
       )}
 
@@ -299,16 +308,16 @@ export function Charts({
     </div>
   );
 
-  if (!collapsible) return grid(true);
+  if (!collapsible) return grid(!omitPrimaries);
 
-  // Repo console: primary trio up front (matches the Insights pane), everything else folded
-  // behind "More charts" — which OMITS the trio (grid(false)) so nothing is shown twice.
+  // Repo console: primary pair up front (matches the Insights pane), everything else — including
+  // "CI failures by stage", hidden by default — folded behind "More charts", which omits the
+  // up-front pair (grid(false, true)) so nothing is shown twice.
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {throughputCard}
         {ciRecoveryCard}
-        {ciStageCard}
       </div>
       <div>
         <button
@@ -318,7 +327,7 @@ export function Charts({
         >
           {showMore ? '▾' : '▸'} More charts
         </button>
-        {showMore && <div className="mt-3">{grid(false)}</div>}
+        {showMore && <div className="mt-3">{grid(false, true)}</div>}
       </div>
     </div>
   );

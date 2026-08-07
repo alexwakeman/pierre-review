@@ -217,6 +217,20 @@ export function WorkspaceMetricsPanel({
     ? [{ key: 'pickup', label: 'Pickup', color: PALETTE.blue, values: pickupTrend }]
     : [];
 
+  // Defined ONCE, rendered in the folded "More charts" section of BOTH branches (default grid
+  // and Pro slot). Hidden by default by product decision; when a `moreChartsSlot` is present the
+  // slot's grid omits its own per-repo CI-failures twin (Charts omitPrimaries) so the folded
+  // section never shows the same concept twice from two data sources.
+  const ciFailuresCard = (
+    <ChartCard title="CI failures by stage" note="which checks fail · window">
+      {reasonLabels.length === 0 ? (
+        <ChartEmpty label="No CI failures recorded yet" />
+      ) : (
+        <BarChart labels={reasonLabels} series={reasonSeries} rotateLabels />
+      )}
+    </ChartCard>
+  );
+
   return (
     <div
       className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-800 dark:bg-gray-900/20"
@@ -334,13 +348,8 @@ export function WorkspaceMetricsPanel({
             <LineChart labels={labels} series={recoverySeries} area curved formatY={fmtDuration} />
           )}
         </ChartCard>
-        <ChartCard title="CI failures by stage" note="which checks fail · window">
-          {reasonLabels.length === 0 ? (
-            <ChartEmpty label="No CI failures recorded yet" />
-          ) : (
-            <BarChart labels={reasonLabels} series={reasonSeries} rotateLabels />
-          )}
-        </ChartCard>
+        {/* "CI failures by stage" deliberately NOT here — hidden by default, first card of the
+            folded "More charts" section below. */}
       </div>
 
       {/* Secondary trends — folded away by default to keep the panel focused. */}
@@ -355,9 +364,13 @@ export function WorkspaceMetricsPanel({
         </button>
         {showMore &&
           (moreChartsSlot != null ? (
-            <div className="mt-2">{moreChartsSlot}</div>
+            <div className="mt-2 space-y-3">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">{ciFailuresCard}</div>
+              {moreChartsSlot}
+            </div>
           ) : (
             <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {ciFailuresCard}
               <ChartCard title="Lead time for changes" note="median open→merge · weekly">
                 {metrics.leadTimeTrend.every((v) => v == null) ? (
                   <ChartEmpty />
