@@ -123,6 +123,7 @@ import type {
   BotDedupMember,
   BotDedupCluster,
   BotDedupResponse,
+  AddressedConfidence,
   BotTuningSuggestion,
   BotOnlyReviewCard,
   UserContributionStats,
@@ -178,6 +179,7 @@ import { fingerprintReview } from '../sync/review-fingerprint.js';
 // benign under ESM because both sides export hoisted function declarations and only call each
 // other at request time — never during module evaluation. Do not add an eval-time use.
 import { getMlWindowAggregates } from './ml-labels.js';
+import { clusterThreadsByLine } from './line-overlap.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
 // timestamptz (drizzle binds the Date through the codec), whereas SQLite columns
@@ -7925,6 +7927,13 @@ const OVERDUE_GRACE_MS = 36 * 60 * 60 * 1000;
 const ML_NIT_SUGGESTION_MIN_FINDINGS = 20;
 const ML_NIT_SUGGESTION_MIN_SHARE = 0.7;
 
+// Gates on the same-line-overlap tuning suggestion (ADVISORY — pair-level redundancy hint;
+// botVerdict never reads overlap). The share is of the bot's window threads landing in ≥2-bot
+// clusters (the shared ±3-line definition — db/line-overlap.ts), with a volume floor so two
+// bots are never called redundant over a handful of threads.
+const OVERLAP_SUGGESTION_MIN_SHARE = 0.4;
+const OVERLAP_SUGGESTION_MIN_THREADS = 5;
+
 // keep / tune / noisy verdict (deterministic rule-of-thumb, no AI): high volume + low
 // acted-on + a high share of OVERDUE-untouched threads (untouched AND aged past the account-
 // wide normal response window) → noisy; moderate low acted-on → tune; else keep. The overdue
@@ -9754,12 +9763,15 @@ export async function getBotAnalytics(
   };
 
   // Automated-reviewer threads over the 12-week trend span (⊇ the selected window).
+  // `line` feeds ONLY the same-line overlap pass below (reviewThreads is the one table carrying
+  // line data — reviewComments has no line columns; overlap never computes from comments).
   const threadRows = await db
     .select({
       id: reviewThreads.id,
       prId: reviewThreads.prId,
       userId: reviewThreads.originalCommenterId,
       path: reviewThreads.path,
+      line: reviewThreads.line,
       state: reviewThreads.derivedState,
       createdAt: reviewThreads.createdAt,
       resolvedAt: reviewThreads.resolvedAt,
@@ -9826,7 +9838,7 @@ export async function getBotAnalytics(
   };
 
   // Trend (12 weekly buckets, oldest→newest) uses the full 12-week span.
-  const windowThreads: { id: number; prId: number; userId: number; kind: AutomatedReviewerKind; path: string; state: DerivedState; createdAt: Date; resolvedAt: Date | null }[] = [];
+  const windowThreads: { id: number; prId: number; userId: number; kind: AutomatedReviewerKind; path: string; line: number | null; state: DerivedState; createdAt: Date; resolvedAt: Date | null }[] = [];
   for (const t of threadRows) {
     if (t.userId == null) continue;
     const kind = kindMap.get(t.userId);
@@ -9856,7 +9868,7 @@ export async function getBotAnalytics(
       b.volume += 1;
       if (t.state === 'untouched') b.untouched += 1;
       acc.buckets.set(pb, b);
-      windowThreads.push({ id: t.id, prId: t.prId, userId: t.userId, kind, path: t.path, state: t.state, createdAt: t.createdAt, resolvedAt: t.resolvedAt });
+      windowThreads.push({ id: t.id, prId: t.prId, userId: t.userId, kind, path: t.path, line: t.line, state: t.state, createdAt: t.createdAt, resolvedAt: t.resolvedAt });
     }
   }
 
@@ -9985,6 +9997,47 @@ export async function getBotAnalytics(
     if (baseActed || humanFollowSet.has(t.id)) accFor(t.userId, t.kind).actedOn += 1;
   }
 
+  // ── Same-line overlap (ADVISORY — the redundancy signal) ──────────────────────────────────
+  // THE shared ±3-line clustering (db/line-overlap.ts — the same definition the per-PR dedup
+  // rollup renders), over the window's REVIEW-role threads. Quality checks are excluded on both
+  // sides (the dedup stance, kept: a rule firing is not review consensus); null-line threads
+  // (outdated / file-level) are excluded too — a thread LOSES its line when it outdates, and a
+  // per-file null lump manufactures overlap out of any two chatty bots. A cluster with ≥2
+  // DISTINCT bots credits EACH bot's threads in it (→ overlapPct = the share of a bot's output
+  // landing where another bot also landed) and counts ONCE per sorted pair for the top-partner
+  // attribution. Advisory only: a column + a suggestion — botVerdict never reads any of this.
+  const overlapThreadsByUser = new Map<number, number>();
+  const overlapPairClusters = new Map<string, number>(); // `u<a>|u<b>` (a < b) → shared clusters
+  {
+    const reviewRoleThreads = windowThreads.filter((t) => roleMap.get(t.userId) !== 'quality_check');
+    for (const c of clusterThreadsByLine(reviewRoleThreads, { nullLineGroup: false })) {
+      if (c.userIds.size < 2) continue;
+      for (const t of c.items)
+        overlapThreadsByUser.set(t.userId, (overlapThreadsByUser.get(t.userId) ?? 0) + 1);
+      const ids = [...c.userIds].sort((x, y) => x - y);
+      for (let i = 0; i < ids.length; i++)
+        for (let j = i + 1; j < ids.length; j++) {
+          const k = `u${ids[i]}|u${ids[j]}`;
+          overlapPairClusters.set(k, (overlapPairClusters.get(k) ?? 0) + 1);
+        }
+    }
+  }
+  // Each bot's top overlap partner (most shared clusters; ties break to the lower userId for
+  // determinism). Only `topOverlapPartner` ships — the pair map itself stays server-side, so
+  // no capped pair list is needed on this wire (the behaviour surface's top-15 covers pairs).
+  const topPartnerByUser = new Map<number, { userId: number; clusters: number }>();
+  for (const [k, clusters] of overlapPairClusters) {
+    const [a, b] = k.split('|').map((s) => Number(s.slice(1))) as [number, number];
+    for (const [self, other] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      const cur = topPartnerByUser.get(self);
+      if (!cur || clusters > cur.clusters || (clusters === cur.clusters && other < cur.userId))
+        topPartnerByUser.set(self, { userId: other, clusters });
+    }
+  }
+
   // Comments volume per REVIEWER — fetched over the TREND span (⊇ the window) so the same
   // rows also feed lastActiveAt; only createdAt >= from counts toward window volume.
   const commentRows = await db
@@ -10080,6 +10133,10 @@ export async function getBotAnalytics(
     const humanFollowThroughPct = acc.threads > 0 ? Math.round((acc.humanFollow / acc.threads) * 100) : null;
     // Noise ratio: untouched-share proxy (see the header — true severity is often unknowable).
     const noiseRatioPct = acc.threads > 0 ? Math.round((acc.untouched / acc.threads) * 100) : null;
+    // Same-line overlap for this bot (always 0 / null for quality checks — excluded from the pass).
+    const overlapThreads = overlapThreadsByUser.get(userId) ?? 0;
+    const overlapPct = acc.threads > 0 ? Math.round((overlapThreads / acc.threads) * 100) : null;
+    const topPartner = topPartnerByUser.get(userId);
     // This bot's own MEDIAN time-to-addressed (reply | resolve | addressing commit); display-only,
     // null when no thread of its was ever addressed.
     const botMedian = medianOf(acc.addressedSamples);
@@ -10129,6 +10186,15 @@ export async function getBotAnalytics(
       oldestUntouchedDays,
       humanFollowThroughPct,
       noiseRatioPct,
+      overlapThreads,
+      overlapPct,
+      topOverlapPartner: topPartner
+        ? {
+            key: `u${topPartner.userId}`,
+            label: reviewerLabel(topPartner.userId, kindMap.get(topPartner.userId) ?? 'in_house'),
+            clusters: topPartner.clusters,
+          }
+        : null,
       // ML severity mix over the SAME window (fields absent when the bot has no in-window
       // labels). Rates divide by FINDINGS — the phantom-gap rule — and round like their `…Pct`
       // siblings; the suggestion gate below uses the raw share, not these rounded figures.
@@ -10202,6 +10268,29 @@ export async function getBotAnalytics(
           untouchedPct: nitPct,
           volume: mlRow.findings,
           rationale: `${nitPct}% of ${label}'s ${mlRow.findings} scored findings are nits — consider raising its severity floor.`,
+        });
+      }
+    }
+    // Same-line overlap advisory — redundant coverage. Gated on the RAW share (like the nit
+    // suggestion; `overlapPct` is the rounded display twin) plus a volume floor. Overlap is
+    // symmetric, so BOTH bots of a heavy pair can earn one (each names the other) — pair-level
+    // presentation on purpose; the reader decides which of the two to narrow.
+    if (acc.threads >= OVERLAP_SUGGESTION_MIN_THREADS && topPartner) {
+      const overlapShare = overlapThreads / acc.threads;
+      if (overlapShare >= OVERLAP_SUGGESTION_MIN_SHARE) {
+        const partnerLabel = reviewerLabel(
+          topPartner.userId,
+          kindMap.get(topPartner.userId) ?? 'in_house',
+        );
+        suggestions.push({
+          vendorKind: kind,
+          label,
+          pathGlob: null,
+          severity: null,
+          partnerLabel,
+          untouchedPct: Math.round(overlapShare * 100),
+          volume: acc.threads,
+          rationale: `${overlapThreads} of ${label}'s threads land on lines ${partnerLabel} also flagged — redundant coverage; consider narrowing one of them.`,
         });
       }
     }
@@ -10850,7 +10939,7 @@ export async function getBotBehaviourAnalytics(
   // bot → repo → area(dir) → thread count: the merged "where bots work" breakdown.
   const repoBotDir = new Map<number, Map<number, Map<string, number>>>();
   const repoIdsSeen = new Set<number>();
-  const lineCluster = new Map<string, { pr: number; bots: Set<number> }>();
+  const overlapItems: { prId: number; path: string; line: number | null; userId: number }[] = [];
   for (const r of threadRows) {
     const uid = r.commenterId;
     if (uid == null) continue;
@@ -10869,20 +10958,20 @@ export async function getBotBehaviourAnalytics(
       rbd.set(r.repoId, rd);
     }
     rd.set(dir, (rd.get(dir) ?? 0) + 1);
-    const ck = `${r.prId}|${r.path}|${r.line ?? 'n'}`;
-    let c = lineCluster.get(ck);
-    if (!c) {
-      c = { pr: r.prId, bots: new Set() };
-      lineCluster.set(ck, c);
-    }
-    c.bots.add(uid);
+    overlapItems.push({ prId: r.prId, path: r.path, line: r.line, userId: uid });
   }
+  // Same-line overlap via THE shared ±3-line clustering (db/line-overlap.ts) — the same
+  // definition the per-PR dedup rollup and the ROI overlap column use. ⚠ DISCONTINUITY: this
+  // used to be EXACT (path,line) equality with a per-file null-line lump; it is now the ±3
+  // window with null-line (outdated / file-level) threads excluded, so the counts step once on
+  // upgrade — adjacent-line findings merge (fewer, truer clusters) while null-line "overlap"
+  // vanishes. User-distinct throughout (two in-house bots CAN overlap), as it always was here.
   let lineOverlapClusters = 0;
   const overlapPrSet = new Set<number>();
-  for (const c of lineCluster.values())
-    if (c.bots.size >= 2) {
+  for (const c of clusterThreadsByLine(overlapItems, { nullLineGroup: false }))
+    if (c.userIds.size >= 2) {
       lineOverlapClusters += 1;
-      overlapPrSet.add(c.pr);
+      overlapPrSet.add(c.prId);
     }
 
   const repoNameById = new Map<number, string>();
@@ -11781,9 +11870,14 @@ export async function getBotVendorPrs(
 }
 
 // WS4 — cross-bot dedup + consensus for one PR. Groups the PR's automated-reviewer
-// threads by (path, ±3-line window); a cluster with ≥2 DISTINCT kinds is a real dedup
-// hit. consensus = the members' inferred severities agree (or are unknowable); conflict
-// = they diverge. Ownership → null (→ the route 404s). Account-scoped.
+// threads by (path, ±3-line window — THE shared definition, db/line-overlap.ts); a group with
+// ≥2 threads from ≥2 DISTINCT USERS is a real dedup hit (user-distinct, not kind-distinct: two
+// different in-house bots independently flagging one line IS the signal — that they share a
+// kind is irrelevant). Members are COLLAPSED per bot — one BotDedupMember per user carrying a
+// representative threadId + the full `threadIds` list — so a verbose bot's 23 threads render
+// as one ×23 pill, not 23 identical pills. consensus = ALL threads' inferred severities agree
+// (or are unknowable); conflict = they diverge. Ownership → null (→ the route 404s).
+// Account-scoped.
 export async function getBotDedupClusters(
   prId: number,
   accountId: number,
@@ -11808,6 +11902,10 @@ export async function getBotDedupClusters(
   const automatedIds = await automatedReviewerUserIds(accountId, prScope.workspaceId, 'review');
   if (automatedIds.length === 0) return { prId, clusters: [] };
   const kindMap = await classificationKindForUser(accountId, prScope.workspaceId);
+  // Per-reviewer label (custom classification label → vendor pretty name → login/display name)
+  // — mirrors getBotAnalytics.reviewerLabel, so two in-house bots are distinguishable here
+  // instead of both reading the kind-generic "In-house AI".
+  const classLabel = await classificationLabelMap(accountId, prScope.workspaceId);
 
   const rows = await db
     .select({
@@ -11818,6 +11916,7 @@ export async function getBotDedupClusters(
       state: reviewThreads.derivedState,
       addressedConfidence: reviewThreads.addressedConfidence,
       login: users.githubLogin,
+      name: users.displayName,
     })
     .from(reviewThreads)
     .innerJoin(users, eq(users.id, reviewThreads.originalCommenterId))
@@ -11846,64 +11945,85 @@ export async function getBotDedupClusters(
     if (!excerptByThread.has(r.threadId)) excerptByThread.set(r.threadId, r.excerpt);
   }
 
-  interface Member extends BotDedupMember {
+  interface DedupThread {
+    prId: number;
+    path: string;
     line: number | null;
+    threadId: number;
+    userId: number;
+    kind: AutomatedReviewerKind;
+    login: string;
+    label: string;
+    excerpt: string | null;
+    derivedState: DerivedState;
+    addressedConfidence: AddressedConfidence;
   }
-  const membersByPath = new Map<string, Member[]>();
+  const threads: DedupThread[] = [];
   for (const r of rows) {
     if (r.userId == null) continue;
     const kind = kindMap.get(r.userId);
     if (!kind) continue;
-    const arr = membersByPath.get(r.path) ?? [];
-    arr.push({
+    const custom = classLabel.get(r.userId);
+    const label =
+      custom ??
+      (kind !== 'in_house' && kind !== 'pierre' && kind !== 'vendor'
+        ? labelForKind(kind)
+        : r.name?.trim() || r.login);
+    threads.push({
+      prId,
+      path: r.path,
+      line: r.line,
       threadId: r.id,
       userId: r.userId,
       kind,
       login: r.login,
-      label: labelForKind(kind),
+      label,
       excerpt: excerptByThread.get(r.id) ?? null,
       derivedState: r.state,
       addressedConfidence: r.addressedConfidence,
-      line: r.line,
     });
-    membersByPath.set(r.path, arr);
   }
 
+  // THE shared ±3-line clustering. The null-line catch-all group is KEPT on this surface —
+  // outdated/file-level threads still render as a per-file lump the reader can clear in one
+  // pass — while the ROI overlap metric excludes them (see getBotAnalytics).
   const clusters: BotDedupCluster[] = [];
-  for (const [path, members] of membersByPath) {
-    // Cluster within a file by line proximity (±3). null-line threads group together.
-    const withLine = members.filter((m) => m.line != null).sort((a, b) => a.line! - b.line!);
-    const nullLine = members.filter((m) => m.line == null);
-    const groups: Member[][] = [];
-    let cur: Member[] = [];
-    let anchor: number | null = null;
-    for (const m of withLine) {
-      if (anchor != null && m.line! - anchor <= 3) {
-        cur.push(m);
-      } else {
-        if (cur.length > 0) groups.push(cur);
-        cur = [m];
-        anchor = m.line!;
-      }
+  for (const c of clusterThreadsByLine(threads, { nullLineGroup: true })) {
+    // Entry gate: ≥2 threads from ≥2 DISTINCT USERS (implied: userIds ⊆ threads).
+    if (c.userIds.size < 2) continue;
+    // Severity-conflict over ALL threads' excerpts, not just the representatives — a bot's 2nd
+    // thread disagreeing with another bot is still a disagreement.
+    const sevs = new Set(
+      c.items.map((m) => inferSeverity(m.excerpt)).filter((s): s is string => s != null),
+    );
+    const conflict = sevs.size >= 2;
+    // Collapse per bot: representative = the bot's first thread in cluster (line) order.
+    const byUser = new Map<number, DedupThread[]>();
+    for (const t of c.items) {
+      const arr = byUser.get(t.userId) ?? [];
+      arr.push(t);
+      byUser.set(t.userId, arr);
     }
-    if (cur.length > 0) groups.push(cur);
-    if (nullLine.length > 0) groups.push(nullLine);
-
-    for (const g of groups) {
-      const distinctKinds = new Set(g.map((m) => m.kind));
-      if (g.length < 2 || distinctKinds.size < 2) continue;
-      const sevs = new Set(g.map((m) => inferSeverity(m.excerpt)).filter((s): s is string => s != null));
-      const conflict = sevs.size >= 2;
-      clusters.push({
-        path,
-        line: g[0]!.line,
-        members: g.map(({ line: _line, ...rest }) => rest),
-        consensus: !conflict,
-        conflict,
-      });
-    }
+    const members: BotDedupMember[] = [...byUser.values()].map((ts) => {
+      const rep = ts[0]!;
+      return {
+        threadId: rep.threadId,
+        userId: rep.userId,
+        kind: rep.kind,
+        login: rep.login,
+        label: rep.label,
+        excerpt: rep.excerpt,
+        derivedState: rep.derivedState,
+        addressedConfidence: rep.addressedConfidence,
+        threadIds: ts.map((t) => t.threadId),
+      };
+    });
+    clusters.push({ path: c.path, line: c.line, members, consensus: !conflict, conflict });
   }
-  clusters.sort((a, b) => b.members.length - a.members.length);
+  // Most bots first, then most threads — the biggest dedup hit leads.
+  const threadTotal = (cl: BotDedupCluster): number =>
+    cl.members.reduce((n, m) => n + (m.threadIds?.length ?? 1), 0);
+  clusters.sort((a, b) => b.members.length - a.members.length || threadTotal(b) - threadTotal(a));
   return { prId, clusters };
 }
 

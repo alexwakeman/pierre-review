@@ -513,7 +513,7 @@ function VendorTable({
 }): JSX.Element {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
-      <table className={`w-full border-collapse text-[11px] ${showMl ? 'min-w-[1000px]' : 'min-w-[820px]'}`}>
+      <table className={`w-full border-collapse text-[11px] ${showMl ? 'min-w-[1060px]' : 'min-w-[880px]'}`}>
         <thead>
           <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-800 dark:text-gray-400">
             <th className="px-2 py-1.5 font-medium">Vendor</th>
@@ -544,6 +544,12 @@ function VendorTable({
             </th>
             <th className="px-2 py-1.5 text-right font-medium" title="Low-value / untouched share — the noise floor">
               Noise
+            </th>
+            <th
+              className="px-2 py-1.5 text-right font-medium"
+              title="Share of this bot's threads landing within ±3 lines of another bot's thread in the same file — redundant coverage. Advisory only; hover a cell for the top partner. Outdated/file-level threads (no line) never count."
+            >
+              Overlap
             </th>
             {showMl && (
               <>
@@ -667,6 +673,18 @@ function VendorTable({
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
                   {v.dormant ? dash : pct(v.noiseRatioPct)}
+                </td>
+                {/* Same-line overlap — advisory. `?? null` guards a stale cached response that
+                    predates the field (the column then reads as blank, never NaN). */}
+                <td
+                  className="px-2 py-1.5 text-right tabular-nums text-gray-500"
+                  title={
+                    v.topOverlapPartner
+                      ? `${v.overlapThreads} thread${v.overlapThreads === 1 ? '' : 's'} land on lines ${v.topOverlapPartner.label} also flagged (${v.topOverlapPartner.clusters} shared spot${v.topOverlapPartner.clusters === 1 ? '' : 's'})`
+                      : 'No threads landing on lines another bot also flagged in this window'
+                  }
+                >
+                  {v.dormant ? dash : pct(v.overlapPct ?? null)}
                 </td>
                 {/* ML severity mix over the SAME window as every other cell. A bot with NO
                     labels in-window ships the fields ABSENT and renders blanks — never zeros,

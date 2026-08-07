@@ -131,16 +131,27 @@ export function ThreadList({
     [myTurn],
   );
 
-  // Cross-bot dedup: (path,line) spots where ≥2 automated reviewers of DISTINCT vendors
-  // both left a thread — the backend clusters + flags consensus/conflict; we surface a
-  // compact rollup so the reader sees "CodeRabbit + Copilot both flagged line 42" without
-  // scanning the whole file for the overlap. Account-scoped, deterministic (no AI).
+  // Cross-bot dedup: (path, ±3-line) spots where ≥2 DISTINCT automated reviewers both left a
+  // thread — the backend clusters + flags consensus/conflict; we surface a compact rollup so
+  // the reader sees "CodeRabbit + Copilot both flagged line 42" without scanning the whole
+  // file for the overlap. Account-scoped, deterministic (no AI). Members arrive collapsed per
+  // BOT (`threadIds` = that bot's threads in the cluster) — one pill per bot, never per thread.
   const { data: dedup } = usePrBotDedup(prId ?? null);
   const dedupClusters = dedup?.clusters ?? [];
 
   // Jump to a clustered thread's row (rowRefs is populated by FileGroup, keyed by thread id).
   const scrollToThread = (threadId: number): void => {
     rowRefs.current.get(threadId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  // A ×N pill cycles through its bot's threads on successive clicks. The cursor lives in a ref
+  // keyed per (cluster, bot) — no re-render needed, the scroll IS the feedback.
+  const dedupCycleRef = useRef(new Map<string, number>());
+  const cycleToThread = (clusterKey: string, userId: number, ids: number[]): void => {
+    const k = `${clusterKey}:${userId}`;
+    const i = dedupCycleRef.current.get(k) ?? 0;
+    scrollToThread(ids[i % ids.length]!);
+    dedupCycleRef.current.set(k, i + 1);
   };
 
   // Apply the vendor filter (Overview "Bots" chip → scoped to a vendor) AND the derived-state
@@ -421,25 +432,36 @@ export function ThreadList({
           <ul className="space-y-1.5">
             {dedupClusters.map((cluster, i) => {
               const file = cluster.path.split('/').pop() ?? cluster.path;
-              const verb = cluster.members.length === 2 ? 'both flagged' : 'all flagged';
+              const clusterKey = `${cluster.path}:${cluster.line ?? 'x'}:${i}`;
+              // Distinct BOTS, computed defensively: a stale IndexedDB-cached cluster predates
+              // the per-bot collapse and still carries one member per THREAD.
+              const distinctBots = new Set(cluster.members.map((m) => m.userId)).size;
+              const verb = distinctBots === 2 ? 'both flagged' : 'all flagged';
               return (
                 <li
-                  key={`${cluster.path}:${cluster.line ?? 'x'}:${i}`}
+                  key={clusterKey}
                   className="flex flex-wrap items-center gap-x-1.5 gap-y-1"
                 >
                   {cluster.members.map((m, idx) => {
                     const meta = automatedReviewerMeta(m.kind);
+                    // Absent on stale cached members (pre-collapse shape) — treat as [threadId].
+                    const ids = m.threadIds && m.threadIds.length > 0 ? m.threadIds : [m.threadId];
                     return (
                       <Fragment key={m.threadId}>
                         {idx > 0 && <span className="text-gray-400">+</span>}
                         <button
                           type="button"
-                          onClick={() => scrollToThread(m.threadId)}
+                          onClick={() => cycleToThread(clusterKey, m.userId, ids)}
                           className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium hover:opacity-80"
                           style={{ color: meta.color, background: `${meta.color}1a` }}
-                          title={`Jump to ${m.label}'s thread`}
+                          title={
+                            ids.length > 1
+                              ? `${m.label} left ${ids.length} threads here — click to cycle through them`
+                              : `Jump to ${m.label}'s thread`
+                          }
                         >
                           {m.label}
+                          {ids.length > 1 && <span className="opacity-70">×{ids.length}</span>}
                         </button>
                       </Fragment>
                     );

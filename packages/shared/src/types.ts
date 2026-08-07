@@ -623,6 +623,19 @@ export interface BotVendorAnalytics {
   oldestUntouchedDays: number | null;
   humanFollowThroughPct: number | null;
   noiseRatioPct: number | null;
+  // ── Same-line overlap (ADVISORY — the redundancy signal), WINDOWED like every other column ──
+  // `overlapThreads` = this bot's window threads landing in a ±3-line cluster (same PR + file —
+  // the ONE shared definition, backend db/line-overlap.ts) that ≥1 OTHER review-role bot also
+  // flagged; `overlapPct` = overlapThreads / threads, rounded 0..100 (null when threads is 0).
+  // Null-line threads (outdated / file-level) NEVER count — a thread loses its line when it
+  // outdates, and a per-file lump manufactures overlap out of any two chatty bots. Quality
+  // checks are excluded on both sides. `topOverlapPartner` = the bot sharing the most CLUSTERS
+  // with this one (cluster count, not threads; symmetric — the partner's row names this bot
+  // back), or null when it overlaps with nobody. ADVISORY ONLY: a column + a tuning suggestion;
+  // `verdict` never reads these (its semantics are pinned by bot-analytics-verdict.test.ts).
+  overlapThreads: number;
+  overlapPct: number | null;
+  topOverlapPartner: { key: string; label: string; clusters: number } | null;
   // ── ML severity mix (CORE, free — docs/ML-SEVERITY.md), WINDOWED like every other column ──
   // Aggregated from `ml_comment_labels` over the SAME window as the ROI numbers, for THIS bot.
   // ALL FOUR ARE ABSENT (undefined) when the bot has no labels in the window — the UI renders
@@ -983,7 +996,10 @@ export interface BotOverlapStats {
   // PR counts bucketed by how many distinct bots touched them: "1 bot" | "2 bots" | "3+ bots".
   distribution: AnalyticsBin[];
   pairs: BotCoReviewPair[]; // co-review pairs, most-overlapping first (capped) — the pair matrix
-  lineOverlapClusters: number; // (path, exact line) flagged by ≥2 DISTINCT bots — "same line" hits
+  // ±3-line clusters (the ONE shared definition, backend db/line-overlap.ts; null-line threads
+  // excluded) flagged by ≥2 DISTINCT bots — "same line" hits. Was exact-(path,line) equality
+  // with a per-file null-line lump; the counts stepped once when the definition unified.
+  lineOverlapClusters: number;
   lineOverlapPrs: number; // distinct PRs carrying ≥1 such same-line overlap
 }
 // Merged "where bots work" breakdown: per bot, its inline-thread volume split by the repos it
@@ -1173,30 +1189,42 @@ export interface BotOnlyPrsResponse {
 }
 
 // ── WS4 cross-bot dedup + consensus ─────────────────────────────────
+// A member is ONE BOT in the cluster (collapsed server-side): `threadId` is its representative
+// thread, `threadIds` every thread it contributed (cluster order) — the ×N pill count + the
+// click-cycle. `label` is the per-reviewer label (custom classification label → vendor name →
+// login), so two in-house bots read differently.
 export interface BotDedupMember {
   threadId: number; userId: number; kind: AutomatedReviewerKind;
   login: string; label: string; excerpt: string | null; derivedState: DerivedState;
   addressedConfidence: AddressedConfidence;
+  // Optional-ADDITIVE: ['bot-dedup', prId] responses persist in IndexedDB, so a cached member
+  // may predate the field (one member per THREAD back then) — treat absent as [threadId].
+  threadIds?: number[];
 }
 export interface BotDedupCluster {
   path: string; line: number | null;
-  members: BotDedupMember[];   // ≥2 members of DISTINCT kinds
+  members: BotDedupMember[];   // ONE per bot; entry gate = ≥2 threads from ≥2 DISTINCT USERS
   consensus: boolean;          // all same broad signal
   conflict: boolean;           // divergent severity/verdict
 }
 export interface BotDedupResponse { prId: number; clusters: BotDedupCluster[]; }
 
 // ── Bot tuning suggestions (advisory; deterministic — no action attached) ───
-// Two shapes share the row. A PATH suggestion (`pathGlob` set, `severity` null) keys on the
+// Three shapes share the row. A PATH suggestion (`pathGlob` set, `severity` null) keys on the
 // untouched share of one (bot, path-bucket). A SEVERITY suggestion (`severity` set — today only
 // 'nit', from the windowed ML label fold) keys on the nit share of the bot's scored findings.
-// `untouchedPct` carries whichever share the suggestion keys on; `volume` is the population it
-// was measured over (threads for path, scored findings for severity). ADVISORY either way — the
-// ML shape must never feed `botVerdict` (nothing auto-acts on a label; the verdict's semantics
-// are pinned by bot-analytics-verdict.test.ts).
+// An OVERLAP suggestion (`partnerLabel` set; pathGlob + severity both null) keys on the share
+// of the bot's threads landing on lines its top partner also flagged (the ±3-line shared
+// definition) — redundant coverage. `untouchedPct` carries whichever share the suggestion keys
+// on; `volume` is the population it was measured over (threads for path/overlap, scored
+// findings for severity). ADVISORY every way — neither the ML nor the overlap shape may ever
+// feed `botVerdict` (nothing auto-acts on either; the verdict's semantics are pinned by
+// bot-analytics-verdict.test.ts).
 export interface BotTuningSuggestion {
   vendorKind: AutomatedReviewerKind; label: string;
   pathGlob: string | null; severity: string | null;
+  // The top overlap partner's display label — set ONLY on the overlap shape (its discriminator).
+  partnerLabel?: string;
   untouchedPct: number; volume: number; rationale: string;
 }
 

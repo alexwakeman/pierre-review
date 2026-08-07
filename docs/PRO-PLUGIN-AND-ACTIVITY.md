@@ -251,9 +251,22 @@ a null-only client fallback. The `noisy` (ex-`kill`)
 verdict is **response-time-gated**: it keys on `overdueUntouched` (untouched threads older than a
 FIXED 36h grace window, `totals.overdueGraceMs`; `medianAddressedMs` per bot = time-to-addressed, display-only), never raw `untouched`, so a bot
 isn't flagged noisy for threads still inside the normal response window (tested in
-`bot-analytics-verdict.test.ts`). **Cross-bot dedup**
-(`getBotDedupClusters(prId,accountId)`): groups automated-reviewer threads by `(path, line±window)`
-across DISTINCT kinds → consensus/conflict, a rollup in `ThreadList` + `FeedView`. **Slack:** a
+`bot-analytics-verdict.test.ts`). **Same-line overlap** (ADVISORY): every "same line" claim now
+goes through the ONE shared ±3-line clustering helper (`db/line-overlap.ts` — user-distinct, so two
+distinct in-house bots CAN overlap; quality checks excluded). `getBotAnalytics` runs it over the
+window's review-role threads with **null-line (outdated/file-level) threads EXCLUDED** (they
+manufacture overlap) → per-row `overlapThreads`/`overlapPct`/`topOverlapPartner` (an Overlap column
+in `BotRoiPanel`) + an advisory `BotTuningSuggestion` (`partnerLabel` set; gates: threads ≥ 5 AND
+share ≥ 0.4; pair-level — both bots of a heavy pair may each name the other). botVerdict NEVER
+reads overlap. `getBotBehaviourAnalytics.lineOverlapClusters` counts the same clusters (was
+exact-line + a null-line lump — the counts stepped once). **Cross-bot dedup**
+(`getBotDedupClusters(prId,accountId)`): groups automated-reviewer threads by the same shared
+`(path, ±3-line)` clustering, entry gate ≥2 threads from ≥2 DISTINCT USERS (not kinds), members
+COLLAPSED per bot (`threadId` = representative + additive `threadIds` — the SPA renders one ×N
+pill per bot that cycles through its threads; the old one-member-per-THREAD shape rendered 23
+identical pills for one verbose bot), per-reviewer labels (custom → vendor → login), null-line
+catch-all group KEPT → consensus/conflict, a rollup in `ThreadList` (its only mount — the old
+FeedView claim was stale). Pinned by `bot-dedup.test.ts`. **Slack:** a
 deterministic "Review bots" block in `buildSlackReport` (reads the `bot_signal` card from
 `getWorkspaceInsights`), gated on `pro_settings` `bot_slack_digest`, sent even when the AI digest is
 empty. ⚠ It is a CRON with no request, so it now resolves `ctx.queries.defaultWorkspaceId(accountId)`
