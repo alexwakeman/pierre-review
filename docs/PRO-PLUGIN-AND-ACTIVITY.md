@@ -556,11 +556,28 @@ USD/repo caps. Capability `activityDigest` tracks `PRO_DIGEST_ENABLED`.
 both dialects) are all gone. The retrospective is a **quick-question pill** in `AdHocChatPanel`
 (`RETRO_PROMPT`, a frontend-local const paired with `SPRINT_REPORT_PROMPT` — backward-looking vs
 forward-looking), answering from the SAME grounded chat payload every other pill uses: one billing
-path, one cache, one prompt surface instead of a second parallel generator. It deliberately asks
+path, one cache, one prompt surface instead of a second parallel generator. `RETRO_PROMPT` asks for
+a short narrative followed by **ONE GFM pipe table** of the retro items (columns `Item | Category |
+PRs | Note`, Category pinned to shipped / went well / dragged / CI, PR refs as plain
+`owner/name#N`): `SummaryMarkdown`/`parseBlocks` (`prRefTable.tsx`) parses a model-authored pipe
+table — a `|` run whose second line is the `---` separator row, cell counts matching — into an
+`mdtable` block rendered in PrTable's visual shell, every cell through `renderInlineMarkdown` so
+refs/bold still work; a malformed table DEGRADES to plain lines, never crashes, and table detection
+runs BEFORE the PR-ref coalescer so a ref-citing row can't be swallowed into a `PrTable` group. It
+deliberately asks
 only for what `buildChatPayload` HOLDS — merged PRs, flow metrics, CI failure reasons, attention
 items — **not themes or sentiment**, which needed the retro's own 50-item corpus of raw comment
 bodies; asking would just trip the chat's "the JSON doesn't hold the answer" decline. Discussion
-themes live in the Feed's Pro **Themes** tab. It is a **NOT a new `PresetPromptKey`**: each key is
+themes live in the Feed's Pro **Themes** tab. A third frontend-local catch-all pill, **"About this
+Workspace"** (`WORKSPACE_ABOUT_PROMPT`), asks purpose-per-repo then current priorities; its
+grounding is the payload's `repos` map (owner/name → the repo's GitHub "About" description,
+truncated ~200 chars, null when unset — the payload's ONLY repo-purpose text). The description is
+synced by the per-repo activity walk (`REPO_ACTIVITY_QUERY` → `upsertRepo`) into
+`repos.description` under the three-state partial-response policy (`undefined` = selection not
+received → preserve; `null` = GitHub positively says none → clear; string → overwrite —
+`sync/branch-status.ts` is the reference), so the add-repo path and tolerant partials never wipe a
+synced description. Every pill prompt must stay **≤500 chars** — the server's `MAX_QUESTION`
+truncates SILENTLY, which would ship a live mispowered pill. It is a **NOT a new `PresetPromptKey`**: each key is
 consumed by the plugin as two EXHAUSTIVE `Record<PresetPromptKey, string>` maps plus its own cache
 row and throttle, for a pill that only prefills the chat box. The table was **dropped rather than
 orphaned** because it carried `account_id`: an orphan would have to stay in `eraseProByAccountId`'s

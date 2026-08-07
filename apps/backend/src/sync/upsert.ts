@@ -212,6 +212,7 @@ export async function upsertRepo(
   defaultBranch: string | null | undefined,
   accountId: number,
   viewerPermission?: string | null,
+  description?: string | null,
 ): Promise<number> {
   // default_branch: only overwrite when known (a branch is never revoked, and the
   // lightweight add-repo path omits it) so we never null a synced value.
@@ -219,14 +220,20 @@ export async function upsertRepo(
   // GitHub reports no permission, i.e. access was revoked), so `undefined` means
   // "not fetched" (add path → preserve) while `null`/string is authoritative and
   // overwrites — otherwise a revoked-to-null permission would stay stale-elevated.
+  // description: the three-state partial-response policy (sync/branch-status.ts is the
+  // reference) — `undefined` ⇒ the selection wasn't received (add path, a tolerant
+  // partial) ⇒ OMIT so the stored value survives; `null` ⇒ GitHub positively said the
+  // repo has no description ⇒ clear; a string overwrites.
   const set: {
     owner: string;
     name: string;
     defaultBranch?: string;
     viewerPermission?: string | null;
+    description?: string | null;
   } = { owner, name };
   if (defaultBranch != null) set.defaultBranch = defaultBranch;
   if (viewerPermission !== undefined) set.viewerPermission = viewerPermission;
+  if (description !== undefined) set.description = description;
 
   const workspaceId = await ensureDefaultWorkspace(accountId);
 
@@ -241,6 +248,7 @@ export async function upsertRepo(
           githubNodeId,
           defaultBranch: defaultBranch ?? null,
           viewerPermission: viewerPermission ?? null,
+          description: description ?? null,
         })
         .onConflictDoUpdate({
           target: [repos.accountId, repos.githubNodeId],

@@ -237,6 +237,7 @@ export const REPO_ACTIVITY_QUERY = /* GraphQL */ `
     repository(owner: $owner, name: $name) {
       id
       nameWithOwner
+      description
       viewerPermission
       defaultBranchRef {
         name
@@ -666,6 +667,12 @@ export interface RepoActivityResponse {
   repository: {
     id: string;
     nameWithOwner: string;
+    // The repo's GitHub "About" description. OPTIONAL on purpose — the three-state
+    // partial-response policy (see sync/branch-status.ts): absent (`undefined`) means the
+    // selection was never received (hand-built fixtures, a salvaged partial without the key)
+    // and the stored value must be PRESERVED; `null` means GitHub positively said the repo
+    // has none and CLEARS it; a string overwrites. Threaded through upsertRepo as-is.
+    description?: string | null;
     // GraphQL RepositoryPermission enum (ADMIN/MAINTAIN/WRITE/TRIAGE/READ); may be
     // null. Drives whether the viewer may approve a PR.
     viewerPermission: string | null;

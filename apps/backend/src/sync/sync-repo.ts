@@ -199,6 +199,9 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
           resp.repository.defaultBranchRef?.name ?? null,
           accountId,
           resp.repository.viewerPermission ?? null,
+          // Passed RAW (no `?? null`): `undefined` = the key never arrived → upsertRepo
+          // preserves the stored description; `null` = GitHub positively says none → clears.
+          resp.repository.description,
         );
       }
 

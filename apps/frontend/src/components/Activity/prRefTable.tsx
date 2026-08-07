@@ -40,10 +40,47 @@ const byPriority = (a: DigestPrRef, b: DigestPrRef): number =>
 const fmtDelta = (n: number): string =>
   Number.isFinite(n) && n >= 10_000 ? `${Math.round(n / 1000)}k` : String(n ?? 0);
 
-interface Block {
-  kind: 'headline' | 'header' | 'subhead' | 'prose' | 'prtable';
+export interface Block {
+  kind: 'headline' | 'header' | 'subhead' | 'prose' | 'prtable' | 'mdtable';
   text?: string; // headline / header / subhead / prose
   groups?: { prs: DigestPrRef[]; summary: string }[]; // prtable
+  table?: { header: string[]; rows: string[][] }; // mdtable (model-authored GFM pipe table)
+}
+
+// ---- GFM pipe tables (model-authored, e.g. the Retro's Item/Category/PRs/Note table) --------
+//
+// A run of `|`-delimited lines whose SECOND line is the `---` separator row parses into an
+// `mdtable` block, rendered in PrTable's visual shell with every cell going through
+// renderInlineMarkdown (so **bold** and owner/name#N refs still work). Anything that fails the
+// separator/shape check simply falls through to the ordinary per-line branches — a malformed
+// table DEGRADES to prose/prtable lines, it never crashes and never half-renders.
+
+// Split one `| a | b |` row into trimmed cells. One leading + one trailing pipe are decoration
+// (GFM), inner pipes delimit. (Escaped `\|` is not handled — the model is asked for plain cells,
+// and a stray one just splits a cell: degraded, not broken.)
+function splitTableRow(line: string): string[] {
+  return line
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((c) => c.trim());
+}
+
+// The GFM delimiter row: every cell is dashes with optional alignment colons.
+function isTableSeparator(cells: string[]): boolean {
+  return cells.length > 0 && cells.every((c) => /^:?-{2,}:?$/.test(c));
+}
+
+// Does a well-formed pipe table start at lines[i]? Requires a header row, a separator row of
+// the SAME cell count (the GFM validity rule — a mismatch degrades the run to plain lines),
+// and at least 2 columns (a 1-column "table" reads better as bullets).
+function tableStartsAt(lines: string[], i: number): boolean {
+  const head = lines[i];
+  const sep = lines[i + 1];
+  if (head == null || sep == null || !head.startsWith('|') || !sep.startsWith('|')) return false;
+  const headCells = splitTableRow(head);
+  const sepCells = splitTableRow(sep);
+  return headCells.length >= 2 && isTableSeparator(sepCells) && sepCells.length === headCells.length;
 }
 
 // Which resolved PR refs a line mentions (deduped, in order of appearance).
@@ -107,8 +144,9 @@ function stripRefs(text: string, index: PrRefIndex): string {
 }
 
 // Parse the summary markdown into an ordered list of blocks, coalescing consecutive
-// PR-referencing bullets into severity-ordered table groups.
-function parseBlocks(markdown: string, index: PrRefIndex): Block[] {
+// PR-referencing bullets into severity-ordered table groups. Exported for the unit tests
+// (the parser must degrade malformed pipe tables, never crash).
+export function parseBlocks(markdown: string, index: PrRefIndex): Block[] {
   const lines = markdown
     .split('\n')
     // Strip code-span backticks — the model sometimes wraps a PR token in them, which would
@@ -116,6 +154,7 @@ function parseBlocks(markdown: string, index: PrRefIndex): Block[] {
     .map((l) => l.replace(/`/g, '').trim())
     // Drop blanks and markdown horizontal rules (`---` / `***` / `___`) — the model uses one
     // to divide the metrics from the action items, which would otherwise render as a stray bullet.
+    // (A pipe-table separator row `|---|---|` starts with `|`, so it survives this filter.)
     .filter((l) => l !== '' && !/^[-–—*_]{3,}$/.test(l));
   const blocks: Block[] = [];
   let pending: { prs: DigestPrRef[]; summary: string }[] = [];
@@ -127,7 +166,8 @@ function parseBlocks(markdown: string, index: PrRefIndex): Block[] {
     blocks.push({ kind: 'prtable', groups: pending });
     pending = [];
   };
-  for (const raw of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]!;
     const header = /^#{1,6}\s+(.*)$/.exec(raw);
     const bullet = raw.replace(/^[-*]\s+/, '');
     // The FIRST line is always the overview headline (the digest's throughput line / the
@@ -137,6 +177,21 @@ function parseBlocks(markdown: string, index: PrRefIndex): Block[] {
     if (!headlineDone) {
       headlineDone = true;
       blocks.push({ kind: 'headline', text: header ? (header[1] ?? '') : bullet });
+      continue;
+    }
+    // A GFM pipe table (checked BEFORE the refs branch — a table row citing owner/name#N
+    // must become a table CELL, not get swallowed into a PrTable group). Consumes the
+    // header + separator + every consecutive following `|` row.
+    if (tableStartsAt(lines, i)) {
+      const headerCells = splitTableRow(raw);
+      const rows: string[][] = [];
+      let j = i + 2;
+      for (; j < lines.length && lines[j]!.startsWith('|'); j++) {
+        rows.push(splitTableRow(lines[j]!));
+      }
+      flush();
+      blocks.push({ kind: 'mdtable', table: { header: headerCells, rows } });
+      i = j - 1;
       continue;
     }
     const refs = refsIn(raw, index);
@@ -275,6 +330,54 @@ function PrTable({
   );
 }
 
+// A model-authored GFM pipe table (e.g. the Retro's Item/Category/PRs/Note table), in the
+// same visual shell as PrTable: the horizontal-scroll container, the same header/border
+// treatment. Columns are whatever the model emitted, so layout stays natural (no colgroup);
+// rows are padded/truncated to the header's width (the GFM rule). Every cell runs through
+// renderInlineMarkdown so **bold** and owner/name#N PR refs render exactly as they do in prose.
+function MdTable({
+  table,
+  onOpenPr,
+  index,
+}: {
+  table: { header: string[]; rows: string[][] };
+  onOpenPr: (ref: DigestPrRef) => void;
+  index: PrRefIndex;
+}): JSX.Element {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[480px] border-collapse text-[12px]">
+        <thead>
+          <tr className="text-left text-[9px] font-semibold uppercase tracking-wide text-gray-400">
+            {table.header.map((h, ci) => (
+              <th key={ci} className="pb-1 pr-2 font-semibold">
+                {renderInlineMarkdown(h, index, onOpenPr)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((row, ri) => (
+            <tr
+              key={ri}
+              className="border-t border-gray-100 align-top dark:border-gray-800/60"
+            >
+              {table.header.map((_, ci) => (
+                <td
+                  key={ci}
+                  className="py-1 pr-2 text-[12px] leading-relaxed text-gray-700 dark:text-gray-200"
+                >
+                  {renderInlineMarkdown(row[ci] ?? '', index, onOpenPr)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // The unified summary renderer: prose stays prose, PR-referencing bullets become a
 // severity-ordered table. Used by both the per-repo digest and the sprint report.
 export function SummaryMarkdown({
@@ -305,6 +408,9 @@ export function SummaryMarkdown({
               index={index}
             />
           );
+        }
+        if (b.kind === 'mdtable') {
+          return <MdTable key={i} table={b.table!} onOpenPr={onOpenPr} index={index} />;
         }
         if (b.kind === 'headline') {
           return (

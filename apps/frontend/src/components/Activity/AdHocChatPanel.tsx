@@ -43,6 +43,11 @@ const SPRINT_REPORT_PROMPT =
 // its own `retro_reports` cache. Paired with the sprint report as the two catch-alls: that one is
 // forward-looking ("what needs attention now"), this one backward-looking ("what just happened").
 //
+// It asks for a short narrative followed by ONE GFM pipe table of the retro items — the renderer
+// (SummaryMarkdown/parseBlocks) parses pipe tables into a real table in PrTable's visual shell,
+// with owner/name#N refs in cells still linkifying. The Category vocabulary is pinned in the
+// prompt (shipped / went well / dragged / CI) so rows stay scannable across runs.
+//
 // It deliberately asks ONLY for what the chat's grounding payload actually holds — merged PRs,
 // flow metrics, CI failure reasons, attention items. NOT themes or sentiment: those needed the
 // retro's own 50-item corpus of raw comment/review bodies, which buildChatPayload has no
@@ -55,11 +60,19 @@ const SPRINT_REPORT_PROMPT =
 // Record<PresetPromptKey, string> maps (PRESET_QUESTIONS + a bespoke per-key system prompt), so
 // it would be an immediate compile error in packages/pro plus a new cache-row kind and a new
 // independent throttle/billing path — for a pill that only needs to prefill the chat box.
+// ⚠ Every pill prompt must stay ≤500 chars — the server's MAX_QUESTION truncates SILENTLY, and a
+// mid-sentence cut would ship a live mispowered pill with no error anywhere.
 const RETRO_PROMPT =
-  'Give me a retrospective of this sprint: what shipped, what went well and what dragged in review, how CI held up and why it failed, and two or three things to change next sprint.';
+  'Give me a retrospective of this sprint: start with a short narrative summary (2-3 sentences), then ONE GitHub-flavoured markdown pipe table of the retro items with columns Item | Category | PRs | Note. Category is one of: shipped, went well, dragged, CI. Put PR references in the PRs column as plain owner/name#N.';
+// The workspace-orientation catch-all: what is this set of repos FOR, and what is it busy with
+// right now. Grounded in the payload's `repos` map (each repo's GitHub "About" description — the
+// only real purpose text the payload carries) plus the merged/open PR activity.
+const WORKSPACE_ABOUT_PROMPT =
+  'What does this workspace do, and what are its latest priorities? Using the repo descriptions and recent PR activity in the JSON, give one line per repository on its purpose, then a short list of the current priorities and themes across the workspace.';
 const QUICK_QUESTIONS: { label: string; question: string }[] = [
   { label: 'Sprint report', question: SPRINT_REPORT_PROMPT },
   { label: 'Retro', question: RETRO_PROMPT },
+  { label: 'About this Workspace', question: WORKSPACE_ABOUT_PROMPT },
   ...PRESET_PROMPTS.map((p) => ({ label: p.label, question: p.question })),
 ];
 
