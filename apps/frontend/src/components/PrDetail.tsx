@@ -9,6 +9,7 @@ import type {
 } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
 import { usePrLiveRefresh } from '../hooks/usePrLiveRefresh.js';
+import { usePrArmedIntent } from '../hooks/useAutoMerge.js';
 import { useMe, useProCapabilities } from '../hooks/useTriage.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
@@ -792,6 +793,11 @@ export function PrDetail({
     liveVisible && pr?.state === 'open',
   );
 
+  // This account's live auto-merge intent — drives the header's "Auto-merge armed" chip. A
+  // selector over the polled armed list (no new request); MUST sit above the early returns
+  // (hooks-order rule). Only `state === 'armed'` counts — the list carries resolved rows too.
+  const armedIntent = usePrArmedIntent(prId);
+
   if (isLoading) {
     return <PrDetailSkeleton />;
   }
@@ -921,6 +927,16 @@ export function PrDetail({
               title="Open, no recent commits, and has open threads"
             >
               Stalled
+            </span>
+          )}
+          {/* Auto-merge armed — visible from EVERY tab, not just Overview. Display only (the
+              disarm affordance lives in the Actions row); honest about the mechanism. */}
+          {armedIntent != null && pr.state === 'open' && (
+            <span
+              className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-xs font-medium text-violet-600 dark:text-violet-300"
+              title="Auto-merge is armed — Limn updates it from trunk if needed and merges when checks pass, while the app is running. Cancel from Overview → Actions."
+            >
+              <span aria-hidden>⏲</span> Auto-merge armed
             </span>
           )}
           {(() => {

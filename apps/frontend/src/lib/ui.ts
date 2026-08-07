@@ -666,6 +666,45 @@ export function mergeVerdictWarning(pr: MergeVerdictInput): MergeVerdictInfo | n
   return DRAFT_COMPACT_WARN_VERDICTS.has(underneath.verdict) ? underneath : null;
 }
 
+// The verdicts the auto-merge watcher can WAIT OUT on its own: blocked/behind clear via CI,
+// reviews or an update-branch; unknown resolves itself. Conflicts and drafts need a human
+// push, which DISARMS the intent — advertising "merge when ready" there would promise a wait
+// that can only end by cancelling itself. Deliberately the MergeVerdict vocabulary (no third
+// "armable" enum beside canMerge / READY_MERGE_STATES).
+const ARM_WAIT_VERDICTS: ReadonlySet<MergeVerdict> = new Set<MergeVerdict>([
+  'blocked',
+  'behind',
+  'unknown',
+]);
+
+/**
+ * Whether the dedicated "Merge when ready" control is worth offering — i.e. arming would DO
+ * something the plain Merge button doesn't. True while a self-clearing blocker is in the way
+ * (blocked / behind / unknown) OR when the PR is mergeable RIGHT NOW but trailing its base
+ * (`canMerge && behindBy > 0` — arming updates from trunk first, then lands it). A fully
+ * clean, up-to-date PR gets no button (arming it is just a delayed merge — press Merge).
+ *
+ * ⚠ `behindBy > 0` is true of MOST healthy PRs and only ever WIDENS this button's
+ * eligibility. It must never gate the plain Merge button (only the 'behind' VERDICT —
+ * mergeStateStatus — means GitHub is blocking), and the verdict passed here must never have
+ * been fed `autoMergeArmed` ('armed' reports canMerge:true, which would make an armed PR
+ * look like the clean-but-behind case).
+ */
+export function mergeWhenReadyEligible(input: {
+  allowedByRepo: boolean;
+  methodCount: number;
+  queueEnabled: boolean;
+  alreadyArmed: boolean;
+  verdict: Pick<MergeVerdictInfo, 'verdict' | 'canMerge'>;
+  behindBy: number;
+}): boolean {
+  if (!input.allowedByRepo || input.methodCount === 0 || input.queueEnabled || input.alreadyArmed) {
+    return false;
+  }
+  if (ARM_WAIT_VERDICTS.has(input.verdict.verdict)) return true;
+  return input.verdict.canMerge && input.behindBy > 0;
+}
+
 export function userLabel(user: User | undefined, fallbackId: number | null): string {
   if (user) return user.displayName || user.githubLogin;
   return fallbackId == null ? 'unknown' : `user ${fallbackId}`;

@@ -115,9 +115,30 @@ nothing we didn't produce. On success the runner stamps the PR merged locally (l
 interactive route) and sets `merged`; a merge/close that happened outside Pierre becomes
 `disarmed_blocked`, NOT `merged` — the latter means "the watcher did it" and would raise a false
 toast. `MAX_CONSECUTIVE_FAILURES` 3, counted in memory so a restart errs towards retrying.
-Client side: `useArmedMerges` polls `GET /api/auto-merge` (45s, foreground only) and
-`AutoMergeBanner` toasts only on an `armed → terminal` TRANSITION it observed itself — the first
-poll seeds a silent baseline, so a page load never replays yesterday's outcomes.
+
+**Client side — the ONE way to arm is `MergeWhenReadyControl`**, a dedicated button beside
+Merge/Close in the Overview Actions row (`MergeControl` keeps its richer armed panel + cancel,
+but no arm button — two arm entries meant two strategy defaults). It fetches merge-options
+EAGERLY on mount (SAME query key as MergeControl, 30s staleTime — one fetch serves both; the
+3-GitHub-call cost per viewed eligible PR is accepted because the user is looking at this PR),
+since eligibility needs the live `behindBy`: **`mergeWhenReadyEligible`** (`lib/ui.ts`, pinned by
+`test/mergeWhenReadyEligibility.test.ts`) offers the button while a SELF-CLEARING blocker is up
+(verdict `blocked` / `behind` / `unknown`) OR the PR is clean-but-behind (`canMerge &&
+behindBy > 0` — arming updates from trunk, then lands it). Absent on a fully clean up-to-date PR
+(that's just Merge) and on conflicts/drafts (the exit there is a push, which DISARMS). `behindBy`
+only ever WIDENS this button — it still never gates Merge (the landmine above), and the verdict
+fed to the predicate must never carry `autoMergeArmed`. Arming always stores a REAL
+`updateStrategy` (`canRebaseUpdate ? 'rebase' : 'merge'`, never `'none'`) so a PR that falls
+behind AFTER arming still freshens — the old arm path stored `'none'` unless already behind,
+which parked exactly those PRs forever on up-to-date-required repos. While armed: the control
+becomes "Armed — merging when ready" + cancel, the PR header shows an armed chip, and the Close
+button HIDES (opposite promises) — all via **`usePrArmedIntent`**, a selector over the polled
+armed list (zero new requests; predicate is `state === 'armed'`, NEVER row existence — the list
+carries 24h-resolved rows; cross-tab it can lag the 45s poll, own-tab arm/disarm is instant via
+the `ARMED_MERGES_KEY` invalidation). `useArmedMerges` polls `GET /api/auto-merge` (45s,
+foreground only) and `AutoMergeBanner` toasts only on an `armed → terminal` TRANSITION it
+observed itself — the first poll seeds a silent baseline, so a page load never replays
+yesterday's outcomes.
 
 ### CI logs (`github/actions-logs.ts`)
 

@@ -27,11 +27,13 @@ import { UserName } from './UserName.js';
 import { Markdown } from './Markdown.js';
 import { ApproveControl } from './ApproveControl.js';
 import { MergeControl } from './MergeControl.js';
+import { MergeWhenReadyControl } from './MergeWhenReadyControl.js';
 import { ClosePrControl } from './ClosePrControl.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
 import { AiSummary } from './AiSummary.js';
 import { CiAnalysisCard } from './CiAnalysisCard.js';
 import { useRequestReviewers } from '../hooks/usePrWrites.js';
+import { usePrArmedIntent } from '../hooks/useAutoMerge.js';
 import { useSuggestedReviewers } from '../hooks/usePr.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { useProCapabilities } from '../hooks/useTriage.js';
@@ -356,6 +358,11 @@ export function ChecksTab({
   // "slower than typical" caution that opens the Bot activity tab.
   const { data: prBots } = usePrBotBehaviour(pr.id, onShowBotActivity != null);
   const slowBots = (prBots?.bots ?? []).filter((b) => b.ttfrAnomaly != null);
+  // This account's live auto-merge intent on this PR — a selector over the armed list the app
+  // already polls (no new request). While armed the Close button hides: "close without merging"
+  // and "merge when ready" are opposite promises, and the armed control's Cancel is the honest
+  // first step. Cross-tab the hide can lag the 45s poll; own-tab arms react instantly.
+  const armedIntent = usePrArmedIntent(pr.id);
   const suggestions = sugg?.suggestedReviewers ?? [];
   const suggestUsersById =
     (sugg?.users?.length ?? 0) > 0
@@ -622,23 +629,30 @@ export function ChecksTab({
       )}
 
       {/* Actions = every viewer write action on the PR in one row: approve, merge (push + open +
-          non-draft) and close-without-merging (push OR author + open). Each control expands in
-          place; the approvers themselves read from the green ✓ badges in the Reviews row above.
-          The Pro "check addressed" run used to sit here too — it is now folded into the single
-          "Check review" bar above the tabs, which covers the same threads and comments in one
-          combined call per target, so leaving both would let a user pay twice for one judgement. */}
+          non-draft), arm "merge when ready" (same gate; its own eligibility inside) and
+          close-without-merging (push OR author + open, HIDDEN while an auto-merge is armed).
+          Each control expands in place; the approvers themselves read from the green ✓ badges
+          in the Reviews row above. The Pro "check addressed" run used to sit here too — it is
+          now folded into the single "Check review" bar above the tabs, which covers the same
+          threads and comments in one combined call per target, so leaving both would let a
+          user pay twice for one judgement. */}
       {(pr.viewerCanApprove ||
         (pr.viewerCanPush && pr.state === 'open' && !pr.isDraft) ||
-        (pr.viewerCanClose && pr.state === 'open')) && (
+        (pr.viewerCanClose && pr.state === 'open' && armedIntent == null)) && (
         <Row label="Actions">
           <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
             {pr.viewerCanApprove && (
               <ApproveControl prId={pr.id} alreadyApproved={pr.viewerHasApprovedStanding} />
             )}
             {pr.viewerCanPush && pr.state === 'open' && !pr.isDraft && (
-              <MergeControl prId={pr.id} githubUrl={pr.githubUrl} />
+              <>
+                <MergeControl prId={pr.id} githubUrl={pr.githubUrl} />
+                <MergeWhenReadyControl prId={pr.id} />
+              </>
             )}
-            {pr.viewerCanClose && pr.state === 'open' && <ClosePrControl prId={pr.id} />}
+            {pr.viewerCanClose && pr.state === 'open' && armedIntent == null && (
+              <ClosePrControl prId={pr.id} />
+            )}
           </div>
         </Row>
       )}

@@ -7,7 +7,7 @@ import {
   useMergePr,
   useUpdatePrBranch,
 } from '../hooks/usePrWrites.js';
-import { useArmAutoMerge, useDisarmAutoMerge } from '../hooks/useAutoMerge.js';
+import { useDisarmAutoMerge } from '../hooks/useAutoMerge.js';
 import { dateTime, MERGE_TONE_CLASS, mergeVerdict, relativeTime, toMergeStateStatus } from '../lib/ui.js';
 import { ApiError } from '../api/client.js';
 
@@ -22,7 +22,10 @@ import { ApiError } from '../api/client.js';
 //      GitHub won't accept a direct merge on a queued branch, so offering one would only
 //      produce a confusing 405. Position/ETA + "Remove from queue" render while queued.
 //   2. it can merge now                   → merge / squash / rebase (whichever the repo allows).
-//   3. it can't merge YET                 → "Merge when ready" arms Pierre's own watcher.
+//   3. it can't merge YET                 → the verdict line says why. ARMING lives in the
+//      sibling MergeWhenReadyControl (the ONE way to arm — it also covers clean-but-behind,
+//      which this control's !canMerge gate could never see). The armed panel + its cancel
+//      still render here: they carry richer detail (method, reason, expiry) than the button.
 //
 // Everything that says "can this land?" comes from the ONE `mergeVerdict` resolver in lib/ui,
 // so this control, the open-PR rows and the timeline tooltip can never disagree.
@@ -46,7 +49,6 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
   const update = useUpdatePrBranch(prId);
   const enqueue = useEnqueueMergeQueue(prId);
   const dequeue = useDequeueMergeQueue(prId);
-  const arm = useArmAutoMerge(prId);
   const disarm = useDisarmAutoMerge(prId);
 
   // The chosen method — default to the repo's first allowed once options load.
@@ -62,7 +64,7 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
   const mergeError = errText(merge.error, 'Failed to merge the PR.');
   const updateError = errText(update.error, 'Failed to update the branch.');
   const queueError = errText(enqueue.error ?? dequeue.error, 'Merge-queue action failed.');
-  const armError = errText(arm.error ?? disarm.error, 'Failed to change auto-merge.');
+  const armError = errText(disarm.error, 'Failed to change auto-merge.');
 
   const behindLabel = useMemo(() => {
     if (options == null || !options.behind) return null;
@@ -126,10 +128,7 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
 
   const hasMethods = options.allowedMethods.length > 0;
   const canMergeNow = verdict.canMerge && hasMethods;
-  // Arming only makes sense while something is still in the way. A PR that can merge right
-  // now should be merged, not queued behind a watcher tick.
-  const canArm = options.autoMerge.allowedByRepo && !isArmed && !verdict.canMerge && !queue?.enabled;
-  const busy = merge.isPending || enqueue.isPending || dequeue.isPending || arm.isPending;
+  const busy = merge.isPending || enqueue.isPending || dequeue.isPending;
 
   return (
     <div className="w-full space-y-2">
@@ -258,7 +257,7 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
               <select
                 value={effectiveMethod}
                 onChange={(e) => setMethod(e.target.value as MergeMethod)}
-                disabled={busy || (!canMergeNow && !canArm)}
+                disabled={busy || !canMergeNow}
                 className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-sm dark:border-gray-700 dark:bg-gray-900"
               >
                 {options.allowedMethods.map((m) => (
@@ -277,28 +276,6 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
             >
               {merge.isPending ? 'Merging…' : METHOD_VERB[effectiveMethod]}
             </button>
-            {canArm && (
-              <button
-                type="button"
-                onClick={() =>
-                  arm.mutate({
-                    mergeMethod: effectiveMethod,
-                    // Behind-ness is the one blocker we can clear ourselves; mirror the
-                    // update selector so the watcher uses the strategy the user picked.
-                    updateStrategy: options.canUpdateBranch
-                      ? options.canRebaseUpdate
-                        ? updateStrategy
-                        : 'merge'
-                      : 'none',
-                  })
-                }
-                disabled={busy}
-                className="whitespace-nowrap rounded border border-violet-400 px-2 py-0.5 text-sm font-medium text-violet-600 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30"
-                title="Merge it automatically once the blockers clear — while the app is running"
-              >
-                {arm.isPending ? 'Arming…' : 'Merge when ready'}
-              </button>
-            )}
           </>
         )}
         <button
@@ -309,7 +286,6 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
             update.reset();
             enqueue.reset();
             dequeue.reset();
-            arm.reset();
             disarm.reset();
           }}
           disabled={busy}

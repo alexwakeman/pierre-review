@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ArmMergeBody, ArmedMergeListResponse } from '@pierre-review/shared';
+import type { ArmMergeBody, ArmedMergeListResponse, ArmedMergeRequest } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 
 // ---- Auto-merge ("merge when ready") -----------------------------------------------------
@@ -31,6 +31,19 @@ export function useArmedMerges(enabled = true) {
     refetchIntervalInBackground: false,
     staleTime: 15_000,
   });
+}
+
+/**
+ * The live armed intent for ONE PR — a selector over the account-wide list the app already
+ * polls (AutoMergeBanner keeps the query warm), so it costs zero new requests. The list also
+ * carries recently-RESOLVED intents for 24h, so row existence is NOT armed-ness: only
+ * `state === 'armed'` counts. Cross-tab the answer can lag the 45s poll; the user's OWN
+ * arm/disarm is instant via the ARMED_MERGES_KEY invalidation below.
+ */
+export function usePrArmedIntent(prId: number | null): ArmedMergeRequest | null {
+  const { data } = useArmedMerges();
+  if (prId == null) return null;
+  return data?.requests.find((r) => r.prId === prId && r.state === 'armed') ?? null;
 }
 
 /**
