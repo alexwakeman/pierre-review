@@ -56,11 +56,58 @@ export function severityApiUnavailable() {
   return null;
 }
 
-function main() {
+/**
+ * What is already listening on the severity-api port: nothing, our service, or a stranger.
+ *
+ * ⚠ WITHOUT THIS THE DEV LOOP FAILS SILENTLY AND LIES. `serve_local.sh` ends in `exec uvicorn`,
+ * which dies with `[Errno 48] Address already in use` on an occupied port. Under `pnpm dev` that
+ * job runs inside `concurrently`, which does NOT restart an exited job — so the ml job vanishes
+ * into the scrollback while `dev.mjs`, having already decided `withMl`, points the backend at the
+ * port anyway. The result is the exact failure this file's header says must never happen: the
+ * backend reports `mlSeverity: true` and the sync UI shows a scoring backlog that nothing is
+ * draining. Observed in the wild after a hand-started service was left holding the port.
+ *
+ * A HEALTHY severity-api already on the port is not an error — it is the thing we were about to
+ * start. Reusing it makes `pnpm dev` idempotent with a separately-run `pnpm dev:ml`, which is how
+ * anyone draining a backlog in its own terminal ends up arranged.
+ */
+async function probePort() {
+  const url = `http://127.0.0.1:${ML_PORT}/health`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return 'stranger';
+    const body = await res.json();
+    // `models_loaded` is the severity-api's own shape; anything else answering /health on this
+    // port is some other service and must NOT be treated as ours.
+    return body && typeof body === 'object' && 'models_loaded' in body ? 'ours' : 'stranger';
+  } catch (err) {
+    // ECONNREFUSED is the ordinary "nothing there" case. Anything else answered badly enough
+    // that we cannot claim the port, and must not be mistaken for a free one.
+    const code = err?.cause?.code ?? err?.code;
+    return code === 'ECONNREFUSED' ? 'free' : 'stranger';
+  }
+}
+
+async function main() {
   const blocked = severityApiUnavailable();
   if (blocked) {
     console.log(`[dev:ml] skipping severity-api — ${blocked}.`);
     console.log('[dev:ml] the app runs fine without it; bot comments just carry no ML labels.');
+    return;
+  }
+
+  const occupant = await probePort();
+  if (occupant === 'ours') {
+    console.log(`[dev:ml] severity-api already serving on :${ML_PORT} — reusing it.`);
+    return;
+  }
+  if (occupant === 'stranger') {
+    console.log(
+      `[dev:ml] NOT starting severity-api — :${ML_PORT} is held by something that is not one.`,
+    );
+    console.log(
+      `[dev:ml] free the port (lsof -ti:${ML_PORT}) or set SEVERITY_API_PORT, then restart.`,
+    );
     return;
   }
 
@@ -114,5 +161,11 @@ function main() {
 
 // Only run when invoked directly — scripts/dev.mjs imports the helpers above.
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  main();
+  // Never reject: this script must not be able to fail the dev loop (see the header).
+  main().catch((err) => {
+    console.log(`[dev:ml] could not start severity-api: ${err?.message ?? err}`);
+    process.exitCode = 0;
+  });
 }
+
+export { probePort };

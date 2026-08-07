@@ -20,28 +20,44 @@
 import { spawn } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ML_DIR, ML_PORT, severityApiUnavailable } from './dev-ml.mjs';
+import { ML_DIR, ML_PORT, probePort, severityApiUnavailable } from './dev-ml.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const blocked = severityApiUnavailable();
-const withMl = blocked === null;
+
+// The port is part of the SAME single decision as `blocked`, and for the same reason: whatever
+// answers here decides both whether to start a service and whether the backend may be pointed at
+// one. Three outcomes, not two —
+//   'free'     start it, point the backend at it (the ordinary case);
+//   'ours'     a severity-api is ALREADY serving (someone ran `pnpm dev:ml` separately, or is
+//              draining a backlog in its own terminal): do not start a second, but DO use it;
+//   'stranger' someone else holds the port: uvicorn would die with EADDRINUSE, `concurrently`
+//              would not restart it, and pointing the backend here anyway is what produces the
+//              "mlSeverity on, backlog draining nowhere" lie this file exists to prevent.
+const occupant = blocked === null ? await probePort() : 'free';
+const withMl = blocked === null && occupant !== 'stranger';
+const startMl = withMl && occupant === 'free';
 
 const env = { ...process.env };
 if (withMl) {
   env.SEVERITY_API_DEFAULT_URL = `http://127.0.0.1:${ML_PORT}`;
   console.log(`[dev] severity-api: ${ML_DIR} → ${env.SEVERITY_API_DEFAULT_URL}`);
+  if (!startMl) {
+    console.log(`[dev] (already serving on :${ML_PORT} — reusing it, not starting a second)`);
+  }
   if (process.env.SEVERITY_API_URL) {
     console.log(
       `[dev] note: SEVERITY_API_URL=${process.env.SEVERITY_API_URL} is set and takes precedence.`,
     );
   }
 } else {
-  console.log(`[dev] severity-api off (${blocked}) — bot comments will carry no ML labels.`);
+  const reason = blocked ?? `:${ML_PORT} is held by something that is not a severity-api`;
+  console.log(`[dev] severity-api off (${reason}) — bot comments will carry no ML labels.`);
 }
 
 const jobs = [
-  ...(withMl ? [{ name: 'ml', color: 'yellow', cmd: 'pnpm dev:ml' }] : []),
+  ...(startMl ? [{ name: 'ml', color: 'yellow', cmd: 'pnpm dev:ml' }] : []),
   { name: 'backend', color: 'blue', cmd: 'pnpm dev:backend' },
   { name: 'frontend', color: 'magenta', cmd: 'pnpm dev:frontend' },
 ];
