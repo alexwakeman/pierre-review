@@ -94,6 +94,8 @@ import type {
   PostReviewResult,
   PrDetail,
   PrFilesResponse,
+  PrRefreshBody,
+  PrRefreshResponse,
   SuggestedReviewersResponse,
   PresetPromptKey,
   PresetPromptResponse,
@@ -129,6 +131,9 @@ class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    // Seconds from a 429's Retry-After header (null when absent) — lets a poller honor
+    // the server's own backoff instead of guessing (see usePrLiveRefresh).
+    public retryAfterSeconds: number | null = null,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -144,7 +149,8 @@ async function handle<T>(res: Response): Promise<T> {
     } catch {
       /* non-JSON error body */
     }
-    throw new ApiError(res.status, message);
+    const ra = res.headers.get('retry-after');
+    throw new ApiError(res.status, message, ra && /^\d+$/.test(ra) ? Number(ra) : null);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -374,6 +380,13 @@ export const api = {
   repoAnalytics: (repoId: number) =>
     get<RepoAnalytics>(`/api/insights/${repoId}/analytics`),
   pr: (id: number) => get<PrDetail>(`/api/prs/${id}`),
+  // Live PR-detail freshness (probe-gated server-side; a quiet poll tick is free). The
+  // manual Refresh button passes {wait:true} — an unconditional re-read of GitHub that
+  // queues behind any in-flight sync. `{synced:false}` is a report, not an error.
+  refreshPr: (id: number, opts?: PrRefreshBody) =>
+    fetch(`/api/prs/${id}/refresh`, jsonBody('POST', opts?.wait ? { wait: true } : {})).then(
+      (r) => handle<PrRefreshResponse>(r),
+    ),
   // Suggested reviewers — a live query (deliberately NOT part of the cached PR detail) so it
   // reflects current state (empties the moment a reviewer is requested).
   suggestedReviewers: (id: number) =>

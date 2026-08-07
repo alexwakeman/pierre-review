@@ -2854,6 +2854,28 @@ export interface MarkViewedBody {
   sha?: string;
 }
 
+// POST /api/prs/:id/refresh — live PR-detail freshness. The SPA polls this every ~5s while
+// a PR pane is open and visible (probe-gated server-side: a quiet tick is one free
+// conditional REST 304), and the PrDetail header's manual Refresh button sends {wait:true}.
+export interface PrRefreshBody {
+  // true = the manual button: unconditionally bust the server's hydration cache and queue
+  // behind any in-flight sync (the post-write-resync composition) so the click's answer is
+  // a read of GitHub AFTER now. Absent/false = the poll, which may honestly do nothing.
+  wait?: boolean;
+}
+
+export interface PrRefreshResponse {
+  // The stored PR reflects GitHub as of this request. false = the refresh could not run
+  // (no token / network / GitHub failure / a concurrent sync raced us) — the stored data
+  // is still perfectly renderable, just possibly stale; NEVER an error state.
+  synced: boolean;
+  // Something MAY have changed: the PR's updatedAt moved, or a forced full walk refreshed
+  // the hydration-only detail (checkRuns are blind to updatedAt). The client invalidates
+  // its caches ONLY when true — an unchanged tick must not churn the timeline.
+  changed: boolean;
+  updatedAt: string; // ISO-8601, the row's updatedAt after the refresh
+}
+
 // Dismissing a "my turn" entry. Auto-resurfaces when newer activity arrives:
 // a review_request reappears when its PR is updated again; a thread reappears
 // on a newer reply; a claude_review reappears when a newer review run finishes

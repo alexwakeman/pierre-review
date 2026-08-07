@@ -212,6 +212,18 @@ function tierFor(method: string, path: string): readonly Tier[] {
   }
   // GET /api/threads/<id> hydrates the same way.
   if (!mutating && /^\/api\/threads\/\d+$/.test(path)) return [TIERS.prDetail, TIERS.read];
+  // POST /api/prs/<id>/refresh — the PrDetail live poll (~every 5s while a PR pane is
+  // visible) + its manual Refresh button. A mutating VERB (POST so the cross-origin guard
+  // applies) with GET-shaped cost: a quiet tick is one free conditional REST 304, a changed
+  // or floor-forced one is a syncOnePr walk + a hydration bust — the same GitHub-cost
+  // profile as GET /api/prs/:id, so it shares the `prDetail` bucket (the 5s cadence is
+  // 12/min of the 60, leaving room for a second tab plus the user's own detail traffic).
+  // NOT `githubWrite` (it writes nothing to GitHub) and NOT the blanket `read` (it can
+  // spend a GraphQL walk per call) — spelled EXACTLY, per this file's twice-documented
+  // failure mode of a tier inherited instead of decided.
+  if (mutating && /^\/api\/prs\/\d+\/refresh$/.test(path)) {
+    return [TIERS.prDetail, TIERS.read];
+  }
   if (mutating && (path === '/api/repos' || /^\/api\/repos\/\d+\/sync$/.test(path))) {
     return [TIERS.sync];
   }

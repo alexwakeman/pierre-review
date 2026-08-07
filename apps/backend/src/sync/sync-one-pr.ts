@@ -46,6 +46,16 @@ const keyOf = (repoId: number, prNumber: number): string => `${repoId}:${prNumbe
 // giving up. Bounded so a stream of writers on one hot PR can't spin here indefinitely.
 const MAX_SERIALIZE_ATTEMPTS = 3;
 
+/**
+ * Is a targeted sync in flight for this PR right now? Read-only. The refresh route
+ * (sync/refresh-pr.ts) samples this BEFORE a no-wait syncOnePr so it can report a
+ * stand-down as "a sync is running" rather than as a failure — the poll's answer is
+ * whatever freshness that run produces, not an error.
+ */
+export function isPrSyncInFlight(repoId: number, prNumber: number): boolean {
+  return running.has(keyOf(repoId, prNumber));
+}
+
 interface RepoTarget {
   owner: string;
   name: string;

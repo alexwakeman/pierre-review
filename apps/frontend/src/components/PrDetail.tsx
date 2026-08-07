@@ -8,12 +8,13 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
+import { usePrLiveRefresh } from '../hooks/usePrLiveRefresh.js';
 import { useMe, useProCapabilities } from '../hooks/useTriage.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { api } from '../api/client.js';
 import { useFilters } from '../store/filters.js';
-import { usePinnedTabs, type PinnedPr } from '../store/pinnedTabs.js';
+import { parseTabKey, usePinnedTabs, type PinnedPr } from '../store/pinnedTabs.js';
 import {
   buildQuotedReply,
   dateTime,
@@ -25,7 +26,14 @@ import {
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
 import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
-import { ExternalLinkIcon, FeedIcon, MagnifierIcon, OctocatIcon, TimelineIcon } from './Icons.js';
+import {
+  ExternalLinkIcon,
+  FeedIcon,
+  MagnifierIcon,
+  OctocatIcon,
+  RefreshIcon,
+  TimelineIcon,
+} from './Icons.js';
 import { ThreadList } from './ThreadList/index.js';
 import { ChecksTab } from './ChecksTab.js';
 import { CommentAnnotations, ReviewCheckButton } from './CommentAnnotations.js';
@@ -766,6 +774,24 @@ export function PrDetail({
     if (pr != null) syncPinnedMeta(pinnedMetaOf(pr, usersById));
   }, [pr, usersById, syncPinnedMeta]);
 
+  // Live freshness: the ~5s probe-gated poll runs only while this PR is OPEN and this
+  // PrDetail is the copy the user can actually SEE. Mounted ≠ visible: the pane path is
+  // visible only under a board-slot Timeline (the shared board or a pr-focus isolate),
+  // and the overlay path only when the active tab IS this PR's pr-detail tab —
+  // refetchIntervalInBackground:false covers document.hidden but not an in-app overlay.
+  // (activeTab is read here, not passed in, so both mount sites get the gate for free.)
+  const liveActiveTab = usePinnedTabs((s) => s.activeTab);
+  const liveActiveParsed = parseTabKey(liveActiveTab);
+  const liveVisible =
+    liveActiveParsed?.kind === 'pr-detail'
+      ? liveActiveParsed.prId === prId
+      : liveActiveTab === 'timeline' || liveActiveParsed?.kind === 'pr-focus';
+  // Closed/merged PRs get no auto-poll (nothing to watch); the manual button still works.
+  const { refreshNow, isRefreshing, isStale } = usePrLiveRefresh(
+    prId,
+    liveVisible && pr?.state === 'open',
+  );
+
   if (isLoading) {
     return <PrDetailSkeleton />;
   }
@@ -853,6 +879,30 @@ export function PrDetail({
             aria-label="Show this PR in the Activity feed"
           >
             <FeedIcon size={15} />
+          </button>
+          {/* Refresh — re-read this PR from GitHub now. Shares in-flight state with the
+              ~5s live poll via the ['pr-refresh', prId] query key: one spinner, and a
+              click can never double a request the poll already has running. Copy stays
+              modest ("Refresh"): a targeted sync pages reviewThreads(first:50), so a
+              refresh can honestly change nothing. Amber = the last attempt couldn't
+              re-read GitHub (a stale note, never an error — the shown data is valid). */}
+          <button
+            type="button"
+            onClick={refreshNow}
+            disabled={isRefreshing}
+            className={`shrink-0 rounded p-0.5 disabled:opacity-60 ${
+              isStale
+                ? 'text-amber-500 hover:text-amber-600'
+                : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+            }`}
+            title={
+              isStale
+                ? "Couldn't refresh from GitHub — showing the last synced state. Click to retry."
+                : 'Refresh — re-check GitHub for new activity on this PR'
+            }
+            aria-label="Refresh this PR from GitHub"
+          >
+            <RefreshIcon size={14} className={isRefreshing ? 'animate-spin' : undefined} />
           </button>
           {/* Open on GitHub (Octocat). */}
           <a

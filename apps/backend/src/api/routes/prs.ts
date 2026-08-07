@@ -22,6 +22,8 @@ import type {
   PrFilesResponse,
   PrDetail,
   PrMergeOptions,
+  PrRefreshBody,
+  PrRefreshResponse,
   RequestReviewersBody,
   RequestReviewersResult,
   ResolveBotThreadsBody,
@@ -81,6 +83,7 @@ import {
   updatePullRequestBranch,
 } from '../../github/mutations.js';
 import { hydratePrDetail } from '../../sync/hydrate-detail.js';
+import { refreshPrFromGitHub } from '../../sync/refresh-pr.js';
 import { confirmPostedReviewComment } from '../../sync/resync-after-write.js';
 import { resolveThreadsOnGitHub } from '../../bot-triage/resolve.js';
 import { accountIdOf } from '../plugins/auth.js';
@@ -151,6 +154,15 @@ const markViewedSchema = {
     type: 'object',
     additionalProperties: false,
     properties: { sha: { type: 'string' } },
+  },
+};
+
+const refreshSchema = {
+  ...idParamSchema,
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { wait: { type: 'boolean' } },
   },
 };
 
@@ -339,6 +351,29 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     // (Suggested reviewers are NOT here — they're a separate live query, see below — so the
     // cached detail never freezes a stale suggestion.)
     return hydratePrDetail(pr, accountId);
+  });
+
+  // Live PR-detail freshness: the SPA polls this every ~5s while a PR is open AND visible,
+  // and the header Refresh button posts {wait:true}. Probe-gated server-side — a quiet
+  // tick is one free conditional REST 304; see sync/refresh-pr.ts for the cost model.
+  // POST deliberately (not GET) so the cross-origin guard applies in cloud; rate tier is
+  // `prDetail` (spelled into tierFor — same GitHub-cost profile as GET /api/prs/:id).
+  // A sync failure is a 200 {synced:false}, NEVER a 5xx — the stored PR is still valid.
+  app.post('/api/prs/:id/refresh', { schema: refreshSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const { wait } = (req.body ?? {}) as PrRefreshBody;
+    const result = await refreshPrFromGitHub({
+      prId: id,
+      accountId: accountIdOf(req),
+      wait: wait === true,
+      log: req.log,
+    });
+    if (!result) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    const resp: PrRefreshResponse = result;
+    return resp;
   });
 
   // PR-scoped bot behaviour (EXPERIMENTAL, CORE, deterministic — no AI): each automated reviewer's

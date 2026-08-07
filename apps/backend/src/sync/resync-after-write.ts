@@ -24,8 +24,9 @@ import type { Logger } from './sync-repo.js';
 const { pullRequests, repos, reviewComments } = schema;
 
 // The sync layer logs with a plain 3-method interface; scheduler.ts and the webhook
-// receiver both build the same shim over their Fastify/pino logger.
-function asSyncLogger(log: FastifyBaseLogger): Logger {
+// receiver both build the same shim over their Fastify/pino logger. Exported so the
+// refresh route's tail (sync/refresh-pr.ts) doesn't grow a fourth copy.
+export function asSyncLogger(log: FastifyBaseLogger): Logger {
   return {
     info: (m, ...a) => log.info(a.length ? { a } : {}, m),
     warn: (m, ...a) => log.warn(a.length ? { a } : {}, m),
@@ -33,19 +34,24 @@ function asSyncLogger(log: FastifyBaseLogger): Logger {
   };
 }
 
-interface PrSyncTarget {
+export interface PrSyncTarget {
   repoId: number;
   owner: string;
   name: string;
   number: number;
+  // The stored row's updatedAt — the refresh route compares it around a walk to decide
+  // `changed`; this module ignores it.
+  updatedAt: Date;
 }
 
 /**
  * Resolve the coordinates a targeted sync needs from a local PR id. Account-scoped even
  * though the write route has already proved ownership, so the isolation guarantee is
- * structural rather than inherited from a caller.
+ * structural rather than inherited from a caller. Exported for sync/refresh-pr.ts (and
+ * named in scripts/verify-isolation.ts — id-addressed reads outside db/queries.ts are
+ * invisible to the isolation walk unless imported explicitly).
  */
-async function getPrSyncTarget(
+export async function getPrSyncTarget(
   prId: number,
   accountId: number,
 ): Promise<PrSyncTarget | null> {
@@ -55,6 +61,7 @@ async function getPrSyncTarget(
       owner: repos.owner,
       name: repos.name,
       number: pullRequests.number,
+      updatedAt: pullRequests.updatedAt,
     })
     .from(pullRequests)
     .innerJoin(repos, eq(repos.id, pullRequests.repoId))

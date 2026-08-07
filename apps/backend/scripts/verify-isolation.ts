@@ -1092,7 +1092,9 @@ check(
 // confirm — and learn the local thread id of — another account's inline comment.
 //
 // `RC_iso_A` was seeded above on A's PR, so both directions have something real to find.
-const { findPostedReviewComment } = await import('../src/sync/resync-after-write.js');
+const { findPostedReviewComment, getPrSyncTarget } = await import(
+  '../src/sync/resync-after-write.js'
+);
 const rcOwn = await findPostedReviewComment(A.prId, 1, 'nonexistent-db-id', 'RC_iso_A');
 check(
   'findPostedReviewComment(A, A’s comment) finds it by node id',
@@ -1100,6 +1102,21 @@ check(
 );
 const rcCross = await findPostedReviewComment(A.prId, 2, 'nonexistent-db-id', 'RC_iso_A');
 check('findPostedReviewComment(B, A’s comment) returns null (IDOR blocked)', rcCross === null);
+
+// ── The targeted-sync coordinate resolver (getPrSyncTarget) ─────────────────────
+// Also outside db/queries.ts, so named here explicitly. It answers "which GitHub repo/PR
+// does this local id point at" for the post-write resync AND the refresh route
+// (POST /api/prs/:id/refresh), where its null IS the 404 — without the accountId
+// predicate one tenant could aim a sync (and its token spend) at another's PR id.
+const tgtOwn = await getPrSyncTarget(A.prId, 1);
+check(
+  'getPrSyncTarget(A, A’s PR) resolves its coordinates',
+  tgtOwn != null && tgtOwn.repoId === A.repoId && tgtOwn.number === 1,
+);
+check(
+  'getPrSyncTarget(B, A’s PR) returns null (IDOR blocked)',
+  (await getPrSyncTarget(A.prId, 2)) === null,
+);
 
 // ── ML severity labels (db/ml-labels.ts) ───────────────────────────────────────
 // Two id-addressed reads that live OUTSIDE db/queries.ts, so — like findPostedReviewComment

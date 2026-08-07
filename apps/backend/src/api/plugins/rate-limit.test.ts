@@ -122,6 +122,17 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/prs/42/files/extra')).toEqual(['read']);
   });
 
+  // POST /api/prs/:id/refresh — the PrDetail live poll + its manual Refresh button. A
+  // mutating verb with GET-shaped cost (probe-gated; a changed tick spends a syncOnePr
+  // walk), so it must share the prDetail bucket: github_write would let the poll starve
+  // real writes, and the 600/min blanket read bucket is the file's documented silent
+  // failure mode for a route that can spend GitHub quota.
+  it('puts the PR refresh poll on the detail bucket, not github_write or the blanket read', () => {
+    expect(tiers('POST', '/api/prs/42/refresh')).toEqual(['pr_detail', 'read']);
+    // ...and the GET spelling must not exist as a cheap alias.
+    expect(tiers('GET', '/api/prs/42/refresh')).toEqual(['read']);
+  });
+
   // The guard on the fix above: `merge` prefix-matches `merge-options`, so a careless widening
   // could steal the merge WRITE verbs out of github_write and hand them a 600/min ceiling.
   it('does not pull any merge WRITE route off github_write', () => {

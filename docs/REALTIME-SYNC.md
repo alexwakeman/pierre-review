@@ -257,6 +257,48 @@ opposite of naïvely dropping `SYNC_CRON`.
 
 ---
 
+## Live PR-detail refresh (POST /api/prs/:id/refresh) ✅ BUILT
+
+The phases above are all **repo-grain background cadence**; nothing made the PR a human is
+looking at RIGHT NOW any fresher than its repo's bucket. `sync/refresh-pr.ts` +
+`usePrLiveRefresh` close that gap client-driven — deliberately **never a backend cron**:
+
+- **Frontend-driven ~5s poll, only while the PR is open AND visible.** The hook gates on
+  `pr.state === 'open'` plus the pinned-tabs `activeTab` (a PrDetail mounted beneath the
+  Activity overlay must not poll; `refetchIntervalInBackground:false` only covers
+  `document.hidden`). On failure/429 it backs off exponentially to 60s, honoring
+  `Retry-After` (surfaced via `ApiError.retryAfterSeconds`). Immediate-on-open = the same
+  query's mount fetch. The header **Refresh** button is the `{wait:true}` variant through
+  the SAME `['pr-refresh', prId]` key (`fetchQuery`), so button + poll share one in-flight
+  state.
+- **Probe-gated server-side** (the Phase-2 shape at PR grain): a per-`(accountId, prId)`
+  in-memory ETag map (bounded FIFO, like the hydrate cache) + `ghRestGetConditional` on
+  `/repos/{o}/{n}/pulls/{number}`. A 304 inside the floor window answers
+  `{synced:true, changed:false}` at zero GitHub cost — an idle open pane costs ~nothing.
+- **A ~30s forced-walk floor** (`WALK_FLOOR_MS`) — the same blind-spot fix as Phase 2's
+  1800s repo floor, much shorter because a human is watching: CI-finish/thread-resolve
+  never bump `updated_at`, so a floor-forced walk is reported `changed:true`
+  ("potentially-changed for checks") even when `updated_at` held still.
+- **Any walk busts hydration BEFORE responding** (the resync-after-write order rule) —
+  in lean mode checkRuns render only from the hydration overlay, so a walk that didn't
+  bust it would hand the client's refetch a ≤60s-old snapshot.
+- **`changed` is the client's only invalidation trigger**: `['pr', id]` + its cached
+  thread keys + `['ml-labels', id]` + `['timeline']` + `['open-prs']` on `changed:true`;
+  NOTHING on false (a 5s timeline invalidation would churn the vis board). A probe-200
+  walk whose `updated_at` didn't move is NOT changed (REST fields like `mergeable_state`
+  churn ETags without real activity).
+- **Never a 5xx on sync failure** — `{synced:false}` is a report (the SPA's Refresh icon
+  turns amber: a stale note, not an error). A no-wait poll that stands down against an
+  in-flight sync reports `synced:true` — that run's freshness IS the answer. The route
+  deliberately does NOT use `enqueuePrSync` (the 4s debounce would swallow the cadence).
+- **Rate tier `prDetail`** (pinned in `rate-limit.test.ts`); POST so the cross-origin
+  guard applies; account-scoped resolve via the exported `getPrSyncTarget` (named in
+  `verify-isolation.ts`). Cloud stays enabled — probe-gated is quota-safe in both modes.
+- **Cost:** idle pane ≈ 720 free 304s/h; worst case ≈ 200–350 GraphQL pts/h per pane
+  (floor walks + the client's re-hydrations) ≈ 4–7% of the 5,000/h budget.
+
+---
+
 ## Cross-cutting
 
 | Item | Detail |

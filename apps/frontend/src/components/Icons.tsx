@@ -126,6 +126,31 @@ export function ExternalLinkIcon({ size = 13, className, title }: IconProps): JS
   );
 }
 
+// Refresh — two chasing arrows (Feather refresh-cw), the PR-detail header's "re-read this
+// PR from GitHub now" button. Spun via className while a refresh is in flight.
+export function RefreshIcon({ size = 14, className, title }: IconProps): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden={title == null ? true : undefined}
+      role={title != null ? 'img' : undefined}
+    >
+      {title != null && <title>{title}</title>}
+      <polyline points="23 4 23 10 17 10" />
+      <polyline points="1 20 1 14 7 14" />
+      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
+  );
+}
+
 // Feed — stacked dot-and-line rows, the "show this PR in the Activity feed (isolated to it)"
 // affordance in the PR-detail header.
 export function FeedIcon({ size = 15, className, title }: IconProps): JSX.Element {
