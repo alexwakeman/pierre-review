@@ -39,6 +39,13 @@ fixture tests (see Conventions).
   dump all 400 into My Turn on day one. ⚠ The cutoff is **per repo** — a single global one passes a
   one-repo fixture and is wrong the moment a second repo is added later (pinned, with that exact
   case, by `db/my-turn-new-prs.test.ts`).
+  **`description`** (TEXT, nullable) is the repo's GitHub "About" text, captured by the activity
+  sync like `defaultBranch`/`viewerPermission` — the app's ONLY stored repo-purpose text (READMEs
+  are never fetched; PR bodies are lean), added as grounding for the sprint chat's
+  "About this Workspace" preset. ⚠ Its write follows the three-state partial-response policy AND
+  the tolerant-partial caveat: a `graphqlTolerant`-salvaged page nulls an ERRORED field with the
+  key still present, so `sync-repo.ts` degrades the whole field to `undefined` (preserve) whenever
+  `onPartial` fired — only a CLEAN response may clear a stored description.
   **There is NO second visibility axis.** `inbox_watch` / `inbox_watch_started_at` — a per-repo
   "watched" toggle that quietly narrowed the Feed, recent activity, My Turn and the Pro digest
   collection to a subset of the added repos — were DROPPED in migration `0046` (pg `0033`). With
@@ -147,7 +154,7 @@ fixture tests (see Conventions).
   - **JUDGEMENT** (provenance: `source`) — `automated`, `role` (`ReviewerRole`
     `'review'|'quality_check'`, NOT NULL default `'review'`), `confidence`, `source`, `reasonsJson`.
   - **IDENTITY** (provenance: `identitySource`) — `kind`, `label`.
-  - **PRICE** (no provenance; exactly one writer) — `monthlyCents`.
+  - **PRICE** (no provenance; exactly one writer) — `monthlyCents` + `costModel`.
 
   Unique `(accountId, workspaceId, authorUserId)` — **the conflict target of every writer** — plus
   `(accountId, workspaceId)` / `(accountId, authorUserId)` listing indexes and the named composite
@@ -200,6 +207,19 @@ fixture tests (see Conventions).
     or UPDATE object anywhere**, and in `reviewer-classify.ts` it does not appear at all, neither in
     a `set:` nor as a derived INSERT value. Clearing a price is a **column write, never a row
     delete** — the row also carries the judgement and the identity.
+  - **`costModel`** (TEXT `'flat'|'per_seat'`, NOT NULL default `'flat'`) says how `monthlyCents`
+    is READ, never a second price: `flat` = the whole workspace subscription (every pre-existing
+    row's meaning, preserved by the default); `per_seat` = a per-seat UNIT price multiplied **on
+    read** by the workspace's derived human seat count (`workspaceHumanSeatCount`: distinct human
+    PR authors over the workspace's membership repos, trailing **fixed 30 days** — a price is
+    invoice-shaped and must not float with the viewed analytics window; exclusions route through
+    `automatedReviewerUserIds` ∪ global `isBot`, with a manual-human judgement winning both
+    directions). ⚠ **The product (seats × cents) is NEVER stored** — it can exceed int4 and goes
+    stale the moment a contributor opens a PR; the wire carries `costMonthlyUsd` as the EFFECTIVE
+    monthly with the unit preserved in `costUnitMonthlyUsd`. Ownership is `monthlyCents`'s,
+    verbatim: same single writer (`setReviewerCost`, one UPDATE), same standalone cost route,
+    never in the PATCH body, never in any derived write; clearing the price resets the model to
+    `'flat'` in that same UPDATE.
   - ⚠ **Never sum cost ACROSS workspaces on one screen.** Six workspaces each listing a $120
     CodeRabbit is either six subscriptions or one seen six ways and **the app must not assert
     which** — Compare-workspaces shows the figures side by side and does not total them. WITHIN one

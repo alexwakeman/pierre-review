@@ -281,6 +281,12 @@ with **composite** conflict targets (`(accountId, githubNodeId)` / events
 - **Webhooks are ADDITIVE, cloud-only**, and need all three of: the secret env var, event
   subscriptions, the App installed — or they silently deliver nothing. Coverage is per
   repo (`(owner,name)` routed across every account that has it).
+- **A VIEWED PR gets its own live cadence**: the SPA polls `POST /api/prs/:id/refresh`
+  every ~5s while the pane is open+visible (`sync/refresh-pr.ts`) — probe-gated (free 304)
+  with a 30s forced-walk floor, a failed walk remembered (`lastWalkOk` — later 304s must
+  not report `synced:true`), and ALL walk attempts floor-gated so a broken token costs
+  2 attempts/min, not 12. Never route this through `enqueuePrSync` (its debounce swallows
+  the cadence) and never default the poll to `waitForInFlight`.
 - First sync of a repo is **two-phase**: a fast ~14-day foreground pass, then the deep
   `backfillDays` (90) backfill in background. Cloud skips accounts idle > 15 min
   (`accounts.lastActiveAt`); local is always-on.
@@ -338,7 +344,9 @@ contracts are in [docs/DATA-MODEL.md](docs/DATA-MODEL.md). Cross-cutting facts:
 - **`workspaceReviewers` is THE BOT OBJECT** — one row per
   `(accountId, workspaceId, authorUserId)` carrying three independently-owned facts:
   judgement (provenance `source`), identity (provenance `identitySource`), and price
-  (`monthlyCents`, INTEGER CENTS, exactly one writer: `setReviewerCost`). The write rules
+  (`monthlyCents` INTEGER CENTS + `costModel` `'flat'|'per_seat'`, exactly one writer:
+  `setReviewerCost`; per_seat = unit × `workspaceHumanSeatCount` — distinct human PR
+  authors, FIXED 30d window — multiplied on READ, the product never stored). The write rules
   are in Conventions below; the full history (three keys tried, the vendor-identity bug,
   the 0045 fold rules) is [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md)
   § "One bot object". Price rules: per WORKSPACE by deliberate product decision (no
@@ -396,6 +404,15 @@ cloud renders `<SignInGate>` on a 401 from `useMe()`.
 
 Landmines that cost real bugs — read the doc before touching any of these:
 
+- **Bots are HIDDEN by default on Timeline AND Feed**, using the UNION set
+  (`hiddenBotUserIds`: `users.isBot` ∪ the workspace's automated reviewers; a manual
+  "human" judgement wins BOTH directions). Timeline: `excludeBots` defaults `true`, URL
+  emits `bots=0` when shown; the persisted-filter blob migrated v2→v3 SURGICALLY
+  (`migratePersistedFilters` drops only the bot keys — never discard the whole blob for a
+  default flip). Feed: lens `'hide'` is the transient default and rides the SERVER's
+  `excludeBots` (excluded before the page cap); a bot contributor's own activity tab
+  derives an effective lens (never written back). `useSearchTimeline` still always sends
+  `excludeBots=false` — the Members dropdown's bot listing depends on it.
 - **`workspaceId === null` means "not resolved yet"** — nothing may render
   workspace-scoped data while null. `?workspace=` is the ONE URL param emitted
   always-once-resolved and omitted while null (an unconditional `p.set` writes the literal
@@ -450,7 +467,13 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   THE USER SAW; a head move disarms unless proven to be our own update-merge (three
   proofs, arity-checked); compare-and-set immediately before the merge; write permission
   re-checked at LAND time. **Landmine: `behindBy > 0` is true of most healthy PRs** — only
-  `mergeStateStatus === 'behind'` means GitHub is blocking.
+  `mergeStateStatus === 'behind'` means GitHub is blocking. The UI has exactly ONE way to
+  arm: the `MergeWhenReadyControl` button in the Overview Actions row (eligible = verdict
+  blocked/behind/unknown OR clean-but-`behindBy>0` — the widening is THIS button's only;
+  never gate Merge on `behindBy`), which ALWAYS stores a real `updateStrategy` (never
+  `'none'` — a PR falling behind after arming must still freshen); while armed the Close
+  button is hidden and a header chip shows the intent (`usePrArmedIntent`: the armed list
+  carries 24h-resolved rows, so the predicate is `state==='armed'`, never row existence).
 - CI logs are live ranged reads of the signed Actions blob URL — server-side only, NEVER
   returned to a client (it is unauthenticated). Logs are offered for passing checks too.
 - Trunk status (`/api/branch-status` over `repos` head columns + `branchCommits`) is
@@ -507,8 +530,10 @@ passthrough on `/api/me`, and inert seams. Details:
 Every bot-authored review comment / PR comment / review body is labelled with a **severity**
 (`nit`·`minor`·`major`·`critical`) and up to eight **categories** by the `severity-api`
 microservice from the **`packages/ml`** submodule (fine-tuned ModernBERT ONNX on CPU + a
-deterministic marker parser). Badges render on the comments; a rollup sits on the Bots tab.
-Full detail: **[docs/ML-SEVERITY.md](docs/ML-SEVERITY.md)**. The invariants:
+deterministic marker parser). Badges render on the comments; the Bots rail shows ONE merged
+table (ROI + severity columns over ONE shared window — the ML fold rides `getBotAnalytics`
+via `ml_comment_labels.targetCreatedAt`; `/api/bot-severity` still serves but has no SPA
+consumer). Full detail: **[docs/ML-SEVERITY.md](docs/ML-SEVERITY.md)**. The invariants:
 
 - **`SEVERITY_API_URL` IS THE WHOLE GATE.** Unset ⇒ no worker, `/api/me` reports
   `mlSeverity:false`, the SPA issues zero ML queries. That is also what keeps the feature dark
