@@ -84,7 +84,9 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
     );
   }
 
-  // The bot-vendor PR drill-down is a non-PR, singleton tab — a compact chip (no PR meta).
+  // The bot-vendor drill-down is a non-PR, singleton tab — a compact chip (no PR meta). The
+  // `bot-prs` kind is the wire/state identifier and keeps its name; the label the user reads
+  // does not, because the tab opens on the COMMENTS view.
   if (tab.kind === 'bot-prs') {
     return (
       <div
@@ -101,7 +103,7 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
           aria-selected={active}
           onClick={() => setActiveTab(tab.key)}
           className="flex items-center gap-1.5 py-1.5 text-left"
-          title="Bot PRs — the PRs a review bot touched"
+          title="Bot Drill-Down — what a review bot said, and the PRs it touched"
         >
           <span aria-hidden="true" className="shrink-0">
             🤖
@@ -111,7 +113,7 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
               active ? 'text-violet-600 dark:text-violet-400' : 'text-gray-600 dark:text-gray-300'
             }`}
           >
-            Bot PRs
+            Bot Drill-Down
           </span>
         </button>
         <button
@@ -119,7 +121,7 @@ function TabChip({ tab }: { tab: Tab }): JSX.Element {
           onClick={() => closeTab(tab.key)}
           className="shrink-0 self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
           title="Close this tab"
-          aria-label="Close bot-PRs tab"
+          aria-label="Close bot drill-down tab"
         >
           ✕
         </button>

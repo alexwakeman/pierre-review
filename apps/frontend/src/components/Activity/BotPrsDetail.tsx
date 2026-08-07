@@ -13,22 +13,39 @@ import { useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
-import { CI_META, DERIVED_STATE_META, indexUsers, relativeTime } from '../../lib/ui.js';
+import {
+  commentFacetCounts,
+  selectComments,
+  SEVERITY_PILLS,
+  type CommentSort,
+  type SeverityPillKey,
+} from '../../lib/botComments.js';
+import {
+  CI_META,
+  DERIVED_STATE_META,
+  indexUsers,
+  ML_SEVERITY_META,
+  relativeTime,
+} from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { Markdown } from '../Markdown.js';
 import { MlSeverityBadge } from '../MlSeverityBadge.js';
 import { UserName } from '../UserName.js';
 
-// The bot PR DRILL-DOWN — a persistent, singleton tab opened by clicking an automated-reviewer
-// row in the Bot-ROI panel. One sub-tab per detected bot, each listing the PRs that reviewer
-// touched in the window (thread volume, acted-on %, still-untouched, and whether ONLY bots
-// reviewed the PR) so a lead can see WHERE a bot's attention lands. Bot sub-tabs come from the
-// CORE analytics read (useBotAnalytics); the per-bot PR list is a lazy read (useBotVendorPrs).
-// Clicking any PR opens its detail tab.
+// The BOT DRILL-DOWN — a persistent, singleton tab opened by clicking an automated-reviewer row in
+// the Bot-ROI panel. One sub-tab per detected bot, under a COMMENTS | PRs toggle: Comments (the
+// default) is everything that reviewer actually said in the window, severity-badged and filterable;
+// PRs is the same reviewer's attention seen per pull request (thread volume, acted-on %,
+// still-untouched, and whether ONLY bots reviewed it). Bot sub-tabs come from the CORE analytics
+// read (useBotAnalytics); BOTH lists are lazy, fetched only while their own view is open, so
+// opening the tab costs exactly one list request. Clicking any row opens that PR's detail tab.
 //
 // ⚠ IT REPRODUCES ONE ROW OF THE PANEL IT WAS OPENED FROM, so it takes the identical
 // workspace + repo narrowing: the header label and each row's `botOnly` badge must not be able to
 // contradict the ROI table behind them.
+//
+// The Comments view's filtering and sorting are PURE and live in lib/botComments.ts (tested in
+// test/botComments.test.ts) — this file only owns the controls and the windowing.
 
 // The window picker options — kept in lockstep with BotRoiPanel's WINDOWS (same store field).
 const WINDOWS: { key: BotWindowKind; label: string }[] = [
@@ -51,6 +68,24 @@ const TARGET_KIND_LABEL: Record<BotVendorComment['targetKind'], string> = {
   pr_comment: 'PR comment',
   review: 'review summary',
 };
+
+// Pill chrome for the severity filter row. The four severities reuse the ONE severity palette
+// (ML_SEVERITY_META) so a pill and the badge it selects are the same colour; `praise` is not a
+// severity and gets its own green, deliberately outside that scale — it is the model saying "this
+// is not a finding at all", and lending it a severity hue would read as a fifth rank.
+const PILL_META: Record<SeverityPillKey, { label: string; color: string; description: string }> = {
+  ...ML_SEVERITY_META,
+  praise: {
+    label: 'Praise',
+    color: '#16a34a',
+    description:
+      'Not a finding — the bot acknowledging a fix, confirming a resolution, withdrawing a concern or saying thanks. Excluded from every severity share.',
+  },
+};
+
+// Stable empty selection, so the derived "filters aren't shown ⇒ nothing is filtered" branch
+// doesn't hand a fresh Set to the memo on every render.
+const NO_PILLS: ReadonlySet<SeverityPillKey> = new Set<SeverityPillKey>();
 
 // One row of the Comments sub-view. The severity badge reads the label shipped INLINE on the
 // row — this list must never mount the per-PR label index per row (the per-card-query failure
@@ -324,20 +359,37 @@ export function BotPrsDetail(): JSX.Element {
     );
   }, [vendors]);
 
-  // PRs | Comments sub-view — state LOCAL to the tab (window/scope stay shared with the panel).
+  // Comments | PRs sub-view — state LOCAL to the tab (window/scope stay shared with the panel).
+  // COMMENTS IS THE DEFAULT: what a review bot actually said is the question this drill-down is
+  // opened to answer; the per-PR shape is the secondary cut.
   // The visible view is DERIVED for the 'pierre' sentinel and never written back: its verbatim
   // reviews are posted with the human's token, so there are no per-comment rows to list — the
   // scalar keeps the user's choice for the sub-tabs that do render it (a corrective set would
   // permanently forget it).
-  const [view, setView] = useState<'prs' | 'comments'>('prs');
+  const [view, setView] = useState<'prs' | 'comments'>('comments');
   const effectiveView: 'prs' | 'comments' = active === 'pierre' ? 'prs' : view;
   const mlEnabled = useMlSeverityEnabled();
-  const [commentSort, setCommentSort] = useState<'newest' | 'severity'>('newest');
+  const [commentSort, setCommentSort] = useState<CommentSort>('newest');
+  // Severity/praise pills (empty = no narrowing) and the vendor-disagreement toggle. They AND.
+  const [severityPills, setSeverityPills] = useState<ReadonlySet<SeverityPillKey>>(NO_PILLS);
+  const [disagreesOnly, setDisagreesOnly] = useState(false);
   const [visibleComments, setVisibleComments] = useState(COMMENTS_PAGE);
+  const togglePill = (k: SeverityPillKey): void =>
+    setSeverityPills((cur) => {
+      const next = new Set(cur);
+      if (!next.delete(k)) next.add(k);
+      return next;
+    });
+  const clearCommentFilters = (): void => {
+    setSeverityPills(NO_PILLS);
+    setDisagreesOnly(false);
+  };
 
-  const prs = useBotVendorPrs(workspaceId, active, window, true, repoScope);
+  // BOTH lists are lazy, each gated on its own view being the visible one. Comments now opens by
+  // default, so making the PR list lazy too is what keeps opening this tab at one list request
+  // rather than two — and the PR list is the heavier read of the pair.
+  const prs = useBotVendorPrs(workspaceId, active, window, effectiveView === 'prs', repoScope);
   const rows = prs.data?.prs ?? [];
-  // Lazy: the comments list (bodies + inline labels) is fetched only while its view is open.
   const comments = useBotVendorComments(
     workspaceId,
     active,
@@ -345,29 +397,52 @@ export function BotPrsDetail(): JSX.Element {
     effectiveView === 'comments',
     repoScope,
   );
-  // Re-window the markdown-heavy list whenever what it shows changes shape. workspaceId and
-  // repoScope are deliberately in the deps: both re-key the comments query WITHOUT remounting
-  // this singleton tab (openBotPrsDetail re-seeds the repo focus in place, and the header
-  // WorkspaceSelector can switch workspace while the tab is open) — an enlarged 'Show more'
-  // window surviving that switch would mount hundreds of markdown bodies in the new scope's
-  // first paint, exactly the stall the windowing exists to prevent.
+  const fetchedComments = useMemo(() => comments.data?.comments ?? [], [comments.data]);
+
+  // Facet counts over the FULL fetched list — pre-filter, so a pill's badge never drops to 0
+  // because another pill is pressed (ThreadList's state-pill rule).
+  const facets = useMemo(() => commentFacetCounts(fetchedComments), [fetchedComments]);
+  // The filter row hides itself when nothing in the list is labelled — with no scoring service (or
+  // an un-enriched install) a permanent row of zero-count pills advertises a filter that can only
+  // ever return nothing. The active selection is then DERIVED to empty rather than cleared: a
+  // scalar that survives a sub-tab with no labels is the user's choice, and a corrective set would
+  // forget it (the derived-sub-tab rule).
+  const showCommentFilters = mlEnabled && facets.labelled > 0;
+  const activePills = showCommentFilters ? severityPills : NO_PILLS;
+  const activeDisagrees = showCommentFilters && disagreesOnly;
+  // Severity is only offerable where severities exist; the two DATE orders always are.
+  const effectiveSort: CommentSort = !mlEnabled && commentSort === 'severity' ? 'newest' : commentSort;
+
+  // Re-window the markdown-heavy list whenever what it shows changes shape — including on a filter
+  // change, which can pull a row from position 3000 into view. workspaceId and repoScope are
+  // deliberately in the deps: both re-key the comments query WITHOUT remounting this singleton tab
+  // (openBotPrsDetail re-seeds the repo focus in place, and the header WorkspaceSelector can switch
+  // workspace while the tab is open) — an enlarged 'Show more' window surviving that switch would
+  // mount hundreds of markdown bodies in the new scope's first paint, exactly the stall the
+  // windowing exists to prevent.
   useEffect(() => {
     setVisibleComments(COMMENTS_PAGE);
-  }, [active, commentSort, window, workspaceId, repoScope]);
-  const commentRows = useMemo(() => {
-    const list = comments.data?.comments ?? [];
-    if (commentSort !== 'severity') return list; // server order — newest first
-    // Worst-first. Summaries and unscored rows sink to the bottom (a walkthrough scored
-    // `major` must not outrank real findings — the worstSeverity rule); newest breaks ties.
-    const ord = (c: BotVendorComment): number =>
-      c.mlLabel && !c.mlLabel.isSummary ? c.mlLabel.severityOrd : -1;
-    return [...list].sort(
-      (a, b) => ord(b) - ord(a) || (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0),
-    );
-  }, [comments.data, commentSort]);
+  }, [active, effectiveSort, activePills, activeDisagrees, window, workspaceId, repoScope]);
 
-  // The selected reviewer's per-reviewer label (from the drill-down response) for the header.
-  const activeLabel = prs.data?.label ?? null;
+  const commentRows = useMemo(
+    () =>
+      selectComments(
+        fetchedComments,
+        { severities: activePills, disagreesOnly: activeDisagrees },
+        effectiveSort,
+      ),
+    [fetchedComments, activePills, activeDisagrees, effectiveSort],
+  );
+  const commentsFiltered = commentRows.length !== fetchedComments.length;
+
+  // The selected reviewer's label for the header. Either list answers it, but with both lazy the
+  // ANALYTICS row is the fallback that is always loaded — otherwise the caption would read
+  // "an automated reviewer" for as long as the open view's own request is in flight.
+  const activeLabel =
+    prs.data?.label ??
+    comments.data?.label ??
+    vendors.find((v) => v.key === active)?.label ??
+    null;
   const botOnlyPrs = analytics.data?.totals.botOnlyPrs ?? 0;
 
   const openPr = (pr: BotVendorPr): void => {
@@ -400,18 +475,22 @@ export function BotPrsDetail(): JSX.Element {
   const isFetching = analytics.isFetching || prs.isFetching || comments.isFetching;
   const refresh = (): void => {
     void analytics.refetch();
-    void prs.refetch();
-    // Only when its view is open — `refetch` ignores `enabled`, and firing the heavy comments
-    // read from the PRs view would spend a search-tier request nothing renders.
+    // Only the OPEN view's list — `refetch` ignores `enabled`, so refetching both would spend a
+    // search-tier request on a list nothing renders (and undo half of making them lazy).
     if (effectiveView === 'comments') void comments.refetch();
+    else void prs.refetch();
   };
 
   return (
     <div className="mx-auto max-w-[100rem] space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Bot PRs</h2>
+        <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
+          Bot Drill-Down
+        </h2>
         <span className="text-[11px] text-gray-400">
-          PRs {activeLabel ?? 'an automated reviewer'} touched · most-recent activity first
+          {effectiveView === 'comments'
+            ? `What ${activeLabel ?? 'an automated reviewer'} said in the window`
+            : `PRs ${activeLabel ?? 'an automated reviewer'} touched · most-recent activity first`}
           {botOnlyPrs > 0 && (
             <>
               {' · '}
@@ -496,15 +575,15 @@ export function BotPrsDetail(): JSX.Element {
             })}
           </div>
 
-          {/* PRs | Comments sub-view toggle. Comments is DISABLED for the 'pierre' sentinel
-              (verbatim reviews are posted with the human's token — no per-comment rows), and
-              the sort control only appears where severity exists to sort by. */}
+          {/* Comments | PRs sub-view toggle — Comments first, and the view this tab opens on.
+              Comments is DISABLED for the 'pierre' sentinel (verbatim reviews are posted with the
+              human's token — no per-comment rows), which is the one case that lands on PRs. */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
               {(
                 [
-                  { key: 'prs', label: 'PRs' },
                   { key: 'comments', label: 'Comments' },
+                  { key: 'prs', label: 'PRs' },
                 ] as const
               ).map((t) => {
                 const disabled = t.key === 'comments' && active === 'pierre';
@@ -532,35 +611,108 @@ export function BotPrsDetail(): JSX.Element {
                 );
               })}
             </div>
-            {effectiveView === 'comments' && mlEnabled && (
+            {/* Sort. Both DATE orders are always offered; Severity only where severities exist
+                to sort by (no scoring service ⇒ the option would sort by nothing). */}
+            {effectiveView === 'comments' && (
               <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
                 {(
                   [
-                    { key: 'newest', label: 'Newest' },
-                    { key: 'severity', label: 'Severity' },
+                    { key: 'newest', label: 'Newest', title: 'Most recent first' },
+                    { key: 'oldest', label: 'Oldest', title: 'Earliest first' },
+                    {
+                      key: 'severity',
+                      label: 'Severity',
+                      title:
+                        'Worst predicted severity first — summaries and unscored comments sink to the bottom',
+                    },
                   ] as const
-                ).map((s) => (
-                  <button
-                    key={s.key}
-                    type="button"
-                    onClick={() => setCommentSort(s.key)}
-                    title={
-                      s.key === 'severity'
-                        ? 'Worst predicted severity first — summaries and unscored comments sink to the bottom'
-                        : 'Most recent first'
-                    }
-                    className={`px-2 py-0.5 text-[11px] font-medium ${
-                      commentSort === s.key
-                        ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300'
-                        : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
-                    }`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
+                )
+                  .filter((s) => s.key !== 'severity' || mlEnabled)
+                  .map((s) => (
+                    <button
+                      key={s.key}
+                      type="button"
+                      onClick={() => setCommentSort(s.key)}
+                      title={s.title}
+                      className={`px-2 py-0.5 text-[11px] font-medium ${
+                        effectiveSort === s.key
+                          ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                          : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
               </div>
             )}
           </div>
+
+          {/* Severity/praise pills + the vendor-disagreement toggle. They AND together, and their
+              badges count the FULL fetched list so pressing one never zeroes the others. Hidden
+              entirely when nothing in the list is labelled — a row of dead pills on an
+              un-enriched (or OSS) install advertises a filter that can only return nothing. */}
+          {effectiveView === 'comments' && showCommentFilters && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                Severity
+              </span>
+              {SEVERITY_PILLS.map((k) => {
+                const meta = PILL_META[k];
+                const on = activePills.has(k);
+                const count = facets.counts[k];
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => togglePill(k)}
+                    aria-pressed={on}
+                    disabled={count === 0 && !on}
+                    className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                      on
+                        ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
+                        : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                    }`}
+                    title={meta.description}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="inline-block h-2 w-2 rounded-full"
+                      style={{ background: meta.color }}
+                    />
+                    {meta.label}
+                    {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => setDisagreesOnly((v) => !v)}
+                aria-pressed={activeDisagrees}
+                disabled={facets.disagreements === 0 && !activeDisagrees}
+                className={`ml-1 flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                  activeDisagrees
+                    ? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-950/30 dark:text-amber-300'
+                    : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                }`}
+                title="Only comments where the bot's OWN declared severity badge differs from Limn's. This is a SEVERITY disagreement and nothing else: vendors declare no machine-readable category, so category disagreement is not derivable and is never claimed here."
+              >
+                <span aria-hidden="true">⚖</span>
+                Bot disagrees
+                {facets.disagreements > 0 && (
+                  <span className="tabular-nums opacity-70">{facets.disagreements}</span>
+                )}
+              </button>
+              {(activePills.size > 0 || activeDisagrees) && (
+                <button
+                  type="button"
+                  onClick={clearCommentFilters}
+                  className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 underline-offset-2 hover:underline"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
 
           {effectiveView === 'comments' ? (
             comments.isLoading ? (
@@ -572,15 +724,33 @@ export function BotPrsDetail(): JSX.Element {
             ) : comments.isError ? (
               <div className="text-sm text-red-500">Couldn’t load the comment list.</div>
             ) : commentRows.length === 0 ? (
+              // Two different empty states: nothing was said, versus nothing survived the pills.
+              // The second must offer the way out, or the filter reads as a broken list.
               <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-                No comments from this bot in the window.
+                {commentsFiltered ? (
+                  <>
+                    None of this bot’s {fetchedComments.length.toLocaleString()} comments match
+                    these filters.
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={clearCommentFilters}
+                        className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
+                      >
+                        Clear filters
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  'No comments from this bot in the window.'
+                )}
               </div>
             ) : (
               <>
                 {comments.data?.truncated && (
                   <div className="rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
                     This bot said more in the window than one read covers — showing the most
-                    recent {commentRows.length.toLocaleString()}.
+                    recent {fetchedComments.length.toLocaleString()}.
                   </div>
                 )}
                 <div className="overflow-x-auto">
@@ -614,6 +784,13 @@ export function BotPrsDetail(): JSX.Element {
                     Show more ({(commentRows.length - visibleComments).toLocaleString()} remaining)
                   </button>
                 )}
+                {/* Filtered-of-fetched, never a bare count: with pills on, "50 comments" would
+                    read as the bot's whole output for the window. */}
+                <div className="text-[11px] text-gray-400">
+                  {commentsFiltered
+                    ? `${commentRows.length.toLocaleString()} of ${fetchedComments.length.toLocaleString()} comments match`
+                    : `${fetchedComments.length.toLocaleString()} comments`}
+                </div>
               </>
             )
           ) : prs.isLoading ? (
