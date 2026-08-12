@@ -37,6 +37,7 @@ import type {
   MlVendorConfidence,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
+import { botWindowMs } from './bot-window.js';
 import { labelFor as labelForKind } from '../sync/reviewer-classify.js';
 import {
   automatedReviewerUserIds,
@@ -934,9 +935,8 @@ export async function getBotVendorComments(
 ): Promise<BotVendorCommentsResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
-  // Same window→days mapping as getBotAnalytics (rolling_7=7, rolling_30=30, else — incl. sprint — 14).
-  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
-  const from = new Date(nowMs - windowDays * 86_400_000);
+  // The one shared window→duration mapping (db/bot-window.ts) — same window as the ROI row.
+  const from = new Date(nowMs - botWindowMs(window));
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
   const generatedAt = to.toISOString();
 

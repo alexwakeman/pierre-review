@@ -5,6 +5,7 @@ import { useFilters } from '../../store/filters.js';
 import { BotRoiPanel, ResolveBacklogBanner } from './BotRoiPanel.js';
 import { BotBehaviourPanel } from './BotBehaviourPanel.js';
 import { BotThemesPanel } from './BotThemesPanel.js';
+import { BotAdvisorPanel } from './BotAdvisorPanel.js';
 import { BotSettingsPanel } from './BotSettingsPanel.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
@@ -54,8 +55,11 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // repo narrowing, so it only appears in the cross-repo Bots rail (repoId == null) — not the
   // per-repo console Bots tab. When it's unavailable but the shared scalar still points at it,
   // fall back to ROI.
-  const { activityDigest } = useProCapabilities();
+  const { activityDigest, botAdvisor } = useProCapabilities();
   const showThemes = repoId == null && activityDigest;
+  // The Advisor is Pro (`botAdvisor`) and WORKSPACE-scoped with no repo narrowing (like
+  // Themes) — cross-repo rail only. Same derived-effective-tab rule.
+  const showAdvisor = repoId == null && botAdvisor;
   // "Settings" ("who counts as a review bot in this Workspace") shows in BOTH views. It used to be
   // cross-repo ONLY because the judgement was keyed per TEAM and a repo tab could not express a
   // team key (team_repos was many-to-many, so one repo sat in several teams). A repo now belongs
@@ -68,7 +72,10 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // optional and shares one scalar with the per-repo console, so it can legitimately hold a key
   // that isn't rendered here — writing a "fix" would permanently forget the user's choice for the
   // view that DOES render it.
-  const effectiveTab = innerTab === 'themes' && !showThemes ? 'roi' : innerTab;
+  const effectiveTab =
+    (innerTab === 'themes' && !showThemes) || (innerTab === 'advisor' && !showAdvisor)
+      ? 'roi'
+      : innerTab;
 
   return (
     <div className="space-y-3" data-testid="bots-view">
@@ -88,6 +95,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           { key: 'roi', label: 'ROI' },
           { key: 'behaviour', label: 'Behaviour' },
           ...(showThemes ? [{ key: 'themes', label: 'Themes' } as const] : []),
+          ...(showAdvisor ? [{ key: 'advisor', label: 'Advisor' } as const] : []),
           { key: 'settings', label: 'Settings' },
         ] as const).map((t) => {
           const on = effectiveTab === t.key;
@@ -105,6 +113,12 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               }`}
             >
               {t.label}
+              {/* Advisor is the paid advisor surface; the rest of the Bots view is core. */}
+              {t.key === 'advisor' && (
+                <span className="rounded bg-violet-500/10 px-1 text-[9px] font-semibold uppercase text-violet-600 dark:text-violet-300">
+                  pro
+                </span>
+              )}
             </button>
           );
         })}
@@ -119,6 +133,8 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         <BotBehaviourPanel repoId={repoId} />
       ) : effectiveTab === 'themes' ? (
         <BotThemesPanel />
+      ) : effectiveTab === 'advisor' ? (
+        <BotAdvisorPanel />
       ) : effectiveTab === 'settings' ? (
         /* A per-repo Bots tab shows the SAME workspace listing, filtered client-side to the bots
            with a footprint in that repo — every edit there is still workspace-wide, and the panel

@@ -52,6 +52,12 @@ RUN npm install --omit=dev --no-audit --no-fund
 # ---- runtime stage: slim image, same base so native addons are compatible ----
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
+# git is NOT in the -slim base, and the coding seams (AI Fix's applyAndPush, the advisor's
+# commitFilesAndOpenPr) shell out to it for their worktree → commit → push path. Without
+# this, every cloud push would die on ENOENT after the feature looked healthy at boot.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 # ARGs don't cross a FROM boundary — re-declare so this stage can gate PRO_PLUGIN_PATH.
 ARG WITH_PRO=
 ENV NODE_ENV=production

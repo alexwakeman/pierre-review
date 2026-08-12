@@ -793,6 +793,31 @@ export async function createPullRequest(
   return { number: res.number, url: res.html_url };
 }
 
+// ---- Create an issue (REST) ----
+
+interface RestCreatedIssue {
+  number: number;
+  html_url: string;
+}
+
+// File an issue (per-account) — the advisor's "send the brief to the bot's own repo"
+// output. Issues are NOT synced (this app tracks PR activity), so the caller stores the
+// returned URL itself; there is no visibility tail to run.
+export async function createIssue(
+  token: string,
+  owner: string,
+  name: string,
+  title: string,
+  body: string,
+): Promise<{ number: number; url: string }> {
+  const res = await ghRestPostFor<RestCreatedIssue>(
+    token,
+    `/repos/${owner}/${name}/issues`,
+    { title, body },
+  );
+  return { number: res.number, url: res.html_url };
+}
+
 // ---- Request reviewers on a PR (REST) ----
 
 // Request one or more reviewers on a PR (POST .../pulls/:n/requested_reviewers with

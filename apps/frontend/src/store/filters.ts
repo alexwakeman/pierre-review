@@ -182,14 +182,22 @@ export interface FilterState {
   // (like feedBotLens) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
   // Which inner sub-tab the Bots view shows: 'roi' (the shipped ROI panel + bot feed),
-  // 'behaviour' (the EXPERIMENTAL behaviour analytics), 'themes' (the Pro Haiku summary), or
+  // 'behaviour' (the EXPERIMENTAL behaviour analytics), 'themes' (the Pro Haiku summary),
+  // 'advisor' (the Pro Bot Tuning Advisor — findings → config-PR/brief/issue outputs), or
   // 'settings' (the "who counts as a review bot in this workspace" classification tab). A single
   // scalar (both the cross-repo rail Bots view and the per-repo console Bots tab share one
   // BotsView) — so 'settings' can be selected while a PER-REPO Bots tab is showing, where it is
   // the same list narrowed to one repo's footprint rather than a different judgement (the bot
   // object is keyed per WORKSPACE now, and a repo belongs to exactly one). BotsView's
-  // effectiveTab fallback still owns any degradation. Transient, URL-silent.
-  botsInnerTab: 'roi' | 'behaviour' | 'themes' | 'settings';
+  // effectiveTab fallback still owns any degradation ('advisor' is capability-gated like
+  // 'themes' — same derived-effective-tab rule). Transient, URL-silent.
+  botsInnerTab: 'roi' | 'behaviour' | 'themes' | 'advisor' | 'settings';
+  // The Advisor tab's one-shot focus, set by the Tune/Drop pills on the Bots table: which
+  // bot the advisor should open on, and with what intent ('tune' = its tuning findings,
+  // 'drop' = the drop-shaped evidence: overlap + suppressions + cost). The PANEL treats it
+  // as its selected-bot filter (overwritten by clicking pills or the panel's own picker);
+  // it is never written back as a "correction". Transient, URL-silent.
+  advisorFocus: { botKey: string; intent: 'tune' | 'drop' } | null;
   // (There is no `botSettingsTeamId` / per-repo judgement picker. The judgement is keyed by the
   // active WORKSPACE, so the panel just reads `workspaceId` like every other Bots panel.)
   //
@@ -422,7 +430,11 @@ export interface FilterState {
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
   // Switch the Bots view's inner sub-tab (ROI / experimental Behaviour / Themes / Settings).
-  setBotsInnerTab: (v: 'roi' | 'behaviour' | 'themes' | 'settings') => void;
+  setBotsInnerTab: (v: 'roi' | 'behaviour' | 'themes' | 'advisor' | 'settings') => void;
+  // The Tune/Drop pills' entry point: focus the advisor on one bot AND switch the Bots view
+  // to the Advisor tab in one action.
+  focusAdvisor: (botKey: string, intent: 'tune' | 'drop') => void;
+  clearAdvisorFocus: () => void;
   setFeedInnerTab: (v: 'feed' | 'themes') => void;
   // Persist the ad-hoc chat's live draft + last result across Insights remounts.
   setSprintChatDraft: (
@@ -733,6 +745,7 @@ function freshDefaults(): FilterData {
     feedIsolatedPrId: null,
     botAnalyticsWindow: 'rolling_14',
     botsInnerTab: 'roi',
+    advisorFocus: null,
     feedInnerTab: 'feed',
     sprintChatDraft: { question: '', wantChart: false, wantBots: false },
     sprintChatResults: {},
@@ -830,6 +843,9 @@ export const useFilters = create<FilterState>((set, get) => ({
   setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setBotsInnerTab: (v) => set({ botsInnerTab: v }),
+  focusAdvisor: (botKey, intent) =>
+    set({ advisorFocus: { botKey, intent }, botsInnerTab: 'advisor' }),
+  clearAdvisorFocus: () => set({ advisorFocus: null }),
   setFeedInnerTab: (v) => set({ feedInnerTab: v }),
   setSprintChatDraft: (patch) =>
     set((s) => ({ sprintChatDraft: { ...s.sprintChatDraft, ...patch } })),

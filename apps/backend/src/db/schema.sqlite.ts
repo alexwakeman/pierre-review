@@ -170,6 +170,13 @@ export const users = sqliteTable('users', {
   // bot-triage classifier (a 'Bot' typename is a hard automated-reviewer signal).
   // Nullable; stays GLOBAL like the rest of `users`.
   githubType: text('github_type'),
+  // The GitHub App slug behind this actor's comments (`performed_via_github_app.slug`,
+  // REST-only), captured by the app-attribution probe (sync/app-attribution.ts) which used
+  // to receive and DISCARD it. A bot's App identity is a global fact about the actor, so it
+  // lives on the global `users` table — the advisor's discovery tier splits App-authored
+  // from Actions-authored comments on it. Nullable: null = never observed (a PAT/OAuth
+  // poster has no app), and an observed slug is never cleared by a later app-less comment.
+  appSlug: text('app_slug'),
 });
 
 export const pullRequests = sqliteTable(
@@ -389,10 +396,11 @@ export const reviewComments = sqliteTable(
       .notNull()
       .references(() => pullRequests.id),
     authorId: integer('author_id').references(() => users.id),
-    // Nullable: in cloud "lean storage" mode the full body is NOT persisted (it's
-    // hydrated on demand from GitHub + browser-cached). `excerpt` keeps a short
-    // (~160 char) preview so the lean triage path (getMyTurn) and graceful UI
-    // degradation work without a network round trip. Local mode still stores body.
+    // ALWAYS persisted (the Feed renders full comment markdown) — lean storage stopped
+    // gating comment/review bodies; only the PR description, diffHunk, commit message and
+    // checkRuns stay hydration-only. Nullable for legacy rows written during the 2026-06
+    // lean window (hydrated on demand). `excerpt` keeps a short (~160 char) preview for
+    // the lean triage path (getMyTurn) and graceful UI degradation.
     body: text('body'),
     excerpt: text('excerpt'),
     diffHunk: text('diff_hunk'),
@@ -416,7 +424,8 @@ export const prComments = sqliteTable(
       .notNull()
       .references(() => pullRequests.id),
     authorId: integer('author_id').references(() => users.id),
-    // Nullable: not persisted in cloud lean-storage mode (hydrated on demand).
+    // ALWAYS persisted (the Feed renders full markdown) — see reviewComments.body; nullable
+    // only for legacy rows from the 2026-06 lean window.
     body: text('body'),
     // GitHub numeric id (fullDatabaseId) for the #issuecomment-<id> deep link.
     databaseId: text('database_id'),

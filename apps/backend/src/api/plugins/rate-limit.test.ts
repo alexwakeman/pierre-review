@@ -55,6 +55,42 @@ describe('tierFor — AI generation', () => {
   });
 });
 
+// The advisor block sits ABOVE the /api/pro/ catch-all, and every path family is spelled
+// exactly (the five-silent-routes lesson: the catch-all is silently wrong for anything it
+// swallows — a DB-only dismiss would ride the 20/min AI bucket, a GitHub-writing config-PR
+// would ride it too and misname its cost).
+describe('tierFor — Bot Tuning Advisor', () => {
+  it('the three GitHub-writing outputs sit on github_write, not ai', () => {
+    expect(tiers('POST', '/api/pro/advisor/config-pr')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/pro/advisor/bots/12/manifest-pr')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/pro/advisor/recommendations/k1/issue')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/pro/advisor/config-pr')).not.toContain('ai');
+  });
+
+  it('refine is the one LLM route and bills like generation', () => {
+    expect(tiers('POST', '/api/pro/advisor/refine')).toEqual(['ai', 'ai_hourly']);
+  });
+
+  it('findings ride the expensive aggregation bucket, discovery the GitHub-read bucket', () => {
+    expect(tiers('GET', '/api/pro/advisor/findings')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/pro/advisor/bots/12/discovery')).toEqual(['pr_detail', 'read']);
+  });
+
+  it('preview (the config-pr dry-run) reads GitHub but writes nothing — discovery tier, not github_write', () => {
+    expect(tiers('POST', '/api/pro/advisor/preview')).toEqual(['pr_detail', 'read']);
+  });
+
+  it('DB-only advisor routes stay on the blanket read bucket — POSTs included', () => {
+    expect(tiers('GET', '/api/pro/advisor/recommendations')).toEqual(['read']);
+    expect(tiers('GET', '/api/pro/advisor/brief')).toEqual(['read']);
+    expect(tiers('GET', '/api/pro/advisor/bots/12/effect')).toEqual(['read']);
+    // The mutating-but-DB-only family the /api/pro/ catch-all would have mis-tiered onto ai:
+    expect(tiers('POST', '/api/pro/advisor/recommendations/k1/dismiss')).toEqual(['read']);
+    expect(tiers('PUT', '/api/pro/advisor/bots/12/profile')).toEqual(['read']);
+    expect(tiers('POST', '/api/pro/advisor/config-events')).toEqual(['read']);
+  });
+});
+
 describe('tierFor — GitHub quota spenders', () => {
   it('throttles live repo search separately', () => {
     expect(tiers('GET', '/api/repos/search')).toEqual(['search', 'read']);

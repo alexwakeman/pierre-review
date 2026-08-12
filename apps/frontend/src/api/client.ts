@@ -1,5 +1,17 @@
 import type {
   ActiveReviewsResponse,
+  AdvisorBriefResponse,
+  AdvisorConfigEventBody,
+  AdvisorConfigPrBody,
+  AdvisorConfigPrResponse,
+  AdvisorPreviewResponse,
+  AdvisorDiscoveryResponse,
+  AdvisorEffectResponse,
+  AdvisorFindingsResponse,
+  AdvisorManifestConfirmBody,
+  AdvisorProfilePutBody,
+  AdvisorRefineBody,
+  AdvisorRefineResponse,
   AuthProvidersResponse,
   AddReviewCommentBody,
   AddReviewCommentResult,
@@ -1052,6 +1064,79 @@ export const api = {
         workspaceParam(workspaceId),
         repoIdsParam(repoIds),
       ),
+    ),
+  // ── Bot Tuning Advisor (Pro; /api/pro/advisor/*) ─────────────────────────────────────────
+  // Workspace-scoped like the Bots rail (never repo-narrowed — the advisor always covers the
+  // whole workspace; the config-PR names its target repo explicitly in the body).
+  advisorFindings: (workspaceId: number) =>
+    get<AdvisorFindingsResponse>(
+      withQuery('/api/pro/advisor/findings', workspaceParam(workspaceId)),
+    ),
+  advisorBrief: (workspaceId: number, botUserId?: number, keys?: string[]) =>
+    get<AdvisorBriefResponse>(
+      withQuery(
+        '/api/pro/advisor/brief',
+        workspaceParam(workspaceId),
+        botUserId != null ? `botUserId=${botUserId}` : undefined,
+        keys && keys.length > 0 ? `keys=${encodeURIComponent(keys.join(','))}` : undefined,
+      ),
+    ),
+  advisorDismiss: (workspaceId: number, dedupeKey: string) =>
+    fetch(
+      withQuery(
+        `/api/pro/advisor/recommendations/${encodeURIComponent(dedupeKey)}/dismiss`,
+        workspaceParam(workspaceId),
+      ),
+      jsonBody('POST'),
+    ).then((r) => handle<{ ok: boolean; dedupeKey: string }>(r)),
+  advisorFileIssue: (workspaceId: number, dedupeKey: string) =>
+    fetch(
+      withQuery(
+        `/api/pro/advisor/recommendations/${encodeURIComponent(dedupeKey)}/issue`,
+        workspaceParam(workspaceId),
+      ),
+      jsonBody('POST'),
+    ).then((r) => handle<{ issueUrl: string }>(r)),
+  advisorConfigPr: (workspaceId: number, body: AdvisorConfigPrBody) =>
+    fetch(
+      withQuery('/api/pro/advisor/config-pr', workspaceParam(workspaceId)),
+      jsonBody('POST', body),
+    ).then((r) => handle<AdvisorConfigPrResponse>(r)),
+  // The config-PR dry-run: same body, nothing written — returns the exact files the PR
+  // would commit so the panel can show the generated config before consent.
+  advisorPreview: (workspaceId: number, body: AdvisorConfigPrBody) =>
+    fetch(
+      withQuery('/api/pro/advisor/preview', workspaceParam(workspaceId)),
+      jsonBody('POST', body),
+    ).then((r) => handle<AdvisorPreviewResponse>(r)),
+  advisorRefine: (workspaceId: number, body: AdvisorRefineBody) =>
+    fetch(
+      withQuery('/api/pro/advisor/refine', workspaceParam(workspaceId)),
+      jsonBody('POST', body),
+    ).then((r) => handle<AdvisorRefineResponse>(r)),
+  advisorEffect: (workspaceId: number, botUserId: number) =>
+    get<AdvisorEffectResponse>(
+      withQuery(`/api/pro/advisor/bots/${botUserId}/effect`, workspaceParam(workspaceId)),
+    ),
+  advisorDiscovery: (workspaceId: number, botUserId: number, repoId: number) =>
+    get<AdvisorDiscoveryResponse>(
+      withQuery(
+        `/api/pro/advisor/bots/${botUserId}/discovery`,
+        workspaceParam(workspaceId),
+        `repoId=${repoId}`,
+      ),
+    ),
+  advisorPutProfile: (botUserId: number, body: AdvisorProfilePutBody) =>
+    fetch(`/api/pro/advisor/bots/${botUserId}/profile`, jsonBody('PUT', body)).then((r) =>
+      handle<{ workspaceId: number }>(r),
+    ),
+  advisorConfirmManifest: (botUserId: number, body: AdvisorManifestConfirmBody) =>
+    fetch(`/api/pro/advisor/bots/${botUserId}/manifest`, jsonBody('POST', body)).then((r) =>
+      handle<{ workspaceId: number }>(r),
+    ),
+  advisorReportConfigEvent: (body: AdvisorConfigEventBody) =>
+    fetch('/api/pro/advisor/config-events', jsonBody('POST', body)).then((r) =>
+      handle<{ ok: boolean }>(r),
     ),
   // The Bots "Themes" AI summary (Pro Haiku) — the qualitative read of what the automated reviewers
   // are flagging over the current WORKSPACE + window. GET is a pure cache read; the refresh POST is

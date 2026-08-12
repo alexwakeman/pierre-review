@@ -501,11 +501,13 @@ passthrough on `/api/me`, and inert seams. Details:
 [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) +
 [docs/PRO-PLATFORM.md](docs/PRO-PLATFORM.md). What bites:
 
-- **`apiVersion` is 14 and FOUR literals must agree**: host `contract.ts`, plugin
+- **`apiVersion` is 15 and FOUR literals must agree**: host `contract.ts`, plugin
   `index.ts`, plugin `contract-types.ts`, and `bind.ts`'s runtime gate
-  (`plugin?.apiVersion !== 14`) — the actual enforcer. A half-bump silently degrades the
+  (`plugin?.apiVersion !== 15`) — the actual enforcer. A half-bump silently degrades the
   ENTIRE plugin to OSS mode: capabilities dark, every `/api/pro/*` 404, nothing thrown.
   No test pins it; detection is `tsc` (TS2367 at the gate) + a boot check of `/api/me`.
+  (14 → 15 was the Bot Tuning Advisor: repo-file read seams + `openIssue` +
+  `commitFilesAndOpenPr` + the two advisor host queries + the `botAdvisor` capability.)
 - **A stale `packages/pro/dist` shadows `src` in dev.** `bind.ts` prefers `src/index.ts`
   outside production and LOGS the entry it bound — the first thing to check when a Pro
   route unexpectedly 404s.
@@ -518,10 +520,37 @@ passthrough on `/api/me`, and inert seams. Details:
 - Generation is cost-gated everywhere: payload-hash caches (**the hash must zero
   `Date.now()`-derived fields** or a dormant repo re-bills hourly), per-account
   serialisation + intervals, credit metering (`AI_CREDITS_PER_USD` = 1250, inlined in
-  THREE places — keep them in lockstep).
+  TWO places — `shared/types.ts` + `db/credits.ts`; the plugin's third copy is gone).
 - The plugin owns its own dual-dialect tables/migrations/isolation test; plugin migrations
   take NO `--> statement-breakpoint` and their pg twins wrap in `DO $$ … EXCEPTION`
   warnings (a plugin-migration failure is TOTAL and SILENT — OSS-mode degrade).
+- **Bot Tuning Advisor** (Pro, gated like `workspaceInsights` via the `botAdvisor`
+  capability): turns the graded-comment corpus into evidence-backed config changes per bot.
+  CORE computes deterministic evidence CELLS (`getAdvisorFindings` — (bot × path-bucket) /
+  (bot × category) / (bot × partner), floors + the path-coverage disclosure — plus the
+  `getBotEffectPanel` verification math and `db/changepoint.ts`); the PLUGIN
+  (`packages/pro/src/advisor/`) derives intents, runs the emitter adapters (CodeRabbit
+  yaml-Document round-trip, Greptile JSON, Copilot/generic prose with a managed
+  `limn:advisor` marker block, confirmed-T3 manifests) and serves `/api/pro/advisor/*`.
+  Outputs: brief (default until a tuning PR merges) / config PR (via
+  `commitFilesAndOpenPr`: default-branch worktree → NEW branch, never force, workflow
+  paths refused, `visible:false` copy contract; `POST …/preview` is the dry-run — same
+  gate chain, returns the exact files, writes nothing) / GitHub issue to the bot's profile
+  `ownerRepo`. Non-negotiables: the recommendation text is TEMPLATED, never
+  model-generated — the ONE LLM touchpoint (`refine/`) rewords prose inside the marker
+  block behind a deterministic diff-guard, and the import-graph test
+  (`llm-isolation.test.ts`) pins that the deterministic modules cannot reach it; the
+  mandatory retro-check gate 422s any suppression it cannot simulate; **a cell with ANY
+  acted-on high-severity finding never earns a full suppress** (the veto — it downgrades
+  to the nit-scoped QUIET_PATH_NITS when the path is nit-dominated, else to silence), and
+  **a suppression needs ≥1 untouched thread on a PR that has since MERGED** (the
+  merged-past gate — open-PR silence is not final; the same signal is the ROI table's
+  "Merged past" column, `mergedPastPrs`, keyed on window `mergedAt`); path
+  cells are adaptive-depth (`a/b/**` when that prefix meets the floor, the coarse `a/**`
+  only when no child does — emitted globs never overlap); nothing the advisor
+  computes may feed `botVerdict`; suggestions arrive via the Bots table's Tune/Drop pills
+  or the Bots "Advisor" inner tab. Config events (`advisor_config_events`) anchor the
+  before/after effect panel — measurement stays independent of emission.
 
 ---
 
@@ -852,4 +881,5 @@ re-scored (neither an edited body nor a model-version bump invalidates one — `
 workspace's enrichment backlog forever (`hardFailure` abandons the workspace, and the candidate
 query re-selects the same comment next tick — the sync UI declines to report it as progress, but
 nothing quarantines it; the one live instance of this is fixed at both ends, so the mechanism is
-now latent rather than firing); and pg `0034` has not been replayed against a real Postgres.
+now latent rather than firing); and pg `0036`–`0037` + the plugin `0021` pg twin have not been
+replayed against a real Postgres (the chain through pg `0035` HAS been — see docs/MIGRATIONS.md).

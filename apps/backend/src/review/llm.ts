@@ -25,6 +25,12 @@ export interface CheapCompleteOpts {
   // Claude session (Agent SDK). The seam NEVER falls back to process.env or the
   // Claude Review key on its own — the caller decides its credential.
   apiKey?: string;
+  // 'local-review-key' → CORE resolves the local BYO key (review/local-settings.ts)
+  // itself and uses it on the raw metered path when set; unset falls through to the
+  // ambient session. The key never crosses the plugin boundary — the advisor's local
+  // refine ladder (BYOK → ambient) names the POLICY, not the secret. Ignored when an
+  // explicit `apiKey` is given; a no-op in cloud (the local store reads null there).
+  credential?: 'local-review-key';
 }
 
 export interface CheapCompleteResult {
@@ -42,6 +48,14 @@ export async function cheapComplete(
   // An explicit key → the cheap, metered, exact-cost raw path. No key → the ambient
   // session via the Agent SDK. (No implicit env / Claude-Review-key fallback here.)
   if (opts.apiKey) return rawComplete(opts.apiKey, model, opts);
+  if (opts.credential === 'local-review-key') {
+    // The caller opted into the local BYO-key ladder: the stored key (if any) on the
+    // metered path, else fall through to the ambient session. Lazy import — the store
+    // module is fs-only but this keeps the no-credential path untouched.
+    const { getUserAnthropicKey } = await import('./local-settings.js');
+    const localKey = getUserAnthropicKey();
+    if (localKey) return rawComplete(localKey, model, opts);
+  }
   return agentComplete(model, opts);
 }
 

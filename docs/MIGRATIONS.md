@@ -246,3 +246,34 @@ and no backfill.
   target_kind, target_id) DO UPDATE` re-write with NULLs clears it, the row count stays 1 and our
   own `severity` is untouched. Re-applying `0035` is a no-op (`ADD COLUMN IF NOT EXISTS`). This
   also closes the standing gap on pg `0031`–`0034` — by hand, once; CI still does not do it.
+
+## `0050` / pg `0037` — `users.app_slug`
+
+One additive nullable `text` column on the GLOBAL `users` table: the GitHub App slug behind an
+actor's comments (`performed_via_github_app.slug`, REST-only), which `sync/app-attribution.ts`
+always received and used to collapse into a PR-level boolean. Journal entries
+`idx 50 / version "6"` and `idx 37 / version "7"`, sharing `when: 1786100000000`. No index, no
+backfill.
+
+- Written by `persistAppSlugs` (fill-or-update: a null fills, a DIFFERENT slug updates — apps get
+  renamed — but a later app-less comment never clears an observed slug; most of a bot's comments
+  carry no attribution object).
+- Read by the Bot Tuning Advisor's discovery tier (App-authored vs Actions-authored split). The
+  probe itself still has no sync-loop caller — the `bots.deepDetect` wiring described in the
+  probe's header remains future work, so the column fills only when something invokes the probe.
+
+## Plugin `0021` — Bot Tuning Advisor tables
+
+Three account-scoped plugin tables (sqlite + pg twins, filename-sorted, NO journal, no
+`--> statement-breakpoint`): `advisor_recommendations` (unique
+`(account_id, workspace_id, dedupe_key)`), `advisor_bot_profiles` (unique
+`(account_id, workspace_id, bot_user_id)` + the NAMED composite FK
+`advisor_bot_profiles_workspace_account_fk (workspace_id, account_id) → workspaces(id,
+account_id)` **spelled in the migration SQL only** — drizzle cannot declare an FK onto a core
+table across the open-core boundary, and index/FK metadata in the schema modules is inert anyway;
+ON DELETE CASCADE because core's `deleteWorkspace` cannot re-home plugin rows), and
+`advisor_config_events` (append-only, index `(account_id, repo_id, occurred_at)`, no unique).
+Unlike the DO-block data migrations, this is pure `CREATE TABLE IF NOT EXISTS` DDL (the
+0014/0017 idiom). All three are in `eraseProByAccountId` and the isolation-test seeds; none is
+PR-keyed, so `pruneProByPrIds` is deliberately unchanged. ⚠ The pg twin (like plugin `0020`'s)
+has not been replayed against a real Postgres.

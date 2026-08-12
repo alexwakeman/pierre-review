@@ -20,6 +20,7 @@ import {
   useResolvableBotThreads,
 } from '../../hooks/useBotTriage.js';
 import { useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useProSettings, useHasProSettings } from '../../hooks/useProSettings.js';
 import { useFilters } from '../../store/filters.js';
 import {
@@ -549,6 +550,8 @@ function VendorTable({
   onOpenVendor,
   overdueGraceMs,
   showMl,
+  onTune,
+  onDrop,
 }: {
   vendors: CostedVendor[];
   botColor: BotColor;
@@ -558,6 +561,11 @@ function VendorTable({
   // columns) — rendered ONLY when the deployment scores (MeResponse.mlSeverity) AND the window
   // has labels. False must render NO ml chrome at all.
   showMl: boolean;
+  // The Bot Tuning Advisor entry point (Pro `botAdvisor`): per-row Tune/Drop pills that open
+  // the Advisor tab focused on this bot. BOTH null in free mode → the Actions column does not
+  // render at all (hidden, not upsold).
+  onTune?: ((key: string) => void) | null;
+  onDrop?: ((key: string) => void) | null;
 }): JSX.Element {
   // ⚠ THE HEADER IS TWO ROWS WHEN `showMl`, ONE WHEN NOT — because the four "not addressed by
   // severity" columns sit under a shared group cell, and a group cell only makes sense with a
@@ -565,9 +573,20 @@ function VendorTable({
   // sub-headers shove the ordinary columns out of alignment with their own data. Add a column
   // here and it needs `rowSpan={headSpan}` too.
   const headSpan = showMl ? 2 : 1;
+  const showActions = Boolean(onTune ?? onDrop);
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
-      <table className={`w-full border-collapse text-[11px] ${showMl ? 'min-w-[1240px]' : 'min-w-[880px]'}`}>
+      <table
+        className={`w-full border-collapse text-[11px] ${
+          showActions
+            ? showMl
+              ? 'min-w-[1450px]'
+              : 'min-w-[1090px]'
+            : showMl
+              ? 'min-w-[1330px]'
+              : 'min-w-[970px]'
+        }`}
+      >
         <thead>
           <tr className={`text-left text-gray-500 dark:text-gray-400${showMl ? '' : ' border-b border-gray-200 dark:border-gray-800'}`}>
             <th rowSpan={headSpan} className="px-2 py-1.5 font-medium">Vendor</th>
@@ -591,6 +610,13 @@ function VendorTable({
               )}h grace window — the genuinely-ignored ones that drive the 'noisy' verdict`}
             >
               Overdue
+            </th>
+            <th
+              rowSpan={headSpan}
+              className="px-2 py-1.5 text-right font-medium"
+              title="PRs merged inside the window that still carried at least one not-addressed thread by this bot at merge — the team's final answer was to ship anyway. The threads themselves may be older than the window."
+            >
+              Merged past
             </th>
             <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="This bot's median time from opening a thread to it being addressed — a human reply, a resolve, or an addressing commit">
               Time to address
@@ -652,6 +678,15 @@ function VendorTable({
               $/acted-on
             </th>
             <th rowSpan={headSpan} className="px-2 py-1.5 text-center font-medium">Verdict</th>
+            {showActions && (
+              <th
+                rowSpan={headSpan}
+                className="px-2 py-1.5 text-center font-medium"
+                title="Open the Bot Tuning Advisor focused on this bot — Tune shows its evidence-backed configuration changes; Drop assembles the case for removing it."
+              >
+                Actions
+              </th>
+            )}
           </tr>
           {showMl && (
             <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-800 dark:text-gray-400">
@@ -748,6 +783,32 @@ function VendorTable({
                       }
                     >
                       {v.overdueUntouched}
+                    </span>
+                  )}
+                </td>
+                {/* Merged past — NOT dashed on dormant: it keys on PRs MERGED in the window,
+                    whose threads may be arbitrarily old, so a window-quiet bot can still have
+                    shipped-past PRs. `?? null` guards a stale cached response predating the
+                    field (blank, never NaN — the overlap precedent). */}
+                <td
+                  className="px-2 py-1.5 text-right tabular-nums"
+                  title={
+                    (v.mergedPastPrs ?? 0) > 0
+                      ? `${v.mergedPastPrs} PR${v.mergedPastPrs === 1 ? '' : 's'} merged this window still carrying ${v.mergedPastThreads} not-addressed thread${v.mergedPastThreads === 1 ? '' : 's'} by this bot`
+                      : 'No PR merged this window carried a not-addressed thread by this bot'
+                  }
+                >
+                  {(v.mergedPastPrs ?? null) == null ? (
+                    dash
+                  ) : (
+                    <span
+                      className={
+                        v.mergedPastPrs > 0
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-gray-400'
+                      }
+                    >
+                      {v.mergedPastPrs}
                     </span>
                   )}
                 </td>
@@ -877,6 +938,32 @@ function VendorTable({
                     </span>
                   )}
                 </td>
+                {showActions && (
+                  <td className="px-2 py-1.5 text-center">
+                    <span className="inline-flex gap-1">
+                      {onTune && (
+                        <button
+                          type="button"
+                          onClick={() => onTune(v.key)}
+                          title="Open the Advisor on this bot's tuning findings — evidence-backed config changes, retro-checked before any PR"
+                          className="rounded border border-amber-400 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-600/70 dark:text-amber-300 dark:hover:bg-amber-950/40"
+                        >
+                          Tune
+                        </button>
+                      )}
+                      {onDrop && (
+                        <button
+                          type="button"
+                          onClick={() => onDrop(v.key)}
+                          title="Open the Advisor with the case for dropping this bot — its acted-on rate, overlap and suppression evidence in one brief"
+                          className="rounded border border-red-400 px-1.5 py-0.5 text-[10px] font-medium text-red-700 hover:bg-red-50 dark:border-red-600/70 dark:text-red-300 dark:hover:bg-red-950/40"
+                        >
+                          Drop
+                        </button>
+                      )}
+                    </span>
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -937,6 +1024,13 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
   const openBotPrsDetail = useFilters((s) => s.openBotPrsDetail);
   const openBotOnlyDetail = useFilters((s) => s.openBotOnlyDetail);
+  // The Tune/Drop pills → the Advisor tab, focused on the clicked bot. Pro-gated
+  // (`botAdvisor`), hidden-not-upsold, and cross-repo-rail only: the Advisor tab itself
+  // doesn't render in the per-repo console (it is workspace-grain, like Themes), so a pill
+  // there would navigate nowhere.
+  const focusAdvisor = useFilters((s) => s.focusAdvisor);
+  const { botAdvisor } = useProCapabilities();
+  const advisorPillsOn = botAdvisor && repoId == null;
   // The workspace decides the VERDICT; `repoIds` only narrows the measured data. Both occupy
   // their own query-key slot, so either change refetches and two workspaces can never share a
   // cache entry.
@@ -1074,6 +1168,8 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           onOpenVendor={(key) => openBotPrsDetail(key, repoId ?? null)}
           overdueGraceMs={t.overdueGraceMs}
           showMl={showMlColumns}
+          onTune={advisorPillsOn ? (key) => focusAdvisor(key, 'tune') : null}
+          onDrop={advisorPillsOn ? (key) => focusAdvisor(key, 'drop') : null}
         />
         {/* Bot-effectiveness charts (per vendor) — all always visible: raw weekly volume, the
             volume-independent effectiveness + verdict, and the acted-on vs untouched split. */}

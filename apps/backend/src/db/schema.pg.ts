@@ -137,6 +137,9 @@ export const users = pgTable('users', {
   // schema.sqlite.ts. Plain text (no enum), nullable, GLOBAL. Feeds the bot-triage
   // classifier. Kept in sync by hand (schema-parity.test.ts).
   githubType: text('github_type'),
+  // The GitHub App slug behind this actor's comments — the pg twin of schema.sqlite.ts
+  // (see the rationale there). Nullable, GLOBAL, never cleared by a later app-less comment.
+  appSlug: text('app_slug'),
 });
 
 export const pullRequests = pgTable(
@@ -337,8 +340,8 @@ export const reviewComments = pgTable(
       .notNull()
       .references(() => pullRequests.id),
     authorId: integer('author_id').references(() => users.id),
-    // Nullable in cloud lean-storage mode (body hydrated on demand; see the
-    // sqlite twin for the full rationale). `excerpt` keeps a short preview.
+    // ALWAYS persisted (the Feed renders full markdown; see the sqlite twin) — nullable
+    // only for legacy rows from the 2026-06 lean window. `excerpt` keeps a short preview.
     body: text('body'),
     excerpt: text('excerpt'),
     diffHunk: text('diff_hunk'),
@@ -361,7 +364,8 @@ export const prComments = pgTable(
       .notNull()
       .references(() => pullRequests.id),
     authorId: integer('author_id').references(() => users.id),
-    // Nullable: not persisted in cloud lean-storage mode (hydrated on demand).
+    // ALWAYS persisted (the Feed renders full markdown; see the sqlite twin) — nullable
+    // only for legacy rows from the 2026-06 lean window.
     body: text('body'),
     databaseId: text('database_id'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),

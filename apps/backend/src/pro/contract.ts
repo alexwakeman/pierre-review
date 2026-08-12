@@ -38,6 +38,9 @@ export interface ProCapabilities {
   // overlay are pro_settings-backed, so this flag is true whenever the plugin is loaded
   // (regardless of the paid PRO_* flags). It gates the free bot Settings section + overlays,
   // NOT the Bots rail view (that reads the core bot routes and shows even with no plugin).
+  botAdvisor: boolean; // Bot Tuning Advisor (paid, like workspaceInsights): findings → intents →
+  // config-PR/brief/issue outputs + the effect panel. Gates the Bots "Advisor" inner tab and
+  // the Tune/Drop row pills; the free amber TuningSuggestions box stays regardless.
 }
 
 // ---- AI Fix seams (github + coding) -------------------------------------------
@@ -241,6 +244,7 @@ export interface PushResolvedArgs {
 //   'MERGE_FAILED'         — the merge failed for a non-conflict reason (→ 422)
 //   'REBASE_FAILED'        — the rebase failed for a non-conflict reason (→ 422)
 //   'TRUNK_FETCH_FAILED'   — the trunk ref couldn't be fetched (→ 422)
+//   'BRANCH_EXISTS'        — commitFilesAndOpenPr's target branch already exists (→ 409)
 export type CodingErrorCode =
   | 'HEAD_MOVED'
   | 'PUSH_DENIED'
@@ -248,7 +252,8 @@ export type CodingErrorCode =
   | 'CONFLICTS_UNRESOLVED'
   | 'MERGE_FAILED'
   | 'REBASE_FAILED'
-  | 'TRUNK_FETCH_FAILED';
+  | 'TRUNK_FETCH_FAILED'
+  | 'BRANCH_EXISTS';
 
 export interface GithubSeam {
   fetchPrDiff(
@@ -281,11 +286,60 @@ export interface GithubSeam {
       body: string;
     },
   ): Promise<{ number: number; url: string }>;
+  // Repo-file read primitives (advisor discovery + adapter config reads). Status-returning,
+  // never throwing — a 404 is the ordinary "no config file yet" outcome. `ref` defaults to
+  // the repo's default branch (the config that governs FUTURE reviews); file bytes come back
+  // raw via the GitHub raw media type. ⚠ Whatever comes back is REPO-AUTHORED, i.e.
+  // attacker-authored in cloud: callers must size-cap before parsing and never execute.
+  readRepoFile(
+    accountId: number,
+    args: { owner: string; name: string; path: string; ref?: string },
+  ): Promise<{ status: number; ok: boolean; text: string }>;
+  listRepoDir(
+    accountId: number,
+    args: { owner: string; name: string; path: string; ref?: string },
+  ): Promise<{
+    status: number;
+    ok: boolean;
+    entries: { name: string; path: string; type: 'file' | 'dir'; size: number }[];
+  }>;
+  // File an issue (the advisor's "send the brief to the bot's own repo" output). Issues are
+  // NOT synced — the caller stores the returned URL itself.
+  openIssue(
+    accountId: number,
+    args: { owner: string; name: string; title: string; body: string },
+  ): Promise<{ number: number; url: string }>;
+}
+
+export interface CommitFilesAndOpenPrArgs {
+  accountId: number;
+  owner: string;
+  name: string;
+  // LITERAL file contents — the adapter merged them against the fetched originals upstream;
+  // this seam writes bytes, it never merges. Paths are repo-relative; anything under
+  // .github/workflows/ is refused outright (no `workflow` OAuth scope — the push would be
+  // rejected AFTER the branch was created), as is any absolute or dot-dot path.
+  files: { path: string; content: string }[];
+  branch: string; // NEW branch name; an existing branch is a refusal (BRANCH_EXISTS), never a force-push
+  title: string;
+  body: string;
+}
+
+export interface CommitFilesAndOpenPrResult {
+  prNumber: number;
+  url: string;
+  // The resync-after-write contract: false = the PR EXISTS on GitHub but the confirming sync
+  // didn't land locally yet — the caller's copy must say "it'll show up shortly", never offer
+  // a retry (a retry double-opens PRs).
+  visible: boolean;
 }
 
 export interface CodingSeam {
   generateFix(args: GenerateFixArgs): Promise<GenerateFixResult>;
   applyAndPush(args: ApplyAndPushArgs): Promise<ApplyAndPushResult>;
+  // The advisor's config-PR primitive: worktree at the DEFAULT branch → write files →
+  // commit → push a NEW branch (never force) → open the PR → syncOnePr visibility tail.
+  commitFilesAndOpenPr(args: CommitFilesAndOpenPrArgs): Promise<CommitFilesAndOpenPrResult>;
   // Trunk-conflict handling (all per-account, cloud-ready; inert in OSS).
   mergePreview(args: MergePreviewArgs): Promise<MergePreviewResult>;
   rebaseResolve(args: RebaseResolveArgs): Promise<RebaseResolveResult>;
@@ -575,6 +629,26 @@ export interface ProHostQueries {
     window: BotWindowKind,
     scope: BotScopeWire,
   ): Promise<unknown>;
+  // Bot Tuning Advisor evidence cells (CORE, deterministic — per-(bot × path-bucket) /
+  // (bot × category) / (bot × partner) aggregation over threads + ml_comment_labels, with
+  // cell-emission floors + the path-coverage disclosure). Returns AdvisorFindingsPayload;
+  // the plugin casts it and derives intents. Nothing here ever feeds botVerdict.
+  getAdvisorFindings(
+    accountId: number,
+    window: BotWindowKind,
+    scope: BotScopeWire,
+  ): Promise<unknown>;
+  // The advisor's verification loop (CORE math): five weekly series over the 12-week span,
+  // split before/after `anchorMs` — or unattributed changepoint detection when null. The
+  // PLUGIN resolves anchors (config events ∪ merged advisor PRs) and passes a timestamp;
+  // this query never sees a recommendation, which keeps measurement independent of emission.
+  // Returns AdvisorEffectPanel (cast by the plugin).
+  getBotEffectPanel(
+    accountId: number,
+    scope: BotScopeWire,
+    botUserId: number,
+    anchorMs: number | null,
+  ): Promise<unknown>;
 }
 
 export interface ProContext {
@@ -618,6 +692,10 @@ export interface ProContext {
       // Explicit API key → the raw metered path; omitted → the ambient Claude
       // session. Lets the summary use its OWN discrete credential.
       apiKey?: string;
+      // 'local-review-key' → CORE resolves the local BYO Anthropic key
+      // (review/local-settings.ts) itself — the key never crosses the plugin boundary —
+      // falling through to the ambient session when unset. Ignored when `apiKey` is given.
+      credential?: 'local-review-key';
     }): Promise<{
       text: string;
       usage?: { inputTokens: number; outputTokens: number };
@@ -663,16 +741,16 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  // Contract handshake; host warns on mismatch. 13 → 14: the workspace refactor is BREAKING —
-  // every scope-bearing ProHostQueries member changed shape, `getTeamInsights`/
-  // `getTeamMetricsDetail` were renamed, two members were added, and the `teamInsights`
-  // capability became `workspaceInsights`.
+  // Contract handshake; host warns on mismatch. 14 → 15: the Bot Tuning Advisor — GithubSeam
+  // gains readRepoFile/listRepoDir/openIssue, CodingSeam gains commitFilesAndOpenPr,
+  // ProHostQueries gains getAdvisorFindings/getBotEffectPanel, CodingErrorCode gains
+  // BRANCH_EXISTS, llm.complete gains `credential`, and ProCapabilities gains `botAdvisor`.
   //
-  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (the `plugin?.apiVersion !== 14` runtime gate) and two
+  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (the `plugin?.apiVersion !== 15` runtime gate) and two
   // more in the plugin (packages/pro/src/index.ts, packages/pro/src/contract-types.ts). Bump ALL
   // FOUR or the plugin log-and-degrades to OSS mode against a version that is actually correct:
   // capabilities go dark, every /api/pro/* route 404s, and nothing throws.
-  apiVersion: 14;
+  apiVersion: 15;
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
@@ -690,6 +768,7 @@ export const EMPTY_CAPABILITIES: ProCapabilities = {
   slackDigest: false,
   issueLinks: false,
   botTriage: false,
+  botAdvisor: false,
 };
 let active: ProCapabilities = EMPTY_CAPABILITIES;
 export function setProCapabilities(c: ProCapabilities): void {

@@ -91,8 +91,10 @@ fixture tests (see Conventions).
     before deleting the row, so the cascade finds nothing to do. Step two is not optional — see the
     landmine under **One bot object** below.
 - **`users`** — GitHub actor metadata (`githubLogin` unique, `isBot`, `displayName`,
-  `avatarUrl`, `githubType` — the GraphQL author `__typename`, fed to the bot classifier);
-  **global**.
+  `avatarUrl`, `githubType` — the GraphQL author `__typename`, fed to the bot classifier;
+  `appSlug` — the `performed_via_github_app.slug` the app-attribution probe persists,
+  fill-or-update and never cleared by a later app-less comment; feeds the advisor's
+  discovery tier); **global**.
 - **`pullRequests`** — PR metadata, state, draft, timestamps, CI/mergeable, etc.; carries
   `accountId`, unique `(accountId, githubNodeId)`. `reviewDecision` (`approved` |
   `changes_requested` | `review_required` | null) is GitHub's OVERALL review verdict — the

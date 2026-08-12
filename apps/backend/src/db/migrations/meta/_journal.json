@@ -351,6 +351,13 @@
       "when": 1786000000000,
       "tag": "0049_seat_pricing_repo_description",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1786100000000,
+      "tag": "0050_users_app_slug",
+      "breakpoints": true
     }
   ]
 }

@@ -19,6 +19,7 @@ const FULL: ProCapabilities = {
   slackDigest: true,
   issueLinks: true,
   botTriage: true,
+  botAdvisor: true,
 };
 
 afterEach(() => {

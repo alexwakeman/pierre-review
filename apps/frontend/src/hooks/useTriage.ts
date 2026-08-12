@@ -103,6 +103,7 @@ export function useProCapabilities(): ProCapabilities {
       slackDigest: false,
       issueLinks: false,
       botTriage: false,
+      botAdvisor: false,
     }
   );
 }

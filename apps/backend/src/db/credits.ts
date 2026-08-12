@@ -3,9 +3,9 @@ import { getAiUsageSummary, getSummaryTurnCount } from './usage.js';
 
 // USD → credits conversion, MIRRORED from @pierre-review/shared AI_CREDITS_PER_USD. Inlined
 // here (not imported) because the release guard forbids a real runtime import of the
-// types-only shared package into release/dist — the same reason the pro plugin inlines its
-// own copy. Keep all three in lockstep (shared + this + packages/pro/src/insights/routes.ts).
-// $1 of model cost = 1250 credits (1 credit ≈ $0.0008).
+// types-only shared package into release/dist. TWO sites, kept in lockstep: shared
+// (types.ts) + this one. (The pro plugin's third copy in insights/routes.ts is gone — it
+// reads ctx.aiCredits now.) $1 of model cost = 1250 credits (1 credit ≈ $0.0008).
 export const AI_CREDITS_PER_USD = 1250;
 
 // The two AI seams are metered DIFFERENTLY:

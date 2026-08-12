@@ -54,11 +54,14 @@ dual-dialect tables (`review_learnings`, `repo_digests`), migrations
 (`packages/pro/migrations{,-pg}/*.sql` run via `ctx.registerMigrations` → `src/pro/migrate.ts`,
 the one sanctioned raw-`$client` DDL site + `pro_migrations` bookkeeping), and isolation test.
 
-**`apiVersion` is 14** (bumped from 13 by the Workspace refactor — a breaking `ProContext` change).
+**`apiVersion` is 15** (bumped from 14 by the Bot Tuning Advisor — GithubSeam gains
+`readRepoFile`/`listRepoDir`/`openIssue`, CodingSeam gains `commitFilesAndOpenPr`, ProHostQueries
+gains `getAdvisorFindings`/`getBotEffectPanel`, `CodingErrorCode` gains `BRANCH_EXISTS`,
+`llm.complete` gains `credential`, ProCapabilities gains `botAdvisor`).
 ⚠ **FOUR literals must agree, not two**, and the one that actually enforces the handshake is the
 easiest to miss: `apps/backend/src/pro/contract.ts` (the host's declared `ProPlugin['apiVersion']`),
 `packages/pro/src/index.ts` (the plugin's exported value), `packages/pro/src/contract-types.ts` (the
-plugin's mirror), and **`apps/backend/src/pro/bind.ts`'s `plugin?.apiVersion !== 14` — THE RUNTIME
+plugin's mirror), and **`apps/backend/src/pro/bind.ts`'s `plugin?.apiVersion !== 15` — THE RUNTIME
 GATE**. A half-bump makes `bind.ts` log-and-degrade the ENTIRE plugin to OSS mode: capabilities dark,
 every `/api/pro/*` 404, nothing thrown. ⚠ **Nothing currently PINS the handshake** —
 `pro/contract.test.ts` asserts capability KEYS (it was updated for the `workspaceInsights` rename)
@@ -719,3 +722,160 @@ raw SDK alone can't use an ambient session (the common Pro/Max local case), whic
 broke the digest. Any new core LLM seam must follow this dual-auth pattern.
 
 
+
+## Bot Tuning Advisor (Pro, `botAdvisor` — apiVersion 15)
+
+Turns the graded-comment corpus (thread states + ML labels + acted-on + overlap + cost) into
+**evidence-backed changes to each bot's configuration**, then measures whether the change worked.
+The pipeline is `Finding → Intent → Emitter → Output`, and the governing constraint is the
+deterministic/templated/LLM boundary: **the recommendation itself is never model-generated**.
+Plan of record: `~/limn/plans/bot-tuning-advisor.md` (2026-08-09; four product decisions recorded
+there — verification loop Pro-gated, local BYOK+ambient refine ladder, DB-primary manifests with
+repo export, GitHub-issue export in v1).
+
+**Core/plugin split (the getBotAnalytics precedent, CI vs not).** CORE owns the deterministic math,
+CI-tested: `getAdvisorFindings` (evidence CELLS — (bot × pathBucket) over threads, (bot × category)
+over labelled findings with thread-linkage disclosed, (bot → partner) overlap, per-bot totals with
+`actedOnNits` + `pathCoveragePct`; floors `ADVISOR_MIN_CELL_THREADS=5` / `ADVISOR_MIN_CELL_FINDINGS=20`
+/ `ADVISOR_AMPLIFY_MIN_ACTED_PCT=70` echoed on the wire; quality checks emit rows but NO cells;
+**path buckets are ADAPTIVE-DEPTH** — every thread aggregates into its depth-1 parent (`a/**`)
+and its depth-2 child (`a/b/**`), emission prefers floor-meeting children and emits the coarse
+parent only when NONE qualifies, so emitted globs never overlap and the retro-check glob-identity
+holds at either depth (a top-level `apps/**` over a monorepo where apps/ IS the codebase was too
+coarse to act on — the free tuning suggestion keeps depth-1); path cells also carry `actedOnNits`,
+the QUIET_PATH_NITS retro numerator),
+`getBotEffectPanel` (five weekly series over the 84-day span split before/after an anchor; volume
+nulls zero-weeks per the behaviour-tab policy) and `db/changepoint.ts` (`detectChangepoints`,
+median±MAD segment comparison, `MIN_BASELINE_POINTS=4`). Advisory invariant inherited and pinned:
+**nothing the advisor computes feeds `botVerdict`**. The shared `botWindowMs` (db/bot-window.ts)
+replaced the seven copy-pasted window ternaries; the shared acted-on predicate
+(`isActedOnThreadState`) replaced the two inline copies.
+
+**Plugin (`packages/pro/src/advisor/`).** Deterministic modules are PURE `(data) => data` — no ctx
+anywhere under `findings/intents/evidence/retro-check/emitters/outputs`; ctx lives only in
+`routes/store/measure/discovery/refine`. `test/advisor/llm-isolation.test.ts` walks the transitive
+import graph and pins that no deterministic module can reach `refine/` (where the one LLM module
+lives beside its pure diff-guard; `outputs/config-pr.ts` takes the guard as an INJECTED function for
+exactly this reason). Intents: SUPPRESS_PATH / QUIET_PATH_NITS / SUPPRESS_CATEGORY /
+LOWER_VERBOSITY (reuses core's ML_NIT pair semantics) / SCOPE_OFF (mirrors the overlap pair) /
+AMPLIFY_PATH / ESCALATE / PROMOTE_TO_LINT (DeepSource first-backtick title templates only —
+measured 1,908 titles → ~250 templates; generic rule-ID regex measured ≤8% yield, not built;
+tag-shaped or >120-char first lines are rejected — DeepSource's HTML run-summary banner crossed
+the fires floor as a "rule" before that guard) / BOOTSTRAP_CONFIG. **The suppression VETO
+(`SUPPRESS_MAX_ACTED_HIGH = 0`):** a path/category cell containing even ONE acted-on high-severity
+finding never earns a full suppress — "4 of 5 ignored" is not licence to silence the one that
+mattered (the erxes `apps/**` case that motivated it). **The MERGED-PAST gate
+(`SUPPRESS_MIN_MERGED_UNTOUCHED = 1`):** a suppression additionally needs ≥1 untouched thread on a
+PR that has SINCE MERGED (`mergedUntouched`, on path + category cells and bot totals) — open-PR
+silence is not final, a merge over the bot's open thread is; the count rides the rationale, the
+evidence line, the brief and the PR body ("N shipped in PRs that merged anyway"). Measured on
+erxes before building: 39% of merged PRs carry an untouched CodeRabbit thread, and both live
+suppressions pass at 19/19 and 6/6. (The companion "resolved with no code change to the flagged
+line" metric was measured and NOT built: commit_files covers only ~32% of erxes's merged-PR
+commits and line-level diffs aren't stored, so it is honestly uncomputable today.) A vetoed path cell falls through to
+**QUIET_PATH_NITS** — keep the path, stop nit-level comments there — which fires when the cell's
+labelled findings are nit-dominated (`QUIET_PATH_MIN_NIT_SHARE = 0.7` over a `floors.minCellThreads`
+labelled floor) and those nits are mostly ignored (`QUIET_PATH_MAX_NIT_ACTED_SHARE = 0.3`); a vetoed
+cell that is NOT nit-dominated produces nothing, which is the honest outcome. CodeRabbit expresses
+it as a `path_instructions` entry for the glob; Greptile degrades to instructions prose; Copilot and
+the generic prose adapter carry it in the managed block.
+
+**Adapters (emitters/).** CodeRabbit (`.coderabbit.yaml` via the eemeli `yaml` **Document** API —
+comments/anchors/ordering survive; `path_filters` gains `!glob`, `path_instructions[]` entries,
+`profile: chill` only when UNSET — a user-set profile degrades to prose, never overwritten),
+Greptile (`greptile.json`, key-order + detected-indent-preserving JSON merge; no published schema —
+hand-maintained), Copilot (`.github/copilot-instructions.md` under the **hard 4,000-char budget**
+computed against existing content; over → lowest-priority slots dropped deterministically and
+reported; SUPPRESS_PATH degrades to an `applyTo`-frontmatter scoped instructions file), the generic
+prose adapter (managed `<!-- limn:advisor:start/end -->` block + a verbatim intents header line;
+never touches a byte outside), and the T3 **manifest interpreter** (executes CONFIRMED
+`advisor_bot_profiles.manifestJson` only — never a guessed schema; hand-rolled structural validator,
+deliberately NOT ajv so the `removeAdditional` input-rewriting trap cannot exist). **Qodo/Sourcery
+are entirely absent, not stubbed** (config surfaces unverified). `yaml` is a dependency of
+`packages/pro` ONLY — never core, never the npm release.
+
+**Storage (3 plugin tables, migration 0021, none PR-keyed).** `advisor_recommendations` (one
+DECIDED row per (account, workspace, dedupeKey='intent|bot|target|window'); findings stay query
+results — a row exists only once the user acts; every onConflictDoUpdate targets exactly the
+3-column unique), `advisor_bot_profiles` (the one-bot-object rule: T1 answers + T3 manifest in ONE
+row, SEPARATE narrowed `set:` objects per writer — the persist() landmine; **named composite FK
+`advisor_bot_profiles_workspace_account_fk` in the migration SQL only** — drizzle can't declare an
+FK onto a core table across the open-core boundary; ON DELETE CASCADE because core's
+`deleteWorkspace` can't re-home plugin rows), `advisor_config_events` (append-only anchor log —
+`user_reported` anchors measure changes Limn never authored; `pr_opened`→`pr_merged` promotion is
+compute-on-read off the synced PR row, writing the `advisor_pr` anchor at mergedAt). All three in
+`eraseProByAccountId` + isolation-test seeds; deliberately NOT in `pruneProByPrIds`.
+
+**Outputs.** Brief (T5, the universal fallback — deterministic markdown, also the issue body;
+client defaults to it until a `pr_merged` row exists in the workspace), config PR (gate chain:
+retro-check computable → parse → plan → serialize → validate → **additive assert** (deep containment
+for yaml/json, outside-markers equality for prose) → `commitFilesAndOpenPr`), GitHub issue (to the
+profile's user-supplied `ownerRepo`). **`POST …/preview` is the config-PR dry-run** — same body,
+same derivation, the full gate chain, but it stops before the seam call and returns the exact
+files the PR would commit (`before`/`after` + the plan's applied/degraded/unsupported items), so
+the generated YAML/JSON/prose is visible before consent; no write permission required, tier
+`pr_detail` (it fetches the config files, writes nothing). The **mandatory retro-check** ("this
+filter would also have hidden N acted-on, M high-severity") is computable for
+SUPPRESS_PATH/SUPPRESS_CATEGORY (cell identity — our emitted globs ARE the cell's aggregated
+prefix, at either depth) and LOWER_VERBOSITY/QUIET_PATH_NITS (`actedOnNits`, bot-level and
+per-path respectively — the nit-scoped simulation covers only the ML-labelled threads, disclosed);
+SCOPE_OFF is honestly **uncomputable → config-PR blocked, brief allowed**. Path coverage (only
+`review_comment`-kind labels can carry a path — 41% corpus-wide in the dev DB) is disclosed on
+every evidence object and rendered in brief + PR body.
+
+**Refine (the ONE LLM touchpoint).** `POST …/refine`, prose targets only — structured formats have
+no LLM code path at all. Cloud: credit gate + `SUMMARY_ANTHROPIC_API_KEY` + `recordAiUsage(seam:
+'summary', feature:'advisor_refine')` (the bot-themes pattern). Local: `cheapComplete`'s new
+`credential:'local-review-key'` — core resolves the BYO key itself (it never crosses the plugin
+boundary) and falls through to the ambient agent-SDK session ($0 ⇒ unmetered by existing design).
+Output re-passes the **deterministic diff-guard** (markers intact, intents header verbatim, char
+budget, no fences) — and so does any client-supplied `refinedByPath` at config-PR time; rejected ⇒
+the templated version ships, never an error.
+
+**Core seams (apiVersion 15).** `readRepoFile`/`listRepoDir` (status-returning, `?ref=`,
+repo-authored bytes size-capped, never executed), `openIssue` (`createIssue` REST — issues aren't
+synced; the URL is stored on the row), `commitFilesAndOpenPr` (`coding/git-ops.ts`:
+default-branch worktree → literal file writes (traversal + `.git/` guarded) → commit → **NEW branch,
+never force** (existing ⇒ `BRANCH_EXISTS` → 409) → `createPullRequest` → `syncOnePr` tail with a
+confirming SELECT; **refuses `.github/workflows/*` outright** — no `workflow` OAuth scope — and the
+route re-refuses it, two layers on purpose; after the 201 nothing throws — `visible:false` copy says
+"shortly", never a retry). ⚠ The cloud runtime image (`node:22-bookworm-slim`) did NOT ship `git` —
+the Dockerfile now installs it (this also un-broke AI Fix's cloud push path, latently dead before).
+
+**Discovery.** T1 ask-once profile card (row presence is the suppressor). T2: workflow-file scan
+(count/byte-capped string scan for known bot actions + config args — attacker-authored, never
+executed) + `users.appSlug`, which `sync/app-attribution.ts` now PERSISTS instead of discarding
+(fill-or-update, never cleared by an app-less comment; the probe itself still has no sync-loop
+caller — deep-detect wiring remains future work). T3: structural-tells proposer
+(`discovery/tier3.ts` — glob-shaped arrays under ignore/exclude/skip/filter keys, severity-shaped
+scalars) → single confirm → `manifestJson`; the repo export `.limn/bot-adapter.yml` publishes via
+`manifest-pr`, and on discovery reads the repo copy wins.
+
+**Frontend.** Fifth `botsInnerTab` member `'advisor'` (transient, derived `effectiveTab`, 'pro'
+badge, cross-repo rail only — workspace grain, like Themes). **The entry point is the Bots table's
+per-row Tune/Drop pills** (Pro-gated, hidden-not-upsold): `focusAdvisor(botKey, intent)` sets the
+focus AND switches the tab in one store action; 'drop' renders the drop-case banner (the bot's ROI
+numbers + the brief as the deliverable). `BotAdvisorPanel`: intents grouped per bot with evidence /
+retro / status chips (dismissed / PR open / PR merged / issue filed), per-intent checkboxes, output
+selector (Brief default until first merged PR; selecting Brief renders it immediately — it is a
+free DB read), repo picker + **Preview changes** (the `…/preview` dry-run rendered as per-file
+generated content + plan-item chips; the result resets when the selection or repo changes so a
+stale preview never sits under new checkboxes), effect panel + T1 profile expanders. Hooks in `useAdvisor.ts` — keys carry `ws:<id>` + skipToken; the config-PR and
+refine mutations share mutationKeys across mounts (the CiAnalysisCard double-bill lesson). The free
+amber `TuningSuggestions` box stays rendered.
+
+**Rate limits.** The `/api/pro/advisor/` block sits ABOVE the `/api/pro/` AI catch-all in `tierFor`
+(else every DB-only advisor POST would ride the 20/min AI bucket): config-pr / manifest-pr / issue →
+`github_write`; refine → `ai`; findings → `search`; discovery + preview → `pr_detail`; everything
+else `read`. Pinned in `rate-limit.test.ts`. (The dry-run route is named `preview`, not
+`config-preview`, so no `endsWith('/config-pr')`-style match can ever prefix-collide with it.)
+
+**Known v1 limits** (deliberate): retro-check prefix-matches only OUR emitted prefix globs
+(`a/**` / `a/b/**`, whichever depth the cell aggregated; user-authored globs in existing configs
+are out of scope, disclosed); CodeRabbit validation is
+structural + round-trip fixtures, not the vendored-JSON-schema/ajv pass the plan sketched (our edits
+are additive into the USER'S file, whose validity is not ours to adjudicate — revisit if a real
+config PR is ever rejected by CodeRabbit's validator); the CodeRabbit assisted-bootstrap
+(`@coderabbitai configuration` comment → parse the synced reply) is not built; cloud per-account BYO
+Anthropic keys are a designed seam (`credential:'account-key'`), not built; Greptile's `.greptile/`
+directory layout is unverified against their docs (single `greptile.json` served first).

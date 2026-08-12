@@ -252,13 +252,20 @@ export async function ghRestGetRaw(
 
 // REST GET a repo file's RAW contents (Accept: application/vnd.github.raw), NOT throwing
 // on a non-2xx — returns the status + body so the caller can branch. Used to fetch a
-// repo's CODEOWNERS file (404 when absent → degrade to no CODEOWNERS suggestions). The
-// raw media type returns the file bytes directly (no base64/JSON envelope to decode).
+// repo's CODEOWNERS file (404 when absent → degrade to no CODEOWNERS suggestions) and the
+// advisor's bot-config reads. The raw media type returns the file bytes directly (no
+// base64/JSON envelope to decode). `ref` (optional) reads at a specific branch/sha —
+// omitted, GitHub serves the default branch, which is the config that governs FUTURE
+// reviews (the advisor's read point).
 export async function ghRestGetContentRaw(
   token: string,
   path: string,
+  ref?: string,
 ): Promise<{ status: number; ok: boolean; text: string }> {
-  const res = await fetch(`https://api.github.com${path}`, {
+  const url = ref
+    ? `https://api.github.com${path}?ref=${encodeURIComponent(ref)}`
+    : `https://api.github.com${path}`;
+  const res = await fetch(url, {
     method: 'GET',
     headers: {
       authorization: `token ${token}`,
@@ -268,6 +275,59 @@ export async function ghRestGetContentRaw(
   });
   const text = await res.text().catch(() => '');
   return { status: res.status, ok: res.ok, text };
+}
+
+// REST GET one directory's contents listing (the JSON contents API — for a FILE it returns
+// an object, for a directory an array). Status-returning like ghRestGetContentRaw: a 404 is
+// the ordinary "that directory doesn't exist" outcome (e.g. a repo with no
+// .github/workflows/). Entries are name/path/type/size only — file BYTES go through
+// ghRestGetContentRaw so there is exactly one place decoding repo-authored content.
+export async function ghRestGetContentDir(
+  token: string,
+  path: string,
+  ref?: string,
+): Promise<{
+  status: number;
+  ok: boolean;
+  entries: { name: string; path: string; type: 'file' | 'dir'; size: number }[];
+}> {
+  const url = ref
+    ? `https://api.github.com${path}?ref=${encodeURIComponent(ref)}`
+    : `https://api.github.com${path}`;
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      authorization: `token ${token}`,
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': '2022-11-28',
+    },
+  });
+  if (!res.ok) {
+    await res.text().catch(() => '');
+    return { status: res.status, ok: false, entries: [] };
+  }
+  const body: unknown = await res.json().catch(() => null);
+  if (!Array.isArray(body)) {
+    // A file path (object body) or an unreadable payload — not a directory listing.
+    return { status: res.status, ok: false, entries: [] };
+  }
+  const entries = body
+    .map((e) => {
+      const it = e as { name?: unknown; path?: unknown; type?: unknown; size?: unknown };
+      if (typeof it.name !== 'string' || typeof it.path !== 'string') return null;
+      const type = it.type === 'dir' ? 'dir' : it.type === 'file' ? 'file' : null;
+      if (!type) return null;
+      return {
+        name: it.name,
+        path: it.path,
+        type,
+        size: typeof it.size === 'number' ? it.size : 0,
+      } as { name: string; path: string; type: 'file' | 'dir'; size: number };
+    })
+    .filter((e): e is { name: string; path: string; type: 'file' | 'dir'; size: number } =>
+      Boolean(e),
+    );
+  return { status: res.status, ok: true, entries };
 }
 
 // REST GET in GitHub's raw `diff` media type (Accept: application/vnd.github.diff),

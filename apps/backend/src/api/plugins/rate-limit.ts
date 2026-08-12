@@ -123,6 +123,28 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // prefix over two sibling vocabularies is precisely how one silently swallows the other.
   if (path === '/api/workspaces' || path.startsWith('/api/workspaces/')) return [TIERS.read];
 
+  // ---- Bot Tuning Advisor (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
+  // "Follow the token": most advisor routes are DB-only reads/writes, but the generic
+  // /api/pro/ branch below puts every mutating POST on the 20/min AI bucket — which would
+  // throttle a plain `dismiss` like an LLM call, while the three GitHub-writing outputs
+  // (config-pr / manifest-pr / issue) genuinely spend GitHub quota and the one LLM route
+  // (refine) genuinely spends model dollars. Each path family is spelled exactly and pinned
+  // in rate-limit.test.ts. Staying under /api/pro/ keeps the automatic 402 entitlement gate.
+  if (path.startsWith('/api/pro/advisor/')) {
+    if (mutating && path.endsWith('/config-pr')) return [TIERS.githubWrite];
+    if (mutating && path.endsWith('/manifest-pr')) return [TIERS.githubWrite];
+    if (mutating && path.endsWith('/issue')) return [TIERS.githubWrite];
+    if (mutating && path.endsWith('/refine')) return [TIERS.ai, TIERS.aiHourly];
+    // findings = a full-corpus aggregation (the compare-tier precedent); discovery and
+    // preview = a few GitHub contents-API reads (the pr-detail hydration precedent —
+    // preview is the config-pr dry-run: it fetches the config files but writes nothing).
+    if (!mutating && path.endsWith('/findings')) return [TIERS.search, TIERS.read];
+    if (!mutating && path.endsWith('/discovery')) return [TIERS.prDetail, TIERS.read];
+    if (mutating && path.endsWith('/preview')) return [TIERS.prDetail, TIERS.read];
+    // dismiss / profiles / config-events / recommendations / brief / effect: DB-only.
+    return [TIERS.read];
+  }
+
   // ---- AI generation ----
   // Two shapes: the Pro plugin's /api/pro/* generators, and the Claude Review
   // family, which for back-compat kept the pre-plugin paths (/api/prs/:id/

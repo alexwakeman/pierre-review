@@ -1,0 +1,12 @@
+-- Bot Tuning Advisor discovery: capture the GitHub App slug behind a bot's comments.
+-- SQLite / local mode; Postgres twin: migrations-pg/0037_users_app_slug.sql. One additive
+-- nullable column, no index, no backfill.
+--
+-- `users.app_slug` — the `performed_via_github_app.slug` the app-attribution probe
+-- (sync/app-attribution.ts) has always RECEIVED and, until now, discarded down to a
+-- PR-level boolean. A bot's App identity is a global fact about the actor (like
+-- `github_type`), so it lives on the global `users` table. The advisor's discovery tier
+-- reads it to split App-authored from Actions-authored comments. Null = never observed
+-- (PAT/OAuth posters have no app); an observed slug is never cleared by a later app-less
+-- comment — the write path only fills nulls or updates to a NEW slug, never nulls out.
+ALTER TABLE `users` ADD `app_slug` text;

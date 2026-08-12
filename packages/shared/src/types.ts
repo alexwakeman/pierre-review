@@ -623,6 +623,13 @@ export interface BotVendorAnalytics {
   oldestUntouchedDays: number | null;
   humanFollowThroughPct: number | null;
   noiseRatioPct: number | null;
+  // "Merged past": PRs MERGED inside the window still carrying ≥1 untouched thread by this
+  // bot at merge — the team's FINAL answer was to ship anyway, a strictly stronger claim than
+  // `untouched` (which includes open PRs where action may still come). Keyed on the PR's
+  // mergedAt (window) — the threads themselves may be older than the window. Display-only:
+  // `verdict` never reads these (bot-analytics-verdict.test.ts pins verdict inputs).
+  mergedPastPrs: number;
+  mergedPastThreads: number;
   // ── Same-line overlap (ADVISORY — the redundancy signal), WINDOWED like every other column ──
   // `overlapThreads` = this bot's window threads landing in a ±3-line cluster (same PR + file —
   // the ONE shared definition, backend db/line-overlap.ts) that ≥1 OTHER review-role bot also
@@ -1306,6 +1313,408 @@ export interface BotTuningSuggestion {
   // The top overlap partner's display label — set ONLY on the overlap shape (its discriminator).
   partnerLabel?: string;
   untouchedPct: number; volume: number; rationale: string;
+}
+
+// ── Bot Tuning Advisor (Pro surface; findings computed DETERMINISTICALLY in core) ───────────
+// The advisor turns the graded-comment corpus into evidence-backed configuration changes for
+// each bot. Core computes the CELLS (pure aggregation over threads + ml_comment_labels — no
+// LLM, no persistence); the Pro plugin maps cells → intents → emitter output. Same advisory
+// rule as BotTuningSuggestion: nothing here may ever feed `botVerdict`.
+//
+// The nine intent kinds the plugin derives from these cells. Core never decides an intent —
+// it only reports what happened; the thresholds that turn a cell into a recommendation live in
+// the plugin (packages/pro/src/advisor/intents.ts). QUIET_PATH_NITS is the noise-focused
+// middle ground between SUPPRESS_PATH and nothing: keep the path, stop nit-level comments
+// there — the shape a cell earns when full suppression is vetoed (acted-on high-severity
+// present) but the path is still nit-dominated and ignored.
+export type AdvisorIntentKind =
+  | 'SUPPRESS_PATH'
+  | 'QUIET_PATH_NITS'
+  | 'SUPPRESS_CATEGORY'
+  | 'LOWER_VERBOSITY'
+  | 'SCOPE_OFF'
+  | 'AMPLIFY_PATH'
+  | 'ESCALATE'
+  | 'PROMOTE_TO_LINT'
+  | 'BOOTSTRAP_CONFIG';
+
+// One (bot × path-bucket) cell over the bot's window THREADS. `actedOnHigh` counts acted-on
+// threads whose ORIGIN comment is labelled major/critical — the retro-check numerator ("this
+// filter would also have hidden M high-severity findings you acted on"); `actedOnNits` is the
+// same numerator for the nit-scoped filter (QUIET_PATH_NITS).
+export interface AdvisorPathCell {
+  botUserId: number;
+  // Adaptive depth: '<seg>/<seg>/**' when that depth-2 prefix alone met the thread floor,
+  // else '<seg>/**' (or the bare filename for a root-level file). Emitted cells never
+  // overlap — a parent is emitted only when NONE of its depth-2 children qualified.
+  pathBucket: string;
+  volume: number; // threads
+  actedOn: number; // merged definition: resolved | likely_addressed | human follow-up
+  actedOnHigh: number;
+  actedOnNits: number;
+  untouched: number;
+  // Untouched threads whose PR has SINCE MERGED (merged-by-now, unlike the ROI table's
+  // window-merged `mergedPastPrs`) — the team's final answer was to ship anyway. The
+  // suppression gate: silence on an open PR is not final; this is.
+  mergedUntouched: number;
+  overdueUntouched: number;
+  dissent: number; // replied_unresolved threads — pushback, not silence
+  bySeverity: MlSeverityCounts; // origin-comment labels, findings only (praise/summary excluded)
+  samplePrIds: number[];
+  sampleThreadIds: number[];
+}
+
+// One (bot × category) cell over the bot's window ML-LABELLED FINDINGS (praise + isSummary
+// excluded from every denominator). Acted-on facts exist only for the THREAD-LINKED subset
+// (`threadLinked` — labels whose target opened a review thread); PR comments and review bodies
+// have no thread and therefore no acted-on claim.
+export interface AdvisorCategoryCell {
+  botUserId: number;
+  category: MlCategory;
+  findings: number;
+  bySeverity: MlSeverityCounts;
+  threadLinked: number;
+  actedOn: number;
+  actedOnHigh: number;
+  untouched: number;
+  mergedUntouched: number; // thread-linked untouched whose PR has since merged (see AdvisorPathCell)
+  overdueUntouched: number;
+  dissent: number;
+  samplePrIds: number[];
+}
+
+// One directed (bot → partner) overlap cell: shared ±3-line clusters (db/line-overlap.ts, the
+// same definition every overlap surface uses). Emitted per direction so each bot's share is a
+// plain division: overlapThreads / threads.
+export interface AdvisorOverlapCell {
+  botUserId: number;
+  partnerUserId: number;
+  sharedClusters: number;
+  overlapThreads: number; // THIS bot's window threads landing in ≥2-bot clusters (pooled, all partners)
+  threads: number; // this bot's window threads (the share's denominator)
+}
+
+// Per-bot totals over the window — the LOWER_VERBOSITY / SCOPE_OFF / BOOTSTRAP_CONFIG inputs,
+// plus the path-coverage disclosure every path-keyed finding must carry (only labels of the
+// `review_comment` kind can ever resolve to a path; PR comments and review bodies never will).
+export interface AdvisorBotTotals {
+  botUserId: number;
+  key: string; // `u<userId>` — the same row key the Bots table uses
+  kind: AutomatedReviewerKind;
+  label: string;
+  login: string | null;
+  isQualityCheck: boolean; // quality checks appear here for context but emit NO cells
+  threads: number;
+  actedOn: number;
+  untouched: number;
+  mergedUntouched: number; // untouched threads whose PR has since merged (see AdvisorPathCell)
+  overdueUntouched: number;
+  dissent: number;
+  mlLabelled: number; // all labels in the window (incl. praise/summaries)
+  mlFindings: number; // findings only
+  mlNits: number;
+  // Acted-on window threads whose ORIGIN comment is labelled 'nit' — the LOWER_VERBOSITY
+  // retro-check numerator ("raising the severity floor would also have hidden N nits you
+  // acted on"). Thread-linked labels only, by construction.
+  actedOnNits: number;
+  pathCoveragePct: number | null; // share of this bot's labels that can carry a path (null when unlabelled)
+  verdict: BotVerdict;
+}
+
+export interface AdvisorFindingsPayload {
+  generatedAt: string;
+  window: { kind: BotWindowKind; from: string; to: string };
+  workspaceId: number;
+  bots: AdvisorBotTotals[];
+  pathCells: AdvisorPathCell[];
+  categoryCells: AdvisorCategoryCell[];
+  overlapCells: AdvisorOverlapCell[];
+  pathCoveragePct: number | null; // corpus-wide (all listed bots' labels)
+  // The core cell-emission floors, echoed so the plugin/UI can state the rule instead of
+  // hard-coding a second copy.
+  floors: {
+    minCellThreads: number;
+    minCellFindings: number;
+    amplifyMinActedPct: number;
+    overdueGraceMs: number;
+  };
+}
+
+// ── Advisor intents (derived in the PLUGIN from the cells above; deterministic) ─────────────
+// An intent is a cell that crossed the plugin's decision thresholds — the "what to change"
+// half of a recommendation, before any emitter runs. The recommendation text itself is
+// TEMPLATED (taxonomy phrasing slots), never model-generated; the one LLM touchpoint
+// (refine) may only reword prose inside a managed marker block, post-guarded.
+export type AdvisorTargetWire =
+  | { kind: 'path'; pathBucket: string }
+  | { kind: 'category'; category: MlCategory }
+  | { kind: 'severity' }
+  | { kind: 'partner'; partnerUserId: number; partnerLabel: string }
+  | { kind: 'bootstrap' }
+  | { kind: 'lint'; template: string };
+
+export interface AdvisorEvidence {
+  windowKind: BotWindowKind;
+  from: string;
+  to: string;
+  volume: number; // threads (path/partner/severity) or findings (category)
+  actedOn: number;
+  actedOnPct: number | null;
+  untouched: number;
+  untouchedPct: number | null;
+  // Of the untouched, how many were on PRs that have since merged — the "final answer"
+  // subset the suppression gate keys on; rendered as a caveat wherever untouched is.
+  mergedUntouched: number;
+  overdueUntouched: number;
+  dissent: number;
+  actedOnHigh: number;
+  bySeverity?: MlSeverityCounts;
+  threadLinked?: number; // category intents: the acted-on denominator (disclosed)
+  samplePrIds: number[];
+  pathCoveragePct: number | null; // the bot-level disclosure every path-keyed finding renders
+}
+
+// The mandatory pre-PR gate for suppress-shaped intents: what the proposed filter would ALSO
+// have hidden over the evidence window. `applicable:false` = an additive intent (amplify /
+// escalate / bootstrap — nothing gets hidden). `computable:false` on an applicable intent
+// BLOCKS the config-PR (422); the brief still renders with the gap disclosed.
+export interface AdvisorRetroCheck {
+  applicable: boolean;
+  computable: boolean;
+  wouldHideActedOn: number;
+  wouldHideActedOnHigh: number;
+  wouldHideTotal: number;
+  disclosure: string;
+}
+
+export interface AdvisorIntentWire {
+  kind: AdvisorIntentKind;
+  botUserId: number;
+  botKey: string; // `u<userId>`
+  botLabel: string;
+  botKind: AutomatedReviewerKind;
+  target: AdvisorTargetWire;
+  targetKey: string; // the dedupe slot: 'src/**' | 'documentation' | 'nit' | 'u12' | 'config' | a lint template
+  dedupeKey: string; // 'intent|botUserId|targetKey|windowKind' — the recommendation row's key
+  rationale: string; // templated sentence (taxonomy slots), never model text
+  evidence: AdvisorEvidence;
+  retro: AdvisorRetroCheck;
+}
+
+// ── Advisor routes (all under /api/pro/advisor/*; Pro-gated, workspace-scoped) ──────────────
+export type AdvisorRecommendationStatus =
+  | 'dismissed'
+  | 'pr_opened'
+  | 'pr_merged'
+  | 'issue_filed'
+  | 'superseded';
+
+export interface AdvisorRecommendationWire {
+  dedupeKey: string;
+  intent: AdvisorIntentKind;
+  botUserId: number;
+  status: AdvisorRecommendationStatus;
+  prNumber: number | null;
+  prUrl: string | null;
+  issueUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdvisorCapabilityWire {
+  level: 'expressible' | 'degraded' | 'unsupported';
+  alternative?: string;
+}
+
+export interface AdvisorBotProfileWire {
+  botUserId: number;
+  kindHint: string | null;
+  configPath: string | null;
+  ownerContact: string | null;
+  ownerRepo: string | null;
+  notes: string | null;
+  profileSource: 'user' | 'inferred' | null;
+  hasManifest: boolean;
+  manifestConfirmedAt: string | null;
+}
+
+// Per-bot adapter/capability overlay: which emitter serves this bot and what each intent
+// kind degrades to there. `adapterKey` null = no known adapter — T5 (the brief) is the
+// universal fallback, presented as a first-class output.
+export interface AdvisorBotOverlay {
+  botUserId: number;
+  adapterKey: string | null;
+  adapterName: string | null;
+  configTargets: { path: string; format: string }[];
+  capabilities: Partial<Record<AdvisorIntentKind, AdvisorCapabilityWire>> | null;
+  profile: AdvisorBotProfileWire | null;
+}
+
+export interface AdvisorFindingsResponse {
+  enabled: boolean;
+  workspaceId: number;
+  payload: AdvisorFindingsPayload;
+  intents: AdvisorIntentWire[];
+  overlays: AdvisorBotOverlay[];
+  recommendations: AdvisorRecommendationWire[]; // stored decisions, keyed by dedupeKey
+}
+
+export interface AdvisorBriefResponse {
+  workspaceId: number;
+  markdown: string;
+  dedupeKeys: string[];
+}
+
+export interface AdvisorConfigPrBody {
+  repoId: number; // must be in the resolved workspace's membership
+  botUserId: number;
+  dedupeKeys: string[]; // the SELECTION only — intents are re-derived server-side
+  // Refined prose per output path (from POST …/refine). Passes the deterministic diff-guard
+  // server-side against the re-derived templated version — never trusted as-is.
+  refinedByPath?: Record<string, string>;
+}
+
+export interface AdvisorConfigPrResponse {
+  prNumber: number;
+  url: string;
+  // The resync-after-write copy contract: false = the PR IS on GitHub and merely couldn't
+  // be confirmed locally — say "it'll show up here shortly", never offer a retry.
+  visible: boolean;
+  applied: { intentKind: AdvisorIntentKind; targetKey: string; status: string; note?: string }[];
+}
+
+// Dry-run of the config-PR pipeline (POST /api/pro/advisor/preview, same body as config-pr):
+// the exact files the PR would commit, shown before anything is written. Runs the full gate
+// chain (retro gate, parse, additive assert) so a preview that renders is a PR that builds.
+export interface AdvisorPreviewFileWire {
+  path: string;
+  before: string | null; // the fetched default-branch content; null = the file doesn't exist yet
+  after: string;
+}
+
+export interface AdvisorPreviewResponse {
+  workspaceId: number;
+  adapterKey: string;
+  adapterName: string;
+  branch: string;
+  title: string;
+  files: AdvisorPreviewFileWire[];
+  applied: { intentKind: AdvisorIntentKind; targetKey: string; status: string; note?: string }[];
+}
+
+export interface AdvisorRefineBody {
+  repoId: number;
+  botUserId: number;
+  dedupeKeys: string[];
+  path: string; // which output file's managed block to reword
+}
+
+export interface AdvisorRefineResponse {
+  path: string;
+  templated: string; // always retained
+  refined: string | null; // null = guard rejected / credits exhausted / no auth
+  creditsExhausted?: boolean;
+  guardRejected?: string; // the reason, when the LLM output failed the deterministic guard
+}
+
+export interface AdvisorProfilePutBody {
+  workspaceId: number;
+  kindHint?: string | null;
+  configPath?: string | null;
+  ownerContact?: string | null;
+  ownerRepo?: string | null;
+  notes?: string | null;
+}
+
+export interface AdvisorManifestConfirmBody {
+  workspaceId: number;
+  manifest: unknown; // validated structurally server-side (validateManifest)
+}
+
+export interface AdvisorConfigEventBody {
+  workspaceId: number;
+  repoId: number;
+  botUserId: number;
+  occurredAt: string; // ISO
+  configPath?: string | null;
+  description?: string | null;
+}
+
+export interface AdvisorConfigEventWire {
+  id: number;
+  repoId: number;
+  botUserId: number;
+  source: 'advisor_pr' | 'user_reported' | 'detected';
+  occurredAt: string;
+  configPath: string | null;
+  description: string | null;
+  prNumber: number | null;
+  prUrl: string | null;
+}
+
+export interface AdvisorDiscoveryResponse {
+  botUserId: number;
+  repoId: number;
+  appSlug: string | null;
+  // Workflow files that mention a known bot action / the bot's login, with the matched lines.
+  workflowMatches: { path: string; matches: string[] }[];
+  configProbes: { path: string; found: boolean }[];
+  // T3: a structurally-inferred manifest PROPOSAL (never executed unconfirmed).
+  inferredManifest: unknown | null;
+  inferenceTells: string[];
+}
+
+export interface AdvisorIssueResponse {
+  issueUrl: string;
+}
+
+export interface AdvisorEffectResponse {
+  enabled: boolean;
+  panel: AdvisorEffectPanel;
+  anchors: {
+    ms: number;
+    source: 'advisor_pr' | 'user_reported' | 'detected';
+    description: string | null;
+  }[];
+}
+
+// ── Advisor effect panel (verification loop; Pro-gated route, core-computed math) ───────────
+// Five weekly series over the 12-week span, split before/after an anchor (a config-change
+// event or a merged advisor PR) — or, with no anchor, scanned for unattributed changepoints.
+// Null-vs-zero policy matches the behaviour analytics: a zero-volume week is null in `volume`
+// (no baseline contribution; going-dark is the silence detector's job, not this panel's).
+export interface AdvisorEffectSummary {
+  weeks: number; // weeks in this segment with any data
+  volumePerWeek: number | null; // median of the segment's ACTIVE weeks
+  nitSharePct: number | null; // segment-total nits / findings
+  actedOnPct: number | null; // segment-total acted / threads (base predicate — no follow-up set)
+  highSeverityMedianHours: number | null; // pooled resolution latency of high-severity threads
+}
+
+export interface AdvisorChangepoint {
+  series: 'volume' | 'nitShare' | 'actedOn';
+  weekIndex: number; // index where the AFTER segment begins
+  beforeMedian: number;
+  afterMedian: number;
+  direction: 'up' | 'down';
+  z: number;
+}
+
+export interface AdvisorEffectPanel {
+  generatedAt: string;
+  botUserId: number;
+  weekStarts: string[]; // 12, oldest → newest
+  volume: (number | null)[]; // threads opened; null = zero-week
+  findings: number[]; // labelled findings (praise/summary excluded)
+  bySeverity: MlSeverityCounts[];
+  nitSharePct: (number | null)[];
+  topCategories: { category: MlCategory; counts: number[] }[]; // per-week counts, biggest first
+  actedOnPct: (number | null)[];
+  highSeverityMedianHours: (number | null)[];
+  anchor: { ms: number; weekIndex: number } | null;
+  before: AdvisorEffectSummary | null; // full weeks strictly before the anchor week
+  after: AdvisorEffectSummary | null; // full weeks strictly after the anchor week
+  changepoints: AdvisorChangepoint[]; // unattributed mode only (anchor null); [] otherwise
 }
 
 // ── Scope-wide bulk resolve of likely-addressed bot threads ─────────
@@ -2125,6 +2534,10 @@ export interface ProCapabilities {
   // flags) so the free bot Settings section + the ROI cost overlay (both pro_settings-backed)
   // stay reachable. All-false only when the plugin is absent.
   botTriage: boolean;
+  // Bot Tuning Advisor (paid, gated like workspaceInsights): the Bots "Advisor" inner tab,
+  // the per-row Tune/Drop pills, findings → config-PR/brief/issue outputs, the effect panel.
+  // The free amber TuningSuggestions box renders regardless of this flag.
+  botAdvisor: boolean;
 }
 
 // Which GitHub sign-in methods this (cloud) deployment offers — GET /api/auth/providers.

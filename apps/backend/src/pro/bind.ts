@@ -22,12 +22,14 @@ import {
 } from '../review/local-settings.js';
 import { getAccessToken, getAccountById } from '../auth/account.js';
 import {
+  createIssue,
   createPullRequest,
   fetchPrHeadInfo,
   fetchPrUnifiedDiff,
 } from '../github/mutations.js';
+import { ghRestGetContentDir, ghRestGetContentRaw } from '../github/client.js';
 import { fetchActionsJobLog } from '../github/actions-logs.js';
-import { applyAndPush } from '../coding/git-ops.js';
+import { applyAndPush, commitFilesAndOpenPr } from '../coding/git-ops.js';
 import { registerRetentionHandler } from '../db/retention.js';
 import { registerAccountErasureHandler } from '../db/erase-account.js';
 import { runPluginMigrations } from './migrate.js';
@@ -82,7 +84,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   // ⚠ THE RUNTIME GATE. This literal is the twin of `ProPlugin['apiVersion']` in contract.ts —
   // bump them together. A half-bump here silently degrades a CORRECT plugin to OSS mode (the warn
   // below is the only trace; capabilities go dark and every /api/pro/* route 404s).
-  if (plugin?.apiVersion !== 14 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 15 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -147,6 +149,10 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         hostQueries.getBotReviewComments(accountId, window, scope),
       getHumanReviewComments: (accountId, window, scope) =>
         hostQueries.getHumanReviewComments(accountId, window, scope),
+      getAdvisorFindings: (accountId, window, scope) =>
+        hostQueries.getAdvisorFindings(accountId, window, scope),
+      getBotEffectPanel: (accountId, scope, botUserId, anchorMs) =>
+        hostQueries.getBotEffectPanel(accountId, scope, botUserId, anchorMs),
     },
     recordAiUsage: (row) => recordAiUsage(row),
     aiCredits: {
@@ -190,6 +196,22 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         ),
       openPullRequest: async (accountId, prArgs) =>
         createPullRequest(await getAccessToken(accountId), prArgs),
+      // Advisor repo-file reads: status-returning, never throwing (a 404 is the ordinary
+      // "no config yet"). `ref` rides the contents-API query string.
+      readRepoFile: async (accountId, a) =>
+        ghRestGetContentRaw(
+          await getAccessToken(accountId),
+          `/repos/${a.owner}/${a.name}/contents/${a.path}`,
+          a.ref,
+        ),
+      listRepoDir: async (accountId, a) =>
+        ghRestGetContentDir(
+          await getAccessToken(accountId),
+          `/repos/${a.owner}/${a.name}/contents/${a.path}`,
+          a.ref,
+        ),
+      openIssue: async (accountId, a) =>
+        createIssue(await getAccessToken(accountId), a.owner, a.name, a.title, a.body),
     },
     coding: {
       // Lazy-import the agent module (it pulls in the Claude Agent SDK) so the SDK
@@ -197,6 +219,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       generateFix: async (fixArgs) =>
         (await import('../coding/agent.js')).runCodingAgent(fixArgs),
       applyAndPush: (pushArgs) => applyAndPush(pushArgs),
+      commitFilesAndOpenPr: (prArgs) => commitFilesAndOpenPr(prArgs),
       // Trunk-conflict handling lives in coding/merge.ts; also lazy so the SDK loads
       // only when a resolution actually runs.
       mergePreview: async (a) =>

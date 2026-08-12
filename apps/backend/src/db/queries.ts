@@ -128,6 +128,14 @@ import type {
   BotDedupResponse,
   AddressedConfidence,
   BotTuningSuggestion,
+  AdvisorFindingsPayload,
+  AdvisorPathCell,
+  AdvisorCategoryCell,
+  AdvisorOverlapCell,
+  AdvisorBotTotals,
+  AdvisorEffectPanel,
+  AdvisorEffectSummary,
+  AdvisorChangepoint,
   MlSeverity,
   MlSeverityCounts,
   MlCategory,
@@ -186,6 +194,8 @@ import { fingerprintReview } from '../sync/review-fingerprint.js';
 // other at request time — never during module evaluation. Do not add an eval-time use.
 import { getMlWindowAggregates, listMlLabelsForBehaviour } from './ml-labels.js';
 import { clusterThreadsByLine } from './line-overlap.js';
+import { botWindowMs } from './bot-window.js';
+import { detectChangepoints } from './changepoint.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
 // timestamptz (drizzle binds the Date through the codec), whereas SQLite columns
@@ -7921,6 +7931,17 @@ function pathBucket(path: string): string {
   return seg && seg !== path ? `${seg}/**` : path;
 }
 
+// The BASE acted-on predicate over a thread's derived state: resolved, or likely_addressed
+// (the commit heuristic). The MERGED headline definition additionally ORs "a human followed
+// up after the bot's last comment" — a per-thread set the caller builds from the thread's
+// comments; the weekly trend deliberately uses only this base form (a follow-up scan over the
+// full 84-day span would be a second heavy pass for a sparkline). One predicate, shared by
+// getBotAnalytics and getAdvisorFindings, so the two surfaces can never disagree about what
+// "acted on" means.
+function isActedOnThreadState(state: DerivedState | string): boolean {
+  return state === 'resolved' || state === 'likely_addressed';
+}
+
 // The overdue grace window: a not-addressed (untouched) thread only counts as overdue — and only
 // then feeds the 'noisy' verdict — once it's older than this. A FIXED 36h, NOT the measured reply
 // time: the reply-time sample is intrinsically fast (only threads someone engaged with ever draw a
@@ -7947,6 +7968,17 @@ function emptyMlSeverityCounts(): MlSeverityCounts {
 // bots are never called redundant over a handful of threads.
 const OVERLAP_SUGGESTION_MIN_SHARE = 0.4;
 const OVERLAP_SUGGESTION_MIN_THREADS = 5;
+
+// ── Bot Tuning Advisor cell-emission floors (CORE — the same family as the gates above) ─────
+// getAdvisorFindings emits evidence CELLS; these floors gate emission so the advisor is never
+// arguing from a handful of threads. They are CELL floors only — the thresholds that turn a
+// cell into a recommendation (suppress/amplify decisions) live in the plugin's intents.ts;
+// AMPLIFY's acted-on bar lives HERE because the plugin must not invent a second definition of
+// "well acted on" (it is echoed on the wire via `floors`).
+const ADVISOR_MIN_CELL_THREADS = 5; // same claim as the path-suggestion volume gate below
+const ADVISOR_MIN_CELL_FINDINGS = 20; // same bar as ML_NIT_MIN_FINDINGS — a real label sample
+const ADVISOR_AMPLIFY_MIN_ACTED_PCT = 70;
+const ADVISOR_SAMPLE_CAP = 5; // sample PR/thread ids carried per cell for evidence deep links
 
 // keep / tune / noisy verdict (deterministic rule-of-thumb, no AI): high volume + low
 // acted-on + a high share of OVERDUE-untouched threads (untouched AND aged past the account-
@@ -9396,8 +9428,7 @@ export async function getHumanReviewComments(
   const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
 
   const nowMs = Date.now();
-  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
-  const from = new Date(nowMs - windowDays * 86_400_000);
+  const from = new Date(nowMs - botWindowMs(window));
   const repoScopeFilter = [inArray(pullRequests.repoId, scope.repoIds)];
   // Exclude bots two ways: any is_bot user, and the resolved automated-reviewer set (which can
   // include service-account PATs that carry is_bot=false). notInArray on [] is a no-op we skip.
@@ -9572,8 +9603,7 @@ export async function getBotReviewComments(
 
   const nowMs = Date.now();
   // Window resolution mirrors getBotAnalytics exactly (rolling_14 / 'sprint' both → 14d trailing).
-  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
-  const from = new Date(nowMs - windowDays * 86_400_000);
+  const from = new Date(nowMs - botWindowMs(window));
   const repoScopeFilter = [inArray(pullRequests.repoId, scope.repoIds)];
 
   // Per-reviewer label (custom classification label → vendor pretty name → login) — mirrors
@@ -9730,10 +9760,8 @@ export async function getBotAnalytics(
 ): Promise<BotAnalyticsResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
-  // rolling_14 and 'sprint' both use the 14-day trailing window (core can't read the
-  // account's configured sprint bounds — they live in Pro settings).
-  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
-  const from = new Date(nowMs - windowDays * 86_400_000);
+  // The one shared window→duration mapping (db/bot-window.ts; sprint = 14d there).
+  const from = new Date(nowMs - botWindowMs(window));
   const trendFrom = new Date(nowMs - 12 * 7 * 86_400_000); // 84 days ⊇ every window
   const generatedAt = to.toISOString();
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
@@ -9827,6 +9855,37 @@ export async function getBotAnalytics(
     )
     .execute();
 
+  // "Merged past": PRs MERGED inside the window still carrying ≥1 untouched thread by the
+  // bot — the team's FINAL answer was to ship anyway. A dedicated query (not the trend-span
+  // thread walk above) so the threads may be arbitrarily older than the window; the WINDOW
+  // applies to the PR's mergedAt. A NULL mergedAt never matches the gte. Display-only —
+  // `verdict` never reads it.
+  const mergedPastRows = await db
+    .select({ prId: reviewThreads.prId, userId: reviewThreads.originalCommenterId })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviewThreads.originalCommenterId, automatedIds),
+        eq(reviewThreads.derivedState, 'untouched'),
+        gte(pullRequests.mergedAt, from),
+        ...repoScopeFilter,
+      ),
+    )
+    .execute();
+  const mergedPastByUser = new Map<number, { prs: Set<number>; threads: number }>();
+  for (const r of mergedPastRows) {
+    if (r.userId == null) continue;
+    let m = mergedPastByUser.get(r.userId);
+    if (!m) {
+      m = { prs: new Set(), threads: 0 };
+      mergedPastByUser.set(r.userId, m);
+    }
+    m.prs.add(r.prId);
+    m.threads += 1;
+  }
+
   type Acc = {
     kind: AutomatedReviewerKind;
     reviewers: Set<number>;
@@ -9884,7 +9943,7 @@ export async function getBotAnalytics(
     if (!kind) continue;
     bumpLastActive(t.userId, t.createdAt.getTime());
     const acc = accFor(t.userId, kind);
-    const acted = t.state === 'resolved' || t.state === 'likely_addressed';
+    const acted = isActedOnThreadState(t.state);
     // Trend bucket by created week.
     const wk = Math.min(11, Math.max(0, Math.floor((t.createdAt.getTime() - trendFrom.getTime()) / (7 * 86_400_000))));
     const bucket = acc.weekly[wk]!;
@@ -10104,8 +10163,9 @@ export async function getBotAnalytics(
   // Item 6 — merged "acted-on": a window thread counts as acted-on when it's resolved or
   // likely_addressed (the commit heuristic) OR a human followed up after the bot (humanFollowSet).
   for (const t of windowThreads) {
-    const baseActed = t.state === 'resolved' || t.state === 'likely_addressed';
-    if (baseActed || humanFollowSet.has(t.id)) accFor(t.userId, t.kind).actedOn += 1;
+    if (isActedOnThreadState(t.state) || humanFollowSet.has(t.id)) {
+      accFor(t.userId, t.kind).actedOn += 1;
+    }
   }
 
   // ── Same-line overlap (ADVISORY — the redundancy signal) ──────────────────────────────────
@@ -10302,6 +10362,8 @@ export async function getBotAnalytics(
       oldestUntouchedDays,
       humanFollowThroughPct,
       noiseRatioPct,
+      mergedPastPrs: mergedPastByUser.get(userId)?.prs.size ?? 0,
+      mergedPastThreads: mergedPastByUser.get(userId)?.threads ?? 0,
       overlapThreads,
       overlapPct,
       topOverlapPartner: topPartner
@@ -10472,6 +10534,808 @@ export async function getBotAnalytics(
   return { enabled: true, generatedAt, window: win, vendors, qualityChecks, totals, ml: mlAgg.totals, suggestions };
 }
 
+// ── Bot Tuning Advisor findings (CORE, deterministic — the Pro advisor's evidence layer) ────
+// A NEW query, not a getBotAnalytics extension: that getter is the Bots-tab hot path at
+// per-reviewer grain, while the advisor's grain is per-CELL over the whole labelled corpus
+// ((bot × path-bucket), (bot × category), (bot × partner)). It REUSES, never re-derives: the
+// shared acted-on predicate, OVERDUE_GRACE_MS, pathBucket (already the `<seg>/**` glob shape),
+// clusterThreadsByLine, and the one window mapping. Cells are pure evidence — the plugin turns
+// them into intents; NOTHING here may ever feed botVerdict (the advisory invariant pinned by
+// bot-analytics-verdict.test.ts holds for this surface too).
+//
+// Quality-check reviewers appear in `bots` (context; the UI can explain why a linter has no
+// findings) but emit NO cells — a linter's untouched findings are its job (the same rule the
+// tuning suggestions apply).
+//
+// Path coverage: only labels of the `review_comment` kind can ever resolve to a path (PR
+// comments and review bodies have no file). `pathCoveragePct` discloses that per bot and
+// corpus-wide, and every path-keyed consumer must render it.
+const ADVISOR_SCAN_CAP = 50_000; // same honesty cap as the ML rollup scan (ml-labels.ts)
+
+export async function getAdvisorFindings(
+  accountId: number,
+  window: BotWindowKind,
+  scope: BotScope,
+): Promise<AdvisorFindingsPayload> {
+  const nowMs = Date.now();
+  const to = new Date(nowMs);
+  // The one shared window→duration mapping (db/bot-window.ts).
+  const from = new Date(nowMs - botWindowMs(window));
+  const generatedAt = to.toISOString();
+  const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
+  const floors = {
+    minCellThreads: ADVISOR_MIN_CELL_THREADS,
+    minCellFindings: ADVISOR_MIN_CELL_FINDINGS,
+    amplifyMinActedPct: ADVISOR_AMPLIFY_MIN_ACTED_PCT,
+    overdueGraceMs: OVERDUE_GRACE_MS,
+  };
+  const empty: AdvisorFindingsPayload = {
+    generatedAt,
+    window: win,
+    workspaceId: scope.workspaceId,
+    bots: [],
+    pathCells: [],
+    categoryCells: [],
+    overlapCells: [],
+    pathCoveragePct: null,
+    floors,
+  };
+  if (scope.repoIds.length === 0) return empty;
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
+  if (automatedIds.length === 0) return empty;
+  const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
+  const roleMap = await reviewerRoleForUser(accountId, scope.workspaceId);
+  const classLabel = await classificationLabelMap(accountId, scope.workspaceId);
+  const repoScopeFilter = [inArray(pullRequests.repoId, scope.repoIds)];
+
+  // Identity maps — the same label preference getBotAnalytics uses.
+  const loginById = new Map<number, string>();
+  const rawLoginById = new Map<number, string>();
+  for (const r of await db
+    .select({ id: users.id, login: users.githubLogin, name: users.displayName })
+    .from(users)
+    .where(inArray(users.id, automatedIds))
+    .execute()) {
+    loginById.set(r.id, r.name?.trim() || r.login || `#${r.id}`);
+    if (r.login) rawLoginById.set(r.id, r.login);
+  }
+  const reviewerLabel = (userId: number, kind: AutomatedReviewerKind): string => {
+    const custom = classLabel.get(userId);
+    if (custom) return custom;
+    if (kind !== 'in_house' && kind !== 'pierre' && kind !== 'vendor')
+      return labelForKind(kind);
+    return loginById.get(userId) ?? labelForKind(kind);
+  };
+
+  // The bot's window THREADS (the path-cell + totals population). `prMerged` feeds the
+  // mergedUntouched counts — an untouched thread whose PR has SINCE merged is the team's
+  // final answer, the subset the plugin's suppression gate keys on.
+  const threadRows = await db
+    .select({
+      id: reviewThreads.id,
+      prId: reviewThreads.prId,
+      userId: reviewThreads.originalCommenterId,
+      path: reviewThreads.path,
+      line: reviewThreads.line,
+      state: reviewThreads.derivedState,
+      createdAt: reviewThreads.createdAt,
+      prState: pullRequests.state,
+    })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        inArray(reviewThreads.originalCommenterId, automatedIds),
+        gte(reviewThreads.createdAt, from),
+        ...repoScopeFilter,
+      ),
+    )
+    .execute();
+
+  type WThread = {
+    id: number;
+    prId: number;
+    userId: number;
+    kind: AutomatedReviewerKind;
+    path: string;
+    line: number | null;
+    state: string;
+    createdAt: Date;
+    prMerged: boolean;
+  };
+  const windowThreads: WThread[] = [];
+  for (const t of threadRows) {
+    if (t.userId == null) continue;
+    const kind = kindMap.get(t.userId);
+    if (!kind) continue;
+    windowThreads.push({
+      id: t.id,
+      prId: t.prId,
+      userId: t.userId,
+      kind,
+      path: t.path,
+      line: t.line,
+      state: t.state,
+      createdAt: t.createdAt,
+      prMerged: t.prState === 'merged',
+    });
+  }
+  const threadById = new Map(windowThreads.map((t) => [t.id, t]));
+
+  // One comments pass over the window threads → the human-follow-up set (the merged acted-on
+  // definition) and the ORIGIN comment of every thread (unlike getBotAnalytics's untouched-only
+  // map — category cells need acted-on facts for acted threads too).
+  const humanFollowSet = new Set<number>();
+  const threadIdByOriginComment = new Map<number, number>();
+  if (windowThreads.length > 0) {
+    const ftRows = await db
+      .select({
+        id: reviewComments.id,
+        threadId: reviewComments.threadId,
+        authorId: reviewComments.authorId,
+        createdAt: reviewComments.createdAt,
+      })
+      .from(reviewComments)
+      .where(inArray(reviewComments.threadId, windowThreads.map((t) => t.id)))
+      .execute();
+    const byThread = new Map<number, { id: number; authorId: number | null; at: number }[]>();
+    for (const r of ftRows) {
+      const arr = byThread.get(r.threadId) ?? [];
+      arr.push({ id: r.id, authorId: r.authorId, at: r.createdAt.getTime() });
+      byThread.set(r.threadId, arr);
+    }
+    for (const t of windowThreads) {
+      // The thread's OWN bot, earliest comment first; ties break on the lower id (deterministic
+      // in both dialects — row order out of the join is not a promise).
+      let origin: { id: number; at: number } | null = null;
+      for (const c of byThread.get(t.id) ?? []) {
+        if (c.authorId !== t.userId) continue;
+        if (origin == null || c.at < origin.at || (c.at === origin.at && c.id < origin.id))
+          origin = { id: c.id, at: c.at };
+      }
+      if (origin) threadIdByOriginComment.set(origin.id, t.id);
+      // Human follow-up after the bot's LAST comment on the thread.
+      let botLastAt = -Infinity;
+      for (const c of byThread.get(t.id) ?? []) {
+        if (c.authorId != null && automatedIds.includes(c.authorId) && c.at > botLastAt)
+          botLastAt = c.at;
+      }
+      if (
+        (byThread.get(t.id) ?? []).some(
+          (c) => c.authorId != null && !automatedIds.includes(c.authorId) && c.at > botLastAt,
+        )
+      )
+        humanFollowSet.add(t.id);
+    }
+  }
+
+  const isOverdue = (t: WThread): boolean =>
+    t.state === 'untouched' && nowMs - t.createdAt.getTime() > OVERDUE_GRACE_MS;
+  const isActed = (t: WThread): boolean =>
+    isActedOnThreadState(t.state) || humanFollowSet.has(t.id);
+
+  // The window LABEL scan (all three target kinds) — the category-cell + coverage population.
+  const labelRows = await db
+    .select({
+      targetKind: mlCommentLabels.targetKind,
+      targetId: mlCommentLabels.targetId,
+      authorUserId: mlCommentLabels.authorUserId,
+      prId: mlCommentLabels.prId,
+      severity: mlCommentLabels.severity,
+      categories: mlCommentLabels.categories,
+      isSummary: mlCommentLabels.isSummary,
+    })
+    .from(mlCommentLabels)
+    .where(
+      and(
+        eq(mlCommentLabels.accountId, accountId),
+        inArray(mlCommentLabels.repoId, scope.repoIds),
+        inArray(mlCommentLabels.authorUserId, automatedIds),
+        gte(mlCommentLabels.targetCreatedAt, from),
+      ),
+    )
+    .orderBy(desc(mlCommentLabels.targetCreatedAt), desc(mlCommentLabels.id))
+    .limit(ADVISOR_SCAN_CAP)
+    .execute();
+
+  type BotAgg = {
+    threads: number;
+    actedOn: number;
+    untouched: number;
+    mergedUntouched: number;
+    overdueUntouched: number;
+    dissent: number;
+    mlLabelled: number;
+    mlFindings: number;
+    mlNits: number;
+    actedOnNits: number;
+    mlWithPath: number;
+  };
+  const botAgg = new Map<number, BotAgg>();
+  const botAggFor = (userId: number): BotAgg => {
+    let a = botAgg.get(userId);
+    if (!a) {
+      a = {
+        threads: 0,
+        actedOn: 0,
+        untouched: 0,
+        mergedUntouched: 0,
+        overdueUntouched: 0,
+        dissent: 0,
+        mlLabelled: 0,
+        mlFindings: 0,
+        mlNits: 0,
+        actedOnNits: 0,
+        mlWithPath: 0,
+      };
+      botAgg.set(userId, a);
+    }
+    return a;
+  };
+
+  const pushSample = (arr: number[], id: number): void => {
+    if (arr.length < ADVISOR_SAMPLE_CAP && !arr.includes(id)) arr.push(id);
+  };
+
+  // Label pass: per-bot ML counts + coverage, category cells, and the per-thread origin label
+  // (feeding the path cells' severity mix / actedOnHigh below).
+  type CatAgg = {
+    findings: number;
+    bySeverity: MlSeverityCounts;
+    threadLinked: number;
+    actedOn: number;
+    actedOnHigh: number;
+    untouched: number;
+    mergedUntouched: number;
+    overdueUntouched: number;
+    dissent: number;
+    samplePrIds: number[];
+  };
+  const catAgg = new Map<number, Map<string, CatAgg>>();
+  const originLabelByThread = new Map<number, MlSeverity>(); // findings only
+  for (const r of labelRows) {
+    const severity = ML_SEVERITY_KEYS.find((s) => s === r.severity);
+    if (!severity) continue; // plain-text column — an unreadable value is no claim
+    const agg = botAggFor(r.authorUserId);
+    agg.mlLabelled += 1;
+    if (r.targetKind === 'review_comment') agg.mlWithPath += 1;
+    const categories = Array.isArray(r.categories) ? (r.categories as string[]) : [];
+    const isFinding = r.isSummary !== true && !categories.includes('praise');
+    if (!isFinding) continue;
+    agg.mlFindings += 1;
+    if (severity === 'nit') agg.mlNits += 1;
+    // Thread linkage exists only for the origin comment of a window thread.
+    const threadId =
+      r.targetKind === 'review_comment' ? threadIdByOriginComment.get(r.targetId) : undefined;
+    const thread = threadId != null ? threadById.get(threadId) : undefined;
+    if (thread) originLabelByThread.set(thread.id, severity);
+    if (roleMap.get(r.authorUserId) === 'quality_check') continue; // no cells for linters
+    let byCat = catAgg.get(r.authorUserId);
+    if (!byCat) {
+      byCat = new Map();
+      catAgg.set(r.authorUserId, byCat);
+    }
+    for (const category of categories) {
+      if (category === 'praise') continue;
+      let c = byCat.get(category);
+      if (!c) {
+        c = {
+          findings: 0,
+          bySeverity: emptyMlSeverityCounts(),
+          threadLinked: 0,
+          actedOn: 0,
+          actedOnHigh: 0,
+          untouched: 0,
+          mergedUntouched: 0,
+          overdueUntouched: 0,
+          dissent: 0,
+          samplePrIds: [],
+        };
+        byCat.set(category, c);
+      }
+      c.findings += 1;
+      c.bySeverity[severity] += 1;
+      pushSample(c.samplePrIds, r.prId);
+      if (thread) {
+        c.threadLinked += 1;
+        if (isActed(thread)) {
+          c.actedOn += 1;
+          if (severity === 'major' || severity === 'critical') c.actedOnHigh += 1;
+        }
+        if (thread.state === 'untouched') {
+          c.untouched += 1;
+          if (thread.prMerged) c.mergedUntouched += 1;
+        }
+        if (isOverdue(thread)) c.overdueUntouched += 1;
+        if (thread.state === 'replied_unresolved') c.dissent += 1;
+      }
+    }
+  }
+
+  // Thread pass: per-bot thread totals + path cells.
+  //
+  // Path buckets are ADAPTIVE-DEPTH: every thread aggregates into its depth-1 parent
+  // (`a/**`) AND — when the path is deep enough — its depth-2 child (`a/b/**`). Emission
+  // below prefers qualifying children; the parent is emitted only when NONE of its children
+  // meets the thread floor, so emitted globs never overlap and the retro-check identity
+  // ("our glob matches exactly the prefix the cell aggregated") holds at either depth.
+  // A top-level `apps/**` cell over a monorepo where apps/ IS the codebase was too coarse
+  // to act on — the free tuning suggestion keeps the depth-1 `pathBucket` above; this
+  // sharper grouping is advisor-only.
+  type PathAgg = {
+    volume: number;
+    actedOn: number;
+    actedOnHigh: number;
+    actedOnNits: number;
+    untouched: number;
+    mergedUntouched: number;
+    overdueUntouched: number;
+    dissent: number;
+    bySeverity: MlSeverityCounts;
+    samplePrIds: number[];
+    sampleThreadIds: number[];
+  };
+  const emptyPathAgg = (): PathAgg => ({
+    volume: 0,
+    actedOn: 0,
+    actedOnHigh: 0,
+    actedOnNits: 0,
+    untouched: 0,
+    mergedUntouched: 0,
+    overdueUntouched: 0,
+    dissent: 0,
+    bySeverity: emptyMlSeverityCounts(),
+    samplePrIds: [],
+    sampleThreadIds: [],
+  });
+  const advisorBucketKeys = (path: string): { parent: string; child: string | null } => {
+    const segs = path.split('/');
+    if (segs.length <= 1) return { parent: path, child: null }; // root-level file
+    if (segs.length === 2) return { parent: `${segs[0]}/**`, child: null }; // direct file
+    return { parent: `${segs[0]}/**`, child: `${segs[0]}/${segs[1]}/**` };
+  };
+  type PathGroup = { all: PathAgg; children: Map<string, PathAgg> };
+  const pathAgg = new Map<number, Map<string, PathGroup>>();
+  for (const t of windowThreads) {
+    const agg = botAggFor(t.userId);
+    agg.threads += 1;
+    const acted = isActed(t);
+    if (acted) agg.actedOn += 1;
+    if (t.state === 'untouched') {
+      agg.untouched += 1;
+      if (t.prMerged) agg.mergedUntouched += 1;
+    }
+    if (isOverdue(t)) agg.overdueUntouched += 1;
+    if (t.state === 'replied_unresolved') agg.dissent += 1;
+    const originSeverity = originLabelByThread.get(t.id);
+    if (acted && originSeverity === 'nit') agg.actedOnNits += 1;
+    if (roleMap.get(t.userId) === 'quality_check') continue; // no cells for linters
+    let byParent = pathAgg.get(t.userId);
+    if (!byParent) {
+      byParent = new Map();
+      pathAgg.set(t.userId, byParent);
+    }
+    const { parent, child } = advisorBucketKeys(t.path);
+    let group = byParent.get(parent);
+    if (!group) {
+      group = { all: emptyPathAgg(), children: new Map() };
+      byParent.set(parent, group);
+    }
+    const targets = [group.all];
+    if (child) {
+      let c = group.children.get(child);
+      if (!c) {
+        c = emptyPathAgg();
+        group.children.set(child, c);
+      }
+      targets.push(c);
+    }
+    for (const p of targets) {
+      p.volume += 1;
+      if (acted) {
+        p.actedOn += 1;
+        if (originSeverity === 'major' || originSeverity === 'critical') p.actedOnHigh += 1;
+        if (originSeverity === 'nit') p.actedOnNits += 1;
+      }
+      if (t.state === 'untouched') {
+        p.untouched += 1;
+        if (t.prMerged) p.mergedUntouched += 1;
+      }
+      if (isOverdue(t)) p.overdueUntouched += 1;
+      if (t.state === 'replied_unresolved') p.dissent += 1;
+      if (originSeverity) p.bySeverity[originSeverity] += 1;
+      pushSample(p.samplePrIds, t.prId);
+      pushSample(p.sampleThreadIds, t.id);
+    }
+  }
+
+  // Overlap pass — the shared ±3-line clustering, review-role bots only (both the dedup and
+  // the ROI overlap column apply the same exclusion).
+  const overlapThreadsByUser = new Map<number, number>();
+  const overlapPairClusters = new Map<string, number>();
+  {
+    const reviewRoleThreads = windowThreads.filter(
+      (t) => roleMap.get(t.userId) !== 'quality_check',
+    );
+    for (const c of clusterThreadsByLine(reviewRoleThreads, { nullLineGroup: false })) {
+      if (c.userIds.size < 2) continue;
+      for (const t of c.items)
+        overlapThreadsByUser.set(t.userId, (overlapThreadsByUser.get(t.userId) ?? 0) + 1);
+      const ids = [...c.userIds].sort((x, y) => x - y);
+      for (let i = 0; i < ids.length; i++)
+        for (let j = i + 1; j < ids.length; j++) {
+          const k = `u${ids[i]}|u${ids[j]}`;
+          overlapPairClusters.set(k, (overlapPairClusters.get(k) ?? 0) + 1);
+        }
+    }
+  }
+
+  // ── Emission (floors + deterministic ordering) ───────────────────────────────────────────
+  const bots: AdvisorBotTotals[] = [];
+  for (const [userId, agg] of botAgg) {
+    if (agg.threads === 0 && agg.mlLabelled === 0) continue;
+    const kind = kindMap.get(userId) ?? 'in_house';
+    const actedOnPct = agg.threads > 0 ? Math.round((agg.actedOn / agg.threads) * 100) : null;
+    bots.push({
+      botUserId: userId,
+      key: `u${userId}`,
+      kind,
+      label: reviewerLabel(userId, kind),
+      login: rawLoginById.get(userId) ?? null,
+      isQualityCheck: roleMap.get(userId) === 'quality_check',
+      threads: agg.threads,
+      actedOn: agg.actedOn,
+      untouched: agg.untouched,
+      mergedUntouched: agg.mergedUntouched,
+      overdueUntouched: agg.overdueUntouched,
+      dissent: agg.dissent,
+      mlLabelled: agg.mlLabelled,
+      mlFindings: agg.mlFindings,
+      mlNits: agg.mlNits,
+      actedOnNits: agg.actedOnNits,
+      pathCoveragePct:
+        agg.mlLabelled > 0 ? Math.round((agg.mlWithPath / agg.mlLabelled) * 100) : null,
+      // READ-only use of the verdict (context for the advisor UI); the advisory invariant runs
+      // the other way — nothing computed here feeds botVerdict.
+      verdict: botVerdict(
+        agg.threads,
+        actedOnPct,
+        agg.overdueUntouched,
+        agg.mlFindings > 0 ? { findings: agg.mlFindings, nits: agg.mlNits } : null,
+      ),
+    });
+  }
+  bots.sort((a, b) => b.threads - a.threads || b.mlFindings - a.mlFindings || a.botUserId - b.botUserId);
+
+  const pathCells: AdvisorPathCell[] = [];
+  for (const [userId, byParent] of pathAgg) {
+    for (const [parentKey, group] of byParent) {
+      // Prefer qualifying depth-2 children; the coarse parent only when none qualifies.
+      // Sub-floor children (and, when children win, the parent's direct-file remainder)
+      // are unreported — the same statement the floors already make everywhere else.
+      const qualifying = [...group.children.entries()].filter(
+        ([, p]) => p.volume >= ADVISOR_MIN_CELL_THREADS,
+      );
+      const emit: [string, PathAgg][] =
+        qualifying.length > 0
+          ? qualifying
+          : group.all.volume >= ADVISOR_MIN_CELL_THREADS
+            ? [[parentKey, group.all]]
+            : [];
+      for (const [bucket, p] of emit) {
+        pathCells.push({
+          botUserId: userId,
+          pathBucket: bucket,
+          volume: p.volume,
+          actedOn: p.actedOn,
+          actedOnHigh: p.actedOnHigh,
+          actedOnNits: p.actedOnNits,
+          untouched: p.untouched,
+          mergedUntouched: p.mergedUntouched,
+          overdueUntouched: p.overdueUntouched,
+          dissent: p.dissent,
+          bySeverity: p.bySeverity,
+          samplePrIds: p.samplePrIds,
+          sampleThreadIds: p.sampleThreadIds,
+        });
+      }
+    }
+  }
+  pathCells.sort(
+    (a, b) => b.volume - a.volume || a.botUserId - b.botUserId || a.pathBucket.localeCompare(b.pathBucket),
+  );
+
+  const categoryCells: AdvisorCategoryCell[] = [];
+  for (const [userId, byCat] of catAgg) {
+    for (const [category, c] of byCat) {
+      if (c.findings < ADVISOR_MIN_CELL_FINDINGS) continue;
+      categoryCells.push({
+        botUserId: userId,
+        category: category as MlCategory,
+        findings: c.findings,
+        bySeverity: c.bySeverity,
+        threadLinked: c.threadLinked,
+        actedOn: c.actedOn,
+        actedOnHigh: c.actedOnHigh,
+        untouched: c.untouched,
+        mergedUntouched: c.mergedUntouched,
+        overdueUntouched: c.overdueUntouched,
+        dissent: c.dissent,
+        samplePrIds: c.samplePrIds,
+      });
+    }
+  }
+  categoryCells.sort(
+    (a, b) =>
+      b.findings - a.findings || a.botUserId - b.botUserId || a.category.localeCompare(b.category),
+  );
+
+  const overlapCells: AdvisorOverlapCell[] = [];
+  for (const [k, sharedClusters] of overlapPairClusters) {
+    const [a, b] = k.split('|').map((s) => Number(s.slice(1))) as [number, number];
+    for (const [self, other] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      const threads = botAgg.get(self)?.threads ?? 0;
+      if (threads < ADVISOR_MIN_CELL_THREADS) continue;
+      overlapCells.push({
+        botUserId: self,
+        partnerUserId: other,
+        sharedClusters,
+        overlapThreads: overlapThreadsByUser.get(self) ?? 0,
+        threads,
+      });
+    }
+  }
+  overlapCells.sort(
+    (a, b) =>
+      b.sharedClusters - a.sharedClusters || a.botUserId - b.botUserId || a.partnerUserId - b.partnerUserId,
+  );
+
+  const totalLabelled = bots.reduce((s, b) => s + b.mlLabelled, 0);
+  const totalWithPath = [...botAgg.values()].reduce((s, a) => s + a.mlWithPath, 0);
+  return {
+    generatedAt,
+    window: win,
+    workspaceId: scope.workspaceId,
+    bots,
+    pathCells,
+    categoryCells,
+    overlapCells,
+    pathCoveragePct: totalLabelled > 0 ? Math.round((totalWithPath / totalLabelled) * 100) : null,
+    floors,
+  };
+}
+
+// ── Bot effect panel (the advisor's verification loop — CORE math, Pro-gated route) ─────────
+// Five weekly series over the behaviour tab's 12-week span, split before/after `anchorMs` (a
+// config event or a merged advisor PR — resolved by the PLUGIN; this query never sees a
+// recommendation, which is what keeps measurement independent of emission), or scanned for
+// unattributed changepoints when the anchor is null. Null-vs-zero policy matches the
+// behaviour analytics verbatim: a zero-volume week is null in the volume series (no baseline
+// contribution — going dark stays detectSilentRuns's job). Acted-on uses the BASE predicate
+// (the weekly-trend precedent — no follow-up scan over the full span).
+export async function getBotEffectPanel(
+  accountId: number,
+  scope: BotScope,
+  botUserId: number,
+  anchorMs: number | null,
+): Promise<AdvisorEffectPanel> {
+  const nowMs = Date.now();
+  const generatedAt = new Date(nowMs).toISOString();
+  const SPAN_WEEKS = 12;
+  const WEEK = 7 * 86_400_000;
+  const spanStartMs = nowMs - SPAN_WEEKS * WEEK;
+  const weekStarts = Array.from({ length: SPAN_WEEKS }, (_, i) =>
+    new Date(spanStartMs + i * WEEK).toISOString(),
+  );
+  const wi = (ms: number): number =>
+    Math.min(SPAN_WEEKS - 1, Math.max(0, Math.floor((ms - spanStartMs) / WEEK)));
+
+  const panel: AdvisorEffectPanel = {
+    generatedAt,
+    botUserId,
+    weekStarts,
+    volume: Array.from({ length: SPAN_WEEKS }, () => null),
+    findings: Array.from({ length: SPAN_WEEKS }, () => 0),
+    bySeverity: Array.from({ length: SPAN_WEEKS }, emptyMlSeverityCounts),
+    nitSharePct: Array.from({ length: SPAN_WEEKS }, () => null),
+    topCategories: [],
+    actedOnPct: Array.from({ length: SPAN_WEEKS }, () => null),
+    highSeverityMedianHours: Array.from({ length: SPAN_WEEKS }, () => null),
+    anchor: null,
+    before: null,
+    after: null,
+    changepoints: [],
+  };
+  // Scope/ownership gate: the bot must be one of THIS workspace's automated reviewers — an
+  // arbitrary user id from the request body earns an empty panel, never data.
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
+  if (scope.repoIds.length === 0 || !automatedIds.includes(botUserId)) return panel;
+
+  const spanStart = new Date(spanStartMs);
+  const threadRows = await db
+    .select({
+      id: reviewThreads.id,
+      state: reviewThreads.derivedState,
+      createdAt: reviewThreads.createdAt,
+      resolvedAt: reviewThreads.resolvedAt,
+    })
+    .from(reviewThreads)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(reviewThreads.originalCommenterId, botUserId),
+        gte(reviewThreads.createdAt, spanStart),
+        inArray(pullRequests.repoId, scope.repoIds),
+      ),
+    )
+    .execute();
+
+  const volumeRaw = Array.from({ length: SPAN_WEEKS }, () => 0);
+  const actedRaw = Array.from({ length: SPAN_WEEKS }, () => 0);
+  for (const t of threadRows) {
+    const w = wi(t.createdAt.getTime());
+    volumeRaw[w]! += 1;
+    if (isActedOnThreadState(t.state)) actedRaw[w]! += 1;
+  }
+
+  const labelRows = await db
+    .select({
+      targetKind: mlCommentLabels.targetKind,
+      targetId: mlCommentLabels.targetId,
+      severity: mlCommentLabels.severity,
+      categories: mlCommentLabels.categories,
+      isSummary: mlCommentLabels.isSummary,
+      targetCreatedAt: mlCommentLabels.targetCreatedAt,
+    })
+    .from(mlCommentLabels)
+    .where(
+      and(
+        eq(mlCommentLabels.accountId, accountId),
+        inArray(mlCommentLabels.repoId, scope.repoIds),
+        eq(mlCommentLabels.authorUserId, botUserId),
+        gte(mlCommentLabels.targetCreatedAt, spanStart),
+      ),
+    )
+    .orderBy(desc(mlCommentLabels.targetCreatedAt), desc(mlCommentLabels.id))
+    .limit(ADVISOR_SCAN_CAP)
+    .execute();
+
+  const catWeekly = new Map<string, number[]>();
+  const highLabelCommentIds = new Set<number>();
+  for (const r of labelRows) {
+    const severity = ML_SEVERITY_KEYS.find((s) => s === r.severity);
+    if (!severity) continue;
+    const categories = Array.isArray(r.categories) ? (r.categories as string[]) : [];
+    if (r.isSummary === true || categories.includes('praise')) continue;
+    const w = wi(r.targetCreatedAt.getTime());
+    panel.findings[w]! += 1;
+    panel.bySeverity[w]![severity] += 1;
+    if (
+      (severity === 'major' || severity === 'critical') &&
+      r.targetKind === 'review_comment'
+    )
+      highLabelCommentIds.add(r.targetId);
+    for (const category of categories) {
+      let counts = catWeekly.get(category);
+      if (!counts) {
+        counts = Array.from({ length: SPAN_WEEKS }, () => 0);
+        catWeekly.set(category, counts);
+      }
+      counts[w]! += 1;
+    }
+  }
+
+  // High-severity resolution latency: threads whose ORIGIN comment carries a major/critical
+  // label and that were resolved — bucketed by the thread's CREATION week (the before/after
+  // question is "how were findings made after the change handled", so the sample belongs to
+  // the week the finding was made, not the week someone got to it).
+  const highSamplesByWeek: number[][] = Array.from({ length: SPAN_WEEKS }, () => []);
+  if (highLabelCommentIds.size > 0 && threadRows.length > 0) {
+    const resolvedIds = threadRows.filter((t) => t.resolvedAt != null).map((t) => t.id);
+    if (resolvedIds.length > 0) {
+      const originRows = await db
+        .select({
+          id: reviewComments.id,
+          threadId: reviewComments.threadId,
+          authorId: reviewComments.authorId,
+          createdAt: reviewComments.createdAt,
+        })
+        .from(reviewComments)
+        .where(inArray(reviewComments.threadId, resolvedIds))
+        .execute();
+      const originByThread = new Map<number, { id: number; at: number }>();
+      for (const c of originRows) {
+        if (c.authorId !== botUserId) continue;
+        const cur = originByThread.get(c.threadId);
+        const at = c.createdAt.getTime();
+        if (!cur || at < cur.at || (at === cur.at && c.id < cur.id))
+          originByThread.set(c.threadId, { id: c.id, at });
+      }
+      for (const t of threadRows) {
+        if (t.resolvedAt == null) continue;
+        const origin = originByThread.get(t.id);
+        if (!origin || !highLabelCommentIds.has(origin.id)) continue;
+        const hours = (t.resolvedAt.getTime() - t.createdAt.getTime()) / 3_600_000;
+        if (hours < 0) continue;
+        highSamplesByWeek[wi(t.createdAt.getTime())]!.push(hours);
+      }
+    }
+  }
+
+  panel.volume = volumeRaw.map((v) => (v > 0 ? v : null));
+  panel.actedOnPct = volumeRaw.map((v, i) =>
+    v > 0 ? Math.round((actedRaw[i]! / v) * 100) : null,
+  );
+  panel.nitSharePct = panel.findings.map((f, i) =>
+    f > 0 ? Math.round((panel.bySeverity[i]!.nit / f) * 100) : null,
+  );
+  panel.highSeverityMedianHours = highSamplesByWeek.map((samples) => {
+    const m = medianOf(samples);
+    return m == null ? null : Math.round(m * 10) / 10;
+  });
+  panel.topCategories = [...catWeekly.entries()]
+    .map(([category, counts]) => ({ category: category as MlCategory, counts }))
+    .sort(
+      (a, b) =>
+        b.counts.reduce((s, n) => s + n, 0) - a.counts.reduce((s, n) => s + n, 0) ||
+        a.category.localeCompare(b.category),
+    )
+    .slice(0, 8);
+
+  const summarize = (weekIdxs: number[]): AdvisorEffectSummary | null => {
+    const active = weekIdxs.filter((i) => volumeRaw[i]! > 0 || panel.findings[i]! > 0);
+    if (active.length === 0) return null;
+    const threads = weekIdxs.reduce((s, i) => s + volumeRaw[i]!, 0);
+    const acted = weekIdxs.reduce((s, i) => s + actedRaw[i]!, 0);
+    const findings = weekIdxs.reduce((s, i) => s + panel.findings[i]!, 0);
+    const nits = weekIdxs.reduce((s, i) => s + panel.bySeverity[i]!.nit, 0);
+    const highSamples = weekIdxs.flatMap((i) => highSamplesByWeek[i]!);
+    const highMedian = medianOf(highSamples);
+    const volMedian = medianOf(weekIdxs.map((i) => volumeRaw[i]!).filter((v) => v > 0));
+    return {
+      weeks: active.length,
+      volumePerWeek: volMedian == null ? null : Math.round(volMedian * 10) / 10,
+      nitSharePct: findings > 0 ? Math.round((nits / findings) * 100) : null,
+      actedOnPct: threads > 0 ? Math.round((acted / threads) * 100) : null,
+      highSeverityMedianHours: highMedian == null ? null : Math.round(highMedian * 10) / 10,
+    };
+  };
+
+  if (anchorMs != null) {
+    const anchorWeek = wi(anchorMs);
+    panel.anchor = { ms: anchorMs, weekIndex: anchorWeek };
+    // The anchor week itself is transitional (part-before, part-after) and joins neither side.
+    panel.before = summarize(Array.from({ length: anchorWeek }, (_, i) => i));
+    panel.after = summarize(
+      Array.from({ length: SPAN_WEEKS - anchorWeek - 1 }, (_, i) => anchorWeek + 1 + i),
+    );
+  } else {
+    const cps: AdvisorChangepoint[] = [];
+    const push = (series: AdvisorChangepoint['series'], values: (number | null)[], minScale: number): void => {
+      for (const cp of detectChangepoints(values, { minScale })) {
+        cps.push({
+          series,
+          weekIndex: cp.index,
+          beforeMedian: Math.round(cp.beforeMedian * 10) / 10,
+          afterMedian: Math.round(cp.afterMedian * 10) / 10,
+          direction: cp.direction,
+          z: Math.round(cp.z * 10) / 10,
+        });
+      }
+    };
+    push('volume', panel.volume, 2);
+    push('nitShare', panel.nitSharePct, 10);
+    push('actedOn', panel.actedOnPct, 10);
+    panel.changepoints = cps;
+  }
+  return panel;
+}
+
 // ── Bot BEHAVIOUR analytics (EXPERIMENTAL, CORE, deterministic) ────────────────────────────
 // A SEPARATE surface from getBotAnalytics (which stays untouched) powering the "Behaviour"
 // sub-tab. Per bot, over the shared window (+ a 12-week TTFR trend): time-to-first-review, the
@@ -10575,8 +11439,7 @@ export async function getBotBehaviourAnalytics(
 ): Promise<BotBehaviourResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
-  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
-  const from = new Date(nowMs - windowDays * 86_400_000);
+  const from = new Date(nowMs - botWindowMs(window));
   const fromMs = from.getTime();
   const trendFrom = new Date(nowMs - 12 * 7 * 86_400_000); // 84 days ⊇ every window
   const generatedAt = to.toISOString();
@@ -11514,8 +12377,7 @@ export async function getBotOnlyPrs(
   const nowMs = Date.now();
   const to = new Date(nowMs);
   // rolling_14 and 'sprint' both use the 14-day trailing window (matches getBotAnalytics).
-  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
-  const from = new Date(nowMs - windowDays * 86_400_000);
+  const from = new Date(nowMs - botWindowMs(window));
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
 
   // An empty workspace means "no repos" → no PRs.
@@ -11843,9 +12705,8 @@ export async function getBotVendorPrs(
 ): Promise<BotVendorPrsResponse> {
   const nowMs = Date.now();
   const to = new Date(nowMs);
-  // Same window→days mapping as getBotAnalytics (rolling_7=7, rolling_30=30, else — incl. sprint — 14).
-  const windowDays = window === 'rolling_7' ? 7 : window === 'rolling_30' ? 30 : 14;
-  const from = new Date(nowMs - windowDays * 86_400_000);
+  // The one shared window→duration mapping (db/bot-window.ts).
+  const from = new Date(nowMs - botWindowMs(window));
   const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
   const generatedAt = new Date(nowMs).toISOString();
 
