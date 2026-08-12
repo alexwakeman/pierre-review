@@ -213,6 +213,8 @@ export function FeedView({
   const feedCatPrEvents = useFilters((s) => s.feedCatPrEvents);
   const toggleFeedCatComments = useFilters((s) => s.toggleFeedCatComments);
   const toggleFeedCatPrEvents = useFilters((s) => s.toggleFeedCatPrEvents);
+  const feedNeedsReview = useFilters((s) => s.feedNeedsReview);
+  const toggleFeedNeedsReview = useFilters((s) => s.toggleFeedNeedsReview);
   const feedShowCommits = useFilters((s) => s.feedShowCommits);
   const toggleFeedShowCommits = useFilters((s) => s.toggleFeedShowCommits);
   const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
@@ -495,6 +497,24 @@ export function FeedView({
       ).length,
     [counts, items],
   );
+  // "Needs review" matcher — a pr_opened / pr_ready_for_review card whose PR STILL awaits a
+  // first review (the server-computed live snapshot). MUST mirror computeFeedCounts's
+  // awaitingReview facet exactly, or the badge and the filtered list disagree.
+  const matchesNeedsReview = useCallback(
+    (i: ConsolidatedFeedItem): boolean =>
+      (i.kind === 'pr_opened' || i.kind === 'pr_ready_for_review') &&
+      i.prAwaitingReview === true,
+    [],
+  );
+  // Needs-review pill badge — the server `awaitingReview` facet with a loaded-page fallback
+  // (a stale IndexedDB-persisted response predates the field). Both sides count DISTINCT PRs,
+  // not events — a draft-first PR carries both kinds in the window.
+  const needsReviewCount = useMemo(
+    () =>
+      counts?.awaitingReview ??
+      new Set(items.filter(matchesNeedsReview).map((i) => i.prId)).size,
+    [counts, items, matchesNeedsReview],
+  );
   // Commits pill badge — how many commit-push items are currently in the stream (the
   // thread-addressing runs by default; every push run once "show commits" is on).
   const commitsCount = useMemo(
@@ -506,14 +526,22 @@ export function FeedView({
   // thread-bearing items carry a derivedState; a non-thread item (a PR open/merge, a plain
   // comment, a Claude run) drops out whenever any state pill is active.
   const [botStateFilter, setBotStateFilter] = useState<Set<DerivedState>>(() => new Set());
-  const toggleBotState = useCallback((s: DerivedState): void => {
-    setBotStateFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(s)) next.delete(s);
-      else next.add(s);
-      return next;
-    });
-  }, []);
+  const toggleBotState = useCallback(
+    (s: DerivedState): void => {
+      setBotStateFilter((prev) => {
+        const next = new Set(prev);
+        if (next.has(s)) next.delete(s);
+        else next.add(s);
+        return next;
+      });
+      // Mutually exclusive with the Needs-review pill: state pills keep only review_comment
+      // items (the only kind carrying derivedState) while Needs-review keeps only
+      // pr_opened/ready cards — ANDed they are empty for EVERY dataset, a dead end where both
+      // badges promise items the combination can never show.
+      if (feedNeedsReview) toggleFeedNeedsReview();
+    },
+    [feedNeedsReview, toggleFeedNeedsReview],
+  );
   // Bots pane: a per-VENDOR filter — a Set of actor ids (each distinct bot is one pill, so the
   // in-house bots deepsource / github-actions / … isolate separately, not lumped as "in_house").
   // Composes with the state pills (vendor ∧ state). Local, botsMode-only.
@@ -596,6 +624,9 @@ export function FeedView({
         base = base.filter((i) => i.actorId != null && botVendorFilter.has(i.actorId));
       if (botStateFilter.size > 0)
         base = base.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState));
+      // The Needs-review pill lives in the SHARED row below the botsMode early return, so it
+      // must be applied here too — not just in the main chain.
+      if (feedNeedsReview) base = base.filter(matchesNeedsReview);
       return base;
     }
     const base = feedMyTurnOnly
@@ -615,10 +646,12 @@ export function FeedView({
           : byCat;
     // Same rule as botsMode: any active state pill hides items without a derivedState
     // (opens/merges/plain comments/Claude rows carry none).
-    return botStateFilter.size > 0
-      ? byLens.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState))
-      : byLens;
-  }, [botsMode, botStateFilter, botVendorFilter, items, feedMyTurnOnly, feedClaudeOnly, effectiveBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor]);
+    const byState =
+      botStateFilter.size > 0
+        ? byLens.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState))
+        : byLens;
+    return feedNeedsReview ? byState.filter(matchesNeedsReview) : byState;
+  }, [botsMode, botStateFilter, botVendorFilter, items, feedMyTurnOnly, feedClaudeOnly, effectiveBotLens, feedCatComments, feedCatPrEvents, catMatch, isBotActor, feedNeedsReview, matchesNeedsReview]);
 
   // Honest count line: loaded-of-TOTAL (the server's post-cap stream length), never
   // visible-of-loaded — the initial page must not read "50 of 50" when the stream holds
@@ -1192,6 +1225,32 @@ export function FeedView({
               </button>
             );
           })}
+          {/* PR-level pill — its own labelled group so it doesn't read as a fifth thread
+              state. Matches only pr_opened/ready cards whose PR still awaits a first review
+              (a live snapshot — the same card can stop matching tomorrow). */}
+          <span className="ml-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+            PR
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              // Turning this on clears the (provably disjoint) state pills — see toggleBotState.
+              if (!feedNeedsReview && botStateFilter.size > 0) setBotStateFilter(new Set());
+              toggleFeedNeedsReview();
+            }}
+            aria-pressed={feedNeedsReview}
+            className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+              feedNeedsReview
+                ? 'border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-indigo-500/60 dark:bg-indigo-950/30 dark:text-indigo-300'
+                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+            }`}
+            title="PRs still awaiting a first review — shows their opened / marked-ready cards · last 14 days"
+          >
+            Needs review
+            {needsReviewCount > 0 && (
+              <span className="tabular-nums opacity-70">{needsReviewCount}</span>
+            )}
+          </button>
           {items.length > 0 && (
             <span className="text-[11px] text-gray-400">{countLabel}</span>
           )}
@@ -1216,9 +1275,13 @@ export function FeedView({
       ) : visible.length === 0 ? (
         <div className="flex h-32 items-center justify-center text-sm text-gray-400">
           {botsMode
-            ? botStateFilter.size > 0
-              ? 'No bot activity matches these state filters.'
-              : 'No bot activity in this window.'
+            ? feedNeedsReview
+              ? 'No PRs awaiting a first review in this window.'
+              : botStateFilter.size > 0
+                ? 'No bot activity matches these state filters.'
+                : 'No bot activity in this window.'
+            : feedNeedsReview
+            ? 'No PRs awaiting a first review in this window.'
             : botStateFilter.size > 0
             ? 'Nothing matches these state filters.'
             : feedClaudeOnly

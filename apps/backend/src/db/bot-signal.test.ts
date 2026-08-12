@@ -24,6 +24,7 @@ let closeDb: (() => void) | undefined;
 let q: any;
 let prId = 0;
 let botId = 0;
+let repoId = 0;
 // BotScope { workspaceId, repoIds } — `workspaceId` decides who counts as a bot, `repoIds`
 // narrows the measured data. Resolved through the production resolver in beforeAll.
 let scope: any;
@@ -49,6 +50,7 @@ beforeAll(async () => {
     .values({ accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_bs' })
     .returning()
     .execute();
+  repoId = repo.id;
   const [pr] = await db
     .insert(pullRequests)
     .values({
@@ -217,5 +219,90 @@ describe('getResolvableBotThreads (Phase 3 bulk-resolve eligibility)', () => {
     const [only] = await q.getResolvableBotThreads(prId, 1);
     expect(await q.getResolvableBotThreads(prId, 1, [only.id])).toEqual([only]);
     expect(await q.getResolvableBotThreads(prId, 1, [999_999])).toHaveLength(0);
+  });
+});
+
+// GitHub TEAM review requests (review_requests rows with userId null + teamName set) must count
+// as "someone is on the hook": no reviewer_routing card, but the PR still surfaces as
+// stalled_review carrying the team's display name. Seeded in a nested beforeAll so the PRs
+// added here can't perturb the describes above (they run first).
+describe('team review requests satisfy routing but still stall', () => {
+  let teamPrId = 0;
+  let userPrId = 0;
+  let reviewerId = 0;
+  let insights: any;
+
+  beforeAll(async () => {
+    const now = Date.now();
+    const { pullRequests, events, reviewRequests, users } = schema;
+
+    // Both PRs: open, non-draft, 2 days old — past the 4h routing floor AND the 24h stall
+    // threshold — with a recent event so the staleness exists-check keeps them.
+    const seedPr = async (node: string, number: number, title: string): Promise<number> => {
+      const [pr] = await db
+        .insert(pullRequests)
+        .values({
+          githubNodeId: node,
+          accountId: 1,
+          repoId,
+          number,
+          title,
+          state: 'open',
+          isDraft: false,
+          openedAt: new Date(now - 2 * DAY),
+          updatedAt: new Date(now - 1 * DAY),
+        })
+        .returning()
+        .execute();
+      await db
+        .insert(events)
+        .values({
+          accountId: 1,
+          repoId,
+          prId: pr.id,
+          type: 'pr_opened',
+          occurredAt: new Date(now - 2 * DAY),
+          dedupeKey: `pr_opened:${node}`,
+        })
+        .execute();
+      return pr.id;
+    };
+    teamPrId = await seedPr('PR_team_req', 2, 'team-requested fixture');
+    userPrId = await seedPr('PR_user_req', 3, 'user-requested fixture');
+
+    const [reviewer] = await db
+      .insert(users)
+      .values({ githubLogin: 'review-rex', githubNodeId: 'U_rx', isBot: false })
+      .returning()
+      .execute();
+    reviewerId = reviewer.id;
+
+    // A TEAM request (userId null) vs the USER-request control.
+    await db
+      .insert(reviewRequests)
+      .values({ prId: teamPrId, userId: null, teamName: 'Platform Team' })
+      .execute();
+    await db.insert(reviewRequests).values({ prId: userPrId, userId: reviewerId }).execute();
+
+    insights = await q.getWorkspaceInsights(1, undefined, scope);
+  });
+
+  it('a team-only request emits NO reviewer_routing card', () => {
+    expect(insights.cards.map((c: { id: string }) => c.id)).not.toContain(`route:${teamPrId}`);
+  });
+
+  it('…but the PR still stalls, with the team name and no null reviewer id', () => {
+    const card = insights.cards.find((c: { id: string }) => c.id === `stalled:${teamPrId}`);
+    expect(card).toBeDefined();
+    expect(card.requestedTeamNames).toEqual(['Platform Team']);
+    expect(card.requestedReviewerIds).toEqual([]); // user-only — the team row must not leak a null
+  });
+
+  it('control: a USER request stalls with reviewer ids and no routing card', () => {
+    const card = insights.cards.find((c: { id: string }) => c.id === `stalled:${userPrId}`);
+    expect(card).toBeDefined();
+    expect(card.requestedReviewerIds).toEqual([reviewerId]);
+    expect(card.requestedTeamNames).toEqual([]);
+    expect(insights.cards.map((c: { id: string }) => c.id)).not.toContain(`route:${userPrId}`);
   });
 });

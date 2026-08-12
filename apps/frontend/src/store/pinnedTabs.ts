@@ -151,6 +151,9 @@ interface TabsState {
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
   closeTab: (key: string) => void; // remove; fall back to 'timeline' if it was active
+  moveTab: (key: string, toIndex: number) => void; // drag-reorder; never touches activeTab
+  closeOtherTabs: (key: string) => void; // keep only that tab (context menu)
+  closeAllTabs: () => void; // remove every dynamic tab (context menu)
   unpin: (id: number) => void; // back-compat: closeTab(prDetailKey(id))
 
   setActiveTab: (tab: ActiveTab) => void;
@@ -374,6 +377,46 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
               ? (tabs[0] as Tab).key
               : 'timeline';
         return { tabs, activeTab: nextActive, boardReturnTabKey };
+      }),
+    // Drag-to-reorder: move a tab to `toIndex` (clamped) in the strip. Pure presentation —
+    // it deliberately never touches activeTab or the "Show" back-step.
+    moveTab: (key, toIndex) =>
+      set((s) => {
+        const from = s.tabs.findIndex((t) => t.key === key);
+        if (from === -1) return s;
+        const to = Math.max(0, Math.min(s.tabs.length - 1, toIndex));
+        if (to === from) return s;
+        const tabs = [...s.tabs];
+        const [moved] = tabs.splice(from, 1);
+        tabs.splice(to, 0, moved as Tab);
+        persist(tabs);
+        return { tabs };
+      }),
+    closeOtherTabs: (key) =>
+      set((s) => {
+        const kept = s.tabs.find((t) => t.key === key);
+        if (!kept || s.tabs.length <= 1) return s;
+        const tabs = [kept];
+        persist(tabs);
+        // If the active tab was one of the closed dynamic tabs, land on the survivor;
+        // the two fixed views (and the survivor itself) stay put.
+        const activeTab =
+          s.activeTab === 'timeline' || s.activeTab === 'activity' || s.activeTab === key
+            ? s.activeTab
+            : key;
+        // The "Show" back-step survives only when it points at the kept tab.
+        const boardReturnTabKey = s.boardReturnTabKey === key ? s.boardReturnTabKey : null;
+        return { tabs, activeTab, boardReturnTabKey };
+      }),
+    closeAllTabs: () =>
+      set((s) => {
+        if (s.tabs.length === 0) return s;
+        persist([]);
+        // Stay on a fixed view; only fall back to the board when the active tab was one
+        // of the dynamic tabs just destroyed (mirrors closeTab's fallback).
+        const activeTab =
+          s.activeTab === 'timeline' || s.activeTab === 'activity' ? s.activeTab : 'timeline';
+        return { tabs: [], activeTab, boardReturnTabKey: null };
       }),
     unpin: (id) => get().closeTab(prDetailKey(id)),
 

@@ -60,6 +60,10 @@ exists the control REPLACES "Merge" with "Add to merge queue" — GitHub refuses
 a queued branch, so offering one only produces a confusing 405. `estimatedTimeToMerge` is SECONDS
 in GitHub's schema; the ×1000 lives in the single `SECONDS_TO_MS` constant, applied at the two
 call sites that read the field (`fetchMergeQueueState` + `enqueuePullRequestOnQueue`).
+`fetchMergeQueueState` also carries the PR's LIVE `state` (OPEN/CLOSED/MERGED — a fast queue can
+merge inside one watcher tick, before the sync observes it) and `reviewDecision` (the review half
+of branch protection is the part that BLOCKS an enqueue; checks don't — AWAITING_CHECKS is a
+normal entry state), both read by the auto-merge watcher's queue phase below.
 
 ### "Merge when ready" (`merge/auto-merge-runner.ts`)
 
@@ -116,6 +120,36 @@ interactive route) and sets `merged`; a merge/close that happened outside Pierre
 `disarmed_blocked`, NOT `merged` — the latter means "the watcher did it" and would raise a false
 toast. `MAX_CONSECUTIVE_FAILURES` 3, counted in memory so a restart errs towards retrying.
 
+**Merge-queue repos** ("queue when ready"): the arm route probes the queue (best-effort, like
+merge-options') and stamps `viaMergeQueue` on the intent — the terminal action is then a
+head-pinned `enqueuePullRequest` instead of the direct merge GitHub would refuse; a PR already
+IN the queue 409s `AlreadyQueued` at arm time (it is already landing). The watcher's queue
+phase, per tick (ONE extra GraphQL point, paid only by queue intents; re-verified live, so a
+queue disabled after arming falls back to the direct merge):
+
+- **Ordering is load-bearing**: the queue phase settles BEFORE the freshen gates — a branch
+  update moves the head, which kicks the entry out of the queue — but the freshen still runs
+  before the FIRST enqueue (rules 1–5 unchanged: behind + a strategy ⇒ bring it current, once,
+  then enqueue the freshened head on a later tick).
+- **The enqueue green light is `reviewDecision`**, not `mergeableState` — a queue repo's resting
+  status is 'blocked' (a direct merge is never allowed), and checks don't gate entry
+  (AWAITING_CHECKS is a normal entry state; the queue runs them itself). REVIEW_REQUIRED /
+  CHANGES_REQUESTED wait with a named reason; APPROVED / null (no review requirement) enqueues,
+  CAS-guarded and pinned to `expectedHeadOid` exactly like the direct merge. A rejected enqueue
+  throws to the strike counter (transient errors retry; a persistent refusal fails the intent
+  with GitHub's message).
+- **`enqueuedAt` is the attribution record** (a real column — it must survive restarts): the
+  watcher's own enqueue stamps it; a merge observed while it is set resolves `merged` (the toast
+  is truthful — checked against the LIVE PR state, since a fast queue can land inside a tick,
+  AND against the synced state in the pre-flight, whichever sees it first); a queue entry a
+  human created supersedes the intent (`disarmed_blocked`), and OUR entry thrown out of the
+  queue (human dequeue, or UNMERGEABLE) stands down with "re-arm to queue it again" rather than
+  re-enqueueing against that decision. A re-arm resets it — new consent, new record.
+- **Disarm dequeues what the watcher enqueued**: DELETE `…/auto-merge` with `enqueuedAt` set
+  also removes the queue entry (best-effort) — "cancel" must not leave the queue to land the PR
+  anyway. The row is deleted FIRST so the cancel beats the watcher's CAS even if the dequeue
+  fails; a human's own entry (`enqueuedAt` null) is never touched.
+
 **Client side — the ONE way to arm is `MergeWhenReadyControl`**, a dedicated button beside
 Merge/Close in the Overview Actions row (`MergeControl` keeps its richer armed panel + cancel,
 but no arm button — two arm entries meant two strategy defaults). It fetches merge-options
@@ -125,13 +159,19 @@ since eligibility needs the live `behindBy`: **`mergeWhenReadyEligible`** (`lib/
 `test/mergeWhenReadyEligibility.test.ts`) offers the button while a SELF-CLEARING blocker is up
 (verdict `blocked` / `behind` / `unknown`) OR the PR is clean-but-behind (`canMerge &&
 behindBy > 0` — arming updates from trunk, then lands it). Absent on a fully clean up-to-date PR
-(that's just Merge) and on conflicts/drafts (the exit there is a push, which DISARMS). `behindBy`
+(that's just Merge) and on conflicts/drafts (the exit there is a push, which DISARMS). A
+merge-QUEUE repo uses the SAME rules — the button reads "Queue when ready" and the confirm copy
+says the queue is the landing verb; only a PR already IN the queue is excluded, via its own
+'queued' verdict (not a wait verdict, `canMerge:false` — there is no `queueEnabled` disqualifier
+anymore). `behindBy`
 only ever WIDENS this button — it still never gates Merge (the landmine above), and the verdict
 fed to the predicate must never carry `autoMergeArmed`. Arming always stores a REAL
 `updateStrategy` (`canRebaseUpdate ? 'rebase' : 'merge'`, never `'none'`) so a PR that falls
 behind AFTER arming still freshens — the old arm path stored `'none'` unless already behind,
 which parked exactly those PRs forever on up-to-date-required repos. While armed: the control
-becomes "Armed — merging when ready" + cancel, the PR header shows an armed chip, and the Close
+becomes "Armed — merging when ready" (queue intents: "Armed — queueing when ready", then "In the
+merge queue" once `enqueuedAt` is set, when Cancel also dequeues) + cancel, the PR header shows
+an armed chip, and the Close
 button HIDES (opposite promises) — all via **`usePrArmedIntent`**, a selector over the polled
 armed list (zero new requests; predicate is `state === 'armed'`, NEVER row existence — the list
 carries 24h-resolved rows; cross-tab it can lag the 45s poll, own-tab arm/disarm is instant via
@@ -204,7 +244,40 @@ attention count, no badge, no My Turn.
 - UI: `Activity/BranchStatusChip` (rail row: dot + branch + age; a HOLLOW dot for "no CI
   observed", unlike the PR surfaces which render nothing for `unknown`) and
   `Activity/BranchStatusPanel` (cross-repo strip on the Feed entry, `compact` per-repo variant in
-  `RepoFeedHeader`). A per-commit expander is driven by `failingChecks.length`, never by the dot's
-  colour, so a caret can never open onto an empty drawer.
+  `RepoFeedHeader`). **The expanded row lists MERGED PRs, not commits** (`mergedPrs`, ≤10 in
+  merge order): each row consolidates its retained trunk commits, whose sha + headline list is
+  the row's `title` TOOLTIP (capped at 20 lines; the visible "N commits" count is the hint it's
+  there); the row's dot is its NEWEST commit's rollup, the #chip opens the PR in-app when
+  `prId` resolved else links to github.com, and a branch fed only by direct pushes shows an
+  explicit "direct pushes only" line (those commits stay visible in the chart cells). The old
+  per-commit failing-check carets went with the commit list — the HEAD's failing checks remain
+  on the row summary.
+- **Branch trend charts** (expanded row, above the commit list). `branch_commits` now retains
+  **the newest 100 commits** (`BRANCH_COMMIT_WINDOW` in `sync/branch-status.ts` — the widening
+  is 1 → 4 GraphQL points per repo per sync, an accepted cost; it backfills instantly since
+  the history walk re-fetches each sync). ⚠ Deliberately NO writer-side age bound: one was
+  tried and deleted a repo's ENTIRE set whenever every commit was older than the cutoff
+  (dormant repo, or backdated committer dates) — "never synced" strip row, permanently
+  disabled expander, 4 points burned per sync writing rows the same transaction destroyed.
+  The 90-day horizon is `getBranchTrends`' READ filter. `READ_PR_CAP` is **10** — the
+  expanded row lists the 10 most recent merged PRs (deeper history is the trend strip's job),
+  which keeps the workspace-wide strip WIRE payload lean (the DB read is bounded by
+  `BRANCH_COMMIT_WINDOW × repos` — accepted; see the comment in `db/branch-queries.ts`).
+  The series ride the LAZY `GET /api/branch-trends?repoId` (`db/branch-queries.ts`
+  `getBranchTrends`, `useBranchTrends(repoId, open)` — fetched only when a row expands, never
+  inlined into the hot `/api/branch-status` path): ONE per-UTC-day array on a SHARED axis —
+  `failed` (trunk commits with a red rollup) + `merged` (PRs merged into the default branch:
+  `baseRefName = defaultBranchName`, NULL base excluded — blind to direct pushes by decision).
+  Dense from the OLDEST RETAINED commit day (padding to 90d would fabricate quiet days on a
+  busy repo whose 100 commits span less); the merged line truncates to the SAME span on
+  purpose — cell-for-cell alignment is the point of the single chart. Rendered as the Bot
+  Behaviour **"Daily coverage" layout verbatim** (`DayStrip`: red failure cells + the thin
+  merged-PRs line band above) in BOTH panel variants — the per-repo console (`compact` panel
+  prop — note the deliberate inversion, `fullTrends={compact}`) wraps it in the same
+  `ChartCard` composition as `BotBehaviourPanel`; the cross-repo Feed strip (a `max-h-64`
+  scroll box) gets the bare captioned strip. Two honest caveats stored nowhere else:
+  per-commit `ciStatus` is upserted in place on re-sync, so a re-run that goes green
+  retroactively erases a past failure from the chart; and depth is bounded by the 90d
+  backfill/read window.
 
 

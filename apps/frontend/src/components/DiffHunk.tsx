@@ -10,10 +10,10 @@ function classify(line: string): LineKind {
 }
 
 const LINE_STYLE: Record<LineKind, string> = {
-  add: 'bg-green-500/15 text-green-300',
-  del: 'bg-red-500/15 text-red-300',
-  meta: 'text-sky-400/80',
-  ctx: 'text-gray-400',
+  add: 'bg-green-500/10 text-green-700 dark:bg-green-500/15 dark:text-green-300',
+  del: 'bg-red-500/10 text-red-700 dark:bg-red-500/15 dark:text-red-300',
+  meta: 'bg-sky-500/5 text-sky-600 dark:bg-transparent dark:text-sky-400',
+  ctx: 'text-gray-600 dark:text-gray-400',
 };
 
 export function DiffHunk({ hunk }: { hunk: string | null }): JSX.Element | null {

@@ -8,7 +8,7 @@ import type {
 } from '@pierre-review/shared';
 import { useAddReviewComment } from '../../hooks/usePrWrites.js';
 import { ApiError } from '../../api/client.js';
-import { parsePatch, patchLineCount, type DiffRow } from '../../lib/diff.js';
+import { isLockFile, parsePatch, patchLineCount, type DiffRow } from '../../lib/diff.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
@@ -48,11 +48,12 @@ export interface DiffThreadContext {
 // enough to catch the eye, short enough that it doesn't linger as permanent decoration.
 const POSTED_HIGHLIGHT_MS = 6000;
 
-// ---- collapse-by-default heuristic (GitHub-style: big files start collapsed) ----
+// ---- collapse-by-default heuristic (GitHub-style: big files + lock files start collapsed) ----
 const LARGE_PATCH_LINES = 250;
 const LARGE_CHANGED_LINES = 400;
 
 function startsCollapsed(file: DiffFile): boolean {
+  if (isLockFile(file.path)) return true;
   if (file.patch == null) return true;
   if (patchLineCount(file.patch) > LARGE_PATCH_LINES) return true;
   if (file.additions + file.deletions > LARGE_CHANGED_LINES) return true;
@@ -430,9 +431,11 @@ function FileDiffBlock({
 
   const hasFocus =
     threadCtx?.focusThreadId != null && threads.some((t) => t.id === threadCtx.focusThreadId);
-  // Files with threads (or the deep-link target) start expanded, mirroring GitHub.
+  // Files with threads (or the deep-link target) start expanded, mirroring GitHub —
+  // EXCEPT lock files, which always start collapsed even with threads (the header's
+  // thread-count badge still advertises them, and the deep-link effect below still opens).
   const [expanded, setExpanded] = useState(
-    () => !startsCollapsed(file) || threads.length > 0,
+    () => !isLockFile(file.path) && (!startsCollapsed(file) || threads.length > 0),
   );
   useEffect(() => {
     if (hasFocus) setExpanded(true);

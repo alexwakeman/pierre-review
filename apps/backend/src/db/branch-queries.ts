@@ -1,17 +1,22 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 import { db, schema } from './client.js';
 import type {
   BranchCheckRun,
-  BranchCommit,
   BranchStatusResponse,
+  BranchTrendDay,
+  BranchTrendsResponse,
   CiStatus,
 } from '@pierre-review/shared';
 
 const { repos, users, branchCommits, pullRequests } = schema;
 
-// Kept in lockstep with `sync/branch-status.ts`'s BRANCH_COMMIT_WINDOW — the sync trims to this
-// many rows per repo, so the read cap only ever matters if the two drift.
-const READ_COMMIT_CAP = 20;
+// How many merged PRs the expanded row lists per repo. DELIBERATELY far under what the sync
+// retains (`BRANCH_COMMIT_WINDOW` = 100 commits, feeding `getBranchTrends`): the list is a
+// glance, deeper history is the trend strip's job — and the cap keeps the hot workspace-wide
+// strip's WIRE payload lean. ⚠ The DB read below is bounded by BRANCH_COMMIT_WINDOW × repos,
+// not this cap — the JS loop discards the surplus. Accepted for now (indexed read, 60s client
+// cache); if it ever matters, the fix is a per-repo windowed subquery, not a lower sync window.
+const READ_PR_CAP = 10;
 
 /**
  * Default-branch health for every repo in scope: the stored head snapshot plus that branch's
@@ -51,25 +56,22 @@ export async function getBranchStatus(
   if (repoRows.length === 0) return { repos: [] };
 
   const ids = repoRows.map((r) => r.id);
-  // One pass over the account's commits for the scoped repos, newest first; bucketed in JS.
-  // The whole set is at most `READ_COMMIT_CAP × repos` rows (the sync trims per repo), so there
-  // is no per-repo query fan-out and no unbounded result.
+  // One pass over the account's commits for the scoped repos, newest first; grouped into their
+  // merged PRs in JS. The whole set is at most `BRANCH_COMMIT_WINDOW × repos` rows (the sync
+  // trims per repo; the grouping below then keeps only READ_PR_CAP PR groups of each), so there
+  // is no per-repo query fan-out and no unbounded result. Commit authors are deliberately not
+  // selected any more — the listed unit is the PR, whose author comes off the PR row below.
   const commitRows = await db
     .select({
       repoId: branchCommits.repoId,
       sha: branchCommits.sha,
       messageHeadline: branchCommits.messageHeadline,
-      authorName: branchCommits.authorName,
-      authorAvatarUrl: branchCommits.authorAvatarUrl,
       committedAt: branchCommits.committedAt,
       ciStatus: branchCommits.ciStatus,
       failingChecks: branchCommits.failingChecks,
       prNumber: branchCommits.prNumber,
-      authorLogin: users.githubLogin,
-      authorUserAvatarUrl: users.avatarUrl,
     })
     .from(branchCommits)
-    .leftJoin(users, eq(users.id, branchCommits.authorUserId))
     .where(and(eq(branchCommits.accountId, accountId), inArray(branchCommits.repoId, ids)))
     .orderBy(desc(branchCommits.committedAt))
     .execute();
@@ -91,15 +93,29 @@ export async function getBranchStatus(
   const prNumbers = [
     ...new Set(commitRows.map((c) => c.prNumber).filter((n): n is number => n != null)),
   ];
-  const prIdByRepoNumber = new Map<string, number>();
+  const prByRepoNumber = new Map<
+    string,
+    {
+      id: number;
+      title: string;
+      mergedAt: Date | null;
+      authorLogin: string | null;
+      authorAvatarUrl: string | null;
+    }
+  >();
   if (prNumbers.length > 0) {
     const prRows = await db
       .select({
         id: pullRequests.id,
         repoId: pullRequests.repoId,
         number: pullRequests.number,
+        title: pullRequests.title,
+        mergedAt: pullRequests.mergedAt,
+        authorLogin: users.githubLogin,
+        authorAvatarUrl: users.avatarUrl,
       })
       .from(pullRequests)
+      .leftJoin(users, eq(users.id, pullRequests.authorId))
       .where(
         and(
           eq(pullRequests.accountId, accountId),
@@ -108,7 +124,14 @@ export async function getBranchStatus(
         ),
       )
       .execute();
-    for (const p of prRows) prIdByRepoNumber.set(`${p.repoId}:${p.number}`, p.id);
+    for (const p of prRows)
+      prByRepoNumber.set(`${p.repoId}:${p.number}`, {
+        id: p.id,
+        title: p.title,
+        mergedAt: p.mergedAt,
+        authorLogin: p.authorLogin ?? null,
+        authorAvatarUrl: p.authorAvatarUrl ?? null,
+      });
   }
 
   // The HEAD commit's failing checks, keyed by `(repoId, sha)` over the UNCAPPED rows. Matching by
@@ -124,41 +147,68 @@ export async function getBranchStatus(
     }
   }
 
-  const byRepo = new Map<number, BranchCommit[]>();
+  // Consolidate each repo's retained trunk commits into their MERGED PRs. Rows arrive newest
+  // first, so groups form in most-recent-commit order; the final per-repo list is then ordered
+  // by mergedAt (the PR row's when resolved, else the group's newest commit time) and capped.
+  // Direct pushes (prNumber null) are deliberately NOT listed — they stay visible in the trend
+  // chart's cells; the list answers "what merged", not "what landed".
+  interface PrGroup {
+    prNumber: number;
+    newestCommitAt: Date;
+    ciStatus: CiStatus;
+    commits: { sha: string; messageHeadline: string }[];
+  }
+  const groupsByRepo = new Map<number, Map<number, PrGroup>>();
+  const lastCommitAtByRepo = new Map<number, Date>();
   for (const c of commitRows) {
-    const list = byRepo.get(c.repoId) ?? [];
-    if (list.length >= READ_COMMIT_CAP) continue;
-    list.push({
-      sha: c.sha,
-      messageHeadline: c.messageHeadline,
-      authorLogin: c.authorLogin ?? null,
-      authorName: c.authorName,
-      // Prefer the synced user's avatar (kept fresh by every sync) over the one frozen onto the
-      // commit row at fetch time; fall back to the commit's own for an unknown committer.
-      authorAvatarUrl: c.authorUserAvatarUrl ?? c.authorAvatarUrl,
-      committedAt: c.committedAt.toISOString(),
-      // The column is nullable ("no CI observed yet"); the wire type is not — 'unknown' is the
-      // single "we can't say" value the client already knows how to render.
-      ciStatus: (c.ciStatus ?? 'unknown') as CiStatus,
-      // Nullable for two reasons — "no failures observed" and "written before this column
-      // existed" — and the wire type is a plain array either way, so the client's caret rule is
-      // one length check rather than a null dance.
-      failingChecks: c.failingChecks ?? [],
-      // The number is emitted even when it resolves to nothing: the client falls back to a
-      // github.com link for a PR this account never synced (squash-merged before the backfill
-      // window, or in a repo added later), which beats dropping the reference.
-      prNumber: c.prNumber ?? null,
-      prId:
-        c.prNumber != null
-          ? (prIdByRepoNumber.get(`${c.repoId}:${c.prNumber}`) ?? null)
-          : null,
-    });
-    byRepo.set(c.repoId, list);
+    // Newest raw commit per repo — INDEPENDENT of PR membership, so a direct-push-only repo
+    // still reads as recently active (the newest commit's own timestamp, never our observation
+    // time: `defaultBranchUpdatedAt` is when we LOOKED, which would make an idle repo read as
+    // freshly active).
+    if (!lastCommitAtByRepo.has(c.repoId)) lastCommitAtByRepo.set(c.repoId, c.committedAt);
+    if (c.prNumber == null) continue;
+    const groups = groupsByRepo.get(c.repoId) ?? new Map<number, PrGroup>();
+    groupsByRepo.set(c.repoId, groups);
+    const g = groups.get(c.prNumber);
+    if (g == null) {
+      groups.set(c.prNumber, {
+        prNumber: c.prNumber,
+        newestCommitAt: c.committedAt,
+        // The group's rollup is its NEWEST commit's — for a merge-commit PR that is the merge
+        // commit itself, i.e. the trunk state this PR produced. Nullable column ("no CI
+        // observed") reads as 'unknown' on the wire.
+        ciStatus: (c.ciStatus ?? 'unknown') as CiStatus,
+        commits: [{ sha: c.sha, messageHeadline: c.messageHeadline }],
+      });
+    } else {
+      g.commits.push({ sha: c.sha, messageHeadline: c.messageHeadline });
+    }
   }
 
   return {
     repos: repoRows.map((r) => {
-      const commits = byRepo.get(r.id) ?? [];
+      const groups = [...(groupsByRepo.get(r.id)?.values() ?? [])];
+      const mergedPrs = groups
+        .map((g) => {
+          const pr = prByRepoNumber.get(`${r.id}:${g.prNumber}`);
+          return {
+            prNumber: g.prNumber,
+            // Null while prNumber is set means "that PR isn't synced for this account"
+            // (squash-merged before the backfill window, or a repo added later): the client
+            // links out to github.com rather than dropping the reference.
+            prId: pr?.id ?? null,
+            title: pr?.title ?? null,
+            authorLogin: pr?.authorLogin ?? null,
+            authorAvatarUrl: pr?.authorAvatarUrl ?? null,
+            // "In the order they were merged": the PR row's mergedAt when resolved, else the
+            // newest consolidated commit's time — never null, so the sort below is total.
+            mergedAt: (pr?.mergedAt ?? g.newestCommitAt).toISOString(),
+            ciStatus: g.ciStatus,
+            commits: g.commits,
+          };
+        })
+        .sort((a, b) => b.mergedAt.localeCompare(a.mergedAt))
+        .slice(0, READ_PR_CAP);
       return {
         repoId: r.id,
         branchName: r.branchName,
@@ -169,11 +219,123 @@ export async function getBranchStatus(
         // head, or nothing synced yet — degrades to the CI label alone.
         failingChecks:
           r.headSha != null ? (failingByRepoSha.get(`${r.id}:${r.headSha}`) ?? []) : [],
-        // The newest commit's own timestamp, not our observation time (`defaultBranchUpdatedAt`
-        // is when we LOOKED, which would make an idle repo read as freshly active).
-        lastCommitAt: commits[0]?.committedAt ?? null,
-        commits,
+        lastCommitAt: lastCommitAtByRepo.get(r.id)?.toISOString() ?? null,
+        mergedPrs,
       };
     }),
   };
+}
+
+// Trend window for `getBranchTrends`. Matches what the sync's count trim can plausibly retain
+// (100 commits in sync/branch-status.ts) — a wider read here would only ever find deleted rows;
+// this read filter is ALSO where the "no year-old bars" promise lives (the writer keeps a pure
+// count bound, see the trim's comment).
+const TREND_DAYS = 90;
+const DAY_MS = 86_400_000;
+
+/**
+ * The ONE lazy series behind an expanded default-branch row: per UTC day, failing trunk commits
+ * (the DayStrip cells) and PRs merged into the default branch (the line band above them) — a
+ * single shared axis, dense from the oldest retained commit day to today, so the two facts
+ * align cell-for-cell.
+ *
+ * Fetched only when a row expands — deliberately NOT part of `getBranchStatus`, whose payload is
+ * a hot workspace-wide read. Bucketed in JS rather than SQL date functions (dialect-divergent),
+ * which is fine because the sync trims `branch_commits` to ≤100 rows per repo and the merged-PR
+ * read is bounded by the axis window.
+ *
+ * Returns null when the repo isn't owned by the account (→ 404 at the route).
+ */
+export async function getBranchTrends(
+  accountId: number,
+  repoId: number,
+): Promise<BranchTrendsResponse | null> {
+  const repoRows = await db
+    .select({ id: repos.id, defaultBranchName: repos.defaultBranchName })
+    .from(repos)
+    .where(and(eq(repos.id, repoId), eq(repos.accountId, accountId)))
+    .execute();
+  const repo = repoRows[0];
+  if (repo == null) return null;
+
+  const now = Date.now();
+
+  const commitRows = await db
+    .select({ committedAt: branchCommits.committedAt, ciStatus: branchCommits.ciStatus })
+    .from(branchCommits)
+    .where(
+      and(
+        eq(branchCommits.accountId, accountId),
+        eq(branchCommits.repoId, repoId),
+        gte(branchCommits.committedAt, new Date(now - TREND_DAYS * DAY_MS)),
+      ),
+    )
+    .execute();
+
+  const failedByDay = new Map<string, number>();
+  const passedByDay = new Map<string, number>();
+  for (const c of commitRows) {
+    const day = c.committedAt.toISOString().slice(0, 10);
+    // "Failed" is the red rollup pair — the same predicate as the strip's own failing count —
+    // and "passed" is 'success' alone: pending/unknown/null are neither, so a day's cell can
+    // legitimately show fewer commits than landed.
+    if (c.ciStatus === 'failure' || c.ciStatus === 'error') {
+      failedByDay.set(day, (failedByDay.get(day) ?? 0) + 1);
+    } else if (c.ciStatus === 'success') {
+      passedByDay.set(day, (passedByDay.get(day) ?? 0) + 1);
+    }
+  }
+  // The axis is dense from the OLDEST RETAINED commit day to today, zero-filled — but never
+  // padded back to the full 90 days: on a busy repo the 100-commit cap trims inside the date
+  // window, and days before the oldest retained commit are trimmed history, not quiet days.
+  // Padding them would draw a green past we never observed. The merged-PR line shares this
+  // axis on purpose (that is the whole point of the single chart), so it is truncated to the
+  // same span even though pullRequests could answer further back.
+  const oldestDay = commitRows
+    .map((c) => c.committedAt.toISOString().slice(0, 10))
+    .sort()[0];
+  const daily: BranchTrendDay[] = [];
+  if (oldestDay != null) {
+    const startMs = Date.parse(`${oldestDay}T00:00:00Z`);
+    const endMs = Date.parse(`${new Date(now).toISOString().slice(0, 10)}T00:00:00Z`);
+
+    // PRs merged into the default branch, counted per UTC day of `mergedAt`. `baseRefName =
+    // <default branch>` excludes NULL bases by construction (SQL equality) and on PURPOSE — an
+    // unhydrated base is not evidence the PR landed on trunk. A repo whose default branch name
+    // we haven't synced yet has nothing attributable, so its line is flat zero rather than a
+    // guess.
+    const mergedByDay = new Map<string, number>();
+    if (repo.defaultBranchName != null) {
+      const mergedRows = await db
+        .select({ mergedAt: pullRequests.mergedAt })
+        .from(pullRequests)
+        .where(
+          and(
+            eq(pullRequests.accountId, accountId),
+            eq(pullRequests.repoId, repoId),
+            eq(pullRequests.baseRefName, repo.defaultBranchName),
+            gte(pullRequests.mergedAt, new Date(startMs)),
+          ),
+        )
+        .execute();
+      for (const p of mergedRows) {
+        // The predicate already excludes NULL mergedAt; the guard is for the type, not the data.
+        if (p.mergedAt == null) continue;
+        const day = p.mergedAt.toISOString().slice(0, 10);
+        mergedByDay.set(day, (mergedByDay.get(day) ?? 0) + 1);
+      }
+    }
+
+    for (let ms = startMs; ms <= endMs; ms += DAY_MS) {
+      const day = new Date(ms).toISOString().slice(0, 10);
+      daily.push({
+        day,
+        failed: failedByDay.get(day) ?? 0,
+        passed: passedByDay.get(day) ?? 0,
+        merged: mergedByDay.get(day) ?? 0,
+      });
+    }
+  }
+
+  return { repoId, daily };
 }

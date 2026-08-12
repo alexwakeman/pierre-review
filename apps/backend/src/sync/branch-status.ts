@@ -25,10 +25,25 @@ import type { BranchCheckRun, CiStatus } from '@pierre-review/shared';
 
 const { repos, users, branchCommits } = schema;
 
-// How many trunk commits we keep per repo. Also the GraphQL page size, so the fetch and the
-// retained window are the same number by construction — a smaller fetch would leave stale rows
-// alive below it, a larger one would write rows the trim immediately deletes.
-export const BRANCH_COMMIT_WINDOW = 20;
+// How many trunk commits we keep per repo. Also the GraphQL page size (GitHub's maximum), so the
+// fetch and the retained window are the same number by construction — a smaller fetch would leave
+// stale rows alive below it, a larger one would write rows the trim immediately deletes.
+//
+// Cost of the widening (20 → 100): phase 1's node budget is N + 3N (the history page plus its
+// nested associatedPullRequests(first: 3)), scored ceil(total/100) — so N=100 is 400 nodes ⇒
+// 4 rate-limit points per repo per sync, where N=20 was 1. An ACCEPTED cost: the wider window is
+// what feeds the branch-trends charts (90 days of trunk CI + what landed), and it rides the
+// per-repo sync, not every adaptive tick.
+export const BRANCH_COMMIT_WINDOW = 100;
+
+// There is deliberately NO age bound on the retained window — only the count bound above. An
+// age bound here looked attractive ("no year-old rows") but is a landmine: a repo whose newest
+// trunk commit is older than the cutoff (dormant repo, or an active one whose committer dates
+// were backdated by a rebase/import) would have its ENTIRE set inserted and deleted in the same
+// transaction on every sync — the strip row reads "never synced", the expander is permanently
+// disabled, and the walk burns its 4 points writing rows it immediately destroys. The trends
+// read (db/branch-queries.ts getBranchTrends) applies its own `committedAt >= now - 90d`
+// filter, which is where the "no year-old bars" promise actually lives.
 
 // Which rollup states earn the SECOND round trip for failing-check detail. A green commit is
 // skipped entirely — that is what keeps the common case at the ~1 point this file's query header
@@ -402,16 +417,18 @@ export async function syncBranchStatus(
         .execute();
     }
 
-    // Trim to the newest window IN the same transaction, so the table can never be observed
-    // holding an unbounded history. Done as select-then-delete-by-id rather than a correlated
-    // DELETE … LIMIT, which is not portable across sqlite and Postgres.
+    // Trim to the newest BRANCH_COMMIT_WINDOW rows IN the same transaction, so the table can
+    // never be observed holding an unbounded history. Count bound ONLY — see the constant's
+    // comment for why an age bound here would delete a dormant repo's whole set. Done as
+    // select-then-delete-by-id rather than a correlated DELETE … LIMIT, which is not portable
+    // across sqlite and Postgres.
     const kept = await tx
       .select({ id: branchCommits.id })
       .from(branchCommits)
       .where(and(eq(branchCommits.accountId, accountId), eq(branchCommits.repoId, repoId)))
       .orderBy(desc(branchCommits.committedAt))
       .execute();
-    const stale = kept.slice(BRANCH_COMMIT_WINDOW).map((r) => r.id);
+    const stale = kept.filter((_, i) => i >= BRANCH_COMMIT_WINDOW).map((r) => r.id);
     // Guard the empty case: `inArray(col, [])` is a degenerate predicate whose behaviour
     // differs by dialect, and there is nothing to delete anyway.
     if (stale.length > 0) {

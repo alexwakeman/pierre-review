@@ -558,6 +558,8 @@ export const autoMergeRequests = pgTable(
       enum: ['rebase', 'merge', 'none'],
     }).notNull(),
     expectedHeadOid: text('expected_head_oid').notNull(),
+    viaMergeQueue: boolean('via_merge_queue').notNull().default(false),
+    enqueuedAt: timestamp('enqueued_at', { withTimezone: true, mode: 'date' }),
     state: text('state', {
       enum: [
         'armed',

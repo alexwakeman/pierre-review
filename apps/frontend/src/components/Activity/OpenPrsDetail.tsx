@@ -1,164 +1,18 @@
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import type { OpenPrsResponse, TimelinePr, User } from '@pierre-review/shared';
-import { api } from '../../api/client.js';
+import { useEffect, useMemo, useState } from 'react';
+import type { TimelinePr } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
-import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
-import { workspaceKey } from '../../hooks/useActivity.js';
+import { useScopedOpenPrs } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
-import {
-  CI_META,
-  indexUsers,
-  relativeTime,
-  sortOpenPrsByActivity,
-  userLabel,
-} from '../../lib/ui.js';
-import { Avatar } from '../CommentCard.js';
-import { ThreadStateBar } from './ThreadStateBar.js';
-import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
+import { indexUsers } from '../../lib/ui.js';
+import { MetricRepoFilter } from './MetricRepoFilter.js';
+import { OpenPrsTable } from './OpenPrsTable.js';
 
-// The all-open-PRs DRILL-DOWN — a persistent, singleton tab opened by the "Show all N open
-// PRs" footer under the Activity open-PR lists. Lists the scope's open PRs (the `openPrsScope`
-// seed: one repo, or 'feed' = the FilterBar-visible scope) as a SORTABLE table — age, staleness,
-// LoC, thread backlog, CI, approval — so a lead can order the open work however the question
-// demands. Default order = sortOpenPrsByActivity (the same order the inline lists use).
-// Clicking a row opens the PR's own detail tab.
-
-type SortCol =
-  | 'pr'
-  | 'repo'
-  | 'author'
-  | 'age'
-  | 'updated'
-  | 'loc'
-  | 'threads'
-  | 'ci'
-  | 'approval';
-
-// Each column's "natural" first-click direction (a second click flips it): text columns read
-// A→Z, time/size/backlog columns lead with the most pressing end (longest-open, most-recently
-// -updated, biggest, most-untouched, failing-first, changes-first).
-const DEFAULT_DIR: Record<SortCol, 'asc' | 'desc'> = {
-  pr: 'desc',
-  repo: 'asc',
-  author: 'asc',
-  age: 'asc',
-  updated: 'desc',
-  loc: 'desc',
-  threads: 'desc',
-  ci: 'asc',
-  approval: 'asc',
-};
-
-// CI rollup → a sortable rank (failing first under 'asc').
-const CI_RANK: Record<TimelinePr['ciStatus'], number> = {
-  failure: 0,
-  error: 0,
-  pending: 1,
-  success: 2,
-  expected: 3,
-  unknown: 4,
-};
-
-// Approval standing → a sortable rank (changes-requested first under 'asc').
-function approvalRank(pr: TimelinePr): number {
-  if (pr.isChangesRequested) return 0;
-  if (pr.isApproved) return 2;
-  return 1;
-}
-
-// The per-column sort value. Strings compare via localeCompare below; ISO-8601 timestamps
-// sort chronologically as strings (same trick as sortOpenPrsByActivity).
-function sortValue(
-  pr: TimelinePr,
-  col: SortCol,
-  usersById: Map<number, User>,
-  repoNameById: Map<number, string>,
-): number | string {
-  switch (col) {
-    case 'pr':
-      return pr.number;
-    case 'repo':
-      return repoNameById.get(pr.repoId) ?? '';
-    case 'author': {
-      const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
-      return (u?.githubLogin ?? userLabel(u, pr.authorId)).toLowerCase();
-    }
-    case 'age':
-      return pr.openedAt;
-    case 'updated':
-      return pr.updatedAt;
-    case 'loc':
-      return pr.additions + pr.deletions;
-    case 'threads':
-      return pr.threadCounts.untouched;
-    case 'ci':
-      return CI_RANK[pr.ciStatus];
-    case 'approval':
-      return approvalRank(pr);
-  }
-}
-
-function CiCell({ ci }: { ci: TimelinePr['ciStatus'] }): JSX.Element {
-  const meta = CI_META[ci];
-  return (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-gray-500 dark:text-gray-400">
-      <span
-        className="inline-block h-2 w-2 rounded-full"
-        style={meta ? { background: meta.color } : { boxShadow: 'inset 0 0 0 1px #9ca3af' }}
-        aria-hidden
-      />
-      {meta?.label ?? 'no checks'}
-    </span>
-  );
-}
-
-function LocCell({ pr }: { pr: TimelinePr }): JSX.Element {
-  return (
-    <span className="whitespace-nowrap text-[11px]">
-      <span className="text-gray-400">{pr.changedFiles}f</span>{' '}
-      <span className="font-mono text-green-600 dark:text-green-400">+{pr.additions}</span>{' '}
-      <span className="font-mono text-red-500 dark:text-red-400">−{pr.deletions}</span>
-    </span>
-  );
-}
-
-// Untouched-thread count + the compact 4-state mini-bar (the shared thread vocabulary).
-function ThreadsCell({ pr }: { pr: TimelinePr }): JSX.Element {
-  return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] tabular-nums">
-      <span
-        className={
-          pr.threadCounts.untouched > 0
-            ? 'text-amber-600 dark:text-amber-400'
-            : 'text-gray-400'
-        }
-        title={`${pr.threadCounts.untouched} untouched thread${pr.threadCounts.untouched === 1 ? '' : 's'}`}
-      >
-        {pr.threadCounts.untouched}
-      </span>
-      <ThreadStateBar counts={pr.threadCounts} compact />
-    </span>
-  );
-}
-
-function ApprovalCell({ pr }: { pr: TimelinePr }): JSX.Element {
-  const standing = pr.isApproved
-    ? { label: 'approved', color: '#22c55e' }
-    : pr.isChangesRequested
-      ? { label: 'changes', color: '#ef4444' }
-      : null;
-  if (standing == null) return <span className="text-[11px] text-gray-300 dark:text-gray-600">—</span>;
-  return (
-    <span
-      className="rounded px-1 text-[10px] font-semibold"
-      style={{ color: standing.color, background: standing.color + '1a' }}
-    >
-      {standing.label}
-    </span>
-  );
-}
+// The all-open-PRs DRILL-DOWN — a persistent, singleton tab: the "Show all N open PRs" footers
+// under the Activity open-PR lists open it per-repo, and the Flow metrics "Open PRs" tile opens
+// it workspace-wide (the 'feed' scope — this is THE open-PRs view; the metrics drill-down no
+// longer has its own). Resolves the `openPrsScope` seed to a label + repo narrowing and renders
+// the shared sortable OpenPrsTable over /api/open-prs. Clicking a row opens the PR's detail tab.
 
 export function OpenPrsDetail(): JSX.Element {
   // The scope seed — read (not consumed) for the tab's lifetime, like botPrsFocusRepoId. A
@@ -168,42 +22,19 @@ export function OpenPrsDetail(): JSX.Element {
   // A repo GROUP scope (from a FeedOpenPrsPanel group footer): the group's exact repo set,
   // so the tab reproduces the group and the footer's promised count holds.
   const groupScope = scope != null && typeof scope === 'object' ? scope : null;
-  // The ACTIVE WORKSPACE is the scope in every branch below, including the narrowed ones.
-  //
-  // ⚠ `repoIds` ALONE IS NOT A SCOPE any more: `/api/open-prs` resolves the workspace from
-  // `?workspace=` (absent ⇒ the account's DEFAULT) and returns `membership ∩ repoIds`. A
-  // repo-scoped drill-down that sent only `repoIds=<id>` would therefore be intersected against
-  // Default's membership and come back EMPTY for any repo the user moved into another workspace.
-  const workspaceId = useFilters((s) => s.workspaceId);
-  // Member-AGNOSTIC fetch (Members is a Timeline-only filter — the Activity lists never narrow by
-  // it), and repo-picker-agnostic for the same reason: a repo/group scope fetches just the repos
-  // the OPENER named, WITHIN the active workspace; the unscoped 'feed' case is the whole workspace.
-  //
-  // ⚠ 'feed' used to reuse `buildOpenPrsSearch(s, false)`, i.e. the FilterBar's repo picker. That
-  // picker is a TIMELINE-board control and is not mounted on Activity, so this tab could open
-  // silently short of the count the panel that launched it had just promised, with nothing on
-  // screen to widen it. Its string is byte-identical to `useWorkspaceOpenPrs`' whenever the picker
-  // is unset, so the shared-cache-entry property survives the common case.
-  const search = useFilters((s) => {
-    const p = new URLSearchParams();
-    if (s.workspaceId != null) p.set('workspace', String(s.workspaceId));
-    if (repoScopeId != null) p.set('repoIds', String(repoScopeId));
-    else if (groupScope != null) p.set('repoIds', groupScope.repoIds.join(','));
-    return p.toString();
-  });
-  const { data, isLoading, isError, refetch, isFetching } = useQuery<OpenPrsResponse>({
-    // The `ws:<id>` segment is NOT redundant with the `workspace=` param: the param fixes what the
-    // server returns, the segment fixes which cache entry it lands in (two workspaces on the same
-    // repo narrowing build the same string).
-    queryKey: ['open-prs', workspaceKey(workspaceId), search],
-    queryFn: () => api.openPrs(search),
-    enabled: workspaceId != null,
-    placeholderData: (prev) => prev,
-  });
+  // The server-side narrowing: one repo, a group's repo set, or null = the whole ACTIVE
+  // WORKSPACE ('feed'). The workspace is the scope in every branch — useScopedOpenPrs always
+  // sends `workspace=` alongside any `repoIds` (a bare repoIds is intersected against the
+  // DEFAULT workspace's membership) and the null case is byte-identical to the Activity
+  // surfaces' query string, sharing their cache entry. Member-AGNOSTIC and repo-picker-agnostic
+  // (Timeline-only filters — see workspaceOpenPrsScope.test.ts).
+  const scopeRepoIds =
+    repoScopeId != null ? [repoScopeId] : groupScope != null ? groupScope.repoIds : null;
+  const isWorkspaceWide = scopeRepoIds == null;
+  const { data, isLoading, isError, refetch, isFetching } = useScopedOpenPrs(scopeRepoIds);
 
   const { data: users } = useUsers();
   const { data: repos } = useRepos();
-  const maintainersByRepo = useMaintainersByRepo();
   const usersById = useMemo(() => indexUsers(users), [users]);
   const repoNameById = useMemo(
     () => new Map((repos ?? []).map((r) => [r.id, r.fullName])),
@@ -212,28 +43,31 @@ export function OpenPrsDetail(): JSX.Element {
 
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
 
-  // null = the default activity order (sortOpenPrsByActivity — same as the inline lists).
-  const [sort, setSort] = useState<SortState<SortCol> | null>(null);
-  const onSort = (col: SortCol): void => setSort((cur) => nextSort(cur, col, DEFAULT_DIR));
+  const prs = useMemo(() => data?.prs ?? [], [data]);
 
-  const prs = data?.prs ?? [];
-  const rows = useMemo(() => {
-    if (sort == null) {
-      return sortOpenPrsByActivity(prs, (pr) => {
-        const set = maintainersByRepo.get(pr.repoId);
-        return pr.authorId != null && set != null && set.has(pr.authorId);
-      });
-    }
-    const mul = sort.dir === 'asc' ? 1 : -1;
-    return [...prs].sort(
-      (a, b) =>
-        mul *
-          compare(
-            sortValue(a, sort.col, usersById, repoNameById),
-            sortValue(b, sort.col, usersById, repoNameById),
-          ) || b.number - a.number, // stable final tiebreak
-    );
-  }, [prs, sort, maintainersByRepo, usersById, repoNameById]);
+  // The workspace-wide scope gets a repo-filter dropdown — LOCAL state narrowing the loaded rows
+  // client-side (null = all). Deliberately NOT `filters.repoIds` (the Timeline picker) and not a
+  // refetch: the workspace's list is already here. The scoped mounts cover exactly the repos the
+  // opener named, so they render no dropdown.
+  const [repoSel, setRepoSel] = useState<number[] | null>(null);
+  // The tab is a singleton that survives scope re-seeds (another "Show all" footer, the Flow
+  // tile) and workspace switches (pinnedTabs is workspace-unaware) — a narrowing kept across
+  // either would silently filter the new list by repos that may not even be in it, under a
+  // label that promises the whole scope. Reset it.
+  const workspaceId = useFilters((s) => s.workspaceId);
+  useEffect(() => {
+    setRepoSel(null);
+  }, [scope, workspaceId]);
+  const repoOptions = useMemo(() => {
+    if (!isWorkspaceWide) return [];
+    const byId = new Map<number, string>();
+    for (const p of prs) byId.set(p.repoId, repoNameById.get(p.repoId) ?? `repo ${p.repoId}`);
+    return [...byId.entries()]
+      .map(([id, fullName]) => ({ id, fullName }))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }, [isWorkspaceWide, prs, repoNameById]);
+  const rows =
+    isWorkspaceWide && repoSel != null ? prs.filter((p) => repoSel.includes(p.repoId)) : prs;
 
   const openTab = (pr: TimelinePr): void => {
     const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
@@ -262,116 +96,45 @@ export function OpenPrsDetail(): JSX.Element {
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Open PRs</h2>
         <span className="text-[11px] text-gray-400">
-          {scopeLabel} · {rows.length} open
-          {draftCount > 0 && ` (${draftCount} draft${draftCount === 1 ? '' : 's'})`} · click a
+          {/* Non-draft headline: the Flow tile and the rail's [N] stat count non-draft opens,
+              and this header must reconcile with the number the user just clicked (the
+              RepoOpenPrList convention), not contradict it. */}
+          {scopeLabel} · {rows.length - draftCount} open
+          {draftCount > 0 && ` · ${draftCount} draft${draftCount === 1 ? '' : 's'}`} · click a
           column to sort · click a row to open it
         </span>
-        <button
-          type="button"
-          onClick={() => void refetch()}
-          disabled={isFetching}
-          className="ml-auto rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
-        >
-          <span aria-hidden className={isFetching ? 'animate-spin' : ''}>
-            ↻
-          </span>{' '}
-          Refresh
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {isWorkspaceWide && (
+            <MetricRepoFilter repos={repoOptions} selected={repoSel} onChange={setRepoSel} />
+          )}
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          >
+            <span aria-hidden className={isFetching ? 'animate-spin' : ''}>
+              ↻
+            </span>{' '}
+            Refresh
+          </button>
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="space-y-2">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-8 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
-          ))}
-        </div>
-      ) : isError ? (
-        <div className="text-sm text-red-500">Couldn’t load the open PRs.</div>
-      ) : rows.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-          No open PRs here. 🎉
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[880px] border-collapse text-sm">
-            <thead>
-              <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                <SortHeader col="pr" label="Pull request" sort={sort} onSort={onSort} />
-                {repoScopeId == null && (
-                  <SortHeader col="repo" label="Repo" sort={sort} onSort={onSort} />
-                )}
-                <SortHeader col="author" label="Author" sort={sort} onSort={onSort} />
-                <SortHeader col="age" label="Age" sort={sort} onSort={onSort} title="Time since the PR opened" />
-                <SortHeader col="updated" label="Updated" sort={sort} onSort={onSort} />
-                <SortHeader col="loc" label="LoC" sort={sort} onSort={onSort} title="Diff size (added + deleted lines)" />
-                <SortHeader col="threads" label="Threads" sort={sort} onSort={onSort} title="Untouched review threads + the state mix" />
-                <SortHeader col="ci" label="CI" sort={sort} onSort={onSort} />
-                <SortHeader col="approval" label="Approval" sort={sort} onSort={onSort} />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((pr) => {
-                const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
-                return (
-                  <tr
-                    key={pr.id}
-                    onClick={() => openTab(pr)}
-                    title={`Open #${pr.number} in its own tab`}
-                    className="cursor-pointer border-t border-gray-100 align-top hover:bg-gray-50/70 dark:border-gray-800/60 dark:hover:bg-gray-900/40"
-                  >
-                    <td className="max-w-md py-1.5 pr-3">
-                      <span className="flex items-center gap-1.5">
-                        <span className="font-mono text-[11px] text-gray-400">#{pr.number}</span>
-                        <span className="min-w-0 truncate text-sm font-medium text-gray-800 dark:text-gray-100">
-                          {pr.title}
-                        </span>
-                        {pr.isDraft && (
-                          <span className="shrink-0 rounded bg-gray-500/15 px-1 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                            draft
-                          </span>
-                        )}
-                      </span>
-                    </td>
-                    {repoScopeId == null && (
-                      <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
-                        <span className="block max-w-[12rem] truncate">
-                          {repoNameById.get(pr.repoId) ?? `repo ${pr.repoId}`}
-                        </span>
-                      </td>
-                    )}
-                    <td className="py-1.5 pr-3">
-                      <span className="inline-flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
-                        <Avatar user={author} size={14} />
-                        <span className="max-w-[8rem] truncate">
-                          {userLabel(author, pr.authorId)}
-                        </span>
-                      </span>
-                    </td>
-                    <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
-                      {relativeTime(pr.openedAt)}
-                    </td>
-                    <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
-                      {relativeTime(pr.updatedAt)}
-                    </td>
-                    <td className="py-1.5 pr-3">
-                      <LocCell pr={pr} />
-                    </td>
-                    <td className="py-1.5 pr-3">
-                      <ThreadsCell pr={pr} />
-                    </td>
-                    <td className="py-1.5 pr-3">
-                      <CiCell ci={pr.ciStatus} />
-                    </td>
-                    <td className="py-1.5 pr-3">
-                      <ApprovalCell pr={pr} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <OpenPrsTable
+        prs={rows}
+        isLoading={isLoading}
+        isError={isError}
+        // Hidden only for the SINGLE-repo scope: a group scope spans several repos, whose rows
+        // are indistinguishable without the column (isWorkspaceWide keys the dropdown, not this).
+        showRepoColumn={repoScopeId == null}
+        onOpenPr={openTab}
+        emptyLabel={
+          repoSel != null && prs.length > 0
+            ? 'No open PRs for the selected repos — adjust the repo filter.'
+            : undefined
+        }
+      />
     </div>
   );
 }

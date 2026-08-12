@@ -27,6 +27,8 @@ vi.mock('../github/mutations.js', () => ({
   isCommitContainedInRef: vi.fn(),
   mergePullRequest: vi.fn(),
   updatePullRequestBranch: vi.fn(),
+  fetchMergeQueueState: vi.fn(),
+  enqueuePullRequestOnQueue: vi.fn(),
 }));
 vi.mock('../auth/account.js', () => ({
   getAccessToken: vi.fn(async () => 'gho_test'),
@@ -137,6 +139,7 @@ afterAll(async () => {
 const armArgs = (oid: string) => ({
   mergeMethod: 'squash' as const,
   updateStrategy: 'none' as const,
+  viaMergeQueue: false,
   expectedHeadOid: oid,
   expiresAt: new Date(now + 72 * HOUR),
 });
@@ -218,6 +221,32 @@ describe('auto-merge intents', () => {
     expect(await q.disarmAutoMerge(A, prA)).toBe(false);
     // B's intent is untouched.
     expect((await q.getAutoMergeRequest(B, prB))?.state).toBe('armed');
+  });
+
+  it('stores the queue mode, and a re-arm resets the enqueue record (new consent)', async () => {
+    const armed = await q.armAutoMerge(A, prA, { ...armArgs('qq1'), viaMergeQueue: true });
+    expect(armed.viaMergeQueue).toBe(true);
+    expect(armed.enqueuedAt).toBeNull();
+
+    // The watcher enqueues → the stamp reads back and rides the runner scan (it is the
+    // attribution record the queue phase keys every decision on).
+    const rows = await db.select().from(schema.autoMergeRequests).execute();
+    const rowA = rows.find((r: any) => r.prId === prA);
+    await q.updateAutoMergeState(rowA.id, {
+      enqueuedAt: new Date(now),
+      lastReason: 'added to the merge queue',
+    });
+    const work = (await q.listArmedMergeRequestsForRunner(50)).find(
+      (w: any) => w.prId === prA,
+    );
+    expect(work.viaMergeQueue).toBe(true);
+    expect(work.enqueuedAt).not.toBeNull();
+
+    // A re-arm is a NEW consent: the previous intent's queue entry must not be attributed
+    // to it.
+    const rearmed = await q.armAutoMerge(A, prA, { ...armArgs('qq2'), viaMergeQueue: false });
+    expect(rearmed.viaMergeQueue).toBe(false);
+    expect(rearmed.enqueuedAt).toBeNull();
   });
 });
 
@@ -302,6 +331,8 @@ describe('the auto-merge watcher', () => {
       gh.isCommitContainedInRef,
       gh.mergePullRequest,
       gh.updatePullRequestBranch,
+      gh.fetchMergeQueueState,
+      gh.enqueuePullRequestOnQueue,
     ]) {
       fn.mockReset();
     }
@@ -402,5 +433,232 @@ describe('the auto-merge watcher', () => {
 
     expect(gh.mergePullRequest).not.toHaveBeenCalled();
     expect(await q.getAutoMergeRequest(A, prC)).toBeNull();
+  });
+});
+
+// The merge-queue path. Same watcher, different terminal action: on a queue-protected base a
+// direct merge is refused by GitHub, so the intent's landing verb is a head-pinned enqueue —
+// and the entry's fate (queue-merged / thrown out / superseded by a human's own enqueue) is
+// what resolves the intent.
+describe('the auto-merge watcher on a merge-queue repo', () => {
+  let runner: any;
+  let gh: any;
+  const log = { info: () => {}, warn: () => {}, error: () => {} } as any;
+
+  const snapshot = (over: Record<string, unknown> = {}) => ({
+    headSha: 'aaa',
+    headRef: 'feat',
+    headRepoFullName: 'orgc/repoc',
+    isFork: false,
+    maintainerCanModify: true,
+    mergeable: true,
+    // A queue repo's resting status: a direct merge is never allowed there, so 'blocked' is
+    // what GitHub reports even for a PR the queue would happily take.
+    mergeableState: 'blocked',
+    baseRef: 'main',
+    baseSha: 'base0',
+    behindBy: 0,
+    aheadBy: 1,
+    ...over,
+  });
+
+  const queueState = (over: Record<string, unknown> = {}) => ({
+    enabled: true,
+    inQueue: false,
+    position: null,
+    state: null,
+    estimatedTimeToMergeMs: null,
+    enqueuedAt: null,
+    prState: 'OPEN',
+    reviewDecision: null,
+    ...over,
+  });
+
+  const rowFor = async (prId: number): Promise<any> => {
+    const rows = await db.select().from(schema.autoMergeRequests).execute();
+    return rows.find((r: any) => r.prId === prId);
+  };
+
+  beforeAll(async () => {
+    runner = await import('../merge/auto-merge-runner.js');
+    gh = await import('../github/mutations.js');
+  });
+
+  beforeEach(async () => {
+    for (const fn of [
+      gh.fetchPrMergeSnapshot,
+      gh.fetchCommitParents,
+      gh.isCommitContainedInRef,
+      gh.mergePullRequest,
+      gh.updatePullRequestBranch,
+      gh.fetchMergeQueueState,
+      gh.enqueuePullRequestOnQueue,
+    ]) {
+      fn.mockReset();
+    }
+    await db.delete(schema.autoMergeRequests).execute();
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(schema.pullRequests)
+      .set({ state: 'open' })
+      .where(eq(schema.pullRequests.id, prC))
+      .execute();
+  });
+
+  it('ENQUEUES instead of direct-merging, pinned to the consented head', async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('qa1'), viaMergeQueue: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'qa1' }));
+    gh.fetchMergeQueueState.mockResolvedValue(queueState());
+    gh.enqueuePullRequestOnQueue.mockResolvedValue({
+      position: 2,
+      state: 'QUEUED',
+      estimatedTimeToMergeMs: null,
+    });
+
+    await runner.runAutoMergeTick(log);
+
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+    expect(gh.enqueuePullRequestOnQueue).toHaveBeenCalledTimes(1);
+    // (token, prNodeId, expectedHeadOid) — the pin is the same consent anchor as PUT /merge.
+    expect(gh.enqueuePullRequestOnQueue.mock.calls[0][1]).toBe('PR_c');
+    expect(gh.enqueuePullRequestOnQueue.mock.calls[0][2]).toBe('qa1');
+    const row = await rowFor(prC);
+    expect(row.state).toBe('armed');
+    expect(row.enqueuedAt).not.toBeNull();
+    expect(row.lastReason).toContain('position 2');
+  });
+
+  it('waits to enqueue while required reviews are missing — and says so by name', async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('qb1'), viaMergeQueue: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'qb1' }));
+    gh.fetchMergeQueueState.mockResolvedValue(queueState({ reviewDecision: 'REVIEW_REQUIRED' }));
+
+    await runner.runAutoMergeTick(log);
+
+    expect(gh.enqueuePullRequestOnQueue).not.toHaveBeenCalled();
+    const row = await rowFor(prC);
+    expect(row.state).toBe('armed');
+    expect(row.enqueuedAt).toBeNull();
+    expect(row.lastReason).toContain('required reviews');
+  });
+
+  it("resolves 'merged' when the queue lands OUR entry (the toast is truthful)", async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('qc1'), viaMergeQueue: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'qc1' }));
+    gh.fetchMergeQueueState.mockResolvedValue(queueState());
+    gh.enqueuePullRequestOnQueue.mockResolvedValue({
+      position: 1,
+      state: 'QUEUED',
+      estimatedTimeToMergeMs: null,
+    });
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).enqueuedAt).not.toBeNull();
+
+    // Next tick: sitting in the queue — the steady state, still armed.
+    gh.fetchMergeQueueState.mockResolvedValue(queueState({ inQueue: true, position: 1 }));
+    await runner.runAutoMergeTick(log);
+    const queued = await rowFor(prC);
+    expect(queued.state).toBe('armed');
+    expect(queued.lastReason).toContain('in the merge queue');
+
+    // Final tick: the queue merged it. The LIVE state is what decides — the synced row can
+    // lag a fast queue by a whole tick.
+    gh.fetchMergeQueueState.mockResolvedValue(queueState({ prState: 'MERGED' }));
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).state).toBe('merged');
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("a queue entry the watcher didn't create supersedes the intent", async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('qd1'), viaMergeQueue: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'qd1' }));
+    gh.fetchMergeQueueState.mockResolvedValue(queueState({ inQueue: true, position: 3 }));
+
+    await runner.runAutoMergeTick(log);
+
+    expect(gh.enqueuePullRequestOnQueue).not.toHaveBeenCalled();
+    const row = await rowFor(prC);
+    expect(row.state).toBe('disarmed_blocked');
+    expect(row.lastReason).toContain('outside auto-merge');
+  });
+
+  it('stands down when OUR entry is thrown out of the queue, instead of re-enqueueing', async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('qe1'), viaMergeQueue: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'qe1' }));
+    gh.fetchMergeQueueState.mockResolvedValue(queueState());
+    gh.enqueuePullRequestOnQueue.mockResolvedValue({
+      position: 1,
+      state: 'QUEUED',
+      estimatedTimeToMergeMs: null,
+    });
+    await runner.runAutoMergeTick(log);
+
+    // Dequeued (a human, or the queue judged it UNMERGEABLE) but still open: re-enqueueing
+    // would fight that decision.
+    gh.fetchMergeQueueState.mockResolvedValue(queueState());
+    await runner.runAutoMergeTick(log);
+
+    expect(gh.enqueuePullRequestOnQueue).toHaveBeenCalledTimes(1); // the first tick only
+    const row = await rowFor(prC);
+    expect(row.state).toBe('disarmed_blocked');
+    expect(row.lastReason).toContain('removed from the merge queue');
+  });
+
+  it('falls back to the direct merge when the queue was disabled after arming', async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('qf1'), viaMergeQueue: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(
+      snapshot({ headSha: 'qf1', mergeableState: 'clean' }),
+    );
+    gh.fetchMergeQueueState.mockResolvedValue(queueState({ enabled: false }));
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed3' });
+
+    await runner.runAutoMergeTick(log);
+
+    expect(gh.enqueuePullRequestOnQueue).not.toHaveBeenCalled();
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
+    expect((await rowFor(prC)).state).toBe('merged');
+  });
+
+  it('freshens from trunk once BEFORE the enqueue, and never while the entry is queued', async () => {
+    await q.armAutoMerge(A, prC, {
+      ...armArgs('qg1'),
+      viaMergeQueue: true,
+      updateStrategy: 'merge',
+    });
+    gh.fetchMergeQueueState.mockResolvedValue(queueState());
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'qg1', behindBy: 2 }));
+    gh.updatePullRequestBranch.mockResolvedValue({ ok: true });
+
+    // Tick 1: behind → bring it current first (the "update from trunk, then queue" contract).
+    await runner.runAutoMergeTick(log);
+    expect(gh.updatePullRequestBranch).toHaveBeenCalledTimes(1);
+    expect(gh.enqueuePullRequestOnQueue).not.toHaveBeenCalled();
+
+    // Tick 2: the head moved to OUR base-into-head merge → re-pin, give its checks a tick.
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'ourqm1', behindBy: 2 }));
+    gh.fetchCommitParents.mockResolvedValue(['qg1', 'trunktip1']);
+    gh.isCommitContainedInRef.mockResolvedValue(true);
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).expectedHeadOid).toBe('ourqm1');
+
+    // Tick 3: still nominally behind (trunk keeps moving) — freshening is ONCE, so this tick
+    // enqueues, pinned to the freshened head.
+    gh.enqueuePullRequestOnQueue.mockResolvedValue({
+      position: 1,
+      state: 'QUEUED',
+      estimatedTimeToMergeMs: null,
+    });
+    await runner.runAutoMergeTick(log);
+    expect(gh.updatePullRequestBranch).toHaveBeenCalledTimes(1);
+    expect(gh.enqueuePullRequestOnQueue).toHaveBeenCalledTimes(1);
+    expect(gh.enqueuePullRequestOnQueue.mock.calls[0][2]).toBe('ourqm1');
+
+    // Tick 4: queued, trunk moved on again — NO second freshen (an update moves the head,
+    // which kicks the entry out of the queue; the queue phase settles before the gates run).
+    gh.fetchMergeQueueState.mockResolvedValue(queueState({ inQueue: true, position: 1 }));
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'ourqm1', behindBy: 7 }));
+    await runner.runAutoMergeTick(log);
+    expect(gh.updatePullRequestBranch).toHaveBeenCalledTimes(1);
+    expect((await rowFor(prC)).state).toBe('armed');
   });
 });

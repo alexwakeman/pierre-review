@@ -38,8 +38,9 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // blank pane. This field is transient (freshDefaults only, never persisted, never URL-parsed), so
 // a stale value can only live in memory for one session.
 export type InsightsSubTab = 'overview' | 'sprint';
-// The all-open-PRs drill-down's scope: one repo | the FilterBar-visible 'feed' scope | a named
-// repo GROUP (label + the exact repo set behind it — see openPrsScope).
+// The all-open-PRs drill-down's scope: one repo | 'feed' (every repo in the active Workspace —
+// the Flow metrics "Open PRs" tile) | a named repo GROUP (label + the exact repo set behind it —
+// see openPrsScope).
 export type OpenPrsScope = number | 'feed' | { label: string; repoIds: number[] };
 
 /**
@@ -169,6 +170,11 @@ export interface FilterState {
   // bot lens, ORTHOGONAL to feedMyTurnOnly/feedClaudeOnly. Transient, URL-silent (like feedBotLens).
   feedCatComments: boolean;
   feedCatPrEvents: boolean;
+  // Activity "Feed" "Needs review" pill — narrow the stream to pr_opened/pr_ready_for_review
+  // cards whose PR is STILL awaiting a first review (the server-computed prAwaitingReview
+  // flag, a live snapshot). Client-side, composes like the category pills. Transient,
+  // URL-silent (like feedCatPrEvents).
+  feedNeedsReview: boolean;
   // Activity "Feed" opt-in "show individual commits" toggle. false (default) → only commit
   // pushes that ADDRESSED a review thread surface (the existing behaviour); true → the server
   // also emits plain commit-push runs. Server-side (the client can't synthesize plain commits),
@@ -286,8 +292,9 @@ export interface FilterState {
   botPrsFocusRepoId: number | null;
 
   // transient: the scope the all-open-PRs drill-down tab lists — a repoId (that repo's open
-  // PRs), 'feed' (the FilterBar-visible scope), or a named GROUP (label + the exact repo set
-  // behind a FeedOpenPrsPanel group — a repoId list, so the footer's promised count ≡ the tab).
+  // PRs), 'feed' (every repo in the active workspace — the Flow metrics "Open PRs" tile), or a
+  // named GROUP (label + the exact repo set behind a FeedOpenPrsPanel group — a repoId list, so
+  // the footer's promised count ≡ the tab).
   // Read (not consumed) for the tab's lifetime, like botPrsFocusRepoId. null = never opened.
   openPrsScope: OpenPrsScope | null;
 
@@ -423,6 +430,8 @@ export interface FilterState {
   // Feed event-category pills (see feedCatComments/feedCatPrEvents) — independent toggles.
   toggleFeedCatComments: () => void;
   toggleFeedCatPrEvents: () => void;
+  // Feed "Needs review" pill (see feedNeedsReview) — independent toggle.
+  toggleFeedNeedsReview: () => void;
   // Feed "show individual commits" toggle (see feedShowCommits).
   toggleFeedShowCommits: () => void;
   // Isolate the Feed to a single PR (or clear with null) — the Feed "open PRs" panel.
@@ -523,7 +532,7 @@ export interface FilterState {
   openBotPrsDetail: (key: string, repoId?: number | null) => void;
   consumeBotPrsFocus: () => void;
   // Open (or re-focus) the sortable all-open-PRs drill-down tab on a scope (a repoId | the
-  // FilterBar-visible 'feed' scope | a named repo group). Sets the openPrsScope seed + opens the
+  // workspace-wide 'feed' scope | a named repo group). Sets the openPrsScope seed + opens the
   // singleton tab; OpenPrsDetail reads (never consumes) the seed.
   openOpenPrsDetail: (scope: OpenPrsScope) => void;
   // Open (or re-focus) the bot-only-PRs drill-down tab (the amber "only a bot reviewed
@@ -741,6 +750,7 @@ function freshDefaults(): FilterData {
     feedBotLens: 'hide',
     feedCatComments: false,
     feedCatPrEvents: false,
+    feedNeedsReview: false,
     feedShowCommits: false,
     feedIsolatedPrId: null,
     botAnalyticsWindow: 'rolling_14',
@@ -839,6 +849,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   setFeedBotLens: (v) => set({ feedBotLens: v }),
   toggleFeedCatComments: () => set((s) => ({ feedCatComments: !s.feedCatComments })),
   toggleFeedCatPrEvents: () => set((s) => ({ feedCatPrEvents: !s.feedCatPrEvents })),
+  toggleFeedNeedsReview: () => set((s) => ({ feedNeedsReview: !s.feedNeedsReview })),
   toggleFeedShowCommits: () => set((s) => ({ feedShowCommits: !s.feedShowCommits })),
   setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),

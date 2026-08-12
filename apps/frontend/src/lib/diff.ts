@@ -69,6 +69,42 @@ export function patchLineCount(patch: string | null | undefined): number {
   return patch.replace(/\n$/, '').split('\n').length;
 }
 
+// Machine-generated language lock files, by exact basename (case-sensitive, matching
+// what git records). Used by the Changes/AI-Fix collapse-by-default heuristic — these
+// files are all noise, so they ALWAYS start collapsed regardless of size. Deliberately
+// NOT a broad `*.lock` suffix match (that would catch real sources). The backend keeps
+// a broader noise list for a different purpose (review routing) in
+// apps/backend/src/review/prepare.ts (NOISE_GLOBS) — the two are not meant to agree.
+const LOCK_FILE_BASENAMES = new Set([
+  'pnpm-lock.yaml',
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'yarn.lock',
+  'bun.lockb',
+  'bun.lock',
+  'Cargo.lock',
+  'poetry.lock',
+  'uv.lock',
+  'Pipfile.lock',
+  'Gemfile.lock',
+  'composer.lock',
+  'go.sum',
+  'flake.lock',
+  'Package.resolved',
+  'gradle.lockfile',
+  'mix.lock',
+  'pubspec.lock',
+  'packages.lock.json',
+]);
+
+// Basename match so nested paths work (…/xcshareddata/swiftpm/Package.resolved). The
+// `.lockfile` suffix arm covers Gradle's per-project locks (gradle/dependency-locks/*.lockfile).
+export function isLockFile(path: string): boolean {
+  const normalized = path.replace(/\\/g, '/');
+  const basename = normalized.slice(normalized.lastIndexOf('/') + 1);
+  return LOCK_FILE_BASENAMES.has(basename) || basename.endsWith('.lockfile');
+}
+
 // ---- full `git diff` splitter (for the AI Fix changeset) ----
 // The AI-Fix agent's captured patch is a WHOLE `git diff --cached --binary` blob (many
 // files, with `diff --git`/`index`/`---`/`+++` headers). This splits it into per-file

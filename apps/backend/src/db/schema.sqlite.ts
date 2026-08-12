@@ -646,6 +646,16 @@ export const autoMergeRequests = sqliteTable(
     }).notNull(),
     // The head SHA at arming time — the consent anchor (see above).
     expectedHeadOid: text('expected_head_oid').notNull(),
+    // Set at arm time when the base branch had a merge queue: the watcher's terminal action
+    // is then "add to the queue", not a direct merge (GitHub refuses PUT .../merge on a
+    // queue-protected branch). Re-checked live each tick — a queue disabled after arming
+    // falls back to the direct merge.
+    viaMergeQueue: integer('via_merge_queue', { mode: 'boolean' }).notNull().default(false),
+    // When the WATCHER added the PR to the merge queue; null until then (and always null for
+    // direct-merge intents). Load-bearing for attribution: a PR that merges while this is set
+    // resolves 'merged' (the watcher's doing — the toast fires); one a human queued resolves
+    // 'disarmed_blocked' like any outside merge.
+    enqueuedAt: integer('enqueued_at', { mode: 'timestamp' }),
     // shared ArmedMergeState.
     state: text('state', {
       enum: [

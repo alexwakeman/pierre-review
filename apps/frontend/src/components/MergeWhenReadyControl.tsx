@@ -12,6 +12,11 @@ import { ApiError } from '../api/client.js';
 // trunk, then land). A fully clean up-to-date PR gets no button (that's just Merge), and
 // neither do conflicts (the fix-push disarms, so the wait could only end by cancelling itself).
 //
+// On a merge-QUEUE repo the same arm exists with a different landing verb: the watcher adds
+// the PR to the queue (instead of a direct merge GitHub would refuse) once required reviews
+// are in — the copy says so, and a PR already IN the queue gets no button (its 'queued'
+// verdict fails eligibility; it is already landing).
+//
 // merge-options is fetched EAGERLY here (unlike MergeControl's click-gated fetch): eligibility
 // needs the LIVE behindBy, and the user is looking at this exact PR — 3 GitHub calls per
 // viewed eligible PR is the accepted cost. The query KEY is shared with MergeControl (30s
@@ -33,13 +38,28 @@ export function MergeWhenReadyControl({ prId }: { prId: number }): JSX.Element |
   // 45s poll hasn't caught yet.
   const armed = armedIntent ?? (options?.autoMerge.armed?.state === 'armed' ? options.autoMerge.armed : null);
   if (armed != null) {
+    // Three phases, not two: a queue intent that the watcher has already enqueued is past
+    // "waiting for conditions" — the queue is landing it, and cancelling now also removes
+    // the queue entry (the server does both).
+    const inQueue = armed.enqueuedAt != null;
     return (
       <div className="flex flex-wrap items-center gap-2">
         <span
           className="inline-flex items-center gap-1 rounded border border-violet-300 bg-violet-50/60 px-2 py-0.5 text-sm font-medium text-violet-700 dark:border-violet-800/60 dark:bg-violet-950/20 dark:text-violet-300"
-          title="Limn updates it from trunk if needed and merges when checks pass — while the app is running. A new commit on the branch disarms it."
+          title={
+            inQueue
+              ? 'Limn added this PR to the merge queue — GitHub lands it from here. Cancelling also removes it from the queue.'
+              : armed.viaMergeQueue
+                ? 'Limn updates it from trunk if needed and adds it to the merge queue when required reviews are in — while the app is running. A new commit on the branch disarms it.'
+                : 'Limn updates it from trunk if needed and merges when checks pass — while the app is running. A new commit on the branch disarms it.'
+          }
         >
-          <span aria-hidden>⏲</span> Armed — merging when ready
+          <span aria-hidden>⏲</span>{' '}
+          {inQueue
+            ? 'In the merge queue'
+            : armed.viaMergeQueue
+              ? 'Armed — queueing when ready'
+              : 'Armed — merging when ready'}
         </span>
         <button
           type="button"
@@ -47,7 +67,7 @@ export function MergeWhenReadyControl({ prId }: { prId: number }): JSX.Element |
           disabled={disarm.isPending}
           className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         >
-          {disarm.isPending ? 'Cancelling…' : 'Cancel auto-merge'}
+          {disarm.isPending ? 'Cancelling…' : inQueue ? 'Cancel & dequeue' : 'Cancel auto-merge'}
         </button>
         {disarmError && <span className="text-xs text-red-500">{disarmError}</span>}
       </div>
@@ -72,10 +92,10 @@ export function MergeWhenReadyControl({ prId }: { prId: number }): JSX.Element |
     queuePosition: queue?.position ?? null,
     behindBy: options.behindBy,
   });
+  const queueEnabled = queue?.enabled ?? false;
   const eligible = mergeWhenReadyEligible({
     allowedByRepo: options.autoMerge.allowedByRepo,
     methodCount: options.allowedMethods.length,
-    queueEnabled: queue?.enabled ?? false,
     alreadyArmed: false, // the armed early-return above already covered it
     verdict,
     behindBy: options.behindBy,
@@ -89,7 +109,9 @@ export function MergeWhenReadyControl({ prId }: { prId: number }): JSX.Element |
             not a GitHub setting. On a clean-but-behind PR this is a ≤2-min delayed merge, so
             the confirm step is deliberate, not decoration. */}
         <span className="text-xs text-gray-500 dark:text-gray-400">
-          Updates from trunk if needed and merges when checks pass — while Limn is running.
+          {queueEnabled
+            ? 'Updates from trunk if needed and adds it to the merge queue when required reviews are in — while Limn is running.'
+            : 'Updates from trunk if needed and merges when checks pass — while Limn is running.'}
         </span>
         <button
           type="button"
@@ -131,9 +153,13 @@ export function MergeWhenReadyControl({ prId }: { prId: number }): JSX.Element |
       type="button"
       onClick={() => setConfirming(true)}
       className="inline-flex items-center gap-1 rounded border border-violet-400 px-2 py-0.5 text-sm font-medium text-violet-600 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30"
-      title="Arm Limn's watcher: it updates from trunk if needed and merges when checks pass — while the app is running"
+      title={
+        queueEnabled
+          ? "Arm Limn's watcher: it updates from trunk if needed and adds the PR to the merge queue when required reviews are in — while the app is running"
+          : "Arm Limn's watcher: it updates from trunk if needed and merges when checks pass — while the app is running"
+      }
     >
-      <span aria-hidden>⏲</span> Merge when ready
+      <span aria-hidden>⏲</span> {queueEnabled ? 'Queue when ready' : 'Merge when ready'}
     </button>
   );
 }

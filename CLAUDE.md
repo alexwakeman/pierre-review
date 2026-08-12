@@ -429,8 +429,9 @@ Landmines that cost real bugs — read the doc before touching any of these:
   slice; `resetAllFilters` preserves it explicitly.
 - **The repo picker (`RepoSelectPanel`) is Timeline-ONLY.** Activity, Feed, Bots and
   Compare always cover every repo in the selected workspace — never let the picker scope a
-  screen that doesn't render it (pinned by `workspaceOpenPrsScope.test.ts`: the two
-  open-PR search builders must disagree exactly once).
+  screen that doesn't render it (pinned by `workspaceOpenPrsScope.test.ts`: of the three
+  open-PR search builders, only the Timeline one honours the picker, and the two Activity
+  builders stay byte-identical to each other when unscoped so they share one cache entry).
 - **Visible sub-tabs are DERIVED, never written back** (`feedInnerTab`, `botsInnerTab`,
   the Compare rail gate): a scalar may legitimately hold a key the current context doesn't
   render; compute an `effectiveTab` for the render only — a corrective `set…` permanently
@@ -474,6 +475,13 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   `'none'` — a PR falling behind after arming must still freshen); while armed the Close
   button is hidden and a header chip shows the intent (`usePrArmedIntent`: the armed list
   carries 24h-resolved rows, so the predicate is `state==='armed'`, never row existence).
+  **Merge-queue repos arm the same way** ("Queue when ready"): the intent is stamped
+  `viaMergeQueue` and the watcher's terminal action becomes a head-pinned ENQUEUE gated on
+  `reviewDecision` (a queue repo rests at 'blocked'; checks don't gate entry) — freshen
+  happens once BEFORE the first enqueue, never while queued (an update kicks the entry out).
+  `enqueuedAt` is the attribution column: merged-while-set ⇒ 'merged' (toast), a human's
+  entry/dequeue ⇒ 'disarmed_blocked', and disarm with it set also dequeues (row deleted
+  first — cancel must win). Full contract in the doc.
 - CI logs are live ranged reads of the signed Actions blob URL — server-side only, NEVER
   returned to a client (it is unauthenticated). Logs are offered for passing checks too.
 - Trunk status (`/api/branch-status` over `repos` head columns + `branchCommits`) is

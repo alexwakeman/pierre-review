@@ -10,10 +10,12 @@
 //     a repo whose CI status says failure.
 //  2. THE PR RESOLUTION IS KEYED BY (repoId, number) AND SCOPED BY accountId. A PR number is
 //     unique only within a repo, so a number-keyed map would cross-link repo A's #12 onto repo B's
-//     commit and open the wrong PR; and the `inArray × inArray` predicate deliberately
+//     group and open the wrong PR; and the `inArray × inArray` predicate deliberately
 //     over-matches, so the accountId predicate is the only thing keeping another tenant's PR id
 //     out. Both traps are seeded here, not merely commented on: deleting either predicate must
-//     fail a specific assertion.
+//     fail a specific assertion. (The wire unit is the merged-PR GROUP — commits consolidated
+//     by prNumber — so the resolution now hangs off `mergedPrs`, and a direct push must join
+//     no group at all.)
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { BranchCheckRun, BranchStatusResponse } from '@pierre-review/shared';
@@ -166,25 +168,19 @@ afterAll(() => closeDb?.());
 // `inArray(repoId, ids) AND inArray(number, numbers)` predicate is a cross-product that legitimately
 // OVER-matches, and it can only over-match when more than one repo is in scope — so narrowing to a
 // single repo would make the cross-repo trap below vacuous, passing even with a bare-number map key.
-const mainCommits = async () => {
+const mainGroups = async () => {
   const { repos: rows } = await getBranchStatus(acctMine, null);
   const repo = rows.find((r) => r.repoId === mainRepo)!;
-  const bySha = new Map(repo.commits.map((c) => [c.sha, c]));
-  return { repo, bySha };
+  const byNumber = new Map(repo.mergedPrs.map((p) => [p.prNumber, p]));
+  return { repo, byNumber };
 };
 
 describe('getBranchStatus: head failing-check summary', () => {
   it('derives it from the commit whose SHA is the head, not from the newest row', async () => {
-    const { repo } = await mainCommits();
+    const { repo } = await mainGroups();
     expect(repo.failingChecks.map((c) => c.name)).toEqual(['build']);
     // 'lint' belongs to the newer-by-date commit; surfacing it here would mean a positional match.
     expect(repo.failingChecks.map((c) => c.name)).not.toContain('lint');
-  });
-
-  it('carries each commit’s own failures, and [] (never null) for a green or pre-migration row', async () => {
-    const { bySha } = await mainCommits();
-    expect(bySha.get('newer_sha')!.failingChecks.map((c) => c.name)).toEqual(['lint']);
-    expect(bySha.get('direct_push_sha')!.failingChecks).toEqual([]);
   });
 
   it('is empty for a repo whose head sha matches no stored commit', async () => {
@@ -193,26 +189,31 @@ describe('getBranchStatus: head failing-check summary', () => {
   });
 });
 
-describe('getBranchStatus: commit → local PR resolution', () => {
-  it('resolves a number in the SAME repo to its local id', async () => {
-    const { bySha } = await mainCommits();
-    expect(bySha.get('head_sha')).toMatchObject({ prNumber: 12, prId: ownPrId });
+describe('getBranchStatus: merged-PR groups + local PR resolution', () => {
+  it('resolves a number in the SAME repo to its local id (with the row’s title)', async () => {
+    const { byNumber } = await mainGroups();
+    expect(byNumber.get(12)).toMatchObject({ prId: ownPrId, title: 'pr 12' });
+    expect(byNumber.get(12)!.commits.map((c) => c.sha)).toEqual(['head_sha']);
   });
 
-  it('does NOT resolve a number that only exists in another repo, but keeps the number', async () => {
-    const { bySha } = await mainCommits();
-    // The number survives so the client can still link out to github.com; only the in-app id is
-    // withheld. A bare-number map key would put otherRepo's PR id here.
-    expect(bySha.get('newer_sha')).toMatchObject({ prNumber: 34, prId: null });
+  it('does NOT resolve a number that only exists in another repo, but keeps the group', async () => {
+    const { byNumber } = await mainGroups();
+    // The number survives so the client can still link out to github.com; only the in-app id
+    // (and the title) is withheld. A bare-number map key would put otherRepo's PR id here.
+    expect(byNumber.get(34)).toMatchObject({ prId: null, title: null });
   });
 
   it('does NOT resolve another account’s PR, even in our own repo', async () => {
-    const { bySha } = await mainCommits();
-    expect(bySha.get('foreign_pr_sha')).toMatchObject({ prNumber: 56, prId: null });
+    const { byNumber } = await mainGroups();
+    expect(byNumber.get(56)).toMatchObject({ prId: null, title: null });
   });
 
-  it('reports a direct push as both-null', async () => {
-    const { bySha } = await mainCommits();
-    expect(bySha.get('direct_push_sha')).toMatchObject({ prNumber: null, prId: null });
+  it('never lists a direct push, and orders groups by the mergedAt fallback (newest commit)', async () => {
+    const { repo } = await mainGroups();
+    const shas = repo.mergedPrs.flatMap((p) => p.commits).map((c) => c.sha);
+    expect(shas).not.toContain('direct_push_sha');
+    // No PR row here carries a real mergedAt, so every group falls back to its newest commit's
+    // time: #34 (07-19) > #56 (07-18) > #12 (07-15, the backdated head).
+    expect(repo.mergedPrs.map((p) => p.prNumber)).toEqual([34, 56, 12]);
   });
 });

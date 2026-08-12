@@ -220,10 +220,11 @@ decision (each would touch the root lockfile, which is why neither was taken uni
   shares a slot with the workspace-wide one `useBotColors` reads), `botReviewers.test.ts`,
   `botCost.test.ts`, `resolvableBotThreads.test.ts` and `checksRow.test.ts`; `prRef.test.ts`
   predates them all. (`teamScope.test.ts` was DELETED with the canonicalisers it pinned.)
-  **`workspaceOpenPrsScope.test.ts`** pins the Timeline-only-picker rule from the client side: the
-  two open-PR search builders must disagree **exactly once** — when the board is narrowed —
-  `buildOpenPrsSearch` honouring `filters.repoIds` (Timeline) and `workspaceOpenPrsSearch` ignoring
-  it (Activity). Both failure modes are silent: pick up `repoIds` on the Activity side and a list
+  **`workspaceOpenPrsScope.test.ts`** pins the Timeline-only-picker rule from the client side:
+  of the three open-PR search builders, only `buildOpenPrsSearch` honours `filters.repoIds`
+  (Timeline); `workspaceOpenPrsSearch` and `scopedOpenPrsSearch` (the drill-down's builder,
+  which takes an EXPLICIT repo list and stays byte-identical to `workspaceOpenPrsSearch` when
+  unscoped) both ignore it (Activity). Both failure modes are silent: pick up `repoIds` on the Activity side and a list
   comes back short, scoped by a control that is not on screen; let the two strings diverge in the
   common case and they stop sharing a React Query cache entry (the key IS the string), so the same
   list is fetched twice forever with both copies rendering correctly.

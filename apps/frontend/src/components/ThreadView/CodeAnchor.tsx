@@ -40,7 +40,7 @@ export function CodeAnchor({
         <button
           type="button"
           onClick={() => toggle(threadId)}
-          className="text-[11px] text-gray-400 hover:text-gray-600"
+          className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
         >
           ⌃ Hide code context
         </button>

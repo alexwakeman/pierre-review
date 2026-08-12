@@ -1,26 +1,23 @@
 import { useState } from 'react';
-import type { BranchCheckRun, BranchCommit, RepoBranchStatus } from '@pierre-review/shared';
+import type {
+  BranchCheckRun,
+  BranchMergedPr,
+  BranchTrendsResponse,
+  RepoBranchStatus,
+} from '@pierre-review/shared';
 import { useBranchStatus } from '../../hooks/useBranchStatus.js';
+import { useBranchTrends } from '../../hooks/useBranchTrends.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { trimTrailingPrRef } from '../../lib/prRef.js';
 import { CHECK_STATE_META, CI_META, relativeTime, safeExternalUrl } from '../../lib/ui.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
+import { ChartCard, PALETTE } from '../charts/common.js';
+import { DayStrip } from '../charts/DayStrip.js';
 import { CiDot } from './BranchStatusChip.js';
 
-// The GitHub URL for a commit. `owner/name` and the sha both come from DATA, so the segments
-// are encoded and the result goes through safeExternalUrl before it can reach an href — the
-// house rule for every data-derived URL, even one we assembled ourselves.
-function commitUrl(fullName: string | undefined, sha: string): string | undefined {
-  if (!fullName) return undefined;
-  const [owner, name] = fullName.split('/');
-  if (!owner || !name) return undefined;
-  return safeExternalUrl(
-    `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commit/${encodeURIComponent(sha)}`,
-  );
-}
-
-// Same treatment for a PR: every segment is data, encoded, and run through safeExternalUrl before
-// it can reach an href.
+// The GitHub URL for a PR: every segment is data, encoded, and run through safeExternalUrl
+// before it can reach an href — the house rule for every data-derived URL, even one we
+// assembled ourselves.
 function prUrl(fullName: string | undefined, prNumber: number): string | undefined {
   if (!fullName) return undefined;
   const [owner, name] = fullName.split('/');
@@ -30,13 +27,19 @@ function prUrl(fullName: string | undefined, prNumber: number): string | undefin
   );
 }
 
-// TabMeta for a trunk commit's PR: the number + repo are all this surface knows. PrDetail
-// backfills the title/author chrome via usePinnedTabs.syncMeta once its detail query lands.
-function prTabMeta(prId: number, prNumber: number, repoFullName: string): TabMeta {
+// TabMeta for a listed merged PR. The title is the synced PR row's when we have it (`#N` as a
+// placeholder otherwise); PrDetail backfills the rest of the chrome via usePinnedTabs.syncMeta
+// once its detail query lands.
+function prTabMeta(
+  prId: number,
+  prNumber: number,
+  repoFullName: string,
+  title?: string | null,
+): TabMeta {
   return {
     id: prId,
     number: prNumber,
-    title: `#${prNumber}`,
+    title: title ?? `#${prNumber}`,
     repoFullName,
     authorLogin: null,
     authorDisplayName: null,
@@ -110,117 +113,174 @@ function FailingSummary({ checks }: { checks: BranchCheckRun[] }): JSX.Element |
   );
 }
 
-function CommitRow({
-  commit,
+// How many consolidated commits the row's tooltip lists before eliding — a merge-commit PR can
+// fold in dozens, and a native title has no scrollbar.
+const PR_TIP_COMMITS = 20;
+
+function PrRow({
+  pr,
   fullName,
 }: {
-  commit: BranchCommit;
+  pr: BranchMergedPr;
   fullName: string | undefined;
 }): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  const [open, setOpen] = useState(false);
-  const href = commitUrl(fullName, commit.sha);
-  const who = commit.authorLogin ?? commit.authorName ?? 'unknown';
-  const avatar = safeExternalUrl(commit.authorAvatarUrl);
-  // Narrowed LOCALS, not `commit.prId` inline: TS does not preserve property narrowing inside the
-  // onClick closure, so narrowing consts is what keeps `prTabMeta(prId, prNumber, …)` typechecking
-  // without a non-null assertion.
-  const prId = commit.prId;
-  const prNumber = commit.prNumber;
-  const prHref = prNumber != null ? prUrl(fullName, prNumber) : undefined;
-  // The caret is driven by the DATA, not by the dot's colour: a red commit whose individual checks
-  // we could never retrieve (or a row written before the failing-checks column existed) gets no
-  // caret rather than a caret that opens onto an empty drawer.
-  const failing = commit.failingChecks;
+  const avatar = safeExternalUrl(pr.authorAvatarUrl);
+  // Narrowed LOCAL, not `pr.prId` inline: TS does not preserve property narrowing inside the
+  // onClick closure.
+  const prId = pr.prId;
+  const prHref = prUrl(fullName, pr.prNumber);
+  // Unresolved PR (not synced for this account): the newest consolidated commit's headline is
+  // the best available stand-in for a title.
+  const title = pr.title ?? pr.commits[0]?.messageHeadline ?? `#${pr.prNumber}`;
+  // The consolidation, as the row's tooltip: sha + headline per trunk commit, newest first.
+  // UNTRUSTED text — a `title` attribute renders as plain text, never HTML, which is the point.
+  const tipLines = pr.commits
+    .slice(0, PR_TIP_COMMITS)
+    .map((c) => `${c.sha.slice(0, 7)}  ${c.messageHeadline}`);
+  if (pr.commits.length > PR_TIP_COMMITS)
+    tipLines.push(`… +${pr.commits.length - PR_TIP_COMMITS} more`);
+  const tip = tipLines.join('\n');
   return (
     <li className="text-[11px]">
-      <div className="flex items-center gap-2 py-0.5">
-        {failing.length > 0 ? (
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            aria-expanded={open}
-            aria-label={`${failing.length} failing check${
-              failing.length === 1 ? '' : 's'
-            } on ${commit.sha.slice(0, 7)}`}
-            className="w-2 shrink-0 text-[9px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-          >
-            {open ? '▾' : '▸'}
-          </button>
-        ) : (
-          // Keeps every row's columns aligned whether or not it has a caret.
-          <span aria-hidden="true" className="w-2 shrink-0" />
-        )}
-        <CiDot status={commit.ciStatus} size={5} />
-        {href ? (
-          <a
-            href={href}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="shrink-0 font-mono text-gray-400 hover:text-sky-600 hover:underline dark:hover:text-sky-400"
-          >
-            {commit.sha.slice(0, 7)}
-          </a>
-        ) : (
-          <span className="shrink-0 font-mono text-gray-400">{commit.sha.slice(0, 7)}</span>
-        )}
-        {/* The PR this commit landed from, read right after the sha the way a GitHub commit line
-            does. A SIBLING of the caret button above, never nested inside it — nested interactive
-            elements are invalid DOM and swallow the inner click. */}
-        {prId != null && prNumber != null ? (
+      <div className="flex items-center gap-2 py-0.5" title={tip}>
+        <CiDot status={pr.ciStatus} size={5} />
+        {prId != null ? (
           <button
             type="button"
             onClick={() =>
-              openPrDetailTab(prTabMeta(prId, prNumber, fullName ?? ''), {
+              openPrDetailTab(prTabMeta(prId, pr.prNumber, fullName ?? '', pr.title), {
                 fromActivity: true,
               })
             }
-            title={`Open #${prNumber} in this app`}
+            title={`Open #${pr.prNumber} in this app`}
             className="shrink-0 rounded bg-sky-500/10 px-1 font-mono text-[10px] text-sky-700 hover:bg-sky-500/20 dark:text-sky-300"
           >
-            #{prNumber}
+            #{pr.prNumber}
           </button>
-        ) : prNumber != null && prHref != null ? (
-          // Not synced for this account (squash-merged before the backfill window, or a repo added
-          // later) — there is no local PR to open, so link out rather than drop the reference.
+        ) : prHref != null ? (
+          // Not synced for this account (squash-merged before the backfill window, or a repo
+          // added later) — there is no local PR to open, so link out rather than drop the
+          // reference.
           <a
             href={prHref}
             target="_blank"
             rel="noreferrer noopener"
-            title={`#${prNumber} on GitHub — not synced here`}
+            title={`#${pr.prNumber} on GitHub — not synced here`}
             className="shrink-0 rounded bg-gray-500/10 px-1 font-mono text-[10px] text-gray-500 hover:text-sky-600 dark:text-gray-400 dark:hover:text-sky-400"
           >
-            #{prNumber}
+            #{pr.prNumber}
           </a>
-        ) : null}
-        {/* The headline is UNTRUSTED text from a commit message — rendered as a plain text node
-            (never markdown/HTML) and truncated. */}
+        ) : (
+          <span className="shrink-0 font-mono text-[10px] text-gray-400">#{pr.prNumber}</span>
+        )}
+        {/* UNTRUSTED text (a PR title / commit message) — a plain text node, never markdown. */}
         <span className="min-w-0 flex-1 truncate text-gray-700 dark:text-gray-200">
-          {trimTrailingPrRef(commit.messageHeadline, prNumber)}
+          {trimTrailingPrRef(title, pr.prNumber)}
         </span>
-        <span className="flex shrink-0 items-center gap-1 text-gray-400">
-          {avatar != null && (
-            <img src={avatar} alt="" className="h-3.5 w-3.5 rounded-full" loading="lazy" />
-          )}
-          <span className="max-w-[10rem] truncate">{who}</span>
+        {/* The consolidation's size — the visible hint that the tooltip has the commit list. */}
+        <span className="shrink-0 text-gray-400">
+          {pr.commits.length} commit{pr.commits.length === 1 ? '' : 's'}
         </span>
+        {(avatar != null || pr.authorLogin != null) && (
+          <span className="flex shrink-0 items-center gap-1 text-gray-400">
+            {avatar != null && (
+              <img src={avatar} alt="" className="h-3.5 w-3.5 rounded-full" loading="lazy" />
+            )}
+            {pr.authorLogin != null && (
+              <span className="max-w-[10rem] truncate">{pr.authorLogin}</span>
+            )}
+          </span>
+        )}
         <span
           className="shrink-0 tabular-nums text-gray-400"
-          title={new Date(commit.committedAt).toLocaleString()}
+          title={new Date(pr.mergedAt).toLocaleString()}
         >
-          {relativeTime(commit.committedAt)}
+          {relativeTime(pr.mergedAt)}
         </span>
       </div>
-      {open && (
-        <ul className="mb-1 ml-4 space-y-0.5 border-l border-gray-200 pl-2 dark:border-gray-800">
-          {failing.map((c, i) => (
-            <li key={`${c.name}-${i}`}>
-              <FailingCheck check={c} />
-            </li>
-          ))}
-        </ul>
-      )}
     </li>
+  );
+}
+
+// The ONE trend chart above an expanded row's commit list — the Bot Behaviour "Daily coverage"
+// layout verbatim (DayStrip): one cell per day tinted by that day's FAILING trunk commits, with
+// the thin line band above tracing PRs MERGED into the default branch per day. Both series ride
+// one shared axis from the wire, so a red patch and a merge burst align cell-for-cell. Data
+// arrives via useBranchTrends only once the row opens, so the collapsed strip never pays.
+//
+// The chart body sits in a FIXED-HEIGHT box: the commit list renders below immediately, and
+// reserving the space is what keeps it from shifting when the query lands. The loading state is
+// a muted one-liner inside that reserved space — no spinner.
+function BranchTrends({
+  data,
+  isLoading,
+  isError,
+  full,
+}: {
+  data: BranchTrendsResponse | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  full: boolean;
+}): JSX.Element {
+  const daily = data?.daily ?? [];
+  const hasData = daily.length > 0;
+  const placeholder = (label: string): JSX.Element => (
+    <div className="flex h-full items-center justify-center text-[10px] text-gray-400">
+      {label}
+    </div>
+  );
+  // A failed request is NOT "no data" — an error rendered as an empty state would present a
+  // fact about the repo the server never asserted. Same reserved box, different words.
+  const errLabel = 'Couldn’t load trends';
+  // DayStrip's own default height with the opened band (2 + 14 + 16 + 5 + 12).
+  const STRIP_H = 49;
+
+  const strip = isLoading ? (
+    placeholder('Loading trends…')
+  ) : isError ? (
+    placeholder(errLabel)
+  ) : !hasData ? (
+    placeholder('No trunk history yet')
+  ) : (
+    <DayStrip
+      daily={daily.map((d) => d.failed)}
+      dailyGood={daily.map((d) => d.passed)}
+      startDate={daily[0]?.day ?? ''}
+      silentRuns={[]}
+      color={PALETTE.red}
+      goodColor={PALETTE.green}
+      opened={daily.map((d) => d.merged)}
+      noun="failing commit"
+      goodNoun="passing commit"
+      openedVerb="merged"
+    />
+  );
+
+  if (full) {
+    // The per-repo console: the ChartCard composition, exactly as BotBehaviourPanel's
+    // "Daily coverage" card.
+    return (
+      <div className="mb-2">
+        <ChartCard
+          title="Trunk health & throughput"
+          note="one cell / day · red = failing, green = passing commits · line = PRs merged · retained window (UTC)"
+        >
+          <div style={{ height: STRIP_H }}>{strip}</div>
+        </ChartCard>
+      </div>
+    );
+  }
+
+  // The cross-repo Feed strip lives in a max-h-64 scroll box — same chart, caption instead of
+  // a card.
+  return (
+    <div className="mb-1 border-b border-gray-100 pb-1 dark:border-gray-800/60">
+      <div className="text-[10px] text-gray-400">
+        Trunk CI · red = failing, green = passing · line = PRs merged · retained window
+      </div>
+      <div style={{ height: STRIP_H }}>{strip}</div>
+    </div>
   );
 }
 
@@ -233,14 +293,21 @@ function BranchRow({
   status,
   fullName,
   showRepoName,
+  fullTrends,
 }: {
   status: RepoBranchStatus;
   fullName: string | undefined;
   showRepoName: boolean;
+  fullTrends: boolean;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const ciMeta = CI_META[status.ciStatus];
-  const hasCommits = status.commits.length > 0;
+  // Any retained trunk history at all (merged PRs OR direct pushes) — the expandable content is
+  // the trend strip + the merged-PR list, and the strip has data whenever commits were synced.
+  const hasHistory = status.lastCommitAt != null;
+  // Lazy by construction: `open` is the enabled flag, and the toggle is disabled without
+  // history, so a collapsed strip of N repos issues zero trend requests.
+  const trends = useBranchTrends(status.repoId, open);
   return (
     <li className="border-b border-gray-100 last:border-b-0 dark:border-gray-800/60">
       {/* The row is a DIV, not one big button: the failing-check names are real <a> links to
@@ -255,13 +322,13 @@ function BranchRow({
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          disabled={!hasCommits}
+          disabled={!hasHistory}
           // flex-1 replaces the timestamp's old ml-auto: the toggle now absorbs the row's slack.
           className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
         >
           <span
             aria-hidden="true"
-            className={`w-2 shrink-0 text-[9px] text-gray-400 ${hasCommits ? '' : 'opacity-0'}`}
+            className={`w-2 shrink-0 text-[9px] text-gray-400 ${hasHistory ? '' : 'opacity-0'}`}
           >
             {open ? '▾' : '▸'}
           </span>
@@ -283,12 +350,28 @@ function BranchRow({
           {status.lastCommitAt != null ? relativeTime(status.lastCommitAt) : 'never synced'}
         </span>
       </div>
-      {open && hasCommits && (
-        <ul className="border-t border-gray-100 px-2 py-1 pl-6 dark:border-gray-800/60">
-          {status.commits.map((c) => (
-            <CommitRow key={c.sha} commit={c} fullName={fullName} />
-          ))}
-        </ul>
+      {open && hasHistory && (
+        <div className="border-t border-gray-100 px-2 py-1 pl-6 dark:border-gray-800/60">
+          <BranchTrends
+            data={trends.data}
+            isLoading={trends.isLoading}
+            isError={trends.isError}
+            full={fullTrends}
+          />
+          {status.mergedPrs.length > 0 ? (
+            <ul>
+              {status.mergedPrs.map((pr) => (
+                <PrRow key={pr.prNumber} pr={pr} fullName={fullName} />
+              ))}
+            </ul>
+          ) : (
+            // Real state, not a gap: a branch fed only by direct pushes has trunk history (the
+            // strip above) but nothing that arrived via a PR.
+            <div className="py-0.5 text-[11px] text-gray-400">
+              No merged PRs in the retained window — direct pushes only.
+            </div>
+          )}
+        </div>
       )}
     </li>
   );
@@ -361,6 +444,11 @@ export function BranchStatusPanel({
             // In the single-repo console the name is already the header above; repeating it in
             // every row is noise.
             showRepoName={!compact}
+            // INVERTED from `compact` on purpose: the `compact` panel is the per-repo console
+            // header, which has the vertical room for full ChartCards; the non-compact panel is
+            // the cross-repo Feed strip whose rows live in the max-h-64 scroll box above and get
+            // the two-line compact strips instead.
+            fullTrends={compact}
           />
         ))}
       </ul>

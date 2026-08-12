@@ -7,7 +7,6 @@ import { mlLabelKey, useMlLabelIndex, useMlSeverityEnabled } from '../../hooks/u
 import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';
 import { CodeAnchor } from './CodeAnchor.js';
-import { MarkThreadDone } from './MarkThreadDone.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { ResolveThread } from './ResolveThread.js';
 import { ReplyComposer } from './ReplyComposer.js';
@@ -22,7 +21,6 @@ export function ThreadCard({
   repoId,
   selected,
   viewedSince,
-  inMyTurn = false,
   highlightCommentId,
   onOpenInPr,
 }: {
@@ -32,9 +30,6 @@ export function ThreadCard({
   repoId?: number;
   selected?: boolean;
   viewedSince?: string | null;
-  // True when this thread is in the user's My Turn set (awaiting their response);
-  // shows a "Done" affordance to clear it from the queue.
-  inMyTurn?: boolean;
   // When set, ONLY this comment is marked "new" (the Activity feed highlights the
   // specific comment a card represents). When null/undefined, fall back to the
   // viewedSince heuristic (the PR-detail Threads tab).
@@ -141,8 +136,7 @@ export function ThreadCard({
           prId={thread.prId}
           target={{ targetKind: 'thread', targetId: thread.id }}
         />
-        <span className="ml-auto flex items-center gap-2">
-          {inMyTurn && <MarkThreadDone threadId={thread.id} />}
+        <span className="ml-auto flex items-center">
           <ResolveThread
             prId={thread.prId}
             threadId={thread.id}

@@ -14,7 +14,16 @@ import { WorkspaceMetricsPanel } from './WorkspaceMetricsPanel.js';
 export function FeedMetricsPanel(): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
   const openMetricsDetail = useFilters((s) => s.openMetricsDetail);
+  const openOpenPrsDetail = useFilters((s) => s.openOpenPrsDetail);
   const { data } = useWorkspaceMetrics(workspaceId);
   if (!data?.metrics) return null;
-  return <WorkspaceMetricsPanel metrics={data.metrics} onOpenMetric={openMetricsDetail} />;
+  return (
+    <WorkspaceMetricsPanel
+      metrics={data.metrics}
+      onOpenMetric={openMetricsDetail}
+      // The Open-PRs tile routes to the SAME sortable open-PRs drill-down the "Show all"
+      // footers open — workspace-wide ('feed'), not a metrics-detail sub-tab.
+      onOpenOpenPrs={() => openOpenPrsDetail('feed')}
+    />
+  );
 }

@@ -885,6 +885,8 @@ const SECONDS_TO_MS = 1000;
 interface GqlMergeQueueState {
   repository: {
     pullRequest: {
+      state: string;
+      reviewDecision: string | null;
       isMergeQueueEnabled: boolean;
       isInMergeQueue: boolean;
       mergeQueueEntry: {
@@ -901,6 +903,8 @@ const MERGE_QUEUE_STATE_QUERY = /* GraphQL */ `
   query MergeQueueState($owner: String!, $name: String!, $number: Int!) {
     repository(owner: $owner, name: $name) {
       pullRequest(number: $number) {
+        state
+        reviewDecision
         isMergeQueueEnabled
         isInMergeQueue
         mergeQueueEntry {
@@ -923,6 +927,14 @@ export interface MergeQueueState {
   state: string | null;
   estimatedTimeToMergeMs: number | null;
   enqueuedAt: string | null;
+  // The PR's LIVE state (OPEN | CLOSED | MERGED) from the same query — the auto-merge watcher
+  // reads it because a fast queue can merge within a tick, before the sync observes it.
+  prState: string;
+  // GitHub's PullRequestReviewDecision (APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED), null
+  // when the base requires no reviews. The review half of branch protection is the part that
+  // BLOCKS an enqueue (checks don't — AWAITING_CHECKS is a normal entry state), so the watcher
+  // waits on it by name instead of hammering the mutation.
+  reviewDecision: string | null;
 }
 
 // Live merge-queue state for one PR. Returns null when the PR can't be read (deleted, or the
@@ -951,6 +963,8 @@ export async function fetchMergeQueueState(
     estimatedTimeToMergeMs:
       entry?.estimatedTimeToMerge != null ? entry.estimatedTimeToMerge * SECONDS_TO_MS : null,
     enqueuedAt: entry?.enqueuedAt ?? null,
+    prState: pr.state,
+    reviewDecision: pr.reviewDecision,
   };
 }
 

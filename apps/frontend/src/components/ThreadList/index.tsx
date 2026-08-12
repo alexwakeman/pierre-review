@@ -7,7 +7,6 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { DERIVED_STATES, ML_SEVERITIES } from '@pierre-review/shared';
-import { useMyTurn } from '../../hooks/useTriage.js';
 import { useResolveBotThreads } from '../../hooks/usePrWrites.js';
 import { useDetectedReviewers, usePrBotDedup } from '../../hooks/useBotTriage.js';
 import { useRepos } from '../../hooks/useTimeline.js';
@@ -122,14 +121,6 @@ export function ThreadList({
   );
   const resolveBotThreads = useResolveBotThreads();
   const [confirming, setConfirming] = useState(false);
-
-  // Threads in the user's My Turn set (awaiting their response) — drives the
-  // per-thread "Done" affordance. Reads the already-loaded my-turn cache.
-  const { data: myTurn } = useMyTurn();
-  const awaitingThreadIds = useMemo(
-    () => new Set((myTurn?.threadsAwaiting ?? []).map((t) => t.threadId)),
-    [myTurn],
-  );
 
   // Cross-bot dedup: (path, ±3-line) spots where ≥2 DISTINCT automated reviewers both left a
   // thread — the backend clusters + flags consensus/conflict; we surface a compact rollup so
@@ -520,7 +511,6 @@ export function ThreadList({
             repoId={repoId}
             selectedThreadId={selectedThreadId}
             viewedSince={viewedSince}
-            awaitingThreadIds={awaitingThreadIds}
             registerRef={(id, el) => {
               if (el) rowRefs.current.set(id, el);
               else rowRefs.current.delete(id);

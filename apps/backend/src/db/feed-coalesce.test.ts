@@ -190,9 +190,26 @@ describe('computeFeedCounts', () => {
       comments: 0,
       prEvents: 0,
       commits: 0,
+      awaitingReview: 0,
       bots: 0,
       byBotActor: {},
       byThreadState: {},
     });
+  });
+
+  it('counts awaitingReview as DISTINCT PRs for pr_opened/pr_ready_for_review flagged prAwaitingReview', () => {
+    const items = [
+      // A draft-first PR has BOTH kinds in the window (same prId 10, the factory default) —
+      // the badge reads as a PR count, so the pair dedupes to one.
+      item({ id: 'a', kind: 'pr_opened', prAwaitingReview: true }),
+      item({ id: 'b', kind: 'pr_ready_for_review', prAwaitingReview: true }),
+      item({ id: 'b2', kind: 'pr_opened', prId: 11, prAwaitingReview: true }),
+      item({ id: 'c', kind: 'pr_opened', prId: 12, prAwaitingReview: false }), // reviewed since
+      item({ id: 'd', kind: 'pr_opened', prId: 13 }), // no flag attached (stale feed) — not counted
+      item({ id: 'e', kind: 'pr_merged', prId: 14, prAwaitingReview: true }), // non-matching kind
+    ];
+    const counts = computeFeedCounts(items, new Set<number>(), false);
+    expect(counts.awaitingReview).toBe(2); // PR 10 (deduped) + PR 11
+    expect(counts.prEvents).toBe(6); // the facet stays independent of the flag
   });
 });

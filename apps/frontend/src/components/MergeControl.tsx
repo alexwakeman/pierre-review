@@ -197,7 +197,9 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
       {isArmed && armed != null && (
         <div className="rounded border border-violet-300 bg-violet-50/60 px-2 py-1.5 text-xs text-violet-900 dark:border-violet-800/60 dark:bg-violet-950/20 dark:text-violet-200">
           <div className="font-medium">
-            Auto-merge armed · {METHOD_VERB[armed.mergeMethod]} · armed{' '}
+            {/* On a queue intent the METHOD verb would mislead — the queue's own configured
+                method wins, not the intent's. Say what actually lands it instead. */}
+            Auto-merge armed · {armed.viaMergeQueue ? 'via the merge queue' : METHOD_VERB[armed.mergeMethod]} · armed{' '}
             {relativeTime(armed.armedAt)}
           </div>
           <div className="mt-0.5 text-violet-700/90 dark:text-violet-300/90">
@@ -205,8 +207,11 @@ export function MergeControl({ prId, githubUrl }: { prId: number; githubUrl: str
           </div>
           {/* Honest about the mechanism: this is a watcher in THIS server, not a GitHub setting. */}
           <div className="mt-0.5 text-[11px] text-violet-700/70 dark:text-violet-300/70">
-            Limn merges it while the app is running. A new commit on the branch disarms it — you
-            re-arm to merge the new code. Expires {dateTime(armed.expiresAt)}.
+            {armed.viaMergeQueue
+              ? 'Limn adds it to the merge queue while the app is running; GitHub lands it from there.'
+              : 'Limn merges it while the app is running.'}{' '}
+            A new commit on the branch disarms it — you re-arm to merge the new code. Expires{' '}
+            {dateTime(armed.expiresAt)}.
           </div>
           <button
             type="button"

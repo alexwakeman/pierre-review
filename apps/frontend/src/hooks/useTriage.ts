@@ -82,6 +82,40 @@ export function useWorkspaceOpenPrs() {
   });
 }
 
+// The DRILL-DOWN builder — the workspace plus an EXPLICIT repo narrowing (the open-PRs tab's
+// repo/group scope). The narrowing is an ARGUMENT, never `filters.repoIds`: that is the Timeline
+// board's picker (see workspaceOpenPrsSearch above for the two failure modes a store read invites).
+//
+// Two properties are load-bearing, both pinned by test/workspaceOpenPrsScope.test.ts:
+//  • `repoIds == null` (workspace-wide) is BYTE-IDENTICAL to workspaceOpenPrsSearch, so the
+//    unscoped drill-down shares the Activity surfaces' cache entry rather than re-fetching it.
+//  • `workspace=` is ALWAYS kept alongside `repoIds`: `/api/open-prs` resolves the workspace from
+//    `?workspace=` (absent ⇒ the account's DEFAULT) and returns membership ∩ repoIds, so a bare
+//    `repoIds=<id>` comes back EMPTY for any repo the user moved into another workspace.
+export function scopedOpenPrsSearch(
+  workspaceId: number | null,
+  repoIds: number[] | null,
+): string {
+  const params = new URLSearchParams();
+  if (workspaceId != null) params.set('workspace', String(workspaceId));
+  if (repoIds != null) params.set('repoIds', repoIds.join(','));
+  return params.toString();
+}
+
+export function useScopedOpenPrs(repoIds: number[] | null) {
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const search = scopedOpenPrsSearch(workspaceId, repoIds);
+  return useQuery<OpenPrsResponse>({
+    // The `ws:<id>` segment is NOT redundant with the `workspace=` param: the param fixes what the
+    // server returns, the segment fixes which cache entry it lands in (two workspaces on the same
+    // repo narrowing build the same string).
+    queryKey: ['open-prs', workspaceKey(workspaceId), search],
+    queryFn: () => api.openPrs(search),
+    enabled: workspaceId != null,
+    placeholderData: (prev) => prev,
+  });
+}
+
 export function useMe() {
   // `retry: false` so a cloud-mode 401 (signed out) surfaces immediately to the
   // App auth gate instead of being retried.

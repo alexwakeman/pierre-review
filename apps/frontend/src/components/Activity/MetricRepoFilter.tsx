@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 
-// Repo filter for a Flow-metric drill-down list — matches the header FilterBar dropdowns
-// (pill trigger + popover + checkbox rows). "All Workspace repos" flattens the list across every
-// repo the drill-down covers; ticking individual repos filters to just those. The selection is
-// `null` = all (the canonical "everything" state) or an explicit id array. Multi-select; each
-// metric tab owns its own selection (the parent keys this per WorkspaceMetricKey).
+// Repo filter for a drill-down list (the Flow-metric sub-tabs and the workspace-wide open-PRs
+// tab) — matches the header FilterBar dropdowns (pill trigger + popover + checkbox rows).
+// "All Workspace repos" flattens the list across every repo the drill-down covers; ticking
+// individual repos filters to just those. The selection is `null` = all (the canonical
+// "everything" state) or an explicit id array. Multi-select; LOCAL client-side state owned by
+// the parent (MetricsDetail keys it per WorkspaceMetricKey) — it must never write
+// `filters.repoIds`, the Timeline board's picker.
 export function MetricRepoFilter({
   repos,
   selected,

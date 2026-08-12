@@ -2,10 +2,12 @@
 //
 // What this pins: the button appears ONLY while arming would do something a plain Merge
 // doesn't — a self-clearing blocker (blocked / behind / unknown) or clean-but-behind
-// (mergeable now, behindBy > 0 → arm = update from trunk, then land). The landmine it
-// guards: behindBy > 0 is true of MOST healthy PRs and may only WIDEN this button's
-// eligibility — it must never flip verdict.canMerge (the plain Merge button's gate), and it
-// must never resurrect the button under conflicts / a queue / a draft / an existing intent.
+// (mergeable now, behindBy > 0 → arm = update from trunk, then land). Merge-QUEUE repos use
+// the same rules (the watcher enqueues instead of direct-merging); only a PR already IN the
+// queue is excluded, via its own 'queued' verdict. The landmine it guards: behindBy > 0 is
+// true of MOST healthy PRs and may only WIDEN this button's eligibility — it must never flip
+// verdict.canMerge (the plain Merge button's gate), and it must never resurrect the button
+// under conflicts / an in-queue PR / a draft / an existing intent.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { describe, expect, it } from 'vitest';
@@ -19,7 +21,6 @@ const verdictOf = (input: Partial<MergeVerdictInput>) =>
 const base = {
   allowedByRepo: true,
   methodCount: 2,
-  queueEnabled: false,
   alreadyArmed: false,
   behindBy: 0,
 };
@@ -88,17 +89,31 @@ describe('mergeWhenReadyEligible', () => {
     ).toBe(false);
   });
 
-  it('yields to a merge queue and to an existing intent', () => {
+  it('stays offerable on a merge-queue repo (queue-when-ready), hidden once IN the queue', () => {
+    // A queue repo's typical resting status is 'blocked' (a direct merge is never allowed
+    // there), so the same wait-verdict rule that offers "merge when ready" offers "queue
+    // when ready" — the watcher's landing verb changes, not the eligibility.
     const blocked = verdictOf({ mergeStateStatus: 'blocked' });
-    expect(mergeWhenReadyEligible({ ...base, queueEnabled: true, verdict: blocked })).toBe(false);
-    // A QUEUED PR stays hidden even if the repo-level queue flag were missed — 'queued' is
-    // not a wait verdict and reports canMerge:false.
+    expect(mergeWhenReadyEligible({ ...base, verdict: blocked })).toBe(true);
+    // A PR already sitting in the queue is already landing: 'queued' is not a wait verdict
+    // and reports canMerge:false, so both arms of the predicate reject it.
     expect(
       mergeWhenReadyEligible({
         ...base,
         verdict: verdictOf({ mergeStateStatus: 'blocked', inMergeQueue: true }),
       }),
     ).toBe(false);
+    expect(
+      mergeWhenReadyEligible({
+        ...base,
+        verdict: verdictOf({ mergeStateStatus: 'blocked', inMergeQueue: true }),
+        behindBy: 3,
+      }),
+    ).toBe(false);
+  });
+
+  it('yields to an existing intent', () => {
+    const blocked = verdictOf({ mergeStateStatus: 'blocked' });
     expect(mergeWhenReadyEligible({ ...base, alreadyArmed: true, verdict: blocked })).toBe(false);
   });
 

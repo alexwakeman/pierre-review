@@ -847,9 +847,26 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
           message: `This PR now targets ${info.baseRef}; Limn last saw ${syncedBaseRef ?? 'no base branch'}. Sync the repository, then arm auto-merge again.`,
         };
       }
+      // Does the base branch have a merge queue? Stamped on the intent so the watcher
+      // enqueues instead of direct-merging (which GitHub refuses on a queue-protected
+      // branch). Best-effort like merge-options' read: an older GHES or a token that can't
+      // run the query arms a direct-merge intent, exactly what those repos need.
+      const queue = await fetchMergeQueueState(token, ctx.owner, ctx.name, ctx.number).catch(
+        () => null,
+      );
+      if (queue?.inQueue) {
+        // Already in the queue ⇒ landing is already arranged; an armed intent could only
+        // duplicate or contradict it.
+        reply.status(409);
+        return {
+          error: 'AlreadyQueued',
+          message: 'This PR is already in the merge queue — it will land on its own.',
+        };
+      }
       const armed = await armAutoMerge(accountId, id, {
         mergeMethod,
         updateStrategy: updateStrategy ?? 'none',
+        viaMergeQueue: queue?.enabled === true,
         expectedHeadOid: info.headSha,
         expiresAt: new Date(Date.now() + AUTO_MERGE_TTL_MS),
       });
@@ -860,7 +877,12 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  // Disarm. 204 whether or not anything was armed (idempotent).
+  // Disarm. 204 whether or not anything was armed (idempotent). When the WATCHER had already
+  // added the PR to the merge queue (`enqueuedAt` set), cancelling must also remove that
+  // entry — otherwise "cancel" leaves the queue to land the PR anyway. The row is deleted
+  // FIRST so the cancel always wins (the watcher's compare-and-set sees the row gone even if
+  // the dequeue then fails); the dequeue itself is best-effort, since the entry may already
+  // be gone and a human queue entry is not ours to remove (enqueuedAt is null for those).
   app.delete('/api/prs/:id/auto-merge', { schema: idParamSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
     const accountId = accountIdOf(req);
@@ -869,7 +891,19 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       reply.status(404);
       return { error: 'NotFound', message: `PR ${id} not found` };
     }
+    const intent = await getAutoMergeRequest(accountId, id);
     await disarmAutoMerge(accountId, id);
+    if (intent?.state === 'armed' && intent.enqueuedAt != null) {
+      try {
+        const token = await getAccessToken(accountId);
+        await dequeuePullRequestFromQueue(token, ctx.prNodeId);
+      } catch (err) {
+        req.log.warn(
+          { err, prId: id },
+          'auto-merge: disarmed, but could not remove the PR from the merge queue',
+        );
+      }
+    }
     reply.status(204);
     return null;
   });

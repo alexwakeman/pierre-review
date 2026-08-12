@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type {
   BranchStatusResponse,
+  BranchTrendsResponse,
   CreateRepoBody,
   RepoSearchResponse,
   RepoSearchResult,
@@ -38,7 +39,7 @@ import {
   listRepos,
   resolveWorkspaceScope,
 } from '../../db/queries.js';
-import { getBranchStatus } from '../../db/branch-queries.js';
+import { getBranchStatus, getBranchTrends } from '../../db/branch-queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 // Local copy of the shared MAX_REPOS_PER_ACCOUNT value. `@pierre-review/shared` is
@@ -123,6 +124,33 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     if (scope.repoIds.length === 0) return { repos: [] };
     return getBranchStatus(accountId, scope.repoIds);
   });
+
+  // The lazy per-day trend series behind an expanded default-branch row (failing trunk commits
+  // + PRs merged into the default branch, one shared axis). Fetched only on expand, so it takes
+  // ONE repo — never the workspace scope — and, unlike /api/branch-status, the id-addressed
+  // getter enforces ownership (→ 404). A pure DB read: default `read` tier.
+  app.get(
+    '/api/branch-trends',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          required: ['repoId'],
+          additionalProperties: false,
+          properties: { repoId: { type: 'integer' } },
+        },
+      },
+    },
+    async (req, reply): Promise<BranchTrendsResponse | { error: string; message: string }> => {
+      const { repoId } = req.query as { repoId: number };
+      const trends = await getBranchTrends(accountIdOf(req), repoId);
+      if (trends == null) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Repo ${repoId} not found` };
+      }
+      return trends;
+    },
+  );
 
   // Live GitHub repository search for the Add-repo picker. Best-match ordering
   // (GitHub default), repos already added to this account filtered out, owned/member repos

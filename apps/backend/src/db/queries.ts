@@ -3662,7 +3662,6 @@ export async function getWorkspaceMetricsDetail(
   };
   const empty: WorkspaceMetricsDetail = {
     sprint,
-    openPrs: [],
     merges: [],
     leadTime: [],
     reviewLatency: [],
@@ -3802,15 +3801,8 @@ export async function getWorkspaceMetricsDetail(
   const openNonDraft = prs.filter((p) => p.state === 'open' && !p.isDraft);
   const isRed = (ci: Row['ciStatus']): boolean => ci === 'failure' || ci === 'error';
 
-  // (0) OPEN PRS — every currently-open, non-draft PR, longest-open first. The metric-
-  // specific figure is the open age (open→now), shown in the same "lead time"-style column.
-  const openPrs = openNonDraft
-    .map((p) => ({
-      ...base(p),
-      leadTimeHours: (now - p.openedAt.getTime()) / 3_600_000,
-    }))
-    .sort((a, b) => (b.leadTimeHours ?? 0) - (a.leadTimeHours ?? 0))
-    .slice(0, METRIC_DETAIL_CAP);
+  // (There is deliberately NO open-PRs list here: the "Open PRs" tile routes to the open-PRs
+  // drill-down over /api/open-prs — uncapped TimelinePr rows, drafts included — not a sub-tab.)
 
   // (1) MERGES — merged in the sprint, newest first (client groups per repo).
   const merges = mergedInSprint
@@ -3918,7 +3910,6 @@ export async function getWorkspaceMetricsDetail(
 
   return {
     sprint,
-    openPrs,
     merges,
     leadTime,
     reviewLatency,
@@ -4165,14 +4156,32 @@ export async function getWorkspaceInsights(
   if (openPrIds.length === 0) return finish();
 
   // Pending review requests (GitHub drops the request once a review lands → still-pending).
+  // Rows with userId null are GitHub TEAM requests (teamName set) — they count as "someone is
+  // on the hook" for the orphan test + the stalled filter, matching getSuggestedReviewersBasis'
+  // `wants` gate (which counts ALL review_requests rows — the two must stay in agreement).
   const reqRows = await db
-    .select({ prId: reviewRequests.prId, userId: reviewRequests.userId })
+    .select({
+      prId: reviewRequests.prId,
+      userId: reviewRequests.userId,
+      teamName: reviewRequests.teamName,
+    })
     .from(reviewRequests)
-    .where(and(inArray(reviewRequests.prId, openPrIds), isNotNull(reviewRequests.userId)))
+    .where(inArray(reviewRequests.prId, openPrIds))
     .execute();
+  const requestedPrIds = new Set<number>(); // any outstanding request, user OR team
+  const teamNamesByPr = new Map<number, string[]>(); // GitHub team display names, deduped
   const pendingByPr = new Map<number, number[]>();
   const pendingByReviewer = new Map<number, number[]>();
   for (const r of reqRows) {
+    requestedPrIds.add(r.prId);
+    if (r.teamName != null) {
+      const t = teamNamesByPr.get(r.prId) ?? [];
+      if (!t.includes(r.teamName)) t.push(r.teamName);
+      teamNamesByPr.set(r.prId, t);
+    }
+    // LOAD-BEARING: pendingByPr/pendingByReviewer stay USER-only — their values flow into
+    // requestedReviewerIds: number[] on the wire and reviewer_load card ids (a null leaked
+    // here mints a bogus 'load:null' card).
     if (r.userId == null) continue;
     const a = pendingByPr.get(r.prId) ?? [];
     a.push(r.userId);
@@ -4210,11 +4219,12 @@ export async function getWorkspaceInsights(
       reviewsThisSprint.set(r.authorId, (reviewsThisSprint.get(r.authorId) ?? 0) + 1);
   }
 
-  // (1) STALLED REVIEWS — open PRs with a still-pending reviewer, open past the threshold.
+  // (1) STALLED REVIEWS — open PRs with a still-pending reviewer (user OR team), open past
+  // the threshold.
   const stalled = openPrs
     .filter(
       (p) =>
-        (pendingByPr.get(p.id)?.length ?? 0) > 0 &&
+        requestedPrIds.has(p.id) &&
         p.openedAt != null &&
         (now - p.openedAt.getTime()) / 3_600_000 > INSIGHT_STALLED_REVIEW_HOURS,
     )
@@ -4243,6 +4253,7 @@ export async function getWorkspaceInsights(
       openedAt: p.openedAt!.toISOString(),
       ageHours,
       requestedReviewerIds: reviewers,
+      requestedTeamNames: teamNamesByPr.get(p.id) ?? [],
     });
   }
 
@@ -4349,10 +4360,11 @@ export async function getWorkspaceInsights(
   }
 
   // (4) REVIEWER ROUTING — orphan PRs (nobody requested, nobody reviewed) + who should review.
+  // `requestedPrIds`, not `pendingByPr`: a TEAM request already has a reviewer on the hook.
   const orphans = openPrs
     .filter(
       (p) =>
-        (pendingByPr.get(p.id)?.length ?? 0) === 0 &&
+        !requestedPrIds.has(p.id) &&
         !reviewedPrIds.has(p.id) &&
         p.openedAt != null &&
         (now - p.openedAt.getTime()) / 3_600_000 > INSIGHT_ROUTING_MIN_AGE_HOURS,
@@ -4460,10 +4472,12 @@ export function computeFeedCounts(
     comments: 0,
     prEvents: 0,
     commits: 0,
+    awaitingReview: 0,
     bots: 0,
     byBotActor: {},
     byThreadState: {},
   };
+  const awaitingPrIds = new Set<number>();
   for (const it of ordered) {
     if (it.isMyTurn) counts.myTurn += 1;
     if (it.kind === 'claude_review') counts.claude += 1;
@@ -4478,12 +4492,22 @@ export function computeFeedCounts(
       it.kind === 'review_submitted'
     )
       counts.prEvents += 1;
+    // Mirrors FeedView's matchesNeedsReview — but counts DISTINCT PRs, not events: a PR opened
+    // as a draft and later marked ready has BOTH kinds in the window, and "Needs review 2" for
+    // one PR reads as two PRs. (FeedView's page-derived fallback dedupes the same way.)
+    if (
+      (it.kind === 'pr_opened' || it.kind === 'pr_ready_for_review') &&
+      it.prAwaitingReview === true &&
+      it.prId != null
+    )
+      awaitingPrIds.add(it.prId);
     if (it.actorId != null && botIds.has(it.actorId)) counts.bots += 1;
     if (botsOnly && it.actorId != null)
       counts.byBotActor[it.actorId] = (counts.byBotActor[it.actorId] ?? 0) + 1;
     if (it.derivedState != null)
       counts.byThreadState[it.derivedState] = (counts.byThreadState[it.derivedState] ?? 0) + 1;
   }
+  counts.awaitingReview = awaitingPrIds.size;
   return counts;
 }
 
@@ -4713,6 +4737,30 @@ export async function getConsolidatedFeed(
     );
     for (const it of items) {
       if (it.threadId != null) it.derivedState = stateById.get(it.threadId) ?? null;
+    }
+  }
+
+  // Attach each PR-bearing item's LIVE "still awaiting a first review" snapshot (open ∧ not
+  // draft ∧ firstReviewAt null) — powers the "Needs review" pill. Recomputed per request,
+  // never stored: the same card can match today and not tomorrow. One query over the distinct
+  // PR ids referenced by the stream; PR-less items stay null.
+  const feedPrIds = [...new Set(items.map((i) => i.prId).filter((p): p is number => p != null))];
+  if (feedPrIds.length > 0) {
+    const prRows = await db
+      .select({
+        id: pullRequests.id,
+        state: pullRequests.state,
+        isDraft: pullRequests.isDraft,
+        firstReviewAt: pullRequests.firstReviewAt,
+      })
+      .from(pullRequests)
+      .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, feedPrIds)))
+      .execute();
+    const awaitingByPr = new Map<number, boolean>(
+      prRows.map((r) => [r.id, r.state === 'open' && !r.isDraft && r.firstReviewAt == null]),
+    );
+    for (const it of items) {
+      it.prAwaitingReview = it.prId != null ? (awaitingByPr.get(it.prId) ?? false) : null;
     }
   }
 
@@ -13168,6 +13216,8 @@ function toArmedMergeRequest(row: AutoMergeRow): ArmedMergeRequest {
     prId: row.prId,
     mergeMethod: row.mergeMethod as MergeMethod,
     updateStrategy: row.updateStrategy,
+    viaMergeQueue: row.viaMergeQueue,
+    enqueuedAt: iso(row.enqueuedAt),
     armedAt: row.armedAt.toISOString(),
     expectedHeadOid: row.expectedHeadOid,
     state: row.state as ArmedMergeState,
@@ -13192,6 +13242,8 @@ export async function armAutoMerge(
   opts: {
     mergeMethod: MergeMethod;
     updateStrategy: 'rebase' | 'merge' | 'none';
+    // Whether the base branch had a merge queue at arm time (the caller checked live).
+    viaMergeQueue: boolean;
     expectedHeadOid: string;
     expiresAt: Date;
   },
@@ -13204,6 +13256,8 @@ export async function armAutoMerge(
       prId,
       mergeMethod: opts.mergeMethod,
       updateStrategy: opts.updateStrategy,
+      viaMergeQueue: opts.viaMergeQueue,
+      enqueuedAt: null,
       expectedHeadOid: opts.expectedHeadOid,
       state: 'armed',
       armedAt: now,
@@ -13217,6 +13271,10 @@ export async function armAutoMerge(
       set: {
         mergeMethod: opts.mergeMethod,
         updateStrategy: opts.updateStrategy,
+        viaMergeQueue: opts.viaMergeQueue,
+        // A re-arm starts clean: any queue entry recorded on the previous intent belonged
+        // to a head/consent that no longer applies.
+        enqueuedAt: null,
         expectedHeadOid: opts.expectedHeadOid,
         state: 'armed',
         armedAt: now,
@@ -13335,6 +13393,12 @@ export interface ArmedMergeWork {
   viewerPermission: string | null;
   mergeMethod: MergeMethod;
   updateStrategy: 'rebase' | 'merge' | 'none';
+  // The base branch had a merge queue at arm time — the watcher enqueues instead of
+  // direct-merging (re-verified live each tick; a since-disabled queue falls back).
+  viaMergeQueue: boolean;
+  // When the watcher itself enqueued the PR; null until then. The attribution record:
+  // merged-while-set resolves 'merged', a human's queue entry never does.
+  enqueuedAt: Date | null;
   expectedHeadOid: string;
   expiresAt: Date;
   armedAt: Date;
@@ -13375,6 +13439,8 @@ export async function listArmedMergeRequestsForRunner(
       viewerPermission: repos.viewerPermission,
       mergeMethod: autoMergeRequests.mergeMethod,
       updateStrategy: autoMergeRequests.updateStrategy,
+      viaMergeQueue: autoMergeRequests.viaMergeQueue,
+      enqueuedAt: autoMergeRequests.enqueuedAt,
       expectedHeadOid: autoMergeRequests.expectedHeadOid,
       expiresAt: autoMergeRequests.expiresAt,
       armedAt: autoMergeRequests.armedAt,
@@ -13413,6 +13479,9 @@ export async function updateAutoMergeState(
     // very next tick disarm the intent as "the branch moved". A head that moved for any other
     // reason must still disarm — that is the whole point of the anchor.
     expectedHeadOid?: string;
+    // Stamp the watcher's own enqueue (merge-queue intents only). Never cleared while armed —
+    // it is the attribution record for the eventual merge; a re-arm resets it.
+    enqueuedAt?: Date;
   },
 ): Promise<void> {
   const now = new Date();
@@ -13426,6 +13495,7 @@ export async function updateAutoMergeState(
       ...(opts.expectedHeadOid !== undefined
         ? { expectedHeadOid: opts.expectedHeadOid }
         : {}),
+      ...(opts.enqueuedAt !== undefined ? { enqueuedAt: opts.enqueuedAt } : {}),
     })
     .where(eq(autoMergeRequests.id, id))
     .execute();

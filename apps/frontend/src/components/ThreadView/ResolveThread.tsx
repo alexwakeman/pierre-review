@@ -1,10 +1,10 @@
 import { useResolveThread } from '../../hooks/usePrWrites.js';
 import { ApiError } from '../../api/client.js';
 
-// Resolve / Unresolve a review thread on GitHub, mirroring MarkThreadDone's
-// placement in the ThreadCard header. Always shown — the API enforces real
-// permission and surfaces a 502 (GitHubError) if the viewer can't resolve, which
-// we render as small inline red text next to the button.
+// Resolve / Unresolve a review thread on GitHub, right-aligned in the ThreadCard
+// header. Always shown — the API enforces real permission and surfaces a 502
+// (GitHubError) if the viewer can't resolve, which we render as small inline red
+// text next to the button.
 export function ResolveThread({
   prId,
   threadId,

@@ -386,10 +386,21 @@ export function AttentionCards({
             <PrMetaRow pr={card} />
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
               <span>waiting on</span>
-              {card.requestedReviewerIds.length > 0 ? (
-                card.requestedReviewerIds.map((id) => (
-                  <UserChip key={id} id={id} usersById={usersById} />
-                ))
+              {card.requestedReviewerIds.length > 0 || card.requestedTeamNames.length > 0 ? (
+                <>
+                  {card.requestedReviewerIds.map((id) => (
+                    <UserChip key={id} id={id} usersById={usersById} />
+                  ))}
+                  {/* GitHub's own teams (display names), same chip grammar as RoutingReviewers */}
+                  {card.requestedTeamNames.map((name) => (
+                    <span
+                      key={`team:${name}`}
+                      className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium"
+                    >
+                      @{name}
+                    </span>
+                  ))}
+                </>
               ) : (
                 <span className="italic">no reviewer requested</span>
               )}

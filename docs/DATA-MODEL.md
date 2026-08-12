@@ -130,12 +130,20 @@ fixture tests (see Conventions).
 - **`autoMergeRequests`** — one standing "merge when ready" intent per `(accountId, prId)`
   (that pair is the unique/upsert target, so re-arming OVERWRITES — this is current state, not a
   log; disarm DELETEs rather than adding a "cancelled" state). Carries `mergeMethod`,
-  `updateStrategy`, the consent anchor `expectedHeadOid`, `state` (`ArmedMergeState`),
-  `expiresAt`, `lastCheckedAt`, `lastReason`. FKs cascade from `accounts`/`pullRequests`. Both
+  `updateStrategy`, the consent anchor `expectedHeadOid`, `viaMergeQueue` (the base had a merge
+  queue at arm time — the watcher ENQUEUES instead of direct-merging), `enqueuedAt` (when the
+  WATCHER enqueued; the attribution record — merged-while-set resolves 'merged', a human's queue
+  entry never does, and disarm-with-it-set also dequeues; reset by every re-arm), `state`
+  (`ArmedMergeState`), `expiresAt`, `lastCheckedAt`, `lastReason`. FKs cascade from
+  `accounts`/`pullRequests`. Both
   exported (Art. 15 — it records an action the user asked the server to take) and erased.
 - **`branchCommits`** — the recent commits on each repo's DEFAULT branch (`accountId`
-  denormalized; unique `(accountId, repoId, sha)`; trimmed to `BRANCH_COMMIT_WINDOW`=20 per
-  repo in the same transaction as the upsert). **Not derivable from `commits`**, which is
+  denormalized; unique `(accountId, repoId, sha)`; trimmed to `BRANCH_COMMIT_WINDOW`=100 per
+  repo in the same transaction as the upsert. COUNT bound only — a writer-side age bound was
+  tried and REVERTED: it deleted a dormant repo's entire set every sync; the 90-day horizon
+  lives in `getBranchTrends`' read filter instead. The branch-status strip still reads only
+  the 10 most recent merged-PR groups (`READ_PR_CAP`; commits consolidated by `prNumber`,
+  direct pushes chart-only); the full window feeds `GET /api/branch-trends`). **Not derivable from `commits`**, which is
   PR-scoped — a squash-merged PR never appears there under the SHA that landed on trunk. Plus
   four nullable `repos` columns for the head snapshot (`defaultBranchName` /
   `defaultBranchHeadSha` / `defaultBranchCiStatus` / `defaultBranchUpdatedAt`, the last being

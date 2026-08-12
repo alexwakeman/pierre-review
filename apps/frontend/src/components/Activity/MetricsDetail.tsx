@@ -17,8 +17,9 @@ import { SortHeader, type SortDir, type SortState, compare, nextSort } from './s
 // the metric-specific figure) so a lead can see WHERE issues cluster. All data comes from a single
 // lazy read (useWorkspaceMetricsDetail); clicking any PR opens its detail tab.
 
+// (No 'open_prs' sub-tab: the "Open PRs" tile routes to the sortable open-PRs drill-down tab —
+// the ONE open-PR list — not here.)
 const METRIC_META: Record<WorkspaceMetricKey, { label: string; blurb: string }> = {
-  open_prs: { label: 'Open PRs', blurb: 'All currently-open PRs · most-recently-updated first' },
   merges: { label: 'Merges', blurb: 'Merged this sprint · most-recently-updated first' },
   lead_time: { label: 'Lead time', blurb: 'Open → merge (merged + open) · longest first' },
   review_latency: { label: 'Review latency', blurb: 'Open → first review · longest first' },
@@ -44,11 +45,10 @@ const DEFAULT_DIR: Record<SortCol, SortDir> = {
   updated: 'desc',
 };
 
-// Per-tab default sort. Recency (updated desc) for the two tabs where "what moved lately" is
-// the useful lens; the duration/CI tabs keep the metric magnitude as the sort (which IS the
+// Per-tab default sort. Recency (updated desc) for Merges, where "what moved lately" is the
+// useful lens; the duration/CI tabs keep the metric magnitude as the sort (which IS the
 // point of the tile — e.g. NOT recency for lead time), reproducing the backend order.
 const DEFAULT_SORT: Record<WorkspaceMetricKey, SortState<SortCol> | null> = {
-  open_prs: { col: 'updated', dir: 'desc' },
   merges: { col: 'updated', dir: 'desc' },
   lead_time: { col: 'value', dir: 'desc' },
   review_latency: { col: 'value', dir: 'desc' },
@@ -73,7 +73,6 @@ function ciRank(ci: MetricPr['ciStatus']): number {
 // The metric-specific "value" column, mapped to a numeric magnitude so it sorts sensibly.
 function valueSort(m: WorkspaceMetricKey, pr: MetricPr): number {
   switch (m) {
-    case 'open_prs':
     case 'merges':
     case 'lead_time':
       return pr.leadTimeHours ?? -1;
@@ -133,8 +132,6 @@ function listFor(
 ): MetricPr[] {
   if (!detail) return [];
   switch (m) {
-    case 'open_prs':
-      return detail.openPrs;
     case 'merges':
       return detail.merges;
     case 'lead_time':
@@ -219,8 +216,6 @@ function Reviewers({
 // The metric-specific "value" cell for a row (and its column header text).
 function valueHeader(m: WorkspaceMetricKey): string {
   switch (m) {
-    case 'open_prs':
-      return 'Open for';
     case 'merges':
     case 'lead_time':
       return 'Lead time';
@@ -238,7 +233,6 @@ function valueHeader(m: WorkspaceMetricKey): string {
 function ValueCell({ m, pr }: { m: WorkspaceMetricKey; pr: MetricPr }): JSX.Element {
   const dur = (h: number | null): string => (h == null ? '—' : fmtDuration(h));
   switch (m) {
-    case 'open_prs':
     case 'merges':
     case 'lead_time':
       return <span className="font-medium">{dur(pr.leadTimeHours)}</span>;
@@ -385,7 +379,7 @@ export function MetricsDetail(): JSX.Element {
   }, [metricsFocus, consumeMetricsFocus]);
 
   // Sort is PER-TAB (each metric keeps its own column + direction), seeded from DEFAULT_SORT —
-  // recency for open_prs/merges, metric magnitude for the duration/CI tabs. Header clicks toggle.
+  // recency for merges, metric magnitude for the duration/CI tabs. Header clicks toggle.
   const [sortByTab, setSortByTab] = useState<Record<WorkspaceMetricKey, SortState<SortCol> | null>>(
     () => ({ ...DEFAULT_SORT }),
   );

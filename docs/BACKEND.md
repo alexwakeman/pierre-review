@@ -72,13 +72,15 @@ incremental, fetch loop, cancel, rate limits). In brief:
   module-cached; per-account `try/catch` so one bad token doesn't abort the loop.
 - **Default-branch snapshot** (`sync/branch-status.ts` + `github/branch-queries.ts`, called at
   the end of every repo sync, foreground pass included): trunk head + its CI rollup onto
-  `repos`, the last 20 trunk commits into `branchCommits`. **STRICTLY NON-FATAL** — it is an
+  `repos`, the last 100 trunk commits (90-day horizon) into `branchCommits`. **STRICTLY NON-FATAL** — it is an
   informational readout, so a token that can walk the PRs but chokes on the branch history must
   never cost the caller the PR sync that just succeeded. **TWO-PHASE, and the split is a cost
   decision**: GitHub prices a GraphQL call from requested nodes, so phase 1
-  (`history(first:20)` × `associatedPullRequests(first:3)` = 80 nodes) is **1 point**, while
-  nesting `statusCheckRollup.contexts(first:100)` under that history would be ~2020 nodes ⇒
-  **~21 points on every walk of every repo, green or red**, on a call adaptive polling re-fires
+  (`history(first:100)` × `associatedPullRequests(first:3)` = 400 nodes) is **4 points** (the
+  widening from 20 commits — 80 nodes, 1 point — is an accepted cost; it feeds the
+  branch-trends charts), while nesting `statusCheckRollup.contexts(first:100)` under that
+  history would be ~10100 nodes ⇒
+  **~102 points on every walk of every repo, green or red**, on a call adaptive polling re-fires
   every 120s. So failing-check DETAIL is a SECOND query (`buildCommitChecksQuery` — aliased
   `object(oid:)` lookups, shas as GraphQL VARIABLES, only the alias names are generated and
   those are index-derived) issued only for the commits phase 1 reported as failure/error/**pending**

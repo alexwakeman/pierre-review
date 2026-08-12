@@ -701,6 +701,13 @@ const ARM_WAIT_VERDICTS: ReadonlySet<MergeVerdict> = new Set<MergeVerdict>([
  * (`canMerge && behindBy > 0` — arming updates from trunk first, then lands it). A fully
  * clean, up-to-date PR gets no button (arming it is just a delayed merge — press Merge).
  *
+ * Merge-QUEUE repos use the SAME rules: the watcher's terminal action there is "add to the
+ * queue" instead of a direct merge, so the button reads "queue when ready". A queue repo's
+ * perpetual 'blocked' status makes the button broadly available there — correct, since the
+ * enqueue really is gated (on required reviews) until then. A PR already IN the queue is
+ * excluded by its own verdict: 'queued' is not a waitable blocker and reports
+ * canMerge:false, so both arms of the predicate reject it.
+ *
  * ⚠ `behindBy > 0` is true of MOST healthy PRs and only ever WIDENS this button's
  * eligibility. It must never gate the plain Merge button (only the 'behind' VERDICT —
  * mergeStateStatus — means GitHub is blocking), and the verdict passed here must never have
@@ -710,12 +717,11 @@ const ARM_WAIT_VERDICTS: ReadonlySet<MergeVerdict> = new Set<MergeVerdict>([
 export function mergeWhenReadyEligible(input: {
   allowedByRepo: boolean;
   methodCount: number;
-  queueEnabled: boolean;
   alreadyArmed: boolean;
   verdict: Pick<MergeVerdictInfo, 'verdict' | 'canMerge'>;
   behindBy: number;
 }): boolean {
-  if (!input.allowedByRepo || input.methodCount === 0 || input.queueEnabled || input.alreadyArmed) {
+  if (!input.allowedByRepo || input.methodCount === 0 || input.alreadyArmed) {
     return false;
   }
   if (ARM_WAIT_VERDICTS.has(input.verdict.verdict)) return true;
@@ -818,9 +824,9 @@ export function relativeTime(iso: string): string {
   return formatDate(iso);
 }
 
-// Absolute date *with* time of day, e.g. "02/05/2026, 09:04" — used where the exact
-// moment matters (the activity feed) rather than a fuzzy "4 days ago". The date part
-// matches formatDate (locale-aware dd/mm/yyyy ordering) for consistency.
+// Absolute date *with* time of day, e.g. "02/05/2026, 09:04" — the absolute formatter
+// for tooltips and anywhere the exact moment must be shown. The date part matches
+// formatDate (locale-aware dd/mm/yyyy ordering) for consistency.
 export function dateTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
     day: '2-digit',

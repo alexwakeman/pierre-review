@@ -137,9 +137,33 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   dynamic tabs (pr-detail / pr-focus) follow as closable PR-named chips. **Closing the active
   tab moves to the adjacent tab** (left, else right, else the Timeline board) — it does NOT
   snap back to the board when other tabs remain (`closeTab` in `store/pinnedTabs.ts`).
+  **Dynamic chips are DRAG-REORDERABLE** (pointer events + 4px threshold, matching the
+  splitter/marker-popover precedents — no HTML5 DnD, no dependency; preview order in local
+  state, ONE `moveTab` store commit on drop so `persist()`/the URL subscription don't run
+  per-frame; avatars get `draggable={false}`; `touch-action:none` or the strip's own
+  horizontal scroll swallows touch drags; order persistence is only as durable as tab
+  persistence — pr tabs survive a reload, drill-down positions don't). **Right-click opens a
+  context menu** (floating-ui in a `FloatingPortal` — the strip is `overflow-x-auto`, an
+  in-flow menu would clip to the 42px bar — virtual reference at the click point): Close this
+  tab / Close other tabs / Close all tabs (`closeOtherTabs`/`closeAllTabs` in the store; on
+  the fixed Activity/Timeline chips the menu shows only "Close all tabs"; "close all" keeps
+  you on a fixed view if that's where you are, mirroring `closeTab`'s fallback). ⚠ The menu's
+  (and an in-flight drag's) Escape MUST `stopPropagation` or `useKeyboard`'s global Escape
+  also yanks the user to the Timeline. TabChip is now one shared `ChipShell` — the nine
+  per-kind branches collapsed to a config switch, which is what made the drag/menu handlers a
+  one-place change; the e2e selectors (`data-testid="pinned-tabs"`, `role="tab"` names, ✕
+  aria-labels) are load-bearing and survived.
   Besides the PR tabs there's a family of **singleton, EPHEMERAL drill-down tabs** (never
   URL/localStorage-persisted; a reload drops them): `metrics-detail`, `bot-prs`, `open-prs`
-  (sortable all-open-PRs: age/author/LoC/untouched-threads/CI/approval columns), `bot-only-prs`
+  (**THE consolidated open-PR view** — the shared `OpenPrsTable` over `GET /api/open-prs`:
+  age/author/LoC/untouched-threads/CI/approval columns, drafts included with a "· N drafts"
+  callout. Reached from BOTH the Feed pane's per-repo "Show all" footers (repo scope) AND the
+  Flow-metrics "Open PRs" tile (`openOpenPrsDetail('feed')` = whole workspace, "All repos"
+  chip, plus a LOCAL `MetricRepoFilter` that must never write `filters.repoIds`) — the old
+  `MetricsDetail` `open_prs` sub-tab is GONE. Its fetch goes through `scopedOpenPrsSearch`,
+  byte-identical to `workspaceOpenPrsSearch` when unscoped so the tab shares the Feed's cache
+  entry, and always carrying `workspace=` alongside `repoIds=` — pinned in
+  `workspaceOpenPrsScope.test.ts`), `bot-only-prs`
   (sortable + Age/Updated + cross-repo repo-filter dropdown), and `bot-threads` (sortable +
   DESELECT-by-default + Select-all/Clear across pages + Stop + repo-filter + client pagination;
   scope-wide review & resolve). **`user-activity` is the one drill-down keyed PER USER**, not a
@@ -324,10 +348,18 @@ Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claud
   the selection actions — PrDetail applies it only when `selectedPrId === prId` (mirroring App's
   `selectedThreadId` guard) so a PR opened via `openPrDetailTab` doesn't inherit a stale preset.
 - **Activity** — a chronological feed (**newest first**) of opens / commits / reviews /
-  comments / merge-close, each with a "Show on timeline" action. A timeline **commit**
+  comments / merge-close, each with a "Show on timeline" action. Timestamps render RELATIVE
+  ("3h ago", the shared `relativeTime`; date-only past 30 days) with the absolute `dateTime`
+  kept as the `title` tooltip — same idiom as the Feed rows. A timeline **commit**
   ("View in Activity") or **review** ("Open in detail pane") popover deep-links here via the
   `activityFocus` signal (matched by `{type, refId}`) → opens this tab, scrolls to + flashes
   the entry. The "Show" links share `ShowOnTimeline`.
+- **Changes** — `ChangesTab` → `diff/FileDiffView`: per-file diffs, each file's expand state a
+  local `useState` seeded by `startsCollapsed` (null patch / >250 patch lines / >400 changed
+  lines) — files with threads override to expanded, EXCEPT **lock files
+  (`isLockFile` in `lib/diff.ts`, exact-basename list, deliberately not `*.lock`), which ALWAYS
+  start collapsed even with threads** (the header badge still advertises them; a deep-linked
+  thread still auto-expands). The rule rides the shared component into the AI Fix tab too.
 - **Bot activity** (`PrBotBehaviourTab.tsx`, EXPERIMENTAL, CORE) — shown only when a bot touched
   the PR (`hasBots`: `reviews.automatedKind` or a bot thread-opener/commenter). Per bot: its on-PR
   touch timeline + TTFR/follow-ups vs the bot's OWN typical (`/api/prs/:id/bot-behaviour`). A ⚠

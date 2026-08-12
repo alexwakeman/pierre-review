@@ -106,11 +106,16 @@ function TileShell({
 export function WorkspaceMetricsPanel({
   metrics,
   onOpenMetric,
+  onOpenOpenPrs,
   openPrsSubtitle = 'across this workspace',
   moreChartsSlot,
 }: {
   metrics: WorkspaceMetrics;
   onOpenMetric?: (metric: WorkspaceMetricKey) => void;
+  // The "Open PRs" tile's drill-in. Separate from `onOpenMetric` because open PRs are NOT a
+  // metrics-detail sub-tab: the tile routes to the sortable open-PRs drill-down (/api/open-prs,
+  // workspace-wide). Absent ⇒ the tile is non-clickable (the per-repo console mount).
+  onOpenOpenPrs?: () => void;
   // The Open-PRs tile caption. The cross-repo mount keeps the default ("across this workspace" —
   // the workspace IS the scope now, so "across all repos" would overstate it); the per-repo console
   // passes a repo-scoped label (e.g. "in this repo").
@@ -247,7 +252,7 @@ export function WorkspaceMetricsPanel({
       </div>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
-        <TileShell onActivate={open('open_prs')}>
+        <TileShell onActivate={onOpenOpenPrs}>
           <div className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
             Open PRs
           </div>

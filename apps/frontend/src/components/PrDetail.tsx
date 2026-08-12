@@ -262,7 +262,7 @@ function ActivityList({
                 />
                 <span className="text-gray-500">{r.label}</span>
                 <span className="text-xs text-gray-400" title={dateTime(r.time)}>
-                  · {dateTime(r.time)}
+                  · {relativeTime(r.time)}
                 </span>
               </div>
               {r.detail && (

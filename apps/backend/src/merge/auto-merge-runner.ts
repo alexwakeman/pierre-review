@@ -26,6 +26,15 @@
 //   7. clean / unstable      → re-read the intent (the user may have hit Cancel mid-tick) and
 //                              merge. ('unstable' = non-required checks red; GitHub merges it.)
 //
+// MERGE-QUEUE repos (`viaMergeQueue`, stamped at arm time, re-verified live each tick): the
+// terminal action replaces rule 7's direct merge — GitHub refuses PUT .../merge on a
+// queue-protected branch. Rules 1–5 apply unchanged (freshen BEFORE the first enqueue, never
+// after — a branch update kicks the entry out of the queue), then: enqueue once required
+// reviews are satisfied (head-pinned, CAS-guarded, `enqueuedAt` stamped); while queued, wait;
+// queue-merged with OUR entry live → 'merged' (the toast is truthful); queued/dequeued/merged
+// by anyone else → 'disarmed_blocked'. A queue disabled since arming falls back to the
+// direct merge.
+//
 // Isolation: every intent is acted on with ITS OWN account's token (`getAccessToken`), and
 // each account's work is wrapped in its own try/catch so one bad token can't abort the loop.
 // The scan is bounded per tick so a big backlog is drained over several ticks rather than
@@ -43,11 +52,14 @@ import {
   type ArmedMergeWork,
 } from '../db/queries.js';
 import {
+  enqueuePullRequestOnQueue,
   fetchCommitParents,
+  fetchMergeQueueState,
   fetchPrMergeSnapshot,
   isCommitContainedInRef,
   mergePullRequest,
   updatePullRequestBranch,
+  type MergeQueueState,
   type PrMergeSnapshot,
 } from '../github/mutations.js';
 
@@ -154,6 +166,142 @@ async function isOurUpdateMerge(
 }
 
 /**
+ * Merge-queue intents, part 1: settle an intent whose PR is already through (or in, or thrown
+ * out of) the queue. Returns true when the tick is done with this intent; false only when the
+ * PR is simply not in the queue and we never put it there — the caller then walks the shared
+ * conflicts/freshen gates and, once current, attempts the enqueue.
+ *
+ * Attribution rides `enqueuedAt`: a merge observed while OUR entry was live is the watcher's
+ * own landing ('merged' — the toast fires); a queue entry a human created supersedes the
+ * intent instead ('disarmed_blocked' — landing is already arranged, and 'merged' would claim
+ * credit for it).
+ */
+async function settleQueuedIntent(
+  work: ArmedMergeWork,
+  queue: MergeQueueState,
+  log: FastifyBaseLogger,
+): Promise<boolean> {
+  // The LIVE PR state, not the synced one: a fast queue can merge within a tick, and the
+  // synced row lags until the next sync observes it.
+  if (queue.prState === 'MERGED') {
+    if (work.enqueuedAt != null) {
+      forgetIntent(work.id);
+      // Stamp locally exactly like the direct-merge landing, so the SPA reflects it before
+      // the next sync; attribution is corrected by the sync if the queue merged as another
+      // actor.
+      const viewerUserId = await getAccountUserId(work.accountId);
+      await markPrMergedLocally(work.prId, work.accountId, viewerUserId);
+      await updateAutoMergeState(work.id, { state: 'merged', lastReason: null });
+      log.info(
+        { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
+        'auto-merge landed via the merge queue',
+      );
+    } else {
+      await resolve(work.id, 'disarmed_blocked', 'the PR was merged outside auto-merge');
+    }
+    return true;
+  }
+  if (queue.prState === 'CLOSED') {
+    await resolve(work.id, 'disarmed_blocked', 'the PR was closed outside auto-merge');
+    return true;
+  }
+
+  if (queue.inQueue) {
+    if (work.enqueuedAt != null) {
+      // The steady state: our entry is in the queue, the queue is doing its job.
+      await updateAutoMergeState(work.id, {
+        lastReason:
+          queue.position != null
+            ? `in the merge queue (position ${queue.position})`
+            : 'in the merge queue',
+      });
+    } else {
+      await resolve(
+        work.id,
+        'disarmed_blocked',
+        'the PR was added to the merge queue outside auto-merge',
+      );
+    }
+    return true;
+  }
+
+  // We enqueued it and it is no longer in the queue (and not merged): the queue rejected the
+  // entry (UNMERGEABLE) or a human dequeued it. Re-enqueueing would fight that decision —
+  // surface it and stand down instead.
+  if (work.enqueuedAt != null) {
+    await resolve(
+      work.id,
+      'disarmed_blocked',
+      'the PR was removed from the merge queue — re-arm to queue it again',
+    );
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Merge-queue intents, part 2: the PR is current and not queued — add it to the queue once
+ * the review half of branch protection is satisfied. Checks do NOT gate entry
+ * (AWAITING_CHECKS is a normal entry state; the queue runs them itself), so waiting on
+ * `reviewDecision` by name is both the correct green light and more honest than hammering
+ * the mutation for its error string.
+ *
+ * The enqueue itself carries the SAME consent anchor as the direct merge: the head pin rides
+ * into the mutation (`expectedHeadOid`), so GitHub rejects it if the branch moved after our
+ * snapshot — and a rejection throws to the caller's strike counter, exactly like a failed
+ * merge (transient errors retry; a persistent refusal fails the intent with GitHub's own
+ * message).
+ */
+async function enqueueWhenReady(
+  work: ArmedMergeWork,
+  queue: MergeQueueState,
+  token: string,
+  pinnedOid: string,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  if (queue.reviewDecision === 'REVIEW_REQUIRED' || queue.reviewDecision === 'CHANGES_REQUESTED') {
+    await updateAutoMergeState(work.id, {
+      lastReason:
+        queue.reviewDecision === 'REVIEW_REQUIRED'
+          ? 'waiting: required reviews aren’t in yet'
+          : 'waiting: a reviewer requested changes',
+    });
+    return;
+  }
+
+  // COMPARE-AND-SET immediately before the enqueue, exactly like the direct merge: a Cancel
+  // mid-tick DELETED the row, and enqueueing anyway would land a PR the user called off.
+  const live = await getAutoMergeRequest(work.accountId, work.prId);
+  if (
+    !live ||
+    live.state !== 'armed' ||
+    live.expectedHeadOid !== pinnedOid ||
+    live.mergeMethod !== work.mergeMethod
+  ) {
+    forgetIntent(work.id);
+    log.info(
+      { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
+      'auto-merge: the intent changed while the tick was running; not enqueueing',
+    );
+    return;
+  }
+
+  const entry = await enqueuePullRequestOnQueue(token, work.prNodeId, pinnedOid);
+  await updateAutoMergeState(work.id, {
+    enqueuedAt: new Date(),
+    lastReason:
+      entry.position != null
+        ? `added to the merge queue (position ${entry.position})`
+        : 'added to the merge queue',
+  });
+  log.info(
+    { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
+    'auto-merge: added the PR to the merge queue',
+  );
+}
+
+/**
  * Evaluate ONE armed intent. Returns nothing — every outcome is recorded on the row. Throws
  * only on an unexpected GitHub/network error, which the caller converts into a failure strike.
  */
@@ -169,8 +317,19 @@ async function processOne(
     return;
   }
 
-  // A merge/close that happened outside Pierre (or was synced after arming).
+  // A merge/close that happened outside Pierre (or was synced after arming). One carve-out:
+  // a merge observed while OUR queue entry was live is the watcher's own landing (the queue
+  // merges asynchronously, and the sync can observe it before the next tick does) — that is
+  // 'merged', so the toast fires, not "outside auto-merge".
   if (work.prState !== 'open') {
+    if (work.prState === 'merged' && work.viaMergeQueue && work.enqueuedAt != null) {
+      await resolve(work.id, 'merged', null);
+      log.info(
+        { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
+        'auto-merge landed via the merge queue',
+      );
+      return;
+    }
     await resolve(
       work.id,
       'disarmed_blocked',
@@ -236,6 +395,22 @@ async function processOne(
       `the PR was retargeted (${work.syncedBaseRef} → ${m.baseRef}) — re-arm to merge into the new base`,
     );
     return;
+  }
+
+  // ---- The merge-queue fork, part 1: where does the intent stand with the queue? --------
+  // Queue intents fork BEFORE the freshen gates, because a PR already sitting in the queue
+  // (or just merged by it) must never be freshened — a branch update moves the head, which
+  // kicks the entry out of the queue. The state is re-read LIVE each tick (one GraphQL
+  // point, paid only by queue intents): a queue disabled since arming makes the direct
+  // merge below the right verb again, so `queue` drops back to null and nothing here runs.
+  let queue: MergeQueueState | null = null;
+  if (work.viaMergeQueue) {
+    queue = await fetchMergeQueueState(token, work.owner, work.name, work.number);
+    if (queue && queue.enabled) {
+      if (await settleQueuedIntent(work, queue, log)) return;
+    } else {
+      queue = null;
+    }
   }
 
   const conflicts = m.mergeable === false || m.mergeableState === 'dirty';
@@ -313,6 +488,16 @@ async function processOne(
     await updateAutoMergeState(work.id, {
       lastReason: `merging ${m.baseRef} in — waiting for GitHub to finish the update`,
     });
+    return;
+  }
+
+  // ---- The merge-queue fork, part 2: current, not queued yet — enqueue when ready. ------
+  // Past the conflicts + freshen gates the queue intent's terminal action replaces the
+  // direct merge entirely: GitHub refuses PUT .../merge on a queue-protected branch, and
+  // the green light is different too — the queue runs the checks itself, so only the REVIEW
+  // half of branch protection gates entry.
+  if (queue) {
+    await enqueueWhenReady(work, queue, token, pinnedOid, log);
     return;
   }
 

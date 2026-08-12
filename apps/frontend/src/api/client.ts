@@ -79,6 +79,7 @@ import type {
   ArmedMergeRequest,
   ArmedMergeListResponse,
   BranchStatusResponse,
+  BranchTrendsResponse,
   AnnotationKind,
   AnnotationRunBody,
   AnnotationRunResponse,
@@ -515,6 +516,11 @@ export const api = {
   // collide in one cache slot), and `repoIds` must be emitted even when empty.
   branchStatus: (search: string) =>
     get<BranchStatusResponse>(`/api/branch-status${search ? `?${search}` : ''}`),
+  // The two lazy trend series behind an EXPANDED default-branch row (CI failures/day over the
+  // retained trunk window, LOC merged/week). One repo, fetched only on expand — deliberately not
+  // part of the workspace-scoped branchStatus payload above. Pure DB read; ownership → 404.
+  branchTrends: (repoId: number) =>
+    get<BranchTrendsResponse>(`/api/branch-trends?repoId=${repoId}`),
   addReviewComment: (prId: number, body: AddReviewCommentBody) =>
     fetch(`/api/prs/${prId}/review-comment`, jsonBody('POST', body)).then((r) =>
       handle<AddReviewCommentResult>(r),
@@ -772,10 +778,6 @@ export const api = {
     fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }),
   myTurn: () => get<MyTurnResponse>('/api/my-turn'),
   myTurnDone: () => get<DismissedMyTurnResponse>('/api/my-turn/done'),
-  dismissMyTurn: (kind: MyTurnDismissKind, refId: number) =>
-    fetch('/api/my-turn/dismiss', jsonBody('POST', { kind, refId })).then((r) =>
-      handle<{ status: string }>(r),
-    ),
   undismissMyTurn: (kind: MyTurnDismissKind, refId: number) =>
     fetch('/api/my-turn/undismiss', jsonBody('POST', { kind, refId })).then((r) =>
       handle<{ status: string }>(r),

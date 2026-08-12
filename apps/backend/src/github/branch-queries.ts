@@ -5,8 +5,8 @@
 // fields), and this query shares none of it. Keeping them apart means a change to the trunk
 // snapshot can never perturb the backfill's page shape.
 //
-// Cost: ~1 rate-limit point per repo per sync — the whole point of asking for the commit
-// history AND its per-commit rollup in a single round trip.
+// Cost: ~4 rate-limit points per repo per sync at the 100-commit window — still the whole point
+// of asking for the commit history AND its per-commit rollup in a single round trip.
 //
 // Nullability, verified field-by-field against GitHub's published SDL (every one of these is a
 // real runtime case, not defensive noise):
@@ -29,13 +29,14 @@
 // COST, and why this file is structured in two phases:
 // GitHub scores a GraphQL call from the nodes its connection arguments request (multiply nested
 // first/last down each path, sum, then ceil(total/100), min 1). Phase 1 below asks for
-// history(first: 20) × associatedPullRequests(first: 3) = 20 + 60 = 80 nodes ⇒ still ONE point,
-// which is what the "~1 point per repo per sync" promise above means. Nesting
-// `statusCheckRollup.contexts(first: 100)` under that history would be 20 + 20×100 = 2020 nodes
-// ⇒ ~21 points on EVERY walk of EVERY repo, green or red, on a call adaptive polling re-fires
-// every 120s for a hot repo. So the failing-check DETAIL is a SECOND query
+// history(first: 100) × associatedPullRequests(first: 3) = 100 + 300 = 400 nodes ⇒ FOUR points,
+// which is what the "~4 points per repo per sync" promise above means (the widening from 20 to
+// 100 — 80 nodes, one point — is an accepted cost; it feeds the branch-trends charts). Nesting
+// `statusCheckRollup.contexts(first: 100)` under that history would be 100 + 100×100 = 10100
+// nodes ⇒ ~102 points on EVERY walk of EVERY repo, green or red, on a call adaptive polling
+// re-fires every 120s for a hot repo. So the failing-check DETAIL is a SECOND query
 // (`buildCommitChecksQuery`) issued only for the commits whose rollup phase 1 already reported
-// as failure/error/pending. A green trunk therefore costs exactly what it costs today.
+// as failure/error/pending. A green trunk therefore costs exactly the phase-1 walk.
 
 import type { GqlCheckContext } from './queries.js';
 
@@ -74,8 +75,9 @@ export const DEFAULT_BRANCH_QUERY = /* GraphQL */ `
                 }
                 # The PR this commit landed from. first:3 rather than 1 because the connection
                 # has NO documented ordering, so first:1 would be a non-deterministic pick that
-                # could FLIP between syncs; and rather than 10 because 3 is what the node budget
-                # described above affords at one rate-limit point. merged + baseRefName are the
+                # could FLIP between syncs; and rather than 10 because 3 keeps the node budget
+                # described above at N + 3N (4 points at the 100-commit window, vs 11 for
+                # first:10). merged + baseRefName are the
                 # ranking inputs (see pickAssociatedPrNumber in sync/branch-status.ts);
                 # repository.nameWithOwner exists because this connection spans the repo NETWORK,
                 # so a fork's own PR can appear and its number would resolve against the WRONG
@@ -203,9 +205,9 @@ const COMMIT_CHECKS_SELECTION = /* GraphQL */ `
 `;
 
 // How many commits one phase-2 call will ask about. Most commits anyone ever expands are the
-// newest few, and capping the alias count caps the worst case (a 20-commit all-red window) at 10
-// points instead of 20 — the pathological case is precisely the one where you don't need 20
-// carets to know trunk is broken.
+// newest few, and capping the alias count caps the worst case (a 100-commit all-red window) at
+// ~10 points instead of ~100 — the pathological case is precisely the one where you don't need
+// 100 carets to know trunk is broken.
 export const COMMIT_CHECKS_ALIAS_CAP = 10;
 
 /**

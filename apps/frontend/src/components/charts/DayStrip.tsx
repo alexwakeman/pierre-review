@@ -17,6 +17,11 @@ export function DayStrip({
   color,
   height,
   opened,
+  noun = 'action',
+  openedVerb = 'opened',
+  dailyGood,
+  goodColor,
+  goodNoun = 'passing commit',
 }: {
   daily: number[];
   startDate: string;
@@ -24,6 +29,19 @@ export function DayStrip({
   color?: string;
   height?: number;
   opened?: number[];
+  // What a cell's count counts, for the hover tooltip ("3 actions" / "3 failing commits").
+  // Pluralized by appending 's'.
+  noun?: string;
+  // What the overlay line's PRs did, for the tooltip ("2 PRs opened" / "2 PRs merged").
+  openedVerb?: string;
+  // Optional SECOND per-day series (same length/alignment as `daily`) rendered as the LOWER
+  // segment of a split cell — `daily` (the "bad" series, in `color`) stacks on top of it, each
+  // segment's height proportional to its share of the day's total, the whole cell's opacity ∝
+  // that total. A day where both are zero stays the neutral empty cell. Used by the trunk
+  // strip: red failing commits over green passing ones.
+  dailyGood?: number[];
+  goodColor?: string;
+  goodNoun?: string;
 }): JSX.Element {
   const hue = color ?? PALETTE.blue;
   const [ref, w] = useChartWidth();
@@ -39,7 +57,12 @@ export function DayStrip({
   const n = Math.max(1, daily.length);
   const gridW = Math.max(w - 2, 1);
   const cellW = gridW / n;
-  const max = Math.max(1, ...daily);
+  const hasGood = dailyGood != null && dailyGood.length > 0;
+  const goodHue = goodColor ?? PALETTE.green;
+  // In split mode a cell's intensity tracks the day's TOTAL (bad + good); single-series mode
+  // keeps the original bad-only normalization.
+  const totals = hasGood ? daily.map((v, i) => v + (dailyGood[i] ?? 0)) : daily;
+  const max = Math.max(1, ...totals);
   const openedMax = hasOpened ? Math.max(1, ...opened) : 1;
   const startMs = Date.parse(startDate);
   const DAY = 86_400_000;
@@ -71,20 +94,69 @@ export function DayStrip({
           <svg width={w} height={H} className="block">
             {daily.map((c, i) => {
               const isHover = hover === i;
+              const total = totals[i] ?? 0;
+              const wRect = Math.max(cellW - 1, 1);
+              if (!hasGood || total === 0) {
+                // Single-series cell, or a split-mode day with nothing at all — the original
+                // rendering (neutral gray when empty).
+                const on = hasGood ? total > 0 : c > 0;
+                return (
+                  <rect
+                    key={i}
+                    x={i * cellW}
+                    y={cellsY}
+                    width={wRect}
+                    height={cellH}
+                    rx={1.5}
+                    fill={on ? hue : 'currentColor'}
+                    className={on ? '' : 'text-gray-100 dark:text-gray-800'}
+                    fillOpacity={on ? 0.2 + 0.8 * (c / max) : 1}
+                    stroke={isHover ? hue : 'none'}
+                    strokeWidth={isHover ? 1.5 : 0}
+                  />
+                );
+              }
+              // Split cell: bad (`daily`, hue) on top, good below, heights ∝ each share of the
+              // day's total; the whole cell's opacity ∝ total volume.
+              const badH = Math.round(cellH * (c / total));
+              const alpha = 0.25 + 0.75 * (total / max);
               return (
-                <rect
-                  key={i}
-                  x={i * cellW}
-                  y={cellsY}
-                  width={Math.max(cellW - 1, 1)}
-                  height={cellH}
-                  rx={1.5}
-                  fill={c > 0 ? hue : 'currentColor'}
-                  className={c > 0 ? '' : 'text-gray-100 dark:text-gray-800'}
-                  fillOpacity={c > 0 ? 0.2 + 0.8 * (c / max) : 1}
-                  stroke={isHover ? hue : 'none'}
-                  strokeWidth={isHover ? 1.5 : 0}
-                />
+                <g key={i}>
+                  {badH > 0 && (
+                    <rect
+                      x={i * cellW}
+                      y={cellsY}
+                      width={wRect}
+                      height={badH}
+                      rx={1.5}
+                      fill={hue}
+                      fillOpacity={alpha}
+                    />
+                  )}
+                  {cellH - badH > 0 && (
+                    <rect
+                      x={i * cellW}
+                      y={cellsY + badH}
+                      width={wRect}
+                      height={cellH - badH}
+                      rx={1.5}
+                      fill={goodHue}
+                      fillOpacity={alpha}
+                    />
+                  )}
+                  {isHover && (
+                    <rect
+                      x={i * cellW}
+                      y={cellsY}
+                      width={wRect}
+                      height={cellH}
+                      rx={1.5}
+                      fill="none"
+                      stroke={c > 0 ? hue : goodHue}
+                      strokeWidth={1.5}
+                    />
+                  )}
+                </g>
               );
             })}
             {/* PR-opened overlay line (top band) — real PR inflow, to read against silent runs. */}
@@ -131,8 +203,14 @@ export function DayStrip({
         )}
         {hover != null && w > 0 && (
           <FloatingTip x={hover * cellW + cellW / 2} y={PAD_T} width={w}>
-            {dateAt(hover)} · {daily[hover] ?? 0} action{daily[hover] === 1 ? '' : 's'}
-            {hasOpened ? ` · ${opened[hover] ?? 0} PR${opened[hover] === 1 ? '' : 's'} opened` : ''}
+            {dateAt(hover)} · {daily[hover] ?? 0} {noun}
+            {daily[hover] === 1 ? '' : 's'}
+            {hasGood
+              ? ` · ${dailyGood[hover] ?? 0} ${goodNoun}${dailyGood[hover] === 1 ? '' : 's'}`
+              : ''}
+            {hasOpened
+              ? ` · ${opened[hover] ?? 0} PR${opened[hover] === 1 ? '' : 's'} ${openedVerb}`
+              : ''}
           </FloatingTip>
         )}
       </div>

@@ -2298,6 +2298,13 @@ export interface ArmedMergeRequest {
   // Whether to bring the branch up to date first when it's merely behind, and how.
   // 'none' = never update; a behind PR just waits (or expires).
   updateStrategy: 'rebase' | 'merge' | 'none';
+  // The base branch had a merge queue at arm time: the watcher's terminal action is "add to
+  // the queue" (head-pinned enqueue) instead of a direct merge, which GitHub refuses on a
+  // queue-protected branch.
+  viaMergeQueue: boolean;
+  // When the WATCHER enqueued the PR (ISO-8601); null until then, always null for
+  // direct-merge intents. While set, cancelling also removes the queue entry.
+  enqueuedAt: string | null;
   armedAt: string; // ISO-8601
   // The head SHA at arming time. The watcher refuses to merge a different head — arming is
   // consent to merge THIS code, not whatever lands next.
@@ -4616,6 +4623,11 @@ export interface ConsolidatedFeedItem {
   // the Bots pane's state-filter pills. Optional: undefined/null on non-thread items and on
   // feeds that don't attach it.
   derivedState?: DerivedState | null;
+  // True when the item's PR is STILL awaiting its first review — open, not draft, and
+  // firstReviewAt null. A LIVE snapshot recomputed per request (the same card can match
+  // today and not tomorrow), never stored. Powers the "Needs review" pill. Optional:
+  // undefined/null on PR-less items and on feeds that don't attach it.
+  prAwaitingReview?: boolean | null;
   // Issue-level PR-comment items (kind 'pr_comment') only: the comment id, so a click can
   // deep-link straight to + highlight that comment in the PR detail's Overview tab. null
   // on every other kind.
@@ -4676,6 +4688,10 @@ export interface ConsolidatedFeedCounts {
   comments: number; // kind 'review_comment' | 'pr_comment'
   prEvents: number; // kind pr_opened|pr_merged|pr_closed|pr_reopened|pr_ready_for_review|review_submitted
   commits: number; // kind 'commit_pushed' — the count behind the opt-in "Commits" pill
+  // DISTINCT PRs with a pr_opened|pr_ready_for_review item still awaiting a first review
+  // (prAwaitingReview === true) — the "Needs review" pill. A PR count, not an event count:
+  // a draft-first PR has both kinds in the window and must not read as two PRs.
+  awaitingReview: number;
   bots: number; // actorId in the GLOBAL users.isBot set (matches FeedView's isBotActor)
   byBotActor: Record<string, number>; // actorId -> count; populated only in the bot-only feed
   byThreadState: Record<string, number>; // DerivedState -> count over items carrying a derivedState
@@ -4779,6 +4795,7 @@ export interface StalledReviewCard extends InsightCardBase, InsightPrRef {
   kind: 'stalled_review';
   ageHours: number; // hours the PR has been open awaiting review
   requestedReviewerIds: number[]; // reviewers still on the hook (GitHub-pending)
+  requestedTeamNames: string[]; // GitHub TEAMS still on the hook — display names, not slugs
 }
 
 export interface UntouchedThreadCard extends InsightCardBase, InsightPrRef {
@@ -4977,8 +4994,11 @@ export interface RepoWorkspaceMetricsResponse {
 // list behind each. Loaded on demand (a separate, heavier read than the always-loaded
 // WorkspaceMetrics), scoped to the workspace's repos + the current sprint. Lets the user see
 // WHERE issues cluster (which PRs/repos drag a metric).
+//
+// The "Open PRs" tile is deliberately NOT a key here: it routes to the sortable open-PRs
+// drill-down over /api/open-prs (TimelinePr rows, drafts included) — the ONE open-PR list —
+// rather than a capped MetricPr sub-tab duplicating it.
 export type WorkspaceMetricKey =
-  | 'open_prs' // ALL currently-open PRs across the repos, oldest first
   | 'merges' // deploy frequency → all merged PRs (per repo)
   | 'lead_time' // open → merge, merged + open, longest first
   | 'review_latency' // open → first review, longest first
@@ -4987,7 +5007,6 @@ export type WorkspaceMetricKey =
   | 'ci_red'; // currently CI-failing open branches
 
 export const WORKSPACE_METRIC_KEYS: WorkspaceMetricKey[] = [
-  'open_prs',
   'merges',
   'lead_time',
   'review_latency',
@@ -5027,7 +5046,6 @@ export interface MetricPr {
 
 export interface WorkspaceMetricsDetail {
   sprint: { from: string; to: string };
-  openPrs: MetricPr[]; // ALL currently-open non-draft PRs, longest-open first
   merges: MetricPr[]; // merged in the sprint (per repo on the client)
   leadTime: MetricPr[]; // merged-in-sprint + currently-open, longest lead first
   reviewLatency: MetricPr[]; // reviewed PRs, longest open→first-review first
@@ -5348,44 +5366,40 @@ export interface BranchCheckRun extends CheckRun {
   workflowName: string | null;
 }
 
-// One commit on a repo's default branch. `authorLogin` is the GitHub login when we could
-// resolve one (a synced `users` row or the GraphQL author); `authorName` is the raw git
-// author name, which is all a commit made by a non-GitHub identity carries. Both nullable
-// and independently useful — prefer the login, fall back to the name.
-export interface BranchCommit {
+// One trunk commit inside a BranchMergedPr's consolidation — just enough for the PR row's
+// tooltip ("what landed"): the sha and the headline. Newest first within the PR.
+export interface BranchMergedPrCommit {
   sha: string;
   messageHeadline: string;
-  authorLogin: string | null;
-  authorName: string | null;
-  authorAvatarUrl: string | null;
-  committedAt: string; // ISO-8601
-  ciStatus: CiStatus;
-  // The checks that were FAILING on this commit — NEVER the passing ones. So this is empty for
-  // every green commit (the DB stores null there, and the read layer resolves null → []), which
-  // is what keeps a healthy repo's rows exactly as small as they are today. A per-commit
-  // expander is shown iff this is non-empty — the caret is driven by the DATA, not by the dot's
-  // colour, so a caret can never open onto an empty drawer.
-  //
-  // Empty on a RED commit is a real, expected state: a row written before the failing-checks
-  // migration (until that repo's next branch sync), or a repo whose check `contexts` the token
-  // can't read. The dot still shows the rollup; there is simply no detail to expand.
-  failingChecks: BranchCheckRun[];
-  // The PR this commit landed from (GitHub's `associatedPullRequests` for the commit), or null
-  // for a direct push to trunk — which is a legitimate, common state, not a sync gap. A commit
-  // can be reachable from several PRs (a cherry-pick, a revert-then-reland, a branch merged into
-  // another open PR); the sync stores exactly ONE, picked deterministically so a re-sync can
-  // never flip the displayed number.
-  prNumber: number | null;
-  // The LOCAL `pullRequests.id` for `prNumber`, resolved per request within (accountId, repoId)
-  // — a PR number is unique only WITHIN a repo, so it is never resolved by number alone.
-  //
-  // Null while `prNumber` is set means "that PR isn't synced for this account": squash-merged
-  // longer ago than the backfill window, or in a repo added after the fact. This PAIR is the
-  // client's whole decision:
-  //   prId != null                   → open the PR's own detail tab in-app
-  //   prNumber != null && prId null  → link out to github.com (better than dropping the ref)
-  //   both null                      → no PR chip at all
+}
+
+// One PR merged into the default branch, CONSOLIDATING its retained trunk commits — the unit
+// the expanded branch row lists (the per-commit list it replaced lives on only as this PR's
+// tooltip). Grouped from `branch_commits.prNumber` (GitHub's `associatedPullRequests`, one
+// number picked deterministically per commit), so a squash-merged PR carries one commit and a
+// merge-commit PR carries several.
+export interface BranchMergedPr {
+  // The PR number, always present (a group only exists for commits WITH a number — direct
+  // pushes are chart-only, never listed).
+  prNumber: number;
+  // The LOCAL `pullRequests.id`, resolved per request within (accountId, repoId) — a PR number
+  // is unique only WITHIN a repo, so it is never resolved by number alone. Null means "that PR
+  // isn't synced for this account" (squash-merged before the backfill window, or a repo added
+  // later): the client links out to github.com rather than dropping the reference.
   prId: number | null;
+  // From the synced PR row; null when unresolved (the client falls back to the newest commit's
+  // headline).
+  title: string | null;
+  authorLogin: string | null;
+  authorAvatarUrl: string | null;
+  // The PR row's mergedAt when resolved, else the newest consolidated commit's committedAt —
+  // never null, so "in the order they were merged" is always well-defined. ISO-8601.
+  mergedAt: string;
+  // The NEWEST consolidated trunk commit's rollup — for a merge-commit PR that is the merge
+  // commit itself, i.e. the trunk state this PR produced.
+  ciStatus: CiStatus;
+  // Newest first. What the tooltip lists.
+  commits: BranchMergedPrCommit[];
 }
 
 // One repo's default-branch health. Everything is nullable-until-synced: a freshly added repo
@@ -5405,14 +5419,46 @@ export interface RepoBranchStatus {
   // head commit's row fell outside the stored window (a rebase with a backdated committer date),
   // which degrades to today's behaviour: the CI label alone.
   failingChecks: BranchCheckRun[];
-  // Most-recent-first, capped server-side. Empty until the first branch sync.
-  commits: BranchCommit[];
+  // The most recently merged PRs on this branch (merge order, newest first), capped
+  // server-side — each consolidating its retained trunk commits. Empty until the first branch
+  // sync, and empty for a branch that only ever sees direct pushes (those stay visible in the
+  // trend chart's cells; they are deliberately not listed).
+  mergedPrs: BranchMergedPr[];
 }
 
 // GET /api/branch-status?repoIds= — one entry per repo in scope (repos with no synced branch
 // data still appear, with nulls, so the strip's row count matches the repo list).
 export interface BranchStatusResponse {
   repos: RepoBranchStatus[];
+}
+
+// One UTC day of trunk history, on ONE shared axis: `failed` = trunk commits that day with a
+// red rollup ('failure'/'error'), `passed` = commits with a 'success' rollup (pending/unknown
+// count as neither — the cells split red-over-green by these two), and `merged` = PRs merged
+// into the default branch that day (the line band above the cells; a null base is excluded —
+// it is not evidence the PR landed on trunk, and an unknown default branch name yields a
+// flat-zero line rather than a guess).
+export interface BranchTrendDay {
+  day: string; // 'YYYY-MM-DD' (UTC)
+  failed: number;
+  passed: number;
+  merged: number;
+}
+
+// GET /api/branch-trends?repoId= — the ONE lazy per-day series behind an expanded
+// default-branch row (rendered as a single coverage-style strip: failure cells + merged-PRs
+// line). Fetched only on expand, never part of /api/branch-status (which stays lean: the
+// strip is a hot workspace-wide read; this covers the WIDER retained window the sync keeps
+// for exactly this endpoint).
+//
+// `daily` is DENSE from the oldest RETAINED commit's day to today — not padded back to the
+// full 90 days, because on a busy repo the commit-count cap can trim inside the date window,
+// and days before the oldest retained commit are trimmed history, not quiet days. The merged
+// line is truncated to the SAME span on purpose (alignment is the point of the shared axis).
+// Empty until the repo has been branch-synced.
+export interface BranchTrendsResponse {
+  repoId: number;
+  daily: BranchTrendDay[];
 }
 
 // ---- Comment annotations platform (Pro; plugin-owned storage) ------------------------------
