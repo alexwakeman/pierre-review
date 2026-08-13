@@ -40,6 +40,42 @@
 
 import type { GqlCheckContext } from './queries.js';
 
+// One trunk-commit node, shared VERBATIM between the live snapshot query and the history
+// backfill below — the two walks must store identical rows, so the selection is written once.
+//
+// On `associatedPullRequests`: first:3 rather than 1 because the connection has NO documented
+// ordering, so first:1 would be a non-deterministic pick that could FLIP between syncs; and
+// rather than 10 because 3 keeps the node budget described above at N + 3N (4 points at the
+// 100-commit window, vs 11 for first:10). merged + baseRefName are the ranking inputs (see
+// pickAssociatedPrNumber in sync/branch-status.ts); repository.nameWithOwner exists because
+// this connection spans the repo NETWORK, so a fork's own PR can appear and its number would
+// resolve against the WRONG repo at read time.
+const BRANCH_COMMIT_FIELDS = /* GraphQL */ `
+                oid
+                messageHeadline
+                committedDate
+                statusCheckRollup {
+                  state
+                }
+                author {
+                  name
+                  avatarUrl
+                  user {
+                    login
+                  }
+                }
+                associatedPullRequests(first: 3) {
+                  nodes {
+                    number
+                    merged
+                    baseRefName
+                    repository {
+                      nameWithOwner
+                    }
+                  }
+                }
+`;
+
 // `StatusState` (SUCCESS | FAILURE | PENDING | ERROR | EXPECTED) is exactly the enum the
 // existing PR rollup mapper already switches on, so the persist layer reuses that mapping
 // rather than inventing a second vocabulary.
@@ -60,38 +96,45 @@ export const DEFAULT_BRANCH_QUERY = /* GraphQL */ `
             }
             history(first: $first) {
               nodes {
-                oid
-                messageHeadline
-                committedDate
-                statusCheckRollup {
-                  state
-                }
-                author {
-                  name
-                  avatarUrl
-                  user {
-                    login
-                  }
-                }
-                # The PR this commit landed from. first:3 rather than 1 because the connection
-                # has NO documented ordering, so first:1 would be a non-deterministic pick that
-                # could FLIP between syncs; and rather than 10 because 3 keeps the node budget
-                # described above at N + 3N (4 points at the 100-commit window, vs 11 for
-                # first:10). merged + baseRefName are the
-                # ranking inputs (see pickAssociatedPrNumber in sync/branch-status.ts);
-                # repository.nameWithOwner exists because this connection spans the repo NETWORK,
-                # so a fork's own PR can appear and its number would resolve against the WRONG
-                # repo at read time.
-                associatedPullRequests(first: 3) {
-                  nodes {
-                    number
-                    merged
-                    baseRefName
-                    repository {
-                      nameWithOwner
-                    }
-                  }
-                }
+${BRANCH_COMMIT_FIELDS}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+// The one-time HISTORY BACKFILL twin of the snapshot query: the same commit nodes, but
+// paginated (`after`) and server-bounded to the trend window (`since` — GitTimestamp, filters
+// on committer date). Same 4-points-per-page cost as the snapshot; the caller caps pages.
+// `since` means an exhausted walk ends at the window edge with hasNextPage:false rather than
+// crawling into ancient history.
+export const DEFAULT_BRANCH_HISTORY_QUERY = /* GraphQL */ `
+  query DefaultBranchHistory(
+    $owner: String!
+    $name: String!
+    $first: Int!
+    $since: GitTimestamp!
+    $after: String
+  ) {
+    rateLimit {
+      cost
+      remaining
+    }
+    repository(owner: $owner, name: $name) {
+      defaultBranchRef {
+        name
+        target {
+          ... on Commit {
+            history(first: $first, since: $since, after: $after) {
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+              nodes {
+${BRANCH_COMMIT_FIELDS}
               }
             }
           }
@@ -137,6 +180,23 @@ export interface DefaultBranchResponse {
         oid?: string;
         statusCheckRollup?: { state?: string | null } | null;
         history?: { nodes: (GqlBranchCommit | null)[] } | null;
+      } | null;
+    } | null;
+  } | null;
+}
+
+// The backfill twin. `pageInfo` optional for the same partial-response reason as everything
+// else: a walk whose pageInfo did not arrive must STOP (treat as no next page), not throw.
+export interface DefaultBranchHistoryResponse {
+  rateLimit?: { cost: number; remaining: number } | null;
+  repository?: {
+    defaultBranchRef?: {
+      name?: string | null;
+      target?: {
+        history?: {
+          pageInfo?: { hasNextPage?: boolean | null; endCursor?: string | null } | null;
+          nodes?: (GqlBranchCommit | null)[] | null;
+        } | null;
       } | null;
     } | null;
   } | null;
@@ -254,4 +314,45 @@ export interface CommitChecksResponse {
   // nothing and arrives as `{}`; a sha GitHub can't resolve arrives as null. Under
   // noUncheckedIndexedAccess an index into this Record is `| undefined`, which the reader handles.
   repository?: Record<string, GqlCommitChecks | null> | null;
+}
+
+// ---- Per-commit rollup STATE, in bulk (the PR CI-history backfill) ------------------------
+//
+// The state-only sibling of `buildCommitChecksQuery`: one aliased `object(oid:)` per sha,
+// selecting nothing but the rollup state. No connection arguments anywhere in the selection, so
+// the whole call costs ~1 rate-limit point regardless of alias count — which is what makes a
+// 100-per-call cap affordable where the contexts query must stop at 10.
+export const COMMIT_STATES_ALIAS_CAP = 100;
+
+/** Same alias/variable discipline as `buildCommitChecksQuery`: index-derived alias names, shas as
+ * `GitObjectID!` variables, never interpolated into the query text. */
+export function buildCommitStatesQuery(count: number): string {
+  const vars = Array.from({ length: count }, (_, i) => `$s${i}: GitObjectID!`).join(', ');
+  const aliases = Array.from(
+    { length: count },
+    (_, i) =>
+      `      c${i}: object(oid: $s${i}) { ... on Commit { oid statusCheckRollup { state } } }`,
+  ).join('\n');
+  return `query CommitStates($owner: String!, $name: String!, ${vars}) {
+    rateLimit {
+      cost
+      remaining
+    }
+    repository(owner: $owner, name: $name) {
+${aliases}
+    }
+  }`;
+}
+
+export interface GqlCommitState {
+  oid?: string;
+  // Null rollup is "CI never ran on this commit" OR "the selection was not received" — the
+  // backfill treats both as unknowable and synthesizes nothing for the sha.
+  statusCheckRollup?: { state?: string | null } | null;
+}
+
+export interface CommitStatesResponse {
+  rateLimit?: { cost: number; remaining: number } | null;
+  // Keyed `c0`…`c<n-1>`, same shapes and caveats as CommitChecksResponse.repository.
+  repository?: Record<string, GqlCommitState | null> | null;
 }

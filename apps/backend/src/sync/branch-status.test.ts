@@ -23,6 +23,7 @@ import {
   type GqlBranchCommit,
 } from '../github/branch-queries.js';
 import {
+  BRANCH_COMMIT_WINDOW,
   detailTargetShas,
   failingChecksFrom,
   failingChecksToWrite,
@@ -30,6 +31,7 @@ import {
   MAX_FAILING_CHECKS_PER_COMMIT,
   pickAssociatedPrNumber,
   prNumberToWrite,
+  staleBranchCommitIds,
 } from './branch-status.js';
 import type { BranchCheckRun } from '@pierre-review/shared';
 
@@ -370,5 +372,51 @@ describe('pickAssociatedPrNumber', () => {
     expect(
       pickAssociatedPrNumber(withPrs([{ merged: true }, { number: 6 }]), 'acme/app', 'main'),
     ).toBe(6);
+  });
+});
+
+describe('staleBranchCommitIds (the hybrid trim)', () => {
+  const NOW = Date.parse('2026-08-01T00:00:00Z');
+  const DAY_MS = 86_400_000;
+  // Rows are handed to the trim newest-first, matching the query's ORDER BY.
+  const rows = (agesDays: number[]): { id: number; committedAt: Date }[] =>
+    agesDays.map((d, i) => ({ id: i + 1, committedAt: new Date(NOW - d * DAY_MS) }));
+
+  it('keeps backfilled rows below the count floor while they sit inside the trend window', () => {
+    // 150 rows spread over the last 80 days — deeper than the floor, but all inside 90d.
+    // A pure count bound here would delete the backfill on the very next sync tick.
+    const set = rows(Array.from({ length: 150 }, (_, i) => (i * 80) / 150));
+    expect(staleBranchCommitIds(set, NOW)).toEqual([]);
+  });
+
+  it('deletes rows that are BOTH below the floor and outside the window', () => {
+    const recent = Array.from({ length: BRANCH_COMMIT_WINDOW }, (_, i) => i / 10);
+    const ancient = [120, 200, 400];
+    const set = rows([...recent, ...ancient]);
+    expect(staleBranchCommitIds(set, NOW)).toEqual([
+      BRANCH_COMMIT_WINDOW + 1,
+      BRANCH_COMMIT_WINDOW + 2,
+      BRANCH_COMMIT_WINDOW + 3,
+    ]);
+  });
+
+  it('never deletes the newest rows, however old — the dormant-repo guard', () => {
+    // A dormant repo whose entire set is ancient must not be inserted-and-deleted every tick.
+    const set = rows(Array.from({ length: 80 }, (_, i) => 400 + i));
+    expect(staleBranchCommitIds(set, NOW)).toEqual([]);
+  });
+
+  it('applies the floor at exactly BRANCH_COMMIT_WINDOW when every row is ancient', () => {
+    const set = rows(Array.from({ length: BRANCH_COMMIT_WINDOW + 5 }, (_, i) => 400 + i));
+    expect(staleBranchCommitIds(set, NOW)).toEqual(
+      Array.from({ length: 5 }, (_, i) => BRANCH_COMMIT_WINDOW + i + 1),
+    );
+  });
+
+  it('keeps an out-of-window row that a fresher set has NOT yet pushed below the floor', () => {
+    // 50 recent rows + one 100-day-old row at index 50: inside the floor, so it survives —
+    // the age test alone may never delete anything.
+    const set = rows([...Array.from({ length: 50 }, (_, i) => i / 10), 100]);
+    expect(staleBranchCommitIds(set, NOW)).toEqual([]);
   });
 });

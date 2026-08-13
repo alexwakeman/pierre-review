@@ -252,11 +252,17 @@ attention count, no badge, no My Turn.
   explicit "direct pushes only" line (those commits stay visible in the chart cells). The old
   per-commit failing-check carets went with the commit list — the HEAD's failing checks remain
   on the row summary.
-- **Branch trend charts** (expanded row, above the commit list). `branch_commits` now retains
-  **the newest 100 commits** (`BRANCH_COMMIT_WINDOW` in `sync/branch-status.ts` — the widening
-  is 1 → 4 GraphQL points per repo per sync, an accepted cost; it backfills instantly since
-  the history walk re-fetches each sync). ⚠ Deliberately NO writer-side age bound: one was
-  tried and deleted a repo's ENTIRE set whenever every commit was older than the cutoff
+- **Branch trend charts** (expanded row, above the commit list). `branch_commits` retains
+  **the newest 100 commits unconditionally** (`BRANCH_COMMIT_WINDOW` in
+  `sync/branch-status.ts` — the widening is 1 → 4 GraphQL points per repo per sync, an
+  accepted cost) **plus anything deeper that still sits inside the 90-day trend window** —
+  those deeper rows come from the ONE-TIME history backfill (`backfillBranchHistory`,
+  paginated `history(since: now − 90d)`, ≤10 pages ≈ 1000 commits, run after a repo's first
+  full sync / deep re-sync — see [SYNC.md](SYNC.md) § CI-history backfill; backfilled commits
+  carry `ciStatus` only, no failing-check detail). The trim is the HYBRID
+  `staleBranchCommitIds`: a row dies only when it is BOTH below the newest-100 floor AND
+  outside 90d. ⚠ The unconditional floor is a landmine guard, not a nicety: a pure age bound
+  was tried and deleted a repo's ENTIRE set whenever every commit was older than the cutoff
   (dormant repo, or backdated committer dates) — "never synced" strip row, permanently
   disabled expander, 4 points burned per sync writing rows the same transaction destroyed.
   The 90-day horizon is `getBranchTrends`' READ filter. `READ_PR_CAP` is **10** — the
@@ -277,7 +283,9 @@ attention count, no badge, no My Turn.
   `ChartCard` composition as `BotBehaviourPanel`; the cross-repo Feed strip (a `max-h-64`
   scroll box) gets the bare captioned strip. Two honest caveats stored nowhere else:
   per-commit `ciStatus` is upserted in place on re-sync, so a re-run that goes green
-  retroactively erases a past failure from the chart; and depth is bounded by the 90d
-  backfill/read window.
+  retroactively erases a past failure from the chart (backfilled rows below the live window
+  are never re-observed, so THEIR statuses are frozen at backfill time); and depth is bounded
+  by the 90d backfill/read window (and, on a repo landing >1000 trunk commits in 90 days, by
+  the history backfill's page cap — disclosed in its log line, never silently).
 
 

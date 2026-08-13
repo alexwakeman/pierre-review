@@ -117,6 +117,14 @@ export const config = {
   // backfillDays is fetched in the background. Two-phase only kicks in when
   // backfillDays exceeds this.
   foregroundSyncDays: intFromEnv('FOREGROUND_SYNC_DAYS', 14),
+  // After a repo's first full sync (and any forced deep re-sync), backfill CI HISTORY so the
+  // Activity tab's CI charts aren't blank on a fresh repo: trunk commits back to the 90-day
+  // trend window, plus per-PR CI transition events synthesized from GitHub's retained check
+  // rollups (sync/backfill-ci-history.ts). One-time, bounded GraphQL spend per repo;
+  // CI_HISTORY_BACKFILL=false disables it.
+  ciHistoryBackfill: process.env.CI_HISTORY_BACKFILL
+    ? process.env.CI_HISTORY_BACKFILL === 'true'
+    : true,
   // How many commit-file REST fetches to keep in flight at once (one pool per
   // page). These draw from the REST quota (disjoint from the GraphQL points
   // pool), so a modest pool safely cuts the dominant sync stage.

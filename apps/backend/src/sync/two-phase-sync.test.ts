@@ -11,8 +11,14 @@ vi.mock('../config.js', () => ({
     foregroundSyncDays: 14,
     syncOverlapMinutes: 20,
     commitFileConcurrency: 10,
+    ciHistoryBackfill: true,
   },
 }));
+// The one-time CI-history backfill that must fire exactly once, after a COMPLETED full walk.
+// `vi.hoisted` for the same reason as sync-manager.test.ts's ML seam: the factory runs while
+// the import graph is being built.
+const ciBackfill = vi.hoisted(() => ({ run: vi.fn(async () => {}) }));
+vi.mock('./backfill-ci-history.js', () => ({ runCiHistoryBackfill: ciBackfill.run }));
 vi.mock('../auth/account.js', () => ({
   getAccessToken: vi.fn(async () => 'test-token'),
   LOCAL_ACCOUNT_ID: 1,
@@ -62,7 +68,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const daysAgo = (since: Date): number => (Date.now() - since.getTime()) / DAY_MS;
 
 describe('two-phase first sync', () => {
-  beforeEach(() => mockSyncRepo.mockReset());
+  beforeEach(() => {
+    mockSyncRepo.mockReset();
+    ciBackfill.run.mockClear();
+  });
 
   it('runs a fast foreground pass then a background backfill pass, handing off the cursor', async () => {
     mockSyncRepo
@@ -100,6 +109,39 @@ describe('two-phase first sync', () => {
     await flush();
 
     expect(mockSyncRepo).toHaveBeenCalledTimes(1);
+    // A cancelled walk must not spend the backfill's GraphQL budget either.
+    expect(ciBackfill.run).not.toHaveBeenCalled();
+  });
+
+  it('runs the CI-history backfill exactly once, after a completed full walk', async () => {
+    mockSyncRepo
+      .mockResolvedValueOnce(result({ prCount: 30, endCursor: 'CURSOR_AT_CUTOFF' }))
+      .mockResolvedValueOnce(result({ prCount: 200, endCursor: null }));
+
+    await runSyncForRepo(1, makeLog(), { background: true });
+    await flush();
+
+    expect(ciBackfill.run).toHaveBeenCalledTimes(1);
+    expect(ciBackfill.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: 'o',
+        name: 'n',
+        repoId: 1,
+        accountId: 1,
+        token: 'test-token',
+      }),
+    );
+  });
+
+  it('skips the backfill when a cancellation lands during phase 2', async () => {
+    mockSyncRepo
+      .mockResolvedValueOnce(result({ prCount: 30, endCursor: 'CURSOR_AT_CUTOFF' }))
+      .mockResolvedValueOnce(result({ prCount: 12, cancelled: true }));
+
+    await runSyncForRepo(1, makeLog(), { background: true });
+    await flush();
+
+    expect(ciBackfill.run).not.toHaveBeenCalled();
   });
 
   it('keeps a forced "deep" re-sync single-pass (no foreground split)', async () => {

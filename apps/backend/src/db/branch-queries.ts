@@ -226,11 +226,13 @@ export async function getBranchStatus(
   };
 }
 
-// Trend window for `getBranchTrends`. Matches what the sync's count trim can plausibly retain
-// (100 commits in sync/branch-status.ts) — a wider read here would only ever find deleted rows;
-// this read filter is ALSO where the "no year-old bars" promise lives (the writer keeps a pure
-// count bound, see the trim's comment).
-const TREND_DAYS = 90;
+// Trend window for `getBranchTrends`. Exported because the sync side keys off the SAME number
+// twice: the trim in sync/branch-status.ts retains rows inside this window even beyond its
+// 100-commit bound (so the one-time history backfill survives the next tick), and the backfill
+// itself fetches `history(since: now − TREND_DAYS)`. This read filter is ALSO where the "no
+// year-old bars" promise lives — the writer never deletes a row the newest-100 bound protects,
+// however old (see the trim's comment).
+export const TREND_DAYS = 90;
 const DAY_MS = 86_400_000;
 
 /**

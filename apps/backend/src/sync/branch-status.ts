@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
-import { db, schema, runTransaction } from '../db/client.js';
+import { db, schema, runTransaction, type Executor } from '../db/client.js';
+import { TREND_DAYS } from '../db/branch-queries.js';
 import {
   getGraphqlClientFor,
   graphqlTolerant,
@@ -10,8 +11,10 @@ import {
   buildCommitChecksQuery,
   COMMIT_CHECKS_ALIAS_CAP,
   DEFAULT_BRANCH_QUERY,
+  DEFAULT_BRANCH_HISTORY_QUERY,
   type CommitChecksResponse,
   type DefaultBranchResponse,
+  type DefaultBranchHistoryResponse,
   type GqlAssociatedPr,
   type GqlBranchCheckContext,
   type GqlBranchCommit,
@@ -25,9 +28,11 @@ import type { BranchCheckRun, CiStatus } from '@pierre-review/shared';
 
 const { repos, users, branchCommits } = schema;
 
-// How many trunk commits we keep per repo. Also the GraphQL page size (GitHub's maximum), so the
-// fetch and the retained window are the same number by construction — a smaller fetch would leave
-// stale rows alive below it, a larger one would write rows the trim immediately deletes.
+// How many trunk commits the LIVE snapshot fetches per repo — GitHub's page maximum — and the
+// unconditional floor of the trim below (the newest this-many rows are never deleted, however
+// old). Rows beyond it survive only inside the TREND_DAYS window; they come from the one-time
+// history backfill (`backfillBranchHistory`), whose ciStatus is final by the time it runs, so
+// the live walk not re-observing them is by design rather than a staleness hole.
 //
 // Cost of the widening (20 → 100): phase 1's node budget is N + 3N (the history page plus its
 // nested associatedPullRequests(first: 3)), scored ceil(total/100) — so N=100 is 400 nodes ⇒
@@ -36,14 +41,17 @@ const { repos, users, branchCommits } = schema;
 // per-repo sync, not every adaptive tick.
 export const BRANCH_COMMIT_WINDOW = 100;
 
-// There is deliberately NO age bound on the retained window — only the count bound above. An
-// age bound here looked attractive ("no year-old rows") but is a landmine: a repo whose newest
-// trunk commit is older than the cutoff (dormant repo, or an active one whose committer dates
-// were backdated by a rebase/import) would have its ENTIRE set inserted and deleted in the same
-// transaction on every sync — the strip row reads "never synced", the expander is permanently
-// disabled, and the walk burns its 4 points writing rows it immediately destroys. The trends
-// read (db/branch-queries.ts getBranchTrends) applies its own `committedAt >= now - 90d`
-// filter, which is where the "no year-old bars" promise actually lives.
+// The trim is a HYBRID bound: the newest BRANCH_COMMIT_WINDOW rows are kept UNCONDITIONALLY,
+// and rows below that survive as long as they sit inside the TREND_DAYS window (which is what
+// lets the one-time history backfill's deeper rows live — a pure count bound would delete them
+// on the very next sync tick). The unconditional half is a landmine guard, not a nicety: an
+// age bound applied to ALL rows would mean a repo whose newest trunk commit is older than the
+// cutoff (dormant repo, or an active one whose committer dates were backdated by a
+// rebase/import) has its ENTIRE set inserted and deleted in the same transaction on every sync
+// — the strip row reads "never synced", the expander is permanently disabled, and the walk
+// burns its 4 points writing rows it immediately destroys. The trends read
+// (db/branch-queries.ts getBranchTrends) applies its own `committedAt >= now - 90d` filter,
+// which is where the "no year-old bars" promise actually lives.
 
 // Which rollup states earn the SECOND round trip for failing-check detail. A green commit is
 // skipped entirely — that is what keeps the common case at the ~1 point this file's query header
@@ -74,6 +82,14 @@ export interface SyncBranchStatusOptions {
   token: string;
   log?: BranchSyncLogger;
 }
+
+const DAY_MS = 86_400_000;
+
+// How many pages the one-time history backfill will walk (at BRANCH_COMMIT_WINDOW commits and
+// ~4 rate-limit points each). 10 pages = 1000 trunk commits — deeper than 90 days of all but
+// the busiest repos; on those the strip's oldest days simply stay unpopulated, disclosed by
+// the `truncated` flag in the result (and the caller's log line), never silently.
+export const BRANCH_BACKFILL_MAX_PAGES = 10;
 
 export interface BranchStatusSyncResult {
   branchName: string | null;
@@ -283,6 +299,100 @@ export async function fetchFailingChecks(
 }
 
 /**
+ * The commit-author logins we already know, resolved in ONE query. Lookup-only on purpose —
+ * see the author-mapping note on `syncBranchStatus`: no `users` rows are ever created here.
+ */
+async function resolveKnownLogins(nodes: GqlBranchCommit[]): Promise<Map<string, number>> {
+  const logins = [
+    ...new Set(
+      nodes
+        .map((n) => n.author?.user?.login)
+        .filter((l): l is string => typeof l === 'string' && l.length > 0),
+    ),
+  ];
+  const userIdByLogin = new Map<string, number>();
+  if (logins.length > 0) {
+    const rows = await db
+      .select({ id: users.id, login: users.githubLogin })
+      .from(users)
+      .where(inArray(users.githubLogin, logins))
+      .execute();
+    for (const r of rows) userIdByLogin.set(r.login, r.id);
+  }
+  return userIdByLogin;
+}
+
+/**
+ * Upsert one page of trunk-commit nodes — shared verbatim between the live snapshot and the
+ * history backfill so the two walks can never store differently-shaped rows. Idempotent on
+ * `(accountId, repoId, sha)`; the observed-key spread implements the partial-response policy
+ * above (an omitted key leaves the column at its default on INSERT and untouched on UPDATE,
+ * which is exactly what "we did not receive that selection" means).
+ */
+async function upsertBranchCommitRows(
+  tx: Executor,
+  args: { accountId: number; repoId: number; fullName: string; branchName: string | null },
+  nodes: GqlBranchCommit[],
+  userIdByLogin: Map<string, number>,
+  failingBySha: Map<string, BranchCheckRun[]>,
+): Promise<void> {
+  for (const n of nodes) {
+    const login = n.author?.user?.login ?? null;
+    const authorUserId = login != null ? userIdByLogin.get(login) ?? null : null;
+    const failingChecks = failingChecksToWrite(n, failingBySha);
+    const prNumber = prNumberToWrite(n, args.fullName, args.branchName);
+    const observed = {
+      ...(failingChecks !== undefined ? { failingChecks } : {}),
+      ...(prNumber !== undefined ? { prNumber } : {}),
+    };
+    await tx
+      .insert(branchCommits)
+      .values({
+        accountId: args.accountId,
+        repoId: args.repoId,
+        sha: n.oid,
+        messageHeadline: n.messageHeadline,
+        authorUserId,
+        // Prefer the git author name; fall back to the login so a commit by a known GitHub
+        // account with a blank git name still shows SOMETHING attributable.
+        authorName: n.author?.name ?? login,
+        authorAvatarUrl: n.author?.avatarUrl ?? null,
+        committedAt: new Date(n.committedDate),
+        ciStatus: ciStatusFrom(n.statusCheckRollup?.state),
+        ...observed,
+      })
+      .onConflictDoUpdate({
+        target: [branchCommits.accountId, branchCommits.repoId, branchCommits.sha],
+        set: {
+          messageHeadline: n.messageHeadline,
+          authorUserId,
+          authorName: n.author?.name ?? login,
+          authorAvatarUrl: n.author?.avatarUrl ?? null,
+          committedAt: new Date(n.committedDate),
+          ciStatus: ciStatusFrom(n.statusCheckRollup?.state),
+          ...observed,
+        },
+      })
+      .execute();
+  }
+}
+
+/**
+ * Which of the retained rows the trim deletes, given rows sorted NEWEST-FIRST: anything both
+ * below the newest-BRANCH_COMMIT_WINDOW floor AND outside the TREND_DAYS window. Pure and
+ * exported so the hybrid bound's two halves are pinned by tests rather than a comment.
+ */
+export function staleBranchCommitIds(
+  rows: { id: number; committedAt: Date }[],
+  nowMs: number,
+): number[] {
+  const cutoffMs = nowMs - TREND_DAYS * DAY_MS;
+  return rows
+    .filter((r, i) => i >= BRANCH_COMMIT_WINDOW && r.committedAt.getTime() < cutoffMs)
+    .map((r) => r.id);
+}
+
+/**
  * Snapshot a repo's DEFAULT BRANCH: its head sha + CI rollup onto `repos`, and the most recent
  * `BRANCH_COMMIT_WINDOW` trunk commits (with their own per-commit CI state, the checks that were
  * failing on them, and the PR each landed from) into `branch_commits`.
@@ -334,22 +444,7 @@ export async function syncBranchStatus(
 
   // Resolve the commit authors we already know, in ONE query. GraphQL gives a login only when
   // the commit email maps to a GitHub account; the rest keep their raw git name.
-  const logins = [
-    ...new Set(
-      nodes
-        .map((n) => n.author?.user?.login)
-        .filter((l): l is string => typeof l === 'string' && l.length > 0),
-    ),
-  ];
-  const userIdByLogin = new Map<string, number>();
-  if (logins.length > 0) {
-    const rows = await db
-      .select({ id: users.id, login: users.githubLogin })
-      .from(users)
-      .where(inArray(users.githubLogin, logins))
-      .execute();
-    for (const r of rows) userIdByLogin.set(r.login, r.id);
-  }
+  const userIdByLogin = await resolveKnownLogins(nodes);
 
   // Phase 2, for the non-green commits only — a green trunk issues no second query at all.
   const detailTargets = detailTargetShas(nodes);
@@ -373,62 +468,26 @@ export async function syncBranchStatus(
   }
 
   await runTransaction(async (tx) => {
-    for (const n of nodes) {
-      const login = n.author?.user?.login ?? null;
-      const authorUserId = login != null ? userIdByLogin.get(login) ?? null : null;
-      const failingChecks = failingChecksToWrite(n, failingBySha);
-      const prNumber = prNumberToWrite(n, fullName, branchName);
-      // Spread rather than assign: an omitted key leaves the column at its default on INSERT and
-      // untouched on UPDATE, which is exactly what "we did not receive that selection" means.
-      // Passing `undefined` explicitly would work for drizzle today, but the spread makes the
-      // three-state intent legible at the call site.
-      const observed = {
-        ...(failingChecks !== undefined ? { failingChecks } : {}),
-        ...(prNumber !== undefined ? { prNumber } : {}),
-      };
-      await tx
-        .insert(branchCommits)
-        .values({
-          accountId,
-          repoId,
-          sha: n.oid,
-          messageHeadline: n.messageHeadline,
-          authorUserId,
-          // Prefer the git author name; fall back to the login so a commit by a known GitHub
-          // account with a blank git name still shows SOMETHING attributable.
-          authorName: n.author?.name ?? login,
-          authorAvatarUrl: n.author?.avatarUrl ?? null,
-          committedAt: new Date(n.committedDate),
-          ciStatus: ciStatusFrom(n.statusCheckRollup?.state),
-          ...observed,
-        })
-        .onConflictDoUpdate({
-          target: [branchCommits.accountId, branchCommits.repoId, branchCommits.sha],
-          set: {
-            messageHeadline: n.messageHeadline,
-            authorUserId,
-            authorName: n.author?.name ?? login,
-            authorAvatarUrl: n.author?.avatarUrl ?? null,
-            committedAt: new Date(n.committedDate),
-            ciStatus: ciStatusFrom(n.statusCheckRollup?.state),
-            ...observed,
-          },
-        })
-        .execute();
-    }
+    await upsertBranchCommitRows(
+      tx,
+      { accountId, repoId, fullName, branchName },
+      nodes,
+      userIdByLogin,
+      failingBySha,
+    );
 
-    // Trim to the newest BRANCH_COMMIT_WINDOW rows IN the same transaction, so the table can
-    // never be observed holding an unbounded history. Count bound ONLY — see the constant's
-    // comment for why an age bound here would delete a dormant repo's whole set. Done as
-    // select-then-delete-by-id rather than a correlated DELETE … LIMIT, which is not portable
-    // across sqlite and Postgres.
+    // Trim IN the same transaction, so the table can never be observed holding an unbounded
+    // history. HYBRID bound (see staleBranchCommitIds + the constants' comments): the newest
+    // BRANCH_COMMIT_WINDOW rows unconditionally, plus backfilled rows inside the TREND_DAYS
+    // window. Done as select-then-delete-by-id rather than a correlated DELETE … LIMIT, which
+    // is not portable across sqlite and Postgres.
     const kept = await tx
-      .select({ id: branchCommits.id })
+      .select({ id: branchCommits.id, committedAt: branchCommits.committedAt })
       .from(branchCommits)
       .where(and(eq(branchCommits.accountId, accountId), eq(branchCommits.repoId, repoId)))
       .orderBy(desc(branchCommits.committedAt))
       .execute();
-    const stale = kept.filter((_, i) => i >= BRANCH_COMMIT_WINDOW).map((r) => r.id);
+    const stale = staleBranchCommitIds(kept, Date.now());
     // Guard the empty case: `inArray(col, [])` is a degenerate predicate whose behaviour
     // differs by dialect, and there is nothing to delete anyway.
     if (stale.length > 0) {
@@ -466,4 +525,97 @@ export async function syncBranchStatus(
     failingCommitCount: detailTargets.length,
     rateLimitCost,
   };
+}
+
+export interface BranchHistoryBackfillResult {
+  pages: number;
+  commitCount: number;
+  rateLimitCost: number;
+  // True when the walk stopped with history still unread (page cap or cancellation) — the
+  // caller logs it so a bounded backfill never silently reads as "covered the whole window".
+  truncated: boolean;
+}
+
+/**
+ * ONE-TIME deepening of the trunk window: walk `history(since: now − TREND_DAYS)` page by page
+ * and upsert every commit, so the branch-trends DayStrip spans its whole 90-day read window
+ * instead of only the newest BRANCH_COMMIT_WINDOW commits the live snapshot retains. Runs after
+ * a repo's first full sync (and a forced deep re-sync) — see sync-manager.ts.
+ *
+ * Deliberate differences from the live snapshot, all cost-driven:
+ *   • NO phase-2 failing-check detail — the trend cells need only `ciStatus`, and per the
+ *     partial-response policy an absent detail simply omits the column (`failingChecksToWrite`
+ *     returns undefined for a non-green commit with no phase-2 entry), so any detail the live
+ *     window already stored is left untouched where the walks overlap.
+ *   • NO `repos` head-column write and NO trim — the live snapshot owns both; every row this
+ *     walk inserts sits inside the TREND_DAYS window the hybrid trim retains.
+ *   • The first page re-reads the live window from the branch tip rather than resuming a stored
+ *     cursor — history cursors are position-relative and trunk moves during the PR walk, so a
+ *     handed-off cursor could silently skip commits; one duplicate page is 4 points, and the
+ *     upsert is idempotent.
+ *
+ * Old commits' rollups are FINAL for our purposes (a historical re-run that flips one is rarer
+ * than the live window's own retro-flips, which docs/MERGE-CI-TRUNK.md already documents), so
+ * never re-observing these rows is by design. A commit whose CI never finished stays `pending`
+ * and counts as neither pass nor fail in the trends read.
+ */
+export async function backfillBranchHistory(
+  opts: SyncBranchStatusOptions & { shouldCancel?: () => boolean },
+): Promise<BranchHistoryBackfillResult> {
+  const { owner, name, repoId, accountId, token } = opts;
+  const client = getGraphqlClientFor(token);
+  const fullName = `${owner}/${name}`;
+  const since = new Date(Date.now() - TREND_DAYS * DAY_MS).toISOString();
+
+  let after: string | null = null;
+  let pages = 0;
+  let commitCount = 0;
+  let rateLimitCost = 0;
+
+  while (pages < BRANCH_BACKFILL_MAX_PAGES) {
+    if (opts.shouldCancel?.()) break;
+    const resp = await withGithubRetry(() =>
+      graphqlTolerant<DefaultBranchHistoryResponse>(
+        client,
+        DEFAULT_BRANCH_HISTORY_QUERY,
+        { owner, name, first: BRANCH_COMMIT_WINDOW, since, after },
+        (errors) =>
+          opts.log?.warn(
+            `branch-backfill ${fullName}: partial GraphQL — continuing without forbidden fields`,
+            errors,
+          ),
+      ),
+    );
+    pages += 1;
+    rateLimitCost += resp.rateLimit?.cost ?? 0;
+
+    const ref = resp.repository?.defaultBranchRef ?? null;
+    const history = ref?.target?.history ?? null;
+    const nodes: GqlBranchCommit[] = (history?.nodes ?? []).filter(
+      (n): n is GqlBranchCommit => n != null && typeof n.oid === 'string',
+    );
+    if (nodes.length > 0) {
+      const userIdByLogin = await resolveKnownLogins(nodes);
+      const branchName = ref?.name ?? null;
+      await runTransaction(async (tx) => {
+        await upsertBranchCommitRows(
+          tx,
+          { accountId, repoId, fullName, branchName },
+          nodes,
+          userIdByLogin,
+          new Map(),
+        );
+      });
+      commitCount += nodes.length;
+    }
+
+    // An absent pageInfo is "not received" (tolerant partial), which must stop the walk rather
+    // than throw or spin; endCursor null with hasNextPage true is treated the same way.
+    const pageInfo = history?.pageInfo ?? null;
+    if (pageInfo?.hasNextPage !== true || pageInfo.endCursor == null) {
+      return { pages, commitCount, rateLimitCost, truncated: false };
+    }
+    after = pageInfo.endCursor;
+  }
+  return { pages, commitCount, rateLimitCost, truncated: true };
 }

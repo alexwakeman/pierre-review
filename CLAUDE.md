@@ -299,6 +299,14 @@ with **composite** conflict targets (`(accountId, githubNodeId)` / events
   **two-phase for GraphQL-cost reasons** — read the cost analysis in
   [docs/BACKEND.md](docs/BACKEND.md) before restructuring its queries;
   `contexts(first:100)` must NOT be lowered.
+- **A completed FULL walk tail-runs the one-time CI-history backfill**
+  (`sync/backfill-ci-history.ts`; `CI_HISTORY_BACKFILL=false` disables): trunk commits back
+  to the 90-day trend window (the `branch_commits` trim is HYBRID — newest-100 unconditional
+  ∪ within-90d, so the backfill survives the next tick) + `ci_status_events` synthesized from
+  GitHub's retained rollups so the CI charts aren't blank on a fresh repo. A PR's log is
+  touched ONLY when it is provably the first-observation snapshot — never real observed
+  history. Strictly non-fatal, capped, cancellation-aware; details in
+  [docs/SYNC.md](docs/SYNC.md).
 
 ### Derived thread state — the heart of the app
 

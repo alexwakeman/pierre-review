@@ -73,6 +73,43 @@ The UI drops you into the recent view the moment phase 1 completes; phase 2 fill
 history in the background. A cancel during either phase leaves the repo
 "never synced" (see [Cancel](#cancel)).
 
+### CI-history backfill (after the full walk)
+
+A newly added repo would otherwise start with **blank CI charts**: the trunk DayStrip
+only spans the newest 100 trunk commits, and `ci_status_events` — the transition log
+behind "CI recovery" and "CI failures by stage" — records only changes a sync
+*witnesses*, so a first walk writes at most one row per PR. GitHub, however, retains
+per-commit check state indefinitely, so after every **completed full walk** (a repo's
+first sync or a forced deep re-sync — never incremental, never after a cancel)
+`runSyncForRepo`'s completion hook runs `runCiHistoryBackfill`
+(`sync/backfill-ci-history.ts`), gated by `config.ciHistoryBackfill` and loaded via
+dynamic import. It has two independently non-fatal halves:
+
+1. **Trunk history** (`backfillBranchHistory` in `sync/branch-status.ts`): paginated
+   `history(since: now − 90d)` on the default branch, ≤10 pages × 100 commits at ~4
+   points each, upserting the same rows as the live snapshot (minus failing-check
+   detail — the trend cells need only `ciStatus`). Survives the next tick because the
+   trim is hybrid: newest-100 unconditionally + anything inside the 90-day trend
+   window ([MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md)).
+2. **PR CI events** (`backfillPrCiHistory`): the walk already stored every PR's commit
+   shas + committer dates, so this fetches their retained `statusCheckRollup`s in
+   ~1-point batches of 100 (`buildCommitStatesQuery`, ≤2000 shas newest-PR-first),
+   failing-check **names** for the newest ≤200 red commits (reusing
+   `buildCommitChecksQuery`, ~1 point per commit), and synthesizes the transition rows
+   the sync would have written — `observedAt` = committer date. **The safety rule**: a
+   PR is touched only when its stored events are provably the initial walk's snapshot
+   (zero rows, or ONE row whose `headSha` is the newest stored commit — that row is
+   replaced in the same transaction); any PR with real observed history is left alone,
+   which is what makes the pass safe on a deep re-sync of a long-tracked repo. An
+   all-green PR writes nothing. Honest limits: a same-sha red→green (re-run flake fix)
+   is invisible — only the final rollup survives — and a red commit past the names cap
+   still opens a recovery streak but contributes nothing to the by-stage chart. Every
+   truncation (sha budget, page cap) is disclosed in the summary log line.
+
+The backfill runs while the repo still holds its `running` slot (no snapshot can race
+it) and respects cancellation between GraphQL batches — a cancelled PR-events pass
+writes nothing, since a partial log would be indistinguishable from a complete one.
+
 ---
 
 ## Incremental updates (every subsequent sync)
@@ -239,6 +276,7 @@ All via env (see `config.ts`); defaults in parentheses.
 | `SYNC_HOT/WARM/COLD_INTERVAL_SEC` | `120` / `300` / `900` | Min seconds between attempts per activity bucket (adaptive only). |
 | `SYNC_FLOOR_INTERVAL_SEC` | `1800` | Force a full re-walk this often even when the probe says unchanged — catches CI-finish / thread-resolve, which never bump `updatedAt`. |
 | `COMMIT_FILE_CONCURRENCY` | `10` | Concurrent commit-file REST fetches per page. |
+| `CI_HISTORY_BACKFILL` | `true` | The one-time post-full-sync CI-history backfill (trunk trend window + synthesized PR CI events). `false` disables both halves. |
 | `DISABLE_SCHEDULER` | `false` | Turn the cron loop off (scripts/tests). |
 | `PERSIST_BODIES` | `false` | Store bulky text during sync instead of hydrating on demand. |
 

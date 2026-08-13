@@ -267,16 +267,16 @@ export async function runSyncForRepo(
   const twoPhase =
     !opts.forceFull && plan.mode === 'full' && config.backfillDays > config.foregroundSyncDays;
 
-  const runWalk = async (): Promise<void> => {
+  const runWalk = async (): Promise<{ cancelled: boolean }> => {
     if (!twoPhase) {
-      await syncRepo({
+      const r = await syncRepo({
         ...common,
         mode: plan.mode,
         since: plan.since,
         commitState: true,
         onProgress: (p) => setSyncProgress(repoId, { ...p, mode: plan.mode }),
       });
-      return;
+      return { cancelled: r.cancelled };
     }
     // Phase 1 — the fast foreground window (the default timeline range). Committed
     // per-PR so the recent board is usable in seconds, but does NOT stamp
@@ -290,7 +290,7 @@ export async function runSyncForRepo(
       onProgress: (p) =>
         setSyncProgress(repoId, { ...p, mode: 'full', foregroundComplete: false }),
     });
-    if (p1.cancelled) return;
+    if (p1.cancelled) return { cancelled: true };
     // Foreground done — flip the flag so the UI drops the user into the recent
     // view, then continue the SAME cursor walk back to the full backfill window.
     setSyncProgress(repoId, {
@@ -300,7 +300,7 @@ export async function runSyncForRepo(
       mode: 'full',
       foregroundComplete: true,
     });
-    await syncRepo({
+    const p2 = await syncRepo({
       ...common,
       mode: 'full',
       since: plan.since, // now − backfillDays
@@ -309,10 +309,11 @@ export async function runSyncForRepo(
       onProgress: (p) =>
         setSyncProgress(repoId, { ...p, mode: 'full', foregroundComplete: true }),
     });
+    return { cancelled: p2.cancelled };
   };
 
   const task = runWalk()
-    .then(async () => {
+    .then(async (walk) => {
       // Deep re-sync is the user's explicit "re-fetch and re-derive everything" gesture:
       // purge this repo's ML labels so the enrichment worker re-scores the whole corpus
       // against the CURRENTLY served model (labels are model_version-stamped; a deep sync
@@ -320,6 +321,29 @@ export async function runSyncForRepo(
       if (opts.forceFull && isSeverityApiConfigured()) {
         await deleteMlLabelsForRepo(repo.accountId, repoId);
         log.info(`deep sync ${repo.owner}/${repo.name}: purged ML labels for re-scoring`);
+      }
+      // One-time CI-HISTORY backfill after a completed FULL walk (a repo's first sync, or a
+      // forced deep re-sync): trunk commits back to the trend window + synthesized per-PR CI
+      // transition events, so the Activity CI charts aren't blank on a fresh repo. Runs while
+      // this repo still holds its `running` slot (no snapshot can race it) and is internally
+      // non-fatal + cancellation-aware. Dynamically imported so the gate stays the only
+      // coupling — a disabled backfill loads nothing.
+      if (
+        plan.mode === 'full' &&
+        !walk.cancelled &&
+        !cancelRequested.has(repoId) &&
+        config.ciHistoryBackfill
+      ) {
+        const { runCiHistoryBackfill } = await import('./backfill-ci-history.js');
+        await runCiHistoryBackfill({
+          owner: repo.owner,
+          name: repo.name,
+          repoId,
+          accountId: repo.accountId,
+          token,
+          log,
+          shouldCancel: common.shouldCancel,
+        });
       }
     })
     .catch((err) => {
