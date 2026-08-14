@@ -33,7 +33,7 @@ remain distinct but flip together.
 **The plugin boundary.** `src/pro/contract.ts` defines `ProContext` (the host hands the
 plugin `db`/`schema`/`runTransaction`/`isPg`/`accountIdOf`/`llm.complete`/`queries`/
 `reviewEvents`/`registerLearningsProvider`/`registerScheduledJob`/`registerPrDetailEnricher`/`registerMigrations`/`aiCredits`), `ProPlugin
-{apiVersion:14, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
+{apiVersion:16, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
 `/api/me` (`pro:{activityDigest,reviewMemory,aiAnalysis,prSummary,aiFix,workspaceInsights,claudeReview,slackDigest,issueLinks}`)
 exactly like `claudeReviewEnabled`. `src/pro/bind.ts`
 runs in `index.ts` between `buildApp()` and `listen()`: gated on **`config.proEnabled`** — now
@@ -41,8 +41,10 @@ runs in `index.ts` between `buildApp()` and `listen()`: gated on **`config.proEn
 AND can run the **paid summary-AI tier in cloud** behind `PRO_CLOUD_ENABLED=true` (agentic AI stays
 off via unset `PRO_ADVANCED_AI_ENABLED`; per-account entitlement via `plan!=='free'` + the
 `/api/pro/* 402` gate). It is **NOT a declared dependency** — instead `bind.ts` resolves the plugin by
-**filesystem path** (`PRO_PLUGIN_PATH` override → `packages/pro/dist/index.js` → `packages/pro/src/index.ts`,
-relative to the repo root via `import.meta.url`) and `await import(...)`s it. **Absent submodule ⇒ no entry file ⇒
+**filesystem path** (`PRO_PLUGIN_PATH` override → then, **ORDER FLIPS BY ENVIRONMENT**:
+`dist/index.js` → `src/index.ts` under `NODE_ENV=production`, `src` FIRST otherwise — a stale
+`packages/pro/dist` would otherwise shadow `src` in dev and freeze the plugin at its last build;
+paths resolve relative to the repo root via `import.meta.url`) and `await import(...)`s it. **Absent submodule ⇒ no entry file ⇒
 clean OSS no-op, and `pnpm install` never fails** (the public-CI path). The path-based loader
 (not a bare `@pierre/pro` specifier / workspace dep) is what keeps install working without the
 submodule — don't reintroduce a `package.json` dependency on it. The plugin imports **no host
@@ -54,14 +56,16 @@ dual-dialect tables (`review_learnings`, `repo_digests`), migrations
 (`packages/pro/migrations{,-pg}/*.sql` run via `ctx.registerMigrations` → `src/pro/migrate.ts`,
 the one sanctioned raw-`$client` DDL site + `pro_migrations` bookkeeping), and isolation test.
 
-**`apiVersion` is 15** (bumped from 14 by the Bot Tuning Advisor — GithubSeam gains
-`readRepoFile`/`listRepoDir`/`openIssue`, CodingSeam gains `commitFilesAndOpenPr`, ProHostQueries
-gains `getAdvisorFindings`/`getBotEffectPanel`, `CodingErrorCode` gains `BRANCH_EXISTS`,
-`llm.complete` gains `credential`, ProCapabilities gains `botAdvisor`).
+**`apiVersion` is 16** (bumped from 15 by the grounded addressed check — GithubSeam gains
+`fetchCompareDiff`, the two-sha compare seam; see § "Grounded `addressed`" below). 14 → 15 was the
+Bot Tuning Advisor (GithubSeam gained `readRepoFile`/`listRepoDir`/`openIssue`, CodingSeam gained
+`commitFilesAndOpenPr`, ProHostQueries gained `getAdvisorFindings`/`getBotEffectPanel`,
+`CodingErrorCode` gained `BRANCH_EXISTS`, `llm.complete` gained `credential`, ProCapabilities
+gained `botAdvisor`).
 ⚠ **FOUR literals must agree, not two**, and the one that actually enforces the handshake is the
 easiest to miss: `apps/backend/src/pro/contract.ts` (the host's declared `ProPlugin['apiVersion']`),
 `packages/pro/src/index.ts` (the plugin's exported value), `packages/pro/src/contract-types.ts` (the
-plugin's mirror), and **`apps/backend/src/pro/bind.ts`'s `plugin?.apiVersion !== 15` — THE RUNTIME
+plugin's mirror), and **`apps/backend/src/pro/bind.ts`'s `plugin?.apiVersion !== 16` — THE RUNTIME
 GATE**. A half-bump makes `bind.ts` log-and-degrade the ENTIRE plugin to OSS mode: capabilities dark,
 every `/api/pro/*` 404, nothing thrown. ⚠ **Nothing currently PINS the handshake** —
 `pro/contract.test.ts` asserts capability KEYS (it was updated for the `workspaceInsights` rename)
@@ -555,6 +559,31 @@ scrolls + flashes the clicked item** (`activityReturnItemId`). A digest's `#N` P
 `pr-detail` tab. (The old pr-focus-on-click, the My-Turn tab, and the MyTurnPanel/FeedPanel/pills
 are all gone.)
 
+**Opt-in CI-failure rows (`includeCiFailures`, OFF by default).** Two more SYNTHESIZED kinds with
+no `events` rows behind them, following the `claude_review` precedent: **`ci_failed`** (a failed
+check on a PR head, from `ci_status_events`) and **`trunk_ci_failed`** (a failed check on the
+default branch, from `trunk_ci_status_events` — migration `0052` / pg `0039`). `ConsolidatedFeedItem.
+kind` stays a bare `string`, NOT `EventType`, precisely so a synthesized kind needs no widening of
+`EVENT_TYPES` / the Timeline's type filter / the Welcome-back counter. What to know before touching
+them:
+- **Grain: one item per `(PR-or-branch, head sha, check name)`, EARLIEST observation winning.** Both
+  sources are TRANSITION logs, so checks going red one at a time write several rows for one broken
+  push. Capped at `MAX_CI_ITEMS_PER_HEAD` = 5 names per head, with the overflow DISCLOSED in the
+  card's summary; scan capped at 1000 rows per builder.
+- **`observedAt` is OUR observation time** (neither branch nor PR query selects `completedAt`), so
+  the copy says "detected", never "failed at".
+- **Actor-less**, so — exactly like Claude runs — the server skips them under `botsOnly` or any
+  member filter, and they are **WITHHELD from `enrichMyTurn`**: a null actor is trivially "not
+  you", so handing them over would turn every red build on a participating PR into an UNCAPPED
+  My-Turn card, a core-lane behaviour change hidden inside a CI toggle.
+- They are NOT in the uncapped `alwaysRows` set (a flaky matrix build would starve the 250-row
+  plain-activity budget), the per-page enrichment must NOT overwrite their `ciStatus` with the PR's
+  LIVE rollup (the card reports the state AT the observation), and `trunk_ci_failed` has **no PR**
+  — its card is non-clickable and carries one `safeExternalUrl`'d commit link instead.
+- Client side: `feedShowCiFailures` is a FETCH toggle threaded into the feed key AND the head-poll
+  key, and the one feed toggle that PERSISTS with the filter bar. See CLAUDE.md § Frontend.
+- ⚠ **No backfill for the trunk log** — see docs/MIGRATIONS.md § known gaps.
+
 **Pro: Haiku digests — per-repo, rendered as a COLLECTION** (`packages/pro/src/activity-digest/`).
 The flagged AI panel: a per-repo banner in each repo's console (`DigestBanner` → `RepoDigestCard`,
 collapsible) AND, atop the Activity "Feed" entry, the **COLLECTION of per-repo digest cards**
@@ -704,6 +733,94 @@ bulk "re-check the stale ones" any more — there is no PR-wide sweep to hang it
   (`requested - cached - skipped > 0` with no `generated`/`failed`) is kept as a FALLBACK for older
   plugin builds and worded with "may", because it is an inference.
 
+### Grounded `addressed` — the two-sha compare seam (apiVersion 16)
+
+Until this landed, the model judging "was this concern addressed?" had **never seen the change it
+was judging**: it got four scalars (`outdated`, `deterministic_signal`,
+`deterministic_confidence`, `commits_after_last_comment=<a COUNT>`) plus — only under
+`PERSIST_BODIES`, i.e. almost never — the original ANCHOR hunk, which is the code as it was when
+the comment was WRITTEN. It now also gets the REAL unified diff of the thread's file between the
+commit the thread was last discussed at and the PR head.
+
+**The seam.** `GithubSeam.fetchCompareDiff(accountId, {owner, name, baseSha, headSha, paths?,
+maxPatchChars?})` → `apps/backend/src/github/compare.ts` (**CORE** — every diff primitive is, by
+the standing PreparedReview policy: the plugin holds no GitHub token). One
+`GET /repos/{o}/{n}/compare/{base}...{head}`, so callers coalesce by `(baseSha, headSha)` rather
+than per file — GitHub has **no server-side path filter**, `paths` narrows the RESULT (matching
+new AND previous name, so a renamed file is still found). It **NEVER THROWS**: `{ok:false,
+reason}` for `identical` / `bad_sha` / `not_found` / `forbidden` / `rate_limited` / `error`, and a
+rate-limited failure is classified through `isRateLimitError` and fed to the per-account budget.
+Modelled rather than hidden: GitHub's 300-file cap (`filesTruncated` — a path's ABSENCE past it
+proves nothing) and the omitted `patch` on binary/oversized files. `accountId` is passed through
+`bind.ts` so the budget is charged to the right tenant. ⚠ Patches are repo-authored, i.e.
+**attacker-authored** — fenced before they reach a model, never executed.
+
+**The window is approximated LOCALLY** (`packages/pro/src/annotations/evidence.ts`): base = the
+newest PR commit at or before the thread's LAST comment (the same instant `commits_after_last_
+comment` counts from), head = the PR's head sha; ties on `committedAt` break on the sha, and the
+corpus commit list is sorted `(time, sha)`, because the pair enters the payload hash and a window
+that flipped per request would mark a fresh row stale for nothing. The exact answer is the
+comment's own `originalCommit { oid }`, which would drag this into the fat sync query + a new
+`review_comments` column + a core migration. ⚠ **Known drift:** after a force-push or rebase
+`committedAt` no longer orders the history the reviewer saw, so the base can be a commit that was
+never in that branch — the compare then 404s and the judgement degrades to "no diff evidence
+available". Wrong-but-silent is not one of the outcomes.
+
+**`t1|` → `t2|` — the payload hash.** `addressedThreadPayloadHash` (exported from
+`annotations/targets.ts`) now hashes `t2|threadId|isOutdated|addressedReason|commitsSince|
+baseSha|headSha|<comments>`. Three things about it:
+- It is the **PAIR, never the diff TEXT**. `currentHashFor` recomputes every stored row's hash on
+  the cached `GET /api/pro/prs/:id/annotations` — a free read fired on every PR open — so a hash
+  that needed the patch would turn every PR open into a GitHub compare call.
+- There is now **ONE copy**. Resolution-check's per-item route used to carry a hand-copied
+  byte-compatible `t1|…` twin with a "do not tidy them" warning (the two surfaces write the SAME
+  row; a drift makes each mark the other's row stale forever, re-billing paid work). It imports
+  the shared function instead — the `validityPayloadHash` precedent.
+- The prefix bump marks every EXISTING addressed row stale **exactly once**: a deliberate one-off
+  re-bill on the next "Check review", in exchange for a verdict that has seen the code. Still no
+  clock-derived field — a dormant PR stays $0. The `c1|…` PR-comment hash is UNCHANGED (a
+  PR-level comment has no file anchor, so nothing about those rows moved).
+
+**Where the fetch may live — the cost landmine.** It sits INSIDE the batch loop in every run
+shape (`runCombinedBatch`, and `runBatch`'s `kind === 'addressed'` branch via
+`groundAddressedBatch`), i.e. **after** the payload-hash cache filter, the in-flight/interval
+gate, the auth pre-flight and `ctx.aiCredits.check`. A fully-cached click must stay $0 **and cost
+zero GitHub quota** — fetching earlier would spend it while the response still reported
+`generated: 0`. Same rule in resolution-check's per-item route: after the cache-hit
+short-circuit, never in the loader (the pure-cached GET calls that loader too). One call per
+distinct window carrying that window's union of paths; a failure resolves to an `unavailable`
+entry the prompt states outright.
+
+**Where the evidence goes in the prompt — the correctness landmine.** In `combinedItemBody` it is
+spliced **INSIDE the `want.has('addressed')` branch**, never into the shared `Diff context` block
+above it. That block is emitted for every item whatever it requested, so evidence added there
+would silently change the *validity* and *simplify* judgements and inflate their input cost —
+**without moving their per-kind payload hashes**, so nothing would re-bill to make it visible. The
+single-kind path rebuilds the prompt through `addressedForThread(corpus, thread, evidence)` rather
+than string-appending, so both shapes place it identically and the hash comes out byte-identical.
+The section is worded as a first-class answer in all three states — the patch (fenced
+`---BEGIN DIFF SINCE COMMENT---`), `NONE — the file was not modified between those commits`, or
+`NOT AVAILABLE — <reason>` + "say the evidence is indirect" — because a MISSING section reads to
+the model as "no information", the opposite of what an empty compare means. `ADDRESSED_RULES`
+gained the matching instructions: judge the concern not the churn, and cite the change relied on.
+
+**Storage + the surfaced Evidence block.** Plugin migration **`0022`** adds
+`pr_comment_annotations.evidence` (nullable text; `addressed` on a `thread` target only — every
+other row writes an explicit NULL) holding `encodeEvidence`'s JSON
+`{v:1, baseSha, headSha, path, outcome:'changed'|'untouched'|'unavailable', patch, previousPath,
+note}`. Stored rather than re-derived because the annotations GET is a pure cached read on every
+PR open — re-fetching to draw the panel would be a GitHub call per open. ⚠ `upsertAnnotation`
+writes `evidence: a.evidence ?? null`, never `a.evidence`: drizzle drops `undefined` keys from a
+`set:`, which would leave last run's diff sitting under this run's verdict. The wire field
+`CommentAnnotation.evidence` is OPTIONAL (an OSS build serves annotations that never set it; rows
+predating `0022` have none). `CommentAnnotations.tsx` renders it under the verdict body as a
+**collapsed** "Evidence · comparing `abc1234..def5678`" disclosure (the summary is the answer;
+the raw patch is what you open when you disagree — and an open diff on every checked thread would
+bury the conversation), with `parseEvidence` treating absent and unparseable identically and
+rendering nothing rather than throwing (that component is mounted in eight places and the app has
+no error boundary). The sha range is the point: "it compared the wrong two commits" is a
+completely different bug from "it misread the diff".
+
 **Pro: Claude Review learnings/memory** (`packages/pro/src/review-memory/`). Core seam =
 `src/review/events.ts`: an **inert** typed event-bus (5 emit sites in `claude-review.ts`,
 zero subscribers in OSS) + a learnings-provider registry, plus an optional
@@ -723,7 +840,7 @@ broke the digest. Any new core LLM seam must follow this dual-auth pattern.
 
 
 
-## Bot Tuning Advisor (Pro, `botAdvisor` — apiVersion 15)
+## Bot Tuning Advisor (Pro, `botAdvisor` — added in apiVersion 15)
 
 Turns the graded-comment corpus (thread states + ML labels + acted-on + overlap + cost) into
 **evidence-backed changes to each bot's configuration**, then measures whether the change worked.
@@ -832,7 +949,7 @@ Output re-passes the **deterministic diff-guard** (markers intact, intents heade
 budget, no fences) — and so does any client-supplied `refinedByPath` at config-PR time; rejected ⇒
 the templated version ships, never an error.
 
-**Core seams (apiVersion 15).** `readRepoFile`/`listRepoDir` (status-returning, `?ref=`,
+**Core seams (added in apiVersion 15).** `readRepoFile`/`listRepoDir` (status-returning, `?ref=`,
 repo-authored bytes size-capped, never executed), `openIssue` (`createIssue` REST — issues aren't
 synced; the URL is stored on the row), `commitFilesAndOpenPr` (`coding/git-ops.ts`:
 default-branch worktree → literal file writes (traversal + `.git/` guarded) → commit → **NEW branch,

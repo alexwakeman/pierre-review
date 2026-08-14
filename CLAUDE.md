@@ -568,13 +568,29 @@ passthrough on `/api/me`, and inert seams. Details:
 [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) +
 [docs/PRO-PLATFORM.md](docs/PRO-PLATFORM.md). What bites:
 
-- **`apiVersion` is 15 and FOUR literals must agree**: host `contract.ts`, plugin
+- **`apiVersion` is 16 and FOUR literals must agree**: host `contract.ts`, plugin
   `index.ts`, plugin `contract-types.ts`, and `bind.ts`'s runtime gate
-  (`plugin?.apiVersion !== 15`) — the actual enforcer. A half-bump silently degrades the
+  (`plugin?.apiVersion !== 16`) — the actual enforcer. A half-bump silently degrades the
   ENTIRE plugin to OSS mode: capabilities dark, every `/api/pro/*` 404, nothing thrown.
   No test pins it; detection is `tsc` (TS2367 at the gate) + a boot check of `/api/me`.
-  (14 → 15 was the Bot Tuning Advisor: repo-file read seams + `openIssue` +
-  `commitFilesAndOpenPr` + the two advisor host queries + the `botAdvisor` capability.)
+  (15 → 16 added ONE seam: `GithubSeam.fetchCompareDiff` — the two-sha compare
+  (`github/compare.ts`, CORE, NEVER THROWS → `{ok:false, reason}`) that grounds the
+  `addressed` annotation in the REAL diff between the commit a thread was last discussed
+  at and the PR head. 14 → 15 was the Bot Tuning Advisor: repo-file read seams +
+  `openIssue` + `commitFilesAndOpenPr` + the two advisor host queries + `botAdvisor`.)
+- **The grounded `addressed` check has three cost landmines** (full contract in
+  [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md)): the payload-hash
+  prefix moved `t1|` → `t2|` and now carries the `(baseSha, headSha)` PAIR — never the diff
+  TEXT, because `currentHashFor` recomputes every stored row's hash on the free cached
+  annotations GET fired on every PR open (the two writers of that row no longer hand-copy
+  the formula — both call the ONE exported `addressedThreadPayloadHash`); the fetch must
+  stay INSIDE the batch loop, AFTER the hash-cache filter / run gate / credit check (the
+  per-item route: after its cache-hit short-circuit, never in the shared loader the GET also
+  calls), or a fully-cached click
+  reporting `generated: 0` still spends GitHub quota; and the evidence must be spliced
+  INSIDE the `want.has('addressed')` branch of `combinedItemBody`, never into the shared
+  `Diff context` block above it (that block also feeds the *validity* and *simplify*
+  judgements, whose per-kind hashes would not change — the drift would be invisible).
 - **A stale `packages/pro/dist` shadows `src` in dev.** `bind.ts` prefers `src/index.ts`
   outside production and LOGS the entry it bound — the first thing to check when a Pro
   route unexpectedly 404s.

@@ -12,6 +12,7 @@ import type {
   ClaudeReviewVerdict,
   PostReviewPreview,
 } from '@pierre-review/shared';
+import type { CompareDiffResult } from '../github/compare.js';
 import type { ReviewEventBus, LearningsProvider } from '../review/events.js';
 import type { PrDetailEnricher } from '../pr/detail-enricher.js';
 import type { AiUsageRecord } from '../db/usage.js';
@@ -309,6 +310,24 @@ export interface GithubSeam {
     accountId: number,
     args: { owner: string; name: string; title: string; body: string },
   ): Promise<{ number: number; url: string }>;
+  // TWO-SHA COMPARE (apiVersion 16) — the per-file unified patches between two commits, the
+  // grounding evidence behind the `addressed` judgement ("what actually changed since the
+  // comment"). ONE REST call covers every path in `paths`, so callers coalesce by
+  // (baseSha, headSha) instead of asking per file. NEVER THROWS: a 404 / 403 / rate-limited
+  // compare comes back `ok:false` with a `reason` so the judgement degrades to "no diff
+  // evidence available" rather than failing. ⚠ The patches are REPO-AUTHORED, i.e.
+  // attacker-authored — fence them before they reach a model, never execute them.
+  fetchCompareDiff(
+    accountId: number,
+    args: {
+      owner: string;
+      name: string;
+      baseSha: string;
+      headSha: string;
+      paths?: readonly string[];
+      maxPatchChars?: number;
+    },
+  ): Promise<CompareDiffResult>;
 }
 
 export interface CommitFilesAndOpenPrArgs {
@@ -741,16 +760,18 @@ export interface ProContext {
 }
 
 export interface ProPlugin {
-  // Contract handshake; host warns on mismatch. 14 → 15: the Bot Tuning Advisor — GithubSeam
-  // gains readRepoFile/listRepoDir/openIssue, CodingSeam gains commitFilesAndOpenPr,
-  // ProHostQueries gains getAdvisorFindings/getBotEffectPanel, CodingErrorCode gains
-  // BRANCH_EXISTS, llm.complete gains `credential`, and ProCapabilities gains `botAdvisor`.
+  // Contract handshake; host warns on mismatch. 15 → 16: GithubSeam gains `fetchCompareDiff`
+  // (the two-sha compare primitive the `addressed` annotation is grounded on — see
+  // src/github/compare.ts). 14 → 15 was the Bot Tuning Advisor — GithubSeam gained
+  // readRepoFile/listRepoDir/openIssue, CodingSeam gained commitFilesAndOpenPr,
+  // ProHostQueries gained getAdvisorFindings/getBotEffectPanel, CodingErrorCode gained
+  // BRANCH_EXISTS, llm.complete gained `credential`, and ProCapabilities gained `botAdvisor`.
   //
-  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (the `plugin?.apiVersion !== 15` runtime gate) and two
+  // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (the `plugin?.apiVersion !== 16` runtime gate) and two
   // more in the plugin (packages/pro/src/index.ts, packages/pro/src/contract-types.ts). Bump ALL
   // FOUR or the plugin log-and-degrades to OSS mode against a version that is actually correct:
   // capabilities go dark, every /api/pro/* route 404s, and nothing throws.
-  apiVersion: 15;
+  apiVersion: 16;
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 

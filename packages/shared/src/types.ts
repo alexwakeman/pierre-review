@@ -5587,6 +5587,21 @@ export interface CommentAnnotation {
   confidence: number | null;
   body: string;
   model: string;
+  /**
+   * The GROUNDING DIFF the verdict was actually judged against, as the JSON written by the
+   * plugin's `annotations/evidence.ts#encodeEvidence`:
+   *   {"v":1,"baseSha":…,"headSha":…,"path":…,"outcome":"changed"|"untouched"|"unavailable",
+   *    "patch":…|null,"previousPath":…|null,"note":…|null}
+   *
+   * Populated for `addressed` on a THREAD target only — that is the one judgement about later
+   * code. Every other row stores null (a PR-level comment has no file anchor; simplify/validity
+   * judge the comment, not the code that followed it), as does any row written before the
+   * plugin's migration 0022.
+   *
+   * OPTIONAL because it is produced by the private plugin: a core-only (OSS) build serves
+   * annotations routes that never set it, and rows predating 0022 have nothing to show.
+   */
+  evidence?: string | null;
   createdAt: string; // ISO-8601
   stale: boolean;
 }

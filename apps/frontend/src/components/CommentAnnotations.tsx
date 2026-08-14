@@ -78,6 +78,142 @@ function verdictChip(a: CommentAnnotation): { label: string; color: string } | n
   return null;
 }
 
+// ---- the grounding-diff evidence block ---------------------------------------------------------
+//
+// An `addressed` verdict is now judged against the REAL diff of the thread's file between the
+// commit it was last discussed at and the PR head (the plugin's annotations/evidence.ts). That
+// diff is stored ALONGSIDE the verdict and shown here, because a verdict you cannot check is a
+// verdict you have to take on faith — and the sha range is what makes a WRONG one debuggable
+// ("it compared the wrong two commits" is a completely different bug from "it misread the diff").
+//
+// `evidence` is a declared optional field on the shared `CommentAnnotation`, so it is read
+// directly — no local widening. It is null for every kind except `addressed` on a thread, and
+// for any row written before the plugin's migration 0022, which is why `parseEvidence` treats
+// absent and unparseable identically and renders nothing rather than throwing.
+
+interface AddressedEvidence {
+  baseSha: string;
+  headSha: string;
+  path: string;
+  outcome: 'changed' | 'untouched' | 'unavailable';
+  patch: string | null;
+  previousPath: string | null;
+  note: string | null;
+}
+
+/**
+ * Defensive by design: the column is free text written by a plugin build that may be older or
+ * newer than this bundle, so anything unparseable simply renders no block rather than throwing
+ * inside a component mounted in eight places (there is no error boundary — a render-time throw
+ * blanks the whole app).
+ */
+function parseEvidence(raw: string | null | undefined): AddressedEvidence | null {
+  if (raw == null || raw.trim() === '') return null;
+  try {
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    const str = (k: string): string | null => (typeof o[k] === 'string' ? (o[k] as string) : null);
+    const baseSha = str('baseSha');
+    const headSha = str('headSha');
+    if (baseSha == null || headSha == null) return null;
+    const outcome =
+      o.outcome === 'changed' || o.outcome === 'untouched' ? o.outcome : 'unavailable';
+    return {
+      baseSha,
+      headSha,
+      path: str('path') ?? '',
+      outcome,
+      patch: str('patch'),
+      previousPath: str('previousPath'),
+      note: str('note'),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const short = (sha: string): string => sha.slice(0, 7);
+
+function diffLineClass(line: string): string {
+  if (line.startsWith('@@')) return 'text-sky-700 dark:text-sky-400';
+  if (line.startsWith('+')) {
+    return 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
+  }
+  if (line.startsWith('-')) {
+    return 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300';
+  }
+  return 'text-gray-600 dark:text-gray-400';
+}
+
+/**
+ * COLLAPSED BY DEFAULT — the opposite of the verdict body above it, and deliberately so. The
+ * two-section summary is the answer and is always worth reading; the raw patch is what you open
+ * when you disagree with it. Volume matters here: an addressed panel exists on every checked
+ * thread, and an open diff on each would bury the conversation the thread is about.
+ */
+function EvidenceBlock({ evidence }: { evidence: AddressedEvidence }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const range = `comparing ${short(evidence.baseSha)}..${short(evidence.headSha)}`;
+  const lines = evidence.patch != null ? evidence.patch.split('\n') : [];
+
+  return (
+    <div className="mt-2 border-t border-violet-200/60 pt-1.5 dark:border-violet-900/40">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        aria-expanded={open}
+        className="flex items-center gap-1 text-[10px] font-medium text-violet-600 hover:underline dark:text-violet-400"
+        title="The exact change this verdict was judged against, and the two commits it was taken between."
+      >
+        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+        Evidence
+        <span className="font-normal text-gray-400 dark:text-gray-500">· {range}</span>
+      </button>
+      {open && (
+        <div className="mt-1.5">
+          <div className="text-[10px] text-gray-500 dark:text-gray-400">
+            {evidence.path !== '' && <span className="font-mono">{evidence.path}</span>}
+            {evidence.previousPath != null && (
+              <span> (renamed from <span className="font-mono">{evidence.previousPath}</span>)</span>
+            )}
+          </div>
+          {evidence.outcome === 'changed' && evidence.patch != null ? (
+            <div className="mt-1 max-h-72 overflow-auto rounded border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+              <pre className="w-max min-w-full text-[11px] leading-[1.35]">
+                {lines.map((line, i) => (
+                  <div
+                    // The patch is a fixed snapshot: index IS the identity of a line here.
+                    key={i}
+                    className={`px-2 font-mono whitespace-pre ${diffLineClass(line)}`}
+                  >
+                    {line === '' ? ' ' : line}
+                  </div>
+                ))}
+              </pre>
+            </div>
+          ) : (
+            <div className="mt-1 text-[11px] text-gray-600 dark:text-gray-300">
+              {evidence.outcome === 'untouched'
+                ? 'The file was not modified between those two commits.'
+                : 'No diff could be fetched for this range, so the verdict above rests on the deterministic signals alone.'}
+              {evidence.note != null && (
+                <span className="text-gray-400 dark:text-gray-500"> ({evidence.note})</span>
+              )}
+            </div>
+          )}
+          {evidence.outcome === 'changed' && evidence.note != null && (
+            <div className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+              {evidence.note}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StaleChip(): JSX.Element {
   return (
     <span
@@ -107,6 +243,11 @@ function AnnotationPanel({
   const [open, setOpen] = useState(defaultOpen);
   const meta = KIND_META[annotation.kind];
   const chip = verdictChip(annotation);
+  // Only `addressed` is grounded in a post-comment diff; the other kinds store null.
+  const evidence =
+    annotation.kind === 'addressed'
+      ? parseEvidence(annotation.evidence)
+      : null;
 
   return (
     <div className="mt-2 rounded-md border border-violet-200/70 bg-violet-50/40 px-2.5 py-1.5 dark:border-violet-900/50 dark:bg-violet-950/20">
@@ -143,6 +284,7 @@ function AnnotationPanel({
       {open && (
         <div className="prose-thread mt-1.5 text-[12px] text-gray-700 dark:text-gray-200">
           <Markdown>{annotation.body}</Markdown>
+          {evidence != null && <EvidenceBlock evidence={evidence} />}
           <div className="mt-1 text-[10px] text-gray-400">
             {annotation.kind === 'simplify'
               ? 'AI rewrite — the original comment is shown below, unchanged.'

@@ -28,6 +28,7 @@ import {
   fetchPrUnifiedDiff,
 } from '../github/mutations.js';
 import { ghRestGetContentDir, ghRestGetContentRaw } from '../github/client.js';
+import { fetchCompareDiff } from '../github/compare.js';
 import { fetchActionsJobLog } from '../github/actions-logs.js';
 import { applyAndPush, commitFilesAndOpenPr } from '../coding/git-ops.js';
 import { registerRetentionHandler } from '../db/retention.js';
@@ -84,7 +85,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   // ⚠ THE RUNTIME GATE. This literal is the twin of `ProPlugin['apiVersion']` in contract.ts —
   // bump them together. A half-bump here silently degrades a CORRECT plugin to OSS mode (the warn
   // below is the only trace; capabilities go dark and every /api/pro/* route 404s).
-  if (plugin?.apiVersion !== 15 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 16 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -212,6 +213,11 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         ),
       openIssue: async (accountId, a) =>
         createIssue(await getAccessToken(accountId), a.owner, a.name, a.title, a.body),
+      // Two-sha compare (apiVersion 16). `accountId` is passed THROUGH so a rate-limited
+      // compare feeds that account's budget — the same discipline sync/commit-files.ts uses.
+      // Never throws; see github/compare.ts.
+      fetchCompareDiff: async (accountId, a) =>
+        fetchCompareDiff(await getAccessToken(accountId), { ...a, accountId }),
     },
     coding: {
       // Lazy-import the agent module (it pulls in the Claude Agent SDK) so the SDK
