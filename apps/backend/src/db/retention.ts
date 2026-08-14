@@ -99,6 +99,18 @@ async function deletePrSubtree(
   await tx.delete(pullRequests).where(inArray(pullRequests.id, prIds)).execute();
   // NB: commitFiles is GLOBAL (sha-keyed, shared across PRs/tenants) — deliberately NOT
   // pruned here. users + syncState are likewise out of scope.
+  //
+  // NB2: `trunk_ci_status_events` (migration 0052 / pg 0039) is deliberately absent, and its
+  // absence is STRUCTURAL, not an oversight. This whole sweep is anchored to a parent PR's
+  // `updatedAt` (see the header) and a trunk CI observation has no PR — there is nothing here to
+  // key it on, and inventing a second, differently-keyed sweep would give the file two retention
+  // definitions. It is bounded instead by a HYBRID trim in its own writer
+  // (`sync/branch-status.ts` — `staleTrunkCiEventIds`: the newest `TRUNK_CI_EVENT_WINDOW` rows per
+  // repo ∪ everything inside `FEED_WINDOW_DAYS`), which runs on every branch snapshot, and it is
+  // cleared outright by `deleteRepo` + `eraseAccountData`. ⚠ It is NOT a plain count trim: a
+  // pure newest-N bound evicted the failure rows the Feed reads on repos that sync faster than the
+  // read window elapses. `branch_commits` is out for the same reason (its hybrid trim lives in the
+  // same writer).
 }
 
 // Prune every PR (and subtree) older than the retention window. `retentionDays` defaults

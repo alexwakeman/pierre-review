@@ -62,7 +62,8 @@ function readWorkspaceFromUrl(p: URLSearchParams): number | null {
   return parseWorkspaceParam(p.get('team'));
 }
 
-function readFromUrl(): Partial<FilterState> {
+/** Exported for its unit test only — see test/feedCiFailuresToggle.test.ts. */
+export function readFromUrl(): Partial<FilterState> {
   const p = new URLSearchParams(window.location.search);
   const out: Partial<FilterState> = {};
 
@@ -99,6 +100,13 @@ function readFromUrl(): Partial<FilterState> {
   const stale = p.get('stale');
   if (stale === '0') out.excludeStale = false;
   else if (stale === '1') out.excludeStale = true;
+  // The Feed's "Show CI failures" toggle — OFF by default, so only `ci=1` turns it on (`ci=0` is
+  // accepted for symmetry with `bots`/`stale`). ⚠ THIS PARAM IS WHAT MAKES IT SURVIVE A RELOAD:
+  // it is persisted with the filter bar, but the persisted blob is read ONLY on a BARE URL, and
+  // writeToUrl puts `?workspace=<id>` (and `view=activity`) on the address bar within a second of
+  // every load — so a FilterDefaults key that is not serialized here is restored precisely never.
+  const ci = p.get('ci');
+  if (ci !== null) out.feedShowCiFailures = ci === '1';
   out.customFrom = p.get('from');
   out.customTo = p.get('to');
 
@@ -154,7 +162,8 @@ function readFromUrl(): Partial<FilterState> {
   return out;
 }
 
-function writeToUrl(s: FilterState): void {
+/** Exported for its unit test only — see test/feedCiFailuresToggle.test.ts. */
+export function writeToUrl(s: FilterState): void {
   const p = new URLSearchParams();
   if (s.preset !== '14d') p.set('preset', s.preset);
   if (s.repoIds?.length) p.set('repos', s.repoIds.join(','));
@@ -176,6 +185,11 @@ function writeToUrl(s: FilterState): void {
   if (s.allowedBotIds.length) p.set('allowBots', s.allowedBotIds.join(','));
   // Hidden is the default; only encode the non-default "show stale" choice (stale=0).
   if (!s.excludeStale) p.set('stale', '0');
+  // OFF is the default; encode only the non-default "show CI failures" choice. It is a
+  // FilterDefaults key, so — like every other one — it has to round-trip through the URL to
+  // survive a reload: this subscription makes the address bar non-bare immediately, and the
+  // localStorage restore path only runs on a BARE url.
+  if (s.feedShowCiFailures) p.set('ci', '1');
   if (s.preset === 'custom' && s.customFrom) p.set('from', s.customFrom);
   if (s.preset === 'custom' && s.customTo) p.set('to', s.customTo);
   // Serialize the category selection whenever it differs from the fresh-load

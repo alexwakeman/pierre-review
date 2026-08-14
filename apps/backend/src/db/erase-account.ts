@@ -46,6 +46,7 @@ const {
   searchIndex,
   autoMergeRequests,
   branchCommits,
+  trunkCiStatusEvents,
   mlCommentLabels,
 } = schema;
 
@@ -157,6 +158,14 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // Default-branch commit snapshots (author names, commit subjects) — same reasoning: the
     // repo cascade normally clears them, this makes the guarantee independent of it.
     await tx.delete(branchCommits).where(eq(branchCommits.accountId, accountId)).execute();
+    // The trunk CI transition log (migration 0052 / pg 0039). Same reasoning again: the repo
+    // loop and the cascade normally clear it, and this makes the guarantee independent of both.
+    // Unlike `ci_status_events` it is NOT anchored to a PR, so the time-based retention sweep
+    // can never reach it either — the only bounds are its own per-repo trim and this delete.
+    await tx
+      .delete(trunkCiStatusEvents)
+      .where(eq(trunkCiStatusEvents.accountId, accountId))
+      .execute();
 
     // Finally the account: identity + the AES-256-GCM sealed GitHub token.
     await tx.delete(accounts).where(eq(accounts.id, accountId)).execute();
@@ -209,6 +218,15 @@ export function accountScopedTables(): {
       table: autoMergeRequests,
     },
     { name: 'branchCommits', col: branchCommits.accountId, table: branchCommits },
+    // The trunk CI transition log. On the checklist rather than in the KNOWN_UNCHECKED
+    // exemption that `ci_status_events` sits in, because this one has NO parent PR: neither the
+    // retention sweep nor `deletePrSubtree` can ever reach it, so `deleteRepo` + this delete are
+    // the ONLY things that bound it.
+    {
+      name: 'trunkCiStatusEvents',
+      col: trunkCiStatusEvents.accountId,
+      table: trunkCiStatusEvents,
+    },
     { name: 'mlCommentLabels', col: mlCommentLabels.accountId, table: mlCommentLabels },
   ];
   return rows.map(({ name, col, table }) => ({

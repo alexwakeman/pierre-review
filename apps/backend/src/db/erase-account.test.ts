@@ -72,6 +72,7 @@ const SEEDED_TABLES = [
   'searchIndex',
   'autoMergeRequests',
   'branchCommits',
+  'trunkCiStatusEvents',
 ];
 
 /**
@@ -263,6 +264,22 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
       authorName: `Dev ${accountId}`,
       committedAt: new Date(),
       ciStatus: 'success',
+    })
+    .execute();
+  // A trunk CI transition observation (migration 0052 / pg 0039). This one MUST be seeded or
+  // its entry on the `accountScopedTables()` checklist is vacuous — it is the only table on
+  // that list with NO parent PR, so neither the retention sweep nor `deletePrSubtree` can
+  // reach it and `deleteRepo` + `eraseAccountData` are the only things that bound it.
+  await db
+    .insert(s.trunkCiStatusEvents)
+    .values({
+      accountId,
+      repoId: repo.id,
+      branchName: 'main',
+      headSha: `trunk-${accountId}`,
+      status: 'failure',
+      failingChecks: [{ name: `build-${accountId}`, conclusion: 'failure' }],
+      observedAt: new Date(),
     })
     .execute();
 }

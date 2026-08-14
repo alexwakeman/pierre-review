@@ -33,6 +33,7 @@ import {
   MY_TURN_REASON_META,
   indexUsers,
   relativeTime,
+  safeExternalUrl,
   userLabel,
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
@@ -45,10 +46,21 @@ import { ThreadCard } from '../ThreadView/index.js';
 import { FeedOpenPrsPanel } from './FeedOpenPrsPanel.js';
 import { UserName } from '../UserName.js';
 
+// The two SYNTHESIZED CI kinds (`db/queries.ts` isCiFeedKind's client twin). One predicate so
+// the count, the renderer and the click affordance can never cover different sets — missing one
+// arm is silent.
+function isCiFailureKind(kind: string): boolean {
+  return kind === 'ci_failed' || kind === 'trunk_ci_failed';
+}
+
 // A coloured chip + label describing WHAT an item is (the event kind). The My-Turn reason is
 // a separate pill (see MY_TURN_REASON_META); Claude runs get their own violet chip.
 function itemGlyph(item: ConsolidatedFeedItem): { color: string; label: string } {
   if (item.kind === 'claude_review') return { color: '#8957e5', label: 'Claude Review' };
+  // CI failures — one card per failed check run. "detected", not "failed at": both sources
+  // timestamp OUR observation, which can lag the real failure by up to the sync floor.
+  if (item.kind === 'ci_failed') return { color: '#ef4444', label: 'CI failed' };
+  if (item.kind === 'trunk_ci_failed') return { color: '#ef4444', label: 'Trunk CI failed' };
   // A submitted review is a first-class TYPED pill — the verdict is folded into the top
   // line ("Review: Approved" / "Review: Comment" / …), coloured by the verdict, instead
   // of a broad "Review" pill with the outcome in a footer.
@@ -217,6 +229,8 @@ export function FeedView({
   const toggleFeedNeedsReview = useFilters((s) => s.toggleFeedNeedsReview);
   const feedShowCommits = useFilters((s) => s.feedShowCommits);
   const toggleFeedShowCommits = useFilters((s) => s.toggleFeedShowCommits);
+  const feedShowCiFailures = useFilters((s) => s.feedShowCiFailures);
+  const toggleFeedShowCiFailures = useFilters((s) => s.toggleFeedShowCiFailures);
   const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
@@ -403,6 +417,10 @@ export function FeedView({
       // Opt-in "show individual commits" — surfaces plain commit-push runs (not just the ones
       // that addressed a thread). Inert in botsMode (the bot feed skips commits anyway).
       includeAllCommits: !botsMode && feedShowCommits,
+      // Opt-in "show CI failures" — one row per failed check run, on PR heads AND on the
+      // default branch. Inert in botsMode (a red build is not review-bot activity, and the
+      // server ignores it there anyway).
+      includeCiFailures: !botsMode && feedShowCiFailures,
     });
 
   // "New activity" detector: poll the server head for this exact scope and compare to what's
@@ -420,6 +438,7 @@ export function FeedView({
     botsOnly: botsMode,
     botWindowDays,
     includeAllCommits: !botsMode && feedShowCommits,
+    includeCiFailures: !botsMode && feedShowCiFailures,
     loadedLatestId: latestId,
     loadedTotal: total,
     // Placeholder pages belong to the PREVIOUS key (e.g. a bots-window flip): total/latestId
@@ -458,8 +477,9 @@ export function FeedView({
     [counts, items, isBotActor],
   );
   // Event-category matcher for the Comments / PR-events pills. Both off = no category filter.
-  // When either is on, keep only items in the enabled categories (commit + Claude rows, which
-  // are in neither category, drop out while a category pill is active).
+  // When either is on, keep only items in the enabled categories (commit, Claude and CI-failure
+  // rows, which are in neither category, drop out while a category pill is active — deliberate:
+  // adding a kind here would silently change what those two existing pills mean).
   const catMatch = useCallback(
     (i: ConsolidatedFeedItem): boolean => {
       if (!feedCatComments && !feedCatPrEvents) return true;
@@ -519,6 +539,12 @@ export function FeedView({
   // thread-addressing runs by default; every push run once "show commits" is on).
   const commitsCount = useMemo(
     () => counts?.commits ?? items.filter((i) => i.kind === 'commit_pushed').length,
+    [counts, items],
+  );
+  // CI-failures pill badge. `counts.ciFailures` is undefined on a stale IndexedDB-persisted
+  // response predating the facet, so the page-derived fallback still has to exist.
+  const ciFailuresCount = useMemo(
+    () => counts?.ciFailures ?? items.filter((i) => isCiFailureKind(i.kind)).length,
     [counts, items],
   );
   // Review-thread DERIVED-state filter (a Set of selected states; empty = all) — a pill row
@@ -1007,7 +1033,11 @@ export function FeedView({
       const prId = item.prId;
       if (prId == null) return;
       openPrFocusTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
-      if (item.kind !== 'claude_review') {
+      // Synthesized kinds are excluded: `focusEventInTab` takes an EventType and matches a
+      // TIMELINE MARKER by it, and neither 'claude_review' nor the CI kinds is one — the
+      // `as EventType` cast would be a lie that silently asks the timeline to glow a marker
+      // that cannot exist. The focus tab itself still opens, which is the useful half.
+      if (item.kind !== 'claude_review' && !isCiFailureKind(item.kind)) {
         const refId = item.threadId ?? item.commentId ?? null;
         const threadId = item.kind === 'review_comment' ? item.threadId : null;
         focusEventInTab(prId, item.occurredAt, { type: item.kind as EventType, refId }, threadId);
@@ -1166,6 +1196,26 @@ export function FeedView({
         >
           <span aria-hidden="true">◆</span> Commits
           {commitsCount > 0 && <span className="tabular-nums opacity-70">{commitsCount}</span>}
+        </button>
+        {/* CI failures — opt-in (off by default), and the one feed toggle that PERSISTS with the
+            filter bar. On: one card per failed check run, on PR heads AND on the default branch.
+            A fetch toggle like Commits (the server can't be asked for them after the fact), NOT
+            part of the category OR-filter above. */}
+        <button
+          type="button"
+          onClick={toggleFeedShowCiFailures}
+          aria-pressed={feedShowCiFailures}
+          className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+            feedShowCiFailures
+              ? 'border-red-400 bg-red-50 text-red-700 dark:border-red-500/60 dark:bg-red-950/30 dark:text-red-300'
+              : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+          }`}
+          title="Show CI failures in the feed (off by default) — one card per failed check run, on pull-request heads and on the default branch. Times are when Limn DETECTED the failure, which can lag the build."
+        >
+          <span aria-hidden="true">⚠</span> CI failures
+          {ciFailuresCount > 0 && (
+            <span className="tabular-nums opacity-70">{ciFailuresCount}</span>
+          )}
         </button>
         {/* Bot lens — Pierre as the calm layer above your review bot. Cycles all → hide → only.
             MUST also render whenever the lens is non-'all': under the server-side 'hide' the
@@ -1689,7 +1739,11 @@ function FeedRowImpl({
     ? 'Claude'
     : item.actorId == null && item.kind === 'commit_pushed'
       ? 'A contributor'
-      : userLabel(actorUser, item.actorId);
+      : // A CI observation has no actor at all — without this it would render the bare
+        // 'unknown' fallback, which reads as a data bug rather than "this wasn't a person".
+        isCiFailureKind(item.kind)
+        ? 'CI'
+        : userLabel(actorUser, item.actorId);
   const prLabel =
     item.prNumber != null
       ? `#${item.prNumber}${item.prTitle != null ? ` ${item.prTitle}` : ''}`
@@ -1704,6 +1758,12 @@ function FeedRowImpl({
   const isThreadCard = item.kind === 'review_comment' && item.threadId != null;
   const isPrCommentCard = item.kind === 'pr_comment' && item.prId != null;
   const isPrOpened = item.kind === 'pr_opened';
+  // A default-branch CI failure belongs to no PR, so `onOpen`/`onFocus` both decline it (they
+  // return at `prId == null`) and the magnifier doesn't render. Rather than ship a card that
+  // visibly does nothing when clicked, it stops LOOKING clickable and carries one explicit
+  // affordance: the commit on GitHub, via safeExternalUrl (the URL is data-derived).
+  const isTrunkCi = item.kind === 'trunk_ci_failed';
+  const trunkCommitUrl = isTrunkCi ? safeExternalUrl(item.githubUrl) : undefined;
 
   // Item 8 — only show credit that's meaningful for THIS card's context: "Merged by" +
   // "Reviewed by" belong on a merge card (and never re-attribute the merge to its own
@@ -1738,6 +1798,8 @@ function FeedRowImpl({
   // (they call their own handlers).
   const onCardClick = (e: ReactMouseEvent<HTMLElement>): void => {
     if ((e.target as HTMLElement).closest('a,button')) return;
+    // No PR behind a trunk card — see isTrunkCi. Its link is the affordance.
+    if (isTrunkCi) return;
     onOpen(item);
   };
 
@@ -1745,7 +1807,7 @@ function FeedRowImpl({
     <li ref={innerRef} className="pb-2">
       <article
         onClick={onCardClick}
-        className={`cursor-pointer rounded-md border p-2.5 text-sm transition-colors ${
+        className={`${isTrunkCi ? 'cursor-default' : 'cursor-pointer'} rounded-md border p-2.5 text-sm transition-colors ${
           flash
             ? 'border-sky-400 ring-2 ring-sky-400/60 dark:border-sky-500'
             : isMyTurn
@@ -1864,6 +1926,19 @@ function FeedRowImpl({
           )}
           {item.path != null && (
             <span className="shrink-0 text-gray-400">· {item.path.split('/').pop()}</span>
+          )}
+          {/* The trunk card's ONE affordance (it has no PR to open). Data-derived href, so it
+              goes through safeExternalUrl — React happily renders a `javascript:` URL. */}
+          {trunkCommitUrl != null && (
+            <a
+              href={trunkCommitUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={(e) => e.stopPropagation()}
+              className="shrink-0 font-medium text-sky-600 hover:underline dark:text-sky-400"
+            >
+              commit {(item.ciHeadSha ?? '').slice(0, 7)} ↗
+            </a>
           )}
         </div>
 

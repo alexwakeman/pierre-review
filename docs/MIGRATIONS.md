@@ -106,8 +106,9 @@ started. Two things to know if you touch it:
 **BOTH journals are hand-maintained, and the pg half is the one that gets forgotten.**
 `run-migrations.ts` picks the folder AND the migrator by mode, and each migrator reads its OWN
 folder's `meta/_journal.json` — a file that is not registered **SILENTLY SKIPS**. sqlite entries are
-`"version": "6"`, **pg entries are `"version": "7"`**; `0038`–`0047` and pg `0025`–`0034` are
-registered. (Plugin migrations are discovered by filename sort and have NO journal — that
+`"version": "6"`, **pg entries are `"version": "7"`**; every file through sqlite `0052` /
+pg `0039` is registered (the two twins of a pair share one `when`, e.g. `1786300000000` for
+`0052`/pg `0039`). (Plugin migrations are discovered by filename sort and have NO journal — that
 requirement is core-only, do not add one.) An unregistered pg file produces a perfectly
 successful-looking boot that then 500s on a missing relation for every query. **Do not run
 `pnpm db:generate:pg` for an incremental change** — it squashes the baseline; `0031`/`0032` are
@@ -156,7 +157,16 @@ nothing).
 - **Plugin `0020`'s pg twin has not been replayed against a real Postgres.** The unit suite is
   SQLite-only, so nothing automated covers the dialect divergences it carries. (CORE's pg chain
   `0000`→`0035` — including `0031`/`0032` — WAS replayed by hand during `0035`; see that section.
-  It is still a one-off by hand, not CI, so it will go stale again.)
+  It is still a one-off by hand, not CI, so it will go stale again.) The same is true of
+  everything added since: **pg `0036`–`0037`, pg `0039` and the plugin `0021`/`0022` pg twins are
+  unverified against a real Postgres.**
+- **`trunk_ci_status_events` (`0052` / pg `0039`) has NO BACKFILL.** The table is append-only and
+  written only by `sync/branch-status.ts`, on a TRANSITION, at the end of a full repo walk — and
+  the one-time CI-history backfill (`sync/backfill-ci-history.ts`) synthesizes only the PR-side
+  `ci_status_events`, deliberately not this. So the Feed's `trunk_ci_failed` half stays EMPTY for
+  a repo until its next full walk observes a red trunk, however much trunk history
+  `branch_commits` already holds. Nothing is wrong; the log records observations, and it has none
+  before it existed.
 - **The legacy `?team=` URL rule is unit-tested nowhere.** It lives in
   `readWorkspaceFromUrl`/`readFromUrl` in `hooks/useUrlState.ts`, neither of which is exported, so a
   test would pin a copy rather than the code — flagged in `workspaceScope.test.ts`'s own header.
@@ -277,3 +287,76 @@ Unlike the DO-block data migrations, this is pure `CREATE TABLE IF NOT EXISTS` D
 0014/0017 idiom). All three are in `eraseProByAccountId` and the isolation-test seeds; none is
 PR-keyed, so `pruneProByPrIds` is deliberately unchanged. ⚠ The pg twin (like plugin `0020`'s)
 has not been replayed against a real Postgres.
+
+## `0052` / pg `0039` — `trunk_ci_status_events`
+
+One additive table in both dialects, hand-written (never `db:generate:pg` — it squashes the pg
+baseline), **no backfill**. Journal entries `idx 52 / version "6"` and `idx 39 / version "7"`,
+sharing `when: 1786300000000`. It is the TRUNK twin of `ci_status_events`:
+`branch_commits.ci_status` is updated IN PLACE by the branch snapshot's idempotent upsert, so a
+trunk commit that turns red hours after it landed carries no record of WHEN — its only timestamps are
+`committed_at` (git commit time) and `created_at` (first insertion), and presenting either as
+"trunk CI failed at" would be a quiet lie. Columns: `account_id` + `repo_id` (both `ON DELETE
+cascade`), nullable `branch_name`, `head_sha`, `status`, `failing_checks`, `observed_at`; indexes
+`tcse_account_repo_observed (account_id, repo_id, observed_at)` (the Feed read AND the trim) and
+`tcse_account_idx`.
+
+- **Write rules live in `sync/branch-status.ts`** (`recordTrunkCiTransition`, exported predicate
+  `trunkCiTransitionChanged`): a row is appended only on a TRANSITION (status / head sha /
+  failing-check NAME SET differs from this repo's last row) and only on a POSITIVE statement from
+  GitHub — `head_sha == null` or `status === 'unknown'` records nothing, since `unknown` is also
+  what `graphqlTolerant` yields when a partial response NULLs the rollup. ⚠ The name dimension is
+  DROPPED from the comparison when phase 2 never told us which checks failed (`undefined` ≠ `[]`),
+  or a repo whose detail fetch fails would log a spurious transition on every sync. The whole
+  block runs OUTSIDE the snapshot's transaction inside its own `try` — strictly non-fatal, like
+  everything else in the branch snapshot.
+- **`failing_checks` is `BranchCheckRun[]`, NOT `ci_status_events`' bare `string[]`** — same
+  column name, different shape, matching `branch_commits` on purpose (sqlite `text mode:'json'`,
+  pg `jsonb`, `$type<>()` in both schemas so the difference is a compile-time fact). The Feed
+  normalises to bare names on the wire.
+- **`observed_at` is OUR observation time** (the branch query selects no `completedAt`), so UI
+  copy says "detected", never "failed at".
+- **Retention is a HYBRID trim in the writer**, NOT the time-based sweep: `pruneOldData` anchors
+  everything to a parent PR's `updated_at` and a trunk row has no PR — `retention.ts` records that
+  absence as structural. The bound is the newest `TRUNK_CI_EVENT_WINDOW = 200` rows per repo **∪**
+  everything still inside the Feed's read window (`FEED_WINDOW_DAYS`, IMPORTED from `db/queries.ts`
+  rather than restated, so retention can never drift below the read), computed by the pure exported
+  `staleTrunkCiEventIds` and applied select-then-delete-by-id because a correlated `DELETE … LIMIT`
+  is not portable. ⚠ **Neither half alone is correct** — the same shape as `branch_commits`' trim,
+  for opposite reasons: a pure COUNT bound evicted the very failure rows
+  `getTrunkCiFailureFeedItems` reads over `FEED_WINDOW_DAYS` on the most active repos (a repo
+  syncing every 120s outruns 200 rows long before 14 days elapse, and the symptom is invisible —
+  the Feed quietly stops showing trunk failures on exactly the repos that have the most), while a
+  pure AGE bound would delete a dormant repo's entire log so the next observation reads as a first
+  observation forever. Both FKs cascade, but the
+  table is ALSO deleted explicitly by `deleteRepo` (by `repoId`) and `eraseAccountData`, so the
+  guarantee does not depend on SQLite's `foreign_keys=ON`; it is on the `accountScopedTables()`
+  checklist rather than in the `KNOWN_UNCHECKED` exemption `ci_status_events` sits in.
+- **No backfill, by construction** — see the known-gaps entry above.
+
+## Plugin `0022` — `pr_comment_annotations.evidence`
+
+One additive nullable `text` column on the plugin's annotation table (sqlite + pg twins,
+filename-sorted, NO journal, no `--> statement-breakpoint`): the GROUNDING DIFF the `addressed`
+verdict was judged against, as the JSON `annotations/evidence.ts#encodeEvidence` writes
+(`{v:1, baseSha, headSha, path, outcome:'changed'|'untouched'|'unavailable', patch, previousPath,
+note}`). Written for `addressed` rows with `target_kind='thread'` only; every other kind stores an
+explicit NULL.
+
+- **Stored rather than re-derived** because the annotations GET is a pure CACHED read fired on
+  every PR open — re-fetching the compare to draw the evidence panel would put a GitHub call on
+  every open of every bot-flooded PR. (Same reason the payload hash carries the `(base, head)`
+  PAIR and never the diff text.)
+- **Additive and nullable, so existing rows stay readable.** They simply have no evidence to show;
+  the panel renders nothing for them and the next "Check review" fills it in — which they are due
+  anyway, because the addressed payload-hash prefix moved `t1|` → `t2|` in the same change and
+  marks every existing addressed row stale exactly once.
+- **The sqlite file is a plain `ALTER TABLE … ADD COLUMN`** (SQLite has no `IF NOT EXISTS` there,
+  and `pro_migrations` guarantees one application); the pg twin is `ADD COLUMN IF NOT EXISTS`
+  inside the standard `DO $$ … EXCEPTION WHEN others THEN RAISE WARNING` wrapper. ⚠ Be honest
+  about what that warning path costs HERE: `readPrAnnotationRows` SELECTs this column, so a
+  database that took the warning 500s on the annotations GET — the "Check review" surface breaks
+  while the rest of the plugin keeps serving. That is still the better trade than a raise, which
+  takes the WHOLE plugin dark (OSS-mode degrade) with nothing anyone would connect to this file;
+  the fix is to delete the row from `pro_migrations` and restart once the cause is cleared.
+- ⚠ The pg twin has not been replayed against a real Postgres.

@@ -768,6 +768,66 @@ export const branchCommits = sqliteTable(
   }),
 );
 
+// ---- Default-branch ("trunk") CI TRANSITION log ----
+// The trunk twin of `ciStatusEvents`, and it exists for exactly the reason that table does:
+// `branch_commits.ciStatus` is UPDATED IN PLACE by the branch snapshot's upsert, so a commit
+// that turns red hours after it landed carries no record of WHEN it turned red — the only
+// timestamps on that row are `committedAt` (git commit time) and `createdAt` (first insertion).
+// Presenting either as "trunk CI failed at" would be a quiet lie, so the observation gets its
+// own append-only row here.
+//
+// Written by `sync/branch-status.ts` at the end of every repo walk, ONLY on a transition (the
+// status / head sha / failing-check name set differs from this repo's last row) and ONLY on a
+// POSITIVE statement from GitHub — an `unknown` rollup, which is also what `graphqlTolerant`
+// yields when a partial response NULLs the selection, records nothing. Strictly non-fatal: a
+// failure here must never cost the branch snapshot that just succeeded.
+//
+// `observedAt` is when WE saw it, never GitHub's completion time (the branch query selects no
+// `completedAt`), so any UI wording must say "detected", not "failed at".
+//
+// Bounded by its OWN per-repo trim, not by the retention sweep: `pruneOldData` anchors everything
+// to a parent PR's `updatedAt`, and a trunk row has no PR. ⚠ That trim is HYBRID, like
+// `branch_commits`' — the newest TRUNK_CI_EVENT_WINDOW rows ∪ everything inside FEED_WINDOW_DAYS
+// (`staleTrunkCiEventIds`) — because a pure count bound silently evicted the failure rows the Feed
+// reads on repos that sync faster than the read window elapses, and a pure age bound would wipe a
+// dormant repo's whole log. FKs CASCADE so a repo delete / account erasure cleans up regardless
+// (both also delete explicitly, so the guarantee never rests on `foreign_keys=ON`).
+//
+// NOTE: `failing_checks` is `BranchCheckRun[]` here — the SAME shape as `branch_commits`
+// (the trunk vocabulary), and deliberately NOT the bare `string[]` of `ci_status_events`.
+// The $type<>() makes the difference a compile-time fact at every call site.
+export const trunkCiStatusEvents = sqliteTable(
+  'trunk_ci_status_events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    // The default branch this observation is about, as GitHub named it at the time. Nullable
+    // because a partial response can null `defaultBranchRef.name` while still carrying the
+    // target's oid + rollup — the branch NAME is display sugar, the sha is the identity.
+    branchName: text('branch_name'),
+    headSha: text('head_sha').notNull(),
+    status: text('status', {
+      enum: ['success', 'failure', 'pending', 'error', 'expected', 'unknown'],
+    }).notNull(),
+    failingChecks: text('failing_checks', { mode: 'json' }).$type<BranchCheckRun[]>(),
+    observedAt: integer('observed_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    // The read (the Feed builder) and the trim: one repo's log, newest first.
+    accountRepoObservedIdx: index('tcse_account_repo_observed').on(
+      t.accountId,
+      t.repoId,
+      t.observedAt,
+    ),
+    accountIdx: index('tcse_account_idx').on(t.accountId),
+  }),
+);
+
 export const syncState = sqliteTable('sync_state', {
   repoId: integer('repo_id')
     .primaryKey()

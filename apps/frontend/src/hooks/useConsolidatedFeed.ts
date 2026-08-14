@@ -52,6 +52,7 @@ function feedSearch(
   botsOnly: boolean,
   botWindowDays: number | null,
   includeAllCommits: boolean,
+  includeCiFailures: boolean,
 ): string {
   const p = new URLSearchParams();
   if (workspaceId != null) p.set('workspace', String(workspaceId));
@@ -73,6 +74,10 @@ function feedSearch(
   // Opt-in "show individual commits" — surface plain commit-push runs too. Only emitted when
   // on (default off keeps the key clean); ignored server-side on the botsOnly path.
   if (includeAllCommits) p.set('includeAllCommits', 'true');
+  // Opt-in "show CI failures" — surface one item per failed check run, on PR heads AND on the
+  // default branch. Only emitted when on (default off keeps the key clean); ignored server-side
+  // on the botsOnly path and whenever a member filter is active (the rows are actor-less).
+  if (includeCiFailures) p.set('includeCiFailures', 'true');
   return p.toString();
 }
 
@@ -98,6 +103,7 @@ export function useConsolidatedFeed(opts: {
   botsOnly?: boolean;
   botWindowDays?: number | null;
   includeAllCommits?: boolean;
+  includeCiFailures?: boolean;
   enabled?: boolean;
 }) {
   const search = feedSearch(
@@ -110,6 +116,7 @@ export function useConsolidatedFeed(opts: {
     opts.botsOnly ?? false,
     opts.botWindowDays ?? null,
     opts.includeAllCommits ?? false,
+    opts.includeCiFailures ?? false,
   );
   const query = useInfiniteQuery<ConsolidatedFeedResponse>({
     queryKey: ['consolidated-feed', workspaceKey(opts.workspaceId), search],
@@ -190,6 +197,10 @@ export function useFeedHasNew(opts: {
   botsOnly?: boolean;
   botWindowDays?: number | null;
   includeAllCommits?: boolean;
+  // MUST be the same value the loaded feed was fetched under — the head is compared against
+  // `loadedLatestId`, so a head that includes CI rows the loaded feed doesn't (or vice versa)
+  // false-fires the "New activity" banner on every 60s poll.
+  includeCiFailures?: boolean;
   loadedLatestId: string | null;
   loadedTotal: number;
   // True once the loaded feed's data actually belongs to the CURRENT key: initial load done
@@ -211,6 +222,7 @@ export function useFeedHasNew(opts: {
     opts.botsOnly ?? false,
     opts.botWindowDays ?? null,
     opts.includeAllCommits ?? false,
+    opts.includeCiFailures ?? false,
   );
   const head = useQuery<ConsolidatedFeedResponse>({
     queryKey: ['feed-head', workspaceKey(opts.workspaceId), search],

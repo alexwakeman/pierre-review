@@ -23,7 +23,7 @@ fixture tests (see Conventions).
 
 ### Data model (`src/db/schema.sqlite.ts` + its `schema.pg.ts` twin are authoritative)
 
-27 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
+28 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
 `users` + `commitFiles` global). The core entities:
 
 - **`accounts`** — a tenant. Local mode has exactly one (`id 1`, `isLocal=true`,
@@ -159,6 +159,32 @@ fixture tests (see Conventions).
   re-sync, and a real FK would drag this table into both delete paths). In
   `accountScopedTables()` + explicitly erased; NOT in the Art. 15 export (unlike
   `autoMergeRequests`) — if that was a decision rather than an omission it isn't recorded anywhere.
+- **`trunkCiStatusEvents`** — the default-branch CI **transition log** (`accountId` denormalized;
+  migration `0052` / pg `0039`), the trunk twin of `ciStatusEvents`. It has to exist because
+  `branchCommits.ciStatus` is updated IN PLACE by the snapshot's idempotent upsert, so a commit
+  that turns red hours after it landed carries no record of WHEN — the only timestamps on that row
+  are `committedAt` and `createdAt`, and presenting either as "trunk CI failed at" would be a lie.
+  `observedAt` is OUR observation time (the branch query selects no `completedAt`), so UI copy says
+  **"detected"**, never "failed at". `failingChecks` is `BranchCheckRun[]` — the `branchCommits`
+  shape, deliberately NOT `ciStatusEvents`' bare `string[]`, with `$type<>()` making the difference
+  a compile-time fact. Written by `sync/branch-status.ts` only on a TRANSITION (status / head sha /
+  failing-name set differs from this repo's last row) and only on a POSITIVE statement from GitHub
+  — an `unknown` rollup, which is what `graphqlTolerant` yields when a partial response NULLs the
+  selection, records nothing — outside the snapshot transaction, strictly non-fatal. A pure head
+  move while trunk is GREEN and nothing is failing is not a transition either, so a hot repo's log
+  is not dominated by rows that state nothing. ⚠ **Retention is HYBRID, not a count trim**: the
+  newest `TRUNK_CI_EVENT_WINDOW`=200 rows per repo **∪** everything inside the Feed's read window
+  (`FEED_WINDOW_DAYS`, imported from `db/queries.ts` so retention can never drift below the read),
+  via the pure exported `staleTrunkCiEventIds`. Each half alone is wrong: a pure count bound evicted
+  the very failure rows `getTrunkCiFailureFeedItems` reads on the most active repos (invisibly — the
+  Feed just stops showing trunk failures), and a pure age bound deletes a dormant repo's entire log
+  so every next observation reads as a first observation forever. Same shape as `branchCommits`'
+  trim, opposite failure modes. `pruneOldData` is anchored to a parent PR's `updatedAt` and a trunk
+  row has no PR, so its absence there is STRUCTURAL. Both FKs cascade, but it is ALSO deleted
+  explicitly in `deleteRepo` (by `repoId`) and `eraseAccountData` so the guarantee never depends on
+  SQLite's `foreign_keys=ON`; it is on the `accountScopedTables()` checklist. **No backfill** — the
+  only writer appends at the end of a full walk, so the trunk half of the CI feed stays blank until
+  each repo's next full walk (`sync/backfill-ci-history.ts` synthesizes only the PR-side rows).
 - **`workspaceReviewers`** — the **Bot-Triage** table (CORE, `accountId`-scoped). **THE BOT OBJECT:
   ONE row per `(accountId, workspaceId, authorUserId)`**, carrying three independent facts:
   - **JUDGEMENT** (provenance: `source`) — `automated`, `role` (`ReviewerRole`

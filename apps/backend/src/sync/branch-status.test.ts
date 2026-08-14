@@ -32,7 +32,10 @@ import {
   pickAssociatedPrNumber,
   prNumberToWrite,
   staleBranchCommitIds,
+  staleTrunkCiEventIds,
+  TRUNK_CI_EVENT_WINDOW,
 } from './branch-status.js';
+import { FEED_WINDOW_DAYS } from '../db/queries.js';
 import type { BranchCheckRun } from '@pierre-review/shared';
 
 const commit = (over: Partial<GqlBranchCommit> = {}): GqlBranchCommit => ({
@@ -418,5 +421,50 @@ describe('staleBranchCommitIds (the hybrid trim)', () => {
     // the age test alone may never delete anything.
     const set = rows([...Array.from({ length: 50 }, (_, i) => i / 10), 100]);
     expect(staleBranchCommitIds(set, NOW)).toEqual([]);
+  });
+});
+
+// The trunk CI transition log's trim. Same hybrid shape as branch_commits, for a reason that bit
+// in the opposite direction: this log is written on every observed TRANSITION, and an active repo
+// transitions far faster than the Feed's window elapses — so a pure newest-N count bound deleted
+// the failure rows the Feed reads over FEED_WINDOW_DAYS, silently, on exactly the repos with the
+// most of them.
+describe('staleTrunkCiEventIds (the hybrid trim)', () => {
+  const NOW = Date.parse('2026-08-01T00:00:00Z');
+  const DAY_MS = 86_400_000;
+  // Rows are handed to the trim newest-first, matching the query's ORDER BY.
+  const rows = (agesDays: number[]): { id: number; observedAt: Date }[] =>
+    agesDays.map((d, i) => ({ id: i + 1, observedAt: new Date(NOW - d * DAY_MS) }));
+
+  it('KEEPS rows past the count floor while they sit inside the Feed’s read window', () => {
+    // A hot repo: 4x the floor, all observed inside the last week. The count-only trim deleted
+    // three quarters of these — every one of them still readable by getTrunkCiFailureFeedItems.
+    const set = rows(
+      Array.from({ length: TRUNK_CI_EVENT_WINDOW * 4 }, (_, i) => (i * 7) / (TRUNK_CI_EVENT_WINDOW * 4)),
+    );
+    expect(staleTrunkCiEventIds(set, NOW)).toEqual([]);
+  });
+
+  it('deletes rows that are BOTH past the floor and outside the window', () => {
+    const recent = Array.from({ length: TRUNK_CI_EVENT_WINDOW }, (_, i) => i / 100);
+    const ancient = [FEED_WINDOW_DAYS + 1, 60, 400];
+    const set = rows([...recent, ...ancient]);
+    expect(staleTrunkCiEventIds(set, NOW)).toEqual([
+      TRUNK_CI_EVENT_WINDOW + 1,
+      TRUNK_CI_EVENT_WINDOW + 2,
+      TRUNK_CI_EVENT_WINDOW + 3,
+    ]);
+  });
+
+  it('never deletes the newest rows, however old — the dormant-repo guard', () => {
+    // A repo whose trunk has been quiet for a year keeps its whole (short) log; an unconditional
+    // age bound would empty it and every later observation would read as a first observation.
+    const set = rows(Array.from({ length: 40 }, (_, i) => 400 + i));
+    expect(staleTrunkCiEventIds(set, NOW)).toEqual([]);
+  });
+
+  it('a row exactly at the window edge is inside it', () => {
+    const set = rows([...Array.from({ length: TRUNK_CI_EVENT_WINDOW }, () => 0), FEED_WINDOW_DAYS]);
+    expect(staleTrunkCiEventIds(set, NOW)).toEqual([]);
   });
 });

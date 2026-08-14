@@ -365,6 +365,13 @@
       "when": 1786200000000,
       "tag": "0051_auto_merge_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1786300000000,
+      "tag": "0052_trunk_ci_status_events",
+      "breakpoints": true
     }
   ]
 }

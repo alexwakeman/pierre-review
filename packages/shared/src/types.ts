@@ -4626,8 +4626,15 @@ export interface ConsolidatedFeedItem {
   // empty for non-my-turn rows. The UI renders the primary reason as a pill.
   myTurnReasons: MyTurnReason[];
   // An activity EventType ('pr_opened' | 'pr_merged' | 'pr_closed' | 'review_submitted' |
-  // 'review_comment' | 'pr_comment' | 'commit_pushed'), or 'claude_review' for a
-  // Claude Review run surfaced in the stream.
+  // 'review_comment' | 'pr_comment' | 'commit_pushed'), or one of the SYNTHESIZED kinds that
+  // have no `events` row behind them: 'claude_review' (a Claude Review run), 'ci_failed' (a
+  // failed check on a PR head, from `ci_status_events`) and 'trunk_ci_failed' (a failed check
+  // on a repo's default branch, from `trunk_ci_status_events`).
+  //
+  // ⚠ DELIBERATELY A BARE `string`, NOT `EventType`. That is what lets a synthesized kind exist
+  // without widening `EVENT_TYPES` / `EVENT_CATEGORY_BY_TYPE` / the Timeline's type filter /
+  // the Welcome-back counter — five surfaces that read the `events` table's enum and have
+  // nothing to do with the Feed.
   kind: string;
   occurredAt: string; // ISO-8601 — the item's relevant timestamp (sort + display)
   repoId: number;
@@ -4686,6 +4693,24 @@ export interface ConsolidatedFeedItem {
   // Short human-readable "what changed" summary (e.g. "pushed 3 commits · addressed 2
   // threads"); null when the row chrome already says everything.
   changeSummary: string | null;
+  // CI-failure items ('ci_failed' / 'trunk_ci_failed') only: the check name(s) this card
+  // reports as failing. ONE item is emitted per failed RUN — per (PR-or-branch, head sha,
+  // check name) — so this normally holds exactly one name; it is an array because a red
+  // rollup with no named contexts emits an empty one (an honest "CI failed, checks unknown").
+  //
+  // ⚠ NORMALISED to bare NAMES. The two sources store different shapes under the same column
+  // name: `ci_status_events.failing_checks` is `string[]`, `trunk_ci_status_events`' (like
+  // `branch_commits`') is `BranchCheckRun[]`. The wire carries names only, so no consumer has
+  // to know which side a card came from.
+  //
+  // OPTIONAL, like `uncappedTotal`/`counts`: feed responses are IndexedDB-persisted
+  // (PersistQueryClientProvider), so a cached response written before this field existed must
+  // stay type-honest.
+  failingChecks?: string[] | null;
+  // CI-failure items only: the commit sha the failure was observed on (the PR head, or the
+  // default-branch head). Rendered short and used to dedupe re-observations. Optional for the
+  // same stale-cache reason as `failingChecks`.
+  ciHeadSha?: string | null;
   // Claude Review items (kind 'claude_review') only: the run id — so the card can
   // deep-link into the PR's Claude Review tab — and Claude's verdict for the badge.
   // null on every other kind.
@@ -4712,6 +4737,9 @@ export interface ConsolidatedFeedCounts {
   comments: number; // kind 'review_comment' | 'pr_comment'
   prEvents: number; // kind pr_opened|pr_merged|pr_closed|pr_reopened|pr_ready_for_review|review_submitted
   commits: number; // kind 'commit_pushed' — the count behind the opt-in "Commits" pill
+  // kind 'ci_failed' | 'trunk_ci_failed' — the count behind the opt-in "CI failures" pill.
+  // Zero (and no items) unless the request set `includeCiFailures=true`.
+  ciFailures: number;
   // DISTINCT PRs with a pr_opened|pr_ready_for_review item still awaiting a first review
   // (prAwaitingReview === true) — the "Needs review" pill. A PR count, not an event count:
   // a draft-first PR has both kinds in the window and must not read as two PRs.

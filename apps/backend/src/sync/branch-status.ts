@@ -1,6 +1,10 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db, schema, runTransaction, type Executor } from '../db/client.js';
 import { TREND_DAYS } from '../db/branch-queries.js';
+// The Feed's rolling read window, imported rather than re-stated: the trunk CI transition log's
+// retention is defined BY it (see TRUNK_CI_EVENT_WINDOW), and two copies of "14" would drift
+// into a trim that silently deletes rows the Feed still reads.
+import { FEED_WINDOW_DAYS } from '../db/queries.js';
 import {
   getGraphqlClientFor,
   graphqlTolerant,
@@ -27,7 +31,7 @@ import {
 import { checkContextState, ciStatusFrom, parseActionsIds } from './upsert.js';
 import type { BranchCheckRun, CiStatus } from '@pierre-review/shared';
 
-const { repos, users, branchCommits } = schema;
+const { repos, users, branchCommits, trunkCiStatusEvents } = schema;
 
 // How many trunk commits the LIVE snapshot fetches per repo — GitHub's page maximum — and the
 // unconditional floor of the trim below (the newest this-many rows are never deleted, however
@@ -393,6 +397,186 @@ export function staleBranchCommitIds(
     .map((r) => r.id);
 }
 
+// ---- The trunk CI TRANSITION log (trunk_ci_status_events) ----------------------------------
+//
+// `branch_commits.ci_status` is updated IN PLACE by the upsert above, so the moment trunk turned
+// red is nowhere on that row — its only timestamps are `committedAt` (git commit time) and
+// `createdAt` (first insertion). Approximating a failure time with either would be a quiet lie,
+// so an observation gets its own append-only row, exactly as `ci_status_events` does for a PR
+// head (sync/upsert.ts). It is what makes the Feed's trunk CI-failure cards honest.
+//
+// How many rows one repo's log keeps UNCONDITIONALLY. The trim is HYBRID, exactly like
+// `branch_commits` above (newest-N ∪ inside the read window), and for the same two reasons in
+// opposite directions:
+//
+//  • The count half alone was WRONG. `trunkCiTransitionChanged` records a transition on any head
+//    move, and `syncBranchStatus` runs at the end of every walk (as often as every 120s on a hot
+//    repo), so an active repo produces transitions far faster than the Feed's window elapses —
+//    and a pure newest-200 bound evicted the failure rows `getTrunkCiFailureFeedItems` reads over
+//    FEED_WINDOW_DAYS. The symptom is invisible: the Feed just quietly stops showing trunk
+//    failures on exactly the repos that have the most of them.
+//  • The age half alone would be wrong too. A dormant repo's whole log is older than the cutoff,
+//    so an unconditional age bound would delete every row it has and the next observation would
+//    read as a first observation forever.
+export const TRUNK_CI_EVENT_WINDOW = 200;
+
+/**
+ * Which of a repo's trunk CI transition rows the trim deletes, given rows sorted NEWEST-FIRST:
+ * anything both below the newest-TRUNK_CI_EVENT_WINDOW floor AND older than the Feed's read
+ * window. Pure and exported so the hybrid bound's two halves are pinned by tests, not comments.
+ *
+ * `observedAt` (our observation time) is the right axis because it is exactly what
+ * `getTrunkCiFailureFeedItems` filters on.
+ */
+export function staleTrunkCiEventIds(
+  rows: { id: number; observedAt: Date }[],
+  nowMs: number,
+): number[] {
+  const cutoffMs = nowMs - FEED_WINDOW_DAYS * DAY_MS;
+  return rows
+    .filter((r, i) => i >= TRUNK_CI_EVENT_WINDOW && r.observedAt.getTime() < cutoffMs)
+    .map((r) => r.id);
+}
+
+/**
+ * Whether a fresh observation is a TRANSITION worth recording, given this repo's last row.
+ *
+ * Mirrors the PR-side predicate in `sync/upsert.ts` (status / head sha / failing-check name set)
+ * with TWO deliberate differences:
+ *
+ *  • `failingCheckNames` may be `undefined`, meaning "phase 2 never told us which checks failed".
+ *    Per the partial-response policy at the top of this file, that is not a statement that the set
+ *    changed, so the name dimension is simply DROPPED from the comparison rather than compared
+ *    against an empty list — otherwise a repo whose detail fetch fails would log a spurious
+ *    "checks changed" transition on every single sync.
+ *  • A head move on a GREEN trunk is not a transition. Trunk's head changes on every landed PR,
+ *    so recording each one filled an active repo's log with rows that state nothing (the Feed
+ *    reads failure/error rows only) and pushed real failures out of it. The narrowing is
+ *    deliberately minimal: it applies ONLY when the rollup is a positive "nothing is failing"
+ *    (CLEAR_STATES) on BOTH sides with no named failures on either, so no red — or amber-with-a-
+ *    real-failure — observation can be swallowed. A new head that is still red IS a new failure
+ *    (its own card, on its own commit) and is always recorded, and the first green after a red is
+ *    a status change, so recovery timing survives.
+ *
+ * Pure + exported so all of that is pinned by tests rather than a comment.
+ */
+export function trunkCiTransitionChanged(
+  last: {
+    status: CiStatus;
+    headSha: string;
+    failingChecks: BranchCheckRun[] | null;
+  } | null,
+  next: { status: CiStatus; headSha: string; failingCheckNames: string[] | undefined },
+): boolean {
+  if (last == null) return true;
+  if (last.status !== next.status) return true;
+  const before = [...new Set((last.failingChecks ?? []).map((c) => c.name))].sort();
+  if (
+    next.failingCheckNames !== undefined &&
+    JSON.stringify(before) !== JSON.stringify(next.failingCheckNames)
+  ) {
+    return true;
+  }
+  if (last.headSha === next.headSha) return false;
+  // Head moved. Record it unless BOTH observations are a positive green with nothing named.
+  const stillClean =
+    CLEAR_STATES.has(next.status) &&
+    before.length === 0 &&
+    (next.failingCheckNames?.length ?? 0) === 0;
+  return !stillClean;
+}
+
+/**
+ * Append one trunk CI observation, if it is a transition — then trim the repo's log.
+ *
+ * TWO GATES, both load-bearing:
+ *  • `headSha == null` — the response never positively identified a branch head, so there is
+ *    nothing to attribute an observation to.
+ *  • `status === 'unknown'` — GitHub's rollup states we model are success/failure/pending/
+ *    error/expected; 'unknown' is BOTH "a state we don't model" AND what `graphqlTolerant`
+ *    yields when a partial response NULLs the rollup. Recording it would manufacture a
+ *    "trunk changed" event out of a permissions error. (Same gate the PR-side writer uses.)
+ *
+ * Never throws: every caller treats the branch snapshot as strictly non-fatal, and a feed
+ * nicety must not be able to cost a repo its sync. Runs OUTSIDE the snapshot's transaction for
+ * the same reason — a failure here rolls back nothing.
+ */
+async function recordTrunkCiTransition(args: {
+  accountId: number;
+  repoId: number;
+  fullName: string;
+  branchName: string | null;
+  headSha: string | null;
+  status: CiStatus;
+  // `undefined` = we did not learn which checks failed (see trunkCiTransitionChanged).
+  failingChecks: BranchCheckRun[] | null | undefined;
+  log?: BranchSyncLogger;
+}): Promise<void> {
+  const { accountId, repoId, headSha, status } = args;
+  if (headSha == null || status === 'unknown') return;
+  const failingCheckNames =
+    args.failingChecks === undefined
+      ? undefined
+      : [...new Set(args.failingChecks?.map((c) => c.name) ?? [])].sort();
+
+  const [last] = await db
+    .select({
+      status: trunkCiStatusEvents.status,
+      headSha: trunkCiStatusEvents.headSha,
+      failingChecks: trunkCiStatusEvents.failingChecks,
+    })
+    .from(trunkCiStatusEvents)
+    .where(
+      and(
+        eq(trunkCiStatusEvents.accountId, accountId),
+        eq(trunkCiStatusEvents.repoId, repoId),
+      ),
+    )
+    // `id` breaks a same-instant tie deterministically (autoincrement ⇒ insertion order).
+    .orderBy(desc(trunkCiStatusEvents.observedAt), desc(trunkCiStatusEvents.id))
+    .limit(1)
+    .execute();
+
+  if (!trunkCiTransitionChanged(last ?? null, { status, headSha, failingCheckNames })) return;
+
+  await db
+    .insert(trunkCiStatusEvents)
+    .values({
+      accountId,
+      repoId,
+      branchName: args.branchName,
+      headSha,
+      status,
+      // `undefined` names ⇒ store null. NOT inheriting the previous row's list: this is an
+      // append-only observation log, and copying names forward would fabricate evidence.
+      failingChecks: args.failingChecks ?? null,
+      observedAt: new Date(),
+    })
+    .execute();
+
+  // HYBRID trim (see TRUNK_CI_EVENT_WINDOW + staleTrunkCiEventIds): the newest N rows
+  // unconditionally, plus everything still inside the Feed's read window. select-then-
+  // delete-by-id rather than a correlated DELETE … LIMIT, which is not portable across sqlite
+  // and Postgres.
+  const kept = await db
+    .select({ id: trunkCiStatusEvents.id, observedAt: trunkCiStatusEvents.observedAt })
+    .from(trunkCiStatusEvents)
+    .where(
+      and(
+        eq(trunkCiStatusEvents.accountId, accountId),
+        eq(trunkCiStatusEvents.repoId, repoId),
+      ),
+    )
+    .orderBy(desc(trunkCiStatusEvents.observedAt), desc(trunkCiStatusEvents.id))
+    .execute();
+  const stale = staleTrunkCiEventIds(kept, Date.now());
+  // `inArray(col, [])` is a degenerate predicate whose behaviour differs by dialect, and there
+  // is nothing to delete anyway.
+  if (stale.length > 0) {
+    await db.delete(trunkCiStatusEvents).where(inArray(trunkCiStatusEvents.id, stale)).execute();
+  }
+}
+
 /**
  * Snapshot a repo's DEFAULT BRANCH: its head sha + CI rollup onto `repos`, and the most recent
  * `BRANCH_COMMIT_WINDOW` trunk commits (with their own per-commit CI state, the checks that were
@@ -507,6 +691,30 @@ export async function syncBranchStatus(
       .where(and(eq(repos.id, repoId), eq(repos.accountId, accountId)))
       .execute();
   });
+
+  // The trunk CI transition log — AFTER the snapshot's transaction and inside its own guard, so
+  // this feed nicety can never roll back (or fail) the strip that just succeeded. The failing
+  // checks handed over come from the head COMMIT's own node under the same partial-response
+  // policy as the column write (`undefined` = we did not learn them).
+  try {
+    const headNode = headSha != null ? nodes.find((n) => n.oid === headSha) : undefined;
+    await recordTrunkCiTransition({
+      accountId,
+      repoId,
+      fullName,
+      branchName,
+      headSha,
+      status: headCi,
+      failingChecks:
+        headNode != null ? failingChecksToWrite(headNode, failingBySha) : undefined,
+      log: opts.log,
+    });
+  } catch (err) {
+    opts.log?.warn(
+      `branch-status ${fullName}: trunk CI transition log failed (non-fatal): ` +
+        `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+    );
+  }
 
   const rateLimitCost = (resp.rateLimit?.cost ?? 0) + detailCost;
   if (detailTargets.length > 0) {

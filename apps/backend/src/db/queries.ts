@@ -222,6 +222,10 @@ const {
   claudeReviews,
   claudeReviewFindings,
   ciStatusEvents,
+  // The TRUNK twin of ciStatusEvents (migration 0052 / pg 0039). Separate table, not a nullable
+  // prId on the PR one: it is repo-scoped, has no PR to anchor retention to, and stores the
+  // BranchCheckRun[] render payload rather than bare names.
+  trunkCiStatusEvents,
   mlCommentLabels,
   // THE ONE SCOPE (migrations 0044/0045). `workspaces` + `workspace_repos` replace the old
   // `teams`/`team_repos` many-to-many: a repo belongs to EXACTLY ONE workspace, as a database
@@ -2596,6 +2600,13 @@ export async function getActivity(
 // flagged isMyTurn by participation (see getConsolidatedFeed). There is no synthesized
 // "My Turn" layer or dedup anymore — one row per underlying event.
 
+// The consolidated Feed's rolling READ window (the un-isolated stream; single-PR isolation drops
+// it — see getConsolidatedFeed). Exported because a retention policy anywhere upstream has to be
+// at least this long or the Feed reads rows that no longer exist: `sync/branch-status.ts`'s trunk
+// CI transition log trims against it, after a count-only trim let an active repo evict the very
+// failure rows this window is supposed to surface.
+export const FEED_WINDOW_DAYS = 14;
+
 // Every My Turn (participated) event is always kept; the plain activity rows are bounded to
 // the most recent, so a busy multi-repo account doesn't render thousands of them.
 const FEED_EVENT_CAP = 250;
@@ -2736,6 +2747,15 @@ export interface ConsolidatedFeedFilters {
   // set. Ignored on the botsOnly path (a push is the author responding, not review-bot
   // activity). The addressed-thread runs still ride along inline either way.
   includeAllCommits?: boolean;
+  // Surface CI FAILURES as feed items — the opt-in "CI failures" toggle, OFF BY DEFAULT.
+  // Covers both halves at once: failed checks on a PR head (`ci_status_events`) AND failed
+  // checks on a repo's default branch (`trunk_ci_status_events`). Absent/false → the two
+  // builders are not even called and the `ciFailures` facet is 0.
+  //
+  // Ignored on the botsOnly path (a red build is not review-bot activity) and skipped whenever
+  // a member filter is active — these rows are actor-less, so they would survive a feed the
+  // reader explicitly scoped to specific people (the getClaudeReviewFeedItems rule).
+  includeCiFailures?: boolean;
   // Pagination over the merged, chronologically-sorted stream. `limit` omitted → the
   // whole stream (legacy). The response `total` is the full count so the client knows
   // when to stop "Load more". Only the returned page is enriched (merge/review credit)
@@ -3112,6 +3132,309 @@ async function getClaudeReviewFeedItems(
     });
   }
   return out;
+}
+
+// ---- CI-failure feed items (OFF BY DEFAULT — the "CI failures" pill) ----
+//
+// Two synthesized kinds, no `events` rows, following the `claude_review` precedent exactly:
+//   'ci_failed'       — a check failing on a PR head        (source: ci_status_events)
+//   'trunk_ci_failed' — a check failing on the default branch (source: trunk_ci_status_events)
+//
+// GRAIN: ONE ITEM PER FAILED RUN, keyed (PR-or-branch, head sha, check name). Both sources are
+// TRANSITION logs that write a new row whenever the failing-check SET changes, so a build whose
+// checks go red one at a time emits several rows for one broken push — un-deduped that reads as
+// spam and crowds the 250-row plain-activity cap. The EARLIEST observation of each key wins, so
+// a card's timestamp is when the failure was first seen, not when it was last re-confirmed.
+//
+// ⚠ `observedAt` is OUR observation time, never GitHub's completion time (neither GraphQL query
+// selects `completedAt`). A PR head can be up to the ~30-minute forced re-walk floor behind, and
+// trunk has no fast path at all — `syncBranchStatus` runs only at the end of a full walk. Card
+// copy therefore says "CI failure detected", never "CI failed at".
+//
+// Both builders are actor-less (`actorId: null`), so — exactly like getClaudeReviewFeedItems —
+// the caller skips them whenever a member filter is active, and they never enter the My-Turn
+// lane (see getConsolidatedFeed).
+
+// The two synthesized CI kinds, in ONE predicate. Every place that must treat them together —
+// the My-Turn withholding, the facet count, the live-CI enrichment guard — goes through this
+// rather than repeating a two-arm `||`, because missing one arm is silent. Exported for tests.
+export function isCiFeedKind(kind: string): boolean {
+  return kind === 'ci_failed' || kind === 'trunk_ci_failed';
+}
+
+// Newest CI transition rows scanned per builder. Bounds the read on an account with a chronically
+// red matrix build; the dedupe below collapses them further.
+const CI_EVENT_SCAN_CAP = 1000;
+// How many distinct failing CHECK NAMES one (target, head sha) may emit cards for. A 60-shard
+// matrix going red must not put 60 cards in the feed; the overflow is DISCLOSED on each emitted
+// card's summary rather than silently dropped.
+//
+// ⚠ THE GRAIN IS THE HEAD, NOT THE ROW. Both sources are TRANSITION logs (a fresh row every time
+// the failing SET changes on the same head), so a sharded matrix build going red shard by shard
+// writes ten rows for one head, each carrying the cumulative set. Applying this cap to a single
+// row's list — while the dedupe set spans rows — let EVERY row contribute one more card (a newly
+// named shard sorts into the top-N window, is an unseen key, and is emitted), so one head emitted
+// far more than N cards and the early ones disclosed "0 more" while N+5 checks were failing.
+// `collapseCiRows` therefore accumulates per head across rows.
+const MAX_CI_ITEMS_PER_HEAD = 5;
+
+const shortSha = (sha: string): string => sha.slice(0, 7);
+
+// Shared shape-builder for both halves, so a PR card and a trunk card can never drift apart.
+function ciFeedItem(args: {
+  id: string;
+  kind: 'ci_failed' | 'trunk_ci_failed';
+  occurredAt: Date;
+  repoId: number;
+  repoFullName: string;
+  prId: number | null;
+  prNumber: number | null;
+  prTitle: string | null;
+  prState: PrState | null;
+  status: CiStatus;
+  headSha: string;
+  checkName: string | null;
+  moreFailing: number;
+  githubUrl: string | null;
+  where: string;
+}): ConsolidatedFeedItem {
+  const label = args.checkName ?? 'CI';
+  const more =
+    args.moreFailing > 0
+      ? ` · ${args.moreFailing} more check${args.moreFailing === 1 ? '' : 's'} also failing`
+      : '';
+  return {
+    id: args.id,
+    isMyTurn: false,
+    myTurnReasons: [],
+    kind: args.kind,
+    occurredAt: args.occurredAt.toISOString(),
+    repoId: args.repoId,
+    repoFullName: args.repoFullName,
+    prId: args.prId,
+    prNumber: args.prNumber,
+    prTitle: args.prTitle,
+    prState: args.prState,
+    actorId: null,
+    content: null,
+    threadId: null,
+    commentId: null,
+    path: null,
+    line: null,
+    reasonTag: null,
+    reviewState: null,
+    githubUrl: args.githubUrl,
+    mergedById: null,
+    reviewers: null,
+    // The rollup state AT THE OBSERVATION, not the PR's live one. getConsolidatedFeed's
+    // per-page enrichment overwrites `ciStatus` for PR-bearing items from pull_requests, which
+    // is the right live answer for those cards; the historical state stays in changeSummary.
+    ciStatus: args.status,
+    changedFilesCount: null,
+    affectedThreads: null,
+    commitCount: null,
+    changeSummary: `${label} failed on ${args.where} ${shortSha(args.headSha)}${more}`,
+    failingChecks: args.checkName != null ? [args.checkName] : [],
+    ciHeadSha: args.headSha,
+    claudeReviewId: null,
+    claudeVerdict: null,
+    mergedComments: [],
+  };
+}
+
+/**
+ * Collapse a transition log's rows into one card per (target, head sha, check name).
+ *
+ * `rows` must arrive NEWEST FIRST (that is how both indexes are read and how the scan cap keeps
+ * the recent tail); this walks them in reverse so the EARLIEST row for each key wins the
+ * timestamp. Emission order doesn't matter — getConsolidatedFeed sorts the merged stream.
+ *
+ * TWO PASSES, and the transition log's shape is the reason (see MAX_CI_ITEMS_PER_HEAD): the cap
+ * and the "N more checks also failing" disclosure are both facts about a HEAD, which routinely
+ * owns many rows, so neither can be computed from the single row being emitted. Pass 1 walks the
+ * rows accumulating, per head, the UNION of every failing name it was ever observed with plus the
+ * capped picks in first-observation order; pass 2 emits, so every card on a head discloses the
+ * same, final overflow count.
+ */
+function collapseCiRows<T>(
+  rows: T[],
+  key: (r: T) => string,
+  names: (r: T) => string[],
+  emit: (r: T, checkName: string | null, moreFailing: number) => ConsolidatedFeedItem,
+): ConsolidatedFeedItem[] {
+  interface HeadState {
+    // Every distinct failing check name this head was EVER observed with — the denominator of
+    // the overflow disclosure. It grows across rows; the cap never truncates it.
+    union: Set<string>;
+    // How many NAMED cards this head emitted (the bare-rollup card names nothing, so it is not
+    // counted here and therefore not subtracted from the union).
+    named: number;
+    cards: { row: T; name: string | null }[];
+  }
+  const heads = new Map<string, HeadState>();
+  const seen = new Set<string>();
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i] as T;
+    const head = key(row);
+    let state = heads.get(head);
+    if (state == null) {
+      state = { union: new Set(), named: 0, cards: [] };
+      heads.set(head, state);
+    }
+    const all = [...new Set(names(row))].sort();
+    for (const name of all) state.union.add(name);
+    // A red rollup that carried no named contexts still deserves one honest card.
+    const emitted = all.length > 0 ? all : [null];
+    for (const name of emitted) {
+      // The cap is spent PER HEAD, ACROSS ROWS — never per row (that was the bug: each later
+      // row's newly-named shard was an unseen key inside its own top-N window, so a matrix build
+      // going red shard by shard emitted one card per row).
+      if (state.cards.length >= MAX_CI_ITEMS_PER_HEAD) break;
+      const k = `${head} ${name ?? ''}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      state.cards.push({ row, name });
+      if (name != null) state.named += 1;
+    }
+  }
+
+  const out: ConsolidatedFeedItem[] = [];
+  for (const state of heads.values()) {
+    // Named failures the cap kept out of the feed, counted over the head's whole union rather
+    // than over whichever row happened to carry the card.
+    const more = Math.max(0, state.union.size - state.named);
+    for (const c of state.cards) out.push(emit(c.row, c.name, more));
+  }
+  return out;
+}
+
+/** PR-side CI failures, from the `ci_status_events` transition log. */
+async function getCiFailureFeedItems(
+  accountId: number,
+  repoIds: number[],
+  since: Date,
+  // Single-PR isolation (see getFeed): scope to this PR's rows (with a widened `since`).
+  prId: number | null = null,
+): Promise<ConsolidatedFeedItem[]> {
+  if (repoIds.length === 0) return [];
+  const conds = [
+    eq(ciStatusEvents.accountId, accountId),
+    inArray(ciStatusEvents.repoId, repoIds),
+    inArray(ciStatusEvents.status, ['failure', 'error']),
+    gte(ciStatusEvents.observedAt, since),
+  ];
+  if (prId != null) conds.push(eq(ciStatusEvents.prId, prId));
+  const rows = await db
+    .select({
+      prId: ciStatusEvents.prId,
+      repoId: ciStatusEvents.repoId,
+      headSha: ciStatusEvents.headSha,
+      status: ciStatusEvents.status,
+      failingChecks: ciStatusEvents.failingChecks,
+      observedAt: ciStatusEvents.observedAt,
+      owner: repos.owner,
+      name: repos.name,
+      prNumber: pullRequests.number,
+      prTitle: pullRequests.title,
+      prState: pullRequests.state,
+    })
+    .from(ciStatusEvents)
+    .innerJoin(pullRequests, eq(pullRequests.id, ciStatusEvents.prId))
+    .innerJoin(repos, eq(repos.id, ciStatusEvents.repoId))
+    .where(and(...conds))
+    // Covered by cse_account_repo_observed / cse_account_pr_observed.
+    .orderBy(desc(ciStatusEvents.observedAt))
+    .limit(CI_EVENT_SCAN_CAP)
+    .execute();
+
+  return collapseCiRows(
+    rows,
+    (r) => `${r.prId} ${r.headSha}`,
+    (r) => r.failingChecks ?? [],
+    (r, checkName, moreFailing) =>
+      ciFeedItem({
+        id: `feed:ci:${r.prId}:${r.headSha}:${checkName ?? ''}`,
+        kind: 'ci_failed',
+        occurredAt: r.observedAt,
+        repoId: r.repoId,
+        repoFullName: `${r.owner}/${r.name}`,
+        prId: r.prId,
+        prNumber: r.prNumber,
+        prTitle: r.prTitle,
+        prState: r.prState,
+        status: r.status as CiStatus,
+        headSha: r.headSha,
+        checkName,
+        moreFailing,
+        githubUrl: `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}/checks`,
+        where: `#${r.prNumber}`,
+      }),
+  );
+}
+
+/**
+ * Default-branch CI failures, from the `trunk_ci_status_events` transition log.
+ *
+ * PR-LESS by construction (`prId: null`), which is what keeps them out of the My-Turn lane
+ * (enrichMyTurn requires a prId) and out of the per-page PR enrichment. Skipped entirely on the
+ * single-PR isolation path — trunk is not a PR's history.
+ */
+async function getTrunkCiFailureFeedItems(
+  accountId: number,
+  repoIds: number[],
+  since: Date,
+): Promise<ConsolidatedFeedItem[]> {
+  if (repoIds.length === 0) return [];
+  const rows = await db
+    .select({
+      repoId: trunkCiStatusEvents.repoId,
+      branchName: trunkCiStatusEvents.branchName,
+      headSha: trunkCiStatusEvents.headSha,
+      status: trunkCiStatusEvents.status,
+      failingChecks: trunkCiStatusEvents.failingChecks,
+      observedAt: trunkCiStatusEvents.observedAt,
+      owner: repos.owner,
+      name: repos.name,
+    })
+    .from(trunkCiStatusEvents)
+    .innerJoin(repos, eq(repos.id, trunkCiStatusEvents.repoId))
+    .where(
+      and(
+        eq(trunkCiStatusEvents.accountId, accountId),
+        inArray(trunkCiStatusEvents.repoId, repoIds),
+        inArray(trunkCiStatusEvents.status, ['failure', 'error']),
+        gte(trunkCiStatusEvents.observedAt, since),
+      ),
+    )
+    .orderBy(desc(trunkCiStatusEvents.observedAt))
+    .limit(CI_EVENT_SCAN_CAP)
+    .execute();
+
+  return collapseCiRows(
+    rows,
+    (r) => `${r.repoId} ${r.headSha}`,
+    (r) => (r.failingChecks ?? []).map((c) => c.name),
+    (r, checkName, moreFailing) =>
+      ciFeedItem({
+        id: `feed:trunkci:${r.repoId}:${r.headSha}:${checkName ?? ''}`,
+        kind: 'trunk_ci_failed',
+        occurredAt: r.observedAt,
+        repoId: r.repoId,
+        repoFullName: `${r.owner}/${r.name}`,
+        prId: null,
+        prNumber: null,
+        prTitle: null,
+        prState: null,
+        status: r.status as CiStatus,
+        headSha: r.headSha,
+        checkName,
+        moreFailing,
+        // The commit, not a PR — a trunk failure often has no PR at all (a direct push), and
+        // the commit page is where its checks live. Rendered through safeExternalUrl client-side.
+        githubUrl: `https://github.com/${r.owner}/${r.name}/commit/${r.headSha}`,
+        where: r.branchName ?? 'trunk',
+      }),
+  );
 }
 
 // ---- Activity-Feed "seen" marker (server-side, per account) ----
@@ -4472,6 +4795,7 @@ export function computeFeedCounts(
     comments: 0,
     prEvents: 0,
     commits: 0,
+    ciFailures: 0,
     awaitingReview: 0,
     bots: 0,
     byBotActor: {},
@@ -4483,6 +4807,7 @@ export function computeFeedCounts(
     if (it.kind === 'claude_review') counts.claude += 1;
     if (it.kind === 'review_comment' || it.kind === 'pr_comment') counts.comments += 1;
     if (it.kind === 'commit_pushed') counts.commits += 1;
+    if (isCiFeedKind(it.kind)) counts.ciFailures += 1;
     if (
       it.kind === 'pr_opened' ||
       it.kind === 'pr_merged' ||
@@ -4530,6 +4855,7 @@ export async function getConsolidatedFeed(
     botsOnly = false,
     botWindowDays = null,
     includeAllCommits = false,
+    includeCiFailures = false,
   } = opts;
 
   // Restrict to the repos this account owns; a passed repoIds narrows within them. The
@@ -4586,7 +4912,8 @@ export async function getConsolidatedFeed(
   // source to the PR and drop the 14-day window (epoch since). The scan is one PR, so it's
   // cheap, and the reader sees the opened event + all activity even on a long-idle PR — not an
   // empty pane. The un-isolated feed keeps the rolling 14-day window (a live activity stream).
-  const feedSince = prId != null ? new Date(0) : new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  const feedSince =
+    prId != null ? new Date(0) : new Date(Date.now() - FEED_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   // Bot-only feed: resolve the automated-reviewer actor set (vendors + classified in-house /
   // Pierre — the SAME set the ROI panel counts, so it catches deepsource-io etc. that aren't
   // users.isBot). Empty → nobody's classified → an empty feed. Filtered IN SQL by getFeed.
@@ -4612,7 +4939,12 @@ export async function getConsolidatedFeed(
       generatedAt: new Date().toISOString(),
     };
   }
-  const [feed, commitItems, claudeItems] = await Promise.all([
+  // CI-failure rows are actor-less, so a member filter must skip them for the same reason it
+  // skips Claude runs: an actor-less row cannot belong to any of the people the reader picked.
+  // Computed once and shared by both halves so the two can never disagree.
+  const ciFailuresOn =
+    includeCiFailures && !botsOnly && !(userIds != null && userIds.length > 0);
+  const [feed, commitItems, claudeItems, ciItems, trunkCiItems] = await Promise.all([
     // The bot-only feed follows the analytics window selector (botWindowDays); every other
     // view keeps the rolling 14 days.
     getFeed(accountId, {
@@ -4644,6 +4976,15 @@ export async function getConsolidatedFeed(
     botsOnly || (userIds != null && userIds.length > 0)
       ? Promise.resolve<ConsolidatedFeedItem[]>([])
       : getClaudeReviewFeedItems(accountId, effectiveRepoIds, feedSince, prId),
+    // CI failures on a PR head — the opt-in "CI failures" toggle, off by default.
+    ciFailuresOn
+      ? getCiFailureFeedItems(accountId, effectiveRepoIds, feedSince, prId)
+      : Promise.resolve<ConsolidatedFeedItem[]>([]),
+    // CI failures on the DEFAULT BRANCH. Same toggle; additionally skipped under single-PR
+    // isolation, where the reader asked for one PR's history and trunk is not part of it.
+    ciFailuresOn && prId == null
+      ? getTrunkCiFailureFeedItems(accountId, effectiveRepoIds, feedSince)
+      : Promise.resolve<ConsolidatedFeedItem[]>([]),
   ]);
 
   // The "My Turn" participation flag (isMyTurn / myTurnReasons / reasonTag) is CORE / free
@@ -4711,6 +5052,12 @@ export async function getConsolidatedFeed(
   // flow but always retained (see the caps below) so the "Claude Reviews" pill finds them.
   for (const it of claudeItems) push(it);
 
+  // CI-failure items (both halves). Deliberately NOT added to the uncapped `alwaysRows` set
+  // below: a repo with a flaky matrix build or a chronically red trunk could otherwise starve
+  // the 250-row plain-activity budget with red cards.
+  for (const it of ciItems) push(it);
+  for (const it of trunkCiItems) push(it);
+
   // Consolidate a coinciding host event (a submitted review OR a close/merge) + the SAME
   // actor's top-level PR comment(s) on the SAME PR posted within a short window (issue comments
   // carry no head SHA, so time is the proxy): fold the comment(s) into the host's
@@ -4766,7 +5113,17 @@ export async function getConsolidatedFeed(
 
   // "My Turn" enrichment (CORE / free): flag each item `isMyTurn` by the viewer's participation
   // in its PR. Runs BEFORE the cap so uncapped My-Turn rows survive.
-  await enrichMyTurn(accountId, items);
+  //
+  // ⚠ CI-failure rows are WITHHELD from it, and this is not tidiness. `enrichMyTurn` flags any
+  // PR-bearing item whose actor isn't you — and a CI item's actor is `null`, so `actorId !==
+  // localUserId` is trivially true. Handing them over would turn every red build on a PR you
+  // participate in into an UNCAPPED yellow My-Turn card, i.e. a silent behaviour change to the
+  // product's core lane hidden inside a CI toggle. (`enrichMyTurn` mutates the items it is
+  // given, so passing a filtered array is enough — the objects are the same.)
+  await enrichMyTurn(
+    accountId,
+    ciFailuresOn ? items.filter((i) => !isCiFeedKind(i.kind)) : items,
+  );
 
   // Optional single-PR isolation (the Feed "open PRs" panel): keep only this PR's items.
   // Applied here so `total` + the page bounds reflect the isolated set.
@@ -4856,7 +5213,10 @@ export async function getConsolidatedFeed(
     if (it.prId == null) continue;
     it.mergedById = mergedByPr.get(it.prId) ?? null;
     it.reviewers = reviewersByPr.get(it.prId) ?? null;
-    it.ciStatus = ciByPr.get(it.prId) ?? null;
+    // A CI-failure card's `ciStatus` is the rollup AT THE OBSERVATION it reports. Overwriting it
+    // with the PR's LIVE rollup would leave a card that says "CI failed" carrying a green
+    // status once the re-run passed — the one item kind where the live answer is the wrong one.
+    if (!isCiFeedKind(it.kind)) it.ciStatus = ciByPr.get(it.prId) ?? null;
     it.changedFilesCount = filesByPr.get(it.prId) ?? null;
   }
 
@@ -6548,6 +6908,15 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
     // migrations 0022 / pg 0011), so leaving it would FK-fail the pullRequests delete
     // below. Keyed by repoId like events (every row is stamped with its PR's repo).
     await tx.delete(ciStatusEvents).where(eq(ciStatusEvents.repoId, id)).execute();
+    // The TRUNK CI transition log (migration 0052 / pg 0039). Its FKs DO cascade, unlike
+    // ci_status_events' — but SQLite enforces FKs only under `foreign_keys=ON` while Postgres
+    // enforces them immediately, so it is deleted explicitly here for the same reason
+    // erase-account.ts deletes branch_commits explicitly: the guarantee must not depend on
+    // which dialect is running. Keyed by repoId — a trunk row has no PR.
+    await tx
+      .delete(trunkCiStatusEvents)
+      .where(eq(trunkCiStatusEvents.repoId, id))
+      .execute();
     if (prIds.length > 0) {
       await tx.delete(reviewComments).where(inArray(reviewComments.prId, prIds)).execute();
       await tx.delete(reviewThreads).where(inArray(reviewThreads.prId, prIds)).execute();

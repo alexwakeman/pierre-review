@@ -238,6 +238,26 @@ export interface FilterState {
   // also emits plain commit-push runs. Server-side (the client can't synthesize plain commits),
   // so it's threaded into the feed query key. Transient, URL-silent (like the other feed toggles).
   feedShowCommits: boolean;
+  // Activity "Feed" opt-in "Show CI failures" toggle. false (default) → no CI rows at all;
+  // true → the server also emits ONE item per failed check run, on PR heads AND on the default
+  // branch (`ci_failed` / `trunk_ci_failed`). Server-side (the client cannot synthesize them),
+  // so it is threaded into the feed query key AND the head-poll key.
+  //
+  // ⚠ Unlike the other feed toggles this one is PERSISTED, with the filter bar (it is in
+  // FilterDefaults / freshFilterDefaults / pickFilterBarState). "Show me broken builds" is a
+  // standing preference, not a per-session lens — a user who turns it on should find it on
+  // tomorrow. It is consequently also reset by "Clear filters", which is the correct reading of
+  // that control for a filter-shaped toggle. NO storage-version bump was needed — a pre-existing
+  // v3 blob simply lacks the key, sanitizePersistedFilters skips it by whitelist, and the store
+  // keeps this default.
+  //
+  // ⚠ AND IT IS URL-SERIALIZED (`ci=1`), which is not optional for a FilterDefaults key.
+  // useUrlState's serializer is hand-written per param, so a new key is silently omitted unless
+  // someone adds it — and being omitted does NOT merely make it unshareable: `writeToUrl` emits
+  // `?workspace=<id>` as soon as the scope resolves, so the address bar is non-bare within a
+  // second of every load, and the localStorage restore path runs ONLY on a bare URL. A
+  // URL-silent FilterDefaults key therefore round-trips into storage and is read back never.
+  feedShowCiFailures: boolean;
   // Activity "Feed" single-PR isolation: null (default) → every PR in scope; a pr id →
   // the consolidated Feed shows ONLY that PR's items. Driven by the Feed "open PRs" panel.
   // Transient, URL-silent (like the other feed toggles); cleared on rail / scope changes.
@@ -506,6 +526,9 @@ export interface FilterState {
   toggleFeedNeedsReview: () => void;
   // Feed "show individual commits" toggle (see feedShowCommits).
   toggleFeedShowCommits: () => void;
+  // Feed "Show CI failures" toggle (see feedShowCiFailures). Persisted with the filter bar and
+  // URL-serialized as `ci=1`.
+  toggleFeedShowCiFailures: () => void;
   // Isolate the Feed to a single PR (or clear with null) — the Feed "open PRs" panel.
   setFeedIsolatedPrId: (id: number | null) => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
@@ -697,6 +720,17 @@ type FilterDefaults = Pick<
   | 'prStatuses'
   | 'reviewStates'
   | 'derivedStates'
+  // The one FEED toggle that is a standing preference rather than a per-session lens: "show me
+  // broken builds" should still be on tomorrow. Every other feed*/bot* toggle stays transient
+  // and out of this list. Adding a key here needs NO FILTER_STORAGE_VERSION bump — restore
+  // whitelists against freshFilterDefaults(), so an older blob just lacks it and the default
+  // applies. (A bump WITHOUT a migratePersistedFilters entry would discard the user's whole
+  // remembered filter bar, which is why that is the wrong tool for an additive key.)
+  //
+  // ⚠ A KEY IN THIS LIST MUST ALSO BE URL-SERIALIZED in hooks/useUrlState (both directions).
+  // Persistence alone does not survive a reload: writeToUrl makes the address bar non-bare the
+  // moment the workspace resolves, and the persisted blob is only read on a BARE url.
+  | 'feedShowCiFailures'
 >;
 
 // Single source of truth for the filter defaults; array defaults are rebuilt per
@@ -728,6 +762,9 @@ function freshFilterDefaults(): FilterDefaults {
     prStatuses: [...DEFAULT_PR_STATUSES],
     reviewStates: [...DEFAULT_REVIEW_STATES],
     derivedStates: [],
+    // CI-failure feed rows are OFF on a fresh load: they are a second, machine-generated stream
+    // on top of human activity, and the Feed's job is situational awareness, not a build board.
+    feedShowCiFailures: false,
   };
 }
 
@@ -750,6 +787,7 @@ export function pickFilterBarState(s: FilterState): FilterDefaults {
     prStatuses: s.prStatuses,
     reviewStates: s.reviewStates,
     derivedStates: s.derivedStates,
+    feedShowCiFailures: s.feedShowCiFailures,
   };
 }
 
@@ -937,6 +975,8 @@ export const useFilters = create<FilterState>((set, get) => ({
   toggleFeedCatPrEvents: () => set((s) => ({ feedCatPrEvents: !s.feedCatPrEvents })),
   toggleFeedNeedsReview: () => set((s) => ({ feedNeedsReview: !s.feedNeedsReview })),
   toggleFeedShowCommits: () => set((s) => ({ feedShowCommits: !s.feedShowCommits })),
+  toggleFeedShowCiFailures: () =>
+    set((s) => ({ feedShowCiFailures: !s.feedShowCiFailures })),
   setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setBotsInnerTab: (v) => set({ botsInnerTab: v }),

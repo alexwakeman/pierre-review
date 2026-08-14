@@ -339,7 +339,7 @@ in `src/sync/__fixtures__/threads/` first (see its README).
 
 ### Data model
 
-`db/schema.sqlite.ts` + `schema.pg.ts` are authoritative (27 tables); the table-by-table
+`db/schema.sqlite.ts` + `schema.pg.ts` are authoritative (28 tables); the table-by-table
 contracts are in [docs/DATA-MODEL.md](docs/DATA-MODEL.md). Cross-cutting facts:
 
 - `accountId` is denormalized onto the anchor tables (`repos`, `pullRequests`, `events`,
@@ -686,8 +686,18 @@ Always-true rules:
 
 ## Conventions & gotchas
 
-- **ESM module resolution differs per package.** Backend **NodeNext** — relative imports
-  need explicit `.js` (`./foo.js`); frontend **Bundler** — no extensions. The #1 confusion.
+- **Relative imports carry an explicit `.js` EVERYWHERE — backend AND frontend.** What
+  differs per package is the tsconfig `moduleResolution`, not the import style: the backend
+  is **NodeNext**, which REQUIRES `./foo.js`; the frontend is **Bundler**, which merely
+  ALLOWS it (TS and Vite both map `./foo.js` → `./foo.ts`). The repo writes it either way —
+  760 relative imports under `apps/frontend/src` use `.js`, 3 (all of `Wordmark`) do not —
+  so match the code, not the resolver. (This line used to say "frontend — no extensions".)
+- **`apps/backend/src/db/queries.ts` CONTAINS LITERAL NUL BYTES (~offset 132k)**, so search
+  tools treat it as BINARY and quietly under-report: `rg` prints only the matches BEFORE the
+  first NUL and then says `binary file matches`; a `grep` that skips binaries (`-I`, which
+  some wrappers set) prints NOTHING and exits 1. Either reads as "the symbol isn't there".
+  Any audit of that file must use `grep -a` / `rg -a` (and `git diff -a` for its diff) —
+  this produced a real false-negative "confirmed clean" pass.
 - **The `shared` package is the only bridge.** Never import backend↔frontend directly — go
   through `@pierre-review/shared` (types only; no build output).
 - **Two schemas, kept in sync BY HAND.** Edit **both** `schema.sqlite.ts` + `schema.pg.ts`
@@ -932,5 +942,9 @@ re-scored (neither an edited body nor a model-version bump invalidates one — `
 workspace's enrichment backlog forever (`hardFailure` abandons the workspace, and the candidate
 query re-selects the same comment next tick — the sync UI declines to report it as progress, but
 nothing quarantines it; the one live instance of this is fixed at both ends, so the mechanism is
-now latent rather than firing); and pg `0036`–`0037` + the plugin `0021` pg twin have not been
-replayed against a real Postgres (the chain through pg `0035` HAS been — see docs/MIGRATIONS.md).
+now latent rather than firing); **`trunk_ci_status_events` has NO backfill** — the writer only
+appends on a transition observed at the end of a full walk, so the trunk half of the CI feed
+stays blank for a repo until its next full walk (the PR half is populated by
+`backfill-ci-history.ts`, which does not touch the trunk table); and pg `0036`–`0037`, pg
+`0039` + the plugin `0021`/`0022` pg twins have not been replayed against a real Postgres
+(the chain through pg `0035` HAS been — see docs/MIGRATIONS.md).

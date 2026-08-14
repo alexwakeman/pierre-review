@@ -636,6 +636,42 @@ export const branchCommits = pgTable(
   }),
 );
 
+// ---- Default-branch ("trunk") CI transition log ── the pg twin of the sqlite
+// trunkCiStatusEvents table. See that file for the full rationale: `branch_commits.ciStatus` is
+// updated IN PLACE, so the moment trunk turned red is otherwise unrecorded; rows are written
+// only on a TRANSITION and only on a POSITIVE statement from GitHub; `observed_at` is OUR
+// observation time; the table is bounded by its own per-repo trim (no PR to anchor the
+// retention sweep to), which is HYBRID — newest TRUNK_CI_EVENT_WINDOW rows ∪ everything inside
+// FEED_WINDOW_DAYS (`staleTrunkCiEventIds`), because neither half alone is correct.
+// `failing_checks` carries `BranchCheckRun[]`, NOT ci_status_events' bare `string[]`.
+export const trunkCiStatusEvents = pgTable(
+  'trunk_ci_status_events',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    branchName: text('branch_name'),
+    headSha: text('head_sha').notNull(),
+    status: text('status', {
+      enum: ['success', 'failure', 'pending', 'error', 'expected', 'unknown'],
+    }).notNull(),
+    failingChecks: jsonb('failing_checks').$type<BranchCheckRun[]>(),
+    observedAt: timestamp('observed_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => ({
+    accountRepoObservedIdx: index('tcse_account_repo_observed').on(
+      t.accountId,
+      t.repoId,
+      t.observedAt,
+    ),
+    accountIdx: index('tcse_account_idx').on(t.accountId),
+  }),
+);
+
 export const syncState = pgTable('sync_state', {
   repoId: integer('repo_id')
     .primaryKey()

@@ -82,6 +82,7 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       botsOnly?: string;
       botWindowDays?: string;
       includeAllCommits?: string;
+      includeCiFailures?: string;
     };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
@@ -106,6 +107,10 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       botsOnly: q.botsOnly === 'true',
       botWindowDays,
       includeAllCommits: q.includeAllCommits === 'true',
+      // Opt-in CI-failure rows (PR heads + the default branch). OFF unless explicitly asked
+      // for, like includeAllCommits — a missing/garbage value means off, never on. Still a
+      // pure DB read over two indexed transition logs, so no new rate-limit tier is needed.
+      includeCiFailures: q.includeCiFailures === 'true',
     });
   });
 

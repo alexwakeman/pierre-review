@@ -190,6 +190,10 @@ describe('computeFeedCounts', () => {
       comments: 0,
       prEvents: 0,
       commits: 0,
+      // The opt-in CI-failure facet ('ci_failed' | 'trunk_ci_failed'). This assertion is
+      // EXHAUSTIVE on purpose — a new facet must be added here deliberately, which is how the
+      // shared ConsolidatedFeedCounts shape and the pure counter stay in step.
+      ciFailures: 0,
       awaitingReview: 0,
       bots: 0,
       byBotActor: {},
