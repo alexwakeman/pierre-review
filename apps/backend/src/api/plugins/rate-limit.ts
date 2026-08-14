@@ -216,6 +216,26 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // route caches the scan for a few seconds precisely because the tier bounds request COUNT and
   // not the work each request does — the two are complementary, neither is a substitute.
   if (path.startsWith('/api/ml-status')) return [TIERS.search, TIERS.read];
+  // ---- Emoji reactions: BOTH routes reach GitHub, and NEITHER lives under /api/prs/<id>/ ----
+  //
+  // Spelled as two EXACT string matches, above the mutating block, for the reason this file has
+  // now recorded three times: a tier that is inherited rather than decided is silently wrong,
+  // and both of these would otherwise land on the 600/min blanket `read` bucket. They are NOT
+  // in the `hitsGithub` alternation below because that regex is anchored to `/api/prs/\d+/` —
+  // adding `reactions` there would match nothing and merely look like coverage.
+  //
+  //   POST /api/reactions/lookup — the batched read. A mutating VERB with GET-shaped cost (the
+  //     `POST /api/prs/:id/refresh` precedent): it carries a target LIST in a body and converts
+  //     1:1 into a GraphQL `nodes(ids:)` call, so it belongs on the same 60/min bucket as the
+  //     other client-driven GitHub-hydrating reads. Client-side batching means one screenful of
+  //     comments is ONE request, so 60/min is far above any human use — while a script looping
+  //     it is exactly what drains the tenant's 5,000 points/hour.
+  //   POST /api/reactions — the toggle. A GitHub write like any other: `github_write`.
+  //
+  // Exact matches rather than a `/api/reactions` prefix so the two cannot be swept into one
+  // bucket if a third route is ever added under this family.
+  if (path === '/api/reactions/lookup') return [TIERS.prDetail, TIERS.read];
+  if (path === '/api/reactions') return [TIERS.githubWrite];
   // GET /api/prs/<id> plus the sub-routes that ALSO hydrate live from GitHub rather than reading
   // already-synced rows:
   //   `/merge-options`            repo merge config + mergeability + the merge-queue GraphQL probe

@@ -490,6 +490,22 @@ Landmines that cost real bugs — read the doc before touching any of these:
   `isMlScoring`; its ETA treats unchanged poll values as no-observation (batch-grain
   drains), and its monotonic percent clamp resets on stage/backfill-set changes and
   per-repo percent regressions (phase 2 legitimately restarts percent from 1.0 → ~0.16).
+- **Reactions are fetched ON DEMAND and NEVER STORED** — no column, no migration, no sync
+  step. `hooks/useReactions.ts` is a MICROTASK-BATCHED loader: each `ReactionBar` runs its
+  own `['reactions', kind, id]` query whose fn only enqueues, and one tick's registrations
+  become ONE `POST /api/reactions/lookup` (60/batch). Per-PR indexing (the `useMlLabelIndex`
+  shape) could NOT serve this — the Feed spans many PRs. The bar renders nothing while state
+  is `undefined` (unknown ≠ "no reactions"), the toggle carries a per-target MUTATION key so
+  two mounts of one comment share in-flight state, and these queries stay OUT of
+  `shouldDehydrateQuery` (a week-old persisted copy of other people's reactions is a lie).
+- **The Feed's "CI failures" toggle is OFF by default and is a FETCH toggle**, not a client
+  filter: `feedShowCiFailures` rides the feed query key AND the head-poll key (a head that
+  includes rows the loaded page doesn't false-fires "New activity"). It is the ONE feed
+  toggle that PERSISTS with the filter bar (in `FilterDefaults`/`pickFilterBarState`, hence
+  also cleared by "Clear filters"), URL-silent, and needs no storage-version bump — restore
+  whitelists against `freshFilterDefaults()`. Rows are actor-less: the server drops them
+  under `botsOnly` or any member filter, and they are withheld from `enrichMyTurn` (a null
+  actor is trivially "not you", which would make every red build an uncapped My-Turn card).
 
 ---
 

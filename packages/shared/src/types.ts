@@ -5830,3 +5830,133 @@ export interface BotSeverityResponse {
   truncated: boolean;
   generatedAt: string;
 }
+
+// ---------------------------------------------------------------------------------------
+// Emoji reactions on comments (CORE, free tier — no AI, no ML, no stored state)
+// ---------------------------------------------------------------------------------------
+//
+// Reactions are FETCHED ON DEMAND and NEVER STORED. There is no column, no migration and no
+// sync cost: the fat walk query is untouched, and a batched client-side loader turns "every
+// comment on screen wants its reactions" into ONE request per tick (see the backend route
+// POST /api/reactions/lookup and the frontend hooks/useReactions.ts).
+//
+// The wire deliberately addresses a target by its LOCAL database id, not its GitHub node id:
+//   • those ids are already on CommentDetail / PrCommentDetail / ReviewDetail, so no read
+//     payload had to grow a field,
+//   • and the server resolves local id → node id through an accountId-scoped join, which
+//     makes tenancy STRUCTURAL. A client cannot name a node id it does not own, so the id
+//     list can never become an existence oracle over another tenant's GitHub content or a
+//     way to spend this account's GitHub quota on arbitrary nodes.
+
+/**
+ * GitHub's fixed reaction set, lowercased at the wire boundary (the same convention as
+ * MlSeverity). Exactly eight — `ReactionContent` in the GraphQL schema. The picker offers all
+ * eight because a reaction added on github.com must be renderable here; the BAR renders only
+ * the non-empty groups.
+ */
+export type ReactionContent =
+  | 'thumbs_up'
+  | 'thumbs_down'
+  | 'laugh'
+  | 'hooray'
+  | 'confused'
+  | 'heart'
+  | 'rocket'
+  | 'eyes';
+
+/** Picker order — GitHub's own order on the web UI. */
+export const REACTION_CONTENTS: ReactionContent[] = [
+  'thumbs_up',
+  'thumbs_down',
+  'laugh',
+  'hooray',
+  'confused',
+  'heart',
+  'rocket',
+  'eyes',
+];
+
+/** The glyph rendered for each content value. */
+export const REACTION_EMOJI: Record<ReactionContent, string> = {
+  thumbs_up: '👍',
+  thumbs_down: '👎',
+  laugh: '😄',
+  hooray: '🎉',
+  confused: '😕',
+  heart: '❤️',
+  rocket: '🚀',
+  eyes: '👀',
+};
+
+/**
+ * The three reactable things this product renders. Same three id spaces as MlLabelTargetKind
+ * — `review_comments.id`, `pr_comments.id`, `reviews.id` — so every lookup MUST carry the kind.
+ *
+ * ⚠ There is deliberately NO `'thread'`. `PullRequestReviewThread` is NOT in GitHub's
+ * `Reactable` interface (verified against the live schema): a thread as a whole cannot carry
+ * reactions, only its constituent comments can. A thread-level bar would be a fabrication that
+ * could never round-trip to github.com.
+ */
+export type ReactionTargetKind = 'review_comment' | 'pr_comment' | 'review';
+
+/** One non-empty reaction group on a target. Zero-count groups are filtered server-side. */
+export interface ReactionGroupSummary {
+  content: ReactionContent;
+  /** Reactor count. Always ≥ 1 — GitHub returns all eight groups, mostly zeroed, and the
+   *  server drops the empty ones so the wire (and every consumer's filter) stays small. */
+  count: number;
+  /** True when the signed-in token is one of the reactors — the "pressed" chip state. */
+  viewerHasReacted: boolean;
+}
+
+/** A target addressed by (kind, LOCAL id). */
+export interface ReactionTargetRef {
+  kind: ReactionTargetKind;
+  id: number;
+}
+
+/** Everything the bar needs for one target. */
+export interface ReactionState extends ReactionTargetRef {
+  groups: ReactionGroupSummary[];
+  /**
+   * GitHub's own `viewerCanReact` — false on a locked conversation or an archived repo even
+   * for a maintainer, true for any authenticated user on a public repo. This is the ONLY gate
+   * on the add affordance; do NOT substitute `repos.viewer_permission`, which answers a
+   * different question.
+   */
+  viewerCanReact: boolean;
+}
+
+/**
+ * The batched read. A POST because the target list is a body, not a path — the same
+ * "mutating VERB with GET-shaped cost" shape as POST /api/prs/:id/refresh, and it keeps the
+ * cross-origin guard applying.
+ */
+export interface ReactionLookupBody {
+  targets: ReactionTargetRef[];
+}
+
+export interface ReactionLookupResponse {
+  /**
+   * One entry per target the account owns AND GitHub answered for. A target that is unknown,
+   * foreign, deleted upstream or invisible to the token is simply ABSENT — "no reactions" and
+   * "we could not see it" both mean "render nothing", and an explicit 404 per id would be the
+   * oracle the local-id addressing exists to avoid.
+   */
+  results: ReactionState[];
+  generatedAt: string;
+}
+
+/** Toggle one reaction. `add:false` removes it. */
+export interface ReactionWriteBody extends ReactionTargetRef {
+  content: ReactionContent;
+  add: boolean;
+}
+
+/**
+ * The post-write state, read straight off the mutation payload's `subject` — GitHub hands back
+ * the fresh group set in the same round trip, which is how this write route satisfies the house
+ * rule that a GitHub write must stamp/confirm rather than promise "on the next sync". Nothing
+ * is stored locally, so there is nothing to stamp: this response IS the new truth.
+ */
+export type ReactionWriteResponse = ReactionState;

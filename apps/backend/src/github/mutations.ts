@@ -7,7 +7,11 @@
 // GraphQL note: @octokit/graphql RESERVES the variable name `query`. The
 // operation-variable here is named `input` / etc., never `query`.
 
-import type { MergeMethod } from '@pierre-review/shared';
+import type {
+  MergeMethod,
+  ReactionContent,
+  ReactionGroupSummary,
+} from '@pierre-review/shared';
 import {
   getGraphqlClientFor,
   ghRestGetDiffStatus,
@@ -17,6 +21,8 @@ import {
   ghRestPostNoContent,
   ghRestPutStatus,
 } from './client.js';
+import type { GqlReactionGroup } from './queries.js';
+import { summariseReactionGroups, toGithubReactionContent } from './reactions.js';
 
 // ---- Review-thread reply (GraphQL) ----
 
@@ -1038,4 +1044,101 @@ export async function dequeuePullRequestFromQueue(
 ): Promise<void> {
   const gql = getGraphqlClientFor(token);
   await gql<GqlDequeueResponse>(DEQUEUE_MUTATION, { input: { id: prNodeId } });
+}
+
+// ---- Emoji reactions (GraphQL) ----
+//
+// GraphQL for all three target kinds, not REST, and not by choice: GitHub's REST reactions API
+// has endpoints for issue comments and PR review comments but NONE for a pull request REVIEW,
+// and a review body is the highest-value reaction target in this product (it is where a bot's
+// summary verdict lands). One code path beats two.
+//
+// `removeReaction` needs only (subjectId, content) — unlike REST, which requires a reaction id
+// you must first list — so add and remove are genuinely symmetric.
+//
+// The payload's `subject` carries the FRESH post-write state, which is what lets the route
+// return authoritative truth in one round trip instead of promising "on the next sync".
+// Nothing about reactions is stored locally, so there is no row to stamp.
+
+interface GqlReactionMutationResponse {
+  // Both payloads are schema-NULLABLE on `subject`; guard before dereferencing.
+  subject: {
+    id: string;
+    viewerCanReact?: boolean | null;
+    reactionGroups?: GqlReactionGroup[] | null;
+  } | null;
+}
+
+// ⚠ `reactors` takes NO `first:` — see github/queries.ts for the measured 44× cost cliff.
+const REACTION_SUBJECT_FIELDS = /* GraphQL */ `
+  subject {
+    id
+    ... on Reactable {
+      viewerCanReact
+      reactionGroups {
+        content
+        viewerHasReacted
+        reactors {
+          totalCount
+        }
+      }
+    }
+  }
+`;
+
+const ADD_REACTION_MUTATION = /* GraphQL */ `
+  mutation AddReaction($input: AddReactionInput!) {
+    addReaction(input: $input) {
+      ${REACTION_SUBJECT_FIELDS}
+    }
+  }
+`;
+
+const REMOVE_REACTION_MUTATION = /* GraphQL */ `
+  mutation RemoveReaction($input: RemoveReactionInput!) {
+    removeReaction(input: $input) {
+      ${REACTION_SUBJECT_FIELDS}
+    }
+  }
+`;
+
+/**
+ * Toggle one reaction on one subject. `subjectNodeId` is the comment / review body's GitHub
+ * node id; `content` is the lowercase wire value, mapped to GitHub's enum here.
+ *
+ * Returns the subject's post-write group set. Adding a reaction the viewer already has (or
+ * removing one they never had) is idempotent on GitHub's side, so a double-click cannot
+ * desynchronise the count.
+ *
+ * ⚠ ASYMMETRY WITH THE READ PATH, and it is GitHub's, not ours. `fetchReactionsForNodes`
+ * feeds `noteBudget` from the `rateLimit` block it selects; this cannot, because `rateLimit`
+ * is a field on the `Query` root ONLY — GitHub's `Mutation` type does not expose it
+ * (verified by introspection), so there is no block to select here. Reading it back would
+ * mean plumbing the HTTP response headers out of the graphql client, which is not worth one
+ * budget observation per user click. The PROTECTIVE half is covered regardless: the caller
+ * classifies a failure through `isRateLimitError` and calls `noteLimited`, so a toggle that
+ * discovers the limit still teaches the shared budget and the next lookup skips itself.
+ */
+export async function setReaction(
+  token: string,
+  subjectNodeId: string,
+  content: ReactionContent,
+  add: boolean,
+): Promise<{ groups: ReactionGroupSummary[]; viewerCanReact: boolean }> {
+  const gql = getGraphqlClientFor(token);
+  const input = { subjectId: subjectNodeId, content: toGithubReactionContent(content) };
+  const res = await gql<
+    { addReaction: GqlReactionMutationResponse } & { removeReaction: GqlReactionMutationResponse }
+  >(add ? ADD_REACTION_MUTATION : REMOVE_REACTION_MUTATION, { input });
+  const payload = add ? res.addReaction : res.removeReaction;
+  const subject = payload?.subject ?? null;
+  if (!subject) {
+    throw new Error(
+      `GitHub returned no subject for the reaction ${add ? 'add' : 'remove'} (it may still have applied)`,
+    );
+  }
+  return {
+    groups: summariseReactionGroups(subject.reactionGroups),
+    viewerCanReact: subject.viewerCanReact === true,
+  };
 }

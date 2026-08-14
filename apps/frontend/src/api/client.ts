@@ -127,6 +127,10 @@ import type {
   SearchResponse,
   Workspace,
   WorkspacesResponse,
+  ReactionLookupBody,
+  ReactionLookupResponse,
+  ReactionWriteBody,
+  ReactionWriteResponse,
   ReplyResult,
   ReplyToThreadBody,
   ResolveThreadBody,
@@ -745,6 +749,23 @@ export const api = {
   // no severity-api configured (empty labels / enabled:false) — the SPA's gate is
   // `useMlSeverityEnabled()` off /api/me, not a 404 from here.
   prMlLabels: (prId: number) => get<PrMlLabelsResponse>(`/api/prs/${prId}/ml-labels`),
+
+  // ---- Emoji reactions (CORE, free tier; GitHub-live, nothing stored) ---------------------
+  // Both are POSTs. The LOOKUP is a read wearing a mutating verb because it carries a target
+  // LIST in its body (the `POST /api/prs/:id/refresh` precedent) — never call it per comment:
+  // it exists to be fed by the microtask batcher in hooks/useReactions.ts, which is what keeps
+  // a whole Feed page at one request instead of one per comment.
+  reactionLookup: (body: ReactionLookupBody) =>
+    fetch('/api/reactions/lookup', jsonBody('POST', body)).then((r) =>
+      handle<ReactionLookupResponse>(r),
+    ),
+  // Toggle one reaction (`add:false` removes). The response is the AUTHORITATIVE post-write
+  // group set straight off GitHub's mutation payload, so the caller overwrites its optimistic
+  // state with it rather than refetching.
+  setReaction: (body: ReactionWriteBody) =>
+    fetch('/api/reactions', jsonBody('POST', body)).then((r) =>
+      handle<ReactionWriteResponse>(r),
+    ),
   botSeverity: (workspaceId: number, repoIds?: number[] | null) =>
     get<BotSeverityResponse>(
       withQuery('/api/bot-severity', workspaceParam(workspaceId), repoIdsParam(repoIds)),

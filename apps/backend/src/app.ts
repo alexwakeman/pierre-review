@@ -36,6 +36,7 @@ import { searchRoutes } from './api/routes/search.js';
 import { billingRoutes } from './api/routes/billing.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
 import { mlLabelRoutes } from './api/routes/ml-labels.js';
+import { reactionRoutes } from './api/routes/reactions.js';
 import { webhookRoutes } from './api/routes/webhooks.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -230,6 +231,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   // configured (empty labels / `enabled:false`), so nothing 404s on a deployment that has the
   // data but not the service. Generation is the background worker's job (sync/ml-enrichment.ts).
   await app.register(mlLabelRoutes);
+  // Emoji reactions (CORE, free tier). Both routes are GitHub-LIVE and store nothing: the
+  // batched lookup turns a screenful of comments into one GraphQL call, the toggle returns the
+  // authoritative post-write groups. Registered in both modes; their rate-limit tiers are
+  // spelled out explicitly in api/plugins/rate-limit.ts.
+  await app.register(reactionRoutes);
   // Stripe billing seam (checkout redirect + webhook). Registered in both modes;
   // inert until the STRIPE_* env vars are set (webhook 501s unconfigured).
   await app.register(billingRoutes);

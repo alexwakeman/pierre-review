@@ -802,3 +802,73 @@ export interface ViewerReposGqlResponse {
   };
   rateLimit: { cost: number; remaining: number };
 }
+
+// ---------------------------------------------------------------------------------------
+// Emoji reactions — the BATCHED on-demand read (nothing here is used by the sync walk)
+// ---------------------------------------------------------------------------------------
+//
+// Deliberately NOT folded into PR_NODE_FIELDS. Reactions are mutable state that GitHub does
+// not stamp with an `updatedAt` and does not deliver over any webhook we subscribe to, so
+// syncing them would buy staleness at a real price: measured on a 25-PR page, the cheap
+// selection below adds 0 GraphQL points but inflates the RESPONSE BODY by ~32.5% on every
+// walk of every repo, forever, for a corpus that is overwhelmingly reaction-free. Fetching
+// on demand costs one cheap query per screenful instead, and is always current.
+//
+// ⚠ MEASURED COST CLIFF — `reactors` MUST NOT take a `first:`/`last:` argument. With no
+// pagination argument it is not counted as a connection and the whole query costs 1 point;
+// `reactors(first: 1)` measured 665 points against the same shape (44×). That is the entire
+// reason this product shows reaction COUNTS and never reactor identities.
+//
+// `... on Reactable` rather than three concrete inline fragments: `Reactable` is the GraphQL
+// interface that owns both `reactionGroups` and `viewerCanReact`, and every kind we address
+// (PullRequestReviewComment / IssueComment / PullRequestReview) implements it. Verified live.
+export const REACTION_NODES_QUERY = /* GraphQL */ `
+  query ReactionsByNode($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      __typename
+      id
+      ... on Reactable {
+        viewerCanReact
+        reactionGroups {
+          content
+          viewerHasReacted
+          reactors {
+            totalCount
+          }
+        }
+      }
+    }
+    rateLimit {
+      remaining
+      resetAt
+      cost
+    }
+  }
+`;
+
+/** One group as GitHub returns it. `content` is the UPPERCASE ReactionContent enum. */
+export interface GqlReactionGroup {
+  content: string;
+  viewerHasReacted: boolean;
+  reactors: { totalCount: number } | null;
+}
+
+/**
+ * A node from REACTION_NODES_QUERY. Every field past `id` is optional because a node id can
+ * resolve to a type that is not Reactable, and because `graphqlTolerant` hands back partial
+ * data with forbidden fields NULLED — "GitHub says no reactions" and "we never received the
+ * selection" are indistinguishable, so the consumer must treat a missing selection as
+ * unknown rather than as an empty set.
+ */
+export interface GqlReactableNode {
+  __typename: string;
+  id: string;
+  viewerCanReact?: boolean | null;
+  reactionGroups?: GqlReactionGroup[] | null;
+}
+
+export interface ReactionNodesGqlResponse {
+  /** GitHub returns a null slot for any id the token cannot see (deleted, private, foreign). */
+  nodes: Array<GqlReactableNode | null> | null;
+  rateLimit?: { remaining: number; resetAt: string; cost: number } | null;
+}

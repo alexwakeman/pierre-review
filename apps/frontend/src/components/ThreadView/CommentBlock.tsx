@@ -1,5 +1,6 @@
 import type { CommentDetail, MlLabel, User } from '@pierre-review/shared';
 import { MlSeverityBadge } from '../MlSeverityBadge.js';
+import { ReactionBar } from '../ReactionBar.js';
 import { Avatar } from '../CommentCard.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
@@ -63,6 +64,13 @@ export function CommentBlock({
       <div className="mt-1 text-sm">
         <Markdown>{comment.body}</Markdown>
       </div>
+      {/* Emoji reactions, directly under the text they react to. THIS ONE MOUNT reaches all
+          eight ThreadCard mount sites (Threads tab, Feed, search results, attention cards, the
+          Pro themes drill-down and both diff views) — which is the whole reason the reaction
+          loader batches per tick rather than per PR: the Feed spans many PRs, so a per-PR index
+          route could not have served it. Renders nothing (and issues no request of its own)
+          when the comment has no reactions and the viewer may not add one. */}
+      <ReactionBar kind="review_comment" id={comment.id} className="mt-1.5" />
     </div>
   );
 }

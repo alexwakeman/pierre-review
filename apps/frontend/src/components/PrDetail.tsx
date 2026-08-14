@@ -40,6 +40,7 @@ import { ChecksTab } from './ChecksTab.js';
 import { CommentAnnotations, ReviewCheckButton } from './CommentAnnotations.js';
 import type { MlSeverity } from '@pierre-review/shared';
 import { MlSeverityBadge } from './MlSeverityBadge.js';
+import { ReactionBar } from './ReactionBar.js';
 import { mlLabelKey, useMlLabelIndex, useMlSeverityEnabled } from '../hooks/useMlLabels.js';
 import { ChangesTab } from './ChangesTab.js';
 import type { DiffFocusTarget } from './diff/FileDiffView.js';
@@ -501,6 +502,19 @@ function PrCommentsList({
             <div className="mt-1 text-sm">
               <Markdown>{it.body}</Markdown>
             </div>
+            {/* Emoji reactions on this conversation item. BOTH kinds are reactable on GitHub —
+                an issue comment is `IssueComment` and a review body is `PullRequestReview` —
+                and they are SEPARATE id spaces on separate tables, exactly like the ML badge
+                above, so the kind rides the same `isComment` discriminator. (A review body is
+                the highest-value target in this product: it is where a bot's summary verdict
+                lands, and REST has no reactions endpoint for it at all, which is why the whole
+                write path is GraphQL.) Renders nothing when there are none and the viewer may
+                not add one. */}
+            <ReactionBar
+              kind={isComment ? 'pr_comment' : 'review'}
+              id={it.id}
+              className="mt-1.5 pl-2"
+            />
             <div className="mt-2 flex items-center gap-3 pl-2 text-[11px]">
               {replyingTo !== rowKey && (
                 <button

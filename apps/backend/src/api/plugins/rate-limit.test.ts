@@ -230,6 +230,23 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/auto-merge')).toEqual(['read']);
     expect(tiers('GET', '/api/branch-status')).toEqual(['read']);
   });
+
+  // Emoji reactions. NEITHER route lives under /api/prs/<id>/, so neither is reachable from the
+  // `hitsGithub` alternation — they are matched by exact string ABOVE the mutating block, and
+  // these assertions are what stops that from rotting. Both spend GitHub GraphQL quota: the
+  // lookup converts 1:1 into a `nodes(ids:)` call, the toggle is an ordinary mutation.
+  it('puts the batched reaction lookup on the detail bucket, not the blanket read', () => {
+    expect(tiers('POST', '/api/reactions/lookup')).toEqual(['pr_detail', 'read']);
+    // The whole point of the explicit line: it must not be the bare fall-through.
+    expect(tiers('POST', '/api/reactions/lookup')).not.toEqual(['read']);
+  });
+
+  it('throttles the reaction toggle as the GitHub write it is', () => {
+    expect(tiers('POST', '/api/reactions')).toEqual(['github_write']);
+    // ...and the two must not collapse into one bucket: a read-shaped 60/min ceiling on the
+    // write, or a write ceiling on the poll-shaped read, would each be wrong in its own way.
+    expect(tiers('POST', '/api/reactions')).not.toEqual(tiers('POST', '/api/reactions/lookup'));
+  });
 });
 
 describe('tierFor — unauthenticated surface', () => {
