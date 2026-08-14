@@ -69,6 +69,152 @@ export function patchLineCount(patch: string | null | undefined): number {
   return patch.replace(/\n$/, '').split('\n').length;
 }
 
+// Find the row a (line, side) pair addresses — the "reveal this line" primitive behind
+// FileDiffView's `focus` prop (the Changes-tab file tree and the Claude-Review finding
+// deep-link both drive it). Deliberately NOT `commentTarget`/`anchorIndexFor` from
+// FileDiffView: those map a CONTEXT row to the RIGHT side only, because that is where an
+// inline comment must be anchored — which silently loses every LEFT-side target sitting on
+// an unchanged line. Here the side is known, so match it honestly on both sides. Prefer the
+// LAST match (line numbers are unique per side within one file's patch, so this only matters
+// for malformed input).
+export function lineRowIndex(
+  rows: DiffRow[],
+  line: number,
+  side: 'LEFT' | 'RIGHT',
+): number | null {
+  let match: number | null = null;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row == null) continue;
+    if (side === 'RIGHT') {
+      if ((row.kind === 'add' || row.kind === 'context') && row.newLine === line) match = i;
+    } else if (row.kind === 'del' || row.kind === 'context') {
+      if (row.oldLine === line) match = i;
+    }
+  }
+  return match;
+}
+
+// ---- changed-file tree (the Changes tab's navigation rail) ----
+
+// The minimum a file needs to appear in the tree. Deliberately structural, not the wire
+// type: it is satisfied by both `PrFileDiff` (the patched list) and `PrFileChange` (the
+// lean metadata fallback), so one tree serves both branches of the Changes tab.
+export interface FileTreeEntry {
+  path: string;
+  additions: number;
+  deletions: number;
+  status?: PrFileDiffStatus;
+  previousPath?: string | null;
+}
+
+export interface FileTreeNode {
+  kind: 'dir' | 'file';
+  // The row's label. For a directory this may be a COLLAPSED chain of segments
+  // ("src/api/routes") — see below.
+  name: string;
+  // Full path from the root: the directory path, or the file path (which is also the
+  // identity FileDiffView keys its blocks on).
+  path: string;
+  children: FileTreeNode[];
+  // Subtree rollups (a file counts as itself).
+  fileCount: number;
+  additions: number;
+  deletions: number;
+  // Files only.
+  entry: FileTreeEntry | null;
+}
+
+interface MutableDir {
+  dirs: Map<string, MutableDir>;
+  files: Map<string, FileTreeEntry>;
+}
+
+function newDir(): MutableDir {
+  return { dirs: new Map(), files: new Map() };
+}
+
+// Byte-ish ordering, not `localeCompare` — the tree is a machine listing of paths and its
+// order must be stable across locales (and reproducible in a unit test).
+function byName(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function dirToNodes(dir: MutableDir, prefix: string): FileTreeNode[] {
+  const nodes: FileTreeNode[] = [];
+  // Directories before files at every level (the convention every file explorer uses).
+  for (const name of [...dir.dirs.keys()].sort(byName)) {
+    const child = dir.dirs.get(name);
+    if (child) nodes.push(dirToNode(name, child, prefix));
+  }
+  for (const name of [...dir.files.keys()].sort(byName)) {
+    const entry = dir.files.get(name);
+    if (!entry) continue;
+    nodes.push({
+      kind: 'file',
+      name,
+      path: entry.path,
+      children: [],
+      fileCount: 1,
+      additions: entry.additions,
+      deletions: entry.deletions,
+      entry,
+    });
+  }
+  return nodes;
+}
+
+function dirToNode(name: string, dir: MutableDir, prefix: string): FileTreeNode {
+  // COLLAPSE SINGLE-CHILD DIRECTORY CHAINS into one row ("apps/frontend/src" rather than
+  // three nested rows). On a monorepo's own paths this is the difference between a readable
+  // rail and a staircase; it never hides a decision, because a chain with one child offers
+  // no choice.
+  let label = name;
+  let path = prefix === '' ? name : `${prefix}/${name}`;
+  let cur = dir;
+  while (cur.files.size === 0 && cur.dirs.size === 1) {
+    const childName = [...cur.dirs.keys()][0];
+    const childDir = childName == null ? undefined : cur.dirs.get(childName);
+    if (childName == null || childDir == null) break;
+    label = `${label}/${childName}`;
+    path = `${path}/${childName}`;
+    cur = childDir;
+  }
+  const children = dirToNodes(cur, path);
+  let fileCount = 0;
+  let additions = 0;
+  let deletions = 0;
+  for (const c of children) {
+    fileCount += c.fileCount;
+    additions += c.additions;
+    deletions += c.deletions;
+  }
+  return { kind: 'dir', name: label, path, children, fileCount, additions, deletions, entry: null };
+}
+
+// Fold a flat changed-file list into its real project directory hierarchy. Pure (no React)
+// so it can be unit-tested. Keyed on the NEW path — `previousPath` is display-only, exactly
+// as FileDiffView keys its blocks (`key={f.path}`).
+export function buildFileTree(entries: readonly FileTreeEntry[]): FileTreeNode[] {
+  const root = newDir();
+  for (const entry of entries) {
+    const segments = entry.path.split('/').filter((s) => s !== '');
+    const basename = segments.pop();
+    if (basename == null) continue; // defensive: a path that is only slashes
+    let cur = root;
+    for (const seg of segments) {
+      let next = cur.dirs.get(seg);
+      if (!next) {
+        next = newDir();
+        cur.dirs.set(seg, next);
+      }
+      cur = next;
+    }
+    cur.files.set(basename, entry);
+  }
+  return dirToNodes(root, '');
+}
+
 // Machine-generated language lock files, by exact basename (case-sensitive, matching
 // what git records). Used by the Changes/AI-Fix collapse-by-default heuristic — these
 // files are all noise, so they ALWAYS start collapsed regardless of size. Deliberately

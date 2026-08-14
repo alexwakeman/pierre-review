@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type {
   DerivedState,
@@ -42,6 +42,7 @@ import type { MlSeverity } from '@pierre-review/shared';
 import { MlSeverityBadge } from './MlSeverityBadge.js';
 import { mlLabelKey, useMlLabelIndex, useMlSeverityEnabled } from '../hooks/useMlLabels.js';
 import { ChangesTab } from './ChangesTab.js';
+import type { DiffFocusTarget } from './diff/FileDiffView.js';
 import { PrCommentComposer } from './PrCommentComposer.js';
 import { SkeletonBlock, SkeletonLine } from './Skeleton.js';
 // The two Pro-only agentic tabs are the heaviest components in the app (~3k LOC combined,
@@ -611,6 +612,43 @@ export function PrDetail({
   const { aiAnalysis, aiFix, claudeReview: claudeReviewEnabled } = useProCapabilities();
   const aiFixTabEnabled = aiAnalysis || aiFix;
   const [tab, setTab] = useState<Tab>('overview');
+  // "Show this finding in the Changes tab" — the Claude Review tab's code anchors hand a
+  // (path, line, side) here and we switch tabs; ChangesTab turns it into FileDiffView's
+  // `focus`. LOCAL state on purpose: both tabs live in THIS PrDetail instance, so unlike
+  // threadStateFilter/claudeTabFocus there is no global field to leak across PRs and no
+  // `selectedPrId === prId` guard to remember. `nonce` makes re-clicking the same finding
+  // re-scroll (an effect keyed on a boolean cannot re-fire).
+  const [changesFocus, setChangesFocus] = useState<DiffFocusTarget | null>(null);
+  /**
+   * THE ONLY WAY TO CHANGE TABS — every path below goes through this, and the reason is
+   * `changesFocus`.
+   *
+   * A deep-link target is consumed by ChangesTab when Changes is on screen, but nothing
+   * un-sets it afterwards, so it OUTLIVES the visit: land on Changes via a finding anchor, let
+   * anything move the tab away (selecting a thread forces `threads`, a comment deep link forces
+   * `overview`, …), and the target is still sitting there. Any later arrival at Changes then
+   * re-fires the OLD finding's jump — the user asked for "the diff" and got someone else's line.
+   *
+   * The tab bar already cleared it by hand, which is exactly why this is a helper rather than a
+   * second hand-patched call site: the header's "N files · +X −Y" button didn't, and that was the
+   * live bug. Clearing on EVERY tab change makes the stale-target state unrepresentable instead
+   * of making each new call site remember.
+   */
+  const goToTab = useCallback((t: Tab): void => {
+    setChangesFocus(null);
+    setTab(t);
+  }, []);
+  const openInChanges = (
+    path: string,
+    line: number | null,
+    side: 'LEFT' | 'RIGHT',
+  ): void => {
+    // THE ONE DELIBERATE EXCEPTION to `goToTab`, and the ordering is the whole point: this path
+    // exists to SET a focus, and `goToTab` clears it. Move the tab first, then arm the target, so
+    // no clearing sits between the two.
+    setTab('changes');
+    setChangesFocus({ path, line, side, nonce: Date.now() });
+  };
   const [activitySince, setActivitySince] = useState<string | null>(null);
   const qc = useQueryClient();
   const openPrFocused = useFilters((s) => s.openPrFocused);
@@ -655,15 +693,15 @@ export function PrDetail({
   // Selecting a thread (e.g. via a timeline marker) forces the Threads tab,
   // where the thread list lives and auto-scrolls to the selected thread.
   useEffect(() => {
-    if (selectedThreadId != null) setTab('threads');
-  }, [selectedThreadId]);
+    if (selectedThreadId != null) goToTab('threads');
+  }, [selectedThreadId, goToTab]);
 
   // Clicking a review-bot chip in Overview (ChecksTab) sets threadBotFilter → jump to the
   // Threads tab, which then shows only that vendor's threads.
   const threadBotFilter = useFilters((s) => s.threadBotFilter);
   useEffect(() => {
-    if (threadBotFilter != null) setTab('threads');
-  }, [threadBotFilter]);
+    if (threadBotFilter != null) goToTab('threads');
+  }, [threadBotFilter, goToTab]);
 
   // Arriving from the resolvable-bot-threads tab presets a derived-state pill (likely_addressed)
   // → force the Threads tab so the relevant threads are visible immediately. The preset belongs
@@ -680,43 +718,43 @@ export function PrDetail({
   const threadSeverityFilter =
     selectedPrId === prId ? rawThreadSeverityFilter : EMPTY_THREAD_SEVERITY_FILTER;
   useEffect(() => {
-    if (threadStateFilter.size > 0) setTab('threads');
-  }, [threadStateFilter]);
+    if (threadStateFilter.size > 0) goToTab('threads');
+  }, [threadStateFilter, goToTab]);
 
   // A timeline deep link to an Activity entry (e.g. the commit popover) forces the
   // Activity tab and clears the "since" filter so the target is visible; the list
   // then scrolls to + flashes it.
   useEffect(() => {
     if (activityFocusForPr) {
-      setTab('activity');
+      goToTab('activity');
       setActivitySince(null);
     }
-  }, [activityFocusForPr]);
+  }, [activityFocusForPr, goToTab]);
 
   // The global Claude-review banner deep-links here: open the Claude Review tab
   // for the matching PR, then consume the signal.
   useEffect(() => {
     if (claudeReviewEnabled && claudeTabFocus && pr && claudeTabFocus.prId === pr.id) {
-      setTab('claude_review');
+      goToTab('claude_review');
       consumeClaudeTabFocus();
     }
-  }, [claudeTabFocus, pr, claudeReviewEnabled, consumeClaudeTabFocus]);
+  }, [claudeTabFocus, pr, claudeReviewEnabled, consumeClaudeTabFocus, goToTab]);
 
   // "Generate fix from this review" (or any deep link) → open the AI Fix tab for the
   // matching PR. The signal is NOT consumed here — AiFixTab reads its `reviewText` to
   // seed the prompt, then consumes it.
   useEffect(() => {
     if (aiFixTabEnabled && aiFixTabFocus && pr && aiFixTabFocus.prId === pr.id) {
-      setTab('ai_fix');
+      goToTab('ai_fix');
     }
-  }, [aiFixTabFocus, pr, aiFixTabEnabled]);
+  }, [aiFixTabFocus, pr, aiFixTabEnabled, goToTab]);
 
   // A timeline deep link to a PR comment (the pr_comment popover's "Open in detail
   // pane") forces the Overview tab, where PrCommentsList then scrolls to + flashes
   // it. PrCommentsList consumes the signal (not here) once it has scrolled.
   useEffect(() => {
-    if (commentFocusForPr != null) setTab('overview');
-  }, [commentFocusForPr]);
+    if (commentFocusForPr != null) goToTab('overview');
+  }, [commentFocusForPr, goToTab]);
 
   // Capture the last-viewed instant before marking (so new comments highlight
   // on this visit), then mark the PR viewed and refresh the list views' badges.
@@ -766,8 +804,8 @@ export function PrDetail({
   // If the active tab is bot_activity but this PR has no bot reviewers (e.g. switched to a
   // human-only PR while on the tab), fall back to Overview so the content can't strand.
   useEffect(() => {
-    if (tab === 'bot_activity' && !botTabVisible) setTab('overview');
-  }, [tab, botTabVisible]);
+    if (tab === 'bot_activity' && !botTabVisible) goToTab('overview');
+  }, [tab, botTabVisible, goToTab]);
 
   // Keep a pinned tab's label fresh if the PR detail (re)loads with a new title /
   // author (e.g. a renamed PR). No-op when the PR isn't pinned or nothing changed.
@@ -945,7 +983,7 @@ export function PrDetail({
               <button
                 type="button"
                 onClick={() => {
-                  setTab('activity');
+                  goToTab('activity');
                   setActivitySince(pr.lastViewedAt);
                 }}
                 className="ml-auto shrink-0 rounded bg-sky-500/15 px-1.5 py-0.5 text-xs font-medium text-sky-500 hover:bg-sky-500/25"
@@ -968,7 +1006,7 @@ export function PrDetail({
               <span>·</span>
               <button
                 type="button"
-                onClick={() => setTab('changes')}
+                onClick={() => goToTab('changes')}
                 className="inline-flex shrink-0 items-center gap-1 font-medium"
                 title="View the files changed by this PR"
               >
@@ -1006,7 +1044,10 @@ export function PrDetail({
             <button
               key={t}
               type="button"
-              onClick={() => setTab(t)}
+              // Picking a tab by hand drops any pending "show me this finding" target, so
+              // opening Changes to browse the diff doesn't re-jump to the last finding — which
+              // is `goToTab`'s whole job, so this is no longer a special case.
+              onClick={() => goToTab(t)}
               className={`-mb-px border-b-2 px-3 py-1.5 text-xs ${
                 tab === t
                   ? 'border-blue-500 text-blue-500'
@@ -1060,7 +1101,7 @@ export function PrDetail({
             <ChecksTab
               pr={pr}
               usersById={usersById}
-              onShowBotActivity={botTabVisible ? () => setTab('bot_activity') : undefined}
+              onShowBotActivity={botTabVisible ? () => goToTab('bot_activity') : undefined}
             />
             <div className="border-t border-gray-200 dark:border-gray-800">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-1 pt-2">
@@ -1107,13 +1148,17 @@ export function PrDetail({
             onConsumed={consumeActivityFocus}
           />
         ) : tab === 'changes' ? (
-          <ChangesTab pr={pr} />
+          <ChangesTab pr={pr} focus={changesFocus} />
         ) : tab === 'bot_activity' ? (
           <PrBotBehaviourTab pr={pr} />
         ) : tab === 'ai_fix' ? (
           <AiFixTab pr={pr} />
         ) : (
-          <ClaudeReviewTab pr={pr} usersById={usersById} />
+          <ClaudeReviewTab
+            pr={pr}
+            usersById={usersById}
+            onOpenInChanges={openInChanges}
+          />
         )}
         </Suspense>
       </div>

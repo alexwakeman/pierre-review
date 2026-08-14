@@ -1,15 +1,25 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { PrDetail, PrFileChange } from '@pierre-review/shared';
 import { usePrFiles } from '../hooks/usePr.js';
 import { useUsers } from '../hooks/useTimeline.js';
+import { buildFileTree, type FileTreeEntry } from '../lib/diff.js';
 import { indexUsers } from '../lib/ui.js';
-import { FileDiffView, type DiffThreadContext } from './diff/FileDiffView.js';
+import {
+  FileDiffView,
+  type DiffFocusTarget,
+  type DiffThreadContext,
+} from './diff/FileDiffView.js';
+import { FileTree } from './diff/FileTree.js';
 
 // The "Changes" tab: every file the PR touches with its inline diff hunks and per-line
 // review-comment affordances. The per-file rendering lives in the shared FileDiffView
 // (also used, read-only, by the AI Fix tab); this file owns the data plumbing, the
-// summary header, and the lean metadata fallback. Patches are hydrated on demand
-// (usePrFiles); on a miss we fall back to the metadata file list with GitHub links.
+// summary header, the navigation rail and the lean metadata fallback. Patches are hydrated
+// on demand (usePrFiles); on a miss we fall back to the metadata file list with GitHub links.
+
+// Below this many changed files the navigation rail is HIDDEN: a 3-file PR does not earn
+// 224px of width, and the bottom detail pane is only 384px tall by default.
+const TREE_MIN_FILES = 5;
 
 // ---- fallback metadata row (when patches aren't available) ----
 
@@ -65,7 +75,15 @@ function Header({ pr, extra }: { pr: PrDetail; extra?: JSX.Element }): JSX.Eleme
   );
 }
 
-export function ChangesTab({ pr }: { pr: PrDetail }): JSX.Element {
+export function ChangesTab({
+  pr,
+  focus: externalFocus,
+}: {
+  pr: PrDetail;
+  // An outside-in reveal request (today: a Claude Review finding's code anchor). The tree's
+  // own clicks feed the same state, so there is exactly ONE focus target at a time.
+  focus?: DiffFocusTarget | null;
+}): JSX.Element {
   const { data, isLoading, isError } = usePrFiles(pr.id);
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
@@ -75,6 +93,34 @@ export function ChangesTab({ pr }: { pr: PrDetail }): JSX.Element {
     usersById,
     prUrl: pr.githubUrl,
   };
+
+  // The focus target is STICKY (never cleared once shown): it doubles as the rail's selected
+  // row, and the highlight fades on its own timer inside FileDiffView. `nonce` is what makes
+  // clicking the same file twice re-scroll.
+  const [focus, setFocus] = useState<DiffFocusTarget | null>(externalFocus ?? null);
+  useEffect(() => {
+    if (externalFocus != null) setFocus(externalFocus);
+  }, [externalFocus]);
+
+  // Computed BEFORE the early returns below — hooks-order rule.
+  const files = data?.files ?? [];
+  const tree = useMemo(
+    () =>
+      buildFileTree(
+        files.map(
+          (f): FileTreeEntry => ({
+            path: f.path,
+            additions: f.additions,
+            deletions: f.deletions,
+            status: f.status,
+            previousPath: f.previousPath ?? null,
+          }),
+        ),
+      ),
+    // `files` is a fresh array each render; the query's data identity is the real input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data?.files],
+  );
 
   // No changes at all on this PR — same empty state as before.
   if (pr.files.length === 0 && pr.changedFilesCount === 0 && !isLoading) {
@@ -96,8 +142,14 @@ export function ChangesTab({ pr }: { pr: PrDetail }): JSX.Element {
     );
   }
 
-  const files = data?.files ?? [];
   const havePatches = !isError && files.length > 0;
+  const showTree = files.length >= TREE_MIN_FILES;
+  // A reveal request for a file this view isn't rendering — the live diff is capped at 100
+  // files, and a Claude Review finding describes the head SHA its run read, not necessarily
+  // this one. Say so rather than letting the click land as a silent no-op.
+  const focusMissing =
+    focus != null &&
+    !files.some((f) => f.path === focus.path || f.previousPath === focus.path);
 
   // Fallback: no patches came back but the PR has changed files — show the lean
   // metadata list (per-file links) + a note, keeping the GitHub deep-links.
@@ -142,8 +194,61 @@ export function ChangesTab({ pr }: { pr: PrDetail }): JSX.Element {
           ) : undefined
         }
       />
-      {/* No divide-y: each file's (sticky) header carries its own bottom border. */}
-      <FileDiffView files={files} commenting={{ prId: pr.id }} threadCtx={threadCtx} />
+      <div className="flex items-start">
+        {/* NAVIGATION RAIL — the changed files in their real directory hierarchy. Sticky
+            rather than its own `h-full overflow-auto` column: the Changes tab has NO scroll
+            container of its own (PrDetail's `min-h-0 flex-1 overflow-auto` is what every
+            per-file `sticky top-0` header sticks to), so a nested full-height scroller here
+            would move that containing block. Hidden below `md` and below TREE_MIN_FILES. */}
+        {showTree && (
+          <div className="sticky top-0 z-20 hidden max-h-[70vh] shrink-0 self-start overflow-y-auto overscroll-contain border-r border-gray-200 bg-white md:block md:w-56 dark:border-gray-800 dark:bg-gray-950">
+            <FileTree
+              nodes={tree}
+              selectedPath={focus?.path ?? null}
+              onSelectFile={(path) => setFocus({ path, nonce: Date.now() })}
+              note={
+                data?.truncated ? (
+                  <div className="px-2 pb-1 pt-0.5 text-[10px] leading-snug text-amber-600 dark:text-amber-400">
+                    Showing {files.length} of {pr.changedFilesCount} files.{' '}
+                    <a
+                      href={`${pr.githubUrl}/files`}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-blue-500 hover:underline"
+                    >
+                      All on GitHub ↗
+                    </a>
+                  </div>
+                ) : null
+              }
+            />
+          </div>
+        )}
+        {/* No divide-y: each file's (sticky) header carries its own bottom border. */}
+        <div className="min-w-0 flex-1">
+          {focusMissing && focus != null && (
+            <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+              <code className="font-mono">{focus.path}</code> isn’t in the diff shown here —
+              it may be outside this PR&apos;s changed files, or beyond the {files.length}-file
+              limit.{' '}
+              <a
+                href={`${pr.githubUrl}/files`}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-blue-500 hover:underline"
+              >
+                View on GitHub ↗
+              </a>
+            </div>
+          )}
+          <FileDiffView
+            files={files}
+            commenting={{ prId: pr.id }}
+            threadCtx={threadCtx}
+            focus={focus}
+          />
+        </div>
+      </div>
       {data?.truncated && (
         <div className="px-4 py-2 text-xs text-gray-400">
           Large diff — not all files are shown.{' '}

@@ -8,10 +8,17 @@ import type {
 } from '@pierre-review/shared';
 import { useAddReviewComment } from '../../hooks/usePrWrites.js';
 import { ApiError } from '../../api/client.js';
-import { isLockFile, parsePatch, patchLineCount, type DiffRow } from '../../lib/diff.js';
+import {
+  isLockFile,
+  lineRowIndex,
+  parsePatch,
+  patchLineCount,
+  type DiffRow,
+} from '../../lib/diff.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
+import { STATUS_META } from './status.js';
 
 // The shared per-file diff renderer used by BOTH the Changes tab (with inline
 // commenting) and the AI Fix tab (read-only, pre-push). Per-file collapsible blocks
@@ -44,9 +51,31 @@ export interface DiffThreadContext {
   onThreadShown?: () => void;
 }
 
+// THE outside-in "reveal this file/line" signal. There are exactly TWO focus grains in this
+// component and they are not interchangeable: `DiffThreadContext.focusThreadId` addresses a
+// THREAD (driven internally by the just-posted-comment self-focus) and this addresses a
+// FILE, optionally a LINE. Every caller-side reveal goes through this one prop — the Changes
+// tab's file tree and the Claude-Review finding deep-link both drive it. Do not add a third.
+//
+// `nonce` is load-bearing: an effect keyed on a boolean cannot re-fire for the same target
+// twice, so clicking the SAME file/line again would do nothing. Give it any monotonically
+// changing value (`Date.now()`).
+export interface DiffFocusTarget {
+  path: string;
+  // null / omitted ⇒ reveal the file (scroll its header into view), not a line.
+  line?: number | null;
+  // Which side of the diff the line number belongs to. Defaults to RIGHT (the new file).
+  side?: 'LEFT' | 'RIGHT';
+  nonce: number;
+}
+
 // How long a just-posted thread keeps its highlight ring after it scrolls into view. Long
 // enough to catch the eye, short enough that it doesn't linger as permanent decoration.
 const POSTED_HIGHLIGHT_MS = 6000;
+
+// Same idea for a focused diff LINE: flash it, then let it go. Shorter than the posted-thread
+// ring because the scroll itself already says "here".
+const FOCUS_HIGHLIGHT_MS = 4000;
 
 // ---- collapse-by-default heuristic (GitHub-style: big files + lock files start collapsed) ----
 const LARGE_PATCH_LINES = 250;
@@ -59,19 +88,6 @@ function startsCollapsed(file: DiffFile): boolean {
   if (file.additions + file.deletions > LARGE_CHANGED_LINES) return true;
   return false;
 }
-
-const STATUS_META: Record<
-  PrFileDiffStatus,
-  { icon: string; label: string; cls: string }
-> = {
-  added: { icon: 'A', label: 'added', cls: 'text-green-600 dark:text-green-400' },
-  removed: { icon: 'D', label: 'removed', cls: 'text-red-500 dark:text-red-400' },
-  modified: { icon: 'M', label: 'modified', cls: 'text-amber-600 dark:text-amber-400' },
-  renamed: { icon: 'R', label: 'renamed', cls: 'text-sky-600 dark:text-sky-400' },
-  copied: { icon: 'C', label: 'copied', cls: 'text-sky-600 dark:text-sky-400' },
-  changed: { icon: 'M', label: 'changed', cls: 'text-amber-600 dark:text-amber-400' },
-  unchanged: { icon: '·', label: 'unchanged', cls: 'text-gray-400' },
-};
 
 // Which side/line an inline comment on this row anchors to (Changes tab only).
 function commentTarget(row: DiffRow): { line: number; side: 'LEFT' | 'RIGHT' } | null {
@@ -116,6 +132,8 @@ function DiffLine({
   open,
   onOpen,
   onClose,
+  focused,
+  focusNonce,
 }: {
   row: DiffRow;
   filePath: string;
@@ -127,13 +145,39 @@ function DiffLine({
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
+  // This row is the current `focus` target: scroll it into view and flash it.
+  focused: boolean;
+  // Changes on every focus request so re-focusing the SAME row re-fires the effect.
+  focusNonce: number | null;
 }): JSX.Element {
   const target = commenting ? commentTarget(row) : null;
   const display = row.kind === 'hunk' ? row.text : row.text.slice(1) || ' ';
 
+  // Scroll-and-flash. Ordinary DOM here (the gated scroll rules are the vis TIMELINE's), so a
+  // ref + scrollIntoView is the whole mechanism — never write scrollTop by hand. `block:
+  // 'center'` and not 'start' because the per-file header is `sticky top-0` and would cover a
+  // top-aligned row.
+  const rowRef = useRef<HTMLTableRowElement>(null);
+  const [flash, setFlash] = useState(false);
+  useEffect(() => {
+    if (!focused) {
+      setFlash(false);
+      return;
+    }
+    rowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setFlash(true);
+    const t = setTimeout(() => setFlash(false), FOCUS_HIGHLIGHT_MS);
+    return () => clearTimeout(t);
+  }, [focused, focusNonce]);
+
   return (
     <>
-      <tr className={`group ${ROW_BG[row.kind]}`}>
+      <tr
+        ref={rowRef}
+        className={`group transition-colors ${
+          flash ? 'bg-amber-300/40 dark:bg-amber-400/25' : ROW_BG[row.kind]
+        }`}
+      >
         <td className="w-9 select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
           {row.kind === 'hunk' ? '' : gutterText(row.oldLine)}
         </td>
@@ -404,12 +448,15 @@ function FileDiffBlock({
   onPosted,
   threads,
   threadCtx,
+  focus,
 }: {
   file: DiffFile;
   commenting: { prId: number } | null;
   onPosted?: (threadId: number | null) => void;
   threads: ThreadDetail[];
   threadCtx: DiffThreadContext | null;
+  // Non-null ONLY when this block is the focus target (FileDiffView does the matching).
+  focus: DiffFocusTarget | null;
 }): JSX.Element {
   const rows = useMemo(() => parsePatch(file.patch), [file.patch]);
   // Anchor each thread to a diff row; those with no matching visible line (outdated /
@@ -441,13 +488,37 @@ function FileDiffBlock({
     if (hasFocus) setExpanded(true);
   }, [hasFocus]);
 
+  // Which row (if any) the focus target addresses. Known even while collapsed — `rows` is
+  // parsed from the patch, not from what's rendered — so the block can decide up front
+  // whether the LINE will scroll itself or whether it must scroll the file header instead.
+  const focusRow = useMemo(() => {
+    if (focus == null || focus.line == null) return null;
+    return lineRowIndex(rows, focus.line, focus.side ?? 'RIGHT');
+  }, [rows, focus]);
+
+  // An explicit reveal ALWAYS wins over the collapse heuristic — including lock files and
+  // >250-line patches. A deliberate click that scrolls to a closed `▸` header reads as a
+  // broken link, which is worse than overriding a default.
+  const blockRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focus == null) return;
+    setExpanded(true);
+    // No addressable row (file-level target, a line that isn't in the current diff, or a
+    // binary/too-large file) ⇒ reveal the FILE. Never do nothing.
+    if (focusRow == null) {
+      blockRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+    // focusRow is derived from `focus`; re-running on it would double-scroll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus]);
+
   const [openRow, setOpenRow] = useState<number | null>(null);
   const meta = STATUS_META[file.status];
   const path = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
   const githubUrl = file.githubUrl ?? null;
 
   return (
-    <div>
+    <div ref={blockRef}>
       {/* Sticky per-file header (mirrors the Changes-tab behaviour): the name stays
           pinned as you scroll and is pushed up by the next file's header. Needs an
           opaque background + a z-index above the diff table. */}
@@ -551,6 +622,8 @@ function FileDiffBlock({
                       open={openRow === i}
                       onOpen={() => setOpenRow(i)}
                       onClose={() => setOpenRow(null)}
+                      focused={focusRow === i}
+                      focusNonce={focus?.nonce ?? null}
                     />
                     {threadCtx &&
                       byRow.get(i)?.map((t) => (
@@ -574,10 +647,13 @@ export function FileDiffView({
   files,
   commenting,
   threadCtx,
+  focus,
 }: {
   files: DiffFile[];
   commenting?: { prId: number } | null;
   threadCtx?: DiffThreadContext | null;
+  // Optional by contract: the AI Fix tab mounts this component twice with only `files`.
+  focus?: DiffFocusTarget | null;
 }): JSX.Element {
   const threadsByPath = useMemo(() => {
     const m = new Map<string, ThreadDetail[]>();
@@ -622,6 +698,18 @@ export function FileDiffView({
       }
     : null;
 
+  // Match the focus target to at most ONE block. A renamed file is addressable under either
+  // name: blocks are keyed on the NEW path, but a caller (a Claude-Review finding recorded
+  // before the rename, a tree row) may still hold the old one.
+  const focusPath = focus?.path ?? null;
+  const focusedBlockPath = useMemo(() => {
+    if (focusPath == null) return null;
+    const exact = files.find((f) => f.path === focusPath);
+    if (exact) return exact.path;
+    const renamed = files.find((f) => f.previousPath === focusPath);
+    return renamed?.path ?? null;
+  }, [files, focusPath]);
+
   return (
     <div>
       {files.map((f) => (
@@ -632,6 +720,7 @@ export function FileDiffView({
           onPosted={focusPostedThread}
           threads={threadsByPath.get(f.path) ?? []}
           threadCtx={effectiveCtx}
+          focus={focus != null && f.path === focusedBlockPath ? focus : null}
         />
       ))}
     </div>

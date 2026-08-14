@@ -360,6 +360,7 @@ Activity / Changes, + a presence-gated **Bot activity** + capability-gated Claud
   (`isLockFile` in `lib/diff.ts`, exact-basename list, deliberately not `*.lock`), which ALWAYS
   start collapsed even with threads** (the header badge still advertises them; a deep-linked
   thread still auto-expands). The rule rides the shared component into the AI Fix tab too.
+  A **navigation rail** (`diff/FileTree.tsx`) sits to its left — see below.
 - **Bot activity** (`PrBotBehaviourTab.tsx`, EXPERIMENTAL, CORE) — shown only when a bot touched
   the PR (`hasBots`: `reviews.automatedKind` or a bot thread-opener/commenter). Per bot: its on-PR
   touch timeline + TTFR/follow-ups vs the bot's OWN typical (`/api/prs/:id/bot-behaviour`). A ⚠
@@ -376,6 +377,112 @@ the one thread in front of them. The only run surface is the per-item **`ReviewC
 Keyboard (`useKeyboard.ts`): `/` focuses the filter, `j`/`k` cycle the board's PRs (board
 only), `i` opens Insights, `esc` leaves any tab/overlay → the board (else clears the
 selection).
+
+#### The Changes-tab file-tree rail + the ONE `focus` mechanism
+
+**The rail** (`components/diff/FileTree.tsx`, tree built by the pure `buildFileTree` in
+`lib/diff.ts`, unit-tested in `apps/frontend/test/fileTree.test.ts`) lists the PR's **changed
+files only**, arranged in their real project directory hierarchy: directories before files at
+every level, byte-ish ordering (**not `localeCompare`** — a machine listing of paths must sort
+identically across locales and be reproducible in a test), per-node `+/−` rollups, the shared
+one-letter status glyph, and lock files dimmed (they always start collapsed in the diff, so the
+rail reads the same way). **Single-child directory chains collapse into one row**
+(`apps/frontend/src` rather than three nested rows) — a chain with one child offers no choice, so
+nothing is hidden. `STATUS_META` moved out of `FileDiffView` into `components/diff/status.ts` so
+the header and the rail can never disagree about what "R" means.
+
+- **Auto-hidden under `TREE_MIN_FILES = 5`** (a 3-file PR does not earn 224px, and the bottom
+  detail pane is 384px tall by default) and hidden below the `md` breakpoint.
+- **Sticky, with its own bounded scroller (`max-h-[70vh]`) — deliberately NOT an `h-full
+  overflow-auto` column.** The Changes tab has no scroll container of its own: PrDetail's
+  `min-h-0 flex-1 overflow-auto` is what every per-file `sticky top-0` header sticks to, and a
+  nested full-height scroller here would move that containing block and break them.
+- **Directory collapse is EPHEMERAL local state** in `FileTree`, deliberately not the global
+  `expandedFileGroups`/`collapsedFileGroups` slice — those are unkeyed by PR, and directory paths
+  collide across repos far more than file paths do. Default: everything open.
+- **The truncation disclosure lives INSIDE the tree** (the `note` prop: "Showing N of M files.
+  All on GitHub ↗", rendered when `data.truncated`), because a tree implies a completeness a
+  scrolling list does not. The pre-existing "Large diff — not all files are shown" line under the
+  diff stays.
+
+**One focus mechanism, two grains that are not interchangeable.** `FileDiffView` takes
+`focus?: DiffFocusTarget` (`{path, line?, side?, nonce}`) addressing a **FILE (optionally a
+LINE)**; `DiffThreadContext.focusThreadId` addresses a **THREAD** (the just-posted-comment
+self-focus). Every caller-side reveal goes through the first — the tree's clicks AND the Claude
+Review finding deep-link. Do not add a third.
+
+- **`nonce` is load-bearing**: an effect keyed on a boolean cannot re-fire for the same target,
+  so clicking the same file/line twice would do nothing. Any monotonic value (`Date.now()`).
+- `ChangesTab` owns the live target: the rail's clicks and the `focus` prop feed the same state,
+  which is **STICKY** (never cleared once shown — it doubles as the rail's selected row; the
+  highlight fades on its own timer). `PrDetail` owns `changesFocus` as **LOCAL** state and
+  `openInChanges(path, line, side)` sets it + switches to the Changes tab — local because both
+  tabs live in this one `PrDetail` instance, so unlike `threadStateFilter` there is no global
+  field to leak across PRs and no `selectedPrId === prId` guard to remember. Picking a tab BY
+  HAND clears the pending target, so opening Changes to browse doesn't re-jump to the last
+  finding.
+- `FileDiffView` matches the target to **at most ONE block**, and a **renamed file is addressable
+  under either name** (blocks are keyed on the NEW path; a caller may hold the old one).
+- Inside the block: **an explicit reveal always wins over the collapse heuristic** — including
+  lock files and >250-line patches; a deliberate click landing on a closed `▸` header reads as a
+  broken link. The addressed row is found by `lineRowIndex(rows, line, side)` (`lib/diff.ts`),
+  which is deliberately NOT `commentTarget`/`anchorIndexFor` — those map a context row to the
+  RIGHT side only (correct for anchoring a comment, silently lossy for a LEFT-side target). It is
+  computed from the parsed patch, so it is known while collapsed. No addressable row (file-level
+  target, a line outside the current diff, a binary file) ⇒ scroll the FILE header (`block:
+  'start'`); a row scrolls `block: 'center'` because the sticky per-file header would cover a
+  top-aligned one. Then a 4s flash. **These are ordinary `scrollIntoView` calls — the gated
+  programmatic-scroll rules are the vis TIMELINE's, and don't apply here; never write `scrollTop`
+  by hand either way.**
+- **A reveal for a file this view isn't rendering says so** (`focusMissing`): the live diff is
+  capped at 100 files and a Claude Review finding describes the head sha ITS run read. An amber
+  banner + a GitHub link, rather than letting the click land as a silent no-op.
+- The Claude Review side (`ClaudeReviewTab`) turns a finding's anchor into an in-app jump only
+  when the file is in the changeset, computed **without issuing a request**: `pr.files` (the lean
+  metadata already on the payload) ∪ the Changes tab's own `['pr-files', prId]` cache read
+  opportunistically via `qc.getQueryData` — NOT `usePrFiles`, which is a live GitHub round trip
+  and would spend quota just to pick a link style. Empty set ⇒ fall back to the finding's own
+  `fileInDiff`. The jump is a `<button>`, never an `<a href="#…">` (a hash navigation would write
+  to the URL `useUrlState` owns), with a small `↗` beside it keeping the GitHub diff-line escape.
+
+#### Emoji reactions (`ReactionBar` + `hooks/useReactions.ts`)
+
+CORE/free, and **nothing is stored or synced** — no column, no migration, no sync step; state is
+read live from GitHub. Exactly **two mounts**: `ThreadView/CommentBlock` (which reaches all eight
+`ThreadCard` mount sites at once — Threads tab, Feed, search results, attention cards, the Pro
+themes drill-down, both diff views) and PrDetail's conversation list (PR comments + review bodies,
+the kind riding the same `isComment` discriminator as the ML badge). There is deliberately **no
+thread-level bar** (`PullRequestReviewThread` is not in GitHub's `Reactable` interface) and no
+read-only variant — the write gate is GitHub's own `viewerCanReact`.
+
+- **The loader is MICROTASK-BATCHED.** Each bar runs an ordinary per-target query
+  (`['reactions', kind, id]`) whose queryFn does not fetch: it drops the target in a shared queue
+  and returns a promise; one tick's registrations become ONE `POST /api/reactions/lookup`
+  (`MAX_BATCH = 60`, which also flushes immediately when reached). That is what lets the feature
+  render everywhere: a 60-thread PR costs one request, not sixty (the `ThreadAssessment` storm),
+  and **the Feed — which spans many PRs — works unchanged**, where a per-PR index route (the
+  `useMlLabelIndex` shape) could not have served it.
+- React Query underneath for two reasons: caching stops a re-render refetching, and the shared
+  cache entry keeps **two mounts of the same comment** in agreement. The toggle carries a
+  per-target MUTATION key for the same reason at the in-flight level (the `CiAnalysisCard` rule).
+  **`staleTime` is a FUNCTION of what was learned**: 5 min for a real answer, 30s when the entry
+  is `null` — the server's rate-limit degrade returns an empty result set rather than a 502, so a
+  transient exhaustion would otherwise cache "unknown" for the full window. `retry: false`;
+  `refetchOnMount` left at its default (a card scrolling back in within the window costs nothing;
+  one that aged out re-registers with the batcher, so it is still one request per screen).
+- **Deliberately NOT in `main.tsx`'s `shouldDehydrateQuery` allowlist** — a reaction is other
+  people's live state, and a week-old persisted copy would be a confident lie.
+- **`undefined` ≠ "no reactions"**: unknown renders NOTHING (no placeholder box under every
+  comment on screen), and so does "no groups AND `!viewerCanReact`". The toggle is optimistic with
+  rollback; **success REPLACES the cache entry** with the server's authoritative post-write groups
+  (a refetch would be a second GraphQL call for what we were just handed), only failure
+  invalidates. `applyReactionToggle` is pure + exported so the "last reactor removes the chip"
+  case is pinned by a test rather than leaving a permanent `0` pill on screen.
+- The returned tree's **SHAPE is fixed** regardless of the picker being open (only the panel is
+  conditional inside it) — a shape that changed with `open` would remount the trigger and detach
+  the node the panel anchors to, the bug that once parked the user popover in the top-left corner.
+  Chips carry `stopPropagation` + a `data-noactivate` marker because they sit inside
+  click-to-open cards.
 
 
 
