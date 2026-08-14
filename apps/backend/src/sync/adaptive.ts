@@ -15,6 +15,7 @@
 // the first walk) and its cadence re-learns from there.
 import { config } from '../config.js';
 import { ghRestGetConditional } from '../github/client.js';
+import { isLimited } from '../github/rate-budget.js';
 
 // Activity windows that define the buckets (constants, not env — the tunable knobs are the
 // per-bucket intervals in config). "Changed" = the probe saw a PR's updatedAt advance.
@@ -91,9 +92,23 @@ export async function decideIncrementalWalk(
   name: string,
   token: string,
   now: number,
-): Promise<{ walk: boolean; reason: 'changed' | 'floor' | 'probe_error' | 'unchanged' }> {
+  // Optional (trailing, so existing call shapes stand): lets the probe stand down while
+  // the owning account is rate-limited — see below.
+  accountId?: number,
+): Promise<{
+  walk: boolean;
+  reason: 'changed' | 'floor' | 'probe_error' | 'unchanged' | 'rate_limited';
+}> {
   const c = ensure(repoId, now);
   c.lastAttemptAt = now;
+
+  // While the account's token is known rate-limited (github/rate-budget.ts), don't even
+  // probe: a limited probe fails non-304, which the "never skip on uncertainty" rule
+  // below would turn into MORE walks — the exact opposite of what a limited token needs.
+  // The limited state self-clears; the floor's blind spots simply wait out the window.
+  if (accountId != null && isLimited(accountId)) {
+    return { walk: false, reason: 'rate_limited' };
+  }
 
   const floorDue = now - c.lastFullWalkAt >= config.syncFloorIntervalSec * 1000;
 

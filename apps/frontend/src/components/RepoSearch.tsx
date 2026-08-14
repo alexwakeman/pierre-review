@@ -7,7 +7,11 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { ACTIVITY_QUERY_KEYS } from '../hooks/useActivity.js';
 import { safeExternalUrl } from '../lib/ui.js';
-import { SUGGESTED_REPOS } from '../lib/suggestedRepos.js';
+import {
+  BOT_MONITORING_REPOS,
+  SUGGESTED_REPOS,
+  type CuratedRepo,
+} from '../lib/suggestedRepos.js';
 import { useFilters } from '../store/filters.js';
 
 // Don't fire a search until there's something to match on.
@@ -21,6 +25,9 @@ const INVALIDATE_KEYS = [
   'users',
   'my-turn',
   'me',
+  // An add changes a workspace's membership (the repo lands in Default server-side): the
+  // selector/manager rosters and every workspaceRepoIds() read must see it immediately.
+  'workspaces',
   ...ACTIVITY_QUERY_KEYS,
 ];
 
@@ -126,6 +133,16 @@ export function RepoSearch({
       ),
     [added, justAdded],
   );
+  // The "Bot monitoring" demo repos go through the SAME added/justAdded filter.
+  const botSuggestions = useMemo(
+    () =>
+      BOT_MONITORING_REPOS.filter(
+        (s) =>
+          !added.has(`${s.owner}/${s.name}`.toLowerCase()) &&
+          !justAdded.has(`${s.owner}/${s.name}`.toLowerCase()),
+      ),
+    [added, justAdded],
+  );
 
   // A fresh search term resets pagination back to the first page.
   useEffect(() => {
@@ -190,7 +207,15 @@ export function RepoSearch({
 
   // The keyboard-navigable list is the live results, or the curated suggestions in
   // the empty-query state (both carry owner+name, so one Enter handler adds either).
-  const navItems = showSuggestions ? suggestions : results;
+  // Suggestions are ONE global index space in visual order — the Bot-monitoring
+  // section first, then the general section — so data-idx / option ids / Enter all
+  // stay globally sequential across both. Memoized so identity stays stable across
+  // renders (two effects dep on navItems).
+  const suggestionNav = useMemo(
+    () => [...botSuggestions, ...suggestions],
+    [botSuggestions, suggestions],
+  );
+  const navItems = showSuggestions ? suggestionNav : results;
 
   // Keep the active index in range when the active list shrinks/changes.
   useEffect(() => {
@@ -242,6 +267,67 @@ export function RepoSearch({
     }
   }
 
+  // One curated-suggestion row. `idx` is the GLOBAL nav index (bot section first,
+  // then general) so it matches navItems / data-idx / `${listboxId}-opt-${idx}`.
+  function renderSuggestionRow(s: CuratedRepo, idx: number): JSX.Element {
+    const adding =
+      addRepo.isPending &&
+      addRepo.variables?.owner === s.owner &&
+      addRepo.variables?.name === s.name;
+    return (
+      <div
+        key={`${s.owner}/${s.name}`}
+        className={`flex items-stretch ${
+          idx === active ? 'bg-gray-100 dark:bg-gray-800' : ''
+        } hover:bg-gray-100 dark:hover:bg-gray-800`}
+      >
+        <button
+          id={`${listboxId}-opt-${idx}`}
+          data-idx={idx}
+          type="button"
+          role="option"
+          aria-selected={idx === active}
+          disabled={addRepo.isPending || atRepoLimit}
+          onMouseEnter={() => setActive(idx)}
+          onClick={() => addRepo.mutate({ owner: s.owner, name: s.name })}
+          className="flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left disabled:opacity-60"
+        >
+          <OwnerAvatar login={s.owner} src={null} />
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5">
+              <span
+                className="truncate text-xs font-medium text-gray-800 dark:text-gray-100"
+                title={`${s.owner}/${s.name}`}
+              >
+                {s.owner}/{s.name}
+              </span>
+              <span className="shrink-0 rounded bg-gray-100 px-1 text-[9px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                {s.category}
+              </span>
+            </span>
+            <span className="mt-0.5 line-clamp-2 text-[11px] text-gray-500 dark:text-gray-400">
+              {s.why}
+            </span>
+          </span>
+          <span className="mt-0.5 shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] text-white">
+            {adding ? 'Adding…' : 'Add'}
+          </span>
+        </button>
+        <a
+          href={`https://github.com/${s.owner}/${s.name}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          title="Open on GitHub"
+          aria-label={`Open ${s.owner}/${s.name} on GitHub`}
+          className="flex shrink-0 items-center px-2 text-[10px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+        >
+          ↗
+        </a>
+      </div>
+    );
+  }
+
   return (
     <div ref={rootRef} className="relative">
       <input
@@ -281,77 +367,48 @@ export function RepoSearch({
             </div>
           )}
           {showSuggestions ? (
-            <div>
-              <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700 dark:bg-gray-900">
-                Suggested repos
-              </div>
-              {suggestions.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-gray-500">
-                  You&rsquo;ve already added all the suggestions.
+            // listRef wraps BOTH sections so the arrow-key scrollIntoView lookup
+            // (data-idx, one global index space) finds rows in either.
+            <div ref={listRef}>
+              {botSuggestions.length === 0 && suggestions.length === 0 ? (
+                <div>
+                  <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700 dark:bg-gray-900">
+                    Suggested repos
+                  </div>
+                  <div className="px-3 py-2 text-xs text-gray-500">
+                    You&rsquo;ve already added all the suggestions.
+                  </div>
                 </div>
               ) : (
-                <div ref={listRef}>
-                  {suggestions.map((s, idx) => {
-                  const adding =
-                    addRepo.isPending &&
-                    addRepo.variables?.owner === s.owner &&
-                    addRepo.variables?.name === s.name;
-                  return (
-                    <div
-                      key={`${s.owner}/${s.name}`}
-                      className={`flex items-stretch ${
-                        idx === active ? 'bg-gray-100 dark:bg-gray-800' : ''
-                      } hover:bg-gray-100 dark:hover:bg-gray-800`}
-                    >
-                      <button
-                        id={`${listboxId}-opt-${idx}`}
-                        data-idx={idx}
-                        type="button"
-                        role="option"
-                        aria-selected={idx === active}
-                        disabled={addRepo.isPending || atRepoLimit}
-                        onMouseEnter={() => setActive(idx)}
-                        onClick={() =>
-                          addRepo.mutate({ owner: s.owner, name: s.name })
-                        }
-                        className="flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left disabled:opacity-60"
-                      >
-                        <OwnerAvatar login={s.owner} src={null} />
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center gap-1.5">
-                            <span
-                              className="truncate text-xs font-medium text-gray-800 dark:text-gray-100"
-                              title={`${s.owner}/${s.name}`}
-                            >
-                              {s.owner}/{s.name}
-                            </span>
-                            <span className="shrink-0 rounded bg-gray-100 px-1 text-[9px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                              {s.category}
-                            </span>
-                          </span>
-                          <span className="mt-0.5 line-clamp-2 text-[11px] text-gray-500 dark:text-gray-400">
-                            {s.why}
-                          </span>
-                        </span>
-                        <span className="mt-0.5 shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] text-white">
-                          {adding ? 'Adding…' : 'Add'}
-                        </span>
-                      </button>
-                      <a
-                        href={`https://github.com/${s.owner}/${s.name}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        title="Open on GitHub"
-                        aria-label={`Open ${s.owner}/${s.name} on GitHub`}
-                        className="flex shrink-0 items-center px-2 text-[10px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                      >
-                        ↗
-                      </a>
+                <>
+                  {botSuggestions.length > 0 && (
+                    <div>
+                      <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 dark:border-gray-700 dark:bg-gray-900">
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                          Bot monitoring demos
+                        </div>
+                        <div className="mt-0.5 text-[10px] leading-snug text-gray-400 dark:text-gray-500">
+                          Several AI review bots are active in these — good for
+                          exploring the Bots tab. First sync can take a few
+                          minutes.
+                        </div>
+                      </div>
+                      {botSuggestions.map((s, idx) => renderSuggestionRow(s, idx))}
                     </div>
-                  );
-                  })}
-                </div>
+                  )}
+                  {suggestions.length > 0 && (
+                    <div>
+                      <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700 dark:bg-gray-900">
+                        Suggested repos
+                      </div>
+                      {suggestions.map((s, idx) =>
+                        // Offset by the bot section so the global index space
+                        // matches visual order exactly.
+                        renderSuggestionRow(s, botSuggestions.length + idx),
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           ) : query.isError ? (

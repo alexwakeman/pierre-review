@@ -106,6 +106,64 @@ const PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = {
   '90d': 90,
 };
 
+// ── The shared sync round ────────────────────────────────────────────────────────────────────
+//
+// One user-visible "sync round" (the GitHub walk + the ML scoring pass that follows it) shared
+// between the header sync button and the WorkspaceManager's embedded progress panel. SyncStatus
+// (always mounted) is the single DRIVER: it owns the status/ml polls, the completion effects and
+// every invalidation, and it is the only writer of this state. Everything else consumes the
+// state and calls the actions SyncStatus registers below.
+export interface SyncRoundState {
+  // The round's progress UI is live — it lingers on the final "done" state for a beat after
+  // both halves settle (the driver's auto-close clears it). WHERE it renders is a separate
+  // routing decision: managerOpen → the manager's embedded panel; otherwise the standalone
+  // SyncProgressModal, and only when `modal` is set.
+  open: boolean;
+  // May the STANDALONE overlay render this round (while the manager is closed)? True only for
+  // rounds opened via requestSyncModal with no manager mounted (the FirstRunOnboarding add
+  // path). Header-initiated rounds keep it false — the header never opens a dialog; the icon
+  // spin is the whole surface until the manager is opened.
+  modal: boolean;
+  // The GitHub walk is still in flight (drives the 1.5s status poll + the header spin's first
+  // half). The ML pass can outlast it — "round done" is the driver's auto-close, not this flag.
+  syncing: boolean;
+  // A user-initiated Cancel is in flight.
+  cancelling: boolean;
+  // Which repos the round tracks. EMPTY = "all repos" (the manual-sync sentinel, same
+  // semantics the modal-scope set always had); adds merge their repo id in.
+  scopeIds: number[];
+}
+
+/** The actions SyncStatus registers so other surfaces (the manager) can drive the round. */
+export interface SyncRoundActions {
+  /** Cancel the in-scope running syncs (the backend deletes never-synced repos). */
+  cancel: () => void;
+  /** Shallow sync of ALL repos (the header button's click). No dialog is opened. */
+  syncAllShallow: () => void;
+  /** Deep (full-backfill) re-sync of ALL repos. Caller is responsible for the confirm gate. */
+  syncAllDeep: () => void;
+  /**
+   * Deep re-sync ONE repo. Resolves 'started' when the POST was accepted (the round then
+   * tracks it), 'cooldown' on the per-repo 429 (recently synced — nothing was started),
+   * 'error' on any other failure.
+   */
+  syncOneDeep: (repoId: number) => Promise<'started' | 'cooldown' | 'error'>;
+  /** Hide the round's progress UI, leaving both halves running server-side. */
+  dismiss: () => void;
+}
+
+// Module-level registry (NOT store state: these are per-render closures, and putting them in
+// the store would churn every subscriber on each SyncStatus render). SyncStatus re-registers
+// after every render so the closures always see fresh data, and unregisters on unmount.
+let syncRoundActions: SyncRoundActions | null = null;
+export function registerSyncRoundActions(actions: SyncRoundActions | null): void {
+  syncRoundActions = actions;
+}
+/** Null while SyncStatus is unmounted — callers must no-op, never queue. */
+export function getSyncRoundActions(): SyncRoundActions | null {
+  return syncRoundActions;
+}
+
 export interface FilterState {
   // Which of the ACTIVE WORKSPACE's repos are visible. null = every repo in the active workspace
   // (NOT every repo in the account — the workspace already bounds the set). An explicit array is
@@ -374,11 +432,25 @@ export interface FilterState {
   // underway and may take a while). SyncStatus watches it, opens the modal and
   // starts polling. Store-only / transient (NOT URL-synced).
   syncModalSignal: number;
-  // The repo id carried by the latest `requestSyncModal` — the just-added repo, so
-  // the add-flow modal can scope itself to ONLY that repo (a concurrent scheduled
-  // sync of the OTHER repos would otherwise bounce their progress bars). Read
+  // The repo ids queued by `requestSyncModal` since the driver last drained them, so
+  // the add-flow modal can scope itself to ONLY those repos (a concurrent scheduled
+  // sync of the OTHER repos would otherwise bounce their progress bars). A LIST, not
+  // a single slot: a multi-add (FirstRunOnboarding) calls requestSyncModal N times in
+  // one synchronous batch, so the driver's effect runs ONCE and must see every id,
+  // not just the last writer's. SyncStatus drains (reads then clears) it. Read
   // alongside syncModalSignal.
-  syncModalRepoId: number | null;
+  syncModalRepoIds: number[];
+  // THE SHARED SYNC ROUND — lifted out of SyncStatus's local state so the header button and
+  // the WorkspaceManager's embedded progress panel describe the SAME round. SyncStatus stays
+  // the single DRIVER (it owns every poll, effect and invalidation and is always mounted);
+  // everything else reads this slice and calls the registered sync-round actions
+  // (getSyncRoundActions). Transient: not persisted, not URL-synced, not in FilterDefaults.
+  syncRound: SyncRoundState;
+  // Whether the WorkspaceManager modal is currently mounted. Routing for the progress UI
+  // hangs off it: while true an active round renders as the manager's embedded panel and the
+  // standalone SyncProgressModal must NOT open. Mirrored by the manager itself
+  // (mount/unmount), so it is correct regardless of which host opened it. Transient.
+  managerOpen: boolean;
   // `claudeReviewKickoff`: a monotonic counter bumped when the user starts a Claude
   // review, so the global progress banner knows a run is in flight and begins
   // polling (and stops once the active list drains). Store-only / transient.
@@ -545,8 +617,14 @@ export interface FilterState {
   openSearchDetail: (query: string) => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
-  // records the added repo id so the modal can scope to just that repo.
+  // dedup-appends the added repo id to syncModalRepoIds so the modal can scope to
+  // just the added repos.
   requestSyncModal: (repoId: number) => void;
+  // Merge a partial into the shared sync round. ONLY the driver (SyncStatus) and its
+  // registered actions may write it — consumers read + call getSyncRoundActions().
+  setSyncRound: (patch: Partial<SyncRoundState>) => void;
+  // Mirror of the WorkspaceManager's mounted state (set by the manager itself).
+  setManagerOpen: (open: boolean) => void;
   bumpClaudeReviewKickoff: () => void;
   // Select an Activity detail target (a repo id, or one of the pseudo-rows: 'feed' for the
   // cross-repo consolidated Feed, 'bots', 'attention', 'compare', 'insights').
@@ -793,7 +871,15 @@ function freshDefaults(): FilterData {
     timelineCenterAt: null,
     rangeResetSignal: 0,
     syncModalSignal: 0,
-    syncModalRepoId: null,
+    syncModalRepoIds: [],
+    syncRound: {
+      open: false,
+      modal: false,
+      syncing: false,
+      cancelling: false,
+      scopeIds: [],
+    },
+    managerOpen: false,
     claudeReviewKickoff: 0,
   };
 }
@@ -1051,7 +1137,14 @@ export const useFilters = create<FilterState>((set, get) => ({
     });
   },
   requestSyncModal: (repoId: number) =>
-    set((s) => ({ syncModalSignal: s.syncModalSignal + 1, syncModalRepoId: repoId })),
+    set((s) => ({
+      syncModalSignal: s.syncModalSignal + 1,
+      syncModalRepoIds: s.syncModalRepoIds.includes(repoId)
+        ? s.syncModalRepoIds
+        : [...s.syncModalRepoIds, repoId],
+    })),
+  setSyncRound: (patch) => set((s) => ({ syncRound: { ...s.syncRound, ...patch } })),
+  setManagerOpen: (open) => set({ managerOpen: open }),
   bumpClaudeReviewKickoff: () =>
     set((s) => ({ claudeReviewKickoff: s.claudeReviewKickoff + 1 })),
   // Selecting a different repo console drops any lingering thread-state filter + the Feed's

@@ -96,8 +96,10 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
   and `fetchGhPrText` refuses both to cache a result whose epoch moved and to share an in-flight
   fetch that began in an older epoch.
 - **`sync-manager.ts`**: per-repo manual-sync cooldown (`manualSyncCooldownMs`, 5 min forced-full
-  / 30s manual) + `apiSyncSlotsExhausted()` cap (4) → 429 from the route. Also added the missing
-  `await` on `runSyncForRepo` (the 409 branch was dead).
+  / 30s manual) → 429 + `Retry-After` from the route, plus per-account SERIALIZATION of all
+  API-triggered walks (`enqueueSyncForRepo` — later repos wait with an honest `queued` progress
+  row; it replaced the old process-wide `apiSyncSlotsExhausted()` cap and its 429; see
+  [docs/SYNC.md](SYNC.md) for the queue's contract).
 - **`review/agent.ts`**: **`Bash` REMOVED from `WORKTREE_TOOLS` and denied outright.** A review
   reads attacker-authored text (title/description/diff/comments); with `bypassPermissions` + a
   shell that is RCE on the developer's machine via a stranger's PR. The old

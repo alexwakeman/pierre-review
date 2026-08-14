@@ -1,13 +1,16 @@
 import { performance } from 'node:perf_hooks';
+import type { SyncProgress } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import {
   getGraphqlClientFor,
   graphqlChecksHint,
   graphqlTolerant,
+  isRateLimitError,
   isSamlBlock,
   summarizeGraphqlErrors,
   withGithubRetry,
 } from '../github/client.js';
+import { gateBudget, noteBudget, noteLimited } from '../github/rate-budget.js';
 import { clearSamlBlock, recordSamlBlock } from './auth-notices.js';
 import { REPO_ACTIVITY_QUERY, type RepoActivityResponse } from '../github/queries.js';
 import { ensureCommitFiles } from './commit-files.js';
@@ -32,6 +35,11 @@ export interface SyncProgressUpdate {
   percent: number;
   prsProcessed: number;
   pages: number;
+  // Set while the walk is deliberately holding still for a GitHub rate-limit window (the
+  // budget gate / a limited response being waited out) and will resume on its own. Rides
+  // the caller's SyncProgress spread; omitted the moment the walk is moving again. NOT an
+  // error — the red sync_state path is reserved for genuinely unrecoverable failures.
+  paused?: SyncProgress['paused'];
 }
 
 export interface SyncRepoOptions {
@@ -67,6 +75,12 @@ export interface SyncRepoOptions {
 function clamp01(n: number): number {
   return n < 0 ? 0 : n > 1 ? 1 : n;
 }
+
+// How many consecutive rate-limit waits ONE page may absorb before the error is allowed
+// through to the real failure path. Each wait already sleeps until the reported window
+// reset, so hitting this cap means GitHub kept refusing across ~5 windows — genuinely
+// unrecoverable, not a budget blip.
+const MAX_RATE_LIMIT_WAITS_PER_PAGE = 5;
 
 export interface SyncRepoResult {
   repoId: number;
@@ -118,13 +132,43 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
   // far through it we are.
   let newestMs: number | null = null;
   const sinceMs = since?.getTime() ?? null;
+  // The last reported percent, so a pause/resume update can re-emit the bar exactly where
+  // it stands rather than snapping it to a recomputed value mid-wait.
+  let lastPercent = 0;
   const reportProgress = (currentMs: number | null): void => {
     if (!onProgress) return;
     let percent = 0;
     if (newestMs != null && sinceMs != null && newestMs > sinceMs && currentMs != null) {
       percent = clamp01((newestMs - currentMs) / (newestMs - sinceMs));
     }
+    lastPercent = percent;
     onProgress({ percent, prsProcessed: prCount, pages });
+  };
+  // Wait out the account's rate budget, if any (github/rate-budget.ts). The paused flag
+  // rides the normal onProgress plumbing, so the UI shows a 'running' sync that is
+  // honestly holding still — never the red error path — and is cleared by a plain update
+  // the moment the walk moves again. Returns false when a user cancel arrived mid-wait;
+  // the caller then bails exactly like any cancelled page.
+  const pauseForBudget = async (): Promise<boolean> => {
+    let paused = false;
+    const gate = await gateBudget(accountId, {
+      shouldCancel: opts.shouldCancel,
+      onWait: (resumeAt) => {
+        paused = true;
+        log.info(
+          `sync ${owner}/${name}: pausing for GitHub rate limit — resuming ~${resumeAt.toISOString()}`,
+        );
+        onProgress?.({
+          percent: lastPercent,
+          prsProcessed: prCount,
+          pages,
+          paused: { reason: 'rate_limit', resumeAt: resumeAt.toISOString() },
+        });
+      },
+    });
+    if (gate === 'cancelled') return false;
+    if (paused) onProgress?.({ percent: lastPercent, prsProcessed: prCount, pages });
+    return true;
   };
 
   try {
@@ -135,8 +179,15 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
         cancelled = true;
         break;
       }
+      // PRE-EMPTIVE budget gate: when the account's remaining rate budget is under the
+      // floor (fed from every page's rateLimit block below) or a hard limit was observed
+      // anywhere on this token, wait out the window HERE — paused, cancellable — instead
+      // of spending the page and slamming into the 403.
+      if (!(await pauseForBudget())) {
+        cancelled = true;
+        break;
+      }
       pageStartCursor = cursor;
-      const tPage = performance.now();
       // Tolerate partial errors so a forbidden sub-field (e.g. `statusCheckRollup` check runs on
       // a private repo the token can't reach, or a token minted before its scope covered checks)
       // doesn't abort the whole sync — the PRs, reviews, comments and review REQUESTS still
@@ -151,30 +202,60 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       // indistinguishable from GitHub positively saying "no description" — and the
       // clear-only-on-a-positive-statement rule then forbids treating it as a clear.
       let pagePartial = false;
-      const resp: RepoActivityResponse = await withGithubRetry(
-        () =>
-          graphqlTolerant<RepoActivityResponse>(
-            client,
-            REPO_ACTIVITY_QUERY,
-            { owner, name, cursor },
-            (errors) => {
-              pagePartial = true;
-              if (isSamlBlock(errors)) samlBlocked = true;
-              log.warn(
-                `sync ${owner}/${name}: partial GraphQL — continuing without forbidden fields${graphqlChecksHint(errors)}. ${summarizeGraphqlErrors(errors)}`,
-              );
+      // A rate-limited page is NOT a failure: note the limit, wait it out (paused,
+      // cancellable), and RE-FETCH THE SAME PAGE — `cursor` is untouched, and the
+      // pageStartCursor/endCursor resume contract already supports an exact re-fetch.
+      // Capped so a token GitHub keeps refusing eventually reaches the real error path.
+      // The retry wraps OUTSIDE withGithubRetry/graphqlTolerant, so partial-data semantics
+      // (onPartial fires only on a salvaged response) are untouched.
+      let resp: RepoActivityResponse | null = null;
+      let rateLimitWaits = 0;
+      while (resp == null) {
+        pagePartial = false;
+        const tPage = performance.now();
+        try {
+          resp = await withGithubRetry(
+            () =>
+              graphqlTolerant<RepoActivityResponse>(
+                client,
+                REPO_ACTIVITY_QUERY,
+                { owner, name, cursor },
+                (errors) => {
+                  pagePartial = true;
+                  if (isSamlBlock(errors)) samlBlocked = true;
+                  log.warn(
+                    `sync ${owner}/${name}: partial GraphQL — continuing without forbidden fields${graphqlChecksHint(errors)}. ${summarizeGraphqlErrors(errors)}`,
+                  );
+                },
+              ),
+            {
+              onRetry: (attempt, delayMs, err) =>
+                log.warn(
+                  `sync ${owner}/${name}: transient GitHub error on page ${pages + 1} ` +
+                    `(attempt ${attempt}, retrying in ${delayMs}ms): ` +
+                    `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+                ),
             },
-          ),
-        {
-          onRetry: (attempt, delayMs, err) =>
-            log.warn(
-              `sync ${owner}/${name}: transient GitHub error on page ${pages + 1} ` +
-                `(attempt ${attempt}, retrying in ${delayMs}ms): ` +
-                `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
-            ),
-        },
-      );
-      graphqlMs += performance.now() - tPage;
+          );
+          graphqlMs += performance.now() - tPage;
+        } catch (err) {
+          graphqlMs += performance.now() - tPage;
+          const rl = isRateLimitError(err);
+          if (!rl.limited || rateLimitWaits >= MAX_RATE_LIMIT_WAITS_PER_PAGE) throw err;
+          rateLimitWaits += 1;
+          noteLimited(accountId, rl.resumeAt);
+          log.warn(
+            `sync ${owner}/${name}: GitHub rate limit on page ${pages + 1} — waiting it ` +
+              `out (${rateLimitWaits}/${MAX_RATE_LIMIT_WAITS_PER_PAGE}), then retrying the same page`,
+          );
+          if (!(await pauseForBudget())) {
+            cancelled = true;
+            break;
+          }
+        }
+      }
+      // Only reachable via a cancel during a rate-limit wait — bail like any cancel.
+      if (resp == null) break;
       pages += 1;
       // `rateLimit` is a top-level sibling of `repository`, so it survives a partial
       // (forbidden-subfield) response — but guard it so a genuinely rateLimit-less partial
@@ -182,6 +263,14 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       // `!resp.repository` 404 below gets to fire.
       totalCost += resp.rateLimit?.cost ?? 0;
       lastRemaining = resp.rateLimit?.remaining ?? lastRemaining;
+      // Feed the per-account budget so the NEXT page — and any sibling walk sharing this
+      // token — can pause pre-emptively instead of running into the hard 403.
+      if (resp.rateLimit) {
+        noteBudget(accountId, {
+          remaining: resp.rateLimit.remaining ?? null,
+          resetAt: resp.rateLimit.resetAt ? new Date(resp.rateLimit.resetAt) : null,
+        });
+      }
 
       if (!resp.repository) {
         // A SAML wall forbids the whole `repository` node → flag the owner's org for the
@@ -261,6 +350,9 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
           pageShas,
           opts.token,
           opts.commitFileConcurrency,
+          // So a rate-limited fan-out can note the account's budget (the next page's gate
+          // then pauses) instead of burning the remaining quota on doomed fetches.
+          accountId,
         );
         commitFilesMs += performance.now() - tFiles;
 

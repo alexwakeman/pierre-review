@@ -106,6 +106,78 @@ export function isRetryableGithubError(err: unknown): boolean {
   );
 }
 
+// Classify a GitHub failure as RATE-LIMITED (primary GraphQL/REST exhaustion, or the
+// secondary "abuse" limiter) and extract a resume time when the response carried one.
+// Deliberately a SEPARATE classifier from isRetryableGithubError: retryable means "try
+// again in milliseconds", limited means "pause until the window resets" — the sync's
+// budget gate (github/rate-budget.ts + sync-repo.ts) owns that wait, and widening the
+// retry predicate would instead hammer a limited token.
+//
+// Shapes recognised:
+//   • GraphQL: `errors[].type === 'RATE_LIMITED'` (GitHub answers HTTP 200, data null —
+//     which is why graphqlTolerant RETHROWS it), or a rate-limit message with no usable
+//     data. GraphqlResponseError exposes the response headers, so a reset time rides in.
+//   • REST: status 429 (Too Many Requests IS the limiter, by definition), or a 403 whose
+//     message carries GitHub's rate-limit/abuse wording (a plain 403 forbidden is NOT
+//     limited). ghRest attaches `status` + the rate-limit headers onto its thrown Error
+//     so this works without re-fetching anything.
+//
+// resumeAt: `retry-after` (relative seconds — the secondary limiter's header) wins, else
+// `x-ratelimit-reset` (epoch seconds), else null (the caller falls back to a default).
+export function isRateLimitError(err: unknown): { limited: boolean; resumeAt: Date | null } {
+  const e = err as {
+    status?: number;
+    response?: { status?: number; headers?: Record<string, unknown> };
+    headers?: Record<string, unknown>;
+    errors?: unknown;
+    data?: unknown;
+    message?: string;
+  };
+  const header = (name: string): string | null => {
+    const h = e.headers?.[name] ?? e.response?.headers?.[name];
+    if (typeof h === 'string' && h.length > 0) return h;
+    if (typeof h === 'number') return String(h);
+    return null;
+  };
+  const resumeAt = (): Date | null => {
+    const retryAfter = header('retry-after');
+    if (retryAfter != null) {
+      const secs = Number.parseInt(retryAfter, 10);
+      if (Number.isFinite(secs) && secs >= 0) return new Date(Date.now() + secs * 1000);
+    }
+    const reset = header('x-ratelimit-reset');
+    if (reset != null) {
+      const epoch = Number.parseInt(reset, 10);
+      if (Number.isFinite(epoch) && epoch > 0) return new Date(epoch * 1000);
+    }
+    return null;
+  };
+
+  if (
+    Array.isArray(e.errors) &&
+    e.errors.some((er) => (er as { type?: string }).type === 'RATE_LIMITED')
+  ) {
+    return { limited: true, resumeAt: resumeAt() };
+  }
+  const status = e.status ?? e.response?.status;
+  if (status === 429) return { limited: true, resumeAt: resumeAt() };
+  if (status === 403 && /rate limit|abuse/i.test(e.message ?? '')) {
+    return { limited: true, resumeAt: resumeAt() };
+  }
+  // Message-only fallback (a GraphQL transport variant with neither structured errors nor
+  // a status). Guarded on "no usable data" + "no status" so a 4xx/5xx that merely MENTIONS
+  // rate limits can't sneak in.
+  if (
+    status == null &&
+    e.errors == null &&
+    e.data == null &&
+    /rate limit/i.test(e.message ?? '')
+  ) {
+    return { limited: true, resumeAt: resumeAt() };
+  }
+  return { limited: false, resumeAt: null };
+}
+
 // Run a GitHub call with bounded exponential-backoff retries on TRANSIENT failures
 // (see isRetryableGithubError). A single 502 on any page must not abort a multi-page
 // backfill of a large repo — without this, adding a big repo (every curated suggestion
@@ -161,9 +233,21 @@ async function ghRest<T>(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(
+    const err = new Error(
       `GitHub REST ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`,
     );
+    // Structured status + the rate-limit headers, so isRateLimitError can classify a REST
+    // 403/429 and derive a resume time without message archaeology. Nulls kept as-is —
+    // the classifier's header lookup only honours strings.
+    Object.assign(err, {
+      status: res.status,
+      headers: {
+        'retry-after': res.headers.get('retry-after'),
+        'x-ratelimit-remaining': res.headers.get('x-ratelimit-remaining'),
+        'x-ratelimit-reset': res.headers.get('x-ratelimit-reset'),
+      },
+    });
+    throw err;
   }
   return res.json() as Promise<T>;
 }

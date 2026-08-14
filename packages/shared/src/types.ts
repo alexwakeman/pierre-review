@@ -2013,6 +2013,12 @@ export interface SyncProgress {
   // continuing in the background. Lets the UI drop the user into the recent view
   // immediately. Absent/false for incremental syncs and during the foreground pass.
   foregroundComplete?: boolean;
+  // Set while the walk is deliberately holding still and will resume on its own:
+  // 'rate_limit' = waiting out a GitHub rate-limit window (resumeAt = ISO estimate),
+  // 'queued' = waiting for another sync on the same account to finish. NOT an error —
+  // status stays 'running' and the red error path is reserved for unrecoverable
+  // failures. Cleared (undefined) the moment the walk is moving again.
+  paused?: { reason: 'rate_limit' | 'queued'; resumeAt?: string };
 }
 
 export interface SyncStatus {
@@ -2022,6 +2028,24 @@ export interface SyncStatus {
   lastFullSyncAt: string | null;
   lastIncrementalSyncAt: string | null;
   lastSyncError: string | null;
+}
+
+// One row of `GET /api/sync-activity` — the account's HEAVY sync work only (full-mode
+// walks: first-sync backfills, deep re-syncs, and repos queued for one). Routine
+// incremental ticks are deliberately excluded so the global loading bar doesn't
+// flicker every few minutes.
+export interface SyncActivityRepo {
+  repoId: number;
+  fullName: string;
+  /** 0..1 walk progress (SyncProgress.percent); 0 while queued. */
+  percent: number;
+  prsProcessed: number;
+  paused?: SyncProgress['paused'];
+}
+
+export interface SyncActivityResponse {
+  backfills: SyncActivityRepo[];
+  generatedAt: string;
 }
 
 /**

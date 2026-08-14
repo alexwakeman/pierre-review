@@ -290,6 +290,19 @@ with **composite** conflict targets (`(accountId, githubNodeId)` / events
 - First sync of a repo is **two-phase**: a fast ~14-day foreground pass, then the deep
   `backfillDays` (90) backfill in background. Cloud skips accounts idle > 15 min
   (`accounts.lastActiveAt`); local is always-on.
+- **GitHub rate limits are PRE-EMPTED, never surfaced as errors.** A per-account in-memory
+  budget (`github/rate-budget.ts`, fed by the `rateLimit` block every walk page already
+  selects) gates every page/backfill loop with a cancellable ≤1s-sliced wait
+  (`waitForSyncToStop` times out at 30s — never one long sleep); classified rate-limit
+  errors (`isRateLimitError` — a SEPARATE path; do NOT widen `isRetryableGithubError`,
+  a test pins its 403/429 exclusion) wait then retry the SAME page. API-triggered walks
+  are SERIALIZED per account (`enqueueSyncForRepo`); a waiting repo reports status
+  `'running'` + `paused:{reason:'queued'}`, a rate-limit wait `paused:{reason:'rate_limit',
+  resumeAt}` — the red error path is reserved for unrecoverable failures. ⚠ Reservation
+  discipline: every synchronous `running`/`queuedRepos`/`deepSyncing` add must be released
+  on EVERY bail path INCLUDING thrown lookups (two leaks here wedged repos forever, one
+  halted the global scheduler). `noteBudget` must NOT clear `limitedUntil` — the REST
+  secondary limiter is independent of GraphQL success. Details in [docs/SYNC.md](docs/SYNC.md).
 - **Lean storage** (default in both modes): the PR description, review-comment `diffHunk`,
   commit `message` and `checkRuns` JSON are neither persisted nor fetched — hydrated on
   demand (`sync/hydrate-detail.ts`) and browser-cached. **Comment + review bodies are
@@ -455,6 +468,28 @@ Landmines that cost real bugs — read the doc before touching any of these:
   called before PrDetail's early returns (hooks-order rule).
 - Data-derived URLs never go straight into `href`/`src` — `safeExternalUrl()` (React
   renders `javascript:` URLs).
+- **Sync-round state is a transient store slice** (`syncRound` + `managerOpen`) with ONE
+  driver: `SyncStatus` (always mounted in the header; registers `{cancel, syncAll…}`
+  actions via a module-level registry). The progress UI embeds INSIDE the
+  WorkspaceManager panel (within `panelRef` or click-outside closes the manager); the
+  standalone `SyncProgressModal` survives ONLY for onboarding adds (`modal:true` iff the
+  manager isn't open), and the header button shows no dialog at all — it just spins.
+  Landmines: the signal mailbox is an ARRAY (`syncModalRepoIds` — React 18 batches a
+  multi-add loop into ONE effect run; a scalar drops all but the last id); an open
+  round's EMPTY `scopeIds` is the all-repos sentinel — never append to it; merging into
+  an open round must re-arm `syncing:true` (the poll is disabled without it); the
+  `foregroundComplete` handoff excludes `paused.reason==='queued'` rows. Adding a repo
+  from the manager AUTO-SWITCHES the active workspace to the destination once the move
+  commits (the "synced fine but nothing loaded" fix — the scope used to stay behind).
+- **There is ONE bottom-right toast column** (App.tsx): ClaudeReviewBanner, AutoMergeBanner
+  and the ambient `GlobalLoadingBar` render as plain cards inside it — never add a new
+  independent `fixed bottom-4 right-4` element (three of them were painting over each
+  other at the same coordinate). The loading bar (yellow, non-dismissible, bottom-most
+  card) covers HEAVY work only: full-mode walks via `GET /api/sync-activity` (which
+  suppresses zero-progress retries of errored repos) + ML scoring strictly under
+  `isMlScoring`; its ETA treats unchanged poll values as no-observation (batch-grain
+  drains), and its monotonic percent clamp resets on stage/backfill-set changes and
+  per-repo percent regressions (phase 2 legitimately restarts percent from 1.0 → ~0.16).
 
 ---
 

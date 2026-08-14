@@ -12,6 +12,9 @@
 //   PIERRE_ML_DIR=…        override the submodule location (default: packages/ml)
 //   SEVERITY_API_PORT=…    port for the severity-api (default 8799)
 //   PIERRE_ML_DISABLED=1   run the app without it
+//   PIERRE_ML_FULL_SPEED=1 don't deprioritize the classifier (dev-ml.mjs starts it under
+//                          `nice -n 15` + OMP/ORT thread caps so a grinding backlog can't
+//                          starve the backend/browser — dev loop only, never production)
 //
 // PRECEDENCE. The URL is exported as SEVERITY_API_DEFAULT_URL, never as SEVERITY_API_URL, so an
 // explicit setting always wins: `process.loadEnvFile` does NOT overwrite an already-set variable

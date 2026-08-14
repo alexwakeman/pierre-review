@@ -22,6 +22,16 @@ const WORKSPACE_INVALIDATE_KEYS = [
   'workspace-metrics',
   'workspace-metrics-detail',
   'workspace-comparison',
+  // The board surfaces. Every one of these keys carries the workspace scope in its query
+  // string (`ws:<id>` / `?workspace=`), but a MEMBERSHIP move changes what the SAME scope
+  // means — the key does not change, so without an explicit invalidation the Timeline,
+  // open-PR strips, My Turn, the Members dropdown and the maintainer shields all kept
+  // rendering the pre-move repo set until something unrelated refetched them.
+  'timeline',
+  'open-prs',
+  'my-turn',
+  'users',
+  'mergers',
   ...ACTIVITY_QUERY_KEYS,
 ] as const;
 

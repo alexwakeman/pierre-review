@@ -134,6 +134,7 @@ import type {
   ResolveBotThreadsBody,
   ResolveBotThreadsResult,
   ScopeResolveBotThreadsBody,
+  SyncActivityResponse,
   SyncStatus,
   ThreadDetail,
   TimelineResponse,
@@ -283,6 +284,11 @@ export const api = {
       handle<{ repoId: number; deleted: boolean }>(r),
     ),
   syncStatus: (id: number) => get<SyncStatus>(`/api/repos/${id}/sync-status`),
+  // The account's HEAVY sync work only — full-mode walks (first-sync backfills, deep
+  // re-syncs, queued-for-full). Routine incremental ticks are excluded SERVER-side, so
+  // the global loading bar polling this never flickers on the 5-minute cron. Account-wide
+  // grain (no workspace param), same reasoning as /api/ml-status.
+  syncActivity: () => get<SyncActivityResponse>('/api/sync-activity'),
 
   // ---- Workspaces (CORE) ----
   //

@@ -1,6 +1,7 @@
 import { inArray } from 'drizzle-orm';
 import { db, schema } from '../db/client.js';
-import { ghRestGetFor } from '../github/client.js';
+import { ghRestGetFor, isRateLimitError } from '../github/client.js';
+import { noteLimited } from '../github/rate-budget.js';
 
 const { commitFiles } = schema;
 
@@ -12,6 +13,9 @@ interface RestCommit {
  * Resolve changed-file paths for the given commit SHAs, using the permanent
  * `commit_files` cache and filling misses via REST. SHAs are immutable, so the
  * cache never expires — re-syncs are free.
+ *
+ * `accountId` (optional — the sync walk passes it) lets a RATE-LIMITED failure feed the
+ * account's budget (github/rate-budget.ts) and stop the fan-out early; see the catch below.
  */
 export async function ensureCommitFiles(
   owner: string,
@@ -19,6 +23,7 @@ export async function ensureCommitFiles(
   shas: string[],
   token: string,
   concurrency = 10,
+  accountId?: number,
 ): Promise<Map<string, string[]>> {
   const result = new Map<string, string[]>();
   const unique = [...new Set(shas)];
@@ -39,6 +44,12 @@ export async function ensureCommitFiles(
   // requests in flight the whole time. SHAs are immutable and the cache upsert is
   // idempotent, so order doesn't matter.
   const missing = unique.filter((sha) => !result.has(sha));
+  // Flipped when a fetch comes back RATE-LIMITED: the remaining misses are doomed on this
+  // token right now, so the workers stop pulling new SHAs (nothing is cached for the
+  // unfetched ones — the map read degrades to "no known files" and the next sync retries
+  // them). The limit is noted on the account's budget so the page loop's gate pauses
+  // before spending more.
+  let limited = false;
   const fetchOne = async (sha: string): Promise<void> => {
     try {
       const commit = await ghRestGetFor<RestCommit>(
@@ -52,15 +63,21 @@ export async function ensureCommitFiles(
         .onConflictDoUpdate({ target: commitFiles.sha, set: { paths } })
         .execute();
       result.set(sha, paths);
-    } catch {
+    } catch (err) {
+      const rl = isRateLimitError(err);
+      if (rl.limited) {
+        limited = true;
+        if (accountId != null) noteLimited(accountId, rl.resumeAt);
+      }
       // A missing/forbidden commit shouldn't abort the whole sync; treat as
-      // "no known files" (derivation falls back to other signals).
+      // "no known files" (derivation falls back to other signals). Nothing is cached, so
+      // a rate-limited SHA is re-fetched by a later sync.
       result.set(sha, []);
     }
   };
   let next = 0;
   const worker = async (): Promise<void> => {
-    while (next < missing.length) {
+    while (!limited && next < missing.length) {
       const sha = missing[next++]!;
       await fetchOne(sha);
     }

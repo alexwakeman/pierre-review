@@ -177,7 +177,7 @@ export function ClaudeReviewBanner(): JSX.Element | null {
     setDismissed((prev) => ({ ...prev, [reviewId]: true }));
 
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+    <div className="flex flex-col gap-2">
       <div className="pointer-events-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
         <div className="flex items-center justify-between border-b border-gray-100 px-3 py-1.5 dark:border-gray-800">
           <span className="text-xs font-semibold">

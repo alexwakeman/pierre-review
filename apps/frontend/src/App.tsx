@@ -16,6 +16,7 @@ import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { AutoMergeBanner } from './components/AutoMergeBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
+import { GlobalLoadingBar } from './components/GlobalLoadingBar.js';
 import { WelcomeBackBanner } from './components/WelcomeBackBanner.js';
 import { HelpModal } from './components/HelpModal.js';
 import { SettingsModal } from './components/settings/SettingsModal.js';
@@ -480,8 +481,18 @@ export default function App(): JSX.Element {
           </div>
         )}
       </main>
-      <ClaudeReviewBanner />
-      <AutoMergeBanner />
+      {/* The ONE bottom-right toast column. Every bottom-right surface renders as a plain
+          card in here — three independent `fixed bottom-4 right-4` elements were painting
+          over each other at the same coordinate. Order = visual stack: banners on top, the
+          ambient loading bar pinned to the corner as the bottom-most card. The column owns
+          pointer-events-none; interactive cards re-enable their own. */}
+      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+        <ClaudeReviewBanner />
+        <AutoMergeBanner />
+        {/* Ambient heavy-work indicator (full-mode backfills + ML bot-comment scoring).
+            An indicator, not a dialog: non-dismissible, no click target. */}
+        <GlobalLoadingBar />
+      </div>
       {/* Analytics consent. Renders only in cloud, only when a GA4 id was configured at build
           time, and only until the user has chosen — see components/CookieBanner.tsx. */}
       <CookieBanner enabled={isCloud} />

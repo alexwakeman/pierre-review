@@ -37,8 +37,9 @@ export function isDeepSyncActive(): boolean {
 // the single shared Fastify process.
 //
 // Two bounds, both deliberately outside `runSyncForRepo` so its signature (and its tests)
-// stay as they are: a per-repo cooldown the route checks first, and a cap on how many
-// API-triggered syncs may be in flight at once. The SCHEDULER is exempt from both — it is a
+// stay as they are: a per-repo cooldown the route checks first, and the per-account SERIAL
+// queue below (`enqueueSyncForRepo` — which replaced the old process-wide
+// MAX_CONCURRENT_SYNCS cap + its 429). The SCHEDULER is exempt from both — it is a
 // sequential loop that already skips `running` repos and is not caller-controlled.
 const manualSyncAt = new Map<number, number>();
 
@@ -56,11 +57,6 @@ const envSec = (key: string, fallback: number): number => {
 const FULL_SYNC_COOLDOWN_MS = envSec('FULL_SYNC_COOLDOWN_SEC', 5 * 60) * 1000;
 const MANUAL_SYNC_COOLDOWN_MS = envSec('MANUAL_SYNC_COOLDOWN_SEC', 30) * 1000;
 
-// How many API-triggered background syncs may run concurrently across the process. The "deep
-// sync everything" button fires one POST per repo, so this queues them instead of running 100
-// GraphQL walks at once — the work still happens, just not all in the same second.
-const MAX_CONCURRENT_API_SYNCS = envSec('MAX_CONCURRENT_SYNCS', 4);
-
 /**
  * Milliseconds a caller must wait before manually syncing this repo again, or 0 when it may
  * go now. Checked by the route so it can answer 429 + Retry-After; `runSyncForRepo` itself is
@@ -72,11 +68,6 @@ export function manualSyncCooldownMs(repoId: number, forceFull: boolean): number
   const window = forceFull ? FULL_SYNC_COOLDOWN_MS : MANUAL_SYNC_COOLDOWN_MS;
   const remaining = window - (Date.now() - last);
   return remaining > 0 ? remaining : 0;
-}
-
-/** True when too many API-triggered syncs are already in flight (caller should 429). */
-export function apiSyncSlotsExhausted(): boolean {
-  return running.size >= MAX_CONCURRENT_API_SYNCS;
 }
 
 /** Record a manual sync so the cooldown above starts running. Called by the route. */
@@ -97,6 +88,14 @@ export function noteManualSync(repoId: number): void {
 const cancelRequested = new Set<number>();
 
 export function requestSyncCancel(repoId: number): void {
+  // A repo still WAITING in the per-account queue never started anything: drop it and
+  // clear its 'queued' progress row synchronously, so waitForSyncToStop (which watches
+  // `running`) returns immediately and cancel-and-delete of a never-synced repo works
+  // without ever touching GitHub.
+  if (queuedRepos.delete(repoId)) {
+    clearSyncProgress(repoId);
+    return;
+  }
   if (running.has(repoId)) cancelRequested.add(repoId);
 }
 
@@ -115,9 +114,42 @@ export async function waitForSyncToStop(
   return true;
 }
 
+// ---- Per-account serialization of API-triggered syncs ----
+//
+// POST /api/repos (add → initial backfill) and POST /api/repos/:id/sync used to fire
+// runSyncForRepo directly, so adding several repos consecutively (or "deep sync
+// everything") ran N concurrent two-phase 90-day walks — each with a 10-way commit-file
+// REST fan-out — against ONE token, which is precisely how a caller drives their own
+// account into GitHub's rate limiter. API-triggered walks now run ONE AT A TIME per
+// account: a chained promise per accountId; later repos wait with an honest
+// `paused: { reason: 'queued' }` progress row (status reads 'running'). The SCHEDULER
+// stays exempt — it is already a sequential loop and is not caller-controlled.
+const apiSyncChain = new Map<number, Promise<void>>();
+// Repos waiting in a chain (queued, not yet started). The source of truth for "still
+// wants to run": requestSyncCancel drops a repo from here synchronously and the chain
+// skips it when its turn comes.
+const queuedRepos = new Set<number>();
+
+/** True while a repo is waiting in the per-account API-sync queue (not yet running). */
+export function isSyncQueued(repoId: number): boolean {
+  return queuedRepos.has(repoId);
+}
+
 // Live progress for in-flight syncs, surfaced via getSyncStatus so the UI can
 // show a determinate bar. Lives only for the duration of the run.
 const progressByRepo = new Map<number, SyncProgress>();
+
+/**
+ * Snapshot of every live progress row — running walks AND repos still waiting in the
+ * per-account queue (their seeded row rides `paused: { reason: 'queued' }`). Read-only,
+ * for `GET /api/sync-activity`; the maps themselves stay private to this module. The
+ * caller filters (e.g. to full-mode walks) and MUST re-scope by account — this map is
+ * process-wide across tenants in cloud. Progress objects are replaced wholesale by
+ * setSyncProgress (never mutated in place), so returning the references is safe.
+ */
+export function listActiveSyncProgress(): Array<{ repoId: number; progress: SyncProgress }> {
+  return [...progressByRepo].map(([repoId, progress]) => ({ repoId, progress }));
+}
 
 function setSyncProgress(repoId: number, p: SyncProgress): void {
   progressByRepo.set(repoId, p);
@@ -143,8 +175,10 @@ export async function getSyncStatus(repoId: number): Promise<SyncStatus | null> 
       .execute()
   )[0];
 
+  // A repo WAITING in the per-account queue reads as 'running' with its queued progress
+  // row — an honest "held, will go on its own", never idle/error.
   let status: SyncRunStatus = 'idle';
-  if (running.has(repoId)) status = 'running';
+  if (running.has(repoId) || queuedRepos.has(repoId)) status = 'running';
   else if (state?.lastSyncStatus === 'error') status = 'error';
   else if (state?.lastSyncStatus === 'ok') status = 'ok';
 
@@ -225,16 +259,32 @@ export async function runSyncForRepo(
   // fires right after this call already sees the deep sync as active).
   if (opts.forceFull) deepSyncing.add(repoId);
 
-  const repo = await getRepoRow(repoId);
-  if (!repo) {
+  let repo: RepoRow;
+  let plan: { mode: 'full' | 'incremental'; since: Date };
+  try {
+    const row = await getRepoRow(repoId);
+    if (!row) {
+      running.delete(repoId);
+      if (opts.forceFull) deepSyncing.delete(repoId);
+      return false;
+    }
+    repo = row;
+    plan = opts.forceFull
+      ? { mode: 'full' as const, since: new Date(Date.now() - config.backfillDays * DAY_MS) }
+      : await planSync(repoId);
+  } catch (err) {
+    // Mirror of the token catch below: a rejected lookup must release BOTH reservations,
+    // or a transient DB error leaks them forever — a leaked `running` entry makes the
+    // repo un-syncable and un-deletable, and a leaked `deepSyncing` entry stands the
+    // scheduler down on every tick (isDeepSyncActive).
     running.delete(repoId);
     if (opts.forceFull) deepSyncing.delete(repoId);
+    clearSyncProgress(repoId);
+    log.error(
+      `sync repo ${repoId}: repo/plan lookup failed: ${err instanceof Error ? err.message : err}`,
+    );
     return false;
   }
-
-  const plan = opts.forceFull
-    ? { mode: 'full' as const, since: new Date(Date.now() - config.backfillDays * DAY_MS) }
-    : await planSync(repoId);
 
   setSyncProgress(repoId, { percent: 0, prsProcessed: 0, pages: 0, mode: plan.mode });
   let token: string;
@@ -374,7 +424,91 @@ export async function runSyncForRepo(
       clearSyncProgress(repoId);
     });
 
-  if (!opts.background) return Boolean(task);
+  // background:false waits for the whole task (walk + follow-on phases + the finally) to
+  // settle before returning — the per-account queue's serialization depends on it. The
+  // task's .catch above means this await never throws.
+  if (!opts.background) await task;
+  return true;
+}
+
+/**
+ * Queue an API-triggered sync behind the account's other API-triggered walks (the add-repo
+ * initial backfill and the manual/deep sync both come through here). Returns false when the
+ * repo is already running or queued (the manual route 409s), true once queued — the walk
+ * itself runs when its turn comes. While waiting, the repo shows a 'running' status with a
+ * `paused: { reason: 'queued' }` progress row; runSyncForRepo's own first progress write
+ * clears the flag when the walk actually starts.
+ */
+export async function enqueueSyncForRepo(
+  repoId: number,
+  log: Logger,
+  opts: { forceFull?: boolean } = {},
+): Promise<boolean> {
+  if (running.has(repoId) || queuedRepos.has(repoId)) return false;
+  // Reserve synchronously, BEFORE any await (the running.add rule above): a second
+  // enqueue racing the lookups below must already see this repo as queued.
+  queuedRepos.add(repoId);
+  let repo: RepoRow;
+  try {
+    const row = await getRepoRow(repoId);
+    if (!row) {
+      queuedRepos.delete(repoId);
+      return false;
+    }
+    repo = row;
+    // Mode is display-only here (the honest waiting row); runSyncForRepo re-plans when the
+    // walk actually starts.
+    const mode = opts.forceFull ? ('full' as const) : (await planSync(repoId)).mode;
+    // A cancel may have raced the awaits above (requestSyncCancel drops queued repos and
+    // clears their progress synchronously) — don't resurrect the row it already cleared.
+    if (!queuedRepos.has(repoId)) return false;
+    setSyncProgress(repoId, {
+      percent: 0,
+      prsProcessed: 0,
+      pages: 0,
+      mode,
+      paused: { reason: 'queued' },
+    });
+  } catch (err) {
+    // A rejected lookup must release the reservation, or a transient DB error leaves the
+    // repo 'queued' forever: status reads 'running' with no progress, every later
+    // enqueue is refused, and the scheduler skips it. Rethrow so both routes keep their
+    // current error behaviour.
+    queuedRepos.delete(repoId);
+    clearSyncProgress(repoId);
+    throw err;
+  }
+
+  const prev = apiSyncChain.get(repo.accountId) ?? Promise.resolve();
+  const next = prev
+    .then(async () => {
+      // Dropped while waiting (cancelled / cancel-and-deleted): its progress row is
+      // already cleared, and nothing must run.
+      if (!queuedRepos.delete(repoId)) return;
+      // background:false ⇒ resolves only when the walk has fully settled — that await IS
+      // the serialization. A false return (repo deleted mid-queue, token failure) must
+      // still drop the queued progress row, which runSyncForRepo never owned.
+      const started = await runSyncForRepo(repoId, log, {
+        background: false,
+        forceFull: opts.forceFull,
+      });
+      if (!started) clearSyncProgress(repoId);
+    })
+    .catch((err) => {
+      // The chain must survive a rejected link, or one bad repo wedges every later sync
+      // of the account. (runSyncForRepo's task never rejects; this guards its lookups.)
+      log.error(
+        `queued sync of repo ${repoId} failed: ${err instanceof Error ? err.message : err}`,
+      );
+      clearSyncProgress(repoId);
+      queuedRepos.delete(repoId);
+    });
+  apiSyncChain.set(repo.accountId, next);
+  // Self-clean: when this link settles and is still the chain's tail, drop the map entry
+  // (bounded by accounts either way; this just keeps the idle map empty).
+  void next.then(() => {
+    if (apiSyncChain.get(repo.accountId) === next) apiSyncChain.delete(repo.accountId);
+  });
   return true;
 }
 
@@ -412,7 +546,9 @@ export async function syncAllRepos(log: Logger): Promise<void> {
     return;
   }
   for (const r of all) {
-    if (running.has(r.id)) continue;
+    // Skip repos mid-sync AND repos waiting in the API queue — the queue will run them,
+    // and a scheduler-started incremental would reset their honest 'queued' row.
+    if (running.has(r.id) || queuedRepos.has(r.id)) continue;
     // Adaptive (config.syncAdaptive): skip repos not yet due for their activity bucket —
     // cheap, no I/O — before reserving the slot or fetching a token. Off by default, so
     // the loop below is unchanged for everyone who hasn't opted in.
@@ -434,6 +570,10 @@ export async function syncAllRepos(log: Logger): Promise<void> {
           repo.name,
           token,
           Date.now(),
+          // Lets the probe stand down entirely while the account is rate-limited (a
+          // limited probe fails non-304, which "never skip on uncertainty" would turn
+          // into MORE walks — the opposite of what a limited token needs).
+          repo.accountId,
         );
         if (!decision.walk) {
           log.info(

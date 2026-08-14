@@ -34,6 +34,7 @@ import {
   withGithubRetry,
   type GraphqlClient,
 } from '../github/client.js';
+import { gateBudget } from '../github/rate-budget.js';
 import {
   buildCommitStatesQuery,
   COMMIT_CHECKS_ALIAS_CAP,
@@ -332,6 +333,11 @@ export async function backfillPrCiHistory(
   let cost = 0;
   for (let i = 0; i < uniqueShas.length; i += COMMIT_STATES_ALIAS_CAP) {
     if (opts.shouldCancel?.()) return { ...none, rateLimitCost: cost, cancelled: true };
+    // Shares its token with the account's PR walks: when the budget is low or limited,
+    // wait (cancellably) rather than burning the remaining points on history.
+    if ((await gateBudget(accountId, { shouldCancel: opts.shouldCancel })) === 'cancelled') {
+      return { ...none, rateLimitCost: cost, cancelled: true };
+    }
     const chunk = uniqueShas.slice(i, i + COMMIT_STATES_ALIAS_CAP);
     const r = await fetchCommitStates(client, owner, name, chunk, opts.log);
     for (const [sha, status] of r.bySha) statusBySha.set(sha, status);
@@ -347,6 +353,10 @@ export async function backfillPrCiHistory(
   const failingNamesBySha = new Map<string, string[]>();
   for (let i = 0; i < redShas.length; i += COMMIT_CHECKS_ALIAS_CAP) {
     if (opts.shouldCancel?.()) return { ...none, rateLimitCost: cost, cancelled: true };
+    // Same budget gate as the states loop above — the names are strictly nice-to-have.
+    if ((await gateBudget(accountId, { shouldCancel: opts.shouldCancel })) === 'cancelled') {
+      return { ...none, rateLimitCost: cost, cancelled: true };
+    }
     const chunk = redShas.slice(i, i + COMMIT_CHECKS_ALIAS_CAP);
     const r = await fetchFailingChecks(client, owner, name, chunk, opts.log);
     for (const [sha, checks] of r.bySha) {

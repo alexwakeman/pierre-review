@@ -12,6 +12,9 @@
 //   PIERRE_ML_DIR=…       override the submodule location (default: packages/ml)
 //   SEVERITY_API_PORT=…   port to serve on (default 8799)
 //   PIERRE_ML_DISABLED=1  skip it entirely
+//   PIERRE_ML_FULL_SPEED=1  do NOT deprioritize the classifier: skip the `nice -n 15` wrapper
+//                         and the OMP_NUM_THREADS/ORT_NUM_THREADS caps applied below (DEV-only
+//                         CPU relief so a grinding backlog can't starve the backend/browser)
 //
 // THIS SCRIPT NEVER FAILS THE DEV LOOP. The submodule is optional — it is a separate,
 // private-ish research repo, and a plain `git clone` (without `--recurse-submodules`) leaves
@@ -19,6 +22,7 @@
 // `pnpm dev` starts the app exactly as it always did.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { cpus } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -111,14 +115,45 @@ async function main() {
     return;
   }
 
-  console.log(`[dev:ml] starting severity-api from ${ML_DIR} on :${ML_PORT}`);
+  // ---- LOCAL-ONLY CPU relief (never a production/Docker path — this file IS the dev loop) ----
+  // The classifier is CPU-bound ONNX inference: a fresh repo's backlog (hundreds of bot
+  // comments, ~1MB of text) grinds every core for minutes, starving the backend + the browser
+  // on the same machine — the board looks dead while the model works. So the service starts at
+  // low OS priority (`nice -n 15`, POSIX only — `nice` EXECS bash in place, same pid, so the
+  // detached group leader and killGroup's -pid targeting below are unchanged, and uv → uvicorn
+  // → python all inherit the niceness) with its thread pools capped via OMP_NUM_THREADS /
+  // ORT_NUM_THREADS (harmless when a runtime ignores them; an explicit env setting wins).
+  // PIERRE_ML_FULL_SPEED=1 restores full speed — see the header.
+  const fullSpeed =
+    process.env.PIERRE_ML_FULL_SPEED === '1' || process.env.PIERRE_ML_FULL_SPEED === 'true';
+  const deprioritize = !fullSpeed && process.platform !== 'win32';
+  const threadCap = String(Math.max(2, cpus().length - 2));
+  console.log(
+    `[dev:ml] starting severity-api from ${ML_DIR} on :${ML_PORT}` +
+      (deprioritize
+        ? ` (nice -n 15, ≤${threadCap} threads — PIERRE_ML_FULL_SPEED=1 for full speed)`
+        : ''),
+  );
   // `detached` puts the service in its OWN process group so it can be killed as a group below.
-  const child = spawn('bash', [SERVE_SCRIPT], {
-    cwd: ML_DIR,
-    stdio: 'inherit',
-    detached: true,
-    env: { ...process.env, SEVERITY_API_PORT: ML_PORT },
-  });
+  const child = spawn(
+    deprioritize ? 'nice' : 'bash',
+    deprioritize ? ['-n', '15', 'bash', SERVE_SCRIPT] : [SERVE_SCRIPT],
+    {
+      cwd: ML_DIR,
+      stdio: 'inherit',
+      detached: true,
+      env: {
+        ...process.env,
+        SEVERITY_API_PORT: ML_PORT,
+        ...(fullSpeed
+          ? {}
+          : {
+              OMP_NUM_THREADS: process.env.OMP_NUM_THREADS ?? threadCap,
+              ORT_NUM_THREADS: process.env.ORT_NUM_THREADS ?? threadCap,
+            }),
+      },
+    },
+  );
 
   // ⚠ SIGNAL THE GROUP, NOT THE CHILD — otherwise uvicorn outlives the dev loop and holds the
   // port. `serve_local.sh` ends in `exec uv run uvicorn`, so the process this spawns becomes

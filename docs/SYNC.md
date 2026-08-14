@@ -211,8 +211,14 @@ what `planSync` reads to decide full vs incremental.
   scheduled incremental loop **stands down entirely**, so a cron tick doesn't reset a
   deep sync's progress bar to 0% the moment one repo finishes.
 - `cancelRequested` — user cancel flags (see below).
+- `queuedRepos` + `apiSyncChain` — the per-account **serial queue** for API-triggered
+  walks (`enqueueSyncForRepo`; see *Tokens, rate limits, isolation* below). A queued repo
+  reads as `running` with `progress.paused = { reason: 'queued' }`; a cancel while queued
+  drops it synchronously (never started, `waitForSyncToStop` sees not-running).
 - `progressByRepo` — live `SyncProgress` surfaced to the UI via
   `GET /api/repos/:id/sync-status`.
+- (in `github/rate-budget.ts`) the per-account **rate budget** — `remaining`/`resetAt`
+  from the last walk page + any observed hard-limit window.
 
 ---
 
@@ -234,10 +240,33 @@ resumed on the next sync for an existing repo).
 - Every persisted row is stamped with the owning **`accountId`**; sync is per-account.
 - `syncAllRepos` wraps each repo in its own `try/catch`, so one bad token or
   inaccessible repo doesn't abort the loop.
-- **Rate limiting:** each page reports `rateLimit.cost` / `remaining` (logged). There
-  is no active throttle/backoff today — a single server process serializes syncs and
-  the `running` set prevents double-syncing a repo, which keeps usage well within
-  GitHub's limits in practice.
+- **Rate limiting is handled actively, per account** — a rate limit is a *pause*, never
+  a red error; `lastSyncStatus: 'error'` is reserved for genuinely unrecoverable
+  failures. Four pieces:
+  - **The budget** (`github/rate-budget.ts`, in-memory per accountId): every walk page
+    feeds `noteBudget` from the `rateLimit { remaining resetAt }` block it already
+    selects; `noteLimited` records an observed hard limit. `gateBudget` — called at the
+    top of the PR-walk page loop, the CI-history backfill's chunk loops and the
+    trunk-history pagination — sleeps until the reset (cancellable, ≤1s slices checking
+    `shouldCancel`) whenever `remaining` is under a ~100-point floor or a limited window
+    is active, instead of spending pages into the hard 403.
+  - **The classifier** (`isRateLimitError` in `github/client.ts`, deliberately SEPARATE
+    from `isRetryableGithubError` — do not widen the retry predicate): GraphQL
+    `errors[].type === 'RATE_LIMITED'`, REST 429, or a 403 with rate-limit/abuse
+    wording; reads `Retry-After` / `x-ratelimit-reset` (which `ghRest` attaches to its
+    thrown errors) for the resume time. A classified page failure notes the limit,
+    waits via the same gate, then **retries the same page** (cursor unchanged), up to 5
+    waits per page before falling through to the real error path. Commit-file fetches
+    stop fanning out on a limited error; adaptive probes and the PR-detail refresh skip
+    cheaply while `isLimited`.
+  - **The paused contract**: while waiting, `SyncProgress.paused =
+    { reason: 'rate_limit', resumeAt }` rides the normal progress plumbing — status
+    stays `running`, and the flag clears the moment the walk moves again.
+  - **The per-account queue** (`enqueueSyncForRepo` in `sync-manager.ts`): API-triggered
+    walks (repo add, manual/deep sync) run one at a time per account; waiters show
+    `paused: { reason: 'queued' }`. This replaced the process-wide
+    `MAX_CONCURRENT_SYNCS` cap and its 429 on `POST /api/repos/:id/sync` (the per-repo
+    cooldown 429s remain). The scheduler's own sequential loop is exempt.
 
 ---
 

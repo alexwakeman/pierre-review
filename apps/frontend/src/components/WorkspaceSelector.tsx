@@ -75,6 +75,15 @@ export function useWorkspaceSync(): void {
     // correct, so it is never touched.
     const stored = useFilters.getState().repoIds;
     if (stored == null) return;
+    // Sticky-[] repair: a persisted EMPTY narrowing can never recover on its own — the prune
+    // below early-returns on 0 === 0, so the empty→null fallback further down is unreachable
+    // and every query keeps sending `repoIds=` (an empty board) forever. An empty array that
+    // SURVIVED into a new session is a trap, not a choice; fall back to the whole workspace.
+    // Still the prune path only — a non-empty user subset is never touched.
+    if (stored.length === 0) {
+      setRepoIds(null);
+      return;
+    }
     const member = new Set(live.repoIds);
     const pruned = stored.filter((id) => member.has(id));
     if (pruned.length === stored.length) return;

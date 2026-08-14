@@ -21,6 +21,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { PrRefreshResponse } from '@pierre-review/shared';
 import { getAccessToken } from '../auth/account.js';
 import { ghRestGetConditional } from '../github/client.js';
+import { isLimited } from '../github/rate-budget.js';
 import { invalidatePrHydration } from './hydrate-detail.js';
 import {
   asSyncLogger,
@@ -81,6 +82,22 @@ export async function refreshPrFromGitHub(args: {
   const target = await getPrSyncTarget(prId, accountId);
   if (!target) return null;
   const before = target.updatedAt;
+
+  // While the account's token is rate-limited (github/rate-budget.ts — the sync's budget
+  // gate or a limited error observed elsewhere), skip BOTH the probe and the walk: the
+  // probe would fail non-304 and a walk would burn the budget a paused repo sync is
+  // waiting for. `synced` carries the LAST walk's honesty exactly like a non-walking tick
+  // (lastWalkOk semantics preserved — probeState is not touched); a manual refresh
+  // reports {synced:false}, which the client renders as a subtle stale note, never an
+  // error. The limited state self-clears and the ~5s poll picks up the next real tick.
+  if (isLimited(accountId)) {
+    const lastOk = probeState.get(probeKey(accountId, prId))?.lastWalkOk ?? true;
+    return {
+      synced: wait ? false : lastOk,
+      changed: false,
+      updatedAt: before.toISOString(),
+    };
+  }
 
   try {
     const key = probeKey(accountId, prId);

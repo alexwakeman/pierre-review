@@ -7,6 +7,7 @@ import {
   withGithubRetry,
   type GraphqlClient,
 } from '../github/client.js';
+import { gateBudget } from '../github/rate-budget.js';
 import {
   buildCommitChecksQuery,
   COMMIT_CHECKS_ALIAS_CAP,
@@ -574,6 +575,13 @@ export async function backfillBranchHistory(
 
   while (pages < BRANCH_BACKFILL_MAX_PAGES) {
     if (opts.shouldCancel?.()) break;
+    // Shares its token with the account's PR walks: when the budget is low or a limit was
+    // observed, wait (cancellably) before spending ~4 points on another history page. A
+    // cancel mid-wait breaks like any cancel — the walk stays strictly non-fatal and the
+    // result is disclosed as truncated.
+    if ((await gateBudget(accountId, { shouldCancel: opts.shouldCancel })) === 'cancelled') {
+      break;
+    }
     const resp = await withGithubRetry(() =>
       graphqlTolerant<DefaultBranchHistoryResponse>(
         client,

@@ -138,3 +138,58 @@ export const SUGGESTED_REPOS: readonly CuratedRepo[] = [
     why: 'An infinite-canvas drawing SDK and whiteboard; a slick showcase of modern web UI and real-time collab.',
   },
 ] as const;
+
+// Repos with SEVERAL active AI review bots — curated for demoing the Bots tab:
+// add one and the bot analytics/verdict surfaces have real multi-bot data to
+// work with. The bot line-ups named in each `why` were observed on live PRs
+// 2026-08; like the list above, revisit periodically (bots come and go).
+export const BOT_MONITORING_REPOS: readonly CuratedRepo[] = [
+  {
+    owner: 'InsForge',
+    name: 'InsForge',
+    category: 'Bot monitoring',
+    why: 'CodeRabbit, cubic, Greptile and Copilot all review here — the densest bot mix we found.',
+  },
+  {
+    owner: 'opentibiabr',
+    name: 'canary',
+    category: 'Bot monitoring',
+    why: 'Five review bots on one C++ codebase: CodeRabbit, SonarCloud, Gemini, Copilot, Greptile.',
+  },
+  {
+    owner: 'BerriAI',
+    name: 'litellm',
+    category: 'Bot monitoring',
+    why: 'Greptile, Cursor Bugbot and Devin on a very high-velocity AI library.',
+  },
+  {
+    owner: 'twentyhq',
+    name: 'twenty',
+    category: 'Bot monitoring',
+    why: 'cubic, Greptile and Copilot review a busy TypeScript CRM.',
+  },
+  {
+    owner: 'obot-platform',
+    name: 'obot',
+    category: 'Bot monitoring',
+    why: 'Copilot reviewer and CodeRabbit side by side on every PR.',
+  },
+  {
+    owner: 'pingdotgg',
+    name: 't3code',
+    category: 'Bot monitoring',
+    why: 'Macroscope, Cursor Bugbot and CodeRabbit on a fast-moving young codebase.',
+  },
+  {
+    owner: 'ai-dynamo',
+    name: 'dynamo',
+    category: 'Bot monitoring',
+    why: 'CodeRabbit, Devin and an in-house review agent on NVIDIA’s inference stack.',
+  },
+  {
+    owner: 'redis',
+    name: 'go-redis',
+    category: 'Bot monitoring',
+    why: 'Codex, Copilot reviewer and Cursor Bugbot on a mainstream Go client.',
+  },
+] as const;

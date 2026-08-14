@@ -3,6 +3,7 @@ import { GraphqlResponseError } from '@octokit/graphql';
 import {
   graphqlChecksHint,
   graphqlTolerant,
+  isRateLimitError,
   isRetryableGithubError,
   isSamlBlock,
   summarizeGraphqlErrors,
@@ -189,6 +190,75 @@ describe('withGithubRetry', () => {
       ),
     ).rejects.toThrow('401');
     expect(calls).toBe(1);
+  });
+});
+
+// A SEPARATE classifier from isRetryableGithubError on purpose: retryable means "try again
+// in milliseconds", limited means "pause until the window resets" (the sync's budget gate
+// owns that wait). The pins above that exclude 403/429 from the RETRY predicate stand
+// unchanged — these are the errors that route to the pause path instead.
+describe('isRateLimitError', () => {
+  it('classifies a GraphQL RATE_LIMITED response (data null — the shape graphqlTolerant rethrows)', () => {
+    const err = gqlError(null, [
+      { type: 'RATE_LIMITED', message: 'API rate limit exceeded for user' },
+    ]);
+    const rl = isRateLimitError(err);
+    expect(rl.limited).toBe(true);
+    expect(rl.resumeAt).toBeNull(); // no headers on this one
+  });
+
+  it('classifies a 403 secondary/abuse limit and reads Retry-After (relative seconds)', () => {
+    const before = Date.now();
+    const err = Object.assign(
+      new Error(
+        'GitHub REST GET /repos/o/n/commits/abc -> 403: You have exceeded a secondary rate limit.',
+      ),
+      { status: 403, headers: { 'retry-after': '30' } },
+    );
+    const rl = isRateLimitError(err);
+    expect(rl.limited).toBe(true);
+    expect(rl.resumeAt).not.toBeNull();
+    const at = rl.resumeAt!.getTime();
+    expect(at).toBeGreaterThanOrEqual(before + 29_000);
+    expect(at).toBeLessThanOrEqual(Date.now() + 31_000);
+  });
+
+  it('classifies a primary 403 with x-ratelimit-reset (epoch seconds)', () => {
+    const epoch = Math.floor(Date.now() / 1000) + 1800;
+    const err = Object.assign(new Error('403: API rate limit exceeded'), {
+      status: 403,
+      headers: { 'x-ratelimit-reset': String(epoch) },
+    });
+    const rl = isRateLimitError(err);
+    expect(rl.limited).toBe(true);
+    expect(rl.resumeAt?.getTime()).toBe(epoch * 1000);
+  });
+
+  it('classifies a bare 429 (Too Many Requests IS the limiter)', () => {
+    expect(isRateLimitError({ status: 429 }).limited).toBe(true);
+  });
+
+  it('does NOT classify a plain 403 forbidden', () => {
+    expect(
+      isRateLimitError(
+        Object.assign(new Error('403: Resource not accessible by integration'), {
+          status: 403,
+        }),
+      ).limited,
+    ).toBe(false);
+  });
+
+  it('does NOT classify 404 / 500 / plain errors', () => {
+    expect(isRateLimitError({ status: 404 }).limited).toBe(false);
+    expect(isRateLimitError({ status: 500, message: 'boom' }).limited).toBe(false);
+    expect(isRateLimitError(new Error('fetch failed')).limited).toBe(false);
+  });
+
+  it('a 500 that merely MENTIONS rate limits is not limited (status wins over message)', () => {
+    expect(
+      isRateLimitError({ status: 500, message: 'proxy error while checking rate limit' })
+        .limited,
+    ).toBe(false);
   });
 });
 

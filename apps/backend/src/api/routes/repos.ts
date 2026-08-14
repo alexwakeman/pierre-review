@@ -6,7 +6,11 @@ import type {
   RepoSearchResponse,
   RepoSearchResult,
   SuggestedReposResponse,
+  SyncActivityRepo,
+  SyncActivityResponse,
 } from '@pierre-review/shared';
+import { and, eq, inArray } from 'drizzle-orm';
+import { db, schema } from '../../db/client.js';
 import { getGraphqlClientFor, graphqlTolerant } from '../../github/client.js';
 import { getAccessToken } from '../../auth/account.js';
 import {
@@ -23,12 +27,13 @@ import {
 } from '../../github/queries.js';
 import { upsertRepo } from '../../sync/upsert.js';
 import {
+  enqueueSyncForRepo,
   getSyncStatus,
+  isSyncQueued,
   isSyncRunning,
+  listActiveSyncProgress,
   requestSyncCancel,
-  runSyncForRepo,
   manualSyncCooldownMs,
-  apiSyncSlotsExhausted,
   noteManualSync,
   waitForSyncToStop,
 } from '../../sync/sync-manager.js';
@@ -423,8 +428,17 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     // My Turn's "New PRs" clock is `repos.createdAt`, stamped by that same upsert, so adding a
     // repo with 400 open PRs still doesn't dump them into the inbox on day one.
 
-    // Kick off the initial backfill in the background.
-    runSyncForRepo(repoId, app.log, { background: true });
+    // Kick off the initial backfill in the background — QUEUED behind any other
+    // API-triggered sync of this account, so adding several repos consecutively walks
+    // them one at a time instead of hammering one token with N concurrent 90-day
+    // backfills (each was also a 10-way commit-file REST fan-out). The 201 still
+    // returns immediately; the queued repo reports status 'running' with
+    // `paused: { reason: 'queued' }` until its turn comes.
+    void enqueueSyncForRepo(repoId, app.log).catch((err) =>
+      app.log.error(
+        `enqueue initial sync for repo ${repoId} failed: ${err instanceof Error ? err.message : err}`,
+      ),
+    );
 
     reply.status(201);
     return getRepo(repoId, accountId);
@@ -443,6 +457,10 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       reply.status(404);
       return { error: 'NotFound', message: `Repo ${id} not found` };
     }
+    // A repo still WAITING in the per-account queue would resurrect the deleted repo
+    // when its turn came (the walk's upsertRepo re-creates the row). Cancelling a queued
+    // repo is synchronous: it dequeues + clears the progress row, so the delete can go.
+    if (isSyncQueued(id)) requestSyncCancel(id);
     // A sync in flight would re-create the repo (and its rows) right after we
     // delete them, since the sync's upserts are still running. Refuse until it
     // settles — the cron tick / initial backfill is short.
@@ -492,25 +510,12 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
           retryAfter,
         };
       }
-      // Process-wide cap on API-triggered syncs. The "deep sync everything" action fires one
-      // POST per repo; without this, 100 concurrent GraphQL walks run inside the single
-      // Fastify process and starve every other request (in cloud, every other tenant).
-      if (apiSyncSlotsExhausted()) {
-        reply.status(429).header('Retry-After', '30');
-        return {
-          error: 'TooManyRequests',
-          message: 'Too many syncs are already running — try again shortly.',
-          retryAfter: 30,
-        };
-      }
-
-      // NOTE the `await`: this was previously assigned un-awaited, so `started` was always a
-      // truthy Promise and the 409 below could never fire. `background: true` still returns
-      // as soon as the sync is launched, so awaiting costs nothing.
-      const started = await runSyncForRepo(id, app.log, {
-        background: true,
-        forceFull,
-      });
+      // QUEUED behind the account's other API-triggered syncs (the per-account serial
+      // queue replaced the old process-wide concurrency 429): "deep sync everything"
+      // fires one POST per repo, and each repo now waits its turn with an honest
+      // 'queued' progress row instead of either running 100 concurrent GraphQL walks
+      // or bouncing off a 429. Returns as soon as the repo is queued.
+      const started = await enqueueSyncForRepo(id, app.log, { forceFull });
       if (!started) {
         reply.status(409);
         return { error: 'Conflict', message: 'A sync is already running for this repo' };
@@ -533,6 +538,73 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       return getSyncStatus(id);
     },
   );
+
+  // The account's HEAVY sync work only: one row per repo whose CURRENT walk is full-mode —
+  // a first-sync backfill, a forced deep re-sync, or a repo QUEUED for one (its seeded
+  // progress row rides `paused: { reason: 'queued' }` and is included only when the seeded
+  // mode is 'full'). Routine incremental ticks are deliberately EXCLUDED: this feeds the
+  // SPA's global bottom-right loading bar, which must not flicker on every 5-minute cron.
+  //
+  // Cost: an in-memory snapshot (`listActiveSyncProgress`) + ONE account-scoped `repos`
+  // SELECT. The join is not just for `fullName` — the progress maps are process-wide across
+  // tenants in cloud, so the accountId predicate IS the isolation: a repo that doesn't come
+  // back from the SELECT (another tenant's, or deleted mid-walk) is silently dropped. Pure
+  // DB read + memory, default `read` rate tier.
+  app.get('/api/sync-activity', async (req): Promise<SyncActivityResponse> => {
+    const accountId = accountIdOf(req);
+    const generatedAt = new Date().toISOString();
+    const full = listActiveSyncProgress().filter((e) => e.progress.mode === 'full');
+    if (full.length === 0) return { backfills: [], generatedAt };
+    const { repos, syncState } = schema;
+    const rows = await db
+      .select({
+        id: repos.id,
+        owner: repos.owner,
+        name: repos.name,
+        lastSyncStatus: syncState.lastSyncStatus,
+      })
+      .from(repos)
+      .leftJoin(syncState, eq(syncState.repoId, repos.id))
+      .where(
+        and(
+          eq(repos.accountId, accountId),
+          inArray(
+            repos.id,
+            full.map((e) => e.repoId),
+          ),
+        ),
+      )
+      .execute();
+    const nameById = new Map(rows.map((r) => [r.id, `${r.owner}/${r.name}`]));
+    const erroredIds = new Set(
+      rows.filter((r) => r.lastSyncStatus === 'error').map((r) => r.id),
+    );
+    const backfills: SyncActivityRepo[] = [];
+    for (const { repoId, progress } of full) {
+      const fullName = nameById.get(repoId);
+      if (fullName === undefined) continue; // not this account's repo (or deleted mid-walk)
+      // A permanently failing first backfill (revoked token, SAML-walled org) is retried
+      // by the scheduler indefinitely, each attempt seeding a fresh full-mode row — which
+      // would flash the ambient loading bar on an idle board forever. Suppress the
+      // zero-progress retries of a repo already marked errored; a walk that is actually
+      // making progress (percent > 0) or an explicit user-queued re-sync still shows.
+      if (
+        erroredIds.has(repoId) &&
+        progress.percent === 0 &&
+        progress.paused?.reason !== 'queued'
+      ) {
+        continue;
+      }
+      backfills.push({
+        repoId,
+        fullName,
+        percent: progress.percent,
+        prsProcessed: progress.prsProcessed,
+        ...(progress.paused ? { paused: progress.paused } : {}),
+      });
+    }
+    return { backfills, generatedAt };
+  });
 
   // Cancel an in-flight sync. Signals the sync loop to stop, waits for it to
   // settle, then — if this repo never completed a sync (an initial backfill the

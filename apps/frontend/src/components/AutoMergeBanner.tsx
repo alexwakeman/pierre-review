@@ -3,9 +3,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { ArmedMergeRequest, ArmedMergeState } from '@pierre-review/shared';
 import { useArmedMerges } from '../hooks/useAutoMerge.js';
 
-// Bottom-right toast stack for auto-merge outcomes, in the same shape as ClaudeReviewBanner
-// (a `pointer-events-none fixed bottom-4 right-4 z-50` column whose cards re-enable pointer
-// events). Driven by polling GET /api/auto-merge and DIFFING the state of each intent: the
+// Bottom-right toast stack for auto-merge outcomes, in the same shape as ClaudeReviewBanner:
+// a plain card column rendered inside App.tsx's ONE shared fixed bottom-right toast column
+// (which owns position/width/z and pointer-events-none; cards re-enable pointer events).
+// Driven by polling GET /api/auto-merge and DIFFING the state of each intent: the
 // watcher runs server-side, so a transition out of 'armed' is the only signal the client
 // gets that something happened.
 //
@@ -88,7 +89,7 @@ export function AutoMergeBanner(): JSX.Element | null {
     setToasts((t) => t.filter((x) => x.prId !== prId));
 
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+    <div className="flex flex-col gap-2">
       {toasts.map((t) => (
         <div
           key={`${t.prId}:${t.state}`}
